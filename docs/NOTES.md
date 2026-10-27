@@ -251,6 +251,9 @@ Causes:
   Fcitx preedit, CJK and dead keys work (proven with IBus Pinyin in nested
   KWin). Window density follows each window's scale, live; see
   [input.md](input.md#text-input) and [windowing.md](windowing.md).
+- 2026-10-27 (integb): **microG** installs as privileged system apps
+  (`tools/microg.sh`); Play Services apps need signature spoofing, which AOSP 17
+  lacks (smallest patch in [microg.md](microg.md)). UnifiedPush (ntfy) works.
 
 ## Backlog (unassigned)
 
