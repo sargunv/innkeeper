@@ -71,6 +71,8 @@ if(ANDROID)
     composer/ComposerClient.cpp
     composer/Display.cpp
     composer/VsyncThread.cpp
+    composer/Buffer.cpp
+    composer/HeadlessPresenter.cpp
     composer/FrameDumper.cpp
     composer/Fence.cpp
     composer/Properties.cpp)
@@ -81,7 +83,7 @@ if(ANDROID)
 
   # On-device tests (not installed into /vendor/bin/hw).
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
-  target_link_libraries(gralloc_test PRIVATE lapk_common lapk_aidl dl)
+  target_link_libraries(gralloc_test PRIVATE lapk_common lapk_aidl dl nativewindow)
   add_executable(hwc_test tests/android/hwc_test.cpp)
   target_link_libraries(hwc_test PRIVATE lapk_common lapk_aidl)
 else()

@@ -5,6 +5,7 @@
 //     our allocator, with the mapper found through the VINTF manifest.
 #include <stddef.h>
 
+#include <aidl/android/hardware/graphics/allocator/AllocationError.h>
 #include <aidl/android/hardware/graphics/allocator/IAllocator.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
