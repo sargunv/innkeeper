@@ -110,9 +110,10 @@ fn setup() -> Setup {
     // server becomes context manager
     b.set_context_mgr(server, None).unwrap();
     // both enter the looper
+    // The server's thread 2 is a looper (joinThreadPool); the client's
+    // thread 1 is a plain caller.
     let w = Bc::default().cmd(BC_ENTER_LOOPER).done();
-    b.write_read(server, 1, &w, 0, false, &mut m);
-    b.write_read(client, 1, &w, 0, false, &mut m);
+    b.write_read(server, 2, &w, 0, false, &mut m);
     Setup {
         b,
         m,
@@ -377,7 +378,7 @@ fn death_notification_fires_on_release() {
     assert!(park.blocked);
 
     // Client dies.
-    let wk = s.b.release_proc(s.client);
+    let wk = s.b.release_proc(s.client, &mut s.m);
     assert!(wk.iter().any(|w| w.proc == s.server));
 
     // Server reads: expect BR_DEAD_BINDER with the cookie.

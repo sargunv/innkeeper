@@ -231,12 +231,12 @@ pub struct BinderPtrCookie {
     pub cookie: BinderUintptr,
 }
 
-#[repr(C)]
+/// `__packed` in the UAPI (12 bytes): the size is part of the
+/// BC_*_DEATH_NOTIFICATION command codes.
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BinderHandleCookie {
     pub handle: u32,
-    // NB: `__packed` in the UAPI; cookie immediately follows handle with no
-    // padding. We parse it by hand (see broker) rather than transmute.
     pub cookie: BinderUintptr,
 }
 

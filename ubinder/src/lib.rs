@@ -17,6 +17,63 @@ pub mod sys;
 
 pub use broker::{Broker, Mem, ProcId, Wakeup, WriteRead};
 
+use std::io::Write;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Verbose tracing (LINUXAPK_UBINDER_DEBUG).
+pub static DEBUG: AtomicBool = AtomicBool::new(false);
+
+/// Bounded trace sink: stderr, or a file that is rotated (to `<path>.1`) every
+/// 64 MiB so a long boot can never fill the disk.
+struct LogSink {
+    path: Option<String>,
+    file: Option<std::fs::File>,
+    written: u64,
+}
+static LOG: Mutex<LogSink> = Mutex::new(LogSink {
+    path: None,
+    file: None,
+    written: 0,
+});
+const LOG_ROTATE: u64 = 64 << 20;
+
+/// Configure tracing from LINUXAPK_UBINDER_DEBUG: unset/empty = off, "1" =
+/// stderr, anything else = a log file path.
+pub fn init_log() {
+    let Some(v) = std::env::var_os("LINUXAPK_UBINDER_DEBUG") else {
+        return;
+    };
+    let v = v.to_string_lossy().into_owned();
+    if v.is_empty() || v == "0" {
+        return;
+    }
+    DEBUG.store(true, Ordering::Relaxed);
+    if v != "1" {
+        LOG.lock().unwrap().path = Some(v);
+    }
+}
+
+pub fn log(args: std::fmt::Arguments) {
+    let mut l = LOG.lock().unwrap();
+    let Some(path) = l.path.clone() else {
+        eprintln!("{args}");
+        return;
+    };
+    if l.file.is_none() || l.written > LOG_ROTATE {
+        if l.file.take().is_some() {
+            let _ = std::fs::rename(&path, format!("{path}.1"));
+        }
+        l.file = std::fs::File::create(&path).ok();
+        l.written = 0;
+    }
+    let line = format!("{args}\n");
+    l.written += line.len() as u64;
+    if let Some(f) = l.file.as_mut() {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
 /// A deterministic in-memory [`Mem`] used by tests and the fuzzer. It models
 /// each process's address space as a sparse map and its receive region as a
 /// bump allocator, so transaction translation can be exercised end to end
@@ -71,6 +128,13 @@ pub mod testmem {
     }
 
     impl Mem for FakeMem {
+        fn recv_size(&mut self, proc: ProcId) -> usize {
+            if self.procs.contains_key(&proc) {
+                1 << 20
+            } else {
+                0
+            }
+        }
         fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>> {
             let p = self.procs.get(&proc)?;
             Some(

@@ -807,18 +807,13 @@ int bpfemu_install_filter(int with_binder) {
     BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
   );
 
-  int openat_i = -1, epollctl_i = -1, ioctl_i = -1, typejeq_i = -1;
+  int openat_i = -1, ioctl_i = -1, typejeq_i = -1;
   if (with_binder) {
-    // openat -> NOTIF (inject the binder memfd); epoll_ctl -> NOTIF (swap the
-    // binder fd for a pollable eventfd); ioctl of type 'b' -> NOTIF (serve the
-    // binder command). All are forwarded to the broker helper.
+    // openat -> NOTIF (inject the binder memfd); ioctl of type 'b' -> NOTIF
+    // (serve the binder command). Both are forwarded to the broker helper.
     openat_i = n;
     f[n++] = (struct sock_filter)BPF_JUMP(
       BPF_JMP | BPF_JEQ | BPF_K, __NR_openat, 0, 0
-    );
-    epollctl_i = n;
-    f[n++] = (struct sock_filter)BPF_JUMP(
-      BPF_JMP | BPF_JEQ | BPF_K, __NR_epoll_ctl, 0, 0
     );
     ioctl_i = n;
     f[n++] =
@@ -844,9 +839,7 @@ int bpfemu_install_filter(int with_binder) {
   f[arch_jf].jf = allow - arch_jf - 1;
   if (with_binder) {
     f[openat_i].jt = notif - openat_i - 1;        // openat -> NOTIF
-    f[openat_i].jf = 0;                           // fall to epoll_ctl check
-    f[epollctl_i].jt = notif - epollctl_i - 1;    // epoll_ctl -> NOTIF
-    f[epollctl_i].jf = 0;                         // fall to ioctl check
+    f[openat_i].jf = 0;                           // fall to ioctl check
     f[ioctl_i].jt = 0;                            // fall to the type load
     f[ioctl_i].jf = clauses_start - ioctl_i - 1;  // not ioctl -> bpf clauses
     f[typejeq_i].jt = notif - typejeq_i - 1;      // type 'b' -> NOTIF
@@ -854,6 +847,9 @@ int bpfemu_install_filter(int with_binder) {
   }
 
   struct sock_fprog prog = {.len = n, .filter = f};
+  // Waits stay interruptible (no WAIT_KILLABLE_RECV): ptrace (debuggerd) and
+  // job control must be able to stop threads parked in a binder read. ubinder
+  // makes an interrupted, restarted BINDER_WRITE_READ idempotent instead.
   return syscall(
     SYS_seccomp, SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER,
     &prog
@@ -868,7 +864,7 @@ void bpfemu_set_binder_forward(int sock) { binder_fwd = sock; }
 // the ubinder broker helper rather than handle here?
 static int is_binder_notif(struct seccomp_notif* req) {
   if (binder_fwd < 0) return 0;
-  if (req->data.nr == __NR_openat || req->data.nr == __NR_epoll_ctl) return 1;
+  if (req->data.nr == __NR_openat) return 1;
   if (req->data.nr == __NR_ioctl)
     return ((req->data.args[1] >> 8) & 0xff) == (unsigned)'b';
   return 0;

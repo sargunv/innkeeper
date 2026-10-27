@@ -73,6 +73,16 @@ static void spawn_ubinder_helper(int sock, int listener) {
   die("exec ubinder helper");
 }
 
+// Is setgroups(2) disabled in this user namespace (/proc/self/setgroups)?
+static int setgroups_denied(void) {
+  char buf[16] = {0};
+  int fd = open("/proc/self/setgroups", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  ssize_t n = read(fd, buf, sizeof(buf) - 1);
+  close(fd);
+  return n > 0 && strncmp(buf, "deny", 4) == 0;
+}
+
 static char** child_argv;
 static int sync_sock[2];  // [0] child end, [1] parent end
 
@@ -176,7 +186,9 @@ int main(int argc, char** argv) {
 
   // Drop the host user's supplementary groups (wheel etc.): they are
   // unmapped here but would still grant access to host files.
-  if (setgroups(0, NULL) != 0) die("setgroups");
+  // (Test harnesses run under `unshare --map-root-user`, where setgroups is
+  // denied; their supplementary groups are already unmapped.)
+  if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
 
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sync_sock) != 0)
     die("socketpair");
