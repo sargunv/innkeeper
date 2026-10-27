@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::desktop::{self, AppEntry, INSTALLER_ID, PREFIX};
+use crate::desktop::{self, AppEntry, Handler, INSTALLER_ID, MANAGER_ID, PREFIX};
 use crate::proc;
 
 /// Sizes we render icons at; all are hicolor theme directories.
@@ -178,10 +178,44 @@ fn mime_package(d: &Dirs) -> PathBuf {
     d.data.join("mime/packages/dev.linuxapk.xml")
 }
 
+/// The handler entry, if registered: `Some(true)` if it opens the manager.
+pub fn handler_registered(d: &Dirs) -> Option<bool> {
+    let t = fs::read_to_string(installer_desktop(d)).ok()?;
+    Some(desktop::read_key(&t, "Icon").as_deref() == Some(MANAGER_ID))
+}
+
+fn manager_desktop(d: &Dirs) -> PathBuf {
+    d.applications().join(format!("{MANAGER_ID}.desktop"))
+}
+
+fn manager_icon(d: &Dirs) -> PathBuf {
+    d.hicolor().join(format!("scalable/apps/{MANAGER_ID}.svg"))
+}
+
+/// Adds the manager (`linuxapk-gui`) to the app menu, with its icon.
+pub fn install_manager(d: &Dirs, cmd: &[String]) -> Result<Vec<PathBuf>> {
+    let icon = manager_icon(d);
+    write_atomic(&icon, desktop::MANAGER_ICON_SVG.as_bytes())?;
+    update_icon_cache(d);
+    let desk = manager_desktop(d);
+    write_atomic(&desk, desktop::manager_entry(cmd)?.as_bytes())?;
+    update_desktop_database(d);
+    Ok(vec![desk, icon])
+}
+
+/// Removes the manager's app-menu entry and icon.
+pub fn remove_manager(d: &Dirs) {
+    let _ = fs::remove_file(manager_desktop(d));
+    if fs::remove_file(manager_icon(d)).is_ok() {
+        update_icon_cache(d);
+    }
+    update_desktop_database(d);
+}
+
 /// `linuxapk setup`: the APK open-with handler, bundle MIME types, defaults.
-pub fn setup(d: &Dirs, cmd: &[String]) -> Result<Vec<PathBuf>> {
+pub fn setup(d: &Dirs, handler: &Handler) -> Result<Vec<PathBuf>> {
     let desk = installer_desktop(d);
-    write_atomic(&desk, desktop::installer_entry(cmd)?.as_bytes())?;
+    write_atomic(&desk, desktop::installer_entry(handler)?.as_bytes())?;
     let mime = mime_package(d);
     write_atomic(&mime, desktop::MIME_PACKAGE_XML.as_bytes())?;
     tool("update-mime-database", &[d.data.join("mime").as_os_str()]);
@@ -205,7 +239,7 @@ pub fn setup(d: &Dirs, cmd: &[String]) -> Result<Vec<PathBuf>> {
     Ok(vec![desk, mime])
 }
 
-/// `linuxapk setup --remove`.
+/// `linuxapk setup --remove` (the handler part; see [`remove_manager`]).
 pub fn unsetup(d: &Dirs) -> Result<()> {
     let _ = fs::remove_file(installer_desktop(d));
     if fs::remove_file(mime_package(d)).is_ok() {
@@ -225,6 +259,72 @@ pub fn unsetup(d: &Dirs) -> Result<()> {
     }
     update_desktop_database(d);
     Ok(())
+}
+
+/// An app installed by Linux.apk, as its desktop entry describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopApp {
+    pub package: String,
+    pub name: String,
+    pub version: Option<String>,
+    /// The session instance the entry runs in (`LINUXAPK_INSTANCE` baked into
+    /// its `Exec`), empty for the default session.
+    pub instance: String,
+    /// The largest icon file, if any.
+    pub icon: Option<PathBuf>,
+}
+
+/// The `LINUXAPK_INSTANCE=` value an `Exec` line sets, if any.
+pub fn exec_instance(exec: &str) -> String {
+    exec.split_whitespace()
+        .take_while(|w| *w == "env" || w.contains('='))
+        .find_map(|w| w.strip_prefix("LINUXAPK_INSTANCE="))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The largest hicolor PNG for `id` (`dev.linuxapk.<pkg>`).
+pub fn largest_icon(d: &Dirs, id: &str) -> Option<PathBuf> {
+    HICOLOR_SIZES
+        .iter()
+        .rev()
+        .map(|n| d.icon_path(*n, id))
+        .find(|p| p.is_file())
+}
+
+/// Apps with a Linux.apk desktop entry (any instance), sorted by name.
+pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
+    let mut v = vec![];
+    let Ok(rd) = fs::read_dir(d.applications()) else {
+        return v;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pkg) = name
+            .strip_prefix(PREFIX)
+            .and_then(|n| n.strip_suffix(".desktop"))
+        else {
+            continue;
+        };
+        if crate::validate::package(pkg).is_err() {
+            continue;
+        }
+        let Ok(t) = fs::read_to_string(e.path()) else {
+            continue;
+        };
+        if desktop::read_key(&t, "X-LinuxApk-Package").as_deref() != Some(pkg) {
+            continue;
+        }
+        v.push(DesktopApp {
+            package: pkg.to_string(),
+            name: desktop::read_key(&t, "Name").unwrap_or_else(|| pkg.to_string()),
+            version: desktop::read_key(&t, "X-LinuxApk-Version"),
+            instance: exec_instance(&desktop::read_key(&t, "Exec").unwrap_or_default()),
+            icon: largest_icon(d, &format!("{PREFIX}{pkg}")),
+        });
+    }
+    v.sort_by_key(|a| (a.name.to_lowercase(), a.package.clone()));
+    v
 }
 
 /// Drops `id` from every association in a `mimeapps.list`, and keys left
@@ -306,6 +406,20 @@ mod tests {
     }
 
     #[test]
+    fn instance_of_exec() {
+        assert_eq!(
+            exec_instance("env LINUXAPK_INSTANCE=gui /x/linuxapk run a.b %U"),
+            "gui"
+        );
+        assert_eq!(
+            exec_instance("env LINUXAPK_SESSION=/s LINUXAPK_INSTANCE=cli linuxapk run a.b %U"),
+            "cli"
+        );
+        assert_eq!(exec_instance("linuxapk run a.b %U"), "");
+        assert_eq!(exec_instance("linuxapk run LINUXAPK_INSTANCE=x"), "");
+    }
+
+    #[test]
     fn png_dims() {
         let mut p = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         p.extend(256u32.to_be_bytes());
@@ -328,6 +442,7 @@ mod tests {
             names: vec![],
             run: vec!["/x/linuxapk".into(), "run".into()],
             icon: None,
+            version: String::new(),
             categories: vec!["Utility".into()],
             schemes: vec![],
             web_hosts: vec![],
@@ -342,6 +457,14 @@ mod tests {
         assert!(!d.icon_path(64, "dev.linuxapk.org.example.app").exists());
         assert_eq!(e.icon.as_deref(), Some("dev.linuxapk.org.example.app"));
         assert_eq!(app_label(&d, "org.example.app").as_deref(), Some("Example"));
+        let apps = desktop_apps(&d);
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].package, "org.example.app");
+        assert_eq!(apps[0].instance, "");
+        assert_eq!(
+            apps[0].icon.as_deref(),
+            Some(d.icon_path(48, "dev.linuxapk.org.example.app").as_path())
+        );
         // Reinstall replaces; remove cleans up.
         install_app(&d, &mut e, &[]).unwrap();
         assert!(!d.icon_path(48, "dev.linuxapk.org.example.app").exists());

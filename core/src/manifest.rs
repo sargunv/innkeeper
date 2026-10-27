@@ -27,6 +27,8 @@ pub struct Badging {
     /// (density, path inside the APK) from `application-icon-<density>`.
     pub icons: Vec<(u32, String)>,
     pub native_code: Vec<String>,
+    /// `uses-permission` names (sorted, deduplicated, as declared).
+    pub permissions: Vec<String>,
 }
 
 /// `key='value'` inside a `package:` line. aapt2 doesn't escape `'` there, so
@@ -86,6 +88,11 @@ pub fn parse_badging(text: &str) -> Badging {
             {
                 b.icons.push((d, v));
             }
+        } else if (line.starts_with("uses-permission:")
+            || line.starts_with("uses-permission-sdk-23:"))
+            && let Some(name) = field(line, "name")
+        {
+            b.permissions.push(name.to_string());
         } else if let Some(rest) = line.strip_prefix("native-code:") {
             b.native_code = rest
                 .split_whitespace()
@@ -93,6 +100,8 @@ pub fn parse_badging(text: &str) -> Badging {
                 .collect();
         }
     }
+    b.permissions.sort();
+    b.permissions.dedup();
     b
 }
 
@@ -302,6 +311,67 @@ fn run_limited(cmd: &mut Command, limit: Duration) -> Result<String> {
     Ok(o.text())
 }
 
+/// Density of a resource configuration (`xxxhdpi`, `hdpi-v4`), if it has one
+/// that a bitmap icon can be ranked by.
+fn config_density(cfg: &str) -> Option<u32> {
+    cfg.split('-').find_map(|q| match q {
+        "ldpi" => Some(120),
+        "mdpi" => Some(160),
+        "tvdpi" => Some(213),
+        "hdpi" => Some(240),
+        "xhdpi" => Some(320),
+        "xxhdpi" => Some(480),
+        "xxxhdpi" => Some(640),
+        _ => q.strip_suffix("dpi").and_then(|d| d.parse().ok()),
+    })
+}
+
+/// The bitmap (PNG, WebP) variants of the resource whose files include
+/// `path`, as (density, path inside the APK), from `aapt2 dump resources`.
+/// For a launcher icon that is an adaptive (XML) icon on API 26+, these are
+/// the legacy bitmaps older Android versions use.
+pub fn bitmap_variants(resources: &str, path: &str) -> Vec<(u32, String)> {
+    let mut block: Vec<(String, String)> = vec![];
+    let mut found = false;
+    let mut out = vec![];
+    let mut flush = |block: &mut Vec<(String, String)>, found: &mut bool| {
+        if *found {
+            for (cfg, p) in block.iter() {
+                if (p.ends_with(".png") || p.ends_with(".webp"))
+                    && let Some(d) = config_density(cfg)
+                {
+                    out.push((d, p.clone()));
+                }
+            }
+        }
+        block.clear();
+        *found = false;
+    };
+    for line in resources.lines() {
+        let t = line.trim_start();
+        if t.starts_with("resource ") || t.starts_with("type ") || t.starts_with("Package ") {
+            flush(&mut block, &mut found);
+            continue;
+        }
+        // `(xxxhdpi) (file) res/o-.png type=PNG`
+        let Some(rest) = t.strip_prefix('(') else {
+            continue;
+        };
+        let Some((cfg, rest)) = rest.split_once(") (file) ") else {
+            continue;
+        };
+        let file = rest.split(" type=").next().unwrap_or(rest).to_string();
+        if file == path {
+            found = true;
+        }
+        block.push((cfg.to_string(), file));
+    }
+    flush(&mut block, &mut found);
+    out.sort();
+    out.dedup();
+    out
+}
+
 pub struct Aapt2(PathBuf);
 
 impl Aapt2 {
@@ -318,6 +388,15 @@ impl Aapt2 {
         )
         .with_context(|| format!("aapt2 dump badging {}", apk.display()))?;
         Ok(parse_badging(&out))
+    }
+
+    /// `aapt2 dump resources` (the resource table, as text).
+    pub fn resources(&self, apk: &Path) -> Result<String> {
+        run_limited(
+            Command::new(&self.0).args(["dump", "resources"]).arg(apk),
+            Duration::from_secs(120),
+        )
+        .with_context(|| format!("aapt2 dump resources {}", apk.display()))
     }
 
     pub fn manifest(&self, apk: &Path) -> Result<ManifestInfo> {
@@ -345,7 +424,14 @@ mod tests {
              application-label-pt-BR:'Calculadora'\n\
              application-icon-160:'res/mipmap-mdpi-v4/ic_launcher.png'\n\
              application-icon-640:'res/dT.xml'\n\
-             native-code: 'arm64-v8a' 'x86_64'\n",
+             native-code: 'arm64-v8a' 'x86_64'\n\
+             uses-permission: name='android.permission.INTERNET'\n\
+             uses-permission: name='android.permission.CAMERA' maxSdkVersion='28'\n\
+             uses-permission-sdk-23: name='android.permission.INTERNET'\n",
+        );
+        assert_eq!(
+            b.permissions,
+            ["android.permission.CAMERA", "android.permission.INTERNET"]
         );
         assert_eq!(b.package, "com.example.app");
         assert_eq!(b.version_code, "53");
@@ -365,6 +451,22 @@ mod tests {
             "package: name='com.example.app' versionCode='1' split='config.x86_64'\n",
         );
         assert_eq!(s.split, "config.x86_64");
+    }
+
+    #[test]
+    fn icon_bitmaps() {
+        let t = "Package name=x id=7f\n  type mipmap id=0f entryCount=2\n\
+                 \x20   resource 0x7f0f0000 mipmap/ic_launcher\n\
+                 \x20     (mdpi) (file) res/9w.png type=PNG\n\
+                 \x20     (xxxhdpi-v4) (file) res/o-.webp type=UNKNOWN\n\
+                 \x20     (anydpi-v26) (file) res/BW.xml type=XML\n\
+                 \x20   resource 0x7f0f0001 mipmap/ic_round\n\
+                 \x20     (xxhdpi) (file) res/r.png type=PNG\n";
+        assert_eq!(
+            bitmap_variants(t, "res/BW.xml"),
+            [(160, "res/9w.png".into()), (640, "res/o-.webp".into())]
+        );
+        assert!(bitmap_variants(t, "res/none.xml").is_empty());
     }
 
     #[test]

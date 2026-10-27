@@ -502,9 +502,8 @@ name = "linuxapk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "clap",
- "zip",
+ "linuxapk-core",
 ]
 
 [[package]]
@@ -527,6 +526,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "linuxapk-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "zip",
 ]
 
 [[package]]

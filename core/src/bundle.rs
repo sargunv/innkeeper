@@ -9,6 +9,7 @@
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result, bail};
 
@@ -116,7 +117,13 @@ pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
         bail!("{} has too many APKs ({})", path.display(), entries.len());
     }
     fs::create_dir_all(work_root)?;
-    let work = work_root.join(format!("install-{}", std::process::id()));
+    // Unique per process and per open: the GUI can hold several at once.
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let work = work_root.join(format!(
+        "install-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = fs::remove_dir_all(&work);
     fs::create_dir(&work).with_context(|| format!("create {}", work.display()))?;
     let mut input = Input {

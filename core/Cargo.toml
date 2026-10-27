@@ -1,0 +1,13 @@
+[package]
+name = "linuxapk-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk host library: install, run and manage Android apps and the session; APK metadata, icons and desktop entries"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+zip = { version = "9.1.2", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }

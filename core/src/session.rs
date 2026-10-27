@@ -72,6 +72,46 @@ fn clean_stderr(s: &str) -> String {
         .join("\n")
 }
 
+/// What [`Session::status`] reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Status {
+    pub running: bool,
+    pub booted: bool,
+    /// The session unit's memory use (cgroup `memory.current`), in bytes.
+    pub memory: Option<u64>,
+}
+
+/// `LINUXAPK_INSTANCE` if it is a valid instance name (as the launcher checks
+/// it), else an error.
+pub fn instance() -> Result<String> {
+    let inst = env::var("LINUXAPK_INSTANCE").unwrap_or_default();
+    if !inst
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        bail!("bad LINUXAPK_INSTANCE");
+    }
+    Ok(inst)
+}
+
+/// The systemd user unit the launcher runs the session in.
+pub fn unit_name() -> String {
+    match instance() {
+        Ok(i) if !i.is_empty() => format!("linuxapk-session-{i}"),
+        _ => "linuxapk-session".into(),
+    }
+}
+
+fn unit_memory(unit: &str) -> Option<u64> {
+    let o = proc::run(
+        Command::new("systemctl").args(["--user", "show", "-P", "MemoryCurrent", unit]),
+        Stdio::null(),
+        Duration::from_secs(10),
+    )
+    .ok()?;
+    o.text().trim().parse().ok()
+}
+
 impl Session {
     pub fn find() -> Result<Self> {
         Ok(Self {
@@ -150,19 +190,45 @@ impl Session {
             .unwrap_or_default()
     }
 
-    fn booted(&self) -> bool {
+    /// Stops the session (no-op if it isn't running).
+    pub fn stop(&self) -> Result<()> {
+        let o = proc::run(
+            Command::new(&self.launcher).arg("stop"),
+            Stdio::null(),
+            Duration::from_secs(120),
+        )?;
+        if !o.ok() {
+            bail!("session stop failed: {}", o.stderr.trim());
+        }
+        Ok(())
+    }
+
+    /// Running state, boot state and memory use, for status displays.
+    pub fn status(&self) -> Status {
+        if !self.running() {
+            return Status::default();
+        }
+        Status {
+            running: true,
+            booted: self.booted(),
+            memory: unit_memory(&unit_name()),
+        }
+    }
+
+    pub fn booted(&self) -> bool {
         self.getprop("sys.boot_completed") == "1"
     }
 
     /// Makes sure a session is running and booted, starting one if needed (with
-    /// its host window unless `LINUXAPK_HEADLESS=1`).
-    pub fn ensure(&self) -> Result<()> {
+    /// its host window unless `LINUXAPK_HEADLESS=1`). Progress goes to
+    /// `status`.
+    pub fn ensure(&self, status: &dyn Fn(&str)) -> Result<()> {
         if !self.running() {
             let headless = env::var("LINUXAPK_HEADLESS").is_ok_and(|v| v == "1");
-            eprintln!(
-                "linuxapk: starting the Android session{}",
+            status(&format!(
+                "starting the Android session{}",
                 if headless { " (headless)" } else { "" }
-            );
+            ));
             let mut c = Command::new(&self.launcher);
             c.arg("start");
             if headless {
@@ -183,7 +249,7 @@ impl Session {
                 bail!("the session did not finish booting in {limit:?}");
             }
             if !said && t.elapsed() > Duration::from_secs(3) {
-                eprintln!("linuxapk: waiting for Android to boot");
+                status("waiting for Android to boot");
                 said = true;
             }
             sleep(Duration::from_secs(1));

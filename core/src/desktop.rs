@@ -11,6 +11,12 @@ use crate::validate::is_forbidden_char;
 /// Desktop-file ID and icon name prefix; `StartupWMClass` uses it too.
 pub const PREFIX: &str = "dev.linuxapk.";
 pub const INSTALLER_ID: &str = "dev.linuxapk.installer";
+/// The manager app (`linuxapk-gui`): its application ID, desktop-file ID and
+/// icon name. One segment after the prefix, so no Android package (which
+/// has at least two) can collide with it or with `INSTALLER_ID`.
+pub const MANAGER_ID: &str = "dev.linuxapk.Manager";
+/// The manager's icon (also used where an app has no icon of its own).
+pub const MANAGER_ICON_SVG: &str = include_str!("../data/dev.linuxapk.Manager.svg");
 
 /// Escapes a `string`/`localestring` value. Refuses control characters other
 /// than the ones the spec has escapes for (we never write those either, but
@@ -92,6 +98,8 @@ pub struct AppEntry {
     /// Command prefix; `<package>` and `%U` are appended (`linuxapk run`).
     pub run: Vec<String>,
     pub icon: Option<String>,
+    /// `versionName`, recorded as `X-LinuxApk-Version` (omitted if empty).
+    pub version: String,
     pub categories: Vec<String>,
     /// Custom URI schemes, declared as `x-scheme-handler/<scheme>`.
     pub schemes: Vec<String>,
@@ -137,6 +145,9 @@ impl AppEntry {
         }
         s.push_str("Keywords=Android;\n");
         writeln!(s, "X-LinuxApk-Package={}", escape_value(&self.package)?)?;
+        if !self.version.is_empty() {
+            writeln!(s, "X-LinuxApk-Version={}", escape_value(&self.version)?)?;
+        }
         if !self.web_hosts.is_empty() {
             writeln!(s, "X-LinuxApk-Web-Hosts={}", list(&self.web_hosts)?)?;
         }
@@ -152,19 +163,56 @@ pub const PACKAGE_MIME_TYPES: &[&str] = &[
     "application/x-android-apkm",
 ];
 
+/// What opens APK files: the manager's install page, or (without the GUI)
+/// `linuxapk install --notify`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Handler {
+    /// The `linuxapk` command line.
+    Cli(Vec<String>),
+    /// The `linuxapk-gui` command line.
+    Gui(Vec<String>),
+}
+
 /// The "Install with Linux.apk" handler for APK files.
-pub fn installer_entry(cmd: &[String]) -> Result<String> {
-    let mut install = cmd.to_vec();
-    install.extend(["install".to_string(), "--notify".to_string()]);
+pub fn installer_entry(h: &Handler) -> Result<String> {
+    let install = match h {
+        Handler::Cli(cmd) => {
+            let mut v = cmd.clone();
+            v.extend(["install".to_string(), "--notify".to_string()]);
+            v
+        }
+        Handler::Gui(cmd) => cmd.clone(),
+    };
     let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
     s.push_str("Name=Linux.apk Installer\n");
     s.push_str("GenericName=Android app installer\n");
     s.push_str("Comment=Install Android apps on this desktop\n");
-    s.push_str("Icon=android-package-archive\n");
+    match h {
+        Handler::Cli(_) => s.push_str("Icon=android-package-archive\n"),
+        Handler::Gui(_) => {
+            writeln!(s, "Icon={MANAGER_ID}")?;
+            writeln!(s, "StartupWMClass={MANAGER_ID}")?;
+        }
+    }
     writeln!(s, "Exec={}", exec_line(&install, Some("%f"))?)?;
     s.push_str("Terminal=false\nNoDisplay=true\n");
     writeln!(s, "MimeType={}", list(PACKAGE_MIME_TYPES)?)?;
     s.push_str("Categories=Settings;PackageManager;\n");
+    Ok(s)
+}
+
+/// The manager's own app-menu entry ("Linux.apk").
+pub fn manager_entry(cmd: &[String]) -> Result<String> {
+    let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
+    s.push_str("Name=Linux.apk\n");
+    s.push_str("GenericName=Android App Manager\n");
+    s.push_str("Comment=Install, run and remove Android apps\n");
+    writeln!(s, "Icon={MANAGER_ID}")?;
+    writeln!(s, "Exec={}", exec_line(cmd, None)?)?;
+    s.push_str("Terminal=false\nStartupNotify=true\n");
+    writeln!(s, "StartupWMClass={MANAGER_ID}")?;
+    s.push_str("Categories=System;PackageManager;\n");
+    s.push_str("Keywords=Android;APK;\n");
     Ok(s)
 }
 
@@ -264,6 +312,7 @@ mod tests {
             ],
             run: vec!["/opt/linux apk/bin/linuxapk".into(), "run".into()],
             icon: Some("dev.linuxapk.org.wikipedia".into()),
+            version: "2.7.50".into(),
             categories: vec!["Utility".into()],
             schemes: vec!["wikipedia".into()],
             web_hosts: vec!["*.wikipedia.org".into()],
@@ -281,7 +330,8 @@ mod tests {
              Exec=\"/opt/linux apk/bin/linuxapk\" run org.wikipedia %U\nTerminal=false\n\
              StartupWMClass=dev.linuxapk.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
-             X-LinuxApk-Package=org.wikipedia\nX-LinuxApk-Web-Hosts=*.wikipedia.org;\n"
+             X-LinuxApk-Package=org.wikipedia\nX-LinuxApk-Version=2.7.50\n\
+             X-LinuxApk-Web-Hosts=*.wikipedia.org;\n"
         );
         assert!(!s.contains("x-scheme-handler/http"));
     }
@@ -356,10 +406,22 @@ mod tests {
 
     #[test]
     fn installer() {
-        let s = installer_entry(&["/x/linuxapk".into()]).unwrap();
+        let s = installer_entry(&Handler::Cli(vec!["/x/linuxapk".into()])).unwrap();
         assert!(s.contains("Exec=/x/linuxapk install --notify %f\n"));
         assert!(s.contains("MimeType=application/vnd.android.package-archive;"));
         assert!(s.contains("NoDisplay=true"));
+        let g = installer_entry(&Handler::Gui(vec!["linuxapk-gui".into()])).unwrap();
+        assert!(g.contains("Exec=linuxapk-gui %f\n"));
+        assert!(g.contains("Icon=dev.linuxapk.Manager\n"));
+        let m = manager_entry(&[
+            "env".into(),
+            "LINUXAPK_INSTANCE=gui".into(),
+            "/x/linuxapk-gui".into(),
+        ])
+        .unwrap();
+        assert!(m.contains("Exec=env LINUXAPK_INSTANCE=gui /x/linuxapk-gui\n"));
+        assert!(!m.contains("NoDisplay"));
+        assert!(!m.contains("MimeType"));
     }
 
     #[test]
