@@ -134,6 +134,11 @@ struct ProcState {
     fd: u32,
     memfd: OwnedFd,
     memfd_ino: u64,
+    /// `/proc/<pid>/mem`, opened while the opener's notification was valid:
+    /// it pins the address space, so a numeric pid that exec'd or was
+    /// recycled is never written. All of the process's memory goes through
+    /// it.
+    mem: OwnedFd,
     map: *mut u8,
     /// Target mapping (base, usable length), found in /proc/<pid>/maps.
     base: Option<(u64, usize)>,
@@ -301,6 +306,36 @@ pub(crate) fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
     n == data.len() as isize
 }
 
+/// Read target memory through a pinned `/proc/<pid>/mem` fd (see
+/// `ProcState::mem`). After an exec the old address space is gone and this
+/// fails.
+fn mem_read(mem: RawFd, addr: u64, len: usize) -> Option<Vec<u8>> {
+    if len == 0 {
+        return Some(Vec::new());
+    }
+    let off = i64::try_from(addr).ok().filter(|&a| a != 0)?;
+    let mut buf = vec![0u8; len];
+    let n = unsafe { libc::pread(mem, buf.as_mut_ptr() as *mut _, len, off) };
+    (n == len as isize).then_some(buf)
+}
+
+fn mem_write(mem: RawFd, addr: u64, data: &[u8]) -> bool {
+    if data.is_empty() {
+        return true;
+    }
+    let Some(off) = i64::try_from(addr).ok().filter(|&a| a != 0) else {
+        return false;
+    };
+    let n = unsafe { libc::pwrite(mem, data.as_ptr() as *const _, data.len(), off) };
+    n == data.len() as isize
+}
+
+fn open_mem(pid: i32) -> Option<OwnedFd> {
+    let path = std::ffi::CString::new(format!("/proc/{pid}/mem")).ok()?;
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
 /// Read a NUL-terminated path, never crossing into a page that need not be
 /// mapped before it is known to be needed.
 pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
@@ -406,8 +441,7 @@ struct SysMem<'a> {
 
 impl Mem for SysMem<'_> {
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>> {
-        let pid = self.procs.get(&proc)?.pid;
-        vm_read(pid, addr, len)
+        mem_read(self.procs.get(&proc)?.mem.as_raw_fd(), addr, len)
     }
     fn recv_size(&mut self, proc: ProcId) -> usize {
         self.procs
@@ -589,6 +623,11 @@ fn maybe_dev_path(pid: i32, addr: u64) -> bool {
     }
 }
 
+/// Is notification `id` still pending (its task still in the syscall)?
+pub(crate) fn notif_id_valid(listener: RawFd, id: u64) -> bool {
+    unsafe { libc::ioctl(listener, notif_id_valid_cmd() as _, &id as *const u64) == 0 }
+}
+
 fn send_continue(listener: RawFd, resp_sz: usize, id: u64) {
     send_resp(listener, resp_sz, id, 0, 0, true);
 }
@@ -691,7 +730,7 @@ impl Supervisor {
     }
 
     fn id_valid(&self, id: u64) -> bool {
-        unsafe { libc::ioctl(self.listener, notif_id_valid_cmd() as _, &id as *const u64) == 0 }
+        notif_id_valid(self.listener, id)
     }
 
     fn addfd(&self, a: &SeccompNotifAddfd) -> i32 {
@@ -749,6 +788,15 @@ impl Supervisor {
                 return;
             }
         };
+        // Pin the address space, then check that tid is still the task that
+        // asked (so the path read above was its too).
+        let Some(mem) = open_mem(tid) else {
+            self.respond(req.id, 0, libc::EPERM, false);
+            return;
+        };
+        if !self.id_valid(req.id) {
+            return;
+        }
         // Drop any earlier binder fds of this process that are gone (exec).
         self.sweep_pid(pid);
         let flags = req.data.args[2] as u32;
@@ -782,6 +830,7 @@ impl Supervisor {
             fd: 0,
             memfd,
             memfd_ino: st.st_ino,
+            mem,
             map: map as *mut u8,
             base: None,
             free: Vec::new(),
@@ -839,19 +888,20 @@ impl Supervisor {
             }
         };
         let ttid = req.pid;
+        let mem = self.procs[&procid].mem.as_raw_fd();
         let err = match cmd {
             BINDER_WRITE_READ => return self.handle_write_read(procid, req, argp),
             BINDER_VERSION => {
                 let v = BinderVersion {
                     protocol_version: self.broker.protocol_version(),
                 };
-                if vm_write(tid, argp, pod_bytes(&v)) {
+                if mem_write(mem, argp, pod_bytes(&v)) {
                     0
                 } else {
                     libc::EFAULT
                 }
             }
-            BINDER_SET_MAX_THREADS => match vm_read(tid, argp, 4) {
+            BINDER_SET_MAX_THREADS => match mem_read(mem, argp, 4) {
                 Some(b) => {
                     self.broker
                         .set_max_threads(procid, u32::from_le_bytes(b.try_into().unwrap()));
@@ -859,7 +909,7 @@ impl Supervisor {
                 }
                 None => libc::EFAULT,
             },
-            BINDER_ENABLE_ONEWAY_SPAM_DETECTION => match vm_read(tid, argp, 4) {
+            BINDER_ENABLE_ONEWAY_SPAM_DETECTION => match mem_read(mem, argp, 4) {
                 Some(b) => {
                     self.broker.enable_oneway_spam_detection(
                         procid,
@@ -871,7 +921,7 @@ impl Supervisor {
             },
             BINDER_SET_CONTEXT_MGR => -self.broker.set_context_mgr(procid, None).err().unwrap_or(0),
             BINDER_SET_CONTEXT_MGR_EXT => {
-                match vm_read(tid, argp, size_of::<FlatBinderObject>())
+                match mem_read(mem, argp, size_of::<FlatBinderObject>())
                     .and_then(|b| read_pod::<FlatBinderObject>(&b, 0))
                 {
                     Some(f) => -self
@@ -890,19 +940,19 @@ impl Supervisor {
             }
             BINDER_GET_EXTENDED_ERROR => {
                 let ee = self.broker.get_extended_error(procid, ttid);
-                if vm_write(tid, argp, pod_bytes(&ee)) {
+                if mem_write(mem, argp, pod_bytes(&ee)) {
                     0
                 } else {
                     libc::EFAULT
                 }
             }
             BINDER_GET_NODE_DEBUG_INFO => {
-                match vm_read(tid, argp, size_of::<BinderNodeDebugInfo>())
+                match mem_read(mem, argp, size_of::<BinderNodeDebugInfo>())
                     .and_then(|b| read_pod::<BinderNodeDebugInfo>(&b, 0))
                 {
                     Some(info) => {
                         let out = self.broker.node_debug_info(procid, info.ptr);
-                        if vm_write(tid, argp, pod_bytes(&out)) {
+                        if mem_write(mem, argp, pod_bytes(&out)) {
                             0
                         } else {
                             libc::EFAULT
@@ -912,12 +962,12 @@ impl Supervisor {
                 }
             }
             BINDER_GET_NODE_INFO_FOR_REF => {
-                match vm_read(tid, argp, size_of::<BinderNodeInfoForRef>())
+                match mem_read(mem, argp, size_of::<BinderNodeInfoForRef>())
                     .and_then(|b| read_pod::<BinderNodeInfoForRef>(&b, 0))
                 {
                     Some(info) => match self.broker.node_info_for_ref(procid, info) {
                         Ok(out) => {
-                            if vm_write(tid, argp, pod_bytes(&out)) {
+                            if mem_write(mem, argp, pod_bytes(&out)) {
                                 0
                             } else {
                                 libc::EFAULT
@@ -936,8 +986,8 @@ impl Supervisor {
     }
 
     fn handle_write_read(&mut self, procid: ProcId, req: SeccompNotif, argp: u64) {
-        let tid = req.pid as i32;
-        let Some(mut bwr) = vm_read(tid, argp, size_of::<BinderWriteRead>())
+        let mem = self.procs[&procid].mem.as_raw_fd();
+        let Some(mut bwr) = mem_read(mem, argp, size_of::<BinderWriteRead>())
             .and_then(|b| read_pod::<BinderWriteRead>(&b, 0))
         else {
             {
@@ -957,7 +1007,7 @@ impl Supervisor {
             match bwr
                 .write_buffer
                 .checked_add(bwr.write_consumed)
-                .and_then(|a| vm_read(tid, a, len))
+                .and_then(|a| mem_read(mem, a, len))
             {
                 Some(w) => write = w,
                 None => {
@@ -991,11 +1041,11 @@ impl Supervisor {
             self.make_pollable(procid, req.id);
         }
         if res.write_err != 0 {
-            vm_write(tid, argp, pod_bytes(&bwr));
+            mem_write(mem, argp, pod_bytes(&bwr));
             self.respond(req.id, 0, res.write_err, false);
         } else if res.blocked {
             // Record progress now so a restarted ioctl never replays the write.
-            vm_write(tid, argp, pod_bytes(&bwr));
+            mem_write(mem, argp, pod_bytes(&bwr));
             self.waiters.insert(
                 (procid, req.pid),
                 Waiter {
@@ -1019,22 +1069,26 @@ impl Supervisor {
         read: Vec<u8>,
         eagain: bool,
     ) {
-        let tid = key.1 as i32;
+        let Some(mem) = self.procs.get(&key.0).map(|p| p.mem.as_raw_fd()) else {
+            self.respond(notif_id, 0, libc::EBADF, false);
+            return;
+        };
         let at = bwr.read_buffer.wrapping_add(bwr.read_consumed);
-        if !read.is_empty() && !vm_write(tid, at, &read) {
-            vm_write(tid, argp, pod_bytes(&bwr));
+        if !read.is_empty() && !mem_write(mem, at, &read) {
+            mem_write(mem, argp, pod_bytes(&bwr));
             self.respond(notif_id, 0, libc::EFAULT, false);
             return;
         }
         let mut out = bwr;
         out.read_consumed += read.len() as u64;
-        vm_write(tid, argp, pod_bytes(&out));
+        mem_write(mem, argp, pod_bytes(&out));
         if !self.respond(notif_id, 0, if eagain { libc::EAGAIN } else { 0 }, false)
             && !read.is_empty()
         {
             // The thread was interrupted after we committed work to it; it
-            // will restart the ioctl. Restore its bwr and keep the bytes.
-            vm_write(tid, argp, pod_bytes(&bwr));
+            // will restart the ioctl. Restore its bwr and keep the bytes. (If
+            // it is gone instead, `mem` reaches nothing else.)
+            mem_write(mem, argp, pod_bytes(&bwr));
             dlog!(
                 "stash {} bytes for proc={} tid={}",
                 read.len(),
@@ -1303,5 +1357,44 @@ mod tests {
         assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, 8);
         assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, -1);
         assert!(!readable(ep));
+    }
+
+    /// The first mapping of `pid` (an address that is mapped).
+    fn first_mapping(pid: i32) -> u64 {
+        let maps = std::fs::read_to_string(format!("/proc/{pid}/maps")).unwrap();
+        let start = maps.split('-').next().unwrap();
+        u64::from_str_radix(start, 16).unwrap()
+    }
+
+    /// A process's pinned mem fd never reaches the image it exec'd into,
+    /// though its numeric pid does (the broker's writes after a failed
+    /// response, or racing an exec, must not land there).
+    #[test]
+    fn pinned_mem_does_not_follow_exec() {
+        use std::io::Write;
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read x; exec sleep 10"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let mem = open_mem(pid).unwrap();
+        let before = first_mapping(pid);
+        assert!(mem_read(mem.as_raw_fd(), before, 8).is_some());
+        child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+        let exe = |p: i32| std::fs::read_link(format!("/proc/{p}/exe")).unwrap_or_default();
+        for _ in 0..500 {
+            if exe(pid).ends_with("sleep") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(exe(pid).ends_with("sleep"));
+        let after = first_mapping(pid);
+        assert!(vm_read(pid, after, 8).is_some());
+        assert!(mem_read(mem.as_raw_fd(), after, 8).is_none());
+        assert!(!mem_write(mem.as_raw_fd(), after, b"x"));
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 }

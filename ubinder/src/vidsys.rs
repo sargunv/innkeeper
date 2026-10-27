@@ -29,7 +29,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
-use crate::sys::{SeccompNotif, read_path, status_field, vm_read, vm_write};
+use crate::sys::{SeccompNotif, notif_id_valid, read_path, status_field, vm_read, vm_write};
 use crate::vid::{self, CredTable, Creds, SetId};
 
 const RLIMIT_RTTIME: i32 = 15;
@@ -163,11 +163,16 @@ impl Vid {
                         Ok(j) => j,
                         Err(_) => return,
                     };
+                    // A queued job's task may be gone (signal, exit, exec)
+                    // and its tid reused: drop it.
+                    if !notif_id_valid(v.listener, job.id) {
+                        continue;
+                    }
                     let t = std::time::Instant::now();
                     let r = match job.nr {
-                        libc::SYS_newfstatat => lstat(&job),
+                        libc::SYS_newfstatat => lstat(&job, v.listener),
                         libc::SYS_faccessat | SYS_FACCESSAT2 => access(&job),
-                        _ => chown(&job),
+                        _ => chown(&job, v.listener),
                     };
                     v.finish(job.id, r);
                     let dt = t.elapsed();
@@ -807,7 +812,7 @@ fn recorded_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
 /// Emulate lstat(path, st) for a path that can carry a recorded owner.
 /// Paths with symlinks before the last component continue natively
 /// (RESOLVE_NO_SYMLINKS), so a lookup never wanders onto a FUSE mount.
-fn lstat(j: &Job) -> Answer {
+fn lstat(j: &Job, listener: RawFd) -> Answer {
     let fd = match resolve_how(j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
         Ok(f) => f,
         Err(libc::ELOOP) | Err(libc::EXDEV) => return Answer::Continue,
@@ -831,6 +836,10 @@ fn lstat(j: &Job) -> Answer {
             size_of::<libc::stat>(),
         )
     };
+    // The path was resolved in tid's root: still the caller's?
+    if !notif_id_valid(listener, j.id) {
+        return Answer::Deferred;
+    }
     if !vm_write(j.tid, j.args[2], b) {
         return Answer::Errno(libc::EFAULT);
     }
@@ -903,7 +912,7 @@ fn access(j: &Job) -> Answer {
 }
 
 /// Emulate one chown-family call (see the module docs).
-fn chown(j: &Job) -> Answer {
+fn chown(j: &Job, listener: RawFd) -> Answer {
     let a = j.args;
     let (fd, uid, gid) = match j.nr {
         libc::SYS_fchown => (getfd(j.tid, a[0] as i32), a[1] as u32, a[2] as u32),
@@ -939,6 +948,10 @@ fn chown(j: &Job) -> Answer {
         Ok(f) => f,
         Err(e) => return Answer::Errno(e),
     };
+    // The path and fd were resolved through tid: still the caller's?
+    if !notif_id_valid(listener, j.id) {
+        return Answer::Deferred;
+    }
     // The kernel's own checks (read-only mounts, immutable files, ...), and
     // its side effects (ctime, clearing set-id bits), without changing ids.
     let empty = c"";
