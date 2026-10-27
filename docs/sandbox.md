@@ -378,7 +378,6 @@ request `--device=dri` only.
      - The image stays unmodified, with no AOSP patches.
      - Nothing on the hot path is trapped.
      - Flatpak is the security boundary that single-uid mode needs.
-     - Per-app bundles work.
    - **Cons:**
      - It relies on undocumented Flatpak behaviour (the writable root).
      - It needs a new network design, with no network namespace.
@@ -386,16 +385,13 @@ request `--device=dri` only.
      - EPERM precedence over the supervisor is verified only on kernel 7.1.
    - **Go/no-go:** `sys.boot_completed` inside `flatpak run`, and an app with
      networking.
-2. **Fallback and power-user path: the session as a native package, with a
-   Flatpak UI.**
-   - Ship today's launcher as an RPM or deb, a systemd-sysext, or a user
-     service.
-   - All host-safety invariants stay as they are: the sysfs masks, pasta and the
-     session's own cgroup.
-   - Ubuntu needs an AppArmor `userns` profile.
-   - The Flatpak UI reaches the session through a socket (`xdg-run/linuxapk`),
-     the libvirt pattern.
-   - Single-uid mode still removes the subuid requirement there.
+2. **Fallback: the session as a user-level host service, with a Flatpak UI.**
+   - No system packages and no `sudo` (user decision): installed into the user's
+     home, such as a user systemd unit, started by the Flatpak UI over a socket.
+   - Only if the in-Flatpak session fails its go/no-go. Ubuntu's AppArmor userns
+     restriction applies here, so this path may not work there without root,
+     which is another reason to prefer option 1.
+
 3. **Avoid: a host helper reached through `flatpak-spawn --host`.**
    - It's a sandbox escape that Flathub is unlikely to accept.
    - It still needs host user namespaces.

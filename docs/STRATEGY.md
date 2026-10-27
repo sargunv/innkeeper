@@ -176,45 +176,43 @@ Pick the language by where the code runs:
 
 ## Packaging and distros
 
-The goal is per-app bundles: each Android app shipped as its own Flatpak or
-AppImage, the way Mac.apk turns each APK into a `.app`. That takes a
-**no-privilege mode** that works in any sandbox:
+**Scope (user decision, 2026-10-27):**
 
-| Piece                    | Kernel mode (M0–M3)                         | No-privilege mode (target)                                                                                                                             |
-| ------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| IPC                      | binderfs + one-time SELinux/AppArmor policy | ubinder                                                                                                                                                |
-| `/system`, `/apex` paths | bind mounts in a user namespace             | relocated image (ART honours `ANDROID_ROOT`/`ANDROID_ART_ROOT`; invoke the linker explicitly; patch the remaining hardcoded paths in our source build) |
-| per-app uids             | subuid map                                  | virtual uids: the broker fakes `getCallingUid`, and the shim turns zygote's `setresuid` into a no-op                                                   |
+- Linux.apk _itself_ ships as a **Flatpak** (and, if practical, an AppImage).
+  Users install it like Gear Lever, then install APKs through it as normal Linux
+  apps.
+- **Installing anything must never require `sudo`:** no RPM/deb/AUR system
+  packages, SELinux modules, AppArmor profiles or kernel modules.
+- Packaging individual Android apps as their own Flatpaks is a possible extra,
+  **not** a design constraint.
 
-Distro friction kernel mode would hit, and no-privilege mode avoids:
+What that requires of the runtime:
 
-|                              | Fedora/openSUSE       | Ubuntu 24.04+         | Debian | Arch     | Flatpak / AppImage                                            |
-| ---------------------------- | --------------------- | --------------------- | ------ | -------- | ------------------------------------------------------------- |
-| binderfs                     | built in              | module                | module | built in | Flatpak: no mounts at all                                     |
-| unprivileged user namespaces | yes                   | restricted (AppArmor) | yes    | yes      | blocked in the Flatpak sandbox; AppImage has the Ubuntu issue |
-| binder service manager       | SELinux module needed | fine                  | fine   | fine     | n/a                                                           |
+| Need                     | How                                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| IPC without root         | ubinder (userspace binder; no binderfs, no SELinux module)                                                  |
+| uids without host setup  | automatic: the subuid range when the host has one, single-uid (virtual uids) otherwise, e.g. inside Flatpak |
+| `/system`, `/apex` paths | bind mounts in a user namespace natively; inside Flatpak, a symlink root (`docs/sandbox.md`)                |
 
-**Open design question for later:** with per-app Flatpaks, does each app get its
-own session (strong isolation, but each costs a system_server) or join a shared
-host session (lighter, cross-app intents)? Measure the session cost first.
+Distro differences that don't need root:
 
-**aarch64 Linux** (Asahi, Snapdragon X, ARM boards) is cheap to add: same
-design, an arm64 image, and a Mesa driver for that GPU. Google publishes
-16K-page images (`*_ps16k`), which suit Asahi. CI can use free GitHub arm64
-runners with software rendering.
+|                              | Fedora/openSUSE | Ubuntu 24.04+                                | Debian  | Arch    | Flatpak                                 |
+| ---------------------------- | --------------- | -------------------------------------------- | ------- | ------- | --------------------------------------- |
+| unprivileged user namespaces | yes             | restricted by AppArmor (but Flatpak is fine) | yes     | yes     | no nested namespaces: symlink-root mode |
+| binder                       | ubinder         | ubinder                                      | ubinder | ubinder | ubinder                                 |
 
 ## Milestones
 
-|                            | Exit criterion                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0 Session boots**       | From the prebuilt emulator image: a rootless namespace, private binderfs, minimal init, servicemanager, system_server and zygote reach "boot completed" on this machine. In parallel, the image-builder lane produces our own source build.                                                                                                                                                                                                             |
-| **M1 Pixels**              | An APK's Activity renders through SurfaceFlinger and our HWC into a Wayland window (start with one surface for the whole display, then per task). Pointer, keyboard and scroll work. First noarch apps are usable: OpenCalc, Open Sudoku, Unit Converter, Now in Android.                                                                                                                                                                               |
-| **M2 Real apps**           | Bionic Mesa for the GPU, PipeWire audio, per-app windows (resize, close, back), the launcher and `.desktop` install. Games with x86_64 libs: Mindustry, Shattered Pixel Dungeon, OpenTTD, Unciv. _ubinder starts in parallel, differential-tested against kernel binder._                                                                                                                                                                               |
-| **M3 Desktop integration** | The bridge: dark mode and accent, fractional scaling to density, notifications, file picker, share and open URI, MPRIS, clipboard, IME through `text-input-v3`. Cross-app intents, F-Droid installing apps, microG.                                                                                                                                                                                                                                     |
-| **M4 No-privilege mode**   | ubinder becomes the default (no binderfs, no SELinux module), virtual uids (`--single-uid`, no subuid range needed), the image switched to Google's AOSP CI build (downloaded at setup instead of built or redistributed), and corpus parity in every mode. Relocating paths was assessed (`docs/sandbox.md`) and moved to M5, where Flatpak needs it. **Done 2026-10-27.**                                                                             |
-| **M5 Packaging**           | Package **Linux.apk itself** as a Flatpak and an AppImage, plus a native runtime package (RPM first); users install it like Gear Lever and then install APKs through it as normal Linux apps. Not one Flatpak per Android app. Flatpak path per `docs/sandbox.md`: a symlink root inside the sandbox with `--single-uid` and ubinder; fallback is a native-package session with a Flatpak UI. Idle shutdown, startup and memory budgets. aarch64 hosts. |
-| **M6 ARM translation**     | arm64-only libs on x86_64 hosts through a NativeBridge (QEMU-user, as in ATL's nb-qemu, or a faster open translator). Wanted before launch if practical.                                                                                                                                                                                                                                                                                                |
-| **Later**                  | Accessibility through AT-SPI.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|                            | Exit criterion                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0 Session boots**       | From the prebuilt emulator image: a rootless namespace, private binderfs, minimal init, servicemanager, system_server and zygote reach "boot completed" on this machine. In parallel, the image-builder lane produces our own source build.                                                                                                                                 |
+| **M1 Pixels**              | An APK's Activity renders through SurfaceFlinger and our HWC into a Wayland window (start with one surface for the whole display, then per task). Pointer, keyboard and scroll work. First noarch apps are usable: OpenCalc, Open Sudoku, Unit Converter, Now in Android.                                                                                                   |
+| **M2 Real apps**           | Bionic Mesa for the GPU, PipeWire audio, per-app windows (resize, close, back), the launcher and `.desktop` install. Games with x86_64 libs: Mindustry, Shattered Pixel Dungeon, OpenTTD, Unciv. _ubinder starts in parallel, differential-tested against kernel binder._                                                                                                   |
+| **M3 Desktop integration** | The bridge: dark mode and accent, fractional scaling to density, notifications, file picker, share and open URI, MPRIS, clipboard, IME through `text-input-v3`. Cross-app intents, F-Droid installing apps, microG.                                                                                                                                                         |
+| **M4 No-privilege mode**   | ubinder becomes the default (no binderfs, no SELinux module), virtual uids (`--single-uid`, no subuid range needed), the image switched to Google's AOSP CI build (downloaded at setup instead of built or redistributed), and corpus parity in every mode. Relocating paths was assessed (`docs/sandbox.md`) and moved to M5, where Flatpak needs it. **Done 2026-10-27.** |
+| **M5 Packaging**           | Ship Linux.apk itself as a Flatpak (AppImage if practical), installable with no `sudo` (Gear Lever model): the session runs inside the Flatpak per `docs/sandbox.md` (symlink root, automatic single-uid, ubinder). Idle shutdown, startup and memory budgets. aarch64 hosts. Per-app Flatpaks are an optional extra.                                                       |
+| **M6 ARM translation**     | arm64-only libs on x86_64 hosts through a NativeBridge (QEMU-user, as in ATL's nb-qemu, or a faster open translator). Wanted before launch if practical.                                                                                                                                                                                                                    |
+| **Later**                  | Accessibility through AT-SPI.                                                                                                                                                                                                                                                                                                                                               |
 
 ## ABI survey (2026-10-26)
 
