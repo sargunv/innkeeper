@@ -16,7 +16,7 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 
 | Milestone                                                       | Status                                                                                                                                          |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 init boots partway; SurfaceFlinger runs on our gralloc and composer HALs (1280x800@60); GLES 3.2 via ANGLE on RADV; system_server not up yet |
+| M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 init, SurfaceFlinger (our HALs, ANGLE on RADV) and system_server run rootless; blocked on netd's eBPF/iptables (userspace shims in progress) |
 | M1 Pixels in a Wayland window, first noarch apps                | ⏳                                                                                                                                              |
 | M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                              |
 | M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                              |
