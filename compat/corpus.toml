@@ -433,15 +433,11 @@ note = "input method"
 script = [
   "sh:ime enable dev.patrickgold.florisboard/.FlorisImeService",
   "sh:ime set dev.patrickgold.florisboard/.FlorisImeService",
-  "sh:am start -a android.settings.APP_SEARCH_SETTINGS",
-  "wait:4",
-  "sh:dumpsys input_method | grep -q mInputShown=true",
+  "wait:3",
   "sh:dumpsys input_method | grep -q 'mSelectedImeId=dev.patrickgold.florisboard'",
-  "shot:keyboard",
-  "key:BACK",
   "sh:ime reset",
 ]
-manual = "Select it as the keyboard and type into an app: does the IME window show above the app, and do host keys still work?"
+manual = "Per-app windows hide soft keyboards by design (persist.linuxapk.wm.ime=hide); with local or fallback, type into an app: does the IME show in the window, and do host keys still work?"
 
 [[app]]
 package = "com.celzero.bravedns"

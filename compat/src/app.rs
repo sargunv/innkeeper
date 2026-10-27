@@ -265,9 +265,17 @@ impl<'a> Run<'a> {
                     ],
                 )
                 .text;
+            // The app's own first frame, or a system activity it opened
+            // straight away (a permission or battery-optimisation prompt).
             if let Some(l) = log
                 .lines()
                 .find(|l| l.contains("Displayed ") && l.contains(&pkg))
+                .or_else(|| {
+                    log.lines().find(|l| {
+                        l.contains("Displayed com.android.settings/")
+                            || l.contains("Displayed com.android.permissioncontroller/")
+                    })
+                })
             {
                 displayed = Some(l.to_string());
                 break;
