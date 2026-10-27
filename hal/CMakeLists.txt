@@ -81,8 +81,31 @@ if(ANDROID)
     PROPERTIES OUTPUT_NAME android.hardware.graphics.allocator-service.linuxapk)
   target_link_libraries(allocator PRIVATE lapk_common lapk_aidl)
 
+  # libwayland-client 1.24.0 + protocol glue + libffi, all static (see
+  # wayland/fetch-deps.sh, which build.sh runs first).
+  if(NOT WAYLAND_DEPS_DIR)
+    message(FATAL_ERROR "WAYLAND_DEPS_DIR not set (run wayland/fetch-deps.sh)")
+  endif()
+  set(WL_SRC ${WAYLAND_DEPS_DIR}/src/wayland-1.24.0/src)
+  file(GLOB WL_GEN_SRCS ${WAYLAND_DEPS_DIR}/gen/src/*.c)
+  add_library(
+    lapk_wayland
+    STATIC
+      ${WL_SRC}/wayland-client.c ${WL_SRC}/connection.c ${WL_SRC}/wayland-os.c
+      ${WL_SRC}/wayland-util.c ${WL_GEN_SRCS})
+  target_include_directories(
+    lapk_wayland
+    PUBLIC ${WAYLAND_DEPS_DIR}/gen/include ${WL_SRC}
+    PRIVATE ${WAYLAND_DEPS_DIR}/ffi/include)
+  target_compile_options(lapk_wayland PRIVATE -w -fvisibility=hidden)
+  target_link_libraries(
+    lapk_wayland
+    PUBLIC ${WAYLAND_DEPS_DIR}/ffi/lib/libffi.a)
+
   add_executable(
     composer
+    composer/WaylandPresenter.cpp
+    composer/InputServer.cpp
     composer/main.cpp
     composer/Composer.cpp
     composer/ComposerClient.cpp
@@ -98,7 +121,10 @@ if(ANDROID)
     PROPERTIES OUTPUT_NAME android.hardware.graphics.composer3-service.linuxapk)
   target_include_directories(composer PRIVATE ${HAL}/composer)
   # libz is not LL-NDK: link the NDK's static copy.
-  target_link_libraries(composer PRIVATE lapk_common lapk_aidl -l:libz.a)
+  target_link_libraries(
+    composer
+    PRIVATE lapk_common lapk_aidl lapk_wayland -l:libz.a)
+  target_compile_definitions(composer PRIVATE LINUXAPK_HWC_WAYLAND)
 
   # On-device tests (not installed into /vendor/bin/hw).
   add_executable(gralloc_test tests/android/gralloc_test.cpp)

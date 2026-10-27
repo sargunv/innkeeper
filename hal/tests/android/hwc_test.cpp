@@ -7,6 +7,7 @@
 #include <aidl/android/hardware/graphics/composer3/IComposer.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <errno.h>
 #include <stdio.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -18,7 +19,9 @@
 
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "linuxapk/gralloc_handle.h"
@@ -349,6 +352,50 @@ int main() {
       ok ? (long long)st.st_size : 0LL
     );
     CHECK(ok);
+  }
+
+  // Optional: keep presenting an animated pattern (e.g. into a Wayland
+  // window) and print the input event stream meanwhile.
+  if (const char* sec = getenv("HWC_TEST_ANIMATE_SEC")) {
+    std::thread([] {
+      int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      sockaddr_un a{};
+      a.sun_family = AF_UNIX;
+      strcpy(a.sun_path, "/dev/socket/linuxapk-input");
+      if (connect(fd, (sockaddr*)&a, sizeof a) != 0) {
+        printf("input: no event stream (%s)\n", strerror(errno));
+        return;
+      }
+      char buf[4096];
+      ssize_t n;
+      while ((n = read(fd, buf, sizeof buf - 1)) > 0) {
+        buf[n] = 0;
+        for (char* line = strtok(buf, "\n"); line;
+             line = strtok(nullptr, "\n")) {
+          printf("input: %s\n", line);
+        }
+      }
+    }).detach();
+    const int64_t end = nowNs() + int64_t(atoi(sec)) * 1000000000;
+    uint32_t phase = 0;
+    int frames = 0;
+    while (nowNs() < end) {
+      int slot = phase % 2;
+      fill(ar.buffers[slot], phase / 8);
+      DisplayCommand c;
+      c.display = D;
+      c.presentOrValidateDisplay = true;
+      std::vector<DisplayCommand> v;
+      v.push_back(std::move(c));
+      std::vector<CommandResultPayload> r;
+      client->executeCommands(v, &r);
+      res = present(slot, false, true);
+      CHECK(countErrors(res) == 0);
+      frames++;
+      phase++;
+      std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    printf("animated %d frames\n", frames);
   }
 
   CHECK(client->destroyLayer(D, l1).isOk());

@@ -100,6 +100,10 @@ class HeadlessPresenter : public Presenter {
   int64_t mLastLogNs = 0;
 };
 
-std::unique_ptr<Presenter> createPresenter(int64_t displayId);
+// vendor.linuxapk.hwc.backend: "headless" (default) or "wayland" (needs
+// WaylandConnection::init() at startup; falls back to headless).
+std::unique_ptr<Presenter> createPresenter(
+  int64_t displayId, uint32_t width, uint32_t height
+);
 
 }  // namespace linuxapk::hwc

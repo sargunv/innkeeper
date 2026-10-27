@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Run our graphics HALs and an on-device test without booting Android.
 #
-#   hal/tests/run-android.sh [-e VAR=val]... -- /vendor/bin/hwc_test [args]
+#   hal/tests/run-android.sh [-w] [-e VAR=val]... -- /vendor/bin/hwc_test [args]
+#
+# -w binds the host compositor's Wayland socket (that one file) at
+# /dev/socket/wayland-host, for the composer's Wayland backend.
 #
 # Builds a throwaway root in a rootless user+mount+pid namespace (inside its
 # own transient systemd user unit): the image's /system, /system_ext,
@@ -13,7 +16,8 @@
 # properties (LINUXAPK_PROPS="name=value;...", see -e). Frame dumps land in out/hal-test/frames.
 #
 # Host safety (docs/NOTES.md): no /sys at all, /dev is a tmpfs with a few
-# individually bound nodes, nothing from $HOME or /run/user is mounted.
+# individually bound nodes, nothing from $HOME or /run/user is mounted
+# (except the single Wayland socket file with -w).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 main=$(cd "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
@@ -31,18 +35,27 @@ case ${1:-} in
       exit 1
     }
     mkdir -p "$out/hal-test/frames"
+    # The host compositor's socket (only this one file is bound in, with -w).
+    wl=""
+    [[ -n ${WAYLAND_DISPLAY:-} ]] && wl=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY
+    [[ ${WAYLAND_DISPLAY:-} == /* ]] && wl=$WAYLAND_DISPLAY
     exec systemd-run --user --quiet --collect --wait --pipe --same-dir \
       --unit="linuxapk-haltest-$$" -p KillMode=control-group -p RuntimeMaxSec=150 \
-      -E OUT="$out" -- "$0" --ns "$@"
+      -E OUT="$out" -E HOST_WAYLAND_SOCKET="$wl" -- "$0" --ns "$@"
     ;;
 esac
 
 envs=()
+wayland=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     -e)
       envs+=("$2")
       shift 2
+      ;;
+    -w)
+      wayland=1
+      shift
       ;;
     --)
       shift
@@ -92,6 +105,15 @@ done
 mkdir -p "$R/dev/binderfs"
 mount -t binder binder "$R/dev/binderfs"
 for b in binder hwbinder vndbinder; do ln -s "binderfs/$b" "$R/dev/$b"; done
+mkdir -p "$R/dev/socket"
+if ((wayland)); then
+  [[ -S ${HOST_WAYLAND_SOCKET:-} ]] || {
+    echo "-w: no host Wayland socket" >&2
+    exit 1
+  }
+  touch "$R/dev/socket/wayland-host"
+  mount --bind "$HOST_WAYLAND_SOCKET" "$R/dev/socket/wayland-host"
+fi
 mount -t proc proc "$R/proc"
 for e in "$out/img/system"/*; do
   n=$(basename "$e")

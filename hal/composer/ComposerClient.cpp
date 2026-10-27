@@ -34,11 +34,15 @@ class ComposerClient::Results {
 ComposerClient::ComposerClient() {
   // One headless primary display. Hotplug of more displays (e.g. one per
   // Wayland output) would add entries here and call onHotplugEvent.
+  const DisplayConfig config = DisplayConfig::fromProperties();
   mDisplays.emplace(
-    kPrimaryDisplay, std::make_unique<Display>(
-                       kPrimaryDisplay, DisplayConfig::fromProperties(),
-                       createPresenter(kPrimaryDisplay)
-                     )
+    kPrimaryDisplay,
+    std::make_unique<Display>(
+      kPrimaryDisplay, config,
+      createPresenter(
+        kPrimaryDisplay, uint32_t(config.width), uint32_t(config.height)
+      )
+    )
   );
 }
 

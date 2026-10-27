@@ -40,7 +40,9 @@ if ((run_tests)); then
 fi
 
 echo "== android x86_64"
+"$hal/wayland/fetch-deps.sh" "$BUILD/wayland" "$NDK" 35
 cmake -S "$hal" -B "$BUILD/android" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DWAYLAND_DEPS_DIR="$BUILD/wayland" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-35 -DANDROID_STL=c++_static \
   -DAIDL_GEN_DIR="$BUILD/aidl" >/dev/null
