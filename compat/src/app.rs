@@ -109,6 +109,27 @@ fn parse_launched(text: &str) -> Option<(i32, i32, i32)> {
     Some((d, w.parse().ok()?, h.parse().ok()?))
 }
 
+/// `<display id="N">` … `</display>` of a `uiautomator dump --windows`.
+fn display_section(xml: &str, display: i32) -> Option<String> {
+    let start = xml.find(&format!("<display id=\"{display}\""))?;
+    let rest = &xml[start..];
+    let end = rest
+        .find("</display>")
+        .map_or(rest.len(), |e| e + "</display>".len());
+    Some(rest[..end].to_string())
+}
+
+/// A window's `size=WxH` in the window manager's LIST reply.
+fn parse_list_size(text: &str, display: i32) -> Option<(i32, i32)> {
+    let key = format!("display={display} ");
+    let line = text.lines().find(|l| l.contains(&key))?;
+    let size = line
+        .split_whitespace()
+        .find_map(|f| f.strip_prefix("size="))?;
+    let (w, h) = size.split_once('x')?;
+    Some((w.parse().ok()?, h.parse().ok()?))
+}
+
 /// SurfaceFlinger's display id for virtual display `name`
 /// (`dumpsys SurfaceFlinger --display-id`).
 fn parse_sf_id(text: &str, name: &str) -> Option<String> {
@@ -529,6 +550,7 @@ impl<'a> Run<'a> {
             return Err(Stop(Status::Broken, format!("{why} ({focus})")));
         }
 
+        self.refresh_window();
         // Per-app script, from a fresh first screen.
         let script = self.app.script.clone();
         if !script.is_empty() {
@@ -701,19 +723,52 @@ impl<'a> Run<'a> {
 
     fn ui_nodes(&self) -> Result<Vec<Node>, String> {
         // The dump waits for the UI to go idle, which busy apps rarely do on
-        // the first try.
+        // the first try. A window's display needs `--windows`: the plain dump
+        // clips every node to display 0's size.
+        let flag = if self.win.is_some() { "--windows " } else { "" };
         let mut last = String::new();
         for _ in 0..3 {
             let o = self.s.sh(
                 60,
-                &format!("rm -f {UI_XML}; uiautomator dump {UI_XML} >/dev/null && cat {UI_XML}"),
+                &format!(
+                    "rm -f {UI_XML}; uiautomator dump {flag}{UI_XML} >/dev/null && cat {UI_XML}"
+                ),
             );
-            if o.text.contains("<hierarchy") {
-                return Ok(parse_nodes(&o.text));
+            if o.text.contains("<hierarchy") || o.text.contains("<displays") {
+                let xml = match &self.win {
+                    Some(w) => display_section(&o.text, w.display).unwrap_or_default(),
+                    None => o.text,
+                };
+                return Ok(parse_nodes(&xml));
             }
             last = o.text.trim().to_string();
         }
         Err(format!("uiautomator dump failed: {last}"))
+    }
+
+    /// Re-reads the window's size: the first window after boot opens at
+    /// scale 1 and is resized when the compositor reports its real scale.
+    fn refresh_window(&mut self) {
+        let Some(display) = self.win.as_ref().map(|w| w.display) else {
+            return;
+        };
+        let o = self.s.run(
+            30,
+            &[
+                "am",
+                "broadcast",
+                "-n",
+                "dev.linuxapk.system/.wm.ControlReceiver",
+                "-a",
+                "dev.linuxapk.LIST",
+            ],
+        );
+        if let Some((w, h)) = parse_list_size(&o.text, display)
+            && let Some(win) = self.win.as_mut()
+        {
+            win.w = w;
+            win.h = h;
+        }
     }
 
     /// Known failure classes in the log since launch, each a failed check.
@@ -848,6 +903,21 @@ mod tests {
         let w = "  Display: mDisplayId=0 (organized)\n  mCurrentFocus=null\n  Display: mDisplayId=4 (organized)\n  mCurrentFocus=Window{1 a.b/a.b.Main}";
         assert_eq!(parse_focus(w, 4).as_deref(), Some("Window{1 a.b/a.b.Main}"));
         assert_eq!(parse_focus(w, 0).as_deref(), Some("null"));
+    }
+
+    #[test]
+    fn picks_the_window_display() {
+        let xml = r#"<displays><display id="0"><node text="Home" bounds="[0,0][1,1]"/></display><display id="4"><node text="Skip" bounds="[10,1200][110,1300]"/></display></displays>"#;
+        let n = parse_nodes(&display_section(xml, 4).unwrap());
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].text, "Skip");
+        assert_eq!(
+            parse_list_size(
+                "Broadcast completed: result=-1, data=\"display=3 package=a size=1280x800 dpi=160\ndisplay=4 package=b size=2176x1360 dpi=272 tasks=9",
+                4
+            ),
+            Some((2176, 1360))
+        );
     }
 
     #[test]

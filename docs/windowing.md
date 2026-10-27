@@ -269,7 +269,12 @@ session default; `composer/BridgePresenter.cpp`):
   - captures screenshots with `screencap -d <SurfaceFlinger id>` (from
     `dumpsys SurfaceFlinger --display-id`);
   - sends input with `input -d <display>`, scaling coordinates to the window's
-    pixels;
+    pixels (re-read from `LIST` once the window has its real scale);
+  - finds script nodes with `uiautomator dump --windows`, in the window's
+    `<display>` section. The plain dump clips every node to display 0's size, so
+    on a window larger than 1280x800 (any scale above 1) buttons near the bottom
+    disappear; that was the `--window` 13/16 (OpenCalc's "15", and Wikipedia's
+    "Skip").
   - reads focus from the window's display.
 - The window probe
   (`LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.wm.WindowProbeActivity`)
@@ -291,6 +296,10 @@ session default; `composer/BridgePresenter.cpp`):
 ### Proof (2026-10-27, nested KWin 6.7 and weston 15 on this machine)
 
 Through the bridge (the default since the bridge move):
+
+- On the AOSP CI image (ci-16644040), in nested KWin at scale 1.7 (the user's
+  desktop scale): `compat/run.sh` with windows gave 15/16 (only arm64-only Open
+  Sudoku fails, as headless), and `android/e2e/e2e.sh` passed 27/27.
 
 - The same two-window input test in nested KWin gave the same results (9 in
   Calculator, Wikipedia advanced), with server-side decorations.
@@ -330,6 +339,15 @@ Direct composer Wayland client (before the bridge move):
     through ANGLE on RADV in virtual displays.
   - Apps that look flat use Material 3 tonal elevation (surface tint) rather
     than shadows.
+
+### Images
+
+Windowing works the same on the AOSP CI (cuttlefish) image and the SDK emulator
+image. Nothing depends on `config_isDesktopModeSupported` (true on the emulator,
+false on cuttlefish): the virtual displays are fullscreen-windowed either way,
+and the window manager uses no desktop-mode API. Switching an instance between
+images needs a fresh `/data` (`LINUXAPK_DATA`); the emulator's `/data` makes the
+CI image's system_server crash-loop in `SyntheticPasswordCrypto.decryptBlob`.
 
 ## Open issues
 

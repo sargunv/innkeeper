@@ -46,7 +46,8 @@ class AppWarningActivity : Activity() {
     private const val DEFAULT_MESSAGE =
       "This app was built for an older version of Android and may not work properly."
 
-    private fun prefs(c: Context) = c.getSharedPreferences("wm", Context.MODE_PRIVATE)
+    private fun prefs(c: Context) =
+      c.createDeviceProtectedStorageContext().getSharedPreferences("wm", Context.MODE_PRIVATE)
 
     private fun systemString(name: String, default: String): String {
       val res = Resources.getSystem()

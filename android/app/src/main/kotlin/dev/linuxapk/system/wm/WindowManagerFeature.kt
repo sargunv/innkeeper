@@ -61,7 +61,9 @@ class WindowManagerFeature(
   private val atm by lazy { ActivityTaskManager.getService() }
   private val wms by lazy { WindowManagerGlobal.getWindowManagerService() }
   private val dm by lazy { context.getSystemService(DisplayManager::class.java) }
-  private val prefs by lazy { context.getSharedPreferences("wm", Context.MODE_PRIVATE) }
+  private val prefs by lazy {
+    context.createDeviceProtectedStorageContext().getSharedPreferences("wm", Context.MODE_PRIVATE)
+  }
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
   private val pending = ConcurrentHashMap<Int, CountDownLatch>() // window_pending replies
