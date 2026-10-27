@@ -12,6 +12,7 @@ Launcher3 run. See "What boots" and "Open issues".
 tools/extract-image.sh ~/Android/Sdk/system-images/android-37.0/default/x86_64 out/img  # once
 session/linuxapk-session start        # first run: builds the shim and iptables, flattens APEXes
 session/linuxapk-session start --headless   # no host Wayland window
+session/linuxapk-session start --single-window   # all of Android in one window (M1); default: a window per app
 session/linuxapk-session log -f       # init's /dev/kmsg (a FIFO read on the host)
 session/linuxapk-session exec logcat -d -b main,system,crash   # (-b all can hang)
 session/linuxapk-session exec getprop sys.boot_completed

@@ -98,7 +98,10 @@ keep using its session.
   the front. With a URI it sends `VIEW` + `BROWSABLE` (the URI comes from an
   untrusted origin, so only activities that accept browser links get it)
   restricted to the package. Both go through `android::launch`, the single place
-  that decides how to start an app. Today that is
+  that decides how to start an app: the window manager's `dev.linuxapk.LAUNCH`
+  broadcast ([windowing.md](windowing.md)). It opens the app in a window of its
+  own, or focuses that window if the app already has one. If no receiver answers
+  (an older system app), it falls back to
   `cmd activity start-activity --display 0`.
 - **`uninstall <pkg> [--keep-data]`** only uninstalls packages listed by
   `pm list packages -3`, so system apps are refused. It runs
@@ -156,12 +159,8 @@ APKs, and URIs passed to `run`, are untrusted input.
 
 ## Windowing integration (M2)
 
-Today every app shares display 0's one "Linux.apk" window (app id `linuxapk`).
-Two changes switch to per-app windows:
-
-- **`android::launch`** becomes a call to the windowing lane's control command:
-  "start this intent on its own display/window". `Launch::Main { component }`
-  and `Launch::View { package, uri }` already carry what it needs.
-- **The composer** gives each app's `xdg_toplevel` the app id
-  `dev.linuxapk.<package>`, matching `StartupWMClass` and the desktop-file ID,
-  so the taskbar groups windows under the app's own icon and name.
+Done ([windowing.md](windowing.md)): `android::launch` sends the window
+manager's `LAUNCH` broadcast with the package and the component or URI. Each
+app's `xdg_toplevel` has app id `dev.linuxapk.<package>`, matching
+`StartupWMClass` and the desktop-file ID, so the taskbar groups windows under
+the app's own icon and name.

@@ -55,7 +55,7 @@ if [[ $(s getprop vendor.linuxapk.wm.mode | tr -d '\r') != single ]]; then
   for p in ADD_TRUSTED_DISPLAY ADD_ALWAYS_UNLOCKED_DISPLAY INTERNAL_SYSTEM_WINDOW MANAGE_ACTIVITY_TASKS REAL_GET_TASKS; do
     check "$p granted" "android.permission.$p: granted=true" "$pkg"
   done
-  check "window manager started" "window manager started \(per-app" "$(s logcat -d -s LinuxApkWm:I)"
+  check "window manager answers" "result=-1" "$(wm LIST)"
   wm CLOSE --es package dev.linuxapk.system >/dev/null || true
   s logcat -c
   out=$(wm LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.input.InputProbeActivity)

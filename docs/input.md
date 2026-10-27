@@ -115,6 +115,14 @@ The mapping follows what InputReader produces for real devices
   `uptimeMillis`. The mapping keeps the spacing between events, which
   VelocityTracker needs for flings. It is clamped to `[now − 100 ms, now]`,
   never goes backwards, and handles the u32 wrap.
+- **Windows (protocol v2):** each window is an Android display
+  ([windowing.md](windowing.md)). The display id on `pointer_enter`,
+  `keyboard_enter` and `touch_down` decides where the following events go; they
+  are injected with `InputEvent.setDisplayId`. When the pointer moves to another
+  window, the old display first gets its button releases and `HOVER_EXIT`. A
+  touch sequence stays on the display of its first finger, and fingers that land
+  on another window meanwhile are dropped. Smooth-scroll distances on a virtual
+  display convert with the window's scale.
 - **One injection stream:** InputDispatcher gives every injected event device id
   −1 and checks the stream with InputVerifier. The mouse and the touchscreen
   therefore must not overlap. A touch sequence that starts during a mouse drag
@@ -141,10 +149,10 @@ The mapping follows what InputReader produces for real devices
 
 ## Tests
 
-| What                                                                                                                                             | How                                 | Result                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------------- |
-| Parser, keymap, translator; model of AOSP's InputVerifier run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`                  | 36 tests, 0 failures                   |
-| Real framework classes: `app_process` builds every event from `android/e2e/probe-stream.txt` in the live session                                 | `InputBridgeMain --dry-run --stdin` | MotionEvent/KeyEvent dumps as expected |
+| What                                                                                                                                                                                                   | How                                 | Result                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------------- |
+| Parser (v1 and v2), keymap, translator (incl. per-display routing); model of AOSP's InputVerifier (per display) run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`                  | 41 tests, 0 failures                   |
+| Real framework classes: `app_process` builds every event from `android/e2e/probe-stream.txt` in the live session                                                                                       | `InputBridgeMain --dry-run --stdin` | MotionEvent/KeyEvent dumps as expected |
 
 ### Proof (2026-10-27, live session, system_server up to NetworkManagementService)
 
@@ -175,8 +183,10 @@ The mapping follows what InputReader produces for real devices
    `out/system_ext-overlay`.
 2. Start the session with the composer's Wayland backend. This needs the session
    changes below.
-3. Run `android/e2e/e2e.sh`. It checks the following and exits non-zero on any
-   FAIL:
+3. Run `android/e2e/e2e.sh`. In per-app window mode it opens the probe in a
+   window of its own and rewrites the stream to protocol v2 with the probe's
+   display id (see [windowing.md](windowing.md)). It checks the following and
+   exits non-zero on any FAIL:
    - the package is a system_ext priv-app;
    - `INJECT_EVENTS` and `HOST_INPUT` are granted;
    - the persistent process runs and logged `started input`;

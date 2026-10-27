@@ -190,6 +190,14 @@ Causes:
   API, service and input type with a desktop counterpart (141 rows: 10 done, 19
   partial, 101 todo, 11 won't-do), with owner lanes, priorities, test apps and a
   recommended order for M3.
+- 2026-10-27 (win): **per-app windows (M2).** Each app runs on a trusted virtual
+  display created by the system app's window manager. SurfaceFlinger hands its
+  frames to the composer (HWC-backed virtual displays), and the composer shows
+  each display as its own `xdg_toplevel` (`app_id` `dev.linuxapk.<pkg>`).
+  Resize, close, focus and input protocol v2 work, and `linuxapk run` launches
+  through `dev.linuxapk.LAUNCH`. Display 0 is headless unless
+  `start --single-window`. Next: move the Wayland client into the bridge (CSD
+  for GNOME). See [windowing.md](windowing.md).
 
 ## Backlog (unassigned)
 

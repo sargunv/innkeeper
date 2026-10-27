@@ -111,9 +111,17 @@ missing it re-runs itself in `tools/hosttools.sh`.
 - **Buffers:** buffer slots are cached per layer and for the client target, and
   honour `bufferSlotsToClear`. Each `BufferRef` is reference-counted, so a
   backend can keep a buffer alive past slot replacement.
-- **Unsupported:** virtual displays (SurfaceFlinger does them with the GPU),
-  readback, content sampling, boot config, idle timer, HDR conversion, LUTs,
-  sideband, EDID (SurfaceFlinger falls back to a port-based display id).
+- **Virtual displays:** HWC-backed, up to 32 (`getMaxVirtualDisplayCount`), with
+  ids from 100 that are never reused. The `.rc` sets `debug.sf.enable_hwc_vds=1`
+  before SurfaceFlinger starts. Every layer stays CLIENT, so SurfaceFlinger
+  renders each frame into the sink's buffer and passes that buffer as both
+  client target and output buffer (`setOutputBuffer`). Virtual displays are
+  powered on from the start and follow the size of their buffers
+  (`VirtualDisplay.resize`). Each one shows in the Wayland window the window
+  manager asked for, or stays headless. See [windowing.md](windowing.md).
+- **Unsupported:** readback, content sampling, boot config, idle timer, HDR
+  conversion, LUTs, sideband, EDID (SurfaceFlinger falls back to a port-based
+  display id).
 - **Frame dumps:** set `vendor.linuxapk.hwc.dump.dir` (or the env var
   `VENDOR_LINUXAPK_HWC_DUMP_DIR`) and the composer writes
   `<dir>/display0-latest.png` atomically, at most once per
@@ -145,8 +153,15 @@ so frame dumps keep working.
 
 ## Wayland backend (`composer/WaylandPresenter.cpp`, M1)
 
-Set `vendor.linuxapk.hwc.backend=wayland` to show display 0 as a window on the
-host compositor.
+Set `vendor.linuxapk.hwc.backend=wayland` to show displays as windows on the
+host compositor:
+
+- **Per-app mode** (default, `vendor.linuxapk.wm.mode` unset or `per-app`):
+  display 0 stays headless, and each virtual display the window manager requests
+  gets its own `xdg_toplevel` ([windowing.md](windowing.md)).
+- **Single-window mode** (`vendor.linuxapk.wm.mode=single`, set by
+  `linuxapk-session start --single-window`): display 0 is the "Linux.apk"
+  window, as in M1.
 
 - **Dependencies:** `hal/wayland/fetch-deps.sh` (run by `build.sh`) fetches and
   sha256-checks three pinned sources:
@@ -166,8 +181,16 @@ host compositor.
   the session's root (the host user) may connect to the host socket. The
   connection is a process singleton with its own event thread. Each composer
   client (each SurfaceFlinger instance) gets its own window.
-- **Window:** one `xdg_toplevel` titled "Linux.apk" (app id `linuxapk`), with
-  server-side decorations via xdg-decoration.
+- **Windows:** one `xdg_toplevel` per shown display, with server-side
+  decorations via xdg-decoration. The window registry keys windows by Android
+  display id:
+  - display 0 is titled "Linux.apk" with app id `linuxapk`;
+  - app windows take the title and app id from `window_new`.
+
+  Pointer, keyboard and touch focus are tracked per `wl_surface`, so events
+  carry the id of the window they belong to. `xdg_activation_v1` is used for
+  `window_activate`.
+
 - **Buffers:** the composer copies each client target (RGBA/RGBX/BGRA 8888) into
   a pool of 3 of its own buffers, so SurfaceFlinger's buffer is free again as
   soon as `present` returns (still no fences). The pool is one of:
@@ -183,11 +206,14 @@ host compositor.
 
 - **Pacing:** vsync stays on the composer's timer. `wp_presentation` feedback
   only counts shown and discarded frames, logged every 10 s.
-- **Scaling:** the Android display size stays fixed (M1). `wp_viewporter`
-  stretches the buffer over the window's logical size from
-  `xdg_toplevel.configure`. The default window is the display size in logical
-  pixels, so the compositor applies the fractional scale. The aspect ratio isn't
-  preserved when the user resizes.
+- **Scaling:** `wp_viewporter` stretches the newest frame over the window's
+  logical size from `xdg_toplevel.configure`.
+  - Display 0 keeps a fixed size; its window starts at the display size in
+    logical pixels, and the aspect ratio isn't preserved when the user resizes.
+  - A virtual display's window starts at its size in dp (pixels × 160 / dpi).
+    The window manager then resizes the display to the window's logical size
+    times the fractional scale, and the composer swaps its buffer pool when
+    frames of a new size arrive.
 - **Real resize (later):**
   1. On configure, compute a new mode: the window's logical size × the
      fractional scale (`wp_fractional_scale_v1`), rounded to whole pixels.
@@ -204,40 +230,63 @@ host compositor.
   - frame callbacks driving vsync;
   - formats other than 8888.
 
-### Input event stream
+### Input event stream (protocol v2)
 
 The composer listens on `vendor.linuxapk.input.socket` (default
 `/dev/socket/linuxapk-input`, `AF_UNIX` `SOCK_STREAM`). If init created a socket
 of that name, the composer uses init's socket (`$ANDROID_SOCKET_<name>`) instead
 of binding the path itself.
 
-Each connected client receives the same stream of events from the window's
+Each connected client receives the same stream of events from the windows'
 `wl_seat`. Every event is one ASCII line of space-separated fields ending in
 `\n`:
 
-- Coordinates are in **display pixels**: surface-local position × display size /
-  window size, as floats with 2 decimals.
+- Coordinates are in the **pixels of the target display**: surface-local
+  position × the shown frame's size / the window's logical size, as floats with
+  2 decimals.
+- `<display>` is the Android display id of the window. Version 2 appends it to
+  the lines that start a pointer, keyboard or touch sequence; the events that
+  follow (motion, buttons, keys, touch motion and up) belong to that window. A
+  version 1 client ignores the extra field, and a missing field means display 0,
+  which is what version 1 meant.
 - `<t>` is the compositor's millisecond timestamp.
 - Button and key codes are Linux evdev codes (`BTN_LEFT`=272, `KEY_A`=30).
 - A client that falls behind (its socket buffer fills up) is disconnected.
 
-| Line                                                                                  | When                                                              |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `hello 1 <display_w> <display_h>`                                                     | first line on connect (protocol version 1)                        |
-| `window <logical_w> <logical_h> <scale>`                                              | on connect and whenever the window size or scale changes          |
-| `pointer_enter <x> <y>` / `pointer_leave`                                             | pointer enters or leaves the window                               |
-| `pointer_motion <t> <x> <y>`                                                          | pointer moves                                                     |
-| `pointer_button <t> <button> <0\|1>`                                                  | button released (0) or pressed (1)                                |
-| `pointer_axis <t> <axis> <value>`                                                     | scroll, axis 0 = vertical, 1 = horizontal; value in surface units |
-| `pointer_axis_value120 <axis> <v120>`                                                 | high-resolution wheel steps (120 = one detent)                    |
-| `pointer_axis_stop <t> <axis>`                                                        | end of a kinetic scroll                                           |
-| `pointer_frame`                                                                       | ends a group of pointer events                                    |
-| `keyboard_enter` / `keyboard_leave`                                                   | keyboard focus                                                    |
-| `key <t> <keycode> <0\|1>`                                                            | key released (0) or pressed (1)                                   |
-| `modifiers <depressed> <latched> <locked> <group>`                                    | xkb masks (compositor keymap)                                     |
-| `touch_down <t> <id> <x> <y>` / `touch_motion <t> <id> <x> <y>` / `touch_up <t> <id>` | touch points                                                      |
-| `touch_frame` / `touch_cancel`                                                        | end of a touch group, or the touch sequence was cancelled         |
-| `close`                                                                               | the user asked to close the window                                |
+| Line                                                                                            | When                                                                      |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `hello 2 <display_w> <display_h>`                                                               | first line on connect (protocol version, display 0's size)                |
+| `window <logical_w> <logical_h> <scale> <display>`                                              | on connect (one per window) and whenever a window's size or scale changes |
+| `pointer_enter <x> <y> <display>` / `pointer_leave <display>`                                   | pointer enters or leaves a window                                         |
+| `pointer_motion <t> <x> <y>`                                                                    | pointer moves                                                             |
+| `pointer_button <t> <button> <0\|1>`                                                            | button released (0) or pressed (1)                                        |
+| `pointer_axis <t> <axis> <value>`                                                               | scroll, axis 0 = vertical, 1 = horizontal; value in surface units         |
+| `pointer_axis_value120 <axis> <v120>`                                                           | high-resolution wheel steps (120 = one detent)                            |
+| `pointer_axis_stop <t> <axis>`                                                                  | end of a kinetic scroll                                                   |
+| `pointer_frame`                                                                                 | ends a group of pointer events                                            |
+| `keyboard_enter <display>` / `keyboard_leave <display>`                                         | keyboard focus                                                            |
+| `key <t> <keycode> <0\|1>`                                                                      | key released (0) or pressed (1)                                           |
+| `modifiers <depressed> <latched> <locked> <group>`                                              | xkb masks (compositor keymap)                                             |
+| `touch_down <t> <id> <x> <y> <display>` / `touch_motion <t> <id> <x> <y>` / `touch_up <t> <id>` | touch points                                                              |
+| `touch_frame` / `touch_cancel`                                                                  | end of a touch group, or the touch sequence was cancelled                 |
+| `close <display>`                                                                               | the user asked to close the window                                        |
+| `window_pending <display>`                                                                      | a `window_new` request was queued                                         |
+| `window_mapped <display> <hwc_display>`                                                         | the window for that request exists                                        |
+| `window_gone <display>`                                                                         | the window was destroyed (`window_destroy`, or its display went away)     |
+| `window_failed <display> <reason>`                                                              | the request failed (`exists`, `timeout`, `bad_request`, `wayland`)        |
+| `pong <token>`                                                                                  | reply to `ping`                                                           |
+
+**Commands** (v2) are lines a client sends; the window manager in the Linux.apk
+System app is the only client that does:
+
+| Command                                                         | Effect                                                                                                                                                      |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `window_new <display> <width> <height> <dpi> <app_id> <title…>` | The next HWC virtual display of exactly `width`×`height` that SurfaceFlinger creates (within 10 s) gets a window, which starts at the display's size in dp. |
+| `window_min_size <display> <w> <h>`                             | Minimum logical size (`xdg_toplevel.set_min_size`), for a pending or existing window.                                                                       |
+| `window_title <display> <title…>`                               | Changes the title.                                                                                                                                          |
+| `window_activate <display>`                                     | Asks the compositor to focus the window (`xdg_activation_v1`).                                                                                              |
+| `window_destroy <display>`                                      | Closes the window now (the display may stay, headless).                                                                                                     |
+| `ping <token>`                                                  | `pong <token>`.                                                                                                                                             |
 
 Example: `socat - UNIX-CONNECT:/dev/socket/linuxapk-input`.
 
