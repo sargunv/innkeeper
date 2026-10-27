@@ -1,15 +1,20 @@
-//! Desktop-integration services. Today there is one: the system service
-//! (id 3), the channel to the Linux.apk System app. Its features each live in
-//! their own module and talk to the desktop over D-Bus or Wayland:
+//! Desktop-integration services, the channels to the Linux.apk System app:
 //!
-//! - `settings`: portal Settings (dark mode, accent, contrast, clock format,
-//!   text scale), the time zone and the locale
-//! - `notify`: `org.freedesktop.Notifications`
-//! - `clipboard`: the Wayland clipboard through `ext-data-control-v1`
-//! - `openuri`: the OpenURI portal (http and https only)
-//! - `mpris`: MediaSessions as MPRIS players
+//! - `system` (id 3): desktop settings, notifications, the clipboard, web
+//!   links and media sessions. Each feature lives in its own module and talks
+//!   to the desktop over D-Bus or Wayland:
+//!   - `settings`: portal Settings (dark mode, accent, contrast, clock format,
+//!     text scale), the time zone and the locale
+//!   - `notify`: `org.freedesktop.Notifications`
+//!   - `clipboard`: the Wayland clipboard through `ext-data-control-v1`
+//!   - `openuri`: the OpenURI portal (http and https only)
+//!   - `mpris`: MediaSessions as MPRIS players
+//! - `documents` (id 4): host files the user picks in the FileChooser portal
+//! - `apps` (id 5): desktop entries for apps installed inside Android
+//! - `blob`: sealed-memfd payloads too big for one message
 //!
-//! See `docs/bridge.md`, "System service".
+//! See `docs/bridge.md`, "System service", "Documents service" and "Apps
+//! service".
 
 pub mod apps;
 pub mod blob;

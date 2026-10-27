@@ -3,7 +3,7 @@ name = "linuxapk-bridge"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Linux.apk desktop bridge: host-side services (audio first) for the Android session"
+description = "Linux.apk desktop bridge: host-side services (audio, windows, desktop integration) for the Android session"
 
 [dependencies]
 anyhow = "1"

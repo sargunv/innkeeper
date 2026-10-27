@@ -59,10 +59,6 @@ pub struct Shared {
 
 impl Shared {
     /// `art_dir`: where MPRIS artwork goes (not shared with Android).
-    pub fn new(art_dir: PathBuf) -> Arc<Shared> {
-        Self::with_policy(art_dir, Policy::default())
-    }
-
     pub fn with_policy(art_dir: PathBuf, policy: Policy) -> Arc<Shared> {
         if policy != Policy::default() {
             crate::info!("system: test session: {policy:?} (log-only sinks)");
