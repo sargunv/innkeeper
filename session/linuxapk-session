@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Linux.apk session launcher: boots the Android userspace from out/img in a
+# rootless user + mount + pid + cgroup namespace.
+#
+#   linuxapk-session start [-f]    boot (in the background unless -f)
+#   linuxapk-session stop          kill the session (its pid 1) and clean up
+#   linuxapk-session status
+#   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
+#   linuxapk-session exec CMD...   run CMD inside the live session as root
+#   linuxapk-session shell         interactive /system/bin/sh inside
+#
+# Environment: LINUXAPK_OUT (default <repo>/out),
+#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data)
+set -euo pipefail
+
+here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+repo=$(dirname "$here")
+out=${LINUXAPK_OUT:-$repo/out}
+out=$(realpath "$out")
+run=$out/run
+data=${LINUXAPK_DATA:-$HOME/.local/share/linuxapk/data}
+unit=linuxapk-session
+
+die() { echo "linuxapk-session: $*" >&2; exit 1; }
+
+# Map root to the invoking user (so image files appear root-owned), and the
+# Android uid/gid ranges we need onto our subordinate ids:
+#   1-29999 (system, AIDs, apps 10000-19999, app cache gids 20000-29999)
+#   50000-59999 (shared app gids), 90000-99999 (isolated/app-zygote uids)
+idmaps() {
+  local kind=$1 who sub
+  if [[ $kind == users ]]; then who=$(id -u); sub=/etc/subuid; else who=$(id -g); sub=/etc/subgid; fi
+  local base count
+  read -r base count < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" \
+    '$1==u || $1==n {print $2, $3; exit}' "$sub")
+  [[ -n ${base:-} ]] || die "no entry for $(id -un) in $sub"
+  (( count >= 49999 )) || die "need at least 49999 subordinate ids in $sub (have $count)"
+  echo "--map-$kind=0:$who:1 --map-$kind=1:$base:29999" \
+       "--map-$kind=50000:$((base + 29999)):10000 --map-$kind=90000:$((base + 39999)):10000"
+}
+
+ns_pid() {
+  [[ -f $run/pid ]] || return 1
+  local p; p=$(<"$run/pid")
+  [[ -d /proc/$p ]] && echo "$p"
+}
+
+cmdline() {
+  # androidboot.* become ro.boot.* properties.
+  cat <<EOF
+androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m
+EOF
+}
+
+start() {
+  local fg=0
+  [[ ${1:-} == -f ]] && fg=1
+  if p=$(ns_pid); then die "already running (pid $p)"; fi
+  [[ -d $out/img/system/system ]] || die "no image at $out/img (run tools/extract-image.sh)"
+  [[ -f $out/root/apex/apex-info-list.xml ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
+  [[ $here/shim/selinux_shim.c -nt $out/session/overlay/system/lib64/liblinuxapk_shim.so ]] \
+    && "$here/build.sh"
+  [[ -f $out/session/overlay/system/lib64/liblinuxapk_shim.so ]] || "$here/build.sh"
+
+  rm -rf "$run"; mkdir -p "$run"
+  cmdline > "$run/cmdline"
+  cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' > "$run/bootconfig"
+  mkfifo "$run/kmsg"
+  # Reader holds the FIFO open read-write so writers never block or see EOF.
+  setsid bash -c 'exec cat 0<>"$1" >>"$2"' _ "$run/kmsg" "$run/kmsg.log" </dev/null &
+  echo $! > "$run/kmsg-reader.pid"
+
+  # shellcheck disable=SC2046
+  setsid systemd-run --user --scope --quiet --collect --unit="$unit-$$" -p Delegate=yes -- \
+    env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
+    unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
+    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
+  local launcher=$!
+  echo "$unit-$$" > "$run/unit"
+  # Find the namespace's pid 1: the child of unshare.
+  local p="" i
+  for i in $(seq 50); do
+    local u; u=$(pgrep -f -n "^unshare .*$here/ns-init.sh" || true)
+    [[ -n $u ]] && p=$(pgrep -P "$u" | head -1 || true)
+    [[ -n $p ]] && break
+    sleep 0.1
+  done
+  [[ -n $p ]] || { cat "$run/session.out" >&2; die "session failed to start"; }
+  echo "$p" > "$run/pid"
+  echo "session started: ns pid 1 = host pid $p; log: $run/kmsg.log"
+  if (( fg )); then
+    tail -n +1 -f "$run/kmsg.log" & local t=$!
+    wait "$launcher" || true
+    kill "$t" 2>/dev/null || true
+    stop
+  fi
+}
+
+stop() {
+  if p=$(ns_pid); then
+    kill -KILL "$p" 2>/dev/null || true   # pid 1 of the ns: takes everything with it
+  fi
+  [[ -f $run/unit ]] && systemctl --user stop "$(<"$run/unit").scope" 2>/dev/null || true
+  [[ -f $run/kmsg-reader.pid ]] && kill "$(<"$run/kmsg-reader.pid")" 2>/dev/null || true
+  rm -f "$run/pid"
+  echo "session stopped"
+}
+
+status() {
+  if p=$(ns_pid); then echo "running: host pid $p"; else echo "stopped"; return 1; fi
+}
+
+# Run a command inside the session (root in the user ns), with the Android
+# environment from init.environ.rc and the derived classpath.
+exec_in() {
+  local p; p=$(ns_pid) || die "not running"
+  local tty=()
+  [[ -t 0 ]] && tty=(-t)
+  exec nsenter -t "$p" -U -m -p -C --preserve-credentials -r -w \
+    /system/bin/sh -c '
+      for f in /init.environ.rc /data/system/environ/classpath; do
+        [ -r "$f" ] && eval "$(sed -n "s/^ *export \([^ ]*\) \(.*\)/export \1=\"\2\"/p" "$f")"
+      done
+      export PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin
+      export HOME=/data/local/tmp TMPDIR=/data/local/tmp
+      cd /
+      exec "$@"' sh "$@"
+}
+
+case ${1:-} in
+  start) shift; start "$@" ;;
+  stop) stop ;;
+  status) status ;;
+  log) shift; if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi ;;
+  exec) shift; (( $# )) || die "usage: exec CMD..."; exec_in "$@" ;;
+  shell) exec_in /system/bin/sh -l ;;
+  *) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 1 ;;
+esac
