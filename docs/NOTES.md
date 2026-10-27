@@ -108,6 +108,16 @@ Rules:
   passes the live InputDispatcher's verifier. End-to-end test waits for
   `boot_completed` (`android/e2e/e2e.sh`). See [input.md](input.md).
 
+## Backlog (unassigned)
+
+- HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
+  layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
+  buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
+  via `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`.
+- Input e2e (`android/e2e/e2e.sh`) once the session reaches boot_completed with
+  the Wayland backend.
+- clang-tidy once host-side `compile_commands.json` exists.
+
 ## Next
 
 - M0: extract the prebuilt image, then boot servicemanager, system_server and
