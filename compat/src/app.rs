@@ -780,11 +780,22 @@ impl<'a> Run<'a> {
                 // pinch|pan|doubletap X Y, as touch through Linux.apk System's
                 // input bridge (multi-touch, which `input` can't do).
                 "gesture" => {
+                    // In a per-app window: scale to its pixels and address its
+                    // display (protocol v2).
+                    let mut a: Vec<String> = arg.split_whitespace().map(str::to_string).collect();
+                    if let (Some(w), 3) = (&self.win, a.len()) {
+                        let x: i32 = a[1].parse().unwrap_or(0);
+                        let y: i32 = a[2].parse().unwrap_or(0);
+                        a[1] = (x * w.w / REF_W).to_string();
+                        a[2] = (y * w.h / REF_H).to_string();
+                        a.extend([w.display.to_string(), w.w.to_string(), w.h.to_string()]);
+                    }
                     let o = self.s.sh(
                         60,
                         &format!(
-                            "{GESTURE} {arg} | CLASSPATH={BRIDGE_APK} app_process / \
-                             dev.linuxapk.system.input.InputBridgeMain --stdin"
+                            "{GESTURE} {} | CLASSPATH={BRIDGE_APK} app_process / \
+                             dev.linuxapk.system.input.InputBridgeMain --stdin",
+                            a.join(" ")
                         ),
                     );
                     if !o.text.contains("inject=true") {
