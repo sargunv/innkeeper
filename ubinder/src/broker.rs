@@ -1030,6 +1030,7 @@ impl Broker {
         errno: i32,
         in_reply_to: Option<TxnId>,
     ) {
+        tlog!("txn fail proc={proc} tid={tid} err={err:#x} errno={errno} reply_to={in_reply_to:?}");
         let t = self.thread_mut(proc, tid);
         t.ee = BinderExtendedError {
             id: 0,
@@ -1880,6 +1881,11 @@ impl Broker {
                 tx.to_proc = None;
                 tx.to_thread = None;
                 cur = tx.to_parent;
+                if let Some(key) = tx.buffer.take()
+                    && let Some(b) = self.buffers.get_mut(&key)
+                {
+                    b.transaction = None;
+                }
             } else if tx.from == Some((proc, tid)) {
                 tx.from = None;
                 cur = tx.from_parent;
@@ -2020,9 +2026,20 @@ impl Broker {
             .collect();
         for k in keys {
             if let Some(t) = self.buffers[&k].transaction {
-                self.free_txn(t);
+                if self.txns.get(&t).map(|t| t.from.is_some()).unwrap_or(false) {
+                    self.send_failed_reply(t, BR_DEAD_REPLY);
+                } else {
+                    self.free_txn(t);
+                }
             }
-            self.release_buffer(k, mem);
+            // binder_alloc_deferred_release frees the memory only: the refs
+            // these buffers held died with the process's nodes and handles.
+            if let Some(b) = self.buffers.remove(&k) {
+                for (_, tok) in b.fd_fixups {
+                    mem.drop_fd(tok);
+                }
+                mem.free_recv(k.0, k.1);
+            }
         }
         // Transactions still pointing at this proc as the target.
         let stale: Vec<TxnId> = self
@@ -2399,8 +2416,16 @@ impl Broker {
                 assert!(p.threads.get(&tid).map(|t| t.parked).unwrap_or(false));
             }
         }
-        for n in self.nodes.values() {
-            assert!(n.internal_strong >= 0 && n.local_strong >= 0 && n.local_weak >= 0);
+        for (id, n) in &self.nodes {
+            assert!(
+                n.internal_strong >= 0 && n.local_strong >= 0 && n.local_weak >= 0,
+                "node {id} owner {:?} ptr {:#x}: internal_strong {} local_strong {} local_weak {}",
+                n.proc,
+                n.ptr,
+                n.internal_strong,
+                n.local_strong,
+                n.local_weak
+            );
         }
     }
 
