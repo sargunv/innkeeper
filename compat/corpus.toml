@@ -87,7 +87,14 @@ url = "https://f-droid.org/repo/org.wikipedia_50612.apk"
 sha256 = "18835ae29ad7543fe64d3cebe993885ef38e8631cd762ebbcae2f31f19c3d9e7"
 size = 83369768
 note = "WebView for articles"
-script = ["tap:Skip", "wait:6", "absent:Cannot connect"]
+script = [
+  "tap:Forward",
+  "tap:Forward",
+  "tap:Forward",
+  "tap:Skip",
+  "wait:8",
+  "expect:Featured article",
+]
 
 [[app]]
 package = "de.danoeh.antennapod"

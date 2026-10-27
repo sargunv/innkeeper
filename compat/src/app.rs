@@ -123,6 +123,9 @@ impl<'a> Run<'a> {
     pub fn run(mut self, apk: &Path) -> AppResult {
         let pkg = self.app.package.clone();
         let outcome = self.steps(apk);
+        if outcome.is_ok() {
+            self.signatures();
+        }
         self.collect();
         self.s.run(120, &["pm", "uninstall", &pkg]);
         self.s.run(15, &["rm", "-f", TMP_APK, UI_XML]);
@@ -133,7 +136,13 @@ impl<'a> Run<'a> {
                     .checks
                     .iter()
                     .filter(|c| !c.ok)
-                    .map(|c| c.name.clone())
+                    .map(|c| {
+                        if c.detail.is_empty() {
+                            c.name.clone()
+                        } else {
+                            format!("{} ({})", c.name, c.detail)
+                        }
+                    })
                     .collect();
                 if failed.is_empty() {
                     (
@@ -143,7 +152,7 @@ impl<'a> Run<'a> {
                 } else {
                     (
                         Status::Partly,
-                        format!("first frame ok; failed: {}", failed.join(", ")),
+                        format!("first frame ok; {}", failed.join("; ")),
                     )
                 }
             }
@@ -487,6 +496,51 @@ impl<'a> Run<'a> {
             last = o.text.trim().to_string();
         }
         Err(format!("uiautomator dump failed: {last}"))
+    }
+
+    /// Known failure classes in the log since launch, each a failed check.
+    fn signatures(&mut self) {
+        const SIGS: &[(&str, &[&str], &str)] = &[
+            (
+                "media codecs",
+                &["Codec reported err"],
+                "MediaCodec failed to start (no sound/media)",
+            ),
+            (
+                "WebView",
+                &[
+                    "MissingWebViewPackageException",
+                    "Failed to load WebView provider",
+                ],
+                "WebView provider missing",
+            ),
+            (
+                "Google Play services",
+                &[
+                    "GooglePlayServicesUtil",
+                    "Google Play services is missing",
+                    "Google Play services not available",
+                ],
+                "needs Google Play services",
+            ),
+        ];
+        let pattern = SIGS
+            .iter()
+            .flat_map(|(_, pats, _)| pats.iter().copied())
+            .collect::<Vec<_>>()
+            .join("|");
+        let log = self
+            .s
+            .sh(
+                60,
+                &format!("logcat -d -b main,system -t 20000 | grep -E '{pattern}' | head -100"),
+            )
+            .text;
+        for (name, pats, why) in SIGS {
+            if pats.iter().any(|p| log.contains(p)) {
+                self.check(name, false, *why);
+            }
+        }
     }
 
     /// Bounded logs and state for triage.
