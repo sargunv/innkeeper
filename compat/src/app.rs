@@ -228,7 +228,6 @@ impl<'a> Run<'a> {
         let component = component.to_string();
 
         // Launch from a clean slate.
-        s.run(15, &["input", "keyevent", "HOME"]);
         s.run(30, &["logcat", "-b", "main,system,crash", "-c"]);
         let o = s.run(90, &["am", "start", "-W", "-n", &component]);
         self.save("am-start.txt", &o.text);
@@ -384,12 +383,11 @@ impl<'a> Run<'a> {
     }
 
     fn focus(&self) -> String {
-        let o = self
-            .s
-            .sh(30, "dumpsys window displays | grep -m1 mCurrentFocus");
+        let o = self.s.run(30, &["dumpsys", "window", "displays"]);
         o.text
-            .trim()
-            .trim_start_matches("mCurrentFocus=")
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("mCurrentFocus="))
+            .unwrap_or("?")
             .to_string()
     }
 
@@ -452,14 +450,20 @@ impl<'a> Run<'a> {
     }
 
     fn ui_nodes(&self) -> Result<Vec<Node>, String> {
-        let o = self.s.sh(
-            60,
-            &format!("uiautomator dump {UI_XML} >/dev/null && cat {UI_XML}"),
-        );
-        if !o.text.contains("<hierarchy") {
-            return Err(format!("uiautomator dump failed: {}", o.text.trim()));
+        // The dump waits for the UI to go idle, which busy apps rarely do on
+        // the first try.
+        let mut last = String::new();
+        for _ in 0..3 {
+            let o = self.s.sh(
+                60,
+                &format!("rm -f {UI_XML}; uiautomator dump {UI_XML} >/dev/null && cat {UI_XML}"),
+            );
+            if o.text.contains("<hierarchy") {
+                return Ok(parse_nodes(&o.text));
+            }
+            last = o.text.trim().to_string();
         }
-        Ok(parse_nodes(&o.text))
+        Err(format!("uiautomator dump failed: {last}"))
     }
 
     /// Bounded logs and state for triage.

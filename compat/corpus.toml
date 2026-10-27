@@ -170,6 +170,7 @@ url = "https://f-droid.org/repo/io.anuke.mindustry_1115.apk"
 sha256 = "64bf33842d8f5495656c44868ea3d11ca5998bf6e36bbb428064dcc58c2e9f44"
 size = 78182684
 note = "M2 target; libGDX, GLES"
+settle = 15
 
 [[app]]
 package = "com.shatteredpixel.shatteredpixeldungeon"
@@ -182,6 +183,7 @@ url = "https://f-droid.org/repo/com.shatteredpixel.shatteredpixeldungeon_922.apk
 sha256 = "ceef4cdd4beddcb3d85379ac004cb4ab5d918b89dc7366b4ce9c4a3585a5e78e"
 size = 30275058
 note = "M2 target; libGDX, GLES"
+settle = 15
 
 [[app]]
 package = "com.unciv.app"
@@ -194,6 +196,7 @@ url = "https://f-droid.org/repo/com.unciv.app_1275.apk"
 sha256 = "baa600c2de291b72cad4100da5a39fc07458bf54e828b1df3f998764a0b63e82"
 size = 27552033
 note = "M2 target; libGDX, GLES"
+settle = 15
 
 [[app]]
 package = "org.openttd.fdroid"
@@ -206,4 +209,5 @@ url = "https://f-droid.org/repo/org.openttd.fdroid_1410128.apk"
 sha256 = "355cc302a892fa8c62459b6ae6d0f2940868b9fea5221f784f36f90677b34610"
 size = 75972249
 note = "M2 target; SDL2, C++"
+settle = 15
 
