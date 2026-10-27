@@ -2,7 +2,10 @@
 # Linux.apk session launcher: boots the Android userspace from out/img in a
 # rootless user + mount + pid + cgroup namespace.
 #
-#   linuxapk-session start [-f]    boot (in the background unless -f)
+#   linuxapk-session start [-f] [--headless]
+#                                  boot (in the background unless -f); the
+#                                  composer opens a host Wayland window unless
+#                                  --headless
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
 #   linuxapk-session status
 #   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
@@ -82,13 +85,30 @@ vendor_props() {
       printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
     fi
     echo "ro.hardware.vulkan=$vk"
+    # Composer backend (hal lane): a window on the host compositor, or none.
+    echo "vendor.linuxapk.hwc.backend=$hwc_backend"
   } >"$dst"
   chmod 0644 "$dst"
 }
 
 start() {
-  local fg=0
-  [[ ${1:-} == -f ]] && fg=1
+  local fg=0 wayland=""
+  hwc_backend=wayland
+  for a in "$@"; do
+    case $a in
+      -f) fg=1 ;;
+      --headless) hwc_backend=headless ;;
+      *) die "unknown start option: $a" ;;
+    esac
+  done
+  if [[ $hwc_backend == wayland ]]; then
+    # Only the host compositor's socket file goes in (as
+    # /dev/socket/wayland-host), never all of $XDG_RUNTIME_DIR.
+    local wd=${WAYLAND_DISPLAY:-$(systemctl --user show-environment | sed -n 's/^WAYLAND_DISPLAY=//p')}
+    local xrd=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+    [[ $wd == /* ]] && wayland=$wd || wayland=$xrd/${wd:-wayland-0}
+    [[ -S $wayland ]] || die "no Wayland socket at $wayland (use --headless)"
+  fi
   if p=$(ns_pid); then die "already running (pid $p)"; fi
   [[ -d $out/img/system/system ]] || die "no image at $out/img (run tools/extract-image.sh)"
   [[ -f $out/root/apex/apex-info-list.xml ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
@@ -97,6 +117,8 @@ start() {
     "$here/build.sh"
   fi
 
+  # iptables with the nf_tables backend (the image's legacy one can't work).
+  [[ -x $out/session/iptables/system/bin/xtables-nft-multi ]] || "$here/iptables/build.sh"
   vendor_props
 
   rm -rf "$run"
@@ -109,7 +131,7 @@ start() {
   # systemd user service, so it outlives this shell and "stop" can take it
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
-    --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" \
+    --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do

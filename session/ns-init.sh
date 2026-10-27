@@ -49,7 +49,7 @@ layer_mount() {
 }
 
 # --- partitions -------------------------------------------------------------
-layer_mount "$R/system" "$ovl/system" "$out/session/overlay/system" "$img/system/system"
+layer_mount "$R/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
 layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
 layer_mount "$R/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
 layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
@@ -81,7 +81,7 @@ if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
 # non-recursive views of it stay complete.
 # Overrides for APEX contents (e.g. rc files) layer on top like partitions.
 mkdir -p "$R/apex" "$R/bootstrap-apex"
-layer_mount "$R/linuxapk/apex" "$ovl/apex" "$apex"
+layer_mount "$R/linuxapk/apex" "$ovl/apex" "$out/session/overlay/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
@@ -104,6 +104,18 @@ for n in null zero full random urandom fuse udmabuf; do
   touch "$R/dev/$n"
   mount --bind "/dev/$n" "$R/dev/$n"
 done
+# TUN (VPN apps, Thread networking): interfaces it creates live in the
+# session's own network namespace. init.rc links /dev/net/tun -> ../tun.
+if [[ -c /dev/net/tun ]]; then
+  touch "$R/dev/tun"
+  mount --bind /dev/net/tun "$R/dev/tun"
+fi
+# The host Wayland compositor's socket (just that file), for the composer HAL.
+if [[ -n ${LINUXAPK_WAYLAND:-} && -S $LINUXAPK_WAYLAND ]]; then
+  mkdir -p "$R/dev/socket"
+  touch "$R/dev/socket/wayland-host"
+  mount --bind "$LINUXAPK_WAYLAND" "$R/dev/socket/wayland-host"
+fi
 # Android init logs to /dev/kmsg: hand it the host-side FIFO instead.
 touch "$R/dev/kmsg"
 mount --bind "$run/kmsg" "$R/dev/kmsg"
@@ -128,6 +140,10 @@ mount -t proc -o nosuid,nodev,noexec proc "$R/proc"
 mkdir -p "$R/linuxapk/proc/sys/vm"
 cp "$run/cmdline" "$run/bootconfig" "$R/linuxapk/proc/"
 echo 32 >"$R/linuxapk/proc/sys/vm/mmap_rnd_bits"
+# Kernel config for code that wants /proc/config.gz (see shim/).
+if [[ -r /boot/config-$(uname -r) ]]; then
+  gzip -c "/boot/config-$(uname -r)" >"$R/linuxapk/config.gz"
+fi
 
 # Host safety: inside this user namespace we are root over everything the host
 # user owns. sysfs submounts expose such files: fusectl's per-connection

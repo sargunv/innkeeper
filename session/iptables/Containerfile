@@ -1,0 +1,5 @@
+# Build tools for cross-compiling iptables (nft backend) for Android with the
+# NDK. The NDK itself comes from the host ($HOME is bind-mounted).
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf -y install make xz bzip2 tar curl pkgconf-pkg-config file diffutils \
+    && dnf clean all

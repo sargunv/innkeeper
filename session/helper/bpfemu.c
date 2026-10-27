@@ -1,7 +1,8 @@
 // Userspace emulation of the bpf(2) syscall for a Linux.apk session.
 // It also intercepts a few calls that only make sense with real eBPF:
-// statfs(2) on /sys/fs/bpf, getsockopt(SO_ANDROID_DROP_REASON), and raising
-// RLIMIT_MEMLOCK.
+// statfs(2) on /sys/fs/bpf, getsockopt(SO_ANDROID_DROP_REASON), raising
+// RLIMIT_MEMLOCK, SELinux label reads of clatd and the eBPF pins,
+// alarm-clock timerfds, and real-time scheduling requests.
 //
 // Android's networking stack (netbpfload, netd, system_server's
 // connectivity code) needs eBPF maps, but a rootless session can't use real
@@ -31,6 +32,7 @@
 #include <linux/bpf.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +44,7 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/timerfd.h>
 #include <sys/uio.h>
 #include <sys/vfs.h>
 #include <unistd.h>
@@ -597,7 +600,87 @@ static long handle_memlock(struct seccomp_notif* req) {
   return 0;
 }
 
+// getxattr/lgetxattr("security.selinux"): with SELinux hidden, files carry
+// host labels. ClatCoordinator (system_server) verifies the Android labels of
+// clatd and the clat eBPF pins and aborts otherwise. Answer with the labels
+// file_contexts/genfs_contexts would give for those paths; let the kernel
+// answer everything else.
+static const char* android_label(const char* p) {
+  static const struct {
+    const char* path;
+    const char* ctx;
+  } fixed[] = {
+    {"/apex/com.android.tethering/bin/for-system", "u:object_r:system_file:s0"},
+    {"/apex/com.android.tethering/bin/for-system/clatd",
+     "u:object_r:clatd_exec:s0"},
+    {"/sys/fs/bpf", "u:object_r:fs_bpf:s0"},
+  };
+  for (size_t i = 0; i < sizeof(fixed) / sizeof(fixed[0]); i++)
+    if (!strcmp(p, fixed[i].path)) return fixed[i].ctx;
+  // /sys/fs/bpf/<dir>[/...] -> fs_bpf_<dir> (Android's genfs_contexts).
+  static char buf[128];
+  if (!strncmp(p, "/sys/fs/bpf/", 12)) {
+    const char* d = p + 12;
+    size_t n = strcspn(d, "/");
+    if (n && n < 64) {
+      snprintf(buf, sizeof(buf), "u:object_r:fs_bpf_%.*s:s0", (int)n, d);
+      return buf;
+    }
+  }
+  return NULL;
+}
+
+static long handle_getxattr(struct seccomp_notif* req) {
+  pid_t pid = req->pid;
+  char name[32], p[256];
+  if (rdstr(pid, req->data.args[1], name, sizeof(name))) return CONTINUE;
+  if (strcmp(name, "security.selinux")) return CONTINUE;
+  if (rdstr(pid, req->data.args[0], p, sizeof(p)) || p[0] != '/')
+    return CONTINUE;
+  const char* ctx = android_label(p);
+  if (!ctx) return CONTINUE;
+  size_t len = strlen(ctx) + 1, size = req->data.args[3];
+  if (size == 0) return len;
+  if (size < len) return -ERANGE;
+  return wr(pid, req->data.args[2], ctx, len) ? -EFAULT : (long)len;
+}
+
+// timerfd_create(CLOCK_*_ALARM) needs CAP_WAKE_ALARM in the initial
+// namespace. AlarmManagerService then falls back to a handler path that
+// crashes system_server on listener alarms. Hand out a timer on the matching
+// non-alarm clock: same semantics except waking a suspended machine.
+static long handle_timerfd(struct seccomp_notif* req) {
+  int clock =
+    req->data.args[0] == CLOCK_REALTIME_ALARM ? CLOCK_REALTIME : CLOCK_BOOTTIME;
+  int flags = (int)req->data.args[1];
+  int fd = timerfd_create(clock, flags | TFD_CLOEXEC);
+  if (fd < 0) return -errno;
+  struct seccomp_notif_addfd a = {
+    .id = req->id,
+    .flags = SECCOMP_ADDFD_FLAG_SEND,
+    .srcfd = fd,
+    .newfd = 0,
+    .newfd_flags = (flags & TFD_CLOEXEC) ? O_CLOEXEC : 0,
+  };
+  int r = ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_ADDFD, &a);
+  close(fd);
+  return r < 0 ? -errno : INJECTED;
+}
+
+// sched_setscheduler(SCHED_FIFO/SCHED_RR) needs CAP_SYS_NICE in the initial
+// namespace (RLIMIT_RTPRIO is 0 on the host). The Bluetooth stack aborts when
+// it can't get real-time scheduling. Pretend it worked; threads keep their
+// normal policy.
+static long handle_sched(struct seccomp_notif* req) {
+  (void)req;
+  return 0;
+}
+
 static long handle(struct seccomp_notif* req) {
+  if (req->data.nr == __NR_sched_setscheduler) return handle_sched(req);
+  if (req->data.nr == __NR_timerfd_create) return handle_timerfd(req);
+  if (req->data.nr == __NR_getxattr || req->data.nr == __NR_lgetxattr)
+    return handle_getxattr(req);
   if (req->data.nr == __NR_statfs) return handle_statfs(req);
   if (req->data.nr == __NR_prlimit64 || req->data.nr == __NR_setrlimit)
     return handle_memlock(req);
@@ -670,35 +753,52 @@ static long handle(struct seccomp_notif* req) {
 // ---------------------------------------------------------------
 
 int bpfemu_install_filter(void) {
-  // Index comments are jump targets: NOTIF = 16, ALLOW = 17.
+  // Generated from a labelled listing: NOTIF = 27, ALLOW = 28.
   struct sock_filter f[] = {
     /* 0 */ BPF_STMT(
       BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)
     ),
-    /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 0, 15),
+    /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 0, 26),
     /* 2 */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-    /* 3 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_bpf, 12, 0),
-    /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_statfs, 11, 0),
-    /* 5 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getsockopt, 0, 4),
+    /* 3 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_bpf, 23, 0),
+    /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_statfs, 22, 0),
+    /* 5 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getxattr, 21, 0),
+    /* 6 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_lgetxattr, 20, 0),
+    /* 7 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getsockopt, 0, 4),
     // getsockopt(fd, SOL_SOCKET, SO_ANDROID_DROP_REASON, ...)
-    /* 6 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 7 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 9),
     /* 8 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])),
-    /* 9 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SO_ANDROID_DROP_REASON, 6, 7),
-    // prlimit64(pid, RLIMIT_MEMLOCK, ...) / setrlimit(RLIMIT_MEMLOCK, ...)
-    /* 10 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_prlimit64, 3, 0),
-    /* 11 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_setrlimit, 0, 5),
-    /* 12 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
-    /* 13 */ BPF_STMT(BPF_JMP | BPF_JA, 1),
-    /* 14 */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 15 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, RLIMIT_MEMLOCK, 0, 1),
-    /* 16 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF),
-    /* 17 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    /* 9 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 18),
+    /* 10 */
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])),
+    /* 11 */
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SO_ANDROID_DROP_REASON, 15, 16),
+    // prlimit64(pid, RLIMIT_MEMLOCK, ...) / setrlimit(RLIMIT_MEMLOCK, ...)
+    /* 12 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_prlimit64, 3, 0),
+    /* 13 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_setrlimit, 0, 4),
+    /* 14 */
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
+    /* 15 */ BPF_STMT(BPF_JMP | BPF_JA, 1),
+    /* 16 */
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
+    /* 17 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, RLIMIT_MEMLOCK, 9, 10),
+    // timerfd_create(CLOCK_{REALTIME,BOOTTIME}_ALARM, ...)
+    /* 18 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_timerfd_create, 0, 3),
+    /* 19 */
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
+    /* 20 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_REALTIME_ALARM, 6, 0),
+    /* 21 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_BOOTTIME_ALARM, 5, 6),
+    // sched_setscheduler(pid, SCHED_FIFO or SCHED_RR [| SCHED_RESET_ON_FORK],
+    // ...)
+    /* 22 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_sched_setscheduler, 0, 5),
+    /* 23 */
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
+    /* 24 */ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, ~SCHED_RESET_ON_FORK),
+    /* 25 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_FIFO, 1, 0),
+    /* 26 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_RR, 0, 1),
+    /* 27 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF),
+    /* 28 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
   };
   struct sock_fprog prog = {.len = sizeof(f) / sizeof(f[0]), .filter = f};
   return syscall(

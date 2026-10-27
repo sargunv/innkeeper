@@ -7,4 +7,7 @@ service vold /system/bin/vold \
     shutdown critical
     group root reserved_disk
     user root
+    # linuxapk: labels the directories it creates (setfscreatecon), which
+    # fails against the host SELinux without the shim.
+    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
     reboot_on_failure reboot,vold-failed

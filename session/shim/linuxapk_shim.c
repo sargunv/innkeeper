@@ -180,3 +180,22 @@ EXPORT int prlimit(
 __attribute__((constructor)) static void linuxapk_shim_init(void) {
   if (syscall(SYS_getpid) == 1) unsetenv("LD_PRELOAD");
 }
+
+// /proc/config.gz: system_server (Debug.isVmapStack, via libvintf's
+// LoadKernelConfigs) CHECKs that it can read the kernel config, but distro
+// kernels often don't build CONFIG_IKCONFIG_PROC, and procfs can't be given a
+// file it lacks. The session launcher stages the host's /boot/config-$(uname
+// -r) as /linuxapk/config.gz; serve that when /proc/config.gz is missing.
+// (zygote, and so system_server and apps, preload this shim.)
+#include <dlfcn.h>
+typedef void* gzFile;
+EXPORT gzFile gzopen(const char* path, const char* mode) {
+  static gzFile (*real)(const char*, const char*);
+  if (!real)
+    real = (gzFile (*)(const char*, const char*))dlsym(RTLD_NEXT, "gzopen");
+  if (!real) return NULL;
+  gzFile f = real(path, mode);
+  if (!f && path && strcmp(path, "/proc/config.gz") == 0)
+    f = real("/linuxapk/config.gz", mode);
+  return f;
+}

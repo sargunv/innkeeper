@@ -20,7 +20,9 @@ cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang"
   exit 1
 }
 
-rm -rf "$out/session/overlay"
+# Parts of the overlay are owned by subordinate ids (see below): remove it
+# from inside a matching user namespace.
+podman unshare rm -rf "$out/session/overlay"
 mkdir -p "$out/session/overlay/system/lib64" "$out/session/overlay/vendor/lib64"
 so="$out/session/overlay/system/lib64/liblinuxapk_shim.so"
 "$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -Wl,-soname,liblinuxapk_shim.so \
@@ -48,4 +50,27 @@ relax vendor "$img/vendor"
 relax system_ext "$img/system_ext"
 relax product "$img/product"
 relax odm "$img/vendor/odm"
+
+# fs_config ownership/modes that code verifies at runtime. Copies are chowned
+# inside "podman unshare", whose id map (0 = us, 1.. = /etc/subuid) matches the
+# session's, so e.g. 1029 here is AID_CLAT in Android.
+#   path (relative to the flattened /apex)            mode   uid  gid
+apex_fs_config=(
+  "com.android.tethering/bin/for-system 0750 1029 1000"       # AID_CLAT:AID_SYSTEM
+  "com.android.tethering/bin/for-system/clatd 6755 1029 1029" # ClatCoordinator checks
+)
+for e in "${apex_fs_config[@]}"; do
+  read -r rel mode uid gid <<<"$e"
+  src=$out/root/apex/$rel dst=$out/session/overlay/apex/$rel
+  [[ -e $src ]] || continue
+  mkdir -p "$(dirname "$dst")"
+  if [[ -d $src ]]; then mkdir -p "$dst"; else cp -p "$src" "$dst"; fi
+done
+# Apply in reverse so files are done before their (possibly 0750) parents.
+for ((i = ${#apex_fs_config[@]} - 1; i >= 0; i--)); do
+  read -r rel mode uid gid <<<"${apex_fs_config[i]}"
+  dst=$out/session/overlay/apex/$rel
+  podman unshare sh -c '[ -e "$4" ] || exit 0; chown "$1:$2" "$4" && chmod "$3" "$4"' \
+    _ "$uid" "$gid" "$mode" "$dst"
+done
 echo "built $out/session"

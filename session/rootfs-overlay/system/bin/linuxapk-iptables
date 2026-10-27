@@ -1,0 +1,23 @@
+#!/system/bin/sh
+# iptables front end for a Linux.apk session: the nf_tables build of upstream
+# iptables (session/iptables/build.sh), minus rules that use the xt_bpf match.
+#
+# netd attaches eBPF socket filters with "-m bpf --object-pinned ...". eBPF
+# is emulated in userspace (session/helper/bpfemu.c) and the kernel can't run
+# those programs; an emulated program never matches, so a rule using one is
+# equivalent to no rule. Drop them instead of failing the whole COMMIT.
+name=${0##*/}
+real=/system/bin/xtables-nft-multi
+case $name in
+  *-restore)
+    # Line-buffered so netd's "#PING" handshake (echoed by -v) gets through.
+    grep --line-buffered -v -e ' -m bpf ' | exec $real "$name" "$@"
+    ;;
+  *)
+    for a in "$@"; do
+      [ "$a" = bpf ] && [ "$prev" = -m ] && exit 0
+      prev=$a
+    done
+    exec $real "$name" "$@"
+    ;;
+esac
