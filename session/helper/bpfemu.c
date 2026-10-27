@@ -492,30 +492,34 @@ static int openat2_(
   return fd < 0 ? -errno : fd;
 }
 
-// Open pin `uaddr` (an absolute path under /sys/fs/bpf) in pid's root. This
-// runs on the supervisor's only thread with the host user's power: no
-// symlinks (they would resolve against the host's root) and no other mounts
-// (FUSE), and never a blocking open (O_NONBLOCK: a FIFO).
+// The session's /sys/fs/bpf tmpfs, opened by pivot-exec before any Android
+// code runs. Pins resolve only beneath it, never through a caller's root or
+// mount namespace (where Android could mount FUSE over /sys/fs/bpf).
+static int pin_dir = -1;
+
+void bpfemu_set_pin_dir(int fd) { pin_dir = fd; }
+
+// Open `rel` beneath pin_dir. This runs on the supervisor's only thread with
+// the host user's power: no symlinks (they would resolve against the host's
+// root), no '..' out and no other mounts (FUSE).
+static int open_beneath(const char* rel, int flags, mode_t mode) {
+  if (pin_dir < 0) return -ENOENT;
+  return openat2_(
+    pin_dir, *rel ? rel : ".", flags | O_CLOEXEC, mode,
+    RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS |
+      RESOLVE_NO_MAGICLINKS
+  );
+}
+
+// Open pin `uaddr` (an absolute path under /sys/fs/bpf), never with a
+// blocking open (O_NONBLOCK: a FIFO), and only if it is a regular file.
 static int open_pin(pid_t pid, uint64_t uaddr, int flags, mode_t mode) {
-  char p[256], root[64];
+  char p[256];
   if (rdstr(pid, uaddr, p, sizeof(p))) return -EFAULT;
   // Relative/path_fd pins and pins elsewhere: unsupported.
   if (strncmp(p, "/sys/fs/bpf/", 12) != 0) return -EINVAL;
-  snprintf(root, sizeof(root), "/proc/%d/root", pid);
-  int rfd = open(root, O_PATH | O_DIRECTORY | O_CLOEXEC);
-  if (rfd < 0) return -errno;
-  uint64_t no_links = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-  int dfd = openat2_(
-    rfd, "sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC, 0,
-    RESOLVE_IN_ROOT | no_links
-  );
-  close(rfd);
-  if (dfd < 0) return dfd;
-  int fd = openat2_(
-    dfd, p + 12, flags | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC, mode,
-    RESOLVE_BENEATH | RESOLVE_NO_XDEV | no_links
-  );
-  close(dfd);
+  int fd =
+    open_beneath(p + 12, flags | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY, mode);
   if (fd < 0) return fd;
   struct stat st;
   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
@@ -663,15 +667,18 @@ static long do_prog_query(pid_t pid, union bpf_attr* a, uint64_t uattr) {
 #endif
 static long handle_statfs(struct seccomp_notif* req) {
   pid_t pid = req->pid;
-  char p[256], path[320];
+  char p[256];
   if (rdstr(pid, req->data.args[0], p, sizeof(p))) return CONTINUE;
   if (strncmp(p, "/sys/fs/bpf", 11) != 0 || (p[11] && p[11] != '/'))
     return CONTINUE;
   if (ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_ID_VALID, &req->id) != 0)
     return -ESRCH;
-  snprintf(path, sizeof(path), "/proc/%d/root%s", pid, p);
+  int fd = open_beneath(p[11] ? p + 12 : "", O_PATH, 0);
+  if (fd < 0) return fd;
   struct statfs st;
-  if (statfs(path, &st) != 0) return -errno;
+  int r = fstatfs(fd, &st);
+  close(fd);
+  if (r != 0) return -errno;
   st.f_type = BPF_FS_MAGIC;
   return wr(pid, req->data.args[1], &st, sizeof(st)) ? -EFAULT : 0;
 }

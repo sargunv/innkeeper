@@ -150,8 +150,10 @@ must survive anything Android sends. From a security review (2026-10-27):
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.
 - `bpfemu.c`: element operations need a map with tables (not ring buffers), LPM
-  keys and prefixes are bounded, and pins are opened with `openat2` under
-  `/sys/fs/bpf` only: no symlinks, no `..`, no other mounts, non-blocking, and
+  keys and prefixes are bounded, and pins (and `statfs` of them) resolve with
+  `openat2` beneath the session's `/sys/fs/bpf` tmpfs, which pivot-exec opens
+  before Android runs, never through the caller's root, where Android could
+  mount FUSE over it: no symlinks, no `..`, no other mounts, non-blocking, and
   regular files only. Objects are capped at 4096 and map memory at 128 MiB plus
   2 MiB per CPU (a boot creates about 250 objects and 25 MB on 32 CPUs), and
   failed creations are unwound. `session/tests/bpfemu.sh` covers these.

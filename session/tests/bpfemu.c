@@ -13,11 +13,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -144,6 +146,24 @@ static void tests(const char* tmp) {
   char outside[512];
   snprintf(outside, sizeof(outside), "%s/m", tmp);
   CHECK(pin(m, outside) == -EINVAL, "pin outside /sys/fs/bpf: EINVAL");
+  struct statfs sfs;
+  CHECK(
+    statfs("/sys/fs/bpf/m", &sfs) == 0 && sfs.f_type == 0xcafe4a11,
+    "statfs of a pin: bpffs magic"
+  );
+  // The supervisor's pin directory was fixed at setup: a mount over
+  // /sys/fs/bpf (FUSE, in a session) changes nothing it opens.
+  if (mount("over", "/sys/fs/bpf", "tmpfs", 0, NULL) == 0) {
+    CHECK(
+      pin(m, "/sys/fs/bpf/over") == 0 && access("/sys/fs/bpf/over", F_OK) != 0,
+      "pin after a mount over /sys/fs/bpf: in the session's directory"
+    );
+    long o = get("/sys/fs/bpf/over");
+    CHECK(o >= 0 && lookup(o, &k, &got) == 0, "get after the over-mount");
+    umount2("/sys/fs/bpf", MNT_DETACH);
+  } else {
+    CHECK(0, "mount over /sys/fs/bpf: %s", strerror(errno));
+  }
 
   // S7: impossible sizes fail up front, and failures leave nothing behind.
   uint32_t before = map_id(lpm);  // the newest map
@@ -188,6 +208,8 @@ int main(int argc, char** argv) {
   getrlimit(RLIMIT_NOFILE, &rl);
   rl.rlim_cur = rl.rlim_max;
   setrlimit(RLIMIT_NOFILE, &rl);
+  // As pivot-exec does before Android runs.
+  bpfemu_set_pin_dir(open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC));
   int sp[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sp))
     return perror("socketpair"), 1;

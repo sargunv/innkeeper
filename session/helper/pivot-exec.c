@@ -201,6 +201,13 @@ int main(int argc, char** argv) {
   // denied; their supplementary groups are already unmapped.)
   if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
 
+  // The session's bpffs tmpfs (ns-init.sh), for the bpf emulator's pins:
+  // opened now, before Android can mount anything over it.
+  int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
+  if (pins < 0)
+    fprintf(stderr, "pivot-exec: /sys/fs/bpf: %s\n", strerror(errno));
+  bpfemu_set_pin_dir(pins);
+
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sync_sock) != 0)
     die("socketpair");
   static char stack[256 * 1024] __attribute__((aligned(16)));

@@ -18,6 +18,10 @@ int bpfemu_install_filter(int with_binder, int single_uid);
 // listener, and still answers via the listener. -1 (default) disables this.
 void bpfemu_set_binder_forward(int sock);
 
+// The directory pins live in (the session's /sys/fs/bpf tmpfs), opened
+// before any Android code runs. Without it, pins fail with ENOENT.
+void bpfemu_set_pin_dir(int fd);
+
 // Serve notifications on the listener fd (passed as the pointer value).
 // Never returns unless the listener breaks.
 void* bpfemu_serve(void* listener_fd);
