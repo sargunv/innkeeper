@@ -20,6 +20,8 @@
 #                       "key:<keycode>" "wait:<seconds>"
 #                       "sh:<command>"  shell command in the session, must exit 0
 #                       "intent:<uri>"  VIEW <uri> in the app
+#                       "bridgelog:<text>" the host bridge logged <text> since
+#                                       the script started (links compat only logs)
 #                       "gesture:<pinch|pan|doubletap> X Y"  multi-touch via
 #                                       Linux.apk System's input bridge
 #                       "shot:<name>"   screenshot, must not be blank
@@ -504,9 +506,10 @@ script = [
   "tap:Next",
   "wait:10",
   "sh:logcat -d -s LinuxApkBrowser | grep -q 'opening on the desktop: https://mastodon.social/oauth/authorize'",
+  "bridgelog:https://mastodon.social/oauth/authorize",
   "shot:oauth",
 ]
-manual = "Log in to a server: the sign-in page opens in the host browser (the system app is the default browser, docs/bridge.md \"Opening links\"); does the redirect come back to the app through the CLI's scheme handler?"
+manual = "Log in to a server (in the main session; test sessions only log links): the sign-in page opens in the host browser (the system app is the default browser, docs/bridge.md \"Opening links\"); does the redirect come back to the app through the CLI's scheme handler?"
 
 [[app]]
 package = "com.github.mkalmousli.floating_mute"

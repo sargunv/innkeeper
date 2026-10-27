@@ -1,5 +1,6 @@
 //! `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR]
-//!                  [--mirror-apps] [--grants FILE] [--sink NAME] [--null] [-v]`
+//!                  [--mirror-apps] [--grants FILE] [--no-open-urls]
+//!                  [--no-desktop-presence] [--sink NAME] [--null] [-v]`
 //!
 //! Listens on PATH for clients from the Android session. Only the given host
 //! uids may connect (default: our own uid). Audio plays to the desktop's
@@ -9,6 +10,8 @@
 //! and apps services. `--mirror-apps` turns on desktop entries for apps
 //! installed inside Android (`$XDG_DATA_HOME`). `--grants FILE` keeps the
 //! documents service's grants (host files the user picked) across restarts.
+//! `--no-open-urls` and `--no-desktop-presence` turn OpenURI, and
+//! notifications and MPRIS, into log-only sinks (test sessions).
 //! `-v` (or `LINUXAPK_BRIDGE_VERBOSE=1`) logs per-stream statistics.
 
 use std::path::PathBuf;
@@ -31,6 +34,7 @@ fn main() -> Result<()> {
     let mut null = false;
     let mut system_app_dir: Option<PathBuf> = None;
     let mut mirror_apps = false;
+    let mut policy = linuxapk_bridge::services::system::Policy::default();
     let mut grants: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -45,6 +49,8 @@ fn main() -> Result<()> {
             "--sink" => sink = Some(args.next().context("--sink needs a name")?),
             "--null" => null = true,
             "--mirror-apps" => mirror_apps = true,
+            "--no-open-urls" => policy.open_urls = false,
+            "--no-desktop-presence" => policy.presence = false,
             "--grants" => grants = Some(args.next().context("--grants needs a path")?.into()),
             "--system-app-dir" => {
                 system_app_dir = Some(args.next().context("--system-app-dir needs a path")?.into())
@@ -91,7 +97,7 @@ fn main() -> Result<()> {
         .and_then(|d| d.parent())
         .map(|d| d.join("art"))
         .unwrap_or_else(|| PathBuf::from("art"));
-    let shared = Shared::new(art_dir);
+    let shared = Shared::with_policy(art_dir, policy);
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))

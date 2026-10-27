@@ -39,8 +39,19 @@ Run it as a capped job on the lane's own session instance:
      screenshots by SurfaceFlinger, so for them the UI tree must have labelled
      nodes instead.
   6. Run the optional per-app script (syntax at the top of `corpus.toml`):
-     - `tap`, `try`, `expect` and `absent` act on `uiautomator dump` nodes;
+     - `tap`, `try`, `expect` and `absent` act on `uiautomator dump` nodes. A
+       dump waits for the UI to go idle and may take long under CPU load (other
+       sessions running): each try gets 150 s, with up to four tries, and their
+       times go to `out/compat/<pkg>/ui-dump-times.txt`. **"uiautomator dump
+       failed: Killed (after 0 s)"** was not a timeout: commands run through
+       `linuxapk-session exec` inherit the caller's niceness, and uiautomator's
+       handler thread, which sets its priority back to 0, dies with
+       `SecurityException: Cannot set priority to 0` (crash buffer). zsh runs
+       background jobs (`cmd &`) at nice 5. `compat/run.sh` now restarts itself
+       at nice 0 through `systemd-run --user` when it finds itself niced;
      - `sh` runs a check in the session;
+     - `bridgelog` checks that the host bridge logged a text since the script
+       started (compat sessions only log links, docs/bridge.md);
      - `intent` opens a URI in the app;
      - `gesture` does a pinch, pan or double tap: real multi-touch through
        Linux.apk System's input bridge (`compat/gesture.sh`, protocol v2 in a

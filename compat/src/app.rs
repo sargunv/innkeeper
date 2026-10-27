@@ -69,6 +69,8 @@ pub struct AppResult {
 
 const TMP_APK: &str = "/data/local/tmp/compat.apk";
 const UI_XML: &str = "/data/local/tmp/compat-ui.xml";
+/// How long one `uiautomator dump` may take (it waits for the UI to go idle).
+const UI_DUMP_SECS: u64 = 150;
 const GESTURE: &str = "/data/local/tmp/compat-gesture.sh";
 const BRIDGE_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
 
@@ -767,10 +769,20 @@ impl<'a> Run<'a> {
     }
 
     fn script(&self, steps: &[String]) -> Result<(), String> {
+        let log_from = self.s.bridge_log_len();
         for step in steps {
             let (op, arg) = step.split_once(':').ok_or(format!("bad step {step}"))?;
             match op {
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
+                // Text the host bridge logged since the script started, e.g. a
+                // link a test session only logs instead of opening
+                // (docs/bridge.md, "Opening links").
+                "bridgelog" => {
+                    let log = self.s.bridge_log(log_from);
+                    if !log.contains(arg) {
+                        return Err(format!("{step}: not in the bridge log"));
+                    }
+                }
                 // A shell command in the session; fails on a non-zero exit.
                 "sh" => {
                     let o = self.s.sh(60, arg);
@@ -897,12 +909,23 @@ impl<'a> Run<'a> {
         // clips every node to display 0's size.
         let flag = if self.win.is_some() { "--windows " } else { "" };
         let mut last = String::new();
-        for _ in 0..3 {
+        // Under CPU load (other sessions running) a dump can take well over a
+        // minute; give it 150 s, and four tries with a pause between them.
+        for attempt in 0..4 {
+            if attempt > 0 {
+                sleep(Duration::from_secs(3));
+            }
+            let t = Instant::now();
             let o = self.s.sh(
-                60,
+                UI_DUMP_SECS,
                 &format!(
                     "rm -f {UI_XML}; uiautomator dump {flag}{UI_XML} >/dev/null && cat {UI_XML}"
                 ),
+            );
+            let took = t.elapsed().as_secs_f64();
+            self.save_append(
+                "ui-dump-times.txt",
+                &format!("attempt {attempt}: {took:.1} s, ok={}\n", o.ok),
             );
             if o.text.contains("<hierarchy") || o.text.contains("<displays") {
                 let xml = match &self.win {
@@ -911,7 +934,7 @@ impl<'a> Run<'a> {
                 };
                 return Ok(parse_nodes(&xml));
             }
-            last = o.text.trim().to_string();
+            last = format!("{} (after {took:.0} s)", o.text.trim());
         }
         Err(format!("uiautomator dump failed: {last}"))
     }

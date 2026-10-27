@@ -24,10 +24,31 @@ use crate::server::{Events, Peer, Reply, Service};
 use crate::wire::errno::*;
 use proto::{ClipKind, Request, feature};
 
+/// What a session may do on the real desktop. Test sessions (lane instances,
+/// the compat runner) get log-only sinks, so nothing opens in the user's
+/// browser and nothing appears in their notifications or media controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Policy {
+    /// OpenURI really opens links (else: logged only).
+    pub open_urls: bool,
+    /// Notifications and MPRIS players are published (else: logged only).
+    pub presence: bool,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Policy {
+            open_urls: true,
+            presence: true,
+        }
+    }
+}
+
 /// Bridge-wide state, created once in `main.rs`; each part starts the first
 /// time a client asks for it.
 pub struct Shared {
     art_dir: PathBuf,
+    policy: Policy,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     settings: OnceLock<Arc<SettingsHub>>,
     notify: OnceLock<Option<Arc<NotifyHub>>>,
@@ -39,8 +60,16 @@ pub struct Shared {
 impl Shared {
     /// `art_dir`: where MPRIS artwork goes (not shared with Android).
     pub fn new(art_dir: PathBuf) -> Arc<Shared> {
+        Self::with_policy(art_dir, Policy::default())
+    }
+
+    pub fn with_policy(art_dir: PathBuf, policy: Policy) -> Arc<Shared> {
+        if policy != Policy::default() {
+            crate::info!("system: test session: {policy:?} (log-only sinks)");
+        }
         Arc::new(Shared {
             art_dir,
+            policy,
             dbus: OnceLock::new(),
             settings: OnceLock::new(),
             notify: OnceLock::new(),
@@ -137,7 +166,9 @@ impl SystemService {
             self.settings_sub = Some(self.shared.settings().subscribe(self.events.clone()));
         }
         have |= feature::SETTINGS;
-        if want & feature::NOTIFICATIONS != 0 && self.shared.notify().is_some() {
+        if want & feature::NOTIFICATIONS != 0
+            && (!self.shared.policy.presence || self.shared.notify().is_some())
+        {
             have |= feature::NOTIFICATIONS;
         }
         if want & feature::CLIPBOARD != 0
@@ -158,9 +189,6 @@ impl SystemService {
     }
 
     fn notify(&mut self, id: u32, len: u32, fd: &OwnedFd) -> Reply {
-        let Some(hub) = self.shared.notify() else {
-            return Reply::err(-ENOSYS);
-        };
         let b = match blob::read(fd, len, proto::limits::NOTIFY_BLOB as usize) {
             Ok(b) => b,
             Err(e) => return Reply::err(e),
@@ -168,6 +196,18 @@ impl SystemService {
         let note = match Note::decode(&b) {
             Ok(n) => n,
             Err(e) => return Reply::err(e.status()),
+        };
+        if !self.shared.policy.presence {
+            crate::info!(
+                "notify: {}: not shown (test session): {} {:?}",
+                self.label,
+                note.package,
+                super::truncate(&note.title, 80)
+            );
+            return Reply::ok();
+        }
+        let Some(hub) = self.shared.notify() else {
+            return Reply::err(-ENOSYS);
         };
         if !hub.contains(self.client, id) && hub.count(self.client) >= notify::MAX_PER_CLIENT {
             return Reply::err(-EBUSY);
@@ -232,6 +272,19 @@ impl SystemService {
             crate::warn!("openuri: {}: rate limited", self.label);
             return Reply::err(-EAGAIN);
         }
+        if !self.shared.policy.open_urls {
+            if let Err(why) = openuri::validate(&url) {
+                crate::warn!("openuri: {}: refused ({why})", self.label);
+                return Reply::err(-EINVAL);
+            }
+            // The compat runner looks for this line (bridge.log).
+            crate::info!(
+                "openuri: {}: not opened (test session): {}",
+                self.label,
+                super::truncate(&url, 512)
+            );
+            return Reply::ok();
+        }
         match openuri::open(self.shared.dbus(), &url, &self.label) {
             Ok(()) => Reply::ok(),
             Err(e) => Reply::err(e),
@@ -239,7 +292,6 @@ impl SystemService {
     }
 
     fn media(&mut self, player: u32, len: u32, fd: &OwnedFd) -> Reply {
-        let hub = self.shared.mpris();
         let b = match blob::read(fd, len, proto::limits::MEDIA_BLOB as usize) {
             Ok(b) => b,
             Err(e) => return Reply::err(e),
@@ -248,6 +300,15 @@ impl SystemService {
             Ok(m) => m,
             Err(e) => return Reply::err(e.status()),
         };
+        if !self.shared.policy.presence {
+            crate::debug!(
+                "mpris: {}: not published (test session): {}",
+                self.label,
+                m.package
+            );
+            return Reply::ok();
+        }
+        let hub = self.shared.mpris();
         if !hub.contains(self.client, player) && hub.count(self.client) >= mpris::MAX_PER_CLIENT {
             return Reply::err(-EBUSY);
         }
@@ -290,7 +351,9 @@ impl Service for SystemService {
             Request::OpenUri { len } => self.open_uri(len, fd()),
             Request::Media { player, len } => self.media(player, len, fd()),
             Request::MediaClose { player } => {
-                self.shared.mpris().remove(self.client, player);
+                if self.shared.policy.presence {
+                    self.shared.mpris().remove(self.client, player);
+                }
                 Reply::ok()
             }
         }

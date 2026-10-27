@@ -69,6 +69,43 @@ impl Session {
         self.run(secs, &["sh", "-c", script])
     }
 
+    /// The host bridge's log: `out/run[-<instance>]/bridge.log`, where `out` is
+    /// `LINUXAPK_OUT` or the launcher's `<repo>/out`.
+    fn bridge_log_path(&self) -> PathBuf {
+        let out = std::env::var_os("LINUXAPK_OUT")
+            .map(PathBuf::from)
+            .or_else(|| Some(self.launcher.parent()?.parent()?.join("out")))
+            .unwrap_or_default();
+        let inst = std::env::var("LINUXAPK_INSTANCE").unwrap_or_default();
+        let run = if inst.is_empty() {
+            "run".to_string()
+        } else {
+            format!("run-{inst}")
+        };
+        out.join(run).join("bridge.log")
+    }
+
+    /// The bridge log's current size, so a step can look only at what comes
+    /// after.
+    pub fn bridge_log_len(&self) -> u64 {
+        std::fs::metadata(self.bridge_log_path()).map_or(0, |m| m.len())
+    }
+
+    /// The bridge log from byte `from` on (at most its last MiB).
+    pub fn bridge_log(&self, from: u64) -> String {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut f) = File::open(self.bridge_log_path()) else {
+            return String::new();
+        };
+        let len = f.metadata().map_or(0, |m| m.len());
+        let start = from.min(len).max(len.saturating_sub(1 << 20));
+        let mut b = Vec::new();
+        if f.seek(SeekFrom::Start(start)).is_ok() {
+            let _ = f.read_to_end(&mut b);
+        }
+        String::from_utf8_lossy(&b).into_owned()
+    }
+
     /// Copies a host file into the session.
     pub fn push(&self, src: &Path, dst: &str) -> Result<()> {
         let f = File::open(src).with_context(|| format!("open {}", src.display()))?;

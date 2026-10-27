@@ -30,6 +30,10 @@
 #              LINUXAPK_BINDER (ubinder (default) | kernel),
 #              LINUXAPK_MIRROR_APPS (1/0: desktop entries for apps installed
 #                inside Android; default on for the main session only),
+#              LINUXAPK_TEST=1 (a test session even without an instance),
+#              LINUXAPK_OPEN_URLS=1 (a test session opens links in the host
+#                browser; by default it only logs them, and it shows
+#                notifications and media players only on a private bus),
 #              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
 #                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
 #                emulator    SDK emulator image in out/img (tools/extract-image.sh)
@@ -268,6 +272,17 @@ start() {
   for v in XDG_DATA_HOME LINUXAPK_MIRROR_APPS LINUXAPK_SESSION; do
     [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
   done
+  # Test sessions (any named instance, or LINUXAPK_TEST=1: lanes, the compat
+  # runner) never reach the user's real desktop: links are only logged (unless
+  # LINUXAPK_OPEN_URLS=1), and so are notifications and media players unless
+  # the session talks to a private bus (a nested test desktop).
+  local quiet=()
+  if [[ -n $inst || ${LINUXAPK_TEST:-} == 1 ]]; then
+    [[ ${LINUXAPK_OPEN_URLS:-} == 1 ]] || quiet+=(--no-open-urls)
+    local bus=${DBUS_SESSION_BUS_ADDRESS:-}
+    [[ -n $bus && $bus != "unix:path=/run/user/$(id -u)/bus" ]] || quiet+=(--no-desktop-presence)
+  fi
+  integ_env+=("--setenv=LINUXAPK_BRIDGE_QUIET=${quiet[*]}")
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
@@ -313,6 +328,11 @@ start_bridge() {
   # or in any instance with LINUXAPK_MIRROR_APPS=1 (0 turns it off).
   local mirror=${LINUXAPK_MIRROR_APPS:-}
   [[ $mirror == 1 || (-z $inst && $mirror != 0) ]] && args+=(--mirror-apps)
+  # Log-only sinks for test sessions (see start).
+  local q
+  for q in ${LINUXAPK_BRIDGE_QUIET:-}; do
+    case $q in --no-open-urls | --no-desktop-presence) args+=("$q") ;; esac
+  done
   while :; do
     # The display service (windows, input) and the clipboard connect to the
     # host compositor.

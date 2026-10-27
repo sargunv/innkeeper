@@ -24,8 +24,8 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
 - **Allow-list:** the bridge also checks `SO_PEERCRED` and only accepts the host
   uids of Android root (the host user), `system` (1000) and `audioserver`
   (1041), which are mapped onto the subordinate range. The Linux.apk System app
-  is admitted to the system, documents and apps services only: its uid is assigned at install time,
-  so the bridge takes the owner of its data directory
+  is admitted to the system, documents and apps services only: its uid is
+  assigned at install time, so the bridge takes the owner of its data directory
   (`--system-app-dir <data>/data/dev.linuxapk.system`, created by installd) at
   connect time. The app reaches the directory through the `audio` group, which
   its `dev.linuxapk.permission.HOST_BRIDGE` permission maps to.
@@ -145,9 +145,9 @@ service; a client that needs two services opens two connections.
 - A wrong major gets `-EPROTO`, and an unknown service gets `-ENOSYS`. Either
   way the connection is closed.
 - Any other first message gets `-EPROTO` and also closes it.
-- Service ids: 1 audio, 2 display, 3 system, 4 documents, 5 apps. A uid
-  admitted to some services only (see "Allow-list") that asks for another gets
-  `-EACCES` and is closed.
+- Service ids: 1 audio, 2 display, 3 system, 4 documents, 5 apps. A uid admitted
+  to some services only (see "Allow-list") that asks for another gets `-EACCES`
+  and is closed.
 
 ### Audio service (id 1)
 
@@ -431,6 +431,14 @@ the compositor has no data control.
   ASCII without spaces, quotes or backslashes, at most 8192 bytes and 5 per 10 s
   per connection; it logs each one (the first 512 bytes) and calls the OpenURI
   portal, or `xdg-open URL` without a shell if there is no portal.
+- **Test sessions** (a named `LINUXAPK_INSTANCE`, or `LINUXAPK_TEST=1`, which
+  `compat/run.sh` sets) never touch the user's real desktop. The launcher passes
+  `--no-open-urls`, so links are validated and logged
+  (`openuri: …: not opened (test session): URL`) but not opened, unless
+  `LINUXAPK_OPEN_URLS=1`. It also passes `--no-desktop-presence` unless the
+  session talks to a private bus (a nested test desktop): notifications and
+  MPRIS players are then only logged. The compat step `bridgelog:<text>` checks
+  the bridge log for such a line.
 - OAuth: the authorize URL opens in the host browser; the redirect to the app's
   custom scheme comes back through the CLI's scheme handler (`linuxapk run`),
   which the window manager delivers to the app's window. https App Link

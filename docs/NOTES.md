@@ -268,6 +268,12 @@ Causes:
   the bridge served by a DocumentsProvider (only what the user picked). Apps
   that F-Droid or `pm install` installs get desktop entries (main session only
   by default). See [bridge.md](bridge.md) (documents and apps services).
+- 2026-10-27 (integb): **test sessions stay off the real desktop**: named
+  instances and `compat/run.sh` only log links (unless `LINUXAPK_OPEN_URLS=1`),
+  and notifications and MPRIS unless on a private bus. The compat "uiautomator
+  dump failed: Killed" flakes were zsh's nice 5 for background jobs, not
+  timeouts: uiautomator died setting its thread priority back to 0.
+  `compat/run.sh` now re-runs itself at nice 0.
 
 ## Backlog (unassigned)
 
