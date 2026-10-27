@@ -16,6 +16,7 @@ tools/extract-image.sh ~/Android/Sdk/system-images/android-37.0/default/x86_64 o
 session/linuxapk-session start        # first run: builds the shim and iptables, flattens APEXes
 session/linuxapk-session start --headless   # no host Wayland window
 session/linuxapk-session start --single-window   # all of Android in one window (M1); default: a window per app
+session/linuxapk-session start --single-uid      # no /etc/subuid needed: virtual uids (docs/sandbox.md)
 session/linuxapk-session log -f       # init's /dev/kmsg (a FIFO read on the host)
 session/linuxapk-session exec logcat -d -b main,system,crash   # (-b all can hang)
 session/linuxapk-session exec getprop sys.boot_completed
@@ -97,7 +98,11 @@ Decisions:
 - **iptables:** upstream iptables 1.8.11 with the nf_tables backend, which works
   in the session's own network namespace. It's layered over the image's legacy
   binary. `linuxapk-iptables` drops `-m bpf` rules, which is equivalent to
-  programs that never match, and keeps netd's `#PING` handshake.
+  programs that never match, and keeps netd's `#PING` handshake. It also drops
+  netd's `-m quota2` rules (data-usage alerts and limits; xt_quota2 isn't in
+  upstream iptables): the parse error failed netd's restore batch, and netd
+  waited out its response timeouts, a 20 s stall of system_server at every boot.
+  Without them quotas never trigger. Warm boot went from about 22 s to 2.6 s.
 - **The shim also covers** `gzopen("/proc/config.gz")` (served from the host's
   `/boot/config-*`). The services that get it via rc `setenv` are
   servicemanager, zygote (and so system_server and apps), vold and installd.

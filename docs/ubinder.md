@@ -48,7 +48,8 @@ the shared listener.
   exec). A lost fd releases the broker process (`binder_deferred_release`),
   which fires death notifications and fails pending calls.
 - **identity:** `sender_pid` is the pid in Android's pid namespace (`NSpid`),
-  `sender_euid` the opener's euid.
+  `sender_euid` the opener's euid (its virtual one in single-uid mode, see
+  [sandbox.md](sandbox.md)).
 - **`linuxapk-session exec`:** nsenter'd processes don't descend from init, so
   they have no filter and no binder. In ubinder mode init runs `linuxapk-execd`
   (`session/helper/linuxapk-exec.c`), and `exec` runs commands through it: argv,

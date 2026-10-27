@@ -3,14 +3,17 @@
 # rootless user + mount + pid + cgroup namespace.
 #
 #   linuxapk-session start [-f] [--headless] [--single-window]
-#                          [--ubinder|--kernel-binder]
+#                          [--ubinder|--kernel-binder] [--single-uid]
 #                                  boot (in the background unless -f). Each
 #                                  app gets its own host Wayland window
 #                                  (docs/windowing.md); --single-window shows
 #                                  all of Android in one window instead, and
 #                                  --headless opens no windows. Binder is
 #                                  served in userspace (docs/ubinder.md);
-#                                  --kernel-binder uses a private binderfs
+#                                  --kernel-binder uses a private binderfs.
+#                                  --single-uid maps only the host user (no
+#                                  /etc/subuid range) and virtualizes
+#                                  Android's uids (docs/sandbox.md)
 #   linuxapk-session prepare       fetch/extract/flatten the selected image only
 #   linuxapk-session image         print the selected image and its paths
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
@@ -34,6 +37,8 @@
 #              LINUXAPK_OPEN_URLS=1 (a test session opens links in the host
 #                browser; by default it only logs them, and it shows
 #                notifications and media players only on a private bus),
+#              LINUXAPK_SINGLE_UID=1 (same as start --single-uid),
+#              LINUXAPK_VID_STATS=1 (single-uid syscall counters in session.out),
 #              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
 #                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
 #                emulator    SDK emulator image in out/img (tools/extract-image.sh)
@@ -96,6 +101,11 @@ fi
 #   50000-59999 (shared app gids), 90000-99999 (isolated/app-zygote uids)
 idmaps() {
   local kind=$1 who sub
+  # Single-uid mode: only root, as the invoking user (docs/sandbox.md).
+  if ((${single_uid:-0})); then
+    if [[ $kind == users ]]; then echo "--map-users=0:$(id -u):1"; else echo "--map-groups=0:$(id -g):1"; fi
+    return
+  fi
   if [[ $kind == users ]]; then
     who=$(id -u)
     sub=/etc/subuid
@@ -123,7 +133,7 @@ cmdline() {
   # androidboot.* (passed via /proc/bootconfig) become ro.boot.* properties.
   # linuxapk.ubinder gates the binderfs mount in init.rc (0 = kernel binder).
   cat <<EOF
-androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m androidboot.linuxapk.ubinder=${ubinder:-0}
+androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m androidboot.linuxapk.ubinder=${ubinder:-0} androidboot.linuxapk.single_uid=${single_uid:-0}
 EOF
   kind_cmdline
 }
@@ -172,6 +182,20 @@ vendor_props() {
   chmod 0644 "$dst"
 }
 
+# /data's files belong to Android's uids: subordinate ids normally, the
+# invoking user in single-uid mode. Booting a data dir made in the other mode
+# leaves apps without access to their files, so refuse.
+check_data_owner() {
+  [[ -d $data/system ]] || return 0
+  local owner
+  owner=$(stat -c %u "$data/system")
+  if ((single_uid)) && [[ $owner != "$(id -u)" ]]; then
+    die "$data was made by a normal (subuid) session; use a fresh LINUXAPK_DATA for --single-uid"
+  elif ((! single_uid)) && [[ $owner == "$(id -u)" ]]; then
+    die "$data was made by a --single-uid session; pass --single-uid or use a fresh LINUXAPK_DATA"
+  fi
+}
+
 # Make sure the selected image is extracted and flattened, and the generated
 # overlay matches it.
 prepare() {
@@ -209,7 +233,8 @@ start() {
   # Binder backend: ubinder (served in userspace, docs/ubinder.md; the
   # default) or kernel binder (a private binderfs, which needs the dev SELinux
   # module on Fedora). LINUXAPK_BINDER sets the default.
-  ubinder=0
+  ubinder=0 single_uid=0
+  [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && single_uid=1
   case ${LINUXAPK_BINDER:-ubinder} in
     ubinder) ubinder=1 ;;
     kernel) ;;
@@ -222,9 +247,13 @@ start() {
       --single-window) wm_mode=single ;;
       --ubinder) ubinder=1 ;;
       --kernel-binder) ubinder=0 ;;
+      --single-uid) single_uid=1 ;;
       *) die "unknown start option: $a" ;;
     esac
   done
+  # Virtual uids come from the ubinder broker (binder's sender_euid).
+  ((single_uid && ! ubinder)) && die "--single-uid needs ubinder (not --kernel-binder)"
+  check_data_owner
   if [[ $hwc_backend != headless ]]; then
     # Only the host compositor's socket file goes in (as
     # /dev/socket/wayland-host), never all of $XDG_RUNTIME_DIR.
@@ -289,6 +318,7 @@ start() {
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
     --setenv=LINUXAPK_UBINDER="$ubinder_helper" --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" \
+    --setenv=LINUXAPK_SINGLE_UID="$single_uid" --setenv=LINUXAPK_VID_STATS="${LINUXAPK_VID_STATS:-}" \
     "${integ_env[@]}" -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do
@@ -318,12 +348,16 @@ start() {
 start_bridge() {
   local bridge=$repo/target/release/linuxapk-bridge base
   [[ -x $bridge ]] || return 0
-  read -r base _ < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" '$1==u || $1==n {print $2, $3; exit}' /etc/subuid)
   mkdir -p "$run/bridge"
-  # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1.
-  local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)" --allow-uid $((base + 999))
-  --allow-uid $((base + 1040)) --system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
-  ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
+  local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)")
+  if [[ ${LINUXAPK_SINGLE_UID:-} != 1 ]]; then
+    # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1. (In
+    # single-uid mode every Android process is the invoking user.)
+    read -r base _ < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" '$1==u || $1==n {print $2, $3; exit}' /etc/subuid)
+    args+=(--allow-uid $((base + 999)) --allow-uid $((base + 1040)))
+  fi
+  args+=(--system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
+    ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
   # Apps installed inside Android get desktop entries: in the default session,
   # or in any instance with LINUXAPK_MIRROR_APPS=1 (0 turns it off).
   local mirror=${LINUXAPK_MIRROR_APPS:-}
@@ -350,6 +384,8 @@ start_bridge() {
 # Body of the systemd service (internal).
 _run() {
   out=$1 data=$2 run=$out/run$sfx
+  single_uid=0
+  [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && single_uid=1
   # Reader holds the FIFO open read-write so writers never block or see EOF.
   cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
   start_bridge
@@ -357,7 +393,7 @@ _run() {
   # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046
   env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
-    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_KIND_OVERLAY="$kind_ovl" \
+    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_KIND_OVERLAY="$kind_ovl" LINUXAPK_SINGLE_UID="$single_uid" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
     -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
   local ushare=$! outer="" inner=""
@@ -437,6 +473,44 @@ exec_in() {
       exec "$@"' sh "$@"
 }
 
+# selftest's group probes for a single-uid session (pid 1 = $1).
+single_uid_groups() {
+  local p=$1 g extra=() bad=""
+  local groups
+  read -ra groups < <(sed -n 's/^Groups:[[:space:]]*//p' "/proc/$p/status")
+  for g in "${groups[@]}"; do
+    [[ $g == "$(id -g)" ]] || extra+=("$g")
+  done
+  if [[ $(<"/proc/$p/setgroups") == deny ]]; then
+    echo "ok   single-uid: setgroups denied in the session"
+  else
+    echo "FAIL single-uid: setgroups allowed in the session"
+  fi
+  if ((${#extra[@]} == 0)); then
+    echo "ok   no host supplementary groups"
+    return
+  fi
+  if awk -v g="${extra[*]}" 'BEGIN { n = split(g, a, " ") } { for (i = 1; i <= n; i++) if ($1 <= a[i] && a[i] < $1 + $3) bad = 1 } END { exit !bad }' "/proc/$p/gid_map"; then
+    echo "FAIL single-uid: a host supplementary group is mapped"
+  else
+    echo "ok   single-uid: host supplementary groups (${extra[*]}) unmapped"
+  fi
+  # The host paths bound into the session (ns-init.sh): /data, the device
+  # nodes, the kmsg FIFO and the bridge's socket directory.
+  local paths=("$data" "$run/kmsg" "$run/bridge") n
+  for n in null zero full random urandom fuse udmabuf net/tun dri; do
+    [[ -e /dev/$n ]] && paths+=("/dev/$n")
+  done
+  for g in "${extra[@]}"; do
+    bad+=$(find "${paths[@]}" -xdev -group "$g" -print -quit 2>/dev/null)
+  done
+  if [[ -z $bad ]]; then
+    echo "ok   single-uid: no bound host path belongs to them"
+  else
+    echo "FAIL single-uid: bound host path owned by a host group: $bad"
+  fi
+}
+
 # Host-safety probes against a live session; each must report "ok".
 selftest() {
   local p
@@ -448,8 +522,17 @@ selftest() {
       echo "ok   own IPC namespace" || echo "FAIL shares the host IPC namespace"
     grep -q "/$unit.service" "/proc/$p/cgroup" &&
       echo "ok   runs in $unit.service's cgroup" || echo "FAIL cgroup: $(cat "/proc/$p/cgroup")"
-    grep -Eq '^Groups:[[:space:]]*$' "/proc/$p/status" &&
-      echo "ok   no host supplementary groups" || echo "FAIL $(grep ^Groups "/proc/$p/status")"
+    if [[ $(wc -l <"/proc/$p/uid_map") == 1 ]]; then
+      # Single-uid mode (docs/sandbox.md): without a subgid range the
+      # kernel denies setgroups, so the host user's supplementary groups
+      # can't be dropped. Check that they stay unusable instead: setgroups
+      # is denied (no way to change them), they're unmapped inside, and no
+      # host path bound into the session belongs to one of them.
+      single_uid_groups "$p"
+    else
+      grep -Eq '^Groups:[[:space:]]*$' "/proc/$p/status" &&
+        echo "ok   no host supplementary groups" || echo "FAIL $(grep ^Groups "/proc/$p/status")"
+    fi
     # shellcheck disable=SC2016 # expanded by the session's shell
     "$0" exec /system/bin/sh -c '
       t() { if eval "$2" >/dev/null 2>&1; then echo "FAIL $1"; else echo "ok   $1"; fi; }

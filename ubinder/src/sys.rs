@@ -60,30 +60,30 @@ fn notif_send_cmd(sz: usize) -> u32 {
 fn notif_id_valid_cmd() -> u32 {
     ioc(1, 2, size_of::<u64>())
 }
-fn notif_addfd_cmd(sz: usize) -> u32 {
+pub(crate) fn notif_addfd_cmd(sz: usize) -> u32 {
     ioc(1, 3, sz)
 }
 
 const SECCOMP_USER_NOTIF_FLAG_CONTINUE: u32 = 1;
 const SECCOMP_ADDFD_FLAG_SETFD: u32 = 1;
-const SECCOMP_ADDFD_FLAG_SEND: u32 = 2;
+pub(crate) const SECCOMP_ADDFD_FLAG_SEND: u32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct SeccompData {
-    nr: i32,
+pub(crate) struct SeccompData {
+    pub(crate) nr: i32,
     arch: u32,
     instruction_pointer: u64,
-    args: [u64; 6],
+    pub(crate) args: [u64; 6],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct SeccompNotif {
-    id: u64,
-    pid: u32,
+pub(crate) struct SeccompNotif {
+    pub(crate) id: u64,
+    pub(crate) pid: u32,
     flags: u32,
-    data: SeccompData,
+    pub(crate) data: SeccompData,
 }
 
 #[repr(C)]
@@ -97,12 +97,12 @@ struct SeccompNotifResp {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct SeccompNotifAddfd {
-    id: u64,
-    flags: u32,
-    srcfd: u32,
-    newfd: u32,
-    newfd_flags: u32,
+pub(crate) struct SeccompNotifAddfd {
+    pub(crate) id: u64,
+    pub(crate) flags: u32,
+    pub(crate) srcfd: u32,
+    pub(crate) newfd: u32,
+    pub(crate) newfd_flags: u32,
 }
 
 #[repr(C)]
@@ -232,6 +232,8 @@ struct Waiter {
 
 pub struct Supervisor {
     broker: Broker,
+    /// Single-uid mode's virtual ids (binder's sender_euid comes from them).
+    vid: Option<Arc<crate::vidsys::Vid>>,
     listener: RawFd,
     resp_sz: usize,
     addfd_sz: usize,
@@ -256,7 +258,7 @@ unsafe impl Send for Supervisor {}
 
 // ---- libc helpers ------------------------------------------------------
 
-fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
+pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
     }
@@ -276,7 +278,7 @@ fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if n == len as isize { Some(buf) } else { None }
 }
 
-fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
+pub(crate) fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
     }
@@ -297,7 +299,7 @@ fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
 
 /// Read a NUL-terminated path, never crossing into a page that need not be
 /// mapped before it is known to be needed.
-fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
+pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let mut a = addr;
     while out.len() < 4096 {
@@ -314,7 +316,7 @@ fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
     None
 }
 
-fn status_field(pid: i32, key: &str) -> Option<String> {
+pub(crate) fn status_field(pid: i32, key: &str) -> Option<String> {
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     status
         .lines()
@@ -454,7 +456,11 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
     let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
     let (tx, rx) = mpsc::channel();
+    // Single-uid mode (docs/sandbox.md): virtual ids for every process.
+    let vid = (std::env::var("LINUXAPK_SINGLE_UID").as_deref() == Ok("1"))
+        .then(|| crate::vidsys::Vid::new(listener, resp_sz));
     let sup = Arc::new(Mutex::new(Supervisor {
+        vid: vid.clone(),
         broker: Broker::new(),
         listener,
         resp_sz,
@@ -489,12 +495,25 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         }
         let req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
         let nr = req.data.nr as i64;
+        if let Some(v) = &vid
+            && crate::vidsys::is_vid(nr, &req.data.args)
+        {
+            v.serve(&req);
+            continue;
+        }
         let ours = nr == libc::SYS_openat
             || (nr == libc::SYS_ioctl && is_binder_ioctl(req.data.args[1] as u32));
         if !ours {
             if unsafe { libc::send(sock, notif.as_ptr() as *const _, notif_sz, 0) } < 0 {
                 eprintln!("ubinder: forward: {}", std::io::Error::last_os_error());
             }
+            continue;
+        }
+        // Single-uid mode: /proc/<pid>/status with the virtual ids.
+        if nr == libc::SYS_openat
+            && let Some(v) = &vid
+            && v.proc_status(&req)
+        {
             continue;
         }
         // Every openat in the session lands here: let the ones that can't be a
@@ -518,11 +537,27 @@ fn maybe_dev_path(pid: i32, addr: u64) -> bool {
 }
 
 fn send_continue(listener: RawFd, resp_sz: usize, id: u64) {
+    send_resp(listener, resp_sz, id, 0, 0, true);
+}
+
+/// Answer notification `id` (`error` is a negative errno, or 0).
+pub(crate) fn send_resp(
+    listener: RawFd,
+    resp_sz: usize,
+    id: u64,
+    val: i64,
+    error: i32,
+    cont: bool,
+) {
     let resp = SeccompNotifResp {
         id,
-        val: 0,
-        error: 0,
-        flags: SECCOMP_USER_NOTIF_FLAG_CONTINUE,
+        val,
+        error,
+        flags: if cont {
+            SECCOMP_USER_NOTIF_FLAG_CONTINUE
+        } else {
+            0
+        },
     };
     let mut buf = vec![0u8; resp_sz];
     unsafe {
@@ -725,9 +760,14 @@ impl Supervisor {
         if newfd < 0 {
             return; // target gone
         }
-        let euid = status_field(pid, "Uid:")
-            .and_then(|u| u.split_whitespace().nth(1).and_then(|v| v.parse().ok()))
-            .unwrap_or(0);
+        // The opener's euid, as the kernel records proc->cred at open; in
+        // single-uid mode its virtual one.
+        let euid = match &self.vid {
+            Some(v) => v.creds(pid).map(|c| c.euid).unwrap_or(0),
+            None => status_field(pid, "Uid:")
+                .and_then(|u| u.split_whitespace().nth(1).and_then(|v| v.parse().ok()))
+                .unwrap_or(0),
+        };
         // NSpid: <this ns> <android ns> [...]; report the Android-namespace pid.
         let ns_pid = status_field(pid, "NSpid:")
             .and_then(|v| {

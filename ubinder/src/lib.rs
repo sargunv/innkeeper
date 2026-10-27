@@ -14,6 +14,9 @@ pub mod broker;
 pub mod defs;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod sys;
+pub mod vid;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod vidsys;
 
 pub use broker::{Broker, Mem, ProcId, Wakeup, WriteRead};
 

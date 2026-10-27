@@ -96,22 +96,45 @@ static int is_selinux_xattr(const char* name) {
   return name && strcmp(name, "security.selinux") == 0;
 }
 
+// Single-uid mode (docs/sandbox.md): the kernel rejects POSIX ACL entries
+// naming Android's uids and gids, which aren't mapped. vold gives
+// /data/media/<user> a default ACL (group media_rw/everybody) and fails user
+// storage preparation without it, and system_server then reboots to recovery
+// to wipe /data. Every Android process is the same kernel uid there, so the
+// ACL has nothing to grant: skip it.
+//
+// The mode comes from LINUXAPK_SINGLE_UID=1, which init passes on to every
+// service. (Not the ro.boot property: libc's own startup fstat()s the
+// property areas through this shim before properties can be read.)
+static int single_uid_state = -1;
+static int single_uid(void) {
+  if (single_uid_state < 0) {
+    const char* e = getenv("LINUXAPK_SINGLE_UID");
+    single_uid_state = e && !strcmp(e, "1");
+  }
+  return single_uid_state;
+}
+static int is_skipped_xattr(const char* name) {
+  if (is_selinux_xattr(name)) return 1;
+  return name && !strncmp(name, "system.posix_acl_", 17) && single_uid();
+}
+
 EXPORT int fsetxattr(
   int fd, const char* name, const void* value, size_t size, int flags
 ) {
-  if (is_selinux_xattr(name)) return 0;
+  if (is_skipped_xattr(name)) return 0;
   return syscall(SYS_fsetxattr, fd, name, value, size, flags);
 }
 EXPORT int setxattr(
   const char* path, const char* name, const void* value, size_t size, int flags
 ) {
-  if (is_selinux_xattr(name)) return 0;
+  if (is_skipped_xattr(name)) return 0;
   return syscall(SYS_setxattr, path, name, value, size, flags);
 }
 EXPORT int lsetxattr(
   const char* path, const char* name, const void* value, size_t size, int flags
 ) {
-  if (is_selinux_xattr(name)) return 0;
+  if (is_skipped_xattr(name)) return 0;
   return syscall(SYS_lsetxattr, path, name, value, size, flags);
 }
 
@@ -229,3 +252,124 @@ EXPORT int ioctl(int fd, int request, ...) {
   }
   return rc;
 }
+
+// Single-uid mode (docs/sandbox.md): the kernel sees every file as owned by
+// uid 0, and the seccomp supervisor records the owner a chown asked for in
+// the "user.linuxapk.owner" xattr ("uid:gid"). installd verifies the owners of
+// the app directories it prepares (fs_prepare_dir_strict, the cache dirs, the
+// fts walks of fixupAppData and clearAppCache) and treats a mismatch as a
+// failure, which makes PackageManager wipe and recreate the app's data on
+// every boot. Report the recorded owner. Only processes whose rc sets
+// LINUXAPK_VSTAT=1 (installd) pay for the extra getxattrat per stat. Not
+// zygote: its children include sandboxed processes (WebView renderers) whose
+// own seccomp policy kills them for a syscall it doesn't allow. Bionic's own
+// callers (fts) reach these wrappers through the PLT too.
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/stat.h>
+
+static int vstat_state = -1;
+static int vstat_on(void) {
+  if (vstat_state < 0) {
+    const char* e = getenv("LINUXAPK_VSTAT");
+    vstat_state = e && !strcmp(e, "1") && single_uid();
+  }
+  return vstat_state;
+}
+
+static void vstat_apply(long n, const char* buf, struct stat* st) {
+  if (n <= 0 || n >= 32) return;
+  char tmp[32];
+  memcpy(tmp, buf, n);
+  tmp[n] = 0;
+  unsigned uid, gid;
+  if (sscanf(tmp, "%u:%u", &uid, &gid) == 2) {
+    st->st_uid = uid;
+    st->st_gid = gid;
+  }
+}
+
+// getxattrat(2) (Linux 6.13): the session's seccomp filter traps every
+// getxattr/lgetxattr (for security.selinux), which would cost a supervisor
+// round trip per stat; getxattrat isn't trapped. Older kernels fall back.
+#ifndef __NR_getxattrat
+#define __NR_getxattrat 464
+#endif
+struct linuxapk_xattr_args {
+  uint64_t value;
+  uint32_t size;
+  uint32_t flags;
+};
+static int have_getxattrat = 1;
+
+static long vstat_getxattr(
+  int dirfd, const char* path, int flags, char* buf, size_t len
+) {
+  static const char kName[] = "user.linuxapk.owner";
+  if (have_getxattrat) {
+    struct linuxapk_xattr_args a = {(uintptr_t)buf, (uint32_t)len, 0};
+    long n = syscall(
+      __NR_getxattrat, dirfd, path,
+      flags & (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH), kName, &a, sizeof(a)
+    );
+    if (n >= 0 || errno != ENOSYS) return n;
+    have_getxattrat = 0;
+  }
+  if ((flags & AT_EMPTY_PATH) && !*path)
+    return syscall(SYS_fgetxattr, dirfd, kName, buf, len);
+  char p[4096];
+  const char* q = path;
+  if (path[0] != '/' && dirfd != AT_FDCWD) {
+    if (
+      snprintf(p, sizeof(p), "/proc/self/fd/%d/%s", dirfd, path) >=
+      (int)sizeof(p)
+    )
+      return -1;
+    q = p;
+  }
+  return syscall(
+    (flags & AT_SYMLINK_NOFOLLOW) ? SYS_lgetxattr : SYS_getxattr, q, kName, buf,
+    len
+  );
+}
+
+static void vstat_fixup(
+  int dirfd, const char* path, int flags, struct stat* st
+) {
+  if (!S_ISDIR(st->st_mode) && !S_ISREG(st->st_mode)) return;
+  char buf[32];
+  vstat_apply(vstat_getxattr(dirfd, path, flags, buf, sizeof(buf)), buf, st);
+}
+
+EXPORT int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
+  int saved = errno;
+  long r = syscall(SYS_newfstatat, dirfd, path, st, flags);
+  if (r == 0 && vstat_on()) {
+    vstat_fixup(dirfd, path, flags, st);
+    errno = saved;
+  }
+  return r;
+}
+EXPORT int fstatat64(int dirfd, const char* path, struct stat64* st, int flags)
+  __attribute__((alias("fstatat")));
+EXPORT int stat(const char* path, struct stat* st) {
+  return fstatat(AT_FDCWD, path, st, 0);
+}
+EXPORT int stat64(const char* path, struct stat64* st)
+  __attribute__((alias("stat")));
+EXPORT int lstat(const char* path, struct stat* st) {
+  return fstatat(AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW);
+}
+EXPORT int lstat64(const char* path, struct stat64* st)
+  __attribute__((alias("lstat")));
+EXPORT int fstat(int fd, struct stat* st) {
+  int saved = errno;
+  long r = syscall(SYS_fstat, fd, st);
+  if (r == 0 && vstat_on()) {
+    vstat_fixup(fd, "", AT_EMPTY_PATH, st);
+    errno = saved;
+  }
+  return r;
+}
+EXPORT int fstat64(int fd, struct stat64* st) __attribute__((alias("fstat")));

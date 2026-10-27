@@ -119,7 +119,11 @@ if [[ -d $out/apex-overlay ]]; then
     if [[ -d $apex/$n ]]; then cp -a "$d" "$aovl/$n"; fi
   done
 fi
-layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$aovl" "$out/session/overlay/apex" "$apex"
+# Single-uid mode: host-owned copies of the files that overlay/ gives
+# subordinate owners (see session/build.sh).
+su_apex=$out/session/overlay-su/apex
+[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] || su_apex=/nonexistent
+layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$aovl" "$su_apex" "$out/session/overlay/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
@@ -161,8 +165,13 @@ fi
 # a subordinate gid on the host) can enter it: the audio HALs run as
 # audioserver with that group.
 if [[ -d $run/bridge ]]; then
-  chown 0:1005 "$run/bridge"
-  chmod 0750 "$run/bridge"
+  if [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]]; then
+    # Single-uid mode: every Android process is uid 0 to the kernel.
+    chmod 0700 "$run/bridge"
+  else
+    chown 0:1005 "$run/bridge"
+    chmod 0750 "$run/bridge"
+  fi
   mkdir -p "$R/dev/socket/linuxapk"
   mount --bind "$run/bridge" "$R/dev/socket/linuxapk"
 fi
@@ -170,7 +179,10 @@ fi
 touch "$R/dev/kmsg"
 mount --bind "$run/kmsg" "$R/dev/kmsg"
 mkdir -p "$R/dev/pts" "$R/dev/socket"
-mount -t devpts -o newinstance,ptmxmode=0666,mode=0620,gid=5 devpts "$R/dev/pts"
+# gid 5 (tty) isn't mapped in single-uid mode.
+pts_gid=5
+[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && pts_gid=0
+mount -t devpts -o newinstance,ptmxmode=0666,mode=0620,gid=$pts_gid devpts "$R/dev/pts"
 ln -s pts/ptmx "$R/dev/ptmx"
 if [[ -d /dev/dri ]]; then
   mkdir -p "$R/dev/dri"
@@ -255,10 +267,14 @@ fi
 # decide whether to install the binder seccomp filter and fork the broker).
 ubinder_helper=${LINUXAPK_UBINDER:-}
 ubinder_debug=${LINUXAPK_UBINDER_DEBUG:-}
+single_uid=${LINUXAPK_SINGLE_UID:-}
+vid_stats=${LINUXAPK_VID_STATS:-}
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
 export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 [[ -n $ubinder_helper ]] && export LINUXAPK_UBINDER=$ubinder_helper
 [[ -n $ubinder_debug ]] && export LINUXAPK_UBINDER_DEBUG=$ubinder_debug
+[[ $single_uid == 1 ]] && export LINUXAPK_SINGLE_UID=1
+[[ $vid_stats == 1 ]] && export LINUXAPK_VID_STATS=1
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

@@ -51,6 +51,10 @@ extern char** environ;
 // copy.
 static const char* ubinder_helper;
 static int ubinder_enabled;
+// Single-uid mode (LINUXAPK_SINGLE_UID=1, needs ubinder): the session maps
+// only uid/gid 0, and the broker helper emulates Android's uids
+// (docs/sandbox.md).
+static int single_uid;
 
 static void die(const char* what);
 
@@ -144,7 +148,7 @@ static int child_main(void* arg) {
 
   // Route Android's bpf() (and, in ubinder mode, openat/binder-ioctl) to the
   // supervisor via one seccomp notification listener, then hand it the fd.
-  int listener = bpfemu_install_filter(ubinder_enabled);
+  int listener = bpfemu_install_filter(ubinder_enabled, single_uid);
   if (listener < 0) die("install seccomp filter");
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
@@ -177,6 +181,12 @@ int main(int argc, char** argv) {
   child_argv = argv + 2;
   ubinder_helper = getenv("LINUXAPK_UBINDER");
   ubinder_enabled = ubinder_helper != NULL && ubinder_helper[0] != '\0';
+  const char* su = getenv("LINUXAPK_SINGLE_UID");
+  single_uid = su != NULL && strcmp(su, "1") == 0;
+  if (single_uid && !ubinder_enabled) {
+    fprintf(stderr, "pivot-exec: single-uid mode needs ubinder\n");
+    return 2;
+  }
 
   if (chdir(argv[1]) != 0) die("chdir newroot");
   // pivot_root(".", "."): the old root ends up stacked on top of the new

@@ -122,6 +122,8 @@ Causes:
   Docs: `docs/audio.md` and `docs/bridge.md`. Instance `audio`.
 - ubinder (M4): userspace binder through the seccomp supervisor. Docs:
   `docs/ubinder.md`. Instance `ubinder`.
+- sandbox (M4): single-uid mode (virtual uids) and the relocation assessment for
+  Flatpak. Docs: `docs/sandbox.md`. Instance `sandbox`.
 - image: boot the CI cuttlefish build (`tools/fetch-image.sh`, image selection
   in the session). Docs: `docs/image.md`. Instance `image`.
 - cli: the `linuxapk` host command (install, `.desktop` files, run). Docs:
@@ -274,6 +276,15 @@ Causes:
   dump failed: Killed" flakes were zsh's nice 5 for background jobs, not
   timeouts: uiautomator died setting its thread priority back to 0.
   `compat/run.sh` now re-runs itself at nice 0.
+- 2026-10-27 (sandbox): **`start --single-uid`** needs no `/etc/subuid`. Only
+  uid/gid 0 are mapped, and the seccomp supervisor gives every process virtual
+  ids (set*id/get*id, chown into a `user.linuxapk.owner` xattr, `SO_PEERCRED`,
+  lstat, `/proc/<pid>/status`; binder's `sender_euid`). It boots as fast as
+  normal mode and passes selftest and the input e2e; there is no isolation
+  between apps, so the sandbox around the session is the boundary. M5
+  recommendation: a symlink root inside Flatpak (no mount namespace needed). The
+  iptables wrapper now drops netd's `quota2` rules, which removed a 20 s stall
+  from every boot (warm boot 2.6 s). See [sandbox.md](sandbox.md).
 
 ## Backlog (unassigned)
 
@@ -281,6 +292,8 @@ Causes:
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
   buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
   via `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`.
+- lmkd can't write app processes' `/proc/<pid>/oom_score_adj` (EACCES, in both
+  modes), so low-memory kills rely on AMS alone.
 - logd ignores `ro.logd.size`, so `init.linuxapk.rc` runs `logcat -G 16M` on
   `logd.ready` (fixed 2026-10-27).
 - clang-tidy once host-side `compile_commands.json` exists.

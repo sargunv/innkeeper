@@ -103,4 +103,17 @@ for ((i = ${#apex_fs_config[@]} - 1; i >= 0; i--)); do
   podman unshare sh -c '[ -e "$4" ] || exit 0; chown "$1:$2" "$4" && chmod "$3" "$4"' \
     _ "$uid" "$gid" "$mode" "$dst"
 done
+# Single-uid mode (docs/sandbox.md) can't use subordinate owners: there,
+# overlay-su/ (layered above overlay/) has copies owned by us, with the
+# Android owner in the user.linuxapk.owner xattr that the shim reports.
+rm -rf "$out/session/overlay-su"
+for e in "${apex_fs_config[@]}"; do
+  read -r rel mode uid gid <<<"$e"
+  src=$apex/$rel dst=$out/session/overlay-su/apex/$rel
+  [[ -e $src ]] || continue
+  mkdir -p "$(dirname "$dst")"
+  if [[ -d $src ]]; then mkdir -p "$dst"; else cp -p "$src" "$dst"; fi
+  chmod "$mode" "$dst"
+  setfattr -n user.linuxapk.owner -v "$uid:$gid" "$dst"
+done
 echo "built $out/session"

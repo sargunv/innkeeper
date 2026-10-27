@@ -755,11 +755,14 @@ static long handle(struct seccomp_notif* req) {
 #ifndef __NR_openat
 #define __NR_openat 257
 #endif
+#ifndef __NR_faccessat2
+#define __NR_faccessat2 439
+#endif
 #ifndef __NR_ioctl
 #define __NR_ioctl 16
 #endif
 
-int bpfemu_install_filter(int with_binder) {
+int bpfemu_install_filter(int with_binder, int single_uid) {
   // The syscall clauses (bpf, statfs, getxattr, getsockopt, prlimit, timerfd,
   // sched). All jumps are relative, and they target NOTIF/ALLOW, which sit
   // immediately after this block, so the whole block can be shifted down by a
@@ -792,7 +795,7 @@ int bpfemu_install_filter(int with_binder) {
   };
   const int nclauses = sizeof(clauses) / sizeof(clauses[0]);
 
-  struct sock_filter f[64];
+  struct sock_filter f[128];
   int n = 0;
   // Prefix: arch guard and nr load. `notif`/`allow` indices are filled once the
   // program length is known.
@@ -827,7 +830,85 @@ int bpfemu_install_filter(int with_binder) {
       (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ('b' << 8), 0, 0);
   }
 
-  int clauses_start = n;
+  // Single-uid mode (virtual ids): the credential syscalls -> NOTIF, and
+  // getsockopt(SOL_SOCKET, SO_PEERCRED) -> NOTIF; everything else falls
+  // through to the clauses with nr reloaded.
+  static const int kVidNrs[] = {
+    __NR_getuid,    __NR_geteuid,   __NR_getgid,    __NR_getegid,
+    __NR_getresuid, __NR_getresgid, __NR_getgroups, __NR_setuid,
+    __NR_setgid,    __NR_setreuid,  __NR_setregid,  __NR_setresuid,
+    __NR_setresgid, __NR_setfsuid,  __NR_setfsgid,  __NR_setgroups,
+    __NR_chown,     __NR_fchown,    __NR_lchown,    __NR_fchownat,
+  };
+  int vid_start = n;  // where non-binder syscalls continue
+  int vid_jumps[32], nvid_jumps = 0, peercred_i = -1, lstat_i = -1,
+                     access_i = -1;
+  if (with_binder && single_uid) {
+    for (size_t i = 0; i < sizeof(kVidNrs) / sizeof(kVidNrs[0]); i++) {
+      vid_jumps[nvid_jumps++] = n;
+      f[n++] = (struct sock_filter)BPF_JUMP(
+        BPF_JMP | BPF_JEQ | BPF_K, kVidNrs[i], 0, 0
+      );
+    }
+    // faccessat/faccessat2 asking for W_OK: ART refuses writable dex files,
+    // which every APK is to the one kernel uid (see vidsys.rs).
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_faccessat, 1, 0
+    );
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_faccessat2, 0, 3
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])
+    );
+    access_i = n;
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, W_OK, 0, 0);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+    );
+    // lstat(): newfstatat(AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW) exactly,
+    // for the virtual owners (see vidsys.rs). Other stat calls run natively.
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_newfstatat, 0, 5
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])
+    );
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)AT_FDCWD, 0, 2
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[3])
+    );
+    lstat_i = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, AT_SYMLINK_NOFOLLOW, 0, 0
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+    );
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_getsockopt, 0, 5
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])
+    );
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 2);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])
+    );
+    peercred_i = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, SO_PEERCRED, 0, 0
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+    );
+  }
+
+  // The bpf clauses follow.
   for (int i = 0; i < nclauses; i++) f[n++] = clauses[i];
   int notif = n;
   f[n++] =
@@ -838,13 +919,18 @@ int bpfemu_install_filter(int with_binder) {
   // Patch relative jumps now that NOTIF/ALLOW positions are known.
   f[arch_jf].jf = allow - arch_jf - 1;
   if (with_binder) {
-    f[openat_i].jt = notif - openat_i - 1;        // openat -> NOTIF
-    f[openat_i].jf = 0;                           // fall to ioctl check
-    f[ioctl_i].jt = 0;                            // fall to the type load
-    f[ioctl_i].jf = clauses_start - ioctl_i - 1;  // not ioctl -> bpf clauses
-    f[typejeq_i].jt = notif - typejeq_i - 1;      // type 'b' -> NOTIF
-    f[typejeq_i].jf = allow - typejeq_i - 1;      // other ioctl -> ALLOW
+    f[openat_i].jt = notif - openat_i - 1;    // openat -> NOTIF
+    f[openat_i].jf = 0;                       // fall to ioctl check
+    f[ioctl_i].jt = 0;                        // fall to the type load
+    f[ioctl_i].jf = vid_start - ioctl_i - 1;  // not ioctl -> the rest
+    f[typejeq_i].jt = notif - typejeq_i - 1;  // type 'b' -> NOTIF
+    f[typejeq_i].jf = allow - typejeq_i - 1;  // other ioctl -> ALLOW
   }
+  for (int i = 0; i < nvid_jumps; i++)
+    f[vid_jumps[i]].jt = notif - vid_jumps[i] - 1;
+  if (peercred_i >= 0) f[peercred_i].jt = notif - peercred_i - 1;
+  if (lstat_i >= 0) f[lstat_i].jt = notif - lstat_i - 1;
+  if (access_i >= 0) f[access_i].jt = notif - access_i - 1;
 
   struct sock_fprog prog = {.len = n, .filter = f};
   // Waits stay interruptible (no WAIT_KILLABLE_RECV): ptrace (debuggerd) and

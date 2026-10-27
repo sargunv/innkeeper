@@ -6,8 +6,11 @@
 // nonzero, the filter also traps openat and binder ioctls (ioctl cmd type byte
 // == 'b') so the serve loop can forward them to the ubinder broker; the kernel
 // allows only one notification listener per process, so bpf and binder must
-// share this one filter.
-int bpfemu_install_filter(int with_binder);
+// share this one filter. If single_uid is nonzero (it needs with_binder), it
+// also traps the credential syscalls (set*id/get*id, setgroups/getgroups,
+// the chown family, getsockopt(SO_PEERCRED)), which the broker helper
+// emulates with virtual ids (ubinder/src/vid.rs, docs/sandbox.md).
+int bpfemu_install_filter(int with_binder, int single_uid);
 
 // ubinder mode: the broker helper receives every notification on the listener
 // and forwards the non-binder ones (one seccomp_notif per SOCK_SEQPACKET

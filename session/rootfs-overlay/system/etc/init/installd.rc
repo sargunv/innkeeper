@@ -5,6 +5,9 @@ service installd /system/bin/installd
     # linuxapk: labels the directories it creates (setfscreatecon), which
     # fails against the host SELinux without the shim.
     setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    # Single-uid mode only: stat reports the owners chown recorded (the shim,
+    # docs/sandbox.md). No effect otherwise.
+    setenv LINUXAPK_VSTAT 1
     capabilities CHOWN DAC_OVERRIDE DAC_READ_SEARCH FOWNER FSETID KILL SETGID SETUID SYS_ADMIN
 
 on early-boot
