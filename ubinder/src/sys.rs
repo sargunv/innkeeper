@@ -134,11 +134,10 @@ struct ProcState {
     fd: u32,
     memfd: OwnedFd,
     memfd_ino: u64,
-    /// `/proc/<pid>/mem`, opened while the opener's notification was valid:
-    /// it pins the address space, so a numeric pid that exec'd or was
-    /// recycled is never written. All of the process's memory goes through
-    /// it.
-    mem: OwnedFd,
+    /// The opener's address space, pinned while its notification was valid,
+    /// so a numeric pid that exec'd or was recycled is never written. All
+    /// of the process's memory goes through it.
+    mem: PinnedMem,
     map: *mut u8,
     /// Target mapping (base, usable length), found in /proc/<pid>/maps.
     base: Option<(u64, usize)>,
@@ -287,34 +286,180 @@ pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if n == len as isize { Some(buf) } else { None }
 }
 
-/// Read target memory through a pinned `/proc/<pid>/mem` fd (see
-/// `ProcState::mem`). After an exec the old address space is gone and this
-/// fails.
-pub(crate) fn mem_read(mem: RawFd, addr: u64, len: usize) -> Option<Vec<u8>> {
+/// A task's address space, pinned: `/proc/<tid>/mem` and `/proc/<tid>/maps`,
+/// opened from one `/proc/<tid>` directory. Both hold the mm the task had
+/// when they were opened, so after an exec they reach nothing. Callers open
+/// it and then check SECCOMP_IOCTL_NOTIF_ID_VALID: an mm switch (exec) or tid
+/// reuse only happens after the caller's notification is gone, so a valid
+/// id afterwards means both are the caller's.
+pub(crate) struct PinnedMem {
+    mem: OwnedFd,
+    maps: OwnedFd,
+}
+
+/// The raw fds of a [`PinnedMem`], for passing around under a borrow.
+#[derive(Clone, Copy)]
+pub(crate) struct MemFds {
+    mem: RawFd,
+    maps: RawFd,
+}
+
+impl PinnedMem {
+    pub(crate) fn raw(&self) -> MemFds {
+        MemFds {
+            mem: self.mem.as_raw_fd(),
+            maps: self.maps.as_raw_fd(),
+        }
+    }
+}
+
+pub(crate) fn open_mem(tid: i32) -> Option<PinnedMem> {
+    let dir = std::ffi::CString::new(format!("/proc/{tid}")).ok()?;
+    let d = unsafe {
+        libc::open(
+            dir.as_ptr(),
+            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if d < 0 {
+        return None;
+    }
+    let d = unsafe { OwnedFd::from_raw_fd(d) };
+    let at = |name: &std::ffi::CStr, flags| {
+        let fd = unsafe { libc::openat(d.as_raw_fd(), name.as_ptr(), flags | libc::O_CLOEXEC) };
+        (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
+    };
+    Some(PinnedMem {
+        mem: at(c"mem", libc::O_RDWR)?,
+        maps: at(c"maps", libc::O_RDONLY)?,
+    })
+}
+
+const PROCMAP_QUERY: u64 = 0xc068_6611; // _IOWR('f', 17, struct procmap_query)
+const VMA_READABLE: u64 = 1;
+const VMA_WRITABLE: u64 = 2;
+
+#[repr(C)]
+#[derive(Default)]
+struct ProcmapQuery {
+    size: u64,
+    query_flags: u64,
+    query_addr: u64,
+    vma_start: u64,
+    vma_end: u64,
+    vma_flags: u64,
+    vma_page_size: u64,
+    vma_offset: u64,
+    inode: u64,
+    dev_major: u32,
+    dev_minor: u32,
+    vma_name_size: u32,
+    build_id_size: u32,
+    vma_name_addr: u64,
+    build_id_addr: u64,
+}
+
+/// Is [addr, addr+len) mapped with `need` (VMA_READABLE/VMA_WRITABLE) in the
+/// pinned mm? `/proc/<pid>/mem` accesses use FOLL_FORCE, which ignores page
+/// protections, so this is what keeps them to what the task could access
+/// itself (and what process_vm_* and the kernel's copy_to_user allow).
+fn accessible(maps: RawFd, addr: u64, len: usize, need: u64) -> bool {
+    let Some(end) = addr.checked_add(len as u64) else {
+        return false;
+    };
+    let mut a = addr;
+    while a < end {
+        let mut q = ProcmapQuery {
+            size: size_of::<ProcmapQuery>() as u64,
+            query_addr: a,
+            ..Default::default()
+        };
+        if unsafe { libc::ioctl(maps, PROCMAP_QUERY as _, &mut q) } != 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOTTY) {
+                return accessible_text(maps, addr, end, need);
+            }
+            return false;
+        }
+        if q.vma_start > a || q.vma_flags & need != need {
+            return false;
+        }
+        a = q.vma_end;
+    }
+    true
+}
+
+/// `accessible` on kernels before 6.11 (no PROCMAP_QUERY): the maps text of
+/// the same pinned mm.
+fn accessible_text(maps: RawFd, addr: u64, end: u64, need: u64) -> bool {
+    let mut text = Vec::new();
+    let mut buf = [0u8; 16384];
+    let mut off = 0i64;
+    loop {
+        let n = unsafe { libc::pread(maps, buf.as_mut_ptr() as *mut _, buf.len(), off) };
+        if n <= 0 {
+            break;
+        }
+        text.extend_from_slice(&buf[..n as usize]);
+        off += n as i64;
+    }
+    let mut a = addr;
+    for line in String::from_utf8_lossy(&text).lines() {
+        let mut it = line.split_ascii_whitespace();
+        let (Some(range), Some(perms)) = (it.next(), it.next()) else {
+            continue;
+        };
+        let Some((s, e)) = range.split_once('-') else {
+            continue;
+        };
+        let (Ok(s), Ok(e)) = (u64::from_str_radix(s, 16), u64::from_str_radix(e, 16)) else {
+            continue;
+        };
+        if e <= a {
+            continue;
+        }
+        let p = perms.as_bytes();
+        let ok = (need & VMA_READABLE == 0 || p.first() == Some(&b'r'))
+            && (need & VMA_WRITABLE == 0 || p.get(1) == Some(&b'w'));
+        if s > a || !ok {
+            return false;
+        }
+        a = e;
+        if a >= end {
+            return true;
+        }
+    }
+    false
+}
+
+/// Read target memory through its pinned address space (see [`PinnedMem`]),
+/// only where the task could read it itself.
+pub(crate) fn mem_read(m: MemFds, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
     }
     let off = i64::try_from(addr).ok().filter(|&a| a != 0)?;
+    if !accessible(m.maps, addr, len, VMA_READABLE) {
+        return None;
+    }
     let mut buf = vec![0u8; len];
-    let n = unsafe { libc::pread(mem, buf.as_mut_ptr() as *mut _, len, off) };
+    let n = unsafe { libc::pread(m.mem, buf.as_mut_ptr() as *mut _, len, off) };
     (n == len as isize).then_some(buf)
 }
 
-pub(crate) fn mem_write(mem: RawFd, addr: u64, data: &[u8]) -> bool {
+/// Write target memory through its pinned address space, only where the
+/// task could write it itself.
+pub(crate) fn mem_write(m: MemFds, addr: u64, data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
     }
     let Some(off) = i64::try_from(addr).ok().filter(|&a| a != 0) else {
         return false;
     };
-    let n = unsafe { libc::pwrite(mem, data.as_ptr() as *const _, data.len(), off) };
+    if !accessible(m.maps, addr, data.len(), VMA_WRITABLE) {
+        return false;
+    }
+    let n = unsafe { libc::pwrite(m.mem, data.as_ptr() as *const _, data.len(), off) };
     n == data.len() as isize
-}
-
-pub(crate) fn open_mem(pid: i32) -> Option<OwnedFd> {
-    let path = std::ffi::CString::new(format!("/proc/{pid}/mem")).ok()?;
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
-    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// Read a NUL-terminated path, never crossing into a page that need not be
@@ -324,7 +469,7 @@ pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
 }
 
 /// `read_path` through a pinned `/proc/<pid>/mem` fd.
-pub(crate) fn mem_read_path(mem: RawFd, addr: u64) -> Option<Vec<u8>> {
+pub(crate) fn mem_read_path(mem: MemFds, addr: u64) -> Option<Vec<u8>> {
     read_path_with(addr, |a, n| mem_read(mem, a, n))
 }
 
@@ -431,7 +576,7 @@ struct SysMem<'a> {
 
 impl Mem for SysMem<'_> {
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>> {
-        mem_read(self.procs.get(&proc)?.mem.as_raw_fd(), addr, len)
+        mem_read(self.procs.get(&proc)?.mem.raw(), addr, len)
     }
     fn recv_size(&mut self, proc: ProcId) -> usize {
         self.procs
@@ -878,7 +1023,7 @@ impl Supervisor {
             }
         };
         let ttid = req.pid;
-        let mem = self.procs[&procid].mem.as_raw_fd();
+        let mem = self.procs[&procid].mem.raw();
         let err = match cmd {
             BINDER_WRITE_READ => return self.handle_write_read(procid, req, argp),
             BINDER_VERSION => {
@@ -976,7 +1121,7 @@ impl Supervisor {
     }
 
     fn handle_write_read(&mut self, procid: ProcId, req: SeccompNotif, argp: u64) {
-        let mem = self.procs[&procid].mem.as_raw_fd();
+        let mem = self.procs[&procid].mem.raw();
         let Some(mut bwr) = mem_read(mem, argp, size_of::<BinderWriteRead>())
             .and_then(|b| read_pod::<BinderWriteRead>(&b, 0))
         else {
@@ -1059,7 +1204,7 @@ impl Supervisor {
         read: Vec<u8>,
         eagain: bool,
     ) {
-        let Some(mem) = self.procs.get(&key.0).map(|p| p.mem.as_raw_fd()) else {
+        let Some(mem) = self.procs.get(&key.0).map(|p| p.mem.raw()) else {
             self.respond(notif_id, 0, libc::EBADF, false);
             return;
         };
@@ -1287,7 +1432,7 @@ impl Supervisor {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Android gets the receive memfd writable; it must not be able to resize
@@ -1371,9 +1516,9 @@ mod tests {
         let pid = child.id() as i32;
         let mem = open_mem(pid).unwrap();
         let before = first_mapping(pid);
-        assert!(mem_read(mem.as_raw_fd(), before, 8).is_some());
+        assert!(mem_read(mem.raw(), before, 8).is_some());
         // (The ELF header there has a NUL early on.)
-        assert!(mem_read_path(mem.as_raw_fd(), before).is_some());
+        assert!(mem_read_path(mem.raw(), before).is_some());
         child.stdin.take().unwrap().write_all(b"go\n").unwrap();
         let exe = |p: i32| std::fs::read_link(format!("/proc/{p}/exe")).unwrap_or_default();
         for _ in 0..500 {
@@ -1386,10 +1531,83 @@ mod tests {
         let after = first_mapping(pid);
         assert!(vm_read(pid, after, 8).is_some());
         assert!(read_path(pid, after).is_some());
-        assert!(mem_read(mem.as_raw_fd(), after, 8).is_none());
-        assert!(mem_read_path(mem.as_raw_fd(), after).is_none());
-        assert!(!mem_write(mem.as_raw_fd(), after, b"x"));
+        assert!(mem_read(mem.raw(), after, 8).is_none());
+        assert!(mem_read_path(mem.raw(), after).is_none());
+        assert!(!mem_write(mem.raw(), after, b"x"));
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    /// Two private pages filled with 0xAA, the second with `prot2`, the first
+    /// with `prot1`.
+    pub(crate) fn pages(prot1: i32, prot2: i32) -> *mut u8 {
+        let p = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                8192,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        } as *mut u8;
+        assert_ne!(p as *mut libc::c_void, libc::MAP_FAILED);
+        unsafe {
+            std::ptr::write_bytes(p, 0xAA, 8192);
+            assert_eq!(libc::mprotect(p as *mut _, 4096, prot1), 0);
+            assert_eq!(libc::mprotect(p.add(4096) as *mut _, 4096, prot2), 0);
+        }
+        p
+    }
+
+    /// The pinned fd is /proc/<pid>/mem, whose accesses ignore page
+    /// protections (FOLL_FORCE). Transfers must still fail where the task
+    /// couldn't read or write itself, as process_vm_* and the kernel's own
+    /// copies do.
+    #[test]
+    fn pinned_mem_respects_page_protections() {
+        let pin = open_mem(unsafe { libc::gettid() }).unwrap();
+        let m = pin.raw();
+        let rw = libc::PROT_READ | libc::PROT_WRITE;
+        // Read-only page.
+        let p = pages(rw, libc::PROT_READ);
+        let ro = p as u64 + 4096;
+        assert!(!mem_write(m, ro, b"x"));
+        assert_eq!(unsafe { *p.add(4096) }, 0xAA);
+        assert_eq!(mem_read(m, ro, 1), Some(vec![0xAA]));
+        // A write that starts on a writable page and runs into it.
+        assert!(!mem_write(m, ro - 4, &[0; 8]));
+        assert_eq!(unsafe { *p.add(4092) }, 0xAA);
+        // The writable page still works.
+        assert!(mem_write(m, p as u64, &[1]));
+        assert_eq!(unsafe { *p }, 1);
+        // PROT_NONE: no reads, no writes.
+        let p = pages(rw, libc::PROT_NONE);
+        let none = p as u64 + 4096;
+        assert!(mem_read(m, none, 1).is_none());
+        assert!(mem_read(m, none - 4, 8).is_none());
+        assert!(mem_read_path(m, none).is_none());
+        assert!(!mem_write(m, none, b"x"));
+        unsafe { libc::mprotect(p.add(4096) as *mut _, 4096, libc::PROT_READ) };
+        assert_eq!(unsafe { *p.add(4096) }, 0xAA);
+        // Unmapped.
+        assert!(mem_read(m, 0x1000, 1).is_none());
+        // The pre-6.11 fallback (maps text) agrees.
+        let q = pages(rw, libc::PROT_READ) as u64;
+        for (a, len, need) in [
+            (q, 8, VMA_WRITABLE),
+            (q + 4092, 8, VMA_WRITABLE),
+            (q + 4092, 8, VMA_READABLE),
+            (none, 1, VMA_READABLE),
+            (0x1000, 1, VMA_READABLE),
+        ] {
+            assert_eq!(
+                accessible_text(m.maps, a, a + len, need),
+                accessible(m.maps, a, len as usize, need),
+                "{a:#x}+{len} need {need}"
+            );
+        }
+        assert!(accessible_text(m.maps, q, q + 8, VMA_WRITABLE));
+        assert!(!accessible_text(m.maps, q + 4092, q + 4100, VMA_WRITABLE));
     }
 }
