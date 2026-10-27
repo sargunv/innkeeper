@@ -108,6 +108,21 @@ Decisions:
   network namespace) and the host Wayland socket file as
   `/dev/socket/wayland-host`, plus `vendor.linuxapk.hwc.backend=wayland`. Both
   are only set up when not `--headless`.
+- **Network for apps:** pasta names its tap interface `eth1`, and a vendor
+  `android.hardware.ethernet` feature file makes system_server run
+  EthernetService, which brings `eth1` up as the default network (DHCP from
+  pasta). Without a network agent netd routes everything to `unreachable`, so
+  apps were offline. `eth0` would come up restricted: the image's resources pin
+  it for the emulator's radio. DHCP hands out `169.254.1.1` as the resolver
+  (`-D --dhcp-dns`), and pasta forwards it to the host's first IPv4 nameserver
+  (`--dns-host`; with `-D` set pasta stops picking it itself).
+- **Defaults for apps:** gesture navigation
+  (`rootfs-overlay/product/overlay/config/config.xml`): with three-button
+  navigation, Launcher3's taskbar on this 1280x800 display crash-loops (NPE on
+  `TaskbarControllers.cueBarController` from the bubble bar) whenever the home
+  screen is in front. `debug.stagefright.c2-poolmask` adds BLOB, so Codec2
+  linear buffers come from gralloc instead of ION/dma-buf heaps we can't open;
+  without it every MediaCodec fails with `NO_MEMORY` (no game sound effects).
 - **Vendor:** `init.linuxapk.rc` replaces `init.ranchu.rc`. The goldfish
   services are blanked: graphics, camera, sensors, radio, gnss, wifi, bt, c2,
   usb, fingerprint and uwb rc files, plus empty VINTF fragments. The ranchu
@@ -126,7 +141,8 @@ See NOTES.md "Host safety". `selftest` checks the following:
   `/dev/kmsg` and the APEX tree can't be unmounted; `/sys` can't be remounted
   rw; fresh sysfs mounts are refused; and no FUSE connections are visible.
 - Android has its own network namespace through pasta: no inbound forwards, and
-  `--no-map-gw`, so host loopback services are unreachable. It also has its own
+  `--no-map-gw`, so host loopback services are unreachable. The one exception is
+  DNS: `169.254.1.1:53` is forwarded to the host's resolver. It also has its own
   IPC and UTS namespaces, which isolates host abstract unix sockets and SysV
   shm.
 - All processes run in `linuxapk-session.service`'s delegated cgroup, and the

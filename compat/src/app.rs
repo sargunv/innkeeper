@@ -203,8 +203,19 @@ impl<'a> Run<'a> {
                 .lines()
                 .find(|l| l.contains("Failure") || l.contains("Exception"))
                 .unwrap_or("pm install failed")
-                .trim()
-                .to_string();
+                .trim();
+            // "Failure [INSTALL_FAILED_X: INSTALL_FAILED_X: detail]" -> "INSTALL_FAILED_X: detail"
+            let why = why
+                .trim_start_matches("Failure [")
+                .trim_end_matches(']')
+                .split(": ")
+                .fold(Vec::<&str>::new(), |mut v, p| {
+                    if v.last() != Some(&p) {
+                        v.push(p);
+                    }
+                    v
+                })
+                .join(": ");
             self.check("install", false, why.clone());
             return Err(Stop(Status::Broken, format!("install: {why}")));
         }

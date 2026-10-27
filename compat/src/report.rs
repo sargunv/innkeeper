@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::app::{AppResult, Status};
-use crate::corpus::Corpus;
+use crate::corpus::{App, Corpus};
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Results {
@@ -69,12 +69,17 @@ pub fn summary(apps: &[AppResult]) -> String {
     )
 }
 
-fn group_label(g: &str) -> &str {
-    match g {
-        "noarch" => "Java/Kotlin",
-        "compose" => "Compose",
-        "native" => "x86_64 native",
-        g => g,
+/// What kind of code the APK carries.
+fn kind(a: &App) -> String {
+    let code = match a.native.as_str() {
+        "none" => "no native code".to_string(),
+        n if n.split(',').any(|x| x == "x86_64") => "x86_64 libs".to_string(),
+        n => format!("{n} libs only"),
+    };
+    if a.group == "compose" {
+        format!("Compose, {code}")
+    } else {
+        code
     }
 }
 
@@ -85,7 +90,10 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
      compat harness (`compat/run.sh`): install, launch, a non-blank first \
      frame, then a tap, a scroll and Back without a crash or ANR, plus an \
      optional per-app script. Failures are triaged in \
-     [docs/compat-triage.md](docs/compat-triage.md).\n\n",
+     [docs/compat-triage.md](docs/compat-triage.md). Generated: run \
+     `compat/run.sh` (or `compat/run.sh report` to rewrite this file from \
+     `compat/results.json`). Start is `am start -W` TotalTime on a fresh \
+     install; memory is the app's total PSS after the interactions.\n\n",
     );
     md += &format!(
         "Last run: {}, image `{}`, {} composer. {}.\n\n",
@@ -94,26 +102,23 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
         res.backend,
         summary(&res.apps)
     );
-    md += "| App | Version | Kind | Result | Cold start | Notes |\n";
-    md += "| --- | --- | --- | --- | --- | --- |\n";
+    md += "| App | Version | Code | Result | Start | Memory | Notes |\n";
+    md += "| --- | --- | --- | --- | --- | --- | --- |\n";
     for a in &corpus.app {
         let Some(r) = res.apps.iter().find(|r| r.package == a.package) else {
             continue;
         };
         let start = r.launch_ms.map(|ms| format!("{ms} ms")).unwrap_or_default();
+        let mem = r.pss_mb.map(|mb| format!("{mb} MB")).unwrap_or_default();
         let mut notes = r.reason.replace('|', "\\|");
         if r.result == Status::Works {
             notes.clear();
         }
-        if a.native == "arm64-v8a" {
-            notes += if notes.is_empty() { "" } else { "; " };
-            notes += "arm64-only APK";
-        }
         md += &format!(
-            "| {} | {} | {} | {} | {start} | {notes} |\n",
+            "| {} | {} | {} | {} | {start} | {mem} | {notes} |\n",
             r.name,
             r.version_name,
-            group_label(&r.group),
+            kind(a),
             r.result.label()
         );
     }

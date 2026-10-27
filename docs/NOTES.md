@@ -124,6 +124,11 @@ Causes:
   the composer's input stream into injected mouse/touch/key events; its stream
   passes the live InputDispatcher's verifier. End-to-end test waits for
   `boot_completed` (`android/e2e/e2e.sh`). See [input.md](input.md).
+- 2026-10-27 (compat): `compat/run.sh` (Rust) runs a 16-app F-Droid corpus in
+  the session and gates on regressions: 15/16 work (only arm64-only Open Sudoku
+  fails). Fixed Launcher3's crash loop (gesture nav), app networking
+  (EthernetService on pasta's `eth1`, DNS) and MediaCodec (BLOB pool). See
+  [compat-triage.md](compat-triage.md) and `COMPATIBILITY.md`.
 
 ## Backlog (unassigned)
 
