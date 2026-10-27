@@ -67,22 +67,18 @@ start() {
   echo "console=null" > "$run/cmdline"
   cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' > "$run/bootconfig"
   mkfifo "$run/kmsg"
-  # Reader holds the FIFO open read-write so writers never block or see EOF.
-  setsid bash -c 'exec cat 0<>"$1" >>"$2"' _ "$run/kmsg" "$run/kmsg.log" </dev/null >/dev/null 2>&1 &
-  echo $! > "$run/kmsg-reader.pid"
 
-  # shellcheck disable=SC2046
-  setsid systemd-run --user --scope --quiet --collect --unit="$unit-$$" -p Delegate=yes -- \
-    env LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
-    unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
-    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
-  local launcher=$!
-  echo "$unit-$$" > "$run/unit"
-  # Find the namespace's pid 1: the child of unshare.
+  # Everything (log reader, unshare, the namespace) runs in one transient
+  # systemd user service, so it outlives this shell and "stop" can take it
+  # all down. Delegate=yes gives the session a cgroup subtree of its own.
+  systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
+    --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" \
+    -- "$here/linuxapk-session" _run "$out" "$data"
+  # Find the namespace's pid 1: the child of unshare (the service's main pid).
   local p="" i
   for i in $(seq 50); do
-    local u; u=$(pgrep -f -n "^unshare .*$here/ns-init.sh" || true)
-    [[ -n $u ]] && p=$(pgrep -P "$u" | head -1 || true)
+    local u; u=$(systemctl --user show -P MainPID "$unit" 2>/dev/null || true)
+    [[ -n $u && $u != 0 ]] && p=$(pgrep -P "$u" | head -1 || true)
     [[ -n $p ]] && break
     sleep 0.1
   done
@@ -90,19 +86,26 @@ start() {
   echo "$p" > "$run/pid"
   echo "session started: ns pid 1 = host pid $p; log: $run/kmsg.log"
   if (( fg )); then
-    tail -n +1 -f "$run/kmsg.log" & local t=$!
-    wait "$launcher" || true
-    kill "$t" 2>/dev/null || true
-    stop
+    tail -n +1 --pid="$p" -f "$run/kmsg.log" || true
   fi
+}
+
+# Body of the systemd service (internal).
+_run() {
+  out=$1 data=$2 run=$out/run
+  # Reader holds the FIFO open read-write so writers never block or see EOF.
+  cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
+  # shellcheck disable=SC2046
+  exec env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
+    unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
+    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1
 }
 
 stop() {
   if p=$(ns_pid); then
     kill -KILL "$p" 2>/dev/null || true   # pid 1 of the ns: takes everything with it
   fi
-  [[ -f $run/unit ]] && systemctl --user stop "$(<"$run/unit").scope" 2>/dev/null || true
-  [[ -f $run/kmsg-reader.pid ]] && kill "$(<"$run/kmsg-reader.pid")" 2>/dev/null || true
+  systemctl --user stop "$unit" 2>/dev/null || true
   rm -f "$run/pid"
   echo "session stopped"
 }
@@ -131,6 +134,7 @@ exec_in() {
 case ${1:-} in
   start) shift; start "$@" ;;
   stop) stop ;;
+  _run) shift; _run "$@" ;;
   status) status ;;
   log) shift; if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi ;;
   exec) shift; (( $# )) || die "usage: exec CMD..."; exec_in "$@" ;;

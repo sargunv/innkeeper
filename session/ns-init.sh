@@ -112,19 +112,43 @@ mount --bind "$run/cmdline" "$R/proc/cmdline"
 echo 32 > "$run/mmap_rnd_bits"
 mount --bind "$run/mmap_rnd_bits" "$R/proc/sys/vm/mmap_rnd_bits"
 
+# Host safety: inside this user namespace we are root over everything the host
+# user owns. sysfs submounts expose such files: fusectl's per-connection
+# "abort" files belong to the FUSE mount's owner, and vold's
+# AbortFuseConnections() on shutdown wrote to them, killing the host's AppImage
+# and xdg-document-portal FUSE mounts. A plain bind isn't allowed here (the
+# submounts are locked to /sys), so rbind it, then cover every submount with an
+# empty read-only tmpfs and make the whole tree read-only.
 mount --rbind /sys "$R/sys"
-mount -o remount,bind,ro "$R/sys" || true
-# Hide SELinux: libselinux then reports it as disabled (see shim/selinux_shim.c).
-mount -t tmpfs -o ro,mode=0755 noselinux "$R/sys/fs/selinux"
-# Cover the host's cgroup tree; init (libprocessgroup) mounts cgroup2 here
-# itself, rooted at this session's cgroup since we are in a new cgroup ns.
-mount -t tmpfs -o mode=0755 nocgroup "$R/sys/fs/cgroup"
+mapfile -t sys_submounts < <(findmnt -rn -o TARGET -R "$R/sys" | tail -n +2 | sort -r)
+for m in "${sys_submounts[@]}"; do
+  mount -t tmpfs -o ro,nosuid,nodev,noexec,mode=0755 masked "$m"
+done
+mount -o remount,bind,ro,nosuid,nodev,noexec "$R/sys"
+# Hiding /sys/fs/selinux (now an empty tmpfs) makes libselinux report SELinux
+# as disabled (see shim/). /sys/fs/cgroup gets a writable tmpfs: init
+# (libprocessgroup) mounts cgroup2 there, rooted at this session's own
+# delegated cgroup because we're in a new cgroup namespace.
+mount -t tmpfs -o mode=0755,nosuid,nodev,noexec nocgroup "$R/sys/fs/cgroup"
+
+findmnt -R -o TARGET,FSTYPE,OPTIONS "$R/sys" > "$run/sys-mounts.txt" || true
+
+# Refuse to boot if any host-user-owned control file is still reachable.
+if [[ -n $(ls -A "$R/sys/fs/fuse/connections" 2>/dev/null) ]]; then
+  log "refusing to continue: host FUSE connections visible in the session"; exit 1
+fi
+if touch "$R/sys/.linuxapk-rw-probe" 2>/dev/null; then
+  log "refusing to continue: /sys is writable in the session"; exit 1
+fi
 
 # --- go -----------------------------------------------------------------------
 if [[ ${LINUXAPK_HOLD:-} == 1 ]]; then
   # Debug: assemble the root but don't run init; "linuxapk-session exec" works.
   log "holding before init (LINUXAPK_HOLD=1)"
-  exec "$out/session/pivot-exec" "$R" /system/bin/sleep infinity
+  # init normally binds the staged APEX tree over /apex; do it here so
+  # /system/bin/linker64 (-> /apex/com.android.runtime/...) resolves.
+  mkdir -p "$R/apex" && mount --bind "$R/linuxapk/apex" "$R/apex"
+  exec "$out/session/pivot-exec" "$R" /system/bin/sleep 2147483647
 fi
 
 for v in $(compgen -e); do unset "$v"; done
