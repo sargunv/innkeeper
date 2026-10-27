@@ -245,6 +245,13 @@ Causes:
   lists, opens and uninstalls apps, with session status and settings. Proven in
   nested KWin. See [gui.md](gui.md).
 
+- 2026-10-27 (integb): **typing through the host's input methods.** The
+  Linux.apk Keyboard (an IME in the system app) is the default and shows no soft
+  keyboard; the bridge's display service drives `zwp_text_input_v3`, so IBus or
+  Fcitx preedit, CJK and dead keys work (proven with IBus Pinyin in nested
+  KWin). Window density follows each window's scale, live; see
+  [input.md](input.md#text-input) and [windowing.md](windowing.md).
+
 ## Backlog (unassigned)
 
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
