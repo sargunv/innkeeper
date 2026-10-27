@@ -290,8 +290,13 @@ Causes:
 
 Round 1, GPT-6.1 Sol (high effort), on the M4 host boundary (supervisor,
 ubinder, bridge): CHANGES, 9 "should" findings (session DoS and unbounded
-resources; no host-compromise path). The hardening lane (`lane/harden`) is
-fixing them, each with a test. Round 2 reviews the fixes.
+resources; no host-compromise path). All 9 fixed with tests (plus a
+symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
+
+- Round 2 (Codex route failed on hardware-key auth; rerun through Pi on the same
+  model): S1–S4 and S7–S9 resolved (S9's declined `Request.Close` accepted); S5
+  (worker-path pid race) and S6 (bpffs anchor via the caller's mount namespace)
+  still open and being fixed.
 
 ## Backlog (unassigned)
 
