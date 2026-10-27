@@ -467,23 +467,30 @@ with `/org/mpris/MediaPlayer2`:
 
 #### Testing on a desktop you can't disturb
 
-A nested Plasma with its own config, data and bus, so nothing touches the real
-desktop:
+A nested Plasma, fully isolated as AGENTS.md requires ("Nested test desktops are
+fully isolated"): a private `dbus-run-session`, `XDG_RUNTIME_DIR`, `HOME` and
+XDG dirs under `out/`, `DISPLAY` unset, and `WAYLAND_DISPLAY` set to the nested
+socket _before_ the bus starts, so the portals, kded and anything else the
+private bus activates inherit it rather than the host's `wayland-0`:
 
 ```sh
-N=out/nested   # config/ data/ cache/ state/ home/ and hold.sh (writes $N/bus)
-systemd-run --user --unit linuxapk-integ-kwin -p MemoryMax=3G \
-  --setenv=HOME=$N/home --setenv=XDG_CONFIG_HOME=$N/config --setenv=XDG_DATA_HOME=$N/data \
-  --setenv=XDG_CACHE_HOME=$N/cache --setenv=XDG_STATE_HOME=$N/state --setenv=XDG_CURRENT_DESKTOP=KDE \
-  -- dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket lapk-integ \
+N=$PWD/out/nested   # rt/ home/ config/ data/ cache/ state/, hold.sh writes $N/bus
+E=(-u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS HOME=$N/home XDG_RUNTIME_DIR=$N/rt
+   XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
+   XDG_CURRENT_DESKTOP=KDE)
+systemd-run --user --unit linuxapk-integ-kwin -p MemoryMax=3G -- env "${E[@]}" WAYLAND_DISPLAY=lapk-integ \
+  dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket lapk-integ \
   --width 1920 --height 1080 --exit-with-session $N/hold.sh
-# then plasmashell in the same environment (its own unit), and:
-WAYLAND_DISPLAY=lapk-integ DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) session/linuxapk-session start
+# plasmashell, if needed, in its own unit with the same env plus the nested bus
+WAYLAND_DISPLAY=$N/rt/lapk-integ DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) session/linuxapk-session start
 ```
 
-- Set `HOME` too: the nested kded's GTK module writes `$HOME/.gtkrc-2.0`. Change
-  the nested color scheme only with every one of those variables set
-  (`plasma-apply-colorscheme BreezeDark`, `--accent-color '#e95420'`).
+- Check the environment of every process on the nested bus
+  (`/proc/<pid>/environ`: private `HOME`, nested `WAYLAND_DISPLAY`) before
+  testing, and stop both units when done.
+- Change the nested color scheme only from a shell with all of the above set
+  (`plasma-apply-colorscheme BreezeDark`, `--accent-color '#e95420'`), and guard
+  against the real `HOME`: the nested kded writes `$HOME/.gtkrc-2.0`.
 - A fake default browser (a `.desktop` for `x-scheme-handler/https` in
   `$N/data/applications`, `mimeapps.list` in `$N/config`) logs what OpenURI
   opens instead of starting a real browser.

@@ -503,11 +503,10 @@ script = [
   "tap:mastodon.social",
   "tap:Next",
   "wait:10",
-  "sh:dumpsys window displays | grep mCurrentFocus | grep -q org.chromium.webview_shell",
-  "expect:mastodon.social/auth/sign_in",
+  "sh:logcat -d -s LinuxApkBrowser | grep -q 'opening on the desktop: https://mastodon.social/oauth/authorize'",
   "shot:oauth",
 ]
-manual = "Log in to a server: which browser opens (none installed by default), and does the redirect come back to the app?"
+manual = "Log in to a server: the sign-in page opens in the host browser (the system app is the default browser, docs/bridge.md \"Opening links\"); does the redirect come back to the app through the CLI's scheme handler?"
 
 [[app]]
 package = "com.github.mkalmousli.floating_mute"
