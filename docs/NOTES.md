@@ -120,6 +120,9 @@ Causes:
   in the session). Docs: `docs/image.md`. Instance `image`.
 - cli: the `linuxapk` host command (install, `.desktop` files, run). Docs:
   `docs/cli.md`. Instance `cli`.
+- integ (M3): bridge/system-app channel (dark mode, accent, time zone, locale),
+  notifications, clipboard, opening URLs/Custom Tabs, MPRIS. Instance `integ`.
+- gui: the GTK4/libadwaita manager app on a shared `cli` core. Instance `gui`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
