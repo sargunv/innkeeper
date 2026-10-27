@@ -186,6 +186,10 @@ Causes:
   `mise run check` passes. Next: the seccomp supervisor binding, a `--ubinder`
   session flag, and full boot with corpus parity. Kernel binder stays the
   default. See [ubinder.md](ubinder.md).
+- 2026-10-27 (inventory): [integration.md](integration.md) lists every Android
+  API, service and input type with a desktop counterpart (141 rows: 10 done, 19
+  partial, 101 todo, 11 won't-do), with owner lanes, priorities, test apps and a
+  recommended order for M3.
 
 ## Backlog (unassigned)
 
