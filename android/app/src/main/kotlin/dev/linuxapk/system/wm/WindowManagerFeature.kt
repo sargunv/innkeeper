@@ -67,7 +67,12 @@ class WindowManagerFeature(
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
   private val pending = ConcurrentHashMap<Int, CountDownLatch>() // window_pending replies
-  private var scale = SystemProps.get("persist.linuxapk.wm.scale", "").toDoubleOrNull() ?: 1.0
+  // The scale new windows start at: the last one a window reported (kept across restarts, so the
+  // first window after boot opens at the desktop's scale), or persist.linuxapk.wm.scale.
+  private var scale =
+    SystemProps.get("persist.linuxapk.wm.scale", "").toDoubleOrNull()
+      ?: prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 }
+      ?: 1.0
   private var refreshQueued = false
 
   private class AppWindow(
@@ -366,7 +371,10 @@ class WindowManagerFeature(
     when (e) {
       is HostEvent.Window -> {
         val w = windows[e.display] ?: return
-        scale = e.scale
+        if (e.scale != scale && e.scale in 0.5..8.0) {
+          scale = e.scale
+          prefs.edit().putFloat(PREF_SCALE, e.scale.toFloat()).apply()
+        }
         // Coalesce interactive resizes; each one is a configuration change for the app.
         w.resize?.let(handler::removeCallbacks)
         val r = Runnable {
@@ -518,6 +526,7 @@ class WindowManagerFeature(
   companion object {
     const val TAG = "LinuxApkWm"
     const val APP_ID_PREFIX = "dev.linuxapk."
+    private const val PREF_SCALE = "scale"
     private const val BASE_DPI = 160
     private const val DEFAULT_DISPLAY = 0
     private const val INVALID_DISPLAY = -1
