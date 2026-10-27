@@ -752,59 +752,119 @@ static long handle(struct seccomp_notif* req) {
 // ---- setup / loop
 // ---------------------------------------------------------------
 
-int bpfemu_install_filter(void) {
-  // Generated from a labelled listing: NOTIF = 27, ALLOW = 28.
-  struct sock_filter f[] = {
-    /* 0 */ BPF_STMT(
-      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)
-    ),
-    /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 0, 26),
-    /* 2 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-    /* 3 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_bpf, 23, 0),
-    /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_statfs, 22, 0),
-    /* 5 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getxattr, 21, 0),
-    /* 6 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_lgetxattr, 20, 0),
-    /* 7 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getsockopt, 0, 4),
-    // getsockopt(fd, SOL_SOCKET, SO_ANDROID_DROP_REASON, ...)
-    /* 8 */
+#ifndef __NR_openat
+#define __NR_openat 257
+#endif
+#ifndef __NR_ioctl
+#define __NR_ioctl 16
+#endif
+
+int bpfemu_install_filter(int with_binder) {
+  // The syscall clauses (bpf, statfs, getxattr, getsockopt, prlimit, timerfd,
+  // sched). All jumps are relative, and they target NOTIF/ALLOW, which sit
+  // immediately after this block, so the whole block can be shifted down by a
+  // fixed prefix without touching any offset inside it.
+  struct sock_filter clauses[] = {
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_bpf, 23, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_statfs, 22, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getxattr, 21, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_lgetxattr, 20, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getsockopt, 0, 4),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 9 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 18),
-    /* 10 */
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 18),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])),
-    /* 11 */
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SO_ANDROID_DROP_REASON, 15, 16),
-    // prlimit64(pid, RLIMIT_MEMLOCK, ...) / setrlimit(RLIMIT_MEMLOCK, ...)
-    /* 12 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_prlimit64, 3, 0),
-    /* 13 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_setrlimit, 0, 4),
-    /* 14 */
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_prlimit64, 3, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_setrlimit, 0, 4),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
-    /* 15 */ BPF_STMT(BPF_JMP | BPF_JA, 1),
-    /* 16 */
+    BPF_STMT(BPF_JMP | BPF_JA, 1),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 17 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, RLIMIT_MEMLOCK, 9, 10),
-    // timerfd_create(CLOCK_{REALTIME,BOOTTIME}_ALARM, ...)
-    /* 18 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_timerfd_create, 0, 3),
-    /* 19 */
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, RLIMIT_MEMLOCK, 9, 10),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_timerfd_create, 0, 3),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
-    /* 20 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_REALTIME_ALARM, 6, 0),
-    /* 21 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_BOOTTIME_ALARM, 5, 6),
-    // sched_setscheduler(pid, SCHED_FIFO or SCHED_RR [| SCHED_RESET_ON_FORK],
-    // ...)
-    /* 22 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_sched_setscheduler, 0, 5),
-    /* 23 */
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_REALTIME_ALARM, 6, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, CLOCK_BOOTTIME_ALARM, 5, 6),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_sched_setscheduler, 0, 5),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 24 */ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, ~SCHED_RESET_ON_FORK),
-    /* 25 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_FIFO, 1, 0),
-    /* 26 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_RR, 0, 1),
-    /* 27 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF),
-    /* 28 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_STMT(BPF_ALU | BPF_AND | BPF_K, ~SCHED_RESET_ON_FORK),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_FIFO, 1, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SCHED_RR, 0, 1),
   };
-  struct sock_fprog prog = {.len = sizeof(f) / sizeof(f[0]), .filter = f};
+  const int nclauses = sizeof(clauses) / sizeof(clauses[0]);
+
+  struct sock_filter f[64];
+  int n = 0;
+  // Prefix: arch guard and nr load. `notif`/`allow` indices are filled once the
+  // program length is known.
+  f[n++] = (struct sock_filter)BPF_STMT(
+    BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)
+  );
+  int arch_jf = n;  // patched below (jump-false to ALLOW)
+  f[n++] = (struct sock_filter)BPF_JUMP(
+    BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 0, 0
+  );
+  f[n++] = (struct sock_filter)BPF_STMT(
+    BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+  );
+
+  int openat_i = -1, ioctl_i = -1, typejeq_i = -1;
+  if (with_binder) {
+    // openat -> NOTIF (inject the binder memfd); ioctl of type 'b' -> NOTIF
+    // (serve the binder command). Both are forwarded to the broker helper.
+    openat_i = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_openat, 0, 0
+    );
+    ioctl_i = n;
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ioctl, 0, 0);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0xff00);
+    typejeq_i = n;
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ('b' << 8), 0, 0);
+  }
+
+  int clauses_start = n;
+  for (int i = 0; i < nclauses; i++) f[n++] = clauses[i];
+  int notif = n;
+  f[n++] =
+    (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF);
+  int allow = n;
+  f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+
+  // Patch relative jumps now that NOTIF/ALLOW positions are known.
+  f[arch_jf].jf = allow - arch_jf - 1;
+  if (with_binder) {
+    f[openat_i].jt = notif - openat_i - 1;        // openat -> NOTIF
+    f[openat_i].jf = 0;                           // fall to ioctl check
+    f[ioctl_i].jt = 0;                            // fall to the type load
+    f[ioctl_i].jf = clauses_start - ioctl_i - 1;  // not ioctl -> bpf clauses
+    f[typejeq_i].jt = notif - typejeq_i - 1;      // type 'b' -> NOTIF
+    f[typejeq_i].jf = allow - typejeq_i - 1;      // other ioctl -> ALLOW
+  }
+
+  struct sock_fprog prog = {.len = n, .filter = f};
   return syscall(
     SYS_seccomp, SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER,
     &prog
   );
+}
+
+static int binder_fwd = -1;
+
+void bpfemu_set_binder_forward(int sock) { binder_fwd = sock; }
+
+// Is this notification a binder one (openat / ioctl of type 'b') to forward to
+// the ubinder broker helper rather than handle here?
+static int is_binder_notif(struct seccomp_notif* req) {
+  if (binder_fwd < 0) return 0;
+  if (req->data.nr == __NR_openat) return 1;
+  if (req->data.nr == __NR_ioctl)
+    return ((req->data.args[1] >> 8) & 0xff) == (unsigned)'b';
+  return 0;
 }
 
 void* bpfemu_serve(void* arg) {
@@ -824,6 +884,13 @@ void* bpfemu_serve(void* arg) {
       if (errno == EINTR || errno == ENOENT) continue;
       LOG("NOTIF_RECV: %s\n", strerror(errno));
       return NULL;
+    }
+    // Hand binder notifications to the Rust broker; it answers them via its own
+    // dup of the listener fd (SOCK_SEQPACKET preserves message boundaries).
+    if (is_binder_notif(req)) {
+      if (send(binder_fwd, req, sizes.seccomp_notif, 0) < 0 && errno != EINTR)
+        LOG("binder forward: %s\n", strerror(errno));
+      continue;
     }
     long r = handle(req);
     if (r == INJECTED) continue;

@@ -11,6 +11,12 @@
 #                       LINUXAPK_HOLD=1 to stop before exec'ing init
 set -euo pipefail
 
+# util-linux 2.41.5's fd-based mount API (fsopen/fsconfig/fsmount) fails
+# EINVAL for an overlay mount inside a user namespace on this host, which
+# breaks the partition overlays below; the classic mount(2) syscall works, so
+# force libmount to use it. Harmless for the other (tmpfs/bind/proc) mounts.
+export LIBMOUNT_FORCE_MOUNT2=always
+
 repo=$LINUXAPK_REPO out=$LINUXAPK_OUT run=$LINUXAPK_RUN data=$LINUXAPK_DATA
 img=${LINUXAPK_IMG:-$out/img}
 apex=${LINUXAPK_APEX:-$out/root/apex}

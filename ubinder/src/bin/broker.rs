@@ -4,15 +4,20 @@
 //! Android process. See `ubinder/src/sys.rs` and `docs/ubinder.md`.
 
 fn main() {
-    let fd: i32 = std::env::args()
-        .nth(1)
+    let mut args = std::env::args().skip(1);
+    let sock: i32 = args
+        .next()
         .and_then(|s| s.parse().ok())
-        .expect("usage: linuxapk-ubinder <listener-fd>");
-    #[cfg(target_os = "linux")]
-    ubinder::sys::serve(fd);
-    #[cfg(not(target_os = "linux"))]
+        .expect("usage: linuxapk-ubinder <forward-sock-fd> <listener-fd>");
+    let listener: i32 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .expect("missing <listener-fd>");
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    ubinder::sys::serve(sock, listener);
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     {
-        let _ = fd;
+        let _ = (sock, listener);
         eprintln!("ubinder broker is Linux-only");
     }
 }

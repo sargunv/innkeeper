@@ -23,12 +23,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
-#include <linux/filter.h>
-#include <linux/seccomp.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,63 +38,37 @@
 
 #include "bpfemu.h"
 
-#ifndef AUDIT_ARCH_X86_64
-#define AUDIT_ARCH_X86_64 0xc000003e
-#endif
-
 extern char** environ;
 
 // Path to the Rust ubinder broker helper (ubinder/src/bin/broker.rs), or NULL.
-// When set (LINUXAPK_UBINDER), the child installs a second seccomp filter and
-// the parent forks+execs the helper to serve the binder listener in userspace.
-// The helper is a normal dynamic bionic binary, so pivot-exec itself stays a
-// pure-C static binary (it is exec'd before pivot_root, where no linker
-// exists). Read in main() before clone(); the child sees a copy.
+// When set (LINUXAPK_UBINDER), bpfemu installs one combined seccomp filter
+// (bpf + openat + binder-ioctl, since the kernel allows only one notification
+// listener per process) and the parent forks+execs the helper to serve the
+// forwarded binder notifications. The helper is a normal dynamic bionic binary,
+// so pivot-exec stays a pure-C static binary (it is exec'd before pivot_root,
+// where no linker exists). Read in main() before clone(); the child sees a
+// copy.
 static const char* ubinder_helper;
 static int ubinder_enabled;
 
 static void die(const char* what);
 
-// Second seccomp filter: trap openat (to inject the per-process binder memfd)
-// and binder ioctls (ioctl cmd type byte == 'b'). Disjoint from bpfemu's
-// filter, so the two listeners coexist. Returns the notification listener fd.
-static int ubinder_install_filter(void) {
-  struct sock_filter f[] = {
-    /* 0 */ BPF_STMT(
-      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)
-    ),
-    /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 0, 7),
-    /* 2 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-    /* 3 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_openat, 4, 0),
-    /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ioctl, 0, 4),
-    /* 5 */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    /* 6 */ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0xff00),
-    /* 7 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ('b' << 8), 0, 1),
-    /* 8 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF),
-    /* 9 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-  };
-  struct sock_fprog prog = {.len = sizeof(f) / sizeof(f[0]), .filter = f};
-  return syscall(
-    SYS_seccomp, SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER,
-    &prog
-  );
-}
-
-// Fork+exec the Rust broker helper to serve the binder listener. Runs in the
-// parent's (outer) namespaces, like the bpf thread, so it sees Android pids and
-// can process_vm_* them. The helper is dynamic bionic; the parent is in the
-// pivoted Android root, so /system/bin/linker64 and libc.so resolve.
-static void spawn_ubinder_helper(int listener) {
+// Fork+exec the Rust broker helper, which reads forwarded binder notifications
+// from `sock` and answers them via `listener`. Runs in the parent's (outer)
+// namespaces like the bpf thread, so it sees Android pids and can
+// process_vm_* them. Dynamic bionic; the parent is in the pivoted Android root,
+// so /system/bin/linker64 and libc.so resolve.
+static void spawn_ubinder_helper(int sock, int listener) {
   pid_t p = fork();
   if (p < 0) die("fork ubinder helper");
   if (p != 0) return;
-  // Child: the listener was received CLOEXEC; clear it so it survives exec.
+  // Inherited fds must survive exec; clear CLOEXEC.
+  fcntl(sock, F_SETFD, 0);
   fcntl(listener, F_SETFD, 0);
-  char fdbuf[16];
+  char sockbuf[16], fdbuf[16];
+  snprintf(sockbuf, sizeof(sockbuf), "%d", sock);
   snprintf(fdbuf, sizeof(fdbuf), "%d", listener);
-  char* argv[] = {(char*)ubinder_helper, fdbuf, NULL};
+  char* argv[] = {(char*)ubinder_helper, sockbuf, fdbuf, NULL};
   execve(ubinder_helper, argv, environ);
   die("exec ubinder helper");
 }
@@ -160,37 +131,26 @@ static int child_main(void* arg) {
     "/linuxapk/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
   );
 
-  // Route every bpf() call of Android (inherited by all descendants) to the
-  // emulator in our parent (see bpfemu.c); with LINUXAPK_UBINDER, add a second
-  // filter that routes openat/binder-ioctl to the Rust broker (ubinder_serve).
-  // Both listeners are passed to the parent in one SCM_RIGHTS array.
-  int listeners[2];
-  int nlisteners = 0;
-  listeners[nlisteners] = bpfemu_install_filter();
-  if (listeners[nlisteners] < 0) die("install bpf seccomp filter");
-  nlisteners++;
-  if (ubinder_enabled) {
-    listeners[nlisteners] = ubinder_install_filter();
-    if (listeners[nlisteners] < 0) die("install binder seccomp filter");
-    nlisteners++;
-  }
-  char cbuf[CMSG_SPACE(2 * sizeof(int))];
+  // Route Android's bpf() (and, in ubinder mode, openat/binder-ioctl) to the
+  // supervisor via one seccomp notification listener, then hand it the fd.
+  int listener = bpfemu_install_filter(ubinder_enabled);
+  if (listener < 0) die("install seccomp filter");
+  char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
-  char label[2] = {(char)('0' + nlisteners), 0};
-  struct iovec iov = {.iov_base = label, .iov_len = 1};
+  struct iovec iov = {.iov_base = "L", .iov_len = 1};
   struct msghdr msg = {
     .msg_iov = &iov,
     .msg_iovlen = 1,
     .msg_control = cbuf,
-    .msg_controllen = CMSG_SPACE(nlisteners * sizeof(int))
+    .msg_controllen = sizeof(cbuf)
   };
   struct cmsghdr* cm = CMSG_FIRSTHDR(&msg);
   cm->cmsg_level = SOL_SOCKET;
   cm->cmsg_type = SCM_RIGHTS;
-  cm->cmsg_len = CMSG_LEN(nlisteners * sizeof(int));
-  memcpy(CMSG_DATA(cm), listeners, nlisteners * sizeof(int));
+  cm->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cm), &listener, sizeof(int));
   if (sendmsg(sync_sock[0], &msg, 0) != 1) die("send seccomp listener");
-  for (int i = 0; i < nlisteners; i++) close(listeners[i]);
+  close(listener);
   close(sync_sock[0]);
 
   execve(child_argv[0], child_argv, environ);
@@ -230,8 +190,8 @@ int main(int argc, char** argv) {
   write_identity_map(pid, "gid_map");
   if (write(sync_sock[1], "x", 1) != 1) die("release child");
 
-  // Receive the child's seccomp listeners: [0] = bpf, [1] = binder (optional).
-  char c, cbuf[CMSG_SPACE(2 * sizeof(int))];
+  // Receive the child's single seccomp listener.
+  char c, cbuf[CMSG_SPACE(sizeof(int))];
   struct iovec iov = {.iov_base = &c, .iov_len = 1};
   struct msghdr msg = {
     .msg_iov = &iov,
@@ -243,16 +203,24 @@ int main(int argc, char** argv) {
     die("receive seccomp listener");
   struct cmsghdr* cm = CMSG_FIRSTHDR(&msg);
   if (!cm || cm->cmsg_type != SCM_RIGHTS) die("no seccomp listener");
-  int nlisteners = (cm->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-  int listeners[2] = {-1, -1};
-  memcpy(listeners, CMSG_DATA(cm), nlisteners * sizeof(int));
+  int listener;
+  memcpy(&listener, CMSG_DATA(cm), sizeof(int));
   close(sync_sock[1]);
+
+  // ubinder: forward binder notifications from the bpf serve loop to the broker
+  // helper over a SOCK_SEQPACKET pair; the helper answers them via its own dup
+  // of the listener. Wire the forward before starting the serve thread.
+  if (ubinder_enabled) {
+    int sp[2];
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)
+      die("binder socketpair");
+    spawn_ubinder_helper(sp[1], listener);
+    close(sp[1]);
+    bpfemu_set_binder_forward(sp[0]);
+  }
   pthread_t t;
-  if (
-    pthread_create(&t, NULL, bpfemu_serve, (void*)(intptr_t)listeners[0]) != 0
-  )
+  if (pthread_create(&t, NULL, bpfemu_serve, (void*)(intptr_t)listener) != 0)
     die("bpfemu thread");
-  if (nlisteners > 1) spawn_ubinder_helper(listeners[1]);
 
   // We are pid 1 of the outer pid namespace: reap until the child is gone.
   int status;

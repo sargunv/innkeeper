@@ -17,7 +17,7 @@
 //!
 //! A death-monitor thread polls a pidfd per process and calls
 //! [`Broker::release_proc`] on exit, firing death notifications.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::missing_safety_doc)]
 
 use std::collections::HashMap;
@@ -32,9 +32,6 @@ use crate::defs::*;
 const SECCOMP_IOC_MAGIC: u8 = b'!';
 const fn ioc(dir: u32, nr: u8, size: usize) -> u32 {
     (dir << 30) | ((SECCOMP_IOC_MAGIC as u32) << 8) | (nr as u32) | ((size as u32) << 16)
-}
-fn notif_recv_cmd(sz: usize) -> u32 {
-    ioc(3, 0, sz)
 }
 fn notif_send_cmd(sz: usize) -> u32 {
     ioc(3, 1, sz)
@@ -365,10 +362,11 @@ impl Supervisor {
 
 // ---- the serve loop ----------------------------------------------------
 
-/// Serve binder notifications on `listener` until it breaks. Spawns a
-/// death-monitor thread. Intended to be called from a dedicated supervisor
-/// thread (see the C ABI `ubinder_serve`).
-pub fn serve(listener: RawFd) {
+/// Serve binder notifications forwarded by the bpf supervisor over `sock`
+/// (one `seccomp_notif` per SOCK_SEQPACKET message), answering them via
+/// `listener` (a dup of the single process listener). Spawns a death-monitor
+/// thread. Called by the broker helper (`src/bin/broker.rs`).
+pub fn serve(sock: RawFd, listener: RawFd) {
     let mut sizes = SeccompNotifSizes::default();
     let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
     if r != 0 {
@@ -400,17 +398,17 @@ pub fn serve(listener: RawFd) {
 
     let mut notif = vec![0u8; notif_sz];
     loop {
-        notif.iter_mut().for_each(|b| *b = 0);
-        let r = unsafe { libc::ioctl(listener, notif_recv_cmd(notif_sz) as _, notif.as_mut_ptr()) };
-        if r != 0 {
+        let n = unsafe { libc::recv(sock, notif.as_mut_ptr() as *mut _, notif_sz, 0) };
+        if n < 0 {
             let e = std::io::Error::last_os_error();
-            match e.raw_os_error() {
-                Some(libc::EINTR) | Some(libc::ENOENT) => continue,
-                _ => {
-                    eprintln!("ubinder: NOTIF_RECV: {e}");
-                    return;
-                }
+            if e.raw_os_error() == Some(libc::EINTR) {
+                continue;
             }
+            eprintln!("ubinder: recv: {e}");
+            return;
+        }
+        if n == 0 {
+            return; // supervisor closed the forward socket
         }
         let req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
         let mut s = sup.lock().unwrap();
@@ -830,16 +828,4 @@ fn pid_euid(pid: i32) -> Option<u32> {
         }
     }
     None
-}
-
-// ---- C ABI for the session supervisor ---------------------------------
-
-/// Entry point the session's `pivot-exec` calls on a dedicated thread, passing
-/// the binder seccomp listener fd. Never returns until the listener breaks.
-///
-/// # Safety
-/// `listener` must be a valid seccomp notification fd owned by the caller.
-#[unsafe(no_mangle)]
-pub extern "C" fn ubinder_serve(listener: RawFd) {
-    serve(listener);
 }

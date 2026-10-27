@@ -39,10 +39,15 @@ cp "$so" "$out/session/overlay/vendor/lib64/"
 if [[ -d $repo/ubinder ]] && command -v cargo >/dev/null; then
   ar="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
   strip="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+  # The parent execs the helper before init mounts /apex, and the seccomp
+  # filter traps every openat, so the helper must not depend on the APEX
+  # linker. Use Android's bootstrap linker (in /system), which loads bootstrap
+  # bionic from /system/lib64/bootstrap and is available from early boot.
   (
     cd "$repo" &&
       env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$ar" \
         CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
+        RUSTFLAGS="-C link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64" \
         cargo build -q -p ubinder --release --target x86_64-linux-android --bin linuxapk-ubinder -j8
   )
   mkdir -p "$out/session/overlay/system/bin"

@@ -12,7 +12,7 @@
 
 pub mod broker;
 pub mod defs;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod sys;
 
 pub use broker::{Broker, Mem, ProcId, Wakeup, WriteRead};
