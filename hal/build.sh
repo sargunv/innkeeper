@@ -57,5 +57,5 @@ for f in "$hal"/etc/init/*.rc; do inst 644 "$f" "$OVERLAY/etc/init/$(basename "$
 for f in "$hal"/etc/vintf/*.xml; do inst 644 "$f" "$OVERLAY/etc/vintf/manifest/$(basename "$f")"; done
 # Test binaries go next to the overlay, not into it.
 mkdir -p "$BUILD/tests"
-cp "$b/gralloc_test" "$b/hwc_test" "$BUILD/tests/"
+cp "$b/gralloc_test" "$b/hwc_test" "$b/libhaltest_shim.so" "$BUILD/tests/"
 (cd "$OVERLAY" && find . -type f | sort | sed 's/^/  /')

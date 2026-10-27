@@ -505,8 +505,8 @@ ndk::ScopedAStatus ComposerClient::registerCallback(
     if (first && cb) {
         for (int64_t id : ids) {
             LOGI("hotplug: display %lld connected", (long long)id);
-            auto st = cb->onHotplug(id, true);
-            if (!st.isOk()) LOGW("onHotplug failed: %s", st.getDescription().c_str());
+            auto st = cb->onHotplugEvent(id, common::DisplayHotplugEvent::CONNECTED);
+            if (!st.isOk()) LOGW("onHotplugEvent failed: %s", st.getDescription().c_str());
         }
     }
     return ndk::ScopedAStatus::ok();

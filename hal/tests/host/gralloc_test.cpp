@@ -99,6 +99,7 @@ static void testLayouts() {
     CHECK_EQ(l.planes[0].stride, 512u);
     CHECK_EQ(l.stridePixels, 64u);
 
+    CHECK(computeLayout(fmt::BLOB, 4 << 20, 1, 1, 0, &l));  // 4 MiB data buffer
     CHECK(computeLayout(fmt::BLOB, 1000, 1, 1, 0, &l));
     CHECK_EQ(l.planes[0].stride, 1000u);
     CHECK_EQ(l.layerSize, 4096ull);

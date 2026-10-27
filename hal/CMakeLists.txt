@@ -79,13 +79,15 @@ if(ANDROID)
   set_target_properties(composer PROPERTIES
     OUTPUT_NAME android.hardware.graphics.composer3-service.linuxapk)
   target_include_directories(composer PRIVATE ${HAL}/composer)
-  target_link_libraries(composer PRIVATE lapk_common lapk_aidl z)
+  # libz is not LL-NDK: link the NDK's static copy.
+  target_link_libraries(composer PRIVATE lapk_common lapk_aidl -l:libz.a)
 
   # On-device tests (not installed into /vendor/bin/hw).
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
   target_link_libraries(gralloc_test PRIVATE lapk_common lapk_aidl dl nativewindow)
   add_executable(hwc_test tests/android/hwc_test.cpp)
   target_link_libraries(hwc_test PRIVATE lapk_common lapk_aidl)
+  add_library(haltest_shim SHARED tests/android/haltest_shim.c)
 else()
   add_executable(gralloc_host_test tests/host/gralloc_test.cpp)
   target_link_libraries(gralloc_host_test PRIVATE lapk_common dl)

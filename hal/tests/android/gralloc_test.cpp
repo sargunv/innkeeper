@@ -41,8 +41,12 @@ static AIMapper* gMapper;
 
 template <StandardMetadataType T>
 static auto get(buffer_handle_t h) -> decltype(StandardMetadata<T>::value::decode(nullptr, 0)) {
-    std::vector<uint8_t> buf(512);
+    std::vector<uint8_t> buf(128);
     int32_t n = gMapper->v5.getStandardMetadata(h, int64_t(T), buf.data(), buf.size());
+    if (n > 0 && size_t(n) > buf.size()) {
+        buf.resize(n);
+        n = gMapper->v5.getStandardMetadata(h, int64_t(T), buf.data(), buf.size());
+    }
     if (n < 0 || size_t(n) > buf.size()) return std::nullopt;
     return StandardMetadata<T>::value::decode(buf.data(), n);
 }
@@ -220,6 +224,7 @@ static void testAHardwareBuffer() {
 }
 
 int main(int argc, char** argv) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     ABinderProcess_startThreadPool();
     testAidl(argc > 1 ? argv[1] : "/vendor/lib64/hw/mapper.linuxapk.so");
     if (!getenv("SKIP_AHB")) testAHardwareBuffer();

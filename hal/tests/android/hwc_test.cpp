@@ -113,6 +113,7 @@ static const auto* find(const std::vector<CommandResultPayload>& r) {
 }
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     ABinderProcess_startThreadPool();
     const std::string name = std::string(IComposer::descriptor) + "/default";
     CHECK(AServiceManager_isDeclared(name.c_str()));

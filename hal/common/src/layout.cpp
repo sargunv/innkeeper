@@ -103,8 +103,13 @@ const char* formatName(int32_t format) {
 bool computeLayout(int32_t format, uint32_t width, uint32_t height, uint32_t layerCount,
                    uint64_t usage, Layout* out) {
     if (width == 0 || height == 0 || layerCount == 0) return false;
-    if (width > 32768 || height > 32768 || layerCount > 64) return false;
     const int32_t resolved = resolveFormat(format, usage);
+    if (resolved == fmt::BLOB) {
+        // 1D buffers: width is the size in bytes (e.g. GPU data buffers).
+        if (uint64_t(width) * height * layerCount > (1ull << 30)) return false;
+    } else if (width > 32768 || height > 32768 || layerCount > 64) {
+        return false;
+    }
     const FormatInfo* fi = formatInfo(resolved);
     if (!fi) return false;
 
