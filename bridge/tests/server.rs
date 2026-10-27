@@ -16,7 +16,7 @@ use linuxapk_bridge::audio::proto::{
 };
 use linuxapk_bridge::audio::{AudioService, Backend, Limits};
 use linuxapk_bridge::proto::{Hello, hello_reply_body, service};
-use linuxapk_bridge::server::{self, Config, Registry};
+use linuxapk_bridge::server::{self, Config, Events, Registry, Reply, Service};
 use linuxapk_bridge::transport;
 use linuxapk_bridge::wire::{self, errno::*};
 use proptest::prelude::*;
@@ -28,6 +28,26 @@ use rustix::net::{
 
 static N: AtomicU32 = AtomicU32::new(0);
 
+/// A test service: request 0x0d01 echoes its body back as event 0x4001.
+const ECHO: u32 = 13;
+struct Echo(Events);
+impl Service for Echo {
+    fn handle(&mut self, ty: u16, body: &[u8], _fds: Vec<OwnedFd>) -> Reply {
+        match ty {
+            0x0d01 => match self.0.send(0x4001, body, &[]) {
+                Ok(()) => Reply::ok(),
+                Err(_) => Reply::err(-EIO),
+            },
+            // Events outside the event range are refused by the sender.
+            0x0d02 => match self.0.send(0x0101, body, &[]) {
+                Ok(()) => Reply::ok(),
+                Err(_) => Reply::err(-EINVAL),
+            },
+            _ => Reply::err(-ENOSYS),
+        }
+    }
+}
+
 fn start(limits: Limits, allow_self: bool) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "bridge-{}-{}.sock",
@@ -38,7 +58,7 @@ fn start(limits: Limits, allow_self: bool) -> PathBuf {
     let me = rustix::process::getuid().as_raw();
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));
-    services.register(service::AUDIO, "audio", move |peer| {
+    services.register(service::AUDIO, "audio", move |peer, _events| {
         Ok(Box::new(AudioService::new(
             Backend::Null,
             limits.clone(),
@@ -46,6 +66,7 @@ fn start(limits: Limits, allow_self: bool) -> PathBuf {
             peer,
         )))
     });
+    services.register(ECHO, "echo", |_peer, events| Ok(Box::new(Echo(events))));
     let cfg = Config {
         allow_uids: if allow_self {
             vec![me]
@@ -415,4 +436,37 @@ proptest! {
         let mut d = Client::connect(path);
         d.hello();
     }
+}
+
+#[test]
+fn service_events() {
+    let path = start(Limits::default(), true);
+    let mut c = Client::connect(&path);
+    assert_eq!(c.call_with(|t| hello(1, ECHO).encode(t)).unwrap().0, 0);
+    c.send_raw(
+        &{
+            let mut w = wire::Writer::message(0x0d01, 5);
+            w.u32(0xfeed);
+            w.into_vec()
+        },
+        &[],
+    )
+    .unwrap();
+    // The event (tag 0) and the reply (tag 5) both arrive, in either order.
+    let mut got = Vec::new();
+    for _ in 0..2 {
+        let (b, _) = c.recv().unwrap();
+        let h = wire::decode_header(&b).unwrap();
+        got.push((h.ty, h.tag, b[wire::HDR..].to_vec()));
+    }
+    got.sort();
+    assert_eq!(got[0], (0x4001, 0, 0xfeedu32.to_le_bytes().to_vec()));
+    assert_eq!((got[1].0, got[1].1), (wire::REPLY, 5));
+    c.tag = 5;
+    assert_eq!(
+        c.call_with(|t| wire::Writer::message(0x0d02, t).into_vec())
+            .unwrap()
+            .0,
+        -EINVAL
+    );
 }

@@ -1,8 +1,9 @@
 # Audio (M2)
 
-Status: Android plays to PipeWire on the emulator image, proven end to end (440
-Hz tone, game music). The CI image needs its APEX overlay; see "Open issues".
-The bridge and its protocol are documented in [bridge.md](bridge.md).
+Status: Android plays to PipeWire, proven end to end on the emulator image (440
+Hz tone, game music) and on the CI image (440 Hz tone, with the image lane's WIP
+session). The CI image's install point lands with the image lane; see "Open
+issues". The bridge and its protocol are documented in [bridge.md](bridge.md).
 
 ## Decision: how Android's audio HAL reaches the host (2026-10-27)
 
@@ -119,22 +120,50 @@ LINUXAPK_AUDIO_SINK=<sink> session/linuxapk-session start   # route to one sink
 speakers. It records the sink's monitor with `parec`. `freq.py` (pure Python
 FFT) reports level and dominant frequency.
 
-## Results (emulator image, 2026-10-27)
+## Results (2026-10-27)
 
-| Check                                          | Result                                                                                         |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 440 Hz tone, `linuxapk-tone` (AAudio)          | captured **439.99 Hz** at −9.0 dBFS: the 0.5 sine is bit-exact through the chain at max volume |
-| Game: Mindustry title music                    | **audible**: −35 dBFS over 10 s, dominant 61 Hz                                                |
-| Bridge share of latency (host, null sink)      | ring fill ~15 ms + PipeWire downstream ~16 ms; a client sees **34 ms** written − presented     |
-| App-visible output latency (AAudio timestamps) | **~93 ms** median (89–97) on the emulator image's goldfish HAL                                 |
-| Bridge stats while playing                     | exactly 48 000 frames/s consumed, 0 underruns                                                  |
+| Check                                          | Emulator image (goldfish HIDL HAL)                 | CI image (AOSP AIDL HAL)                                  |
+| ---------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------- |
+| 440 Hz tone (`linuxapk-tone`, AAudio)          | **439.99 Hz**, −9.0 dBFS (bit-exact at max volume) | **439.99 Hz**, −9.0 dBFS, normal and LOW_LATENCY requests |
+| Game: Mindustry title music                    | **audible**, −35 dBFS over 10 s                    | **audible**, −36 dBFS over 8 s                            |
+| App-visible output latency (AAudio timestamps) | ~93 ms median (89–97)                              | **~86 ms** median (85–88)                                 |
+| Our share: ring fill + PipeWire downstream     | ~15 + 16 ms                                        | 18.4 + 16 ms                                              |
+| Bridge while playing                           | 48 000 frames/s, 0 underruns                       | 48 000 frames/s, 0 underruns                              |
+| Compat corpus (`compat/run.sh`)                | 15/16 work, no regressions                         | (image lane's run)                                        |
+| `selftest`                                     | 12/12                                              |                                                           |
 
-The emulator image misses the < 50 ms target. Goldfish's HIDL HAL runs its own
-clock model and ring, with no fast mixer and no low-latency path (AAudio falls
-back to `PERFORMANCE_MODE_NONE` with 44 ms buffers), and that sits on top of our
-~34 ms. On the CI image, the AIDL HAL writes straight through alsa_utils into
-our ring, so the expected total is AudioFlinger's buffering plus ~34 ms. That
-gets measured once the CI session can load the overlay.
+Methods:
+
+- **Tone:** `audio/tests/e2e.sh` (or the same steps by hand) plays 5 s through
+  AAudio and records the null sink's monitor. Level and frequency come from
+  `freq.py`.
+- **App-visible latency:** Oboe's method,
+  `(timestamp time + (written − position) / rate) − now`, sampled every 50 ms.
+- **Our share:** the bridge's own statistics (`LINUXAPK_BRIDGE_VERBOSE=1`). The
+  CI run used the image lane's WIP session, with our library in its cuttlefish
+  APEX overlay.
+
+**Why the < 50 ms target isn't met yet:**
+
+- **Our share is ~34 ms.** The ring is capped at 2 × 10 ms whatever the HAL asks
+  for. pipewire-pulse floors its own latency at ~16 ms (three 5.3 ms quanta),
+  and 10 ms and 20 ms targets measured the same.
+- **The rest is the HAL.**
+  - AOSP's default AIDL HAL hardcodes an 85 ms nominal latency for its primary
+    port (`ModulePrimary::getNominalLatencyMs`, "4096 frames … allows the
+    virtual Android device implementation to pass CTS"). That sets
+    AudioFlinger's HAL buffer.
+  - Its only low-latency paths, the `mmap_no_irq_out` and `compressed_offload`
+    ports, are served by silent stubs. We confirmed it: a LOW_LATENCY AAudio
+    stream played nothing.
+  - Setting `aaudio.mmap_policy=1` doesn't help, because AudioFlinger asks the
+    AIDL HAL for its MMAP ports. Our policy overlay removes the ports instead.
+    LOW_LATENCY streams then use the primary output: 439.99 Hz, 86 ms.
+  - Goldfish (emulator image) adds its own clock-driven ring and has no fast
+    mixer.
+- **What gets us there:** our own stream in the AIDL HAL ("Porting to AIDL"
+  below). It would offer a 10 ms primary or MMAP port backed by the ring, which
+  should make it roughly 10 ms of mixer, 20 ms of ring and 16 ms of PipeWire.
 
 ## Porting to AIDL (our source-built image, M4)
 
@@ -164,12 +193,16 @@ each call maps onto `bridge_client.h`:
 
 ## Open issues
 
-1. **The CI image needs the overlay at the right path.** Its HAL loads
-   `libtinyalsav2.so` from `/apex/com.android.hardware.audio/lib64`. The symbol
-   set matches (checked against the CI APEX), but the session needs an APEX
-   overlay layer that `audio/build.sh` can install into. That's for the image
-   lane, see `docs/image.md`. The proof (tone, game, latency) has to be rerun
-   there.
+1. **CI image install point.**
+   - The AIDL HAL loads `libtinyalsav2.so` from
+     `/apex/com.android.hardware.audio/lib64`. The symbol set matches (checked
+     against the CI APEX), and the tone works there.
+   - For that run, the library sat in the image lane's
+     `session/image-overlay/cuttlefish/apex/...`. A built artifact needs a
+     generated layer instead. Proposal: `audio/build.sh` installs into
+     `out/apex-overlay/<apex>/`, and ns-init stacks it above `$apex` for the
+     APEXes the image has. The image lane is reworking ns-init now, so this
+     lands with them.
 2. **Per-app stream names.** The tinyalsa layer can't see which app is playing.
    AudioFlinger mixes every app into the primary output, so there is one
    PipeWire stream ("Linux.apk: Android"). For M3: the Linux.apk System app

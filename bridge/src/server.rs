@@ -6,7 +6,7 @@
 //! [`Service`]; register a factory for its id in a [`Registry`] (see
 //! `main.rs` and `docs/bridge.md`).
 
-use std::os::fd::OwnedFd;
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -59,6 +59,30 @@ pub struct Peer {
     pub label: String,
 }
 
+/// Sends unsolicited events (types `wire::EVENT_MIN..=EVENT_MAX`, tag 0) to
+/// one connection. Cheap to clone; a service can hand it to its own threads.
+/// Each event is one packet, so events and replies never interleave
+/// mid-message (their order relative to each other is not defined). Sending
+/// after the client went away fails with an error.
+#[derive(Clone)]
+pub struct Events {
+    sock: Arc<OwnedFd>,
+}
+
+impl Events {
+    pub fn send(&self, ty: u16, body: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
+        if !(wire::EVENT_MIN..=wire::EVENT_MAX).contains(&ty) {
+            bail!("event type {ty:#06x} outside the event range");
+        }
+        let mut w = wire::Writer::message(ty, 0);
+        w.0.extend_from_slice(body);
+        if w.0.len() > MAX_MSG {
+            bail!("event too long ({} bytes)", w.0.len());
+        }
+        transport::send(&self.sock, &w.0, fds)
+    }
+}
+
 /// A service bound to one connection. `handle` gets every request after
 /// HELLO: the message type, the untrusted body (decode it with
 /// `wire::Reader`), and any fds the client attached (closed when dropped).
@@ -67,7 +91,7 @@ pub trait Service: Send {
     fn handle(&mut self, ty: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply;
 }
 
-type Factory = Box<dyn Fn(&Peer) -> Result<Box<dyn Service>> + Send + Sync>;
+type Factory = Box<dyn Fn(&Peer, Events) -> Result<Box<dyn Service>> + Send + Sync>;
 
 /// Service ids to factories.
 #[derive(Default)]
@@ -80,7 +104,7 @@ impl Registry {
         &mut self,
         id: u32,
         name: &'static str,
-        f: impl Fn(&Peer) -> Result<Box<dyn Service>> + Send + Sync + 'static,
+        f: impl Fn(&Peer, Events) -> Result<Box<dyn Service>> + Send + Sync + 'static,
     ) {
         assert!(
             self.entries.iter().all(|e| e.0 != id),
@@ -91,8 +115,11 @@ impl Registry {
     pub fn names(&self) -> Vec<&'static str> {
         self.entries.iter().map(|e| e.1).collect()
     }
-    fn open(&self, id: u32, peer: &Peer) -> Option<Result<Box<dyn Service>>> {
-        self.entries.iter().find(|e| e.0 == id).map(|e| (e.2)(peer))
+    fn open(&self, id: u32, peer: &Peer, events: Events) -> Option<Result<Box<dyn Service>>> {
+        self.entries
+            .iter()
+            .find(|e| e.0 == id)
+            .map(|e| (e.2)(peer, events))
     }
 }
 
@@ -149,6 +176,7 @@ fn send_reply(sock: &OwnedFd, tag: u32, r: &Reply) -> Result<()> {
 }
 
 fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
+    let sock = Arc::new(sock);
     let mut buf = [0u8; MAX_MSG + 1];
     let mut svc: Option<Box<dyn Service>> = None;
     while let Some(pkt) = transport::recv(&sock, &mut buf)? {
@@ -178,7 +206,10 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
                 bail!("protocol {}.{} not supported", hello.major, hello.minor);
             }
             peer.name = hello.name.clone();
-            match cfg.services.open(hello.service, &peer) {
+            match cfg
+                .services
+                .open(hello.service, &peer, Events { sock: sock.clone() })
+            {
                 None => {
                     send_reply(&sock, h.tag, &Reply::err(-ENOSYS))?;
                     bail!("unknown service {}", hello.service);

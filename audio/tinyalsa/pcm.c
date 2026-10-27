@@ -54,6 +54,7 @@
 // "frames written - (buffer - avail)" stays exact (alsa_device_proxy).
 #define DOWNSTREAM_HEADROOM_MS 200u
 #define WRITE_TIMEOUT_MS 500
+#define RING_PERIOD_MS 10u
 
 struct pcm {
   unsigned int card, device, flags;
@@ -293,6 +294,16 @@ static uint64_t presented_locked(struct pcm* p) {
   return pr > total ? total : pr;
 }
 
+// The ring is our share of the latency, so keep it small whatever buffer
+// the HAL asked for: two periods of at most RING_PERIOD_MS. The HAL's own
+// period still sets how much each write carries (a write bigger than the
+// ring simply blocks until the last part fits).
+static uint32_t ring_period(const struct pcm* p) {
+  uint32_t max = p->config.rate * RING_PERIOD_MS / 1000;
+  uint32_t f = p->config.period_size < max ? p->config.period_size : max;
+  return f < MIN_PERIOD ? MIN_PERIOD : f;
+}
+
 static void connect_locked(struct pcm* p) {
   if (p->s.map) return;
   int64_t t = now_ns();
@@ -302,8 +313,8 @@ static void connect_locked(struct pcm* p) {
     .rate = p->config.rate,
     .channels = (uint8_t)p->config.channels,
     .format = p->config.format == PCM_FORMAT_FLOAT_LE ? LXB_F32LE : LXB_S16LE,
-    .period_frames = p->config.period_size,
-    .periods = p->config.period_count,
+    .period_frames = ring_period(p),
+    .periods = 2,
     .name = "Android",
   };
   uint64_t pos = presented_locked(p);

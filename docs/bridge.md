@@ -49,9 +49,11 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
 To add a service (the windowing lane's display service is id 2, types
 `0x0200..=0x02ff`):
 
-1. **Id and types.** Take a service id in `proto::service` and a type range
-   `0xNN00..=0xNNff` (NN = the id). Requests live below `0x4000`; events (bridge
-   to client, tag 0) live in `0x4000..=0x7fff`.
+1. **Id and types.** Take a service id below 64 in `proto::service`. Its
+   requests use `0xNN01..=0xNNff` (NN = the id). Requests live below `0x4000`,
+   and the core answers anything at or above it with `-EPROTO`. Events (bridge
+   to client, tag 0) use `0x4000..=0x7fff`; take `0x40NN`-style sub-ranges per
+   service and list them here.
 2. **Messages.** Write `<service>/proto.rs`, with `decode(ty, body)` built only
    on `wire::Reader` and finishing with `Reader::end()`, plus `encode(...)` for
    tests. Rules:
@@ -65,13 +67,20 @@ To add a service (the windowing lane's display service is id 2, types
    on the connection's thread, so keep it short and hand long work to your own
    threads. Close fds you don't expect: drop them and return `-EPROTO`. Check
    fds you do accept (`fstat`, `F_GET_SEALS`, size) before you map them.
-   Dropping the service is the connection's cleanup. Put per- client caps
+   Dropping the service is the connection's cleanup. Put per-client caps
    (memory, objects) in the service, as `audio::Limits` does.
-4. **Registration.** Register a factory with
-   `Registry::register(id, name, |peer| ...)` in `main.rs`. If the service has
-   new clients, extend the launcher's `--allow-uid` list and document them
-   below.
-5. **Shared memory and fds you hand out.** Create them in the bridge, and seal
+4. **Events.** The factory receives a `server::Events` for the connection.
+   `Events::send(ty, body, fds)` pushes one event packet (tag 0; the type must
+   be in the event range; at most 512 bytes and 4 fds). It is cheap to clone, so
+   hand it to your threads. Each event is one packet, so events never split a
+   reply, but their order relative to replies isn't defined. Clients match
+   replies by tag and treat tag-0 event types separately. Sends fail once the
+   client is gone.
+5. **Registration.** Register a factory with
+   `Registry::register(id, name, |peer, events| ...)` in `main.rs`. If the
+   service has new clients, extend the launcher's `--allow-uid` list and
+   document them below.
+6. **Shared memory and fds you hand out.** Create them in the bridge, and seal
    memfds against shrinking (`F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL`) so a
    client can't truncate them under your mapping and SIGBUS the bridge. Use
    non-blocking eventfds on both sides. Never read back state you own from
@@ -91,7 +100,9 @@ reply               type 0x8000, the request's tag, i32 status (0 or -errno), bo
 ```
 
 - Every request gets exactly one reply, in order. A reply may carry fds
-  (`SCM_RIGHTS`, at most 4).
+  (`SCM_RIGHTS`, at most 4). Services may also send events (types
+  `0x4000..=0x7fff`, tag 0) at any time; clients that don't expect any can drop
+  them.
 - No request in v1 carries fds. If one arrives with fds, the bridge closes them
   and replies `-EPROTO`.
 - **Errors:**

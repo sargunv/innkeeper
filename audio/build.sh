@@ -51,4 +51,5 @@ ovl=$out/vendor-overlay
 install -D -m 644 "$build/libtinyalsav2.so" "$ovl/lib64/libtinyalsav2.so"
 "$bin/llvm-strip" --strip-unneeded "$ovl/lib64/libtinyalsav2.so"
 install -D -m 644 "$here/etc/audio.prop" "$ovl/etc/audio.prop"
+install -D -m 644 "$here/etc/primary_audio_policy_configuration.xml" "$ovl/etc/primary_audio_policy_configuration.xml"
 echo "built $build; installed into $ovl"

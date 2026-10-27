@@ -52,7 +52,7 @@ fn main() -> Result<()> {
     linuxapk_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));
-    services.register(service::AUDIO, "audio", move |peer| {
+    services.register(service::AUDIO, "audio", move |peer, _events| {
         Ok(Box::new(AudioService::new(
             backend.clone(),
             Limits::default(),
