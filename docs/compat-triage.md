@@ -70,9 +70,15 @@ Run it as a capped job on the lane's own session instance:
 
 ## Results (2026-10-27)
 
-30 of 31 apps work in per-app windows (the only failure is Open Sudoku, whose
-F-Droid build is arm64-only). They install, render, survive input, reach the
-network and decode media.
+On the default image, the AOSP CI build 16644040 (cuttlefish x86_64), 29 of 31
+apps work in per-app windows. The two failures:
+
+- **Open Sudoku:** its F-Droid build is arm64-only.
+- **NewPipe:** playing a video crashes SurfaceFlinger (open issue 1 below).
+
+The working apps install, render, survive input, reach the network and decode
+audio. On the SDK emulator image, 30 of 31 worked: NewPipe's tap didn't start a
+video there.
 
 Screenshots: see the README (images are hosted as attachments on issue #1, not
 committed).
@@ -104,8 +110,8 @@ MapLibre Native's GL backend runs on ANGLE over RADV.
   2. A `geo:52.5163,13.3777?z=17` intent goes to street level at Pariser Platz.
 - **Map:** vector tiles render at every zoom: world borders, CJK labels, street
   names, house numbers, one-way arrows.
-- **Logs:** no GL/EGL/Vulkan errors. The only MapLibre messages are a few
-  transient `Failed to load tile ... Connection reset` while panning.
+- **Logs:** no GL/EGL/Vulkan errors, on both images. The only MapLibre messages
+  are a few transient `Failed to load tile ... Connection reset` while panning.
 - **Windowed run:** the same in its own Linux.apk window on a 2176x1360 display.
   The screenshot is on issue #1.
 - **Manual checks still to do:**
@@ -200,10 +206,33 @@ MapLibre Native's GL backend runs on ANGLE over RADV.
 
 ## Open issues, ranked
 
-1. **arm64-only APKs don't install** (Open Sudoku 4.11.3; F-Droid has no x86_64
+1. **Video playback crashes SurfaceFlinger, and with it all of Android** (CI
+   image). A tap in NewPipe starts a video. The decoder's YV12 frames
+   (`format:842094169` = `HAL_PIXEL_FORMAT_YV12`, 896x480) reach RenderEngine,
+   which can't import them as a texture through ANGLE/RADV and aborts:
+
+   ```
+   F DEBUG: pid: 242, ppid: 1, tid: 262, name: RenderEngine  >>> /system/bin/surfaceflinger <<<
+   F DEBUG: Abort message: 'Failed to create a valid texture. [0x...]:[896,480] isProtected:0 isWriteable:0 format:842094169'
+     #03 android::renderengine::skia::GaneshBackendTexture::GaneshBackendTexture(sk_sp<GrDirectContext>, AHardwareBuffer*, bool)
+     #05 android::renderengine::skia::SkiaRenderEngine::mapExternalTextureBuffer(...)
+   ```
+
+   - **Effect:** zygote and every app restart, and the host windows go away. It
+     reproduces every time.
+   - **Harness:** it now notices a system_server or SurfaceFlinger death during
+     an app. It counts that against the app, with the abort message, and waits
+     for Android to come back before the next app.
+   - **Lane:** gpu/hal. Make YV12 (and `YCBCR_420_888`) AHardwareBuffers
+     importable by ANGLE's Vulkan backend on RADV: AHB format properties,
+     external-format YCbCr conversion. [gpu.md](gpu.md) already expects RADV to
+     reject YV12's chroma pitch. One mitigation is for software decoders to
+     output a format SurfaceFlinger can sample.
+
+2. **arm64-only APKs don't install** (Open Sudoku 4.11.3; F-Droid has no x86_64
    build): `INSTALL_FAILED_NO_MATCHING_ABIS ... res=-113`. Next step: the M6
    NativeBridge. For M1, SudoQ stands in as the noarch Sudoku.
-2. **lmkd can't lower `oom_score_adj`.** The log shows
+3. **lmkd can't lower `oom_score_adj`.** The log shows
    `E lowmemorykiller: Error writing /proc/<pid>/oom_score_adj; errno=13`
    (EACCES). Raising works, for example a cached process at 905, but lowering
    needs `CAP_SYS_RESOURCE` in the host user namespace.
@@ -213,21 +242,21 @@ MapLibre Native's GL backend runs on ANGLE over RADV.
    - **Related:** zygote can't create per-app memcgs
      (`Activation of cgroup controller +memory failed in path /sys/fs/cgroup/apps/uid_N`).
    - **Lane:** session. Emulate the writes, or keep adj in lmkd only.
-3. **OAuth and links open the WebView Shell.** The image's only browser is
+4. **OAuth and links open the WebView Shell.** The image's only browser is
    `org.chromium.webview_shell` ("WebView Browser Tester"), the default for
    `https:`. Mastodon's sign-in opens there, and there is no Custom Tabs
    provider. Whether its redirect comes back to the app is unchecked. A real
    default browser, or handing links to the host browser (M3), would fix this.
    Fennec offers itself as the default when it's installed.
-4. **Legacy-target dialog.** Apps with targetSdk below 28, such as Simple
+5. **Legacy-target dialog.** Apps with targetSdk below 28, such as Simple
    Solitaire (25), open behind `DeprecatedTargetSdkVersionDialog`. This is stock
    Android behaviour. The harness dismisses the dialog, and a desktop build
    might want to suppress it.
-5. **Soft keyboards don't show in per-app windows.** This is by design
+6. **Soft keyboards don't show in per-app windows.** This is by design
    (`persist.linuxapk.wm.ime=hide`, the host keyboard types). An IME app like
    FlorisBoard can be enabled and selected, but it is never shown. Checking it
    needs `local` or `fallback`.
-6. **Minor log noise, no visible effect:**
+7. **Minor log noise, no visible effect:**
    - OpenTTD (SDL2):
      `ERROR: Setting the swap interval is not supported`/`GL_GetAttribute not supported`.
      Check `eglSwapInterval` on ANGLE.

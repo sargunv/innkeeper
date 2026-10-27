@@ -190,9 +190,10 @@ Causes:
   [compat-triage.md](compat-triage.md) and `COMPATIBILITY.md`.
 - 2026-10-27 (compat): 31-app corpus with a Framework column (Flutter, React
   Native, Capacitor, Godot, Compose, MapLibre) and window types (PiP, browser,
-  IME, VPN, overlay, OAuth, TV): 30/31 work in per-app windows. StreetComplete's
-  MapLibre map renders and pans/zooms. Fixed app external storage on non-ext4
-  hosts (vold quota ioctls; Godot crashed).
+  IME, VPN, overlay, OAuth, TV): 29/31 work on the CI image in per-app windows.
+  StreetComplete's MapLibre map renders and pans/zooms. Fixed app external
+  storage on non-ext4 hosts (vold quota ioctls; Godot crashed). Top new issue:
+  video (YV12 buffers) aborts SurfaceFlinger on RADV/ANGLE.
 - 2026-10-27 (cli): `linuxapk install|run|uninstall|list|session|setup` installs
   APKs and split bundles. It writes `.desktop` entries with Android-rendered
   icons and custom-scheme handlers, and `setup` makes double-clicking an APK
