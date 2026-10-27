@@ -116,7 +116,7 @@ Causes:
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
-- win (M2): per-app windows through trusted virtual displays. Docs:
+- win (M2, done): per-app windows through trusted virtual displays. Docs:
   `docs/windowing.md`. Instance `win`.
 - audio (M2): Rust `bridge/` plus `audio.primary.linuxapk`, played to PipeWire.
   Docs: `docs/audio.md` and `docs/bridge.md`. Instance `audio`.
@@ -128,8 +128,11 @@ Causes:
   `docs/cli.md`. Instance `cli`.
 - integ (M3): bridge/system-app channel (dark mode, accent, time zone, locale),
   notifications, clipboard, opening URLs/Custom Tabs, MPRIS. Instance `integ`.
-- gui: the GTK4/libadwaita manager app (`gui/`) on the shared `core/` library.
-  Docs: `docs/gui.md`. Instance `gui`.
+- integb (M3): IME (`text-input-v3`), document picker (FileChooser portal),
+  in-Android installs mirrored to `.desktop` entries, microG, fractional scaling
+  to density. Instance `integb`.
+- gui (done): the GTK4/libadwaita manager app (`gui/`) on the shared `core/`
+  library. Docs: `docs/gui.md`. Instance `gui`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
