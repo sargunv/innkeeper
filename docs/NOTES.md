@@ -73,6 +73,10 @@ Rules:
   systemd unit `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's
   BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by
   `~/aosp/build-full.sh`.
+- 2026-10-27 (gpu): `gpu/build.sh` NDK-builds Mesa 26.2.5 RADV and lavapipe into
+  `out/vendor-overlay/lib64/hw/vulkan.{radv,lvp}.so` (LL-NDK deps only). Both pass compute,
+  udmabuf import and swapchain-image import via `mapper.linuxapk.so` in a Bionic namespace.
+  GLES via ANGLE still needs a session. See [gpu.md](gpu.md).
 
 ## Next
 
