@@ -8,6 +8,7 @@
 #   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
 #   linuxapk-session exec CMD...   run CMD inside the live session as root
 #   linuxapk-session shell         interactive /system/bin/sh inside
+#   linuxapk-session selftest      host-safety probes against the live session
 #
 # Environment: LINUXAPK_OUT (default <repo>/out),
 #              LINUXAPK_DATA (default ~/.local/share/linuxapk/data)
@@ -74,20 +75,19 @@ start() {
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" \
     -- "$here/linuxapk-session" _run "$out" "$data"
-  # Find the namespace's pid 1: the child of unshare (the service's main pid).
-  local p="" i
-  for i in $(seq 50); do
-    local u; u=$(systemctl --user show -P MainPID "$unit" 2>/dev/null || true)
-    [[ -n $u && $u != 0 ]] && p=$(pgrep -P "$u" | head -1 || true)
-    [[ -n $p ]] && break
+  # _run records the pids once Android init (or the hold process) is up.
+  local i
+  for i in $(seq 100); do
+    [[ -s $run/pid ]] && break
+    systemctl --user -q is-active "$unit" || break
     sleep 0.1
   done
-  [[ -n $p ]] || { cat "$run/session.out" >&2; die "session failed to start"; }
-  echo "$p" > "$run/pid"
-  echo "session started: ns pid 1 = host pid $p; log: $run/kmsg.log"
+  local p; p=$(ns_pid) || { cat "$run/session.out" >&2; die "session failed to start"; }
+  echo "session started: Android pid 1 = host pid $p; log: $run/kmsg.log"
   if (( fg )); then
     tail -n +1 --pid="$p" -f "$run/kmsg.log" || true
   fi
+  return 0
 }
 
 # Body of the systemd service (internal).
@@ -95,18 +95,43 @@ _run() {
   out=$1 data=$2 run=$out/run
   # Reader holds the FIFO open read-write so writers never block or see EOF.
   cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
+  # Outer namespaces: user (subuid map), mount, pid, cgroup. pivot-exec then
+  # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046
-  exec env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
+  env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
-    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1
+    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
+  local ushare=$! outer="" inner="" i
+  for i in $(seq 200); do
+    [[ -z $outer ]] && outer=$(pgrep -P "$ushare" | head -1 || true)
+    [[ -n $outer ]] && inner=$(pgrep -P "$outer" -x 'init|sh' | head -1 || true)
+    [[ -n $inner ]] && break
+    kill -0 "$ushare" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ -n $inner ]]; then
+    echo "$outer" > "$run/outer.pid"
+    echo "$inner" > "$run/pid"
+    # User-mode networking for the session's own network namespace. No
+    # inbound port forwarding, and --no-map-gw keeps the host's loopback
+    # services unreachable from Android.
+    pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw \
+      --dns-forward 169.254.1.1 -t none -u none -T none -U none \
+      --userns "/proc/$inner/ns/user" --netns "/proc/$inner/ns/net" >>"$run/session.out" 2>&1 &
+    echo $! > "$run/pasta.pid"
+  fi
+  wait "$ushare"
+  [[ -f $run/pasta.pid ]] && kill "$(<"$run/pasta.pid")" 2>/dev/null
+  return 0
 }
 
 stop() {
-  if p=$(ns_pid); then
-    kill -KILL "$p" 2>/dev/null || true   # pid 1 of the ns: takes everything with it
-  fi
+  local p
+  for f in outer.pid pid; do
+    [[ -f $run/$f ]] && p=$(<"$run/$f") && [[ -d /proc/$p ]] && kill -KILL "$p" 2>/dev/null
+  done
   systemctl --user stop "$unit" 2>/dev/null || true
-  rm -f "$run/pid"
+  rm -f "$run/pid" "$run/outer.pid"
   echo "session stopped"
 }
 
@@ -118,9 +143,10 @@ status() {
 # environment from init.environ.rc and the derived classpath.
 exec_in() {
   local p; p=$(ns_pid) || die "not running"
-  local tty=()
-  [[ -t 0 ]] && tty=(-t)
-  exec nsenter -t "$p" -U -m -p -C --preserve-credentials -r -w \
+  # Join the session's own cgroup so nothing started here outlives "stop".
+  local cg; cg=$(systemctl --user show -P ControlGroup "$unit")
+  [[ -n $cg ]] && echo $$ > "/sys/fs/cgroup$cg/cgroup.procs"
+  exec nsenter -t "$p" -U -m -p -C -n -i -u --preserve-credentials -r -w \
     /system/bin/sh -c '
       for f in /init.environ.rc /data/system/environ/classpath; do
         [ -r "$f" ] && eval "$(sed -n "s/^ *export \([^ ]*\) \(.*\)/export \1=\"\2\"/p" "$f")"
@@ -131,11 +157,40 @@ exec_in() {
       exec "$@"' sh "$@"
 }
 
+# Host-safety probes against a live session; each must report "ok".
+selftest() {
+  local p; p=$(ns_pid) || die "not running"
+  {
+    [[ $(readlink "/proc/$p/ns/net") != $(readlink /proc/self/ns/net) ]] &&
+      echo "ok   own network namespace" || echo "FAIL shares the host network namespace"
+    [[ $(readlink "/proc/$p/ns/ipc") != $(readlink /proc/self/ns/ipc) ]] &&
+      echo "ok   own IPC namespace" || echo "FAIL shares the host IPC namespace"
+    grep -q "/$unit.service" "/proc/$p/cgroup" &&
+      echo "ok   runs in $unit.service's cgroup" || echo "FAIL cgroup: $(cat "/proc/$p/cgroup")"
+    grep -Eq '^Groups:[[:space:]]*$' "/proc/$p/status" &&
+      echo "ok   no host supplementary groups" || echo "FAIL $(grep ^Groups "/proc/$p/status")"
+    "$0" exec /system/bin/sh -c '
+      t() { if eval "$2" >/dev/null 2>&1; then echo "FAIL $1"; else echo "ok   $1"; fi; }
+      t "umount of the fusectl mask refused" "umount /sys/fs/fuse/connections"
+      t "lazy umount of a /sys mask refused" "umount -l /sys/fs/cgroup"
+      t "remount /sys rw refused" "mount -o remount,bind,rw /sys"
+      t "sysfs not writable" "echo 1 > /sys/kernel/mm/ksm/run"
+      t "no FUSE connections visible" "[ -n \"\$(ls -A /sys/fs/fuse/connections)\" ]"
+      t "fresh sysfs mount refused" "mkdir -p /tmp/.st && mount -t sysfs s /tmp/.st"
+      t "sysrq refused" "echo h > /proc/sysrq-trigger"
+      t "umount of the staged APEX tree refused" "umount /linuxapk/apex"
+    ' 2>&1 | grep -v 'linker'
+  } > "$run/selftest.txt"
+  cat "$run/selftest.txt"
+  ! grep -q FAIL "$run/selftest.txt"
+}
+
 case ${1:-} in
   start) shift; start "$@" ;;
   stop) stop ;;
   _run) shift; _run "$@" ;;
   status) status ;;
+  selftest) selftest ;;
   log) shift; if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi ;;
   exec) shift; (( $# )) || die "usage: exec CMD..."; exec_in "$@" ;;
   shell) exec_in /system/bin/sh -l ;;

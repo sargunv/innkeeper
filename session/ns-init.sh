@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs as pid 1 inside the session's user, mount, pid and cgroup namespaces
-# (started by linuxapk-session). Assembles the Android root on a tmpfs,
-# pivots into it and execs Android init (second stage).
+# (started by linuxapk-session). Assembles the Android root on a tmpfs, then
+# pivot-exec pivots into it and starts Android init (second stage) in nested,
+# locked namespaces (see helper/pivot-exec.c).
 #
 # Inputs (environment): LINUXAPK_REPO LINUXAPK_OUT LINUXAPK_RUN LINUXAPK_DATA
 #                       LINUXAPK_HOLD=1 to stop before exec'ing init
@@ -86,7 +87,7 @@ chmod 0770 "$R/cache"
 
 # --- /dev -------------------------------------------------------------------
 mount -t tmpfs -o mode=0755,nosuid dev "$R/dev"
-for n in null zero full random urandom tty fuse; do
+for n in null zero full random urandom fuse; do
   [[ -e /dev/$n ]] || continue
   touch "$R/dev/$n"
   mount --bind "/dev/$n" "$R/dev/$n"
@@ -104,13 +105,17 @@ fi
 mkdir -p "$R/dev/binderfs"   # init mounts binderfs itself (init.rc "on init")
 
 # --- /proc, /sys -------------------------------------------------------------
+# A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested
+# namespace's own /proc on top (the kernel only allows that while a fully
+# visible procfs exists, so nothing may be mounted over this one) and binds
+# these stand-ins over it:
+#  - cmdline/bootconfig carry our androidboot.* values;
+#  - init insists on raising ASLR entropy (fatal if it can't), so it gets a
+#    writable mmap_rnd_bits; the host's real setting applies regardless.
 mount -t proc -o nosuid,nodev,noexec proc "$R/proc"
-mount --bind "$run/cmdline" "$R/proc/cmdline"
-[[ -e $R/proc/bootconfig ]] && mount --bind "$run/bootconfig" "$R/proc/bootconfig"
-# init insists on raising ASLR entropy (fatal if it can't): give it a
-# writable stand-in. The host's real setting applies regardless.
-echo 32 > "$run/mmap_rnd_bits"
-mount --bind "$run/mmap_rnd_bits" "$R/proc/sys/vm/mmap_rnd_bits"
+mkdir -p "$R/linuxapk/proc/sys/vm"
+cp "$run/cmdline" "$run/bootconfig" "$R/linuxapk/proc/"
+echo 32 > "$R/linuxapk/proc/sys/vm/mmap_rnd_bits"
 
 # Host safety: inside this user namespace we are root over everything the host
 # user owns. sysfs submounts expose such files: fusectl's per-connection
@@ -148,7 +153,7 @@ if [[ ${LINUXAPK_HOLD:-} == 1 ]]; then
   # init normally binds the staged APEX tree over /apex; do it here so
   # /system/bin/linker64 (-> /apex/com.android.runtime/...) resolves.
   mkdir -p "$R/apex" && mount --bind "$R/linuxapk/apex" "$R/apex"
-  exec "$out/session/pivot-exec" "$R" /system/bin/sleep 2147483647
+  exec "$out/session/pivot-exec" "$R" /system/bin/sh -c "while :; do /system/bin/sleep 3600; done"
 fi
 
 for v in $(compgen -e); do unset "$v"; done
