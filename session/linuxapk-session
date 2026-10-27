@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-# Linux.apk session launcher: boots an Android image (LINUXAPK_IMAGE) in a
-# rootless user + mount + pid + cgroup namespace.
+# Linux.apk session launcher: boots the pinned Android image (image/pin.toml)
+# in a rootless user + mount + pid + cgroup namespace.
 #
-#   linuxapk-session start [-f] [--headless] [--single-window]
-#                          [--ubinder|--kernel-binder] [--single-uid]
+#   linuxapk-session start [-f] [--headless] [--single-uid]
 #                                  boot (in the background unless -f). Each
 #                                  app gets its own host Wayland window
-#                                  (docs/windowing.md); --single-window shows
-#                                  all of Android in one window instead, and
-#                                  --headless opens no windows. Binder is
-#                                  served in userspace (docs/ubinder.md);
-#                                  --kernel-binder uses a private binderfs.
-#                                  --single-uid maps only the host user (no
-#                                  /etc/subuid range) and virtualizes
-#                                  Android's uids (docs/sandbox.md)
+#                                  (docs/windowing.md); --headless opens no
+#                                  windows. Binder is served in userspace
+#                                  (docs/ubinder.md). --single-uid maps only
+#                                  the host user (no /etc/subuid range) and
+#                                  virtualizes Android's uids (docs/sandbox.md)
 #   linuxapk-session prepare       fetch/extract/flatten the selected image only
 #   linuxapk-session image         print the selected image and its paths
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
@@ -30,9 +26,6 @@
 #              LINUXAPK_AUDIO_SINK (PipeWire sink for the session's audio;
 #                default: the desktop's default output),
 #              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log),
-#              LINUXAPK_BINDER (ubinder (default) | kernel),
-#              LINUXAPK_MIRROR_APPS (1/0: desktop entries for apps installed
-#                inside Android; default on for the main session only),
 #              LINUXAPK_TEST=1 (a test session even without an instance),
 #              LINUXAPK_OPEN_URLS=1 (a test session opens links in the host
 #                browser; by default it only logs them, and it shows
@@ -40,10 +33,7 @@
 #              LINUXAPK_SINGLE_UID=1 (same as start --single-uid),
 #              LINUXAPK_UBINDER_DEBUG=1 (broker tracing, and single-uid syscall
 #                counters every 10 s, in session.out; another value is a log
-#                file path inside the session root),
-#              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
-#                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
-#                emulator    SDK emulator image in out/img (tools/extract-image.sh)
+#                file path inside the session root)
 set -euo pipefail
 
 here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
@@ -65,37 +55,26 @@ die() {
   exit 1
 }
 
-# Image selection. Each image is a set of extracted partitions ($img), its
-# flattened APEXes ($apexdir), and a kind whose overrides live in
-# session/image-overlay/<kind>/ (rootfs layers plus extra androidboot.* in
-# "cmdline"), layered above session/rootfs-overlay. See docs/image.md.
+# The image: the pinned AOSP CI build's extracted partitions ($img) and its
+# flattened APEXes ($apexdir). Our overrides are session/rootfs-overlay, the
+# extra androidboot.* values image/cmdline and the vendor properties
+# image/vendor.prop. See docs/image.md.
 images=${LINUXAPK_IMAGES:-$HOME/.local/share/linuxapk/images}
 # The pin's top-level name: the keys before the first [table] header (the
 # [[artifact]] tables have names of their own).
 pin=${LINUXAPK_PIN:-$repo/image/pin.toml}
-pinned=$(awk -F'"' '/^[[:space:]]*\[/ { exit } /^name[[:space:]]*=/ { print $2; exit }' "$pin" 2>/dev/null || true)
-image=${LINUXAPK_IMAGE:-${pinned:-emulator}}
-case $image in
-  emulator) kind=emulator ;;
-  ci-[0-9]*) kind=cuttlefish ;;
-  *) die "unknown LINUXAPK_IMAGE: $image (ci-<build> or emulator)" ;;
-esac
-kind_ovl=$repo/session/image-overlay/$kind
-# Extra androidboot.* for this kind, one per line (e.g. the vendor APEX
-# selection androidboot.vendor.apex.<name>=<file>|none, which apexd and
+image=$(awk -F'"' '/^[[:space:]]*\[/ { exit } /^name[[:space:]]*=/ { print $2; exit }' "$pin" 2>/dev/null || true)
+[[ -n $image ]] || die "no image name in $pin"
+# The extra androidboot.* values, one per line (e.g. the vendor APEX selection
+# androidboot.vendor.apex.<name>=<file>|none, which apexd and
 # tools/flatten-apex.sh both honour).
-kind_cmdline() {
-  [[ -f $kind_ovl/cmdline ]] || return 0
-  sed 's/#.*//' "$kind_ovl/cmdline" | tr -s ' \t' '\n' | grep . || true
+image_cmdline() {
+  sed 's/#.*//' "$repo/image/cmdline" | tr -s ' \t' '\n' | grep .
 }
-if [[ $kind == emulator ]]; then
-  img=$out/img apexdir=$out/root/apex
-else
-  # Shared by all checkouts and instances, so each vendor APEX selection gets
-  # its own flattened tree (never rewritten under a running session).
-  img=$images/$image/img
-  apexdir=$images/$image/apex-$(kind_cmdline | grep '^androidboot\.vendor\.apex\.' | sha256sum | cut -c1-12)
-fi
+# Shared by all checkouts and instances, so each vendor APEX selection gets its
+# own flattened tree (never rewritten under a running session).
+img=$images/$image/img
+apexdir=$images/$image/apex-$(image_cmdline | grep '^androidboot\.vendor\.apex\.' | sha256sum | cut -c1-12)
 
 # Map root to the invoking user (so image files appear root-owned), and the
 # Android uid/gid ranges we need onto our subordinate ids:
@@ -133,11 +112,10 @@ ns_pid() {
 
 cmdline() {
   # androidboot.* (passed via /proc/bootconfig) become ro.boot.* properties.
-  # linuxapk.ubinder gates the binderfs mount in init.rc (0 = kernel binder).
   cat <<EOF
-androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m androidboot.linuxapk.ubinder=${ubinder:-0} androidboot.linuxapk.single_uid=${single_uid:-0}
+androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m
 EOF
-  kind_cmdline
+  image_cmdline
 }
 
 # /vendor/build.prop = the image's plus graphics driver selection from
@@ -157,22 +135,15 @@ vendor_props() {
       printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
     fi
     echo "ro.hardware.vulkan=$vk"
-    # The default 256 KiB main buffer wraps within seconds of boot.
-    echo "ro.logd.size=16M"
-    # Composer backend (hal lane): a window on the host compositor, or none.
+    # Composer backend (hal lane): windows through the bridge, or none.
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
-    # Windowing (docs/windowing.md): a window per app, or display 0 as one.
-    echo "vendor.linuxapk.wm.mode=$wm_mode"
     # Audio (audio lane): tinyalsa buffer sizing for the bridge-backed card.
     if [[ -f $out/vendor-overlay/etc/audio.prop ]]; then
       echo "# --- linuxapk-session: audio ---"
       grep -v '^#' "$out/vendor-overlay/etc/audio.prop"
     fi
-    # Per-image-kind vendor properties (session/image-overlay/<kind>/vendor.prop).
-    if [[ -f $kind_ovl/vendor.prop ]]; then
-      echo "# --- linuxapk-session: $kind ---"
-      cat "$kind_ovl/vendor.prop"
-    fi
+    echo "# --- linuxapk-session: image/vendor.prop ---"
+    cat "$repo/image/vendor.prop"
   )
   {
     # The image's file minus every key set here, so ours take effect.
@@ -201,21 +172,15 @@ check_data_owner() {
 # Make sure the selected image is extracted and flattened, and the generated
 # overlay matches it.
 prepare() {
-  if [[ ! -d $img/system/system ]]; then
-    [[ $kind == emulator ]] && die "no image at $img (run tools/extract-image.sh)"
-    [[ $image == "$pinned" ]] || die "no image at $img (pin it in image/pin.toml and run tools/fetch-image.sh)"
-    "$repo/tools/fetch-image.sh"
-  fi
+  [[ -d $img/system/system ]] || "$repo/tools/fetch-image.sh" "$pin"
   if [[ ! -f $apexdir/apex-info-list.xml ]]; then
-    mkdir -p "$out/session"
-    kind_cmdline >"$out/session/apex-select"
     rm -rf "$apexdir.tmp$sfx"
-    "$repo/tools/flatten-apex.sh" "$img" "$apexdir.tmp$sfx" "$out/session/apex-select"
+    "$repo/tools/flatten-apex.sh" "$img" "$apexdir.tmp$sfx"
     mv -T "$apexdir.tmp$sfx" "$apexdir" 2>/dev/null || rm -rf "$apexdir.tmp$sfx" # lost a race: fine
   fi
   # A stable name for the last-prepared tree, for tools that link against
   # image libraries (e.g. audio/build.sh); sessions use $apexdir itself.
-  if [[ $kind != emulator ]]; then ln -sfn "$(basename "$apexdir")" "$images/$image/apex"; fi
+  ln -sfn "$(basename "$apexdir")" "$images/$image/apex"
   # build.sh's generated overlay holds image-derived files (relaxed copies,
   # APEX fs_config), so rebuild it when the image changes too.
   if [[ ! -x $out/session/pivot-exec ]] ||
@@ -228,37 +193,20 @@ prepare() {
 
 start() {
   local fg=0 wayland=""
-  # Windows go through the bridge's display service (the composer falls back
-  # to the host Wayland socket itself); LINUXAPK_HWC_BACKEND=wayland skips
-  # the bridge.
-  hwc_backend=${LINUXAPK_HWC_BACKEND:-bridge} wm_mode=per-app
-  # Binder backend: ubinder (served in userspace, docs/ubinder.md; the
-  # default) or kernel binder (a private binderfs, which needs the dev SELinux
-  # module on Fedora). LINUXAPK_BINDER sets the default.
-  ubinder=0 single_uid=0
+  # Windows go through the bridge's display service; --headless shows none.
+  hwc_backend=bridge single_uid=0
   [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && single_uid=1
-  case ${LINUXAPK_BINDER:-ubinder} in
-    ubinder) ubinder=1 ;;
-    kernel) ;;
-    *) die "LINUXAPK_BINDER must be kernel or ubinder" ;;
-  esac
   for a in "$@"; do
     case $a in
       -f) fg=1 ;;
       --headless) hwc_backend=headless ;;
-      --single-window) wm_mode=single ;;
-      --ubinder) ubinder=1 ;;
-      --kernel-binder) ubinder=0 ;;
       --single-uid) single_uid=1 ;;
       *) die "unknown start option: $a" ;;
     esac
   done
-  # Virtual uids come from the ubinder broker (binder's sender_euid).
-  ((single_uid && ! ubinder)) && die "--single-uid needs ubinder (not --kernel-binder)"
   check_data_owner
   if [[ $hwc_backend != headless ]]; then
-    # Only the host compositor's socket file goes in (as
-    # /dev/socket/wayland-host), never all of $XDG_RUNTIME_DIR.
+    # The host compositor's socket, for the bridge's display service.
     local wd=${WAYLAND_DISPLAY:-$(systemctl --user show-environment | sed -n 's/^WAYLAND_DISPLAY=//p')}
     local xrd=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
     [[ $wd == /* ]] && wayland=$wd || wayland=$xrd/${wd:-wayland-0}
@@ -267,14 +215,11 @@ start() {
   if p=$(ns_pid); then die "already running (pid $p)"; fi
   prepare
 
-  # The desktop bridge (audio to PipeWire; bridge/, Rust). Optional: without
-  # it Android still boots, with audio going nowhere.
+  # The desktop bridge (bridge/, Rust): windows, input, audio and desktop
+  # integration.
   local bridge=$repo/target/release/linuxapk-bridge
   if [[ ! -x $bridge ]] || [[ -n $(find "$repo/bridge" -newer "$bridge" -name '*.rs' 2>/dev/null) ]]; then
-    (cd "$repo" && cargo build -q --release -j 8 -p linuxapk-bridge) || echo "linuxapk-session: bridge build failed; no audio" >&2
-  fi
-  if ((ubinder)) && [[ ! -x $out/session/overlay/system/bin/linuxapk-ubinder ]]; then
-    die "ubinder helper not built (need cargo; see session/build.sh)"
+    (cd "$repo" && cargo build -q --release -j 8 -p linuxapk-bridge) || die "bridge build failed"
   fi
 
   # iptables with the nf_tables backend (the image's legacy one can't work).
@@ -290,13 +235,11 @@ start() {
   # Everything (log reader, unshare, the namespace) runs in one transient
   # systemd user service, so it outlives this shell and "stop" can take it
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
-  local ubinder_helper=""
-  ((ubinder)) && ubinder_helper=/system/bin/linuxapk-ubinder
-  # The bridge's desktop integration (docs/bridge.md, "System service") uses the
-  # caller's session bus. Desktop entries for apps installed inside Android
-  # (docs/bridge.md, "Apps service"): where they go, and whether to write them.
+  # The bridge's desktop integration (docs/bridge.md, "System service") uses
+  # the caller's session bus, and desktop entries for apps installed inside
+  # Android ("Apps service") go to the caller's XDG_DATA_HOME.
   local integ_env=() v
-  for v in DBUS_SESSION_BUS_ADDRESS XDG_DATA_HOME LINUXAPK_MIRROR_APPS LINUXAPK_SESSION; do
+  for v in DBUS_SESSION_BUS_ADDRESS XDG_DATA_HOME LINUXAPK_SESSION; do
     [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
   done
   # Test sessions (any named instance, or LINUXAPK_TEST=1: lanes, the compat
@@ -311,14 +254,13 @@ start() {
   fi
   integ_env+=("--setenv=LINUXAPK_BRIDGE_QUIET=${quiet[*]}")
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
-    -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
-    --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
+    -p MemoryHigh=6G -p MemoryMax=8G -p MemorySwapMax=0 \
+    --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_WAYLAND="$wayland" \
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
-    --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
-    --setenv=LINUXAPK_UBINDER="$ubinder_helper" --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" \
-    --setenv=LINUXAPK_SINGLE_UID="$single_uid" \
+    --setenv=LINUXAPK_PIN="$pin" --setenv=LINUXAPK_IMAGES="$images" \
+    --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" --setenv=LINUXAPK_SINGLE_UID="$single_uid" \
     "${integ_env[@]}" -- "$here/linuxapk-session" _run "$out" "$data"
-  # _run records the pids once Android init (or the hold process) is up.
+  # _run records the pids once Android init is up.
   for _ in $(seq 100); do
     [[ -s $run/pid ]] && break
     systemctl --user -q is-active "$unit" || break
@@ -345,7 +287,6 @@ start() {
 # docs/bridge.md.
 start_bridge() {
   local bridge=$repo/target/release/linuxapk-bridge base
-  [[ -x $bridge ]] || return 0
   mkdir -p "$run/bridge"
   local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)")
   if [[ ${LINUXAPK_SINGLE_UID:-} != 1 ]]; then
@@ -357,10 +298,8 @@ start_bridge() {
   args+=(--system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
     ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
   [[ ${LINUXAPK_BRIDGE_VERBOSE:-} == 1 ]] && args+=(-v)
-  # Apps installed inside Android get desktop entries: in the default session,
-  # or in any instance with LINUXAPK_MIRROR_APPS=1 (0 turns it off).
-  local mirror=${LINUXAPK_MIRROR_APPS:-}
-  [[ $mirror == 1 || (-z $inst && $mirror != 0) ]] && args+=(--mirror-apps)
+  # Apps installed inside the main session get desktop entries.
+  [[ -n $inst ]] || args+=(--mirror-apps)
   # Log-only sinks for test sessions (see start).
   local q
   for q in ${LINUXAPK_BRIDGE_QUIET:-}; do
@@ -377,7 +316,7 @@ start_bridge() {
     [[ -S $run/bridge/bridge.sock ]] && return 0
     sleep 0.02
   done
-  echo "linuxapk-session: the bridge did not start (see $run/bridge.log)" >&2
+  return 1
 }
 
 # Body of the systemd service (internal).
@@ -387,12 +326,16 @@ _run() {
   [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && single_uid=1
   # Reader holds the FIFO open read-write so writers never block or see EOF.
   cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
-  start_bridge
+  # start shows session.out when the session fails to come up.
+  start_bridge || {
+    echo "the bridge did not start (see $run/bridge.log)" >"$run/session.out"
+    return 1
+  }
   # Outer namespaces: user (subuid map), mount, pid, cgroup. pivot-exec then
   # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046
   env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
-    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_KIND_OVERLAY="$kind_ovl" LINUXAPK_SINGLE_UID="$single_uid" \
+    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_SINGLE_UID="$single_uid" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
     -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
   local ushare=$! outer="" inner=""
@@ -408,10 +351,10 @@ _run() {
     echo "$inner" >"$run/pid"
     # User-mode networking for the session's own network namespace. No
     # inbound port forwarding, and --no-map-gw keeps the host's loopback
-    # services unreachable from Android. The interface is eth1 so Android's
-    # EthernetService brings it up (DHCP from pasta) as the default network;
-    # the emulator's resources pin eth0 as a restricted network. DHCP hands
-    # out 169.254.1.1 as the resolver, which pasta forwards to the host's
+    # services unreachable from Android. Android's EthernetService brings eth1
+    # up (DHCP from pasta) as the default network, with default capabilities
+    # since the image's connectivity overlay is blanked (docs/image.md). DHCP
+    # hands out 169.254.1.1 as the resolver, which pasta forwards to the host's
     # first IPv4 nameserver (with -D, pasta no longer picks it by itself).
     local dns_host
     dns_host=$(awk '$1 == "nameserver" && $2 !~ /:/ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)
@@ -466,10 +409,9 @@ exec_in() {
       export PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin
       export HOME=/data/local/tmp TMPDIR=/data/local/tmp
       cd /
-      # ubinder mode: binder needs the seccomp filter that only descendants
-      # of init have, so run the command through the exec relay.
-      [ -S /dev/socket/linuxapk-exec ] && exec /system/bin/linuxapk-exec "$@"
-      exec "$@"' sh "$@"
+      # Binder needs the seccomp filter that only descendants of init have,
+      # so run the command through the exec relay.
+      exec /system/bin/linuxapk-exec "$@"' sh "$@"
 }
 
 # selftest's group probes for a single-uid session (pid 1 = $1).
@@ -556,7 +498,7 @@ case ${1:-} in
     ;;
   stop) stop ;;
   prepare) prepare ;;
-  image) printf 'image=%s\nkind=%s\nimg=%s\napex=%s\n' "$image" "$kind" "$img" "$apexdir" ;;
+  image) printf 'image=%s\nimg=%s\napex=%s\n' "$image" "$img" "$apexdir" ;;
   _run)
     shift
     _run "$@"
@@ -574,7 +516,7 @@ case ${1:-} in
     ;;
   shell) exec_in /system/bin/sh -l ;;
   *)
-    sed -n '2,22s/^# \{0,1\}//p' "$0"
+    sed -n '2,20s/^# \{0,1\}//p' "$0"
     exit 1
     ;;
 esac

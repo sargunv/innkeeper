@@ -1,3 +1,3 @@
 # Host-side tooling for image work, so dev machines never need sudo/dnf.
 FROM registry.fedoraproject.org/fedora:44
-RUN dnf -y install android-tools erofs-utils e2fsprogs lz4 cpio file util-linux python3 && dnf clean all
+RUN dnf -y install android-tools erofs-utils e2fsprogs file python3 && dnf clean all

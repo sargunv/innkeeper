@@ -3,8 +3,7 @@
 # (tools/fetch-image.sh); we never redistribute it. See docs/image.md, which
 # also explains how to bump this pin.
 
-# Image name: LINUXAPK_IMAGE value and directory under
-# ~/.local/share/linuxapk/images/.
+# Image name: the directory under ~/.local/share/linuxapk/images/.
 name = "ci-16644040"
 branch = "aosp-android-latest-release"
 build_id = "16644040"

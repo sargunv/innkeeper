@@ -3,7 +3,7 @@
 # extract its partitions (see docs/image.md):
 #   $LINUXAPK_IMAGES/<name>/dl/   artifacts from image/pin.toml (resumable)
 #   $LINUXAPK_IMAGES/<name>/img/  system, system_ext, product, vendor, odm,
-#                                 *_dlkm, ramdisk (the layout of out/img)
+#                                 *_dlkm (tools/extract-image.sh)
 # LINUXAPK_IMAGES defaults to ~/.local/share/linuxapk/images. The session
 # flattens the APEXes itself (per vendor APEX selection), on first start.
 #

@@ -1,2 +1,2 @@
-<!-- linuxapk: emulator HAL disabled; see docs/m0-session.md -->
+<!-- linuxapk: disabled image HAL (sensors); see vendor/etc/init/android.hardware.sensors-service-multihal.rc -->
 <manifest version="9.0" type="device"/>

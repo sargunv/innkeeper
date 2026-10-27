@@ -5,28 +5,26 @@
 #   <out>/apex-info-list.xml       what apexd writes to /apex/apex-info-list.xml
 # Unprivileged: runs inside the host-tools container (tools/hosttools.sh).
 #
-# usage: flatten-apex.sh <extracted-image-dir> <out-dir> [cmdline-file]
-#   e.g. flatten-apex.sh out/img out/root/apex
+# usage: flatten-apex.sh <extracted-image-dir> <out-dir>
 #
 # Multi-install vendor APEXes (several files with one manifest name, e.g.
 # cuttlefish's keymint.rust_nonsecure / keymint.rust_cf_remote) are selected
 # the way apexd does it: androidboot.vendor.apex.<name>=<file without .apex>
 # (ro.boot.vendor.apex.*) picks one, and "none" drops a vendor APEX. The
-# selections are read from cmdline-file (whitespace-separated
-# androidboot.*=value tokens, # comments), the same file the session passes
-# to init.
+# selections are read from image/cmdline (whitespace-separated
+# androidboot.*=value tokens, # comments), which the session also passes to
+# init.
 set -euo pipefail
 if [[ ! -e /run/.containerenv ]]; then
   exec "$(dirname "$0")/hosttools.sh" "$0" "$@"
 fi
 
-img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir> [cmdline-file]}")
-out=${2:?usage: flatten-apex.sh <img-dir> <out-dir> [cmdline-file]}
+img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir>}")
+out=${2:?usage: flatten-apex.sh <img-dir> <out-dir>}
+cmdline=$(dirname "$0")/../image/cmdline
 declare -A sel=()
-if [[ -n ${3:-} ]]; then
-  while read -r k v; do sel[$k]=$v; done < <(sed 's/#.*//' "$3" | tr -s ' \t' '\n' |
-    sed -n 's/^androidboot\.vendor\.apex\.\([^=]*\)=\(.*\)/\1 \2/p')
-fi
+while read -r k v; do sel[$k]=$v; done < <(sed 's/#.*//' "$cmdline" | tr -s ' \t' '\n' |
+  sed -n 's/^androidboot\.vendor\.apex\.\([^=]*\)=\(.*\)/\1 \2/p')
 mkdir -p "$out"
 out=$(realpath "$out")
 work=$(mktemp -d)

@@ -1,6 +1,7 @@
 # Device rc for androidboot.hardware=linuxapk (imported by init.rc as
-# /vendor/etc/init/hw/init.${ro.hardware}.rc). Replaces the emulator's
-# init.ranchu.rc. androidboot.* values from linuxapk-session can override.
+# /vendor/etc/init/hw/init.${ro.hardware}.rc). Replaces the image's
+# init.cutf_cvm.rc (blanked in this overlay). androidboot.* values from
+# linuxapk-session can override.
 
 on early-init
     # ro.hardware.egl/vulkan and ro.opengles.version come from
@@ -22,7 +23,14 @@ on late-fs
     setprop ro.crypto.state unsupported
     trigger nonencrypted
 
-# logd ignores ro.logd.size here (the buffer stays at 256 KiB and boot logs wrap
-# within seconds), so enlarge the buffers as soon as logd is up.
+# The default 256 KiB log buffers wrap within seconds of boot, so enlarge them
+# as soon as logd is up.
 on property:logd.ready=true
     exec - root root -- /system/bin/logcat -G 16M
+
+on property:sys.boot_completed=1
+    # SystemUI's "Viewing full screen" cling takes focus from every immersive
+    # app (games) until dismissed. On a desktop it has no purpose, so mark it
+    # as already confirmed.
+    # (As root: "cmd settings" from uid system hits an NPE resolving the caller.)
+    exec_background - root root -- /system/bin/settings put secure immersive_mode_confirmations confirmed

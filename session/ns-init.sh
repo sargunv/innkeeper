@@ -5,10 +5,9 @@
 # locked namespaces (see helper/pivot-exec.c).
 #
 # Inputs (environment): LINUXAPK_REPO LINUXAPK_OUT LINUXAPK_RUN LINUXAPK_DATA
-#                       LINUXAPK_IMG, LINUXAPK_APEX (the selected image's
-#                         partitions and flattened APEXes),
-#                       LINUXAPK_KIND_OVERLAY (session/image-overlay/<kind>)
-#                       LINUXAPK_HOLD=1 to stop before exec'ing init
+#                       LINUXAPK_IMG, LINUXAPK_APEX (the image's partitions
+#                         and flattened APEXes)
+#                       LINUXAPK_SINGLE_UID, LINUXAPK_UBINDER_DEBUG
 set -euo pipefail
 
 # util-linux 2.41.5's fd-based mount API (fsopen/fsconfig/fsmount) fails
@@ -18,11 +17,8 @@ set -euo pipefail
 export LIBMOUNT_FORCE_MOUNT2=always
 
 repo=$LINUXAPK_REPO out=$LINUXAPK_OUT run=$LINUXAPK_RUN data=$LINUXAPK_DATA
-img=${LINUXAPK_IMG:-$out/img}
-apex=${LINUXAPK_APEX:-$out/root/apex}
+img=$LINUXAPK_IMG apex=$LINUXAPK_APEX
 ovl=$repo/session/rootfs-overlay
-# Per-image-kind overrides, above the common ones (absent dirs are skipped).
-kovl=${LINUXAPK_KIND_OVERLAY:-$ovl/none}
 
 log() { echo "ns-init: $*" >&2; }
 
@@ -67,16 +63,13 @@ layer_mount() {
 }
 
 # --- partitions -------------------------------------------------------------
-layer_mount "$R/system" "$kovl/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
-layer_mount "$R/vendor" "$kovl/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
-layer_mount "$R/system_ext" "$kovl/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
-layer_mount "$R/product" "$kovl/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
-# odm: its own partition (CI image), or a directory inside vendor (emulator).
-odm=$img/odm
-[[ -d $odm ]] || odm=$img/vendor/odm
-layer_mount "$R/odm" "$kovl/odm" "$ovl/odm" "$out/session/overlay/odm" "$odm"
+layer_mount "$R/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
+layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
+layer_mount "$R/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
+layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
+layer_mount "$R/odm" "$out/session/overlay/odm" "$img/odm"
 for p in system_dlkm vendor_dlkm odm_dlkm; do
-  if [[ -d $img/$p ]]; then layer_mount "$R/$p" "$img/$p"; fi
+  layer_mount "$R/$p" "$img/$p"
 done
 
 # Top-level entries of the system-as-root image (symlinks, init.environ.rc,
@@ -94,9 +87,6 @@ for e in "$img/system"/* "$img/system"/.[!.]*; do
   fi
 done
 rm -rf "$R/lost+found"
-# Root-level overrides (e.g. init.environ.rc additions).
-if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
-if [[ -d $kovl/root ]]; then cp -a "$kovl/root/." "$R/"; fi
 
 # --- /apex: pre-flattened APEXes instead of apexd ---------------------------
 # Init mounts an empty tmpfs over /apex early in second stage, so the tree is
@@ -123,7 +113,7 @@ fi
 # subordinate owners (see session/build.sh).
 su_apex=$out/session/overlay-su/apex
 [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] || su_apex=/nonexistent
-layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$aovl" "$su_apex" "$out/session/overlay/apex" "$apex"
+layer_mount "$R/linuxapk/apex" "$ovl/apex" "$aovl" "$su_apex" "$out/session/overlay/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
@@ -132,13 +122,11 @@ sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]
 # --- writable state -----------------------------------------------------------
 mkdir -p "$data"
 mount --bind "$data" "$R/data"
-for d in linkerconfig metadata cache mnt storage tmp data_mirror; do
-  # Images without a cache partition have /cache -> /data/cache.
-  [[ -L $R/$d ]] && continue
+# (The image has no cache partition: /cache -> /data/cache.)
+for d in linkerconfig metadata mnt storage tmp data_mirror; do
   mkdir -p "$R/$d"
   mount -t tmpfs -o mode=0755 "$d" "$R/$d"
 done
-[[ -L $R/cache ]] || chmod 0770 "$R/cache"
 
 # --- /dev -------------------------------------------------------------------
 mount -t tmpfs -o mode=0755,nosuid dev "$R/dev"
@@ -154,27 +142,19 @@ if [[ -c /dev/net/tun ]]; then
   touch "$R/dev/tun"
   mount --bind /dev/net/tun "$R/dev/tun"
 fi
-# The host Wayland compositor's socket (just that file), for the composer HAL.
-if [[ -n ${LINUXAPK_WAYLAND:-} && -S $LINUXAPK_WAYLAND ]]; then
-  mkdir -p "$R/dev/socket"
-  touch "$R/dev/socket/wayland-host"
-  mount --bind "$LINUXAPK_WAYLAND" "$R/dev/socket/wayland-host"
-fi
 # The desktop bridge's socket directory (the launcher started the bridge;
 # it may restart and recreate its socket in there). Group audio (AID 1005,
 # a subordinate gid on the host) can enter it: the audio HALs run as
 # audioserver with that group.
-if [[ -d $run/bridge ]]; then
-  if [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]]; then
-    # Single-uid mode: every Android process is uid 0 to the kernel.
-    chmod 0700 "$run/bridge"
-  else
-    chown 0:1005 "$run/bridge"
-    chmod 0750 "$run/bridge"
-  fi
-  mkdir -p "$R/dev/socket/linuxapk"
-  mount --bind "$run/bridge" "$R/dev/socket/linuxapk"
+if [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]]; then
+  # Single-uid mode: every Android process is uid 0 to the kernel.
+  chmod 0700 "$run/bridge"
+else
+  chown 0:1005 "$run/bridge"
+  chmod 0750 "$run/bridge"
 fi
+mkdir -p "$R/dev/socket/linuxapk"
+mount --bind "$run/bridge" "$R/dev/socket/linuxapk"
 # Android init logs to /dev/kmsg: hand it the host-side FIFO instead.
 touch "$R/dev/kmsg"
 mount --bind "$run/kmsg" "$R/dev/kmsg"
@@ -188,19 +168,16 @@ if [[ -d /dev/dri ]]; then
   mkdir -p "$R/dev/dri"
   mount --rbind /dev/dri "$R/dev/dri"
 fi
-mkdir -p "$R/dev/binderfs" # init mounts binderfs itself (init.rc "on init")
-# ubinder: no binderfs, so create dummy, readable binder device nodes here
-# (before the seccomp filter is installed). libbinder gates on
+# Binder is served in userspace, so create dummy, readable binder device nodes
+# here (before the seccomp filter is installed). libbinder gates on
 # access("/dev/binder", R_OK) in selfIfKernelBinderEnabled(); the files must
 # exist and be readable. Real opens are intercepted by the supervisor, which
 # injects a memfd, so these files are never actually opened or read. init
 # cannot create them itself (its own open of /dev/binder is intercepted).
-if [[ -n ${LINUXAPK_UBINDER:-} ]]; then
-  for d in binder hwbinder vndbinder; do
-    : >"$R/dev/$d"
-    chmod 0666 "$R/dev/$d"
-  done
-fi
+for d in binder hwbinder vndbinder; do
+  : >"$R/dev/$d"
+  chmod 0666 "$R/dev/$d"
+done
 
 # --- /proc, /sys -------------------------------------------------------------
 # A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested
@@ -254,25 +231,15 @@ if touch "$R/sys/.linuxapk-rw-probe" 2>/dev/null; then
 fi
 
 # --- go -----------------------------------------------------------------------
-if [[ ${LINUXAPK_HOLD:-} == 1 ]]; then
-  # Debug: assemble the root but don't run init; "linuxapk-session exec" works.
-  log "holding before init (LINUXAPK_HOLD=1)"
-  # init normally binds the staged APEX tree over /apex; do it here so
-  # /system/bin/linker64 (-> /apex/com.android.runtime/...) resolves.
-  mkdir -p "$R/apex" && mount --bind "$R/linuxapk/apex" "$R/apex"
-  exec "$out/session/pivot-exec" "$R" /system/bin/sh -c "while :; do /system/bin/sleep 3600; done"
-fi
-
-# Preserve the ubinder helper path across the env wipe (pivot-exec reads it to
-# decide whether to install the binder seccomp filter and fork the broker).
-ubinder_helper=${LINUXAPK_UBINDER:-}
+# Android starts with a clean environment, plus what pivot-exec and the broker
+# read.
 ubinder_debug=${LINUXAPK_UBINDER_DEBUG:-}
 single_uid=${LINUXAPK_SINGLE_UID:-}
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
 export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
-[[ -n $ubinder_helper ]] && export LINUXAPK_UBINDER=$ubinder_helper
+export LINUXAPK_UBINDER=/system/bin/linuxapk-ubinder
 [[ -n $ubinder_debug ]] && export LINUXAPK_UBINDER_DEBUG=$ubinder_debug
 [[ $single_uid == 1 ]] && export LINUXAPK_SINGLE_UID=1
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

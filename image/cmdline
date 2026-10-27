@@ -11,7 +11,7 @@ androidboot.vendor.apex.com.android.hardware.keymint=com.android.hardware.keymin
 androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure
 
 # Graphics: our allocator, mapper, composer3 and RADV/lavapipe
-# (out/vendor-overlay) replace minigbm, ranchu/drm_hwcomposer and gfxstream.
+# (out/vendor-overlay) replace minigbm, the image's composers and gfxstream.
 androidboot.vendor.apex.com.android.hardware.graphics.composer=none
 androidboot.vendor.apex.com.google.cf.gralloc=none
 androidboot.vendor.apex.com.google.cf.vulkan=none

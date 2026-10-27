@@ -17,14 +17,13 @@ ro.rebootescrow.device=
 ro.vendor.hwcomposer.pmem=
 vendor.hwc.drm.device=
 
-# No lock screen (a session isn't a phone). The emulator image's setup leaves
-# the lock screen disabled; this is the same default for LockSettingsService.
+# No lock screen (a session isn't a phone): LockSettingsService's default.
 ro.lockscreen.disable.default=true
 
 # Cuttlefish lists arm64-v8a for its (absent here) native bridge; with
 # ro.dalvik.vm.native.bridge=0 arm64-only apps would install and then fail at
-# runtime. Advertise x86_64 only, as the emulator image does, until a
-# translator lands (M6). Set explicitly, init then skips deriving them from
+# runtime. Advertise x86_64 only until a translator lands (M6). Set
+# explicitly, init then skips deriving them from
 # ro.{product,odm,vendor,system}.product.cpu.abilist* (odm's would win).
 ro.product.cpu.abilist=x86_64
 ro.product.cpu.abilist64=x86_64

@@ -1,2 +1,2 @@
-<!-- linuxapk: emulator HAL disabled; see docs/m0-session.md -->
+<!-- linuxapk: blanks the image's minigbm mapper; our mapper (out/vendor-overlay) replaces it -->
 <manifest version="9.0" type="device"/>

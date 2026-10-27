@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # Build the session's generated pieces into out/session/:
 #   overlay/system/lib64/liblinuxapk_shim.so   (NDK; LD_PRELOADed into init)
-#   overlay/vendor/lib64/liblinuxapk_shim.so
+#   overlay/system/bin/linuxapk-exec           (static; the exec relay)
+#   overlay/system/bin/linuxapk-ubinder        (Rust; the binder broker)
 #   overlay/<partition>/...                    image files with relaxed modes
 #   pivot-exec                                 (static; pivots and execs init)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
 out=${LINUXAPK_OUT:-$repo/out}
-# The selected image (linuxapk-session passes these; default: emulator layout).
-img=${LINUXAPK_IMG:-$out/img}
-apex=${LINUXAPK_APEX:-$out/root/apex}
+# The image (linuxapk-session prepare passes these; default: what it selects).
+img=${LINUXAPK_IMG:-} apex=${LINUXAPK_APEX:-}
+if [[ -z $img || -z $apex ]]; then
+  while IFS='=' read -r k v; do
+    case $k in
+      img) img=$v ;;
+      apex) apex=$v ;;
+    esac
+  done < <("$here/linuxapk-session" image)
+fi
 
 ndk=${ANDROID_NDK_HOME:-}
 if [[ -z $ndk ]]; then
@@ -25,40 +33,34 @@ cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang"
 # Parts of the overlay are owned by subordinate ids (see below): remove it
 # from inside a matching user namespace.
 podman unshare rm -rf "$out/session/overlay"
-mkdir -p "$out/session/overlay/system/lib64" "$out/session/overlay/vendor/lib64"
-so="$out/session/overlay/system/lib64/liblinuxapk_shim.so"
+mkdir -p "$out/session/overlay/system/lib64" "$out/session/overlay/system/bin"
 "$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -Wl,-soname,liblinuxapk_shim.so \
-  -o "$so" "$here/shim/linuxapk_shim.c"
-cp "$so" "$out/session/overlay/vendor/lib64/"
+  -o "$out/session/overlay/system/lib64/liblinuxapk_shim.so" "$here/shim/linuxapk_shim.c"
 "$cc" -static -O2 -Wall -Werror -o "$out/session/pivot-exec" "$here/helper/pivot-exec.c" "$here/helper/bpfemu.c"
-# ubinder mode's exec relay (init service + `linuxapk-session exec` client).
-mkdir -p "$out/session/overlay/system/bin"
+# The exec relay (init service + `linuxapk-session exec` client).
 "$cc" -static -O2 -Wall -Werror -o "$out/session/overlay/system/bin/linuxapk-exec" "$here/helper/linuxapk-exec.c"
 
-# ubinder broker helper (Rust, dynamic bionic): installed as
-# /system/bin/linuxapk-ubinder. pivot-exec forks+execs it in ubinder mode to
-# serve the binder seccomp listener (session/helper, ubinder/src/sys.rs). Built
-# out of tree with the NDK like every other vendor/system binary.
-if [[ -d $repo/ubinder ]] && command -v cargo >/dev/null; then
-  ar="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-  strip="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-  # The parent execs the helper before init mounts /apex, and the seccomp
-  # filter traps every openat, so the helper must not depend on the APEX
-  # linker. Use Android's bootstrap linker (in /system), which loads bootstrap
-  # bionic from /system/lib64/bootstrap and is available from early boot.
-  (
-    cd "$repo" &&
-      env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$ar" \
-        CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
-        RUSTFLAGS="-C link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64" \
-        cargo build -q -p ubinder --release --target x86_64-linux-android --bin linuxapk-ubinder -j8
-  )
-  mkdir -p "$out/session/overlay/system/bin"
-  cp "$repo/target/x86_64-linux-android/release/linuxapk-ubinder" \
-    "$out/session/overlay/system/bin/linuxapk-ubinder"
-  "$strip" --strip-unneeded "$out/session/overlay/system/bin/linuxapk-ubinder" 2>/dev/null || true
-  chmod 0755 "$out/session/overlay/system/bin/linuxapk-ubinder"
-fi
+# The binder broker (Rust, dynamic bionic): installed as
+# /system/bin/linuxapk-ubinder. pivot-exec forks+execs it to serve the binder
+# seccomp listener (session/helper, ubinder/src/sys.rs). Built out of tree with
+# the NDK like every other vendor/system binary.
+ar="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+strip="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+# The parent execs the broker before init mounts /apex, and the seccomp filter
+# traps every openat, so the broker must not depend on the APEX linker. Use
+# Android's bootstrap linker (in /system), which loads bootstrap bionic from
+# /system/lib64/bootstrap and is available from early boot.
+(
+  cd "$repo" &&
+    env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$ar" \
+      CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
+      RUSTFLAGS="-C link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64" \
+      cargo build -q -p ubinder --release --target x86_64-linux-android --bin linuxapk-ubinder -j8
+)
+broker=$out/session/overlay/system/bin/linuxapk-ubinder
+cp "$repo/target/x86_64-linux-android/release/linuxapk-ubinder" "$broker"
+"$strip" --strip-unneeded "$broker"
+chmod 0755 "$broker"
 
 # The extracted image lost its fs_config ownership: every file is owned by
 # the invoking user (root in the session), so files meant for e.g.
@@ -79,7 +81,7 @@ relax system "$img/system/system"
 relax vendor "$img/vendor"
 relax system_ext "$img/system_ext"
 relax product "$img/product"
-if [[ -d $img/odm ]]; then relax odm "$img/odm"; else relax odm "$img/vendor/odm"; fi
+relax odm "$img/odm"
 
 # fs_config ownership/modes that code verifies at runtime. Copies are chowned
 # inside "podman unshare", whose id map (0 = us, 1.. = /etc/subuid) matches the

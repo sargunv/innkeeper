@@ -1,8 +1,0 @@
-# Linux.apk additions for the AOSP CI cuttlefish image (see docs/image.md).
-
-on property:sys.boot_completed=1
-    # SystemUI's "Viewing full screen" cling takes focus from every immersive
-    # app (games) until dismissed; the emulator image never shows it. On a
-    # desktop it has no purpose, so mark it as already confirmed.
-    # (As root: "cmd settings" from uid system hits an NPE resolving the caller.)
-    exec_background - root root -- /system/bin/settings put secure immersive_mode_confirmations confirmed
