@@ -199,3 +199,33 @@ EXPORT gzFile gzopen(const char* path, const char* mode) {
     f = real("/linuxapk/config.gz", mode);
   return f;
 }
+
+// Quota project ids: vold (and installd) tag app directories with
+// FS_IOC_FSSETXATTR and FS_PROJINHERIT_FL. Only the initial user namespace may
+// change a project id, so the first fails with EINVAL here, and filesystems
+// without project quotas (btrfs) reject the flag. vold forgives that only on
+// ext4 ("legacy userdata"); elsewhere it gives up on the app's external dirs,
+// getExternalFilesDir() returns null, and apps that use it crash (Godot does
+// at startup). Treat the refusal as success, as vold does on ext4, and set the
+// other flags without FS_PROJINHERIT_FL.
+#include <linux/fs.h>
+#include <stdarg.h>
+#include <sys/ioctl.h>
+EXPORT int ioctl(int fd, int request, ...) {
+  va_list ap;
+  va_start(ap, request);
+  void* arg = va_arg(ap, void*);
+  va_end(ap);
+  long rc = syscall(SYS_ioctl, fd, request, arg);
+  if (rc == -1 && (errno == EINVAL || errno == EPERM || errno == EOPNOTSUPP)) {
+    if ((unsigned)request == FS_IOC_FSSETXATTR) return 0;
+    if (
+      (unsigned)request == FS_IOC_SETFLAGS && arg &&
+      (*(unsigned*)arg & FS_PROJINHERIT_FL)
+    ) {
+      unsigned flags = *(unsigned*)arg & ~FS_PROJINHERIT_FL;
+      return syscall(SYS_ioctl, fd, request, &flags);
+    }
+  }
+  return rc;
+}
