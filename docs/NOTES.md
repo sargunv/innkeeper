@@ -262,6 +262,13 @@ Causes:
   (`tools/microg.sh`); Play Services apps need signature spoofing, which AOSP 17
   lacks (smallest patch in [microg.md](microg.md)). UnifiedPush (ntfy) works.
 
+- 2026-10-27 (integb): **document picker and installs from inside Android.**
+  `OPEN_DOCUMENT`/`GET_CONTENT`/`CREATE_DOCUMENT`/`OPEN_DOCUMENT_TREE` open the
+  desktop's FileChooser portal over the app's window; the results are grants in
+  the bridge served by a DocumentsProvider (only what the user picked). Apps
+  that F-Droid or `pm install` installs get desktop entries (main session only
+  by default). See [bridge.md](bridge.md) (documents and apps services).
+
 ## Backlog (unassigned)
 
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
