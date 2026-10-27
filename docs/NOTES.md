@@ -72,11 +72,11 @@ Rules:
 ## Current state
 
 - 2026-10-26: repo created. M0 started.
-- 2026-10-27 (session): real init boots rootless; SurfaceFlinger runs on the
-  display lane's HALs (ANGLE on RADV); system_server reaches
-  NetworkManagementService and blocks on netd, which needs eBPF plus legacy
-  iptables and can't get either rootless. Needs a decision; see
-  `docs/m0-session.md`.
+- 2026-10-27 (session): **M0a reached:** `sys.boot_completed=1` rootless, with
+  no AOSP patches. eBPF is emulated through seccomp user notification
+  (`session/helper/bpfemu.c`), and iptables uses the nf_tables backend. The host
+  Wayland socket is bound at `/dev/socket/wayland-host` (`start --headless` to
+  skip it). See `docs/m0-session.md`.
 - 2026-10-27: AOSP 17 synced (`~/aosp/a17`, 158 GB). First full build running as
   systemd unit `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's
   BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by

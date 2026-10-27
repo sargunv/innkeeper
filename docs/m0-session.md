@@ -1,17 +1,19 @@
 # M0a: the rootless session
 
 Boots the Android 17 emulator image (`out/img`) under real Android `init` in a
-rootless namespace on the dev host. Status: **system_server runs to
-`StartNetworkManagementService` (82 system services started, PackageManager
-ready) and then blocks on netd.** See "Blockers".
+rootless namespace on the dev host. Status: **M0a reached:
+`sys.boot_completed=1` with no root and no AOSP patches**, about 4 s from zygote
+start. system_server stays up with 289 binder services, and SystemUI and
+Launcher3 run. See "What boots" and "Open issues".
 
 ## How to run
 
 ```sh
 tools/extract-image.sh ~/Android/Sdk/system-images/android-37.0/default/x86_64 out/img  # once
-session/linuxapk-session start        # builds the shim, flattens APEXes on first run
+session/linuxapk-session start        # first run: builds the shim and iptables, flattens APEXes
+session/linuxapk-session start --headless   # no host Wayland window
 session/linuxapk-session log -f       # init's /dev/kmsg (a FIFO read on the host)
-session/linuxapk-session exec logcat -d
+session/linuxapk-session exec logcat -d -b main,system,crash   # (-b all can hang)
 session/linuxapk-session exec getprop sys.boot_completed
 session/linuxapk-session shell
 session/linuxapk-session selftest     # host-safety probes; all must say "ok"
@@ -25,15 +27,17 @@ with `podman unshare rm -rf ~/.local/share/linuxapk/data`.
 
 ## How it works
 
-| Piece                                                                               | File                                          |
-| ----------------------------------------------------------------------------------- | --------------------------------------------- |
-| APEX flattening (manifest name → `out/root/apex/<name>`, `apex-info-list.xml`)      | `tools/flatten-apex.sh`                       |
-| Launcher (transient systemd user service `linuxapk-session`, pasta, exec, selftest) | `session/linuxapk-session`                    |
-| Root assembly on tmpfs (runs as pid 1 of the outer namespaces)                      | `session/ns-init.sh`                          |
-| pivot_root, nested locked namespaces, fresh `/proc`, exec init                      | `session/helper/pivot-exec.c` (NDK, static)   |
-| LD_PRELOAD shim                                                                     | `session/shim/linuxapk_shim.c`                |
-| Overrides layered over the image                                                    | `session/rootfs-overlay/{system,vendor,apex}` |
-| Generated overlay layer (shim, relaxed-mode copies, vendor `build.prop`)            | `session/build.sh` → `out/session/`           |
+| Piece                                                                               | File                                                               |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| APEX flattening (manifest name → `out/root/apex/<name>`, `apex-info-list.xml`)      | `tools/flatten-apex.sh`                                            |
+| Launcher (transient systemd user service `linuxapk-session`, pasta, exec, selftest) | `session/linuxapk-session`                                         |
+| Root assembly on tmpfs (runs as pid 1 of the outer namespaces)                      | `session/ns-init.sh`                                               |
+| pivot_root, nested locked namespaces, fresh `/proc`, exec init                      | `session/helper/pivot-exec.c` (NDK, static)                        |
+| LD_PRELOAD shim                                                                     | `session/shim/linuxapk_shim.c`                                     |
+| Syscall emulation (bpf() and friends) via seccomp user notification                 | `session/helper/bpfemu.c`                                          |
+| iptables with the nf_tables backend (NDK, podman), plus a `-m bpf` filter           | `session/iptables/`, `rootfs-overlay/system/bin/linuxapk-iptables` |
+| Overrides layered over the image                                                    | `session/rootfs-overlay/{system,vendor,apex}`                      |
+| Generated overlay layer (shim, relaxed-mode copies, vendor `build.prop`)            | `session/build.sh` → `out/session/`                                |
 
 Namespaces: the outer `unshare` maps root to the host user, plus Android uids
 1–29999, 50000–59999 and 90000–99999 onto `/etc/subuid`. `pivot-exec` then
@@ -65,12 +69,45 @@ Decisions:
   namespace) adds erofs "file-backed mount" entries to the `/proc/mounts` that
   apexd reads, so it reports all 50 APEXes active, and PackageManager finds the
   apks-in-apex.
+- **eBPF is emulated in userspace.** pivot-exec installs a seccomp filter on
+  init, inherited by every Android process. It turns `bpf(2)` into user
+  notifications, which a pivot-exec thread answers (`helper/bpfemu.c`).
+  - Maps (hash, array, per-CPU, LRU, LPM, local storage) live in that thread.
+    Processes hold injected memfds that stand in for real object fds.
+  - Pins are files on a session-private `/sys/fs/bpf` tmpfs.
+  - Program load, attach and links succeed and do nothing; `PROG_QUERY` reports
+    the attachments. Traffic accounting and the per-UID firewall are no-ops.
+  - Because it works at the syscall level, there are no linker-namespace issues:
+    netbpfload, the platform bpfloader, netd and system_server's JNI code are
+    all covered.
+  - The same supervisor also fakes:
+    - `statfs` → `BPF_FS_MAGIC` for `/sys/fs/bpf` (libbpf pinning);
+    - `getsockopt(SO_ANDROID_DROP_REASON)` (netd self-test);
+    - raising `RLIMIT_MEMLOCK` (netd treats failure as fatal);
+    - `security.selinux` reads for clatd and the BPF pins (ClatCoordinator
+      verifies them);
+    - `timerfd_create(CLOCK_*_ALARM)` → plain clocks;
+    - SCHED_FIFO/RR requests.
+  - The real netbpfload runs through `linuxapk-bpfload`, in a private mount
+    namespace with writable stand-ins for the BPF sysctls.
+- **iptables:** upstream iptables 1.8.11 with the nf_tables backend, which works
+  in the session's own network namespace. It's layered over the image's legacy
+  binary. `linuxapk-iptables` drops `-m bpf` rules, which is equivalent to
+  programs that never match, and keeps netd's `#PING` handshake.
+- **The shim also covers** `gzopen("/proc/config.gz")` (served from the host's
+  `/boot/config-*`). The services that get it via rc `setenv` are
+  servicemanager, zygote (and so system_server and apps), vold and installd.
 - init.rc edits (diff against the committed stock copy): no ueventd (it can't
   open a uevent socket, so `ro.cold_boot_done` is set directly); binderfs
   without `stats=global`; `sys.use_memfd=true` (no ashmem). Other overrides: a
-  cgroup2-only `cgroups.json`; `bpfloader` and `netd1shot` as no-ops; netd runs
-  once; a fake `mmap_rnd_bits`. Image files whose fs_config owner was lost
-  (`logd` 0550 and others) get world r/x copies.
+  cgroup2-only `cgroups.json`; netd1shot is a no-op; netd runs once; a fake
+  `mmap_rnd_bits`. Image files whose fs_config owner was lost (`logd` 0550 and
+  others) get world r/x copies. clatd gets its real owner and setuid bits
+  through `podman unshare`, whose id map matches the session's.
+- **Host devices and sockets:** `/dev/tun` (interfaces stay in the session's
+  network namespace) and the host Wayland socket file as
+  `/dev/socket/wayland-host`, plus `vendor.linuxapk.hwc.backend=wayland`. Both
+  are only set up when not `--headless`.
 - **Vendor:** `init.linuxapk.rc` replaces `init.ranchu.rc`. The goldfish
   services are blanked: graphics, camera, sensors, radio, gnss, wifi, bt, c2,
   usb, fingerprint and uwb rc files, plus empty VINTF fragments. The ranchu
@@ -107,56 +144,42 @@ See NOTES.md "Host safety". `selftest` checks the following:
 
 ## What boots
 
-These start and stay up: logd, servicemanager, hwservicemanager, vold, keystore2
-with software KeyMint, gatekeeperd, apexd, statsd, installd, tombstoned,
-credstore, gpuservice, traced, media services, audioserver (on the emulator
-audio HAL), the display lane's allocator and composer3, and **SurfaceFlinger**
-(ANGLE on RADV). Example vendor HALs also stay up: health, power, thermal,
-lights, vibrator, identity and others. zygote64 preloads and forks
-system_server:
+Everything needed for `sys.boot_completed=1` (`dev.bootcomplete=1`):
+
+- logd, servicemanager, vold, keystore2 with software KeyMint, apexd, installd
+  and statsd;
+- netd (nf_tables iptables, emulated eBPF);
+- SurfaceFlinger on the display lane's allocator/composer (ANGLE on RADV);
+- zygote64 and system_server;
+- SystemUI, Launcher3, Settings, the IME, Phone and PermissionController.
 
 ```
-boot_progress_system_run → pms_start → pms_system_scan_start → pms_data_scan_start → pms_ready
-SystemServerTiming: StartNetworkManagementService
-NetdService: WARNING: returning null INetd instance.   (repeats every second)
+boot_progress_start → preload_end → system_run → pms_ready → ams_ready → enable_screen
+sys.boot_completed=1, bpf.progs_loaded=1, init.svc.netd=running
+selftest: 12/12 ok
 ```
 
-## Blockers
+## Open issues
 
-1. **netd (hard wall, needs a decision).** netd aborts in
-   `libnetd_updatable_init()` because the network eBPF programs can't be loaded:
-   `unprivileged_bpf_disabled=2`, and pinning needs bpffs. With that init
-   stubbed (experimental `session/shim/netd_shim.c`), netd then exits on
-   `iptables-restore: unable to initialize table 'filter'`. The host has
-   nf_tables only, and a user namespace can't autoload the legacy x_tables
-   modules. system_server waits for INetd forever. Past netd,
-   ConnectivityService and NetworkStats (Tethering APEX) also require eBPF maps.
-   Options:
-   - (a) A one-time root setup: load the `ip_tables`/`ip6_tables` modules, and
-     delegate a bpffs through a BPF token (kernel ≥ 6.9).
-   - (b) A stub INetd plus patched connectivity eBPF users. That means an AOSP
-     patch and a rebuilt Tethering APEX, from the image-builder lane.
-   - (c) Accept root, as Waydroid does.
-2. **AlarmManager / timerfd:** `timerfd_create(CLOCK_*_ALARM)` gets EPERM
-   (CAP_WAKE_ALARM in the initial namespace). Seen in audioserver; it hasn't
-   blocked anything yet.
-3. **Interim cross-lane override:**
-   `rootfs-overlay/vendor/etc/init/android.hardware.graphics.allocator-linuxapk.rc`
-   runs the allocator as root. Only the session's root maps to the host user,
-   who has the logind ACL on `/dev/udmabuf`. The HAL should open udmabuf before
-   dropping privileges, after which this override can go.
+- Bluetooth (`com.android.bluetooth`) crash-loops: there's no HCI HAL. It should
+  be disabled via config.
+- The emulator's system_ext apps (MultiDisplay, sdksetup) spam about missing
+  goldfish pipes. Trim them.
+- `logcat -b all` hangs; the specific buffers work.
+- Emulated eBPF means no per-app traffic stats or firewall. VPNs and TUN work.
+- Remaining interim stubs: the emulator audio HAL (until the PipeWire HAL lands)
+  and the example vendor HALs.
 
-## Vendor HALs needed so far
-
-Each of these is required by something that blocks or aborts without it:
+## Vendor HALs needed for boot-completed
 
 - **KeyMint, SecureClock, SharedSecret.** keystore2 sets
-  `keystore.module_hash.sent`, and init.rc waits for it. Gatekeeper is needed
-  for gatekeeperd. The image's software versions work.
+  `keystore.module_hash.sent`, which init.rc waits for. Gatekeeper is needed for
+  gatekeeperd. The image's software HALs work.
 - **graphics allocator, mapper and composer3.** SurfaceFlinger aborts without
-  buffers, and its restarts kill zygote. EGL/Vulkan through `ro.hardware.egl`
-  and `ro.hardware.vulkan`.
-- **audio core and effect HAL.** AudioFlinger aborts in `onFirstRef` without
-  one. The emulator's HIDL 7.1 HAL is enough as a stub.
-- Health, power and the rest are optional so far: their example HALs run, and
-  system_server hasn't reached the services that use them.
+  buffers, and its restarts take zygote down. EGL/Vulkan come through
+  `ro.hardware.egl` and `ro.hardware.vulkan`.
+- **audio core and effect.** AudioFlinger aborts without them. The emulator's
+  HIDL 7.1 HAL works as a stub.
+- Everything else is optional: health, power, thermal, lights, vibrator and the
+  rest run as example HALs. Camera, sensors, radio, GNSS, Wi-Fi and BT are
+  disabled.
