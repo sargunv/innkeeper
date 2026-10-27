@@ -165,6 +165,13 @@ impl Session {
         self.run(15, &["wm", "dismiss-keyguard"]);
     }
 
+    /// True when apps get windows of their own (docs/windowing.md): the
+    /// harness then launches through the window manager and drives the app's
+    /// display instead of display 0.
+    pub fn per_app_windows(&self) -> bool {
+        self.getprop("vendor.linuxapk.wm.mode") != "single"
+    }
+
     /// "wayland" or "headless".
     pub fn backend(&self) -> String {
         self.getprop("vendor.linuxapk.hwc.backend")

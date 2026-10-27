@@ -76,6 +76,7 @@ class WindowManagerFeature(
     var width: Int,
     var height: Int,
     var dpi: Int,
+    val sizing: WindowSizing,
   ) {
     val id: Int = display.display.displayId
     val created = SystemClock.uptimeMillis()
@@ -188,18 +189,30 @@ class WindowManagerFeature(
           Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(r.component)
         else -> pm.getLaunchIntentForPackage(r.pkg) ?: return "error: no launcher activity"
       }
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher does: an existing task comes to the front.
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    // A desktop link is an untrusted-origin VIEW: only activities that accept web links.
+    if (r.uri != null) intent.addCategory(Intent.CATEGORY_BROWSABLE)
+    if (!perApp) {
+      start(intent, DEFAULT_DISPLAY)
+      return "launched display=$DEFAULT_DISPLAY package=${r.pkg}"
+    }
 
     refreshTasks()
     windows.values
       .firstOrNull { it.pkg == r.pkg }
       ?.let { w ->
-        if (r.uri != null) start(intent, w.id)
+        // A link or another activity opens in the app's window; its launcher activity just
+        // brings the task back.
+        if (r.uri != null || r.component != null) start(intent, w.id)
         focus(w, activate = true)
         return "focused display=${w.id} package=${r.pkg}"
       }
 
-    val w = createWindow(r.pkg, label, r.widthDp, r.heightDp) ?: return "error: no virtual display"
+    val sizing =
+      if (r.widthDp > 0 && r.heightDp > 0) WindowSizing(r.widthDp, r.heightDp, 0, 0)
+      else sizingFor(intent)
+    val w = createWindow(r.pkg, label, sizing) ?: return "error: no virtual display"
     // An existing task (say, started on display 0) moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
     if (existing != null && r.uri == null) {
@@ -221,12 +234,24 @@ class WindowManagerFeature(
     atm.focusTopTask(w.id)
   }
 
-  private fun createWindow(pkg: String, label: String, widthDp: Int, heightDp: Int): AppWindow? {
+  private fun sizingFor(intent: Intent): WindowSizing {
+    val ai =
+      try {
+        context.packageManager.resolveActivity(intent, 0)?.activityInfo
+      } catch (e: Exception) {
+        null
+      }
+    return WindowSizing.of(
+      ai,
+      SystemProps.getInt("persist.linuxapk.wm.width", 1280),
+      SystemProps.getInt("persist.linuxapk.wm.height", 800),
+    )
+  }
+
+  private fun createWindow(pkg: String, label: String, sizing: WindowSizing): AppWindow? {
     val s = scale
-    val wDp = if (widthDp > 0) widthDp else SystemProps.getInt("persist.linuxapk.wm.width", 1280)
-    val hDp = if (heightDp > 0) heightDp else SystemProps.getInt("persist.linuxapk.wm.height", 800)
-    val width = (wDp * s).roundToInt()
-    val height = (hDp * s).roundToInt()
+    val width = (sizing.widthDp * s).roundToInt()
+    val height = (sizing.heightDp * s).roundToInt()
     val dpi = (BASE_DPI * s).roundToInt()
     // SurfaceFlinger renders each frame into one of these buffers and hands the same buffer to
     // the composer, which copies it into the window; the frames themselves are dropped here.
@@ -261,7 +286,7 @@ class WindowManagerFeature(
       reader.close()
       return null
     }
-    val w = AppWindow(pkg, label, vd, reader, width, height, dpi)
+    val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing)
     windows[w.id] = w
     try {
       wms.setDisplayImePolicy(w.id, imePolicy())
@@ -281,6 +306,9 @@ class WindowManagerFeature(
       val latch = CountDownLatch(1)
       pending[w.id] = latch
       b.send("window_new ${w.id} ${w.width} ${w.height} ${w.dpi} $APP_ID_PREFIX${w.pkg} ${w.label}")
+      if (w.sizing.minWidthDp > 0 || w.sizing.minHeightDp > 0) {
+        b.send("window_min_size ${w.id} ${w.sizing.minWidthDp} ${w.sizing.minHeightDp}")
+      }
       // window_pending arrives on the bridge thread; this thread only waits for it.
       if (!latch.await(2, TimeUnit.SECONDS)) Log.w(TAG, "display ${w.id}: no window_pending")
       pending.remove(w.id)
@@ -459,7 +487,7 @@ class WindowManagerFeature(
       val pkg = (t.baseActivity ?: t.topActivity)?.packageName ?: continue
       val w =
         windows.values.firstOrNull { it.pkg == pkg }
-          ?: createWindow(pkg, labelOf(pkg), 0, 0)
+          ?: createWindow(pkg, labelOf(pkg), sizingFor(t.baseIntent ?: Intent()))
           ?: continue
       move(t, w)
     }

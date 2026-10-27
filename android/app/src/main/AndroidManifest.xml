@@ -54,6 +54,12 @@
       android:exported="true"
       android:label="@string/probe_name" />
 
+    <!-- Insets and elevation-shadow check for app windows (docs/windowing.md). -->
+    <activity
+      android:name=".wm.WindowProbeActivity"
+      android:exported="true"
+      android:label="@string/window_probe_name" />
+
     <!-- The deprecated-target-SDK warning, in the app's window (see AppWarningActivity). -->
     <activity
       android:name=".wm.AppWarningActivity"

@@ -202,8 +202,12 @@ fn today() -> String {
 
 /// Memory of the whole session unit (cgroup), in MiB.
 fn session_mem_mb() -> Option<u64> {
+    let unit = match std::env::var("LINUXAPK_INSTANCE") {
+        Ok(i) if !i.is_empty() => format!("linuxapk-session-{i}"),
+        _ => "linuxapk-session".to_string(),
+    };
     let o = Command::new("systemctl")
-        .args(["--user", "show", "-P", "MemoryCurrent", "linuxapk-session"])
+        .args(["--user", "show", "-P", "MemoryCurrent", &unit])
         .output()
         .ok()?;
     let b: u64 = String::from_utf8_lossy(&o.stdout).trim().parse().ok()?;

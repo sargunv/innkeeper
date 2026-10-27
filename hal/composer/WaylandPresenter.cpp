@@ -72,6 +72,7 @@ struct WindowSpec {
   int32_t id = 0;  // Android display id (the key in input events)
   uint32_t width = 0, height = 0;  // display pixels
   int32_t dpi = kBaseDpi;
+  int32_t minW = 0, minH = 0;  // logical; 0 = our default minimum
   std::string appId, title;
 };
 
@@ -167,6 +168,7 @@ class WaylandWindow {
   int32_t id() const { return mSpec.id; }
   int64_t hwcId() const { return mHwcId; }
   void setTitle(const std::string& title);
+  void setMinSize(int32_t w, int32_t h);
   void activate();
 
   // Called with c->mutex held.
@@ -636,6 +638,7 @@ void WaylandConnection::Impl::loop() {
 
 // Commands from the window manager (docs/hal-display.md, protocol v2):
 //   window_new <display> <width> <height> <dpi> <app_id> <title...>
+//   window_min_size <display> <logical width> <logical height>
 //   window_title <display> <title...>
 //   window_activate <display>
 //   window_destroy <display>
@@ -697,6 +700,24 @@ void WaylandConnection::Impl::onCommand(const std::string& line) {
       spec.width, spec.height, spec.dpi, spec.appId.c_str(), spec.title.c_str()
     );
     input.send("window_pending %d", id);
+  } else if (op == "window_min_size") {
+    int32_t w = 0, h = 0;
+    if (
+      sscanf(rest, "%d %d", &w, &h) != 2 || w < 0 || h < 0 || w > 16384 ||
+      h > 16384
+    )
+      return;
+    if (std::shared_ptr<WaylandWindow> win = findWindow(id, -1)) {
+      win->setMinSize(w, h);
+      return;
+    }
+    std::lock_guard lock(mutex);
+    for (auto& p : pending) {
+      if (p.spec.id == id) {
+        p.spec.minW = w;
+        p.spec.minH = h;
+      }
+    }
   } else if (op == "window_title") {
     std::shared_ptr<WaylandWindow> w = findWindow(id, -1);
     if (w) w->setTitle(sanitize(rest));
@@ -863,7 +884,9 @@ bool WaylandWindow::init() {
   xdg_toplevel_add_listener(mToplevel, &kToplevelListener, mCtx);
   xdg_toplevel_set_title(mToplevel, mSpec.title.c_str());
   xdg_toplevel_set_app_id(mToplevel, mSpec.appId.c_str());
-  xdg_toplevel_set_min_size(mToplevel, 240, 160);
+  xdg_toplevel_set_min_size(
+    mToplevel, std::max(240, mSpec.minW), std::max(160, mSpec.minH)
+  );
   if (c->decorations) {
     mDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
       c->decorations, mToplevel
@@ -1012,6 +1035,16 @@ void WaylandWindow::setTitle(const std::string& title) {
   std::lock_guard lock(c->mutex);
   mSpec.title = title;
   if (mToplevel) xdg_toplevel_set_title(mToplevel, title.c_str());
+  wl_display_flush(c->display);
+}
+
+void WaylandWindow::setMinSize(int32_t w, int32_t h) {
+  std::lock_guard lock(c->mutex);
+  mSpec.minW = w;
+  mSpec.minH = h;
+  if (mToplevel)
+    xdg_toplevel_set_min_size(mToplevel, std::max(240, w), std::max(160, h));
+  if (mSurface) wl_surface_commit(mSurface);
   wl_display_flush(c->display);
 }
 

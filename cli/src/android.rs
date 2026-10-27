@@ -200,10 +200,63 @@ pub fn am_start_args(l: &Launch) -> Vec<String> {
     v
 }
 
-/// Starts an app. This is the one place that decides *how*: today `am start`
-/// on display 0 (the session's single window). Per-app windows
-/// (docs/windowing.md) replace this call with the windowing control command.
+/// The window manager's control command (docs/windowing.md): opens the app
+/// in a window of its own, or focuses the window it already has.
+pub fn wm_launch_args(l: &Launch) -> Vec<String> {
+    let mut v: Vec<String> = [
+        "am",
+        "broadcast",
+        "--user",
+        "current",
+        "-n",
+        "dev.linuxapk.system/.wm.ControlReceiver",
+        "-a",
+        "dev.linuxapk.LAUNCH",
+    ]
+    .map(String::from)
+    .to_vec();
+    match l {
+        Launch::Main { component } => {
+            let pkg = component
+                .split_once('/')
+                .map_or(component.as_str(), |c| c.0);
+            v.extend(["--es", "package", pkg, "--es", "component", component].map(String::from));
+        }
+        Launch::View { package, uri } => {
+            v.extend(["--es", "package", package, "--es", "uri", uri].map(String::from));
+        }
+    }
+    v
+}
+
+/// What the window manager answered: Ok(reply) on success, Err(reply) for an
+/// error it reported, None if nothing handled the broadcast (an older system
+/// app).
+fn wm_reply(text: &str) -> Option<Result<String, String>> {
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("Broadcast completed:"))?;
+    let data = line
+        .split_once("data=\"")
+        .map(|(_, d)| d.trim_end_matches('"').to_string())?;
+    if line.contains("result=-1") {
+        Some(Ok(data))
+    } else {
+        Some(Err(data))
+    }
+}
+
+/// Starts an app: through the window manager (one window per app), or with
+/// `am start` on display 0 if the system app predates it.
 pub fn launch(s: &Session, l: &Launch) -> Result<()> {
+    let args = wm_launch_args(l);
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let o = s.exec(60, &argv)?;
+    match wm_reply(&o.text()) {
+        Some(Ok(_)) => return Ok(()),
+        Some(Err(e)) => bail!("launch failed: {e}"),
+        None => {}
+    }
     let args = am_start_args(l);
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let o = s.exec(60, &argv)?;
@@ -307,6 +360,40 @@ mod tests {
             v.windows(2)
                 .any(|w| w == ["-c", "android.intent.category.BROWSABLE"])
         );
+    }
+
+    #[test]
+    fn wm_args_and_reply() {
+        let m = wm_launch_args(&Launch::Main {
+            component: "org.wikipedia/.main.MainActivity".into(),
+        });
+        assert!(
+            m.windows(3)
+                .any(|w| w == ["--es", "package", "org.wikipedia"])
+        );
+        assert!(
+            m.windows(3)
+                .any(|w| w == ["--es", "component", "org.wikipedia/.main.MainActivity"])
+        );
+        let v = wm_launch_args(&Launch::View {
+            package: "org.wikipedia".into(),
+            uri: "https://en.wikipedia.org/wiki/Linux".into(),
+        });
+        assert!(
+            v.windows(3)
+                .any(|w| w == ["--es", "uri", "https://en.wikipedia.org/wiki/Linux"])
+        );
+        assert_eq!(
+            wm_reply(
+                "Broadcasting: x\nBroadcast completed: result=-1, data=\"launched display=2\"\n"
+            ),
+            Some(Ok("launched display=2".into()))
+        );
+        assert_eq!(
+            wm_reply("Broadcast completed: result=0, data=\"error: no launcher activity\""),
+            Some(Err("error: no launcher activity".into()))
+        );
+        assert_eq!(wm_reply("Broadcast completed: result=0\n"), None);
     }
 
     #[test]

@@ -485,9 +485,10 @@ ndk::ScopedAStatus ComposerClient::getHdrCapabilities(
 }
 
 ndk::ScopedAStatus ComposerClient::getPerFrameMetadataKeys(
-  int64_t, std::vector<PerFrameMetadataKey>*
+  int64_t, std::vector<PerFrameMetadataKey>* out
 ) {
-  return toStatus(Error::Unsupported);
+  out->clear();  // no HDR metadata (SurfaceFlinger logs an error otherwise)
+  return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus ComposerClient::getReadbackBufferAttributes(

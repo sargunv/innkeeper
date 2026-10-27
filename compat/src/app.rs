@@ -77,6 +77,64 @@ pub struct Run<'a> {
     checks: Vec<Check>,
     launch_ms: Option<u64>,
     pss_mb: Option<u64>,
+    /// The app's window (per-app window mode); None means display 0.
+    win: Option<Win>,
+}
+
+/// An app window: its Android display, SurfaceFlinger's id for screencap and
+/// its size in pixels.
+struct Win {
+    display: i32,
+    sf_id: String,
+    w: i32,
+    h: i32,
+}
+
+/// The harness's coordinates are for a 1280x800 display.
+const REF_W: i32 = 1280;
+const REF_H: i32 = 800;
+
+/// `launched display=N package=P size=WxH ...` from the window manager.
+fn parse_launched(text: &str) -> Option<(i32, i32, i32)> {
+    let data = text.split("data=\"").nth(1)?;
+    let field = |k: &str| {
+        data.split_whitespace()
+            .find_map(|f| f.strip_prefix(k))
+            .map(|v| v.trim_end_matches('"').to_string())
+    };
+    let d = field("display=")?.parse().ok()?;
+    let (w, h) = field("size=")?
+        .split_once('x')
+        .map(|(a, b)| (a.to_string(), b.to_string()))?;
+    Some((d, w.parse().ok()?, h.parse().ok()?))
+}
+
+/// SurfaceFlinger's display id for virtual display `name`
+/// (`dumpsys SurfaceFlinger --display-id`).
+fn parse_sf_id(text: &str, name: &str) -> Option<String> {
+    let key = format!("displayName=\"{name}\"");
+    text.lines()
+        .find(|l| l.contains(&key))?
+        .strip_prefix("Display ")?
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+}
+
+/// `mCurrentFocus` of `display` in `dumpsys window displays`.
+fn parse_focus(text: &str, display: i32) -> Option<String> {
+    let mut cur = -1;
+    for l in text.lines() {
+        let t = l.trim();
+        if let Some(r) = t.strip_prefix("Display: mDisplayId=") {
+            cur = r.split_whitespace().next()?.parse().unwrap_or(-1);
+        } else if cur == display
+            && let Some(f) = t.strip_prefix("mCurrentFocus=")
+        {
+            return Some(f.to_string());
+        }
+    }
+    None
 }
 
 /// Why a step ended the run early.
@@ -94,7 +152,131 @@ impl<'a> Run<'a> {
             checks: vec![],
             launch_ms: None,
             pss_mb: None,
+            win: None,
         }
+    }
+
+    /// `input` with `-d` for the app's display, coordinates scaled to it.
+    fn input(&self, args: &[&str]) {
+        let mut v: Vec<String> = vec!["input".into()];
+        if let Some(w) = &self.win {
+            v.push("-d".into());
+            v.push(w.display.to_string());
+        }
+        let scale = |i: usize, a: &str| -> String {
+            match (&self.win, a.parse::<i32>()) {
+                (Some(w), Ok(n)) if matches!(args[0], "tap" | "swipe") && i > 0 && i <= 4 => {
+                    let (full, reff) = if i % 2 == 1 {
+                        (w.w, REF_W)
+                    } else {
+                        (w.h, REF_H)
+                    };
+                    (n * full / reff).to_string()
+                }
+                _ => a.to_string(),
+            }
+        };
+        v.extend(args.iter().enumerate().map(|(i, a)| scale(i, a)));
+        let argv: Vec<&str> = v.iter().map(String::as_str).collect();
+        self.s.run(15, &argv);
+    }
+
+    /// Opens the app in a window of its own through the window manager and
+    /// waits for its first frame ("Displayed" in the log, like `am start -W`).
+    fn launch_in_window(&mut self, component: &str) -> Result<(), Stop> {
+        let pkg = self.app.package.clone();
+        let o = self.s.run(
+            60,
+            &[
+                "am",
+                "broadcast",
+                "-n",
+                "dev.linuxapk.system/.wm.ControlReceiver",
+                "-a",
+                "dev.linuxapk.LAUNCH",
+                "--es",
+                "package",
+                &pkg,
+                "--es",
+                "component",
+                component,
+                "--ei",
+                "width",
+                &REF_W.to_string(),
+                "--ei",
+                "height",
+                &REF_H.to_string(),
+            ],
+        );
+        self.save("am-start.txt", &o.text);
+        let Some((display, w, h)) = parse_launched(&o.text) else {
+            let why = o
+                .text
+                .split("data=\"")
+                .nth(1)
+                .unwrap_or("no window manager reply")
+                .trim()
+                .trim_end_matches('"')
+                .to_string();
+            self.check("launch", false, why.clone());
+            return Err(Stop(Status::Broken, format!("launch: {why}")));
+        };
+        let t = Instant::now();
+        let mut displayed = None;
+        while t.elapsed() < Duration::from_secs(60) {
+            let log = self
+                .s
+                .run(
+                    20,
+                    &[
+                        "logcat",
+                        "-d",
+                        "-b",
+                        "system,main",
+                        "-s",
+                        "ActivityTaskManager:I",
+                    ],
+                )
+                .text;
+            if let Some(l) = log
+                .lines()
+                .find(|l| l.contains("Displayed ") && l.contains(&pkg))
+            {
+                displayed = Some(l.to_string());
+                break;
+            }
+            sleep(Duration::from_millis(500));
+        }
+        let Some(line) = displayed else {
+            self.check("launch", false, "no first frame in 60 s");
+            return Err(Stop(Status::Broken, "launch: timeout".into()));
+        };
+        // "... Displayed pkg/.Act for user 0: +1s234ms"
+        self.launch_ms = line.rsplit_once('+').and_then(|(_, d)| {
+            let d = d.trim().trim_end_matches("ms");
+            let (s, ms) = d.split_once('s').unwrap_or(("0", d));
+            Some(s.parse::<u64>().ok()? * 1000 + ms.parse::<u64>().ok()?)
+        });
+        let sf = self
+            .s
+            .run(20, &["dumpsys", "SurfaceFlinger", "--display-id"])
+            .text;
+        let sf_id = parse_sf_id(&sf, &format!("linuxapk:{pkg}")).unwrap_or_default();
+        self.check(
+            "launch",
+            true,
+            format!(
+                "{} ms, window display {display} ({w}x{h})",
+                self.launch_ms.unwrap_or(0)
+            ),
+        );
+        self.win = Some(Win {
+            display,
+            sf_id,
+            w,
+            h,
+        });
+        Ok(())
     }
 
     fn check(&mut self, name: &str, ok: bool, detail: impl Into<String>) -> bool {
@@ -249,7 +431,17 @@ impl<'a> Run<'a> {
 
         // Launch from a clean slate.
         s.run(30, &["logcat", "-b", "main,system,crash", "-c"]);
-        let o = s.run(90, &["am", "start", "-W", "-n", &component]);
+        if s.per_app_windows() {
+            self.launch_in_window(&component)?;
+        } else {
+            self.launch_on_display0(&component)?;
+        }
+        self.after_launch()
+    }
+
+    fn launch_on_display0(&mut self, component: &str) -> Result<(), Stop> {
+        let s = self.s;
+        let o = s.run(90, &["am", "start", "-W", "-n", component]);
         self.save("am-start.txt", &o.text);
         if o.text.contains("Error") || !o.text.contains("Status: ok") {
             let why = o
@@ -270,7 +462,11 @@ impl<'a> Run<'a> {
             true,
             format!("{} ms", self.launch_ms.unwrap_or(0)),
         );
+        Ok(())
+    }
 
+    fn after_launch(&mut self) -> Result<(), Stop> {
+        let pkg = self.app.package.clone();
         // Settle, watching for an early death.
         let settle = Duration::from_secs(self.app.settle.unwrap_or(8));
         let t = Instant::now();
@@ -284,9 +480,15 @@ impl<'a> Run<'a> {
         self.check("alive after launch", true, "");
 
         // Platform compatibility warnings ("built for an older version of
-        // Android") sit over a working app; note them and dismiss them.
+        // Android") sit over a working app; note them and dismiss them. In
+        // per-app windows the window manager shows the first in the app's
+        // window (AppWarningActivity).
         let mut focus = self.focus();
-        for dialog in ["DeprecatedTargetSdkVersionDialog", "DeprecatedAbiDialog"] {
+        for dialog in [
+            "DeprecatedTargetSdkVersionDialog",
+            "DeprecatedAbiDialog",
+            "AppWarningActivity",
+        ] {
             if focus.contains(dialog) {
                 let _ = self.screencap(&self.dir.join("warning.png"));
                 self.check(&format!("{dialog} shown"), true, "dismissed");
@@ -340,18 +542,15 @@ impl<'a> Run<'a> {
 
         // Generic interactions.
         for (name, cmd) in [
-            ("tap centre", vec!["input", "tap", "640", "420"]),
-            (
-                "scroll",
-                vec!["input", "swipe", "640", "600", "640", "250", "300"],
-            ),
-            ("back", vec!["input", "keyevent", "BACK"]),
+            ("tap centre", vec!["tap", "640", "420"]),
+            ("scroll", vec!["swipe", "640", "600", "640", "250", "300"]),
+            ("back", vec!["keyevent", "BACK"]),
         ] {
             if name == "back" {
                 self.pss_mb = self.pss();
                 let _ = self.screencap(&self.dir.join("after.png"));
             }
-            s.run(15, &cmd);
+            self.input(&cmd);
             sleep(Duration::from_millis(2500));
             if let Some(why) = self.dead() {
                 self.check(&format!("alive after {name}"), false, why);
@@ -418,16 +617,18 @@ impl<'a> Run<'a> {
 
     fn focus(&self) -> String {
         let o = self.s.run(30, &["dumpsys", "window", "displays"]);
-        o.text
-            .lines()
-            .find_map(|l| l.trim().strip_prefix("mCurrentFocus="))
-            .unwrap_or("?")
-            .to_string()
+        let display = self.win.as_ref().map_or(0, |w| w.display);
+        parse_focus(&o.text, display).unwrap_or_else(|| "?".into())
     }
 
     fn screencap(&self, dst: &Path) -> anyhow::Result<frame::FrameStats> {
         let tmp = "/data/local/tmp/compat-screen.png";
-        let o = self.s.run(30, &["screencap", "-p", tmp]);
+        let o = match &self.win {
+            Some(w) if !w.sf_id.is_empty() => {
+                self.s.run(30, &["screencap", "-d", &w.sf_id, "-p", tmp])
+            }
+            _ => self.s.run(30, &["screencap", "-p", tmp]),
+        };
         if !o.ok {
             anyhow::bail!("screencap failed: {}", o.text.trim());
         }
@@ -454,7 +655,7 @@ impl<'a> Run<'a> {
             match op {
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
                 "key" => {
-                    self.s.run(15, &["input", "keyevent", arg]);
+                    self.input(&["keyevent", arg]);
                     sleep(Duration::from_millis(700));
                 }
                 "tap" => {
@@ -463,9 +664,15 @@ impl<'a> Run<'a> {
                         .iter()
                         .find(|n| n.text == arg || n.desc == arg)
                         .ok_or(format!("{step}: no such node"))?;
+                    // Node bounds are already in the app display's pixels.
                     let (x, y) = n.centre;
-                    self.s
-                        .run(15, &["input", "tap", &x.to_string(), &y.to_string()]);
+                    let mut v = vec!["input".to_string()];
+                    if let Some(w) = &self.win {
+                        v.extend(["-d".to_string(), w.display.to_string()]);
+                    }
+                    v.extend(["tap".to_string(), x.to_string(), y.to_string()]);
+                    let argv: Vec<&str> = v.iter().map(String::as_str).collect();
+                    self.s.run(15, &argv);
                     sleep(Duration::from_millis(700));
                 }
                 "absent" => {
@@ -623,6 +830,25 @@ pub fn parse_nodes(xml: &str) -> Vec<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_window_manager_output() {
+        assert_eq!(
+            parse_launched(
+                "Broadcast completed: result=-1, data=\"launched display=4 package=a.b size=2176x1360 dpi=272\""
+            ),
+            Some((4, 2176, 1360))
+        );
+        assert_eq!(parse_launched("Broadcast completed: result=0"), None);
+        let sf = "Display 0 (HWC display 0): no display identification data\nDisplay 9223372039441632759 (Virtual display): displayName=\"linuxapk:a.b\" uniqueId=\"virtual:x\"";
+        assert_eq!(
+            parse_sf_id(sf, "linuxapk:a.b").as_deref(),
+            Some("9223372039441632759")
+        );
+        let w = "  Display: mDisplayId=0 (organized)\n  mCurrentFocus=null\n  Display: mDisplayId=4 (organized)\n  mCurrentFocus=Window{1 a.b/a.b.Main}";
+        assert_eq!(parse_focus(w, 4).as_deref(), Some("Window{1 a.b/a.b.Main}"));
+        assert_eq!(parse_focus(w, 0).as_deref(), Some("null"));
+    }
 
     #[test]
     fn parses_nodes() {
