@@ -32,6 +32,8 @@ const MAX_CHUNK: usize = 64 * 1024;
 const TIMING_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Target total latency (PipeWire queue plus device), in microseconds.
+/// pipewire-pulse floors it at about 16 ms (three 5.3 ms quanta at 48 kHz),
+/// so 10 ms measured the same.
 pub const TARGET_LATENCY_US: u32 = 20_000;
 
 pub struct PulseOut {
@@ -57,11 +59,17 @@ pub struct PulseOut {
 }
 
 /// Counters logged every few seconds in verbose mode.
+#[derive(Default)]
 struct Stats {
-    since: Instant,
+    since: Option<Instant>,
     frames: u64,
     requests: u32,
     underflows: u32,
+    /// Sum and count of downstream latency samples (ns) and of ring fill
+    /// (frames) when each sample was taken.
+    latency_ns: u64,
+    fill: u64,
+    samples: u64,
 }
 
 impl PulseOut {
@@ -90,12 +98,7 @@ impl PulseOut {
             volume: (1.0, 1.0),
             master: (1.0, false),
             tmp: vec![0; MAX_CHUNK - MAX_CHUNK % fb],
-            stats: Stats {
-                since: Instant::now(),
-                frames: 0,
-                requests: 0,
-                underflows: 0,
-            },
+            stats: Stats::default(),
         };
 
         let cookie = pulseaudio::cookie_path_from_env()
@@ -267,6 +270,9 @@ impl PulseOut {
         let latency_ns = lat.sink_usec.saturating_mul(1000)
             + (queued_bytes as u64 / self.frame_bytes as u64) * 1_000_000_000 / self.rate as u64;
         ring.publish_timing(played.min(ring.read_pos()), mid_ns, latency_ns);
+        self.stats.latency_ns += latency_ns;
+        self.stats.fill += ring.available();
+        self.stats.samples += 1;
         ring.set_state(if lat.playing && !self.corked {
             STATE_PLAYING
         } else {
@@ -307,26 +313,22 @@ impl PulseOut {
             self.stats.frames += got as u64;
             moved = true;
         }
-        if crate::log::verbose() && self.stats.since.elapsed() >= Duration::from_secs(5) {
+        let since = *self.stats.since.get_or_insert_with(Instant::now);
+        if crate::log::verbose() && since.elapsed() >= Duration::from_secs(5) {
             let s = &self.stats;
+            let n = s.samples.max(1);
             crate::debug!(
-                "pulse ch {}: {} frames in {:.1} s, {} requests, {} underflows, pending {} B, ring {}/{}{}",
+                "pulse ch {}: {} frames in {:.1} s, {} requests, {} underflows; avg ring fill {:.1} ms + downstream {:.1} ms{}",
                 self.channel,
                 s.frames,
-                s.since.elapsed().as_secs_f32(),
+                since.elapsed().as_secs_f32(),
                 s.requests,
                 s.underflows,
-                self.pending,
-                ring.available(),
-                ring.capacity(),
+                (s.fill / n) as f64 * 1000.0 / self.rate as f64,
+                (s.latency_ns / n) as f64 / 1e6,
                 if self.corked { ", corked" } else { "" }
             );
-            self.stats = Stats {
-                since: Instant::now(),
-                frames: 0,
-                requests: 0,
-                underflows: 0,
-            };
+            self.stats = Stats::default();
         }
         if moved && self.timing_seq.is_none() && self.last_timing.elapsed() >= TIMING_INTERVAL {
             self.last_timing = Instant::now();

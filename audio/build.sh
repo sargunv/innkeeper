@@ -3,6 +3,7 @@
 #   libtinyalsav2.so  tinyalsa API backed by the host bridge (tinyalsa/), for
 #                     the image's audio HAL; see docs/audio.md
 #   linuxapk-tone     AAudio tone + latency test (tests/tone.c), not installed
+#   alsa_proxy_test   drives an image's libalsautilsv2 like the AIDL HAL does
 # and install into the vendor overlay.
 #
 # Env: LINUXAPK_OUT (default <repo>/out), NDK.
@@ -27,6 +28,13 @@ cflags=(-O2 -g -Wall -Wextra -Werror -std=c17 -fPIC -I"$here/third_party/aosp/in
   "$here/tinyalsa/pcm.c" "$here/tinyalsa/mixer.c" "$here/tinyalsa/bridge_client.c" \
   "$here/tinyalsa/internal.c" -llog
 "$cc" "${cflags[@]}" -fPIE -pie -o "$build/linuxapk-tone" "$here/tests/tone.c" -laaudio -lm
+# Links against an image's libalsautilsv2 (the AIDL HAL's APEX ships one;
+# point ALSAUTILS_DIR at that lib64 directory). Skipped if there's none.
+alsautils=${ALSAUTILS_DIR:-$HOME/.local/share/linuxapk/images/ci-16644040/apex-25e53b3b20c5/com.android.hardware.audio/lib64}
+if [[ -f $alsautils/libalsautilsv2.so ]]; then
+  "$cc" "${cflags[@]}" -fPIE -pie -L"$alsautils" -Wl,--allow-shlib-undefined \
+    -o "$build/alsa_proxy_test" "$here/tests/alsa_proxy_test.c" -lalsautilsv2 -lm
+fi
 
 # Every symbol the image's libtinyalsav2.so exports must exist in ours.
 if [[ -f $out/img/vendor/lib64/libtinyalsav2.so ]]; then

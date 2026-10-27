@@ -198,6 +198,12 @@ Causes:
   through `dev.linuxapk.LAUNCH`. Display 0 is headless unless
   `start --single-window`. Next: move the Wayland client into the bridge (CSD
   for GNOME). See [windowing.md](windowing.md).
+- 2026-10-27 (audio): **sound works.** The host bridge `linuxapk-bridge`
+  (`bridge/`, Rust, modular services) plays the HAL's output to PipeWire. Our
+  `libtinyalsav2.so` (`audio/`) replaces the image's tinyalsa and writes into a
+  sealed memfd ring. A 440 Hz AAudio tone captures at 439.99 Hz and Mindustry's
+  music is audible (emulator image). See [audio.md](audio.md) and
+  [bridge.md](bridge.md). Next: the CI image's APEX path, and latency there.
 
 ## Backlog (unassigned)
 
