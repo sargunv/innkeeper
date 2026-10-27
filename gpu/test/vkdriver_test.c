@@ -538,10 +538,12 @@ static const native_handle_t *hal_buffer(int width, int height, size_t *stride, 
    return h;
 }
 
+static int anb_stride_px = 128; /* --anb-stride */
+
 static int test_anb(bool hal)
 {
    const int width = 100, height = 64;
-   size_t stride = 128 * 4, size = (stride * height + 4095) & ~4095ul; /* padded rows */
+   size_t stride = anb_stride_px * 4, size = (stride * height + 4095) & ~4095ul; /* padded rows */
    void *map;
    const native_handle_t *h;
    if (hal) {
@@ -675,6 +677,8 @@ int main(int argc, char **argv)
          udmabuf = true;
       else if (!strcmp(argv[i], "--anb"))
          anb = true;
+      else if (!strcmp(argv[i], "--anb-stride") && i + 1 < argc)
+         anb_stride_px = atoi(argv[++i]);
       else if (!strcmp(argv[i], "--anb-hal"))
          anb_hal = true;
    }
