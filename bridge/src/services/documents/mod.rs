@@ -22,6 +22,7 @@ use std::ffi::OsStr;
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use rustix::fs::{Mode, OFlags, ResolveFlags};
@@ -36,7 +37,9 @@ use proto::{Kind, Meta, OpenMode, Pick, PickMode, Request};
 const MAX_GRANTS: usize = 4096;
 /// Entries one LIST returns at most.
 const MAX_LIST: usize = 10_000;
-/// Picks waiting for the user, per connection.
+/// Picks waiting for the user, bridge-wide. A pick outlives its connection
+/// (its dialog stays up until the user answers), so a per-connection limit
+/// would let a client reconnect for more.
 const MAX_PICKS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +54,16 @@ pub struct Store {
     file: Option<PathBuf>,
     grants: Mutex<Vec<(u64, Grant)>>,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
+    picks: AtomicUsize,
+}
+
+/// One of the MAX_PICKS outstanding picks, released when dropped.
+pub struct PickSlot(Arc<Store>);
+
+impl Drop for PickSlot {
+    fn drop(&mut self) {
+        self.0.picks.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Store {
@@ -60,7 +73,19 @@ impl Store {
             file,
             grants: Mutex::new(grants),
             dbus: OnceLock::new(),
+            picks: AtomicUsize::new(0),
         })
+    }
+
+    /// A slot for one more pick, unless MAX_PICKS are outstanding.
+    pub fn pick_slot(self: &Arc<Self>) -> Option<PickSlot> {
+        let ok = self
+            .picks
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_PICKS).then_some(n + 1)
+            })
+            .is_ok();
+        ok.then(|| PickSlot(self.clone()))
     }
 
     fn dbus(&self) -> Option<&zbus::blocking::Connection> {
@@ -386,7 +411,6 @@ pub struct DocumentsService {
     store: Arc<Store>,
     events: Events,
     label: String,
-    picks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl DocumentsService {
@@ -395,37 +419,26 @@ impl DocumentsService {
             store,
             events,
             label: peer.label.clone(),
-            picks: Default::default(),
         }
     }
 
     fn pick(&mut self, p: Pick) -> Reply {
-        use std::sync::atomic::Ordering;
         if self.store.dbus().is_none() {
             return Reply::err(-ENOSYS);
         }
-        if self.picks.fetch_add(1, Ordering::SeqCst) >= MAX_PICKS {
-            self.picks.fetch_sub(1, Ordering::SeqCst);
+        let Some(slot) = self.store.pick_slot() else {
             return Reply::err(-EBUSY);
-        }
-        let (store, events, picks, label) = (
-            self.store.clone(),
-            self.events.clone(),
-            self.picks.clone(),
-            self.label.clone(),
-        );
+        };
+        let (store, events, label) = (self.store.clone(), self.events.clone(), self.label.clone());
         let spawned = std::thread::Builder::new()
             .name("documents-pick".into())
             .spawn(move || {
                 run_pick(&store, &events, &p, &label);
-                picks.fetch_sub(1, Ordering::SeqCst);
+                drop(slot);
             });
         match spawned {
             Ok(_) => Reply::ok(),
-            Err(_) => {
-                self.picks.fetch_sub(1, Ordering::SeqCst);
-                Reply::err(-EAGAIN)
-            }
+            Err(_) => Reply::err(-EAGAIN),
         }
     }
 }
@@ -590,6 +603,18 @@ impl Service for DocumentsService {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    /// Outstanding picks are counted for the whole bridge (every connection
+    /// shares the Store), and stay charged until the pick finishes, not
+    /// until its connection closes.
+    #[test]
+    fn picks_are_capped_bridge_wide() {
+        let s = Store::new(None);
+        let held: Vec<PickSlot> = (0..MAX_PICKS).map(|_| s.pick_slot().unwrap()).collect();
+        assert!(s.pick_slot().is_none());
+        drop(held);
+        assert!(s.pick_slot().is_some());
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("linuxapk-docs-{name}-{}", std::process::id()));
