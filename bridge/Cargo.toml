@@ -1,0 +1,21 @@
+[package]
+name = "linuxapk-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk desktop bridge: host-side services (audio first) for the Android session"
+
+[dependencies]
+anyhow = "1"
+pulseaudio = "0.3.2"
+rustix = { version = "1.1", features = [
+  "event",
+  "fs",
+  "mm",
+  "net",
+  "process",
+  "time",
+] }
+
+[dev-dependencies]
+proptest = "1.12"

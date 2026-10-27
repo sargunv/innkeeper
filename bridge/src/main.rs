@@ -1,0 +1,57 @@
+//! `linuxapk-bridge --socket PATH [--allow-uid UID]... [--sink NAME] [--null] [-v]`
+//!
+//! Listens on PATH for clients from the Android session. Only the given host
+//! uids may connect (default: our own uid). Audio plays to the desktop's
+//! default PipeWire sink, or `--sink NAME`; `--null` plays nowhere.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::{Context, Result, bail};
+use linuxapk_bridge::audio::{Backend, Limits};
+use linuxapk_bridge::server::{self, Config};
+
+fn main() -> Result<()> {
+    let mut socket: Option<PathBuf> = None;
+    let mut allow = Vec::new();
+    let mut sink = None;
+    let mut null = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--socket" => socket = Some(args.next().context("--socket needs a path")?.into()),
+            "--allow-uid" => allow.push(
+                args.next()
+                    .context("--allow-uid needs a uid")?
+                    .parse()
+                    .context("bad uid")?,
+            ),
+            "--sink" => sink = Some(args.next().context("--sink needs a name")?),
+            "--null" => null = true,
+            "-v" | "--verbose" => linuxapk_bridge::log::set_verbose(true),
+            _ => bail!("unknown argument {a:?} (see the source header for usage)"),
+        }
+    }
+    let socket = socket.context("--socket is required")?;
+    if allow.is_empty() {
+        allow.push(rustix::process::getuid().as_raw());
+    }
+    let cfg = Config {
+        allow_uids: allow,
+        backend: if null {
+            Backend::Null
+        } else {
+            Backend::Pulse { sink }
+        },
+        limits: Limits::default(),
+        max_clients: 8,
+    };
+    let listener = server::listen(&socket)?;
+    linuxapk_bridge::info!(
+        "listening on {} (uids {:?}, {:?})",
+        socket.display(),
+        cfg.allow_uids,
+        cfg.backend
+    );
+    server::serve(listener, Arc::new(cfg))
+}
