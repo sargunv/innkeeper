@@ -1,0 +1,14 @@
+[package]
+name = "linuxapk"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk host command: install Android apps with desktop entries, run them, manage the session"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive"] }
+zip = { version = "9.1.2", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }
