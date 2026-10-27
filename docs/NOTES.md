@@ -180,6 +180,12 @@ Causes:
 
 ## Backlog (unassigned)
 
+- **Manager app (user request, 2026-10-27):** a GUI like Gear Lever, built in
+  Rust with GTK4/libadwaita on top of a shared library split out of `cli/`.
+  Drag-and-drop install, installed-apps list, uninstall, session status and
+  settings (growing with M3). Starts after the windowing control interface
+  lands.
+
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
   buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
