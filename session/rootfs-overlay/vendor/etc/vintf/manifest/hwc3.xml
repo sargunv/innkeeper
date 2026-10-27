@@ -1,0 +1,2 @@
+<!-- linuxapk: emulator HAL disabled; see docs/m0-session.md -->
+<manifest version="9.0" type="device"/>

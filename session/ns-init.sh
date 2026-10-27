@@ -158,5 +158,6 @@ fi
 
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
-export LD_PRELOAD=liblinuxapk_shim.so
+# Absolute path: a bare name is not found from APEX linker namespaces.
+export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

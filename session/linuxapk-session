@@ -131,6 +131,12 @@ stop() {
     [[ -f $run/$f ]] && p=$(<"$run/$f") && [[ -d /proc/$p ]] && kill -KILL "$p" 2>/dev/null
   done
   systemctl --user stop "$unit" 2>/dev/null || true
+  systemctl --user reset-failed "$unit" 2>/dev/null || true
+  local i
+  for i in $(seq 50); do
+    [[ $(systemctl --user show -P LoadState "$unit" 2>/dev/null) == not-found ]] && break
+    sleep 0.1
+  done
   rm -f "$run/pid" "$run/outer.pid"
   echo "session stopped"
 }
@@ -172,7 +178,7 @@ selftest() {
     "$0" exec /system/bin/sh -c '
       t() { if eval "$2" >/dev/null 2>&1; then echo "FAIL $1"; else echo "ok   $1"; fi; }
       t "umount of the fusectl mask refused" "umount /sys/fs/fuse/connections"
-      t "lazy umount of a /sys mask refused" "umount -l /sys/fs/cgroup"
+      t "lazy umount of a /sys mask refused" "umount -l /sys/firmware/efi/efivars"
       t "remount /sys rw refused" "mount -o remount,bind,rw /sys"
       t "sysfs not writable" "echo 1 > /sys/kernel/mm/ksm/run"
       t "no FUSE connections visible" "[ -n \"\$(ls -A /sys/fs/fuse/connections)\" ]"

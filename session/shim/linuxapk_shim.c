@@ -97,6 +97,7 @@ EXPORT int lsetxattr(const char* path, const char* name, const void* value, size
 // for that service (zygote has "priority -20"). Clamp limits to what we may
 // set and treat priority changes we aren't allowed to make as best-effort.
 #include <sys/resource.h>
+#include <stdlib.h>
 
 EXPORT int setpriority(int which, id_t who, int prio) {
     long rc = syscall(SYS_setpriority, which, who, prio);
@@ -130,4 +131,15 @@ EXPORT int prlimit(pid_t pid, int resource, const struct rlimit* new_limit,
     int rc = prlimit64(pid, resource, new_limit ? &n : NULL, old_limit ? &o : NULL);
     if (rc == 0 && old_limit) { old_limit->rlim_cur = o.rlim_cur; old_limit->rlim_max = o.rlim_max; }
     return rc;
+}
+
+// Scope: the shim is LD_PRELOADed into init only. It has to be loaded by
+// path, and no single path is visible from every linker namespace (vendor
+// and APEX namespaces reject /system/lib64, and a bare name is only found in
+// some of them), so letting init's services inherit LD_PRELOAD makes some of
+// them fail to link. init's forked children still run the shim between fork
+// and exec, which is where init needs it. Services that need it themselves
+// get "setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so" in their rc.
+__attribute__((constructor)) static void linuxapk_shim_init(void) {
+    if (syscall(SYS_getpid) == 1) unsetenv("LD_PRELOAD");
 }
