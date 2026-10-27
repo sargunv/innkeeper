@@ -1,0 +1,664 @@
+u_gralloc: stable-C IMapper v5 backend; resolve libhardware at runtime
+
+Lets an NDK-built (android-stub) Vulkan driver import buffers from any
+IMapper v5 gralloc while linking only LL-NDK libraries:
+
+- u_gralloc_imapper5_stablec.c loads mapper.<suffix>.so (suffix from
+  MESA_GRALLOC_MAPPER_SUFFIX / mesa.gralloc.mapper.suffix, or from
+  IAllocator.getIMapperLibrarySuffix() via libbinder_ndk) and decodes the
+  StandardMetadataType encoding itself instead of using libui.
+- hw_get_module() is dlopen'ed from libhardware.so on demand, because
+  libhardware is not LL-NDK. Drop the libhardware android stub.
+
+diff --git a/src/android_stub/meson.build b/src/android_stub/meson.build
+index 0e3f27b..816ed2e 100644
+--- a/src/android_stub/meson.build
++++ b/src/android_stub/meson.build
+@@ -1,6 +1,6 @@
+ if with_android_stub
+   stub_libs = []
+-  lib_names = ['hardware', 'log', 'nativewindow', 'sync']
++  lib_names = ['log', 'nativewindow', 'sync']
+ 
+   if with_libbacktrace
+     lib_names += ['backtrace']
+diff --git a/src/util/u_gralloc/meson.build b/src/util/u_gralloc/meson.build
+index a4aee6f..35b822a 100644
+--- a/src/util/u_gralloc/meson.build
++++ b/src/util/u_gralloc/meson.build
+@@ -12,6 +12,7 @@ files_u_gralloc = files(
+   'u_gralloc.c',
+   'u_gralloc_internal.c',
+   'u_gralloc_fallback.c',
++  'u_gralloc_imapper5_stablec.c',
+   'u_gralloc_cros_api.c',
+   'u_gralloc_libdrm.c',
+   'u_gralloc_qcom.c',
+diff --git a/src/util/u_gralloc/u_gralloc.c b/src/util/u_gralloc/u_gralloc.c
+index 960986f..f4e297e 100644
+--- a/src/util/u_gralloc/u_gralloc.c
++++ b/src/util/u_gralloc/u_gralloc.c
+@@ -28,6 +28,7 @@ static const struct u_grallocs {
+ #ifdef USE_IMAPPER4_METADATA_API
+    {.type = U_GRALLOC_TYPE_GRALLOC4, .create = u_gralloc_imapper_api_create},
+ #endif /* USE_IMAPPER4_METADATA_API */
++   {.type = U_GRALLOC_TYPE_IMAPPER5_STABLEC, .create = u_gralloc_imapper5_stablec_create},
+    {.type = U_GRALLOC_TYPE_LIBDRM, .create = u_gralloc_libdrm_create},
+    {.type = U_GRALLOC_TYPE_QCOM, .create = u_gralloc_qcom_create},
+    {.type = U_GRALLOC_TYPE_FALLBACK, .create = u_gralloc_fallback_create},
+diff --git a/src/util/u_gralloc/u_gralloc.h b/src/util/u_gralloc/u_gralloc.h
+index 334b39e..56f51d0 100644
+--- a/src/util/u_gralloc/u_gralloc.h
++++ b/src/util/u_gralloc/u_gralloc.h
+@@ -54,6 +54,7 @@ enum u_gralloc_type {
+    U_GRALLOC_TYPE_LIBDRM,
+    U_GRALLOC_TYPE_QCOM,
+    U_GRALLOC_TYPE_FALLBACK,
++   U_GRALLOC_TYPE_IMAPPER5_STABLEC,
+    U_GRALLOC_TYPE_COUNT,
+ };
+ 
+diff --git a/src/util/u_gralloc/u_gralloc_imapper5_stablec.c b/src/util/u_gralloc/u_gralloc_imapper5_stablec.c
+new file mode 100644
+index 0000000..46f14cb
+--- /dev/null
++++ b/src/util/u_gralloc/u_gralloc_imapper5_stablec.c
+@@ -0,0 +1,533 @@
++/*
++ * Mesa 3-D graphics library
++ *
++ * Copyright (C) 2026 Linux.apk contributors
++ * SPDX-License-Identifier: MIT
++ *
++ * u_gralloc backend for the stable-C IMapper v5 (AIMapper) interface.
++ *
++ * Unlike u_gralloc_imapper5_api.cpp, this does not go through libui, which is
++ * not an LL-NDK library. It loads the vendor's mapper.<suffix>.so itself and
++ * decodes the StandardMetadataType encoding, so a driver built out of tree
++ * with the NDK can import buffers from any IMapper v5 gralloc.
++ *
++ * The mapper suffix is taken from the MESA_GRALLOC_MAPPER_SUFFIX option
++ * (property mesa.gralloc.mapper.suffix), or else queried from the IAllocator
++ * AIDL service, the same way libui does it.
++ */
++
++#include <dlfcn.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <android/binder_ibinder.h>
++#include <android/binder_parcel.h>
++#include <android/binder_status.h>
++
++#include "util/log.h"
++#include "util/os_misc.h"
++#include "util/u_memory.h"
++#include "u_gralloc_internal.h"
++
++/* ABI subset of <android/hardware/graphics/mapper/IMapper.h>. */
++#define AIMAPPER_VERSION_5 5
++
++typedef struct {
++   void *importBuffer, *freeBuffer, *getTransportSize, *lock, *unlock;
++   void *flushLockedBuffer, *rereadLockedBuffer, *getMetadata;
++   int32_t (*getStandardMetadata)(buffer_handle_t buffer, int64_t type,
++                                  void *dest, size_t dest_size);
++   void *setMetadata, *setStandardMetadata, *listSupportedMetadataTypes;
++   void *dumpBuffer, *dumpAllBuffers, *getReservedRegion;
++} aimapper_v5;
++
++typedef struct {
++   _Alignas(max_align_t) uint32_t version;
++   aimapper_v5 v5;
++} aimapper;
++
++/* android.hardware.graphics.common.StandardMetadataType */
++enum {
++   SMT_PIXEL_FORMAT_FOURCC = 7,
++   SMT_PIXEL_FORMAT_MODIFIER = 8,
++   SMT_CHROMA_SITING = 14,
++   SMT_PLANE_LAYOUTS = 15,
++   SMT_DATASPACE = 17,
++};
++
++/* android.hardware.graphics.common.ChromaSiting */
++enum {
++   CHROMA_SITED_INTERSTITIAL = 2,
++   CHROMA_COSITED_HORIZONTAL = 3,
++   CHROMA_COSITED_VERTICAL = 4,
++   CHROMA_COSITED_BOTH = 5,
++};
++
++/* android.hardware.graphics.common.Dataspace */
++#define DATASPACE_STANDARD_MASK (63 << 16)
++#define DATASPACE_STANDARD_BT709 (1 << 16)
++#define DATASPACE_STANDARD_BT2020 (6 << 16)
++#define DATASPACE_STANDARD_BT2020_CL (7 << 16)
++#define DATASPACE_RANGE_MASK (7 << 27)
++#define DATASPACE_RANGE_FULL (1 << 27)
++
++#define BUFFER_USAGE_FRONT_BUFFER (1ull << 32)
++
++struct imapper5_gralloc {
++   struct u_gralloc base;
++   void *lib;
++   aimapper *mapper;
++};
++
++/* ---- StandardMetadata decoding (see IMapperMetadataTypes.h) ------------ */
++
++struct md_reader {
++   const uint8_t *p;
++   size_t left;
++   bool ok;
++};
++
++static void
++md_read(struct md_reader *r, void *dst, size_t n)
++{
++   if (!r->ok || r->left < n) {
++      r->ok = false;
++      memset(dst, 0, n);
++      return;
++   }
++   memcpy(dst, r->p, n);
++   r->p += n;
++   r->left -= n;
++}
++
++static int64_t
++md_i64(struct md_reader *r)
++{
++   int64_t v;
++   md_read(r, &v, sizeof(v));
++   return v;
++}
++
++/* Strings are an int64 length followed by bytes, without a terminator. */
++static bool
++md_string_is(struct md_reader *r, const char *expect)
++{
++   int64_t len = md_i64(r);
++   if (!r->ok || len < 0 || (uint64_t)len > r->left) {
++      r->ok = false;
++      return false;
++   }
++   bool match = (size_t)len == strlen(expect) && !memcmp(r->p, expect, len);
++   r->p += len;
++   r->left -= len;
++   return match;
++}
++
++static void
++md_header(struct md_reader *r, int64_t type)
++{
++   if (!md_string_is(r, "android.hardware.graphics.common.StandardMetadataType") ||
++       md_i64(r) != type)
++      r->ok = false;
++}
++
++/* Fetch standard metadata `type` into a malloc'ed buffer and position a
++ * reader after its header. */
++static uint8_t *
++get_metadata(struct imapper5_gralloc *gr, buffer_handle_t handle, int64_t type,
++             struct md_reader *r)
++{
++   size_t size = 512;
++   uint8_t *buf = NULL;
++
++   for (int attempt = 0; attempt < 2; attempt++) {
++      free(buf);
++      buf = malloc(size);
++      if (!buf)
++         return NULL;
++      int32_t ret = gr->mapper->v5.getStandardMetadata(handle, type, buf, size);
++      if (ret < 0) {
++         free(buf);
++         return NULL;
++      }
++      if ((size_t)ret <= size) {
++         *r = (struct md_reader){.p = buf, .left = ret, .ok = true};
++         md_header(r, type);
++         if (!r->ok) {
++            free(buf);
++            return NULL;
++         }
++         return buf;
++      }
++      size = ret;
++   }
++
++   free(buf);
++   return NULL;
++}
++
++/* ---- u_gralloc ops ------------------------------------------------------ */
++
++static int
++imapper5_get_buffer_basic_info(struct u_gralloc *gralloc,
++                               struct u_gralloc_buffer_handle *hnd,
++                               struct u_gralloc_buffer_basic_info *out)
++{
++   struct imapper5_gralloc *gr = (struct imapper5_gralloc *)gralloc;
++   const native_handle_t *handle = hnd->handle;
++   struct md_reader r;
++   uint8_t *buf;
++
++   if (!handle)
++      return -EINVAL;
++
++   buf = get_metadata(gr, handle, SMT_PIXEL_FORMAT_FOURCC, &r);
++   if (!buf)
++      return -EINVAL;
++   uint32_t fourcc;
++   md_read(&r, &fourcc, sizeof(fourcc));
++   free(buf);
++   if (!r.ok)
++      return -EINVAL;
++
++   buf = get_metadata(gr, handle, SMT_PIXEL_FORMAT_MODIFIER, &r);
++   if (!buf)
++      return -EINVAL;
++   uint64_t modifier;
++   md_read(&r, &modifier, sizeof(modifier));
++   free(buf);
++   if (!r.ok)
++      return -EINVAL;
++
++   buf = get_metadata(gr, handle, SMT_PLANE_LAYOUTS, &r);
++   if (!buf)
++      return -EINVAL;
++
++   int64_t num_planes = md_i64(&r);
++   if (!r.ok || num_planes < 1 || num_planes > 4) {
++      free(buf);
++      return -EINVAL;
++   }
++
++   int fd_index = 0;
++   for (int i = 0; i < num_planes && r.ok; i++) {
++      int64_t num_components = md_i64(&r);
++      for (int64_t j = 0; j < num_components && r.ok; j++) {
++         /* component.type (ExtendableType: name, value), offsetInBits, sizeInBits */
++         md_string_is(&r, "");
++         md_i64(&r);
++         md_i64(&r);
++         md_i64(&r);
++      }
++      int64_t offset = md_i64(&r);
++      md_i64(&r); /* sampleIncrementInBits */
++      int64_t stride = md_i64(&r);
++      md_i64(&r); /* widthInSamples */
++      md_i64(&r); /* heightInSamples */
++      md_i64(&r); /* totalSizeInBytes */
++      md_i64(&r); /* horizontalSubsampling */
++      md_i64(&r); /* verticalSubsampling */
++
++      /* Same convention as the libui-based path: a plane at offset 0 after
++       * the first one lives in the next dma-buf. */
++      if (offset == 0 && i > 0)
++         fd_index++;
++      if (fd_index >= handle->numFds) {
++         free(buf);
++         return -EINVAL;
++      }
++
++      out->offsets[i] = offset;
++      out->strides[i] = stride;
++      out->fds[i] = handle->data[fd_index];
++   }
++   free(buf);
++   if (!r.ok)
++      return -EINVAL;
++
++   out->drm_fourcc = fourcc;
++   out->modifier = modifier;
++   out->num_planes = num_planes;
++
++   return 0;
++}
++
++static int
++imapper5_get_buffer_color_info(struct u_gralloc *gralloc,
++                               struct u_gralloc_buffer_handle *hnd,
++                               struct u_gralloc_buffer_color_info *out)
++{
++   struct imapper5_gralloc *gr = (struct imapper5_gralloc *)gralloc;
++   struct md_reader r;
++   uint8_t *buf;
++
++   if (!hnd->handle)
++      return -EINVAL;
++
++   int64_t siting = CHROMA_SITED_INTERSTITIAL;
++   buf = get_metadata(gr, hnd->handle, SMT_CHROMA_SITING, &r);
++   if (buf) {
++      md_string_is(&r, "");
++      int64_t v = md_i64(&r);
++      if (r.ok)
++         siting = v;
++      free(buf);
++   }
++
++   int32_t dataspace = 0;
++   buf = get_metadata(gr, hnd->handle, SMT_DATASPACE, &r);
++   if (buf) {
++      int32_t v;
++      md_read(&r, &v, sizeof(v));
++      if (r.ok)
++         dataspace = v;
++      free(buf);
++   }
++
++   switch (dataspace & DATASPACE_STANDARD_MASK) {
++   case DATASPACE_STANDARD_BT709:
++      out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC709;
++      break;
++   case DATASPACE_STANDARD_BT2020:
++   case DATASPACE_STANDARD_BT2020_CL:
++      out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC2020;
++      break;
++   default:
++      out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC601;
++      break;
++   }
++
++   out->sample_range = (dataspace & DATASPACE_RANGE_MASK) == DATASPACE_RANGE_FULL
++                          ? __DRI_YUV_FULL_RANGE
++                          : __DRI_YUV_NARROW_RANGE;
++
++   switch (siting) {
++   case CHROMA_COSITED_HORIZONTAL:
++      out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0;
++      out->vertical_siting = __DRI_YUV_CHROMA_SITING_0_5;
++      break;
++   case CHROMA_COSITED_VERTICAL:
++      out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0_5;
++      out->vertical_siting = __DRI_YUV_CHROMA_SITING_0;
++      break;
++   case CHROMA_COSITED_BOTH:
++      out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0;
++      out->vertical_siting = __DRI_YUV_CHROMA_SITING_0;
++      break;
++   default:
++      out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0_5;
++      out->vertical_siting = __DRI_YUV_CHROMA_SITING_0_5;
++      break;
++   }
++
++   return 0;
++}
++
++static int
++imapper5_get_front_rendering_usage(struct u_gralloc *gralloc, uint64_t *out_usage)
++{
++   *out_usage = BUFFER_USAGE_FRONT_BUFFER;
++   return 0;
++}
++
++static int
++imapper5_destroy(struct u_gralloc *gralloc)
++{
++   struct imapper5_gralloc *gr = (struct imapper5_gralloc *)gralloc;
++   /* Do not dlclose: other users in the process (libui) share the mapper. */
++   FREE(gr);
++   return 0;
++}
++
++/* ---- mapper discovery ---------------------------------------------------- */
++
++static void *
++binder_on_create(void *args)
++{
++   return args;
++}
++
++static void
++binder_on_destroy(void *user_data)
++{
++}
++
++static binder_status_t
++binder_on_transact(AIBinder *binder, transaction_code_t code, const AParcel *in,
++                   AParcel *out)
++{
++   return STATUS_UNKNOWN_TRANSACTION;
++}
++
++static bool
++string_alloc(void *data, int32_t length, char **buffer)
++{
++   char **str = data;
++   if (length < 0) {
++      *str = NULL;
++      return true;
++   }
++   *str = calloc(1, length);
++   *buffer = *str;
++   return *str != NULL;
++}
++
++/* IAllocator.getIMapperLibrarySuffix() via libbinder_ndk (LL-NDK), resolved
++ * at runtime because the NDK stubs lack AServiceManager_*. */
++static char *
++query_mapper_suffix(void)
++{
++   static const char descriptor[] = "android.hardware.graphics.allocator.IAllocator";
++   static const char instance[] = "android.hardware.graphics.allocator.IAllocator/default";
++   /* FIRST_CALL_TRANSACTION + index: allocate, allocate2, isSupported, getIMapperLibrarySuffix */
++   const transaction_code_t TRANSACTION_getIMapperLibrarySuffix = FIRST_CALL_TRANSACTION + 3;
++   char *suffix = NULL;
++
++   /* libbinder aborts if the driver is missing; don't take the process down. */
++   if (access("/dev/binder", R_OK | W_OK) != 0)
++      return NULL;
++
++   void *lib = dlopen("libbinder_ndk.so", RTLD_NOW | RTLD_LOCAL);
++   if (!lib)
++      return NULL;
++
++#define SYM(name) __typeof__(&name) p_##name = (__typeof__(&name))dlsym(lib, #name)
++   SYM(AIBinder_Class_define);
++   SYM(AIBinder_associateClass);
++   SYM(AIBinder_prepareTransaction);
++   SYM(AIBinder_transact);
++   SYM(AIBinder_decStrong);
++   SYM(AParcel_readStatusHeader);
++   SYM(AParcel_readString);
++   SYM(AParcel_delete);
++   SYM(AStatus_isOk);
++   SYM(AStatus_delete);
++#undef SYM
++   bool (*p_isDeclared)(const char *) =
++      (bool (*)(const char *))dlsym(lib, "AServiceManager_isDeclared");
++   AIBinder *(*p_waitForService)(const char *) =
++      (AIBinder * (*)(const char *)) dlsym(lib, "AServiceManager_waitForService");
++
++   if (!p_AIBinder_Class_define || !p_AIBinder_associateClass ||
++       !p_AIBinder_prepareTransaction || !p_AIBinder_transact ||
++       !p_AIBinder_decStrong || !p_AParcel_readStatusHeader ||
++       !p_AParcel_readString || !p_AParcel_delete || !p_AStatus_isOk ||
++       !p_AStatus_delete || !p_isDeclared || !p_waitForService)
++      return NULL;
++
++   if (!p_isDeclared(instance))
++      return NULL;
++
++   AIBinder *binder = p_waitForService(instance);
++   if (!binder)
++      return NULL;
++
++   AIBinder_Class *clazz = p_AIBinder_Class_define(descriptor, binder_on_create,
++                                                   binder_on_destroy, binder_on_transact);
++   AParcel *in = NULL, *out = NULL;
++   AStatus *status = NULL;
++   if (clazz && p_AIBinder_associateClass(binder, clazz) &&
++       p_AIBinder_prepareTransaction(binder, &in) == STATUS_OK &&
++       p_AIBinder_transact(binder, TRANSACTION_getIMapperLibrarySuffix, &in, &out, 0) == STATUS_OK &&
++       p_AParcel_readStatusHeader(out, &status) == STATUS_OK && p_AStatus_isOk(status)) {
++      if (p_AParcel_readString(out, &suffix, string_alloc) != STATUS_OK) {
++         free(suffix);
++         suffix = NULL;
++      }
++   }
++
++   if (status)
++      p_AStatus_delete(status);
++   if (out)
++      p_AParcel_delete(out);
++   p_AIBinder_decStrong(binder);
++
++   return suffix;
++}
++
++static void *
++load_mapper_library(const char *suffix)
++{
++   char name[256];
++   void *so = NULL;
++
++   snprintf(name, sizeof(name), "mapper.%s.so", suffix);
++
++   /* Same as libui: load from the sphal namespace when there is one. */
++   void *vndk = dlopen("libvndksupport.so", RTLD_NOW | RTLD_LOCAL);
++   if (vndk) {
++      void *(*load_sphal)(const char *, int) =
++         (void *(*)(const char *, int))dlsym(vndk, "android_load_sphal_library");
++      if (load_sphal)
++         so = load_sphal(name, RTLD_NOW | RTLD_LOCAL);
++   }
++
++   if (!so) {
++      char path[300];
++#ifdef __LP64__
++      snprintf(path, sizeof(path), "/vendor/lib64/hw/%s", name);
++#else
++      snprintf(path, sizeof(path), "/vendor/lib/hw/%s", name);
++#endif
++      so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
++   }
++
++   return so;
++}
++
++struct u_gralloc *
++u_gralloc_imapper5_stablec_create(void)
++{
++   char *suffix = NULL;
++   const char *opt = os_get_option("MESA_GRALLOC_MAPPER_SUFFIX");
++
++   if (opt && *opt)
++      suffix = strdup(opt);
++   else
++      suffix = query_mapper_suffix();
++
++   if (!suffix) {
++      mesa_logi("No IMapper v5 (stable-C) mapper found");
++      return NULL;
++   }
++
++   void *lib = load_mapper_library(suffix);
++   if (!lib) {
++      mesa_logw("Failed to load mapper.%s.so: %s", suffix, dlerror());
++      free(suffix);
++      return NULL;
++   }
++
++   int32_t (*load_imapper)(aimapper **) =
++      (int32_t (*)(aimapper **))dlsym(lib, "AIMapper_loadIMapper");
++   aimapper *mapper = NULL;
++   if (!load_imapper || load_imapper(&mapper) != 0 || !mapper ||
++       mapper->version < AIMAPPER_VERSION_5 || !mapper->v5.getStandardMetadata) {
++      mesa_logw("mapper.%s.so does not provide AIMapper v5", suffix);
++      free(suffix);
++      return NULL;
++   }
++
++   struct imapper5_gralloc *gr = CALLOC_STRUCT(imapper5_gralloc);
++   if (!gr) {
++      free(suffix);
++      return NULL;
++   }
++   gr->lib = lib;
++   gr->mapper = mapper;
++   gr->base.ops.get_buffer_basic_info = imapper5_get_buffer_basic_info;
++   gr->base.ops.get_buffer_color_info = imapper5_get_buffer_color_info;
++   gr->base.ops.get_front_rendering_usage = imapper5_get_front_rendering_usage;
++   gr->base.ops.destroy = imapper5_destroy;
++
++   mesa_logi("Using IMapper v5 stable-C API (mapper.%s.so)", suffix);
++   free(suffix);
++
++   return &gr->base;
++}
+diff --git a/src/util/u_gralloc/u_gralloc_internal.c b/src/util/u_gralloc/u_gralloc_internal.c
+index c645202..0f52a36 100644
+--- a/src/util/u_gralloc/u_gralloc_internal.c
++++ b/src/util/u_gralloc/u_gralloc_internal.c
+@@ -9,6 +9,7 @@
+ #include "u_gralloc_internal.h"
+ 
+ #include <hardware/gralloc.h>
++#include <dlfcn.h>
+ #include <errno.h>
+ 
+ #include "drm-uapi/drm_fourcc.h"
+@@ -177,3 +178,24 @@ bufferinfo_from_ycbcr(const struct android_ycbcr *ycbcr,
+ 
+    return 0;
+ }
++
++#undef hw_get_module
++int
++u_gralloc_hw_get_module(const char *id, const struct hw_module_t **module)
++{
++   static int (*fn)(const char *, const struct hw_module_t **);
++   static bool tried;
++
++   /* Racy but idempotent: callers are serialized by u_gralloc_mutex. */
++   if (!tried) {
++      void *lib = dlopen("libhardware.so", RTLD_NOW | RTLD_LOCAL);
++      if (lib)
++         fn = (int (*)(const char *, const struct hw_module_t **))dlsym(lib, "hw_get_module");
++      tried = true;
++   }
++
++   if (!fn)
++      return -ENOENT;
++
++   return fn(id, module);
++}
+diff --git a/src/util/u_gralloc/u_gralloc_internal.h b/src/util/u_gralloc/u_gralloc_internal.h
+index 8097560..3973fb2 100644
+--- a/src/util/u_gralloc/u_gralloc_internal.h
++++ b/src/util/u_gralloc/u_gralloc_internal.h
+@@ -14,6 +14,15 @@ extern "C" {
+ 
+ #include "u_gralloc.h"
+ 
++#include <hardware/hardware.h>
++
++/* libhardware is not an LL-NDK library, so a vendor driver may not link it.
++ * Resolve hw_get_module() at runtime instead; it fails cleanly with -ENOENT
++ * when the vendor partition does not ship libhardware.so.
++ */
++int u_gralloc_hw_get_module(const char *id, const struct hw_module_t **module);
++#define hw_get_module u_gralloc_hw_get_module
++
+ struct u_gralloc_ops {
+    int (*get_buffer_basic_info)(struct u_gralloc *gralloc,
+                                 struct u_gralloc_buffer_handle *hnd,
+@@ -35,6 +44,7 @@ extern struct u_gralloc *u_gralloc_cros_api_create(void);
+ #ifdef USE_IMAPPER4_METADATA_API
+ extern struct u_gralloc *u_gralloc_imapper_api_create(void);
+ #endif
++extern struct u_gralloc *u_gralloc_imapper5_stablec_create(void);
+ extern struct u_gralloc *u_gralloc_qcom_create(void);
+ extern struct u_gralloc *u_gralloc_libdrm_create(void);
+ extern struct u_gralloc *u_gralloc_fallback_create(void);
