@@ -17,10 +17,13 @@ log() { echo "ns-init: $*" >&2; }
 
 # Safety: never run Android init outside a fresh pid namespace.
 if [[ $$ != 1 ]]; then
-  log "refusing to continue: not pid 1 in a new pid namespace (pid $$)"; exit 1
+  log "refusing to continue: not pid 1 in a new pid namespace (pid $$)"
+  exit 1
 fi
 [[ $(cat /proc/self/uid_map | awk '{print $2; exit}') != 0 ]] || {
-  log "refusing to continue: in the initial user namespace"; exit 1; }
+  log "refusing to continue: in the initial user namespace"
+  exit 1
+}
 
 mount --make-rprivate /
 
@@ -31,11 +34,12 @@ mount -t tmpfs -o mode=0755 rootfs "$R"
 # Mount an overlayfs of the existing dirs among "$@" (topmost first) on $dst,
 # or a plain read-only bind if only one layer exists.
 layer_mount() {
-  local dst=$1; shift
+  local dst=$1
+  shift
   local layers=()
   for l in "$@"; do [[ -d $l ]] && layers+=("$l"); done
   mkdir -p "$dst"
-  if (( ${#layers[@]} == 1 )); then
+  if ((${#layers[@]} == 1)); then
     mount --bind "${layers[0]}" "$dst"
     mount -o remount,bind,ro "$dst"
   else
@@ -58,9 +62,12 @@ for e in "$img/system"/* "$img/system"/.[!.]*; do
   [[ -e $e || -L $e ]] || continue
   n=$(basename "$e")
   [[ -e $R/$n ]] && continue
-  if [[ -L $e ]]; then cp -P "$e" "$R/$n"
-  elif [[ -d $e ]]; then mkdir -m "$(stat -c %a "$e")" "$R/$n"
-  else cp -p "$e" "$R/$n"
+  if [[ -L $e ]]; then
+    cp -P "$e" "$R/$n"
+  elif [[ -d $e ]]; then
+    mkdir -m "$(stat -c %a "$e")" "$R/$n"
+  else
+    cp -p "$e" "$R/$n"
   fi
 done
 rm -rf "$R/lost+found"
@@ -78,7 +85,7 @@ layer_mount "$R/linuxapk/apex" "$ovl/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
-  "$apex/apex-info-list.xml" > "$R/linuxapk/apexd-mounts"
+  "$apex/apex-info-list.xml" >"$R/linuxapk/apexd-mounts"
 
 # --- writable state -----------------------------------------------------------
 mkdir -p "$data"
@@ -107,7 +114,7 @@ if [[ -d /dev/dri ]]; then
   mkdir -p "$R/dev/dri"
   mount --rbind /dev/dri "$R/dev/dri"
 fi
-mkdir -p "$R/dev/binderfs"   # init mounts binderfs itself (init.rc "on init")
+mkdir -p "$R/dev/binderfs" # init mounts binderfs itself (init.rc "on init")
 
 # --- /proc, /sys -------------------------------------------------------------
 # A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested
@@ -120,7 +127,7 @@ mkdir -p "$R/dev/binderfs"   # init mounts binderfs itself (init.rc "on init")
 mount -t proc -o nosuid,nodev,noexec proc "$R/proc"
 mkdir -p "$R/linuxapk/proc/sys/vm"
 cp "$run/cmdline" "$run/bootconfig" "$R/linuxapk/proc/"
-echo 32 > "$R/linuxapk/proc/sys/vm/mmap_rnd_bits"
+echo 32 >"$R/linuxapk/proc/sys/vm/mmap_rnd_bits"
 
 # Host safety: inside this user namespace we are root over everything the host
 # user owns. sysfs submounts expose such files: fusectl's per-connection
@@ -141,14 +148,16 @@ mount -o remount,bind,ro,nosuid,nodev,noexec "$R/sys"
 # delegated cgroup because we're in a new cgroup namespace.
 mount -t tmpfs -o mode=0755,nosuid,nodev,noexec nocgroup "$R/sys/fs/cgroup"
 
-findmnt -R -o TARGET,FSTYPE,OPTIONS "$R/sys" > "$run/sys-mounts.txt" || true
+findmnt -R -o TARGET,FSTYPE,OPTIONS "$R/sys" >"$run/sys-mounts.txt" || true
 
 # Refuse to boot if any host-user-owned control file is still reachable.
 if [[ -n $(ls -A "$R/sys/fs/fuse/connections" 2>/dev/null) ]]; then
-  log "refusing to continue: host FUSE connections visible in the session"; exit 1
+  log "refusing to continue: host FUSE connections visible in the session"
+  exit 1
 fi
 if touch "$R/sys/.linuxapk-rw-probe" 2>/dev/null; then
-  log "refusing to continue: /sys is writable in the session"; exit 1
+  log "refusing to continue: /sys is writable in the session"
+  exit 1
 fi
 
 # --- go -----------------------------------------------------------------------

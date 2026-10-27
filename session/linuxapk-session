@@ -22,7 +22,10 @@ run=$out/run
 data=${LINUXAPK_DATA:-$HOME/.local/share/linuxapk/data}
 unit=linuxapk-session
 
-die() { echo "linuxapk-session: $*" >&2; exit 1; }
+die() {
+  echo "linuxapk-session: $*" >&2
+  exit 1
+}
 
 # Map root to the invoking user (so image files appear root-owned), and the
 # Android uid/gid ranges we need onto our subordinate ids:
@@ -30,19 +33,26 @@ die() { echo "linuxapk-session: $*" >&2; exit 1; }
 #   50000-59999 (shared app gids), 90000-99999 (isolated/app-zygote uids)
 idmaps() {
   local kind=$1 who sub
-  if [[ $kind == users ]]; then who=$(id -u); sub=/etc/subuid; else who=$(id -g); sub=/etc/subgid; fi
+  if [[ $kind == users ]]; then
+    who=$(id -u)
+    sub=/etc/subuid
+  else
+    who=$(id -g)
+    sub=/etc/subgid
+  fi
   local base count
   read -r base count < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" \
     '$1==u || $1==n {print $2, $3; exit}' "$sub")
   [[ -n ${base:-} ]] || die "no entry for $(id -un) in $sub"
-  (( count >= 49999 )) || die "need at least 49999 subordinate ids in $sub (have $count)"
+  ((count >= 49999)) || die "need at least 49999 subordinate ids in $sub (have $count)"
   echo "--map-$kind=0:$who:1 --map-$kind=1:$base:29999" \
-       "--map-$kind=50000:$((base + 29999)):10000 --map-$kind=90000:$((base + 39999)):10000"
+    "--map-$kind=50000:$((base + 29999)):10000 --map-$kind=90000:$((base + 39999)):10000"
 }
 
 ns_pid() {
   [[ -f $run/pid ]] || return 1
-  local p; p=$(<"$run/pid")
+  local p
+  p=$(<"$run/pid")
   [[ -d /proc/$p ]] && echo "$p"
 }
 
@@ -58,19 +68,21 @@ EOF
 # driven by amdgpu, else lavapipe.
 vendor_props() {
   local dst=$out/session/overlay/vendor/build.prop gpu=$out/vendor-overlay/etc/gpu.prop vk=lvp
-  local drv; drv=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)")
+  local drv
+  drv=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)")
   [[ $drv == amdgpu ]] && vk=radv
   mkdir -p "$(dirname "$dst")"
   {
     cat "$out/img/vendor/build.prop"
-    echo; echo "# --- linuxapk-session: graphics (render node driver: ${drv:-none}) ---"
+    echo
+    echo "# --- linuxapk-session: graphics (render node driver: ${drv:-none}) ---"
     if [[ -f $gpu ]]; then
       grep -v '^ro.hardware.vulkan=' "$gpu"
     else
       printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
     fi
     echo "ro.hardware.vulkan=$vk"
-  } > "$dst"
+  } >"$dst"
   chmod 0644 "$dst"
 }
 
@@ -81,15 +93,16 @@ start() {
   [[ -d $out/img/system/system ]] || die "no image at $out/img (run tools/extract-image.sh)"
   [[ -f $out/root/apex/apex-info-list.xml ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
   if [[ ! -x $out/session/pivot-exec ]] ||
-     [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
+    [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
     "$here/build.sh"
   fi
 
   vendor_props
 
-  rm -rf "$run"; mkdir -p "$run"
-  echo "console=null" > "$run/cmdline"
-  cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' > "$run/bootconfig"
+  rm -rf "$run"
+  mkdir -p "$run"
+  echo "console=null" >"$run/cmdline"
+  cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' >"$run/bootconfig"
   mkfifo "$run/kmsg"
 
   # Everything (log reader, unshare, the namespace) runs in one transient
@@ -99,15 +112,18 @@ start() {
     --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
-  local i
-  for i in $(seq 100); do
+  for _ in $(seq 100); do
     [[ -s $run/pid ]] && break
     systemctl --user -q is-active "$unit" || break
     sleep 0.1
   done
-  local p; p=$(ns_pid) || { cat "$run/session.out" >&2; die "session failed to start"; }
+  local p
+  p=$(ns_pid) || {
+    cat "$run/session.out" >&2
+    die "session failed to start"
+  }
   echo "session started: Android pid 1 = host pid $p; log: $run/kmsg.log"
-  if (( fg )); then
+  if ((fg)); then
     tail -n +1 --pid="$p" -f "$run/kmsg.log" || true
   fi
   return 0
@@ -124,8 +140,8 @@ _run() {
   env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
     -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
-  local ushare=$! outer="" inner="" i
-  for i in $(seq 200); do
+  local ushare=$! outer="" inner=""
+  for _ in $(seq 200); do
     [[ -z $outer ]] && outer=$(pgrep -P "$ushare" | head -1 || true)
     [[ -n $outer ]] && inner=$(pgrep -P "$outer" -x 'init|sh' | head -1 || true)
     [[ -n $inner ]] && break
@@ -133,15 +149,15 @@ _run() {
     sleep 0.05
   done
   if [[ -n $inner ]]; then
-    echo "$outer" > "$run/outer.pid"
-    echo "$inner" > "$run/pid"
+    echo "$outer" >"$run/outer.pid"
+    echo "$inner" >"$run/pid"
     # User-mode networking for the session's own network namespace. No
     # inbound port forwarding, and --no-map-gw keeps the host's loopback
     # services unreachable from Android.
     pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw \
       --dns-forward 169.254.1.1 -t none -u none -T none -U none \
       --userns "/proc/$inner/ns/user" --netns "/proc/$inner/ns/net" >>"$run/session.out" 2>&1 &
-    echo $! > "$run/pasta.pid"
+    echo $! >"$run/pasta.pid"
   fi
   wait "$ushare"
   [[ -f $run/pasta.pid ]] && kill "$(<"$run/pasta.pid")" 2>/dev/null
@@ -155,8 +171,7 @@ stop() {
   done
   systemctl --user stop "$unit" 2>/dev/null || true
   systemctl --user reset-failed "$unit" 2>/dev/null || true
-  local i
-  for i in $(seq 50); do
+  for _ in $(seq 50); do
     [[ $(systemctl --user show -P LoadState "$unit" 2>/dev/null) == not-found ]] && break
     sleep 0.1
   done
@@ -165,16 +180,22 @@ stop() {
 }
 
 status() {
-  if p=$(ns_pid); then echo "running: host pid $p"; else echo "stopped"; return 1; fi
+  if p=$(ns_pid); then echo "running: host pid $p"; else
+    echo "stopped"
+    return 1
+  fi
 }
 
 # Run a command inside the session (root in the user ns), with the Android
 # environment from init.environ.rc and the derived classpath.
 exec_in() {
-  local p; p=$(ns_pid) || die "not running"
+  local p
+  p=$(ns_pid) || die "not running"
   # Join the session's own cgroup so nothing started here outlives "stop".
-  local cg; cg=$(systemctl --user show -P ControlGroup "$unit")
-  [[ -n $cg ]] && echo $$ > "/sys/fs/cgroup$cg/cgroup.procs"
+  local cg
+  cg=$(systemctl --user show -P ControlGroup "$unit")
+  [[ -n $cg ]] && echo $$ >"/sys/fs/cgroup$cg/cgroup.procs"
+  # shellcheck disable=SC2016 # expanded by the session's shell
   exec nsenter -t "$p" -U -m -p -C -n -i -u --preserve-credentials -r -w \
     /system/bin/sh -c '
       for f in /init.environ.rc /data/system/environ/classpath; do
@@ -188,7 +209,8 @@ exec_in() {
 
 # Host-safety probes against a live session; each must report "ok".
 selftest() {
-  local p; p=$(ns_pid) || die "not running"
+  local p
+  p=$(ns_pid) || die "not running"
   {
     [[ $(readlink "/proc/$p/ns/net") != $(readlink /proc/self/ns/net) ]] &&
       echo "ok   own network namespace" || echo "FAIL shares the host network namespace"
@@ -198,6 +220,7 @@ selftest() {
       echo "ok   runs in $unit.service's cgroup" || echo "FAIL cgroup: $(cat "/proc/$p/cgroup")"
     grep -Eq '^Groups:[[:space:]]*$' "/proc/$p/status" &&
       echo "ok   no host supplementary groups" || echo "FAIL $(grep ^Groups "/proc/$p/status")"
+    # shellcheck disable=SC2016 # expanded by the session's shell
     "$0" exec /system/bin/sh -c '
       t() { if eval "$2" >/dev/null 2>&1; then echo "FAIL $1"; else echo "ok   $1"; fi; }
       t "umount of the fusectl mask refused" "umount /sys/fs/fuse/connections"
@@ -209,19 +232,35 @@ selftest() {
       t "sysrq refused" "echo h > /proc/sysrq-trigger"
       t "umount of the staged APEX tree refused" "umount /linuxapk/apex"
     ' 2>&1 | grep -v 'linker'
-  } > "$run/selftest.txt"
+  } >"$run/selftest.txt"
   cat "$run/selftest.txt"
   ! grep -q FAIL "$run/selftest.txt"
 }
 
 case ${1:-} in
-  start) shift; start "$@" ;;
+  start)
+    shift
+    start "$@"
+    ;;
   stop) stop ;;
-  _run) shift; _run "$@" ;;
+  _run)
+    shift
+    _run "$@"
+    ;;
   status) status ;;
   selftest) selftest ;;
-  log) shift; if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi ;;
-  exec) shift; (( $# )) || die "usage: exec CMD..."; exec_in "$@" ;;
+  log)
+    shift
+    if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi
+    ;;
+  exec)
+    shift
+    (($#)) || die "usage: exec CMD..."
+    exec_in "$@"
+    ;;
   shell) exec_in /system/bin/sh -l ;;
-  *) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 1 ;;
+  *)
+    sed -n '2,12s/^# \{0,1\}//p' "$0"
+    exit 1
+    ;;
 esac

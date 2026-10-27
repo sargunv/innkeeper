@@ -14,7 +14,8 @@ fi
 
 img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir>}")
 out=${2:?usage: flatten-apex.sh <img-dir> <out-dir>}
-mkdir -p "$out"; out=$(realpath "$out")
+mkdir -p "$out"
+out=$(realpath "$out")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -57,15 +58,15 @@ extract_fs() {
 }
 
 declare -A partition_of=(
-  [system/system/apex]=SYSTEM [system_ext/apex]=SYSTEM_EXT
-  [product/apex]=PRODUCT [vendor/apex]=VENDOR [odm/apex]=ODM)
+  [system / system / apex]=SYSTEM [system_ext / apex]=SYSTEM_EXT
+  [product / apex]=PRODUCT [vendor / apex]=VENDOR [odm / apex]=ODM)
 declare -A mountpoint_of=(
-  [system/system/apex]=/system/apex [system_ext/apex]=/system_ext/apex
-  [product/apex]=/product/apex [vendor/apex]=/vendor/apex [odm/apex]=/odm/apex)
+  [system / system / apex]=/system/apex [system_ext / apex]=/system_ext/apex
+  [product / apex]=/product/apex [vendor / apex]=/vendor/apex [odm / apex]=/odm/apex)
 
 list="$work/apex-info-list.xml"
-echo '<?xml version="1.0" encoding="utf-8"?>' > "$list"
-echo '<apex-info-list>' >> "$list"
+echo '<?xml version="1.0" encoding="utf-8"?>' >"$list"
+echo '<apex-info-list>' >>"$list"
 
 for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex; do
   [[ -d $img/$rel ]] || continue
@@ -73,13 +74,16 @@ for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex;
     [[ -e $apex ]] || continue
     file=$(basename "$apex")
     if [[ $file == *.capex ]]; then
-      echo "skipping compressed $file (unsupported)" >&2; continue
+      echo "skipping compressed $file (unsupported)" >&2
+      continue
     fi
-    rm -rf "$work/x"; mkdir -p "$work/x"
+    rm -rf "$work/x"
+    mkdir -p "$work/x"
     (cd "$work/x" && python3 -Ic "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('.', ['apex_payload.img','apex_manifest.pb'])" "$apex")
     IFS=$'\t' read -r name version < <(manifest_info "$work/x/apex_manifest.pb")
     dest="$out/$name"
-    rm -rf "$dest"; mkdir -p "$dest"
+    rm -rf "$dest"
+    mkdir -p "$dest"
     extract_fs "$work/x/apex_payload.img" "$dest"
     rm -rf "$dest/lost+found"
     # apexd exposes the manifest at /apex/<name>/apex_manifest.pb; the payload
@@ -87,10 +91,10 @@ for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex;
     [[ -e $dest/apex_manifest.pb ]] || cp "$work/x/apex_manifest.pb" "$dest/"
     path="${mountpoint_of[$rel]}/$file"
     printf '    <apex-info moduleName="%s" modulePath="%s" preinstalledModulePath="%s" versionCode="%s" versionName="" isFactory="true" isActive="true" lastUpdateMillis="0" provideSharedApexLibs="false" partition="%s"/>\n' \
-      "$name" "$path" "$path" "$version" "${partition_of[$rel]}" >> "$list"
+      "$name" "$path" "$path" "$version" "${partition_of[$rel]}" >>"$list"
     echo "$name ($file, v$version)"
   done
 done
-echo '</apex-info-list>' >> "$list"
+echo '</apex-info-list>' >>"$list"
 cp "$list" "$out/apex-info-list.xml"
 echo "flattened $(grep -c '<apex-info ' "$list") APEXes into $out"

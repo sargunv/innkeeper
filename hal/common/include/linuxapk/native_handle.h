@@ -14,10 +14,10 @@ void nativeHandleClose(const native_handle_t* h);
 // Frees the struct (not the fds).
 void nativeHandleDelete(native_handle_t* h);
 inline void nativeHandleCloseAndDelete(native_handle_t* h) {
-    if (h) {
-        nativeHandleClose(h);
-        nativeHandleDelete(h);
-    }
+  if (h) {
+    nativeHandleClose(h);
+    nativeHandleDelete(h);
+  }
 }
 
 }  // namespace linuxapk

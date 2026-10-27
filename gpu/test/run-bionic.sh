@@ -20,14 +20,15 @@ out=${OUT:-$repo/out}
 if [[ ${1:-} != --inner ]]; then
   [[ -d $out/root/apex/com.android.runtime ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
   mkdir -p "$out/gpu/run"
-  export BIONIC_ROOT; BIONIC_ROOT=$(mktemp -d "$out/gpu/run/root.XXXXXX")
+  export BIONIC_ROOT
+  BIONIC_ROOT=$(mktemp -d "$out/gpu/run/root.XXXXXX")
   # SIGKILL on timeout: unshare does not forward SIGTERM, but --kill-child
   # takes the whole pid namespace down when unshare dies.
   rc=0
   timeout -s KILL "${TIMEOUT:-300}" \
     unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@" || rc=$?
   rmdir "$BIONIC_ROOT" 2>/dev/null || true
-  (( rc == 137 )) && echo "run-bionic: killed after ${TIMEOUT:-300}s" >&2
+  ((rc == 137)) && echo "run-bionic: killed after ${TIMEOUT:-300}s" >&2
   exit $rc
 fi
 shift
@@ -35,9 +36,18 @@ shift
 extra_vendor=() envs=()
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -v) extra_vendor+=("$2"); shift 2 ;;
-    -e) envs+=("$2"); shift 2 ;;
-    --) shift; break ;;
+    -v)
+      extra_vendor+=("$2")
+      shift 2
+      ;;
+    -e)
+      envs+=("$2")
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
     *) break ;;
   esac
 done
@@ -47,13 +57,19 @@ R=$BIONIC_ROOT
 mount -t tmpfs -o mode=0755 root "$R"
 mkdir -p "$R"/{system,vendor,apex,linkerconfig,dev,proc,sys,data/gputest,tmp,product,system_ext,odm}
 
-ro_bind() { mount --bind "$1" "$2"; mount -o remount,bind,ro "$2"; }
+ro_bind() {
+  mount --bind "$1" "$2"
+  mount -o remount,bind,ro "$2"
+}
 ro_bind "$out/img/system/system" "$R/system"
 ro_bind "$out/img/system_ext" "$R/system_ext"
 ro_bind "$out/img/product" "$R/product"
 ro_bind "$out/root/apex" "$R/apex"
-if (( ${#extra_vendor[@]} )); then
-  lower=$(IFS=:; echo "${extra_vendor[*]}"):$out/vendor-overlay
+if ((${#extra_vendor[@]})); then
+  lower=$(
+    IFS=:
+    echo "${extra_vendor[*]}"
+  ):$out/vendor-overlay
   mount -t overlay overlay -o "ro,lowerdir=$lower" "$R/vendor"
 else
   ro_bind "$out/vendor-overlay" "$R/vendor"
@@ -64,13 +80,15 @@ mount -t tmpfs linkerconfig "$R/linkerconfig"
 mount -t tmpfs -o mode=0755 dev "$R/dev"
 for n in null zero full random urandom udmabuf; do
   [[ -e /dev/$n ]] || continue
-  touch "$R/dev/$n"; mount --bind "/dev/$n" "$R/dev/$n"
+  touch "$R/dev/$n"
+  mount --bind "/dev/$n" "$R/dev/$n"
 done
 # Render nodes only (no card*/KMS).
 mkdir -p "$R/dev/dri"
 for n in /dev/dri/renderD*; do
   [[ -e $n ]] || continue
-  touch "$R$n"; mount --bind "$n" "$R$n"
+  touch "$R$n"
+  mount --bind "$n" "$R$n"
 done
 mount -t proc proc "$R/proc"
 # Host safety (docs/NOTES.md): never expose host /sys wholesale. A tmpfs /sys
@@ -81,14 +99,17 @@ mount -t tmpfs -o mode=0755 sys "$R/sys"
 mkdir -p "$R/sys/dev/char"
 for n in /dev/dri/renderD*; do
   [[ -e $n ]] || continue
-  majmin=$(printf '%d:%d' 0x$(stat -c %t "$n") 0x$(stat -c %T "$n"))
-  node=$(readlink -f "/sys/dev/char/$majmin")      # .../<pci dev>/drm/renderD128
+  majmin=$(printf '%d:%d' "0x$(stat -c %t "$n")" "0x$(stat -c %T "$n")")
+  node=$(readlink -f "/sys/dev/char/$majmin") # .../<pci dev>/drm/renderD128
   pcidev=${node%/drm/*}
-  mkdir -p "$R$pcidev"; ro_bind "$pcidev" "$R$pcidev"
+  mkdir -p "$R$pcidev"
+  ro_bind "$pcidev" "$R$pcidev"
   ln -s "$node" "$R/sys/dev/char/$majmin"
 done
-mkdir -p "$R/sys/devices/system/cpu"; ro_bind /sys/devices/system/cpu "$R/sys/devices/system/cpu"
-mount --rbind "$R/sys" "$R/sys"; mount -o remount,bind,ro "$R/sys"
+mkdir -p "$R/sys/devices/system/cpu"
+ro_bind /sys/devices/system/cpu "$R/sys/devices/system/cpu"
+mount --rbind "$R/sys" "$R/sys"
+mount -o remount,bind,ro "$R/sys"
 # Top-level symlinks from the system-as-root image (/bin, /etc, ...).
 for e in "$out/img/system"/*; do
   n=$(basename "$e")

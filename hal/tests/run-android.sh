@@ -20,28 +20,34 @@ main=$(cd "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)/.
 out=${OUT:-$main/out}
 
 case ${1:-} in
---inner) shift ;;
---ns)
-  shift
-  exec unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
-  ;;
-*)
-  [[ -d $out/root/apex/com.android.runtime ]] || {
-    echo "missing $out/root/apex (run tools/flatten-apex.sh)" >&2
-    exit 1
-  }
-  mkdir -p "$out/hal-test/frames"
-  exec systemd-run --user --quiet --collect --wait --pipe --same-dir \
-    --unit="linuxapk-haltest-$$" -p KillMode=control-group -p RuntimeMaxSec=150 \
-    -E OUT="$out" -- "$0" --ns "$@"
-  ;;
+  --inner) shift ;;
+  --ns)
+    shift
+    exec unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
+    ;;
+  *)
+    [[ -d $out/root/apex/com.android.runtime ]] || {
+      echo "missing $out/root/apex (run tools/flatten-apex.sh)" >&2
+      exit 1
+    }
+    mkdir -p "$out/hal-test/frames"
+    exec systemd-run --user --quiet --collect --wait --pipe --same-dir \
+      --unit="linuxapk-haltest-$$" -p KillMode=control-group -p RuntimeMaxSec=150 \
+      -E OUT="$out" -- "$0" --ns "$@"
+    ;;
 esac
 
 envs=()
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -e) envs+=("$2"); shift 2 ;;
-    --) shift; break ;;
+    -e)
+      envs+=("$2")
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
     *) break ;;
   esac
 done
@@ -52,7 +58,10 @@ mount -t tmpfs -o mode=0755 root "$R"
 mkdir -p "$R"/{system,system_ext,product,vendor,apex,linkerconfig,dev,proc,tmp,data} \
   "$R"/data/local/tmp "$R"/data/vendor/linuxapk/frames "$R/.vendor-test/bin"
 
-ro_bind() { mount --bind "$1" "$2"; mount -o remount,bind,ro "$2"; }
+ro_bind() {
+  mount --bind "$1" "$2"
+  mount -o remount,bind,ro "$2"
+}
 ro_bind "$out/img/system/system" "$R/system"
 ro_bind "$out/img/system_ext" "$R/system_ext"
 ro_bind "$out/img/product" "$R/product"
@@ -101,10 +110,16 @@ export PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
 for e in "${envs[@]}"; do export "${e?}"; done
 
 /apex/com.android.runtime/bin/linkerconfig --target /linkerconfig >/tmp/linkerconfig.log 2>&1 ||
-  { echo "linkerconfig failed:"; cat /tmp/linkerconfig.log; } >&2
+  {
+    echo "linkerconfig failed:"
+    cat /tmp/linkerconfig.log
+  } >&2
 
 LD_PRELOAD=/data/local/tmp/libhaltest_shim.so /system/bin/servicemanager &
-for _ in $(seq 50); do [[ -e /dev/binderfs/binder ]] && break; sleep 0.1; done
+for _ in $(seq 50); do
+  [[ -e /dev/binderfs/binder ]] && break
+  sleep 0.1
+done
 sleep 0.3
 export VENDOR_PRELOAD=/vendor/lib64/libhaltest_shim.so
 LD_PRELOAD=$VENDOR_PRELOAD /vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk &

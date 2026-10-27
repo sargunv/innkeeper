@@ -15,10 +15,10 @@ MESA_TAG=mesa-26.2.5
 MESA_URL=https://gitlab.freedesktop.org/mesa/mesa.git
 LIBDRM_TAG=libdrm-2.4.134
 LIBDRM_URL=https://gitlab.freedesktop.org/mesa/libdrm.git
-LLVM_TAG=llvmorg-19.1.7               # for lavapipe; same as Mesa CI's Android LLVM
+LLVM_TAG=llvmorg-19.1.7 # for lavapipe; same as Mesa CI's Android LLVM
 LLVM_URL=https://github.com/llvm/llvm-project.git
-NDK_VERSION=30.0.16248370            # NDK r30
-API=37                               # Android 17
+NDK_VERSION=30.0.16248370 # NDK r30
+API=37                    # Android 17
 # -----------------------------------------------------------------------------
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -28,7 +28,10 @@ if [[ ! -e /run/.containerenv ]]; then
 fi
 
 NDK=${NDK:-$HOME/Android/Sdk/ndk/$NDK_VERSION}
-[[ -d $NDK ]] || { echo "NDK $NDK_VERSION not found at $NDK" >&2; exit 1; }
+[[ -d $NDK ]] || {
+  echo "NDK $NDK_VERSION not found at $NDK" >&2
+  exit 1
+}
 ndk_bin=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 ndk_sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
 
@@ -36,13 +39,13 @@ out=${OUT:-$repo/out}
 work=$out/gpu
 src=$work/src
 build=$work/build
-stage=$work/stage                     # static libs + pkg-config for Mesa
+stage=$work/stage # static libs + pkg-config for Mesa
 overlay=$out/vendor-overlay
 jobs=$(nproc)
 mkdir -p "$src" "$build" "$stage" "$overlay"
 
 # Generated cross file with the absolute NDK path; combined with cross/android-x86_64.ini.
-cat > "$build/ndk.ini" <<EOF
+cat >"$build/ndk.ini" <<EOF
 [constants]
 ndk_bin = '$ndk_bin'
 api = '$API'
@@ -61,7 +64,10 @@ fetch() {
     git clone -q --depth 1 -b "$tag" "$url" "$src/$dir"
   fi
   local stamp=$work/stamps/$dir want
-  want=$( { echo "$tag"; cat "$here"/patches/"$dir"/*.patch 2>/dev/null || true; } | sha256sum)
+  want=$({
+    echo "$tag"
+    cat "$here"/patches/"$dir"/*.patch 2>/dev/null || true
+  } | sha256sum)
   [[ -f $stamp && $(<"$stamp") == "$want" ]] && return 0
   if ! git -C "$src/$dir" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     git -C "$src/$dir" fetch -q --depth 1 origin tag "$tag"
@@ -73,7 +79,8 @@ fetch() {
       git -C "$src/$dir" apply "$p"
     done
   fi
-  mkdir -p "$work/stamps"; echo "$want" > "$stamp"
+  mkdir -p "$work/stamps"
+  echo "$want" >"$stamp"
 }
 
 # Re-run meson setup on existing build dirs so option edits here take effect.
@@ -82,6 +89,7 @@ reconf() { [[ -f $1/build.ninja ]] && echo --reconfigure || true; }
 build_libdrm() {
   fetch libdrm "$LIBDRM_URL" "$LIBDRM_TAG"
   local b=$build/libdrm
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
   meson setup $(reconf "$b") "$b" "$src/libdrm" "${cross[@]}" \
     --prefix=/vendor --libdir=lib64 --datadir=etc \
     -Ddefault_library=static -Dbuildtype=release \
@@ -100,7 +108,7 @@ build_libdrm() {
 stage_zlib() {
   mkdir -p "$PKG_CONFIG_LIBDIR"
   install -m644 "$ndk_sysroot/usr/lib/x86_64-linux-android/libz.a" "$stage/vendor/lib64/libz.a"
-  cat > "$PKG_CONFIG_LIBDIR/zlib.pc" <<'EOF'
+  cat >"$PKG_CONFIG_LIBDIR/zlib.pc" <<'EOF'
 Name: zlib
 Description: NDK static zlib
 Version: 1.3.1
@@ -114,6 +122,7 @@ build_radv() {
   stage_zlib
   fetch mesa "$MESA_URL" "$MESA_TAG"
   local b=$build/mesa
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
   meson setup $(reconf "$b") "$b" "$src/mesa" "${cross[@]}" \
     --prefix=/vendor --libdir=lib64 \
     -Dbuildtype=release -Db_ndebug=true \
@@ -154,9 +163,9 @@ build_llvm() {
 write_llvm_wrap() {
   local prefix=$stage/llvm d=$src/mesa/subprojects/llvm libs ver
   mkdir -p "$d"
-  libs=$(cd "$prefix/lib" && ls libLLVM*.a | sed "s/\.a$//; s/.*/'&'/" | paste -sd,)
+  libs=$(cd "$prefix/lib" && printf '%s\n' libLLVM*.a | sed "s/\.a$//; s/.*/'&'/" | paste -sd,)
   ver=$(sed -n 's/^#define LLVM_VERSION_STRING "\([^"]*\)".*/\1/p' "$prefix/include/llvm/Config/llvm-config.h")
-  cat > "$d/meson.build" <<WRAP
+  cat >"$d/meson.build" <<WRAP
 project('llvm', ['cpp'])
 cpp = meson.get_compiler('cpp')
 _deps = []
@@ -179,6 +188,7 @@ build_lvp() {
   fetch mesa "$MESA_URL" "$MESA_TAG"
   write_llvm_wrap
   local b=$build/mesa-lvp
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
   meson setup $(reconf "$b") "$b" "$src/mesa" "${cross[@]}" \
     --prefix=/vendor --libdir=lib64 --force-fallback-for=llvm \
     -Dbuildtype=release -Db_ndebug=true -Dcpp_rtti=false \
@@ -212,18 +222,22 @@ libbinder_ndk.so libEGL.so libGLESv1_CM.so libGLESv2.so libGLESv3.so libvulkan.s
 libcamera_metadata.so libmediandk.so libapexsupport.so libvendorsupport.so"
 check_elf() {
   local f=$1 bad=0
-  local needed; needed=$(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+  local needed
+  needed=$(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
   for n in $needed; do
     if [[ " $LLNDK " != *" $n "* && ! -e $overlay/lib64/$n ]]; then
-      echo "check_elf: $f: disallowed DT_NEEDED $n" >&2; bad=1
+      echo "check_elf: $f: disallowed DT_NEEDED $n" >&2
+      bad=1
     fi
   done
   # A HAL module should export HMI and nothing else (no static LLVM/libc++).
-  local exports; exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u)
+  local exports
+  exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u)
   if [[ $exports != HMI ]]; then
-    echo "check_elf: $f exports $(echo "$exports" | wc -l) symbols, expected only HMI" >&2; bad=1
+    echo "check_elf: $f exports $(echo "$exports" | wc -l) symbols, expected only HMI" >&2
+    bad=1
   fi
-  echo "check_elf: $(basename "$f") NEEDED: $(echo $needed); exports: $(echo $exports | cut -c1-80)"
+  echo "check_elf: $(basename "$f") NEEDED: ${needed//$'\n'/ }; exports: $(echo "$exports" | cut -c1-80)"
   return $bad
 }
 
@@ -255,10 +269,21 @@ build_test() {
 
 case ${1:-all} in
   libdrm) build_libdrm ;;
-  radv) build_radv; install_etc ;;
+  radv)
+    build_radv
+    install_etc
+    ;;
   llvm) build_llvm ;;
   lvp) build_lvp ;;
   test) build_test ;;
-  all) build_radv; build_lvp; install_etc; build_test ;;
-  *) echo "unknown target $1" >&2; exit 1 ;;
+  all)
+    build_radv
+    build_lvp
+    install_etc
+    build_test
+    ;;
+  *)
+    echo "unknown target $1" >&2
+    exit 1
+    ;;
 esac

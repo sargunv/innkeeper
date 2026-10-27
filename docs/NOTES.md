@@ -22,6 +22,7 @@ anything the host user owns. vold's shutdown path wrote to
 T3's AppImage, which crashed T3 with SIGBUS.
 
 Rules:
+
 - Every namespace that runs Android code must cover all host sysfs submounts and
   make `/sys` read-only (see `session/ns-init.sh`).
 - Run sessions in their own delegated systemd user unit, never in the caller's
@@ -41,8 +42,8 @@ Rules:
 ## Findings (graphics)
 
 - AOSP 17 `external/` includes mesa3d (26.1-devel; Android.bp builds only
-  lavapipe, zink and gfxstream, not RADV), minigbm (intel/msm/meson variants,
-  no amdgpu), drm_hwcomposer (has an hwc3 AIDL frontend), angle, swiftshader,
+  lavapipe, zink and gfxstream, not RADV), minigbm (intel/msm/meson variants, no
+  amdgpu), drm_hwcomposer (has an hwc3 AIDL frontend), angle, swiftshader,
   wayland and wayland-protocols, all buildable for Android.
 - RADV uses ACO and needs no LLVM, so it can be cross-built out of tree with
   meson and the NDK. ANGLE (already in /system) provides GLES on top of
@@ -54,14 +55,15 @@ Rules:
 
 ## Lanes (worktrees in `~/Projects/linux.apk-wt/<lane>`, branch `lane/<lane>`, rebase then push to main)
 
-- session: namespace launcher, APEX flattening, init boot (M0a). Docs: `docs/m0-session.md`.
+- session: namespace launcher, APEX flattening, init boot (M0a). Docs:
+  `docs/m0-session.md`.
 - hal: allocator, mapper (stable-C v5), composer3, built with the NDK and
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
 - image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17` runs as
-  systemd user unit `linuxapk-aosp-sync` (`~/aosp/sync-loop.sh`), build container
-  `aosp/build-shell.sh`.
+  systemd user unit `linuxapk-aosp-sync` (`~/aosp/sync-loop.sh`), build
+  container `aosp/build-shell.sh`.
 - Resilience: the host app can restart and kill agents and background shells.
   Long jobs run under `systemd-run --user`; lanes push WIP to `lane/<name>`.
 
@@ -78,16 +80,19 @@ Rules:
   BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by
   `~/aosp/build-full.sh`.
 - 2026-10-27 (gpu): `gpu/build.sh` NDK-builds Mesa 26.2.5 RADV and lavapipe into
-  `out/vendor-overlay/lib64/hw/vulkan.{radv,lvp}.so` (LL-NDK deps only). Both pass compute,
-  udmabuf import and swapchain-image import via `mapper.linuxapk.so` in a Bionic namespace.
-  In the session, GLES 3.2 via ANGLE runs on RADV; GPU buffers there need `/dev/udmabuf` bound
-  into the session. See [gpu.md](gpu.md).
-- 2026-10-27 (hal): `hal/build.sh` NDK-builds allocator AIDL V3, `mapper.linuxapk.so`
-  (IMapper v5, memfd→udmabuf linear buffers) and composer3 V5 (headless, all-CLIENT, timer
-  vsync, PNG frame dumps) into `out/vendor-overlay`. Proven in a namespace with the image's
-  servicemanager, incl. AHardwareBuffer via libui. See [hal-display.md](hal-display.md).
-  In the session SF uses them (display 0 1280x800@60, client targets allocated); first
-  composed frame still pending a layer (bootanimation crashes in RADV `vkAcquireNextImageKHR`).
+  `out/vendor-overlay/lib64/hw/vulkan.{radv,lvp}.so` (LL-NDK deps only). Both
+  pass compute, udmabuf import and swapchain-image import via
+  `mapper.linuxapk.so` in a Bionic namespace. In the session, GLES 3.2 via ANGLE
+  runs on RADV; GPU buffers there need `/dev/udmabuf` bound into the session.
+  See [gpu.md](gpu.md).
+- 2026-10-27 (hal): `hal/build.sh` NDK-builds allocator AIDL V3,
+  `mapper.linuxapk.so` (IMapper v5, memfd→udmabuf linear buffers) and composer3
+  V5 (headless, all-CLIENT, timer vsync, PNG frame dumps) into
+  `out/vendor-overlay`. Proven in a namespace with the image's servicemanager,
+  incl. AHardwareBuffer via libui. See [hal-display.md](hal-display.md). In the
+  session SF uses them (display 0 1280x800@60, client targets allocated); first
+  composed frame still pending a layer (bootanimation crashes in RADV
+  `vkAcquireNextImageKHR`).
 
 ## Next
 

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "lineWidth": 80,
+  "indentWidth": 2,
+  "useTabs": false,
+  "newLineKind": "lf",
+  "oxc": {
+    "experimentalSortImports": { "newlinesBetween": true },
+    "lineWidth": 80,
+    "proseWrap": "always",
+    "sortPackageJson": false,
+  },
+  "clangFormat": {
+    "BasedOnStyle": "Google",
+    "ColumnLimit": 80,
+    "IndentWidth": 2,
+    "ContinuationIndentWidth": 2,
+    "UseCRLF": false,
+    "UseTab": "Never",
+    "AlignAfterOpenBracket": "BlockIndent",
+    "IncludeBlocks": "Regroup",
+    "IncludeCategories": [
+      { "Regex": "^<[a-zA-Z0-9_]+>$", "Priority": -100 },
+      { "Regex": "^<.*>$", "Priority": -50 },
+      { "Regex": ".*", "Priority": 1 },
+    ],
+  },
+  "exec": {
+    "commands": [
+      { "command": "rustfmt --edition 2024", "exts": ["rs"] },
+      {
+        "command": "shfmt -i 2 -ci --filename {{file_path}}",
+        "exts": ["sh"],
+        "fileNames": ["linuxapk-session", "linuxapk-apexd"],
+      },
+    ],
+  },
+  "excludes": [
+    "**/third_party/**",
+    "gpu/patches/**",
+    "session/rootfs-overlay/**/*.rc",
+  ],
+  "plugins": [
+    "npm:@dprint/oxc@0.47.0",
+    "npm:@dprint/exec@0.8.0/plugin.json@9d6234ea05810c775f388c2a4cce82b9116b69294b65e0e1e9d64f1446283ef3",
+    "npm:@dprint/clang-format@0.2.1",
+    "https://plugins.dprint.dev/cmakefmt/cmakefmt-v2.3.1.wasm",
+    "npm:@dprint/ruff@0.11.2",
+  ],
+}

@@ -5,30 +5,31 @@ License: AGPL-3.0. Status: draft for alignment, 2026-10-26.
 
 ## Goal
 
-Double-click an APK on desktop Linux and get a native-feeling app: its own Wayland
-window, desktop dark mode, notifications, file pickers, media controls, and no
-root at runtime. No VM, no visible Android "device", no launcher-in-a-box.
-Banking and other apps that need Play Integrity are out of scope.
+Double-click an APK on desktop Linux and get a native-feeling app: its own
+Wayland window, desktop dark mode, notifications, file pickers, media controls,
+and no root at runtime. No VM, no visible Android "device", no
+launcher-in-a-box. Banking and other apps that need Play Integrity are out of
+scope.
 
 ## Landscape (researched 2026-10-26)
 
-- **Waydroid** runs a full LineageOS in a root LXC container on binderfs. It's the
-  most compatible option. It's heavy (full boot, a resident system image), and the
-  desktop integration is weak. It isn't on Flathub, for the same reasons listed
-  under Packaging below.
-- **ATL** reimplements the framework on real ART 10 with GTK4. It's driven by two
-  core developers adding stubs: about 18% of its own methods are empty. Over time
-  it keeps replacing its own code with copied AOSP code.
+- **Waydroid** runs a full LineageOS in a root LXC container on binderfs. It's
+  the most compatible option. It's heavy (full boot, a resident system image),
+  and the desktop integration is weak. It isn't on Flathub, for the same reasons
+  listed under Packaging below.
+- **ATL** reimplements the framework on real ART 10 with GTK4. It's driven by
+  two core developers adding stubs: about 18% of its own methods are empty. Over
+  time it keeps replacing its own code with copied AOSP code.
 - **Mac.apk** (macOS) reimplements the framework on HotSpot and reached 58 of 71
   tested apps working in about five months. It had to reimplement, because macOS
   has no Linux kernel, Bionic or ART.
-- **Nucleus** (MIT) is a Compose Desktop host. It isn't an Android layer, but it's
-  the best reference for Linux desktop integration: portals, MPRIS, notifications,
-  AT-SPI through AccessKit, clipboard, and drag and drop.
+- **Nucleus** (MIT) is a Compose Desktop host. It isn't an Android layer, but
+  it's the best reference for Linux desktop integration: portals, MPRIS,
+  notifications, AT-SPI through AccessKit, clipboard, and drag and drop.
 
 ## Core bet: real Android userspace, our own bottom layer and UX
 
-Android *is* Linux. We run a real, near-stock AOSP x86_64 userspace (ART,
+Android _is_ Linux. We run a real, near-stock AOSP x86_64 userspace (ART,
 framework, system_server, SurfaceFlinger) in a rootless, on-demand session, and
 put our work at Android's **stable boundaries**:
 
@@ -42,8 +43,8 @@ put our work at Android's **stable boundaries**:
   `uiMode`/density from desktop settings, handlers for document-picker and share
   intents, notification and MediaSession listeners.
 - **A glibc "desktop bridge" helper** reached over a Unix socket. It talks to
-  D-Bus portals (FileChooser, OpenURI, Settings), notifications, MPRIS, AT-SPI and
-  the tray. Nucleus patterns are the reference.
+  D-Bus portals (FileChooser, OpenURI, Settings), notifications, MPRIS, AT-SPI
+  and the tray. Nucleus patterns are the reference.
 - **A host launcher:** installs an APK into the session, generates `.desktop`
   files and icons, and opens apps as individual windows.
 
@@ -64,6 +65,7 @@ designed to be implemented out of tree, so routine work needs no AOSP rebuilds.
 ```
 
 **How this differs from Waydroid:**
+
 - rootless, using user namespaces instead of a root LXC daemon;
 - started on demand and stopped when idle, with no visible boot;
 - per-app windows by default, plus APK double-click install and `.desktop`
@@ -99,11 +101,12 @@ memory optimisation only if the measured session cost justifies it.
 ## Root and the binder transport
 
 **Dev machines need root once, not during development.** Fedora's SELinux denies
-`binder { set_context_mgr }` to ordinary user processes (verified: AVC denial for
-`unconfined_t`). A 10-line dev policy module ([`selinux/linuxapk_dev.te`](../selinux/linuxapk_dev.te), compiles
-cleanly) grants binder permissions to `unconfined_t` on the user's own private
-binderfs instances. The user installs it once with
-`sudo semodule -i linuxapk_dev.pp`. After that:
+`binder { set_context_mgr }` to ordinary user processes (verified: AVC denial
+for `unconfined_t`). A 10-line dev policy module
+([`selinux/linuxapk_dev.te`](../selinux/linuxapk_dev.te), compiles cleanly)
+grants binder permissions to `unconfined_t` on the user's own private binderfs
+instances. The user installs it once with `sudo semodule -i linuxapk_dev.pp`.
+After that:
 
 - nothing per build or per test needs root, because the policy keys on the
   process domain rather than a labelled binary path;
@@ -125,20 +128,21 @@ running with no privileges anywhere:
   per-process handle tables, strong and weak refcounts, translating binder
   objects and fds inside transactions, routing nested sync calls back to the
   waiting thread, oneway queues per node, thread-pool spawn requests, death
-  notifications, and the sender pid/uid (which the broker can *virtualize*).
+  notifications, and the sender pid/uid (which the broker can _virtualize_).
 - **Size:** about the kernel's `binder.c` (~7k lines of C).
 - **Oracle:** AOSP's own binder test suites (`binderLibTest`,
-  `binderDriverInterfaceTest`, the throughput benchmarks) run against both kernel
-  binder and ubinder for differential testing.
+  `binderDriverInterfaceTest`, the throughput benchmarks) run against both
+  kernel binder and ubinder for differential testing.
 - **Cost:** an extra copy and hop through the broker. Measure it. Input events
   use sockets, not binder.
 
 ## Languages
 
 Pick the language by where the code runs:
-- **C/C++ inside Android processes and on C ABIs:** the vendor HAL services
-  (the AIDL NDK backend generates C++), mapper and Vulkan `.so` files loaded
-  into every process, `LD_PRELOAD` shims, and Mesa patches. Keep these small.
+
+- **C/C++ inside Android processes and on C ABIs:** the vendor HAL services (the
+  AIDL NDK backend generates C++), mapper and Vulkan `.so` files loaded into
+  every process, `LD_PRELOAD` shims, and Mesa patches. Keep these small.
 - **Rust for new standalone components,** especially at security boundaries:
   - the ubinder broker (parses untrusted input from every Android process);
   - the session launcher (namespace and mount setup; bash today, rewritten once
@@ -151,44 +155,44 @@ Pick the language by where the code runs:
 ## Packaging and distros
 
 The goal is per-app bundles: each Android app shipped as its own Flatpak or
-AppImage, the way Mac.apk turns each APK into a `.app`. That takes a **no-privilege
-mode** that works in any sandbox:
+AppImage, the way Mac.apk turns each APK into a `.app`. That takes a
+**no-privilege mode** that works in any sandbox:
 
-| Piece | Kernel mode (M0–M3) | No-privilege mode (target) |
-|---|---|---|
-| IPC | binderfs + one-time SELinux/AppArmor policy | ubinder |
-| `/system`, `/apex` paths | bind mounts in a user namespace | relocated image (ART honours `ANDROID_ROOT`/`ANDROID_ART_ROOT`; invoke the linker explicitly; patch the remaining hardcoded paths in our source build) |
-| per-app uids | subuid map | virtual uids: the broker fakes `getCallingUid`, and the shim turns zygote's `setresuid` into a no-op |
+| Piece                    | Kernel mode (M0–M3)                         | No-privilege mode (target)                                                                                                                             |
+| ------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| IPC                      | binderfs + one-time SELinux/AppArmor policy | ubinder                                                                                                                                                |
+| `/system`, `/apex` paths | bind mounts in a user namespace             | relocated image (ART honours `ANDROID_ROOT`/`ANDROID_ART_ROOT`; invoke the linker explicitly; patch the remaining hardcoded paths in our source build) |
+| per-app uids             | subuid map                                  | virtual uids: the broker fakes `getCallingUid`, and the shim turns zygote's `setresuid` into a no-op                                                   |
 
 Distro friction kernel mode would hit, and no-privilege mode avoids:
 
-| | Fedora/openSUSE | Ubuntu 24.04+ | Debian | Arch | Flatpak / AppImage |
-|---|---|---|---|---|---|
-| binderfs | built in | module | module | built in | Flatpak: no mounts at all |
-| unprivileged user namespaces | yes | restricted (AppArmor) | yes | yes | blocked in the Flatpak sandbox; AppImage has the Ubuntu issue |
-| binder service manager | SELinux module needed | fine | fine | fine | n/a |
+|                              | Fedora/openSUSE       | Ubuntu 24.04+         | Debian | Arch     | Flatpak / AppImage                                            |
+| ---------------------------- | --------------------- | --------------------- | ------ | -------- | ------------------------------------------------------------- |
+| binderfs                     | built in              | module                | module | built in | Flatpak: no mounts at all                                     |
+| unprivileged user namespaces | yes                   | restricted (AppArmor) | yes    | yes      | blocked in the Flatpak sandbox; AppImage has the Ubuntu issue |
+| binder service manager       | SELinux module needed | fine                  | fine   | fine     | n/a                                                           |
 
 **Open design question for later:** with per-app Flatpaks, does each app get its
 own session (strong isolation, but each costs a system_server) or join a shared
 host session (lighter, cross-app intents)? Measure the session cost first.
 
-**aarch64 Linux** (Asahi, Snapdragon X, ARM boards) is cheap to add: same design,
-an arm64 image, and a Mesa driver for that GPU. Google publishes 16K-page images
-(`*_ps16k`), which suit Asahi. CI can use free GitHub arm64 runners with software
-rendering.
+**aarch64 Linux** (Asahi, Snapdragon X, ARM boards) is cheap to add: same
+design, an arm64 image, and a Mesa driver for that GPU. Google publishes
+16K-page images (`*_ps16k`), which suit Asahi. CI can use free GitHub arm64
+runners with software rendering.
 
 ## Milestones
 
-| | Exit criterion |
-|---|---|
-| **M0 Session boots** | From the prebuilt emulator image: a rootless namespace, private binderfs, minimal init, servicemanager, system_server and zygote reach "boot completed" on this machine. In parallel, the image-builder lane produces our own source build. |
-| **M1 Pixels** | An APK's Activity renders through SurfaceFlinger and our HWC into a Wayland window (start with one surface for the whole display, then per task). Pointer, keyboard and scroll work. First noarch apps are usable: OpenCalc, Open Sudoku, Unit Converter, Now in Android. |
-| **M2 Real apps** | Bionic Mesa for the GPU, PipeWire audio, per-app windows (resize, close, back), the launcher and `.desktop` install. Games with x86_64 libs: Mindustry, Shattered Pixel Dungeon, OpenTTD, Unciv. *ubinder starts in parallel, differential-tested against kernel binder.* |
-| **M3 Desktop integration** | The bridge: dark mode and accent, fractional scaling to density, notifications, file picker, share and open URI, MPRIS, clipboard, IME through `text-input-v3`. Cross-app intents, F-Droid installing apps, microG. |
-| **M4 No-privilege mode** | ubinder becomes the default, plus a relocated image and virtual uids. Switch to our source-built image. Corpus parity with kernel mode. |
-| **M5 Packaging** | Per-app Flatpak and AppImage bundles, and a runtime package (RPM first). Idle shutdown, startup and memory budgets. aarch64 hosts. |
-| **M6 ARM translation** | arm64-only libs on x86_64 hosts through a NativeBridge (QEMU-user, as in ATL's nb-qemu, or a faster open translator). Wanted before launch if practical. |
-| **Later** | Accessibility through AT-SPI. |
+|                            | Exit criterion                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0 Session boots**       | From the prebuilt emulator image: a rootless namespace, private binderfs, minimal init, servicemanager, system_server and zygote reach "boot completed" on this machine. In parallel, the image-builder lane produces our own source build.                               |
+| **M1 Pixels**              | An APK's Activity renders through SurfaceFlinger and our HWC into a Wayland window (start with one surface for the whole display, then per task). Pointer, keyboard and scroll work. First noarch apps are usable: OpenCalc, Open Sudoku, Unit Converter, Now in Android. |
+| **M2 Real apps**           | Bionic Mesa for the GPU, PipeWire audio, per-app windows (resize, close, back), the launcher and `.desktop` install. Games with x86_64 libs: Mindustry, Shattered Pixel Dungeon, OpenTTD, Unciv. _ubinder starts in parallel, differential-tested against kernel binder._ |
+| **M3 Desktop integration** | The bridge: dark mode and accent, fractional scaling to density, notifications, file picker, share and open URI, MPRIS, clipboard, IME through `text-input-v3`. Cross-app intents, F-Droid installing apps, microG.                                                       |
+| **M4 No-privilege mode**   | ubinder becomes the default, plus a relocated image and virtual uids. Switch to our source-built image. Corpus parity with kernel mode.                                                                                                                                   |
+| **M5 Packaging**           | Per-app Flatpak and AppImage bundles, and a runtime package (RPM first). Idle shutdown, startup and memory budgets. aarch64 hosts.                                                                                                                                        |
+| **M6 ARM translation**     | arm64-only libs on x86_64 hosts through a NativeBridge (QEMU-user, as in ATL's nb-qemu, or a faster open translator). Wanted before launch if practical.                                                                                                                  |
+| **Later**                  | Accessibility through AT-SPI.                                                                                                                                                                                                                                             |
 
 ## ABI survey (2026-10-26)
 
@@ -215,22 +219,22 @@ FOSS (Mindustry, Shattered Pixel Dungeon, OpenTTD, Unciv, Clash Royale, Roblox).
 - **Corpus:** F-Droid APKs (redistributable, so they can be cached in CI), plus
   Mac.apk's compatibility list as targets. Non-free APKs stay local only.
 - **Smoke harness:** install, launch into a headless nested compositor (headless
-  KWin or `weston --backend=headless`), then check for crash or ANR, a first frame,
-  a non-blank screenshot, and a scripted interaction. Output is a checked-in
-  `COMPATIBILITY.md`.
+  KWin or `weston --backend=headless`), then check for crash or ANR, a first
+  frame, a non-blank screenshot, and a scripted interaction. Output is a
+  checked-in `COMPATIBILITY.md`.
 - **Gate:** no change lands if it regresses an app that passed before.
-- **Budgets tracked in the harness:** cold session start, warm app start, session
-  RSS. These keep us honest about "lighter than Waydroid".
+- **Budgets tracked in the harness:** cold session start, warm app start,
+  session RSS. These keep us honest about "lighter than Waydroid".
 
 ## Agent workstreams
 
-The orchestrator sequences these, reviews diffs, runs the gate and keeps this doc
-current.
+The orchestrator sequences these, reviews diffs, runs the gate and keeps this
+doc current.
 
 1. **Image builder** (serial, owns the AOSP tree): checkout, the patch queue,
    builds, sysroot export.
-2. **Session** (M0): the namespace launcher, binderfs, the property area, minimal
-   init rc, subuid mapping.
+2. **Session** (M0): the namespace launcher, binderfs, the property area,
+   minimal init rc, subuid mapping.
 3. **Display** (M1–M2): the HWC-to-Wayland HAL, gralloc on GBM, Bionic Mesa.
 4. **Input and windowing** (M1–M3): seat to input, per-task windows, insets,
    scaling.
@@ -253,6 +257,8 @@ current.
 3. **Session weight.** A real system_server costs hundreds of MB. Mitigations:
    disable services by config, start on demand, stop when idle. Measure before
    doing anything more invasive.
-4. **ubinder fidelity and performance.** It reimplements subtle kernel semantics. AOSP's binder tests serve as a differential oracle, and kernel mode stays as the reference.
+4. **ubinder fidelity and performance.** It reimplements subtle kernel
+   semantics. AOSP's binder tests serve as a differential oracle, and kernel
+   mode stays as the reference.
 5. **Prebuilt image vs source image drift.** We switch to our own build by M4 at
    the latest, and keep HAL code dependent only on stable interfaces.

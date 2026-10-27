@@ -31,7 +31,7 @@ mp=$hi/graphics/mapper/stable-c
 mkdir -p "$dst/include/android/hardware/graphics/mapper/utils"
 cp "$mp/include/android/hardware/graphics/mapper/IMapper.h" "$dst/include/android/hardware/graphics/mapper/"
 cp "$mp/implutils/include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h" \
-   "$dst/include/android/hardware/graphics/mapper/utils/"
+  "$dst/include/android/hardware/graphics/mapper/utils/"
 
 cat >"$dst/SOURCE" <<S
 Copied from AOSP $(cd "$AOSP" && cat .repo/manifests/default.xml 2>/dev/null | grep -o 'revision="[^"]*"' | head -1 || echo android-17.0.0_r1)

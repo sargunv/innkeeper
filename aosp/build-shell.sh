@@ -8,7 +8,9 @@ if ! podman image exists linuxapk-aospbuild; then
   podman build -q -t linuxapk-aospbuild -f "$here/Containerfile.build" "$here" >/dev/null
 fi
 mkdir -p "$HOME/.cache/linuxapk-ccache"
-exec podman run --rm -i $([ -t 0 ] && echo -t) --userns=keep-id --security-opt label=disable \
+tty=()
+[ -t 0 ] && tty=(-t)
+exec podman run --rm -i "${tty[@]}" --userns=keep-id --security-opt label=disable \
   --ulimit nofile=65536:65536 --pids-limit=-1 \
   -v "$AOSP:$AOSP" -v "$HOME/Projects:$HOME/Projects" -v "$HOME/.cache/linuxapk-ccache:/ccache" \
   -e USE_CCACHE=1 -e CCACHE_DIR=/ccache -e CCACHE_EXEC=/usr/bin/ccache \

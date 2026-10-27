@@ -7,8 +7,20 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-EXPORT int libnetd_updatable_init(const char* cg2_path) { (void)cg2_path; return 0; }
-EXPORT int libnetd_updatable_tagSocket(int sockFd, uint32_t tag, uid_t chargeUid, uid_t realUid) {
-    (void)sockFd; (void)tag; (void)chargeUid; (void)realUid; return 0;
+EXPORT int libnetd_updatable_init(const char* cg2_path) {
+  (void)cg2_path;
+  return 0;
 }
-EXPORT int libnetd_updatable_untagSocket(int sockFd) { (void)sockFd; return 0; }
+EXPORT int libnetd_updatable_tagSocket(
+  int sockFd, uint32_t tag, uid_t chargeUid, uid_t realUid
+) {
+  (void)sockFd;
+  (void)tag;
+  (void)chargeUid;
+  (void)realUid;
+  return 0;
+}
+EXPORT int libnetd_updatable_untagSocket(int sockFd) {
+  (void)sockFd;
+  return 0;
+}

@@ -24,13 +24,15 @@ for p in json.load(sys.stdin)['partitiontable']['partitions']:
 
 fs_extract() {
   local img=$1 dest=$2
-  rm -rf "$dest"; mkdir -p "$dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
   if [[ $(file -b "$img") == *ext4* || $(file -b "$img") == *ext2* ]]; then
     debugfs -R "rdump / $dest" "$img" >/dev/null 2>&1
   elif [[ $(file -b "$img") == *EROFS* ]] || head -c 1028 "$img" | tail -c 4 | od -An -tx4 | grep -q e0f5e1e2; then
     fsck.erofs --extract="$dest" --no-preserve "$img" >/dev/null
   else
-    echo "unknown fs in $img: $(file -b "$img")" >&2; return 1
+    echo "unknown fs in $img: $(file -b "$img")" >&2
+    return 1
   fi
 }
 
@@ -47,7 +49,8 @@ for p in "$work"/*.img; do
   fs_extract "$p" "$out/$name"
 done
 
-rm -rf "$out/ramdisk"; mkdir -p "$out/ramdisk"
+rm -rf "$out/ramdisk"
+mkdir -p "$out/ramdisk"
 lz4 -dc "$img_dir/ramdisk.img" | (cd "$out/ramdisk" && cpio -idm --quiet 2>/dev/null)
 cp "$img_dir/build.prop" "$out/" 2>/dev/null || true
 rm -rf "$work"

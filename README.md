@@ -14,19 +14,22 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 
 **Pre-alpha. Nothing runs yet.**
 
-| Milestone | Status |
-|---|---|
+| Milestone                                                       | Status                                                                                                                                          |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 init boots partway; SurfaceFlinger runs on our gralloc and composer HALs (1280x800@60); GLES 3.2 via ANGLE on RADV; system_server not up yet |
-| M1 Pixels in a Wayland window, first noarch apps | ⏳ |
-| M2 GPU, audio, per-app windows, launcher | ⏳ |
-| M3 Desktop integration (portals, notifications, MPRIS, IME) | ⏳ |
-| M4 No-privilege mode (userspace binder, relocated image) | ⏳ |
-| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts | ⏳ |
-| M6 ARM translation on x86_64 | ⏳ |
+| M1 Pixels in a Wayland window, first noarch apps                | ⏳                                                                                                                                              |
+| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                              |
+| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                              |
+| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                              |
+| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                              |
+| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                              |
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
 
 ## Dev setup (Fedora)
+
+Install [mise](https://mise.jdx.dev), then run `mise install`. Agent and
+contributor context is in [AGENTS.md](AGENTS.md).
 
 Fedora's SELinux policy stops ordinary processes from becoming a binder context
 manager. Install the dev policy once:

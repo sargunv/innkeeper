@@ -35,7 +35,7 @@ cmake -S "$hal" -B "$BUILD/host" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DAIDL_GEN_DIR="$BUILD/aidl" >/dev/null
 cmake --build "$BUILD/host"
-if (( run_tests )); then
+if ((run_tests)); then
   (cd "$BUILD/host" && ctest --output-on-failure)
 fi
 
@@ -49,7 +49,10 @@ cmake --build "$BUILD/android"
 echo "== install -> $OVERLAY"
 b=$BUILD/android
 strip=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
-inst() { install -D -m "$1" "$2" "$3"; [[ "$1" == 755 || "$3" == *.so ]] && "$strip" --strip-unneeded "$3" || true; }
+inst() {
+  install -D -m "$1" "$2" "$3"
+  [[ "$1" == 755 || "$3" == *.so ]] && "$strip" --strip-unneeded "$3" || true
+}
 inst 755 "$b/android.hardware.graphics.allocator-service.linuxapk" "$OVERLAY/bin/hw/android.hardware.graphics.allocator-service.linuxapk"
 inst 755 "$b/android.hardware.graphics.composer3-service.linuxapk" "$OVERLAY/bin/hw/android.hardware.graphics.composer3-service.linuxapk"
 inst 644 "$b/mapper.linuxapk.so" "$OVERLAY/lib64/hw/mapper.linuxapk.so"
