@@ -286,6 +286,13 @@ Causes:
   iptables wrapper now drops netd's `quota2` rules, which removed a 20 s stall
   from every boot (warm boot 2.6 s). See [sandbox.md](sandbox.md).
 
+## Security review (sol-loop, 2026-10-27)
+
+Round 1, GPT-6.1 Sol (high effort), on the M4 host boundary (supervisor,
+ubinder, bridge): CHANGES, 9 "should" findings (session DoS and unbounded
+resources; no host-compromise path). The hardening lane (`lane/harden`) is
+fixing them, each with a test. Round 2 reviews the fixes.
+
 ## Backlog (unassigned)
 
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
