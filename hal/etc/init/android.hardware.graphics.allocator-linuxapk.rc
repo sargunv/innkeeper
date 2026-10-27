@@ -1,7 +1,8 @@
 service vendor.graphics.allocator-linuxapk /vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk
     class hal animation
     interface aidl android.hardware.graphics.allocator.IAllocator/default
-    user system
+    # Starts as root to open /dev/udmabuf, then drops to system:graphics.
+    user root
     group graphics
     capabilities SYS_NICE
     onrestart restart surfaceflinger

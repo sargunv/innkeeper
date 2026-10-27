@@ -7,8 +7,10 @@
 #include <aidl/android/hardware/graphics/allocator/BnAllocator.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <grp.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstring>
 #include <string>
 
@@ -123,7 +125,24 @@ class Allocator : public BnAllocator {
 }  // namespace
 }  // namespace linuxapk
 
+// Started as root (see the .rc): open /dev/udmabuf, then become system:graphics.
+// In the rootless session only uid 0 (the host user) can open the device.
+static void dropPrivileges() {
+    constexpr uid_t kSystem = 1000;
+    constexpr gid_t kGraphics = 1003;
+    if (!linuxapk::openUdmabufDevice()) {
+        LOGW("no /dev/udmabuf: only CPU-only buffers can be allocated");
+    }
+    if (getuid() != 0) return;
+    const gid_t groups[] = {kGraphics};
+    if (setgroups(1, groups) != 0 || setresgid(kSystem, kSystem, kSystem) != 0 ||
+        setresuid(kSystem, kSystem, kSystem) != 0) {
+        LOGW("could not drop to system:graphics: %s", strerror(errno));
+    }
+}
+
 int main() {
+    dropPrivileges();
     ABinderProcess_setThreadPoolMaxThreadCount(4);
     ABinderProcess_startThreadPool();
     auto allocator = ndk::SharedRefBase::make<linuxapk::Allocator>();

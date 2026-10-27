@@ -52,7 +52,10 @@ missing it re-runs itself in `tools/hosttools.sh`.
   CPU-only usages fall back to a plain memfd. GPU and composer usages (any
   `GPU_*`, `COMPOSER_*`) fail with UNSUPPORTED or NO_RESOURCES, because
   their consumers can't import a memfd. The session must bind
-  `/dev/udmabuf`.
+  `/dev/udmabuf`. Only the session's root (the host user, who holds the
+  logind ACL) can open it, so the allocator's `.rc` runs it as root. It opens
+  the device first and then drops to `system:graphics`. This replaces the
+  session lane's interim `user root` override.
 - **Handle** (`gralloc_handle.h`): 1 fd + ints, holding size, format, DRM
   fourcc, usage, buffer id, and per-plane offset and stride.
 - **fd layout:** `[pixels, layerCount layers][4 KiB SharedMetadata][reserved region]`.
@@ -119,7 +122,9 @@ missing it re-runs itself in `tools/hosttools.sh`.
 
   `present` only waits on the acquire fence and copies the pixels; a worker
   thread does the encoding. The composer's `.rc` creates
-  `/data/vendor/linuxapk/frames`.
+  `/data/vendor/linuxapk/frames`. The properties are re-read every second,
+  so `setprop vendor.linuxapk.hwc.dump.dir /data/vendor/linuxapk/frames`
+  works on a running session.
 
 ### Adding the Wayland backend (M1)
 

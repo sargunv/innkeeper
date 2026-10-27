@@ -68,9 +68,7 @@ struct HeadlessPresenter::Worker {
 };
 
 HeadlessPresenter::HeadlessPresenter(std::unique_ptr<FrameDumper> dumper)
-    : mDumper(std::move(dumper)) {
-    if (mDumper && mDumper->enabled()) mWorker = std::make_unique<Worker>(mDumper.get());
-}
+    : mDumper(std::move(dumper)) {}
 
 HeadlessPresenter::~HeadlessPresenter() = default;
 
@@ -83,6 +81,8 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
         mLastLogNs = now;
     }
     ClientTargetState* ct = frame.clientTarget;
+    mDumper->reloadFromProperties(now);
+    if (!mWorker && mDumper->enabled()) mWorker = std::make_unique<Worker>(mDumper.get());
     if (mWorker && ct && ct->buffer && mDumper->shouldDump(now)) {
         const BufferHandle* bh = ct->buffer->info();
         const uint8_t* base = ct->buffer->map();

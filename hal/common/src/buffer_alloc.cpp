@@ -44,6 +44,8 @@ uint64_t nextBufferId() {
 
 bool udmabufAvailable() { return gUdmabufOk.load(); }
 
+bool openUdmabufDevice() { return udmabufDevice() >= 0; }
+
 AllocStatus checkRequest(const AllocRequest& req, Layout* outLayout) {
     if (req.width == 0 || req.height == 0 || req.layerCount == 0) {
         return AllocStatus::BadDescriptor;

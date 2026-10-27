@@ -30,4 +30,9 @@ AllocStatus allocateBuffer(const AllocRequest& req, native_handle_t** outHandle)
 // True if the last allocation produced a dma-buf (udmabuf available).
 bool udmabufAvailable();
 
+// Opens /dev/udmabuf (or $LINUXAPK_UDMABUF) now; later calls reuse the fd.
+// The allocator calls this before dropping root, since in the session only
+// root (the host user) can open the device. Returns false if unavailable.
+bool openUdmabufDevice();
+
 }  // namespace linuxapk

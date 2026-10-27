@@ -152,19 +152,39 @@ FrameDumper::Config FrameDumper::configFromProperties() {
     return c;
 }
 
-bool FrameDumper::shouldDump(int64_t nowNs) {
-    if (!enabled()) return false;
+void FrameDumper::reloadFromProperties(int64_t nowNs) {
+    {
+        std::lock_guard lock(mMutex);
+        if (nowNs - mLastReloadNs < 1'000'000'000) return;
+        mLastReloadNs = nowNs;
+    }
+    Config c = configFromProperties();
     std::lock_guard lock(mMutex);
+    if (c.dir != mConfig.dir) {
+        LOGI("dump: %s%s", c.dir.empty() ? "disabled" : "enabled, dir ", c.dir.c_str());
+    }
+    mConfig = std::move(c);
+}
+
+bool FrameDumper::shouldDump(int64_t nowNs) {
+    std::lock_guard lock(mMutex);
+    if (mConfig.dir.empty()) return false;
     if (nowNs - mLastNs < mConfig.intervalMs * 1000000) return false;
     mLastNs = nowNs;
     return true;
 }
 
 bool FrameDumper::dump(const std::string& prefix, const FrameView& f) {
-    const bool ppm = mConfig.format == "ppm";
+    Config cfg;
+    {
+        std::lock_guard lock(mMutex);
+        cfg = mConfig;
+    }
+    if (cfg.dir.empty()) return false;
+    const bool ppm = cfg.format == "ppm";
     const char* ext = ppm ? "ppm" : "png";
-    mkdir(mConfig.dir.c_str(), 0775);
-    std::string latest = mConfig.dir + "/" + prefix + "-latest." + ext;
+    mkdir(cfg.dir.c_str(), 0775);
+    std::string latest = cfg.dir + "/" + prefix + "-latest." + ext;
     bool ok = ppm ? writePpm(latest, f) : writePng(latest, f);
     if (!ok) {
         LOGW("dump: failed to write %s (format 0x%x)", latest.c_str(), f.format);
@@ -175,10 +195,10 @@ bool FrameDumper::dump(const std::string& prefix, const FrameView& f) {
         std::lock_guard lock(mMutex);
         n = mCount++;
     }
-    if (mConfig.keep > 0) {
+    if (cfg.keep > 0) {
         char name[64];
-        snprintf(name, sizeof name, "-%04llu.", (unsigned long long)(n % mConfig.keep));
-        std::string numbered = mConfig.dir + "/" + prefix + name + ext;
+        snprintf(name, sizeof name, "-%04llu.", (unsigned long long)(n % cfg.keep));
+        std::string numbered = cfg.dir + "/" + prefix + name + ext;
         if (link(latest.c_str(), (numbered + ".tmp").c_str()) == 0) {
             rename((numbered + ".tmp").c_str(), numbered.c_str());
         }

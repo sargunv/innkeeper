@@ -32,7 +32,13 @@ class FrameDumper {
     static Config configFromProperties();
 
     explicit FrameDumper(Config c) : mConfig(std::move(c)) {}
-    bool enabled() const { return !mConfig.dir.empty(); }
+    bool enabled() {
+        std::lock_guard lock(mMutex);
+        return !mConfig.dir.empty();
+    }
+    // Re-reads the properties (at most once per second), so dumping can be
+    // switched on with setprop while the composer runs.
+    void reloadFromProperties(int64_t nowNs);
     // True if a frame presented at nowNs should be dumped (and books it).
     bool shouldDump(int64_t nowNs);
     // Writes <dir>/<prefix>-latest.<ext> atomically (tmp + rename).
@@ -42,6 +48,7 @@ class FrameDumper {
     Config mConfig;
     std::mutex mMutex;
     int64_t mLastNs = INT64_MIN / 2;
+    int64_t mLastReloadNs = INT64_MIN / 2;
     uint64_t mCount = 0;
 };
 
