@@ -5,22 +5,25 @@
 
 use std::io::IoSliceMut;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use linuxapk_bridge::audio::{Backend, Limits};
-use linuxapk_bridge::proto::{
-    self, OpenOutputReply, OutputConfig, Request, SampleFormat, libc_errno::*,
+use linuxapk_bridge::audio::proto::{
+    self as audio, OpenOutputReply, OutputConfig, Request, SampleFormat,
 };
-use linuxapk_bridge::server::{self, Config};
+use linuxapk_bridge::audio::{AudioService, Backend, Limits};
+use linuxapk_bridge::proto::{Hello, hello_reply_body, service};
+use linuxapk_bridge::server::{self, Config, Registry};
+use linuxapk_bridge::transport;
+use linuxapk_bridge::wire::{self, errno::*};
 use proptest::prelude::*;
 use rustix::event::{PollFd, PollFlags};
 use rustix::net::{
-    AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
-    SendAncillaryMessage, SendFlags, SocketAddrUnix, SocketFlags, SocketType,
+    AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SocketAddrUnix,
+    SocketFlags, SocketType,
 };
 
 static N: AtomicU32 = AtomicU32::new(0);
@@ -31,20 +34,38 @@ fn start(limits: Limits, allow_self: bool) -> PathBuf {
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ));
-    let l = server::listen(&path).unwrap();
+    let l = transport::listen(&path).unwrap();
     let me = rustix::process::getuid().as_raw();
+    let mut services = Registry::default();
+    let streams = Arc::new(AtomicUsize::new(0));
+    services.register(service::AUDIO, "audio", move |peer| {
+        Ok(Box::new(AudioService::new(
+            Backend::Null,
+            limits.clone(),
+            streams.clone(),
+            peer,
+        )))
+    });
     let cfg = Config {
         allow_uids: if allow_self {
             vec![me]
         } else {
             vec![me.wrapping_add(1)]
         },
-        backend: Backend::Null,
-        limits,
         max_clients: 4,
+        services,
     };
     std::thread::spawn(move || server::serve(l, Arc::new(cfg)));
     path
+}
+
+fn hello(major: u16, service: u32) -> Hello {
+    Hello {
+        major,
+        minor: 0,
+        service,
+        name: "test".into(),
+    }
 }
 
 struct Client {
@@ -65,19 +86,8 @@ impl Client {
         Client { sock, tag: 0 }
     }
 
-    fn send_raw(&self, b: &[u8], fds: &[OwnedFd]) -> rustix::io::Result<usize> {
-        let borrowed: Vec<_> = fds.iter().map(|f| f.as_fd()).collect();
-        let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(8))];
-        let mut anc = SendAncillaryBuffer::new(&mut space);
-        if !borrowed.is_empty() {
-            assert!(anc.push(SendAncillaryMessage::ScmRights(&borrowed)));
-        }
-        rustix::net::sendmsg(
-            &self.sock,
-            &[std::io::IoSlice::new(b)],
-            &mut anc,
-            SendFlags::NOSIGNAL,
-        )
+    fn send_raw(&self, b: &[u8], fds: &[OwnedFd]) -> anyhow::Result<()> {
+        transport::send_owned(&self.sock, b, fds)
     }
 
     /// Receives one packet: None on EOF or timeout.
@@ -113,26 +123,29 @@ impl Client {
         Some((buf, fds))
     }
 
-    fn call(&mut self, req: &Request) -> Option<(i32, Vec<u8>, Vec<OwnedFd>)> {
+    /// Sends a message built by `f(tag)` and returns (status, body, fds).
+    fn call_with(
+        &mut self,
+        f: impl FnOnce(u32) -> Vec<u8>,
+    ) -> Option<(i32, Vec<u8>, Vec<OwnedFd>)> {
         self.tag += 1;
-        self.send_raw(&proto::encode(self.tag, req), &[]).ok()?;
+        self.send_raw(&f(self.tag), &[]).ok()?;
         let (b, fds) = self.recv()?;
-        let (tag, status, body) = proto::decode_reply(&b).unwrap();
+        let (tag, status, body) = wire::decode_reply(&b).unwrap();
         assert_eq!(tag, self.tag);
         Some((status, body.to_vec(), fds))
     }
 
+    fn call(&mut self, req: &Request) -> Option<(i32, Vec<u8>, Vec<OwnedFd>)> {
+        self.call_with(|t| audio::encode(t, req))
+    }
+
     fn hello(&mut self) {
         let r = self
-            .call(&Request::Hello {
-                major: 1,
-                minor: 0,
-                service: 1,
-                name: "test".into(),
-            })
+            .call_with(|t| hello(1, service::AUDIO).encode(t))
             .unwrap();
         assert_eq!(r.0, 0);
-        assert_eq!(r.1, proto::hello_body());
+        assert_eq!(r.1, hello_reply_body());
     }
 }
 
@@ -179,6 +192,7 @@ fn stream_through_ring() {
         )
         .unwrap()
     } as *mut u8;
+    // SAFETY: header fields are 8-aligned inside the first page.
     let hdr = |off: usize| unsafe { &*(map.add(off) as *const std::sync::atomic::AtomicU64) };
     assert_eq!(unsafe { *(map as *const u32) }, 0x5241_584c);
     // The client cannot shrink the ring under the bridge.
@@ -233,6 +247,16 @@ fn stream_through_ring() {
         .0,
         0
     );
+    assert_eq!(
+        c.call(&Request::SetMetadata {
+            stream: r.stream,
+            usage: 14,
+            label: String::new()
+        })
+        .unwrap()
+        .0,
+        0
+    );
     assert_eq!(c.call(&Request::Close { stream: r.stream }).unwrap().0, 0);
     assert_eq!(
         c.call(&Request::Close { stream: r.stream }).unwrap().0,
@@ -249,60 +273,66 @@ fn protocol_errors() {
     let mut c = Client::connect(&path);
     assert_eq!(c.call(&Request::Close { stream: 1 }).unwrap().0, -EPROTO);
     assert!(c.recv().is_none());
-    // Wrong major, unknown service.
+    // Wrong major, unknown service, malformed HELLO.
     let mut c = Client::connect(&path);
     assert_eq!(
-        c.call(&Request::Hello {
-            major: 2,
-            minor: 0,
-            service: 1,
-            name: String::new()
-        })
-        .unwrap()
-        .0,
+        c.call_with(|t| hello(2, service::AUDIO).encode(t))
+            .unwrap()
+            .0,
         -EPROTO
     );
     let mut c = Client::connect(&path);
+    assert_eq!(c.call_with(|t| hello(1, 99).encode(t)).unwrap().0, -ENOSYS);
+    let mut c = Client::connect(&path);
     assert_eq!(
-        c.call(&Request::Hello {
-            major: 1,
-            minor: 0,
-            service: 99,
-            name: String::new()
+        c.call_with(|t| hello(1, service::DISPLAY).encode(t))
+            .unwrap()
+            .0,
+        -ENOSYS
+    );
+    let mut c = Client::connect(&path);
+    assert_eq!(
+        c.call_with(|t| {
+            let mut b = hello(1, 1).encode(t);
+            b.push(0);
+            b
         })
         .unwrap()
         .0,
-        -ENOSYS
+        -EINVAL
     );
 
     let mut c = Client::connect(&path);
     c.hello();
-    // Second HELLO, bad values, unknown type, unknown stream: answered.
+    // Second HELLO, event types, bad values, unknown type, unknown stream:
+    // answered.
     assert_eq!(
-        c.call(&Request::Hello {
-            major: 1,
-            minor: 0,
-            service: 1,
-            name: String::new()
-        })
-        .unwrap()
-        .0,
+        c.call_with(|t| hello(1, service::AUDIO).encode(t))
+            .unwrap()
+            .0,
+        -EPROTO
+    );
+    assert_eq!(
+        c.call_with(|t| wire::Writer::message(0x4001, t).into_vec())
+            .unwrap()
+            .0,
         -EPROTO
     );
     assert_eq!(c.call(&out_cfg(1, 4)).unwrap().0, -EINVAL);
     assert_eq!(c.call(&Request::Standby { stream: 42 }).unwrap().0, -ENOENT);
-    let mut unknown = proto::encode(77, &Request::Close { stream: 0 });
-    unknown[0] = 0x55;
-    c.send_raw(&unknown, &[]).unwrap();
-    let (b, _) = c.recv().unwrap();
-    assert_eq!(proto::decode_reply(&b).unwrap().1, -ENOSYS);
+    assert_eq!(
+        c.call_with(|t| wire::Writer::message(0x0155, t).into_vec())
+            .unwrap()
+            .0,
+        -ENOSYS
+    );
     // Attached fds are closed and the request refused.
     let fd = rustix::event::eventfd(0, rustix::event::EventfdFlags::CLOEXEC).unwrap();
-    c.send_raw(&proto::encode(78, &Request::Standby { stream: 1 }), &[fd])
+    c.send_raw(&audio::encode(78, &Request::Standby { stream: 1 }), &[fd])
         .unwrap();
     let (b, fds) = c.recv().unwrap();
     assert!(fds.is_empty());
-    assert_eq!(proto::decode_reply(&b).unwrap().1, -EPROTO);
+    assert_eq!(wire::decode_reply(&b).unwrap().1, -EPROTO);
     // Oversized packet: dropped.
     c.send_raw(&[0u8; 2000], &[]).unwrap();
     assert!(c.recv().is_none());
@@ -339,15 +369,7 @@ fn resource_caps() {
     let extra: Vec<Client> = (0..4).map(|_| Client::connect(&path)).collect();
     std::thread::sleep(Duration::from_millis(200));
     let mut last = Client::connect(&path);
-    assert!(
-        last.call(&Request::Hello {
-            major: 1,
-            minor: 0,
-            service: 1,
-            name: String::new()
-        })
-        .is_none()
-    );
+    assert!(last.call_with(|t| hello(1, 1).encode(t)).is_none());
     drop(extra);
 }
 
@@ -355,15 +377,7 @@ fn resource_caps() {
 fn refuses_unlisted_uid() {
     let path = start(Limits::default(), false);
     let mut c = Client::connect(&path);
-    assert!(
-        c.call(&Request::Hello {
-            major: 1,
-            minor: 0,
-            service: 1,
-            name: String::new()
-        })
-        .is_none()
-    );
+    assert!(c.call_with(|t| hello(1, 1).encode(t)).is_none());
 }
 
 #[test]
@@ -371,7 +385,7 @@ fn listen_refuses_to_replace_files() {
     let p = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("not-a-socket-{}", std::process::id()));
     std::fs::write(&p, b"keep me").unwrap();
-    assert!(server::listen(&p).is_err());
+    assert!(transport::listen(&p).is_err());
     assert_eq!(std::fs::read(&p).unwrap(), b"keep me");
     std::fs::remove_file(&p).unwrap();
 }

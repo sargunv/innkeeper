@@ -9,8 +9,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::audio::{Backend, Limits};
-use linuxapk_bridge::server::{self, Config};
+use std::sync::atomic::AtomicUsize;
+
+use linuxapk_bridge::audio::{AudioService, Backend, Limits};
+use linuxapk_bridge::proto::service;
+use linuxapk_bridge::server::{self, Config, Registry};
+use linuxapk_bridge::transport;
 
 fn main() -> Result<()> {
     let mut socket: Option<PathBuf> = None;
@@ -40,22 +44,33 @@ fn main() -> Result<()> {
     if allow.is_empty() {
         allow.push(rustix::process::getuid().as_raw());
     }
+    let backend = if null {
+        Backend::Null
+    } else {
+        Backend::Pulse { sink }
+    };
+    linuxapk_bridge::info!("audio: {backend:?}");
+    let mut services = Registry::default();
+    let streams = Arc::new(AtomicUsize::new(0));
+    services.register(service::AUDIO, "audio", move |peer| {
+        Ok(Box::new(AudioService::new(
+            backend.clone(),
+            Limits::default(),
+            streams.clone(),
+            peer,
+        )))
+    });
     let cfg = Config {
         allow_uids: allow,
-        backend: if null {
-            Backend::Null
-        } else {
-            Backend::Pulse { sink }
-        },
-        limits: Limits::default(),
-        max_clients: 8,
+        max_clients: 32,
+        services,
     };
-    let listener = server::listen(&socket)?;
+    let listener = transport::listen(&socket)?;
     linuxapk_bridge::info!(
-        "listening on {} (uids {:?}, {:?})",
+        "listening on {} (uids {:?}, services {:?})",
         socket.display(),
         cfg.allow_uids,
-        cfg.backend
+        cfg.services.names()
     );
     server::serve(listener, Arc::new(cfg))
 }

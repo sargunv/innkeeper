@@ -13,8 +13,8 @@ use anyhow::Result;
 use rustix::event::{EventfdFlags, PollFd, PollFlags};
 use rustix::time::{ClockId, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags};
 
+use super::proto::OutputConfig;
 use super::ring::{Ring, STATE_DEAD, STATE_PLAYING};
-use crate::proto::OutputConfig;
 
 /// Control messages from the client thread.
 #[derive(Debug, Clone, PartialEq)]

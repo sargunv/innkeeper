@@ -9,15 +9,19 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::proto::{self, OpenOutputReply, OutputConfig, Request, SampleFormat};
+use linuxapk_bridge::audio::proto::{
+    self as audio, OpenOutputReply, OutputConfig, Request, SampleFormat,
+};
+use linuxapk_bridge::proto::{Hello, service};
+use linuxapk_bridge::wire;
 use rustix::event::{PollFd, PollFlags};
 use rustix::net::{
     AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendFlags, SocketAddrUnix,
     SocketFlags, SocketType,
 };
 
-fn call(sock: &OwnedFd, tag: u32, req: &Request) -> Result<(i32, Vec<u8>, Vec<OwnedFd>)> {
-    rustix::net::send(sock, &proto::encode(tag, req), SendFlags::NOSIGNAL)?;
+fn call_raw(sock: &OwnedFd, msg: &[u8]) -> Result<(i32, Vec<u8>, Vec<OwnedFd>)> {
+    rustix::net::send(sock, msg, SendFlags::NOSIGNAL)?;
     let mut buf = vec![0u8; 1024];
     let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(4))];
     let mut anc = RecvAncillaryBuffer::new(&mut space);
@@ -33,7 +37,7 @@ fn call(sock: &OwnedFd, tag: u32, req: &Request) -> Result<(i32, Vec<u8>, Vec<Ow
             fds.extend(f);
         }
     }
-    let (_, status, body) = proto::decode_reply(&buf[..m.bytes]).context("bad reply")?;
+    let (_, status, body) = wire::decode_reply(&buf[..m.bytes]).context("bad reply")?;
     Ok((status, body.to_vec(), fds))
 }
 
@@ -49,31 +53,30 @@ fn main() -> Result<()> {
         None,
     )?;
     rustix::net::connect(&sock, &SocketAddrUnix::new(path.as_str())?)?;
-    let (st, _, _) = call(
-        &sock,
-        1,
-        &Request::Hello {
-            major: 1,
-            minor: 0,
-            service: 1,
-            name: "tone example".into(),
-        },
-    )?;
+    let hello = Hello {
+        major: 1,
+        minor: 0,
+        service: service::AUDIO,
+        name: "tone example".into(),
+    };
+    let (st, _, _) = call_raw(&sock, &hello.encode(1))?;
     if st != 0 {
         bail!("hello: {st}");
     }
     let (rate, period, periods) = (48000u32, 240u32, 4u32);
-    let (st, body, fds) = call(
+    let (st, body, fds) = call_raw(
         &sock,
-        2,
-        &Request::OpenOutput(OutputConfig {
-            rate,
-            channels: 2,
-            format: SampleFormat::S16Le,
-            period_frames: period,
-            periods,
-            name: format!("{hz} Hz tone"),
-        }),
+        &audio::encode(
+            2,
+            &Request::OpenOutput(OutputConfig {
+                rate,
+                channels: 2,
+                format: SampleFormat::S16Le,
+                period_frames: period,
+                periods,
+                name: format!("{hz} Hz tone"),
+            }),
+        ),
     )?;
     if st != 0 {
         bail!("open: {st}");
@@ -155,7 +158,10 @@ fn main() -> Result<()> {
             r.latency_us / 1000
         );
     }
-    let (st, _, _) = call(&sock, 3, &Request::Close { stream: r.stream })?;
+    let (st, _, _) = call_raw(
+        &sock,
+        &audio::encode(3, &Request::Close { stream: r.stream }),
+    )?;
     println!(
         "played {:.1} s at {hz} Hz (close: {st})",
         w as f64 / rate as f64

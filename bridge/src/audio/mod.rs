@@ -1,5 +1,6 @@
 //! The audio service: output streams from the Android audio HAL to PipeWire.
 
+pub mod proto;
 pub mod pulse;
 pub mod ring;
 pub mod stream;
@@ -11,8 +12,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustix::event::EventfdFlags;
 
-use crate::proto::{OpenOutputReply, OutputConfig, Request, libc_errno::*};
-use crate::server::{Reply, Service};
+use crate::server::{Peer, Reply, Service};
+use crate::wire::errno::*;
+use proto::{OpenOutputReply, OutputConfig, Request};
 use ring::{DATA_OFFSET, Ring};
 use stream::{Ctl, NullOut, Output, StreamHandle};
 
@@ -55,7 +57,8 @@ pub struct AudioService {
 }
 
 impl AudioService {
-    pub fn new(backend: Backend, limits: Limits, total: Arc<AtomicUsize>, peer: String) -> Self {
+    /// `total` counts streams across all connections (for the global cap).
+    pub fn new(backend: Backend, limits: Limits, total: Arc<AtomicUsize>, peer: &Peer) -> Self {
         AudioService {
             backend,
             limits,
@@ -63,7 +66,7 @@ impl AudioService {
             streams: HashMap::new(),
             next_id: 1,
             master: (1.0, false),
-            peer,
+            peer: peer.label.clone(),
         }
     }
 
@@ -191,7 +194,17 @@ impl Drop for AudioService {
 }
 
 impl Service for AudioService {
-    fn handle(&mut self, req: Request) -> Reply {
+    fn handle(&mut self, ty: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply {
+        if !fds.is_empty() {
+            return Reply::err(-EPROTO); // no audio request carries fds
+        }
+        let req = match proto::decode(ty, body) {
+            Ok(r) => r,
+            Err(e) => {
+                crate::debug!("{}: bad request {ty:#06x}: {e:?}", self.peer);
+                return Reply::err(e.status());
+            }
+        };
         match req {
             Request::OpenOutput(cfg) => self.open_output(cfg),
             Request::Close { stream } => {
@@ -220,7 +233,6 @@ impl Service for AudioService {
                 }
                 Reply::ok()
             }
-            Request::Hello { .. } => Reply::err(-EPROTO),
         }
     }
 }

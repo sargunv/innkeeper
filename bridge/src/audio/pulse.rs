@@ -19,9 +19,9 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{Context, Result, anyhow, bail};
 use pulseaudio::protocol::{self, Command, Prop, Props};
 
+use super::proto::{OutputConfig, SampleFormat};
 use super::ring::{Ring, STATE_IDLE, STATE_PLAYING};
 use super::stream::{Ctl, Output, monotonic_ns, usage_name_role};
-use crate::proto::{OutputConfig, SampleFormat};
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Largest control frame we accept from the server.
