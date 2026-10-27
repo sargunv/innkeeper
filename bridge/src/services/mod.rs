@@ -125,8 +125,16 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(5))
             .expect("broadcast blocked on a full socket");
         assert!(!subs.is_empty());
+        // Once the client is gone, a send fails with something other than
+        // EAGAIN (the kernel may free the queued packets a moment later).
         drop(b);
-        subs.broadcast(0x4001, b"x", &[], None);
+        for _ in 0..100 {
+            subs.broadcast(0x4001, b"x", &[], None);
+            if subs.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(subs.is_empty());
     }
 }
