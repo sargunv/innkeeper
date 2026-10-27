@@ -19,9 +19,9 @@ app input and real apps are next.
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables                                 |
 | M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games |
-| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                                                 |
+| M2 GPU, audio, per-app windows, launcher                        | 🚧 GPU ✅ (RADV/ANGLE); `linuxapk` CLI ✅ (install, `.desktop` entries, open-with for APKs); per-app windows and PipeWire audio in progress                        |
 | M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                                                 |
-| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                                                 |
+| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 userspace binder in progress; switching to Google's public AOSP CI build (no redistribution, no local AOSP build)                                               |
 | M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                 |
 | M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                 |
 
@@ -36,6 +36,12 @@ Real apps running in Linux.apk on KDE Plasma (Wayland):
 | ![Mindustry in Linux.apk](https://github.com/user-attachments/assets/c52f2c4b-0a3f-45bb-a521-0fa0300f545a)                    | ![Shattered Pixel Dungeon in Linux.apk](https://github.com/user-attachments/assets/2f450098-1226-45e9-91e2-407423303333) |
 | **Tomato** (Jetpack Compose)                                                                                                  | **OpenCalc**                                                                                                             |
 | ![Tomato (Jetpack Compose) in Linux.apk](https://github.com/user-attachments/assets/3229708b-5d53-4cc7-a8df-d096d7d5812f)     | ![OpenCalc in Linux.apk](https://github.com/user-attachments/assets/4ff9dca7-6851-4285-93ca-1e3c2250c66d)                |
+
+## Try it
+
+`linuxapk install some.apk` installs an app, adds it to your app launcher and
+starts the Android session when needed; `linuxapk setup` makes double-clicking
+APKs install them. See [docs/cli.md](docs/cli.md).
 
 ## Dev setup (Fedora)
 
