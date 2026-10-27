@@ -172,3 +172,22 @@ presenter two things:
 missing pieces. It fakes the selinux status, fakes properties (seeding
 `servicemanager.ready`, plus `LINUXAPK_PROPS` via `-e`) and mirrors liblog to
 stderr.
+
+## Status in the live session (2026-10-27)
+
+What works in the session lane's boot, with the session's interim
+`user root` allocator override:
+
+- init starts both services.
+- SurfaceFlinger connects to the composer and reports display 0 at
+  1280x800 @ 60 Hz, 160 dpi.
+- SurfaceFlinger allocates its client targets
+  (`LegacyFramebufferSurface`, usage 0x1a00) and RenderEngine buffers through
+  our allocator.
+- RenderEngine runs ANGLE on RADV, which uses `mapper.linuxapk.so`.
+
+No frame has been composed yet, because there are no layers: system_server
+isn't up. I ran `bootanimation` by hand to get a layer. Its buffer was
+allocated (`[BBQ] BootAnimation`, 1280x800, usage 0xb00), but the process
+then crashed in RADV's `vkAcquireNextImageKHR`. That's in the gpu lane's
+driver, not in the gralloc or the composer.

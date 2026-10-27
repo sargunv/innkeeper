@@ -82,6 +82,8 @@ Rules:
   (IMapper v5, memfd→udmabuf linear buffers) and composer3 V5 (headless, all-CLIENT, timer
   vsync, PNG frame dumps) into `out/vendor-overlay`. Proven in a namespace with the image's
   servicemanager, incl. AHardwareBuffer via libui. See [hal-display.md](hal-display.md).
+  In the session SF uses them (display 0 1280x800@60, client targets allocated); first
+  composed frame still pending a layer (bootanimation crashes in RADV `vkAcquireNextImageKHR`).
 
 ## Next
 
