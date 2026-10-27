@@ -94,13 +94,22 @@ single-window mode is still there:
    the surface, which makes SurfaceFlinger create a fresh HWC display.
 
 4. **Window semantics**:
-   - **Resize:** the window's `configure` and `wp_fractional_scale_v1` preferred
-     scale come back as `window <w> <h> <scale> <display>`. After a 120 ms
-     debounce the window manager calls
+   - **Resize and scale:** the window's `configure` and `wp_fractional_scale_v1`
+     preferred scale (or the integer buffer scale where the compositor has no
+     fractional scale) come back as `window <w> <h> <scale> <display>`. After a
+     120 ms debounce the window manager calls
      `VirtualDisplay.resize(w×scale, h×scale, 160×scale)`. The app gets a normal
      configuration change and renders at the window's physical pixel size, so
      text stays sharp at fractional scales. Until the first frame at the new
-     size arrives, `wp_viewporter` stretches the old one.
+     size arrives, `wp_viewporter` stretches the old one. Each window follows
+     its own scale (a window moved to another monitor gets that monitor's), and
+     the last scale seen is kept in the window manager's preferences, so after a
+     restart new windows open at it. Proof (nested KWin, 2026-10-27): changing
+     the output scale live with `kscreen-doctor` from 1.7 to 1.25 resized
+     F-Droid's display from 2176x1360 @ 272 dpi to 1600x1000 @ 200 dpi, and the
+     activity was relaunched with `sw800dp w1280dp h800dp 200dpi` (the same
+     1280x800 dp: the window's logical size didn't change); back to 1.7 restored
+     2176x1360 @ 272.
    - **Close:** `xdg_toplevel.close` arrives as `close <display>`. The window
      manager calls `removeTask` on every task on the display, sends
      `window_destroy`, and releases the display.
@@ -120,10 +129,12 @@ single-window mode is still there:
      touch events to that display (`InputEvent.setDisplayId`). It ends the hover
      or drag on the old window before the pointer starts on a new one, and it
      keeps a touch sequence on one window.
-   - **IME:** the display IME policy is `HIDE` (`persist.linuxapk.wm.ime`:
-     `hide`, `local`, `fallback`). The host keyboard types, so no soft keyboard
-     covers the window. `local` shows the soft keyboard inside the window
-     instead.
+   - **IME:** the display IME policy is `LOCAL` (`persist.linuxapk.wm.ime`:
+     `local`, `hide`, `fallback`). The default input method, the Linux.apk
+     Keyboard ([input.md](input.md#text-input)), draws nothing, so no soft
+     keyboard covers the window; an Android IME the user picks shows inside the
+     window. `hide` keeps every IME from binding, so text input through the
+     host's input methods stops working.
 5. **Display 0 in per-app mode** keeps running, headless:
    - Launcher3 is its home activity.
    - Any ordinary app task that appears there is moved into a window of its own
@@ -357,8 +368,8 @@ CI image's system_server crash-loop in `SyntheticPasswordCrypto.decryptBlob`.
   content-sized dialog windows (see above).
 - `AppWarnings` dialogs other than the target-SDK one, and SystemUI dialogs,
   still go to display 0.
-- The first window after boot opens at scale 1 and is resized once the
-  compositor reports the real scale.
+- The first window on a fresh `/data` opens at scale 1 and is resized once the
+  compositor reports the real scale (later boots start at the last scale).
 - Activation without a fresh input serial may only flag the window in KWin.
 - An app that asks for portrait on a landscape window is letterboxed. The window
   doesn't reshape itself yet (`onActivityRequestedOrientationChanged`).

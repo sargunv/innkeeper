@@ -202,6 +202,7 @@ the session launcher sets to the host socket.
 | `0x0206` | BUFFER_ADD          | `u32 buffer`, `u32 window`, `u32 width`, `u32 height`, `u32 fourcc` (XBGR/ABGR/XRGB/ARGB8888), `u32 stride` (≥ 4×width), `u32 offset`, `u64 modifier` (0, LINEAR); fd: the dma-buf | The fd's size (`lseek`) must cover `offset + stride × height`; the compositor imports it through linux-dmabuf                                 |
 | `0x0207` | BUFFER_REMOVE       | `u32 buffer`                                                                                                                                                                       |                                                                                                                                               |
 | `0x0208` | FRAME               | `u32 window`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's until RELEASE; a frame for a window that isn't configured yet, or a buffer not imported yet, is released at once |
+| `0x0209` | TEXT_INPUT          | `u16 len` + one `ti_*` line from the Linux.apk IME (≤ 480 bytes), relayed by the composer                                                                                          | Applied to the window with text-input focus; see "Text input" below                                                                           |
 
 | Event    | Message   | Body                                                                                   |
 | -------- | --------- | -------------------------------------------------------------------------------------- |
@@ -229,3 +230,37 @@ the session launcher sets to the host socket.
   re-added with the next frame).
 - **Test:** `cargo run -p linuxapk-bridge --example window -- SOCKET` opens a
   window with a udmabuf pool the way the composer does and prints the events.
+- **Scale:** `wp_fractional_scale_v1` where the compositor has it; otherwise the
+  integer `wl_surface.preferred_buffer_scale` (or the outputs' scale), with
+  `wl_surface.set_buffer_scale` when there is no viewporter. Either way a change
+  sends CONFIGURE with the new `scale×120`.
+
+#### Text input
+
+The display service drives `zwp_text_input_v3` for the Linux.apk IME
+(`display/ime.rs` is the line protocol, `display/wl/text_input.rs` the Wayland
+side; [input.md](input.md#text-input) has the Android side). There is one text
+input per seat, and it follows the keyboard focus: the compositor sends
+`enter`/`leave` for our windows' surfaces.
+
+- **IME to bridge** (TEXT_INPUT, through the composer), applied only while a
+  window has text-input focus and in order:
+
+  | Line                                             | Effect                                                                                                                                |
+  | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | `ti_enable` / `ti_disable`                       | `enable` / `disable`                                                                                                                  |
+  | `ti_content <hint> <purpose>`                    | `set_content_type` (hint ≤ `0x3ff`, purpose ≤ 13)                                                                                     |
+  | `ti_surrounding <cursor> <anchor> <0\|1> <text>` | `set_surrounding_text`; byte offsets on char boundaries; 1 also sets the change cause to `other` (the user or the app moved the text) |
+  | `ti_cursor <x> <y> <w> <h>`                      | `set_cursor_rectangle`, from the display's pixels divided by the window's scale                                                       |
+  | `ti_apply`                                       | `commit`                                                                                                                              |
+
+- **Bridge to IME**, as ordinary INPUT lines at each `done`, so they stay in
+  order with the keys: `ti_delete <before> <after>` (bytes), `ti_commit <text>`
+  (repeated for long text; the IME appends), `ti_preedit <begin> <end> [<text>]`
+  (always sent; no text means no preedit), then `ti_done <window>`. On `leave`
+  the IME gets an empty preedit and `ti_done`, as the protocol asks.
+- **Text encoding:** bytes up to space, DEL and `%` are `%XX`; everything else
+  (UTF-8) goes as is. The parser accepts only that canonical form (each line
+  must re-encode to itself), bounded lengths and numbers, and no NUL.
+- Without a host input method (IBus, Fcitx) enabling changes nothing: keys keep
+  arriving as `wl_keyboard` keys.

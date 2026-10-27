@@ -131,11 +131,59 @@ The mapping follows what InputReader produces for real devices
 - **Disconnects:** if the composer goes away, the client releases everything
   held and reconnects with backoff from 250 ms to 5 s.
 
+## Text input
+
+"Linux.apk Keyboard" (`ime/HostImeService.kt`, an `InputMethodService` in the
+system app) connects Android text fields to the host's keyboard and input
+methods through the bridge's `zwp_text_input_v3`
+([bridge.md](bridge.md#text-input)). The pure logic, which is unit-tested on the
+JVM, is in `android/input/.../ime/TextInputSession.kt`.
+
+- **Default, no soft keyboard:** `ImeFeature` enables it and makes it the
+  default input method at every start, unless the user chose another one than
+  the stock LatinIME (`persist.linuxapk.ime=android` leaves the choice alone).
+  It never shows an input view, so nothing pops up on focus. The window
+  manager's per-display IME policy is now `local`: with `hide`,
+  InputMethodManager binds no IME at all (`NO_IME`), so there would be no text
+  input either.
+- **Keys:** injected key events still reach the app as before (the IME passes
+  them through untouched), so typing, shortcuts, Backspace and Enter don't
+  change. Without a host input method, that is all there is.
+- **With a host input method** (IBus, Fcitx; this covers CJK, dead keys and
+  compose):
+  - For each editor (`onStartInput`, any input type but `TYPE_NULL`) the IME
+    sends `ti_enable` and the content type (input type and IME options mapped to
+    the protocol's hints and purpose: password, email, URL, number, PIN, phone,
+    date, multi-line, capitalization).
+  - It keeps the bridge up to date with the surrounding text (up to 120 UTF-16
+    units each side of the selection, trimmed to fit a line) and the cursor
+    rectangle (`requestCursorUpdates`; the insertion marker through
+    `CursorAnchorInfo`'s matrix, in display pixels). The host input method's
+    candidate window opens at the text cursor.
+  - The input method's results come back as `ti_*` lines on the composer's
+    stream and are applied in `zwp_text_input_v3`'s order inside one batch edit:
+    remove the preedit, `deleteSurroundingTextInCodePoints` (byte lengths
+    converted with the text last sent), `commitText`, `setComposingText` for the
+    new preedit.
+  - A selection change caused by those edits is reported with change cause
+    `input_method`; any other one with `other`, which resets the input method.
+- **Limits:** `setComposingText` can only put the cursor at either end of the
+  preedit, so a cursor inside it (Anthy's segment editing) shows at the end.
+  `TYPE_NULL` editors (terminals) get raw keys only.
+
+Proof (2026-10-27, nested KWin 6.7 at scale 1.7 with IBus 1.5.34 as KWin's input
+method, CI image): in F-Droid's search field, IBus Pinyin's preedit "你好"
+showed underlined in the field with the candidate window under the text cursor,
+and Space committed it (the field's text was `你好`). With the `xkb:us:intl:eng`
+engine, `'` then `e` typed `café`. The IME window stayed without a surface on
+the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
+`android/e2e/e2e.sh` checks that the Linux.apk Keyboard is the default.
+
 ### Known limits (injection rather than an input device)
 
-- **No keyboard device:** Android sees no physical keyboard, so the soft
-  keyboard opens on text fields. A dedicated IME (M3, `text-input-v3`) fixes
-  this, as would a virtual input device.
+- **No keyboard device:** Android sees no physical keyboard. The Linux.apk
+  Keyboard (above) keeps the soft keyboard away; apps that look for a hardware
+  keyboard (`Configuration.keyboard`) still see none.
 - **US layout only:** characters come from `Virtual.kcm`, so the host's xkb
   layout is ignored.
 - **No cursor feedback:** Android draws no pointer for injected events, and

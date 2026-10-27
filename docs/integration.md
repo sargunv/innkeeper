@@ -272,10 +272,14 @@ ubinder supervisor work.
 
 ### Text input
 
-- [ ] **IME: host input methods through `text-input-v3`** · todo · P0 · sysapp +
+- [x] **IME: host input methods through `text-input-v3`** · done · P0 · sysapp +
       bridge
-  - Now: no IME integration. Android sees no physical keyboard, so the soft
-    keyboard (LatinIME) pops up on every text field.
+  - Now: done (integb). "Linux.apk Keyboard" (`android/app/.../ime/`) is the
+    default IME and shows nothing; the bridge's display service drives
+    `zwp_text_input_v3` (`bridge/src/display/ime.rs`, `wl/text_input.rs`).
+    Proven with IBus Pinyin and dead keys in nested KWin
+    ([input.md](input.md#text-input)). Left: a preedit cursor inside the text
+    shows at its end.
   - Linux: `zwp_text_input_v3` (enable, `set_surrounding_text`,
     `set_content_type`, `set_cursor_rectangle`, `preedit_string`,
     `commit_string`, `delete_surrounding_text`). fcitx5 and IBus serve it on KDE
@@ -386,10 +390,12 @@ ubinder supervisor work.
     The window moves between outputs.
   - Android: per-display density and refresh rate follow the window's output. No
     Android display per monitor is needed.
-- [ ] **HiDPI, fractional scaling and density** · partial · P0 · windowing +
-      bridge
-  - Now: fractional-scale-v1 and viewporter are bound. On `lane/win` the display
-    density is 160 dpi times the scale.
+- [x] **HiDPI, fractional scaling and density** · done · P0 · windowing + bridge
+  - Now: each window's display is its logical size times its fractional scale
+    (or the integer buffer scale without fractional-scale-v1), at 160 dpi times
+    the scale. A live desktop scale change resizes the display and the app gets
+    a configuration change (proof in [windowing.md](windowing.md)). Left: the
+    user density multiplier below.
   - Linux: `wp_fractional_scale_v1`, `wp_viewporter`.
   - Android: `VirtualDisplay.resize(w, h, dpi)`. Add a user density multiplier:
     desktop users expect denser UI than phones (ChromeOS uses about 0.8–1.0).

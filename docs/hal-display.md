@@ -272,40 +272,42 @@ Each connected client receives the same stream of events from the windows'
 - Button and key codes are Linux evdev codes (`BTN_LEFT`=272, `KEY_A`=30).
 - A client that falls behind (its socket buffer fills up) is disconnected.
 
-| Line                                                                                            | When                                                                      |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `hello 2 <display_w> <display_h>`                                                               | first line on connect (protocol version, display 0's size)                |
-| `window <logical_w> <logical_h> <scale> <display>`                                              | on connect (one per window) and whenever a window's size or scale changes |
-| `pointer_enter <x> <y> <display>` / `pointer_leave <display>`                                   | pointer enters or leaves a window                                         |
-| `pointer_motion <t> <x> <y>`                                                                    | pointer moves                                                             |
-| `pointer_button <t> <button> <0\|1>`                                                            | button released (0) or pressed (1)                                        |
-| `pointer_axis <t> <axis> <value>`                                                               | scroll, axis 0 = vertical, 1 = horizontal; value in surface units         |
-| `pointer_axis_value120 <axis> <v120>`                                                           | high-resolution wheel steps (120 = one detent)                            |
-| `pointer_axis_stop <t> <axis>`                                                                  | end of a kinetic scroll                                                   |
-| `pointer_frame`                                                                                 | ends a group of pointer events                                            |
-| `keyboard_enter <display>` / `keyboard_leave <display>`                                         | keyboard focus                                                            |
-| `key <t> <keycode> <0\|1>`                                                                      | key released (0) or pressed (1)                                           |
-| `modifiers <depressed> <latched> <locked> <group>`                                              | xkb masks (compositor keymap)                                             |
-| `touch_down <t> <id> <x> <y> <display>` / `touch_motion <t> <id> <x> <y>` / `touch_up <t> <id>` | touch points                                                              |
-| `touch_frame` / `touch_cancel`                                                                  | end of a touch group, or the touch sequence was cancelled                 |
-| `close <display>`                                                                               | the user asked to close the window                                        |
-| `window_pending <display>`                                                                      | a `window_new` request was queued                                         |
-| `window_mapped <display> <hwc_display>`                                                         | the window for that request exists                                        |
-| `window_gone <display>`                                                                         | the window was destroyed (`window_destroy`, or its display went away)     |
-| `window_failed <display> <reason>`                                                              | the request failed (`exists`, `timeout`, `bad_request`, `wayland`)        |
-| `pong <token>`                                                                                  | reply to `ping`                                                           |
+| Line                                                                                                       | When                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `hello 2 <display_w> <display_h>`                                                                          | first line on connect (protocol version, display 0's size)                                                  |
+| `window <logical_w> <logical_h> <scale> <display>`                                                         | on connect (one per window) and whenever a window's size or scale changes                                   |
+| `pointer_enter <x> <y> <display>` / `pointer_leave <display>`                                              | pointer enters or leaves a window                                                                           |
+| `pointer_motion <t> <x> <y>`                                                                               | pointer moves                                                                                               |
+| `pointer_button <t> <button> <0\|1>`                                                                       | button released (0) or pressed (1)                                                                          |
+| `pointer_axis <t> <axis> <value>`                                                                          | scroll, axis 0 = vertical, 1 = horizontal; value in surface units                                           |
+| `pointer_axis_value120 <axis> <v120>`                                                                      | high-resolution wheel steps (120 = one detent)                                                              |
+| `pointer_axis_stop <t> <axis>`                                                                             | end of a kinetic scroll                                                                                     |
+| `pointer_frame`                                                                                            | ends a group of pointer events                                                                              |
+| `keyboard_enter <display>` / `keyboard_leave <display>`                                                    | keyboard focus                                                                                              |
+| `key <t> <keycode> <0\|1>`                                                                                 | key released (0) or pressed (1)                                                                             |
+| `modifiers <depressed> <latched> <locked> <group>`                                                         | xkb masks (compositor keymap)                                                                               |
+| `touch_down <t> <id> <x> <y> <display>` / `touch_motion <t> <id> <x> <y>` / `touch_up <t> <id>`            | touch points                                                                                                |
+| `touch_frame` / `touch_cancel`                                                                             | end of a touch group, or the touch sequence was cancelled                                                   |
+| `close <display>`                                                                                          | the user asked to close the window                                                                          |
+| `window_pending <display>`                                                                                 | a `window_new` request was queued                                                                           |
+| `window_mapped <display> <hwc_display>`                                                                    | the window for that request exists                                                                          |
+| `window_gone <display>`                                                                                    | the window was destroyed (`window_destroy`, or its display went away)                                       |
+| `window_failed <display> <reason>`                                                                         | the request failed (`exists`, `timeout`, `bad_request`, `wayland`)                                          |
+| `pong <token>`                                                                                             | reply to `ping`                                                                                             |
+| `ti_delete <before> <after>`, `ti_commit <text>`, `ti_preedit <begin> <end> [<text>]`, `ti_done <display>` | the host input method's result for the Linux.apk IME (bridge backend only; [input.md](input.md#text-input)) |
 
 **Commands** (v2) are lines a client sends; the window manager in the Linux.apk
 System app is the only client that does:
 
-| Command                                                         | Effect                                                                                                                                                      |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `window_new <display> <width> <height> <dpi> <app_id> <title…>` | The next HWC virtual display of exactly `width`×`height` that SurfaceFlinger creates (within 10 s) gets a window, which starts at the display's size in dp. |
-| `window_min_size <display> <w> <h>`                             | Minimum logical size (`xdg_toplevel.set_min_size`), for a pending or existing window.                                                                       |
-| `window_title <display> <title…>`                               | Changes the title.                                                                                                                                          |
-| `window_activate <display>`                                     | Asks the compositor to focus the window (`xdg_activation_v1`).                                                                                              |
-| `window_destroy <display>`                                      | Closes the window now (the display may stay, headless).                                                                                                     |
-| `ping <token>`                                                  | `pong <token>`.                                                                                                                                             |
+| Command                                                                                     | Effect                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `window_new <display> <width> <height> <dpi> <app_id> <title…>`                             | The next HWC virtual display of exactly `width`×`height` that SurfaceFlinger creates (within 10 s) gets a window, which starts at the display's size in dp.                       |
+| `window_min_size <display> <w> <h>`                                                         | Minimum logical size (`xdg_toplevel.set_min_size`), for a pending or existing window.                                                                                             |
+| `window_title <display> <title…>`                                                           | Changes the title.                                                                                                                                                                |
+| `window_activate <display>`                                                                 | Asks the compositor to focus the window (`xdg_activation_v1`).                                                                                                                    |
+| `window_destroy <display>`                                                                  | Closes the window now (the display may stay, headless).                                                                                                                           |
+| `ping <token>`                                                                              | `pong <token>`.                                                                                                                                                                   |
+| `ti_…` (`ti_enable`, `ti_content`, `ti_surrounding`, `ti_cursor`, `ti_apply`, `ti_disable`) | The Linux.apk IME's text-input state. The composer relays these unchanged to the bridge (display request `TEXT_INPUT`), which validates them ([bridge.md](bridge.md#text-input)). |
 
 Example: `socat - UNIX-CONNECT:/dev/socket/linuxapk-input`.
 
