@@ -132,6 +132,28 @@ Tracing: `LINUXAPK_UBINDER_DEBUG=1` logs to the helper's stderr (`session.out`);
 any other value is a log file path inside the session root (for example
 `/data/ubinder.log`), rotated every 64 MiB.
 
+## Hardening against hostile Android processes
+
+The broker helper and the C supervisor run with the host user's power, so they
+must survive anything Android sends. From a security review (2026-10-27):
+
+- The receive memfd is sealed against resizing (a truncate made the broker's
+  writes SIGBUS). Transaction sizes are aligned with checked arithmetic.
+- A process's memory is read and written only through `/proc/<pid>/mem`, opened
+  at binder open while its notification is valid. That pins its address space,
+  so a thread killed by an exec, or a recycled tid, never gets writes meant for
+  the old image. Queued single-uid jobs are dropped once their notification is
+  gone, and checked again before they act.
+- Poll mode hands out an epoll fd, never the broker's eventfd (see "poll").
+- The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
+  failing the call with `EAGAIN` if it is behind, so binder never waits on it.
+- `bpfemu.c`: element operations need a map with tables (not ring buffers), LPM
+  keys and prefixes are bounded, and pins are opened with `openat2` under
+  `/sys/fs/bpf` only: no symlinks, no `..`, no other mounts, non-blocking, and
+  regular files only. Objects are capped at 4096 and map memory at 128 MiB plus
+  2 MiB per CPU (a boot creates about 250 objects and 25 MB on 32 CPUs), and
+  failed creations are unwound. `session/tests/bpfemu.sh` covers these.
+
 ## Bugs found on the way (for the record)
 
 - `binder_handle_cookie` is `__packed` (12 bytes). The old 16-byte struct gave

@@ -8,6 +8,9 @@ socket.
 
 The bridge is a **security boundary**. Everything it reads from a client is
 untrusted: message bodies, shared memory, and fds the client may still hold.
+Nothing a client does may block the bridge: events never wait for a client
+(conventions 4 and 6), and limits on work that outlives a connection, such as
+document picks, are bridge-wide (from a security review, 2026-10-27).
 
 ## Running
 
