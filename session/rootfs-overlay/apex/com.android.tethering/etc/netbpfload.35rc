@@ -1,0 +1,11 @@
+# linuxapk: replaces the APEX's netbpfload.35rc. Loading network eBPF
+# programs needs CAP_SYS_ADMIN/CAP_BPF in the initial user namespace, which a
+# rootless session doesn't have, and the stock service reboots on failure.
+# Pretend loading finished so init.rc's "wait_for_prop bpf.progs_loaded 1"
+# proceeds. Networking features that rely on eBPF (netd traffic accounting,
+# per-uid firewall) will not work.
+service bpfloader /system/bin/setprop bpf.progs_loaded 1
+    disabled
+    user root
+    oneshot
+    override

@@ -4,6 +4,7 @@
 # pivots into it and execs Android init (second stage).
 #
 # Inputs (environment): LINUXAPK_REPO LINUXAPK_OUT LINUXAPK_RUN LINUXAPK_DATA
+#                       LINUXAPK_HOLD=1 to stop before exec'ing init
 set -euo pipefail
 
 repo=$LINUXAPK_REPO out=$LINUXAPK_OUT run=$LINUXAPK_RUN data=$LINUXAPK_DATA
@@ -45,9 +46,9 @@ layer_mount() {
 # --- partitions -------------------------------------------------------------
 layer_mount "$R/system" "$ovl/system" "$out/session/overlay/system" "$img/system/system"
 layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
-layer_mount "$R/system_ext" "$ovl/system_ext" "$img/system_ext"
-layer_mount "$R/product" "$ovl/product" "$img/product"
-layer_mount "$R/odm" "$ovl/odm" "$img/vendor/odm"
+layer_mount "$R/system_ext" "$ovl/system_ext" "$out/session/overlay/system_ext" "$img/system_ext"
+layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
+layer_mount "$R/odm" "$ovl/odm" "$out/session/overlay/odm" "$img/vendor/odm"
 [[ -d $img/system_dlkm ]] && layer_mount "$R/system_dlkm" "$img/system_dlkm"
 
 # Top-level entries of the system-as-root image (symlinks, init.environ.rc,
@@ -66,19 +67,13 @@ rm -rf "$R/lost+found"
 if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
 
 # --- /apex: pre-flattened APEXes instead of apexd ---------------------------
-mount -t tmpfs -o mode=0755 apex "$R/apex"
-for d in "$apex"/*/; do
-  n=$(basename "$d")
-  mkdir "$R/apex/$n"
-  mount --bind "$d" "$R/apex/$n"
-  mount -o remount,bind,ro "$R/apex/$n"
-done
-cp "$apex/apex-info-list.xml" "$R/apex/"
-chmod 0644 "$R/apex/apex-info-list.xml"
-# init bind-mounts /bootstrap-apex over /apex in the bootstrap mount namespace;
-# give it the same full set so both namespaces see every APEX.
-mkdir -p "$R/bootstrap-apex"
-mount --rbind "$R/apex" "$R/bootstrap-apex"
+# Init mounts an empty tmpfs over /apex early in second stage, so the tree is
+# staged at /linuxapk/apex and init.rc bind-mounts it over /apex in
+# early-init. It is one mount of the whole tree (no submounts), so
+# non-recursive views of it stay complete.
+# Overrides for APEX contents (e.g. rc files) layer on top like partitions.
+mkdir -p "$R/apex" "$R/bootstrap-apex"
+layer_mount "$R/linuxapk/apex" "$ovl/apex" "$apex"
 
 # --- writable state -----------------------------------------------------------
 mkdir -p "$data"
@@ -112,21 +107,27 @@ mkdir -p "$R/dev/binderfs"   # init mounts binderfs itself (init.rc "on init")
 mount -t proc -o nosuid,nodev,noexec proc "$R/proc"
 mount --bind "$run/cmdline" "$R/proc/cmdline"
 [[ -e $R/proc/bootconfig ]] && mount --bind "$run/bootconfig" "$R/proc/bootconfig"
+# init insists on raising ASLR entropy (fatal if it can't): give it a
+# writable stand-in. The host's real setting applies regardless.
+echo 32 > "$run/mmap_rnd_bits"
+mount --bind "$run/mmap_rnd_bits" "$R/proc/sys/vm/mmap_rnd_bits"
 
 mount --rbind /sys "$R/sys"
 mount -o remount,bind,ro "$R/sys" || true
 # Hide SELinux: libselinux then reports it as disabled (see shim/selinux_shim.c).
 mount -t tmpfs -o ro,mode=0755 noselinux "$R/sys/fs/selinux"
-# A cgroup2 view rooted at this session's cgroup (we are in a new cgroup ns).
-mount -t cgroup2 -o nosuid,nodev,noexec cgroup2 "$R/sys/fs/cgroup" || log "cgroup2 mount failed"
+# Cover the host's cgroup tree; init (libprocessgroup) mounts cgroup2 here
+# itself, rooted at this session's cgroup since we are in a new cgroup ns.
+mount -t tmpfs -o mode=0755 nocgroup "$R/sys/fs/cgroup"
 
 # --- go -----------------------------------------------------------------------
-cd "$R"
-pivot_root . .
-umount -l .
-cd /
+if [[ ${LINUXAPK_HOLD:-} == 1 ]]; then
+  # Debug: assemble the root but don't run init; "linuxapk-session exec" works.
+  log "holding before init (LINUXAPK_HOLD=1)"
+  exec "$out/session/pivot-exec" "$R" /system/bin/sleep infinity
+fi
 
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 export LD_PRELOAD=liblinuxapk_shim.so
-exec /system/bin/init second_stage
+exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

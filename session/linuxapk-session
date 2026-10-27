@@ -46,7 +46,7 @@ ns_pid() {
 }
 
 cmdline() {
-  # androidboot.* become ro.boot.* properties.
+  # androidboot.* (passed via /proc/bootconfig) become ro.boot.* properties.
   cat <<EOF
 androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m
 EOF
@@ -58,21 +58,22 @@ start() {
   if p=$(ns_pid); then die "already running (pid $p)"; fi
   [[ -d $out/img/system/system ]] || die "no image at $out/img (run tools/extract-image.sh)"
   [[ -f $out/root/apex/apex-info-list.xml ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
-  [[ $here/shim/selinux_shim.c -nt $out/session/overlay/system/lib64/liblinuxapk_shim.so ]] \
-    && "$here/build.sh"
-  [[ -f $out/session/overlay/system/lib64/liblinuxapk_shim.so ]] || "$here/build.sh"
+  if [[ ! -x $out/session/pivot-exec ]] ||
+     [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
+    "$here/build.sh"
+  fi
 
   rm -rf "$run"; mkdir -p "$run"
-  cmdline > "$run/cmdline"
+  echo "console=null" > "$run/cmdline"
   cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' > "$run/bootconfig"
   mkfifo "$run/kmsg"
   # Reader holds the FIFO open read-write so writers never block or see EOF.
-  setsid bash -c 'exec cat 0<>"$1" >>"$2"' _ "$run/kmsg" "$run/kmsg.log" </dev/null &
+  setsid bash -c 'exec cat 0<>"$1" >>"$2"' _ "$run/kmsg" "$run/kmsg.log" </dev/null >/dev/null 2>&1 &
   echo $! > "$run/kmsg-reader.pid"
 
   # shellcheck disable=SC2046
   setsid systemd-run --user --scope --quiet --collect --unit="$unit-$$" -p Delegate=yes -- \
-    env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
+    env LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
     -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
   local launcher=$!
