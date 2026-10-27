@@ -15,6 +15,8 @@
  *   compute shader, check through the memfd mapping.
  * --anb-hal: same, but the buffer comes from the hal lane's allocator code and
  *   is imported through the real mapper.linuxapk.so (libhalbuf.so).
+ * --deferred: with --anb/--anb-hal, use libvulkan's deferred-allocation
+ *   swapchain path (bind the gralloc buffer with vkBindImageMemory2).
  * --anb: create a VkImage from a gralloc-style native handle
  *   (VkNativeBufferANDROID) backed by udmabuf, as libvulkan's swapchain does;
  *   requires the mock mapper (MESA_GRALLOC_MAPPER_SUFFIX=lapktest).
@@ -136,6 +138,7 @@ FN(vkQueueWaitIdle);
 FN(vkGetMemoryFdPropertiesKHR);
 FN(vkCreateImage);
 FN(vkResetCommandBuffer);
+FN(vkBindImageMemory2);
 #undef FN
 
 static VkCommandBuffer cmd;
@@ -185,6 +188,7 @@ static void load_device_fns(void) {
   L(vkGetMemoryFdPropertiesKHR);
   L(vkCreateImage);
   L(vkResetCommandBuffer);
+  L(vkBindImageMemory2);
 #undef L
 }
 
@@ -625,6 +629,7 @@ static const native_handle_t* hal_buffer(
 }
 
 static int anb_stride_px = 128; /* --anb-stride */
+static bool anb_deferred;       /* --deferred */
 
 static int test_anb(bool hal) {
   const int width = 100, height = 64;
@@ -679,11 +684,49 @@ static int test_anb(bool hal) {
     .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
   };
   VkImage img;
-  VkResult r = vkCreateImage(dev, &ici, NULL, &img);
-  printf(
-    "anb: vkCreateImage(VkNativeBufferANDROID, udmabuf, stride %zu) = %d\n",
-    stride, r
-  );
+  VkResult r;
+  if (anb_deferred) {
+    /* libvulkan's deferred-allocation swapchain (what ANGLE uses): create
+     * the image with VkImageSwapchainCreateInfoKHR only, then bind the
+     * gralloc buffer at acquire time with vkBindImageMemory2(memory =
+     * VK_NULL_HANDLE, pNext = VkNativeBufferANDROID -> swapchain info).
+     * The driver never dereferences the swapchain handle on Android. */
+    VkImageSwapchainCreateInfoKHR isci = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR,
+      .swapchain = (VkSwapchainKHR)(uintptr_t)0x5eed,
+    };
+    ici.pNext = &isci;
+    r = vkCreateImage(dev, &ici, NULL, &img);
+    printf(
+      "anb: deferred vkCreateImage(VkImageSwapchainCreateInfoKHR) = %d\n", r
+    );
+    if (r != VK_SUCCESS) return 1;
+    VkBindImageMemorySwapchainInfoKHR bimsi = {
+      .sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR,
+      .swapchain = isci.swapchain,
+      .imageIndex = 0,
+    };
+    nb.pNext = &bimsi;
+    VkBindImageMemoryInfo bimi = {
+      .sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO,
+      .pNext = &nb,
+      .image = img,
+      .memory = VK_NULL_HANDLE,
+    };
+    fflush(stdout);
+    r = vkBindImageMemory2(dev, 1, &bimi);
+    printf(
+      "anb: deferred vkBindImageMemory2(memory=NULL, VkNativeBufferANDROID, "
+      "stride %zu) = %d\n",
+      stride, r
+    );
+  } else {
+    r = vkCreateImage(dev, &ici, NULL, &img);
+    printf(
+      "anb: vkCreateImage(VkNativeBufferANDROID, udmabuf, stride %zu) = %d\n",
+      stride, r
+    );
+  }
   if (r != VK_SUCCESS) {
     printf("FAIL: native buffer import\n");
     return 1;
@@ -781,6 +824,8 @@ int main(int argc, char** argv) {
       anb = true;
     else if (!strcmp(argv[i], "--anb-stride") && i + 1 < argc)
       anb_stride_px = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--deferred"))
+      anb_deferred = true;
     else if (!strcmp(argv[i], "--anb-hal"))
       anb_hal = true;
   }

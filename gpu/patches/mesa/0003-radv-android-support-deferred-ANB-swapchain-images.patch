@@ -1,0 +1,183 @@
+radv/android: support deferred-allocation ANB swapchain images
+
+Android's libvulkan creates swapchain images with only
+VkImageSwapchainCreateInfoKHR when the app asks for deferred memory
+allocation (ANGLE does), and binds each gralloc buffer at acquire time
+with vkBindImageMemory2(memory = VK_NULL_HANDLE) plus VkNativeBufferANDROID.
+RADV laid such images out as ordinary optimal images and then dereferenced
+the NULL memory in vkBindImageMemory2 (SIGSEGV at 0x60 under
+vkAcquireNextImageKHR).
+
+Defer the layout with vk_android_init_deferred_image() and, at bind time,
+lay the image out from the gralloc metadata (vk_android_get_anb_layout) and
+bind the imported dma-buf, as turnip does.
+
+diff --git a/src/amd/vulkan/radv_image.c b/src/amd/vulkan/radv_image.c
+index 2fc9a4a..9c28766 100644
+--- a/src/amd/vulkan/radv_image.c
++++ b/src/amd/vulkan/radv_image.c
+@@ -30,6 +30,12 @@
+ #include "vk_render_pass.h"
+ #include "vk_util.h"
+ 
++#if DETECT_OS_ANDROID
++#include <unistd.h>
++#include "util/os_file.h"
++#include "vk_android.h"
++#endif
++
+ static unsigned
+ radv_choose_tiling(struct radv_device *device, const struct radv_image *image, VkFormat format)
+ {
+@@ -1462,6 +1468,22 @@ radv_image_create(VkDevice _device, const struct radv_image_create_info *create_
+       image->queue_family_mask &= ~(1u << RADV_QUEUE_SPARSE);
+    }
+ 
++#if DETECT_OS_ANDROID
++   /* Swapchain images from libvulkan's deferred-allocation path (ANB spec 8+)
++    * carry VkImageSwapchainCreateInfoKHR. The gralloc buffer, and so the
++    * layout, only arrives with VkNativeBufferANDROID at vkBindImageMemory2.
++    */
++   if (vk_image_is_android_native_buffer_alias(&image->vk)) {
++      result = vk_android_init_deferred_image(&device->vk, &image->vk, pCreateInfo, alloc);
++      if (result != VK_SUCCESS) {
++         radv_destroy_image(device, alloc, image);
++         return result;
++      }
++      *pImage = radv_image_to_handle(image);
++      return VK_SUCCESS;
++   }
++#endif
++
+    if (mod_list) {
+       result = radv_select_modifier(device, format, mod_list, &modifier);
+       if (result != VK_SUCCESS) {
+@@ -1828,6 +1850,109 @@ radv_bind_image_memory(struct radv_device *device, struct radv_image *image, uin
+                              image->bindings[bind_idx].range, VK_DEVICE_ADDRESS_BINDING_TYPE_BIND_EXT);
+ }
+ 
++#if DETECT_OS_ANDROID
++/* Complete a deferred ANB image (see radv_image_create): lay it out from the
++ * gralloc metadata and bind the imported gralloc dma-buf.
++ */
++static VkResult
++radv_image_bind_deferred_anb(struct radv_device *device, struct radv_image *image, const VkNativeBufferANDROID *anb)
++{
++   const struct radv_physical_device *pdev = radv_device_physical(device);
++   VkDevice device_h = radv_device_to_handle(device);
++   VkImageCreateInfo info = *image->vk.android_deferred_create_info;
++   VkResult result;
++
++   if (!anb->handle || anb->handle->numFds < 1)
++      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++
++   /* vk_android_get_anb_layout looks for the ANB in the create info chain. */
++   VkNativeBufferANDROID local_anb = *anb;
++   local_anb.pNext = info.pNext;
++   info.pNext = &local_anb;
++
++   VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info;
++   VkSubresourceLayout layouts[4];
++   result = vk_android_get_anb_layout(&info, &mod_info, layouts, ARRAY_SIZE(layouts));
++   if (result != VK_SUCCESS)
++      return result;
++
++   VkExternalMemoryImageCreateInfo external_info = {
++      .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
++      .pNext = info.pNext,
++      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++   };
++   mod_info.pNext = &external_info;
++   info.pNext = &mod_info;
++   info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
++   image->vk.external_handle_types |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
++
++   /* Import the gralloc dma-buf the same way radv_image_from_gralloc does. */
++   int memory_type_index = 0;
++   for (int i = 0; i < pdev->memory_properties.memoryTypeCount; ++i) {
++      bool is_local = !!(pdev->memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
++      bool is_32bit = !!(pdev->memory_types_32bit & (1u << i));
++      if (is_local && !is_32bit) {
++         memory_type_index = i;
++         break;
++      }
++   }
++   int fd = os_dupfd_cloexec(anb->handle->data[0]);
++   if (fd < 0)
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++   VkDeviceMemory memory_h;
++   result = radv_AllocateMemory(device_h,
++                                &(VkMemoryAllocateInfo){
++                                   .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++                                   .pNext =
++                                      &(VkImportMemoryFdInfoKHR){
++                                         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
++                                         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
++                                         .fd = fd,
++                                      },
++                                   /* Max buffer size, unused for imports */
++                                   .allocationSize = 0x7FFFFFFF,
++                                   .memoryTypeIndex = memory_type_index,
++                                },
++                                &device->vk.alloc, &memory_h);
++   if (result != VK_SUCCESS) {
++      close(fd);
++      return result;
++   }
++   VK_FROM_HANDLE(radv_device_memory, mem, memory_h);
++
++   struct radeon_bo_metadata md;
++   device->ws->buffer_get_metadata(device->ws, mem->bo, &md);
++
++   unsigned plane_count = radv_get_internal_plane_count(pdev, image->vk.format);
++   for (unsigned plane = 0; plane < plane_count; ++plane) {
++      image->planes[plane].surface.flags = radv_get_surface_flags(device, image, plane, &info, image->vk.format);
++      image->planes[plane].surface.modifier = mod_info.drmFormatModifier;
++   }
++
++   result = radv_image_create_layout(device,
++                                     (struct radv_image_create_info){
++                                        .vk_info = &info,
++                                        .no_metadata_planes = true,
++                                        .bo_metadata = &md,
++                                     },
++                                     &mod_info, NULL, image);
++   if (result != VK_SUCCESS) {
++      radv_FreeMemory(device_h, memory_h, &device->vk.alloc);
++      return result;
++   }
++
++   if (image->size > mem->bo->size) {
++      radv_FreeMemory(device_h, memory_h, &device->vk.alloc);
++      return vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE, "gralloc buffer too small for the image");
++   }
++
++   radv_bind_image_memory(device, image, 0, mem->bo, radv_buffer_get_va(mem->bo), 0, image->size);
++   image->owned_memory = memory_h;
++
++   return VK_SUCCESS;
++}
++#endif
++
+ VKAPI_ATTR VkResult VKAPI_CALL
+ radv_BindImageMemory2(VkDevice _device, uint32_t bindInfoCount, const VkBindImageMemoryInfo *pBindInfos)
+ {
+@@ -1842,6 +1967,18 @@ radv_BindImageMemory2(VkDevice _device, uint32_t bindInfoCount, const VkBindImag
+       if (status)
+          *status->pResult = VK_SUCCESS;
+ 
++#if DETECT_OS_ANDROID
++      if (!mem && image->vk.android_deferred_create_info) {
++         const VkNativeBufferANDROID *anb = vk_find_struct_const(pBindInfos[i].pNext, NATIVE_BUFFER_ANDROID);
++         VkResult result = anb ? radv_image_bind_deferred_anb(device, image, anb) : VK_ERROR_UNKNOWN;
++         if (status)
++            *status->pResult = result;
++         if (result != VK_SUCCESS)
++            return vk_error(device, result);
++         continue;
++      }
++#endif
++
+       /* Ignore this struct on Android, we cannot access swapchain structures there. */
+ #ifdef RADV_USE_WSI_PLATFORM
+       if (!mem) {

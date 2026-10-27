@@ -1,0 +1,24 @@
+lavapipe: use the gralloc layout for deferred ANB images
+
+lvp_bind_anb_memory() re-runs lvp_image_init() with VkNativeBufferANDROID
+chained, but lvp_image_init() only honoured the gralloc layout for
+ANDROID_BUFFER_NATIVE images, not aliased (deferred-allocation swapchain)
+ones, so they got lavapipe's own row pitch instead of the gralloc stride.
+
+diff --git a/src/gallium/frontends/lavapipe/lvp_image.c b/src/gallium/frontends/lavapipe/lvp_image.c
+index 44d457f..f6a6ac4 100644
+--- a/src/gallium/frontends/lavapipe/lvp_image.c
++++ b/src/gallium/frontends/lavapipe/lvp_image.c
+@@ -64,7 +64,11 @@ lvp_image_init(struct lvp_device *device, struct lvp_image *image,
+    /* This section is removed by the optimizer for non-ANDROID builds */
+    VkImageDrmFormatModifierExplicitCreateInfoEXT eci;
+    VkSubresourceLayout a_plane_layouts[LVP_MAX_PLANE_COUNT];
+-   if (vk_image_is_android_native_buffer(&image->vk)) {
++   /* Deferred (aliased) ANB images reach here from lvp_bind_anb_memory with
++    * the VkNativeBufferANDROID chained; they need the gralloc layout too. */
++   if (vk_image_is_android_native_buffer(&image->vk) ||
++       (vk_image_is_android_native_buffer_alias(&image->vk) &&
++        vk_find_struct_const(pCreateInfo->pNext, NATIVE_BUFFER_ANDROID))) {
+       VkResult result = vk_android_get_anb_layout(
+          pCreateInfo, &eci, a_plane_layouts, LVP_MAX_PLANE_COUNT);
+       if (result != VK_SUCCESS)
