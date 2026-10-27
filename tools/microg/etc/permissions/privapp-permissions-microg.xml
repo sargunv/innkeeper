@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Installed as /system_ext/etc/permissions/privapp-permissions-microg.xml by
+     tools/microg.sh. ro.control_privapp_permissions=enforce: every
+     signature|privileged permission a priv-app requests must be listed here
+     (granted) or as deny-permission, or system_server refuses to boot. These
+     are the privileged permissions microG requests that AOSP 17's
+     framework-res defines (aapt2 dump permissions, see docs/microg.md). -->
+<permissions>
+  <privapp-permissions package="com.google.android.gms">
+    <permission name="android.permission.CHANGE_DEVICE_IDLE_TEMP_WHITELIST" />
+    <permission name="android.permission.DUMP" />
+    <permission name="android.permission.INSTALL_LOCATION_PROVIDER" />
+    <permission name="android.permission.INTERACT_ACROSS_USERS" />
+    <permission name="android.permission.LOCATION_HARDWARE" />
+    <permission name="android.permission.MANAGE_USB" />
+    <permission name="android.permission.MODIFY_PHONE_STATE" />
+    <permission name="android.permission.NETWORK_SCAN" />
+    <permission name="android.permission.PROVIDE_DEFAULT_ENABLED_CREDENTIAL_SERVICE" />
+    <permission name="android.permission.PROVIDE_REMOTE_CREDENTIALS" />
+    <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <permission name="android.permission.UPDATE_APP_OPS_STATS" />
+    <permission name="android.permission.UPDATE_DEVICE_STATS" />
+    <permission name="android.permission.WATCH_APPOPS" />
+  </privapp-permissions>
+
+  <!-- FakeStore (the Play Store stand-in): app installs for Play licensing
+       and in-app update stubs. -->
+  <privapp-permissions package="com.android.vending">
+    <permission name="android.permission.DELETE_PACKAGES" />
+    <permission name="android.permission.INSTALL_PACKAGES" />
+    <permission name="android.permission.INTERACT_ACROSS_USERS" />
+  </privapp-permissions>
+
+  <!-- GsfProxy requests no privileged permissions. -->
+  <privapp-permissions package="com.google.android.gsf" />
+</permissions>

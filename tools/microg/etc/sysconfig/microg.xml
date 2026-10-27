@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Installed as /system_ext/etc/sysconfig/microg.xml by tools/microg.sh.
+     GmsCore keeps the push (MCS) connection: exempt it from Doze and from
+     Data Saver, as AOSP's GMS sysconfig does for Google's GmsCore. -->
+<config>
+  <allow-in-power-save package="com.google.android.gms" />
+  <allow-in-data-usage-save package="com.google.android.gms" />
+</config>
