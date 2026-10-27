@@ -14,6 +14,24 @@ current state, decisions, next steps. Put history in git.
   works unprivileged.
 - No sudo. Build deps go in rootless podman.
 
+## Host safety (incident 2026-10-26)
+
+Inside our user namespace, Android "root" is the host user, so it can touch
+anything the host user owns. vold's shutdown path wrote to
+`/sys/fs/fuse/connections/*/abort` and killed every host FUSE mount, including
+T3's AppImage, which crashed T3 with SIGBUS.
+
+Rules:
+- Every namespace that runs Android code must cover all host sysfs submounts and
+  make `/sys` read-only (see `session/ns-init.sh`).
+- Run sessions in their own delegated systemd user unit, never in the caller's
+  cgroup.
+- Don't bind-mount host `/run/user`, `$HOME` or `/dev` wholesale.
+- TODO (session lane): lock the masks against umount by entering a nested user
+  and mount namespace before exec'ing init.
+- TODO: give the session its own network namespace (pasta) so netd can't touch
+  the host network namespace.
+
 ## Locations
 
 - Repo: `~/Projects/linux.apk`
