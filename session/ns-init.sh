@@ -233,8 +233,12 @@ if [[ ${LINUXAPK_HOLD:-} == 1 ]]; then
   exec "$out/session/pivot-exec" "$R" /system/bin/sh -c "while :; do /system/bin/sleep 3600; done"
 fi
 
+# Preserve the ubinder helper path across the env wipe (pivot-exec reads it to
+# decide whether to install the binder seccomp filter and fork the broker).
+ubinder_helper=${LINUXAPK_UBINDER:-}
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
 export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
+[[ -n $ubinder_helper ]] && export LINUXAPK_UBINDER=$ubinder_helper
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

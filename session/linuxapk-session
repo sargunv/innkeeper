@@ -111,8 +111,9 @@ ns_pid() {
 
 cmdline() {
   # androidboot.* (passed via /proc/bootconfig) become ro.boot.* properties.
+  # linuxapk.ubinder gates the binderfs mount in init.rc (0 = kernel binder).
   cat <<EOF
-androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m
+androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m androidboot.linuxapk.ubinder=${ubinder:-0}
 EOF
   kind_cmdline
 }
@@ -183,7 +184,7 @@ prepare() {
   # APEX fs_config), so rebuild it when the image changes too.
   if [[ ! -x $out/session/pivot-exec ]] ||
     [[ "$img $apexdir" != "$(cat "$out/session/overlay/.image" 2>/dev/null)" ]] ||
-    [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
+    [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" "$repo/ubinder/src" -newer "$out/session/pivot-exec" 2>/dev/null) ]]; then
     LINUXAPK_IMG=$img LINUXAPK_APEX=$apexdir "$here/build.sh"
     echo "$img $apexdir" >"$out/session/overlay/.image"
   fi
@@ -195,11 +196,13 @@ start() {
   # to the host Wayland socket itself); LINUXAPK_HWC_BACKEND=wayland skips
   # the bridge.
   hwc_backend=${LINUXAPK_HWC_BACKEND:-bridge} wm_mode=per-app
+  ubinder=0
   for a in "$@"; do
     case $a in
       -f) fg=1 ;;
       --headless) hwc_backend=headless ;;
       --single-window) wm_mode=single ;;
+      --ubinder) ubinder=1 ;;
       *) die "unknown start option: $a" ;;
     esac
   done
@@ -220,6 +223,9 @@ start() {
   if [[ ! -x $bridge ]] || [[ -n $(find "$repo/bridge" -newer "$bridge" -name '*.rs' 2>/dev/null) ]]; then
     (cd "$repo" && cargo build -q --release -j 8 -p linuxapk-bridge) || echo "linuxapk-session: bridge build failed; no audio" >&2
   fi
+  if ((ubinder)) && [[ ! -x $out/session/overlay/system/bin/linuxapk-ubinder ]]; then
+    die "ubinder helper not built (need cargo; see session/build.sh)"
+  fi
 
   # iptables with the nf_tables backend (the image's legacy one can't work).
   [[ -x $out/session/iptables/system/bin/xtables-nft-multi ]] || "$here/iptables/build.sh"
@@ -234,11 +240,14 @@ start() {
   # Everything (log reader, unshare, the namespace) runs in one transient
   # systemd user service, so it outlives this shell and "stop" can take it
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
+  local ubinder_helper=""
+  ((ubinder)) && ubinder_helper=/system/bin/linuxapk-ubinder
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
+    --setenv=LINUXAPK_UBINDER="$ubinder_helper" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do

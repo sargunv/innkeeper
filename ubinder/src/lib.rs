@@ -12,6 +12,8 @@
 
 pub mod broker;
 pub mod defs;
+#[cfg(target_os = "linux")]
+pub mod sys;
 
 pub use broker::{Broker, Mem, ProcId, Wakeup, WriteRead};
 

@@ -32,6 +32,26 @@ so="$out/session/overlay/system/lib64/liblinuxapk_shim.so"
 cp "$so" "$out/session/overlay/vendor/lib64/"
 "$cc" -static -O2 -Wall -Werror -o "$out/session/pivot-exec" "$here/helper/pivot-exec.c" "$here/helper/bpfemu.c"
 
+# ubinder broker helper (Rust, dynamic bionic): installed as
+# /system/bin/linuxapk-ubinder. pivot-exec forks+execs it in ubinder mode to
+# serve the binder seccomp listener (session/helper, ubinder/src/sys.rs). Built
+# out of tree with the NDK like every other vendor/system binary.
+if [[ -d $repo/ubinder ]] && command -v cargo >/dev/null; then
+  ar="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+  strip="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+  (
+    cd "$repo" &&
+      env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$ar" \
+        CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
+        cargo build -q -p ubinder --release --target x86_64-linux-android --bin linuxapk-ubinder -j8
+  )
+  mkdir -p "$out/session/overlay/system/bin"
+  cp "$repo/target/x86_64-linux-android/release/linuxapk-ubinder" \
+    "$out/session/overlay/system/bin/linuxapk-ubinder"
+  "$strip" --strip-unneeded "$out/session/overlay/system/bin/linuxapk-ubinder" 2>/dev/null || true
+  chmod 0755 "$out/session/overlay/system/bin/linuxapk-ubinder"
+fi
+
 # The extracted image lost its fs_config ownership: every file is owned by
 # the invoking user (root in the session), so files meant for e.g.
 # "0550 logd logd" are unusable by their real owner. Copy such files into
