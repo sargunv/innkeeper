@@ -315,9 +315,9 @@ Through the bridge (the default since the bridge move):
 - The same two-window input test in nested KWin gave the same results (9 in
   Calculator, Wikipedia advanced), with server-side decorations.
 - Under weston (headless, in podman; weston has no xdg-decoration, like GNOME)
-  Calculator and Wikipedia got Adwaita-style client-side title bars. With
-  `LINUXAPK_BRIDGE_CSD=1` in nested KWin, a fake-input click on the frame's
-  close button sent `CLOSE`.
+  Calculator and Wikipedia got Adwaita-style client-side title bars. With the
+  client-side frame forced in nested KWin (a test switch since removed), a
+  fake-input click on the frame's close button sent `CLOSE`.
 - weston in podman needs `--security-opt label=disable`: with SELinux labels,
   `container_t` may not write the host's memfds, and weston fails the
   decorations' `wl_shm_pool.resize` (`failed mremap`).

@@ -4,10 +4,6 @@
 //!
 //! One watcher thread per bridge. Each change is sent as a full `SETTINGS`
 //! event to every subscribed system-app connection.
-//!
-//! Test overrides (fixed values, for nested or headless runs):
-//! `LINUXAPK_TZ`, `LINUXAPK_LOCALE` (BCP 47 list), `LINUXAPK_CLOCK`
-//! (`12h`/`24h`), `LINUXAPK_TEXT_SCALE`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -40,7 +36,6 @@ impl SettingsHub {
         hub.update(|s| {
             s.timezone = timezone();
             s.locales = locales();
-            apply_env_overrides(s);
         });
         if let Some(conn) = dbus {
             let h = hub.clone();
@@ -50,10 +45,7 @@ impl SettingsHub {
         spawn("settings-tz", move || {
             loop {
                 std::thread::sleep(Duration::from_secs(5));
-                h.update(|s| {
-                    s.timezone = timezone();
-                    apply_env_overrides(s);
-                });
+                h.update(|s| s.timezone = timezone());
             }
         });
         hub
@@ -105,7 +97,6 @@ impl SettingsHub {
                         apply(s, ns, k, v);
                     }
                 }
-                apply_env_overrides(s);
             }),
             Err(e) => crate::warn!("settings: portal ReadAll: {e}"),
         }
@@ -118,10 +109,7 @@ impl SettingsHub {
             let Ok((ns, key, value)) = body.deserialize::<(String, String, OwnedValue)>() else {
                 continue;
             };
-            self.update(|s| {
-                apply(s, &ns, &key, &value);
-                apply_env_overrides(s);
-            });
+            self.update(|s| apply(s, &ns, &key, &value));
         }
         crate::warn!("settings: portal signal stream ended");
     }
@@ -197,29 +185,6 @@ fn text_scale(f: f64) -> f32 {
         f as f32
     } else {
         0.0
-    }
-}
-
-fn apply_env_overrides(s: &mut Settings) {
-    if let Some(tz) = std::env::var("LINUXAPK_TZ").ok().filter(|t| valid_tz(t)) {
-        s.timezone = tz;
-    }
-    if let Some(l) = std::env::var("LINUXAPK_LOCALE")
-        .ok()
-        .and_then(|l| bcp47_list(l.split(',').map(str::to_owned)))
-    {
-        s.locales = l;
-    }
-    match std::env::var("LINUXAPK_CLOCK").as_deref() {
-        Ok("12h") => s.clock = 1,
-        Ok("24h") => s.clock = 2,
-        _ => {}
-    }
-    if let Some(f) = std::env::var("LINUXAPK_TEXT_SCALE")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
-        s.text_scale = text_scale(f);
     }
 }
 

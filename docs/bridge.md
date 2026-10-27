@@ -40,11 +40,8 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
     default output.
   - The system service uses the launching shell's `DBUS_SESSION_BUS_ADDRESS`
     (the launcher passes it on) and `$WAYLAND_DISPLAY` (the clipboard).
-  - Test overrides for the desktop settings, passed on by the launcher:
-    `LINUXAPK_TZ`, `LINUXAPK_LOCALE` (BCP 47 list), `LINUXAPK_CLOCK`
-    (`12h`/`24h`), `LINUXAPK_TEXT_SCALE`.
   - Standalone:
-    `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR] [--mirror-apps] [--grants FILE] [--sink NAME] [--null] [-v]`.
+    `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR] [--mirror-apps] [--grants FILE] [--sink NAME] [-v]`.
 - **Tests:** `cargo test -p linuxapk-bridge` covers the protocol, the ring, a
   live server with hostile clients, and proptest fuzzing of every decoder.
   `cargo run -p linuxapk-bridge --example tone -- SOCKET` plays a tone the way
@@ -239,8 +236,7 @@ the session launcher sets to the host socket.
 - **Decorations:** server-side through xdg-decoration where the compositor
   offers it (KDE); else client-side, an Adwaita-style frame from `sctk-adwaita`
   with title, minimize, maximize, close, move, resize and the window menu
-  (GNOME, weston). `LINUXAPK_BRIDGE_CSD=1` forces the client-side frame for
-  testing.
+  (GNOME, weston).
 - **Frames:** each buffer is shown through `wp_viewporter` at the window's
   logical size (fractional scale through `wp_fractional_scale_v1`); input
   coordinates map from surface units to the shown buffer's pixels.

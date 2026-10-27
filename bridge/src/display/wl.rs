@@ -606,14 +606,9 @@ impl State {
         }
         let qh = self.qh.clone();
         let surface = self.compositor.create_surface(&qh);
-        // LINUXAPK_BRIDGE_CSD=1 asks for client-side decorations even where
-        // the compositor offers server-side ones (for testing the frame).
-        let deco = if std::env::var_os("LINUXAPK_BRIDGE_CSD").is_some_and(|v| v == "1") {
-            WindowDecorations::RequestClient
-        } else {
-            WindowDecorations::RequestServer
-        };
-        let window = self.xdg.create_window(surface, deco, &qh);
+        let window = self
+            .xdg
+            .create_window(surface, WindowDecorations::RequestServer, &qh);
         window.set_title(s.title.clone());
         window.set_app_id(s.app_id.clone());
         window.set_min_size(Some((s.min_width.max(MIN_W), s.min_height.max(MIN_H))));

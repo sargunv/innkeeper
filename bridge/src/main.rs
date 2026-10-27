@@ -1,10 +1,10 @@
 //! `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR]
 //!                  [--mirror-apps] [--grants FILE] [--no-open-urls]
-//!                  [--no-desktop-presence] [--sink NAME] [--null] [-v]`
+//!                  [--no-desktop-presence] [--sink NAME] [-v]`
 //!
 //! Listens on PATH for clients from the Android session. Only the given host
 //! uids may connect (default: our own uid). Audio plays to the desktop's
-//! default PipeWire sink, or `--sink NAME`; `--null` plays nowhere.
+//! default PipeWire sink, or `--sink NAME`.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
 //! seen from the host) admits the uid that owns DIR to the system, documents
 //! and apps services. `--mirror-apps` turns on desktop entries for apps
@@ -12,7 +12,7 @@
 //! documents service's grants (host files the user picked) across restarts.
 //! `--no-open-urls` and `--no-desktop-presence` turn OpenURI, and
 //! notifications and MPRIS, into log-only sinks (test sessions).
-//! `-v` (or `LINUXAPK_BRIDGE_VERBOSE=1`) logs per-stream statistics.
+//! `-v` logs per-stream statistics.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,7 +31,6 @@ fn main() -> Result<()> {
     let mut socket: Option<PathBuf> = None;
     let mut allow = Vec::new();
     let mut sink = None;
-    let mut null = false;
     let mut system_app_dir: Option<PathBuf> = None;
     let mut mirror_apps = false;
     let mut policy = linuxapk_bridge::services::system::Policy::default();
@@ -47,7 +46,6 @@ fn main() -> Result<()> {
                     .context("bad uid")?,
             ),
             "--sink" => sink = Some(args.next().context("--sink needs a name")?),
-            "--null" => null = true,
             "--mirror-apps" => mirror_apps = true,
             "--no-open-urls" => policy.open_urls = false,
             "--no-desktop-presence" => policy.presence = false,
@@ -59,18 +57,11 @@ fn main() -> Result<()> {
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
     }
-    if std::env::var_os("LINUXAPK_BRIDGE_VERBOSE").is_some_and(|v| v == "1") {
-        linuxapk_bridge::log::set_verbose(true);
-    }
     let socket = socket.context("--socket is required")?;
     if allow.is_empty() {
         allow.push(rustix::process::getuid().as_raw());
     }
-    let backend = if null {
-        Backend::Null
-    } else {
-        Backend::Pulse { sink }
-    };
+    let backend = Backend::Pulse { sink };
     linuxapk_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));

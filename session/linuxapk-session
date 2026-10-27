@@ -291,14 +291,10 @@ start() {
   local ubinder_helper=""
   ((ubinder)) && ubinder_helper=/system/bin/linuxapk-ubinder
   # The bridge's desktop integration (docs/bridge.md, "System service") uses the
-  # caller's session bus, and takes test overrides for the desktop settings.
+  # caller's session bus. Desktop entries for apps installed inside Android
+  # (docs/bridge.md, "Apps service"): where they go, and whether to write them.
   local integ_env=() v
-  for v in DBUS_SESSION_BUS_ADDRESS LINUXAPK_TZ LINUXAPK_LOCALE LINUXAPK_CLOCK LINUXAPK_TEXT_SCALE; do
-    [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
-  done
-  # Desktop entries for apps installed inside Android (docs/bridge.md, "Apps
-  # service"): where they go, and whether to write them.
-  for v in XDG_DATA_HOME LINUXAPK_MIRROR_APPS LINUXAPK_SESSION; do
+  for v in DBUS_SESSION_BUS_ADDRESS XDG_DATA_HOME LINUXAPK_MIRROR_APPS LINUXAPK_SESSION; do
     [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
   done
   # Test sessions (any named instance, or LINUXAPK_TEST=1: lanes, the compat
@@ -358,6 +354,7 @@ start_bridge() {
   fi
   args+=(--system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
     ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
+  [[ ${LINUXAPK_BRIDGE_VERBOSE:-} == 1 ]] && args+=(-v)
   # Apps installed inside Android get desktop entries: in the default session,
   # or in any instance with LINUXAPK_MIRROR_APPS=1 (0 turns it off).
   local mirror=${LINUXAPK_MIRROR_APPS:-}
