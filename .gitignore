@@ -1,6 +1,2 @@
 /out/
-/build/
-/cache/
-*.pp
-*.mod
 /target/

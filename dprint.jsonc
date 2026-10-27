@@ -35,7 +35,12 @@
       {
         "command": "shfmt -i 2 -ci --filename {{file_path}}",
         "exts": ["sh"],
-        "fileNames": ["linuxapk-session", "linuxapk-apexd"],
+        "fileNames": [
+          "linuxapk-session",
+          "linuxapk-apexd",
+          "linuxapk-bpfload",
+          "linuxapk-iptables",
+        ],
       },
     ],
   },

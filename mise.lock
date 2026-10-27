@@ -45,37 +45,6 @@ checksum = "sha256:76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea
 url = "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64"
 url_api = "https://api.github.com/repos/mvdan/sh/releases/assets/547320883"
 
-[[tools."conda:clang-tools"]]
-version = "23.1.4"
-backend = "conda:clang-tools"
-specifiers = ["23.1.4"]
-
-[tools."conda:clang-tools".options]
-channel = "conda-forge"
-
-[tools."conda:clang-tools"."platforms.linux-x64"]
-checksum = "sha256:4552f7741e48db43f958db50b4847837aadc027ecfaa61f13cc9565b3b99898d"
-url = "https://conda.anaconda.org/conda-forge/linux-64/clang-tools-23.1.4-default_h28e42e8_0.conda"
-conda_deps = [
-    "libclang-cpp23.1-23.1.4-default_h0acdd01_0",
-    "clang-scan-deps-23.1.4-default_h0acdd01_0",
-    "libclang13-23.1.4-default_he646a05_0",
-    "clang-format-23.1.4-default_h0301843_0",
-    "clang-format-23-23.1.4-default_h0acdd01_0",
-    "libzlib-1.3.2-h25fd6f3_3",
-    "libllvm23-23.1.4-h474f4eb_1",
-    "libstdcxx-16.2.0-h934c35e_7",
-    "libgcc-16.2.0-ha9f2e26_7",
-    "zstd-1.5.7-hb78ec9c_7",
-    "libxml2-2.15.4-h7df9aa5_1",
-    "libxml2-16-2.15.4-hf3af7cc_1",
-    "_openmp_mutex-4.5-20_gnu",
-    "libgomp-16.2.0-he0feb66_7",
-    "liblzma-5.8.3-hb03c661_1",
-    "icu-78.3-py310h44b86e0_2",
-    "libiconv-1.18-h0cb94f2_3",
-]
-
 [[tools."github:jdx/hk"]]
 version = "2.8.1"
 backend = "github:jdx/hk"
@@ -104,4 +73,4 @@ specifiers = ["1.99.1"]
 [tools.rust.options]
 components = "clippy,rustfmt"
 profile = "minimal"
-targets = "aarch64-linux-android,x86_64-linux-android"
+targets = "x86_64-linux-android"

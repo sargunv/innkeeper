@@ -7,9 +7,9 @@
 # writable stand-ins (only it can see them).
 d=/dev/.linuxapk-bpfload
 mkdir -p $d/core
-echo 2 > $d/unprivileged_bpf_disabled
-echo 1 > $d/core/bpf_jit_enable
-echo 0 > $d/core/bpf_jit_kallsyms
+echo 2 >$d/unprivileged_bpf_disabled
+echo 1 >$d/core/bpf_jit_enable
+echo 0 >$d/core/bpf_jit_kallsyms
 mount --bind $d/unprivileged_bpf_disabled /proc/sys/kernel/unprivileged_bpf_disabled
 mount --bind $d/core /proc/sys/net/core
 exec /apex/com.android.tethering/bin/netbpfload "$@"
