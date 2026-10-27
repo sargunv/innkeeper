@@ -69,6 +69,8 @@ pub struct AppResult {
 
 const TMP_APK: &str = "/data/local/tmp/compat.apk";
 const UI_XML: &str = "/data/local/tmp/compat-ui.xml";
+const GESTURE: &str = "/data/local/tmp/compat-gesture.sh";
+const BRIDGE_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
 
 pub struct Run<'a> {
     s: &'a Session,
@@ -79,6 +81,8 @@ pub struct Run<'a> {
     pss_mb: Option<u64>,
     /// The app's window (per-app window mode); None means display 0.
     win: Option<Win>,
+    last_shot: std::cell::RefCell<Option<PathBuf>>,
+    gesture_sh: PathBuf,
 }
 
 /// An app window: its Android display, SurfaceFlinger's id for screencap and
@@ -162,7 +166,7 @@ fn parse_focus(text: &str, display: i32) -> Option<String> {
 struct Stop(Status, String);
 
 impl<'a> Run<'a> {
-    pub fn new(s: &'a Session, app: &'a App, out: &Path) -> Self {
+    pub fn new(s: &'a Session, app: &'a App, out: &Path, gesture_sh: &Path) -> Self {
         let dir = out.join(&app.package);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::create_dir_all(&dir);
@@ -174,6 +178,8 @@ impl<'a> Run<'a> {
             launch_ms: None,
             pss_mb: None,
             win: None,
+            last_shot: Default::default(),
+            gesture_sh: gesture_sh.to_path_buf(),
         }
     }
 
@@ -323,6 +329,17 @@ impl<'a> Run<'a> {
         let _ = fs::write(self.dir.join(name), text);
     }
 
+    fn save_append(&self, name: &str, text: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.dir.join(name))
+        {
+            let _ = f.write_all(text.as_bytes());
+        }
+    }
+
     pub fn run(mut self, apk: &Path) -> AppResult {
         let pkg = self.app.package.clone();
         let outcome = self.steps(apk);
@@ -424,31 +441,43 @@ impl<'a> Run<'a> {
         }
         self.check("install", true, "");
 
-        // Launcher activity.
-        let o = s.run(
-            30,
-            &[
-                "cmd",
-                "package",
-                "resolve-activity",
-                "--brief",
-                "-a",
-                "android.intent.action.MAIN",
-                "-c",
-                "android.intent.category.LAUNCHER",
-                &pkg,
-            ],
-        );
-        let Some(component) = o
-            .text
-            .lines()
-            .map(str::trim)
-            .rfind(|l| l.starts_with(&format!("{pkg}/")))
-        else {
-            self.check("launcher activity", false, o.text.trim());
+        // Launcher activity; TV apps may only have a leanback one.
+        let mut component = None;
+        for cat in [
+            "android.intent.category.LAUNCHER",
+            "android.intent.category.LEANBACK_LAUNCHER",
+        ] {
+            let o = s.run(
+                30,
+                &[
+                    "cmd",
+                    "package",
+                    "resolve-activity",
+                    "--brief",
+                    "-a",
+                    "android.intent.action.MAIN",
+                    "-c",
+                    cat,
+                    &pkg,
+                ],
+            );
+            if let Some(c) = o
+                .text
+                .lines()
+                .map(str::trim)
+                .rfind(|l| l.starts_with(&format!("{pkg}/")))
+            {
+                if cat.contains("LEANBACK") {
+                    self.check("leanback-only launcher", true, c);
+                }
+                component = Some(c.to_string());
+                break;
+            }
+        }
+        let Some(component) = component else {
+            self.check("launcher activity", false, "");
             return Err(Stop(Status::Broken, "no launcher activity".into()));
         };
-        let component = component.to_string();
 
         // Launch from a clean slate.
         s.run(30, &["logcat", "-b", "main,system,crash", "-c"]);
@@ -553,6 +582,10 @@ impl<'a> Run<'a> {
         self.refresh_window();
         // Per-app script, from a fresh first screen.
         let script = self.app.script.clone();
+        if script.iter().any(|st| st.starts_with("gesture:")) {
+            let _ = self.s.push(&self.gesture_sh, GESTURE);
+            self.s.run(10, &["chmod", "755", GESTURE]);
+        }
         if !script.is_empty() {
             let res = self.script(&script);
             self.check("script", res.is_ok(), res.err().unwrap_or_default());
@@ -676,6 +709,66 @@ impl<'a> Run<'a> {
             let (op, arg) = step.split_once(':').ok_or(format!("bad step {step}"))?;
             match op {
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
+                // A shell command in the session; fails on a non-zero exit.
+                "sh" => {
+                    let o = self.s.sh(60, arg);
+                    self.save_append("script-sh.txt", &format!("$ {arg}\n{}\n", o.text));
+                    if !o.ok {
+                        return Err(format!("{step}: failed: {}", o.text.trim()));
+                    }
+                }
+                "intent" => {
+                    self.s.run(
+                        30,
+                        &[
+                            "am",
+                            "start",
+                            "-a",
+                            "android.intent.action.VIEW",
+                            "-d",
+                            arg,
+                            &self.app.package,
+                        ],
+                    );
+                    sleep(Duration::from_secs(1));
+                }
+                // pinch|pan|doubletap X Y, as touch through Linux.apk System's
+                // input bridge (multi-touch, which `input` can't do).
+                "gesture" => {
+                    let o = self.s.sh(
+                        60,
+                        &format!(
+                            "{GESTURE} {arg} | CLASSPATH={BRIDGE_APK} app_process / \
+                             dev.linuxapk.system.input.InputBridgeMain --stdin"
+                        ),
+                    );
+                    if !o.text.contains("inject=true") {
+                        return Err(format!("{step}: not injected: {}", o.text.trim()));
+                    }
+                    sleep(Duration::from_millis(1500));
+                }
+                // Screenshot that must not be blank; "changed" must also
+                // differ from the previous script screenshot.
+                "shot" | "changed" => {
+                    let png = self.dir.join(format!("script-{arg}.png"));
+                    let st = self.screencap(&png).map_err(|e| format!("{step}: {e:#}"))?;
+                    if st.blank() {
+                        return Err(format!("{step}: blank ({})", st.describe()));
+                    }
+                    let mut last = self.last_shot.borrow_mut();
+                    if op == "changed"
+                        && let Some(prev) = last.as_ref()
+                    {
+                        let d = frame::diff(prev, &png).map_err(|e| format!("{step}: {e:#}"))?;
+                        if d < 0.01 {
+                            return Err(format!(
+                                "{step}: frame unchanged ({:.2}% differs)",
+                                d * 100.0
+                            ));
+                        }
+                    }
+                    *last = Some(png);
+                }
                 "key" => {
                     self.input(&["keyevent", arg]);
                     sleep(Duration::from_millis(700));
@@ -788,6 +881,18 @@ impl<'a> Run<'a> {
                 "WebView provider missing",
             ),
             (
+                "GL/Vulkan errors",
+                &[
+                    "GL_INVALID_",
+                    "GL_OUT_OF_MEMORY",
+                    "EGL_BAD_",
+                    "[OpenGL]",
+                    "eglCreateContext failed",
+                    "VK_ERROR_",
+                ],
+                "GL/EGL/Vulkan errors logged",
+            ),
+            (
                 "Google Play services",
                 &[
                     "GooglePlayServicesUtil",
@@ -801,12 +906,12 @@ impl<'a> Run<'a> {
             .iter()
             .flat_map(|(_, pats, _)| pats.iter().copied())
             .collect::<Vec<_>>()
-            .join("|");
+            .join("' -e '");
         let log = self
             .s
             .sh(
                 60,
-                &format!("logcat -d -b main,system -t 20000 | grep -E '{pattern}' | head -100"),
+                &format!("logcat -d -b main,system -t 20000 | grep -F -e '{pattern}' | head -100"),
             )
             .text;
         for (name, pats, why) in SIGS {

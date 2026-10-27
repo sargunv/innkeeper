@@ -66,3 +66,36 @@ pub fn analyze(path: &Path) -> Result<FrameStats> {
         colours: hist.len(),
     })
 }
+
+fn decode(path: &Path) -> Result<(u32, u32, usize, Vec<u8>)> {
+    let mut dec = png::Decoder::new(std::io::BufReader::new(File::open(path)?));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size().unwrap_or(0)];
+    let info = reader.next_frame(&mut buf)?;
+    let ch = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        t => bail!("unexpected PNG colour type {t:?}"),
+    };
+    buf.truncate(info.line_size * info.height as usize);
+    Ok((info.width, info.height, ch, buf))
+}
+
+/// Share of pixels below the status bar that differ between two frames.
+pub fn diff(a: &Path, b: &Path) -> Result<f64> {
+    let (wa, ha, ca, pa) = decode(a)?;
+    let (wb, hb, cb, pb) = decode(b)?;
+    if (wa, ha, ca) != (wb, hb, cb) {
+        return Ok(1.0);
+    }
+    let top = (STATUS_BAR as usize).min(ha as usize / 4) * wa as usize * ca;
+    let (pa, pb) = (&pa[top..], &pb[top..]);
+    let n = pa.len() / ca;
+    let changed = pa
+        .chunks_exact(ca)
+        .zip(pb.chunks_exact(ca))
+        .filter(|(x, y)| x[..3] != y[..3])
+        .count();
+    Ok(changed as f64 / n.max(1) as f64)
+}

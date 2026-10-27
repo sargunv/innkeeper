@@ -115,7 +115,7 @@ fn real_main() -> Result<ExitCode> {
                 eprintln!("compat: session: {e:#}");
             }
             let pid = s.pid();
-            let mut r = Run::new(&s, a, &out).run(apk);
+            let mut r = Run::new(&s, a, &out, &repo.join("compat/gesture.sh")).run(apk);
             // Another lane may restart the session under us; that's not the app's
             // fault, so retry once on a fresh session.
             if pid.is_none() || s.pid() != pid || !s.booted() {

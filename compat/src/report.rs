@@ -71,15 +71,10 @@ pub fn summary(apps: &[AppResult]) -> String {
 
 /// What kind of code the APK carries.
 fn kind(a: &App) -> String {
-    let code = match a.native.as_str() {
-        "none" => "no native code".to_string(),
-        n if n.split(',').any(|x| x == "x86_64") => "x86_64 libs".to_string(),
-        n => format!("{n} libs only"),
-    };
-    if a.group == "compose" {
-        format!("Compose, {code}")
-    } else {
-        code
+    match a.native.as_str() {
+        "none" => "none".to_string(),
+        n if n.split(',').any(|x| x == "x86_64") => "x86_64".to_string(),
+        n => format!("{n} only"),
     }
 }
 
@@ -102,8 +97,8 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
         res.backend,
         summary(&res.apps)
     );
-    md += "| App | Version | Code | Result | Start | Memory | Notes |\n";
-    md += "| --- | --- | --- | --- | --- | --- | --- |\n";
+    md += "| App | Version | Framework | Native code | Result | Start | Memory | Notes |\n";
+    md += "| --- | --- | --- | --- | --- | --- | --- | --- |\n";
     for a in &corpus.app {
         let Some(r) = res.apps.iter().find(|r| r.package == a.package) else {
             continue;
@@ -115,9 +110,10 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
             notes.clear();
         }
         md += &format!(
-            "| {} | {} | {} | {} | {start} | {mem} | {notes} |\n",
+            "| {} | {} | {} | {} | {} | {start} | {mem} | {notes} |\n",
             r.name,
             r.version_name,
+            a.framework,
             kind(a),
             r.result.label()
         );

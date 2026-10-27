@@ -22,6 +22,8 @@ pub struct App {
     pub version_code: u64,
     pub version_name: String,
     pub native: String,
+    /// UI framework or engine, checked against the APK's contents.
+    pub framework: String,
     pub url: String,
     pub sha256: String,
     pub settle: Option<u64>,
