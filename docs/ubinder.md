@@ -150,6 +150,19 @@ cargo run --release -p ubinder --bin ubinder-fuzz -- 500000 <seed>
 4. **Full boot** under `--ubinder` to `sys.boot_completed=1` with no binderfs,
    and the compat corpus (`compat/run.sh`) at parity with kernel binder. Measure
    binder throughput/latency (ping-pong) and boot time vs kernel binder.
-5. **AOSP `binderLibTest`/`binderDriverInterfaceTest`**: not in the prebuilt
-   image. Test hooks are stubbed so they run when the image-builder lane
-   produces them; they are the differential oracle.
+5. **AOSP `binderLibTest`/`binderDriverInterfaceTest`** (the differential
+   oracle): the image-builder lane built these from android-17.0.0_r1 (the
+   image's release). `ubinder/tests/run-binder-tests.sh` runs them in a rootless
+   namespace over the image rootfs (the `hal/tests/run-android.sh` pattern),
+   against kernel binder today and ubinder once the binding lands (`--ubinder`,
+   currently SKIP). Copy the binaries into `$LINUXAPK_OUT/ubinder-tests/`.
+
+   Kernel-binder baseline in our rootless namespace (host 7.1.9):
+   `binderDriverInterfaceTest` = **13/20 pass**. The 7 failures are
+   environmental, not binder-semantics: `SetContextMgrBusy`/`Transaction`/
+   `IncRefs`/`RequestDeathNotification` cascade from `BINDER_SET_CONTEXT_MGR`
+   being gated (the exact SELinux restriction ubinder removes), and the three
+   `*FrozenNotification` tests need freeze-notification kernel support.
+   ubinder's differential target is to match-or-exceed this per test; because it
+   has no SELinux gate, it should also pass the context-manager/transaction
+   group.
