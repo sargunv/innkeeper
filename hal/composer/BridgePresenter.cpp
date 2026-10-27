@@ -149,7 +149,9 @@ class BridgeWindow {
   Error present(FrameInput& frame);
   // Bridge lock held.
   void onRelease(uint32_t buffer);
-  void dropPool();  // bridge reconnected: buffers must be added again
+  // Bridge lock held. The bridge (re)connected without our buffers: the next
+  // present adds a new pool.
+  void invalidatePool() { mPoolStale = true; }
   void setMinSize(int32_t w, int32_t h) {
     mSpec.minW = w;
     mSpec.minH = h;
@@ -161,7 +163,8 @@ class BridgeWindow {
   Bridge* b;
   Spec mSpec;
   const int64_t mHwcId;
-  Pool mPool;  // guarded by the bridge lock (busy flags)
+  Pool mPool;  // written by present(); busy flags under the bridge lock
+  bool mPoolStale = false;  // guarded by the bridge lock
   int mLast = -1;
   uint64_t mFrames = 0, mDropped = 0;
   int64_t mLastLogNs = 0;
@@ -180,11 +183,15 @@ class Bridge {
   std::deque<Pending> pending;
   std::atomic<uint32_t> nextBuffer{1};
 
-  bool connect(const std::string& path);
   bool send(Msg& m, int fd = -1);
   uint32_t tag() { return mTag.fetch_add(1) + 1; }
   void createWindow(const BridgeWindow& w);
-  void start() {
+  // Registers a window; asks the bridge for it now if connected, else on
+  // connect.
+  void addWindow(std::shared_ptr<BridgeWindow> w);
+  // Connects in the background, and again whenever the connection drops.
+  void start(std::string path) {
+    mPath = std::move(path);
     mThread = std::thread([this] { loop(); });
   }
   bool connected() const { return mSock.load() >= 0; }
@@ -195,6 +202,7 @@ class Bridge {
 
  private:
   void loop();
+  int connect(std::string* error);
   void handle(const uint8_t* m, size_t n);
   std::string mPath;
   std::atomic<int> mSock{-1};
@@ -209,20 +217,22 @@ static Bridge* gBridge = nullptr;
 // ---- connection
 // ------------------------------------------------------------------
 
-bool Bridge::connect(const std::string& path) {
-  mPath = path;
+// Returns the socket after the display service accepted our HELLO, or -1
+// with the reason in *error.
+int Bridge::connect(std::string* error) {
   int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
-  if (fd < 0 || path.size() >= sizeof(addr.sun_path)) {
+  if (fd < 0 || mPath.size() >= sizeof(addr.sun_path)) {
+    *error = "socket: " + std::string(strerror(fd < 0 ? errno : ENAMETOOLONG));
     if (fd >= 0) close(fd);
-    return false;
+    return -1;
   }
-  memcpy(addr.sun_path, path.c_str(), path.size() + 1);
+  memcpy(addr.sun_path, mPath.c_str(), mPath.size() + 1);
   if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0) {
-    LOGW("bridge: connect %s: %s", path.c_str(), strerror(errno));
+    *error = "connect " + mPath + ": " + strerror(errno);
     close(fd);
-    return false;
+    return -1;
   }
   Msg hello(kHello, 1);
   hello.u16(1).u16(0).u32(kServiceDisplay).name("composer");
@@ -239,16 +249,14 @@ bool Bridge::connect(const std::string& path) {
   if (
     n < 12 || (buf[0] | buf[1] << 8) != kReply || int32_t(rd32(buf + 8)) != 0
   ) {
-    LOGW(
-      "bridge: the display service refused us (%s)",
-      n < 12 ? "no reply" : std::to_string(int32_t(rd32(buf + 8))).c_str()
-    );
+    *error = "the display service refused us (" +
+             (n < 12 ? std::string("no reply")
+                     : std::to_string(int32_t(rd32(buf + 8)))) +
+             ")";
     close(fd);
-    return false;
+    return -1;
   }
-  mSock = fd;
-  LOGI("bridge: display service on %s", path.c_str());
-  return true;
+  return fd;
 }
 
 bool Bridge::send(Msg& m, int fd) {
@@ -292,7 +300,24 @@ void Bridge::createWindow(const BridgeWindow& w) {
     std::lock_guard lock(mutex);
     mCreates[t] = w.id();
   }
-  send(m);
+  if (!send(m)) {
+    std::lock_guard lock(mutex);
+    mCreates.erase(t);
+  }
+}
+
+void Bridge::addWindow(std::shared_ptr<BridgeWindow> w) {
+  std::shared_ptr<BridgeWindow> old;
+  bool now;
+  {
+    std::lock_guard lock(mutex);
+    old = std::move(windows[w->id()]);
+    windows[w->id()] = w;
+    // Same lock as loop()'s connect: exactly one of us asks for the window.
+    now = connected();
+  }
+  old.reset();
+  if (now) createWindow(*w);
 }
 
 void Bridge::handle(const uint8_t* m, size_t n) {
@@ -352,12 +377,14 @@ void Bridge::handle(const uint8_t* m, size_t n) {
   }
 }
 
+// "Not connected yet" and "connection lost" are the same state: the bridge
+// may start before or after the composer, and may restart.
 void Bridge::loop() {
   pthread_setname_np(pthread_self(), "hwc-bridge");
   uint8_t buf[kMaxMsg + 1];
+  std::string lastError;
   while (true) {
-    const int s = mSock.load();
-    if (s >= 0) {
+    if (const int s = mSock.load(); s >= 0) {
       ssize_t n = recv(s, buf, sizeof buf, 0);
       if (n > 0) {
         handle(buf, size_t(n));
@@ -367,15 +394,26 @@ void Bridge::loop() {
       LOGW("bridge: connection lost; reconnecting");
       mSock = -1;
       close(s);
+      sleep(1);
     }
-    sleep(1);
-    if (!connect(mPath)) continue;
-    // The bridge restarted: its windows and buffers are gone. Ask again.
+    std::string error;
+    const int fd = connect(&error);
+    if (fd < 0) {
+      if (error != lastError)
+        LOGW("bridge: %s; retrying every second", error.c_str());
+      lastError = std::move(error);
+      sleep(1);
+      continue;
+    }
+    lastError.clear();
+    LOGI("bridge: display service on %s", mPath.c_str());
+    // The bridge has none of our windows or buffers: ask for them again.
     std::vector<std::shared_ptr<BridgeWindow>> ws;
     {
       std::lock_guard lock(mutex);
+      mSock = fd;
       for (auto& [id, w] : windows) {
-        w->dropPool();
+        w->invalidatePool();
         ws.push_back(w);
       }
     }
@@ -554,11 +592,6 @@ void BridgeWindow::freePool(Pool& p, bool tellBridge) {
   p.width = p.height = 0;
 }
 
-void BridgeWindow::dropPool() {
-  freePool(mPool, /*tellBridge=*/false);
-  mLast = -1;
-}
-
 void BridgeWindow::onRelease(uint32_t buffer) {
   for (auto& buf : mPool.bufs) {
     if (buf.id == buffer) buf.busy = false;
@@ -649,6 +682,14 @@ Error BridgeWindow::present(FrameInput& frame) {
     mHwcId >= 0 ? bh->height : std::min(bh->height, mSpec.height);
   if (w == 0 || h == 0 || !b->connected()) return Error::None;
 
+  {
+    std::lock_guard lock(b->mutex);
+    if (mPoolStale) {
+      freePool(mPool, /*tellBridge=*/false);
+      mPoolStale = false;
+      mLast = -1;
+    }
+  }
   if (w != mPool.width || h != mPool.height || format != mPool.format) {
     Pool np;
     if (!makePool(w, h, format, &np)) {
@@ -735,15 +776,7 @@ class BridgeWindowPresenter : public Presenter {
 std::unique_ptr<Presenter> addWindow(
   Spec spec, int64_t hwcId, std::unique_ptr<HeadlessPresenter> secondary
 ) {
-  auto w = std::make_shared<BridgeWindow>(gBridge, spec, hwcId);
-  std::shared_ptr<BridgeWindow> old;
-  {
-    std::lock_guard lock(gBridge->mutex);
-    old = std::move(gBridge->windows[spec.id]);
-    gBridge->windows[spec.id] = w;
-  }
-  old.reset();
-  gBridge->createWindow(*w);
+  gBridge->addWindow(std::make_shared<BridgeWindow>(gBridge, spec, hwcId));
   if (hwcId >= 0)
     gBridge->input.send("window_mapped %d %lld", spec.id, (long long)hwcId);
   if (secondary && hwcId >= 0) {
@@ -757,22 +790,17 @@ std::unique_ptr<Presenter> addWindow(
 }
 }  // namespace
 
-bool initBridge(
+void startBridge(
   const std::string& bridgeSocket, const std::string& inputSocket
 ) {
   auto* b = new Bridge();
-  if (!b->connect(bridgeSocket)) {
-    delete b;
-    return false;
-  }
   gBridge = b;
   b->input.setCommandHandler([b](const std::string& l) { b->onCommand(l); });
   b->input.start(inputSocket);
-  b->start();
-  return true;
+  b->start(bridgeSocket);
 }
 
-bool bridgeConnected() { return gBridge != nullptr; }
+bool bridgeStarted() { return gBridge != nullptr; }
 
 void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height) {
   if (gBridge) gBridge->input.setDisplaySize(width, height);

@@ -130,7 +130,7 @@ std::unique_ptr<Presenter> createPresenter(
   std::string backend = getProperty("vendor.linuxapk.hwc.backend", "headless");
 #ifdef LINUXAPK_HWC_WAYLAND
   if (backend == "bridge" || backend == "wayland") {
-    const bool bridge = bridgeConnected();
+    const bool bridge = bridgeStarted();
     if (bridge) {
       bridgeSetPrimaryDisplaySize(width, height);
     } else {
@@ -160,7 +160,7 @@ std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
 #ifdef LINUXAPK_HWC_WAYLAND
-  if (bridgeConnected()) {
+  if (bridgeStarted()) {
     if (
       auto p =
         createBridgeVirtualPresenter(displayId, width, height, makeHeadless())

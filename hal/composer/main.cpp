@@ -20,7 +20,7 @@
 
 // Backends with windows (vendor.linuxapk.hwc.backend):
 //   bridge:  the host bridge's display service (docs/bridge.md) owns the
-//            Wayland connection; falls back to wayland if it is unreachable.
+//            Wayland connection; the composer (re)connects in the background.
 //   wayland: the composer is the Wayland client itself (needs root to reach
 //            the host socket, which only the session's root may connect to).
 // Connect first, then become system:graphics (plus audio: the bridge socket
@@ -31,18 +31,14 @@ static void connectAndDropPrivileges() {
     getProperty("vendor.linuxapk.hwc.backend", "headless");
   const std::string input =
     getProperty("vendor.linuxapk.input.socket", "/dev/socket/linuxapk-input");
-  bool connected = false;
   if (backend == "bridge") {
-    connected = initBridge(
+    startBridge(
       getProperty(
         "vendor.linuxapk.bridge.socket", "/dev/socket/linuxapk/bridge.sock"
       ),
       input
     );
-    if (!connected)
-      LOGW("bridge unavailable; trying the host Wayland socket directly");
-  }
-  if (!connected && (backend == "bridge" || backend == "wayland")) {
+  } else if (backend == "wayland") {
     WaylandConnection::init(
       getProperty("vendor.linuxapk.wayland.socket", "/dev/socket/wayland-host"),
       input

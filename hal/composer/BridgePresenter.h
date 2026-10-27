@@ -17,12 +17,12 @@ namespace linuxapk::hwc {
 
 class HeadlessPresenter;
 
-// Connects to the bridge at `bridgeSocket` and serves the input socket.
-// Returns false if the bridge is unreachable or refuses the display service.
-bool initBridge(
+// Serves the input socket, and connects to the bridge at `bridgeSocket` in
+// the background: windows wait while it is unreachable or restarting.
+void startBridge(
   const std::string& bridgeSocket, const std::string& inputSocket
 );
-bool bridgeConnected();
+bool bridgeStarted();
 
 // Same contracts as the Wayland presenters (WaylandPresenter.h).
 void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height);
