@@ -24,7 +24,6 @@
 #include "BridgePresenter.h"
 
 #include "InputServer.h"
-#include "Properties.h"
 #include "linuxapk/layout.h"
 #include "linuxapk/log.h"
 
@@ -787,14 +786,12 @@ std::unique_ptr<Presenter> addWindow(
 }
 }  // namespace
 
-void startBridge(
-  const std::string& bridgeSocket, const std::string& inputSocket
-) {
+void startBridge() {
   auto* b = new Bridge();
   gBridge = b;
   b->input.setCommandHandler([b](const std::string& l) { b->onCommand(l); });
-  b->input.start(inputSocket);
-  b->start(bridgeSocket);
+  b->input.start("/dev/socket/linuxapk-input");
+  b->start("/dev/socket/linuxapk/bridge.sock");
 }
 
 bool bridgeStarted() { return gBridge != nullptr; }

@@ -4,7 +4,6 @@
 
 #include "ComposerClient.h"
 
-#include "Properties.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
@@ -38,7 +37,7 @@ class ComposerClient::Results {
 ComposerClient::ComposerClient() {
   mNextVirtualDisplay = kFirstVirtualDisplay;
   // One primary display; windows show virtual displays.
-  const DisplayConfig config = DisplayConfig::fromProperties();
+  const DisplayConfig config;
   mDisplays.emplace(
     kPrimaryDisplay,
     std::make_unique<Display>(

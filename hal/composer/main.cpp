@@ -21,12 +21,7 @@ int main() {
   const std::string backend =
     getProperty("vendor.linuxapk.hwc.backend", "headless");
   if (backend == "bridge") {
-    startBridge(
-      getProperty(
-        "vendor.linuxapk.bridge.socket", "/dev/socket/linuxapk/bridge.sock"
-      ),
-      getProperty("vendor.linuxapk.input.socket", "/dev/socket/linuxapk-input")
-    );
+    startBridge();
   } else if (backend != "headless") {
     LOGW("unknown backend '%s'; using headless", backend.c_str());
   }

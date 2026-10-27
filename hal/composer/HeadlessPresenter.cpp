@@ -84,7 +84,7 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
     mLastLogNs = now;
   }
   ClientTargetState* ct = frame.clientTarget;
-  mDumper->reloadFromProperties(now);
+  mDumper->reloadFromProperty(now);
   if (!mWorker && mDumper->enabled())
     mWorker = std::make_unique<Worker>(mDumper.get());
   if (mWorker && ct && ct->buffer && mDumper->shouldDump(now)) {
@@ -113,7 +113,7 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
 
 static std::unique_ptr<HeadlessPresenter> makeHeadless() {
   return std::make_unique<HeadlessPresenter>(
-    std::make_unique<FrameDumper>(FrameDumper::configFromProperties())
+    std::make_unique<FrameDumper>(FrameDumper::dirFromProperty())
   );
 }
 

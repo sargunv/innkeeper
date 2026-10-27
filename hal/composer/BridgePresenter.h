@@ -9,7 +9,6 @@
 #pragma once
 
 #include <memory>
-#include <string>
 
 #include "Presenter.h"
 
@@ -17,11 +16,10 @@ namespace linuxapk::hwc {
 
 class HeadlessPresenter;
 
-// Serves the input socket, and connects to the bridge at `bridgeSocket` in
-// the background: windows wait while it is unreachable or restarting.
-void startBridge(
-  const std::string& bridgeSocket, const std::string& inputSocket
-);
+// Serves the input socket (/dev/socket/linuxapk-input), and connects to the
+// bridge (/dev/socket/linuxapk/bridge.sock) in the background: windows wait
+// while it is unreachable or restarting.
+void startBridge();
 bool bridgeStarted();
 
 // Display 0's size, for the input stream's hello line.

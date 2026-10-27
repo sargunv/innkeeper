@@ -338,7 +338,7 @@ int main() {
   res = present(2, false, true);
   CHECK(countErrors(res) == 1);
 
-  // Dump check (set VENDOR_LINUXAPK_HWC_DUMP_DIR for the composer).
+  // Dump check (set vendor.linuxapk.hwc.dump.dir for the composer).
   if (const char* dir = getenv("EXPECT_DUMP")) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     struct stat st;

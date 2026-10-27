@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include <cctype>
-#include <cstdlib>
-
 #include "Properties.h"
 
 #if defined(__ANDROID__)
@@ -15,20 +12,7 @@ std::string getProperty(const char* name, const std::string& def) {
   char value[PROP_VALUE_MAX] = {};
   if (__system_property_get(name, value) > 0) return value;
 #endif
-  // Env fallback (host tests, and runs without a property service).
-  std::string env;
-  for (const char* p = name; *p; p++)
-    env += *p == '.' ? '_' : char(toupper(*p));
-  const char* v = getenv(env.c_str());
-  return v && *v ? v : def;
-}
-
-int64_t getIntProperty(const char* name, int64_t def) {
-  std::string v = getProperty(name);
-  if (v.empty()) return def;
-  char* end = nullptr;
-  long long r = strtoll(v.c_str(), &end, 0);
-  return end && *end == '\0' ? r : def;
+  return def;
 }
 
 }  // namespace linuxapk::hwc

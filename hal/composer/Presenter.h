@@ -7,7 +7,7 @@
 //   2. present: show the client target and/or DEVICE layers, returning a
 //      present fence and per-layer release fences (-1 = already free).
 //
-// HeadlessPresenter: the client target is optionally dumped to PNG/PPM.
+// HeadlessPresenter: the client target is optionally dumped to PNG.
 // BridgePresenter.h: the client target is copied into a window's buffer pool
 // and shown on the host through the bridge.
 #pragma once
@@ -83,7 +83,7 @@ class Presenter {
 
 class FrameDumper;
 
-// No output; optional rate-limited PNG/PPM dumps of the client target.
+// No output; optional rate-limited PNG dumps of the client target.
 class HeadlessPresenter : public Presenter {
  public:
   explicit HeadlessPresenter(std::unique_ptr<FrameDumper> dumper);

@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
   ABinderProcess_startThreadPool();
   testAidl(argc > 1 ? argv[1] : "/vendor/lib64/hw/mapper.linuxapk.so");
-  if (!getenv("SKIP_AHB")) testAHardwareBuffer();
+  testAHardwareBuffer();
   printf("%d checks, %d failures\n", gChecks, gFail);
   return gFail ? 1 : 0;
 }

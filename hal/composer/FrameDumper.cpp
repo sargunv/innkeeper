@@ -139,82 +139,47 @@ bool writePng(const std::string& path, const FrameView& f) {
   return writeFileAtomic(path, out.data(), out.size());
 }
 
-bool writePpm(const std::string& path, const FrameView& f) {
-  char header[64];
-  int n =
-    snprintf(header, sizeof header, "P6\n%u %u\n255\n", f.width, f.height);
-  std::vector<uint8_t> out(header, header + n);
-  out.resize(n + size_t(f.width) * 3 * f.height);
-  for (uint32_t y = 0; y < f.height; y++) {
-    if (!convertRowToRgb8(f, y, &out[n + size_t(y) * f.width * 3]))
-      return false;
-  }
-  return writeFileAtomic(path, out.data(), out.size());
+std::string FrameDumper::dirFromProperty() {
+  return getProperty("vendor.linuxapk.hwc.dump.dir");
 }
 
-FrameDumper::Config FrameDumper::configFromProperties() {
-  Config c;
-  c.dir = getProperty("vendor.linuxapk.hwc.dump.dir");
-  c.format = getProperty("vendor.linuxapk.hwc.dump.format", "png");
-  c.intervalMs = getIntProperty("vendor.linuxapk.hwc.dump.interval_ms", 1000);
-  c.keep = uint32_t(getIntProperty("vendor.linuxapk.hwc.dump.keep", 0));
-  return c;
-}
-
-void FrameDumper::reloadFromProperties(int64_t nowNs) {
+void FrameDumper::reloadFromProperty(int64_t nowNs) {
   {
     std::lock_guard lock(mMutex);
     if (nowNs - mLastReloadNs < 1'000'000'000) return;
     mLastReloadNs = nowNs;
   }
-  Config c = configFromProperties();
+  std::string dir = dirFromProperty();
   std::lock_guard lock(mMutex);
-  if (c.dir != mConfig.dir) {
-    LOGI(
-      "dump: %s%s", c.dir.empty() ? "disabled" : "enabled, dir ", c.dir.c_str()
-    );
+  if (dir != mDir) {
+    LOGI("dump: %s%s", dir.empty() ? "disabled" : "enabled, dir ", dir.c_str());
   }
-  mConfig = std::move(c);
+  mDir = std::move(dir);
 }
 
 bool FrameDumper::shouldDump(int64_t nowNs) {
   std::lock_guard lock(mMutex);
-  if (mConfig.dir.empty()) return false;
-  if (nowNs - mLastNs < mConfig.intervalMs * 1000000) return false;
+  if (mDir.empty() || nowNs - mLastNs < 1'000'000'000) return false;
   mLastNs = nowNs;
   return true;
 }
 
 bool FrameDumper::dump(const std::string& prefix, const FrameView& f) {
-  Config cfg;
+  std::string dir;
   {
     std::lock_guard lock(mMutex);
-    cfg = mConfig;
+    dir = mDir;
   }
-  if (cfg.dir.empty()) return false;
-  const bool ppm = cfg.format == "ppm";
-  const char* ext = ppm ? "ppm" : "png";
-  mkdir(cfg.dir.c_str(), 0775);
-  std::string latest = cfg.dir + "/" + prefix + "-latest." + ext;
-  bool ok = ppm ? writePpm(latest, f) : writePng(latest, f);
-  if (!ok) {
+  if (dir.empty()) return false;
+  mkdir(dir.c_str(), 0775);
+  const std::string latest = dir + "/" + prefix + "-latest.png";
+  if (!writePng(latest, f)) {
     LOGW("dump: failed to write %s (format 0x%x)", latest.c_str(), f.format);
     return false;
   }
-  uint64_t n;
-  {
-    std::lock_guard lock(mMutex);
-    n = mCount++;
-  }
-  if (cfg.keep > 0) {
-    char name[64];
-    snprintf(name, sizeof name, "-%04llu.", (unsigned long long)(n % cfg.keep));
-    std::string numbered = cfg.dir + "/" + prefix + name + ext;
-    if (link(latest.c_str(), (numbered + ".tmp").c_str()) == 0) {
-      rename((numbered + ".tmp").c_str(), numbered.c_str());
-    }
-  }
-  if (n == 0) LOGI("dump: first frame written to %s", latest.c_str());
+  std::lock_guard lock(mMutex);
+  if (!mWroteFirst) LOGI("dump: first frame written to %s", latest.c_str());
+  mWroteFirst = true;
   return true;
 }
 

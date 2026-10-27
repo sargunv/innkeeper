@@ -19,13 +19,13 @@
 
 namespace linuxapk::hwc {
 
+// The defaults are display 0's: it has no window, so its size only matters
+// to what SurfaceFlinger and the framework derive from it.
 struct DisplayConfig {
   int32_t id = 0;
   int32_t width = 1280, height = 800;
   int32_t vsyncPeriodNs = 16'666'666;
   int32_t dpi = 160;
-  // vendor.linuxapk.display.{width,height,refresh_hz,dpi}
-  static DisplayConfig fromProperties();
 };
 
 struct Layer : LayerState {

@@ -4,27 +4,9 @@
 
 #include "Display.h"
 
-#include "Properties.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
-
-DisplayConfig DisplayConfig::fromProperties() {
-  DisplayConfig c;
-  c.width = int32_t(getIntProperty("vendor.linuxapk.display.width", c.width));
-  c.height =
-    int32_t(getIntProperty("vendor.linuxapk.display.height", c.height));
-  int64_t hz = getIntProperty("vendor.linuxapk.display.refresh_hz", 60);
-  if (hz < 1 || hz > 1000) hz = 60;
-  c.vsyncPeriodNs = int32_t(1'000'000'000 / hz);
-  c.dpi = int32_t(getIntProperty("vendor.linuxapk.display.dpi", c.dpi));
-  if (c.width < 1 || c.height < 1 || c.width > 16384 || c.height > 16384) {
-    LOGW("bad display size %dx%d; using 1280x800", c.width, c.height);
-    c.width = 1280;
-    c.height = 800;
-  }
-  return c;
-}
 
 Display::Display(
   int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter,

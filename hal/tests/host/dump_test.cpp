@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Writes a test pattern through FrameDumper in each supported format; the
-// PNGs can be eyeballed (and are validated by `file`/python in build.sh).
+// Writes a test pattern through FrameDumper in each supported format and
+// checks a converted pixel; the PNGs can be eyeballed.
 #include <vector>
 
 #include <stdio.h>
@@ -76,26 +76,19 @@ int main(int argc, char** argv) {
       }
     }
     FrameView v{buf.data(), w, h, l.planes[0].stride, f};
-    FrameDumper::Config c;
-    c.dir = dir;
-    c.keep = 2;
-    c.format = "png";
-    FrameDumper d(c);
+    FrameDumper d(dir);
     bool ok = d.shouldDump(0) && !d.shouldDump(1) && d.dump(formatName(f), v);
-    c.format = "ppm";
-    FrameDumper d2(c);
-    ok = ok && d2.dump(formatName(f), v);
     uint8_t rgb[3 * w];
     convertRowToRgb8(v, 60, rgb);
     // Pixel (100,60) is inside the blue square, with red ~127 and green ~128.
     bool pixOk = rgb[300 + 2] == 255 &&
                  (f == fmt::RGBA_FP16 || (rgb[300] > 110 && rgb[300] < 140));
     printf(
-      "%-14s png+ppm %s, pixel(100,60)=%u,%u,%u %s\n", formatName(f),
+      "%-14s png %s, pixel(100,60)=%u,%u,%u %s\n", formatName(f),
       ok ? "ok" : "FAIL", rgb[300], rgb[301], rgb[302], pixOk ? "ok" : "FAIL"
     );
     fails += !ok + !pixOk;
   }
-  printf("wrote %s/*-latest.{png,ppm}\n", dir.c_str());
+  printf("wrote %s/*-latest.png\n", dir.c_str());
   return fails ? 1 : 0;
 }

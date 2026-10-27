@@ -23,7 +23,7 @@ run_tests=1
 android_tests() {
   local run=$repo/tests/bionic/run.sh
   "$run" -v "$BUILD/test-vendor" -- /vendor/bin/gralloc_test
-  "$run" -v "$BUILD/test-vendor" -e VENDOR_LINUXAPK_HWC_DUMP_DIR=/data/vendor/linuxapk/frames \
+  "$run" -v "$BUILD/test-vendor" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
     -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
 }
 

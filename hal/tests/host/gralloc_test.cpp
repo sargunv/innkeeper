@@ -181,7 +181,7 @@ static void testMapper() {
     isDmabuf(bh->fd) ? "udmabuf" : "not dmabuf",
     (unsigned long long)bh->totalSize.get()
   );
-  if (getenv("REQUIRE_UDMABUF")) CHECK(isDmabuf(bh->fd));
+  CHECK(isDmabuf(bh->fd) == !!(bh->flags & kFlagDmabuf));
 
   buffer_handle_t a = nullptr, b = nullptr;
   CHECK_EQ(gMapper->v5.importBuffer(raw, &a), AIMAPPER_ERROR_NONE);
