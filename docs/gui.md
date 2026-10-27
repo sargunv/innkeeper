@@ -21,7 +21,7 @@ it also wants `javac` and the Android SDK.
 ## Architecture
 
 ```
- cli/  linuxapk        clap, stdout/stderr, --notify      ┐
+ cli/  linuxapk        clap, stdout/stderr                ┐
  gui/  linuxapk-gui    GTK 4 + libadwaita, worker threads ├─► core/  linuxapk-core
                                                           ┘     ops: inspect, install, uninstall,
                                                                      run, list, installed_apps, setup
@@ -76,11 +76,7 @@ it also wants `javac` and the Android SDK.
   `MemoryCurrent`. It's polled every 3 s off the UI thread. Start runs
   `Session::ensure` (start and wait for boot) and Stop runs
   `linuxapk-session stop`.
-- **Preferences:**
-  - "Open APK Files With Linux.apk" switches the handler (below).
-  - Placeholders for M3: follow dark style, accent color, text size, and stop
-    when idle.
-  - The session instance and launcher path.
+- **Preferences:** "Open APK Files With Linux.apk" switches the handler (below).
 - **Errors** are an alert (or the install page itself) with a heading and a
   sentence for known cases: not an APK, ARM only, signature conflict, downgrade,
   an older Android, damaged APK, missing aapt2, Android not starting, no
@@ -89,18 +85,16 @@ it also wants `javac` and the Android SDK.
 
 ## APK handler and registration (decision)
 
-`linuxapk setup` registers the GUI when it is installed: `linuxapk-gui` next to
-`linuxapk`, or on `PATH`. Otherwise it registers the CLI as before.
+Only the manager handles APK files. `linuxapk setup` registers `linuxapk-gui`,
+found next to `linuxapk` or on `PATH`, and fails without it.
 
-| file                                                   | GUI installed                                                                                          | CLI only                                        |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `applications/dev.linuxapk.installer.desktop`          | `Exec=linuxapk-gui %f`, `Icon=dev.linuxapk.Manager`, `NoDisplay`, the APK MIME types; default for them | `Exec=linuxapk install --notify %f` (unchanged) |
-| `applications/dev.linuxapk.Manager.desktop`            | the app-menu entry "Linux.apk" (`Exec=linuxapk-gui`, `StartupWMClass=dev.linuxapk.Manager`)            | not written                                     |
-| `icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg` | the manager's icon (`core/data/`)                                                                      | not written                                     |
-| `mime/packages/dev.linuxapk.xml`                       | `.apks`, `.xapk`, `.apkm` types                                                                        | same                                            |
+| file                                                   | contents                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `applications/dev.linuxapk.installer.desktop`          | `Exec=linuxapk-gui %f`, `Icon=dev.linuxapk.Manager`, `NoDisplay`, the APK MIME types; default for them |
+| `applications/dev.linuxapk.Manager.desktop`            | the app-menu entry "Linux.apk" (`Exec=linuxapk-gui`, `StartupWMClass=dev.linuxapk.Manager`)            |
+| `icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg` | the manager's icon (`core/data/`)                                                                      |
+| `mime/packages/dev.linuxapk.xml`                       | `.apks`, `.xapk`, `.apkm` types                                                                        |
 
-- The handler keeps one desktop ID either way, so `mimeapps.list` defaults
-  survive a switch between the GUI and the CLI.
 - The GUI is a single instance (`GApplication`, app ID `dev.linuxapk.Manager`,
   `HANDLES_OPEN`). Opening an APK while it runs pushes a new install page into
   the open window.
@@ -175,5 +169,4 @@ nested in Flatpak (see STRATEGY M5). The plan:
   rendering an uninstalled APK while the session runs).
 - No per-row progress for open and uninstall (a toast only). The list doesn't
   show which apps have open windows (`dev.linuxapk.LIST` could).
-- The M3 settings are placeholders until the bridge/system-app channel lands.
 - Flatpak packaging (above).

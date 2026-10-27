@@ -154,52 +154,6 @@ pub enum Launch {
     View { package: String, uri: String },
 }
 
-/// `am start` arguments for a launch on display 0.
-pub fn am_start_args(l: &Launch) -> Vec<String> {
-    let mut v: Vec<String> = [
-        "cmd",
-        "activity",
-        "start-activity",
-        "--user",
-        "current",
-        "--display",
-        "0",
-    ]
-    .map(String::from)
-    .to_vec();
-    match l {
-        Launch::Main { component } => v.extend(
-            [
-                "-a",
-                "android.intent.action.MAIN",
-                "-c",
-                "android.intent.category.LAUNCHER",
-                // NEW_TASK | RESET_TASK_IF_NEEDED, as Launcher3 does: resumes
-                // the existing task instead of stacking a new activity.
-                "-f",
-                "0x10200000",
-                "-n",
-                component,
-            ]
-            .map(String::from),
-        ),
-        Launch::View { package, uri } => v.extend(
-            [
-                "-a",
-                "android.intent.action.VIEW",
-                "-c",
-                "android.intent.category.BROWSABLE",
-                "-d",
-                uri,
-                "-p",
-                package,
-            ]
-            .map(String::from),
-        ),
-    }
-    v
-}
-
 /// The window manager's control command (docs/windowing.md): opens the app
 /// in a window of its own, or focuses the window it already has.
 pub fn wm_launch_args(l: &Launch) -> Vec<String> {
@@ -230,8 +184,7 @@ pub fn wm_launch_args(l: &Launch) -> Vec<String> {
 }
 
 /// What the window manager answered: Ok(reply) on success, Err(reply) for an
-/// error it reported, None if nothing handled the broadcast (an older system
-/// app).
+/// error it reported, None if nothing answered the broadcast.
 fn wm_reply(text: &str) -> Option<Result<String, String>> {
     let line = text
         .lines()
@@ -246,25 +199,23 @@ fn wm_reply(text: &str) -> Option<Result<String, String>> {
     }
 }
 
-/// Starts an app: through the window manager (one window per app), or with
-/// `am start` on display 0 if the system app predates it.
+/// Starts an app through the window manager (one window per app).
 pub fn launch(s: &Session, l: &Launch) -> Result<()> {
     let args = wm_launch_args(l);
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let o = s.exec(60, &argv)?;
     match wm_reply(&o.text()) {
-        Some(Ok(_)) => return Ok(()),
+        Some(Ok(_)) => Ok(()),
         Some(Err(e)) => bail!("launch failed: {e}"),
-        None => {}
+        None => bail!(
+            "launch failed: Linux.apk System's window manager did not answer (Android {})",
+            if s.booted() {
+                "has booted"
+            } else {
+                "is still booting"
+            }
+        ),
     }
-    let args = am_start_args(l);
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let o = s.exec(60, &argv)?;
-    let t = o.text();
-    if !o.ok() || t.contains("Error") {
-        bail!("launch failed: {} {}", t.trim(), o.stderr.trim());
-    }
-    Ok(())
 }
 
 /// What Android itself reports for an installed app.
@@ -340,26 +291,6 @@ mod tests {
             Some(1834552)
         );
         assert_eq!(parse_session_id("Failure [x]\n"), None);
-    }
-
-    #[test]
-    fn start_args() {
-        let m = am_start_args(&Launch::Main {
-            component: "org.wikipedia/.main.MainActivity".into(),
-        });
-        assert_eq!(m.last().unwrap(), "org.wikipedia/.main.MainActivity");
-        assert!(m.windows(2).any(|w| w == ["--display", "0"]));
-        let v = am_start_args(&Launch::View {
-            package: "org.wikipedia".into(),
-            uri: "https://en.wikipedia.org/wiki/Linux".into(),
-        });
-        // The URI is always the value of -d, never an option of its own.
-        let i = v.iter().position(|a| a == "-d").unwrap();
-        assert_eq!(v[i + 1], "https://en.wikipedia.org/wiki/Linux");
-        assert!(
-            v.windows(2)
-                .any(|w| w == ["-c", "android.intent.category.BROWSABLE"])
-        );
     }
 
     #[test]

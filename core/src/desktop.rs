@@ -169,38 +169,16 @@ pub const PACKAGE_MIME_TYPES: &[&str] = &[
     "application/x-android-apkm",
 ];
 
-/// What opens APK files: the manager's install page, or (without the GUI)
-/// `linuxapk install --notify`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Handler {
-    /// The `linuxapk` command line.
-    Cli(Vec<String>),
-    /// The `linuxapk-gui` command line.
-    Gui(Vec<String>),
-}
-
-/// The "Install with Linux.apk" handler for APK files.
-pub fn installer_entry(h: &Handler) -> Result<String> {
-    let install = match h {
-        Handler::Cli(cmd) => {
-            let mut v = cmd.clone();
-            v.extend(["install".to_string(), "--notify".to_string()]);
-            v
-        }
-        Handler::Gui(cmd) => cmd.clone(),
-    };
+/// The "Install with Linux.apk" handler for APK files: `manager` (the
+/// `linuxapk-gui` command line) opens them on its install page.
+pub fn installer_entry(manager: &[String]) -> Result<String> {
     let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
     s.push_str("Name=Linux.apk Installer\n");
     s.push_str("GenericName=Android app installer\n");
     s.push_str("Comment=Install Android apps on this desktop\n");
-    match h {
-        Handler::Cli(_) => s.push_str("Icon=android-package-archive\n"),
-        Handler::Gui(_) => {
-            writeln!(s, "Icon={MANAGER_ID}")?;
-            writeln!(s, "StartupWMClass={MANAGER_ID}")?;
-        }
-    }
-    writeln!(s, "Exec={}", exec_line(&install, Some("%f"))?)?;
+    writeln!(s, "Icon={MANAGER_ID}")?;
+    writeln!(s, "StartupWMClass={MANAGER_ID}")?;
+    writeln!(s, "Exec={}", exec_line(manager, Some("%f"))?)?;
     s.push_str("Terminal=false\nNoDisplay=true\n");
     writeln!(s, "MimeType={}", list(PACKAGE_MIME_TYPES)?)?;
     s.push_str("Categories=Settings;PackageManager;\n");
@@ -413,13 +391,11 @@ mod tests {
 
     #[test]
     fn installer() {
-        let s = installer_entry(&Handler::Cli(vec!["/x/linuxapk".into()])).unwrap();
-        assert!(s.contains("Exec=/x/linuxapk install --notify %f\n"));
-        assert!(s.contains("MimeType=application/vnd.android.package-archive;"));
-        assert!(s.contains("NoDisplay=true"));
-        let g = installer_entry(&Handler::Gui(vec!["linuxapk-gui".into()])).unwrap();
+        let g = installer_entry(&["linuxapk-gui".into()]).unwrap();
         assert!(g.contains("Exec=linuxapk-gui %f\n"));
         assert!(g.contains("Icon=dev.linuxapk.Manager\n"));
+        assert!(g.contains("MimeType=application/vnd.android.package-archive;"));
+        assert!(g.contains("NoDisplay=true"));
         let m = manager_entry(&[
             "env".into(),
             "LINUXAPK_INSTANCE=gui".into(),

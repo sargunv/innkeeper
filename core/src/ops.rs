@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::android::{self, Launch};
 use crate::bundle::{self, Input};
-use crate::desktop::{self, AppEntry, Handler};
+use crate::desktop::{self, AppEntry};
 use crate::manifest::{self, Aapt2, Badging};
 use crate::session::{self, Session};
 use crate::xdg::{self, DesktopApp, Dirs};
@@ -204,8 +204,6 @@ pub struct Installed {
     pub package: String,
     pub name: String,
     pub desktop: PathBuf,
-    /// Icon name in the desktop entry.
-    pub icon: String,
     pub schemes: Vec<String>,
 }
 
@@ -321,7 +319,6 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         package: pkg,
         name,
         desktop: path,
-        icon: entry.icon.unwrap_or_default(),
         schemes: entry.schemes,
     })
 }
@@ -464,26 +461,15 @@ pub fn android_packages() -> Option<Vec<String>> {
     android::user_packages(&s).ok()
 }
 
-/// The handler `setup` registers: the GUI if it is installed next to this
-/// program or on `PATH`, else the CLI.
-pub fn default_handler() -> Result<Handler> {
-    match command_for("linuxapk-gui") {
-        Ok(g) => Ok(Handler::Gui(g)),
-        Err(_) => Ok(Handler::Cli(command_for("linuxapk")?)),
-    }
-}
-
-/// `linuxapk setup`: the APK handler (see [`default_handler`]), plus the
-/// manager's app-menu entry if the GUI is installed. Returns the files
-/// written.
-pub fn setup() -> Result<(Handler, Vec<PathBuf>)> {
+/// `linuxapk setup`: makes the manager (`linuxapk-gui`, next to this program
+/// or on `PATH`) the APK handler and adds it to the app menu. Returns the
+/// files written.
+pub fn setup() -> Result<Vec<PathBuf>> {
     let d = Dirs::from_env();
-    let h = default_handler()?;
-    let mut files = xdg::setup(&d, &h)?;
-    if let Handler::Gui(g) = &h {
-        files.extend(xdg::install_manager(&d, g)?);
-    }
-    Ok((h, files))
+    let g = command_for("linuxapk-gui")?;
+    let mut files = xdg::setup(&d, &g)?;
+    files.extend(xdg::install_manager(&d, &g)?);
+    Ok(files)
 }
 
 /// `linuxapk setup --remove`: the handler and the manager's entry.
@@ -498,14 +484,11 @@ pub fn unsetup() -> Result<()> {
 /// `linuxapk-gui` next to it) becomes the APK handler and gets its app-menu
 /// entry. Off: the handler is removed (the menu entry stays).
 pub fn set_gui_handler(on: bool) -> Result<()> {
-    let d = Dirs::from_env();
-    if !on {
-        return xdg::unsetup(&d);
+    if on {
+        setup().map(drop)
+    } else {
+        xdg::unsetup(&Dirs::from_env())
     }
-    let g = command_for("linuxapk-gui")?;
-    xdg::setup(&d, &Handler::Gui(g.clone()))?;
-    xdg::install_manager(&d, &g)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -521,13 +504,7 @@ mod tests {
 
     #[test]
     fn inspects_corpus_apk() {
-        let corpus = env::var_os("LINUXAPK_CORPUS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(env::var("HOME").unwrap_or_default())
-                    .join("Projects/linux.apk-wt/compat/out/corpus")
-            });
-        let apk = corpus.join("com.darkempire78.opencalculator_53.apk");
+        let apk = crate::test_corpus().join("com.darkempire78.opencalculator_53.apk");
         if !apk.is_file() || Aapt2::find().is_err() {
             eprintln!("skipping: no corpus APK or aapt2");
             return;

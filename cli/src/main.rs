@@ -3,15 +3,13 @@
 //! `linuxapk-core` (shared with the `linuxapk-gui` manager). See docs/cli.md.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
-use std::time::Duration;
+use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use linuxapk_core::desktop::Handler;
 use linuxapk_core::ops::{self, Event};
 use linuxapk_core::session::Session;
-use linuxapk_core::{proc, validate};
+use linuxapk_core::validate;
 
 #[derive(Parser)]
 #[command(
@@ -27,13 +25,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
-    Install {
-        file: PathBuf,
-        /// Report progress and the result as desktop notifications (used by
-        /// the "open with" handler when the GUI isn't installed).
-        #[arg(long)]
-        notify: bool,
-    },
+    Install { file: PathBuf },
     /// Uninstall an app and remove its desktop entry and icons.
     Uninstall {
         package: String,
@@ -53,8 +45,8 @@ enum Cmd {
         #[command(subcommand)]
         action: SessionCmd,
     },
-    /// Register Linux.apk as the handler for APK files (double-click to
-    /// install), and add the manager app to the app menu if it's installed.
+    /// Register the Linux.apk manager as the handler for APK files
+    /// (double-click to install), and add it to the app menu.
     Setup {
         /// Unregister and remove the handler.
         #[arg(long)]
@@ -64,11 +56,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum SessionCmd {
-    Start {
-        /// No host window.
-        #[arg(long)]
-        headless: bool,
-    },
+    Start,
     Stop,
     Status,
 }
@@ -80,49 +68,14 @@ fn stderr(e: Event) {
     }
 }
 
-/// Desktop notifications for `--notify` (argv to notify-send; the body is
-/// markup for some servers, so it's escaped).
-struct Notifier(bool);
-
-impl Notifier {
-    fn send(&self, icon: &str, summary: &str, body: &str) {
-        if !self.0 || proc::which("notify-send").is_none() {
-            return;
-        }
-        let esc = |s: &str| {
-            s.replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;")
-        };
-        let _ = proc::run(
-            Command::new("notify-send").args([
-                "--app-name=Linux.apk",
-                "-i",
-                icon,
-                "--",
-                &esc(summary),
-                &esc(body),
-            ]),
-            Stdio::null(),
-            Duration::from_secs(10),
-        );
-    }
-}
-
-fn install(file: &Path, notify: &Notifier) -> Result<()> {
+fn install(file: &Path) -> Result<()> {
     let p = ops::inspect(file, &stderr)?;
-    notify.send(
-        "android-package-archive",
-        "Installing Android app",
-        &p.package,
-    );
     let i = ops::install(&p, &stderr)?;
     println!("installed {} as \"{}\"", i.package, i.name);
     println!("  desktop entry: {}", i.desktop.display());
     if !i.schemes.is_empty() {
         println!("  URI schemes: {}", i.schemes.join(", "));
     }
-    notify.send(&i.icon, &format!("Installed {}", i.name), &i.package);
     Ok(())
 }
 
@@ -158,11 +111,8 @@ fn setup(remove: bool) -> Result<()> {
         println!("removed the APK handler");
         return Ok(());
     }
-    let (h, files) = ops::setup()?;
-    match h {
-        Handler::Gui(_) => println!("APK files now open in Linux.apk (linuxapk-gui):"),
-        Handler::Cli(_) => println!("APK files now open with linuxapk install:"),
-    }
+    let files = ops::setup()?;
+    println!("APK files now open in Linux.apk (linuxapk-gui):");
     for f in files {
         println!("  {}", f.display());
     }
@@ -172,28 +122,13 @@ fn setup(remove: bool) -> Result<()> {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let res = match cli.cmd {
-        Cmd::Install { file, notify } => {
-            let n = Notifier(notify);
-            let r = install(&file, &n);
-            if let Err(e) = &r {
-                n.send(
-                    "dialog-error",
-                    "Couldn't install Android app",
-                    &format!("{e:#}"),
-                );
-            }
-            r
-        }
+        Cmd::Install { file } => install(&file),
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
         Cmd::Run { package, uri } => ops::run(&package, uri.as_deref(), &stderr),
         Cmd::List => list(),
         Cmd::Session { action } => {
             let r = Session::find().and_then(|s| match action {
-                SessionCmd::Start { headless } => s.passthrough(if headless {
-                    &["start", "--headless"]
-                } else {
-                    &["start"]
-                }),
+                SessionCmd::Start => s.passthrough(&["start"]),
                 SessionCmd::Stop => s.passthrough(&["stop"]),
                 SessionCmd::Status => s.passthrough(&["status"]),
             });

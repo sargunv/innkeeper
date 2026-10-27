@@ -1,5 +1,4 @@
-//! The preferences dialog: the APK handler, and placeholders for the
-//! desktop-integration settings that arrive with M3.
+//! The preferences dialog: whether APK files open in the manager.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -7,21 +6,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 use linuxapk_core::ops;
-use linuxapk_core::session;
 use linuxapk_core::xdg::{self, Dirs};
 
 use crate::errors::Op;
 use crate::window::Window;
 use crate::worker;
-
-fn handler_subtitle() -> &'static str {
-    match xdg::handler_registered(&Dirs::from_env()) {
-        Some(false) => {
-            "APK files now install with the linuxapk command; turn off and on to use this app"
-        }
-        _ => "Double-click an APK in your file manager to install it here",
-    }
-}
 
 pub fn present(w: &Window) {
     let dialog = adw::PreferencesDialog::new();
@@ -36,8 +25,8 @@ pub fn present(w: &Window) {
         .build();
     let handler = adw::SwitchRow::builder()
         .title("Open APK Files With Linux.apk")
-        .subtitle(handler_subtitle())
-        .active(xdg::handler_registered(&Dirs::from_env()) == Some(true))
+        .subtitle("Double-click an APK in your file manager to install it here")
+        .active(xdg::handler_registered(&Dirs::from_env()))
         .build();
     let w2 = w.clone();
     let reverting = Rc::new(Cell::new(false));
@@ -66,75 +55,10 @@ pub fn present(w: &Window) {
                     reverting.set(false);
                 }
             }
-            row.set_subtitle(handler_subtitle());
         });
     });
     integration.add(&handler);
     page.add(&integration);
-
-    // Coming with M3: the system app follows desktop settings.
-    let look = adw::PreferencesGroup::builder()
-        .title("Appearance")
-        .description("Coming soon: Android apps will follow these desktop settings")
-        .build();
-    for (title, subtitle) in [
-        (
-            "Follow Dark Style",
-            "Apps switch to their dark theme with the desktop",
-        ),
-        (
-            "Use the Desktop Accent Color",
-            "Apps with dynamic color pick up the accent color",
-        ),
-        ("Match Text Size", "Apps use the desktop’s font scaling"),
-    ] {
-        look.add(
-            &adw::SwitchRow::builder()
-                .title(title)
-                .subtitle(subtitle)
-                .sensitive(false)
-                .build(),
-        );
-    }
-    page.add(&look);
-
-    // Session.
-    let sess = adw::PreferencesGroup::builder().title("Session").build();
-    let inst = session::instance().unwrap_or_default();
-    sess.add(
-        &adw::ActionRow::builder()
-            .title("Instance")
-            .subtitle(if inst.is_empty() {
-                "Default".to_string()
-            } else {
-                inst
-            })
-            .subtitle_selectable(true)
-            .use_markup(false)
-            .css_classes(["property"])
-            .build(),
-    );
-    sess.add(
-        &adw::ActionRow::builder()
-            .title("Launcher")
-            .subtitle(
-                session::find_launcher()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| "Not found".into()),
-            )
-            .subtitle_selectable(true)
-            .use_markup(false)
-            .css_classes(["property"])
-            .build(),
-    );
-    sess.add(
-        &adw::SwitchRow::builder()
-            .title("Stop When Idle")
-            .subtitle("Coming soon: free the memory when no Android app is open")
-            .sensitive(false)
-            .build(),
-    );
-    page.add(&sess);
 
     dialog.add(&page);
     dialog.present(Some(&w.win));

@@ -542,16 +542,10 @@ mod tests {
         assert_eq!(m.web_hosts, ["*.example.org"]);
     }
 
-    /// Corpus fixtures (not committed): skipped unless the corpus and aapt2
-    /// are present. `LINUXAPK_CORPUS` overrides the corpus directory.
+    /// A corpus APK ([`crate::test_corpus`]) and aapt2, or None (the test is
+    /// skipped) if either is missing.
     fn corpus(name: &str) -> Option<(Aapt2, PathBuf)> {
-        let dir = env::var_os("LINUXAPK_CORPUS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(env::var("HOME").unwrap_or_default())
-                    .join("Projects/linux.apk-wt/compat/out/corpus")
-            });
-        let p = dir.join(name);
+        let p = crate::test_corpus().join(name);
         let a = Aapt2::find().ok()?;
         if !p.is_file() {
             eprintln!("skipping: no corpus APK {}", p.display());

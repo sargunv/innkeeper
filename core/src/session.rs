@@ -18,9 +18,9 @@ pub struct Session {
     launcher: PathBuf,
 }
 
-/// Finds `linuxapk-session`: `$LINUXAPK_SESSION`; the checkout this binary was
+/// Finds `linuxapk-session`: `$LINUXAPK_SESSION`; the checkout this binary
 /// runs from (`<repo>/target/*/linuxapk`) or was built in, or its main checkout
-/// if that is a git worktree without an extracted image; or `linuxapk-session`
+/// if that is a git worktree whose image isn't prepared; or `linuxapk-session`
 /// on `PATH`.
 pub fn find_launcher() -> Result<PathBuf> {
     if let Some(p) = env::var_os("LINUXAPK_SESSION") {
@@ -41,7 +41,7 @@ pub fn find_launcher() -> Result<PathBuf> {
         if !l.is_file() {
             continue;
         }
-        if dir.join("out/img/system").is_dir() {
+        if image_ready(&l) {
             return Ok(l);
         }
         if let Some(main) = main_checkout(&dir) {
@@ -53,6 +53,27 @@ pub fn find_launcher() -> Result<PathBuf> {
         return Ok(l);
     }
     proc::which("linuxapk-session").context("linuxapk-session not found: set LINUXAPK_SESSION")
+}
+
+/// Whether the image `launcher` selects is extracted and flattened, at the
+/// paths `linuxapk-session image` prints.
+fn image_ready(launcher: &Path) -> bool {
+    let Ok(o) = proc::run(
+        Command::new(launcher).arg("image"),
+        Stdio::null(),
+        Duration::from_secs(10),
+    ) else {
+        return false;
+    };
+    let text = o.text();
+    let path = |key: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .map(PathBuf::from)
+    };
+    o.ok()
+        && path("img=").is_some_and(|p| p.join("system/system").is_dir())
+        && path("apex=").is_some_and(|p| p.join("apex-info-list.xml").is_file())
 }
 
 /// The main checkout of a git worktree (`.git` is a file naming
@@ -219,22 +240,16 @@ impl Session {
         self.getprop("sys.boot_completed") == "1"
     }
 
-    /// Makes sure a session is running and booted, starting one if needed (with
-    /// its host window unless `LINUXAPK_HEADLESS=1`). Progress goes to
-    /// `status`.
+    /// Makes sure a session is running and booted, starting one if needed.
+    /// Progress goes to `status`.
     pub fn ensure(&self, status: &dyn Fn(&str)) -> Result<()> {
         if !self.running() {
-            let headless = env::var("LINUXAPK_HEADLESS").is_ok_and(|v| v == "1");
-            status(&format!(
-                "starting the Android session{}",
-                if headless { " (headless)" } else { "" }
-            ));
-            let mut c = Command::new(&self.launcher);
-            c.arg("start");
-            if headless {
-                c.arg("--headless");
-            }
-            if !c.stdout(Stdio::null()).status()?.success() {
+            status("starting the Android session");
+            let st = Command::new(&self.launcher)
+                .arg("start")
+                .stdout(Stdio::null())
+                .status()?;
+            if !st.success() {
                 bail!("session start failed ({} start)", self.launcher.display());
             }
         }

@@ -16,21 +16,19 @@ linuxapk run org.wikipedia                 # launch (starts the session if neede
 linuxapk run org.wikipedia https://en.wikipedia.org/wiki/Linux
 linuxapk list                              # user-installed apps
 linuxapk uninstall org.wikipedia [--keep-data]
-linuxapk session start [--headless] | stop | status
-linuxapk setup [--remove]                  # double-click APKs to install them (in the GUI if installed)
+linuxapk session start | stop | status
+linuxapk setup [--remove]                  # double-click APKs to install them in the GUI
 ```
 
 After `install`, the app is in the desktop's app menu ("Calculator", with its
 own icon). Its custom URL schemes open in it: `xdg-open wikipedia://…` launches
 Wikipedia. `linuxapk setup` registers an "open with" handler for APK files and
-bundles. Double-clicking one in Dolphin opens the GUI's install page if
-`linuxapk-gui` is installed, else installs it with the progress shown as
-notifications.
+bundles. Double-clicking one in Dolphin opens the GUI's install page
+(`linuxapk-gui` must be installed).
 
 `install`, `run`, `uninstall` and `list` start the session if it isn't running
-(with its host window; `LINUXAPK_HEADLESS=1` for none) and wait for boot.
-Building needs `javac` and the Android SDK (for the embedded icon helper);
-running `install` needs the SDK's `aapt2`.
+and wait for boot. Building needs `javac` and the Android SDK (for the embedded
+icon helper); running `install` needs the SDK's `aapt2`.
 
 ## What `install` does
 
@@ -104,9 +102,8 @@ keep using its session.
   restricted to the package. Both go through `android::launch`, the single place
   that decides how to start an app: the window manager's `dev.linuxapk.LAUNCH`
   broadcast ([windowing.md](windowing.md)). It opens the app in a window of its
-  own, or focuses that window if the app already has one. If no receiver answers
-  (an older system app), it falls back to
-  `cmd activity start-activity --display 0`.
+  own, or focuses that window if the app already has one. If nothing answers,
+  `run` fails and says whether Android has finished booting.
 - **`uninstall <pkg> [--keep-data]`** only uninstalls packages listed by
   `pm list packages -3`, so system apps are refused. It runs
   `cmd package uninstall [-k]`, then removes the entry and every
@@ -116,19 +113,18 @@ keep using its session.
   `application/vnd.android.package-archive` plus three types it defines in
   `~/.local/share/mime/packages/dev.linuxapk.xml`: `application/x-android-apks`
   (`*.apks`), `-xapk` and `-apkm`. It then runs `update-mime-database` and
-  `xdg-mime default`. The entry runs `linuxapk-gui %f` if the GUI is installed
-  next to the CLI or on `PATH` (and `setup` then adds the GUI's app-menu entry,
-  see [gui.md](gui.md)), else `linuxapk install --notify %f`. `setup --remove`
-  deletes these files (and the GUI's menu entry) and drops the handler from
-  `mimeapps.list`.
+  `xdg-mime default`. The entry runs `linuxapk-gui %f`, the GUI found next to
+  the CLI or on `PATH`, and `setup` also adds the GUI's app-menu entry (see
+  [gui.md](gui.md)); without the GUI it fails. `setup --remove` deletes these
+  files (and the GUI's menu entry) and drops the handler from `mimeapps.list`.
 
 ## Safety
 
 APKs, and URIs passed to `run`, are untrusted input.
 
-- **No shell.** Host tools (aapt2, notify-send, xdg-mime, …) and Android
-  commands get argv only. `linuxapk-session exec` ends in `exec "$@"`. The one
-  `sh -c` (copying the helper jar) is a constant script with a constant path.
+- **No shell.** Host tools (aapt2, xdg-mime, …) and Android commands get argv
+  only. `linuxapk-session exec` ends in `exec "$@"`. The one `sh -c` (copying
+  the helper jar) is a constant script with a constant path.
 - **Package names** must match Android's grammar (dot-separated segments, each a
   letter followed by `[A-Za-z0-9_]`, at least two segments, at most 255 bytes)
   before they're used in a path, desktop ID or command.
@@ -142,8 +138,8 @@ APKs, and URIs passed to `run`, are untrusted input.
   `ll` or `ll_CC`.
 - **URIs** for `run` must have a scheme and contain no spaces or control
   characters. `file:`, `content:`, `intent:`, `javascript:` and
-  `android.resource:` are refused. The URI is always the value of `-d`.
-- **Notifications** escape markup in the body.
+  `android.resource:` are refused. The URI is always the value of the `uri`
+  extra.
 - **Zip entry names** never become paths, and extraction is size-capped.
 
 ## Tests
@@ -153,8 +149,8 @@ APKs, and URIs passed to `run`, are untrusted input.
   xmltree parsing, bundle member selection and ABI filtering, `mimeapps.list`
   editing, and the icon and entry files in a temp `XDG` tree. Corpus fixtures
   (Wikipedia, OpenCalc, Thunderbird, Shattered Pixel Dungeon) are read by path
-  from `$LINUXAPK_CORPUS` (default the compat lane's `compat/out/corpus`).
-  They're skipped if absent, and never committed.
+  from `$LINUXAPK_CORPUS` (default `out/corpus`, where `compat/run.sh fetch`
+  puts them). They're skipped if absent, and never committed.
 - `cli/tests/integration.sh` runs against a real session
   (`LINUXAPK_INSTANCE=cli` by default). It installs OpenCalc and Wikipedia, runs
   `desktop-file-validate` (via podman if the tool is missing) and checks icon

@@ -8,12 +8,12 @@
 # `LINUXAPK_INSTANCE=cli linuxapk session stop`.
 #
 # Environment: LINUXAPK_INSTANCE (default cli), LINUXAPK_SESSION (default: the
-# main checkout's launcher), LINUXAPK_CORPUS.
+# main checkout's launcher), LINUXAPK_CORPUS (default out/corpus, filled by
+# `compat/run.sh fetch`).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-corpus=${1:-${LINUXAPK_CORPUS:-$repo/compat/out/corpus}}
-[[ -d $corpus ]] || corpus=$HOME/Projects/linux.apk-wt/compat/out/corpus
+corpus=${1:-${LINUXAPK_CORPUS:-$repo/out/corpus}}
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-cli}
 if [[ -z ${LINUXAPK_SESSION:-} ]]; then
   main=$(dirname "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)")

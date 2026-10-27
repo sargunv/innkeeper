@@ -198,8 +198,7 @@ am broadcast $C -a dev.linuxapk.CLOSE (--ei display 3 | --es package org.wikiped
   `display=N package=P size=WxH dpi=D tasks=… window=yes|no label=…`.
 - **CLOSE:** `closed display=N package=P`.
 
-In single-window mode, LAUNCH starts the app on display 0. `linuxapk run` falls
-back to `am start` on display 0 if no receiver answers (an older system app).
+In single-window mode, LAUNCH starts the app on display 0.
 
 ## Window types (decisions; the protocol leaves room for each)
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::desktop::{self, AppEntry, Handler, INSTALLER_ID, MANAGER_ID, PREFIX};
+use crate::desktop::{self, AppEntry, INSTALLER_ID, MANAGER_ID, PREFIX};
 use crate::proc;
 
 /// Sizes we render icons at; all are hicolor theme directories.
@@ -178,10 +178,10 @@ fn mime_package(d: &Dirs) -> PathBuf {
     d.data.join("mime/packages/dev.linuxapk.xml")
 }
 
-/// The handler entry, if registered: `Some(true)` if it opens the manager.
-pub fn handler_registered(d: &Dirs) -> Option<bool> {
-    let t = fs::read_to_string(installer_desktop(d)).ok()?;
-    Some(desktop::read_key(&t, "Icon").as_deref() == Some(MANAGER_ID))
+/// Whether the APK handler entry is registered and opens the manager.
+pub fn handler_registered(d: &Dirs) -> bool {
+    fs::read_to_string(installer_desktop(d))
+        .is_ok_and(|t| desktop::read_key(&t, "Icon").as_deref() == Some(MANAGER_ID))
 }
 
 fn manager_desktop(d: &Dirs) -> PathBuf {
@@ -212,10 +212,11 @@ pub fn remove_manager(d: &Dirs) {
     update_desktop_database(d);
 }
 
-/// `linuxapk setup`: the APK open-with handler, bundle MIME types, defaults.
-pub fn setup(d: &Dirs, handler: &Handler) -> Result<Vec<PathBuf>> {
+/// `linuxapk setup`: the APK open-with handler for `manager` (the
+/// `linuxapk-gui` command line), bundle MIME types, defaults.
+pub fn setup(d: &Dirs, manager: &[String]) -> Result<Vec<PathBuf>> {
     let desk = installer_desktop(d);
-    write_atomic(&desk, desktop::installer_entry(handler)?.as_bytes())?;
+    write_atomic(&desk, desktop::installer_entry(manager)?.as_bytes())?;
     let mime = mime_package(d);
     write_atomic(&mime, desktop::MIME_PACKAGE_XML.as_bytes())?;
     tool("update-mime-database", &[d.data.join("mime").as_os_str()]);
