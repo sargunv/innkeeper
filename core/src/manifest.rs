@@ -12,6 +12,9 @@ use anyhow::{Context, Result, bail};
 
 use crate::{proc, validate};
 
+/// The oldest Android API level a session runs (Android 16; the image is 17).
+pub const SESSION_MIN_SDK: u32 = 36;
+
 /// What we use from `aapt2 dump badging`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Badging {
@@ -92,7 +95,12 @@ pub fn parse_badging(text: &str) -> Badging {
             || line.starts_with("uses-permission-sdk-23:"))
             && let Some(name) = field(line, "name")
         {
-            b.permissions.push(name.to_string());
+            // Requested only up to an old SDK (`maxSdkVersion`): doesn't apply
+            // in the session, which runs a current Android.
+            let max: Option<u32> = field(line, "maxSdkVersion").and_then(|v| v.parse().ok());
+            if max.is_none_or(|m| m >= SESSION_MIN_SDK) {
+                b.permissions.push(name.to_string());
+            }
         } else if let Some(rest) = line.strip_prefix("native-code:") {
             b.native_code = rest
                 .split_whitespace()
@@ -426,7 +434,8 @@ mod tests {
              application-icon-640:'res/dT.xml'\n\
              native-code: 'arm64-v8a' 'x86_64'\n\
              uses-permission: name='android.permission.INTERNET'\n\
-             uses-permission: name='android.permission.CAMERA' maxSdkVersion='28'\n\
+             uses-permission: name='android.permission.CAMERA' maxSdkVersion='40'\n\
+             uses-permission: name='android.permission.GET_ACCOUNTS' maxSdkVersion='22'\n\
              uses-permission-sdk-23: name='android.permission.INTERNET'\n",
         );
         assert_eq!(

@@ -37,7 +37,7 @@ pub fn present(w: &Window) {
     let handler = adw::SwitchRow::builder()
         .title("Open APK Files With Linux.apk")
         .subtitle(handler_subtitle())
-        .active(xdg::handler_registered(&Dirs::from_env()).is_some())
+        .active(xdg::handler_registered(&Dirs::from_env()) == Some(true))
         .build();
     let w2 = w.clone();
     let reverting = Rc::new(Cell::new(false));
@@ -52,11 +52,13 @@ pub fn present(w: &Window) {
             let r = worker::run_quiet(move || ops::set_gui_handler(on)).await;
             row.set_sensitive(true);
             match r {
-                Ok(()) => w.say(if on {
-                    "APK files now open in Linux.apk"
-                } else {
-                    "APK files no longer open in Linux.apk"
-                }),
+                Ok(()) => {
+                    _ = w.say(if on {
+                        "APK files now open in Linux.apk"
+                    } else {
+                        "APK files no longer open in Linux.apk"
+                    })
+                }
                 Err(e) => {
                     w.show_error(Op::Settings, None, &e);
                     reverting.set(true);
@@ -90,7 +92,6 @@ pub fn present(w: &Window) {
             &adw::SwitchRow::builder()
                 .title(title)
                 .subtitle(subtitle)
-                .active(true)
                 .sensitive(false)
                 .build(),
         );

@@ -177,12 +177,18 @@ fn details(
     let progress = gtk::Box::builder()
         .spacing(12)
         .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .vexpand(true)
         .visible(false)
         .build();
     progress.append(&adw::Spinner::new());
     progress.append(&progress_label);
+    // Fixed height, so the page doesn't shift when the button turns into
+    // progress.
     let actions = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .height_request(48)
         .margin_top(18)
         .build();
     actions.append(&button);
@@ -213,7 +219,7 @@ fn details(
     if p.apk_count > 1 {
         size.push_str(&format!(" · bundle of {} APKs", p.apk_count));
     }
-    info.add(&property_row("Download Size", &size));
+    info.add(&property_row("Size", &size));
     let abis = if p.abis.is_empty() {
         "Any (no native code)".to_string()
     } else {
@@ -252,10 +258,9 @@ fn details(
             .use_markup(false)
             .build();
         if s.sensitive {
-            row.set_subtitle("Personal data");
             let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
             icon.add_css_class("warning");
-            icon.set_tooltip_text(Some("Android asks you first"));
+            icon.set_tooltip_text(Some("Personal data: Android asks you first"));
             row.add_suffix(&icon);
         }
         match &more {

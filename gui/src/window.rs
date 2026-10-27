@@ -7,10 +7,10 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linuxapk_core::desktop::MANAGER_ID;
+use linuxapk_core::desktop::{MANAGER_ID, PREFIX};
 use linuxapk_core::ops::{self, Event};
 use linuxapk_core::session::{Session, Status};
-use linuxapk_core::xdg::DesktopApp;
+use linuxapk_core::xdg::{DesktopApp, Dirs};
 
 use crate::errors::{self, Op};
 use crate::{install, worker};
@@ -34,6 +34,9 @@ pub struct Inner {
     session_busy: Cell<bool>,
     polling: Cell<bool>,
     last_status: Cell<Option<Status>>,
+    /// Watches the desktop entries, so installs from the CLI show up.
+    monitor: RefCell<Option<gio::FileMonitor>>,
+    refresh_pending: Cell<bool>,
 }
 
 impl std::ops::Deref for Window {
@@ -159,9 +162,7 @@ impl Window {
         list.add(&apps);
         list.add(&sessions[1].group);
 
-        let stack = gtk::Stack::builder()
-            .transition_type(gtk::StackTransitionType::Crossfade)
-            .build();
+        let stack = gtk::Stack::new();
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&list, Some("list"));
 
@@ -236,6 +237,8 @@ impl Window {
             session_busy: Cell::new(false),
             polling: Cell::new(false),
             last_status: Cell::new(None),
+            monitor: RefCell::default(),
+            refresh_pending: Cell::new(false),
         }));
 
         let open = gio::SimpleAction::new("open", None);
@@ -269,6 +272,7 @@ impl Window {
         });
         w.win.add_controller(drop);
 
+        w.watch_entries();
         w.refresh();
         w.poll_session();
         let weak = Rc::downgrade(&w.0);
@@ -290,9 +294,12 @@ impl Window {
         self.toasts.add_toast(t);
     }
 
-    /// A plain toast; `text` isn't markup.
-    pub fn say(&self, text: &str) {
-        self.toast(adw::Toast::builder().title(text).use_markup(false).build());
+    /// A plain toast; `text` isn't markup. Progress toasts are dismissed
+    /// when their operation ends.
+    pub fn say(&self, text: &str) -> adw::Toast {
+        let t = adw::Toast::builder().title(text).use_markup(false).build();
+        self.toast(t.clone());
+        t
     }
 
     pub fn show_error(&self, op: Op, name: Option<&str>, err: &anyhow::Error) {
@@ -357,6 +364,33 @@ impl Window {
             .cloned()
     }
 
+    fn watch_entries(&self) {
+        let dir = gio::File::for_path(Dirs::from_env().applications());
+        let Ok(m) = dir.monitor_directory(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)
+        else {
+            return;
+        };
+        let weak = Rc::downgrade(&self.0);
+        m.connect_changed(move |_, f, _, _| {
+            let ours = f
+                .basename()
+                .is_some_and(|n| n.to_string_lossy().starts_with(PREFIX));
+            let Some(inner) = weak.upgrade() else { return };
+            if !ours || inner.refresh_pending.replace(true) {
+                return;
+            }
+            // Coalesce the burst of events an install makes.
+            let weak = Rc::downgrade(&inner);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.refresh_pending.set(false);
+                    Window(inner).refresh();
+                }
+            });
+        });
+        *self.monitor.borrow_mut() = Some(m);
+    }
+
     /// Reloads the app list (desktop entries, plus the session's own list if
     /// it is running).
     pub fn refresh(&self) {
@@ -416,11 +450,12 @@ impl Window {
 
     /// Opens an app in its own window (starting the session if needed).
     pub fn launch(&self, pkg: &str, name: &str) {
-        self.say(&format!("Opening {name}…"));
+        let toast = self.say(&format!("Opening {name}…"));
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {
             let p = pkg.clone();
             let r = worker::run(move |rep| ops::run(&p, None, rep), |_| {}).await;
+            toast.dismiss();
             if let Err(e) = r {
                 w.show_error(Op::Open, Some(&name), &e);
             }
@@ -453,15 +488,18 @@ impl Window {
                 return;
             }
             let keep_data = keep.is_active();
-            w.say(&format!("Uninstalling {}…", a.name));
+            let toast = w.say(&format!("Uninstalling {}…", a.name));
             let pkg = a.package.clone();
             let r = worker::run(move |rep| ops::uninstall(&pkg, keep_data, rep), |_| {}).await;
+            toast.dismiss();
             match r {
-                Ok(_) => w.say(&format!(
-                    "{} uninstalled{}",
-                    a.name,
-                    if keep_data { " (data kept)" } else { "" }
-                )),
+                Ok(_) => {
+                    _ = w.say(&format!(
+                        "{} uninstalled{}",
+                        a.name,
+                        if keep_data { " (data kept)" } else { "" }
+                    ))
+                }
                 Err(e) => w.show_error(Op::Uninstall, Some(&a.name), &e),
             }
             w.refresh();
