@@ -286,6 +286,22 @@ Causes:
   iptables wrapper now drops netd's `quota2` rules, which removed a 20 s stall
   from every boot (warm boot 2.6 s). See [sandbox.md](sandbox.md).
 
+## M4 wrap-up cleanup (in progress, 2026-10-27)
+
+- Workflow `linuxapk-cleanup-implement` (run `wf_d6cd8651-125`; the script is
+  under the session's workflows dir) runs these steps from
+  `out/cleanup/design.json`:
+  - S0, R1, then removals R2–R8, then checkpoint R9;
+  - M1 (by-runtime reorg: host/ supervisor/ image/ android/ tests/ tools/), then
+    B1 (build/run split);
+  - A1–A4 (A4 = broker simplification, desktop-parity threat model), then X1
+    (bridge→system-app input; composer pure HWC);
+  - B2, B3, then D1 (docs), I1 (GitHub issues), V1 (clean verify plus restoring
+    the main session).
+- Inputs: `out/cleanup/understand.json` and `design.json`.
+- After it finishes: a council review (GPT-6 Astra, Claude Opus, Grok) of the
+  simplified broker.
+
 ## Security review (sol-loop, 2026-10-27)
 
 Round 1, GPT-6.1 Sol (high effort), on the M4 host boundary (supervisor,
