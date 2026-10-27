@@ -10,6 +10,7 @@
 //! - `audio`: the audio service
 
 pub mod audio;
+pub mod display;
 pub mod log;
 pub mod proto;
 pub mod server;

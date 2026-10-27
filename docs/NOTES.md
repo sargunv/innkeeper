@@ -206,8 +206,9 @@ Causes:
   each display as its own `xdg_toplevel` (`app_id` `dev.linuxapk.<pkg>`).
   Resize, close, focus and input protocol v2 work, and `linuxapk run` launches
   through `dev.linuxapk.LAUNCH`. Display 0 is headless unless
-  `start --single-window`. Next: move the Wayland client into the bridge (CSD
-  for GNOME). See [windowing.md](windowing.md).
+  `start --single-window`. The Wayland client now lives in the host bridge's
+  display service (SSD on KDE, Adwaita CSD elsewhere, e.g. GNOME); the composer
+  sends it dma-buf frames. See [windowing.md](windowing.md).
 - 2026-10-27 (audio): **sound works.** The host bridge `linuxapk-bridge`
   (`bridge/`, Rust: wire/transport/registry core, the audio service, and an
   events API for the display service) plays the HAL's output to PipeWire. Our

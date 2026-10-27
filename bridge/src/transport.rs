@@ -111,6 +111,26 @@ pub fn send(sock: &OwnedFd, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> 
     Ok(())
 }
 
+/// Like [`send`], but fails with EAGAIN instead of waiting for a full
+/// socket buffer (for events: a slow client must not stall the bridge).
+pub fn send_nonblocking(sock: &OwnedFd, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
+    if fds.len() > MAX_FDS {
+        bail!("too many fds");
+    }
+    let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
+    let mut anc = SendAncillaryBuffer::new(&mut space);
+    if !fds.is_empty() && !anc.push(SendAncillaryMessage::ScmRights(fds)) {
+        bail!("fds don't fit");
+    }
+    rustix::net::sendmsg(
+        sock,
+        &[IoSlice::new(bytes)],
+        &mut anc,
+        SendFlags::NOSIGNAL | SendFlags::DONTWAIT,
+    )?;
+    Ok(())
+}
+
 /// Sends `fds` owned by the caller (convenience for replies).
 pub fn send_owned(sock: &OwnedFd, bytes: &[u8], fds: &[OwnedFd]) -> Result<()> {
     let b: Vec<_> = fds.iter().map(|f| f.as_fd()).collect();

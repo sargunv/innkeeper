@@ -16,7 +16,7 @@ pub const HELLO: u16 = 0x0001;
 pub mod service {
     /// Audio output to PipeWire (`audio::proto`, types 0x0100..=0x01ff).
     pub const AUDIO: u32 = 1;
-    /// Reserved for the windowing lane's display service (types
+    /// Host windows for the composer (`display::proto`, types
     /// 0x0200..=0x02ff).
     pub const DISPLAY: u32 = 2;
 }

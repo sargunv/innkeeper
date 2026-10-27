@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use std::sync::atomic::AtomicUsize;
 
 use linuxapk_bridge::audio::{AudioService, Backend, Limits};
+use linuxapk_bridge::display::{DisplayService, Limits as DisplayLimits};
 use linuxapk_bridge::proto::service;
 use linuxapk_bridge::server::{self, Config, Registry};
 use linuxapk_bridge::transport;
@@ -59,6 +60,14 @@ fn main() -> Result<()> {
             streams.clone(),
             peer,
         )))
+    });
+    // Windows for the composer (docs/windowing.md); needs $WAYLAND_DISPLAY.
+    services.register(service::DISPLAY, "display", |peer, events| {
+        Ok(Box::new(DisplayService::new(
+            DisplayLimits::default(),
+            peer,
+            events,
+        )?))
     });
     let cfg = Config {
         allow_uids: allow,

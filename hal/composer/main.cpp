@@ -12,26 +12,46 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "BridgePresenter.h"
 #include "Composer.h"
 #include "Properties.h"
 #include "WaylandPresenter.h"
 #include "linuxapk/log.h"
 
-// Started as root (see the .rc) so it can reach the host's Wayland socket,
-// which only the session's root (the host user) may connect to. Connect
-// first, then become system:graphics.
+// Backends with windows (vendor.linuxapk.hwc.backend):
+//   bridge:  the host bridge's display service (docs/bridge.md) owns the
+//            Wayland connection; falls back to wayland if it is unreachable.
+//   wayland: the composer is the Wayland client itself (needs root to reach
+//            the host socket, which only the session's root may connect to).
+// Connect first, then become system:graphics (plus audio: the bridge socket
+// directory is root:audio 0750, and a reconnect happens after the drop).
 static void connectAndDropPrivileges() {
   using namespace linuxapk::hwc;
-  if (getProperty("vendor.linuxapk.hwc.backend", "headless") == "wayland") {
+  const std::string backend =
+    getProperty("vendor.linuxapk.hwc.backend", "headless");
+  const std::string input =
+    getProperty("vendor.linuxapk.input.socket", "/dev/socket/linuxapk-input");
+  bool connected = false;
+  if (backend == "bridge") {
+    connected = initBridge(
+      getProperty(
+        "vendor.linuxapk.bridge.socket", "/dev/socket/linuxapk/bridge.sock"
+      ),
+      input
+    );
+    if (!connected)
+      LOGW("bridge unavailable; trying the host Wayland socket directly");
+  }
+  if (!connected && (backend == "bridge" || backend == "wayland")) {
     WaylandConnection::init(
       getProperty("vendor.linuxapk.wayland.socket", "/dev/socket/wayland-host"),
-      getProperty("vendor.linuxapk.input.socket", "/dev/socket/linuxapk-input")
+      input
     );
   }
   if (getuid() != 0) return;
-  const gid_t groups[] = {1003};  // graphics
+  const gid_t groups[] = {1003, 1005};  // graphics, audio
   if (
-    setgroups(1, groups) != 0 || setresgid(1000, 1000, 1000) != 0 ||
+    setgroups(2, groups) != 0 || setresgid(1000, 1000, 1000) != 0 ||
     setresuid(1000, 1000, 1000) != 0
   ) {
     LOGW("could not drop to system:graphics: %s", strerror(errno));

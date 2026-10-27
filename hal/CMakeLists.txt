@@ -105,6 +105,7 @@ if(ANDROID)
   add_executable(
     composer
     composer/WaylandPresenter.cpp
+    composer/BridgePresenter.cpp
     composer/InputServer.cpp
     composer/main.cpp
     composer/Composer.cpp

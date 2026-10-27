@@ -191,7 +191,10 @@ prepare() {
 
 start() {
   local fg=0 wayland=""
-  hwc_backend=wayland wm_mode=per-app
+  # Windows go through the bridge's display service (the composer falls back
+  # to the host Wayland socket itself); LINUXAPK_HWC_BACKEND=wayland skips
+  # the bridge.
+  hwc_backend=${LINUXAPK_HWC_BACKEND:-bridge} wm_mode=per-app
   for a in "$@"; do
     case $a in
       -f) fg=1 ;;
@@ -200,7 +203,7 @@ start() {
       *) die "unknown start option: $a" ;;
     esac
   done
-  if [[ $hwc_backend == wayland ]]; then
+  if [[ $hwc_backend != headless ]]; then
     # Only the host compositor's socket file goes in (as
     # /dev/socket/wayland-host), never all of $XDG_RUNTIME_DIR.
     local wd=${WAYLAND_DISPLAY:-$(systemctl --user show-environment | sed -n 's/^WAYLAND_DISPLAY=//p')}
@@ -269,7 +272,8 @@ start_bridge() {
   local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)" --allow-uid $((base + 999))
   --allow-uid $((base + 1040)) ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
   while :; do
-    "$bridge" "${args[@]}" </dev/null >>"$run/bridge.log" 2>&1
+    # The display service connects to the host compositor (windows, input).
+    WAYLAND_DISPLAY=${LINUXAPK_WAYLAND:-} "$bridge" "${args[@]}" </dev/null >>"$run/bridge.log" 2>&1
     echo "linuxapk-session: bridge exited ($?); restarting" >>"$run/bridge.log"
     sleep 1
   done &

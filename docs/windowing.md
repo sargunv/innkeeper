@@ -213,66 +213,46 @@ back to `am start` on display 0 if no receiver answers (an older system app).
 - **Overlays** (`TYPE_APPLICATION_OVERLAY`, chat heads): they render inside the
   display of the app that owns them, which is acceptable for now. A separate
   always-on-top surface is a later feature.
-- **Fullscreen and immersive:** map an app's immersive or fullscreen request
-  (system bars hidden) to `xdg_toplevel.set_fullscreen`, plus F11 and a window
-  menu toggle in the host-side window. Not implemented.
+- **Fullscreen and immersive:** F11 toggles `xdg_toplevel.set_fullscreen` in the
+  bridge (the key never reaches Android), and the display follows the new size
+  like any resize. Mapping an app's own immersive or fullscreen request (system
+  bars hidden) to fullscreen, and a window-menu entry, are next.
 
-## Moving the Wayland client to the host bridge
+## Windows through the host bridge (default)
 
-The composer is a Bionic process, so it can't use libdecor, GTK or host fonts.
-Compositors without xdg-decoration (GNOME) would therefore show our windows
-without a title bar. Other host integrations are much easier in Rust on the host
-too: cursor-shape, tablet, pointer constraints, text-input-v3, clipboard and
-drag-and-drop.
+The composer is a Bionic process, so it can't use libdecor, GTK or host fonts,
+and compositors without xdg-decoration (GNOME) would show its windows without a
+title bar. So the Wayland client lives in the Rust host bridge
+(`linuxapk-bridge`, its `display` service; protocol in
+[bridge.md](bridge.md#display-service-id-2)), and the composer talks to the
+bridge instead of the compositor (`vendor.linuxapk.hwc.backend=bridge`, the
+session default; `composer/BridgePresenter.cpp`):
 
-The Wayland client therefore moves into the host bridge (`bridge/`,
-`linuxapk-bridge`) as its `display` service (id 2). The composer keeps the HWC
-and virtual-display side and the window registry above, behind the same
-`Presenter` seam, and talks to the bridge instead of the compositor. The window
-manager protocol (`window_new` … `window_gone`, display ids on input) doesn't
-change, so the system app is untouched.
-
-**Input path (a deviation, on purpose):**
-
-- **Bridge to composer:** the bridge sends seat input to the composer as
-  protocol v2 lines (an `INPUT` event carrying the line).
-- **Composer to app:** the composer relays them on `/dev/socket/linuxapk-input`
-  as today.
-- **Why:** the composer is the one place that knows which HWC display is which
-  window, the system app keeps its 0660 `system:input` socket, and the bridge
-  needs no extra allowed uid. Relaying costs one local hop.
-
-**Messages** (bridge protocol v1 framing, types `0x02xx`):
-
-- **Requests** (composer to bridge), each with a reply:
-  - `WINDOW_CREATE`: window id, logical size, minimum size, flags, `app_id`,
-    title.
-  - `WINDOW_DESTROY`, `WINDOW_SET_TITLE`, `WINDOW_SET_MIN_SIZE`,
-    `WINDOW_ACTIVATE` and, later, `WINDOW_SET_FULLSCREEN`.
-  - `BUFFER_ADD`: buffer id, window, width, height, DRM fourcc, modifier, stride
-    and offset, plus the dma-buf fd. Sent once per pool buffer; the bridge
-    `fstat`s and `lseek`s the fd to check its size before importing it.
-  - `BUFFER_REMOVE`.
-  - `FRAME`: window, buffer id, damage rect, plus an optional acquire-fence fd.
-- **Events** (bridge to composer, tag 0):
-  - `CONFIGURE`: window, logical size, scale×120.
-  - `CLOSE`.
-  - `BUFFER_RELEASED`: mirrors `wl_buffer.release`.
-  - `FRAME_DONE`: the frame callback, for pacing.
-  - `INPUT`: one v2 line.
-
-**Bridge side** (Rust, smithay-client-toolkit):
-
-- one `xdg_toplevel` per window, with linux-dmabuf import and a wl_shm fallback;
-- server-side decorations when xdg-decoration is offered, else client-side
-  decorations (an adwaita-style frame with title, buttons, move and resize);
-- viewporter and fractional scale, xdg-activation;
-- all of `wl_seat`.
-
-**Composer side:** the copy into its udmabuf pool stays as it is. Only "attach
-and commit" becomes `FRAME`, and "wait for `wl_buffer.release`" becomes
-`BUFFER_RELEASED`. Composer-side zero copy (the sink's own buffers) is a later
-step.
+- **Composer:** HWC, virtual displays and the window registry, as above. On a
+  claimed display it sends `WINDOW_CREATE`; each frame is copied into one of
+  three udmabufs per window, added once (`BUFFER_ADD` with the dma-buf fd), and
+  shown with `FRAME`; `RELEASE` hands the buffer back, the way
+  `wl_buffer.release` did. RGBA frames go as XBGR8888 and BGRA as XRGB8888, so
+  the copy is a plain `memcpy`. If the bridge restarts, the composer reconnects
+  and asks for its windows again. If the bridge is unreachable at boot, it falls
+  back to being the Wayland client itself (`backend=wayland`, still available
+  with `LINUXAPK_HWC_BACKEND=wayland`).
+- **Bridge:** one host Wayland connection per composer connection; one
+  `xdg_toplevel` per window with linux-dmabuf buffers, `wp_viewporter`,
+  fractional scale and xdg-activation. Decorations are server-side where
+  xdg-decoration is offered (KDE) and otherwise an Adwaita-style client-side
+  frame (`sctk-adwaita`: title, minimize, maximize, close, move, resize, window
+  menu). The seat becomes protocol v2 lines.
+- **Input path (a deviation, on purpose):** the bridge sends the lines to the
+  composer (`INPUT` events), and the composer relays them on
+  `/dev/socket/linuxapk-input` as before. The composer is the one place that
+  knows which HWC display is which window, the system app keeps its 0660
+  `system:input` socket and stays unchanged, and the bridge needs no extra
+  allowed uid. Relaying costs one local hop.
+- The composer no longer needs the host Wayland socket or root for this path;
+  its `.rc` still starts it as root for the fallback, and it keeps the `audio`
+  group after dropping to `system`, for the bridge socket directory
+  (`root:audio 0750`).
 
 ## Testing
 
@@ -295,8 +275,9 @@ step.
   (`LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.wm.WindowProbeActivity`)
   shows and logs the window's insets over a card with 24 dp elevation.
 - Without a desktop to spare (or with the user's screen locked), run a nested
-  compositor and point the session at it. A locked host session swallows input
-  and discards frames.
+  compositor and point the session at it (`WAYLAND_DISPLAY`, a name or an
+  absolute socket path, when starting the session). A locked host session
+  swallows input and discards frames.
   ```sh
   systemd-run --user -p MemoryMax=2G -- dbus-run-session -- kwin_wayland \
     --virtual --no-lockscreen --socket lapk-win --width 2560 --height 1440 \
@@ -307,7 +288,21 @@ step.
   `org_kde_kwin_fake_input` gives real seat input: the client needs a `.desktop`
   file with `X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input`.
 
-### Proof (2026-10-27, nested KWin 6.7 on this machine)
+### Proof (2026-10-27, nested KWin 6.7 and weston 15 on this machine)
+
+Through the bridge (the default since the bridge move):
+
+- The same two-window input test in nested KWin gave the same results (9 in
+  Calculator, Wikipedia advanced), with server-side decorations.
+- Under weston (headless, in podman; weston has no xdg-decoration, like GNOME)
+  Calculator and Wikipedia got Adwaita-style client-side title bars. With
+  `LINUXAPK_BRIDGE_CSD=1` in nested KWin, a fake-input click on the frame's
+  close button sent `CLOSE`.
+- weston in podman needs `--security-opt label=disable`: with SELinux labels,
+  `container_t` may not write the host's memfds, and weston fails the
+  decorations' `wl_shm_pool.resize` (`failed mremap`).
+
+Direct composer Wayland client (before the bridge move):
 
 - **Two windows at once:** OpenCalc and Wikipedia, each a KDE window with
   server-side decorations, title "Calculator" / "Wikipedia" and `app_id`

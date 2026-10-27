@@ -177,7 +177,7 @@ fn real_main() -> Result<ExitCode> {
 
 /// Leaves a booted session showing its window, for whoever is watching.
 fn finish_with_window(s: &Session) {
-    if s.pid().is_some() && s.backend() == "wayland" {
+    if s.pid().is_some() && s.backend() != "headless" {
         return;
     }
     eprintln!("compat: restarting the session with its window");

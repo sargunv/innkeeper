@@ -45,6 +45,7 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
 | `proto`     | Protocol versions, `HELLO`, service ids                                                          |
 | `server`    | Accept loop, HELLO, the `Service` trait, `Registry`, client and uid caps                         |
 | `audio`     | The audio service: `proto` (its messages), `ring`, `stream` (threads), `pulse` (PipeWire output) |
+| `display`   | The display service: `proto` (its messages), `wl` (the Wayland side: windows, decorations, seat) |
 
 To add a service (the windowing lane's display service is id 2, types
 `0x0200..=0x02ff`):
@@ -101,10 +102,14 @@ reply               type 0x8000, the request's tag, i32 status (0 or -errno), bo
 
 - Every request gets exactly one reply, in order. A reply may carry fds
   (`SCM_RIGHTS`, at most 4). Services may also send events (types
-  `0x4000..=0x7fff`, tag 0) at any time; clients that don't expect any can drop
-  them.
-- No request in v1 carries fds. If one arrives with fds, the bridge closes them
-  and replies `-EPROTO`.
+  `0x4000..=0x7fff`, tag 0) at any time (`server::Events`, passed to the
+  factory); clients that don't expect any can drop them. `Events::try_send`
+  never blocks (a client that doesn't read its socket loses those events), and
+  `Events::shutdown` ends the connection, so the client sees EOF and can
+  reconnect.
+- Requests carry fds only where their service says so (display: `BUFFER_ADD`,
+  `FRAME`). Any other request that arrives with fds gets them closed and a
+  `-EPROTO` reply.
 - **Errors:**
   - A malformed body gets `-EINVAL`, and an unknown type gets `-ENOSYS`. Either
     way the connection stays open.
@@ -175,3 +180,52 @@ sides:
   `state = 2` and signals space, so a blocked writer wakes up.
 - The client never sees the bridge's view of `read_pos` except through this
   header, which the bridge rewrites and never reads back.
+
+### Display service (id 2)
+
+Host windows for the composer (the Android HWC HAL), which is the only client:
+it connects as `system` from inside the session. The composer keeps the HWC and
+virtual-display side and the window registry ([windowing.md](windowing.md)); the
+bridge owns the Wayland connection (one per client connection, on its own thread
+with a calloop loop; `bridge/src/display/wl.rs`), the toplevels, their
+decorations and the seat. Windows are named by the Android display id they show;
+buffers by ids the composer picks. The bridge needs `$WAYLAND_DISPLAY`, which
+the session launcher sets to the host socket.
+
+| Type     | Message             | Body                                                                                                                                                                               | Notes                                                                                                                                         |
+| -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0x0201` | WINDOW_CREATE       | `u32 window`, `u32 width`, `u32 height` (logical, 1–16384), `u32 min_width`, `u32 min_height` (0–16384, 0: 240x160), name `app_id`, name `title`                                   | Replies once the toplevel exists; `-EBUSY` for a duplicate id or over the limit                                                               |
+| `0x0202` | WINDOW_DESTROY      | `u32 window`                                                                                                                                                                       | Drops the window's buffers too                                                                                                                |
+| `0x0203` | WINDOW_SET_TITLE    | `u32 window`, name                                                                                                                                                                 |                                                                                                                                               |
+| `0x0204` | WINDOW_SET_MIN_SIZE | `u32 window`, `u32 width`, `u32 height` (logical)                                                                                                                                  |                                                                                                                                               |
+| `0x0205` | WINDOW_ACTIVATE     | `u32 window`                                                                                                                                                                       | `xdg_activation_v1` with the newest input serial                                                                                              |
+| `0x0206` | BUFFER_ADD          | `u32 buffer`, `u32 window`, `u32 width`, `u32 height`, `u32 fourcc` (XBGR/ABGR/XRGB/ARGB8888), `u32 stride` (≥ 4×width), `u32 offset`, `u64 modifier` (0, LINEAR); fd: the dma-buf | The fd's size (`lseek`) must cover `offset + stride × height`; the compositor imports it through linux-dmabuf                                 |
+| `0x0207` | BUFFER_REMOVE       | `u32 buffer`                                                                                                                                                                       |                                                                                                                                               |
+| `0x0208` | FRAME               | `u32 window`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's until RELEASE; a frame for a window that isn't configured yet, or a buffer not imported yet, is released at once |
+
+| Event    | Message   | Body                                                                                   |
+| -------- | --------- | -------------------------------------------------------------------------------------- |
+| `0x4201` | CONFIGURE | `u32 window`, `u32 width`, `u32 height` (logical), `u32 scale×120`                     |
+| `0x4202` | CLOSE     | `u32 window` (the user closed it: title bar button or compositor)                      |
+| `0x4203` | RELEASE   | `u32 buffer` (mirrors `wl_buffer.release`)                                             |
+| `0x4204` | INPUT     | `u16 len` + one input protocol v2 line (≤ 400 bytes, [hal-display.md](hal-display.md)) |
+
+- **Decorations:** server-side through xdg-decoration where the compositor
+  offers it (KDE); else client-side, an Adwaita-style frame from `sctk-adwaita`
+  with title, minimize, maximize, close, move, resize and the window menu
+  (GNOME, weston). `LINUXAPK_BRIDGE_CSD=1` forces the client-side frame for
+  testing.
+- **Frames:** each buffer is shown through `wp_viewporter` at the window's
+  logical size (fractional scale through `wp_fractional_scale_v1`); input
+  coordinates map from surface units to the shown buffer's pixels.
+- **Input:** the bridge turns `wl_pointer`, `wl_keyboard` and `wl_touch` into
+  protocol v2 lines with the window id on the enter lines; pointer events on the
+  client-side frame drive the frame instead. The composer relays the lines on
+  `/dev/socket/linuxapk-input`, so the Linux.apk System app is unchanged.
+- **Limits** per connection: 32 windows, 128 buffers. Unknown windows or buffers
+  get `-ENOENT`.
+- **Compositor gone:** the service shuts the client connection; the composer
+  reconnects every second and asks for its windows again (its buffers are
+  re-added with the next frame).
+- **Test:** `cargo run -p linuxapk-bridge --example window -- SOCKET` opens a
+  window with a udmabuf pool the way the composer does and prints the events.

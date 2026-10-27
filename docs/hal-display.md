@@ -153,8 +153,12 @@ so frame dumps keep working.
 
 ## Wayland backend (`composer/WaylandPresenter.cpp`, M1)
 
-Set `vendor.linuxapk.hwc.backend=wayland` to show displays as windows on the
-host compositor:
+Set `vendor.linuxapk.hwc.backend=wayland` to have the composer itself show
+displays as windows on the host compositor. The session default is `bridge`: the
+same windows, but the host bridge's display service is the Wayland client
+(`composer/BridgePresenter.cpp`, [windowing.md](windowing.md), and
+[bridge.md](bridge.md)); the composer falls back to `wayland` if the bridge is
+unreachable. Either way:
 
 - **Per-app mode** (default, `vendor.linuxapk.wm.mode` unset or `per-app`):
   display 0 stays headless, and each virtual display the window manager requests

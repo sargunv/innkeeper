@@ -81,6 +81,27 @@ impl Events {
         }
         transport::send(&self.sock, &w.0, fds)
     }
+
+    /// Like [`send`](Self::send), but fails instead of waiting when the
+    /// client's socket buffer is full: a client that doesn't read loses
+    /// events rather than stalling the service.
+    pub fn try_send(&self, ty: u16, body: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
+        if !(wire::EVENT_MIN..=wire::EVENT_MAX).contains(&ty) {
+            bail!("event type {ty:#06x} outside the event range");
+        }
+        let mut w = wire::Writer::message(ty, 0);
+        w.0.extend_from_slice(body);
+        if w.0.len() > MAX_MSG {
+            bail!("event too long ({} bytes)", w.0.len());
+        }
+        transport::send_nonblocking(&self.sock, &w.0, fds)
+    }
+
+    /// Ends the connection (the client sees EOF and may reconnect), e.g. when
+    /// the service's backend went away.
+    pub fn shutdown(&self) {
+        let _ = rustix::net::shutdown(&*self.sock, rustix::net::Shutdown::Both);
+    }
 }
 
 /// A service bound to one connection. `handle` gets every request after

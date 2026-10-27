@@ -12,6 +12,7 @@
 #include "Presenter.h"
 #include "Properties.h"
 #ifdef LINUXAPK_HWC_WAYLAND
+#include "BridgePresenter.h"
 #include "WaylandPresenter.h"
 #endif
 #include "linuxapk/log.h"
@@ -128,8 +129,13 @@ std::unique_ptr<Presenter> createPresenter(
 ) {
   std::string backend = getProperty("vendor.linuxapk.hwc.backend", "headless");
 #ifdef LINUXAPK_HWC_WAYLAND
-  if (backend == "wayland") {
-    setPrimaryDisplaySize(width, height);
+  if (backend == "bridge" || backend == "wayland") {
+    const bool bridge = bridgeConnected();
+    if (bridge) {
+      bridgeSetPrimaryDisplaySize(width, height);
+    } else {
+      setPrimaryDisplaySize(width, height);
+    }
     if (!singleWindowMode()) {
       LOGI(
         "display %lld: per-app windows (vendor.linuxapk.wm.mode), no window",
@@ -137,11 +143,11 @@ std::unique_ptr<Presenter> createPresenter(
       );
       return makeHeadless();
     }
-    if (
-      auto p = createWaylandPresenter(displayId, width, height, makeHeadless())
-    )
-      return p;
-    LOGW("wayland backend unavailable; using headless");
+    auto p =
+      bridge ? createBridgePresenter(displayId, width, height, makeHeadless())
+             : createWaylandPresenter(displayId, width, height, makeHeadless());
+    if (p) return p;
+    LOGW("no window backend available; using headless");
     return makeHeadless();
   }
 #endif
@@ -154,7 +160,14 @@ std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
 #ifdef LINUXAPK_HWC_WAYLAND
-  if (getProperty("vendor.linuxapk.hwc.backend", "headless") == "wayland") {
+  if (bridgeConnected()) {
+    if (
+      auto p =
+        createBridgeVirtualPresenter(displayId, width, height, makeHeadless())
+    ) {
+      return p;
+    }
+  } else if (WaylandConnection::get()) {
     if (
       auto p =
         createWaylandVirtualPresenter(displayId, width, height, makeHeadless())
