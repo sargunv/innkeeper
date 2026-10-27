@@ -239,6 +239,14 @@ build_test() {
   "$cc" -O2 -Wall -I"$t" -o "$t/vkdriver_test" "$here/test/vkdriver_test.c" -ldl
   "$cc" -O2 -Wall -o "$t/gles_test" "$here/test/gles_test.c" -lEGL -lGLESv3
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$t/libpropshim.so" "$here/test/propshim.c" -ldl
+  # Integration helper for --anb-hal, from the hal lane's allocator sources.
+  local hal=${HAL_SRC:-$repo/hal}
+  [[ -f $hal/common/src/buffer_alloc.cpp ]] || hal=$repo-wt/hal/hal
+  if [[ -f $hal/common/src/buffer_alloc.cpp ]]; then
+    "$cc++" -O2 -std=c++20 -shared -fPIC -fvisibility=hidden -static-libstdc++ \
+      -I"$hal/common/include" -o "$t/libhalbuf.so" "$here/test/halbuf.cpp" \
+      "$hal"/common/src/{buffer_alloc,layout,native_handle}.cpp -llog
+  fi
   # Test-only vendor layer (run-bionic.sh -v): the mock IMapper v5.
   mkdir -p "$build/test-vendor/lib64/hw"
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$build/test-vendor/lib64/hw/mapper.lapktest.so" "$here/test/mock_mapper.c"

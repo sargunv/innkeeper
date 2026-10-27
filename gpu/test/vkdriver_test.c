@@ -11,6 +11,8 @@
  * host-visible buffer and check the result.
  * --udmabuf: import a memfd/udmabuf dma-buf as VkDeviceMemory, write it from a
  *   compute shader, check through the memfd mapping.
+ * --anb-hal: same, but the buffer comes from the hal lane's allocator code and
+ *   is imported through the real mapper.linuxapk.so (libhalbuf.so).
  * --anb: create a VkImage from a gralloc-style native handle
  *   (VkNativeBufferANDROID) backed by udmabuf, as libvulkan's swapchain does;
  *   requires the mock mapper (MESA_GRALLOC_MAPPER_SUFFIX=lapktest).
@@ -520,33 +522,54 @@ static int test_udmabuf(void)
    return bad != 0;
 }
 
-static int test_anb(void)
+/* --anb-hal: buffer from the hal lane's allocator, imported by mapper.linuxapk.so. */
+static const native_handle_t *hal_buffer(int width, int height, size_t *stride, size_t *size,
+                                         void **map)
 {
-   const int width = 100, height = 64, stride_px = 128; /* padded rows */
-   const size_t stride = stride_px * 4, size = (stride * height + 4095) & ~4095ul;
-   int memfd;
-   void *map;
-   int dmabuf = make_udmabuf(size, &memfd, &map);
-   if (dmabuf < 0)
-      return 1;
-   memset(map, 0xab, size);
+   void *so = dlopen("/data/gputest/libhalbuf.so", RTLD_NOW);
+   int (*alloc)(int, int, const native_handle_t **, int *, size_t *, void **, size_t *) =
+      so ? dlsym(so, "halbuf_alloc") : NULL;
+   const native_handle_t *h = NULL;
+   int stride_px;
+   if (!alloc || alloc(width, height, &h, &stride_px, stride, map, size) != 0) {
+      printf("FAIL: halbuf: %s\n", so ? "allocation" : dlerror());
+      exit(1);
+   }
+   return h;
+}
 
-   /* gralloc-style handle: fds [dmabuf], ints [magic, w, h, stride_bytes, fourcc] (mock_mapper.c) */
-   native_handle_t *h = calloc(1, sizeof(*h) + 6 * sizeof(int));
-   h->version = sizeof(native_handle_t);
-   h->numFds = 1;
-   h->numInts = 5;
-   h->data[0] = dmabuf;
-   h->data[1] = 0x4c41504b;
-   h->data[2] = width;
-   h->data[3] = height;
-   h->data[4] = stride;
-   h->data[5] = 0x34324241; /* DRM_FORMAT_ABGR8888 = R8G8B8A8 in memory */
+static int test_anb(bool hal)
+{
+   const int width = 100, height = 64;
+   size_t stride = 128 * 4, size = (stride * height + 4095) & ~4095ul; /* padded rows */
+   void *map;
+   const native_handle_t *h;
+   if (hal) {
+      h = hal_buffer(width, height, &stride, &size, &map);
+   } else {
+      int memfd;
+      int dmabuf = make_udmabuf(size, &memfd, &map);
+      if (dmabuf < 0)
+         return 1;
+      /* gralloc-style handle: fds [dmabuf], ints [magic, w, h, stride_bytes, fourcc] (mock_mapper.c) */
+      native_handle_t *mh = calloc(1, sizeof(*mh) + 6 * sizeof(int));
+      mh->version = sizeof(native_handle_t);
+      mh->numFds = 1;
+      mh->numInts = 5;
+      mh->data[0] = dmabuf;
+      mh->data[1] = 0x4c41504b;
+      mh->data[2] = width;
+      mh->data[3] = height;
+      mh->data[4] = stride;
+      mh->data[5] = 0x34324241; /* DRM_FORMAT_ABGR8888 = R8G8B8A8 in memory */
+      h = mh;
+   }
+   memset(map, 0xab, size);
 
    VkNativeBufferANDROID nb = {
       .sType = VK_STRUCTURE_TYPE_NATIVE_BUFFER_ANDROID,
       .handle = h,
-      /* Deliberately wrong (the real row pitch is 128 px): only the mapper's
+      /* Deliberately wrong (the real row pitch is wider): only the mapper's
        * PLANE_LAYOUTS metadata has the truth, so this passes only if the
        * driver asked the IMapper rather than guessing from the ANB. */
       .stride = width,
@@ -642,7 +665,7 @@ static int test_anb(void)
 int main(int argc, char **argv)
 {
    const char *hal = "vulkan.radv.so"; /* bare name, as libvulkan does */
-   bool loader = false, udmabuf = false, anb = false;
+   bool loader = false, udmabuf = false, anb = false, anb_hal = false;
    for (int i = 1; i < argc; i++) {
       if (!strcmp(argv[i], "--hal") && i + 1 < argc)
          hal = argv[++i];
@@ -652,13 +675,17 @@ int main(int argc, char **argv)
          udmabuf = true;
       else if (!strcmp(argv[i], "--anb"))
          anb = true;
+      else if (!strcmp(argv[i], "--anb-hal"))
+         anb_hal = true;
    }
    setup_device(loader ? open_loader() : open_hal(hal));
    int fails = test_compute();
    if (udmabuf)
       fails += test_udmabuf();
    if (anb)
-      fails += test_anb();
+      fails += test_anb(false);
+   if (anb_hal)
+      fails += test_anb(true);
    printf("%s\n", fails ? "SOME TESTS FAILED" : "ALL PASSED");
    return fails != 0;
 }
