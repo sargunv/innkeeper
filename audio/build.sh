@@ -29,24 +29,28 @@ cflags=(-O2 -g -Wall -Wextra -Werror -std=c17 -fPIC -I"$here/third_party/aosp/in
   "$here/tinyalsa/pcm.c" "$here/tinyalsa/mixer.c" "$here/tinyalsa/bridge_client.c" \
   "$here/tinyalsa/internal.c" -llog
 "$cc" "${cflags[@]}" -fPIE -pie -o "$build/linuxapk-tone" "$here/tests/tone.c" -laaudio -lm
-# Links against an image's libalsautilsv2 (the AIDL HAL's APEX ships one;
-# point ALSAUTILS_DIR at that lib64 directory). Skipped if there's none.
-image_apex=$("$repo/session/linuxapk-session" image 2>/dev/null | sed -n 's/^apex=//p' || true)
-alsautils=${ALSAUTILS_DIR:-$image_apex/com.android.hardware.audio/lib64}
+# The image's own libtinyalsav2.so, in the AIDL audio HAL's APEX: ours
+# replaces it, so it must export everything the image's does.
+apex=$("$repo/session/linuxapk-session" image | sed -n 's/^apex=//p')
+image_lib=$apex/com.android.hardware.audio/lib64
+[[ -f $image_lib/libtinyalsav2.so ]] || {
+  echo "no $image_lib/libtinyalsav2.so (run session/linuxapk-session prepare)" >&2
+  exit 1
+}
+missing=$(comm -23 \
+  <("$bin/llvm-nm" -D --defined-only "$image_lib/libtinyalsav2.so" | awk '$2 == "T" {print $3}' | sort -u) \
+  <("$bin/llvm-nm" -D --defined-only "$build/libtinyalsav2.so" | awk '$2 == "T" {print $3}' | sort -u))
+if [[ -n $missing ]]; then
+  echo "libtinyalsav2.so lacks image symbols:" "$missing" >&2
+  exit 1
+fi
+
+# Links against the image's libalsautilsv2 (from the same APEX, or
+# ALSAUTILS_DIR). Skipped if there's none.
+alsautils=${ALSAUTILS_DIR:-$image_lib}
 if [[ -f $alsautils/libalsautilsv2.so ]]; then
   "$cc" "${cflags[@]}" -fPIE -pie -L"$alsautils" -Wl,--allow-shlib-undefined \
     -o "$build/alsa_proxy_test" "$here/tests/alsa_proxy_test.c" -lalsautilsv2 -lm
-fi
-
-# Every symbol the image's libtinyalsav2.so exports must exist in ours.
-if [[ -f $out/img/vendor/lib64/libtinyalsav2.so ]]; then
-  missing=$(comm -23 \
-    <("$bin/llvm-nm" -D --defined-only "$out/img/vendor/lib64/libtinyalsav2.so" | awk '$2 == "T" {print $3}' | sort -u) \
-    <("$bin/llvm-nm" -D --defined-only "$build/libtinyalsav2.so" | awk '$2 == "T" {print $3}' | sort -u))
-  if [[ -n $missing ]]; then
-    echo "libtinyalsav2.so lacks image symbols:" "$missing" >&2
-    exit 1
-  fi
 fi
 
 ovl=$out/vendor-overlay
