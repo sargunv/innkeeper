@@ -122,7 +122,8 @@ Causes:
   `docs/cli.md`. Instance `cli`.
 - integ (M3): bridge/system-app channel (dark mode, accent, time zone, locale),
   notifications, clipboard, opening URLs/Custom Tabs, MPRIS. Instance `integ`.
-- gui: the GTK4/libadwaita manager app on a shared `cli` core. Instance `gui`.
+- gui: the GTK4/libadwaita manager app (`gui/`) on the shared `core/` library.
+  Docs: `docs/gui.md`. Instance `gui`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
@@ -211,13 +212,13 @@ Causes:
   the image lane, then our own AIDL stream for < 50 ms. See [audio.md](audio.md)
   and [bridge.md](bridge.md).
 
-## Backlog (unassigned)
+- 2026-10-27 (gui): **manager app.** `linuxapk-gui` (GTK 4/libadwaita) on
+  `linuxapk-core`, split out of `cli/`, installs APKs from a confirmation page
+  (drop, file chooser, or "open with"; `linuxapk setup` now registers it), and
+  lists, opens and uninstalls apps, with session status and settings. Proven in
+  nested KWin. See [gui.md](gui.md).
 
-- **Manager app (user request, 2026-10-27):** a GUI like Gear Lever, built in
-  Rust with GTK4/libadwaita on top of a shared library split out of `cli/`.
-  Drag-and-drop install, installed-apps list, uninstall, session status and
-  settings (growing with M3). Starts after the windowing control interface
-  lands.
+## Backlog (unassigned)
 
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger

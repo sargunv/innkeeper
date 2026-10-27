@@ -3,7 +3,9 @@
 `linuxapk` (Rust, `cli/`) is the user-facing host command. It installs Android
 apps into the session and gives them desktop entries and icons, launches them,
 and wraps the session launcher. It runs on the host (glibc) and drives Android
-only through `session/linuxapk-session exec`.
+only through `session/linuxapk-session exec`. The logic lives in the
+`linuxapk-core` library (`core/`), which the GUI manager ([gui.md](gui.md))
+shares; `cli/` is the command line on top.
 
 ## Usage
 
@@ -15,13 +17,14 @@ linuxapk run org.wikipedia https://en.wikipedia.org/wiki/Linux
 linuxapk list                              # user-installed apps
 linuxapk uninstall org.wikipedia [--keep-data]
 linuxapk session start [--headless] | stop | status
-linuxapk setup [--remove]                  # double-click APKs to install them
+linuxapk setup [--remove]                  # double-click APKs to install them (in the GUI if installed)
 ```
 
 After `install`, the app is in the desktop's app menu ("Calculator", with its
 own icon). Its custom URL schemes open in it: `xdg-open wikipedia://…` launches
 Wikipedia. `linuxapk setup` registers an "open with" handler for APK files and
-bundles, so double-clicking one in Dolphin installs it and shows the progress as
+bundles. Double-clicking one in Dolphin opens the GUI's install page if
+`linuxapk-gui` is installed, else installs it with the progress shown as
 notifications.
 
 `install`, `run`, `uninstall` and `list` start the session if it isn't running
@@ -82,6 +85,7 @@ Categories=Utility;
 MimeType=x-scheme-handler/wikipedia;
 Keywords=Android;
 X-LinuxApk-Package=org.wikipedia
+X-LinuxApk-Version=2.7.50        # versionName, if it is a safe label
 X-LinuxApk-Web-Hosts=*.wikipedia.org;
 ```
 
@@ -108,13 +112,15 @@ keep using its session.
   `cmd package uninstall [-k]`, then removes the entry and every
   `hicolor/*/apps/dev.linuxapk.<pkg>.png`.
 - **`list`** prints the user packages with the `Name` of their entry.
-- **`setup`** writes `dev.linuxapk.installer.desktop`
-  (`Exec=… install --notify %f`, `NoDisplay`) for
+- **`setup`** writes `dev.linuxapk.installer.desktop` (`NoDisplay`) for
   `application/vnd.android.package-archive` plus three types it defines in
   `~/.local/share/mime/packages/dev.linuxapk.xml`: `application/x-android-apks`
   (`*.apks`), `-xapk` and `-apkm`. It then runs `update-mime-database` and
-  `xdg-mime default`. `setup --remove` deletes both files and drops the handler
-  from `mimeapps.list`.
+  `xdg-mime default`. The entry runs `linuxapk-gui %f` if the GUI is installed
+  next to the CLI or on `PATH` (and `setup` then adds the GUI's app-menu entry,
+  see [gui.md](gui.md)), else `linuxapk install --notify %f`. `setup --remove`
+  deletes these files (and the GUI's menu entry) and drops the handler from
+  `mimeapps.list`.
 
 ## Safety
 
@@ -142,8 +148,8 @@ APKs, and URIs passed to `run`, are untrusted input.
 
 ## Tests
 
-- `cargo test -p linuxapk` covers desktop entry generation and escaping, Exec
-  quoting, package, scheme, label, locale and URI validation, badging and
+- `cargo test -p linuxapk-core` covers desktop entry generation and escaping,
+  Exec quoting, package, scheme, label, locale and URI validation, badging and
   xmltree parsing, bundle member selection and ABI filtering, `mimeapps.list`
   editing, and the icon and entry files in a temp `XDG` tree. Corpus fixtures
   (Wikipedia, OpenCalc, Thunderbird, Shattered Pixel Dungeon) are read by path
