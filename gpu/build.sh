@@ -218,7 +218,12 @@ check_elf() {
       echo "check_elf: $f: disallowed DT_NEEDED $n" >&2; bad=1
     fi
   done
-  echo "check_elf: $(basename "$f") NEEDED: $(echo $needed)"
+  # A HAL module should export HMI and nothing else (no static LLVM/libc++).
+  local exports; exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u)
+  if [[ $exports != HMI ]]; then
+    echo "check_elf: $f exports $(echo "$exports" | wc -l) symbols, expected only HMI" >&2; bad=1
+  fi
+  echo "check_elf: $(basename "$f") NEEDED: $(echo $needed); exports: $(echo $exports | cut -c1-80)"
   return $bad
 }
 
