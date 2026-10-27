@@ -37,8 +37,7 @@ class ComposerClient::Results {
 
 ComposerClient::ComposerClient() {
   mNextVirtualDisplay = kFirstVirtualDisplay;
-  // One headless primary display. Hotplug of more displays (e.g. one per
-  // Wayland output) would add entries here and call onHotplugEvent.
+  // One primary display; windows show virtual displays.
   const DisplayConfig config = DisplayConfig::fromProperties();
   mDisplays.emplace(
     kPrimaryDisplay,
@@ -99,7 +98,7 @@ ndk::ScopedAStatus ComposerClient::destroyLayer(
 // debug.sf.enable_hwc_vds=1, set by our .rc). Every layer stays CLIENT, so
 // SurfaceFlinger renders each frame straight into the sink's buffer and hands
 // it to us as both client target and output buffer; the presenter shows it in
-// the Wayland window that the window manager asked for (docs/windowing.md).
+// the window that the window manager asked for (docs/windowing.md).
 ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
   int32_t width, int32_t height, common::PixelFormat format,
   int32_t outputSlotCount, VirtualDisplay* out

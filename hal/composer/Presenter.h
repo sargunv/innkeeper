@@ -7,11 +7,9 @@
 //   2. present: show the client target and/or DEVICE layers, returning a
 //      present fence and per-layer release fences (-1 = already free).
 //
-// HeadlessPresenter (M0): everything is CLIENT; the client target is
-// optionally dumped to PNG/PPM. A WaylandPresenter (M1) implements the same
-// interface: it attaches the client target (or, per layer, each DEVICE
-// layer's buffer) to a wl_surface via zwp_linux_dmabuf_v1 (the buffers are
-// linear udmabufs, see gralloc_handle.h) or copies into wl_shm.
+// HeadlessPresenter: the client target is optionally dumped to PNG/PPM.
+// BridgePresenter.h: the client target is copied into a window's buffer pool
+// and shown on the host through the bridge.
 #pragma once
 
 #include <memory>
@@ -104,11 +102,10 @@ class HeadlessPresenter : public Presenter {
   std::string mPrefix;
 };
 
-// vendor.linuxapk.hwc.backend: "headless" (default) or "wayland" (needs
-// WaylandConnection::init() at startup; falls back to headless). Display 0
-// gets a Wayland window only in single-window mode
-// (vendor.linuxapk.wm.mode=single); in per-app mode (the default) only
-// virtual displays that the window manager asked for get windows.
+// With the bridge started (startBridge), display 0 gets a window only in
+// single-window mode (vendor.linuxapk.wm.mode=single); in per-app mode (the
+// default) only virtual displays that the window manager asked for get
+// windows.
 std::unique_ptr<Presenter> createPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );

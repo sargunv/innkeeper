@@ -8,13 +8,10 @@
 #include <pthread.h>
 #include <string.h>
 
+#include "BridgePresenter.h"
 #include "FrameDumper.h"
 #include "Presenter.h"
 #include "Properties.h"
-#ifdef LINUXAPK_HWC_WAYLAND
-#include "BridgePresenter.h"
-#include "WaylandPresenter.h"
-#endif
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
@@ -127,15 +124,8 @@ static std::unique_ptr<HeadlessPresenter> makeHeadless() {
 std::unique_ptr<Presenter> createPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
-  std::string backend = getProperty("vendor.linuxapk.hwc.backend", "headless");
-#ifdef LINUXAPK_HWC_WAYLAND
-  if (backend == "bridge" || backend == "wayland") {
-    const bool bridge = bridgeStarted();
-    if (bridge) {
-      bridgeSetPrimaryDisplaySize(width, height);
-    } else {
-      setPrimaryDisplaySize(width, height);
-    }
+  if (bridgeStarted()) {
+    bridgeSetPrimaryDisplaySize(width, height);
     if (!singleWindowMode()) {
       LOGI(
         "display %lld: per-app windows (vendor.linuxapk.wm.mode), no window",
@@ -143,23 +133,17 @@ std::unique_ptr<Presenter> createPresenter(
       );
       return makeHeadless();
     }
-    auto p =
-      bridge ? createBridgePresenter(displayId, width, height, makeHeadless())
-             : createWaylandPresenter(displayId, width, height, makeHeadless());
-    if (p) return p;
-    LOGW("no window backend available; using headless");
-    return makeHeadless();
+    if (
+      auto p = createBridgePresenter(displayId, width, height, makeHeadless())
+    )
+      return p;
   }
-#endif
-  if (backend != "headless")
-    LOGW("unknown backend '%s'; using headless", backend.c_str());
   return makeHeadless();
 }
 
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
-#ifdef LINUXAPK_HWC_WAYLAND
   if (bridgeStarted()) {
     if (
       auto p =
@@ -167,15 +151,7 @@ std::unique_ptr<Presenter> createVirtualPresenter(
     ) {
       return p;
     }
-  } else if (WaylandConnection::get()) {
-    if (
-      auto p =
-        createWaylandVirtualPresenter(displayId, width, height, makeHeadless())
-    ) {
-      return p;
-    }
   }
-#endif
   return makeHeadless();
 }
 

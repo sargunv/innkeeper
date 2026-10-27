@@ -7,7 +7,7 @@
 //   [metadataOffset, +kPageSize)         SharedMetadata (mutable metadata)
 //   [reservedOffset, +reservedSize)      client reserved region (optional)
 // Planes are linear (DRM_FORMAT_MOD_LINEAR) at the offsets/strides below, so
-// GPU drivers and Wayland (linux-dmabuf) can import fd 0 directly.
+// GPU drivers can import fd 0 directly.
 #pragma once
 
 #include <cstddef>

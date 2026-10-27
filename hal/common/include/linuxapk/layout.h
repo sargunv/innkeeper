@@ -31,8 +31,8 @@ constexpr uint64_t CPU_READ_MASK = 0xf, CPU_WRITE_MASK = 0xf0,
                    VIDEO_DECODER = 1 << 22, GPU_DATA_BUFFER = 1 << 24,
                    COMPOSER_CURSOR = 1 << 15, GPU_CUBE_MAP = 1 << 25,
                    GPU_MIPMAP_COMPLETE = 1 << 26;
-// Usages whose consumers import the buffer as a dma-buf (GPU drivers, the
-// Wayland compositor): these must not get the memfd fallback.
+// Usages whose consumers import the buffer as a dma-buf (GPU drivers): these
+// must not get the memfd fallback.
 constexpr uint64_t NEEDS_DMABUF =
   GPU_TEXTURE | GPU_RENDER_TARGET | COMPOSER_OVERLAY | COMPOSER_CLIENT_TARGET |
   COMPOSER_CURSOR | GPU_DATA_BUFFER | GPU_CUBE_MAP | GPU_MIPMAP_COMPLETE;

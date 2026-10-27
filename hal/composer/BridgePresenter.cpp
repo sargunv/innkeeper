@@ -421,8 +421,8 @@ void Bridge::loop() {
   }
 }
 
-// ---- window registry (same commands as the direct Wayland backend)
-// --------------
+// ---- window registry
+// -------------------------------------------------------------
 
 void Bridge::onCommand(const std::string& line) {
   // The Linux.apk IME's text-input lines ("ti_..."): the bridge parses and

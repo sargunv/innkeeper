@@ -2,8 +2,8 @@
 // Windows through the host bridge's display service (docs/bridge.md,
 // "Display service"; docs/windowing.md): the composer keeps the HWC side and
 // the window registry, and the bridge (linuxapk-bridge, Rust, on the host)
-// owns the Wayland connection, decorations (server- or client-side) and the
-// seat. Frames go over as dma-buf fds of the composer's own udmabuf pool;
+// owns the host compositor connection, decorations (server- or client-side) and
+// the seat. Frames go over as dma-buf fds of the composer's own udmabuf pool;
 // input comes back as protocol v2 lines, which the composer relays on its
 // input socket unchanged.
 #pragma once
@@ -24,7 +24,7 @@ void startBridge(
 );
 bool bridgeStarted();
 
-// Same contracts as the Wayland presenters (WaylandPresenter.h).
+// Display 0's size, for the input stream's hello line.
 void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height);
 std::unique_ptr<Presenter> createBridgePresenter(
   int64_t displayId, uint32_t width, uint32_t height,
