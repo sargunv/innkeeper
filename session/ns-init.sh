@@ -147,6 +147,9 @@ mount -o remount,bind,ro,nosuid,nodev,noexec "$R/sys"
 # (libprocessgroup) mounts cgroup2 there, rooted at this session's own
 # delegated cgroup because we're in a new cgroup namespace.
 mount -t tmpfs -o mode=0755,nosuid,nodev,noexec nocgroup "$R/sys/fs/cgroup"
+# /sys/fs/bpf: a writable session-private tmpfs. Pinned objects of the bpf()
+# emulator (helper/bpfemu.c) are plain files here.
+mount -t tmpfs -o mode=1777,nosuid,nodev,noexec bpf "$R/sys/fs/bpf"
 
 findmnt -R -o TARGET,FSTYPE,OPTIONS "$R/sys" >"$run/sys-mounts.txt" || true
 

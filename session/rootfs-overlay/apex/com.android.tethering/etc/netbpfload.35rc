@@ -1,11 +1,14 @@
-# linuxapk: replaces the APEX's netbpfload.35rc. Loading network eBPF
-# programs needs CAP_SYS_ADMIN/CAP_BPF in the initial user namespace, which a
-# rootless session doesn't have, and the stock service reboots on failure.
-# Pretend loading finished so init.rc's "wait_for_prop bpf.progs_loaded 1"
-# proceeds. Networking features that rely on eBPF (netd traffic accounting,
-# per-uid firewall) will not work.
-service bpfloader /system/bin/setprop bpf.progs_loaded 1
+# linuxapk: replaces the APEX's netbpfload.35rc. The real netbpfload runs, and
+# its bpf() calls are served by the session's userspace emulator
+# (session/helper/bpfemu.c): maps get created and pinned under /sys/fs/bpf,
+# program loads and attaches are no-ops. linuxapk-bpfload gives it a private
+# mount namespace with writable stand-ins for the BPF sysctls it insists on
+# setting (absent or read-only in a user namespace). No reboot on failure.
+service bpfloader /system/bin/linuxapk-bpfload
     disabled
+    namespace mnt
+    group root graphics network_stack net_admin net_bw_acct net_bw_stats net_raw system
     user root
+    file /dev/kmsg w
     oneshot
     override
