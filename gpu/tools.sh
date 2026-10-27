@@ -8,4 +8,4 @@ if ! podman image exists "$img"; then
   podman build -q -t "$img" -f "$here/Containerfile" "$here" >/dev/null
 fi
 exec podman run --rm --userns=keep-id --security-opt label=disable \
-  -v "$HOME:$HOME" -w "$PWD" -e HOME="$HOME" "$img" "$@"
+  -v "$HOME:$HOME" -w "$PWD" -e HOME="$HOME" -e LINUXAPK_OUT "$img" "$@"

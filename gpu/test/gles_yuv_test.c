@@ -16,8 +16,10 @@
 #define GL_GLEXT_PROTOTYPES
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2ext.h> /* after gl3.h, which defines the GL types */
+// clang-format off
 #include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h> /* after gl3.h, which defines the GL types */
+// clang-format on
 #include <android/hardware_buffer.h>
 #include <stdio.h>
 #include <stdlib.h>

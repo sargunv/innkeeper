@@ -1,7 +1,7 @@
 // Test helper for vkdriver_test --anb-hal: allocate a buffer with the hal
 // lane's allocator code (memfd -> udmabuf, linuxapk handle layout) and import
 // it through the real mapper.linuxapk.so, as libui would in an app process.
-// Built from the hal sources (HAL_SRC) by gpu/build.sh when they exist.
+// Built from the hal sources by gpu/build.sh.
 #include <dlfcn.h>
 #include <stdio.h>
 #include <sys/mman.h>

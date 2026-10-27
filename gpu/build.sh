@@ -5,9 +5,12 @@
 #   gpu/build.sh            # everything
 #   gpu/build.sh radv       # libdrm + Mesa RADV only
 #   gpu/build.sh lvp        # LLVM + Mesa lavapipe (software fallback)
-#   gpu/build.sh test       # NDK test programs (gpu/test)
+#   gpu/build.sh test       # NDK test programs (gpu/test), then run them
 #
-# Runs itself inside the gpu build container (gpu/tools.sh); no sudo needed.
+# Builds inside the gpu build container (gpu/tools.sh); no sudo needed. The
+# tests run on the host through tests/bionic/run.sh, on lavapipe and, when
+# there is an amdgpu render node, on RADV. Env: LINUXAPK_OUT (default
+# <main checkout>/out).
 set -euo pipefail
 
 # ---- pins -------------------------------------------------------------------
@@ -22,9 +25,53 @@ API=37                    # Android 17
 # -----------------------------------------------------------------------------
 
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/.." && git rev-parse --path-format=absolute --git-common-dir | xargs dirname)
+repo=$(dirname "$here")
+main=$(cd "$repo" && git rev-parse --path-format=absolute --git-common-dir | xargs dirname)
+out=${LINUXAPK_OUT:-$main/out}
+build=$out/gpu/build
+
+# Run the test programs (build_test) on each driver.
+run_tests() {
+  local drivers=(lvp) n d
+  for n in /dev/dri/renderD*; do
+    if [[ $(readlink -f "/sys/class/drm/${n##*/}/device/driver") == */amdgpu ]]; then
+      drivers+=(radv)
+      break
+    fi
+  done
+  for d in "${drivers[@]}"; do
+    echo "== gpu tests: $d"
+    driver_tests "$d"
+  done
+}
+
+driver_tests() {
+  local d=$1 t=/data/nativetest64
+  bionic() {
+    "$repo/tests/bionic/run.sh" -t "$build/test" -v "$build/test-vendor" \
+      -e "LINUXAPK_PROPS=ro.hardware.vulkan=$d;ro.hardware.egl=angle" "$@"
+  }
+  local vk=("$t/vkdriver_test" --hal "vulkan.$d.so")
+  bionic -- "${vk[@]}" --udmabuf
+  # --anb hands the driver a deliberately wrong stride: it passes only if the
+  # layout came from the mapper (mock_mapper.c here, ours with --anb-hal).
+  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=lapktest -- "${vk[@]}" --anb
+  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=lapktest -- "${vk[@]}" --anb --deferred
+  bionic -- "${vk[@]}" --anb-hal --deferred
+  bionic -- "$t/vkdriver_test" --loader
+  # fake_sf stands in for SurfaceFlinger's getDisplayStats.
+  local sf="$t/fake_sf & until service check SurfaceFlingerAIDL | grep -q ': found'; do sleep 0.05; done"
+  bionic -- /system/bin/sh -c "$sf; $t/swapchain_test"
+  bionic -- /system/bin/sh -c "$sf; $t/swapchain_test --deferred"
+  bionic -- "$t/ahb_vk_test"
+  bionic -- "$t/gles_test"
+  bionic -- "$t/gles_yuv_test"
+}
+
 if [[ ! -e /run/.containerenv ]]; then
-  exec "$here/tools.sh" "$here/build.sh" "$@"
+  "$here/tools.sh" "$here/build.sh" "$@"
+  case ${1:-all} in test | all) run_tests ;; esac
+  exit
 fi
 
 NDK=${NDK:-$HOME/Android/Sdk/ndk/$NDK_VERSION}
@@ -35,10 +82,8 @@ NDK=${NDK:-$HOME/Android/Sdk/ndk/$NDK_VERSION}
 ndk_bin=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 ndk_sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
 
-out=${OUT:-$repo/out}
 work=$out/gpu
 src=$work/src
-build=$work/build
 stage=$work/stage # static libs + pkg-config for Mesa
 overlay=$out/vendor-overlay
 jobs=$(nproc)
@@ -256,16 +301,12 @@ build_test() {
   "$cc" -O2 -Wall -o "$t/ahb_vk_test" "$here/test/ahb_vk_test.c" -lvulkan -lnativewindow
   "$cc" -O2 -Wall -o "$t/swapchain_test" "$here/test/swapchain_test.c" -lvulkan -lmediandk -lnativewindow
   "$cc" -O2 -Wall -o "$t/fake_sf" "$here/test/fake_sf.c" -lbinder_ndk -ldl
-  "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$t/libpropshim.so" "$here/test/propshim.c" -ldl
-  # Integration helper for --anb-hal, from the hal lane's allocator sources.
-  local hal=${HAL_SRC:-$repo/hal}
-  [[ -f $hal/common/src/buffer_alloc.cpp ]] || hal=$repo-wt/hal/hal
-  if [[ -f $hal/common/src/buffer_alloc.cpp ]]; then
-    "$cc++" -O2 -std=c++20 -shared -fPIC -fvisibility=hidden -static-libstdc++ \
-      -I"$hal/common/include" -o "$t/libhalbuf.so" "$here/test/halbuf.cpp" \
-      "$hal"/common/src/{buffer_alloc,layout,native_handle}.cpp -llog
-  fi
-  # Test-only vendor layer (run-bionic.sh -v): the mock IMapper v5.
+  # vkdriver_test --anb-hal: buffers from our allocator's code.
+  local hal=$repo/hal
+  "$cc++" -O2 -std=c++20 -shared -fPIC -fvisibility=hidden -static-libstdc++ \
+    -I"$hal/common/include" -o "$t/libhalbuf.so" "$here/test/halbuf.cpp" \
+    "$hal"/common/src/{buffer_alloc,layout,native_handle}.cpp -llog
+  # Test-only vendor layer (tests/bionic/run.sh -v): the mock IMapper v5.
   mkdir -p "$build/test-vendor/lib64/hw"
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$build/test-vendor/lib64/hw/mapper.lapktest.so" "$here/test/mock_mapper.c"
   ls -l "$t"

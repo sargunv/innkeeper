@@ -42,9 +42,8 @@ int main(void) {
   }
   const EGLint pb_attr[] = {EGL_WIDTH, 64, EGL_HEIGHT, 64, EGL_NONE};
   EGLSurface surf = eglCreatePbufferSurface(dpy, cfg, pb_attr);
-  const EGLint ctx_attr[] = {
-    EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 2, EGL_NONE
-  };
+  // ES 3.0: ANGLE on lavapipe offers no 3.2 context (EGL_BAD_MATCH).
+  const EGLint ctx_attr[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
   EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
   if (
     surf == EGL_NO_SURFACE || ctx == EGL_NO_CONTEXT ||

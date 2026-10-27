@@ -119,8 +119,7 @@ it all of Android.
   [SurfaceFlinger screencap](https://github.com/user-attachments/assets/82a59938-0e1a-4c47-bebc-ba1464fa6528).
 
 ```
-TIMEOUT=90 gpu/test/run-bionic.sh -s \
-  -e "LINUXAPK_PROPS=ro.hardware.vulkan=radv;ro.hardware.egl=angle" -- /data/gputest/gles_yuv_test
+gpu/build.sh test    # gles_yuv_test, among the others, on lavapipe and RADV
 ```
 
 ## Swapchains, the bootanimation crash, and fences
@@ -178,29 +177,30 @@ With `lvp`, level 0 would be the honest value.
 
 ## Runtime evidence (2026-10-27, gfx1151)
 
-`gpu/test/run-bionic.sh` runs Bionic binaries in a rootless user+mount+pid
-namespace, without booting Android:
+`gpu/build.sh test` runs the test programs through `tests/bionic/run.sh`, in a
+rootless user+mount+pid namespace, without booting Android:
 
-- It provides the image's `/system`, the flattened `/apex` (`out/root/apex`),
-  our `/vendor` and only the render nodes.
-- `/sys` is a read-only tmpfs with read-only binds of just the GPU's PCI device
-  dir and the CPU topology (see the host-safety rules in NOTES.md).
+- It provides the session image's `/system`, flattened `/apex`, our `/vendor`
+  and only the render nodes, with servicemanager, our allocator and our composer
+  running on the broker.
+- `/sys` is a tmpfs with read-only binds of just the GPU's PCI device dir and
+  the CPU topology (see the host-safety rules in AGENTS.md).
 - The image's own `linkerconfig` generates `/linkerconfig`, and tests live in
-  `/data/gputest`, so they run in the `[system]` section with a real `sphal`
-  namespace.
+  `/data/nativetest64`, so they run in the `[system]` section with a real
+  `sphal` namespace.
 
 `gpu/test/vkdriver_test` covers the following (all PASS):
 
-| Test                                                                                                                                                           | RADV                                                          | lavapipe                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
-| HAL load like libvulkan (`android_load_sphal_library("vulkan.X.so")`, `HMI`, open `vk0`), instance and device                                                  | `AMD Radeon 8060S Graphics (RADV STRIX_HALO)`, Vulkan 1.4.354 | `llvmpipe (LLVM 19.1.7, 256 bits)`, 1.4.354 |
-| Compute dispatch of 1M invocations, host readback                                                                                                              | 0 mismatches                                                  | 0 mismatches                                |
-| Import a memfd→udmabuf dma-buf as VkDeviceMemory, compute writes, check through the memfd mmap                                                                 | memoryTypeBits 0x420 (GTT), 0 mismatches                      | 0 mismatches                                |
-| `VkNativeBufferANDROID` image (the swapchain path) from a gralloc handle, GPU copy, check pixels and row padding through the mmap                              | PASS                                                          | PASS                                        |
-| Same, but with the hal lane's allocator code and the real `mapper.linuxapk.so` (`--anb-hal`)                                                                   | PASS                                                          | PASS                                        |
-| Through the system `libvulkan.so` (`--loader`, properties via `test/propshim.c`)                                                                               | PASS                                                          |                                             |
-| libvulkan's deferred-allocation bind (`--anb --deferred`, `--anb-hal --deferred`)                                                                              | PASS (crashed at 0x60 before patch 0003)                      | PASS (wrong pitch before patch 0004)        |
-| `swapchain_test`: 120-frame acquire, clear, present loop on an `AImageReader` window, consumer checks every frame (`run-bionic.sh -s`, eager and `--deferred`) | PASS, 120/120 real release fences                             | PASS                                        |
+| Test                                                                                                                                                     | RADV                                                          | lavapipe                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
+| HAL load like libvulkan (`android_load_sphal_library("vulkan.X.so")`, `HMI`, open `vk0`), instance and device                                            | `AMD Radeon 8060S Graphics (RADV STRIX_HALO)`, Vulkan 1.4.354 | `llvmpipe (LLVM 19.1.7, 256 bits)`, 1.4.354 |
+| Compute dispatch of 1M invocations, host readback                                                                                                        | 0 mismatches                                                  | 0 mismatches                                |
+| Import a memfd→udmabuf dma-buf as VkDeviceMemory, compute writes, check through the memfd mmap                                                           | memoryTypeBits 0x420 (GTT), 0 mismatches                      | 0 mismatches                                |
+| `VkNativeBufferANDROID` image (the swapchain path) from a gralloc handle, GPU copy, check pixels and row padding through the mmap                        | PASS                                                          | PASS                                        |
+| Same, but with the hal lane's allocator code and the real `mapper.linuxapk.so` (`--anb-hal`)                                                             | PASS                                                          | PASS                                        |
+| Through the system `libvulkan.so` (`--loader`, properties via `tests/bionic/props-shim.c`)                                                               | PASS                                                          |                                             |
+| libvulkan's deferred-allocation bind (`--anb --deferred`, `--anb-hal --deferred`)                                                                        | PASS (crashed at 0x60 before patch 0003)                      | PASS (wrong pitch before patch 0004)        |
+| `swapchain_test`: 120-frame acquire, clear, present loop on an `AImageReader` window, consumer checks every frame (`fake_sf` up, eager and `--deferred`) | PASS, 120/120 real release fences                             | PASS                                        |
 
 The ANB test passes the driver a deliberately wrong pixel stride, so it can only
 pass if the driver got `PLANE_LAYOUTS` from the IMapper. Without a mapper,
@@ -210,7 +210,7 @@ Mesa's fallback gralloc fails with
 ### Inside the session (2026-10-27)
 
 The session was partially booted: servicemanager, `IAllocator/default` and `gpu`
-were up; there were no props yet, so `propshim` supplied them. The tests ran
+were up; there were no props yet, so a props shim supplied them. The tests ran
 from `/data/gputest`.
 
 - **GLES through ANGLE on RADV works.** `gles_test` reports
@@ -241,13 +241,10 @@ the patched driver:
   `out/gpu/bootanimation-frame.png`).
 
 ```
-gpu/build.sh test
-TIMEOUT=120 gpu/test/run-bionic.sh -e MESA_GRALLOC_MAPPER_SUFFIX=linuxapk -- \
-  /data/gputest/vkdriver_test --hal vulkan.radv.so --udmabuf --anb-hal --deferred
-# Swapchain loop without a session: -s starts servicemanager and our allocator.
-# test/fake_sf.c stands in for SurfaceFlinger's getDisplayStats.
-TIMEOUT=90 gpu/test/run-bionic.sh -s -e LINUXAPK_PROPS=ro.hardware.vulkan=radv -- \
-  /system/bin/sh -c '/data/gputest/fake_sf & sleep 0.5; /data/gputest/swapchain_test --deferred'
+gpu/build.sh test    # every test, on lavapipe, and on RADV with an amdgpu render node
+# One by hand (test/fake_sf.c stands in for SurfaceFlinger's getDisplayStats):
+tests/bionic/run.sh -t out/gpu/build/test -e LINUXAPK_PROPS=ro.hardware.vulkan=radv -- \
+  /system/bin/sh -c '/data/nativetest64/fake_sf & sleep 0.5; /data/nativetest64/swapchain_test --deferred'
 ```
 
 ## Gralloc guidance for the hal lane

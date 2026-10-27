@@ -615,7 +615,7 @@ static int test_udmabuf(void) {
 static const native_handle_t* hal_buffer(
   int width, int height, size_t* stride, size_t* size, void** map
 ) {
-  void* so = dlopen("/data/gputest/libhalbuf.so", RTLD_NOW);
+  void* so = dlopen("/data/nativetest64/libhalbuf.so", RTLD_NOW);
   int (*alloc)(
     int, int, const native_handle_t**, int*, size_t*, void**, size_t*
   ) = so ? dlsym(so, "halbuf_alloc") : NULL;
