@@ -15,17 +15,21 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 **Pre-alpha.** Android 17 boots rootless to its launcher in a Wayland window;
 app input and real apps are next.
 
-| Milestone                                                       | Status                                                                                                                             |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables |
-| M1 Pixels in a Wayland window, first noarch apps                | 🚧 launcher in a KDE Wayland window; mouse/keyboard/touch injection passes e2e (15/15); F-Droid compat harness in progress         |
-| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                 |
-| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                 |
-| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                 |
-| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                 |
-| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                 |
+| Milestone                                                       | Status                                                                                                                                                             |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables                                 |
+| M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games |
+| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                                                 |
+| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                                                 |
+| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                                                 |
+| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                 |
+| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                 |
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
+
+| First frames of the F-Droid test corpus (OpenCalc, SudoQ, Wikipedia, AntennaPod, Thunderbird, F-Droid, Read You, Tomato, Mindustry, Shattered Pixel Dungeon, Unciv, OpenTTD) |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ![compat first frames](docs/img/compat/first-frames.png)                                                                                                                     |
 
 | Android's boot animation rendered rootless (ANGLE → RADV → SurfaceFlinger → our composer) | Composer output in a KDE Wayland window (test pattern) |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------ |
