@@ -102,17 +102,15 @@ class HeadlessPresenter : public Presenter {
   std::string mPrefix;
 };
 
-// With the bridge started (startBridge), display 0 gets a window only in
-// single-window mode (vendor.linuxapk.wm.mode=single); in per-app mode (the
-// default) only virtual displays that the window manager asked for get
-// windows.
-std::unique_ptr<Presenter> createPresenter(
-  int64_t displayId, uint32_t width, uint32_t height
+// Display 0 never has a window: apps show in windows of the virtual
+// displays that the window manager (the Linux.apk System app) creates.
+std::unique_ptr<Presenter> createPrimaryPresenter(
+  uint32_t width, uint32_t height
 );
-// A HWC-backed virtual display (ComposerClient::createVirtualDisplay).
+// A HWC-backed virtual display (ComposerClient::createVirtualDisplay): a
+// window if the bridge is started and the window manager asked for one.
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );
-bool singleWindowMode();
 
 }  // namespace linuxapk::hwc

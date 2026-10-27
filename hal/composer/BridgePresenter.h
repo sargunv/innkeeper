@@ -26,10 +26,8 @@ bool bridgeStarted();
 
 // Display 0's size, for the input stream's hello line.
 void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height);
-std::unique_ptr<Presenter> createBridgePresenter(
-  int64_t displayId, uint32_t width, uint32_t height,
-  std::unique_ptr<HeadlessPresenter> secondary
-);
+// A virtual display's window, if the window manager asked for one of this
+// size; nullptr otherwise. `secondary` gets every frame too (frame dumps).
 std::unique_ptr<Presenter> createBridgeVirtualPresenter(
   int64_t hwcDisplayId, uint32_t width, uint32_t height,
   std::unique_ptr<HeadlessPresenter> secondary

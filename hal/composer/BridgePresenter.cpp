@@ -57,6 +57,8 @@ constexpr int32_t kBaseDpi = 160;
 constexpr int64_t kPendingTimeoutNs = 10'000'000'000;
 constexpr uint32_t kXBGR8888 = fourcc('X', 'B', '2', '4');  // R,G,B,X bytes
 constexpr uint32_t kXRGB8888 = fourcc('X', 'R', '2', '4');  // B,G,R,X bytes
+// findWindow/removeWindow: the window, whichever virtual display it shows.
+constexpr int64_t kAnyDisplay = -1;
 
 struct Msg {
   std::vector<uint8_t> b;
@@ -511,12 +513,12 @@ void Bridge::onCommand(const std::string& line) {
     m.u32(uint32_t(id)).u32(uint32_t(w)).u32(uint32_t(h));
     send(m);
   } else if (op == "window_title") {
-    if (!findWindow(id, -1)) return;
+    if (!findWindow(id, kAnyDisplay)) return;
     Msg m(kWindowSetTitle, tag());
     m.u32(uint32_t(id)).name(sanitize(rest));
     send(m);
   } else if (op == "window_activate") {
-    if (!findWindow(id, -1)) return;
+    if (!findWindow(id, kAnyDisplay)) return;
     Msg m(kWindowActivate, tag());
     m.u32(uint32_t(id));
     send(m);
@@ -525,7 +527,7 @@ void Bridge::onCommand(const std::string& line) {
       std::lock_guard lock(mutex);
       std::erase_if(pending, [&](auto& p) { return p.spec.id == id; });
     }
-    removeWindow(id, -1);
+    removeWindow(id, kAnyDisplay);
   }
 }
 
@@ -547,7 +549,7 @@ std::shared_ptr<BridgeWindow> Bridge::findWindow(int32_t id, int64_t hwcId) {
   std::lock_guard lock(mutex);
   auto it = windows.find(id);
   if (it == windows.end()) return nullptr;
-  if (hwcId != -1 && it->second->hwcId() != hwcId) return nullptr;
+  if (hwcId != kAnyDisplay && it->second->hwcId() != hwcId) return nullptr;
   return it->second;
 }
 
@@ -557,7 +559,7 @@ void Bridge::removeWindow(int32_t id, int64_t hwcId) {
     std::lock_guard lock(mutex);
     auto it = windows.find(id);
     if (it == windows.end()) return;
-    if (hwcId != -1 && it->second->hwcId() != hwcId) return;
+    if (hwcId != kAnyDisplay && it->second->hwcId() != hwcId) return;
     gone = std::move(it->second);
     windows.erase(it);
   }
@@ -677,9 +679,7 @@ Error BridgeWindow::present(FrameInput& frame) {
     LOGW("bridge: client target fence timeout");
   src += bh->planes[0].offset.get();
   const uint32_t srcStride = bh->planes[0].stride;
-  const uint32_t w = mHwcId >= 0 ? bh->width : std::min(bh->width, mSpec.width);
-  const uint32_t h =
-    mHwcId >= 0 ? bh->height : std::min(bh->height, mSpec.height);
+  const uint32_t w = bh->width, h = bh->height;
   if (w == 0 || h == 0 || !b->connected()) return Error::None;
 
   {
@@ -777,13 +777,10 @@ std::unique_ptr<Presenter> addWindow(
   Spec spec, int64_t hwcId, std::unique_ptr<HeadlessPresenter> secondary
 ) {
   gBridge->addWindow(std::make_shared<BridgeWindow>(gBridge, spec, hwcId));
-  if (hwcId >= 0)
-    gBridge->input.send("window_mapped %d %lld", spec.id, (long long)hwcId);
-  if (secondary && hwcId >= 0) {
-    char prefix[32];
-    snprintf(prefix, sizeof prefix, "window%d", spec.id);
-    secondary->setDumpPrefix(prefix);
-  }
+  gBridge->input.send("window_mapped %d %lld", spec.id, (long long)hwcId);
+  char prefix[32];
+  snprintf(prefix, sizeof prefix, "window%d", spec.id);
+  secondary->setDumpPrefix(prefix);
   return std::make_unique<BridgeWindowPresenter>(
     spec.id, hwcId, std::move(secondary)
   );
@@ -804,20 +801,6 @@ bool bridgeStarted() { return gBridge != nullptr; }
 
 void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height) {
   if (gBridge) gBridge->input.setDisplaySize(width, height);
-}
-
-std::unique_ptr<Presenter> createBridgePresenter(
-  int64_t displayId, uint32_t width, uint32_t height,
-  std::unique_ptr<HeadlessPresenter> secondary
-) {
-  if (!gBridge) return nullptr;
-  Spec s;
-  s.id = int32_t(displayId);
-  s.width = width;
-  s.height = height;
-  s.appId = "linuxapk";
-  s.title = "Linux.apk";
-  return addWindow(s, -1, std::move(secondary));
 }
 
 std::unique_ptr<Presenter> createBridgeVirtualPresenter(

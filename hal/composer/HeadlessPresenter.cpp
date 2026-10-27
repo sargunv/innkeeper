@@ -111,33 +111,16 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
   return Error::None;
 }
 
-bool singleWindowMode() {
-  return getProperty("vendor.linuxapk.wm.mode", "per-app") == "single";
-}
-
 static std::unique_ptr<HeadlessPresenter> makeHeadless() {
   return std::make_unique<HeadlessPresenter>(
     std::make_unique<FrameDumper>(FrameDumper::configFromProperties())
   );
 }
 
-std::unique_ptr<Presenter> createPresenter(
-  int64_t displayId, uint32_t width, uint32_t height
+std::unique_ptr<Presenter> createPrimaryPresenter(
+  uint32_t width, uint32_t height
 ) {
-  if (bridgeStarted()) {
-    bridgeSetPrimaryDisplaySize(width, height);
-    if (!singleWindowMode()) {
-      LOGI(
-        "display %lld: per-app windows (vendor.linuxapk.wm.mode), no window",
-        (long long)displayId
-      );
-      return makeHeadless();
-    }
-    if (
-      auto p = createBridgePresenter(displayId, width, height, makeHeadless())
-    )
-      return p;
-  }
+  bridgeSetPrimaryDisplaySize(width, height);
   return makeHeadless();
 }
 

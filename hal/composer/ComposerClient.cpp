@@ -43,9 +43,7 @@ ComposerClient::ComposerClient() {
     kPrimaryDisplay,
     std::make_unique<Display>(
       kPrimaryDisplay, config,
-      createPresenter(
-        kPrimaryDisplay, uint32_t(config.width), uint32_t(config.height)
-      )
+      createPrimaryPresenter(uint32_t(config.width), uint32_t(config.height))
     )
   );
 }
