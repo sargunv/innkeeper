@@ -49,7 +49,9 @@ Causes:
 
 - Repo: `~/Projects/linux.apk`
 - AOSP checkout (android-17.0.0_r1): `~/aosp/a17` (outside the repo)
-- Prebuilt image: `~/Android/Sdk/system-images/android-37.0/default/x86_64`
+- Android image: `~/.local/share/linuxapk/images/<name>/` (`image/pin.toml`,
+  `tools/fetch-image.sh`); SDK emulator image (optional):
+  `~/Android/Sdk/system-images/android-37.0/default/x86_64`
 - Large working files: `~/Projects/linux.apk/out/` (gitignored)
 
 ## Findings (graphics)
@@ -211,6 +213,14 @@ Causes:
   HAL (85 ms nominal); our share is ~34 ms. Next: the CI APEX install point with
   the image lane, then our own AIDL stream for < 50 ms. See [audio.md](audio.md)
   and [bridge.md](bridge.md).
+- 2026-10-27 (image): **the session boots the AOSP CI image by default**
+  (`aosp_cf_x86_64_only_phone-userdebug` 16644040, fetched and verified by
+  `tools/fetch-image.sh`; `LINUXAPK_IMAGE=emulator` for the old one). Vendor
+  APEXes are selected cuttlefish's way (`androidboot.vendor.apex.*`), with the
+  VM-only ones blanked. Parity: boot ~24 s from a fresh `/data` (emulator 22.5
+  s), idle anon memory the same, selftest 12/12, input and audio e2e pass,
+  compat 15/16 with no regressions (headless composer). See
+  [image.md](image.md).
 
 - 2026-10-27 (gui): **manager app.** `linuxapk-gui` (GTK 4/libadwaita) on
   `linuxapk-core`, split out of `cli/`, installs APKs from a confirmation page

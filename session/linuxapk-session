@@ -9,6 +9,7 @@
 #                                  all of Android in one window instead, and
 #                                  --headless opens no windows
 #   linuxapk-session prepare       fetch/extract/flatten the selected image only
+#   linuxapk-session image         print the selected image and its paths
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
 #   linuxapk-session status
 #   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
@@ -52,7 +53,10 @@ die() {
 # session/image-overlay/<kind>/ (rootfs layers plus extra androidboot.* in
 # "cmdline"), layered above session/rootfs-overlay. See docs/image.md.
 images=${LINUXAPK_IMAGES:-$HOME/.local/share/linuxapk/images}
-pinned=$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$repo/image/pin.toml" 2>/dev/null || true)
+# The pin's top-level name: the keys before the first [table] header (the
+# [[artifact]] tables have names of their own).
+pin=${LINUXAPK_PIN:-$repo/image/pin.toml}
+pinned=$(awk -F'"' '/^[[:space:]]*\[/ { exit } /^name[[:space:]]*=/ { print $2; exit }' "$pin" 2>/dev/null || true)
 image=${LINUXAPK_IMAGE:-${pinned:-emulator}}
 case $image in
   emulator) kind=emulator ;;
@@ -172,6 +176,9 @@ prepare() {
     "$repo/tools/flatten-apex.sh" "$img" "$apexdir.tmp$sfx" "$out/session/apex-select"
     mv -T "$apexdir.tmp$sfx" "$apexdir" 2>/dev/null || rm -rf "$apexdir.tmp$sfx" # lost a race: fine
   fi
+  # A stable name for the last-prepared tree, for tools that link against
+  # image libraries (e.g. audio/build.sh); sessions use $apexdir itself.
+  if [[ $kind != emulator ]]; then ln -sfn "$(basename "$apexdir")" "$images/$image/apex"; fi
   # build.sh's generated overlay holds image-derived files (relaxed copies,
   # APEX fs_config), so rebuild it when the image changes too.
   if [[ ! -x $out/session/pivot-exec ]] ||
@@ -397,6 +404,7 @@ case ${1:-} in
     ;;
   stop) stop ;;
   prepare) prepare ;;
+  image) printf 'image=%s\nkind=%s\nimg=%s\napex=%s\n' "$image" "$kind" "$img" "$apexdir" ;;
   _run)
     shift
     _run "$@"
@@ -414,7 +422,7 @@ case ${1:-} in
     ;;
   shell) exec_in /system/bin/sh -l ;;
   *)
-    sed -n '2,15s/^# \{0,1\}//p' "$0"
+    sed -n '2,18s/^# \{0,1\}//p' "$0"
     exit 1
     ;;
 esac

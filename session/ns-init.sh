@@ -99,7 +99,21 @@ if [[ -d $kovl/root ]]; then cp -a "$kovl/root/." "$R/"; fi
 # non-recursive views of it stay complete.
 # Overrides for APEX contents (e.g. rc files) layer on top like partitions.
 mkdir -p "$R/apex" "$R/bootstrap-apex"
-layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$out/session/overlay/apex" "$apex"
+# Built files for APEX contents go in out/apex-overlay/<apex name>/ (like
+# out/vendor-overlay for /vendor; e.g. the audio lane's libtinyalsav2.so for
+# com.android.hardware.audio). Only APEXes this image has are staged, so the
+# tree gains no directories apexd and linkerconfig don't know about.
+aovl=$run/apex-overlay
+rm -rf "$aovl"
+mkdir -p "$aovl"
+if [[ -d $out/apex-overlay ]]; then
+  for d in "$out/apex-overlay"/*/; do
+    [[ -d $d ]] || continue
+    n=$(basename "$d")
+    if [[ -d $apex/$n ]]; then cp -a "$d" "$aovl/$n"; fi
+  done
+fi
+layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$aovl" "$out/session/overlay/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \

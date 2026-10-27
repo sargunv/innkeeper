@@ -1,9 +1,8 @@
 # Audio (M2)
 
-Status: Android plays to PipeWire, proven end to end on the emulator image (440
-Hz tone, game music) and on the CI image (440 Hz tone, with the image lane's WIP
-session). The CI image's install point lands with the image lane; see "Open
-issues". The bridge and its protocol are documented in [bridge.md](bridge.md).
+Status: Android plays to PipeWire, proven end to end on the emulator image and
+on the CI image, the default (440 Hz tone and game music, `audio/tests/e2e.sh`).
+The bridge and its protocol are documented in [bridge.md](bridge.md).
 
 ## Decision: how Android's audio HAL reaches the host (2026-10-27)
 
@@ -133,7 +132,7 @@ FFT) reports level and dominant frequency.
 | App-visible output latency (AAudio timestamps) | ~93 ms median (89–97)                              | **~86 ms** median (85–88)                                 |
 | Our share: ring fill + PipeWire downstream     | ~15 + 16 ms                                        | 18.4 + 16 ms                                              |
 | Bridge while playing                           | 48 000 frames/s, 0 underruns                       | 48 000 frames/s, 0 underruns                              |
-| Compat corpus (`compat/run.sh`)                | 15/16 work, no regressions                         | (image lane's run)                                        |
+| Compat corpus (`compat/run.sh`)                | 15/16 work, no regressions                         | 15/16 work, no regressions (docs/image.md)                |
 | `selftest`                                     | 12/12                                              |                                                           |
 
 Methods:
@@ -197,16 +196,11 @@ each call maps onto `bridge_client.h`:
 
 ## Open issues
 
-1. **CI image install point.**
-   - The AIDL HAL loads `libtinyalsav2.so` from
-     `/apex/com.android.hardware.audio/lib64`. The symbol set matches (checked
-     against the CI APEX), and the tone works there.
-   - For that run, the library sat in the image lane's
-     `session/image-overlay/cuttlefish/apex/...`. A built artifact needs a
-     generated layer instead. Proposal: `audio/build.sh` installs into
-     `out/apex-overlay/<apex>/`, and ns-init stacks it above `$apex` for the
-     APEXes the image has. The image lane is reworking ns-init now, so this
-     lands with them.
+1. **CI image install point (landed with the image lane).** The AIDL HAL loads
+   `libtinyalsav2.so` from `/apex/com.android.hardware.audio/lib64`.
+   `audio/build.sh` installs it into `out/apex-overlay/<apex>/`, and ns-init
+   stages that layer above the flattened APEXes for the APEXes the image has
+   (docs/image.md).
 2. **Per-app stream names.** The tinyalsa layer can't see which app is playing.
    AudioFlinger mixes every app into the primary output, so there is one
    PipeWire stream ("Linux.apk: Android"). For M3: the Linux.apk System app

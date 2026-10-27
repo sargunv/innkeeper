@@ -4,7 +4,8 @@
 #                     the image's audio HAL; see docs/audio.md
 #   linuxapk-tone     AAudio tone + latency test (tests/tone.c), not installed
 #   alsa_proxy_test   drives an image's libalsautilsv2 like the AIDL HAL does
-# and install into the vendor overlay.
+# and install into the vendor overlay (emulator image: /vendor/lib64) and the
+# APEX overlay (CI image: the AIDL HAL's /apex/com.android.hardware.audio/lib64).
 #
 # Env: LINUXAPK_OUT (default <repo>/out), NDK.
 set -euo pipefail
@@ -30,7 +31,8 @@ cflags=(-O2 -g -Wall -Wextra -Werror -std=c17 -fPIC -I"$here/third_party/aosp/in
 "$cc" "${cflags[@]}" -fPIE -pie -o "$build/linuxapk-tone" "$here/tests/tone.c" -laaudio -lm
 # Links against an image's libalsautilsv2 (the AIDL HAL's APEX ships one;
 # point ALSAUTILS_DIR at that lib64 directory). Skipped if there's none.
-alsautils=${ALSAUTILS_DIR:-$HOME/.local/share/linuxapk/images/ci-16644040/apex-25e53b3b20c5/com.android.hardware.audio/lib64}
+image_apex=$("$repo/session/linuxapk-session" image 2>/dev/null | sed -n 's/^apex=//p' || true)
+alsautils=${ALSAUTILS_DIR:-$image_apex/com.android.hardware.audio/lib64}
 if [[ -f $alsautils/libalsautilsv2.so ]]; then
   "$cc" "${cflags[@]}" -fPIE -pie -L"$alsautils" -Wl,--allow-shlib-undefined \
     -o "$build/alsa_proxy_test" "$here/tests/alsa_proxy_test.c" -lalsautilsv2 -lm
@@ -50,6 +52,8 @@ fi
 ovl=$out/vendor-overlay
 install -D -m 644 "$build/libtinyalsav2.so" "$ovl/lib64/libtinyalsav2.so"
 "$bin/llvm-strip" --strip-unneeded "$ovl/lib64/libtinyalsav2.so"
+# ns-init stages out/apex-overlay/<apex>/ only for APEXes the image has.
+install -D -m 644 "$ovl/lib64/libtinyalsav2.so" "$out/apex-overlay/com.android.hardware.audio/lib64/libtinyalsav2.so"
 install -D -m 644 "$here/etc/audio.prop" "$ovl/etc/audio.prop"
 install -D -m 644 "$here/etc/primary_audio_policy_configuration.xml" "$ovl/etc/primary_audio_policy_configuration.xml"
-echo "built $build; installed into $ovl"
+echo "built $build; installed into $ovl and $out/apex-overlay"

@@ -52,9 +52,19 @@ Every image partition is mounted read-only, with our layers on top.
 
 1. `session/image-overlay/<kind>`: per image kind (`cuttlefish` here);
 2. `session/rootfs-overlay`;
-3. `out/vendor-overlay` and `out/system_ext-overlay`;
+3. built files: `out/vendor-overlay`, `out/system_ext-overlay`, and
+   `out/apex-overlay/<apex name>/` for APEX contents. ns-init stages only the
+   APEXes the image has, so the emulator image gets no stray
+   `/apex/com.android.hardware.audio`;
 4. the generated `out/session/overlay`;
 5. the image.
+
+`linuxapk-session image` prints the selected image and its paths.
+`linuxapk-session prepare` fetches and flattens it without booting.
+`$LINUXAPK_IMAGES/<name>/apex` links to the last-prepared APEX tree, for tools
+that link against image libraries (`audio/build.sh` uses it for
+`libalsautilsv2`). The default image is the top-level `name` in `pin.toml`
+(`LINUXAPK_PIN` overrides the file); `session/tests/image-select.sh` tests that.
 
 ## What the CI image needs (`session/image-overlay/cuttlefish/`)
 
@@ -160,12 +170,25 @@ Everything else carries over unchanged:
 - init: the stock `init.rc` and the other system rc files we override are
   byte-identical in both images.
 
-## Audio (interim, until the audio lane's HAL lands)
+## Audio
 
 The CI vendor has no HIDL audio wrapper, only AOSP's default **AIDL** HAL
-(`com.android.hardware.audio`). It works as the interim stub with one change.
-Its stream worker threads call `setpriority(ANDROID_PRIORITY_AUDIO)` and fail
-the stream open on `EACCES`, because there's no `CAP_SYS_NICE` over the initial
+(`com.android.hardware.audio`). We keep that HAL, with three changes:
+
+- the audio lane's bridge-backed `libtinyalsav2.so` (`audio/build.sh` puts it in
+  `out/apex-overlay/com.android.hardware.audio/lib64/`);
+- their `primary_audio_policy_configuration.xml`, without the HAL's silent MMAP
+  and offload ports (`out/vendor-overlay/etc`);
+- this lane's rc override, described next.
+
+`audio/tests/e2e.sh` on the CI image:
+
+- the 440 Hz AAudio tone measures 439.99 Hz at −9 dBFS, 86.6 ms latency;
+- Mindustry's title music isn't silent.
+
+**The rc override.** Without it the HAL doesn't work in the session at all. Its
+stream worker threads call `setpriority(ANDROID_PRIORITY_AUDIO)` and fail the
+stream open on `EACCES`, because there's no `CAP_SYS_NICE` over the initial
 namespace. audioserver then blocks in `openOutput`, and with it system_server's
 AudioService. The watchdog kills system_server every 65 s and boot never
 completes.
@@ -176,9 +199,7 @@ changes best-effort. `/system/lib64` is in that APEX's linker namespace and
 `/vendor/lib64` is not. With no `/dev/snd` the primary module still opens
 streams, and r_submix and bluetooth load.
 
-The audio lane's plan (`docs/audio.md`, option (c)) replaces
-`/apex/com.android.hardware.audio/lib64/libtinyalsav2.so`. It needs this rc
-override too, so keep it, or move it into their layer, when they land.
+Keep this override as long as the CI image's AIDL HAL is in use.
 
 ## Comparison with the emulator image
 
@@ -197,6 +218,11 @@ spread in `memory.current` is page cache (`file` ranged 39–167 MiB).
 
 ## Open issues
 
+- **Compat in per-app windows (`compat/run.sh --window`)** gives 13/16 on
+  current main, on _both_ images. OpenCalc loses a tap ("78" instead of 15), and
+  Wikipedia finds no "Skip" node. These are windowing-lane issues, not image
+  issues, so `COMPATIBILITY.md` records the CI image with the headless composer:
+  15/16, no regressions.
 - **Desktop mode.** The emulator's vendor RRO sets
   `config_isDesktopModeSupported=true`; cuttlefish's doesn't. The windowing lane
   should check whether per-app windows depend on it. If they do, enable it
