@@ -329,6 +329,20 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
 
 ## Backlog (unassigned)
 
+- **Settings in the manager app (user request, 2026-10-27; after the cleanup):**
+  - The bridge exposes a session D-Bus service (e.g. `dev.linuxapk.Session`)
+    that the manager and CLI call; the bridge relays to the system app over its
+    existing channel. Never shell into the session.
+  - Linux.apk preferences: follow desktop dark mode/accent/locale/time format
+    (on by default, opt-out switches); open links in the desktop or an Android
+    browser; stop the session when idle (timeout); start at login; mirror
+    in-Android installs to the app menu; microG toggle with the caveat; a
+    one-time isolation notice on hosts without a subuid range.
+  - Per app: notifications, permissions, storage and clear data, "keep running
+    when its window is closed", uninstall.
+  - An "Android settings…" button opens Settings in its own window.
+  - Not settings, just correct defaults: touch sounds, Android stream volumes.
+
 - **In-app store installs (user question, 2026-10-27):** the F-Droid → install →
   `.desktop` mirroring path is proven, but the "install unknown apps" permission
   was pre-granted. Add compat install-flow tests for F-Droid, Droid-ify and
