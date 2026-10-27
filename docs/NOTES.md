@@ -295,6 +295,12 @@ fixing them, each with a test. Round 2 reviews the fixes.
 
 ## Backlog (unassigned)
 
+- **In-app store installs (user question, 2026-10-27):** the F-Droid → install →
+  `.desktop` mirroring path is proven, but the "install unknown apps" permission
+  was pre-granted. Add compat install-flow tests for F-Droid, Droid-ify and
+  Aurora: grant via the real prompt and check which window it appears in,
+  install a small app, open it, update it, uninstall it. Check Aurora's device
+  profile serves x86_64 splits; otherwise fix it (an x86_64 profile) or warn.
 - **Mode cleanup (user request, 2026-10-27; after hardening lands):** keep usage
   simple.
   - Remove `--kernel-binder` from the launcher (only the binder test harnesses
