@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Linux.apk: no Bluetooth HAL, so no Bluetooth feature (system_server then
+     skips the Bluetooth service instead of crash-looping its app). -->
+<permissions />

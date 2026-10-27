@@ -183,3 +183,14 @@ selftest: 12/12 ok
 - Everything else is optional: health, power, thermal, lights, vibrator and the
   rest run as example HALs. Camera, sensors, radio, GNSS, Wi-Fi and BT are
   disabled.
+
+## Blanked image parts (rootfs overlay)
+
+- **Emulator apps:**
+  `system_ext/priv-app/{MultiDisplayProvider,EmulatorRadioConfig}` are overlaid
+  with empty APKs, which PackageManager skips. MultiDisplayProvider polled a
+  missing goldfish device, used a full core and flooded logcat.
+- **Bluetooth:** `vendor/etc/permissions/android.hardware.bluetooth{,_le}.xml`
+  are overlaid with empty permission files, so system_server never starts the
+  Bluetooth service. Without a Bluetooth HAL it crash-looped.
+- **Logging:** `ro.logd.size=16M`.

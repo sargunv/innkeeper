@@ -85,6 +85,8 @@ vendor_props() {
       printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
     fi
     echo "ro.hardware.vulkan=$vk"
+    # The default 256 KiB main buffer wraps within seconds of boot.
+    echo "ro.logd.size=16M"
     # Composer backend (hal lane): a window on the host compositor, or none.
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
   } >"$dst"

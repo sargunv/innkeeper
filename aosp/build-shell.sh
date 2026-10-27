@@ -11,7 +11,7 @@ mkdir -p "$HOME/.cache/linuxapk-ccache"
 tty=()
 [ -t 0 ] && tty=(-t)
 exec podman run --rm -i "${tty[@]}" --userns=keep-id --security-opt label=disable \
-  --ulimit nofile=65536:65536 --pids-limit=-1 \
+  --ulimit nofile=65536:65536 --pids-limit=-1 --memory=80g --memory-swap=80g \
   -v "$AOSP:$AOSP" -v "$HOME/Projects:$HOME/Projects" -v "$HOME/.cache/linuxapk-ccache:/ccache" \
   -e USE_CCACHE=1 -e CCACHE_DIR=/ccache -e CCACHE_EXEC=/usr/bin/ccache \
   -w "$AOSP" linuxapk-aospbuild "${@:-bash}"

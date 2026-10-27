@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "linuxapk-hwc"
+#include <cctype>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -25,7 +27,11 @@ bool InputServer::start(const std::string& path) {
   // init-created socket: "socket linuxapk-input stream 0660 system input".
   // The fallback bind (tests without init) is owner-only.
   std::string base = path.substr(path.find_last_of('/') + 1);
+  // init publishes ANDROID_SOCKET_<name> with non-alphanumerics mapped to '_'.
   std::string env = "ANDROID_SOCKET_" + base;
+  for (char& c : env) {
+    if (!isalnum(static_cast<unsigned char>(c))) c = '_';
+  }
   if (const char* v = getenv(env.c_str())) {
     mListenFd = atoi(v);
     fcntl(mListenFd, F_SETFD, FD_CLOEXEC);
