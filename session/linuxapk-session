@@ -38,7 +38,9 @@
 #                browser; by default it only logs them, and it shows
 #                notifications and media players only on a private bus),
 #              LINUXAPK_SINGLE_UID=1 (same as start --single-uid),
-#              LINUXAPK_VID_STATS=1 (single-uid syscall counters in session.out),
+#              LINUXAPK_UBINDER_DEBUG=1 (broker tracing, and single-uid syscall
+#                counters every 10 s, in session.out; another value is a log
+#                file path inside the session root),
 #              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
 #                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
 #                emulator    SDK emulator image in out/img (tools/extract-image.sh)
@@ -314,7 +316,7 @@ start() {
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
     --setenv=LINUXAPK_UBINDER="$ubinder_helper" --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" \
-    --setenv=LINUXAPK_SINGLE_UID="$single_uid" --setenv=LINUXAPK_VID_STATS="${LINUXAPK_VID_STATS:-}" \
+    --setenv=LINUXAPK_SINGLE_UID="$single_uid" \
     "${integ_env[@]}" -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do

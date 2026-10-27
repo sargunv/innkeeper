@@ -268,7 +268,6 @@ fi
 ubinder_helper=${LINUXAPK_UBINDER:-}
 ubinder_debug=${LINUXAPK_UBINDER_DEBUG:-}
 single_uid=${LINUXAPK_SINGLE_UID:-}
-vid_stats=${LINUXAPK_VID_STATS:-}
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
@@ -276,5 +275,4 @@ export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 [[ -n $ubinder_helper ]] && export LINUXAPK_UBINDER=$ubinder_helper
 [[ -n $ubinder_debug ]] && export LINUXAPK_UBINDER_DEBUG=$ubinder_debug
 [[ $single_uid == 1 ]] && export LINUXAPK_SINGLE_UID=1
-[[ $vid_stats == 1 ]] && export LINUXAPK_VID_STATS=1
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

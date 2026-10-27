@@ -59,7 +59,7 @@ pub(crate) enum Answer {
     Continue,
 }
 
-/// Counters for `LINUXAPK_VID_STATS=1` (a line on stderr every 10 s).
+/// Counters, logged every 10 s when tracing is on (`LINUXAPK_UBINDER_DEBUG`).
 #[derive(Default)]
 struct Stats {
     getid: AtomicU64,
@@ -199,7 +199,7 @@ impl Vid {
                 }
             });
         }
-        if std::env::var("LINUXAPK_VID_STATS").as_deref() == Ok("1") {
+        if crate::DEBUG.load(Ordering::Relaxed) {
             let v = Arc::clone(&v);
             std::thread::spawn(move || v.report());
         }
@@ -226,7 +226,7 @@ impl Vid {
                 self.table.lock().unwrap().len()
             );
             if line != last {
-                eprintln!("{line}");
+                crate::log(format_args!("{line}"));
                 last = line;
             }
         }

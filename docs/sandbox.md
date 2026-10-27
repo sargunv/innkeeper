@@ -161,8 +161,8 @@ baseline. Before the fixes above, single-uid compat was 2/31 (the writable-dex
 check), then 28/31: WebView apps' renderers were killed by Chromium's seccomp
 policy for the shim's `getxattrat`.
 
-Single-uid overhead in the first 10 s of a fresh boot, from
-`LINUXAPK_VID_STATS=1`:
+Single-uid overhead in the first 10 s of a fresh boot, from the counters that
+`LINUXAPK_UBINDER_DEBUG` logs:
 
 - 187k `get*id` calls, 440 `set*id`, 7.3k chowns, 657 `SO_PEERCRED` lookups,
   6.1k trapped lstats (5.1k emulated) and 392 `status` opens;
