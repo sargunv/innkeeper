@@ -45,7 +45,6 @@ struct lxb_stream {
 int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s);
 void lxb_close_output(struct lxb_stream* s);
 int lxb_standby(struct lxb_stream* s);
-int lxb_set_volume(struct lxb_stream* s, float left, float right);
 // Applies to every stream of this process, including later ones.
 int lxb_set_master(float volume, int muted);
 
@@ -64,8 +63,6 @@ int lxb_presented(
 );
 // Whether the bridge marked the stream dead (the client should reopen).
 int lxb_dead(const struct lxb_stream* s);
-// Downstream latency estimate in ns (PipeWire queue plus device), or 0.
-uint64_t lxb_latency_ns(const struct lxb_stream* s);
 
 #ifdef __cplusplus
 }

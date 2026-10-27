@@ -2,9 +2,8 @@
 // device 0) whose playback goes to the host bridge through a shared ring
 // (bridge_client.c), and whose capture is silence for now.
 //
-// This replaces the image's libtinyalsav2.so, so the AOSP audio HAL (AIDL
-// default HAL, or goldfish's HIDL HAL on the emulator image) plays to the
-// desktop without changes. See docs/audio.md.
+// This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
+// HAL plays to the desktop without changes. See docs/audio.md.
 //
 // Behaviour notes:
 // - The bridge stream is opened lazily on the first write, so the HAL's
@@ -13,10 +12,8 @@
 //   audio clock. Without a bridge (not running, or it went away) writes are
 //   paced by CLOCK_MONOTONIC and the audio is dropped; we retry once a
 //   second.
-// - PCM_NONBLOCK (goldfish's HAL) behaves like ALSA: writes take what fits
-//   and return -EAGAIN when full, and pcm_get_poll_fd() is POLLOUT-ready
-//   only while there's room (an eventfd we saturate when full; a watcher
-//   thread clears it once the bridge has consumed).
+// - There's no device fd: pcm_get_file_descriptor() and pcm_get_poll_fd()
+//   return -1. Use pcm_wait() to wait for room.
 // - Positions (pcm_get_htimestamp, pcm_get_delay) come from the bridge's
 //   presentation estimate, which includes PipeWire's queue and the device.
 
@@ -29,7 +26,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/eventfd.h>
 #include <time.h>
 #include <tinyalsa/pcm.h>
 #include <unistd.h>
@@ -70,12 +66,6 @@ struct pcm {
   int64_t fb_t0;
   uint64_t fb_f0;
   int64_t next_retry;
-  // PCM_NONBLOCK support: wfd is the poll fd, POLLOUT-ready unless
-  // `blocked` (then its counter is saturated); the watcher clears it.
-  int wfd;
-  bool blocked, quit, watching;
-  pthread_cond_t cond;
-  pthread_t watcher;
   // Input (silence).
   int64_t in_t0;
   uint64_t in_frames;
@@ -175,8 +165,6 @@ API struct pcm* pcm_open(
   p->device = device;
   p->flags = flags;
   p->s.data_fd = p->s.space_fd = -1;
-  pthread_cond_init(&p->cond, NULL);
-  p->wfd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (card != 0 || device != 0) {
     set_error(
       p, "no device %u on card %u (Linux.apk has card 0 device 0)", device, card
@@ -207,16 +195,8 @@ static void disconnect_locked(struct pcm* p) {
 API int pcm_close(struct pcm* p) {
   if (!p) return 0;
   pthread_mutex_lock(&p->lock);
-  p->quit = true;
-  pthread_cond_signal(&p->cond);
-  bool join = p->watching;
-  pthread_mutex_unlock(&p->lock);
-  if (join) pthread_join(p->watcher, NULL);
-  pthread_mutex_lock(&p->lock);
   disconnect_locked(p);
   pthread_mutex_unlock(&p->lock);
-  if (p->wfd >= 0) close(p->wfd);
-  pthread_cond_destroy(&p->cond);
   pthread_mutex_destroy(&p->lock);
   free(p);
   return 0;
@@ -241,8 +221,14 @@ API unsigned int pcm_get_subdevice(const struct pcm* p) {
   return 0;
 }
 
-API int pcm_get_file_descriptor(const struct pcm* p) { return p->wfd; }
-API int pcm_get_poll_fd(struct pcm* p) { return pcm_get_file_descriptor(p); }
+API int pcm_get_file_descriptor(const struct pcm* p) {
+  (void)p;
+  return -1;
+}
+API int pcm_get_poll_fd(struct pcm* p) {
+  (void)p;
+  return -1;
+}
 
 API int pcm_set_config(struct pcm* p, const struct pcm_config* config) {
   if (!p) return -EFAULT;
@@ -339,72 +325,6 @@ static void enter_fallback_locked(struct pcm* p) {
   p->fb_f0 = pos;
 }
 
-// Whether a write would make progress now.
-static bool has_room_locked(struct pcm* p) {
-  if (p->s.map) {
-    return lxb_dead(&p->s) || __atomic_load_n(&p->s.written, __ATOMIC_ACQUIRE) -
-                                  lxb_consumed(&p->s) <
-                                p->s.capacity;
-  }
-  return total_of(p) - presented_locked(p) < buffer_frames(p);
-}
-
-static void* watcher_main(void* arg) {
-  struct pcm* p = arg;
-  pthread_mutex_lock(&p->lock);
-  while (!p->quit) {
-    if (!p->blocked) {
-      pthread_cond_wait(&p->cond, &p->lock);
-      continue;
-    }
-    if (has_room_locked(p)) {
-      uint64_t v;
-      (void)!read(p->wfd, &v, sizeof(v));  // counter back to 0: POLLOUT
-      p->blocked = false;
-      continue;
-    }
-    int fd = p->s.map ? p->s.space_fd : -1;
-    pthread_mutex_unlock(&p->lock);
-    struct pollfd pf = {.fd = fd, .events = POLLIN};
-    poll(&pf, 1, 2);
-    pthread_mutex_lock(&p->lock);
-  }
-  pthread_mutex_unlock(&p->lock);
-  return NULL;
-}
-
-// Full in PCM_NONBLOCK mode: make the poll fd unwritable until there's room.
-static void block_poll_fd(struct pcm* p) {
-  pthread_mutex_lock(&p->lock);
-  if (!p->blocked) {
-    uint64_t v;
-    (void)!read(p->wfd, &v, sizeof(v));
-    v = 0xfffffffffffffffeULL;
-    (void)!write(p->wfd, &v, sizeof(v));
-    p->blocked = true;
-    if (!p->watching && pthread_create(&p->watcher, NULL, watcher_main, p) == 0)
-      p->watching = true;
-    pthread_cond_signal(&p->cond);
-  }
-  pthread_mutex_unlock(&p->lock);
-}
-
-// No bridge, PCM_NONBLOCK: take what the virtual device has room for.
-static int fallback_write_nb(struct pcm* p, unsigned int frames) {
-  pthread_mutex_lock(&p->lock);
-  uint64_t queued = total_of(p) - presented_locked(p);
-  pthread_mutex_unlock(&p->lock);
-  uint64_t cap = buffer_frames(p);
-  uint64_t n = queued >= cap ? 0 : cap - queued;
-  if (n > frames) n = frames;
-  if (n == 0) {
-    block_poll_fd(p);
-    return -EAGAIN;
-  }
-  __atomic_fetch_add(&p->total, n, __ATOMIC_ACQ_REL);
-  return (int)n;
-}
-
 // No bridge: block like a device consuming at the nominal rate.
 static int fallback_write(struct pcm* p, unsigned int frames) {
   for (;;) {
@@ -438,18 +358,12 @@ API int pcm_writei(struct pcm* p, const void* data, unsigned int frames) {
   bool connected = p->s.map != NULL;
   p->running = true;
   pthread_mutex_unlock(&p->lock);
-  bool nonblock = p->flags & PCM_NONBLOCK;
-  if (!connected)
-    return nonblock ? fallback_write_nb(p, frames) : fallback_write(p, frames);
+  if (!connected) return fallback_write(p, frames);
 
-  int r = lxb_write(&p->s, data, frames, nonblock ? 0 : WRITE_TIMEOUT_MS);
+  int r = lxb_write(&p->s, data, frames, WRITE_TIMEOUT_MS);
   if (r > 0) {
     __atomic_fetch_add(&p->total, (uint64_t)r, __ATOMIC_ACQ_REL);
     return r;
-  }
-  if (r == 0 && nonblock) {
-    block_poll_fd(p);
-    return -EAGAIN;
   }
   // Dead stream, or the bridge stopped consuming for WRITE_TIMEOUT_MS.
   ALOGW(
@@ -459,7 +373,7 @@ API int pcm_writei(struct pcm* p, const void* data, unsigned int frames) {
   pthread_mutex_lock(&p->lock);
   enter_fallback_locked(p);
   pthread_mutex_unlock(&p->lock);
-  return nonblock ? fallback_write_nb(p, frames) : fallback_write(p, frames);
+  return fallback_write(p, frames);
 }
 
 API int pcm_write(struct pcm* p, const void* data, unsigned int count) {
@@ -469,7 +383,6 @@ API int pcm_write(struct pcm* p, const void* data, unsigned int count) {
   unsigned int done = 0;
   while (done < frames) {
     int r = pcm_writei(p, d + pcm_frames_to_bytes(p, done), frames - done);
-    if (r == -EAGAIN) continue;
     if (r < 0) return r;
     done += (unsigned int)r;
   }
@@ -495,7 +408,6 @@ API int pcm_readi(struct pcm* p, void* data, unsigned int frames) {
   int64_t wake = p->in_t0 + (int64_t)due_ns;
   int64_t t = now_ns();
   if (wake > t) {
-    if (p->flags & PCM_NONBLOCK) return -EAGAIN;
     struct timespec ts = {
       .tv_sec = (time_t)(wake / 1000000000),
       .tv_nsec = (long)(wake % 1000000000)

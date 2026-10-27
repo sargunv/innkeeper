@@ -22,7 +22,6 @@
 #define T_OPEN_OUTPUT 0x0101
 #define T_CLOSE 0x0102
 #define T_STANDBY 0x0103
-#define T_SET_VOLUME 0x0104
 #define T_SET_MASTER 0x0105
 #define T_REPLY 0x8000
 #define MAX_MSG 512
@@ -35,7 +34,6 @@
 #define OFF_TIMING_SEQ 192
 #define OFF_PLAYED 200
 #define OFF_TS_NS 208
-#define OFF_LATENCY_NS 216
 #define OFF_STATE 224
 #define DATA_OFFSET 4096
 #define STATE_PLAYING 1
@@ -286,7 +284,7 @@ int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s) {
   return 0;
 }
 
-static int simple_call(uint16_t type, uint32_t id, const float* f, int nf) {
+static int simple_call(uint16_t type, uint32_t id) {
   pthread_mutex_lock(&g_lock);
   if (g_sock < 0) {
     pthread_mutex_unlock(&g_lock);
@@ -295,7 +293,6 @@ static int simple_call(uint16_t type, uint32_t id, const float* f, int nf) {
   struct wr w;
   header(&w, type);
   put_u32(&w, id);
-  for (int i = 0; i < nf; i++) put_f32(&w, f[i]);
   int st = call_locked(&w, NULL, NULL, NULL, NULL);
   pthread_mutex_unlock(&g_lock);
   return st;
@@ -303,7 +300,7 @@ static int simple_call(uint16_t type, uint32_t id, const float* f, int nf) {
 
 void lxb_close_output(struct lxb_stream* s) {
   if (!s->map) return;
-  simple_call(T_CLOSE, s->id, NULL, 0);
+  simple_call(T_CLOSE, s->id);
   munmap(s->map, s->map_size);
   close(s->data_fd);
   close(s->space_fd);
@@ -312,12 +309,7 @@ void lxb_close_output(struct lxb_stream* s) {
 }
 
 int lxb_standby(struct lxb_stream* s) {
-  return s->map ? simple_call(T_STANDBY, s->id, NULL, 0) : -ENOTCONN;
-}
-
-int lxb_set_volume(struct lxb_stream* s, float left, float right) {
-  float f[2] = {left, right};
-  return s->map ? simple_call(T_SET_VOLUME, s->id, f, 2) : -ENOTCONN;
+  return s->map ? simple_call(T_STANDBY, s->id) : -ENOTCONN;
 }
 
 int lxb_set_master(float volume, int muted) {
@@ -349,10 +341,6 @@ uint64_t lxb_consumed(const struct lxb_stream* s) {
     atomic_load_explicit(hdr64(s, OFF_READ_POS), memory_order_acquire);
   uint64_t w = __atomic_load_n(&s->written, __ATOMIC_ACQUIRE);
   return r > w ? w : r;
-}
-
-uint64_t lxb_latency_ns(const struct lxb_stream* s) {
-  return atomic_load_explicit(hdr64(s, OFF_LATENCY_NS), memory_order_relaxed);
 }
 
 int lxb_write(

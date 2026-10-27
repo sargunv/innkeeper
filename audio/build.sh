@@ -3,9 +3,8 @@
 #   libtinyalsav2.so  tinyalsa API backed by the host bridge (tinyalsa/), for
 #                     the image's audio HAL; see docs/audio.md
 #   linuxapk-tone     AAudio tone + latency test (tests/tone.c), not installed
-#   alsa_proxy_test   drives an image's libalsautilsv2 like the AIDL HAL does
-# and install into the vendor overlay (emulator image: /vendor/lib64) and the
-# APEX overlay (CI image: the AIDL HAL's /apex/com.android.hardware.audio/lib64).
+# libtinyalsav2.so replaces the image's copy in the AIDL audio HAL's APEX
+# (out/apex-overlay); audio.prop and the policy XML go to out/vendor-overlay/etc.
 #
 # Env: LINUXAPK_OUT (default <repo>/out), NDK.
 set -euo pipefail
@@ -45,19 +44,10 @@ if [[ -n $missing ]]; then
   exit 1
 fi
 
-# Links against the image's libalsautilsv2 (from the same APEX, or
-# ALSAUTILS_DIR). Skipped if there's none.
-alsautils=${ALSAUTILS_DIR:-$image_lib}
-if [[ -f $alsautils/libalsautilsv2.so ]]; then
-  "$cc" "${cflags[@]}" -fPIE -pie -L"$alsautils" -Wl,--allow-shlib-undefined \
-    -o "$build/alsa_proxy_test" "$here/tests/alsa_proxy_test.c" -lalsautilsv2 -lm
-fi
-
-ovl=$out/vendor-overlay
-install -D -m 644 "$build/libtinyalsav2.so" "$ovl/lib64/libtinyalsav2.so"
-"$bin/llvm-strip" --strip-unneeded "$ovl/lib64/libtinyalsav2.so"
-# ns-init stages out/apex-overlay/<apex>/ only for APEXes the image has.
-install -D -m 644 "$ovl/lib64/libtinyalsav2.so" "$out/apex-overlay/com.android.hardware.audio/lib64/libtinyalsav2.so"
-install -D -m 644 "$here/etc/audio.prop" "$ovl/etc/audio.prop"
-install -D -m 644 "$here/etc/primary_audio_policy_configuration.xml" "$ovl/etc/primary_audio_policy_configuration.xml"
-echo "built $build; installed into $ovl and $out/apex-overlay"
+apex_lib=$out/apex-overlay/com.android.hardware.audio/lib64/libtinyalsav2.so
+install -D -m 644 "$build/libtinyalsav2.so" "$apex_lib"
+"$bin/llvm-strip" --strip-unneeded "$apex_lib"
+etc=$out/vendor-overlay/etc
+install -D -m 644 "$here/etc/audio.prop" "$etc/audio.prop"
+install -D -m 644 "$here/etc/primary_audio_policy_configuration.xml" "$etc/primary_audio_policy_configuration.xml"
+echo "built $build; installed $apex_lib and $etc"
