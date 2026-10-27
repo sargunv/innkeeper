@@ -589,7 +589,12 @@ ubinder supervisor work.
       bridge
   - Now: the CLI registers custom-scheme handlers
     (`MimeType=x-scheme-handler/<scheme>`), so a host browser redirect to
-    `com.example.app:/oauth2redirect` reaches the app as a `VIEW` intent.
+    `com.example.app:/oauth2redirect` reaches the app as a `VIEW` intent. The
+    system app is the default browser and a Custom Tabs provider: Mastodon's
+    sign-in opened `https://mastodon.social/oauth/authorize?…` in the host
+    browser, and its `org.joinmastodon.android-auth://callback` reached the
+    app's `OAuthActivity` ([bridge.md](bridge.md), "Opening links"). Remaining:
+    https App Link redirects (below).
   - Android: there's no Android browser in the image. The system app is the
     default browser and the Custom Tabs provider:
     - handle `VIEW` http(s) with `BROWSABLE`;
@@ -619,7 +624,11 @@ ubinder supervisor work.
 
 ## System UI and appearance
 
-- [ ] **Dark mode** · todo · P0 · sysapp + bridge
+- [x] **Dark mode** · done · P0 · sysapp + bridge
+  - Now: portal `color-scheme` drives `UiModeManager.setNightMode` live
+    (`services/settings.rs`, `integration/settings/HostSettings.kt`;
+    [bridge.md](bridge.md), "Desktop settings"). Proven in nested Plasma:
+    BreezeDark → `mNightMode=2 (yes)`, Read You turns dark.
   - Linux: `org.freedesktop.portal.Settings`, `org.freedesktop.appearance`
     `color-scheme` (0 default, 1 dark, 2 light), with `SettingChanged`. Nucleus
     `darkmode-detector`.
@@ -627,7 +636,11 @@ ubinder supervisor work.
     `setNightMode(MODE_NIGHT_YES/NO)` (`MODIFY_DAY_NIGHT_MODE`), live. Mac.apk
     does this live.
   - Test: Read You, Tomato.
-- [ ] **Accent color and Material You** · todo · P1 · sysapp + bridge
+- [x] **Accent color and Material You** · done · P1 · sysapp + bridge
+  - Now: the portal accent becomes the "preset" seed in
+    `theme_customization_overlay_packages`; SystemUI regenerates its fabricated
+    overlays (`system_accent1_600` #3e627a → #845242 for an orange accent).
+    `IThemeManager` is flag-off in both images.
   - Linux: `org.freedesktop.appearance` `accent-color` (sRGB doubles; KDE and
     GNOME 47+). Nucleus `system-color`.
   - Android: Android 17's `IThemeManager.updateThemeSettings` (new in 17:
@@ -642,7 +655,9 @@ ubinder supervisor work.
     `runtime/src/wallpaper_bridge.mm`). Read it from the Wallpaper portal or a
     file.
   - Test: Read You, Auxio (dynamic color).
-- [ ] **Font scaling** · todo · P1 · sysapp + bridge
+- [x] **Font scaling** · done · P1 · sysapp + bridge
+  - Now: `text-scaling-factor` (KDE's portal provides it too) → `FONT_SCALE`,
+    clamped to 0.85–2; proven with an override (1.25).
   - Linux: the portal Settings `org.gnome.desktop.interface`
     `text-scaling-factor`. KDE's font DPI is in `kdeglobals` (`forceFontDPI`).
   - Android: `Settings.System.FONT_SCALE` (nonlinear scaling from Android 14).
@@ -652,7 +667,11 @@ ubinder supervisor work.
     worth it, since apps bundle fonts.
   - Mac.apk backs CJK families with host faces (`runtime/src/host_fonts.cpp`).
     Only needed if we trim Noto CJK from the image.
-- [ ] **Locale and regional preferences** · todo · P0 · sysapp
+- [ ] **Locale and regional preferences** · partial · P0 · sysapp
+  - Now: `LANGUAGE`/`LC_ALL`/`LC_MESSAGES`/`LANG` → `LocalePicker.updateLocales`
+    at connect (proven: `de-DE,en-US`, Tomato in German). Next: live changes
+    (`plasma-localerc`, locale1) and `LC_TIME`/`LC_MEASUREMENT` as Unicode
+    extensions.
   - Linux: `LANG`/`LC_*` from the session environment;
     `org.freedesktop.locale1`; the Account portal for the user name.
   - Android: `LocalePicker.updateLocales` or
@@ -660,7 +679,9 @@ ubinder supervisor work.
     startup and on change. `LC_TIME`/`LC_MEASUREMENT` become Unicode extensions
     (`-u-fw-`, `-mu-`) for Android 14 regional preferences. Per-app languages
     (`LocaleManager`) already work inside Android.
-- [ ] **Time zone** · todo · P0 · sysapp + bridge
+- [x] **Time zone** · done · P0 · sysapp + bridge
+  - Now: `/etc/localtime` (polled) → `AlarmManager.setTimeZone` with automatic
+    detection off; proven with `Europe/Berlin` (`date` → CET).
   - Now: the session uses the kernel clock, so the time is right, but the zone
     is the image default.
   - Linux: `org.freedesktop.timedate1` `Timezone` (PropertiesChanged), or
@@ -669,21 +690,32 @@ ubinder supervisor work.
     time-zone detection (`time_zone_detector`) so telephony and location sources
     don't fight it.
   - Test: Fossify Clock, Etar.
-- [ ] **12/24-hour time format** · todo · P1 · sysapp
+- [x] **12/24-hour time format** · done · P1 · sysapp
+  - Now: portal `clock-format` (KDE fills it from its locale) → `TIME_12_24`
+    plus the `TIME_CHANGED` broadcast.
   - Linux: GNOME `clock-format` through the portal Settings; KDE through
     `LC_TIME`.
   - Android: `Settings.System.TIME_12_24`.
-- [ ] **Reduced motion** · todo · P1 · sysapp + bridge
+- [ ] **Reduced motion** · partial · P1 · sysapp + bridge
+  - Now: implemented (`reduced-motion` → the three animation scales), not yet
+    seen on a desktop that sets it.
   - Linux: `org.freedesktop.appearance` `reduced-motion` (xdg-desktop-portal
     1.20+).
   - Android: `Settings.Global` `animator_duration_scale`,
     `transition_animation_scale` and `window_animation_scale` set to 0 (the
     "Remove animations" switch).
-- [ ] **High contrast** · todo · P2 · sysapp + bridge
+- [ ] **High contrast** · partial · P2 · sysapp + bridge
+  - Now: implemented (`contrast` → `contrast_level`), not yet seen on a desktop
+    that sets it.
   - Linux: `org.freedesktop.appearance` `contrast` (1 = high).
   - Android: `Settings.Secure.CONTRAST_LEVEL` (UiModeManager contrast, Android
     14+), and optionally `high_text_contrast_enabled`.
-- [ ] **Notifications** · todo · P0 · sysapp + bridge
+- [x] **Notifications** · done · P0 · sysapp + bridge
+  - Now: `NotificationForwarder` → `services/notify.rs` →
+    `org.freedesktop.Notifications` (title, text, app name, icon/picture,
+    `desktop-entry`, urgency), updates in place, dismissal both ways, click
+    opens or raises the app's window ([bridge.md](bridge.md), "Notifications").
+    Proven with Tomato in nested Plasma.
   - Linux: `org.freedesktop.Notifications` (Nucleus `notification-linux`) or
     `org.freedesktop.portal.Notification` v2 (needed inside Flatpak).
     `desktop-entry` hint `dev.linuxapk.<pkg>` gives the app's name and icon.
@@ -697,21 +729,30 @@ ubinder supervisor work.
     - Clicks: the `contentIntent` `PendingIntent.send()` opens the app's window,
       with an activation token from the `ActivationToken` signal.
   - Test: Tasks.org reminders, Thunderbird.
-- [ ] **Notification actions** · todo · P0 · sysapp + bridge
+- [x] **Notification actions** · done · P0 · sysapp + bridge
+  - Now: up to 3 buttons; Tomato's "Stop" on the desktop paused the timer and
+    the notification updated to "Paused".
   - Linux: the `actions` list and `ActionInvoked`.
   - Android: send `Notification.Action.actionIntent`.
-- [ ] **Inline reply** · todo · P1 · sysapp + bridge
+- [x] **Inline reply** · done · P1 · sysapp + bridge
+  - Now: first free-form `RemoteInput` → KDE `inline-reply`; proven with the
+    `NotificationProbe` (reply text reached the app's receiver, which updated
+    the notification).
   - Linux: KDE's `inline-reply` capability (`NotificationReplied`), and portal
     Notification v2's text-input action where supported.
   - Android: `RemoteInput.addResultsToIntent` and send.
   - Test: Conversations.
-- [ ] **Progress** · todo · P1 · sysapp + bridge
+- [ ] **Progress** · partial · P1 · sysapp + bridge
+  - Now: `EXTRA_PROGRESS` → the `value` hint (indeterminate is dropped). Next:
+    Unity `LauncherEntry` progress.
   - Linux: the `value` hint (KDE, GNOME ignores it), and Unity `LauncherEntry`
     `progress` on the app's taskbar entry (Nucleus `taskbar-progress`).
   - Android: `EXTRA_PROGRESS`/`EXTRA_PROGRESS_MAX`, and Android 16
     `ProgressStyle`.
   - Test: F-Droid (download progress), NewPipe downloads.
-- [ ] **Channels, importance, DND** · todo · P1 · sysapp + bridge
+- [ ] **Channels, importance, DND** · partial · P1 · sysapp + bridge
+  - Now: importance → urgency, low importance and alert-once updates →
+    `suppress-sound`. DND not mapped.
   - Map importance to urgency and category; silent channels to `suppress-sound`.
     Host Do Not Disturb (`Inhibited` on KDE, the GNOME `show-banners` setting)
     maps to Android Zen through `NotificationManager.setInterruptionFilter`, or
@@ -806,7 +847,11 @@ ubinder supervisor work.
   - Linux: when the pointer leaves the window mid-drag, the bridge starts
     `wl_data_device.start_drag`, offering the URIs as files (exported through
     the bridge).
-- [ ] **Clipboard: text** · todo · P0 · sysapp + bridge
+- [x] **Clipboard: text** · done (data-control desktops) · P0 · sysapp + bridge
+  - Now: `services/clipboard.rs` (own Wayland connection, `ext_data_control_v1`)
+    ⇄ `integration/clipboard/ClipboardSync.kt`, sensitive hint both ways; proven
+    both ways in nested KWin. GNOME (no data control) needs the display
+    service's seat: see [bridge.md](bridge.md), "Clipboard".
   - Linux: `ext_data_control_v1` (or `zwlr_data_control_v1`) for focus-less sync
     on KDE and wlroots. On GNOME, `wl_data_device` selection while one of our
     windows has focus.
@@ -817,7 +862,9 @@ ubinder supervisor work.
     `hwcomposer/WaydroidClipboard.cpp`. Mac.apk:
     `runtime/src/clipboard_bridge.mm`.
   - Test: Markor, KeePassDX (sensitive).
-- [ ] **Clipboard: images and URIs** · todo · P1 · sysapp + bridge
+- [ ] **Clipboard: images and URIs** · partial · P1 · sysapp + bridge
+  - Now: images both ways (host PNG ⇄ RGBA ⇄ `ClipImageProvider` URI), proven
+    with `ClipProbe`. URIs and files: todo.
   - Out: read the `content://` stream and offer `image/png` or the file.
   - In: host image data goes behind a system-app content URI in a `ClipData`.
 - [ ] **File associations** · todo · P1 · cli + sysapp
@@ -828,8 +875,10 @@ ubinder supervisor work.
     `content://dev.linuxapk.host/…` in a `VIEW` intent with
     `FLAG_GRANT_READ_URI_PERMISSION`, restricted to the package.
   - Test: Markor (`text/markdown`), VLC (video files).
-- [ ] **Opening URLs and files from Android on the desktop** · todo · P0 ·
-      sysapp + bridge
+- [ ] **Opening URLs and files from Android on the desktop** · partial · P0 ·
+  - Now: http(s): `BrowserActivity` (default browser role, test shell turned
+    off) → `OPEN_URI` → OpenURI portal; Wikipedia's "Learn more" link opened on
+    the host. `mailto:` and files: todo. sysapp + bridge
   - Android: the system app handles http(s), `mailto:` and others no Android app
     claims, and files no Android app can open. It's the default browser role
     (`RoleManager` `ROLE_BROWSER`, set at setup).
@@ -857,7 +906,10 @@ ubinder supervisor work.
     capture PCM). Android 12+ mic toggles and the privacy indicator already
     work. Mac.apk: `runtime/src/audio_input.mm`.
   - Test: Fossify Voice Recorder.
-- [ ] **MediaSession to MPRIS** · todo · P1 · sysapp + bridge
+- [x] **MediaSession to MPRIS** · done · P1 · sysapp + bridge
+  - Now: `MediaSync.kt` → `services/mpris.rs`: metadata, art, position, seek,
+    Can*; a KWin media key paused VLC through plasmashell → `Pause`, and the
+    Plasma media widget showed it ([bridge.md](bridge.md), "Media").
   - Linux: `org.mpris.MediaPlayer2.dev_linuxapk_<pkg>` (`Player`: metadata, art
     URL as a file, PlaybackStatus, Position, CanGoNext, Seek, `DesktopEntry`).
     Nucleus `media-control`.
@@ -1169,20 +1221,20 @@ The next ten items, by value per effort, assuming `lane/win` (per-app windows)
 and `lane/audio` (audio out) land first. Effort: S (days), M (about a week), L
 (weeks).
 
-1. **Bridge to system app channel, plus dark mode, time zone and locale** (S–M,
-   sysapp + bridge). The socket protocol every later row reuses, proven on the
-   cheapest P0 settings rows (portal Settings, timedate1, `LANG`).
+1. **(done)** **Bridge to system app channel, plus dark mode, time zone and
+   locale** (S–M, sysapp + bridge). The socket protocol every later row reuses,
+   proven on the cheapest P0 settings rows (portal Settings, timedate1, `LANG`).
 2. **App id, title, icon, activation token and default window size** (S,
    windowing + bridge). Makes per-app windows feel native in the taskbar.
    Includes a host cursor on enter (the default arrow).
-3. **Notifications with actions** (M, sysapp + bridge). A
+3. **(done)** **Notifications with actions** (M, sysapp + bridge). A
    NotificationListenerService to `org.freedesktop.Notifications`; progress and
    inline reply come right after.
-4. **Clipboard text both ways** (S–M, sysapp + bridge). `ext-data-control`, with
-   a focus fallback.
-5. **Open URLs and Custom Tabs via the host browser** (S, sysapp + bridge). The
-   default-browser role, CustomTabsService and OpenURI. With the CLI's scheme
-   handlers, this unlocks OAuth sign-ins (Thunderbird, Tusky).
+4. **(done)** **Clipboard text both ways** (S–M, sysapp + bridge).
+   `ext-data-control`, with a focus fallback.
+5. **(done)** **Open URLs and Custom Tabs via the host browser** (S, sysapp +
+   bridge). The default-browser role, CustomTabsService and OpenURI. With the
+   CLI's scheme handlers, this unlocks OAuth sign-ins (Thunderbird, Tusky).
 6. **IME through `text-input-v3`** (M, sysapp + bridge). Removes the soft
    keyboard and gives non-US text and CJK input through fcitx5/IBus. It also
    fixes the non-US layouts row for text.
@@ -1191,8 +1243,8 @@ and `lane/audio` (audio out) land first. Effort: S (days), M (about a week), L
 8. **Minimize/close lifecycle and session keep-alive rules** (M, windowing +
    session). `suspended` stops apps; foreground services and MPRIS keep the
    session running; idle shutdown otherwise.
-9. **MediaSession to MPRIS** (S–M, sysapp + bridge). Media keys and desktop
-   media controls, with artwork.
+9. **(done)** **MediaSession to MPRIS** (S–M, sysapp + bridge). Media keys and
+   desktop media controls, with artwork.
 10. **Store installs end to end** (S–M, sysapp + cli). F-Droid and Aurora
     installs get `.desktop` entries through the package callback. The confirm
     dialog renders in the store's window.

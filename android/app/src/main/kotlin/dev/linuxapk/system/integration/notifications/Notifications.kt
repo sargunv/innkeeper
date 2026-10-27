@@ -98,7 +98,6 @@ class Notifications(private val context: Context, private val feature: Integrati
   }
 
   fun posted(sbn: StatusBarNotification, initial: Boolean = false) {
-    if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "posted ${sbn.key}")
     if (!wanted(sbn)) {
       // It may have been forwarded before it turned into something we skip.
       byKey[sbn.key]?.let { removed(sbn.key) }

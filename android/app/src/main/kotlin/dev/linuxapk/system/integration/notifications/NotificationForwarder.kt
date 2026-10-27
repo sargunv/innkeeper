@@ -25,7 +25,7 @@ class NotificationForwarder : NotificationListenerService() {
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
-    Log.d(Notifications.TAG, "onNotificationPosted ${sbn.key}")
+    if (Log.isLoggable(Notifications.TAG, Log.DEBUG)) Log.d(Notifications.TAG, "posted ${sbn.key}")
     val f = feature ?: return
     f.handler.post { f.notifications.posted(sbn) }
   }

@@ -244,6 +244,13 @@ Causes:
   (drop, file chooser, or "open with"; `linuxapk setup` now registers it), and
   lists, opens and uninstalls apps, with session status and settings. Proven in
   nested KWin. See [gui.md](gui.md).
+- 2026-10-27 (integ): **M3 desktop integration.** The bridge's system service
+  (id 3, `bridge/src/services/`) and the system app's integration feature: dark
+  mode, accent (Material You seed), time zone, locale, 12/24 h and font scale
+  follow the desktop live; notifications (actions, inline reply, dismissal both
+  ways), clipboard text and images both ways (`ext-data-control`), http(s) and
+  Custom Tabs to the host browser (OAuth), MediaSessions as MPRIS players (media
+  keys). Proven in nested Plasma. See [bridge.md](bridge.md), "System service".
 
 - 2026-10-27 (integb): **typing through the host's input methods.** The
   Linux.apk Keyboard (an IME in the system app) is the default and shows no soft
