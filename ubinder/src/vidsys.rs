@@ -30,8 +30,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use crate::sys::{
-    SeccompNotif, mem_read_path, mem_write, notif_id_valid, open_mem, read_path, status_field,
-    vm_read, vm_write,
+    SeccompNotif, mem_read, mem_read_path, mem_write, notif_id_valid, open_mem, read_path,
+    status_field, vm_read,
 };
 use crate::vid::{self, CredTable, Creds, SetId};
 
@@ -336,7 +336,7 @@ impl Vid {
         }
         if nr == libc::SYS_getsockopt {
             st.peercred.fetch_add(1, Ordering::Relaxed);
-            return self.peercred(tid, a);
+            return self.peercred(req.id, tid, a);
         }
         if matches!(
             nr,
@@ -361,8 +361,18 @@ impl Vid {
             libc::SYS_geteuid => return Answer::Val(c.euid as i64),
             libc::SYS_getgid => return Answer::Val(c.rgid as i64),
             libc::SYS_getegid => return Answer::Val(c.egid as i64),
-            libc::SYS_getresuid => return write_ids(tid, &a, [c.ruid, c.euid, c.suid]),
-            libc::SYS_getresgid => return write_ids(tid, &a, [c.rgid, c.egid, c.sgid]),
+            libc::SYS_getresuid | libc::SYS_getresgid => {
+                let mem = match self.pin(req.id, tid) {
+                    Ok(m) => m,
+                    Err(e) => return e,
+                };
+                let ids = if nr == libc::SYS_getresuid {
+                    [c.ruid, c.euid, c.suid]
+                } else {
+                    [c.rgid, c.egid, c.sgid]
+                };
+                return write_ids(mem.as_raw_fd(), &a, ids);
+            }
             libc::SYS_getgroups => {
                 let size = a[0] as i32;
                 if size < 0 {
@@ -372,9 +382,13 @@ impl Vid {
                     Err(e) => Answer::Errno(e),
                     Ok(n) => {
                         if size > 0 {
+                            let mem = match self.pin(req.id, tid) {
+                                Ok(m) => m,
+                                Err(e) => return e,
+                            };
                             let b: Vec<u8> =
                                 c.groups.iter().flat_map(|g| g.to_ne_bytes()).collect();
-                            if !vm_write(tid, a[1], &b) {
+                            if !mem_write(mem.as_raw_fd(), a[1], &b) {
                                 return Answer::Errno(libc::EFAULT);
                             }
                         }
@@ -395,7 +409,11 @@ impl Vid {
                 if n < 0 || n as usize > vid::NGROUPS_MAX {
                     return Answer::Errno(libc::EINVAL);
                 }
-                let Some(b) = vm_read(tid, a[1], n as usize * 4) else {
+                let mem = match self.pin(req.id, tid) {
+                    Ok(m) => m,
+                    Err(e) => return e,
+                };
+                let Some(b) = mem_read(mem.as_raw_fd(), a[1], n as usize * 4) else {
                     return Answer::Errno(libc::EFAULT);
                 };
                 SetId::Groups(
@@ -559,9 +577,26 @@ impl Vid {
         m.get(&p).copied()
     }
 
+    /// The caller's address space, for a call that transfers memory: pinned
+    /// (`/proc/<tid>/mem`) and then checked to be the caller's. A signal can
+    /// end the notification wait and let the caller exec before we write, so
+    /// writing by numeric tid could reach the new image.
+    fn pin(&self, id: u64, tid: i32) -> Result<OwnedFd, Answer> {
+        let mem = open_mem(tid);
+        if !notif_id_valid(self.listener, id) {
+            return Err(Answer::Deferred);
+        }
+        mem.ok_or(Answer::Errno(libc::ESRCH))
+    }
+
     /// getsockopt(fd, SOL_SOCKET, SO_PEERCRED, optval, optlen).
-    fn peercred(&self, tid: i32, a: [u64; 6]) -> Answer {
-        let Some(len) = vm_read(tid, a[4], 4) else {
+    fn peercred(&self, id: u64, tid: i32, a: [u64; 6]) -> Answer {
+        let mem = match self.pin(id, tid) {
+            Ok(m) => m,
+            Err(e) => return e,
+        };
+        let mem = mem.as_raw_fd();
+        let Some(len) = mem_read(mem, a[4], 4) else {
             return Answer::Errno(libc::EFAULT);
         };
         let len = i32::from_ne_bytes([len[0], len[1], len[2], len[3]]);
@@ -606,7 +641,7 @@ impl Vid {
         }
         let n = (len as usize).min(size_of::<libc::ucred>());
         let bytes: [u8; 12] = unsafe { std::mem::transmute(uc) };
-        if !vm_write(tid, a[3], &bytes[..n]) || !vm_write(tid, a[4], &(n as u32).to_ne_bytes()) {
+        if !mem_write(mem, a[3], &bytes[..n]) || !mem_write(mem, a[4], &(n as u32).to_ne_bytes()) {
             return Answer::Errno(libc::EFAULT);
         }
         Answer::Val(0)
@@ -619,9 +654,9 @@ fn errno() -> i32 {
         .unwrap_or(libc::EIO)
 }
 
-fn write_ids(tid: i32, a: &[u64; 6], ids: [u32; 3]) -> Answer {
+fn write_ids(mem: RawFd, a: &[u64; 6], ids: [u32; 3]) -> Answer {
     for (i, id) in ids.iter().enumerate() {
-        if !vm_write(tid, a[i], &id.to_ne_bytes()) {
+        if !mem_write(mem, a[i], &id.to_ne_bytes()) {
             return Answer::Errno(libc::EFAULT);
         }
     }
@@ -1018,4 +1053,46 @@ fn chown(j: &Job, listener: RawFd, mem: RawFd) -> Answer {
         };
     }
     Answer::Val(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sys::vm_read;
+
+    /// The inline answers (getresuid and friends, SO_PEERCRED, getgroups)
+    /// write through the caller's pinned address space: once the caller has
+    /// exec'd, the write fails instead of landing in the new image, which a
+    /// write by numeric tid would reach.
+    #[test]
+    fn inline_writes_do_not_follow_exec() {
+        use std::io::Write;
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read x; exec sleep 10"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let mem = open_mem(pid).unwrap();
+        child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+        let exe = |p: i32| std::fs::read_link(format!("/proc/{p}/exe")).unwrap_or_default();
+        for _ in 0..500 {
+            if exe(pid).ends_with("sleep") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(exe(pid).ends_with("sleep"));
+        // A writable address in the new image.
+        let maps = std::fs::read_to_string(format!("/proc/{pid}/maps")).unwrap();
+        let line = maps.lines().find(|l| l.contains(" rw-p ")).unwrap();
+        let addr = u64::from_str_radix(line.split('-').next().unwrap(), 16).unwrap();
+        let before = vm_read(pid, addr, 12).unwrap();
+        let a = [addr, addr + 4, addr + 8, 0, 0, 0];
+        let r = write_ids(mem.as_raw_fd(), &a, [0x1111, 0x2222, 0x3333]);
+        assert!(matches!(r, Answer::Errno(libc::EFAULT)));
+        assert_eq!(vm_read(pid, addr, 12).unwrap(), before);
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
 }

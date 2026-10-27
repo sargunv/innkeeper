@@ -287,25 +287,6 @@ pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if n == len as isize { Some(buf) } else { None }
 }
 
-pub(crate) fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
-    if data.is_empty() {
-        return true;
-    }
-    if addr == 0 {
-        return false;
-    }
-    let local = libc::iovec {
-        iov_base: data.as_ptr() as *mut _,
-        iov_len: data.len(),
-    };
-    let remote = libc::iovec {
-        iov_base: addr as *mut _,
-        iov_len: data.len(),
-    };
-    let n = unsafe { libc::process_vm_writev(pid, &local, 1, &remote, 1, 0) };
-    n == data.len() as isize
-}
-
 /// Read target memory through a pinned `/proc/<pid>/mem` fd (see
 /// `ProcState::mem`). After an exec the old address space is gone and this
 /// fails.
