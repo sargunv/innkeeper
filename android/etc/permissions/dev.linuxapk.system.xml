@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Installed as /system_ext/etc/permissions/dev.linuxapk.system.xml. -->
+<permissions>
+  <!-- ro.control_privapp_permissions=enforce: every privileged permission the
+       app requests must be listed here, or system_server refuses to boot.
+       None yet (INJECT_EVENTS is signature-only). -->
+  <privapp-permissions package="dev.linuxapk.system" />
+
+  <!-- Holders run with the "input" group: the composer's input socket can then
+       be 0660 system:input instead of world-readable. -->
+  <permission name="dev.linuxapk.permission.HOST_INPUT">
+    <group gid="input" />
+  </permission>
+</permissions>

@@ -25,6 +25,10 @@
       { "Regex": ".*", "Priority": 1 },
     ],
   },
+  "ktfmt": {
+    "style": "google",
+    "lineWidth": 100,
+  },
   "exec": {
     "commands": [
       { "command": "rustfmt --edition 2024", "exts": ["rs"] },
@@ -46,5 +50,6 @@
     "npm:@dprint/clang-format@0.2.1",
     "https://plugins.dprint.dev/cmakefmt/cmakefmt-v2.3.1.wasm",
     "npm:@dprint/ruff@0.11.2",
+    "https://plugins.dprint.dev/sargunv/ktfmt-0.65.0.json@d355d4440dda00c0e315b5c39669f417bcfa76b64b68591fa1818f7a1f6b1005",
   ],
 }

@@ -9,8 +9,9 @@ lockfile = true
 "aqua:koalaman/shellcheck" = "0.11.0"
 "aqua:mvdan/sh" = "3.14.1"
 "conda:clang-tools" = "23.1.4"
-"github:jdx/hk" = "2.8.1"
 "core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-linux-android,aarch64-linux-android" }
+"github:jdx/hk" = "2.8.1"
+"core:java" = "zulu-25.36.205.0"
 
 [tasks.check]
 run = "hk check --all"

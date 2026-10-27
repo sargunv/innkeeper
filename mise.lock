@@ -87,6 +87,15 @@ url = "https://github.com/jdx/hk/releases/download/v2.8.1/hk-x86_64-unknown-linu
 url_api = "https://api.github.com/repos/jdx/hk/releases/assets/668781856"
 provenance = "github-attestations"
 
+[[tools.java]]
+version = "zulu-25.36.205.0"
+backend = "core:java"
+specifiers = ["zulu-25.36.205.0"]
+
+[tools.java."platforms.linux-x64"]
+checksum = "sha256:e11d92589de8fd55616a843e0298ba72348848bd49b675088e930b67538497cb"
+url = "https://cdn.azul.com/zulu/bin/zulu25.36.205-ca-jdk25.0.4.1-linux_x64.tar.gz"
+
 [[tools.rust]]
 version = "1.99.1"
 backend = "core:rust"

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  Linux.apk System: privileged, platform-signed, persistent. Installed in
+  /system_ext/priv-app/LinuxApkSystem with
+  /system_ext/etc/permissions/dev.linuxapk.system.xml (see android/build.sh).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- Holders get the "input" group (gid mapping in dev.linuxapk.system.xml),
+       so the composer's input socket can be 0660 system:input. -->
+  <permission
+    android:name="dev.linuxapk.permission.HOST_INPUT"
+    android:protectionLevel="signature" />
+
+  <uses-permission android:name="dev.linuxapk.permission.HOST_INPUT" />
+  <!-- signature: granted by the platform key. -->
+  <uses-permission android:name="android.permission.INJECT_EVENTS" />
+
+  <application
+    android:name=".LinuxApkSystemApp"
+    android:allowBackup="false"
+    android:directBootAware="true"
+    android:label="@string/app_name"
+    android:persistent="true">
+
+    <!-- Diagnostic: logs every input event it receives (tag LinuxApkProbe).
+         am start -n dev.linuxapk.system/.input.InputProbeActivity -->
+    <activity
+      android:name=".input.InputProbeActivity"
+      android:exported="true"
+      android:label="@string/probe_name" />
+  </application>
+</manifest>
