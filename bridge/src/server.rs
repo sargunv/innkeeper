@@ -82,21 +82,14 @@ pub struct Events {
 }
 
 impl Events {
-    pub fn send(&self, ty: u16, body: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
-        if !(wire::EVENT_MIN..=wire::EVENT_MAX).contains(&ty) {
-            bail!("event type {ty:#06x} outside the event range");
-        }
-        let mut w = wire::Writer::message(ty, 0);
-        w.0.extend_from_slice(body);
-        if w.0.len() > MAX_MSG {
-            bail!("event too long ({} bytes)", w.0.len());
-        }
-        transport::send(&self.sock, &w.0, fds)
+    /// Events on `sock` (tests).
+    pub fn new(sock: Arc<OwnedFd>) -> Events {
+        Events { sock }
     }
 
-    /// Like [`send`](Self::send), but fails instead of waiting when the
-    /// client's socket buffer is full: a client that doesn't read loses
-    /// events rather than stalling the service.
+    /// Sends one event. Never waits: when the client's socket buffer is full
+    /// this fails with EAGAIN, so a client that doesn't read loses events
+    /// rather than stalling the service (or every client sharing its locks).
     pub fn try_send(&self, ty: u16, body: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
         if !(wire::EVENT_MIN..=wire::EVENT_MAX).contains(&ty) {
             bail!("event type {ty:#06x} outside the event range");

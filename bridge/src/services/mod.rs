@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::server::Events;
 
-/// Connections that want one kind of event. Sends that fail (the client is
-/// gone) drop the subscriber.
+/// Connections that want one kind of event. A client whose socket is full
+/// misses the event; one that is gone is dropped.
 #[derive(Default)]
 pub struct Subscribers {
     next: AtomicU64,
@@ -55,7 +55,16 @@ impl Subscribers {
         self.list
             .lock()
             .unwrap()
-            .retain(|(k, e)| Some(*k) == skip || e.send(ty, body, fds).is_ok());
+            .retain(|(k, e)| Some(*k) == skip || alive(e.try_send(ty, body, fds)));
+    }
+}
+
+/// Did an event send leave the connection usable (sent, or only dropped
+/// because the client isn't reading)?
+fn alive(r: anyhow::Result<()>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(e) => e.downcast_ref::<rustix::io::Errno>() == Some(&rustix::io::Errno::AGAIN),
     }
 }
 
@@ -76,4 +85,48 @@ pub fn valid_package(p: &str) -> bool {
         && !p.starts_with('.')
         && p.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// A subscriber that stops reading can't stall a broadcast (which holds
+    /// the subscriber lock), and keeps its subscription; one that is gone is
+    /// dropped.
+    #[test]
+    fn broadcast_never_waits_for_a_slow_client() {
+        let (a, b) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        let e = Events::new(Arc::new(a));
+        // Fill the client's socket.
+        let full = loop {
+            if let Err(x) = e.try_send(0x4001, &[0; 256], &[]) {
+                break x;
+            }
+        };
+        assert!(!alive(Err(anyhow::anyhow!("other"))));
+        assert!(alive(Err(full)), "filling the socket failed otherwise");
+        let subs = Arc::new(Subscribers::default());
+        subs.add(e);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let s = subs.clone();
+        std::thread::spawn(move || {
+            s.broadcast(0x4001, b"x", &[], None);
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("broadcast blocked on a full socket");
+        assert!(!subs.is_empty());
+        drop(b);
+        subs.broadcast(0x4001, b"x", &[], None);
+        assert!(subs.is_empty());
+    }
 }

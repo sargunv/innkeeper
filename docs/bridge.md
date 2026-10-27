@@ -85,12 +85,14 @@ To add a service (the windowing lane's display service is id 2, types
    Dropping the service is the connection's cleanup. Put per-client caps
    (memory, objects) in the service, as `audio::Limits` does.
 4. **Events.** The factory receives a `server::Events` for the connection.
-   `Events::send(ty, body, fds)` pushes one event packet (tag 0; the type must
-   be in the event range; at most 512 bytes and 4 fds). It is cheap to clone, so
-   hand it to your threads. Each event is one packet, so events never split a
-   reply, but their order relative to replies isn't defined. Clients match
-   replies by tag and treat tag-0 event types separately. Sends fail once the
-   client is gone.
+   `Events::try_send(ty, body, fds)` pushes one event packet (tag 0; the type
+   must be in the event range; at most 512 bytes and 4 fds). It is cheap to
+   clone, so hand it to your threads. Each event is one packet, so events never
+   split a reply, but their order relative to replies isn't defined. Clients
+   match replies by tag and treat tag-0 event types separately. Sends fail once
+   the client is gone, and never wait: a client whose socket is full loses the
+   event (EAGAIN). There is no blocking variant, because a slow client could
+   otherwise stall a service, and everyone behind its locks.
 5. **Registration.** Register a factory with
    `Registry::register(id, name, |peer, events| ...)` in `main.rs`. If the
    service has new clients, extend the launcher's `--allow-uid` list and

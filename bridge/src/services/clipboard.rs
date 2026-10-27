@@ -144,7 +144,7 @@ impl ClipboardHub {
         if let Some(clip) = self.current.lock().unwrap().clone()
             && let Ok((body, fd)) = clip.event()
         {
-            let _ = e.send(ev::CLIP, &body, &[fd.as_fd()]);
+            let _ = e.try_send(ev::CLIP, &body, &[fd.as_fd()]);
         }
         self.subs.add(e)
     }

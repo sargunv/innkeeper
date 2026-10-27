@@ -66,7 +66,7 @@ impl SettingsHub {
     /// Subscribes `e` and sends it the current settings.
     pub fn subscribe(&self, e: Events) -> u64 {
         let body = self.current().encode();
-        let _ = e.send(ev::SETTINGS, &body, &[]);
+        let _ = e.try_send(ev::SETTINGS, &body, &[]);
         self.subs.add(e)
     }
 

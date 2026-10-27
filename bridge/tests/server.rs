@@ -34,12 +34,12 @@ struct Echo(Events);
 impl Service for Echo {
     fn handle(&mut self, ty: u16, body: &[u8], _fds: Vec<OwnedFd>) -> Reply {
         match ty {
-            0x0d01 => match self.0.send(0x4001, body, &[]) {
+            0x0d01 => match self.0.try_send(0x4001, body, &[]) {
                 Ok(()) => Reply::ok(),
                 Err(_) => Reply::err(-EIO),
             },
             // Events outside the event range are refused by the sender.
-            0x0d02 => match self.0.send(0x0101, body, &[]) {
+            0x0d02 => match self.0.try_send(0x0101, body, &[]) {
                 Ok(()) => Reply::ok(),
                 Err(_) => Reply::err(-EINVAL),
             },

@@ -383,7 +383,7 @@ impl NotifyHub {
                 crate::info!("notify: {host} ({}): {key}", r.id);
                 let _ = r
                     .events
-                    .send(ev::NOTIFY_EVENT, &notify_event(r.id, what, idx, 0), &[]);
+                    .try_send(ev::NOTIFY_EVENT, &notify_event(r.id, what, idx, 0), &[]);
             }
             "NotificationReplied" => {
                 let Ok((host, text)) = body.deserialize::<(u32, String)>() else {
@@ -400,7 +400,7 @@ impl NotifyHub {
                     Ok(fd) => {
                         let body =
                             notify_event(r.id, notify_event::REPLY, idx as u8, text.len() as u32);
-                        let _ = r.events.send(
+                        let _ = r.events.try_send(
                             ev::NOTIFY_EVENT,
                             &body,
                             &[std::os::fd::AsFd::as_fd(&fd)],
@@ -427,7 +427,7 @@ impl NotifyHub {
                 // 2: dismissed by the user; 3: closed by us.
                 if reason == 2 {
                     crate::info!("notify: {host} ({}): dismissed", r.id);
-                    let _ = r.events.send(
+                    let _ = r.events.try_send(
                         ev::NOTIFY_EVENT,
                         &notify_event(r.id, notify_event::DISMISSED, 0, 0),
                         &[],

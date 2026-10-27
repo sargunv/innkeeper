@@ -456,7 +456,7 @@ fn run_pick(store: &Store, events: &Events, p: &Pick, label: &str) {
                         let id = store.add(g);
                         crate::info!("documents: {label}: granted {kind:?} {id:016x}");
                         let body = proto::event::picked(p.request, id, kind, write, &name);
-                        let _ = events.send(proto::ty::PICKED, &body, &[]);
+                        let _ = events.try_send(proto::ty::PICKED, &body, &[]);
                         count += 1;
                     }
                     Err(e) => crate::warn!("documents: {}: {e}", path.display()),
@@ -466,7 +466,7 @@ fn run_pick(store: &Store, events: &Events, p: &Pick, label: &str) {
         }
         Err(e) => e,
     };
-    let _ = events.send(
+    let _ = events.try_send(
         proto::ty::PICK_DONE,
         &proto::event::done(p.request, status, count),
         &[],

@@ -179,7 +179,7 @@ struct Target {
 impl Target {
     fn send(&self, cmd: u8, arg: i64) {
         crate::info!("mpris: player {}: command {cmd} {arg}", self.player);
-        let _ = self.events.send(
+        let _ = self.events.try_send(
             ev::MEDIA_CMD,
             &super::system::proto::media_cmd(self.player, cmd, arg),
             &[],
