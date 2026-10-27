@@ -201,13 +201,13 @@ Causes:
   APKs and split bundles. It writes `.desktop` entries with Android-rendered
   icons and custom-scheme handlers, and `setup` makes double-clicking an APK
   install it. `cli/tests/integration.sh` passes. See [cli.md](cli.md).
-- 2026-10-27 (ubinder): **M4 milestone 1** — the userspace binder driver state
-  machine (`ubinder/`, Rust) is implemented and proven: 8 state-machine tests
-  (register/transact, sync reply routing, fd passing, oneway, node ref
-  handshake, death notification) plus a fuzzer (2M iterations, no panics).
-  `mise run check` passes. Next: the seccomp supervisor binding, a `--ubinder`
-  session flag, and full boot with corpus parity. Kernel binder stays the
-  default. See [ubinder.md](ubinder.md).
+- 2026-10-27 (ubinder): **ubinder is the default binder: no binderfs and no
+  SELinux module.** It matches kernel binder on AOSP's binder tests
+  (binderLibTest has the same 5 environmental failures), selftest and compat
+  (30/31 headless and windowed). Warm boot takes 22.3 s vs 21.6 s, ping-pong 15
+  µs vs 3.8 µs. `start --kernel-binder` keeps the old path. The boot stall was a
+  packed-struct size bug that broke every `linkToDeath`. See
+  [ubinder.md](ubinder.md).
 - 2026-10-27 (inventory): [integration.md](integration.md) lists every Android
   API, service and input type with a desktop counterpart (141 rows: 10 done, 19
   partial, 101 todo, 11 won't-do), with owner lanes, priorities, test apps and a

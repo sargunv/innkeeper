@@ -14,6 +14,10 @@ else
   echo "hello 1 $w $h"
   echo "window $w $h 1.000"
 fi
+# The bridge (app_process) needs about a second to start reading. Events that
+# reach it in a burst are clamped to its clock, which squeezes a double tap's
+# gap below GestureDetector's 40 ms minimum, so wait before the timed part.
+sleep "${GESTURE_DELAY:-1.5}"
 case $g in
   pinch) # two fingers 80 px apart spreading to 560 px: zoom in
     i=0 s=40

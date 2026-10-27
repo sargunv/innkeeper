@@ -18,6 +18,8 @@
 #               `linuxapk-session start --ubinder` does.
 #
 # Env: UBINDER_TEST_TIMEOUT (seconds per binary, default 300),
+#      UBINDER_TEST_ARGS (extra arguments for every binary, e.g. for
+#      binderThroughputTest: "-w 2 -i 20000 -p"),
 #      LINUXAPK_UBINDER_DEBUG=1 (broker tracing, to $OUT/ubinder-tests/logs).
 # Logs: $OUT/ubinder-tests/logs/<kernel|ubinder>-<test>.log
 #
@@ -87,7 +89,7 @@ case ${1:-} in
     exec systemd-run --user --quiet --collect --wait --pipe --same-dir \
       --unit="linuxapk-ubindertest-$$" -p KillMode=control-group -p RuntimeMaxSec=3600 \
       -p MemoryHigh=3G -p MemoryMax=4G -E OUT="$out" -E UBINDER="$ubinder" \
-      -E UBINDER_TEST_TIMEOUT="${UBINDER_TEST_TIMEOUT:-300}" \
+      -E UBINDER_TEST_TIMEOUT="${UBINDER_TEST_TIMEOUT:-300}" -E UBINDER_TEST_ARGS="${UBINDER_TEST_ARGS:-}" \
       -E LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" -- "$0" --ns "$@"
     ;;
 esac
@@ -167,7 +169,7 @@ for spec in $(printf '%q ' "${tests[@]}"); do
   [ "\$t" != "\$spec" ] && filter="--gtest_filter=\${spec#*:}"
   if [ ! -x /tests/\$t ]; then echo "== \$t: MISSING"; rc=1; continue; fi
   echo "== \$t \$filter =="
-  timeout $((${UBINDER_TEST_TIMEOUT:-300})) /tests/\$t \$filter >/logs/$mode-\$t.log 2>&1
+  timeout $((${UBINDER_TEST_TIMEOUT:-300})) /tests/\$t \$filter ${UBINDER_TEST_ARGS:-} >/logs/$mode-\$t.log 2>&1
   r=\$?
   grep -E '^\[  (PASSED|FAILED) |^\[==========\] .* ran' /logs/$mode-\$t.log | grep -v ' listed below' | sort -u
   if [ \$r = 0 ]; then echo "== \$t: PASS"; else echo "== \$t: FAIL (\$r)"; rc=1; fi

@@ -1,13 +1,14 @@
 # ubinder: userspace binder (M4)
 
 ubinder serves Android's binder IPC from a userspace broker instead of the
-kernel driver. A session started with `--ubinder` (or `LINUXAPK_BINDER=ubinder`)
-needs **no binderfs mount and no SELinux module**. Android is unmodified; the
-session's seccomp supervisor intercepts the binder syscalls.
+kernel driver. **It is the session's default** (since 2026-10-27): a session
+needs **no binderfs mount and no SELinux module**. `start --kernel-binder` (or
+`LINUXAPK_BINDER=kernel`) uses a private binderfs instead. Android is
+unmodified; the session's seccomp supervisor intercepts the binder syscalls.
 
-Status: **boots to `sys.boot_completed`, at parity with kernel binder** on
-AOSP's own binder tests, selftest and the compat corpus (numbers below). Kernel
-binder is still the default.
+Status: at parity with kernel binder on AOSP's own binder tests, selftest, boot
+and the compat corpus (headless and windowed). Latency is higher but doesn't
+show at the system level (numbers below).
 
 ## How it works
 
@@ -104,6 +105,26 @@ LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
 - **Boot:** `sys.boot_completed` with 305 binder services and Launcher3 resumed.
   `selftest` 12/12. Warm boot (start to `boot_completed`, same data dir, three
   runs each): kernel 21.6–21.7 s, ubinder 22.2–22.3 s.
+- **Compat corpus** (31 apps, CI image): headless 30/31 and `--window` (nested
+  KWin) 30/31, the same as kernel binder. Only arm64-only Open Sudoku fails, as
+  on kernel. One windowed StreetComplete double tap flaked on ubinder (3/6, 0/5
+  on kernel). The cause was in the harness: its gesture events reached the input
+  bridge in a burst before `app_process` was up, so the tap gap became injection
+  timing (41 vs 55 ms, against GestureDetector's 40 ms minimum).
+  `compat/gesture.sh` now waits for the bridge; the double tap then passed 4/4.
+- **Latency**
+  (`UBINDER_TEST_ARGS=... run-binder-tests.sh [--ubinder] binderThroughputTest`;
+  median per transaction):
+
+  | workload                          | kernel         | ubinder        |
+  | --------------------------------- | -------------- | -------------- |
+  | 1 client/server pair (`-w 2 -p`)  | 3.8 µs         | 15.0 µs        |
+  | same, 16 KiB payload (`-s 16384`) | 3.6 µs         | 13.3 µs        |
+  | 8 workers all-to-all (`-w 8`)     | 7.2 µs, 819k/s | 78.5 µs, 66k/s |
+
+  The broker is one thread, so it tops out around 70–90k transactions/s
+  session-wide. A desktop session uses a small fraction of that. If it ever
+  matters, sharding by context, or by process with a lock per process, is next.
 
 Tracing: `LINUXAPK_UBINDER_DEBUG=1` logs to the helper's stderr (`session.out`);
 any other value is a log file path inside the session root (for example

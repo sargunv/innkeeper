@@ -103,7 +103,8 @@ Decisions:
   servicemanager, zygote (and so system_server and apps), vold and installd.
 - init.rc edits (diff against the committed stock copy): no ueventd (it can't
   open a uevent socket, so `ro.cold_boot_done` is set directly); binderfs
-  without `stats=global`; `sys.use_memfd=true` (no ashmem). Other overrides: a
+  without `stats=global`, only with `--kernel-binder` (the default is
+  [ubinder](ubinder.md)); `sys.use_memfd=true` (no ashmem). Other overrides: a
   cgroup2-only `cgroups.json`; netd1shot is a no-op; netd runs once; a fake
   `mmap_rnd_bits`. Image files whose fs_config owner was lost (`logd` 0550 and
   others) get world r/x copies. clatd gets its real owner and setuid bits

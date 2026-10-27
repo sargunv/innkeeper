@@ -12,7 +12,7 @@ aosp/        AOSP build container (aosp/build-shell.sh); tree lives in ~/aosp/a1
 docs/        STRATEGY (plan), NOTES (live state), per-lane design docs
 gpu/         RADV + lavapipe Vulkan drivers cross-built with the NDK, Mesa patches
 hal/         graphics allocator, IMapper v5, composer3 (C++, NDK); AOSP AIDL copies
-selinux/     dev SELinux module (binder for unconfined_t)
+selinux/     dev SELinux module (binder for unconfined_t; only for --kernel-binder)
 session/     namespace launcher, ns-init, pivot-exec, preload shim, rootfs overlay
 tools/       host-tools container, image extraction, APEX flattening
 out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, builds
