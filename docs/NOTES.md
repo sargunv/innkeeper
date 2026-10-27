@@ -306,6 +306,11 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
   `/proc/<tid>` dirfd's maps, on both the vidsys and binder paths. Round 5
   (last) after.
 
+- Round 5 (last in budget): S11 resolved. New S12 [should] (unbounded maps read
+  in the pre-6.11 fallback) and S13 [should] (binder writeback errors ignored)
+  are being fixed; no Sol round remains to re-review them unless the user
+  extends the budget.
+
 ## Backlog (unassigned)
 
 - **In-app store installs (user question, 2026-10-27):** the F-Droid → install →
