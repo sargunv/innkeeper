@@ -534,15 +534,22 @@ impl<'a> Run<'a> {
         // per-app windows the window manager shows the first in the app's
         // window (AppWarningActivity).
         let mut focus = self.focus();
-        for dialog in [
-            "DeprecatedTargetSdkVersionDialog",
-            "DeprecatedAbiDialog",
-            "AppWarningActivity",
+        // The same goes for the system's "let app always run in the
+        // background?" prompt that some apps raise at start.
+        for (dialog, button) in [
+            ("DeprecatedTargetSdkVersionDialog", "OK"),
+            ("DeprecatedAbiDialog", "OK"),
+            ("AppWarningActivity", "OK"),
+            ("RequestIgnoreBatteryOptimizations", "Allow"),
         ] {
             if focus.contains(dialog) {
                 let _ = self.screencap(&self.dir.join("warning.png"));
-                self.check(&format!("{dialog} shown"), true, "dismissed");
-                let _ = self.script(&["tap:OK".to_string()]);
+                self.check(
+                    &format!("{dialog} shown"),
+                    true,
+                    format!("answered {button}"),
+                );
+                let _ = self.script(&[format!("tap:{button}")]);
                 sleep(Duration::from_secs(1));
                 focus = self.focus();
             }
@@ -553,6 +560,28 @@ impl<'a> Run<'a> {
         self.check("app window focused", focused, focus.clone());
         let png = self.dir.join("first.png");
         match self.screencap(&png) {
+            Ok(st) if st.blank() && self.secure_window() => {
+                // FLAG_SECURE: SurfaceFlinger leaves the app out of
+                // screenshots (the display itself still shows it). Judge the
+                // first screen by its UI tree instead.
+                let nodes = self.ui_nodes().unwrap_or_default();
+                let n = nodes.len();
+                let texts = nodes
+                    .iter()
+                    .filter(|n| !n.text.is_empty() || !n.desc.is_empty())
+                    .count();
+                self.check(
+                    "first frame",
+                    texts > 0,
+                    format!("FLAG_SECURE window, screenshot blocked; UI tree: {n} nodes, {texts} labelled"),
+                );
+                if texts == 0 {
+                    return Err(Stop(
+                        Status::Broken,
+                        "secure window with an empty UI tree".into(),
+                    ));
+                }
+            }
             Ok(st) if st.blank() => {
                 self.check("first frame", false, format!("blank: {}", st.describe()));
                 return Err(Stop(
@@ -670,6 +699,22 @@ impl<'a> Run<'a> {
         None
     }
 
+    /// Whether the app's focused window has FLAG_SECURE.
+    fn secure_window(&self) -> bool {
+        let o = self.s.run(30, &["dumpsys", "window", "windows"]);
+        let mut in_app = false;
+        for l in o.text.lines() {
+            let t = l.trim();
+            if t.starts_with("Window #") {
+                in_app = t.contains(&format!(" {}/", self.app.package));
+            } else if in_app && t.starts_with("fl=") && t.split_whitespace().any(|f| f == "SECURE")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     fn focus(&self) -> String {
         let o = self.s.run(30, &["dumpsys", "window", "displays"]);
         let display = self.win.as_ref().map_or(0, |w| w.display);
@@ -773,12 +818,16 @@ impl<'a> Run<'a> {
                     self.input(&["keyevent", arg]);
                     sleep(Duration::from_millis(700));
                 }
-                "tap" => {
+                // "try" taps like "tap" but skips a missing node (optional
+                // onboarding pages, tours, rating prompts).
+                "tap" | "try" => {
                     let nodes = self.ui_nodes()?;
-                    let n = nodes
-                        .iter()
-                        .find(|n| n.text == arg || n.desc == arg)
-                        .ok_or(format!("{step}: no such node"))?;
+                    let Some(n) = nodes.iter().find(|n| n.text == arg || n.desc == arg) else {
+                        if op == "try" {
+                            continue;
+                        }
+                        return Err(format!("{step}: no such node"));
+                    };
                     // Node bounds are already in the app display's pixels.
                     let (x, y) = n.centre;
                     let mut v = vec!["input".to_string()];

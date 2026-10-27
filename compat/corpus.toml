@@ -14,6 +14,7 @@
 #   script = [...]      scripted check, run after the first frame:
 #                       "tap:<text>"    tap the node whose text or content-desc
 #                                       is <text> (uiautomator dump)
+#                       "try:<text>"    tap it if it's there (optional prompts)
 #                       "expect:<text>" a node's text or content-desc contains it
 #                       "absent:<text>" no node's text or content-desc contains it
 #                       "key:<keycode>" "wait:<seconds>"
@@ -269,10 +270,10 @@ script = [
   "tap:Let’s go!",
   "wait:6",
   "shot:world",
-  "gesture:pan 900 400",
-  "changed:panned",
   "gesture:pinch 900 300",
   "changed:pinched",
+  "gesture:pan 900 400",
+  "changed:panned",
   "gesture:doubletap 700 360",
   "changed:doubletapped",
   "intent:geo:52.5163,13.3777?z=17",
@@ -319,6 +320,7 @@ url = "https://f-droid.org/repo/net.cozic.joplin_2097817.apk"
 sha256 = "79acd24866ef5c3f8779fcdf926dd6e0d6e242ccffda8581c556f2a80f4b2782"
 size = 154987817
 note = "React Native with Hermes and Expo (libhermes.so, libreactnative); editor in a WebView"
+script = ["tap:1. Welcome to Joplin!", "wait:5", "shot:note"]
 
 [[app]]
 package = "com.logseq.app"
@@ -385,6 +387,7 @@ url = "https://f-droid.org/repo/org.schabi.newpipe_1015.apk"
 sha256 = "1d66d19eedbab969b1be2e44e0ea35f5f8921cbe83b5c5ac810767ca1a84b7e8"
 size = 11507122
 note = "picture-in-picture popup player, network video"
+script = ["try:OK", "wait:3", "absent:Network error", "shot:trending"]
 manual = "Play a video in the popup player and in PiP; does the stream play (network, codecs, audio)?"
 
 [[app]]
@@ -399,6 +402,20 @@ url = "https://f-droid.org/repo/org.mozilla.fennec_fdroid_1580210.apk"
 sha256 = "67cc62f1845badc347bf774dc88e6c519772660bb09e760b8478612b5dcfb080"
 size = 135681571
 note = "browser: multi-window, tabs, custom tabs provider"
+script = [
+  "tap:Continue",
+  "wait:2",
+  "try:CANCEL",
+  "wait:2",
+  "try:Not now",
+  "wait:2",
+  "try:Not now",
+  "wait:2",
+  "intent:https://en.wikipedia.org/wiki/Linux",
+  "wait:12",
+  "expect:Linux - Wikipedia",
+  "shot:page",
+]
 manual = "Open several tabs and a new window; load a heavy page; check GPU process (Gecko on ANGLE/Vulkan), downloads, file upload picker."
 
 [[app]]
@@ -413,6 +430,17 @@ url = "https://f-droid.org/repo/dev.patrickgold.florisboard_117.apk"
 sha256 = "d8ef30b212730e7c005250f3f9a8bcee4afd1605b66efaa15f7f59a89cffa9b5"
 size = 14143390
 note = "input method"
+script = [
+  "sh:ime enable dev.patrickgold.florisboard/.FlorisImeService",
+  "sh:ime set dev.patrickgold.florisboard/.FlorisImeService",
+  "sh:am start -a android.settings.APP_SEARCH_SETTINGS",
+  "wait:4",
+  "sh:dumpsys input_method | grep -q mInputShown=true",
+  "sh:dumpsys input_method | grep -q 'mSelectedImeId=dev.patrickgold.florisboard'",
+  "shot:keyboard",
+  "key:BACK",
+  "sh:ime reset",
+]
 manual = "Select it as the keyboard and type into an app: does the IME window show above the app, and do host keys still work?"
 
 [[app]]
@@ -427,6 +455,24 @@ url = "https://f-droid.org/repo/com.celzero.bravedns_709.apk"
 sha256 = "0e8e5d70496b506038ca4afaef868fadaac6e0b5416b80aa6e139174fa181004"
 size = 32270073
 note = "VpnService (TUN in the session)"
+script = [
+  "tap:Skip",
+  "wait:2",
+  "tap:START",
+  "wait:2",
+  "try:Skip Tour",
+  "wait:1",
+  "tap:START",
+  "wait:2",
+  "tap:Proceed",
+  "wait:2",
+  "sh:dumpsys window displays | grep mCurrentFocus | grep -q vpndialogs",
+  "tap:OK",
+  "wait:10",
+  "sh:dumpsys connectivity | grep -q 'VPN CONNECTED extra: VPN:com.celzero.bravedns'",
+  "sh:ip link | grep -q tun",
+  "shot:vpn",
+]
 manual = "Start the DNS/firewall VPN and browse: does traffic flow through the TUN, does the VPN key icon show?"
 
 [[app]]
@@ -455,6 +501,16 @@ url = "https://f-droid.org/repo/org.joinmastodon.android_191.apk"
 sha256 = "ce1a8222a1f9a59cdde0816a64a39692123c3bc05f64966abae5b0ea2dfe709e"
 size = 4841271
 note = "OAuth sign-in through Custom Tabs/browser"
+script = [
+  "tap:Log in",
+  "wait:3",
+  "tap:mastodon.social",
+  "tap:Next",
+  "wait:10",
+  "sh:dumpsys window displays | grep mCurrentFocus | grep -q org.chromium.webview_shell",
+  "expect:mastodon.social/auth/sign_in",
+  "shot:oauth",
+]
 manual = "Log in to a server: which browser opens (none installed by default), and does the redirect come back to the app?"
 
 [[app]]
@@ -469,4 +525,10 @@ url = "https://f-droid.org/repo/com.github.mkalmousli.floating_mute_5.apk"
 sha256 = "6d3a2d0e5f0fe7936f461f7e7366d9fe9576ed5f10f060b4d853e4fbb624d33e"
 size = 2293463
 note = "SYSTEM_ALERT_WINDOW floating button"
+script = [
+  "key:HOME",
+  "wait:2",
+  "sh:dumpsys window windows | grep -A4 'u0 com.github.mkalmousli.floating_mute}:' | grep -q ty=APPLICATION_OVERLAY",
+  "shot:overlay",
+]
 manual = "Grant 'display over other apps': does the floating button stay on top of other apps and stay draggable?"
