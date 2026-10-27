@@ -8,3 +8,11 @@
 ro.hardware.audio.tinyalsa.host_latency_ms=0
 ro.hardware.audio.tinyalsa.period_count=2
 ro.hardware.audio.tinyalsa.period_size_multiplier=1
+
+# The CI image's audio policy config also routes MMAP (AAudio low latency)
+# and compressed-offload outputs to the speaker, but AOSP's HAL serves those
+# with silent stubs (StreamMmapStub, StreamOffloadStub). Keep all playback on
+# the primary output, which is ours.
+aaudio.mmap_policy=1
+aaudio.mmap_exclusive_policy=1
+audio.offload.disable=1
