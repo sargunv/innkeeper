@@ -27,13 +27,15 @@ app input and real apps are next.
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
 
-| First frames of the F-Droid test corpus (OpenCalc, SudoQ, Wikipedia, AntennaPod, Thunderbird, F-Droid, Read You, Tomato, Mindustry, Shattered Pixel Dungeon, Unciv, OpenTTD) |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![compat first frames](docs/img/compat/first-frames.png)                                                                                                                     |
+Real apps running in Linux.apk on KDE Plasma (Wayland):
 
-| Android's boot animation rendered rootless (ANGLE → RADV → SurfaceFlinger → our composer) | Composer output in a KDE Wayland window (test pattern) |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| ![boot animation](docs/img/m0-bootanimation.png)                                          | ![wayland window](docs/img/m1-wayland-window.png)      |
+| Wikipedia                                                                                                                     | F-Droid                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| ![Wikipedia reading an article in Linux.apk](https://github.com/user-attachments/assets/68722463-49e5-49fd-80d8-a7b2c498d612) | ![F-Droid app store in Linux.apk](https://github.com/user-attachments/assets/19d9cd5c-673b-4584-9955-f9d169c54822)       |
+| **Mindustry**                                                                                                                 | **Shattered Pixel Dungeon**                                                                                              |
+| ![Mindustry in Linux.apk](https://github.com/user-attachments/assets/c52f2c4b-0a3f-45bb-a521-0fa0300f545a)                    | ![Shattered Pixel Dungeon in Linux.apk](https://github.com/user-attachments/assets/2f450098-1226-45e9-91e2-407423303333) |
+| **Tomato** (Jetpack Compose)                                                                                                  | **OpenCalc**                                                                                                             |
+| ![Tomato (Jetpack Compose) in Linux.apk](https://github.com/user-attachments/assets/3229708b-5d53-4cc7-a8df-d096d7d5812f)     | ![OpenCalc in Linux.apk](https://github.com/user-attachments/assets/4ff9dca7-6851-4285-93ca-1e3c2250c66d)                |
 
 ## Dev setup (Fedora)
 

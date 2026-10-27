@@ -57,6 +57,9 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
 - **Languages:** C/C++ for code loaded into Android processes or on C ABIs; Rust
   for new standalone components (see STRATEGY).
 - **Workflow:** push straight to `main` (rebase, don't merge). The repo is
-  public: never commit secrets, image contents or third-party APKs, and never
-  commit screenshots that show anything beyond our own windows. Generated files
-  go in `out/`. Long jobs run under `systemd-run --user`.
+  public: never commit secrets, image contents or third-party APKs. Never commit
+  media files: upload screenshots with
+  `gh issue comment 1 --attach <file>#<alt>` (the README media issue) and link
+  the user-attachments URL. `tools/window-shot.sh` captures only the Linux.apk
+  window. Generated files go in `out/`. Long jobs run under
+  `systemd-run --user`.

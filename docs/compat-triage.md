@@ -54,7 +54,8 @@ Run it as a capped job:
 They install, render, survive input, reach the network (Wikipedia's feed and
 articles in WebView, F-Droid's repository fetch) and decode media.
 
-![First frames](img/compat/first-frames.png)
+Screenshots: see the README (images are hosted as attachments on issue #1, not
+committed).
 
 ## Fixed in this lane
 
