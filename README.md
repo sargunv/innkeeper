@@ -6,8 +6,10 @@ and media controls. There's no VM, no visible Android device, and no root at
 runtime.
 
 How it works: a real AOSP (Android 17) userspace runs in a rootless, on-demand
-session. Our code plugs in at Android's stable vendor interfaces (display, GPU,
-audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
+session. The image is Google's own AOSP build from Android's public CI,
+downloaded and checksummed at setup ([docs/image.md](docs/image.md)). Our code
+plugs in at Android's stable vendor interfaces (display, GPU, audio, input),
+plus a desktop bridge for portals, notifications and MPRIS. See
 [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Status
@@ -21,7 +23,7 @@ app input and real apps are next.
 | M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games |
 | M2 GPU, audio, per-app windows, launcher                        | 🚧 GPU ✅; per-app windows ✅; sound via PipeWire ✅ (≈90 ms latency); `linuxapk` CLI ✅; GNOME client-side decorations and the manager app in progress            |
 | M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                                                 |
-| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 userspace binder in progress; switching to Google's public AOSP CI build (no redistribution, no local AOSP build)                                               |
+| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 AOSP CI image ✅ (default; no local AOSP build or redistribution needed); userspace binder in progress                                                          |
 | M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                 |
 | M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                 |
 

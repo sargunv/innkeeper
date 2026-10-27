@@ -45,6 +45,10 @@ Causes:
   actually needed (M4: our own redistributable image). The rules are in
   AGENTS.md.
 
+- Main session moved to the CI image 2026-10-27. The old emulator-image `/data`
+  is kept at `~/.local/share/linuxapk/data-emulator-backup-20261027` (delete it
+  with `podman unshare rm -rf`).
+
 ## Locations
 
 - Repo: `~/Projects/linux.apk`
