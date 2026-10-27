@@ -242,13 +242,19 @@ start() {
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
   local ubinder_helper=""
   ((ubinder)) && ubinder_helper=/system/bin/linuxapk-ubinder
+  # The bridge's desktop integration (docs/bridge.md, "System service") uses the
+  # caller's session bus, and takes test overrides for the desktop settings.
+  local integ_env=() v
+  for v in DBUS_SESSION_BUS_ADDRESS LINUXAPK_TZ LINUXAPK_LOCALE LINUXAPK_CLOCK LINUXAPK_TEXT_SCALE; do
+    [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
+  done
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
     --setenv=LINUXAPK_UBINDER="$ubinder_helper" --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" \
-    -- "$here/linuxapk-session" _run "$out" "$data"
+    "${integ_env[@]}" -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do
     [[ -s $run/pid ]] && break
@@ -271,7 +277,9 @@ start() {
 # this unit's cgroup, so "stop" ends it too, restarted if it exits. Its
 # socket directory is bound into the session as /dev/socket/linuxapk
 # (root:audio 0750, see ns-init.sh), and the bridge only accepts Android
-# root, system and audioserver (SO_PEERCRED, as host ids). docs/bridge.md.
+# root, system and audioserver (SO_PEERCRED, as host ids), plus the Linux.apk
+# System app's uid (the owner of its data directory) for the system service.
+# docs/bridge.md.
 start_bridge() {
   local bridge=$repo/target/release/linuxapk-bridge base
   [[ -x $bridge ]] || return 0
@@ -279,9 +287,11 @@ start_bridge() {
   mkdir -p "$run/bridge"
   # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1.
   local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)" --allow-uid $((base + 999))
-  --allow-uid $((base + 1040)) ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
+  --allow-uid $((base + 1040)) --system-app-dir "$data/data/dev.linuxapk.system"
+  ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
   while :; do
-    # The display service connects to the host compositor (windows, input).
+    # The display service (windows, input) and the clipboard connect to the
+    # host compositor.
     WAYLAND_DISPLAY=${LINUXAPK_WAYLAND:-} "$bridge" "${args[@]}" </dev/null >>"$run/bridge.log" 2>&1
     echo "linuxapk-session: bridge exited ($?); restarting" >>"$run/bridge.log"
     sleep 1

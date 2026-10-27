@@ -28,6 +28,7 @@ pub mod errno {
     pub const EPERM: i32 = 1;
     pub const ENOENT: i32 = 2;
     pub const EIO: i32 = 5;
+    pub const EACCES: i32 = 13;
     pub const EAGAIN: i32 = 11;
     pub const ENOMEM: i32 = 12;
     pub const EBUSY: i32 = 16;
@@ -49,6 +50,14 @@ pub enum DecodeError {
     /// A field was out of range or malformed.
     Invalid(&'static str),
 }
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for DecodeError {}
 
 impl DecodeError {
     /// The status a reply carries for this error.

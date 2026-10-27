@@ -49,6 +49,11 @@ impl Service for Echo {
 }
 
 fn start(limits: Limits, allow_self: bool) -> PathBuf {
+    start_with(limits, allow_self, false)
+}
+
+/// `echo_only`: our uid isn't on the allow-list, but may use the echo service.
+fn start_with(limits: Limits, allow_self: bool, echo_only: bool) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "bridge-{}-{}.sock",
         std::process::id(),
@@ -72,6 +77,12 @@ fn start(limits: Limits, allow_self: bool) -> PathBuf {
             vec![me]
         } else {
             vec![me.wrapping_add(1)]
+        },
+        service_uids: if echo_only {
+            let me2 = me;
+            vec![(ECHO, Arc::new(move |u| u == me2) as server::UidCheck)]
+        } else {
+            Vec::new()
         },
         max_clients: 4,
         services,
@@ -399,6 +410,20 @@ fn refuses_unlisted_uid() {
     let path = start(Limits::default(), false);
     let mut c = Client::connect(&path);
     assert!(c.call_with(|t| hello(1, 1).encode(t)).is_none());
+}
+
+#[test]
+fn service_only_uid() {
+    let path = start_with(Limits::default(), false, true);
+    let mut c = Client::connect(&path);
+    assert_eq!(
+        c.call_with(|t| hello(1, service::AUDIO).encode(t))
+            .unwrap()
+            .0,
+        -EACCES
+    );
+    let mut c = Client::connect(&path);
+    assert_eq!(c.call_with(|t| hello(1, ECHO).encode(t)).unwrap().0, 0);
 }
 
 #[test]

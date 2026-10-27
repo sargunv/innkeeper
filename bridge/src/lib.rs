@@ -8,11 +8,14 @@
 //! - `proto`: versions, HELLO, service ids
 //! - `server`: accept loop, HELLO, `Service` trait and `Registry`
 //! - `audio`: the audio service
+//! - `services`: desktop integration (the system service for the Linux.apk
+//!   System app)
 
 pub mod audio;
 pub mod display;
 pub mod log;
 pub mod proto;
 pub mod server;
+pub mod services;
 pub mod transport;
 pub mod wire;

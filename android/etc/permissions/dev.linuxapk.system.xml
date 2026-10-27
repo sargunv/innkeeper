@@ -9,6 +9,12 @@
   <privapp-permissions package="dev.linuxapk.system">
     <permission name="android.permission.REAL_GET_TASKS" />
     <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <!-- Desktop integration. -->
+    <permission name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+    <permission name="android.permission.CHANGE_CONFIGURATION" />
+    <permission name="android.permission.MEDIA_CONTENT_CONTROL" />
+    <permission name="android.permission.MODIFY_DAY_NIGHT_MODE" />
+    <permission name="android.permission.SET_TIME_ZONE" />
     <permission name="android.permission.WRITE_SECURE_SETTINGS" />
   </privapp-permissions>
 
@@ -16,5 +22,11 @@
        be 0660 system:input instead of world-readable. -->
   <permission name="dev.linuxapk.permission.HOST_INPUT">
     <group gid="input" />
+  </permission>
+
+  <!-- Holders run with the "audio" group, which may enter the host bridge's socket directory
+       (/dev/socket/linuxapk, root:audio 0750). The bridge also checks the uid. -->
+  <permission name="dev.linuxapk.permission.HOST_BRIDGE">
+    <group gid="audio" />
   </permission>
 </permissions>

@@ -36,6 +36,32 @@
   <!-- signature|privileged: makes the Linux.apk Keyboard the default input method. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
+  <!-- Desktop integration (docs/bridge.md, "System service"). Holders get the "audio" group,
+       which may enter the host bridge's socket directory (/dev/socket/linuxapk, root:audio 0750);
+       the bridge then admits only this app's uid to its system service. -->
+  <permission
+    android:name="dev.linuxapk.permission.HOST_BRIDGE"
+    android:protectionLevel="signature" />
+
+  <uses-permission android:name="dev.linuxapk.permission.HOST_BRIDGE" />
+  <!-- Desktop settings: night mode, theme seed, contrast and animation scales, time zone,
+       locales, 12/24-hour clock, font scale. -->
+  <uses-permission android:name="android.permission.MODIFY_DAY_NIGHT_MODE" />
+  <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+  <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+  <uses-permission android:name="android.permission.SET_TIME_ZONE" />
+  <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
+  <!-- Notifications to the desktop: our own listener access; media sessions. -->
+  <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
+  <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
+  <!-- Clipboard sync while no window of ours has focus. -->
+  <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" />
+  <!-- Default browser role (BrowserRole), when no real browser has it. -->
+  <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
+  <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+  <!-- The notification probe posts one. -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
        "linuxapk-session exec") passes any permission check. -->
   <permission
@@ -97,5 +123,69 @@
         <action android:name="dev.linuxapk.RESIZE" />
       </intent-filter>
     </receiver>
+
+    <!-- Desktop integration (integration/). Android notifications to the desktop. -->
+    <service
+      android:name=".integration.notifications.NotificationForwarder"
+      android:exported="true"
+      android:label="@string/app_name"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+
+    <!-- Diagnostic: a notification with an action and an inline reply (NotificationProbe). -->
+    <activity
+      android:name=".integration.notifications.NotificationProbe"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.NoDisplay" />
+    <receiver
+      android:name=".integration.notifications.NotificationProbe$Receiver"
+      android:exported="false" />
+
+    <!-- Diagnostic: sets or logs the clipboard (ClipProbe). -->
+    <activity
+      android:name=".integration.clipboard.ClipProbe"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.NoDisplay" />
+
+    <!-- Fallback browser: http(s) links nothing else handles open in the host browser. The low
+         priority (honoured for privileged apps) lets real browsers and app links win. -->
+    <activity
+      android:name=".integration.browser.BrowserActivity"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:label="@string/browser_name"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.NoDisplay">
+      <intent-filter android:priority="-100">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="http" />
+        <data android:scheme="https" />
+      </intent-filter>
+    </activity>
+
+    <!-- Custom Tabs provider stub, so Custom Tabs and AppAuth see a browser. -->
+    <service
+      android:name=".integration.browser.CustomTabsService"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.support.customtabs.action.CustomTabsService" />
+      </intent-filter>
+    </service>
+
+    <!-- Images copied on the desktop, pasted into Android apps. -->
+    <provider
+      android:name=".integration.clipboard.ClipImageProvider"
+      android:authorities="dev.linuxapk.system.clipboard"
+      android:exported="false"
+      android:grantUriPermissions="true" />
   </application>
 </manifest>

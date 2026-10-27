@@ -144,9 +144,15 @@ impl Registry {
     }
 }
 
+/// Decides at connect time whether a host uid may use one service.
+pub type UidCheck = Arc<dyn Fn(u32) -> bool + Send + Sync>;
+
 pub struct Config {
-    /// Host uids allowed to connect (SO_PEERCRED).
+    /// Host uids allowed to connect (SO_PEERCRED) and use any service.
     pub allow_uids: Vec<u32>,
+    /// Extra uids admitted to one service only (service id, check): for
+    /// example the system app, whose uid is only known once it's installed.
+    pub service_uids: Vec<(u32, UidCheck)>,
     pub max_clients: usize,
     pub services: Registry,
 }
@@ -161,7 +167,7 @@ pub fn serve(listener: OwnedFd, cfg: Arc<Config>) -> Result<()> {
             Err(e) => return Err(e).context("accept"),
         };
         let (uid, pid) = (cred.uid.as_raw(), cred.pid.as_raw_nonzero().get());
-        if !cfg.allow_uids.contains(&uid) {
+        if !cfg.allow_uids.contains(&uid) && !cfg.service_uids.iter().any(|(_, ok)| ok(uid)) {
             crate::warn!("refused connection from uid {uid} (pid {pid})");
             continue;
         }
@@ -225,6 +231,15 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
             if hello.major != proto::MAJOR {
                 send_reply(&sock, h.tag, &Reply::err(-EPROTO))?;
                 bail!("protocol {}.{} not supported", hello.major, hello.minor);
+            }
+            let allowed = cfg.allow_uids.contains(&peer.uid)
+                || cfg
+                    .service_uids
+                    .iter()
+                    .any(|(id, ok)| *id == hello.service && ok(peer.uid));
+            if !allowed {
+                send_reply(&sock, h.tag, &Reply::err(-EACCES))?;
+                bail!("uid {} may not use service {}", peer.uid, hello.service);
             }
             peer.name = hello.name.clone();
             match cfg

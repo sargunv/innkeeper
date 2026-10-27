@@ -495,6 +495,9 @@ class WindowManagerFeature(
     for (t in byDisplay[DEFAULT_DISPLAY].orEmpty()) {
       if (!Tasks.isAppTask(t)) continue
       val pkg = (t.baseActivity ?: t.topActivity)?.packageName ?: continue
+      // Our own activities on display 0 (the desktop browser stand-in) finish at once and never
+      // need a window; the probes are launched into windows explicitly.
+      if (pkg == context.packageName) continue
       val w =
         windows.values.firstOrNull { it.pkg == pkg }
           ?: createWindow(pkg, labelOf(pkg), sizingFor(t.baseIntent ?: Intent()))

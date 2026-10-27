@@ -19,6 +19,10 @@ pub mod service {
     /// Host windows for the composer (`display::proto`, types
     /// 0x0200..=0x02ff).
     pub const DISPLAY: u32 = 2;
+    /// The Linux.apk System app's channel: settings, notifications,
+    /// clipboard, links, media (`services::system`, types 0x0300..=0x03ff,
+    /// events 0x4300..=0x43ff).
+    pub const SYSTEM: u32 = 3;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
