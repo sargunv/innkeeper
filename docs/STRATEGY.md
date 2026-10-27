@@ -27,6 +27,21 @@ scope.
   it's the best reference for Linux desktop integration: portals, MPRIS,
   notifications, AT-SPI through AccessKit, clipboard, and drag and drop.
 
+## Threat model (decided 2026-10-27)
+
+**Desktop parity:** an Android app may do what a native desktop app running as
+the user can do. Linux.apk adds no protection that costs complexity, hacks or
+performance beyond that.
+
+- **Keep:** isolation that comes for free from the namespaces the session needs
+  anyway, and bounds checking that is simple and serves correctness (sizes,
+  overflow, never writing into the wrong process).
+- **Out of scope:** making host helpers robust against deliberately malicious
+  Android processes (session DoS, kernel-exact fault semantics for malformed
+  requests that only hurt the caller).
+- **Outer boundary:** the packaging (Flatpak) provides it, as it does for any
+  other desktop app.
+
 ## Non-goals
 
 - **Virtual machines.** Linux.apk runs Android natively, as host processes
