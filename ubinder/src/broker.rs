@@ -844,6 +844,11 @@ impl Broker {
         _res: &mut WriteRead,
     ) -> Result<(), u32> {
         let oneway = td.flags & TF_ONE_WAY != 0;
+        tlog!(
+            "txn proc={proc} tid={tid} reply={reply} oneway={oneway} handle={} code={}",
+            td.target as u32,
+            td.code
+        );
         let (target_proc, target_node, mut target_thread, in_reply_to);
 
         if reply {
@@ -1810,6 +1815,7 @@ impl Broker {
                 .unwrap_or(false);
             (t.is_reply, t.target_node, sec)
         };
+        tlog!("emit to proc={proc} tid={tid} txid={txid} is_reply={is_reply}");
         // Install captured fds into the target now that it has an outstanding
         // notification, and patch the recv buffer with the new fd numbers
         // (kernel: binder_apply_fd_fixups runs in the target's context).
