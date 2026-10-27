@@ -4,6 +4,7 @@
 #
 #   gpu/build.sh            # everything
 #   gpu/build.sh radv       # libdrm + Mesa RADV only
+#   gpu/build.sh lvp        # LLVM + Mesa lavapipe (software fallback)
 #   gpu/build.sh test       # NDK test programs (gpu/test)
 #
 # Runs itself inside the gpu build container (gpu/tools.sh); no sudo needed.
@@ -14,6 +15,8 @@ MESA_TAG=mesa-26.2.5
 MESA_URL=https://gitlab.freedesktop.org/mesa/mesa.git
 LIBDRM_TAG=libdrm-2.4.134
 LIBDRM_URL=https://gitlab.freedesktop.org/mesa/libdrm.git
+LLVM_TAG=llvmorg-19.1.7               # for lavapipe; same as Mesa CI's Android LLVM
+LLVM_URL=https://github.com/llvm/llvm-project.git
 NDK_VERSION=30.0.16248370            # NDK r30
 API=37                               # Android 17
 # -----------------------------------------------------------------------------
@@ -50,19 +53,19 @@ export PKG_CONFIG_LIBDIR=$stage/vendor/lib64/pkgconfig
 export PKG_CONFIG_SYSROOT_DIR=$stage
 unset PKG_CONFIG_PATH
 
-# fetch <dir> <url> <tag>: shallow clone at a pinned tag, then apply gpu/patches/<dir>/*.patch.
+# fetch <dir> <url> <tag>: shallow clone at a pinned tag, then apply
+# gpu/patches/<dir>/*.patch. Resets the tree only when the tag or patches change.
 fetch() {
   local dir=$1 url=$2 tag=$3
   if [[ ! -d $src/$dir/.git ]]; then
     git clone -q --depth 1 -b "$tag" "$url" "$src/$dir"
   fi
-  local have
-  have=$(git -C "$src/$dir" describe --tags --exact-match HEAD 2>/dev/null || true)
-  if [[ $have != "$tag" ]]; then
+  local stamp=$work/stamps/$dir want
+  want=$( { echo "$tag"; cat "$here"/patches/"$dir"/*.patch 2>/dev/null || true; } | sha256sum)
+  [[ -f $stamp && $(<"$stamp") == "$want" ]] && return 0
+  if ! git -C "$src/$dir" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     git -C "$src/$dir" fetch -q --depth 1 origin tag "$tag"
-    git -C "$src/$dir" checkout -q -f "$tag"
   fi
-  # Re-apply patches from a clean tree so edits to patches take effect.
   git -C "$src/$dir" checkout -q -f "$tag"
   git -C "$src/$dir" clean -qfdx
   if compgen -G "$here/patches/$dir/*.patch" >/dev/null; then
@@ -70,6 +73,7 @@ fetch() {
       git -C "$src/$dir" apply "$p"
     done
   fi
+  mkdir -p "$work/stamps"; echo "$want" > "$stamp"
 }
 
 # Re-run meson setup on existing build dirs so option edits here take effect.
@@ -123,13 +127,83 @@ build_radv() {
     -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
     -Dvideo-codecs=all_free -Dspirv-tools=disabled
   meson compile -C "$b"
-  local so=$b/src/amd/vulkan/libvulkan_radeon.so
+  install_driver "$b/src/amd/vulkan/libvulkan_radeon.so" radv
+}
+
+# LLVM static libraries for lavapipe, as in Mesa's
+# .gitlab-ci/container/build-android-x86_64-llvm.sh.
+build_llvm() {
+  fetch llvm-project "$LLVM_URL" "$LLVM_TAG"
+  local b=$build/llvm prefix=$stage/llvm
+  [[ -f $prefix/include/llvm/Config/llvm-config.h ]] && return 0
+  cmake -GNinja -S "$src/llvm-project/llvm" -B "$b" \
+    -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-$API -DANDROID_NDK="$NDK" \
+    -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DCMAKE_CXX_FLAGS="-march=x86-64 -fno-rtti" \
+    -DLLVM_HOST_TRIPLE=x86_64-linux-android$API -DLLVM_TARGETS_TO_BUILD=X86 \
+    -DLLVM_BUILD_LLVM_DYLIB=OFF -DLLVM_BUILD_TESTS=OFF -DLLVM_BUILD_EXAMPLES=OFF \
+    -DLLVM_BUILD_DOCS=OFF -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_ENABLE_RTTI=OFF \
+    -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF \
+    -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_OPTIMIZED_TABLEGEN=ON
+  ninja -C "$b" -j"$jobs" install
+}
+
+# Meson subproject wrapping the static LLVM (Mesa's create-llvm-meson-wrap-file.sh).
+write_llvm_wrap() {
+  local prefix=$stage/llvm d=$src/mesa/subprojects/llvm libs ver
+  mkdir -p "$d"
+  libs=$(cd "$prefix/lib" && ls libLLVM*.a | sed "s/\.a$//; s/.*/'&'/" | paste -sd,)
+  ver=$(sed -n 's/^#define LLVM_VERSION_STRING "\([^"]*\)".*/\1/p' "$prefix/include/llvm/Config/llvm-config.h")
+  cat > "$d/meson.build" <<WRAP
+project('llvm', ['cpp'])
+cpp = meson.get_compiler('cpp')
+_deps = []
+foreach d : [$libs]
+  _deps += cpp.find_library(d, dirs : '$prefix/lib', static : true)
+endforeach
+dep_llvm = declare_dependency(
+  include_directories : include_directories('$prefix/include'),
+  dependencies : _deps,
+  version : '$ver',
+)
+has_rtti = false
+irbuilder_h = files('$prefix/include/llvm/IR/IRBuilder.h')
+WRAP
+}
+
+build_lvp() {
+  build_llvm
+  stage_zlib
+  fetch mesa "$MESA_URL" "$MESA_TAG"
+  write_llvm_wrap
+  local b=$build/mesa-lvp
+  meson setup $(reconf "$b") "$b" "$src/mesa" "${cross[@]}" \
+    --prefix=/vendor --libdir=lib64 --force-fallback-for=llvm \
+    -Dbuildtype=release -Db_ndebug=true -Dcpp_rtti=false \
+    -Dplatforms=android -Dplatform-sdk-version=$API \
+    -Dandroid-stub=true -Dandroid-libbacktrace=disabled -Dandroid-strict=false \
+    -Dvulkan-drivers=swrast -Dgallium-drivers=llvmpipe -Dllvm=enabled -Dshared-llvm=disabled \
+    -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dopengl=false \
+    -Dgles1=disabled -Dgles2=disabled \
+    -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
+    -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
+    -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
+    -Dvideo-codecs= -Dspirv-tools=disabled -Ddraw-use-llvm=true
+  meson compile -C "$b"
+  install_driver "$b/src/gallium/targets/lavapipe/libvulkan_lvp.so" lvp
+}
+
+# install_driver <built .so> <name>: install as /vendor/lib64/hw/vulkan.<name>.so.
+install_driver() {
+  local so=$1 name=$2 dst=$build/vulkan.$2.so
   install -d "$overlay/lib64/hw"
-  # libvulkan dlopens /vendor/lib64/hw/vulkan.<ro.hardware.vulkan>.so; give it a matching soname.
-  "$ndk_bin/llvm-objcopy" --strip-unneeded "$so" "$build/vulkan.radv.so"
-  patchelf --set-soname vulkan.radv.so --remove-rpath "$build/vulkan.radv.so"
-  install -m644 "$build/vulkan.radv.so" "$overlay/lib64/hw/vulkan.radv.so"
-  check_elf "$overlay/lib64/hw/vulkan.radv.so"
+  # libvulkan dlopens vulkan.<ro.hardware.vulkan>.so; give it a matching soname.
+  "$ndk_bin/llvm-objcopy" --strip-unneeded "$so" "$dst"
+  patchelf --set-soname "vulkan.$name.so" --remove-rpath "$dst"
+  install -m644 "$dst" "$overlay/lib64/hw/vulkan.$name.so"
+  check_elf "$overlay/lib64/hw/vulkan.$name.so"
 }
 
 # Allowed DT_NEEDED for vendor libraries: LL-NDK + what we ship in the overlay.
@@ -148,11 +222,18 @@ check_elf() {
   return $bad
 }
 
+# Property defaults and Vulkan feature XMLs (gpu/overlay -> out/vendor-overlay).
+install_etc() {
+  cp -r "$here/overlay/." "$overlay/"
+}
+
 build_test() {
   local t=$build/test cc=$ndk_bin/x86_64-linux-android$API-clang
   mkdir -p "$t"
   glslangValidator -V --quiet --vn fill_comp -o "$t/fill_comp.h" "$here/test/fill.comp"
   "$cc" -O2 -Wall -I"$t" -o "$t/vkdriver_test" "$here/test/vkdriver_test.c" -ldl
+  "$cc" -O2 -Wall -o "$t/gles_test" "$here/test/gles_test.c" -lEGL -lGLESv3
+  "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$t/libpropshim.so" "$here/test/propshim.c" -ldl
   # Test-only vendor layer (run-bionic.sh -v): the mock IMapper v5.
   mkdir -p "$build/test-vendor/lib64/hw"
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$build/test-vendor/lib64/hw/mapper.lapktest.so" "$here/test/mock_mapper.c"
@@ -161,8 +242,10 @@ build_test() {
 
 case ${1:-all} in
   libdrm) build_libdrm ;;
-  radv) build_radv ;;
+  radv) build_radv; install_etc ;;
+  llvm) build_llvm ;;
+  lvp) build_lvp ;;
   test) build_test ;;
-  all) build_radv; build_test ;;
+  all) build_radv; build_lvp; install_etc; build_test ;;
   *) echo "unknown target $1" >&2; exit 1 ;;
 esac

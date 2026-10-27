@@ -641,7 +641,7 @@ static int test_anb(void)
 
 int main(int argc, char **argv)
 {
-   const char *hal = "/vendor/lib64/hw/vulkan.radv.so";
+   const char *hal = "vulkan.radv.so"; /* bare name, as libvulkan does */
    bool loader = false, udmabuf = false, anb = false;
    for (int i = 1; i < argc; i++) {
       if (!strcmp(argv[i], "--hal") && i + 1 < argc)
