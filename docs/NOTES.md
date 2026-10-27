@@ -66,6 +66,31 @@ Causes:
   `/dev/dma_heap/system`. So memfd → udmabuf gives CPU-backed dma-bufs for a
   simple gralloc.
 
+## Plan to M4 (decided 2026-10-27)
+
+- **M2 windowing:** one Android trusted virtual display per app task, created by
+  the Linux.apk System app. Our composer presents each display as its own
+  `xdg_toplevel` (HWC-backed virtual displays preferred). A window resize calls
+  `VirtualDisplay.resize`, and input carries a display id.
+- **M2 audio:** a Rust host-side `bridge/` (glibc, outside the namespaces)
+  reached through a socket bound into the session. Audio flows from Android
+  through a shared memfd ring to PipeWire. Interim HAL: a legacy
+  `audio.primary.linuxapk.so` under the image's HIDL 7.1 wrapper. The source
+  image gets a proper AIDL HAL.
+- **M3:** desktop integration in the bridge plus the system app. The host
+  `linuxapk` CLI (Rust) installs APKs and generates `.desktop` files.
+- **M4 ubinder:** binder emulated through the session's seccomp
+  user-notification supervisor (the one already used for bpf). openat on binder
+  devices gets an injected memfd (`SECCOMP_IOCTL_NOTIF_ADDFD`), and the broker
+  services `BINDER_*` ioctls through the target's memory. No AOSP patches, and
+  it covers every linker namespace. Virtual uids come from the broker.
+- **M4 scope:** ubinder as the default, virtual uids (no subuid range needed),
+  our own source-built image, and corpus parity. Relocating `/system` and
+  `/apex` paths is only needed inside Flatpak, where nested user namespaces are
+  blocked. Its feasibility is assessed in M4 and implemented in M5.
+- Concurrency: at most three agent lanes plus the capped AOSP build. Each lane
+  uses its own `LINUXAPK_INSTANCE`.
+
 ## Lanes (worktrees in `~/Projects/linux.apk-wt/<lane>`, branch `lane/<lane>`, rebase then push to main)
 
 - session: namespace launcher, APEX flattening, init boot (M0a). Docs:
