@@ -6,9 +6,9 @@
 #   hal/build.sh            build + install + tests
 #   hal/build.sh --no-test  skip the tests
 #
+# Needs cmake, ninja, clang and python3 on the host.
 # Env: NDK, AIDL, LINUXAPK_OUT (default: <main checkout>/out; installs into
-#      its vendor-overlay, builds in its hal-build). If cmake/ninja/python3
-#      are missing on the host, the build re-runs itself in tools/hosttools.sh.
+#      its vendor-overlay, builds in its hal-build).
 set -euo pipefail
 hal=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$hal/.." && pwd)
@@ -18,26 +18,6 @@ OVERLAY=$LINUXAPK_OUT/vendor-overlay
 BUILD=$LINUXAPK_OUT/hal-build
 run_tests=1
 [[ "${1:-}" == "--no-test" ]] && run_tests=0
-
-# On-device tests: test binaries in a /vendor layer above the overlay.
-android_tests() {
-  local run=$repo/tests/bionic/run.sh
-  "$run" -v "$BUILD/test-vendor" -- /vendor/bin/gralloc_test
-  "$run" -v "$BUILD/test-vendor" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
-    -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
-}
-
-if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null || ! command -v python3 >/dev/null; then
-  if [[ -z "${LINUXAPK_IN_CONTAINER:-}" ]]; then
-    # Build (and host-test) in the container; the on-device tests need host
-    # namespaces.
-    env LINUXAPK_IN_CONTAINER=1 "$repo/tools/hosttools.sh" "$0" "$@"
-    if ((run_tests)); then android_tests; fi
-    exit
-  fi
-  echo "cmake, ninja and python3 are required" >&2
-  exit 1
-fi
 
 NDK=${NDK:-$HOME/Android/Sdk/ndk/30.0.16248370}
 export AIDL=${AIDL:-$HOME/Android/Sdk/build-tools/37.0.0/aidl}
@@ -76,7 +56,11 @@ for f in "$hal"/etc/vintf/*.xml; do inst 644 "$f" "$OVERLAY/etc/vintf/manifest/$
 # Test binaries go next to the overlay, not into it.
 mkdir -p "$BUILD/test-vendor/bin"
 cp "$b/gralloc_test" "$b/hwc_test" "$BUILD/test-vendor/bin/"
-if ((run_tests)) && [[ -z ${LINUXAPK_IN_CONTAINER:-} ]]; then
+if ((run_tests)); then
+  # The test binaries run from a /vendor layer above the overlay.
   echo "== android tests"
-  android_tests
+  run=$repo/tests/bionic/run.sh
+  "$run" -v "$BUILD/test-vendor" -- /vendor/bin/gralloc_test
+  "$run" -v "$BUILD/test-vendor" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
+    -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
 fi
