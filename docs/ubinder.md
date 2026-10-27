@@ -1,5 +1,12 @@
 # ubinder: userspace binder (M4)
 
+> **Status (2026-10-27):** the cross-process broker stays. It will be simplified
+> for correctness and clarity (single owner for thread state, explicit operation
+> lifecycles), and guards that only defend against deliberately malicious
+> callers (e.g. the S11 maps/protection checks and the S12 fallback) will be
+> removed in the upcoming cleanup. See [STRATEGY.md](STRATEGY.md) "Threat
+> model".
+
 ubinder serves Android's binder IPC from a userspace broker instead of the
 kernel driver. **It is the session's default** (since 2026-10-27): a session
 needs **no binderfs mount and no SELinux module**. `start --kernel-binder` (or
