@@ -133,6 +133,7 @@ start() {
   # systemd user service, so it outlives this shell and "stop" can take it
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
+    -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.

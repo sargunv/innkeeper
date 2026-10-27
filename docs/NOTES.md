@@ -32,6 +32,19 @@ Rules:
   namespaces, so the masks are locked against umount; pasta gives it its own
   network namespace. `session/linuxapk-session selftest` checks all of this.
 
+## Host memory incident (2026-10-27 01:37)
+
+The kernel's global OOM killer and systemd-oomd crashed the user's desktop apps.
+Causes:
+
+- the AOSP build (siso about 23 GB plus parallel R8/javac, inside an 80 GB cap);
+- `/tmp`, a RAM tmpfs, holding about 42 GB, including our 3.5 GB logcat dump
+  `/tmp/lc.txt`;
+- swap full. Fixes: deleted our `/tmp` files; session unit capped at 6G/8G; AOSP
+  container capped at 32 GB with `-j12`. The AOSP build is **paused** until it's
+  actually needed (M4: our own redistributable image). The rules are in
+  AGENTS.md.
+
 ## Locations
 
 - Repo: `~/Projects/linux.apk`
@@ -80,9 +93,10 @@ Rules:
   (`session/helper/bpfemu.c`), and iptables uses the nf_tables backend. The host
   Wayland socket is bound at `/dev/socket/wayland-host` (`start --headless` to
   skip it). See `docs/m0-session.md`.
-- 2026-10-27: AOSP 17 synced (`~/aosp/a17`, 158 GB). First full build running as
-  systemd unit `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's
-  BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by
+- 2026-10-27: AOSP 17 synced (`~/aosp/a17`, 158 GB). First full build (paused at
+  77% after the OOM incident, see above) runs as systemd unit
+  `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's BUILD_ID is
+  CP2A.260605.016), log `~/aosp/a17-build.log`, driven by
   `~/aosp/build-full.sh`.
 - 2026-10-27 (gpu): `gpu/build.sh` NDK-builds Mesa 26.2.5 RADV and lavapipe into
   `out/vendor-overlay/lib64/hw/vulkan.{radv,lvp}.so` (LL-NDK deps only). Both

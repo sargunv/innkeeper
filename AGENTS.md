@@ -32,6 +32,17 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
 
 ## Project invariants
 
+- **Memory safety for the host** (incident 2026-10-27: a global OOM crashed the
+  user's desktop). `/tmp` is RAM-backed tmpfs on the dev machine, so never write
+  large files (logcat dumps, downloads, build trees) there; use `out/`. Every
+  long job runs under a memory cap:
+  - the session unit is capped at `MemoryHigh=6G` / `MemoryMax=8G` (an idle
+    session uses about 1.3 GB);
+  - podman builds pass `--memory=`, and the AOSP build is capped at 32 GB with
+    `-j12`. Don't run the AOSP build alongside other heavy work.
+  - Never `logcat -b all` or an unbounded `logcat` into a file; bound it with
+    `-d`, `-t <n>` or `-s <tags>`.
+
 - **Host safety.** Inside our user namespace, Android "root" is the host user.
   Every namespace running Android code must mask and lock host sysfs submounts,
   get its own systemd unit/cgroup and network namespace, and must not bind host
