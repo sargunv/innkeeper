@@ -145,16 +145,19 @@ must survive anything Android sends. From a security review (2026-10-27):
   recycled tid, never gets writes meant for the old image. `mem` ignores page
   protections (FOLL_FORCE), so every transfer first checks its range with
   `PROCMAP_QUERY` on the pinned `maps` (readable, or writable) and fails with
-  `EFAULT` otherwise, as `process_vm_*` and the driver would. Cost
-  (`binderThroughputTest`, interleaved runs on one machine): `-w 2 -p` median
-  11.5 µs before pinning, 12.5–14.8 µs with the pin, 13.6–14.6 µs with the
-  check; `-w 8` all-to-all 65–70k → 53–57k transactions/s for the check. Boot
-  time is unchanged. Queued single-uid jobs are dropped once their notification
-  is gone, and checked again before they act. Single-uid calls that transfer
-  memory (`getresuid`, group lists, `SO_PEERCRED`, chown paths, lstat results)
-  pin and check the same way, per call; scalar `get*id` don't. Single-uid boot
-  time is unchanged (fresh 4.87 s, warm 2.60 s, and 0.86 s of receive-thread
-  time in the first 10 s, before and after).
+  `EFAULT` otherwise, as `process_vm_*` and the driver would. Before Linux 6.11
+  the check streams the maps text instead, failing closed past 16,384 lines
+  (system_server has about 5,400). A bwr that can't be written back fails the
+  ioctl with `EFAULT`, as in the driver. Cost (`binderThroughputTest`,
+  interleaved runs on one machine): `-w 2 -p` median 11.5 µs before pinning,
+  12.5–14.8 µs with the pin, 13.6–14.6 µs with the check; `-w 8` all-to-all
+  65–70k → 53–57k transactions/s for the check. Boot time is unchanged. Queued
+  single-uid jobs are dropped once their notification is gone, and checked again
+  before they act. Single-uid calls that transfer memory (`getresuid`, group
+  lists, `SO_PEERCRED`, chown paths, lstat results) pin and check the same way,
+  per call; scalar `get*id` don't. Single-uid boot time is unchanged (fresh 4.87
+  s, warm 2.60 s, and 0.86 s of receive-thread time in the first 10 s, before
+  and after).
 - Poll mode hands out an epoll fd, never the broker's eventfd (see "poll").
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.

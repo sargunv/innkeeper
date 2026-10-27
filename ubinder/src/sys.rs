@@ -391,47 +391,72 @@ fn accessible(maps: RawFd, addr: u64, len: usize, need: u64) -> bool {
     true
 }
 
+/// Lines and bytes of maps text the fallback reads at most per check (about
+/// 10 ms of work at the limit). After boot system_server has about 5,400
+/// mappings, SystemUI 4,000 and Launcher3 3,400; a caller with more than this
+/// many below the range gets EFAULT (pre-6.11 kernels only).
+const MAPS_MAX_LINES: usize = 16384;
+const MAPS_MAX_BYTES: usize = 4 << 20;
+
 /// `accessible` on kernels before 6.11 (no PROCMAP_QUERY): the maps text of
-/// the same pinned mm.
+/// the same pinned mm, streamed in fixed-size chunks (the caller controls how
+/// long it is) and parsed line by line until the range is decided. Over
+/// budget, it fails closed.
 fn accessible_text(maps: RawFd, addr: u64, end: u64, need: u64) -> bool {
-    let mut text = Vec::new();
-    let mut buf = [0u8; 16384];
-    let mut off = 0i64;
-    loop {
-        let n = unsafe { libc::pread(maps, buf.as_mut_ptr() as *mut _, buf.len(), off) };
-        if n <= 0 {
-            break;
-        }
-        text.extend_from_slice(&buf[..n as usize]);
-        off += n as i64;
-    }
+    let mut buf = [0u8; 8192];
+    // The start of the current line: "start-end perms" fits in 64 bytes.
+    let mut line = [0u8; 64];
+    let (mut ll, mut lines, mut read) = (0usize, 0usize, 0usize);
     let mut a = addr;
-    for line in String::from_utf8_lossy(&text).lines() {
-        let mut it = line.split_ascii_whitespace();
-        let (Some(range), Some(perms)) = (it.next(), it.next()) else {
-            continue;
-        };
-        let Some((s, e)) = range.split_once('-') else {
-            continue;
-        };
-        let (Ok(s), Ok(e)) = (u64::from_str_radix(s, 16), u64::from_str_radix(e, 16)) else {
-            continue;
-        };
-        if e <= a {
-            continue;
-        }
-        let p = perms.as_bytes();
-        let ok = (need & VMA_READABLE == 0 || p.first() == Some(&b'r'))
-            && (need & VMA_WRITABLE == 0 || p.get(1) == Some(&b'w'));
-        if s > a || !ok {
+    while read < MAPS_MAX_BYTES {
+        let n = unsafe { libc::pread(maps, buf.as_mut_ptr() as *mut _, buf.len(), read as i64) };
+        if n <= 0 {
             return false;
         }
-        a = e;
-        if a >= end {
-            return true;
+        read += n as usize;
+        for &c in &buf[..n as usize] {
+            if c != b'\n' {
+                if ll < line.len() {
+                    line[ll] = c;
+                    ll += 1;
+                }
+                continue;
+            }
+            lines += 1;
+            if lines > MAPS_MAX_LINES {
+                return false;
+            }
+            if let Some(decided) = maps_line(&line[..ll], &mut a, end, need) {
+                return decided;
+            }
+            ll = 0;
         }
     }
     false
+}
+
+/// One maps line against the part of the range still to cover, from `a`:
+/// Some(answer) once decided, None to read on.
+fn maps_line(line: &[u8], a: &mut u64, end: u64, need: u64) -> Option<bool> {
+    let line = std::str::from_utf8(line).ok()?;
+    let mut it = line.split_ascii_whitespace();
+    let (range, perms) = (it.next()?, it.next()?);
+    let (s, e) = range.split_once('-')?;
+    let (s, e) = (
+        u64::from_str_radix(s, 16).ok()?,
+        u64::from_str_radix(e, 16).ok()?,
+    );
+    if e <= *a {
+        return None;
+    }
+    let p = perms.as_bytes();
+    let ok = (need & VMA_READABLE == 0 || p.first() == Some(&b'r'))
+        && (need & VMA_WRITABLE == 0 || p.get(1) == Some(&b'w'));
+    if s > *a || !ok {
+        return Some(false);
+    }
+    *a = e;
+    (*a >= end).then_some(true)
 }
 
 /// Read target memory through its pinned address space (see [`PinnedMem`]),
@@ -1733,5 +1758,45 @@ pub(crate) mod tests {
                 unsafe { std::ptr::read_unaligned(p.add(4096) as *const BinderWriteRead) };
             assert_eq!(back.write_consumed, if write && prot == rw { 4 } else { 0 });
         }
+    }
+
+    /// The pre-6.11 fallback's work is bounded by the caller's mapping count:
+    /// past MAPS_MAX_LINES lines it fails closed (EFAULT) even where
+    /// PROCMAP_QUERY would allow the access.
+    #[test]
+    fn maps_fallback_is_bounded() {
+        let pin = open_mem(unsafe { libc::gettid() }).unwrap();
+        let m = pin.raw();
+        // Many small mappings: alternate page protections in one region.
+        let n = 2 * MAPS_MAX_LINES + 256;
+        let p = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                n * 4096,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE,
+                -1,
+                0,
+            )
+        } as *mut u8;
+        assert_ne!(p as *mut libc::c_void, libc::MAP_FAILED);
+        for i in (0..n).step_by(2) {
+            unsafe { libc::mprotect(p.add(i * 4096) as *mut _, 4096, libc::PROT_READ) };
+        }
+        // An address above all of them: this thread's stack.
+        let local = 0u64;
+        let a = &local as *const u64 as u64;
+        assert!(a > p as u64);
+        assert!(accessible(m.maps, a, 8, VMA_READABLE));
+        let t = std::time::Instant::now();
+        assert!(!accessible_text(m.maps, a, a + 8, VMA_READABLE));
+        eprintln!("over budget after {:?}", t.elapsed());
+        // Below the budget the two agree.
+        let first = p as u64 + 4096;
+        assert!(
+            accessible_text(m.maps, first, first + 8, VMA_WRITABLE)
+                == accessible(m.maps, first, 8, VMA_WRITABLE)
+        );
+        unsafe { libc::munmap(p as *mut _, n * 4096) };
     }
 }
