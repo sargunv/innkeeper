@@ -1032,7 +1032,12 @@ ubinder supervisor work.
   - Android: `BOOT_COMPLETED` fires at each session start. Apps the user allows
     in the background get the session started at login.
   - Test: Syncthing-Fork, KDE Connect.
-- [ ] **Accounts and GMS/microG** · todo · P1 · image + sysapp
+- [ ] **Accounts and GMS/microG** · partial · P1 · image + sysapp
+  - Now (integb): `tools/microg.sh` installs microG as privileged system apps
+    through the overlay; location, checkin and its push connection work, but
+    apps using the Play Services libraries don't (no signature spoofing on AOSP
+    17; the smallest patch is sketched). UnifiedPush through ntfy works end to
+    end. See [microg.md](microg.md).
   - Android: microG (GmsCore, GsfProxy, the FakeStore companion) as priv-apps in
     our source-built image. Signature spoofing needs a documented AOSP patch
     (the image lane's patch queue), since the CI image can't do it. Gives FCM
