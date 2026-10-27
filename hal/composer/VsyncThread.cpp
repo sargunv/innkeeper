@@ -38,8 +38,6 @@ void VsyncThread::setEnabled(bool enabled) {
   mCv.notify_all();
 }
 
-void VsyncThread::setPeriod(int64_t periodNs) { mPeriodNs = periodNs; }
-
 void VsyncThread::loop() {
   pthread_setname_np(pthread_self(), "hwc-vsync");
   struct sched_param param = {.sched_priority = 2};
@@ -50,7 +48,7 @@ void VsyncThread::loop() {
   int64_t next = nowNs();
   std::unique_lock lock(mMutex);
   while (!mStop) {
-    const int64_t period = mPeriodNs.load();
+    const int64_t period = mPeriodNs;
     next += period;
     const int64_t now = nowNs();
     if (next < now)

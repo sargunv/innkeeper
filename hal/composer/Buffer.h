@@ -39,8 +39,6 @@ class BufferSlots {
   // Applies a composer3 Buffer: a non-null handle replaces the slot (dup'ing
   // its fds), a null handle selects the cached one.
   Error update(const c3::Buffer& buffer, BufferPtr* out);
-  void clear(int32_t slot);
-  void clearAll() { mSlots.clear(); }
 
  private:
   std::vector<BufferPtr> mSlots;

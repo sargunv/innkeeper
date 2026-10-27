@@ -63,8 +63,4 @@ Error BufferSlots::update(const c3::Buffer& buffer, BufferPtr* out) {
   return Error::None;
 }
 
-void BufferSlots::clear(int32_t slot) {
-  if (slot >= 0 && size_t(slot) < mSlots.size()) mSlots[slot].reset();
-}
-
 }  // namespace linuxapk::hwc

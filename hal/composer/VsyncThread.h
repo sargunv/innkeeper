@@ -22,8 +22,7 @@ class VsyncThread {
       ::aidl::android::hardware::graphics::composer3::IComposerCallback>
   );
   void setEnabled(bool enabled);
-  void setPeriod(int64_t periodNs);
-  int64_t period() const { return mPeriodNs.load(); }
+  int64_t period() const { return mPeriodNs; }
   // Most recent vsync timestamp (whether or not it was delivered).
   int64_t lastVsyncNs() const { return mLastVsyncNs.load(); }
 
@@ -31,7 +30,7 @@ class VsyncThread {
   void loop();
 
   const int64_t mDisplayId;
-  std::atomic<int64_t> mPeriodNs;
+  const int64_t mPeriodNs;
   std::atomic<int64_t> mLastVsyncNs{0};
   std::atomic<bool> mEnabled{false};
   std::mutex mMutex;
