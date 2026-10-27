@@ -17,15 +17,15 @@ plus a desktop bridge for portals, notifications and MPRIS. See
 **Pre-alpha.** Android 17 boots rootless to its launcher in a Wayland window;
 app input and real apps are next.
 
-| Milestone                                                       | Status                                                                                                                                                             |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables                                 |
-| M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games |
-| M2 GPU, audio, per-app windows, launcher                        | 🚧 GPU ✅; per-app windows ✅; sound via PipeWire ✅ (≈90 ms latency); `linuxapk` CLI ✅; GNOME client-side decorations and the manager app in progress            |
-| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                                                 |
-| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 AOSP CI image ✅ (default; no local AOSP build or redistribution needed); userspace binder in progress                                                          |
-| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                 |
-| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                 |
+| Milestone                                                       | Status                                                                                                                                                                 |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables                                     |
+| M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games     |
+| M2 GPU, audio, per-app windows, launcher                        | ✅ RADV/ANGLE GPU; one window per app (title bars on KDE, client-side on GNOME); PipeWire sound (≈90 ms); `linuxapk` CLI and manager app; 15/16 corpus in per-app mode |
+| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                                                     |
+| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 AOSP CI image ✅ (default; no local AOSP build or redistribution needed); userspace binder in progress                                                              |
+| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                     |
+| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                     |
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
 
