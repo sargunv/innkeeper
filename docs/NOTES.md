@@ -78,6 +78,10 @@ Rules:
   udmabuf import and swapchain-image import via `mapper.linuxapk.so` in a Bionic namespace.
   In the session, GLES 3.2 via ANGLE runs on RADV; GPU buffers there need `/dev/udmabuf` bound
   into the session. See [gpu.md](gpu.md).
+- 2026-10-27 (hal): `hal/build.sh` NDK-builds allocator AIDL V3, `mapper.linuxapk.so`
+  (IMapper v5, memfd→udmabuf linear buffers) and composer3 V5 (headless, all-CLIENT, timer
+  vsync, PNG frame dumps) into `out/vendor-overlay`. Proven in a namespace with the image's
+  servicemanager, incl. AHardwareBuffer via libui. See [hal-display.md](hal-display.md).
 
 ## Next
 
