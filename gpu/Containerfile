@@ -1,4 +1,4 @@
-# Build tools for cross-compiling Mesa/libdrm/SwiftShader for Android with the NDK.
+# Build tools for cross-compiling Mesa, libdrm and LLVM for Android with the NDK.
 # The NDK itself is used from the host ($HOME is bind-mounted), pinned in build.sh.
 FROM registry.fedoraproject.org/fedora:44
 RUN dnf -y install \
