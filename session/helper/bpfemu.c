@@ -184,6 +184,13 @@ static int is_percpu(uint32_t t) {
 }
 
 static int map_alloc(struct obj* m) {
+  // Element operations copy keys through a fixed buffer; LPM keys are
+  // {u32 prefixlen; u8 data[1..256]} as in kernel/bpf/lpm_trie.c.
+  if (m->key_size > 512) return -E2BIG;
+  if (
+    m->type == BPF_MAP_TYPE_LPM_TRIE && (m->key_size < 5 || m->key_size > 260)
+  )
+    return -EINVAL;
   if (m->type == BPF_MAP_TYPE_RINGBUF || m->type == BPF_MAP_TYPE_USER_RINGBUF) {
     // consumer page + producer page + data mapped twice
     long pg = sysconf(_SC_PAGESIZE);
@@ -263,6 +270,12 @@ static int map_update(
     if (!v) return -E2BIG;
     memcpy(v, val, m->vstride);
     return 0;
+  }
+  if (m->type == BPF_MAP_TYPE_LPM_TRIE) {
+    // find_lpm trusts stored prefix lengths to fit the key.
+    uint32_t plen;
+    memcpy(&plen, key, 4);
+    if (plen > (m->key_size - 4) * 8) return -EINVAL;
   }
   int64_t i = find_key(m, key);
   if (i >= 0) {
@@ -367,7 +380,8 @@ static long do_map_create(pid_t pid, union bpf_attr* a, uint64_t req_id) {
 static long do_elem(pid_t pid, int cmd, union bpf_attr* a) {
   struct obj* m = lookup_fd(pid, a->map_fd, K_MAP);
   if (!m) return -EBADF;
-  if (m->type == BPF_MAP_TYPE_RINGBUF) return -EINVAL;
+  // Ring buffers have no elements (and no tables).
+  if (!m->vals) return -EINVAL;
   uint8_t key[512], next[512];
   if (m->key_size > sizeof(key)) return -E2BIG;
   int have_key = a->key != 0;
