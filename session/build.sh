@@ -31,6 +31,9 @@ so="$out/session/overlay/system/lib64/liblinuxapk_shim.so"
   -o "$so" "$here/shim/linuxapk_shim.c"
 cp "$so" "$out/session/overlay/vendor/lib64/"
 "$cc" -static -O2 -Wall -Werror -o "$out/session/pivot-exec" "$here/helper/pivot-exec.c" "$here/helper/bpfemu.c"
+# ubinder mode's exec relay (init service + `linuxapk-session exec` client).
+mkdir -p "$out/session/overlay/system/bin"
+"$cc" -static -O2 -Wall -Werror -o "$out/session/overlay/system/bin/linuxapk-exec" "$here/helper/linuxapk-exec.c"
 
 # ubinder broker helper (Rust, dynamic bionic): installed as
 # /system/bin/linuxapk-ubinder. pivot-exec forks+execs it in ubinder mode to

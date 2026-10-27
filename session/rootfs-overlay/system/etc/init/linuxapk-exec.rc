@@ -1,0 +1,11 @@
+# linuxapk: ubinder mode serves binder through the seccomp filter on init,
+# which `linuxapk-session exec` (nsenter) processes don't have. This relay,
+# an init descendant, runs their commands instead (session/helper/linuxapk-exec.c).
+service linuxapk-execd /system/bin/linuxapk-exec --serve /dev/socket/linuxapk-exec
+    class core
+    user root
+    group root
+    disabled
+
+on post-fs-data && property:ro.boot.linuxapk.ubinder=1
+    start linuxapk-execd

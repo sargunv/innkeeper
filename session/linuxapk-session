@@ -387,6 +387,9 @@ exec_in() {
       export PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin
       export HOME=/data/local/tmp TMPDIR=/data/local/tmp
       cd /
+      # ubinder mode: binder needs the seccomp filter that only descendants
+      # of init have, so run the command through the exec relay.
+      [ -S /dev/socket/linuxapk-exec ] && exec /system/bin/linuxapk-exec "$@"
       exec "$@"' sh "$@"
 }
 
