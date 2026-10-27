@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <linux/bpf.h>
 #include <linux/filter.h>
+#include <linux/openat2.h>
 #include <linux/seccomp.h>
 #include <sched.h>
 #include <stddef.h>
@@ -43,6 +44,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/timerfd.h>
 #include <sys/uio.h>
@@ -428,33 +430,62 @@ static long do_new_simple(enum kind k, union bpf_attr* a, uint64_t req_id) {
   return r < 0 ? r : INJECTED;
 }
 
-static int pin_path(pid_t pid, uint64_t uaddr, char* out, size_t len) {
-  char p[256];
+static int openat2_(
+  int dirfd, const char* path, uint64_t flags, uint64_t mode, uint64_t resolve
+) {
+  struct open_how how = {.flags = flags, .mode = mode, .resolve = resolve};
+  int fd = (int)syscall(__NR_openat2, dirfd, path, &how, sizeof(how));
+  return fd < 0 ? -errno : fd;
+}
+
+// Open pin `uaddr` (an absolute path under /sys/fs/bpf) in pid's root. This
+// runs on the supervisor's only thread with the host user's power: no
+// symlinks (they would resolve against the host's root) and no other mounts
+// (FUSE), and never a blocking open (O_NONBLOCK: a FIFO).
+static int open_pin(pid_t pid, uint64_t uaddr, int flags, mode_t mode) {
+  char p[256], root[64];
   if (rdstr(pid, uaddr, p, sizeof(p))) return -EFAULT;
-  if (p[0] != '/') return -EINVAL;  // relative/path_fd pins: unsupported
-  snprintf(out, len, "/proc/%d/root%s", pid, p);
-  return 0;
+  // Relative/path_fd pins and pins elsewhere: unsupported.
+  if (strncmp(p, "/sys/fs/bpf/", 12) != 0) return -EINVAL;
+  snprintf(root, sizeof(root), "/proc/%d/root", pid);
+  int rfd = open(root, O_PATH | O_DIRECTORY | O_CLOEXEC);
+  if (rfd < 0) return -errno;
+  uint64_t no_links = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+  int dfd = openat2_(
+    rfd, "sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC, 0,
+    RESOLVE_IN_ROOT | no_links
+  );
+  close(rfd);
+  if (dfd < 0) return dfd;
+  int fd = openat2_(
+    dfd, p + 12, flags | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC, mode,
+    RESOLVE_BENEATH | RESOLVE_NO_XDEV | no_links
+  );
+  close(dfd);
+  if (fd < 0) return fd;
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    close(fd);
+    return -EINVAL;
+  }
+  return fd;
 }
 
 static long do_obj_pin(pid_t pid, union bpf_attr* a) {
   struct obj* o = lookup_fd(pid, a->bpf_fd, -1);
   if (!o) return -EBADF;
-  char path[320];
-  int r = pin_path(pid, a->pathname, path, sizeof(path));
-  if (r) return r;
-  int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-  if (fd < 0) return -errno;
+  int fd = open_pin(pid, a->pathname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  if (fd < 0) return fd;
   dprintf(fd, "lxbpf-%s-%u\n", kKindName[o->kind], o->id);
   close(fd);
   return 0;
 }
 
 static long do_obj_get(pid_t pid, union bpf_attr* a, uint64_t req_id) {
-  char path[320], buf[64], kname[16];
-  int r = pin_path(pid, a->pathname, path, sizeof(path));
-  if (r) return r;
-  int fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (fd < 0) return -errno;
+  char buf[64], kname[16];
+  int r;
+  int fd = open_pin(pid, a->pathname, O_RDONLY, 0);
+  if (fd < 0) return fd;
   ssize_t n = read(fd, buf, sizeof(buf) - 1);
   close(fd);
   if (n <= 0) return -EINVAL;

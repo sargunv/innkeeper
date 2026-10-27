@@ -521,8 +521,12 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         let ours = nr == libc::SYS_openat
             || (nr == libc::SYS_ioctl && is_binder_ioctl(req.data.args[1] as u32));
         if !ours {
-            if unsafe { libc::send(sock, notif.as_ptr() as *const _, notif_sz, 0) } < 0 {
+            // Never wait for the C supervisor: if it is stuck (or behind),
+            // binder must keep working, so the forwarded call fails instead.
+            let flags = libc::MSG_DONTWAIT;
+            if unsafe { libc::send(sock, notif.as_ptr() as *const _, notif_sz, flags) } < 0 {
                 eprintln!("ubinder: forward: {}", std::io::Error::last_os_error());
+                send_resp(listener, resp_sz, req.id, 0, -libc::EAGAIN, false);
             }
             continue;
         }

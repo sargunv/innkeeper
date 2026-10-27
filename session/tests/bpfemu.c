@@ -117,6 +117,24 @@ static void tests(const char* tmp) {
   CHECK(
     update(lpm, &key, &v) == 0 && lookup(lpm, &key, &got) == 0, "LPM prefix 32"
   );
+
+  // S6: pins are regular files under /sys/fs/bpf, opened without blocking or
+  // following links out of it.
+  mkfifo("/sys/fs/bpf/fifo", 0600);
+  CHECK(get("/sys/fs/bpf/fifo") == -EINVAL, "get of a FIFO: EINVAL, no hang");
+  char esc[512];
+  snprintf(esc, sizeof(esc), "%s/escaped", tmp);
+  symlink(tmp, "/sys/fs/bpf/link");
+  CHECK(
+    pin(m, "/sys/fs/bpf/link/escaped") == -ELOOP && access(esc, F_OK) != 0,
+    "pin through a symlink: ELOOP, nothing created outside"
+  );
+  symlink(esc, "/sys/fs/bpf/flink");
+  CHECK(get("/sys/fs/bpf/flink") == -ELOOP, "get of a symlink: ELOOP");
+  CHECK(get("/sys/fs/bpf/../../../etc/passwd") == -EXDEV, "get with ..: EXDEV");
+  char outside[512];
+  snprintf(outside, sizeof(outside), "%s/m", tmp);
+  CHECK(pin(m, outside) == -EINVAL, "pin outside /sys/fs/bpf: EINVAL");
 }
 
 int main(int argc, char** argv) {
