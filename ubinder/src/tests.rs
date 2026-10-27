@@ -214,6 +214,21 @@ fn register_service_and_transact() {
     );
 }
 
+/// A data_size near u64::MAX must fail the transaction, not overflow the
+/// alignment (a panic in debug builds) or wrap to a tiny buffer.
+#[test]
+fn huge_data_size_fails() {
+    let mut s = setup();
+    let mut td = BinderTransactionData::default();
+    td.target = 0;
+    td.data_size = u64::MAX;
+    td.data_buffer = 0x9001_0000;
+    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
+    s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
+    let r = s.b.write_read(s.client, 1, &[], 256, false, &mut s.m);
+    assert!(find(&decode(&r.read), BR_FAILED_REPLY).is_some());
+}
+
 #[test]
 fn sync_call_and_reply_routing() {
     let mut s = setup();

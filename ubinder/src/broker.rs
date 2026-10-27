@@ -1405,7 +1405,8 @@ impl Broker {
             .map(|n| self.nodes[&n].txn_security_ctx)
             .unwrap_or(false);
         const SECCTX: &[u8] = b"u:r:su:s0\0";
-        let off_start = align_up(data_size, 8);
+        // Checked: a huge data_size must fail here, not wrap to a small total.
+        let off_start = data_size.checked_next_multiple_of(8).ok_or(fail)?;
         let sg_start = off_start.checked_add(offsets_size).ok_or(fail)?;
         let sg_end = sg_start.checked_add(extra).ok_or(fail)?;
         let total = if want_secctx {
