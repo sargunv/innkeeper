@@ -76,7 +76,8 @@ Rules:
 - 2026-10-27 (gpu): `gpu/build.sh` NDK-builds Mesa 26.2.5 RADV and lavapipe into
   `out/vendor-overlay/lib64/hw/vulkan.{radv,lvp}.so` (LL-NDK deps only). Both pass compute,
   udmabuf import and swapchain-image import via `mapper.linuxapk.so` in a Bionic namespace.
-  GLES via ANGLE still needs a session. See [gpu.md](gpu.md).
+  In the session, GLES 3.2 via ANGLE runs on RADV; GPU buffers there need `/dev/udmabuf` bound
+  into the session. See [gpu.md](gpu.md).
 
 ## Next
 

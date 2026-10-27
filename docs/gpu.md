@@ -96,10 +96,25 @@ only pass if the driver got `PLANE_LAYOUTS` from the IMapper. Without a
 mapper, Mesa's fallback gralloc fails with
 `VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT`.
 
-Not yet tested: GLES through ANGLE. `gles_test` reaches ANGLE's Vulkan init on
-RADV, then blocks in `AHardwareBuffer_isSupported` → libui → waiting for
-IAllocator via servicemanager. It needs a booted session with the allocator
-running.
+### Inside the session (2026-10-27)
+
+The session was partially booted: servicemanager, `IAllocator/default` and
+`gpu` were up; there were no props yet, so `propshim` supplied them. The tests
+ran from `/data/gputest`.
+
+- **GLES through ANGLE on RADV works.** `gles_test` reports
+  `GL_RENDERER=ANGLE (AMD, Vulkan 1.4.354 (AMD Radeon 8060S Graphics (RADV STRIX_HALO) (0x00001586)), radv-26.2.5)`
+  and `OpenGL ES 3.2`, and the pbuffer clear and scissor readback passes.
+  (Outside a session it blocks: libui waits for IAllocator.)
+- Compute through the system libvulkan also passes.
+- Mesa found the mapper through the IAllocator binder query, with no
+  override. Image layout came from `mapper.linuxapk.so`.
+- **Blocker: the session has no `/dev/udmabuf`.** The allocator fell back to
+  plain memfd, and a memfd can't be imported as a dma-buf
+  (`VK_ERROR_INVALID_EXTERNAL_HANDLE`), so swapchain buffers would fail.
+  - Session lane: bind `/dev/udmabuf` into the session.
+  - hal lane: fail allocations with GPU or composer usage rather than hand out
+    memfd buffers.
 
 ```
 gpu/build.sh test
