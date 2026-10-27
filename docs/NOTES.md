@@ -179,6 +179,13 @@ Causes:
   APKs and split bundles. It writes `.desktop` entries with Android-rendered
   icons and custom-scheme handlers, and `setup` makes double-clicking an APK
   install it. `cli/tests/integration.sh` passes. See [cli.md](cli.md).
+- 2026-10-27 (ubinder): **M4 milestone 1** — the userspace binder driver state
+  machine (`ubinder/`, Rust) is implemented and proven: 8 state-machine tests
+  (register/transact, sync reply routing, fd passing, oneway, node ref
+  handshake, death notification) plus a fuzzer (2M iterations, no panics).
+  `mise run check` passes. Next: the seccomp supervisor binding, a `--ubinder`
+  session flag, and full boot with corpus parity. Kernel binder stays the
+  default. See [ubinder.md](ubinder.md).
 
 ## Backlog (unassigned)
 
