@@ -493,6 +493,20 @@ pub fn unsetup() -> Result<()> {
     Ok(())
 }
 
+/// The manager's "open APK files" setting. On: the GUI (this program, or
+/// `linuxapk-gui` next to it) becomes the APK handler and gets its app-menu
+/// entry. Off: the handler is removed (the menu entry stays).
+pub fn set_gui_handler(on: bool) -> Result<()> {
+    let d = Dirs::from_env();
+    if !on {
+        return xdg::unsetup(&d);
+    }
+    let g = command_for("linuxapk-gui")?;
+    xdg::setup(&d, &Handler::Gui(g.clone()))?;
+    xdg::install_manager(&d, &g)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
