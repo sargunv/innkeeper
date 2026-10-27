@@ -178,9 +178,16 @@ _run() {
     echo "$inner" >"$run/pid"
     # User-mode networking for the session's own network namespace. No
     # inbound port forwarding, and --no-map-gw keeps the host's loopback
-    # services unreachable from Android.
-    pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw \
-      --dns-forward 169.254.1.1 -t none -u none -T none -U none \
+    # services unreachable from Android. The interface is eth1 so Android's
+    # EthernetService brings it up (DHCP from pasta) as the default network;
+    # the emulator's resources pin eth0 as a restricted network. DHCP hands
+    # out 169.254.1.1 as the resolver, which pasta forwards to the host's
+    # first IPv4 nameserver (with -D, pasta no longer picks it by itself).
+    local dns_host
+    dns_host=$(awk '$1 == "nameserver" && $2 !~ /:/ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)
+    pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw -I eth1 \
+      -D 169.254.1.1 --dhcp-dns --dns-forward 169.254.1.1 ${dns_host:+--dns-host "$dns_host"} \
+      -t none -u none -T none -U none \
       --userns "/proc/$inner/ns/user" --netns "/proc/$inner/ns/net" >>"$run/session.out" 2>&1 &
     echo $! >"$run/pasta.pid"
   fi

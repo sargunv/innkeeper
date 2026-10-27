@@ -1,0 +1,623 @@
+{
+  "date": "2026-10-27",
+  "build": "Android/sdk_phone64_x86_64/emu64x:17/CE2A.260420.051.A3/16571990:userdebug/test-keys",
+  "backend": "headless",
+  "session_mem_mb": 886,
+  "apps": [
+    {
+      "package": "com.darkempire78.opencalculator",
+      "name": "OpenCalc",
+      "group": "noarch",
+      "version_name": "3.2.0",
+      "version_code": 53,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 106,
+      "pss_mb": 32,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "106 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{99f9659 u0 com.darkempire78.opencalculator/com.darkempire78.opencalculator.activities.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "49.8% #e0e0f8, 193 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.moire.opensudoku",
+      "name": "Open Sudoku",
+      "group": "noarch",
+      "version_name": "4.11.3",
+      "version_code": 20261008,
+      "result": "broken",
+      "reason": "install: Failure [INSTALL_FAILED_NO_MATCHING_ABIS: INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]",
+      "checks": [
+        {
+          "name": "install",
+          "ok": false,
+          "detail": "Failure [INSTALL_FAILED_NO_MATCHING_ABIS: INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]"
+        }
+      ]
+    },
+    {
+      "package": "de.sudoq",
+      "name": "SudoQ",
+      "group": "noarch",
+      "version_name": "3.3.3",
+      "version_code": 65,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 2642,
+      "pss_mb": 25,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "2642 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{7aee059 u0 de.sudoq/de.sudoq.controller.menus.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "76.8% #e8e8e8, 177 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.physphil.android.unitconverterultimate",
+      "name": "Unit Converter Ultimate",
+      "group": "noarch",
+      "version_name": "5.7.3",
+      "version_code": 50703,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 82,
+      "pss_mb": 38,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "82 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{9c91330 u0 com.physphil.android.unitconverterultimate/com.physphil.android.unitconverterultimate.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "62.0% #101010, 88 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "de.tobiasbielefeld.solitaire",
+      "name": "Simple Solitaire Collection",
+      "group": "noarch",
+      "version_name": "3.13",
+      "version_code": 71,
+      "result": "broken",
+      "reason": "app window not in front (Window{5d2e15c u0 DeprecatedTargetSdkVersionDialog})",
+      "launch_ms": 135,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "135 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": false,
+          "detail": "Window{5d2e15c u0 DeprecatedTargetSdkVersionDialog}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "15.1% #e8e8f0, 698 colours"
+        }
+      ]
+    },
+    {
+      "package": "org.wikipedia",
+      "name": "Wikipedia",
+      "group": "noarch",
+      "version_name": "r/50612-r-2026-10-19",
+      "version_code": 50612,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 182,
+      "pss_mb": 45,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "182 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{813d2b4 u0 org.wikipedia/org.wikipedia.onboarding.InitialOnboardingActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "53.0% #000000, 4119 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "de.danoeh.antennapod",
+      "name": "AntennaPod - Podcast Player",
+      "group": "noarch",
+      "version_name": "3.12.3",
+      "version_code": 3120395,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 178,
+      "pss_mb": 50,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "178 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{abb828b u0 de.danoeh.antennapod/de.danoeh.antennapod.activity.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "87.2% #f8f8f8, 533 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "net.thunderbird.android",
+      "name": "Thunderbird: Free Your Inbox",
+      "group": "noarch",
+      "version_name": "24.0",
+      "version_code": 33,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 216,
+      "pss_mb": 42,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "216 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{82f345c u0 net.thunderbird.android/app.k9mail.feature.launcher.FeatureLauncherActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "92.0% #f8f0f0, 492 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.aurora.store",
+      "name": "Aurora Store",
+      "group": "noarch",
+      "version_name": "4.8.4",
+      "version_code": 76,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 181,
+      "pss_mb": 41,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "181 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{f43af3a u0 com.aurora.store/com.aurora.store.ComposeActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "95.0% #f8f8f8, 321 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.fdroid.fdroid",
+      "name": "F-Droid",
+      "group": "noarch",
+      "version_name": "2.0.2",
+      "version_code": 2000052,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 262,
+      "pss_mb": 54,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "262 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{1d5352e u0 org.fdroid.fdroid/org.fdroid.IconActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "93.9% #f8f8f8, 213 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "me.ash.reader",
+      "name": "Read You",
+      "group": "compose",
+      "version_name": "0.16.2",
+      "version_code": 47,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 155,
+      "pss_mb": 50,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "155 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{2b31356 u0 me.ash.reader/me.ash.reader.infrastructure.android.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "85.6% #f8f8f8, 255 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.nsh07.pomodoro",
+      "name": "Tomato",
+      "group": "compose",
+      "version_name": "2.0.1",
+      "version_code": 40,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 270,
+      "pss_mb": 49,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "270 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{9c1ea2c u0 org.nsh07.pomodoro/org.nsh07.pomodoro.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "73.4% #f8f8f8, 223 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "io.anuke.mindustry",
+      "name": "Mindustry",
+      "group": "native",
+      "version_name": "8-fdroid-160.7",
+      "version_code": 1115,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 132,
+      "pss_mb": 111,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "132 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{1e87a59 u0 io.anuke.mindustry/mindustry.android.AndroidLauncher}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "17.6% #402820, 576 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.shatteredpixel.shatteredpixeldungeon",
+      "name": "Shattered Pixel Dungeon",
+      "group": "native",
+      "version_name": "4.0.2",
+      "version_code": 922,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 125,
+      "pss_mb": 43,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "125 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{774213b u0 com.shatteredpixel.shatteredpixeldungeon/com.shatteredpixel.shatteredpixeldungeon.android.AndroidLauncher}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "28.3% #000000, 563 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.unciv.app",
+      "name": "Unciv",
+      "group": "native",
+      "version_name": "4.22.13",
+      "version_code": 1275,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 109,
+      "pss_mb": 59,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "109 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{458d4f8 u0 com.unciv.app/com.unciv.app.AndroidLauncher}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "75.8% #000030, 641 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.openttd.fdroid",
+      "name": "OpenTTD",
+      "group": "native",
+      "version_name": "14.1.rev128",
+      "version_code": 1410128,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 85,
+      "pss_mb": 230,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "85 ms"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{e6475d6 u0 org.openttd.fdroid/org.openttd.fdroid.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "7.0% #f8b030, 5713 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

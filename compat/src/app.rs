@@ -263,8 +263,20 @@ impl<'a> Run<'a> {
         }
         self.check("alive after launch", true, "");
 
+        // Platform compatibility warnings ("built for an older version of
+        // Android") sit over a working app; note them and dismiss them.
+        let mut focus = self.focus();
+        for dialog in ["DeprecatedTargetSdkVersionDialog", "DeprecatedAbiDialog"] {
+            if focus.contains(dialog) {
+                let _ = self.screencap(&self.dir.join("warning.png"));
+                self.check(&format!("{dialog} shown"), true, "dismissed");
+                let _ = self.script(&["tap:OK".to_string()]);
+                sleep(Duration::from_secs(1));
+                focus = self.focus();
+            }
+        }
+
         // First frame.
-        let focus = self.focus();
         let focused = focus.contains(&pkg);
         self.check("app window focused", focused, focus.clone());
         let png = self.dir.join("first.png");
@@ -315,6 +327,10 @@ impl<'a> Run<'a> {
             ),
             ("back", vec!["input", "keyevent", "BACK"]),
         ] {
+            if name == "back" {
+                self.pss_mb = self.pss();
+                let _ = self.screencap(&self.dir.join("after.png"));
+            }
             s.run(15, &cmd);
             sleep(Duration::from_millis(2500));
             if let Some(why) = self.dead() {
@@ -323,8 +339,6 @@ impl<'a> Run<'a> {
             }
         }
         self.check("alive after tap/scroll/back", true, "");
-        self.pss_mb = self.pss();
-        let _ = self.screencap(&self.dir.join("after.png"));
         Ok(())
     }
 
@@ -433,6 +447,15 @@ impl<'a> Run<'a> {
                     self.s
                         .run(15, &["input", "tap", &x.to_string(), &y.to_string()]);
                     sleep(Duration::from_millis(700));
+                }
+                "absent" => {
+                    let nodes = self.ui_nodes()?;
+                    if nodes
+                        .iter()
+                        .any(|n| n.text.contains(arg) || n.desc.contains(arg))
+                    {
+                        return Err(format!("{step}: on screen"));
+                    }
                 }
                 "expect" => {
                     let nodes = self.ui_nodes()?;

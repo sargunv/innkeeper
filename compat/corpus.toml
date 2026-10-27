@@ -11,6 +11,7 @@
 #                       "tap:<text>"    tap the node whose text or content-desc
 #                                       is <text> (uiautomator dump)
 #                       "expect:<text>" a node's text or content-desc contains it
+#                       "absent:<text>" no node's text or content-desc contains it
 #                       "key:<keycode>" "wait:<seconds>"
 #   note = "..."        why the app is in the corpus
 
@@ -86,6 +87,7 @@ url = "https://f-droid.org/repo/org.wikipedia_50612.apk"
 sha256 = "18835ae29ad7543fe64d3cebe993885ef38e8631cd762ebbcae2f31f19c3d9e7"
 size = 83369768
 note = "WebView for articles"
+script = ["tap:Skip", "wait:6", "absent:Cannot connect"]
 
 [[app]]
 package = "de.danoeh.antennapod"
@@ -134,6 +136,7 @@ url = "https://f-droid.org/repo/org.fdroid.fdroid_2000052.apk"
 sha256 = "19d51fad482239f6df6a99120e34513667e9a86d136dafdc4a211a68c3327b52"
 size = 12569951
 note = "app store; installs packages (M3)"
+script = ["wait:5", "absent:offline"]
 
 [[app]]
 package = "me.ash.reader"

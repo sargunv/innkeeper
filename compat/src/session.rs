@@ -148,7 +148,9 @@ impl Session {
                 bail!("session is not running");
             }
             if self.booted() {
-                eprintln!("compat: session booted ({:.0?} wait)", t.elapsed());
+                if t.elapsed() > Duration::from_secs(1) {
+                    eprintln!("compat: session booted ({:.0?} wait)", t.elapsed());
+                }
                 return Ok(());
             }
             sleep(Duration::from_secs(2));

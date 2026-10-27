@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Linux.apk: the session's network is pasta's tap interface, named eth1.
+     With this feature system_server runs EthernetService, which brings eth1
+     up as Android's default network (DHCP from pasta). Without it no network
+     agent exists, netd routes everything to "unreachable" and apps see no
+     internet. -->
+<permissions>
+  <feature name="android.hardware.ethernet" />
+</permissions>
