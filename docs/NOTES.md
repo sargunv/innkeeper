@@ -329,6 +329,22 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
 
 ## Backlog (unassigned)
 
+- **Storage (user question, 2026-10-27; after the cleanup):**
+  - Per-app management goes in the manager's per-app page (with the settings
+    item above): storage sizes, clear cache, clear data, runtime permission
+    toggles, force stop, uninstall. Implement through the system app via the
+    bridge's session D-Bus service.
+  - Shared storage proposal: Android's Download/Pictures/Music/Movies/Documents
+    are live views of the user's XDG folders. Map the host uid to Android
+    `media_rw` (1023) instead of root (root gets a subuid; capabilities in the
+    namespace don't depend on the mapping), then bind the XDG dirs into
+    `/data/media/0`. In single-uid mode the files are already the user's. Open
+    question for the user: real XDG folders or a dedicated `~/Android`.
+  - App-private data and cache stay private; maybe a read-only "Open app files"
+    view or export later (pending the user).
+  - Today the host user can't browse `~/.local/share/linuxapk/data` at all
+    (subuid-owned).
+
 - **Performance and latency benchmarks (user question, 2026-10-27; after the
   cleanup, on a quiet machine):**
   - Input-to-photon: a probe APK that changes colour on input; timestamps at the
