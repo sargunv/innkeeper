@@ -75,6 +75,10 @@ if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
 # Overrides for APEX contents (e.g. rc files) layer on top like partitions.
 mkdir -p "$R/apex" "$R/bootstrap-apex"
 layer_mount "$R/linuxapk/apex" "$ovl/apex" "$apex"
+# For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
+# mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
+sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
+  "$apex/apex-info-list.xml" > "$R/linuxapk/apexd-mounts"
 
 # --- writable state -----------------------------------------------------------
 mkdir -p "$data"
@@ -87,7 +91,8 @@ chmod 0770 "$R/cache"
 
 # --- /dev -------------------------------------------------------------------
 mount -t tmpfs -o mode=0755,nosuid dev "$R/dev"
-for n in null zero full random urandom fuse; do
+# udmabuf: dma-bufs from memfds for the gralloc HAL (logind ACL on the host).
+for n in null zero full random urandom fuse udmabuf; do
   [[ -e /dev/$n ]] || continue
   touch "$R/dev/$n"
   mount --bind "/dev/$n" "$R/dev/$n"

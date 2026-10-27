@@ -29,9 +29,10 @@ service netd /system/bin/netd
     # netd is not updatable, but depends on libs provided by tethering apex.
     # Mark it as updatable so init won't start it until all APEX packages are ready.
     updatable
-    # for obvious reasons 'onrestart' doesn't apply to netd1shot above
-    onrestart restart zygote
-    onrestart restart zygote_secondary
+    # linuxapk: netd aborts without its eBPF programs (unavailable in a user
+    # namespace). Run it once instead of crash-looping, and don't take zygote
+    # down with it.
+    oneshot
 
 # Moved from external/android-clat/vendor-464xlat.rc. Since
 # clatd is modularized and shipped in apex, migrate the

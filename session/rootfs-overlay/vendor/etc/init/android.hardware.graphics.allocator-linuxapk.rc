@@ -1,0 +1,11 @@
+service vendor.graphics.allocator-linuxapk /vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk
+    class hal animation
+    interface aidl android.hardware.graphics.allocator.IAllocator/default
+    # linuxapk (session lane, interim): only the session's root maps to the host
+    # user, who holds the logind ACL on /dev/udmabuf. Run as root until the
+    # HAL opens udmabuf before dropping privileges.
+    user root
+    group graphics
+    capabilities SYS_NICE
+    onrestart restart surfaceflinger
+    task_profiles ServiceCapacityLow

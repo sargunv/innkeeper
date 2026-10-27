@@ -74,6 +74,10 @@ on early-init
     # Mount bootstrap linker configuration as current
     mount none /linkerconfig/bootstrap /linkerconfig bind rec
 
+    # linuxapk: the host kernel has no ashmem, and libcutils only picks memfd
+    # on its own when SELinux reports the memfd_class capability.
+    setprop sys.use_memfd true
+
     # linuxapk: no ueventd. There are no real devices to populate /dev with,
     # and uevent netlink sockets are unavailable in a user namespace.
     # start ueventd
@@ -1274,10 +1278,13 @@ import /system/etc/init/init-perfetto.rc
 
 ## Daemon processes to be run by init.
 ##
-service ueventd /system/bin/ueventd
+# linuxapk: ueventd can't open a uevent netlink socket in a user namespace
+# and there are no device nodes for it to manage; it would crash-loop and
+# (being critical) reboot the session. Keep the name for "start ueventd"
+# callers (e.g. shutdown) but run nothing.
+service ueventd /system/bin/true
     class core
-    critical
-    seclabel u:r:ueventd:s0
+    oneshot
     user root
     shutdown critical
 

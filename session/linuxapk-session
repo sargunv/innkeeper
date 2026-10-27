@@ -53,6 +53,27 @@ androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifie
 EOF
 }
 
+# /vendor/build.prop = the image's plus graphics driver selection from
+# out/vendor-overlay/etc/gpu.prop (gpu lane). RADV only if the render node is
+# driven by amdgpu, else lavapipe.
+vendor_props() {
+  local dst=$out/session/overlay/vendor/build.prop gpu=$out/vendor-overlay/etc/gpu.prop vk=lvp
+  local drv; drv=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)")
+  [[ $drv == amdgpu ]] && vk=radv
+  mkdir -p "$(dirname "$dst")"
+  {
+    cat "$out/img/vendor/build.prop"
+    echo; echo "# --- linuxapk-session: graphics (render node driver: ${drv:-none}) ---"
+    if [[ -f $gpu ]]; then
+      grep -v '^ro.hardware.vulkan=' "$gpu"
+    else
+      printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
+    fi
+    echo "ro.hardware.vulkan=$vk"
+  } > "$dst"
+  chmod 0644 "$dst"
+}
+
 start() {
   local fg=0
   [[ ${1:-} == -f ]] && fg=1
@@ -63,6 +84,8 @@ start() {
      [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
     "$here/build.sh"
   fi
+
+  vendor_props
 
   rm -rf "$run"; mkdir -p "$run"
   echo "console=null" > "$run/cmdline"
