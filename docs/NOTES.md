@@ -95,7 +95,9 @@ Causes:
   - Users download it from ci.android.com at setup, so we never redistribute it.
   - Its vendor APEXes supply the software KeyMint, gatekeeper, health and AIDL
     audio HALs.
-  - The local AOSP build keeps running (the user's call); delete it once the
+  - The local AOSP build **finished** 2026-10-27 03:44 (`generic_x86_64`
+    system.img; tree in `~/aosp/a17`, about 240 GB). It's kept as a fallback and
+    for test binaries (binder tests). Ask the user before deleting it once the
     project is proven without it.
 - Concurrency: at most three agent lanes plus the capped AOSP build. Each lane
   uses its own `LINUXAPK_INSTANCE`.
