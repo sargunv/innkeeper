@@ -1,0 +1,7 @@
+{
+  global:
+    AIMapper_loadIMapper;
+    ANDROID_HAL_STABLEC_VERSION;
+  local:
+    *;
+};
