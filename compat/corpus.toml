@@ -1,0 +1,209 @@
+# Compat corpus: pinned F-Droid APKs (see docs/compat-triage.md).
+#
+# `compat/run.sh fetch` downloads each APK into out/corpus/ and checks its
+# SHA-256; the APKs are never committed. To bump an app, copy the new version
+# code, URL and SHA-256 from https://f-droid.org/repo/index-v2.json. Prefer
+# x86_64 or universal APKs (`native` lists the ABIs the APK ships).
+#
+# Per app, optional:
+#   settle = <seconds>  wait after launch before the first-frame check (default 8)
+#   script = [...]      scripted check, run after the first frame:
+#                       "tap:<text>"    tap the node whose text or content-desc
+#                                       is <text> (uiautomator dump)
+#                       "expect:<text>" a node's text or content-desc contains it
+#                       "key:<keycode>" "wait:<seconds>"
+#   note = "..."        why the app is in the corpus
+
+[[app]]
+package = "com.darkempire78.opencalculator"
+name = "OpenCalc"
+group = "noarch"
+version_code = 53
+version_name = "3.2.0"
+native = "none"
+url = "https://f-droid.org/repo/com.darkempire78.opencalculator_53.apk"
+sha256 = "2642613868a8a80f0ce963a4863bc153e7281b97b3bbdf36ca92a99dded7134a"
+size = 2359134
+note = "M1 target; no native code"
+script = ["tap:7", "tap:+", "tap:8", "wait:1", "expect:15"]
+
+[[app]]
+package = "org.moire.opensudoku"
+name = "Open Sudoku"
+group = "noarch"
+version_code = 20261008
+version_name = "4.11.3"
+native = "arm64-v8a"
+url = "https://f-droid.org/repo/org.moire.opensudoku_20261008.apk"
+sha256 = "ac4c6c8d0bc9058c1cc8d8f4570dc51977b3bc51577a82a12b94e6ec7714b9f0"
+size = 19398348
+note = "M1 target; F-Droid only ships an arm64-v8a build (needs M6 translation)"
+
+[[app]]
+package = "de.sudoq"
+name = "SudoQ"
+group = "noarch"
+version_code = 65
+version_name = "3.3.3"
+native = "none"
+url = "https://f-droid.org/repo/de.sudoq_65.apk"
+sha256 = "a53f275455171208d308ba1baf1667011b18fc5ae7e167cb3a837d0317e5a218"
+size = 2978836
+note = "noarch Sudoku stand-in for Open Sudoku"
+
+[[app]]
+package = "com.physphil.android.unitconverterultimate"
+name = "Unit Converter Ultimate"
+group = "noarch"
+version_code = 50703
+version_name = "5.7.3"
+native = "none"
+url = "https://f-droid.org/repo/com.physphil.android.unitconverterultimate_50703.apk"
+sha256 = "2569924fcb71d96699f48cbc06620bb5708b88b36624df72c4badb7a2c6ebbcb"
+size = 3466886
+note = "M1 target; no native code"
+
+[[app]]
+package = "de.tobiasbielefeld.solitaire"
+name = "Simple Solitaire Collection"
+group = "noarch"
+version_code = 71
+version_name = "3.13"
+native = "none"
+url = "https://f-droid.org/repo/de.tobiasbielefeld.solitaire_71.apk"
+sha256 = "fdfaf7cad18e4416989b337b5c60b71158c54652384e564fe3e6386421504220"
+size = 16738109
+note = "targetSdk 25 (legacy app)"
+
+[[app]]
+package = "org.wikipedia"
+name = "Wikipedia"
+group = "noarch"
+version_code = 50612
+version_name = "r/50612-r-2026-10-19"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/org.wikipedia_50612.apk"
+sha256 = "18835ae29ad7543fe64d3cebe993885ef38e8631cd762ebbcae2f31f19c3d9e7"
+size = 83369768
+note = "WebView for articles"
+
+[[app]]
+package = "de.danoeh.antennapod"
+name = "AntennaPod - Podcast Player"
+group = "noarch"
+version_code = 3120395
+version_name = "3.12.3"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/de.danoeh.antennapod_3120395.apk"
+sha256 = "6e79f28f69cef1a8b2e4f5f88c9c3cf3c3d7c51356f01394ac23b0dc5d56a00b"
+size = 17758020
+note = "media playback, network"
+
+[[app]]
+package = "net.thunderbird.android"
+name = "Thunderbird: Free Your Inbox"
+group = "noarch"
+version_code = 33
+version_name = "24.0"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/net.thunderbird.android_33.apk"
+sha256 = "473b33da5963d0a4261a834c845aaf8e3878309565e9f40e61f6e5def21565e5"
+size = 10965795
+note = "large Kotlin app, onboarding flow"
+
+[[app]]
+package = "com.aurora.store"
+name = "Aurora Store"
+group = "noarch"
+version_code = 76
+version_name = "4.8.4"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/com.aurora.store_76.apk"
+sha256 = "fd9c75d90d0f4a7c132b9b4a5a2cf1992a45e03b8d8ff988b7dcfbc0db2c4d11"
+size = 9360088
+note = "Play Store client, no GMS"
+
+[[app]]
+package = "org.fdroid.fdroid"
+name = "F-Droid"
+group = "noarch"
+version_code = 2000052
+version_name = "2.0.2"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/org.fdroid.fdroid_2000052.apk"
+sha256 = "19d51fad482239f6df6a99120e34513667e9a86d136dafdc4a211a68c3327b52"
+size = 12569951
+note = "app store; installs packages (M3)"
+
+[[app]]
+package = "me.ash.reader"
+name = "Read You"
+group = "compose"
+version_code = 47
+version_name = "0.16.2"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/me.ash.reader_47.apk"
+sha256 = "78b1b8b9b6f6d18baaba31427895f1f10e9ca6cc1e01b3ceeb96df26e8fca075"
+size = 11209694
+note = "Jetpack Compose"
+
+[[app]]
+package = "org.nsh07.pomodoro"
+name = "Tomato"
+group = "compose"
+version_code = 40
+version_name = "2.0.1"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/org.nsh07.pomodoro_40.apk"
+sha256 = "36aa0e28055f6fadc8c634d2b94b024acc6ab52c2944f62f97227ccad5317892"
+size = 6050950
+note = "Jetpack Compose, Material 3 Expressive, targetSdk 37"
+
+[[app]]
+package = "io.anuke.mindustry"
+name = "Mindustry"
+group = "native"
+version_code = 1115
+version_name = "8-fdroid-160.7"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/io.anuke.mindustry_1115.apk"
+sha256 = "64bf33842d8f5495656c44868ea3d11ca5998bf6e36bbb428064dcc58c2e9f44"
+size = 78182684
+note = "M2 target; libGDX, GLES"
+
+[[app]]
+package = "com.shatteredpixel.shatteredpixeldungeon"
+name = "Shattered Pixel Dungeon"
+group = "native"
+version_code = 922
+version_name = "4.0.2"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/com.shatteredpixel.shatteredpixeldungeon_922.apk"
+sha256 = "ceef4cdd4beddcb3d85379ac004cb4ab5d918b89dc7366b4ce9c4a3585a5e78e"
+size = 30275058
+note = "M2 target; libGDX, GLES"
+
+[[app]]
+package = "com.unciv.app"
+name = "Unciv"
+group = "native"
+version_code = 1275
+version_name = "4.22.13"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/com.unciv.app_1275.apk"
+sha256 = "baa600c2de291b72cad4100da5a39fc07458bf54e828b1df3f998764a0b63e82"
+size = 27552033
+note = "M2 target; libGDX, GLES"
+
+[[app]]
+package = "org.openttd.fdroid"
+name = "OpenTTD"
+group = "native"
+version_code = 1410128
+version_name = "14.1.rev128"
+native = "arm64-v8a,armeabi-v7a,x86,x86_64"
+url = "https://f-droid.org/repo/org.openttd.fdroid_1410128.apk"
+sha256 = "355cc302a892fa8c62459b6ae6d0f2940868b9fea5221f784f36f90677b34610"
+size = 75972249
+note = "M2 target; SDL2, C++"
+
