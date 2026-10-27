@@ -12,17 +12,18 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 
 ## Status
 
-**Pre-alpha. Nothing runs yet.**
+**Pre-alpha.** Android 17 boots rootless to its launcher in a Wayland window;
+app input and real apps are next.
 
-| Milestone                                                       | Status                                                                                                                                          |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 init, SurfaceFlinger (our HALs, ANGLE on RADV) and system_server run rootless; blocked on netd's eBPF/iptables (userspace shims in progress) |
-| M1 Pixels in a Wayland window, first noarch apps                | 🚧 composer presents into a real KDE Wayland window (dmabuf); input forwarding + Android-side injection in progress                             |
-| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                              |
-| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                              |
-| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                              |
-| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                              |
-| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                              |
+| Milestone                                                       | Status                                                                                                                             |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables |
+| M1 Pixels in a Wayland window, first noarch apps                | 🚧 launcher renders in a KDE Wayland window (dmabuf); input injection app built, end-to-end test next                              |
+| M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                 |
+| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                 |
+| M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                 |
+| M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                 |
+| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                 |
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
 
