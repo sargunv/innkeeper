@@ -15,26 +15,43 @@ compat/run.sh fetch              # download and verify the corpus only
 compat/run.sh report             # rewrite COMPATIBILITY.md from results.json
 ```
 
-Run it as a capped job:
-`systemd-run --user --unit=compat-run --collect -p MemoryMax=4G -- compat/run.sh`.
+Run it as a capped job on the lane's own session instance:
+`systemd-run --user --unit=compat-run --collect -p MemoryMax=4G -E LINUXAPK_INSTANCE=compat -- compat/run.sh --no-finish`.
 
 - **Corpus:** `compat/corpus.toml` holds pinned F-Droid APKs (version code, URL
-  and SHA-256). They download into `out/corpus/` and are never committed.
+  and SHA-256). They download into `out/corpus/` and are never committed. Each
+  entry also records the app's framework, checked against the APK's contents
+  (see "Frameworks" below), and optional `manual` notes for checks the harness
+  doesn't do.
 - **Per app** (`compat/src/app.rs`):
   1. Copy the APK into `/data/local/tmp` and run `pm install -r -g`.
-  2. Resolve the launcher activity, then `am start -W` (start time).
+  2. Resolve the launcher activity (or a TV app's leanback one), then launch it.
+     In per-app window mode (`vendor.linuxapk.wm.mode`, the default) it opens in
+     its own window and display. A system prompt the app opens first, such as
+     the battery-optimisation request, also counts as the first frame.
   3. For 8 s (15 s for games), poll the crash buffer, ActivityManager ANRs and
      `pidof`.
   4. Check that the app's window has focus. A platform "built for an older
-     version of Android" dialog is noted and dismissed.
-  5. `screencap -p`. Below the status bar, the frame is blank if one colour
-     covers more than 99.5% of it.
-  6. Run the optional per-app script: tap or find text through
-     `uiautomator dump`.
+     version of Android" dialog or the battery-optimisation prompt is noted and
+     answered.
+  5. `screencap`. Below the status bar, the frame is blank if one colour covers
+     more than 99.5% of it. Apps with `FLAG_SECURE` (Ente Auth) are left out of
+     screenshots by SurfaceFlinger, so for them the UI tree must have labelled
+     nodes instead.
+  6. Run the optional per-app script (syntax at the top of `corpus.toml`):
+     - `tap`, `try`, `expect` and `absent` act on `uiautomator dump` nodes;
+     - `sh` runs a check in the session;
+     - `intent` opens a URI in the app;
+     - `gesture` does a pinch, pan or double tap: real multi-touch through
+       Linux.apk System's input bridge (`compat/gesture.sh`, protocol v2 in a
+       per-app window);
+     - `shot` and `changed` take screenshots that must not be blank, and
+       `changed` must differ from the previous one.
   7. Tap the centre, scroll and press Back. After each one, check the app is
      still alive.
   8. Scan the log for known failure signatures: MediaCodec start errors, missing
-     WebView, Google Play services.
+     WebView, GL/EGL/Vulkan errors (`GL_INVALID_*`, `EGL_BAD_*`, MapLibre's
+     `[OpenGL]`, `VK_ERROR_*`) and Google Play services.
   9. Save bounded logs and screenshots into `out/compat/<pkg>/`, then uninstall.
 - **Result:** "works" means everything passed. "Partly works" means the first
   frame was fine but a later check failed. "Doesn't work" covers install,
@@ -43,19 +60,72 @@ Run it as a capped job:
 - **Gate:** any app whose result is worse than in `compat/results.json` fails
   the run (exit 1), and the baseline is left alone. `--accept` records it
   anyway.
-- **Session:** the harness uses `session/linuxapk-session` (from a lane
-  worktree, the main checkout's). If no session is running, it starts a headless
-  one and waits for `sys.boot_completed`. At the end it leaves a session showing
-  its window (`--no-finish` skips that).
+- **Session:** the harness uses this checkout's `session/linuxapk-session` if
+  `out/img` exists (lane worktrees symlink `img`, `root`, `vendor-overlay` and
+  `system_ext-overlay` from the main checkout's `out/`), else the main
+  checkout's. Set `LINUXAPK_INSTANCE` to use a session of your own. If no
+  session is running, it starts a headless one and waits for
+  `sys.boot_completed`. At the end it leaves a session showing its window
+  (`--no-finish` skips that).
 
 ## Results (2026-10-27)
 
-15 of 16 apps work: every noarch, Compose and x86_64-native app in the corpus.
-They install, render, survive input, reach the network (Wikipedia's feed and
-articles in WebView, F-Droid's repository fetch) and decode media.
+30 of 31 apps work in per-app windows (the only failure is Open Sudoku, whose
+F-Droid build is arm64-only). They install, render, survive input, reach the
+network and decode media.
 
 Screenshots: see the README (images are hosted as attachments on issue #1, not
 committed).
+
+### Frameworks
+
+Each framework is checked from the APK's contents.
+
+| Framework              | App (corpus)                                       | Evidence in the APK                                             | Result                               |
+| ---------------------- | -------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------ |
+| Flutter                | Saber 1.36.3, Ente Auth 4.4.26                     | `lib/x86_64/libflutter.so`, `assets/flutter_assets/`            | Works                                |
+| React Native           | Joplin 3.7.8                                       | `libhermes.so`, `libreactnative*`, Expo modules                 | Works (note opens in its WebView)    |
+| Capacitor (Cordova)    | Logseq 0.10.15                                     | `assets/capacitor.config.json`, `assets/public/cordova.js`      | Works                                |
+| Godot 4                | Pomodorot 0.13.3                                   | `libgodot_android.so`                                           | Works after the external-storage fix |
+| Jetpack Compose        | Read You, Tomato, Droid-ify, FlorisBoard, ...      | `androidx/compose/ui` classes, `libandroidx.graphics.path.so`   | Works                                |
+| libGDX / Arc / SDL 1.2 | Shattered Pixel Dungeon, Unciv, Mindustry, OpenTTD | `libgdx.so`, `libarc.so`, `libsdl-1.2.so`                       | Works                                |
+| MapLibre Native (GLES) | StreetComplete 63.4, Wikipedia                     | `libmaplibre.so` (needs `libEGL`/`libGLESv3`)                   | Works                                |
+| Xamarin/.NET MAUI      | none                                               | no FOSS Xamarin, MAUI or Avalonia app on F-Droid or IzzyOnDroid |                                      |
+| Unity                  | none                                               | no FOSS Unity app on F-Droid or IzzyOnDroid                     |                                      |
+
+### StreetComplete (MapLibre)
+
+StreetComplete 63.4 (F-Droid, universal APK with x86_64 `libmaplibre.so`).
+MapLibre Native's GL backend runs on ANGLE over RADV.
+
+- **Script:** four onboarding pages, then the map.
+  1. A two-finger pinch zooms in, a one-finger pan moves the map and a double
+     tap zooms in. Each one is checked by comparing screenshots.
+  2. A `geo:52.5163,13.3777?z=17` intent goes to street level at Pariser Platz.
+- **Map:** vector tiles render at every zoom: world borders, CJK labels, street
+  names, house numbers, one-way arrows.
+- **Logs:** no GL/EGL/Vulkan errors. The only MapLibre messages are a few
+  transient `Failed to load tile ... Connection reset` while panning.
+- **Windowed run:** the same in its own Linux.apk window on a 2176x1360 display.
+  The screenshot is on issue #1.
+- **Manual checks still to do:**
+  - mouse-wheel zoom and drag-pan with the host pointer (the harness injects
+    touch);
+  - quest pins after downloading an area;
+  - answering a quest.
+
+### Window types and app kinds
+
+| App                 | What it exercises                  | What the smoke test checks                                                                        | Verify by hand later                                                              |
+| ------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| VLC 3.7.2           | picture-in-picture, media          | launch and first frame                                                                            | Play a video, press Home: does PiP get a window, can it move and close?           |
+| NewPipe 0.29.1      | PiP and popup player, video        | dismisses its notice; Trending loads, no network error                                            | Popup player and PiP; does a stream play with sound?                              |
+| Fennec 158.0.2      | GeckoView browser                  | through onboarding; a Wikipedia page loads (title in the a11y tree)                               | Multiple tabs and windows, downloads, upload picker, Gecko GPU process            |
+| FlorisBoard 0.5.2   | input method                       | `ime enable` + `ime set` select it                                                                | Per-app windows hide soft keyboards (`persist.linuxapk.wm.ime=hide`); try `local` |
+| Rethink 0.5.8       | `VpnService`                       | consent dialog (`com.android.vpndialogs`) → OK; a `VPN CONNECTED` network and a `tun` link appear | Browse through the VPN; firewall rules                                            |
+| Floating Mute 4.0.1 | `SYSTEM_ALERT_WINDOW` overlay      | battery prompt answered; after Home its `APPLICATION_OVERLAY` window stays up                     | Does the floating button stay above other apps' windows and stay draggable?       |
+| Mastodon 2.13.4     | OAuth sign-in in a browser         | Log in → mastodon.social → the sign-in page opens                                                 | Which browser should handle it, and does the redirect come back to the app?       |
+| Jellyfin TV 0.19.10 | Android TV app (also has LAUNCHER) | launch and first frame ("optimized for televisions" notice)                                       | D-pad navigation from the host keyboard                                           |
 
 ## Fixed in this lane
 
@@ -109,6 +179,25 @@ committed).
      `init.linuxapk.rc` makes them gralloc BLOB buffers from our udmabuf
      allocator. MP3 decode now runs.
 
+4. **App-specific external storage was missing on non-ext4 hosts.** Godot
+   (Pomodorot) crashed at start:
+
+   ```
+   E vold: Failed to set project id on /data/media/0/Android/data/app.pomodorot/: Invalid argument
+   E vold: Failed to set flags for /data/media/0/Android/data/app.pomodorot/ to set project id inheritance.: Invalid argument
+   W ContextImpl: Failed to ensure /storage/emulated/0/Android/data/app.pomodorot/files
+   E AndroidRuntime: Caused by: java.lang.NullPointerException: ... File.getCanonicalPath() on a null object reference
+     at org.godotengine.godot.io.StorageScope$Identifier.<init>(StorageScope.kt:80)
+   ```
+
+   - **Cause:** vold tags app directories with a quota project id
+     (`FS_IOC_FSSETXATTR`) and `FS_PROJINHERIT_FL`. In a user namespace, and on
+     btrfs, both fail. vold only forgives that on ext4, so on other hosts
+     `getExternalFilesDir()` returned null for every app.
+   - **Fix:** the session shim (preloaded into vold and installd) treats the
+     refused project-id ioctl as success, and sets the other flags without
+     `FS_PROJINHERIT_FL`. This is what vold already does on ext4.
+
 ## Open issues, ranked
 
 1. **arm64-only APKs don't install** (Open Sudoku 4.11.3; F-Droid has no x86_64
@@ -124,13 +213,21 @@ committed).
    - **Related:** zygote can't create per-app memcgs
      (`Activation of cgroup controller +memory failed in path /sys/fs/cgroup/apps/uid_N`).
    - **Lane:** session. Emulate the writes, or keep adj in lmkd only.
-3. **No sound output.** Decoding works now, but audio still goes to the
-   emulator's stub HAL. Lane: the planned PipeWire audio HAL.
+3. **OAuth and links open the WebView Shell.** The image's only browser is
+   `org.chromium.webview_shell` ("WebView Browser Tester"), the default for
+   `https:`. Mastodon's sign-in opens there, and there is no Custom Tabs
+   provider. Whether its redirect comes back to the app is unchecked. A real
+   default browser, or handing links to the host browser (M3), would fix this.
+   Fennec offers itself as the default when it's installed.
 4. **Legacy-target dialog.** Apps with targetSdk below 28, such as Simple
    Solitaire (25), open behind `DeprecatedTargetSdkVersionDialog`. This is stock
    Android behaviour. The harness dismisses the dialog, and a desktop build
    might want to suppress it.
-5. **Minor log noise, no visible effect:**
+5. **Soft keyboards don't show in per-app windows.** This is by design
+   (`persist.linuxapk.wm.ime=hide`, the host keyboard types). An IME app like
+   FlorisBoard can be enabled and selected, but it is never shown. Checking it
+   needs `local` or `fallback`.
+6. **Minor log noise, no visible effect:**
    - OpenTTD (SDL2):
      `ERROR: Setting the swap interval is not supported`/`GL_GetAttribute not supported`.
      Check `eglSwapInterval` on ANGLE.
@@ -141,6 +238,7 @@ committed).
 
 - Installing apps from F-Droid or Aurora (PackageInstaller sessions and the
   unknown-sources flow). The M3 target.
-- Input from a real host pointer (the harness uses `input`), and audio.
+- Input from a real host pointer (the harness uses `input` and the input
+  bridge), and audio output.
 - Deeper per-app scripts: AntennaPod subscribing to a feed, Thunderbird account
   setup, a game session past the menu.
