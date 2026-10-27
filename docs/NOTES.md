@@ -299,7 +299,12 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
   still open.
 - Round 3 (Codex, after re-auth): S5 and S6 resolved. New S10 [should]: inline
   vidsys result writes by numeric tid (fix: a per-notification mem fd for
-  memory-transferring calls only). Being fixed; round 4 after.
+  memory-transferring calls only).
+- Round 4: S10 resolved. New S11 [should]: `/proc/<tid>/mem` transfers use
+  FOLL_FORCE, so they bypass page protections (wrote into PROT_READ pages, where
+  `process_vm_*` returned EFAULT). Fix: a protection check through the pinned
+  `/proc/<tid>` dirfd's maps, on both the vidsys and binder paths. Round 5
+  (last) after.
 
 ## Backlog (unassigned)
 
