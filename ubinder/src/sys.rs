@@ -260,6 +260,9 @@ pub struct Supervisor {
     dirty: HashSet<ProcId>,
     /// Read bytes a thread never received (its notification was interrupted).
     stash: HashMap<(ProcId, u32), Vec<u8>>,
+    /// Tests: every response sent, as (id, error).
+    #[cfg(test)]
+    sent: std::cell::RefCell<Vec<(u64, i32)>>,
 }
 
 unsafe impl Send for Supervisor {}
@@ -694,6 +697,8 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         pending: Vec::new(),
         dirty: HashSet::new(),
         stash: HashMap::new(),
+        #[cfg(test)]
+        sent: Default::default(),
     }));
     {
         let sup = Arc::clone(&sup);
@@ -853,6 +858,8 @@ impl Supervisor {
                 0
             },
         };
+        #[cfg(test)]
+        self.sent.borrow_mut().push((id, resp.error));
         let mut buf = vec![0u8; self.resp_sz];
         unsafe {
             std::ptr::write_unaligned(buf.as_mut_ptr() as *mut SeccompNotifResp, resp);
@@ -1175,12 +1182,25 @@ impl Supervisor {
         if res.became_poll {
             self.make_pollable(procid, req.id);
         }
+        // Like binder_ioctl_write_read, a bwr that can't be written back
+        // fails the ioctl with EFAULT.
         if res.write_err != 0 {
-            mem_write(mem, argp, pod_bytes(&bwr));
-            self.respond(req.id, 0, res.write_err, false);
+            let ok = mem_write(mem, argp, pod_bytes(&bwr));
+            self.respond(
+                req.id,
+                0,
+                if ok { res.write_err } else { libc::EFAULT },
+                false,
+            );
         } else if res.blocked {
-            // Record progress now so a restarted ioctl never replays the write.
-            mem_write(mem, argp, pod_bytes(&bwr));
+            // Record progress now so a restarted ioctl never replays the
+            // write. If that fails, fail now: like an interrupted wait, the
+            // thread's work stays queued for its next read.
+            if !mem_write(mem, argp, pod_bytes(&bwr)) {
+                self.respond(req.id, 0, libc::EFAULT, false);
+                self.pending.extend(res.wakeups);
+                return;
+            }
             self.waiters.insert(
                 (procid, req.pid),
                 Waiter {
@@ -1216,7 +1236,12 @@ impl Supervisor {
         }
         let mut out = bwr;
         out.read_consumed += read.len() as u64;
-        mem_write(mem, argp, pod_bytes(&out));
+        if !mem_write(mem, argp, pod_bytes(&out)) {
+            // The read bytes are lost, as with the driver's failed
+            // copy_to_user of the bwr.
+            self.respond(notif_id, 0, libc::EFAULT, false);
+            return;
+        }
         if !self.respond(notif_id, 0, if eagain { libc::EAGAIN } else { 0 }, false)
             && !read.is_empty()
         {
@@ -1609,5 +1634,104 @@ pub(crate) mod tests {
         }
         assert!(accessible_text(m.maps, q, q + 8, VMA_WRITABLE));
         assert!(!accessible_text(m.maps, q + 4092, q + 4100, VMA_WRITABLE));
+    }
+
+    /// A supervisor with one binder process: this test process, with its
+    /// memory pinned like a real opener's. Responses are only recorded (the
+    /// listener is invalid).
+    fn test_supervisor() -> (Supervisor, ProcId) {
+        let (tx, _rx) = mpsc::channel();
+        let mut sup = Supervisor {
+            vid: None,
+            broker: Broker::new(),
+            listener: -1,
+            resp_sz: size_of::<SeccompNotifResp>(),
+            addfd_sz: size_of::<SeccompNotifAddfd>(),
+            procs: HashMap::new(),
+            fd_index: HashMap::new(),
+            waiters: HashMap::new(),
+            captured: HashMap::new(),
+            next_token: 0,
+            tgids: HashMap::new(),
+            next_memfd: 1,
+            watch: tx,
+            pending: Vec::new(),
+            dirty: HashSet::new(),
+            stash: HashMap::new(),
+            sent: Default::default(),
+        };
+        let pid = unsafe { libc::getpid() };
+        let memfd = recv_memfd("lxbinder-test").unwrap();
+        let map = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                BINDER_MEMFD_SIZE,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                memfd.as_raw_fd(),
+                0,
+            )
+        };
+        assert_ne!(map, libc::MAP_FAILED);
+        let procid = sup.broker.open_ns(pid, pid, 0, 0);
+        sup.procs.insert(
+            procid,
+            ProcState {
+                pid,
+                fd: 0,
+                memfd,
+                memfd_ino: 0,
+                mem: open_mem(unsafe { libc::gettid() }).unwrap(),
+                map: map as *mut u8,
+                base: None,
+                free: Vec::new(),
+                live: HashMap::new(),
+                nonblock: false,
+                pidfd: None,
+                poll_evfd: None,
+                poll_level: false,
+            },
+        );
+        (sup, procid)
+    }
+
+    /// BINDER_WRITE_READ whose bwr can be read but not written back fails
+    /// with EFAULT, as binder_ioctl_write_read does, instead of succeeding
+    /// with the caller's consumed counters left stale.
+    #[test]
+    fn write_read_fails_if_bwr_cannot_be_written_back() {
+        let rw = libc::PROT_READ | libc::PROT_WRITE;
+        // No work at all, and a write of one command (whose consumed count
+        // the caller must see).
+        for (write, prot, want) in [
+            (false, libc::PROT_READ, -libc::EFAULT),
+            (false, rw, 0),
+            (true, libc::PROT_READ, -libc::EFAULT),
+            (true, rw, 0),
+        ] {
+            let (mut sup, procid) = test_supervisor();
+            let p = pages(rw, rw);
+            let mut bwr = BinderWriteRead::default();
+            if write {
+                unsafe { std::ptr::write_unaligned(p as *mut u32, BC_ENTER_LOOPER) };
+                bwr.write_size = 4;
+                bwr.write_buffer = p as u64;
+            }
+            unsafe {
+                std::ptr::write_unaligned(p.add(4096) as *mut BinderWriteRead, bwr);
+                libc::mprotect(p.add(4096) as *mut _, 4096, prot);
+            }
+            let mut req = SeccompNotif {
+                id: 7,
+                pid: unsafe { libc::gettid() } as u32,
+                ..Default::default()
+            };
+            req.data.args[2] = p as u64 + 4096;
+            sup.handle_write_read(procid, req, p as u64 + 4096);
+            assert_eq!(sup.sent.borrow().last(), Some(&(7, want)), "{write} {prot}");
+            let back: BinderWriteRead =
+                unsafe { std::ptr::read_unaligned(p.add(4096) as *const BinderWriteRead) };
+            assert_eq!(back.write_consumed, if write && prot == rw { 4 } else { 0 });
+        }
     }
 }
