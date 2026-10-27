@@ -5,8 +5,8 @@ current state, decisions, next steps. Put history in git.
 
 ## Ground rules
 
-- Push straight to `main` (no PRs). The repo is private, with no CI for now.
-  Post nothing outside this repo.
+- Push straight to `main` (no PRs). The repo is public (since 2026-10-27), with
+  no CI for now. Post nothing outside this repo.
 - Follow the strategy in [STRATEGY.md](STRATEGY.md). Record any pivots here and
   update STRATEGY.md.
 - Dev host: Fedora 44 x86_64, KDE Wayland, AMD Strix Halo, 32 threads, 128 GB.

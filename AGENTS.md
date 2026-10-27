@@ -45,6 +45,7 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
 - **Only the image-builder lane runs AOSP builds** in `~/aosp/a17`.
 - **Languages:** C/C++ for code loaded into Android processes or on C ABIs; Rust
   for new standalone components (see STRATEGY).
-- **Workflow:** push straight to `main` (rebase, don't merge), and keep the repo
-  private. Generated files go in `out/`. Long jobs run under
-  `systemd-run --user`.
+- **Workflow:** push straight to `main` (rebase, don't merge). The repo is
+  public: never commit secrets, image contents or third-party APKs, and never
+  commit screenshots that show anything beyond our own windows. Generated files
+  go in `out/`. Long jobs run under `systemd-run --user`.
