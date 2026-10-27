@@ -296,7 +296,10 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
 - Round 2 (Codex route failed on hardware-key auth; rerun through Pi on the same
   model): S1–S4 and S7–S9 resolved (S9's declined `Request.Close` accepted); S5
   (worker-path pid race) and S6 (bpffs anchor via the caller's mount namespace)
-  still open and being fixed.
+  still open.
+- Round 3 (Codex, after re-auth): S5 and S6 resolved. New S10 [should]: inline
+  vidsys result writes by numeric tid (fix: a per-notification mem fd for
+  memory-transferring calls only). Being fixed; round 4 after.
 
 ## Backlog (unassigned)
 
