@@ -18,7 +18,7 @@ app input and real apps are next.
 | Milestone                                                       | Status                                                                                                                             |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables |
-| M1 Pixels in a Wayland window, first noarch apps                | 🚧 launcher renders in a KDE Wayland window (dmabuf); input injection app built, end-to-end test next                              |
+| M1 Pixels in a Wayland window, first noarch apps                | 🚧 launcher in a KDE Wayland window; mouse/keyboard/touch injection passes e2e (15/15); F-Droid compat harness in progress         |
 | M2 GPU, audio, per-app windows, launcher                        | ⏳                                                                                                                                 |
 | M3 Desktop integration (portals, notifications, MPRIS, IME)     | ⏳                                                                                                                                 |
 | M4 No-privilege mode (userspace binder, relocated image)        | ⏳                                                                                                                                 |

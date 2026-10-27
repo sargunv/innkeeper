@@ -61,8 +61,11 @@ Rules:
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
-- input: Kotlin platform-signed system app (`dev.linuxapk.system`) that injects
-  the composer's Wayland input stream into Android. Docs: `docs/input.md`.
+- compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
+  `docs/compat-triage.md`.
+- input (done, e2e 15/15): Kotlin platform-signed system app
+  (`dev.linuxapk.system`) that injects the composer's Wayland input stream into
+  Android. Docs: `docs/input.md`.
 - image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17` runs as
   systemd user unit `linuxapk-aosp-sync` (`~/aosp/sync-loop.sh`), build
   container `aosp/build-shell.sh`.
@@ -114,8 +117,8 @@ Rules:
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
   buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
   via `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`.
-- Input e2e (`android/e2e/e2e.sh`) once the session reaches boot_completed with
-  the Wayland backend.
+- logd ignores `ro.logd.size=16M` from vendor build.prop (still 256 KiB); the
+  workaround is `logcat -G 16M` after boot.
 - clang-tidy once host-side `compile_commands.json` exists.
 
 ## Next
