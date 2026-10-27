@@ -78,6 +78,7 @@ struct obj {
   uint8_t* vals;
   uint8_t* used;  // hash-like maps only
   uint32_t count;
+  size_t bytes;  // charged to map_bytes
   // programs
   uint32_t prog_type, insn_cnt;
 };
@@ -85,6 +86,14 @@ struct obj {
 static struct obj** objs[K_NKINDS];
 static uint32_t nobjs[K_NKINDS];
 static int ncpus = 1;
+
+// Objects live as long as the session, so Android can't be allowed to grow
+// them without bound. A boot creates about 250 objects and 25 MB of maps
+// (two thirds of it per-CPU values, on 32 CPUs).
+#define MAX_OBJS 4096
+#define MAX_MAP_BYTES ((size_t)128 << 20)
+#define MAX_MAP_BYTES_PER_CPU ((size_t)2 << 20)
+static size_t map_bytes;
 static int notif_fd = -1;
 
 // ---- target access ----------------------------------------------------------
@@ -137,6 +146,9 @@ static struct obj* lookup_fd(pid_t pid, int fd, int want_kind) {
 }
 
 static struct obj* new_obj(enum kind k) {
+  uint32_t total = 0;
+  for (int i = 0; i < K_NKINDS; i++) total += nobjs[i];
+  if (total >= MAX_OBJS) return NULL;
   struct obj* o = calloc(1, sizeof(*o));
   if (!o) return NULL;
   o->kind = k;
@@ -157,6 +169,18 @@ static struct obj* new_obj(enum kind k) {
   objs[k] = n;
   objs[k][nobjs[k]++] = o;
   return o;
+}
+
+// Unregister and free the newest object of kind k, whose creation failed
+// (nobody else has seen it yet).
+static void drop_last(enum kind k) {
+  struct obj* o = objs[k][--nobjs[k]];
+  map_bytes -= o->bytes;
+  free(o->keys);
+  free(o->vals);
+  free(o->used);
+  close(o->memfd);
+  free(o);
 }
 
 // ---- maps
@@ -185,6 +209,19 @@ static int is_percpu(uint32_t t) {
          t == BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE;
 }
 
+static int is_ring(uint32_t t) {
+  return t == BPF_MAP_TYPE_RINGBUF || t == BPF_MAP_TYPE_USER_RINGBUF;
+}
+
+// Charge `n` bytes to the map budget.
+static int charge(struct obj* m, size_t n) {
+  size_t max = MAX_MAP_BYTES + MAX_MAP_BYTES_PER_CPU * (size_t)ncpus;
+  if (n > max - map_bytes) return -ENOMEM;
+  map_bytes += n;
+  m->bytes += n;
+  return 0;
+}
+
 static int map_alloc(struct obj* m) {
   // Element operations copy keys through a fixed buffer; LPM keys are
   // {u32 prefixlen; u8 data[1..256]} as in kernel/bpf/lpm_trie.c.
@@ -193,10 +230,13 @@ static int map_alloc(struct obj* m) {
     m->type == BPF_MAP_TYPE_LPM_TRIE && (m->key_size < 5 || m->key_size > 260)
   )
     return -EINVAL;
-  if (m->type == BPF_MAP_TYPE_RINGBUF || m->type == BPF_MAP_TYPE_USER_RINGBUF) {
+  if (is_ring(m->type)) {
     // consumer page + producer page + data mapped twice
     long pg = sysconf(_SC_PAGESIZE);
-    return ftruncate(m->memfd, 2 * pg + 2 * (off_t)m->max_entries) ? -errno : 0;
+    size_t sz = 2 * (size_t)pg + 2 * (size_t)m->max_entries;
+    int r = charge(m, sz);
+    if (r) return r;
+    return ftruncate(m->memfd, (off_t)sz) ? -errno : 0;
   }
   switch (m->type) {
     case BPF_MAP_TYPE_SK_STORAGE:
@@ -209,13 +249,20 @@ static int map_alloc(struct obj* m) {
       break;
   }
   if (!m->max_entries || m->max_entries > (1u << 24)) return -EINVAL;
-  m->vstride =
-    is_percpu(m->type) ? ((m->value_size + 7) & ~7u) * ncpus : m->value_size;
-  m->vals = calloc(m->max_entries, m->vstride ? m->vstride : 1);
+  uint64_t stride = m->value_size;
+  if (is_percpu(m->type)) stride = ((stride + 7) & ~7ull) * (uint64_t)ncpus;
+  if (stride > (1u << 24)) return -E2BIG;
+  m->vstride = (uint32_t)stride;
+  size_t n = m->max_entries, vs = m->vstride ? m->vstride : 1;
+  size_t ks = m->key_size ? m->key_size : 1;
+  // At most 2^24 entries of at most 2^24 + 512 + 1 bytes: no overflow.
+  int r = charge(m, n * vs + (is_array(m->type) ? 0 : n * (ks + 1)));
+  if (r) return r;
+  m->vals = calloc(n, vs);
   if (!m->vals) return -ENOMEM;
   if (!is_array(m->type)) {
-    m->keys = calloc(m->max_entries, m->key_size ? m->key_size : 1);
-    m->used = calloc(m->max_entries, 1);
+    m->keys = calloc(n, ks);
+    m->used = calloc(n, 1);
     if (!m->keys || !m->used) return -ENOMEM;
   }
   return 0;
@@ -374,9 +421,12 @@ static long do_map_create(pid_t pid, union bpf_attr* a, uint64_t req_id) {
     m->flags |= BPF_F_RDONLY_PROG;
   memcpy(m->name, a->map_name, sizeof(m->name));
   int r = map_alloc(m);
-  if (r) return r;
-  r = inject(req_id, m);
-  return r < 0 ? r : INJECTED;
+  if (!r) r = inject(req_id, m);
+  if (r < 0) {
+    drop_last(K_MAP);
+    return r;
+  }
+  return INJECTED;
 }
 
 static long do_elem(pid_t pid, int cmd, union bpf_attr* a) {
@@ -427,7 +477,11 @@ static long do_new_simple(enum kind k, union bpf_attr* a, uint64_t req_id) {
     memcpy(o->name, a->prog_name, sizeof(o->name));
   }
   int r = inject(req_id, o);
-  return r < 0 ? r : INJECTED;
+  if (r < 0) {
+    drop_last(k);
+    return r;
+  }
+  return INJECTED;
 }
 
 static int openat2_(

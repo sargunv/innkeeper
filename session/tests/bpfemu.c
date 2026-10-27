@@ -82,6 +82,15 @@ static long get(const char* path) {
   return bpf(BPF_OBJ_GET, &a);
 }
 
+static uint32_t map_id(int fd) {
+  struct bpf_map_info info = {0};
+  union bpf_attr a = {0};
+  a.info.bpf_fd = fd;
+  a.info.info_len = sizeof(info);
+  a.info.info = (uintptr_t)&info;
+  return bpf(BPF_OBJ_GET_INFO_BY_FD, &a) == 0 ? info.id : 0;
+}
+
 static void tests(const char* tmp) {
   // A working map, pinned and fetched back.
   long m = map_create(BPF_MAP_TYPE_HASH, 4, 8, 16);
@@ -135,6 +144,41 @@ static void tests(const char* tmp) {
   char outside[512];
   snprintf(outside, sizeof(outside), "%s/m", tmp);
   CHECK(pin(m, outside) == -EINVAL, "pin outside /sys/fs/bpf: EINVAL");
+
+  // S7: impossible sizes fail up front, and failures leave nothing behind.
+  uint32_t before = map_id(lpm);  // the newest map
+  CHECK(
+    map_create(BPF_MAP_TYPE_HASH, 4, 4096, 1u << 24) == -ENOMEM,
+    "64 GiB map: ENOMEM"
+  );
+  CHECK(
+    map_create(BPF_MAP_TYPE_PERCPU_HASH, 4, 1u << 30, 1) == -E2BIG,
+    "huge per-CPU value: E2BIG"
+  );
+  long next = map_create(BPF_MAP_TYPE_ARRAY, 4, 4, 1);
+  uint32_t last = map_id(next);
+  CHECK(
+    before && last == before + 1,
+    "failed creations unregistered (id %u after %u)", last, before
+  );
+
+  // S7: aggregate map memory is capped (64 MiB each).
+  int i;
+  for (i = 0; i < 64; i++) {
+    long f = map_create(BPF_MAP_TYPE_ARRAY, 4, 16384, 4096);
+    if (f < 0) break;
+    close(f);
+  }
+  CHECK(i < 64, "map memory capped after %d x 64 MiB", i);
+
+  // S7: the object count is capped.
+  for (i = 0; i < 5000; i++) {
+    union bpf_attr a = {0};
+    long f = bpf(BPF_PROG_LOAD, &a);
+    if (f < 0) break;
+    close(f);
+  }
+  CHECK(i < 5000, "objects capped after %d programs", i);
 }
 
 int main(int argc, char** argv) {
