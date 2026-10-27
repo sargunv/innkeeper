@@ -1,0 +1,25 @@
+[package]
+name = "ubinder"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk ubinder: a userspace reimplementation of the Android binder driver, serviced through the session's seccomp user-notification supervisor"
+
+[lib]
+# rlib for tests and the standalone binary; staticlib so the C supervisor
+# (session/helper) can link the state machine and call it over a small C ABI.
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+libc = "0.2"
+
+[features]
+# Pulls in the syscall/seccomp binding layer (Linux only). The pure state
+# machine (broker.rs) and its tests never touch these, so `cargo test` is
+# host-portable and fuzzable.
+default = []
+
+[[bin]]
+name = "ubinder-fuzz"
+path = "src/bin/fuzz.rs"
+
