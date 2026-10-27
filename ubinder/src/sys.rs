@@ -1219,9 +1219,11 @@ impl Supervisor {
             );
         } else if res.blocked {
             // Record progress now so a restarted ioctl never replays the
-            // write. If that fails, fail now: like an interrupted wait, the
-            // thread's work stays queued for its next read.
+            // write. If that fails, fail now, and don't leave the thread
+            // registered as waiting (work queued on it stays for its next
+            // read).
             if !mem_write(mem, argp, pod_bytes(&bwr)) {
+                self.broker.cancel_wait(procid, req.pid);
                 self.respond(req.id, 0, libc::EFAULT, false);
                 self.pending.extend(res.wakeups);
                 return;
@@ -1685,8 +1687,17 @@ pub(crate) mod tests {
             stash: HashMap::new(),
             sent: Default::default(),
         };
+        let procid = add_proc(&mut sup);
+        (sup, procid)
+    }
+
+    /// Add a binder process to `sup`: this test process again, with its own
+    /// receive memfd mapped here (so the receive region is found in maps).
+    fn add_proc(sup: &mut Supervisor) -> ProcId {
         let pid = unsafe { libc::getpid() };
         let memfd = recv_memfd("lxbinder-test").unwrap();
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::fstat(memfd.as_raw_fd(), &mut st) }, 0);
         let map = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -1705,7 +1716,7 @@ pub(crate) mod tests {
                 pid,
                 fd: 0,
                 memfd,
-                memfd_ino: 0,
+                memfd_ino: st.st_ino,
                 mem: open_mem(unsafe { libc::gettid() }).unwrap(),
                 map: map as *mut u8,
                 base: None,
@@ -1717,7 +1728,7 @@ pub(crate) mod tests {
                 poll_level: false,
             },
         );
-        (sup, procid)
+        procid
     }
 
     /// BINDER_WRITE_READ whose bwr can be read but not written back fails
@@ -1798,5 +1809,56 @@ pub(crate) mod tests {
                 == accessible(m.maps, first, 8, VMA_WRITABLE)
         );
         unsafe { libc::munmap(p as *mut _, n * 4096) };
+    }
+
+    /// A looper whose blocking read fails (its bwr can't be written back)
+    /// must not stay registered as waiting: the next incoming transaction
+    /// goes to a looper that is really reading, not to the failed one (where
+    /// a synchronous caller would hang).
+    #[test]
+    fn failed_park_leaves_no_waiting_looper() {
+        let (mut sup, server) = test_supervisor();
+        let client = add_proc(&mut sup);
+        sup.broker.set_context_mgr(server, None).unwrap();
+        let enter = BC_ENTER_LOOPER.to_le_bytes();
+        for tid in [1001, 1002] {
+            sup.with_mem(None, |b, m| b.write_read(server, tid, &enter, 0, false, m));
+        }
+        // Looper 1001 parks first with a read-only bwr: its read blocks, and
+        // the writeback before parking fails.
+        let rw = libc::PROT_READ | libc::PROT_WRITE;
+        let p = pages(rw, rw);
+        let bwr = BinderWriteRead {
+            read_size: 256,
+            read_buffer: p as u64,
+            ..Default::default()
+        };
+        unsafe {
+            std::ptr::write_unaligned(p.add(4096) as *mut BinderWriteRead, bwr);
+            libc::mprotect(p.add(4096) as *mut _, 4096, libc::PROT_READ);
+        }
+        let req = SeccompNotif {
+            id: 9,
+            pid: 1001,
+            ..Default::default()
+        };
+        sup.handle_write_read(server, req, p as u64 + 4096);
+        assert_eq!(sup.sent.borrow().last(), Some(&(9, -libc::EFAULT)));
+        // Looper 1002 waits properly.
+        let r = sup.with_mem(None, |b, m| b.write_read(server, 1002, &[], 256, false, m));
+        assert!(r.blocked);
+        // A client calls the context manager: looper 1002 must get it.
+        let mut cmd = BC_TRANSACTION.to_le_bytes().to_vec();
+        cmd.extend_from_slice(pod_bytes(&BinderTransactionData::default()));
+        let r = sup.with_mem(Some((client, 0)), |b, m| {
+            b.write_read(client, 2001, &cmd, 0, false, m)
+        });
+        let woken: Vec<u32> = r
+            .wakeups
+            .iter()
+            .filter(|w| w.proc == server)
+            .map(|w| w.tid)
+            .collect();
+        assert_eq!(woken, vec![1002]);
     }
 }

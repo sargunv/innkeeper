@@ -467,6 +467,19 @@ impl Broker {
         self.poll_dirty.insert(proc);
     }
 
+    /// A thread whose read blocked won't wait after all (the syscall layer
+    /// failed the ioctl): undo its parking, so no work is routed to a thread
+    /// that isn't reading. Work already queued on it stays for its next read.
+    pub fn cancel_wait(&mut self, proc: ProcId, tid: u32) {
+        if let Some(p) = self.procs.get_mut(&proc)
+            && let Some(t) = p.threads.get_mut(&tid)
+        {
+            t.parked = false;
+            t.looper &= !LOOPER_WAITING;
+            p.waiting_threads.retain(|&x| x != tid);
+        }
+    }
+
     /// `binder_select_thread_ilocked`: pop the first thread waiting for
     /// process work.
     fn select_thread(&mut self, proc: ProcId) -> Option<u32> {
