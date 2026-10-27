@@ -26,6 +26,10 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 
 Progress log: [docs/NOTES.md](docs/NOTES.md).
 
+| Android's boot animation rendered rootless (ANGLE → RADV → SurfaceFlinger → our composer) | Composer output in a KDE Wayland window (test pattern) |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| ![boot animation](docs/img/m0-bootanimation.png)                                          | ![wayland window](docs/img/m1-wayland-window.png)      |
+
 ## Dev setup (Fedora)
 
 Install [mise](https://mise.jdx.dev), then run `mise install`. Agent and
