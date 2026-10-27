@@ -57,6 +57,71 @@ gpu/build.sh radv     # just RADV (about 2 min); also: lvp, llvm, test
 4. **lavapipe: use the gralloc layout for deferred ANB images.** Before this,
    deferred images got lavapipe's own row pitch (448 B instead of the gralloc's
    512 B for 100 px).
+5. **radv/android: YUV AHB formats through u_gralloc, and NV21.** This fixes
+   SurfaceFlinger aborting on video (see "YUV buffers" below).
+
+## YUV buffers (video), and the SurfaceFlinger abort
+
+**The bug.** On the CI image, playing a video in NewPipe aborted SurfaceFlinger
+(`Failed to create a valid texture ... format:842094169`, i.e. YV12), and with
+it all of Android.
+
+- RenderEngine is Skia GL on ANGLE. It imports a layer's buffer with
+  `eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID)`, and ANGLE calls
+  `vkGetAndroidHardwareBufferPropertiesANDROID`.
+- RADV had its own version of that call. It only knew AHB formats with a fixed
+  Vulkan equivalent, never asked the gralloc, and hardcoded BT.601 full range.
+  For YV12 and NV21 it returned `format = externalFormat = 0`, so ANGLE rejected
+  the buffer (`EGL_BAD_PARAMETER`).
+- Patch 0005 makes RADV use Mesa's common implementation, which asks the gralloc
+  (our IMapper v5, through u_gralloc) for the fourcc, plane layout and
+  dataspace:
+
+  | Buffer (our gralloc)                                  | External format reported (Vulkan)                | Conversion                     |
+  | ----------------------------------------------------- | ------------------------------------------------ | ------------------------------ |
+  | YV12 (`YVU420`, 3 planes)                             | `G8_B8_R8_3PLANE_420_UNORM` (U/V planes swapped) | model and range from dataspace |
+  | YCbCr_420_888 / IMPLEMENTATION_DEFINED video (`NV12`) | `G8_B8R8_2PLANE_420_UNORM`                       | same                           |
+  | NV21 (`YCrCb_420_SP`)                                 | `G8_B8R8_2PLANE_420_UNORM`                       | swizzle swaps Cb and Cr        |
+
+- Mesa ignored the conversion's component swizzle for external formats (as the
+  old spec text says). The AHB extension tells apps to pass
+  `samplerYcbcrConversionComponents`, and ANGLE does, so the patch honors it.
+  That is how NV21 works; zeroed components are IDENTITY, the same as before.
+- Range and model come from the gralloc's `DATASPACE`, which Codec2 sets on its
+  output buffers. An unset dataspace means BT.601 narrow range, the video
+  default. Before the patch, RADV assumed full range, which washes colors out by
+  about 10 levels.
+- No HAL change was needed. The allocator already gives every YUV plane a
+  256-byte pitch (YV12 luma is padded to 512 so its half-width chroma rows are
+  256), keeps all planes in one dma-buf, and reports per-plane offsets and
+  strides in `PLANE_LAYOUTS`. Flexible YUV is allocated as NV12, and explicit
+  YV12 requests are honored. Both now render correctly, so there's no reason to
+  steer producers away from YV12.
+- Lavapipe shares the same common code and passes the same tests.
+
+**Proof.**
+
+- `gpu/test/gles_yuv_test` allocates YV12, flexible 420 (NV12) and NV21 AHBs and
+  fills four quadrants with known BT.601 narrow-range colors through
+  `lockPlanes`. It then imports each one exactly as Skia does (EGLImage →
+  `samplerExternalOES`), renders it and checks the pixels.
+  - Before the patch: YV12 and NV21 failed with `EGL_BAD_PARAMETER`, and NV12
+    was off by about 11 levels.
+  - After: all three are within ±1, on RADV and on lavapipe, at 896x480, 854x480
+    and 1920x1080.
+- `gpu/test/ahb_vk_test` runs the Vulkan side step by step: properties,
+  external-format image, AHB import, bind and conversion.
+- In a session (CI image): NewPipe plays Big Buck Bunny, decoded by
+  `c2.android.avc.decoder` into YV12 1280x720 buffers. SurfaceFlinger keeps its
+  pid, logs no texture errors, and the frames have correct colors. The
+  screenshots are on issue #1:
+  [host window](https://github.com/user-attachments/assets/cd2d730a-f536-4f28-bf42-a0767d470bd7),
+  [SurfaceFlinger screencap](https://github.com/user-attachments/assets/82a59938-0e1a-4c47-bebc-ba1464fa6528).
+
+```
+TIMEOUT=90 gpu/test/run-bionic.sh -s \
+  -e "LINUXAPK_PROPS=ro.hardware.vulkan=radv;ro.hardware.egl=angle" -- /data/gputest/gles_yuv_test
+```
 
 ## Swapchains, the bootanimation crash, and fences
 
@@ -213,9 +278,9 @@ What the drivers need from the gralloc:
      `VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT`; 512, 768, 1024 and
      1280 B work. Lavapipe accepts any pitch.
    - The current `kRowAlign = 256` is right.
-   - YV12's chroma rule (luma stride / 2, aligned to 16) gives non-256-aligned
-     chroma pitches. Expect RADV to reject YV12 images unless the chroma pitch
-     is 256-aligned too. Not yet tested.
+   - This applies to every plane. YV12's chroma rows are half the luma stride
+     (Android's rule), so the allocator pads YV12 luma to a multiple of 512.
+     Verified with `gles_yuv_test`.
 3. **IAllocator AIDL** must implement `getIMapperLibrarySuffix()` (V2+). Mesa
    finds the mapper with it, so the driver needs no configuration.
 4. Accept the gralloc usages libvulkan asks for on swapchain images:

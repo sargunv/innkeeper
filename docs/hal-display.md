@@ -88,6 +88,21 @@ missing it re-runs itself in `tools/hosttools.sh`.
   IMPLEMENTATION_DEFINED becomes NV12 for camera and video usage, and RGBA
   otherwise. PROTECTED usage is unsupported.
 
+- **YUV in the GPU drivers (gpu lane, 2026-10-27):** YV12, NV12 and NV21 buffers
+  from this allocator import into ANGLE/RADV and lavapipe as Vulkan external
+  formats with YCbCr conversion. Video frames composited by SurfaceFlinger
+  render correctly; before Mesa patch 0005, YV12 aborted SurfaceFlinger. The
+  drivers depend on four things from this HAL:
+  - the fourcc (`PIXEL_FORMAT_FOURCC`);
+  - per-plane offsets and strides in `PLANE_LAYOUTS`, with all planes in one
+    dma-buf;
+  - 256-byte pitches on every plane;
+  - `DATASPACE` (Codec2 sets it; unset means BT.601 narrow range).
+
+  Explicit YV12 stays YV12 and flexible YUV stays NV12: both render correctly,
+  so producers need no steering. Details and tests are in
+  [gpu.md](gpu.md#yuv-buffers-video-and-the-surfaceflinger-abort).
+
 - **Mapper:** all standard metadata types up to SMPTE2094_50 are gettable, using
   AOSP's `IMapperMetadataTypes.h` encoders. `lock` waits on the acquire fence
   and closes it, then returns the base pointer. `unlock` returns -1. There's no
