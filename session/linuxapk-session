@@ -14,16 +14,24 @@
 #   linuxapk-session selftest      host-safety probes against the live session
 #
 # Environment: LINUXAPK_OUT (default <repo>/out),
-#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data)
+#              LINUXAPK_INSTANCE (default empty: the main session; set a name
+#                to run an independent session, e.g. one per agent lane),
+#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data[-<instance>])
 set -euo pipefail
 
 here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
 repo=$(dirname "$here")
 out=${LINUXAPK_OUT:-$repo/out}
 out=$(realpath "$out")
-run=$out/run
-data=${LINUXAPK_DATA:-$HOME/.local/share/linuxapk/data}
-unit=linuxapk-session
+inst=${LINUXAPK_INSTANCE:-}
+[[ $inst =~ ^[a-z0-9-]*$ ]] || {
+  echo "linuxapk-session: bad LINUXAPK_INSTANCE" >&2
+  exit 1
+}
+sfx=${inst:+-$inst}
+run=$out/run$sfx
+data=${LINUXAPK_DATA:-$HOME/.local/share/linuxapk/data$sfx}
+unit=linuxapk-session$sfx
 
 die() {
   echo "linuxapk-session: $*" >&2
@@ -134,7 +142,7 @@ start() {
   # all down. Delegate=yes gives the session a cgroup subtree of its own.
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
-    --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
+    --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do
@@ -156,7 +164,7 @@ start() {
 
 # Body of the systemd service (internal).
 _run() {
-  out=$1 data=$2 run=$out/run
+  out=$1 data=$2 run=$out/run$sfx
   # Reader holds the FIFO open read-write so writers never block or see EOF.
   cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
   # Outer namespaces: user (subuid map), mount, pid, cgroup. pivot-exec then
