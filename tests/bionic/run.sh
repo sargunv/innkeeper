@@ -83,7 +83,7 @@ cp "$here/init.sh" "$R/init.sh"
 mkdir -p "$R/data/nativetest64" "$R/data/vendor/linuxapk/frames"
 [[ -z $tests ]] || ro_bind "$tests" "$R/data/nativetest64"
 mount --bind "$scratch/frames" "$R/data/vendor/linuxapk/frames"
-cp "$bin/linuxapk-ubinder" "$R/data/local/tmp/"
+cp "$bin/linuxapk-broker" "$R/data/local/tmp/"
 
 for n in /dev/udmabuf /dev/dri/renderD*; do
   [[ -e $n ]] || continue
@@ -105,5 +105,5 @@ ro_bind /sys/devices/system/cpu "$R/sys/devices/system/cpu"
 
 bionic_env
 for e in "${envs[@]}"; do export "${e?}"; done
-export LINUXAPK_UBINDER=/data/local/tmp/linuxapk-ubinder TIMEOUT=$timeout
+export LINUXAPK_BROKER=/data/local/tmp/linuxapk-broker TIMEOUT=$timeout
 exec "$bin/pivot-exec" "$R" /system/bin/sh /init.sh "$@"

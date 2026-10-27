@@ -1,0 +1,6 @@
+# Audio properties for the Linux.apk vendor overlay (audio lane), merged into
+# /vendor/build.prop by host/launcher/linuxapk-session. See docs/audio.md.
+
+# The AIDL HAL's alsa_utils splits its PCM buffer into this many periods
+# (default 4). Our card is fed by the bridge's ring, so 2 is enough.
+ro.hardware.audio.tinyalsa.period_count=2

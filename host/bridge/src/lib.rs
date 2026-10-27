@@ -1,0 +1,20 @@
+//! Linux.apk desktop bridge: a host-side daemon that clients in the Android
+//! session reach over a `SOCK_SEQPACKET` socket. Services plug in through
+//! `ipc::server::Registry`. See `docs/bridge.md`.
+//!
+//! - `ipc`: framing, transport, HELLO, the server and blobs
+//! - `audio` (id 1): the audio service (PipeWire output)
+//! - `display` (id 2): host windows and input for the composer
+//! - `system` (id 3): desktop settings, notifications, the clipboard, web
+//!   links and media sessions, for the Linux.apk System app
+//! - `documents` (id 4): host files the user picks in the FileChooser portal
+//! - `apps` (id 5): desktop entries for apps installed inside Android
+//! - `log`: stderr logging
+
+pub mod apps;
+pub mod audio;
+pub mod display;
+pub mod documents;
+pub mod ipc;
+pub mod log;
+pub mod system;

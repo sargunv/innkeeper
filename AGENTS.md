@@ -8,14 +8,17 @@ namespace session, with our own vendor HALs and a desktop bridge. The plan is in
 ## Project map
 
 ```
-aosp/        AOSP build container (aosp/build-shell.sh); tree lives in ~/aosp/a17
+host/        runs on the desktop: core library, linuxapk CLI, manager app,
+             desktop bridge, session launcher (linuxapk-session, ns-init.sh)
+supervisor/  the syscall boundary: pivot-exec, the binder broker, the shim
+image/       the pinned AOSP CI image: pin, bootconfig, fetch/extract/flatten
+android/     runs inside Android: vendor HALs and drivers (graphics, vulkan,
+             audio), system pieces (exec relay, iptables), the system app,
+             the config overlay, microG
+tests/       cross-module tests: bionic harness, e2e suites, compat corpus
+tools/       dev tooling (dev/window-shot.sh)
 docs/        STRATEGY (plan), NOTES (live state), per-lane design docs
-gpu/         RADV + lavapipe Vulkan drivers cross-built with the NDK, Mesa patches
-hal/         graphics allocator, IMapper v5, composer3 (C++, NDK); AOSP AIDL copies
-selinux/     dev SELinux module (binder for unconfined_t; only for --kernel-binder)
-session/     namespace launcher, ns-init, pivot-exec, preload shim, rootfs overlay
-tools/       host-tools container, image extraction, APEX flattening
-out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, builds
+out/         (gitignored) builds, generated overlays, test output
 ```
 
 ## Dev tool commands
@@ -23,12 +26,12 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
 - `mise install`: tools (hk, dprint, clang-format, shellcheck, shfmt, Rust).
 - `mise run check` / `mise run fix`: lint and format everything (hk + dprint).
   The pre-commit hook runs hk on staged files.
-- `tools/extract-image.sh <sdk-image-dir> out/img`, then
-  `tools/flatten-apex.sh`: prepare the prebuilt Android image.
-- `hal/build.sh`, `gpu/build.sh`: build the HALs and drivers into
-  `out/vendor-overlay` (each runs its tests).
-- `session/linuxapk-session start|stop|status|log|exec|shell|selftest`: run the
-  Android session.
+- `host/launcher/linuxapk-session prepare`: fetch, extract and flatten the
+  pinned image (`image/fetch.sh`, `image/flatten-apex.sh`).
+- `android/vendor/graphics/build.sh`, `android/vendor/vulkan/build.sh`: build
+  the HALs and drivers into `out/vendor-overlay` (each runs its tests).
+- `host/launcher/linuxapk-session start|stop|status|log|exec|shell|selftest`:
+  run the Android session.
 
 ## Project invariants
 
@@ -46,8 +49,8 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
 - **Host safety.** Inside our user namespace, Android "root" is the host user.
   Every namespace running Android code must mask and lock host sysfs submounts,
   get its own systemd unit/cgroup and network namespace, and must not bind host
-  `/run/user`, `$HOME` or `/dev` wholesale. `session/linuxapk-session selftest`
-  must pass. Never use sudo.
+  `/run/user`, `$HOME` or `/dev` wholesale.
+  `host/launcher/linuxapk-session selftest` must pass. Never use sudo.
 - **Nested test desktops are fully isolated** (incident 2026-10-27: nested
   portals opened dialogs on the user's real desktop, and a nested plasmashell
   started kded, kdeconnect and akonadi against the user's real config and data).
@@ -68,6 +71,6 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
   public: never commit secrets, image contents or third-party APKs. Never commit
   media files: upload screenshots with
   `gh issue comment 1 --attach <file>#<alt>` (the README media issue) and link
-  the user-attachments URL. `tools/window-shot.sh` captures only the Linux.apk
-  window. Generated files go in `out/`. Long jobs run under
+  the user-attachments URL. `tools/dev/window-shot.sh` captures only the
+  Linux.apk window. Generated files go in `out/`. Long jobs run under
   `systemd-run --user`.

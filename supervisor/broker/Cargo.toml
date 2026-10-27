@@ -1,0 +1,20 @@
+[package]
+name = "linuxapk-broker"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk broker: Android's binder driver reimplemented in userspace, served through the session's seccomp user notifications"
+
+[dependencies]
+libc = "0.2"
+
+# The dynamic bionic binary pivot-exec forks to serve the session's seccomp
+# listener. supervisor/build.sh installs it as /system/bin/linuxapk-broker.
+[[bin]]
+name = "linuxapk-broker"
+path = "src/main.rs"
+
+# Dependency-free fuzzer for the command-stream parser.
+[[bin]]
+name = "linuxapk-broker-fuzz"
+path = "src/bin/fuzz.rs"

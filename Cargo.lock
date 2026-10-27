@@ -1168,6 +1168,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linuxapk-broker"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "linuxapk-compat"
 version = "0.1.0"
 dependencies = [
@@ -1189,7 +1196,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "linuxapk-gui"
+name = "linuxapk-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1953,13 +1960,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "ubinder"
-version = "0.1.0"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "uds_windows"

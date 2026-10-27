@@ -1,3 +1,13 @@
 [workspace]
-members = ["bridge", "cli", "compat", "core", "gui", "ubinder"]
+members = [
+  "host/bridge",
+  "host/cli",
+  "host/core",
+  "host/manager",
+  "supervisor/broker",
+  "tests/compat",
+]
+# A plain `cargo build` builds only what runs on the desktop: the broker is a
+# bionic binary (supervisor/build.sh) and compat is a test harness.
+default-members = ["host/bridge", "host/cli", "host/core", "host/manager"]
 resolver = "3"

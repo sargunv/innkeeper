@@ -1,0 +1,18 @@
+//! linuxapk-broker: a small dynamic bionic binary that the session's
+//! `pivot-exec` forks and execs with two fds, the socket to its bpf emulator
+//! thread and the session's seccomp listener. It runs in the outer namespaces
+//! and serves binder for every Android process. See `src/notify.rs` and
+//! `docs/ubinder.md`.
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let sock: i32 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .expect("usage: linuxapk-broker <forward-sock-fd> <listener-fd>");
+    let listener: i32 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .expect("missing <listener-fd>");
+    linuxapk_broker::notify::serve(sock, listener);
+}

@@ -45,10 +45,10 @@
     ],
   },
   "excludes": [
-    "COMPATIBILITY.md",
+    "docs/compatibility.md",
     "**/third_party/**",
-    "gpu/patches/**",
-    "session/rootfs-overlay/**/*.rc",
+    "android/vendor/vulkan/patches/**",
+    "android/overlay/**/*.rc",
   ],
   "plugins": [
     "npm:@dprint/oxc@0.47.0",

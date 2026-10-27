@@ -1,0 +1,11 @@
+# linuxapk: binder is served through the seccomp filter on init, which
+# `linuxapk-session exec` (nsenter) processes don't have. This relay, an init
+# descendant, runs their commands instead (android/system/exec/linuxapk-exec.c).
+service linuxapk-execd /system/bin/linuxapk-exec --serve
+    class core
+    user root
+    group root
+    disabled
+
+on post-fs-data
+    start linuxapk-execd

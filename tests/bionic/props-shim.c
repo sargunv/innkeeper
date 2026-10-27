@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // LD_PRELOADed into every process of the bionic test harnesses
-// (tests/bionic/run.sh, ubinder/tests/run-binder-tests.sh), which run Android
+// (tests/bionic/run.sh, supervisor/tests/binder/run.sh), which run Android
 // binaries without init. Test only; never installed.
 //  - __system_property_*: no property service. A per-process store, seeded
 //    with servicemanager.ready=true (libbinder's defaultServiceManager() waits

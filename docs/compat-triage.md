@@ -1,7 +1,7 @@
 # Compat harness and triage
 
 The harness runs the F-Droid corpus in a live session and records whether each
-app works. Results are in [COMPATIBILITY.md](../COMPATIBILITY.md) and
+app works. Results are in [compatibility.md](compatibility.md) and
 `compat/results.json`. This file lists what fails and why, ranked, for lane
 assignment.
 

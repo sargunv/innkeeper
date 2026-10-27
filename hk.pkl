@@ -7,7 +7,7 @@ steps {
   ["shellcheck"] = Builtins.shellcheck
   ["cargo-clippy"] {
     glob = List("**/*.rs")
-    check = "cargo clippy -- -D warnings"
-    fix = "cargo clippy --fix --allow-dirty --allow-staged"
+    check = "cargo clippy --workspace --all-targets -- -D warnings"
+    fix = "cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged"
   }
 }

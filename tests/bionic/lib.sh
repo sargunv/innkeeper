@@ -1,12 +1,12 @@
 # shellcheck shell=bash
 # Shared by the bionic test harnesses (tests/bionic/run.sh,
-# ubinder/tests/run-binder-tests.sh): run Android binaries from the session's
+# supervisor/tests/binder/run.sh): run Android binaries from the session's
 # image in a throwaway root, without booting Android.
 #
 # Sourcing it sets:
 #   repo     this checkout
-#   out      LINUXAPK_OUT, default <main checkout>/out (where hal/build.sh and
-#            gpu/build.sh install out/vendor-overlay)
+#   out      LINUXAPK_OUT, default <main checkout>/out (where the graphics
+#            and vulkan builds install out/vendor-overlay)
 #   scratch  $out/test/bionic: everything the harnesses write
 #   bin      $scratch/bin: pivot-exec, the broker and the props shim
 
@@ -26,9 +26,9 @@ bionic_image() {
       img) img=$v ;;
       apex) apex=$v ;;
     esac
-  done < <(LINUXAPK_OUT=$out "$repo/session/linuxapk-session" image)
+  done < <(LINUXAPK_OUT=$out "$repo/host/launcher/linuxapk-session" image)
   [[ -d $img/system/system && -f $apex/apex-info-list.xml ]] || {
-    echo "no prepared image at $img (run session/linuxapk-session prepare)" >&2
+    echo "no prepared image at $img (run host/launcher/linuxapk-session prepare)" >&2
     return 1
   }
 }
@@ -36,7 +36,7 @@ bionic_image() {
 # Build what runs inside the root into $bin, when its sources changed:
 #   pivot-exec           the session's: pivots, installs the seccomp filter
 #                        and forks the broker
-#   linuxapk-ubinder     the broker (binder in userspace)
+#   linuxapk-broker      the broker (binder in userspace)
 #   libprops_shim.so     tests/bionic/props-shim.c
 bionic_build() {
   local ndk=${ANDROID_NDK_HOME:-}
@@ -48,22 +48,22 @@ bionic_build() {
     return 1
   }
   mkdir -p "$bin"
-  local shim=$repo/tests/bionic/props-shim.c helper=$repo/session/helper
+  local shim=$repo/tests/bionic/props-shim.c pivot=$repo/supervisor/pivot-exec
   [[ $bin/libprops_shim.so -nt $shim ]] ||
     "$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -o "$bin/libprops_shim.so" "$shim"
-  if [[ ! -x $bin/pivot-exec || -n $(find "$helper" -newer "$bin/pivot-exec") ]]; then
-    "$cc" -static -O2 -Wall -Werror -o "$bin/pivot-exec" "$helper/pivot-exec.c" "$helper/bpfemu.c"
+  if [[ ! -x $bin/pivot-exec || -n $(find "$pivot" -newer "$bin/pivot-exec") ]]; then
+    "$cc" -static -O2 -Wall -Werror -o "$bin/pivot-exec" "$pivot/pivot-exec.c" "$pivot/bpfemu.c"
   fi
-  # The bootstrap linker, as in session/build.sh: the broker starts before
+  # The bootstrap linker, as in supervisor/build.sh: the broker starts before
   # anything mounts /apex.
   (
     cd "$repo" &&
       env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$tc/llvm-ar" \
         CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
         RUSTFLAGS="-C link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64" \
-        cargo build -q -p ubinder --release --target x86_64-linux-android --bin linuxapk-ubinder -j8
+        cargo build -q -p linuxapk-broker --release --target x86_64-linux-android --bin linuxapk-broker -j8
   )
-  cp -u "$repo/target/x86_64-linux-android/release/linuxapk-ubinder" "$bin/"
+  cp -u "$repo/target/x86_64-linux-android/release/linuxapk-broker" "$bin/"
 }
 
 ro_bind() {

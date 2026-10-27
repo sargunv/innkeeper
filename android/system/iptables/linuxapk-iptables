@@ -1,0 +1,31 @@
+#!/system/bin/sh
+# iptables front end for a Linux.apk session: the nf_tables build of upstream
+# iptables (android/system/iptables/build.sh), minus rules that use the xt_bpf or
+# xt_quota2 matches.
+#
+# netd attaches eBPF socket filters with "-m bpf --object-pinned ...". eBPF
+# is emulated in userspace (supervisor/pivot-exec/bpfemu.c) and the kernel can't run
+# those programs; an emulated program never matches, so a rule using one is
+# equivalent to no rule. Drop them instead of failing the whole COMMIT.
+#
+# netd's data-usage alerts and limits (BandwidthController) use "-m quota2"
+# (Android's xt_quota2, not in upstream iptables or nf_tables). The parse
+# error failed netd's whole restore batch, and netd then waited out its 5 s
+# response timeout per process (iptables and ip6tables, twice): a ~20 s stall
+# of system_server's NetworkStatsService at every boot. Without the rules a
+# quota is never exceeded, so alerts never fire and limits never block.
+name=${0##*/}
+real=/system/bin/xtables-nft-multi
+case $name in
+  *-restore)
+    # Line-buffered so netd's "#PING" handshake (echoed by -v) gets through.
+    grep --line-buffered -v -e ' -m bpf ' -e ' -m quota2 ' | exec $real "$name" "$@"
+    ;;
+  *)
+    for a in "$@"; do
+      [ "$prev" = -m ] && { [ "$a" = bpf ] || [ "$a" = quota2 ]; } && exit 0
+      prev=$a
+    done
+    exec $real "$name" "$@"
+    ;;
+esac
