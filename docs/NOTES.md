@@ -281,8 +281,8 @@ Causes:
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
   buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
   via `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`.
-- logd ignores `ro.logd.size=16M` from vendor build.prop (still 256 KiB); the
-  workaround is `logcat -G 16M` after boot.
+- logd ignores `ro.logd.size`, so `init.linuxapk.rc` runs `logcat -G 16M` on
+  `logd.ready` (fixed 2026-10-27).
 - clang-tidy once host-side `compile_commands.json` exists.
 
 ## Next

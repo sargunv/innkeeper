@@ -21,3 +21,8 @@ on late-fs
     # late_start; do that here.
     setprop ro.crypto.state unsupported
     trigger nonencrypted
+
+# logd ignores ro.logd.size here (the buffer stays at 256 KiB and boot logs wrap
+# within seconds), so enlarge the buffers as soon as logd is up.
+on property:logd.ready=true
+    exec - root root -- /system/bin/logcat -G 16M
