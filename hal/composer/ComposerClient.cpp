@@ -75,12 +75,10 @@ Display* ComposerClient::display(int64_t id) {
 // ---- layers ----
 
 ndk::ScopedAStatus ComposerClient::createLayer(
-  int64_t displayId, int32_t bufferSlotCount, int64_t* out
+  int64_t displayId, int32_t, int64_t* out
 ) {
   DISPLAY_OR_RETURN();
   *out = d->createLayer();
-  if (Layer* l = d->layer(*out))
-    l->slots.resize(size_t(std::max(bufferSlotCount, 0)));
   return ndk::ScopedAStatus::ok();
 }
 
@@ -185,9 +183,7 @@ void ComposerClient::executeDisplayCommand(
     results.error(Error::BadConfig);
   }
   if (cmd.clientTarget) {
-    results.error(
-      d->setClientTarget(cmd.clientTarget->buffer, cmd.clientTarget->dataspace)
-    );
+    results.error(d->setClientTarget(cmd.clientTarget->buffer));
   }
   if (cmd.virtualDisplayOutputBuffer) {
     results.error(
@@ -215,26 +211,14 @@ void ComposerClient::executeDisplayCommand(
   if (cmd.acceptDisplayChanges) results.error(d->acceptChanges());
   if (cmd.presentOrValidateDisplay) validate(true);
   if (cmd.presentDisplay) {
-    PresentResult pr;
-    Error e = d->present(&pr);
+    Error e = d->present();
     if (e != Error::None) {
       results.error(e);
       return;
     }
-    if (pr.presentFence.ok()) {
-      PresentFence pf;
-      pf.display = d->id();
-      pf.fence = ndk::ScopedFileDescriptor(pr.presentFence.release());
-      results.add(std::move(pf));
-    }
+    // No present fence, and no layer to release (Presenter.h).
     ReleaseFences rf;
     rf.display = d->id();
-    for (auto& [layerId, fence] : pr.releaseFences) {
-      ReleaseFences::Layer l;
-      l.layer = layerId;
-      l.fence = ndk::ScopedFileDescriptor(fence.release());
-      rf.layers.push_back(std::move(l));
-    }
     results.add(std::move(rf));
   }
 }
@@ -247,37 +231,13 @@ void ComposerClient::executeLayerCommand(
     results.error(Error::BadLayer);
     return;
   }
-  if (c.bufferSlotsToClear) {
-    for (int32_t s : *c.bufferSlotsToClear) l->slots.clear(s);
-  }
-  if (c.buffer) {
-    BufferPtr b;
-    Error e = l->slots.update(*c.buffer, &b);
-    if (e == Error::None) {
-      l->buffer = std::move(b);
-      l->acquireFence.reset(dupFd(c.buffer->fence.get()));
-    }
-    results.error(e);
-  }
   if (c.composition) {
     l->requested = c.composition->composition;
     d.invalidate();
   }
-  if (c.z) {
-    l->z = c.z->z;
-    d.invalidate();
-  }
-  if (c.displayFrame) l->displayFrame = *c.displayFrame;
-  if (c.sourceCrop) l->sourceCrop = *c.sourceCrop;
-  if (c.transform) l->transform = c.transform->transform;
-  if (c.blendMode) l->blendMode = c.blendMode->blendMode;
-  if (c.planeAlpha) l->planeAlpha = c.planeAlpha->alpha;
-  if (c.dataspace) l->dataspace = c.dataspace->dataspace;
-  if (c.color) l->color = *c.color;
   if (c.sidebandStream) results.error(Error::Unsupported);
-  // cursorPosition, damage, visibleRegion, colorTransform, brightness,
-  // perFrameMetadata(Blob), blockingRegion, luts, pictureProfileId: only
-  // relevant to DEVICE composition, which the headless backend never does.
+  // Buffers, geometry, color and the rest only matter to DEVICE composition,
+  // which we never do (Display.h, Layer).
 }
 
 // ---- display queries ----

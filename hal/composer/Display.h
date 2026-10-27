@@ -28,8 +28,10 @@ struct DisplayConfig {
   int32_t dpi = 160;
 };
 
-struct Layer : LayerState {
-  BufferSlots slots;
+// SurfaceFlinger composites every layer itself (CLIENT), so a layer is only
+// the composition it asked for: its buffer and geometry never reach us.
+struct Layer {
+  c3::Composition requested = c3::Composition::INVALID;
 };
 
 class Display {
@@ -53,7 +55,7 @@ class Display {
   void setClientTargetSlotCount(int32_t n) {
     mClientTargetSlots.resize(size_t(n));
   }
-  Error setClientTarget(const c3::Buffer& buffer, common::Dataspace dataspace);
+  Error setClientTarget(const c3::Buffer& buffer);
   Error setOutputBuffer(const c3::Buffer& buffer);
   Error setPowerMode(c3::PowerMode mode);
   void setColorTransform(const std::vector<float>& m);
@@ -61,7 +63,7 @@ class Display {
   // validate: returns the composition changes (if any) SF must accept.
   Error validate(std::optional<c3::ChangedCompositionTypes>* changes);
   Error acceptChanges();
-  Error present(PresentResult* out);
+  Error present();
   // Any layer/display state change invalidates a previous validate.
   void invalidate() { mState = State::NeedValidate; }
 
@@ -73,16 +75,15 @@ class Display {
   DisplayConfig mConfig;
   std::unique_ptr<Presenter> mPresenter;
   VsyncThread mVsync;
-  std::map<int64_t, std::unique_ptr<Layer>> mLayers;
+  std::map<int64_t, Layer> mLayers;
   int64_t mNextLayerId = 1;
   BufferSlots mClientTargetSlots;
   ClientTargetState mClientTarget;
   BufferSlots mOutputSlots;
   BufferPtr mOutputBuffer;
   State mState = State::NeedValidate;
-  std::vector<std::pair<int64_t, c3::Composition>> mPendingChanges;
+  std::vector<int64_t> mPendingChanges;  // layers that become CLIENT
   c3::PowerMode mPower = c3::PowerMode::OFF;
-  uint64_t mFrameNumber = 0;
 };
 
 }  // namespace linuxapk::hwc

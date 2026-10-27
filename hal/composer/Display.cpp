@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "linuxapk-hwc"
-#include <algorithm>
-
 #include "Display.h"
 
 #include "linuxapk/log.h"
@@ -27,10 +25,8 @@ Display::Display(
 }
 
 int64_t Display::createLayer() {
-  int64_t id = mNextLayerId++;
-  auto l = std::make_unique<Layer>();
-  l->id = id;
-  mLayers.emplace(id, std::move(l));
+  const int64_t id = mNextLayerId++;
+  mLayers.emplace(id, Layer{});
   invalidate();
   return id;
 }
@@ -43,12 +39,10 @@ Error Display::destroyLayer(int64_t id) {
 
 Layer* Display::layer(int64_t id) {
   auto it = mLayers.find(id);
-  return it == mLayers.end() ? nullptr : it->second.get();
+  return it == mLayers.end() ? nullptr : &it->second;
 }
 
-Error Display::setClientTarget(
-  const c3::Buffer& buffer, common::Dataspace dataspace
-) {
+Error Display::setClientTarget(const c3::Buffer& buffer) {
   BufferPtr b;
   Error e = mClientTargetSlots.update(buffer, &b);
   if (e != Error::None) return e;
@@ -56,7 +50,6 @@ Error Display::setClientTarget(
   mClientTarget.acquireFence.reset(
     buffer.fence.get() >= 0 ? dupFd(buffer.fence.get()) : -1
   );
-  mClientTarget.dataspace = dataspace;
   return Error::None;
 }
 
@@ -83,7 +76,6 @@ Error Display::setPowerMode(c3::PowerMode mode) {
       "display %lld: power %s", (long long)mId,
       mode == c3::PowerMode::ON ? "ON" : "OFF"
     );
-    mPresenter->setPowerOn(mode == c3::PowerMode::ON);
   }
   mPower = mode;
   return Error::None;
@@ -97,22 +89,20 @@ void Display::setColorTransform(const std::vector<float>&) {
 Error Display::validate(std::optional<c3::ChangedCompositionTypes>* changes) {
   mPendingChanges.clear();
   for (auto& [id, l] : mLayers) {
-    c3::Composition want = l->requested;
-    if (want == c3::Composition::INVALID) want = c3::Composition::CLIENT;
-    c3::Composition got = c3::Composition::CLIENT;
-    if (want != c3::Composition::CLIENT && mPresenter->acceptDeviceLayer(*l))
-      got = want;
-    if (got != want) mPendingChanges.emplace_back(id, got);
-    l->composition = got;
+    if (
+      l.requested != c3::Composition::CLIENT &&
+      l.requested != c3::Composition::INVALID
+    )
+      mPendingChanges.push_back(id);
   }
   changes->reset();
   if (!mPendingChanges.empty()) {
     c3::ChangedCompositionTypes c;
     c.display = mId;
-    for (auto& [id, comp] : mPendingChanges) {
+    for (int64_t id : mPendingChanges) {
       c3::ChangedCompositionLayer cl;
       cl.layer = id;
-      cl.composition = comp;
+      cl.composition = c3::Composition::CLIENT;
       c.layers.push_back(cl);
     }
     *changes = std::move(c);
@@ -127,37 +117,22 @@ Error Display::acceptChanges() {
   if (mState != State::NeedAccept) {
     return mState == State::NeedValidate ? Error::NotValidated : Error::None;
   }
-  for (auto& [id, comp] : mPendingChanges) {
-    if (Layer* l = layer(id)) l->requested = comp;
+  for (int64_t id : mPendingChanges) {
+    if (Layer* l = layer(id)) l->requested = c3::Composition::CLIENT;
   }
   mPendingChanges.clear();
   mState = State::ReadyToPresent;
   return Error::None;
 }
 
-Error Display::present(PresentResult* out) {
+Error Display::present() {
   if (mState == State::NeedValidate) return Error::NotValidated;
   if (mState == State::NeedAccept)
     acceptChanges();  // SF may present right after validate
   mState = State::NeedValidate;
-
-  FrameInput f{};
-  f.displayId = mId;
-  f.width = uint32_t(mConfig.width);
-  f.height = uint32_t(mConfig.height);
-  f.frameNumber = ++mFrameNumber;
-  f.clientTarget = &mClientTarget;
-  f.outputBuffer = mOutputBuffer;
-  for (auto& [_, l] : mLayers) {
-    f.layers.push_back(l.get());
-    if (l->composition == c3::Composition::CLIENT) f.hasClientLayers = true;
-  }
-  std::stable_sort(
-    f.layers.begin(), f.layers.end(),
-    [](const LayerState* a, const LayerState* b) { return a->z < b->z; }
-  );
-  if (mPower != c3::PowerMode::ON) return Error::None;
-  return mPresenter->present(f, out);
+  if (mPower == c3::PowerMode::ON)
+    mPresenter->present({mId, &mClientTarget, mOutputBuffer});
+  return Error::None;
 }
 
 }  // namespace linuxapk::hwc

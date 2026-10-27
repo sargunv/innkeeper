@@ -147,7 +147,7 @@ class BridgeWindow {
     *w = std::max(1u, uint32_t(mSpec.width * k + 0.5));
     *h = std::max(1u, uint32_t(mSpec.height * k + 0.5));
   }
-  Error present(FrameInput& frame);
+  void present(const FrameInput& frame);
   // Bridge lock held.
   void onRelease(uint32_t buffer);
   // Bridge lock held. The bridge (re)connected without our buffers: the next
@@ -656,13 +656,13 @@ bool BridgeWindow::makePool(
   return true;
 }
 
-Error BridgeWindow::present(FrameInput& frame) {
+void BridgeWindow::present(const FrameInput& frame) {
   ClientTargetState* ct = frame.clientTarget;
   BufferPtr buffer = ct && ct->buffer ? ct->buffer : frame.outputBuffer;
-  if (!buffer) return Error::None;
+  if (!buffer) return;
   const BufferHandle* bh = buffer->info();
   const uint8_t* src = buffer->map();
-  if (!bh || !src) return Error::None;
+  if (!bh || !src) return;
   const int32_t f = bh->resolvedFormat;
   uint32_t format;
   if (f == fmt::RGBA_8888 || f == fmt::RGBX_8888) {
@@ -672,14 +672,14 @@ Error BridgeWindow::present(FrameInput& frame) {
   } else {
     if (!mWarnedFormat) LOGW("bridge: frame format 0x%x not supported yet", f);
     mWarnedFormat = true;
-    return Error::None;
+    return;
   }
   if (ct && ct->buffer == buffer && !waitFence(ct->acquireFence.get(), 1000))
     LOGW("bridge: client target fence timeout");
   src += bh->planes[0].offset.get();
   const uint32_t srcStride = bh->planes[0].stride;
   const uint32_t w = bh->width, h = bh->height;
-  if (w == 0 || h == 0 || !b->connected()) return Error::None;
+  if (w == 0 || h == 0 || !b->connected()) return;
 
   {
     std::lock_guard lock(b->mutex);
@@ -693,7 +693,7 @@ Error BridgeWindow::present(FrameInput& frame) {
     Pool np;
     if (!makePool(w, h, format, &np)) {
       LOGE("bridge: window %d: no %ux%u buffers", mSpec.id, w, h);
-      return Error::None;
+      return;
     }
     std::lock_guard lock(b->mutex);
     freePool(mPool, /*tellBridge=*/true);
@@ -714,7 +714,7 @@ Error BridgeWindow::present(FrameInput& frame) {
     }
     if (idx < 0) {
       mDropped++;  // every buffer is still on screen or queued
-      return Error::None;
+      return;
     }
     mPool.bufs[size_t(idx)].busy = true;
     id = mPool.bufs[size_t(idx)].id;
@@ -741,7 +741,6 @@ Error BridgeWindow::present(FrameInput& frame) {
     );
     mLastLogNs = now;
   }
-  return Error::None;
 }
 
 // ---- presenters
@@ -756,14 +755,9 @@ class BridgeWindowPresenter : public Presenter {
       : mId(id), mHwcId(hwcId), mSecondary(std::move(secondary)) {}
   ~BridgeWindowPresenter() override { gBridge->removeWindow(mId, mHwcId); }
   const char* name() const override { return "bridge"; }
-  Error present(FrameInput& frame, PresentResult* out) override {
-    if (mSecondary) {
-      PresentResult ignored;
-      mSecondary->present(frame, &ignored);
-    }
-    out->presentFence.reset();
-    if (auto w = gBridge->findWindow(mId, mHwcId)) return w->present(frame);
-    return Error::None;
+  void present(const FrameInput& frame) override {
+    mSecondary->present(frame);
+    if (auto w = gBridge->findWindow(mId, mHwcId)) w->present(frame);
   }
 
  private:

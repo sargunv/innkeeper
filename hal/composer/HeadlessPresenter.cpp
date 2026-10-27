@@ -73,7 +73,7 @@ HeadlessPresenter::HeadlessPresenter(std::unique_ptr<FrameDumper> dumper)
 
 HeadlessPresenter::~HeadlessPresenter() = default;
 
-Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
+void HeadlessPresenter::present(const FrameInput& frame) {
   mPresented++;
   const int64_t now = nowNs();
   if (now - mLastLogNs > 60'000'000'000) {
@@ -106,9 +106,6 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
       mWorker->submit(mPrefix.empty() ? prefix : mPrefix, v);
     }
   }
-  // Nothing holds the buffers after we return: no present/release fences.
-  out->presentFence.reset();
-  return Error::None;
 }
 
 static std::unique_ptr<HeadlessPresenter> makeHeadless() {
