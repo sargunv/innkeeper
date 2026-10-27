@@ -1,7 +1,8 @@
-//! The ubinder broker helper: a tiny dynamic bionic binary the session's
-//! `pivot-exec` forks and execs with the binder seccomp listener fd as argv[1].
-//! It runs in the supervisor's (outer) namespaces and serves binder for every
-//! Android process. See `ubinder/src/sys.rs` and `docs/ubinder.md`.
+//! The ubinder broker helper: a small dynamic bionic binary that the session's
+//! `pivot-exec` forks and execs with two fds, the socket to its bpf emulator
+//! thread and the session's seccomp listener. It runs in the outer namespaces
+//! and serves binder for every Android process. See `ubinder/src/sys.rs` and
+//! `docs/ubinder.md`.
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -13,11 +14,5 @@ fn main() {
         .next()
         .and_then(|s| s.parse().ok())
         .expect("missing <listener-fd>");
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     ubinder::sys::serve(sock, listener);
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    {
-        let _ = (sock, listener);
-        eprintln!("ubinder broker is Linux-only");
-    }
 }

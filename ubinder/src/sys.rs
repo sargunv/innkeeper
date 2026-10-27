@@ -28,8 +28,6 @@
 //! checks with `kcmp` that each process still holds its binder fd (close,
 //! exec), releasing the broker process otherwise, which fires death
 //! notifications.
-#![cfg(any(target_os = "linux", target_os = "android"))]
-#![allow(clippy::missing_safety_doc)]
 
 use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -941,19 +939,17 @@ impl Supervisor {
         let tid = req.pid as i32;
         let path = read_path(tid, req.data.args[1]);
         let ctx = match path.as_deref() {
-            Some(b"/dev/binder") | Some(b"/dev/binderfs/binder") => 0u8,
-            Some(b"/dev/hwbinder") | Some(b"/dev/binderfs/hwbinder") => 1,
-            Some(b"/dev/vndbinder") | Some(b"/dev/binderfs/vndbinder") => 2,
+            Some(b"/dev/binder") => 0u8,
+            Some(b"/dev/hwbinder") => 1,
+            Some(b"/dev/vndbinder") => 2,
             _ => {
                 self.respond(req.id, 0, 0, true);
                 return;
             }
         };
         let Some(pid) = self.tgid(tid) else {
-            {
-                self.respond(req.id, 0, 0, true);
-                return;
-            }
+            self.respond(req.id, 0, 0, true);
+            return;
         };
         // Pin the address space, then check that tid is still the task that
         // asked (so the path read above was its too).
@@ -987,10 +983,8 @@ impl Supervisor {
             )
         };
         if map == libc::MAP_FAILED {
-            {
-                self.respond(req.id, 0, libc::ENOMEM, false);
-                return;
-            }
+            self.respond(req.id, 0, libc::ENOMEM, false);
+            return;
         }
         let ps = ProcState {
             pid,
@@ -1033,7 +1027,7 @@ impl Supervisor {
                 f.get(1).or(f.first()).and_then(|x| x.parse().ok())
             })
             .unwrap_or(pid);
-        let procid = self.broker.open_ns(pid, ns_pid, euid, ctx);
+        let procid = self.broker.open(ns_pid, euid, ctx);
         let mut ps = ps;
         ps.fd = newfd as u32;
         self.procs.insert(procid, ps);
@@ -1157,19 +1151,15 @@ impl Supervisor {
         let Some(mut bwr) = mem_read(mem, argp, size_of::<BinderWriteRead>())
             .and_then(|b| read_pod::<BinderWriteRead>(&b, 0))
         else {
-            {
-                self.respond(req.id, 0, libc::EFAULT, false);
-                return;
-            }
+            self.respond(req.id, 0, libc::EFAULT, false);
+            return;
         };
         let mut write = Vec::new();
         if bwr.write_size > bwr.write_consumed {
             let len = (bwr.write_size - bwr.write_consumed) as usize;
             if len > MAX_WRITE {
-                {
-                    self.respond(req.id, 0, libc::EINVAL, false);
-                    return;
-                }
+                self.respond(req.id, 0, libc::EINVAL, false);
+                return;
             }
             match bwr
                 .write_buffer
@@ -1709,7 +1699,7 @@ pub(crate) mod tests {
             )
         };
         assert_ne!(map, libc::MAP_FAILED);
-        let procid = sup.broker.open_ns(pid, pid, 0, 0);
+        let procid = sup.broker.open(pid, 0, 0);
         sup.procs.insert(
             procid,
             ProcState {

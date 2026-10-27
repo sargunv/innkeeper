@@ -22,7 +22,6 @@
 //!    LD_PRELOAD shim's stat wrappers don't reach code in isolated linker
 //!    namespaces such as the Tethering APEX. Every other lstat continues
 //!    natively; other stat calls aren't trapped at all.
-#![cfg(any(target_os = "linux", target_os = "android"))]
 
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};

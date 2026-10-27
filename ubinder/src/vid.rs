@@ -1,4 +1,4 @@
-//! Virtual ids for single-uid sessions (`linuxapk-session start --single-uid`,
+//! Virtual ids for single-uid sessions (`LINUXAPK_SINGLE_UID=1`,
 //! docs/sandbox.md).
 //!
 //! In single-uid mode the session's user namespace maps only uid/gid 0 (the
@@ -279,10 +279,6 @@ impl CredTable {
 
     pub fn len(&self) -> usize {
         self.by_id.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        false
     }
 }
 

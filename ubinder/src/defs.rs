@@ -1,11 +1,9 @@
 //! Binder UAPI constants and wire structs.
 //!
 //! Mirror of `include/uapi/linux/android/binder.h` for the x86_64 (64-bit
-//! `binder_uintptr_t`) ABI that the AOSP 17 image uses. Only the pieces the
-//! broker needs are defined; everything is `#[repr(C)]` so the byte layout
-//! matches what libbinder writes into the command stream and reads back.
-
-#![allow(dead_code)]
+//! `binder_uintptr_t`) ABI that the AOSP 17 image uses: the pieces the broker
+//! uses, and the freezer's. Structs are `#[repr(C)]`, so their bytes are what
+//! libbinder writes into the command stream and reads back.
 
 pub type BinderSize = u64;
 pub type BinderUintptr = u64;
@@ -41,17 +39,13 @@ const fn iowr(ty: u8, nr: u8, size: usize) -> u32 {
 
 // BINDER_* ioctls (type 'b' = 0x62).
 pub const BINDER_WRITE_READ: u32 = iowr(b'b', 1, size_of::<BinderWriteRead>());
-pub const BINDER_SET_IDLE_TIMEOUT: u32 = iow(b'b', 3, size_of::<i64>());
 pub const BINDER_SET_MAX_THREADS: u32 = iow(b'b', 5, size_of::<u32>());
-pub const BINDER_SET_IDLE_PRIORITY: u32 = iow(b'b', 6, size_of::<i32>());
 pub const BINDER_SET_CONTEXT_MGR: u32 = iow(b'b', 7, size_of::<i32>());
 pub const BINDER_THREAD_EXIT: u32 = iow(b'b', 8, size_of::<i32>());
 pub const BINDER_VERSION: u32 = iowr(b'b', 9, size_of::<BinderVersion>());
 pub const BINDER_GET_NODE_DEBUG_INFO: u32 = iowr(b'b', 11, size_of::<BinderNodeDebugInfo>());
 pub const BINDER_GET_NODE_INFO_FOR_REF: u32 = iowr(b'b', 12, size_of::<BinderNodeInfoForRef>());
 pub const BINDER_SET_CONTEXT_MGR_EXT: u32 = iow(b'b', 13, size_of::<FlatBinderObject>());
-pub const BINDER_FREEZE: u32 = iow(b'b', 14, size_of::<BinderFreezeInfo>());
-pub const BINDER_GET_FROZEN_INFO: u32 = iowr(b'b', 15, size_of::<BinderFrozenStatusInfo>());
 pub const BINDER_ENABLE_ONEWAY_SPAM_DETECTION: u32 = iow(b'b', 16, size_of::<u32>());
 pub const BINDER_GET_EXTENDED_ERROR: u32 = iowr(b'b', 17, size_of::<BinderExtendedError>());
 
@@ -102,20 +96,13 @@ pub const BR_SPAWN_LOOPER: u32 = ioc(IOC_NONE, b'r', 13, 0);
 pub const BR_DEAD_BINDER: u32 = ior(b'r', 15, size_of::<BinderUintptr>());
 pub const BR_CLEAR_DEATH_NOTIFICATION_DONE: u32 = ior(b'r', 16, size_of::<BinderUintptr>());
 pub const BR_FAILED_REPLY: u32 = ioc(IOC_NONE, b'r', 17, 0);
-pub const BR_FROZEN_REPLY: u32 = ioc(IOC_NONE, b'r', 18, 0);
 pub const BR_ONEWAY_SPAM_SUSPECT: u32 = ioc(IOC_NONE, b'r', 19, 0);
-pub const BR_TRANSACTION_PENDING_FROZEN: u32 = ioc(IOC_NONE, b'r', 20, 0);
-pub const BR_FROZEN_BINDER: u32 = ior(b'r', 21, size_of::<BinderFrozenStateInfo>());
-pub const BR_CLEAR_FREEZE_NOTIFICATION_DONE: u32 = ior(b'r', 22, size_of::<BinderUintptr>());
 
 // transaction_flags
 pub const TF_ONE_WAY: u32 = 0x01;
 pub const TF_ACCEPT_FDS: u32 = 0x10;
-pub const TF_CLEAR_BUF: u32 = 0x20;
-pub const TF_UPDATE_TXN: u32 = 0x40;
 
 // flat_binder_object flags
-pub const FLAT_BINDER_FLAG_PRIORITY_MASK: u32 = 0xff;
 pub const FLAT_BINDER_FLAG_ACCEPTS_FDS: u32 = 0x100;
 pub const FLAT_BINDER_FLAG_TXN_SECURITY_CTX: u32 = 0x1000;
 
@@ -269,6 +256,25 @@ pub struct BinderNodeInfoForRef {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct BinderExtendedError {
+    pub id: u32,
+    pub command: u32,
+    pub param: i32,
+}
+
+// The freezer (BINDER_FREEZE) is unsupported: the ioctls fail with EINVAL, so
+// Android disables its app freezer, and the broker acknowledges freeze
+// notification requests without ever sending one. These are the pieces an
+// implementation needs (binder freezer issue).
+pub const BINDER_FREEZE: u32 = iow(b'b', 14, size_of::<BinderFreezeInfo>());
+pub const BINDER_GET_FROZEN_INFO: u32 = iowr(b'b', 15, size_of::<BinderFrozenStatusInfo>());
+pub const BR_FROZEN_REPLY: u32 = ioc(IOC_NONE, b'r', 18, 0);
+pub const BR_TRANSACTION_PENDING_FROZEN: u32 = ioc(IOC_NONE, b'r', 20, 0);
+pub const BR_FROZEN_BINDER: u32 = ior(b'r', 21, size_of::<BinderFrozenStateInfo>());
+pub const BR_CLEAR_FREEZE_NOTIFICATION_DONE: u32 = ior(b'r', 22, size_of::<BinderUintptr>());
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BinderFreezeInfo {
     pub pid: u32,
     pub enable: u32,
@@ -290,17 +296,6 @@ pub struct BinderFrozenStateInfo {
     pub is_frozen: u32,
     pub reserved: u32,
 }
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct BinderExtendedError {
-    pub id: u32,
-    pub command: u32,
-    pub param: i32,
-}
-
-/// `extended_error` id libbinder expects on a fresh thread.
-pub const BINDER_EE_ID: u32 = 1;
 
 /// Read/write a little-endian POD from/to a byte slice.
 pub(crate) fn read_pod<T: Copy>(buf: &[u8], off: usize) -> Option<T> {

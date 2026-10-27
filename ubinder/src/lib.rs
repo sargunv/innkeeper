@@ -1,24 +1,24 @@
-//! ubinder: a userspace reimplementation of the Android binder driver.
+//! ubinder: Android's binder driver, reimplemented in userspace, plus the
+//! virtual ids of single-uid sessions.
 //!
-//! The crate has two layers:
-//!   * [`broker`] — the pure driver state machine. No syscalls; all process
-//!     access goes through the [`broker::Mem`] trait, so it is fully unit
-//!     tested and fuzzed on the host.
-//!   * `sys` (feature-gated, Linux only) — the seccomp user-notification
-//!     binding that drives the broker against real Android processes in a
-//!     Linux.apk session, plus the C ABI the session supervisor links against.
+//!   * [`broker`]: the driver's state machine (`drivers/android/binder.c`). It
+//!     makes no syscalls: process memory, receive buffers and fds go through
+//!     the [`broker::Mem`] trait, so it is unit tested and fuzzed on the host
+//!     against [`testmem`].
+//!   * [`sys`]: the serve loop of the broker helper (`linuxapk-ubinder`). It
+//!     receives the session's seccomp user notifications and drives the broker
+//!     against real Android processes.
+//!   * `vid` and `vidsys`: single-uid mode's credential model and the
+//!     syscalls it answers.
 //!
-//! See `docs/ubinder.md`.
+//! `LINUXAPK_UBINDER_DEBUG` turns on tracing (see [`init_log`]). See
+//! `docs/ubinder.md` and `docs/sandbox.md`.
 
 pub mod broker;
 pub mod defs;
-#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod sys;
-pub mod vid;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+mod vid;
 mod vidsys;
-
-pub use broker::{Broker, Mem, ProcId, Wakeup, WriteRead};
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -41,8 +41,9 @@ static LOG: Mutex<LogSink> = Mutex::new(LogSink {
 });
 const LOG_ROTATE: u64 = 64 << 20;
 
-/// Configure tracing from LINUXAPK_UBINDER_DEBUG: unset/empty = off, "1" =
-/// stderr, anything else = a log file path.
+/// Configure tracing from LINUXAPK_UBINDER_DEBUG: unset, empty or "0" = off,
+/// "1" = stderr, anything else = a log file path. Tracing covers every binder
+/// call and, in single-uid mode, a line of syscall counters every 10 s.
 pub fn init_log() {
     let Some(v) = std::env::var_os("LINUXAPK_UBINDER_DEBUG") else {
         return;

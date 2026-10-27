@@ -52,8 +52,9 @@ pub type TxnId = u64;
 type DeathId = u64;
 
 /// Access to process memory, receive buffers and fds. The real implementation
-/// uses `process_vm_{readv,writev}`, a per-process memfd, and
-/// `SECCOMP_IOCTL_NOTIF_ADDFD`/`pidfd_getfd`; tests use an in-memory fake.
+/// (`sys.rs`) uses each process's pinned `/proc/<pid>/mem`, a per-process
+/// memfd, and `SECCOMP_IOCTL_NOTIF_ADDFD`/`pidfd_getfd`; tests use an
+/// in-memory fake.
 pub trait Mem {
     /// Read `len` bytes from `proc`'s address space at `addr`.
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>>;
@@ -307,13 +308,10 @@ impl Broker {
         i
     }
 
-    /// Open a binder device; `context` is 0=binder, 1=hwbinder, 2=vndbinder.
-    pub fn open(&mut self, pid: i32, euid: u32, context: u8) -> ProcId {
-        self.open_ns(pid, pid, euid, context)
-    }
-
-    /// [`Self::open`] with the pid as seen inside the Android pid namespace.
-    pub fn open_ns(&mut self, _pid: i32, ns_pid: i32, euid: u32, context: u8) -> ProcId {
+    /// Open a binder device for a process with pid `ns_pid` (in Android's pid
+    /// namespace) and `euid`; `context` is 0=binder, 1=hwbinder,
+    /// 2=vndbinder.
+    pub fn open(&mut self, ns_pid: i32, euid: u32, context: u8) -> ProcId {
         let id = self.next_proc;
         self.next_proc += 1;
         self.procs.insert(

@@ -25,17 +25,12 @@ impl Bc {
         self
     }
     fn td(mut self, td: &BinderTransactionData) -> Self {
-        self.0.extend_from_slice(pod_bytes_pub(td));
+        self.0.extend_from_slice(pod_bytes(td));
         self
     }
     fn done(self) -> Vec<u8> {
         self.0
     }
-}
-
-fn pod_bytes_pub<T: Copy>(v: &T) -> &[u8] {
-    let p = v as *const T as *const u8;
-    unsafe { std::slice::from_raw_parts(p, std::mem::size_of::<T>()) }
 }
 
 /// Decode a BR_* stream into (cmd, payload-bytes) pairs.
@@ -76,19 +71,7 @@ fn find(stream: &[(u32, Vec<u8>)], cmd: u32) -> Option<&Vec<u8>> {
 }
 
 fn td_from(p: &[u8]) -> BinderTransactionData {
-    read_pod_pub(p, 0)
-}
-
-fn read_pod_pub<T: Copy>(buf: &[u8], off: usize) -> T {
-    let mut v = std::mem::MaybeUninit::<T>::uninit();
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            buf.as_ptr().add(off),
-            v.as_mut_ptr() as *mut u8,
-            std::mem::size_of::<T>(),
-        );
-        v.assume_init()
-    }
+    read_pod(p, 0).unwrap()
 }
 
 // A standard two-process setup: a server that is the context manager, and a
@@ -147,7 +130,7 @@ fn register_service_and_transact() {
     fbo.flags = FLAT_BINDER_FLAG_ACCEPTS_FDS;
     fbo.binder_or_handle = 0xBEEF_0000; // client's local BBinder ptr
     fbo.cookie = 0xCAFE;
-    s.m.poke(s.client, data_addr, pod_bytes_pub(&fbo));
+    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
     s.m.poke(s.client, off_addr, &0u64.to_le_bytes()); // object at offset 0
 
     let mut td = BinderTransactionData::default();
@@ -182,7 +165,7 @@ fn register_service_and_transact() {
         td2.data_buffer,
         std::mem::size_of::<FlatBinderObject>(),
     );
-    let fbo2: FlatBinderObject = read_pod_pub(&obj, 0);
+    let fbo2: FlatBinderObject = read_pod(&obj, 0).unwrap();
     assert_eq!(fbo2.hdr_type, BINDER_TYPE_HANDLE);
     let handle = fbo2.binder_or_handle as u32;
     assert!(handle >= 1);
@@ -301,7 +284,7 @@ fn fd_passing() {
     let mut fdo = BinderFdObject::default();
     fdo.hdr_type = BINDER_TYPE_FD;
     fdo.fd_or_pad = 7; // client's fd 7
-    m.poke(client, data_addr, pod_bytes_pub(&fdo));
+    m.poke(client, data_addr, pod_bytes(&fdo));
     m.poke(client, off_addr, &0u64.to_le_bytes());
 
     let mut td = BinderTransactionData::default();
@@ -323,7 +306,7 @@ fn fd_passing() {
         td2.data_buffer,
         std::mem::size_of::<BinderFdObject>(),
     );
-    let fdo2: BinderFdObject = read_pod_pub(&obj, 0);
+    let fdo2: BinderFdObject = read_pod(&obj, 0).unwrap();
     let new_fd = fdo2.fd_or_pad as u32;
     assert_ne!(new_fd, 7);
     assert!(m.procs[&server].installed_fds.contains(&new_fd));
@@ -354,7 +337,7 @@ fn death_notification_fires_on_release() {
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.binder_or_handle = 0xBEEF;
-    s.m.poke(s.client, data_addr, pod_bytes_pub(&fbo));
+    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
     s.m.poke(s.client, off_addr, &0u64.to_le_bytes());
     let mut td = BinderTransactionData::default();
     td.target = 0;
@@ -371,7 +354,9 @@ fn death_notification_fires_on_release() {
         td2.data_buffer,
         std::mem::size_of::<FlatBinderObject>(),
     );
-    let handle = (read_pod_pub::<FlatBinderObject>(&obj, 0)).binder_or_handle as u32;
+    let handle = read_pod::<FlatBinderObject>(&obj, 0)
+        .unwrap()
+        .binder_or_handle as u32;
     // Server replies to the registration so its thread returns to proc work.
     let mut rtd = BinderTransactionData::default();
     rtd.code = 0;
@@ -413,7 +398,7 @@ fn node_ref_handshake() {
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.binder_or_handle = 0xABCD;
-    s.m.poke(s.client, data_addr, pod_bytes_pub(&fbo));
+    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
     s.m.poke(s.client, off_addr, &0u64.to_le_bytes());
     let mut td = BinderTransactionData::default();
     td.target = 0;
