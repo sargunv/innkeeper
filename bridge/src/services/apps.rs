@@ -1,0 +1,471 @@
+//! The apps service (id 5): apps installed or removed inside Android (an app
+//! store, PackageInstaller, `pm install`) get or lose their desktop entry and
+//! icons. The Linux.apk System app reports package events; the entries are
+//! written with `linuxapk-core`, the same code as `linuxapk install`
+//! (`docs/bridge.md`, "Apps service").
+//!
+//! Entries this service writes say `X-LinuxApk-Origin=android`. An entry
+//! written by `linuxapk install` (which has more metadata, such as URL
+//! schemes) is never replaced; an entry for another session instance is never
+//! touched.
+
+use std::os::fd::OwnedFd;
+use std::sync::Arc;
+
+use linuxapk_core::desktop::{self, AppEntry};
+use linuxapk_core::{validate, xdg};
+
+use super::blob;
+use crate::server::{Peer, Reply, Service};
+use crate::wire::errno::*;
+use crate::wire::{DecodeError, Reader, Writer};
+
+pub mod ty {
+    pub const HAVE: u16 = 0x0501;
+    pub const ADDED: u16 = 0x0502;
+    pub const REMOVED: u16 = 0x0503;
+}
+
+/// Largest icon blob (all sizes together).
+pub const MAX_ICONS: u32 = 4 << 20;
+/// Icons per app.
+const MAX_ICON_COUNT: usize = 8;
+const MAX_ICON_SIZE: u32 = 512;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    /// Is the desktop entry for `package` at `version` current?
+    Have {
+        package: String,
+        version: String,
+    },
+    /// `package` was installed or updated; its icons come in a blob.
+    Added {
+        package: String,
+        version: String,
+        label: String,
+        /// `ApplicationInfo.category` (-1 for none).
+        category: i32,
+        game: bool,
+        icons_len: u32,
+    },
+    Removed {
+        package: String,
+    },
+}
+
+impl Request {
+    pub fn takes_fd(&self) -> bool {
+        matches!(self, Request::Added { .. })
+    }
+}
+
+/// HAVE's answer.
+pub mod have {
+    /// No entry, or ours for another version: send ADDED.
+    pub const MISSING: u8 = 0;
+    pub const CURRENT: u8 = 1;
+    /// Someone else's entry (`linuxapk install`, another instance), or
+    /// mirroring is off: leave it.
+    pub const NOT_OURS: u8 = 2;
+}
+
+fn package(r: &mut Reader<'_>) -> Result<String, DecodeError> {
+    let p = r.name()?;
+    validate::package(&p).map_err(|_| DecodeError::Invalid("package name"))?;
+    Ok(p)
+}
+
+pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
+    let mut r = Reader::new(body);
+    let req = match t {
+        ty::HAVE => Request::Have {
+            package: package(&mut r)?,
+            version: r.name()?,
+        },
+        ty::ADDED => {
+            let package = package(&mut r)?;
+            let version = r.name()?;
+            let label = r.name()?;
+            let category = r.i32()?;
+            if !(-1..=64).contains(&category) {
+                return Err(DecodeError::Invalid("category"));
+            }
+            Request::Added {
+                package,
+                version,
+                label,
+                category,
+                game: r.bool()?,
+                icons_len: r.u32()?,
+            }
+        }
+        ty::REMOVED => Request::Removed {
+            package: package(&mut r)?,
+        },
+        t => return Err(DecodeError::UnknownType(t)),
+    };
+    r.end()?;
+    Ok(req)
+}
+
+pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
+    let mut w;
+    match req {
+        Request::Have { package, version } => {
+            w = Writer::message(ty::HAVE, tag);
+            w.name(package).name(version);
+        }
+        Request::Added {
+            package,
+            version,
+            label,
+            category,
+            game,
+            icons_len,
+        } => {
+            w = Writer::message(ty::ADDED, tag);
+            w.name(package)
+                .name(version)
+                .name(label)
+                .i32(*category)
+                .u8(*game as u8)
+                .u32(*icons_len);
+        }
+        Request::Removed { package } => {
+            w = Writer::message(ty::REMOVED, tag);
+            w.name(package);
+        }
+    }
+    w.into_vec()
+}
+
+/// Icons in a blob: repeated `u32 size`, `u32 len`, `len` bytes of PNG.
+/// Only square hicolor sizes up to 512 whose PNG header matches are kept.
+pub fn parse_icons(b: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, i32> {
+    let mut r = Reader::new(b);
+    let mut out = Vec::new();
+    while !r.is_empty() {
+        let size = r.u32().map_err(|_| -EINVAL)?;
+        let len = r.u32().map_err(|_| -EINVAL)? as usize;
+        let png = r.take(len).map_err(|_| -EINVAL)?;
+        if out.len() >= MAX_ICON_COUNT || size == 0 || size > MAX_ICON_SIZE {
+            return Err(-EINVAL);
+        }
+        if xdg::png_size(png) != Some((size, size)) {
+            return Err(-EINVAL);
+        }
+        out.push((size, png.to_vec()));
+    }
+    Ok(out)
+}
+
+/// Settings shared by every connection.
+pub struct Config {
+    /// Off: every request is a no-op (other instances' sessions, tests).
+    pub enabled: bool,
+    pub dirs: xdg::Dirs,
+    /// The session instance (`LINUXAPK_INSTANCE`) entries are made for.
+    pub instance: String,
+    /// `Exec` prefix: `linuxapk run` (with the instance), the package and
+    /// `%U` are appended.
+    pub run: Vec<String>,
+}
+
+impl Config {
+    pub fn from_env(enabled: bool) -> Config {
+        let instance = std::env::var("LINUXAPK_INSTANCE").unwrap_or_default();
+        let mut run = linuxapk_core::ops::command_for("linuxapk").unwrap_or_else(|e| {
+            crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
+            let mut v = vec![];
+            if !instance.is_empty() {
+                v = vec!["env".into(), format!("LINUXAPK_INSTANCE={instance}")];
+            }
+            v.push("linuxapk".into());
+            v
+        });
+        run.push("run".into());
+        Config {
+            enabled,
+            dirs: xdg::Dirs::from_env(),
+            instance,
+            run,
+        }
+    }
+
+    /// The existing entry for `pkg`: (ours, its version), or None.
+    fn existing(&self, pkg: &str) -> Option<(bool, Option<String>)> {
+        let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
+        let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
+        let ours = desktop::read_key(&text, "X-LinuxApk-Origin").as_deref() == Some("android")
+            && xdg::exec_instance(&exec) == self.instance;
+        Some((ours, desktop::read_key(&text, "X-LinuxApk-Version")))
+    }
+
+    fn have(&self, pkg: &str, version: &str) -> u8 {
+        if !self.enabled {
+            return have::NOT_OURS;
+        }
+        match self.existing(pkg) {
+            None => have::MISSING,
+            Some((false, _)) => have::NOT_OURS,
+            Some((true, v)) if v.as_deref().unwrap_or("") == version => have::CURRENT,
+            Some((true, _)) => have::MISSING,
+        }
+    }
+}
+
+pub struct AppsService {
+    cfg: Arc<Config>,
+    label: String,
+}
+
+impl AppsService {
+    pub fn new(cfg: Arc<Config>, peer: &Peer) -> AppsService {
+        AppsService {
+            cfg,
+            label: peer.label.clone(),
+        }
+    }
+
+    fn added(
+        &self,
+        pkg: String,
+        version: String,
+        label: String,
+        category: i32,
+        game: bool,
+        icons: Vec<(u32, Vec<u8>)>,
+    ) -> Reply {
+        if self.cfg.have(&pkg, &version) != have::MISSING {
+            return Reply::ok();
+        }
+        let name = validate::label(&label).unwrap_or_else(|| pkg.clone());
+        let mut entry = AppEntry {
+            package: pkg.clone(),
+            name,
+            names: vec![],
+            run: self.cfg.run.clone(),
+            icon: None,
+            version,
+            categories: desktop::categories_for((category >= 0).then_some(category), game),
+            schemes: vec![],
+            web_hosts: vec![],
+            origin: Some("android".into()),
+        };
+        match xdg::install_app(&self.cfg.dirs, &mut entry, &icons) {
+            Ok(p) => {
+                crate::info!("apps: {}: added {} ({})", self.label, pkg, p.display());
+                Reply::ok()
+            }
+            Err(e) => {
+                crate::warn!("apps: {pkg}: {e:#}");
+                Reply::err(-EIO)
+            }
+        }
+    }
+
+    fn removed(&self, pkg: &str) -> Reply {
+        if !self.cfg.enabled {
+            return Reply::ok();
+        }
+        // The app is gone from this instance: drop its entry, whoever wrote
+        // it, unless it belongs to another instance.
+        let Some(text) = std::fs::read_to_string(self.cfg.dirs.app_desktop(pkg)).ok() else {
+            return Reply::ok();
+        };
+        let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
+        if xdg::exec_instance(&exec) != self.cfg.instance {
+            return Reply::ok();
+        }
+        xdg::remove_app(&self.cfg.dirs, pkg);
+        crate::info!("apps: {}: removed {pkg}", self.label);
+        Reply::ok()
+    }
+}
+
+impl Service for AppsService {
+    fn handle(&mut self, t: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
+        let req = match decode(t, body) {
+            Ok(r) => r,
+            Err(e) => return Reply::err(e.status()),
+        };
+        if fds.len() != req.takes_fd() as usize {
+            return Reply::err(-EPROTO);
+        }
+        match req {
+            Request::Have { package, version } => {
+                let mut w = Writer::default();
+                w.u8(self.cfg.have(&package, &version));
+                Reply::with_body(w.into_vec())
+            }
+            Request::Added {
+                package,
+                version,
+                label,
+                category,
+                game,
+                icons_len,
+            } => {
+                let fd = fds.pop().expect("checked above");
+                let b = match blob::read(&fd, icons_len, MAX_ICONS as usize) {
+                    Ok(b) => b,
+                    Err(e) => return Reply::err(e),
+                };
+                let icons = match parse_icons(&b) {
+                    Ok(i) => i,
+                    Err(e) => return Reply::err(e),
+                };
+                self.added(package, version, label, category, game, icons)
+            }
+            Request::Removed { package } => self.removed(&package),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::{HDR, decode_header};
+    use proptest::prelude::*;
+
+    fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
+        let h = decode_header(b)?;
+        decode(h.ty, &b[HDR..])
+    }
+
+    fn png(size: u32) -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        v.extend_from_slice(&size.to_be_bytes());
+        v.extend_from_slice(&size.to_be_bytes());
+        v.extend_from_slice(&[8, 6, 0, 0, 0]);
+        v
+    }
+
+    fn icons(list: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut w = Writer::default();
+        for (s, p) in list {
+            w.u32(*s).u32(p.len() as u32);
+            w.0.extend_from_slice(p);
+        }
+        w.into_vec()
+    }
+
+    #[test]
+    fn roundtrips() {
+        for r in [
+            Request::Have {
+                package: "org.example.app".into(),
+                version: "1.2".into(),
+            },
+            Request::Added {
+                package: "org.example.app".into(),
+                version: "1.2 (beta)".into(),
+                label: "Example ✓".into(),
+                category: 4,
+                game: false,
+                icons_len: 1000,
+            },
+            Request::Removed {
+                package: "org.example.app".into(),
+            },
+        ] {
+            assert_eq!(roundtrip(&encode(1, &r)), Ok(r));
+        }
+        for bad in ["", "noDot", "../x.y", "a.b/c", "1a.b"] {
+            let r = Request::Removed {
+                package: bad.into(),
+            };
+            assert!(roundtrip(&encode(1, &r)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn icons_are_checked() {
+        let ok = icons(&[(48, png(48)), (256, png(256))]);
+        assert_eq!(parse_icons(&ok).unwrap().len(), 2);
+        assert!(parse_icons(&icons(&[(48, png(64))])).is_err()); // size mismatch
+        assert!(parse_icons(&icons(&[(1024, png(1024))])).is_err());
+        assert!(parse_icons(&icons(&[(48, b"not a png".to_vec())])).is_err());
+        assert!(parse_icons(&ok[..ok.len() - 1]).is_err());
+        let many: Vec<_> = (0..9).map(|_| (48, png(48))).collect();
+        assert!(parse_icons(&icons(&many)).is_err());
+    }
+
+    #[test]
+    fn mirror_writes_and_removes_only_its_own_entries() {
+        let tmp = std::env::temp_dir().join(format!("linuxapk-apps-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let cfg = Arc::new(Config {
+            enabled: true,
+            dirs: xdg::Dirs {
+                data: tmp.join("data"),
+                config: tmp.join("config"),
+                cache: tmp.join("cache"),
+            },
+            instance: "t".into(),
+            run: vec![
+                "env".into(),
+                "LINUXAPK_INSTANCE=t".into(),
+                "linuxapk".into(),
+                "run".into(),
+            ],
+        });
+        let peer = Peer::test();
+        let s = AppsService::new(cfg.clone(), &peer);
+        assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
+        let r = s.added(
+            "org.ex.a".into(),
+            "1".into(),
+            "A".into(),
+            -1,
+            false,
+            vec![(48, png(48))],
+        );
+        assert_eq!(r.status, 0);
+        let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
+        assert!(text.contains("X-LinuxApk-Origin=android"), "{text}");
+        assert!(
+            text.contains("Exec=env LINUXAPK_INSTANCE=t linuxapk run org.ex.a %U"),
+            "{text}"
+        );
+        assert!(cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").is_file());
+        assert_eq!(cfg.have("org.ex.a", "1"), have::CURRENT);
+        assert_eq!(cfg.have("org.ex.a", "2"), have::MISSING);
+        // An entry from `linuxapk install` is left alone, and so is another
+        // instance's.
+        let cli =
+            "[Desktop Entry]\nName=B\nExec=env LINUXAPK_INSTANCE=t linuxapk run org.ex.b %U\n";
+        std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
+        assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
+        let other =
+            "[Desktop Entry]\nName=C\nX-LinuxApk-Origin=android\nExec=linuxapk run org.ex.c %U\n";
+        std::fs::write(cfg.dirs.app_desktop("org.ex.c"), other).unwrap();
+        assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
+        s.removed("org.ex.c");
+        assert!(cfg.dirs.app_desktop("org.ex.c").is_file());
+        // Uninstalled here: the entry goes, whoever wrote it.
+        s.removed("org.ex.a");
+        s.removed("org.ex.b");
+        assert!(!cfg.dirs.app_desktop("org.ex.a").exists());
+        assert!(!cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").exists());
+        assert!(!cfg.dirs.app_desktop("org.ex.b").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(20000))]
+
+        #[test]
+        fn decode_arbitrary_bodies(t in 0x0500u16..0x0505, body in proptest::collection::vec(any::<u8>(), 0..200)) {
+            if let Ok(req) = decode(t, &body) {
+                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
+            }
+        }
+
+        #[test]
+        fn icons_never_panic(b in proptest::collection::vec(any::<u8>(), 0..300)) {
+            let _ = parse_icons(&b);
+        }
+    }
+}

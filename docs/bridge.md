@@ -24,7 +24,7 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
 - **Allow-list:** the bridge also checks `SO_PEERCRED` and only accepts the host
   uids of Android root (the host user), `system` (1000) and `audioserver`
   (1041), which are mapped onto the subordinate range. The Linux.apk System app
-  is admitted to the system service only: its uid is assigned at install time,
+  is admitted to the system, documents and apps services only: its uid is assigned at install time,
   so the bridge takes the owner of its data directory
   (`--system-app-dir <data>/data/dev.linuxapk.system`, created by installd) at
   connect time. The app reaches the directory through the `audio` group, which
@@ -41,7 +41,7 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
     `LINUXAPK_TZ`, `LINUXAPK_LOCALE` (BCP 47 list), `LINUXAPK_CLOCK`
     (`12h`/`24h`), `LINUXAPK_TEXT_SCALE`.
   - Standalone:
-    `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR] [--sink NAME] [--null] [-v]`.
+    `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR] [--mirror-apps] [--grants FILE] [--sink NAME] [--null] [-v]`.
 - **Tests:** `cargo test -p linuxapk-bridge` covers the protocol, the ring, a
   live server with hostile clients, and proptest fuzzing of every decoder.
   `cargo run -p linuxapk-bridge --example tone -- SOCKET` plays a tone the way
@@ -145,8 +145,9 @@ service; a client that needs two services opens two connections.
 - A wrong major gets `-EPROTO`, and an unknown service gets `-ENOSYS`. Either
   way the connection is closed.
 - Any other first message gets `-EPROTO` and also closes it.
-- Service ids: 1 audio, 2 display, 3 system. A uid admitted to one service only
-  (see "Allow-list") that asks for another gets `-EACCES` and is closed.
+- Service ids: 1 audio, 2 display, 3 system, 4 documents, 5 apps. A uid
+  admitted to some services only (see "Allow-list") that asks for another gets
+  `-EACCES` and is closed.
 
 ### Audio service (id 1)
 
@@ -495,3 +496,109 @@ WAYLAND_DISPLAY=$N/rt/lapk-integ DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) session/
   `$N/data/applications`, `mimeapps.list` in `$N/config`) logs what OpenURI
   opens instead of starting a real browser.
 - A null sink (`LINUXAPK_AUDIO_SINK`) keeps media tests silent.
+
+### Documents service (id 4)
+
+Host files and folders the user picks in the desktop's file chooser, for the
+Linux.apk System app's document picker (`documents/PickerActivity.kt`) and its
+DocumentsProvider (`HostDocumentsProvider.kt`, authority
+`dev.linuxapk.system.documents`). Code: `bridge/src/services/documents/`. Only
+the system app's uid may open it (`--system-app-dir`).
+
+The bridge is the only side that sees host paths. Android gets opaque **grant**
+ids (u64) and file descriptors:
+
+- A grant is made only from a FileChooser portal result, so Android can reach
+  only what the user picked. Folder grants cover everything beneath the folder.
+- Grants persist in `--grants FILE` (the session passes
+  `out/run[-<instance>]/documents.grants`), so persisted URI permissions keep
+  working across restarts. At most 4096 are kept; FORGET drops one.
+- Paths are relative to a folder grant: `/`-separated names, none empty, `.` or
+  `..`, at most 400 bytes. They are opened with
+  `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` from the folder's fd, so
+  `..`, absolute or escaping symlinks and `/proc` magic links can't leave it.
+- Only regular files are opened: the type is checked through an `O_PATH` fd
+  first (a FIFO would block), the real open is non-blocking and must be the same
+  inode. Writes, creates, deletes and renames need a grant made for writing;
+  deletes and renames only apply beneath a folder grant (never to the picked
+  file or folder itself), and folders are deleted only when empty.
+
+| Type     | Message | Body                                                                                                                                                                                                   | Reply                                                                                                   |
+| -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `0x0401` | PICK    | `u32 request` (client's id), `u8 mode` (1 open, 2 open several, 3 save, 4 folder), `u8 write`, `u32 window` (Android display id, 0 none), name `title`, name `suggested`, `u8 n` (≤ 16) + n MIME names | (none) at once; the result comes as events. `-EBUSY` with 4 picks open, `-ENOSYS` without a session bus |
+| `0x0402` | OPEN    | `u64 grant`, `u8 mode` (1 read, 2 write+truncate, 3 read-write, 4 append), path                                                                                                                        | fd: the open file                                                                                       |
+| `0x0403` | STAT    | `u64 grant`, path                                                                                                                                                                                      | meta                                                                                                    |
+| `0x0404` | LIST    | `u64 grant`, path (a folder)                                                                                                                                                                           | `u32 len`, `u32 count`; fd: sealed memfd with `count` metas (regular files and folders, ≤ 10000)        |
+| `0x0405` | CREATE  | `u64 grant`, path (the folder), `u8 kind` (0 file, 1 folder), file name                                                                                                                                | `u16 len` + the name used (`name (1).ext` if taken)                                                     |
+| `0x0406` | DELETE  | `u64 grant`, path                                                                                                                                                                                      | (none)                                                                                                  |
+| `0x0407` | RENAME  | `u64 grant`, path, new file name (same folder, never replacing)                                                                                                                                        | (none)                                                                                                  |
+| `0x0408` | FORGET  | `u64 grant`                                                                                                                                                                                            | (none)                                                                                                  |
+
+Paths and file names are `u16 len` + UTF-8 (paths ≤ 400 bytes, names ≤ 255, no
+NUL or `/` in a name). A meta is `u8 kind`, `u64 size`, `i64 mtime_ms`,
+`u8 writable`, `u16 len` + name.
+
+| Event    | Message   | Body                                                                                       |
+| -------- | --------- | ------------------------------------------------------------------------------------------ |
+| `0x4401` | PICKED    | `u32 request`, `u64 grant`, `u8 kind`, `u8 writable`, name (display name), one per item    |
+| `0x4402` | PICK_DONE | `u32 request`, `i32 status` (0, `-ECANCELED` when the user cancelled, `-EIO`), `u32 count` |
+
+The dialog is the FileChooser portal's `OpenFile` (with `multiple` or
+`directory`) or `SaveFile` (with `current_name`), modal, with a filter for the
+app's MIME types plus "All files". Its parent is the app's window, exported
+through `zxdg_exporter_v2` by the display service (`wayland:<handle>`). A saved
+file is created empty at once, as Android's `CREATE_DOCUMENT` expects.
+
+Proof (2026-10-27, nested KWin 6.7 with the KDE portal, CI image): in Editor
+(`org.billthefarmer.editor`, installed from F-Droid), "Storage" in its open
+dialog sent `OPEN_DOCUMENT`; KDE's "Open File" dialog came up centered on the
+Editor window, modal over it (parent `wayland:<handle>`). Picking a host
+`hello.txt` returned
+`content://dev.linuxapk.system.documents/document/52a263e898716b97`, Editor
+showed the file, and Ctrl+S wrote the edit back to the host file. Unknown grant
+ids and `..` paths are refused (`cargo test -p linuxapk-bridge documents` covers
+symlinks out of a folder, FIFOs and writes without a write grant).
+
+- **Testing:** in a fully isolated nested desktop ("Testing on a desktop you
+  can't disturb" above). The portal must be activated on the private bus with
+  the nested `WAYLAND_DISPLAY`, or its dialog opens on the host desktop.
+
+### Apps service (id 5)
+
+Apps installed or removed inside Android (an app store, PackageInstaller,
+`pm install`) get or lose their desktop entry and icons. The system app
+(`apps/AppMirrorFeature.kt`) reports launchable, non-system packages; the bridge
+writes the entries with `linuxapk-core` (`xdg::install_app`), the same code as
+`linuxapk install` (`bridge/src/services/apps.rs`).
+
+| Type     | Message | Body                                                                                                      | Reply                                                                                                  |
+| -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `0x0501` | HAVE    | name package, name version                                                                                | `u8`: 0 missing or outdated (send ADDED), 1 current, 2 not ours (leave it)                             |
+| `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 len`; fd: sealed memfd | (none). The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all) |
+| `0x0503` | REMOVED | name package                                                                                              | (none)                                                                                                 |
+
+- **Who owns an entry:** entries written here carry `X-LinuxApk-Origin=android`.
+  An entry from `linuxapk install` (which knows more, such as URL schemes) is
+  never replaced, and an entry whose `Exec` names another session instance is
+  never touched. An uninstall inside Android removes this instance's entry,
+  whoever wrote it.
+- **When:** at each connection the system app checks every launchable user app
+  (HAVE), so installs made while the bridge was away catch up; then it follows
+  `PACKAGE_ADDED`/`REPLACED`/`CHANGED`/`FULLY_REMOVED`.
+- **Where:** `$XDG_DATA_HOME` (`applications/dev.linuxapk.<pkg>.desktop`,
+  `icons/hicolor/<n>x<n>/apps/`). `Exec` is `linuxapk run` (with the session
+  instance, as `linuxapk install` writes it).
+- **Off by default except in the main session:** the bridge mirrors only with
+  `--mirror-apps`, which the launcher passes for the default instance or with
+  `LINUXAPK_MIRROR_APPS=1` (`0` turns it off), so lanes and the compat runner
+  don't fill the user's app menu. Otherwise every request succeeds and does
+  nothing.
+
+Proof (2026-10-27, nested KWin with plasmashell, CI image, instance with
+`LINUXAPK_MIRROR_APPS=1` and a test `XDG_DATA_HOME`): `pm install` of F-Droid
+wrote `dev.linuxapk.org.fdroid.fdroid.desktop` and its icons. In F-Droid,
+Install on Editor showed PackageInstaller's "Install this app?" inside F-Droid's
+window (the install-from-this-source app op was granted beforehand); confirming
+it wrote Editor's entry, which Kickoff listed as "Editor — Android app
+(org.billthefarmer.editor)" and launched (`linuxapk run`) into a window of its
+own. `pm uninstall` removed the entry and its icons.

@@ -59,6 +59,18 @@ pub struct Peer {
     pub label: String,
 }
 
+impl Peer {
+    /// A peer for unit tests.
+    pub fn test() -> Peer {
+        Peer {
+            uid: 0,
+            pid: 0,
+            name: "test".into(),
+            label: "test".into(),
+        }
+    }
+}
+
 /// Sends unsolicited events (types `wire::EVENT_MIN..=EVENT_MAX`, tag 0) to
 /// one connection. Cheap to clone; a service can hand it to its own threads.
 /// Each event is one packet, so events and replies never interleave

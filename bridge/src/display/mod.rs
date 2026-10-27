@@ -20,6 +20,12 @@ use crate::wire::errno::*;
 use proto::Request;
 use wl::Cmd;
 
+/// The xdg-foreign handle of the window showing Android display `window`, if
+/// the compositor exported it (for portal dialogs: `wayland:<handle>`).
+pub fn foreign_handle(window: u32) -> Option<String> {
+    wl::foreign_handles(window)
+}
+
 /// Per-connection caps.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {

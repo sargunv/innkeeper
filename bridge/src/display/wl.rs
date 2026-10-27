@@ -56,6 +56,7 @@ use super::ime;
 use super::proto::{BufferSpec, WindowSpec, event, ty};
 use crate::server::Events;
 
+mod foreign;
 mod text_input;
 
 /// Work for the Wayland thread.
@@ -98,6 +99,9 @@ struct Win {
     window: Window,
     viewport: Option<WpViewport>,
     fractional: Option<WpFractionalScaleV1>,
+    /// xdg-foreign export, for portal dialogs parented to the window.
+    exported:
+        Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exported_v2::ZxdgExportedV2>,
     frame: Option<AdwaitaFrame<State>>,
     title: String,
     app_id: String,
@@ -124,6 +128,8 @@ struct State {
     viewporter: Option<WpViewporter>,
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
+    exporter:
+        Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2>,
     qh: QueueHandle<State>,
     events: Events,
 
@@ -619,6 +625,7 @@ impl State {
             .fractional
             .as_ref()
             .map(|f| f.get_fractional_scale(window.wl_surface(), &qh, ScaleOf(s.window)));
+        let exported = foreign::export(self.exporter.as_ref(), window.wl_surface(), s.window, &qh);
         window.commit();
         crate::info!(
             "display: window {} \"{}\" ({}) {}x{}",
@@ -635,6 +642,7 @@ impl State {
                 window,
                 viewport,
                 fractional,
+                exported,
                 frame: None,
                 title: s.title,
                 app_id: s.app_id,
@@ -660,6 +668,7 @@ impl State {
         if let Some(f) = &w.fractional {
             f.destroy();
         }
+        foreign::forget(id, w.exported.clone());
         // Buffers of this window go too; busy ones were in use by the
         // compositor, which keeps its own reference.
         let gone: Vec<u32> = self
@@ -1130,6 +1139,15 @@ where
     globals.bind(qh, 1..=max, Unit).ok()
 }
 
+pub(super) fn foreign_handles(window: u32) -> Option<String> {
+    foreign::HANDLES
+        .lock()
+        .unwrap()
+        .as_ref()?
+        .get(&window)
+        .cloned()
+}
+
 /// Runs the Wayland side until [`Cmd::Quit`] or the compositor goes away.
 pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<()> {
     let (globals, queue) = registry_queue_init::<State>(&conn).context("registry")?;
@@ -1149,6 +1167,7 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<(
         viewporter: bind_opt(&globals, &qh, 1),
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
+        exporter: bind_opt(&globals, &qh, 1),
         qh: qh.clone(),
         events,
         windows: HashMap::new(),

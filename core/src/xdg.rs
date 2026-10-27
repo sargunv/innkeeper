@@ -446,6 +446,7 @@ mod tests {
             categories: vec!["Utility".into()],
             schemes: vec![],
             web_hosts: vec![],
+            origin: None,
         };
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());

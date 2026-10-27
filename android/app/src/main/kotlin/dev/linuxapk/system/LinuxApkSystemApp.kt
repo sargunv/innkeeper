@@ -3,6 +3,7 @@ package dev.linuxapk.system
 
 import android.app.Application
 import android.util.Log
+import dev.linuxapk.system.apps.AppMirrorFeature
 import dev.linuxapk.system.ime.ImeFeature
 import dev.linuxapk.system.input.InputBridge
 import dev.linuxapk.system.input.InputFeature
@@ -36,7 +37,7 @@ class LinuxApkSystemApp : Application() {
     val wm = WindowManagerFeature(this) { input.bridge }
     // Desktop integration over the host bridge (docs/bridge.md, "System service").
     val integration = IntegrationFeature(this)
-    for (f in listOf<Feature>(input, wm, ImeFeature(this), integration)) {
+    for (f in listOf<Feature>(input, wm, ImeFeature(this), integration, AppMirrorFeature(this))) {
       try {
         f.start()
         features += f

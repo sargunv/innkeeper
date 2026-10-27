@@ -23,6 +23,13 @@ pub mod service {
     /// clipboard, links, media (`services::system`, types 0x0300..=0x03ff,
     /// events 0x4300..=0x43ff).
     pub const SYSTEM: u32 = 3;
+    /// Host files the user picks for the system app's document picker and
+    /// provider (`services::documents`, types 0x0400..=0x04ff, events
+    /// 0x4400..=0x44ff).
+    pub const DOCUMENTS: u32 = 4;
+    /// Apps installed inside Android, mirrored to desktop entries
+    /// (`services::apps`, types 0x0500..=0x05ff).
+    pub const APPS: u32 = 5;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

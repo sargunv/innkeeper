@@ -32,9 +32,14 @@ pub mod errno {
     pub const EAGAIN: i32 = 11;
     pub const ENOMEM: i32 = 12;
     pub const EBUSY: i32 = 16;
+    pub const EEXIST: i32 = 17;
+    pub const EXDEV: i32 = 18;
+    pub const ENOTDIR: i32 = 20;
     pub const EINVAL: i32 = 22;
+    pub const ENAMETOOLONG: i32 = 36;
     pub const ENOSYS: i32 = 38;
     pub const EPROTO: i32 = 71;
+    pub const ECANCELED: i32 = 125;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +177,9 @@ impl<'a> Reader<'a> {
             return Err(DecodeError::Invalid("control character in name"));
         }
         Ok(s.to_owned())
+    }
+    pub fn is_empty(&self) -> bool {
+        self.b.is_empty()
     }
     /// Fails unless the whole body was consumed.
     pub fn end(&self) -> Result<(), DecodeError> {

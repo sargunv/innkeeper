@@ -1,11 +1,14 @@
 //! `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR]
-//!                  [--sink NAME] [--null] [-v]`
+//!                  [--mirror-apps] [--grants FILE] [--sink NAME] [--null] [-v]`
 //!
 //! Listens on PATH for clients from the Android session. Only the given host
 //! uids may connect (default: our own uid). Audio plays to the desktop's
 //! default PipeWire sink, or `--sink NAME`; `--null` plays nowhere.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
-//! seen from the host) admits the uid that owns DIR to the system service.
+//! seen from the host) admits the uid that owns DIR to the system, documents
+//! and apps services. `--mirror-apps` turns on desktop entries for apps
+//! installed inside Android (`$XDG_DATA_HOME`). `--grants FILE` keeps the
+//! documents service's grants (host files the user picked) across restarts.
 //! `-v` (or `LINUXAPK_BRIDGE_VERBOSE=1`) logs per-stream statistics.
 
 use std::path::PathBuf;
@@ -27,6 +30,8 @@ fn main() -> Result<()> {
     let mut sink = None;
     let mut null = false;
     let mut system_app_dir: Option<PathBuf> = None;
+    let mut mirror_apps = false;
+    let mut grants: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -39,6 +44,8 @@ fn main() -> Result<()> {
             ),
             "--sink" => sink = Some(args.next().context("--sink needs a name")?),
             "--null" => null = true,
+            "--mirror-apps" => mirror_apps = true,
+            "--grants" => grants = Some(args.next().context("--grants needs a path")?.into()),
             "--system-app-dir" => {
                 system_app_dir = Some(args.next().context("--system-app-dir needs a path")?.into())
             }
@@ -104,17 +111,41 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         })?;
+    // Host files the user picks for Android (docs/bridge.md, "Documents
+    // service"); grants persist in --grants FILE.
+    let store = linuxapk_bridge::services::documents::Store::new(grants);
+    services.register(service::DOCUMENTS, "documents", move |peer, events| {
+        Ok(Box::new(
+            linuxapk_bridge::services::documents::DocumentsService::new(
+                store.clone(),
+                peer,
+                events,
+            ),
+        ))
+    });
+    // Apps installed inside Android get desktop entries (docs/bridge.md,
+    // "Apps service"); only with --mirror-apps (the default session).
+    let apps = Arc::new(linuxapk_bridge::services::apps::Config::from_env(
+        mirror_apps,
+    ));
+    linuxapk_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
+    services.register(service::APPS, "apps", move |peer, _events| {
+        Ok(Box::new(linuxapk_bridge::services::apps::AppsService::new(
+            apps.clone(),
+            peer,
+        )))
+    });
     let mut service_uids: Vec<(u32, UidCheck)> = Vec::new();
     if let Some(dir) = system_app_dir {
         // The system app's uid is assigned at install time; the owner of its
         // data directory (created by installd) is the source of truth.
-        service_uids.push((
-            service::SYSTEM,
-            Arc::new(move |uid| {
-                use std::os::unix::fs::MetadataExt;
-                std::fs::metadata(&dir).is_ok_and(|m| m.uid() == uid)
-            }),
-        ));
+        let check: UidCheck = Arc::new(move |uid| {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&dir).is_ok_and(|m| m.uid() == uid)
+        });
+        for id in [service::SYSTEM, service::DOCUMENTS, service::APPS] {
+            service_uids.push((id, check.clone()));
+        }
     }
     let cfg = Config {
         allow_uids: allow,

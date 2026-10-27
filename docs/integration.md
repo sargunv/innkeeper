@@ -785,7 +785,13 @@ ubinder supervisor work.
 
 ## Files and content
 
-- [ ] **SAF picker to the FileChooser portal** · todo · P0 · sysapp + bridge
+- [x] **SAF picker to the FileChooser portal** · done · P0 · sysapp + bridge
+  - Now: done (integb). `documents/PickerActivity.kt` (priority 200) asks the
+    bridge's documents service, which opens the FileChooser portal parented to
+    the app's window (xdg-foreign) and answers with grants; the results are
+    `content://dev.linuxapk.system.documents/…` URIs. Without the bridge the
+    request goes on to DocumentsUI. See
+    [bridge.md](bridge.md#documents-service-id-4).
   - Linux: `org.freedesktop.portal.FileChooser` `OpenFile` and `SaveFile`, with
     filters from MIME types. Parent window through `xdg_foreign`
     (`zxdg_exporter_v2`), as Nucleus `share` does. Mac.apk:
@@ -797,13 +803,19 @@ ubinder supervisor work.
     DocumentsProvider (next row), with grant flags. Keep DocumentsUI reachable
     as a setting.
   - Test: Markor (open/save), AnkiDroid import.
-- [ ] **`ACTION_OPEN_DOCUMENT_TREE`** · todo · P1 · sysapp + bridge
+- [x] **`ACTION_OPEN_DOCUMENT_TREE`** · done · P1 · sysapp + bridge
+  - Now: done (integb): a folder grant; the bridge lists, opens, creates,
+    renames and deletes beneath it with `openat2(RESOLVE_BENEATH)`; grants
+    persist, so `takePersistableUriPermission` works across restarts.
   - Linux: FileChooser with `directory: true`.
   - Android: a tree URI on our provider rooted at the chosen folder.
     `takePersistableUriPermission` works on our provider. The bridge persists
     the host path through the Documents portal or its own grant store.
   - Test: Markor (notebook folder), Syncthing-Fork.
-- [ ] **DocumentsProvider over host folders** · todo · P1 · sysapp + bridge
+- [ ] **DocumentsProvider over host folders** · partial · P1 · sysapp + bridge
+  - Now: `HostDocumentsProvider` serves what the user picked (files and folder
+    trees), with no roots: nothing is browsable without a pick. Left: optional
+    roots for XDG user folders.
   - Android: `HostDocumentsProvider` in the system app (`MANAGE_DOCUMENTS`):
     `queryRoots`, `queryChildDocuments` and `openDocument`. The bridge answers
     with listings and opened fds (`ParcelFileDescriptor` from the passed fd),
@@ -1107,6 +1119,10 @@ ubinder supervisor work.
     providers (`config_webview_packages.xml` overlay, e.g. Vanadium or Bromite
     builds) for security fixes between image releases.
 - [ ] **App stores and installs** · partial · P0 · sysapp + cli + bridge
+  - Now (integb): installs and uninstalls made inside Android get or lose their
+    desktop entry and icons (`apps/AppMirrorFeature.kt`, the bridge's apps
+    service, written with `linuxapk-core`). See
+    [bridge.md](bridge.md#apps-service-id-5).
   - Now: F-Droid and Aurora run (`COMPATIBILITY.md`), but installs from them
     haven't been tested (the M3 target in `docs/compat-triage.md`).
   - Android: PackageInstaller sessions show the confirmation dialog

@@ -11,8 +11,10 @@
 //!
 //! See `docs/bridge.md`, "System service".
 
+pub mod apps;
 pub mod blob;
 pub mod clipboard;
+pub mod documents;
 pub mod mpris;
 pub mod notify;
 pub mod openuri;

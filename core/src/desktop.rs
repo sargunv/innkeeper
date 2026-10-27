@@ -106,6 +106,9 @@ pub struct AppEntry {
     /// Hosts of the app's verified-style `http(s)` deep links. Metadata only:
     /// `http`/`https` are never declared for an app.
     pub web_hosts: Vec<String>,
+    /// Who wrote the entry, as `X-LinuxApk-Origin` (`android`: the bridge, for
+    /// an app installed inside Android). None: `linuxapk install`.
+    pub origin: Option<String>,
 }
 
 impl AppEntry {
@@ -150,6 +153,9 @@ impl AppEntry {
         }
         if !self.web_hosts.is_empty() {
             writeln!(s, "X-LinuxApk-Web-Hosts={}", list(&self.web_hosts)?)?;
+        }
+        if let Some(o) = &self.origin {
+            writeln!(s, "X-LinuxApk-Origin={}", escape_value(o)?)?;
         }
         Ok(s)
     }
@@ -316,6 +322,7 @@ mod tests {
             categories: vec!["Utility".into()],
             schemes: vec!["wikipedia".into()],
             web_hosts: vec!["*.wikipedia.org".into()],
+            origin: None,
         }
     }
 

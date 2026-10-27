@@ -28,6 +28,8 @@
 #                default: the desktop's default output),
 #              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log),
 #              LINUXAPK_BINDER (ubinder (default) | kernel),
+#              LINUXAPK_MIRROR_APPS (1/0: desktop entries for apps installed
+#                inside Android; default on for the main session only),
 #              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
 #                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
 #                emulator    SDK emulator image in out/img (tools/extract-image.sh)
@@ -261,6 +263,11 @@ start() {
   for v in DBUS_SESSION_BUS_ADDRESS LINUXAPK_TZ LINUXAPK_LOCALE LINUXAPK_CLOCK LINUXAPK_TEXT_SCALE; do
     [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
   done
+  # Desktop entries for apps installed inside Android (docs/bridge.md, "Apps
+  # service"): where they go, and whether to write them.
+  for v in XDG_DATA_HOME LINUXAPK_MIRROR_APPS LINUXAPK_SESSION; do
+    [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
+  done
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
@@ -300,8 +307,12 @@ start_bridge() {
   mkdir -p "$run/bridge"
   # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1.
   local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)" --allow-uid $((base + 999))
-  --allow-uid $((base + 1040)) --system-app-dir "$data/data/dev.linuxapk.system"
+  --allow-uid $((base + 1040)) --system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
   ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
+  # Apps installed inside Android get desktop entries: in the default session,
+  # or in any instance with LINUXAPK_MIRROR_APPS=1 (0 turns it off).
+  local mirror=${LINUXAPK_MIRROR_APPS:-}
+  [[ $mirror == 1 || (-z $inst && $mirror != 0) ]] && args+=(--mirror-apps)
   while :; do
     # The display service (windows, input) and the clipboard connect to the
     # host compositor.

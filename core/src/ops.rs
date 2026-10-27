@@ -314,6 +314,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         categories: desktop::categories_for(man.app_category.or(info.category), man.is_game),
         schemes: man.schemes.clone(),
         web_hosts: man.web_hosts.clone(),
+        origin: None,
     };
     let path = xdg::install_app(&dirs, &mut entry, &icons)?;
     Ok(Installed {
