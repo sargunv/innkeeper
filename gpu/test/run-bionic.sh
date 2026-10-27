@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mount --make-rprivate /
-R=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/bionic-root.XXXXXX")
+mkdir -p "$out/gpu/run"; R=$(mktemp -d "$out/gpu/run/root.XXXXXX")
 mount -t tmpfs -o mode=0755 root "$R"
 mkdir -p "$R"/{system,vendor,apex,linkerconfig,dev,proc,sys,data/gputest,tmp,product,system_ext,odm}
 
@@ -55,9 +55,29 @@ for n in null zero full random urandom udmabuf; do
   [[ -e /dev/$n ]] || continue
   touch "$R/dev/$n"; mount --bind "/dev/$n" "$R/dev/$n"
 done
-mkdir -p "$R/dev/dri"; mount --rbind /dev/dri "$R/dev/dri"
+# Render nodes only (no card*/KMS).
+mkdir -p "$R/dev/dri"
+for n in /dev/dri/renderD*; do
+  [[ -e $n ]] || continue
+  touch "$R$n"; mount --bind "$n" "$R$n"
+done
 mount -t proc proc "$R/proc"
-mount --rbind /sys "$R/sys"
+# Host safety (docs/NOTES.md): never expose host /sys wholesale. A tmpfs /sys
+# with read-only binds of what libdrm/Mesa read: each render node's PCI
+# device dir (vendor/device/revision/uevent), /sys/dev/char links to them,
+# and CPU topology.
+mount -t tmpfs -o mode=0755 sys "$R/sys"
+mkdir -p "$R/sys/dev/char"
+for n in /dev/dri/renderD*; do
+  [[ -e $n ]] || continue
+  majmin=$(printf '%d:%d' 0x$(stat -c %t "$n") 0x$(stat -c %T "$n"))
+  node=$(readlink -f "/sys/dev/char/$majmin")      # .../<pci dev>/drm/renderD128
+  pcidev=${node%/drm/*}
+  mkdir -p "$R$pcidev"; ro_bind "$pcidev" "$R$pcidev"
+  ln -s "$node" "$R/sys/dev/char/$majmin"
+done
+mkdir -p "$R/sys/devices/system/cpu"; ro_bind /sys/devices/system/cpu "$R/sys/devices/system/cpu"
+mount --rbind "$R/sys" "$R/sys"; mount -o remount,bind,ro "$R/sys"
 # Top-level symlinks from the system-as-root image (/bin, /etc, ...).
 for e in "$out/img/system"/*; do
   n=$(basename "$e")
