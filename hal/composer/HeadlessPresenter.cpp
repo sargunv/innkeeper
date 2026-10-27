@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#define LOG_TAG "linuxapk-hwc"
+#include <pthread.h>
+#include <string.h>
+
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "FrameDumper.h"
+#include "Presenter.h"
+#include "Properties.h"
+#include "linuxapk/log.h"
+
+namespace linuxapk::hwc {
+
+// Encodes dumps off the present path: present() copies the pixels (a few ms)
+// and the worker compresses/writes them. Frames are dropped while it is busy.
+struct HeadlessPresenter::Worker {
+    FrameDumper* dumper;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool stop = false;
+    bool pending = false;
+    std::string prefix;
+    std::vector<uint8_t> pixels;
+    FrameView view{};
+    std::thread thread;
+
+    explicit Worker(FrameDumper* d) : dumper(d) {
+        thread = std::thread([this] {
+            pthread_setname_np(pthread_self(), "hwc-dump");
+            std::unique_lock lock(mutex);
+            while (true) {
+                cv.wait(lock, [this] { return stop || pending; });
+                if (stop) return;
+                FrameView v = view;
+                std::string p = prefix;
+                lock.unlock();
+                dumper->dump(p, v);
+                lock.lock();
+                pending = false;
+            }
+        });
+    }
+    ~Worker() {
+        {
+            std::lock_guard lock(mutex);
+            stop = true;
+        }
+        cv.notify_all();
+        thread.join();
+    }
+    bool submit(const std::string& pfx, const FrameView& src) {
+        std::lock_guard lock(mutex);
+        if (pending) return false;
+        const size_t rowBytes = src.strideBytes;
+        pixels.resize(rowBytes * src.height);
+        memcpy(pixels.data(), src.data, pixels.size());
+        view = src;
+        view.data = pixels.data();
+        prefix = pfx;
+        pending = true;
+        cv.notify_all();
+        return true;
+    }
+};
+
+HeadlessPresenter::HeadlessPresenter(std::unique_ptr<FrameDumper> dumper)
+    : mDumper(std::move(dumper)) {
+    if (mDumper && mDumper->enabled()) mWorker = std::make_unique<Worker>(mDumper.get());
+}
+
+HeadlessPresenter::~HeadlessPresenter() = default;
+
+Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
+    mPresented++;
+    const int64_t now = nowNs();
+    if (now - mLastLogNs > 10'000'000'000) {
+        LOGI("display %lld: %llu frames presented (headless)", (long long)frame.displayId,
+             (unsigned long long)mPresented);
+        mLastLogNs = now;
+    }
+    ClientTargetState* ct = frame.clientTarget;
+    if (mWorker && ct && ct->buffer && mDumper->shouldDump(now)) {
+        const BufferHandle* bh = ct->buffer->info();
+        const uint8_t* base = ct->buffer->map();
+        if (bh && base) {
+            // The client target is complete once its acquire fence signals.
+            if (!waitFence(ct->acquireFence.get(), 1000)) {
+                LOGW("client target fence did not signal; dumping anyway");
+            }
+            FrameView v{base + bh->planes[0].offset.get(), bh->width, bh->height,
+                        bh->planes[0].stride, bh->resolvedFormat};
+            char prefix[32];
+            snprintf(prefix, sizeof prefix, "display%lld", (long long)frame.displayId);
+            mWorker->submit(prefix, v);
+        }
+    }
+    // Nothing holds the buffers after we return: no present/release fences.
+    out->presentFence.reset();
+    return Error::None;
+}
+
+std::unique_ptr<Presenter> createPresenter(int64_t displayId) {
+    std::string backend = getProperty("vendor.linuxapk.hwc.backend", "headless");
+    if (backend != "headless") {
+        LOGW("backend '%s' not available; using headless", backend.c_str());
+    }
+    auto dumper = std::make_unique<FrameDumper>(FrameDumper::configFromProperties());
+    return std::make_unique<HeadlessPresenter>(std::move(dumper));
+}
+
+}  // namespace linuxapk::hwc

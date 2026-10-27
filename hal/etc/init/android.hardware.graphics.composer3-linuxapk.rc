@@ -1,0 +1,13 @@
+service vendor.hwcomposer-3-linuxapk /vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk
+    class hal animation
+    interface aidl android.hardware.graphics.composer3.IComposer/default
+    user system
+    group graphics
+    capabilities SYS_NICE
+    onrestart restart surfaceflinger
+    task_profiles ServiceCapacityLow
+
+# Frame dumps: setprop vendor.linuxapk.hwc.dump.dir /data/vendor/linuxapk/frames
+on post-fs-data
+    mkdir /data/vendor/linuxapk 0775 system graphics
+    mkdir /data/vendor/linuxapk/frames 0775 system graphics
