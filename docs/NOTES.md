@@ -103,6 +103,12 @@ Rules:
   streams seat input as text on `/dev/socket/linuxapk-input`. Session lane: bind
   the host socket at `/dev/socket/wayland-host` and set the property.
 
+- 2026-10-27 (input): "Linux.apk System" (`android/`, Kotlin, platform-signed
+  persistent priv-app `dev.linuxapk.system` in `out/system_ext-overlay`) turns
+  the composer's input stream into injected mouse/touch/key events; its stream
+  passes the live InputDispatcher's verifier. End-to-end test waits for
+  `boot_completed` (`android/e2e/e2e.sh`). See [input.md](input.md).
+
 ## Next
 
 - M0: extract the prebuilt image, then boot servicemanager, system_server and

@@ -39,10 +39,14 @@ class InputBridge(
   }
 
   private fun run() {
-    try {
-      Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
-    } catch (e: SecurityException) {
-      Log.w(TAG, "no urgent-display priority: $e")
+    // Input latency matters; negative nice values need RLIMIT_NICE, which the rootless session
+    // may not grant, so take what we can get.
+    for (prio in
+      intArrayOf(Process.THREAD_PRIORITY_URGENT_DISPLAY, Process.THREAD_PRIORITY_DISPLAY)) {
+      try {
+        Process.setThreadPriority(prio)
+        break
+      } catch (_: SecurityException) {}
     }
     var backoff = MIN_BACKOFF_MS
     var lastError: String? = null

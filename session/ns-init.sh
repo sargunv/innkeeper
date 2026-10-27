@@ -51,7 +51,7 @@ layer_mount() {
 # --- partitions -------------------------------------------------------------
 layer_mount "$R/system" "$ovl/system" "$out/session/overlay/system" "$img/system/system"
 layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
-layer_mount "$R/system_ext" "$ovl/system_ext" "$out/session/overlay/system_ext" "$img/system_ext"
+layer_mount "$R/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
 layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
 layer_mount "$R/odm" "$ovl/odm" "$out/session/overlay/odm" "$img/vendor/odm"
 [[ -d $img/system_dlkm ]] && layer_mount "$R/system_dlkm" "$img/system_dlkm"

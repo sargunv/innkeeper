@@ -41,8 +41,9 @@ clones init into nested user, mount, pid, cgroup, net, ipc and uts namespaces
 with an identity map, so every inherited mount is locked (bubblewrap technique).
 `/system`, `/vendor`, `/system_ext`, `/product`, `/odm` and the staged APEX tree
 are read-only overlayfs mounts: repo overrides, then the display/GPU lanes'
-`out/vendor-overlay` (vendor only), then generated files, then the image.
-Nothing in `out/img` is modified.
+`out/vendor-overlay` (vendor only) and the input lane's `out/system_ext-overlay`
+(system_ext only), then generated files, then the image. Nothing in `out/img` is
+modified.
 
 Decisions:
 

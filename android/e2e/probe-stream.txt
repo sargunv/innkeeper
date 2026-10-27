@@ -1,0 +1,36 @@
+hello 1 1280 800
+window 1280 800 1.000
+pointer_enter 640.00 400.00
+pointer_frame
+pointer_motion 1000 650.50 410.25
+pointer_frame
+pointer_button 1010 272 1
+pointer_frame
+pointer_motion 1020 660.00 420.00
+pointer_frame
+pointer_button 1030 272 0
+pointer_frame
+pointer_axis_value120 0 120
+pointer_axis 1040 0 15.000
+pointer_frame
+key 1050 42 1
+modifiers 1 0 0 0
+key 1060 30 1
+key 1070 30 0
+key 1080 42 0
+modifiers 0 0 0 0
+key 1090 1 1
+key 1095 1 0
+touch_down 1100 4 500.00 400.00
+touch_frame
+touch_down 1110 5 600.00 450.00
+touch_frame
+touch_motion 1120 4 510.00 410.00
+touch_motion 1120 5 610.00 460.00
+touch_frame
+touch_up 1130 4
+touch_frame
+touch_up 1140 5
+touch_frame
+pointer_leave
+pointer_frame
