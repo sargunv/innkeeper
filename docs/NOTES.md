@@ -42,8 +42,11 @@ current state, decisions, next steps. Put history in git.
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
-- image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17`, build
-  container `aosp/build-shell.sh`.
+- image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17` runs as
+  systemd user unit `linuxapk-aosp-sync` (`~/aosp/sync-loop.sh`), build container
+  `aosp/build-shell.sh`.
+- Resilience: the host app can restart and kill agents and background shells.
+  Long jobs run under `systemd-run --user`; lanes push WIP to `lane/<name>`.
 
 ## Current state
 
