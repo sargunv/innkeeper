@@ -89,7 +89,7 @@ accepted and never fire. Priority inheritance is ignored too.
 ```sh
 cargo test -p ubinder                                   # state machine + fuzz smoke
 cargo run --release -p ubinder --bin ubinder-fuzz -- 250000 <seed>
-ubinder/tests/run-binder-tests.sh [--ubinder] [TEST[:FILTER] ...]
+ubinder/tests/run-binder-tests.sh [TEST[:FILTER] ...]          # broker, then kernel
 LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
 ```
 
@@ -121,8 +121,7 @@ LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
   bridge in a burst before `app_process` was up, so the tap gap became injection
   timing (41 vs 55 ms, against GestureDetector's 40 ms minimum).
   `compat/gesture.sh` now waits for the bridge; the double tap then passed 4/4.
-- **Latency**
-  (`UBINDER_TEST_ARGS=... run-binder-tests.sh [--ubinder] binderThroughputTest`;
+- **Latency** (`UBINDER_TEST_ARGS=... run-binder-tests.sh binderThroughputTest`;
   median per transaction):
 
   | workload                          | kernel         | ubinder        |
