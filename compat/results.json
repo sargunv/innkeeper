@@ -1,8 +1,8 @@
 {
   "date": "2026-10-27",
   "build": "generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys",
-  "backend": "bridge",
-  "session_mem_mb": 1082,
+  "backend": "headless",
+  "session_mem_mb": 806,
   "apps": [
     {
       "package": "com.darkempire78.opencalculator",
@@ -12,8 +12,8 @@
       "version_code": 53,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 99,
-      "pss_mb": 25,
+      "launch_ms": 88,
+      "pss_mb": 28,
       "checks": [
         {
           "name": "install",
@@ -22,7 +22,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "99 ms, window display 7 (2176x1360)"
+          "detail": "88 ms, window display 2 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -31,12 +31,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{1f28f76 u0 com.darkempire78.opencalculator/com.darkempire78.opencalculator.activities.MainActivity}"
+          "detail": "Window{d49ac6e u0 com.darkempire78.opencalculator/com.darkempire78.opencalculator.activities.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "44.8% #e0e0f8, 207 colours"
+          "detail": "43.7% #e0e0f8, 198 colours"
         },
         {
           "name": "script",
@@ -72,8 +72,8 @@
       "version_code": 65,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 2654,
-      "pss_mb": 20,
+      "launch_ms": 2663,
+      "pss_mb": 19,
       "checks": [
         {
           "name": "install",
@@ -82,7 +82,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "2654 ms, window display 8 (2176x1360)"
+          "detail": "2663 ms, window display 3 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -91,12 +91,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{bc56199 u0 de.sudoq/de.sudoq.controller.menus.MainActivity}"
+          "detail": "Window{6f379ef u0 de.sudoq/de.sudoq.controller.menus.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "85.1% #e8e8e8, 120 colours"
+          "detail": "87.0% #e8e8e8, 111 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -112,8 +112,8 @@
       "version_code": 50703,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 99,
-      "pss_mb": 32,
+      "launch_ms": 95,
+      "pss_mb": 31,
       "checks": [
         {
           "name": "install",
@@ -122,7 +122,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "99 ms, window display 9 (2176x1360)"
+          "detail": "95 ms, window display 4 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -131,12 +131,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{e68b406 u0 com.physphil.android.unitconverterultimate/com.physphil.android.unitconverterultimate.MainActivity}"
+          "detail": "Window{f54af05 u0 com.physphil.android.unitconverterultimate/com.physphil.android.unitconverterultimate.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "78.7% #101010, 87 colours"
+          "detail": "80.2% #101010, 79 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -152,8 +152,8 @@
       "version_code": 71,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 132,
-      "pss_mb": 35,
+      "launch_ms": 135,
+      "pss_mb": 46,
       "checks": [
         {
           "name": "install",
@@ -162,26 +162,21 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "132 ms, window display 10 (2176x1360)"
+          "detail": "135 ms, window display 5 (1280x800)"
         },
         {
           "name": "alive after launch",
           "ok": true
         },
         {
-          "name": "AppWarningActivity shown",
-          "ok": true,
-          "detail": "dismissed"
-        },
-        {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{6a1df91 u0 de.tobiasbielefeld.solitaire/de.tobiasbielefeld.solitaire.ui.GameSelector}"
+          "detail": "Window{8f1ab97 u0 de.tobiasbielefeld.solitaire/de.tobiasbielefeld.solitaire.ui.GameSelector}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "19.9% #5880f0, 5135 colours"
+          "detail": "20.9% #5880f0, 3997 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -198,7 +193,7 @@
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
       "launch_ms": 188,
-      "pss_mb": 113,
+      "pss_mb": 110,
       "checks": [
         {
           "name": "install",
@@ -207,7 +202,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "188 ms, window display 11 (2176x1360)"
+          "detail": "188 ms, window display 6 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -216,12 +211,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{b93666e u0 org.wikipedia/org.wikipedia.onboarding.InitialOnboardingActivity}"
+          "detail": "Window{da901b u0 org.wikipedia/org.wikipedia.onboarding.InitialOnboardingActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "34.2% #000000, 5046 colours"
+          "detail": "32.5% #000000, 4262 colours"
         },
         {
           "name": "script",
@@ -241,8 +236,8 @@
       "version_code": 3120395,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 186,
-      "pss_mb": 50,
+      "launch_ms": 180,
+      "pss_mb": 48,
       "checks": [
         {
           "name": "install",
@@ -251,7 +246,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "186 ms, window display 12 (2176x1360)"
+          "detail": "180 ms, window display 7 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -260,12 +255,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{4fb5fdf u0 de.danoeh.antennapod/de.danoeh.antennapod.activity.MainActivity}"
+          "detail": "Window{c34038e u0 de.danoeh.antennapod/de.danoeh.antennapod.activity.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "90.8% #f8f8f8, 554 colours"
+          "detail": "90.6% #f8f8f8, 410 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -281,8 +276,8 @@
       "version_code": 33,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 227,
-      "pss_mb": 43,
+      "launch_ms": 242,
+      "pss_mb": 42,
       "checks": [
         {
           "name": "install",
@@ -291,7 +286,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "227 ms, window display 13 (2176x1360)"
+          "detail": "242 ms, window display 8 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -300,12 +295,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{dc76a6e u0 net.thunderbird.android/app.k9mail.feature.launcher.FeatureLauncherActivity}"
+          "detail": "Window{9dd75a6 u0 net.thunderbird.android/app.k9mail.feature.launcher.FeatureLauncherActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "95.6% #f8f0f0, 508 colours"
+          "detail": "95.3% #f8f0f0, 460 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -321,8 +316,8 @@
       "version_code": 76,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 170,
-      "pss_mb": 45,
+      "launch_ms": 168,
+      "pss_mb": 43,
       "checks": [
         {
           "name": "install",
@@ -331,7 +326,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "170 ms, window display 14 (2176x1360)"
+          "detail": "168 ms, window display 9 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -340,12 +335,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{b6e8e0b u0 com.aurora.store/com.aurora.store.ComposeActivity}"
+          "detail": "Window{8d5821d u0 com.aurora.store/com.aurora.store.ComposeActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "97.3% #f8f8f8, 358 colours"
+          "detail": "96.9% #f8f8f8, 302 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -361,8 +356,8 @@
       "version_code": 2000052,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 254,
-      "pss_mb": 95,
+      "launch_ms": 268,
+      "pss_mb": 94,
       "checks": [
         {
           "name": "install",
@@ -371,7 +366,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "254 ms, window display 15 (2176x1360)"
+          "detail": "268 ms, window display 10 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -380,12 +375,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{7980889 u0 org.fdroid.fdroid/org.fdroid.IconActivity}"
+          "detail": "Window{4ecfe20 u0 org.fdroid.fdroid/org.fdroid.IconActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "97.0% #f8f8f8, 234 colours"
+          "detail": "96.6% #f8f8f8, 211 colours"
         },
         {
           "name": "script",
@@ -405,8 +400,8 @@
       "version_code": 47,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 165,
-      "pss_mb": 61,
+      "launch_ms": 200,
+      "pss_mb": 60,
       "checks": [
         {
           "name": "install",
@@ -415,7 +410,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "165 ms, window display 16 (2176x1360)"
+          "detail": "200 ms, window display 11 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -424,12 +419,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{be1d380 u0 me.ash.reader/me.ash.reader.infrastructure.android.MainActivity}"
+          "detail": "Window{2ce87f8 u0 me.ash.reader/me.ash.reader.infrastructure.android.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "84.7% #f8f8f8, 327 colours"
+          "detail": "84.2% #f8f8f8, 264 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -445,8 +440,8 @@
       "version_code": 40,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 276,
-      "pss_mb": 51,
+      "launch_ms": 259,
+      "pss_mb": 49,
       "checks": [
         {
           "name": "install",
@@ -455,7 +450,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "276 ms, window display 17 (2176x1360)"
+          "detail": "259 ms, window display 12 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -464,12 +459,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{1dd3b30 u0 org.nsh07.pomodoro/org.nsh07.pomodoro.MainActivity}"
+          "detail": "Window{5a63f42 u0 org.nsh07.pomodoro/org.nsh07.pomodoro.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "77.1% #f8f8f8, 216 colours"
+          "detail": "77.2% #f8f8f8, 202 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -485,7 +480,7 @@
       "version_code": 1115,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 247,
+      "launch_ms": 235,
       "pss_mb": 114,
       "checks": [
         {
@@ -495,7 +490,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "247 ms, window display 18 (2176x1360)"
+          "detail": "235 ms, window display 13 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -504,12 +499,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{43b56a9 u0 io.anuke.mindustry/mindustry.android.AndroidLauncher}"
+          "detail": "Window{dc63f4a u0 io.anuke.mindustry/mindustry.android.AndroidLauncher}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "16.6% #282020, 402 colours"
+          "detail": "22.3% #483050, 385 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -525,8 +520,8 @@
       "version_code": 922,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 125,
-      "pss_mb": 43,
+      "launch_ms": 137,
+      "pss_mb": 40,
       "checks": [
         {
           "name": "install",
@@ -535,7 +530,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "125 ms, window display 19 (2176x1360)"
+          "detail": "137 ms, window display 14 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -544,12 +539,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{9daacd0 u0 com.shatteredpixel.shatteredpixeldungeon/com.shatteredpixel.shatteredpixeldungeon.android.AndroidLauncher}"
+          "detail": "Window{f8923db u0 com.shatteredpixel.shatteredpixeldungeon/com.shatteredpixel.shatteredpixeldungeon.android.AndroidLauncher}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "35.1% #000000, 551 colours"
+          "detail": "37.0% #000000, 458 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -565,8 +560,8 @@
       "version_code": 1275,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 238,
-      "pss_mb": 56,
+      "launch_ms": 228,
+      "pss_mb": 54,
       "checks": [
         {
           "name": "install",
@@ -575,7 +570,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "238 ms, window display 20 (2176x1360)"
+          "detail": "228 ms, window display 15 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -584,12 +579,12 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{d61fdbc u0 com.unciv.app/com.unciv.app.AndroidLauncher}"
+          "detail": "Window{892a60c u0 com.unciv.app/com.unciv.app.AndroidLauncher}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "75.9% #000030, 803 colours"
+          "detail": "75.8% #000030, 641 colours"
         },
         {
           "name": "alive after tap/scroll/back",
@@ -605,8 +600,8 @@
       "version_code": 1410128,
       "result": "works",
       "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 89,
-      "pss_mb": 223,
+      "launch_ms": 60,
+      "pss_mb": 208,
       "checks": [
         {
           "name": "install",
@@ -615,7 +610,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "89 ms, window display 21 (2176x1360)"
+          "detail": "60 ms, window display 16 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -624,12 +619,654 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{f435ae2 u0 org.openttd.fdroid/org.openttd.fdroid.MainActivity}"
+          "detail": "Window{9ea402 u0 org.openttd.fdroid/org.openttd.fdroid.MainActivity}"
         },
         {
           "name": "first frame",
           "ok": true,
-          "detail": "8.3% #f8b030, 7375 colours"
+          "detail": "7.0% #f8b030, 5750 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "de.westnordost.streetcomplete",
+      "name": "StreetComplete",
+      "group": "native",
+      "version_name": "63.4",
+      "version_code": 6308,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 239,
+      "pss_mb": 137,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "239 ms, window display 17 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{9971467 u0 de.westnordost.streetcomplete/de.westnordost.streetcomplete.screens.main.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "94.5% #f8f8f8, 721 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.adilhanney.saber",
+      "name": "Saber",
+      "group": "framework",
+      "version_name": "1.36.3",
+      "version_code": 1360303,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 166,
+      "pss_mb": 96,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "166 ms, window display 18 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{407320d u0 com.adilhanney.saber/com.adilhanney.saber.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "96.8% #f8f8f8, 153 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "io.ente.auth",
+      "name": "Ente Auth - 2FA Authenticator",
+      "group": "framework",
+      "version_name": "4.4.26",
+      "version_code": 1118,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 343,
+      "pss_mb": 96,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "343 ms, window display 19 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{5e0ced9 u0 io.ente.auth/io.ente.auth.IconDefault}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "FLAG_SECURE window, screenshot blocked; UI tree: 26 nodes, 4 labelled"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "net.cozic.joplin",
+      "name": "Joplin",
+      "group": "framework",
+      "version_name": "3.7.8",
+      "version_code": 2097817,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 85,
+      "pss_mb": 222,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "85 ms, window display 20 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{2d36c97 u0 net.cozic.joplin/net.cozic.joplin.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "96.3% #f8f8f8, 103 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.logseq.app",
+      "name": "Logseq",
+      "group": "framework",
+      "version_name": "0.10.15",
+      "version_code": 90,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 760,
+      "pss_mb": 85,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "760 ms, window display 21 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{3c45d6a u0 com.logseq.app/com.logseq.app.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "70.0% #f8f8f8, 365 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "app.pomodorot",
+      "name": "Pomodorot",
+      "group": "framework",
+      "version_name": "0.13.3",
+      "version_code": 233,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 87,
+      "pss_mb": 171,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "87 ms, window display 22 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{a8d190a u0 app.pomodorot/com.godot.game.GodotAppLauncher}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "60.9% #000000, 102 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.looker.droidify",
+      "name": "Droid-ify",
+      "group": "framework",
+      "version_name": "0.7.8",
+      "version_code": 780,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 183,
+      "pss_mb": 68,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "183 ms, window display 23 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{c0ff369 u0 com.looker.droidify/com.looker.droidify.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "78.8% #f8f8f0, 1644 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.videolan.vlc",
+      "name": "VLC",
+      "group": "window",
+      "version_name": "3.7.2",
+      "version_code": 13070208,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 111,
+      "pss_mb": 67,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "111 ms, window display 24 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{2f30411 u0 org.videolan.vlc/org.videolan.vlc.gui.onboarding.OnboardingActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "99.2% #001020, 214 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.schabi.newpipe",
+      "name": "NewPipe",
+      "group": "window",
+      "version_name": "0.29.1",
+      "version_code": 1015,
+      "result": "broken",
+      "reason": "Android restarted during the run (/system/bin/surfaceflinger: Failed to create a valid texture. [0x7f1e140248d0]:[896,480] isProtected:0 isWriteable:0 format:842094169)",
+      "launch_ms": 155,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "155 ms, window display 25 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{d738aa3 u0 org.schabi.newpipe/org.schabi.newpipe.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "37.1% #585858, 1624 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap centre",
+          "ok": false,
+          "detail": "process gone: no crash logged"
+        },
+        {
+          "name": "no system restart",
+          "ok": false,
+          "detail": "/system/bin/surfaceflinger: Failed to create a valid texture. [0x7f1e140248d0]:[896,480] isProtected:0 isWriteable:0 format:842094169"
+        }
+      ]
+    },
+    {
+      "package": "org.mozilla.fennec_fdroid",
+      "name": "Fennec F-Droid",
+      "group": "window",
+      "version_name": "158.0.2",
+      "version_code": 1580210,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 151,
+      "pss_mb": 291,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "151 ms, window display 2 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{a3f178e u0 org.mozilla.fennec_fdroid/org.mozilla.fennec_fdroid.App}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "46.0% #f8f0f0, 871 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "dev.patrickgold.florisboard",
+      "name": "FlorisBoard",
+      "group": "window",
+      "version_name": "0.5.2",
+      "version_code": 117,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 73,
+      "pss_mb": 29,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "73 ms, window display 3 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{7cdf77a u0 dev.patrickgold.florisboard/dev.patrickgold.florisboard.SettingsLauncherAlias}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "81.8% #f8f8f8, 128 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.celzero.bravedns",
+      "name": "Rethink: DNS + Firewall + VPN",
+      "group": "window",
+      "version_name": "v0.5.8",
+      "version_code": 709,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 62,
+      "pss_mb": 92,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "62 ms, window display 4 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{7324a4c u0 com.celzero.bravedns/com.celzero.bravedns.ui.activity.WelcomeActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "53.1% #f8f0f8, 139 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.jellyfin.androidtv",
+      "name": "Jellyfin for Android TV",
+      "group": "window",
+      "version_name": "0.19.10",
+      "version_code": 191099,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 117,
+      "pss_mb": 81,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "117 ms, window display 5 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{78fe1fe u0 org.jellyfin.androidtv/org.jellyfin.androidtv.ui.startup.StartupActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "94.8% #101010, 208 colours"
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "org.joinmastodon.android",
+      "name": "Mastodon",
+      "group": "window",
+      "version_name": "2.13.4",
+      "version_code": 191,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 112,
+      "pss_mb": 34,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "112 ms, window display 6 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{24cc37d u0 org.joinmastodon.android/org.joinmastodon.android.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "22.5% #78d0e8, 2430 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
+        },
+        {
+          "name": "alive after tap/scroll/back",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "package": "com.github.mkalmousli.floating_mute",
+      "name": "Floating Mute",
+      "group": "window",
+      "version_name": "4.0.1",
+      "version_code": 5,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 99,
+      "pss_mb": 24,
+      "checks": [
+        {
+          "name": "install",
+          "ok": true
+        },
+        {
+          "name": "launch",
+          "ok": true,
+          "detail": "99 ms, window display 7 (1280x800)"
+        },
+        {
+          "name": "alive after launch",
+          "ok": true
+        },
+        {
+          "name": "RequestIgnoreBatteryOptimizations shown",
+          "ok": true,
+          "detail": "answered Allow"
+        },
+        {
+          "name": "app window focused",
+          "ok": true,
+          "detail": "Window{8a02daa u0 com.github.mkalmousli.floating_mute/com.github.mkalmousli.floating_mute.MainActivity}"
+        },
+        {
+          "name": "first frame",
+          "ok": true,
+          "detail": "91.2% #f8f8f8, 263 colours"
+        },
+        {
+          "name": "script",
+          "ok": true
         },
         {
           "name": "alive after tap/scroll/back",
