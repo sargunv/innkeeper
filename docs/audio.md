@@ -93,8 +93,12 @@ Install points:
     it into `/vendor/build.prop`, the same way as `gpu.prop`. It sets the
     tinyalsa period count to 2 and the multiplier to 1, and removes the
     emulator's 80 ms "host latency".
-  - The image's audio policy config already maps the primary module to Speaker
-    and Built-In Mic, so we don't overlay it.
+  - `audio/etc/primary_audio_policy_configuration.xml` overlays the images'
+    primary module without its `mmap_no_irq_*` and `compressed_offload` mix
+    ports. AOSP's AIDL HAL builds its module from this file and serves those
+    ports with silent stubs. Everything plays through "primary output"
+    (Speaker), which is tinyalsa card 0, which is ours. The emulator image's own
+    file already has this shape.
 - **The bridge** (`bridge/`, Rust) plays each output stream as one PipeWire
   stream through PipeWire's Pulse protocol server, using the pure Rust
   `pulseaudio` crate. In the desktop mixer it appears as application
