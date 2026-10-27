@@ -127,7 +127,7 @@ missing it re-runs itself in `tools/hosttools.sh`.
   `setprop vendor.linuxapk.hwc.dump.dir /data/vendor/linuxapk/frames` works on a
   running session.
 
-### Adding the Wayland backend (M1)
+### Presenter backends
 
 `Presenter.h` is the seam. `Display` owns all HWC3 state and asks the presenter
 two things:
@@ -138,20 +138,108 @@ two things:
    z-sorted layers. Each layer carries its `BufferRef`, acquire fence, frame,
    crop, transform and alpha.
 
-`createPresenter()` picks the backend from `vendor.linuxapk.hwc.backend`. A
-`WaylandPresenter` would work like this:
+`createPresenter()` picks the backend from `vendor.linuxapk.hwc.backend`:
+`headless` (default) or `wayland`. If the Wayland backend can't start, it falls
+back to headless. In Wayland mode the headless presenter still runs alongside,
+so frame dumps keep working.
 
-- Start with one `wl_surface` for the client target. Wrap the dma-buf from
-  `BufferRef::info()` with `zwp_linux_dmabuf_v1` (fourcc and offsets/strides
-  from the handle, modifier LINEAR), or copy into `wl_shm` when the compositor
-  rejects it.
-- Then accept DEVICE layers per task and map each to its own surface or
-  subsurface.
-- We can't create sync_files (no sw_sync for this user). So, until
-  `wl_buffer.release`, either keep the `BufferRef` and copy, or keep returning
-  no release fences and only accept buffers that SurfaceFlinger cycles through
-  3+ slots.
-- Vsync could come from `wp_presentation` feedback instead of the timer.
+## Wayland backend (`composer/WaylandPresenter.cpp`, M1)
+
+Set `vendor.linuxapk.hwc.backend=wayland` to show display 0 as a window on the
+host compositor.
+
+- **Dependencies:** `hal/wayland/fetch-deps.sh` (run by `build.sh`) fetches and
+  sha256-checks three pinned sources:
+  - wayland 1.24.0, for libwayland-client;
+  - wayland-protocols 1.45, for xdg-shell, viewporter, presentation-time,
+    linux-dmabuf v1, fractional-scale-v1 and xdg-decoration;
+  - libffi 3.5.2, which it cross-compiles with the NDK.
+
+  Everything is linked statically into the composer, whose dependencies stay
+  LL-NDK only. The protocol code is generated with the host's `wayland-scanner`
+  (version 1.22 or newer).
+
+- **Connection:** the composer starts as root. Before dropping to
+  `system:graphics`, it connects to `vendor.linuxapk.wayland.socket` (default
+  `/dev/socket/wayland-host`, where the session binds the host's
+  `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`). It has to connect as root, because only
+  the session's root (the host user) may connect to the host socket. The
+  connection is a process singleton with its own event thread. Each composer
+  client (each SurfaceFlinger instance) gets its own window.
+- **Window:** one `xdg_toplevel` titled "Linux.apk" (app id `linuxapk`), with
+  server-side decorations via xdg-decoration.
+- **Buffers:** the composer copies each client target (RGBA/RGBX/BGRA 8888) into
+  a pool of 3 of its own buffers, so SurfaceFlinger's buffer is free again as
+  soon as `present` returns (still no fences). The pool is one of:
+  - linear udmabufs (`XBGR8888`, modifier LINEAR), imported with
+    `zwp_linux_dmabuf_v1` v3. They're created with the async `create`, so a
+    rejection falls back instead of killing the connection.
+  - `wl_shm`, either as a fallback or forced with
+    `vendor.linuxapk.wayland.force_shm=1`. It uses `XBGR8888` if offered, else
+    the mandatory `XRGB8888` with an R/B swizzle; KWin only offers `XRGB8888`.
+
+  The composer never writes into a buffer until its `wl_buffer.release` arrives.
+  If all 3 are held, it drops the frame and counts it.
+
+- **Pacing:** vsync stays on the composer's timer. `wp_presentation` feedback
+  only counts shown and discarded frames, logged every 10 s.
+- **Scaling:** the Android display size stays fixed (M1). `wp_viewporter`
+  stretches the buffer over the window's logical size from
+  `xdg_toplevel.configure`. The default window is the display size in logical
+  pixels, so the compositor applies the fractional scale. The aspect ratio isn't
+  preserved when the user resizes.
+- **Real resize (later):**
+  1. On configure, compute a new mode: the window's logical size × the
+     fractional scale (`wp_fractional_scale_v1`), rounded to whole pixels.
+  2. Report it as a new `DisplayConfiguration` and let SurfaceFlinger switch.
+     Or, since the HWC3 mode list is static, hotplug the display again with the
+     new single mode, which is how emulator HWCs resize.
+  3. Map the scale to density through the desktop bridge.
+  4. Keep the viewport at 1:1 until SurfaceFlinger's next client target arrives
+     at the new size.
+- **Next steps:**
+  - zero-copy: attach the client target's own dma-buf and hold its `BufferRef`
+    until release;
+  - per-layer subsurfaces (DEVICE layers);
+  - frame callbacks driving vsync;
+  - formats other than 8888.
+
+### Input event stream
+
+The composer listens on `vendor.linuxapk.input.socket` (default
+`/dev/socket/linuxapk-input`, `AF_UNIX` `SOCK_STREAM`). If init created a socket
+of that name, the composer uses init's socket (`$ANDROID_SOCKET_<name>`) instead
+of binding the path itself.
+
+Each connected client receives the same stream of events from the window's
+`wl_seat`. Every event is one ASCII line of space-separated fields ending in
+`\n`:
+
+- Coordinates are in **display pixels**: surface-local position × display size /
+  window size, as floats with 2 decimals.
+- `<t>` is the compositor's millisecond timestamp.
+- Button and key codes are Linux evdev codes (`BTN_LEFT`=272, `KEY_A`=30).
+- A client that falls behind (its socket buffer fills up) is disconnected.
+
+| Line                                                                                  | When                                                              |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `hello 1 <display_w> <display_h>`                                                     | first line on connect (protocol version 1)                        |
+| `window <logical_w> <logical_h> <scale>`                                              | on connect and whenever the window size or scale changes          |
+| `pointer_enter <x> <y>` / `pointer_leave`                                             | pointer enters or leaves the window                               |
+| `pointer_motion <t> <x> <y>`                                                          | pointer moves                                                     |
+| `pointer_button <t> <button> <0\|1>`                                                  | button released (0) or pressed (1)                                |
+| `pointer_axis <t> <axis> <value>`                                                     | scroll, axis 0 = vertical, 1 = horizontal; value in surface units |
+| `pointer_axis_value120 <axis> <v120>`                                                 | high-resolution wheel steps (120 = one detent)                    |
+| `pointer_axis_stop <t> <axis>`                                                        | end of a kinetic scroll                                           |
+| `pointer_frame`                                                                       | ends a group of pointer events                                    |
+| `keyboard_enter` / `keyboard_leave`                                                   | keyboard focus                                                    |
+| `key <t> <keycode> <0\|1>`                                                            | key released (0) or pressed (1)                                   |
+| `modifiers <depressed> <latched> <locked> <group>`                                    | xkb masks (compositor keymap)                                     |
+| `touch_down <t> <id> <x> <y>` / `touch_motion <t> <id> <x> <y>` / `touch_up <t> <id>` | touch points                                                      |
+| `touch_frame` / `touch_cancel`                                                        | end of a touch group, or the touch sequence was cancelled         |
+| `close`                                                                               | the user asked to close the window                                |
+
+Example: `socat - UNIX-CONNECT:/dev/socket/linuxapk-input`.
 
 ## Tests
 
@@ -173,6 +261,31 @@ two things:
 pieces. It fakes the selinux status, fakes properties (seeding
 `servicemanager.ready`, plus `LINUXAPK_PROPS` via `-e`) and mirrors liblog to
 stderr.
+
+### Wayland proof (2026-10-27, KDE Plasma 6 / KWin on this machine)
+
+```sh
+hal/tests/run-android.sh -w -e VENDOR_LINUXAPK_HWC_BACKEND=wayland \
+  -e HWC_TEST_ANIMATE_SEC=25 -- /vendor/bin/hwc_test
+```
+
+`-w` binds only the host's Wayland socket file at `/dev/socket/wayland-host`.
+`HWC_TEST_ANIMATE_SEC` keeps `hwc_test` presenting a blinking test pattern for
+that many seconds and prints the input stream. Results:
+
+- A "Linux.apk" window appeared with KWin decorations and the gradient and
+  checkerboard pattern. The screenshot is in `out/hal-test/wayland-window.png`
+  (taken with `spectacle -b -n`, cropped to the window).
+- Log line:
+  `wayland: connected ... dmabuf=v3 (XBGR8888 linear: yes), viewporter=yes, fractional-scale=yes, xdg-decoration=yes, presentation=yes, seat=yes`.
+- Over 528 frames: 527 shown by the compositor (presentation-time), 2 discarded,
+  0 dropped, window 1280x800 at scale 1.70, refresh 120 Hz.
+- The input stream delivered `hello 1 1280 800`, `window 1280 800 1.700`,
+  `pointer_motion <t> 501.49 564.17` and so on, plus `pointer_frame` and
+  `keyboard_leave`, while the mouse moved over the window.
+- With `VENDOR_LINUXAPK_WAYLAND_FORCE_SHM=1`, the `wl_shm` (XRGB8888) path
+  showed 258 of 258 frames.
+- `hwc_test` passed all its checks in both runs.
 
 ## Status in the live session (2026-10-27)
 

@@ -1,7 +1,9 @@
 service vendor.hwcomposer-3-linuxapk /vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk
     class hal animation
     interface aidl android.hardware.graphics.composer3.IComposer/default
-    user system
+    # Starts as root to connect to the host Wayland socket (backend=wayland),
+    # then drops to system:graphics.
+    user root
     group graphics
     capabilities SYS_NICE
     onrestart restart surfaceflinger

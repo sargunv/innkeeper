@@ -93,6 +93,10 @@ Rules:
   session SF uses them (display 0 1280x800@60, client targets allocated); first
   composed frame still pending a layer (bootanimation crashes in RADV
   `vkAcquireNextImageKHR`).
+- 2026-10-27 (hal): Wayland backend: `vendor.linuxapk.hwc.backend=wayland` shows
+  display 0 as a "Linux.apk" KWin window (linux-dmabuf, wl_shm fallback) and
+  streams seat input as text on `/dev/socket/linuxapk-input`. Session lane: bind
+  the host socket at `/dev/socket/wayland-host` and set the property.
 
 ## Next
 
