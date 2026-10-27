@@ -14,11 +14,11 @@ plus a desktop bridge for portals, notifications and MPRIS. See
 
 ## Status
 
-**Pre-alpha.** Android 17 boots rootless and 29 of 31 test apps work
+**Pre-alpha.** Android 17 boots rootless and 30 of 31 test apps work
 ([COMPATIBILITY.md](COMPATIBILITY.md)), across Compose, Flutter, React Native,
-Capacitor and Godot apps, including StreetComplete's MapLibre map. Each app
-opens in its own window with sound. Next: desktop integration (M3) and
-no-privilege mode (M4).
+Capacitor and Godot apps, including StreetComplete's MapLibre map and video
+playback. Each app opens in its own window with sound. Next: desktop integration
+(M3) and no-privilege mode (M4).
 
 | Milestone                                                       | Status                                                                                                                                                                 |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
