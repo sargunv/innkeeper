@@ -25,10 +25,11 @@ android/build.sh --no-test
   - `android/app`: the APK. It holds the socket client, the injector and the app
     shell.
 - **Signing:** AGP leaves the release APK unsigned. `build.sh` signs it with
-  `android/keys/platform.{pk8,x509.pem}`, which is AOSP's public test-keys
-  platform key. The emulator image is signed with that key too (its certificate
-  SHA-256 is `c8a2e9bc…`, the same as `framework-res.apk`). To use another key,
-  set `LINUXAPK_PLATFORM_KEY`.
+  AOSP's public test-keys platform key. The key isn't committed: `build.sh`
+  copies it from the AOSP checkout or fetches it from android.googlesource.com
+  into `out/keys/`, and checks its SHA-256 either way. The emulator image is
+  signed with that key too (its certificate SHA-256 is `c8a2e9bc…`, the same as
+  `framework-res.apk`). To use another key, set `LINUXAPK_PLATFORM_KEY`.
 - **Install:** `build.sh` writes two files under `out/system_ext-overlay/`:
   - `priv-app/LinuxApkSystem/LinuxApkSystem.apk`
   - `etc/permissions/dev.linuxapk.system.xml`
