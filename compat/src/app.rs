@@ -451,10 +451,19 @@ impl<'a> Run<'a> {
 
         // Launcher activity; TV apps may only have a leanback one.
         let mut component = None;
-        for cat in [
+        // Right after an install (or an Android restart) the package may not
+        // resolve yet: retry a few times.
+        let cats = [
             "android.intent.category.LAUNCHER",
             "android.intent.category.LEANBACK_LAUNCHER",
-        ] {
+        ];
+        for (attempt, cat) in (0..4).flat_map(|a| cats.iter().map(move |c| (a, *c))) {
+            if component.is_some() {
+                break;
+            }
+            if attempt > 0 && cat == cats[0] {
+                sleep(Duration::from_secs(3));
+            }
             let o = s.run(
                 30,
                 &[

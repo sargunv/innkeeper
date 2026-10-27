@@ -172,6 +172,65 @@ impl Session {
         self.getprop("vendor.linuxapk.wm.mode") != "single"
     }
 
+    /// Pid of Android's system_server, if running.
+    pub fn system_server_pid(&self) -> Option<String> {
+        let o = self.run(15, &["pidof", "system_server"]);
+        let p = o.text.trim().to_string();
+        (o.ok && !p.is_empty()).then_some(p)
+    }
+
+    /// The last native crash in the crash buffer: process and abort message.
+    pub fn last_fatal(&self) -> String {
+        let log = self
+            .run(20, &["logcat", "-d", "-b", "crash", "-t", "300"])
+            .text;
+        let proc = log
+            .lines()
+            .rfind(|l| l.contains(">>> "))
+            .and_then(|l| l.split(">>> ").nth(1))
+            .map(|p| p.trim_end_matches(" <<<").trim().to_string());
+        let msg = log
+            .lines()
+            .rfind(|l| l.contains("Abort message: "))
+            .and_then(|l| l.split("Abort message: ").nth(1))
+            .map(|m| m.trim().trim_matches('\'').to_string());
+        match (proc, msg) {
+            (Some(p), Some(m)) => format!("{p}: {m}"),
+            (Some(p), None) => format!("{p} crashed"),
+            (None, _) => "system_server restarted".into(),
+        }
+    }
+
+    /// Waits until a restarted Android userspace serves activities again.
+    pub fn wait_system(&self, limit: Duration) -> Result<()> {
+        let t = Instant::now();
+        let mut last = None;
+        while t.elapsed() < limit {
+            let pid = self.system_server_pid();
+            let home = self.run(
+                20,
+                &[
+                    "cmd",
+                    "package",
+                    "resolve-activity",
+                    "--brief",
+                    "-a",
+                    "android.intent.action.MAIN",
+                    "-c",
+                    "android.intent.category.HOME",
+                ],
+            );
+            if pid.is_some() && pid == last && home.text.contains('/') {
+                sleep(Duration::from_secs(10));
+                eprintln!("compat: Android is back ({:.0?})", t.elapsed());
+                return Ok(());
+            }
+            last = pid;
+            sleep(Duration::from_secs(5));
+        }
+        bail!("Android did not come back in {limit:?}")
+    }
+
     /// "wayland" or "headless".
     pub fn backend(&self) -> String {
         self.getprop("vendor.linuxapk.hwc.backend")

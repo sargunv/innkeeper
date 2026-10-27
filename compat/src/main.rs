@@ -115,7 +115,25 @@ fn real_main() -> Result<ExitCode> {
                 eprintln!("compat: session: {e:#}");
             }
             let pid = s.pid();
+            let system = s.system_server_pid();
             let mut r = Run::new(&s, a, &out, &repo.join("compat/gesture.sh")).run(apk);
+            // Android's own restart (SurfaceFlinger or system_server died) in
+            // the same session: the app triggered it, so it counts against the
+            // app, and the next app waits until the system is back.
+            if s.pid() == pid && system.is_some() && s.system_server_pid() != system {
+                let why = s.last_fatal();
+                eprintln!("compat: Android restarted during the run: {why}");
+                r.result = Status::Broken;
+                r.reason = format!("Android restarted during the run ({why})");
+                r.checks.push(app::Check {
+                    name: "no system restart".into(),
+                    ok: false,
+                    detail: why,
+                });
+                if let Err(e) = s.wait_system(Duration::from_secs(300)) {
+                    eprintln!("compat: {e:#}");
+                }
+            }
             // Another lane may restart the session under us; that's not the app's
             // fault, so retry once on a fresh session.
             if pid.is_none() || s.pid() != pid || !s.booted() {
