@@ -313,21 +313,22 @@ Example: `socat - UNIX-CONNECT:/dev/socket/linuxapk-input`.
 
 ## Tests
 
-| What                                                                                                                                                                                                               | Command                                                                                                                                                     | Evidence                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Host unit tests (layouts, every format, 256-byte plane pitches, udmabuf alloc and the no-udmabuf policy, mapper via `dlopen`, metadata get/set across imports and `fork`, sync_file acquire fence, PNG/PPM writer) | `hal/build.sh` (ctest)                                                                                                                                      | `260 + 8 checks, 0 failures`                                                                                                                       |
-| On-device gralloc                                                                                                                                                                                                  | `hal/tests/run-android.sh -- /vendor/bin/gralloc_test`                                                                                                      | IAllocator V3, 10 formats allocated as udmabufs, plus `AHardwareBuffer_allocate/lock/lockPlanes` through libui: `110 checks, 0 failures`           |
-| On-device composer                                                                                                                                                                                                 | `hal/tests/run-android.sh -e VENDOR_LINUXAPK_HWC_DUMP_DIR=/data/vendor/linuxapk/frames -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test` | hotplug, 60 vsyncs/s on a 16.667 ms grid, DEVICE→CLIENT, present, NOT_VALIDATED, slot cache, PNG in `out/hal-test/frames`: `55 checks, 0 failures` |
+| What                                                                                                                                                                                                               | Command                                | Evidence                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host unit tests (layouts, every format, 256-byte plane pitches, udmabuf alloc and the no-udmabuf policy, mapper via `dlopen`, metadata get/set across imports and `fork`, sync_file acquire fence, PNG/PPM writer) | `hal/build.sh` (ctest)                 | `260 + 8 checks, 0 failures`                                                                                                                          |
+| On-device gralloc                                                                                                                                                                                                  | `hal/build.sh` (`tests/bionic/run.sh`) | IAllocator V3, 10 formats allocated as udmabufs, plus `AHardwareBuffer_allocate/lock/lockPlanes` through libui: `110 checks, 0 failures`              |
+| On-device composer                                                                                                                                                                                                 | `hal/build.sh` (`tests/bionic/run.sh`) | hotplug, 60 vsyncs/s on a 16.667 ms grid, DEVICE→CLIENT, present, NOT_VALIDATED, slot cache, PNG in `out/test/bionic/frames`: `55 checks, 0 failures` |
 
-`hal/tests/run-android.sh` needs no full session. It runs inside a transient
+`tests/bionic/run.sh` needs no full session. It runs inside a transient
 `systemd-run --user` unit, in a user+mount+pid namespace, with:
 
-- the image's `/system`, `/system_ext`, `/product` and flattened `/apex`;
+- the session image's `/system`, `/system_ext`, `/product` and flattened
+  `/apex`;
 - `/vendor` = `out/vendor-overlay` plus the test binaries;
-- a private binderfs, and no `/sys`;
+- binder from the broker, behind the session's pivot-exec;
 - the image's `servicemanager` and our two services.
 
-`tests/android/haltest_shim.c` (LD_PRELOAD, test only) stands in for the missing
+`tests/bionic/props-shim.c` (LD_PRELOAD, test only) stands in for the missing
 pieces. It fakes the selinux status, fakes properties (seeding
 `servicemanager.ready`, plus `LINUXAPK_PROPS` via `-e`) and mirrors liblog to
 stderr.
@@ -335,11 +336,12 @@ stderr.
 ### Wayland proof (2026-10-27, KDE Plasma 6 / KWin on this machine)
 
 ```sh
+# The old hal/tests/run-android.sh; its -w mode is gone.
 hal/tests/run-android.sh -w -e VENDOR_LINUXAPK_HWC_BACKEND=wayland \
   -e HWC_TEST_ANIMATE_SEC=25 -- /vendor/bin/hwc_test
 ```
 
-`-w` binds only the host's Wayland socket file at `/dev/socket/wayland-host`.
+`-w` bound only the host's Wayland socket file at `/dev/socket/wayland-host`.
 `HWC_TEST_ANIMATE_SEC` keeps `hwc_test` presenting a blinking test pattern for
 that many seconds and prints the input stream. Results:
 

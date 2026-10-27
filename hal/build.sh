@@ -1,21 +1,39 @@
 #!/usr/bin/env bash
 # Build the display HALs out of tree with the NDK and install them into the
-# vendor overlay. Also builds and runs the host unit tests.
+# vendor overlay, then run the host unit tests and the on-device tests
+# (gralloc_test, hwc_test) through tests/bionic/run.sh.
 #
-#   hal/build.sh            host tests + Android build + install
-#   hal/build.sh --no-test  skip running host tests
+#   hal/build.sh            build + install + tests
+#   hal/build.sh --no-test  skip the tests
 #
-# Env: NDK, AIDL, OVERLAY (default: <main checkout>/out/vendor-overlay),
-#      BUILD (default: <main checkout>/out/hal-build). If cmake/ninja/python3
+# Env: NDK, AIDL, LINUXAPK_OUT (default: <main checkout>/out; installs into
+#      its vendor-overlay, builds in its hal-build). If cmake/ninja/python3
 #      are missing on the host, the build re-runs itself in tools/hosttools.sh.
 set -euo pipefail
 hal=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$hal/.." && pwd)
 main=$(cd "$(git -C "$repo" rev-parse --git-common-dir)/.." && pwd)
+export LINUXAPK_OUT=${LINUXAPK_OUT:-$main/out}
+OVERLAY=$LINUXAPK_OUT/vendor-overlay
+BUILD=$LINUXAPK_OUT/hal-build
+run_tests=1
+[[ "${1:-}" == "--no-test" ]] && run_tests=0
+
+# On-device tests: test binaries in a /vendor layer above the overlay.
+android_tests() {
+  local run=$repo/tests/bionic/run.sh
+  "$run" -v "$BUILD/test-vendor" -- /vendor/bin/gralloc_test
+  "$run" -v "$BUILD/test-vendor" -e VENDOR_LINUXAPK_HWC_DUMP_DIR=/data/vendor/linuxapk/frames \
+    -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
+}
 
 if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null || ! command -v python3 >/dev/null; then
   if [[ -z "${LINUXAPK_IN_CONTAINER:-}" ]]; then
-    exec env LINUXAPK_IN_CONTAINER=1 "$repo/tools/hosttools.sh" "$0" "$@"
+    # Build (and host-test) in the container; the on-device tests need host
+    # namespaces.
+    env LINUXAPK_IN_CONTAINER=1 "$repo/tools/hosttools.sh" "$0" "$@"
+    if ((run_tests)); then android_tests; fi
+    exit
   fi
   echo "cmake, ninja and python3 are required" >&2
   exit 1
@@ -23,10 +41,6 @@ fi
 
 NDK=${NDK:-$HOME/Android/Sdk/ndk/30.0.16248370}
 export AIDL=${AIDL:-$HOME/Android/Sdk/build-tools/37.0.0/aidl}
-OVERLAY=${OVERLAY:-$main/out/vendor-overlay}
-BUILD=${BUILD:-$main/out/hal-build}
-run_tests=1
-[[ "${1:-}" == "--no-test" ]] && run_tests=0
 
 "$hal/tools/gen-aidl.sh" "$BUILD/aidl" >/dev/null
 
@@ -60,7 +74,11 @@ inst 755 "$b/android.hardware.graphics.composer3-service.linuxapk" "$OVERLAY/bin
 inst 644 "$b/mapper.linuxapk.so" "$OVERLAY/lib64/hw/mapper.linuxapk.so"
 for f in "$hal"/etc/init/*.rc; do inst 644 "$f" "$OVERLAY/etc/init/$(basename "$f")"; done
 for f in "$hal"/etc/vintf/*.xml; do inst 644 "$f" "$OVERLAY/etc/vintf/manifest/$(basename "$f")"; done
-# Test binaries go next to the overlay, not into it.
-mkdir -p "$BUILD/tests"
-cp "$b/gralloc_test" "$b/hwc_test" "$b/libhaltest_shim.so" "$BUILD/tests/"
 (cd "$OVERLAY" && find . -type f | sort | sed 's/^/  /')
+# Test binaries go next to the overlay, not into it.
+mkdir -p "$BUILD/test-vendor/bin"
+cp "$b/gralloc_test" "$b/hwc_test" "$BUILD/test-vendor/bin/"
+if ((run_tests)) && [[ -z ${LINUXAPK_IN_CONTAINER:-} ]]; then
+  echo "== android tests"
+  android_tests
+fi

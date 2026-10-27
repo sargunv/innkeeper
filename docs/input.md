@@ -262,7 +262,7 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
 
 - **Session:** the Wayland backend in the full session.
   - Bind the host's `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` socket file into the
-    root, as `hal/tests/run-android.sh -w` does, and point
+    root, as the old `hal/tests/run-android.sh -w` did, and point
     `vendor.linuxapk.wayland.socket` at it.
   - Set `vendor.linuxapk.hwc.backend=wayland`, for example from the launcher's
     `vendor_props`.

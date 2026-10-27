@@ -20,7 +20,11 @@ void linuxapk_host_assert(
 }
 
 int main(int argc, char** argv) {
-  std::string dir = argc > 1 ? argv[1] : "/tmp/dump-test";
+  if (argc != 2) {
+    fprintf(stderr, "usage: dump_host_test OUTPUT_DIR\n");
+    return 2;
+  }
+  std::string dir = argv[1];
   const uint32_t w = 200, h = 120;
   int fails = 0;
   for (int32_t f :

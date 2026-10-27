@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Test-only LD_PRELOAD used by tests/run-android.sh, which runs servicemanager,
-// our HALs and test clients without init. Never installed into /vendor.
+// LD_PRELOADed into every process of the bionic test harnesses
+// (tests/bionic/run.sh, ubinder/tests/run-binder-tests.sh), which run Android
+// binaries without init. Test only; never installed.
+//  - __system_property_*: no property service. A per-process store, seeded
+//    with servicemanager.ready=true (libbinder's defaultServiceManager() waits
+//    for it) and LINUXAPK_PROPS="name=value;name=value".
 //  - selinux_status_*: no selinuxfs; servicemanager CHECKs
-//  selinux_status_open().
+//    selinux_status_open().
 //  - __android_log_write_log_message: no logd; mirror logs to stderr.
-//  - __system_property_*: no property service. A per-process fake store,
-//    seeded with servicemanager.ready=true (libbinder's defaultServiceManager()
-//    waits for it) and LINUXAPK_PROPS="name=value;name=value".
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
