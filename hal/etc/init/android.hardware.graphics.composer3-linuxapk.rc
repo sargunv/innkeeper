@@ -6,6 +6,9 @@ service vendor.hwcomposer-3-linuxapk /vendor/bin/hw/android.hardware.graphics.co
     user root
     group graphics
     capabilities SYS_NICE
+    # Host input stream (keystrokes!): only system and the input group, which
+    # the Linux.apk System app gets through its permissions.
+    socket linuxapk-input stream 0660 system input
     onrestart restart surfaceflinger
     task_profiles ServiceCapacityLow
 

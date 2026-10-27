@@ -22,7 +22,8 @@ namespace linuxapk::hwc {
 InputServer::~InputServer() { stop(); }
 
 bool InputServer::start(const std::string& path) {
-  // init-created socket: "socket linuxapk-input stream 0666 system system".
+  // init-created socket: "socket linuxapk-input stream 0660 system input".
+  // The fallback bind (tests without init) is owner-only.
   std::string base = path.substr(path.find_last_of('/') + 1);
   std::string env = "ANDROID_SOCKET_" + base;
   if (const char* v = getenv(env.c_str())) {
@@ -43,7 +44,7 @@ bool InputServer::start(const std::string& path) {
       mListenFd = -1;
       return false;
     }
-    chmod(path.c_str(), 0666);
+    chmod(path.c_str(), 0600);
   }
   if (listen(mListenFd, 4) != 0) {
     LOGE("input: listen: %s", strerror(errno));
