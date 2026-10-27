@@ -120,6 +120,8 @@ Causes:
   `docs/cli.md`. Instance `cli`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
+- cli (M3): host command `linuxapk` (`cli/`, Rust): install, run, `.desktop`
+  entries, APK open-with handler. Docs: `docs/cli.md`. Instance `cli`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
   (`dev.linuxapk.system`) that injects the composer's Wayland input stream into
   Android. Docs: `docs/input.md`.
@@ -173,6 +175,10 @@ Causes:
   fails). Fixed Launcher3's crash loop (gesture nav), app networking
   (EthernetService on pasta's `eth1`, DNS) and MediaCodec (BLOB pool). See
   [compat-triage.md](compat-triage.md) and `COMPATIBILITY.md`.
+- 2026-10-27 (cli): `linuxapk install|run|uninstall|list|session|setup` installs
+  APKs and split bundles. It writes `.desktop` entries with Android-rendered
+  icons and custom-scheme handlers, and `setup` makes double-clicking an APK
+  install it. `cli/tests/integration.sh` passes. See [cli.md](cli.md).
 
 ## Backlog (unassigned)
 

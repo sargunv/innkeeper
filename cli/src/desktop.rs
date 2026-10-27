@@ -164,14 +164,14 @@ pub fn installer_entry(cmd: &[String]) -> Result<String> {
     writeln!(s, "Exec={}", exec_line(&install, Some("%f"))?)?;
     s.push_str("Terminal=false\nNoDisplay=true\n");
     writeln!(s, "MimeType={}", list(PACKAGE_MIME_TYPES)?)?;
-    s.push_str("Categories=System;PackageManager;\n");
+    s.push_str("Categories=Settings;PackageManager;\n");
     Ok(s)
 }
 
 /// shared-mime-info definitions for the bundle formats (plain APKs already
 /// have `application/vnd.android.package-archive`).
 pub const MIME_PACKAGE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!-- Installed by `linuxapk setup`; removed by `linuxapk setup --remove`. -->
+<!-- Installed and removed by linuxapk setup (dev.linuxapk). -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-android-apks">
     <comment>Android app bundle (APK set)</comment>
@@ -360,6 +360,15 @@ mod tests {
         assert!(s.contains("Exec=/x/linuxapk install --notify %f\n"));
         assert!(s.contains("MimeType=application/vnd.android.package-archive;"));
         assert!(s.contains("NoDisplay=true"));
+    }
+
+    #[test]
+    fn mime_xml_is_well_formed_enough() {
+        // update-mime-database rejects "--" inside comments (and exits 0).
+        for c in MIME_PACKAGE_XML.split("<!--").skip(1) {
+            let body = c.split("-->").next().unwrap();
+            assert!(!body.contains("--"), "{body}");
+        }
     }
 
     #[test]
