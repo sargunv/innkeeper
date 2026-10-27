@@ -145,7 +145,11 @@ must survive anything Android sends. From a security review (2026-10-27):
   the old image. It costs about 1.5 µs per call (`binderThroughputTest -w 2 -p`
   median 11.5 → 13.3 µs, interleaved runs on one machine). Queued single-uid
   jobs are dropped once their notification is gone, and checked again before
-  they act.
+  they act. Single-uid calls that transfer memory (`getresuid`, group lists,
+  `SO_PEERCRED`, chown paths, lstat results) pin `/proc/<tid>/mem` the same way,
+  per call; scalar `get*id` don't. Single-uid boot time is unchanged (fresh 4.87
+  s, warm 2.60 s, and 0.86 s of receive-thread time in the first 10 s, before
+  and after).
 - Poll mode hands out an epoll fd, never the broker's eventfd (see "poll").
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.
