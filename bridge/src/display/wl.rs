@@ -52,8 +52,11 @@ use wayland_protocols::xdg::activation::v1::client::{
     xdg_activation_v1::XdgActivationV1,
 };
 
+use super::ime;
 use super::proto::{BufferSpec, WindowSpec, event, ty};
 use crate::server::Events;
+
+mod text_input;
 
 /// Work for the Wayland thread.
 pub enum Cmd {
@@ -69,6 +72,8 @@ pub enum Cmd {
         buffer: u32,
         damage: [i32; 4],
     },
+    /// A request from the Linux.apk IME (through the composer).
+    TextInput(ime::Req),
     Quit,
 }
 
@@ -137,6 +142,8 @@ struct State {
     pointer_surface: Option<sctk::reexports::client::backend::ObjectId>,
     keyboard_focus: Option<u32>,
     touch_focus: HashMap<i32, u32>,
+    /// zwp_text_input_v3 for the IME (`text_input.rs`).
+    text: text_input::TextInput,
     last_serial: u32,
     quit: bool,
 }
@@ -671,6 +678,7 @@ impl State {
             self.keyboard_focus = None;
         }
         self.touch_focus.retain(|_, w| *w != id);
+        self.text.forget(id);
         crate::info!("display: window {id} closed");
         drop(w);
     }
@@ -802,6 +810,7 @@ impl State {
                 buffer,
                 damage,
             } => self.frame(window, buffer, damage),
+            Cmd::TextInput(r) => self.text_input(r),
             Cmd::Quit => self.quit = true,
         }
     }
@@ -909,13 +918,38 @@ impl WindowHandler for State {
 }
 
 impl CompositorHandler for State {
+    /// The integer scale (`wl_surface.preferred_buffer_scale`, or the
+    /// outputs the surface is on). Only used where the compositor has no
+    /// `wp_fractional_scale_v1`; the fractional scale wins otherwise.
     fn scale_factor_changed(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: i32,
+        surface: &wl_surface::WlSurface,
+        factor: i32,
     ) {
+        let Some(w) = self
+            .windows
+            .values_mut()
+            .find(|w| w.window.wl_surface() == surface && w.fractional.is_none())
+        else {
+            return;
+        };
+        let scale120 = factor.clamp(1, 8) as u32 * 120;
+        if scale120 == w.scale120 {
+            return;
+        }
+        w.scale120 = scale120;
+        // Without a viewport, the buffer scale maps the frame's pixels to
+        // the window's logical size.
+        if w.viewport.is_none() {
+            surface.set_buffer_scale(factor.clamp(1, 8));
+        }
+        if let Some(f) = w.frame.as_mut() {
+            f.set_scaling_factor(factor as f64);
+        }
+        let id = w.id;
+        self.send_configure(id);
     }
     fn transform_changed(
         &mut self,
@@ -979,7 +1013,8 @@ impl SeatHandler for State {
                 self.pointer = Some(seat.get_pointer(qh, Ptr))
             }
             Capability::Keyboard if self.keyboard.is_none() => {
-                self.keyboard = Some(seat.get_keyboard(qh, Kbd))
+                self.keyboard = Some(seat.get_keyboard(qh, Kbd));
+                self.text.attach(&seat, qh);
             }
             Capability::Touch if self.touch.is_none() => self.touch = Some(seat.get_touch(qh, Tch)),
             _ => {}
@@ -1002,6 +1037,7 @@ impl SeatHandler for State {
                 if let Some(k) = self.keyboard.take() {
                     k.release();
                 }
+                self.text.detach();
             }
             Capability::Touch => {
                 if let Some(t) = self.touch.take() {
@@ -1126,15 +1162,17 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<(
         pointer_surface: None,
         keyboard_focus: None,
         touch_focus: HashMap::new(),
+        text: text_input::TextInput::new(bind_opt(&globals, &qh, 1)),
         last_serial: 0,
         quit: false,
     };
     crate::info!(
-        "display: connected to the compositor (dmabuf v{:?}, viewporter {}, fractional-scale {}, activation {})",
+        "display: connected to the compositor (dmabuf v{:?}, viewporter {}, fractional-scale {}, activation {}, text-input {})",
         st.dmabuf.version(),
         st.viewporter.is_some(),
         st.fractional.is_some(),
-        st.activation.is_some()
+        st.activation.is_some(),
+        st.text.available()
     );
     let mut ev: EventLoop<State> = EventLoop::try_new().context("event loop")?;
     WaylandSource::new(conn, queue)

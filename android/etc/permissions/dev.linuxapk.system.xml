@@ -9,6 +9,7 @@
   <privapp-permissions package="dev.linuxapk.system">
     <permission name="android.permission.REAL_GET_TASKS" />
     <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <permission name="android.permission.WRITE_SECURE_SETTINGS" />
   </privapp-permissions>
 
   <!-- Holders run with the "input" group: the composer's input socket can then

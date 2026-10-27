@@ -5,6 +5,7 @@
 //! Each composer connection gets its own host Wayland connection and thread
 //! ([`wl`]); this connection thread only validates requests and forwards them.
 
+pub mod ime;
 pub mod proto;
 mod wl;
 
@@ -184,6 +185,7 @@ impl Service for DisplayService {
                     damage,
                 })
             }
+            Request::TextInput(r) => self.send(Cmd::TextInput(r)),
             _ => Reply::err(-ENOENT),
         }
     }

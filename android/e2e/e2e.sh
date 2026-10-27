@@ -40,6 +40,9 @@ else
   bad "persistent process running"
 fi
 check "service started" "started input" "$(s logcat -d -s LinuxApkSystem:I)"
+# Text input (docs/input.md): the Linux.apk Keyboard is the input method, so no soft keyboard.
+check "Linux.apk Keyboard is the default input method" "^dev.linuxapk.system/.ime.HostImeService" \
+  "$(s settings get secure default_input_method)"
 input_log=$(s logcat -d -s LinuxApkInput:I)
 if grep -q "connected to" <<<"$input_log"; then
   ok "connected to the composer's input socket"

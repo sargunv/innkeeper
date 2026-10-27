@@ -39,6 +39,10 @@ class InputBridge(
     listeners += l
   }
 
+  fun removeListener(l: Listener) {
+    listeners -= l
+  }
+
   /** Sends one command line; returns false if not connected or the write failed. */
   fun send(line: String): Boolean {
     val s = socket ?: return false

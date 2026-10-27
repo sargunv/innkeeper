@@ -44,6 +44,8 @@ constexpr uint16_t kWindowActivate = 0x0205;
 constexpr uint16_t kBufferAdd = 0x0206;
 constexpr uint16_t kBufferRemove = 0x0207;
 constexpr uint16_t kFrame = 0x0208;
+constexpr uint16_t kTextInput = 0x0209;
+constexpr size_t kMaxTextInputLine = 480;
 constexpr uint16_t kEvConfigure = 0x4201;
 constexpr uint16_t kEvClose = 0x4202;
 constexpr uint16_t kEvRelease = 0x4203;
@@ -385,6 +387,16 @@ void Bridge::loop() {
 // --------------
 
 void Bridge::onCommand(const std::string& line) {
+  // The Linux.apk IME's text-input lines ("ti_..."): the bridge parses and
+  // validates them (docs/bridge.md, "Text input"); relay them as they are.
+  if (line.rfind("ti_", 0) == 0) {
+    if (line.size() > kMaxTextInputLine) return;
+    Msg m(kTextInput, tag());
+    m.u16(uint16_t(line.size()));
+    m.b.insert(m.b.end(), line.begin(), line.end());
+    send(m);
+    return;
+  }
   char cmd[32] = {};
   int32_t id = -1;
   int n = 0;

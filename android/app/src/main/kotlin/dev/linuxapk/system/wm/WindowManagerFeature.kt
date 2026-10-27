@@ -504,11 +504,15 @@ class WindowManagerFeature(
     }
   }
 
+  // LOCAL by default: the input method binds to editors in the window. The default one, the
+  // Linux.apk Keyboard (ime/), draws nothing; an Android IME the user picks shows inside the
+  // window.
+  // HIDE would keep any IME from binding (IMMS returns NO_IME), so no text input at all.
   private fun imePolicy(): Int =
-    when (SystemProps.get("persist.linuxapk.wm.ime", "hide")) {
-      "local" -> 0 // WindowManager.DISPLAY_IME_POLICY_LOCAL
+    when (SystemProps.get("persist.linuxapk.wm.ime", "local")) {
+      "hide" -> 2 // WindowManager.DISPLAY_IME_POLICY_HIDE
       "fallback" -> 1 // DISPLAY_IME_POLICY_FALLBACK_DISPLAY (on display 0)
-      else -> 2 // DISPLAY_IME_POLICY_HIDE: the host keyboard types, no soft keyboard
+      else -> 0 // DISPLAY_IME_POLICY_LOCAL
     }
 
   companion object {

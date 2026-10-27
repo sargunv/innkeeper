@@ -4,6 +4,7 @@
 //! The client is the composer (the Android HWC HAL). Windows are named by the
 //! Android display id they show; buffers by ids the composer picks.
 
+use super::ime;
 use crate::wire::{DecodeError, Reader, Writer};
 
 pub mod ty {
@@ -15,6 +16,7 @@ pub mod ty {
     pub const BUFFER_ADD: u16 = 0x0206;
     pub const BUFFER_REMOVE: u16 = 0x0207;
     pub const FRAME: u16 = 0x0208;
+    pub const TEXT_INPUT: u16 = 0x0209;
 
     /// Events (bridge to composer, tag 0).
     pub const CONFIGURE: u16 = 0x4201;
@@ -110,6 +112,8 @@ pub enum Request {
         buffer: u32,
         damage: [i32; 4],
     },
+    /// A line from the Linux.apk IME, relayed by the composer.
+    TextInput(ime::Req),
 }
 
 fn dim(r: &mut Reader<'_>, what: &'static str) -> Result<u32, DecodeError> {
@@ -171,6 +175,15 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             buffer: r.u32()?,
             damage: [r.i32()?, r.i32()?, r.i32()?, r.i32()?],
         },
+        ty::TEXT_INPUT => {
+            let n = r.u16()? as usize;
+            if n > ime::MAX_LINE {
+                return Err(DecodeError::Invalid("text-input line too long"));
+            }
+            let line = std::str::from_utf8(r.take(n)?)
+                .map_err(|_| DecodeError::Invalid("text-input line not UTF-8"))?;
+            Request::TextInput(ime::parse(line).ok_or(DecodeError::Invalid("text-input line"))?)
+        }
         t => return Err(DecodeError::UnknownType(t)),
     };
     r.end()?;
@@ -235,6 +248,12 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             for d in damage {
                 w.i32(*d);
             }
+        }
+        Request::TextInput(r) => {
+            w = Writer::message(ty::TEXT_INPUT, tag);
+            let l = r.to_line();
+            w.u16(l.len() as u16);
+            w.0.extend_from_slice(l.as_bytes());
         }
     }
     w.into_vec()
@@ -323,6 +342,13 @@ mod tests {
                 buffer: 7,
                 damage: [0, 0, 1280, 800],
             },
+            Request::TextInput(ime::Req::Surrounding {
+                text: "日本語 text".into(),
+                cursor: 3,
+                anchor: 3,
+                other: true,
+            }),
+            Request::TextInput(ime::Req::Apply),
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
         }

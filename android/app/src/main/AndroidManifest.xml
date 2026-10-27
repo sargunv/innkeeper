@@ -33,6 +33,8 @@
   <!-- signature|privileged: listed in dev.linuxapk.system.xml. -->
   <uses-permission android:name="android.permission.REAL_GET_TASKS" />
   <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+  <!-- signature|privileged: makes the Linux.apk Keyboard the default input method. -->
+  <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
        "linuxapk-session exec") passes any permission check. -->
@@ -68,6 +70,21 @@
       android:noHistory="true"
       android:taskAffinity=""
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+    <!-- Linux.apk Keyboard: host keyboard and input methods through zwp_text_input_v3
+         (docs/input.md, "Text input"). -->
+    <service
+      android:name=".ime.HostImeService"
+      android:exported="true"
+      android:label="@string/ime_name"
+      android:permission="android.permission.BIND_INPUT_METHOD">
+      <intent-filter>
+        <action android:name="android.view.InputMethod" />
+      </intent-filter>
+      <meta-data
+        android:name="android.view.im"
+        android:resource="@xml/method" />
+    </service>
 
     <receiver
       android:name=".wm.ControlReceiver"

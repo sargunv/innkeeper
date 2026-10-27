@@ -158,7 +158,11 @@ class InputTranslator(
       is HostEvent.WindowMapped,
       is HostEvent.WindowGone,
       is HostEvent.WindowFailed,
-      is HostEvent.Pong -> {}
+      is HostEvent.Pong,
+      is HostEvent.TextDelete,
+      is HostEvent.TextCommit,
+      is HostEvent.TextPreedit,
+      is HostEvent.TextDone -> {}
     }
     return out
   }

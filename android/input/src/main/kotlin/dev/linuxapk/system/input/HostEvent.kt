@@ -83,6 +83,21 @@ sealed interface HostEvent {
 
   data class Pong(val token: String) : HostEvent
 
+  // Text input (docs/input.md, "Text input"): the host input method's results for the Linux.apk
+  // IME, gathered until [TextDone]. Lengths and offsets are UTF-8 bytes; text is decoded.
+
+  /** Delete [before] bytes before the cursor and [after] bytes after it. */
+  data class TextDelete(val before: Int, val after: Int) : HostEvent
+
+  /** Insert [text] (several lines append). */
+  data class TextCommit(val text: String) : HostEvent
+
+  /** The new preedit and its cursor (-1: hidden); empty: none. */
+  data class TextPreedit(val begin: Int, val end: Int, val text: String) : HostEvent
+
+  /** Apply what came since the last one, for the window of [display]. */
+  data class TextDone(val display: Int) : HostEvent
+
   companion object {
     const val PROTOCOL_VERSION = 2
 
@@ -154,6 +169,13 @@ sealed interface HostEvent {
         "window_failed" ->
           need(args, 1) { WindowFailed(int(1), f.drop(2).joinToString(" ").ifEmpty { "?" }) }
         "pong" -> Pong(f.drop(1).joinToString(" "))
+        "ti_delete" -> need(args, 2) { TextDelete(int(1), int(2)) }
+        "ti_commit" -> TextCommit(PercentText.decode(f.getOrElse(1) { "" }) ?: return null)
+        "ti_preedit" ->
+          need(args, 2) {
+            TextPreedit(int(1), int(2), PercentText.decode(f.getOrElse(3) { "" }) ?: return null)
+          }
+        "ti_done" -> need(args, 1) { TextDone(int(1)) }
         else -> null
       }
     }

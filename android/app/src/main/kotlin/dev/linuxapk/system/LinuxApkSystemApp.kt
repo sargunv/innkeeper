@@ -3,6 +3,8 @@ package dev.linuxapk.system
 
 import android.app.Application
 import android.util.Log
+import dev.linuxapk.system.ime.ImeFeature
+import dev.linuxapk.system.input.InputBridge
 import dev.linuxapk.system.input.InputFeature
 import dev.linuxapk.system.wm.WindowManagerFeature
 
@@ -20,12 +22,18 @@ class LinuxApkSystemApp : Application() {
   var windows: WindowManagerFeature? = null
     private set
 
+  @Volatile private var input: InputFeature? = null
+
+  /** The composer connection (input stream and window-manager commands), shared by features. */
+  val inputBridge: InputBridge?
+    get() = input?.bridge
+
   override fun onCreate() {
     super.onCreate()
     Log.i(TAG, "starting")
-    val input = InputFeature(this)
+    val input = InputFeature(this).also { this.input = it }
     val wm = WindowManagerFeature(this) { input.bridge }
-    for (f in listOf<Feature>(input, wm)) {
+    for (f in listOf<Feature>(input, wm, ImeFeature(this))) {
       try {
         f.start()
         features += f
