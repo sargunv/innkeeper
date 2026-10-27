@@ -166,6 +166,9 @@ Causes:
   `vkAcquireNextImageKHR` (deferred-allocation swapchain images; Mesa patch
   0003). Vulkan acquire/present loops and bootanimation (ANGLE on RADV) now run
   in the session, with real release sync_files from amdgpu (no sw_sync needed).
+- 2026-10-27 (gpu): video no longer aborts SurfaceFlinger. RADV reports YV12,
+  NV12 and NV21 AHBs as external formats with YCbCr conversion through u_gralloc
+  (Mesa patch 0005). NewPipe plays video with correct colors; compat is 30/31.
 - 2026-10-27 (hal): `hal/build.sh` NDK-builds allocator AIDL V3,
   `mapper.linuxapk.so` (IMapper v5, memfd→udmabuf linear buffers) and composer3
   V5 (headless, all-CLIENT, timer vsync, PNG frame dumps) into

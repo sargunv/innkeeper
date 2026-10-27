@@ -74,7 +74,8 @@ On the default image, the AOSP CI build 16644040 (cuttlefish x86_64), 29 of 31
 apps work in per-app windows. The two failures:
 
 - **Open Sudoku:** its F-Droid build is arm64-only.
-- **NewPipe:** playing a video crashes SurfaceFlinger (open issue 1 below).
+- **NewPipe:** works since the YV12 fix (issue 1 below); it used to crash
+  SurfaceFlinger when playing a video.
 
 The working apps install, render, survive input, reach the network and decode
 audio. On the SDK emulator image, 30 of 31 worked: NewPipe's tap didn't start a
@@ -206,28 +207,13 @@ MapLibre Native's GL backend runs on ANGLE over RADV.
 
 ## Open issues, ranked
 
-1. **Video playback crashes SurfaceFlinger, and with it all of Android** (CI
-   image). A tap in NewPipe starts a video. The decoder's YV12 frames
-   (`format:842094169` = `HAL_PIXEL_FORMAT_YV12`, 896x480) reach RenderEngine,
-   which can't import them as a texture through ANGLE/RADV and aborts:
-
-   ```
-   F DEBUG: pid: 242, ppid: 1, tid: 262, name: RenderEngine  >>> /system/bin/surfaceflinger <<<
-   F DEBUG: Abort message: 'Failed to create a valid texture. [0x...]:[896,480] isProtected:0 isWriteable:0 format:842094169'
-     #03 android::renderengine::skia::GaneshBackendTexture::GaneshBackendTexture(sk_sp<GrDirectContext>, AHardwareBuffer*, bool)
-     #05 android::renderengine::skia::SkiaRenderEngine::mapExternalTextureBuffer(...)
-   ```
-
-   - **Effect:** zygote and every app restart, and the host windows go away. It
-     reproduces every time.
-   - **Harness:** it now notices a system_server or SurfaceFlinger death during
-     an app. It counts that against the app, with the abort message, and waits
-     for Android to come back before the next app.
-   - **Lane:** gpu/hal. Make YV12 (and `YCBCR_420_888`) AHardwareBuffers
-     importable by ANGLE's Vulkan backend on RADV: AHB format properties,
-     external-format YCbCr conversion. [gpu.md](gpu.md) already expects RADV to
-     reject YV12's chroma pitch. One mitigation is for software decoders to
-     output a format SurfaceFlinger can sample.
+1. **Fixed (2026-10-27, gpu lane): video playback crashed SurfaceFlinger.**
+   NewPipe's YV12 frames (`format:842094169`) made RenderEngine abort with
+   `Failed to create a valid texture`, restarting all of Android. RADV didn't
+   report YUV AHB formats to ANGLE. Mesa patch 0005 fixes it (see
+   [gpu.md](gpu.md#yuv-buffers-video-and-the-surfaceflinger-abort)).
+   - NewPipe now plays video with correct colors.
+   - `compat/run.sh --window` gives 30/31 with no restarts (NewPipe works).
 
 2. **arm64-only APKs don't install** (Open Sudoku 4.11.3; F-Droid has no x86_64
    build): `INSTALL_FAILED_NO_MATCHING_ABIS ... res=-113`. Next step: the M6
