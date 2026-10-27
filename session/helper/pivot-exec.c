@@ -11,8 +11,10 @@
 //     namespace, every mount it inherits is MNT_LOCKED, so Android's root
 //     cannot unmount the masks over host sysfs/proc, and read-only/nosuid/
 //     nodev/noexec flags on inherited mounts can't be cleared.
-//  3. The child installs a seccomp filter that routes bpf(2) to an emulator
-//     thread in the parent (bpfemu.c), since real eBPF needs privileges.
+//  3. The child installs the seccomp filter (bpfemu.c). The parent forks the
+//     binder broker (LINUXAPK_UBINDER), which receives every notification,
+//     serves binder and forwards the rest, such as bpf(2), to an emulator
+//     thread (real eBPF needs privileges).
 //  4. The child (pid 1 of the nested pid namespace) mounts a fresh /proc,
 //     binds the fake files staged under /linuxapk/proc over it, and execs
 //     PROG. The parent stays as the outer pid 1 and exits with the child's
@@ -23,7 +25,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
-#include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdio.h>
@@ -40,32 +41,28 @@
 
 extern char** environ;
 
-// Path to the Rust ubinder broker helper (ubinder/src/bin/broker.rs), or NULL.
-// When set (LINUXAPK_UBINDER), bpfemu installs one combined seccomp filter
-// (bpf + openat + binder-ioctl, since the kernel allows only one notification
-// listener per process) and the parent forks+execs the helper, which receives
-// every notification, serves the binder ones and forwards the rest to the bpf
-// thread. The helper is a normal dynamic bionic binary,
-// so pivot-exec stays a pure-C static binary (it is exec'd before pivot_root,
-// where no linker exists). Read in main() before clone(); the child sees a
-// copy.
-static const char* ubinder_helper;
-static int ubinder_enabled;
-// Single-uid mode (LINUXAPK_SINGLE_UID=1, needs ubinder): the session maps
-// only uid/gid 0, and the broker helper emulates Android's uids
-// (docs/sandbox.md).
+// Path to the Rust binder broker (ubinder/src/bin/broker.rs), from
+// LINUXAPK_UBINDER. The kernel allows only one notification listener per
+// process, so bpfemu installs one seccomp filter for bpf, openat and binder
+// ioctls, and the broker receives every notification, serves the binder ones
+// and forwards the rest to the bpf thread. The broker is a normal dynamic
+// bionic binary, so pivot-exec stays a pure-C static binary (it is exec'd
+// before pivot_root, where no linker exists).
+static const char* broker;
+// Single-uid mode (LINUXAPK_SINGLE_UID=1): the session maps only uid/gid 0,
+// and the broker emulates Android's uids (docs/sandbox.md).
 static int single_uid;
 
 static void die(const char* what);
 
-// Fork+exec the Rust broker helper, which receives notifications on `listener`
-// and forwards non-binder ones to `sock`. Runs in the parent's (outer)
-// namespaces like the bpf thread, so it sees Android pids and can
-// process_vm_* them. Dynamic bionic; the parent is in the pivoted Android root,
-// so /system/bin/linker64 and libc.so resolve.
-static void spawn_ubinder_helper(int sock, int listener) {
+// Fork+exec the broker, which receives notifications on `listener` and
+// forwards non-binder ones to `sock`. Runs in the parent's (outer) namespaces
+// like the bpf thread, so it sees Android pids and can process_vm_* them.
+// Dynamic bionic; the parent is in the pivoted Android root, so
+// /system/bin/linker64 and libc.so resolve.
+static void spawn_broker(int sock, int listener) {
   pid_t p = fork();
-  if (p < 0) die("fork ubinder helper");
+  if (p < 0) die("fork broker");
   if (p != 0) return;
   // Inherited fds must survive exec; clear CLOEXEC.
   fcntl(sock, F_SETFD, 0);
@@ -73,9 +70,9 @@ static void spawn_ubinder_helper(int sock, int listener) {
   char sockbuf[16], fdbuf[16];
   snprintf(sockbuf, sizeof(sockbuf), "%d", sock);
   snprintf(fdbuf, sizeof(fdbuf), "%d", listener);
-  char* argv[] = {(char*)ubinder_helper, sockbuf, fdbuf, NULL};
-  execve(ubinder_helper, argv, environ);
-  die("exec ubinder helper");
+  char* argv[] = {(char*)broker, sockbuf, fdbuf, NULL};
+  execve(broker, argv, environ);
+  die("exec broker");
 }
 
 // Is setgroups(2) disabled in this user namespace (/proc/self/setgroups)?
@@ -146,9 +143,9 @@ static int child_main(void* arg) {
     "/linuxapk/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
   );
 
-  // Route Android's bpf() (and, in ubinder mode, openat/binder-ioctl) to the
-  // supervisor via one seccomp notification listener, then hand it the fd.
-  int listener = bpfemu_install_filter(ubinder_enabled, single_uid);
+  // Route Android's bpf(), openat and binder ioctls to the supervisor via one
+  // seccomp notification listener, then hand it the fd.
+  int listener = bpfemu_install_filter(single_uid);
   if (listener < 0) die("install seccomp filter");
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
@@ -179,14 +176,13 @@ int main(int argc, char** argv) {
     return 2;
   }
   child_argv = argv + 2;
-  ubinder_helper = getenv("LINUXAPK_UBINDER");
-  ubinder_enabled = ubinder_helper != NULL && ubinder_helper[0] != '\0';
-  const char* su = getenv("LINUXAPK_SINGLE_UID");
-  single_uid = su != NULL && strcmp(su, "1") == 0;
-  if (single_uid && !ubinder_enabled) {
-    fprintf(stderr, "pivot-exec: single-uid mode needs ubinder\n");
+  broker = getenv("LINUXAPK_UBINDER");
+  if (broker == NULL || broker[0] == '\0') {
+    fprintf(stderr, "pivot-exec: LINUXAPK_UBINDER (the broker) is not set\n");
     return 2;
   }
+  const char* su = getenv("LINUXAPK_SINGLE_UID");
+  single_uid = su != NULL && strcmp(su, "1") == 0;
 
   if (chdir(argv[1]) != 0) die("chdir newroot");
   // pivot_root(".", "."): the old root ends up stacked on top of the new
@@ -237,20 +233,14 @@ int main(int argc, char** argv) {
   memcpy(&listener, CMSG_DATA(cm), sizeof(int));
   close(sync_sock[1]);
 
-  // ubinder: the broker helper receives all notifications and forwards the bpf
-  // ones to the serve thread over a SOCK_SEQPACKET pair. Wire it before
-  // starting the serve thread.
-  if (ubinder_enabled) {
-    int sp[2];
-    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)
-      die("binder socketpair");
-    spawn_ubinder_helper(sp[1], listener);
-    close(sp[1]);
-    bpfemu_set_binder_forward(sp[0]);
-  }
-  pthread_t t;
-  if (pthread_create(&t, NULL, bpfemu_serve, (void*)(intptr_t)listener) != 0)
-    die("bpfemu thread");
+  // The broker receives all notifications and forwards the bpf ones to the
+  // serve thread over a SOCK_SEQPACKET pair.
+  int sp[2];
+  if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)
+    die("broker socketpair");
+  spawn_broker(sp[1], listener);
+  close(sp[1]);
+  if (bpfemu_start(listener, sp[0]) != 0) die("bpfemu thread");
 
   // We are pid 1 of the outer pid namespace: reap until the child is gone.
   int status;

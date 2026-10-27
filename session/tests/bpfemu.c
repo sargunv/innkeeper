@@ -1,18 +1,21 @@
 // The bpf() emulator (helper/bpfemu.c) against hostile callers. Built and
 // run by bpfemu.sh inside a private user and mount namespace whose
 // /sys/fs/bpf is a tmpfs, like the session's. A child installs the session's
-// filter and makes bpf() calls; the parent serves them with bpfemu_serve, as
-// pivot-exec does, and must survive each one.
+// filter and makes bpf() calls. In the parent a stand-in for the broker lets
+// openat and binder ioctls continue and forwards the rest to bpfemu's serve
+// thread, as pivot-exec wires it; the parent must survive each call.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/bpf.h>
+#include <linux/seccomp.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -201,6 +204,36 @@ static void tests(const char* tmp) {
   CHECK(i < 5000, "objects capped after %d programs", i);
 }
 
+// The broker's part (ubinder/src/sys.rs): receive every notification on the
+// listener, let the ones it would serve (openat, binder ioctls) continue, and
+// forward the rest to bpfemu.
+struct broker {
+  int listener, forward;
+};
+
+static void* serve_as_broker(void* arg) {
+  struct broker* b = arg;
+  struct seccomp_notif_sizes sz;
+  if (syscall(__NR_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &sz)) return NULL;
+  struct seccomp_notif* req = calloc(1, sz.seccomp_notif);
+  struct seccomp_notif_resp* resp = calloc(1, sz.seccomp_notif_resp);
+  for (;;) {
+    memset(req, 0, sz.seccomp_notif);
+    if (ioctl(b->listener, SECCOMP_IOCTL_NOTIF_RECV, req)) {
+      if (errno == EINTR || errno == ENOENT) continue;
+      return NULL;
+    }
+    if (req->data.nr != __NR_openat && req->data.nr != __NR_ioctl) {
+      send(b->forward, req, sz.seccomp_notif, 0);
+      continue;
+    }
+    memset(resp, 0, sz.seccomp_notif_resp);
+    resp->id = req->id;
+    resp->flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
+    ioctl(b->listener, SECCOMP_IOCTL_NOTIF_SEND, resp);
+  }
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) return fprintf(stderr, "usage: %s TMPDIR\n", argv[0]), 2;
   // Room for more objects than the cap (each holds a memfd).
@@ -217,7 +250,7 @@ int main(int argc, char** argv) {
   if (c == 0) {
     alarm(20);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-    int lfd = bpfemu_install_filter(0, 0);
+    int lfd = bpfemu_install_filter(0);
     if (lfd < 0) return perror("filter"), 1;
     char ctl[CMSG_SPACE(sizeof(int))] = {0};
     char b = 0;
@@ -249,10 +282,15 @@ int main(int argc, char** argv) {
   };
   if (recvmsg(sp[0], &mh, 0) != 1 || !CMSG_FIRSTHDR(&mh))
     return fprintf(stderr, "no listener\n"), 1;
-  int lfd;
-  memcpy(&lfd, CMSG_DATA(CMSG_FIRSTHDR(&mh)), sizeof(int));
+  static struct broker brk;
+  memcpy(&brk.listener, CMSG_DATA(CMSG_FIRSTHDR(&mh)), sizeof(int));
+  int fwd[2];
+  if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fwd))
+    return perror("socketpair"), 1;
+  brk.forward = fwd[1];
   pthread_t t;
-  pthread_create(&t, NULL, bpfemu_serve, (void*)(intptr_t)lfd);
+  pthread_create(&t, NULL, serve_as_broker, &brk);
+  if (bpfemu_start(brk.listener, fwd[0])) return perror("bpfemu_start"), 1;
   // A hung or crashed supervisor fails the test (SIGALRM, SIGSEGV).
   alarm(30);
   int st;

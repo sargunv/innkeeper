@@ -240,9 +240,8 @@ on init
     chmod 0770 /config/sdcardfs
     chown system package_info /config/sdcardfs
 
-    # linuxapk: binderfs setup moved to a property-gated action below so
-    # ubinder mode (ro.boot.linuxapk.ubinder=1) boots with no binderfs; the
-    # userspace broker serves /dev/{binder,hwbinder,vndbinder} by path.
+    # linuxapk: binder isn't mounted here. The userspace broker serves
+    # /dev/{binder,hwbinder,vndbinder} by path (ns-init.sh creates the nodes).
 
     # Mount fusectl
     mount fusectl none /sys/fs/fuse/connections
@@ -506,21 +505,6 @@ service boringssl_self_test_apex64 /apex/com.android.conscrypt/bin/boringssl_sel
     # Explicitly specify that boringssl_self_test_apex64 doesn't require any capabilities
     capabilities
     user nobody
-
-# linuxapk: kernel binder via a private binderfs instance (M0-M3). Skipped in
-# ubinder mode, where the session's seccomp supervisor serves binder in
-# userspace and no binderfs is mounted (androidboot.linuxapk.ubinder=1).
-on init && property:ro.boot.linuxapk.ubinder=0
-    mkdir /dev/binderfs
-    # stats=global needs CAP_SYS_ADMIN in the initial user ns, so plain mount.
-    mount binder binder /dev/binderfs
-    chmod 0755 /dev/binderfs
-    symlink /dev/binderfs/binder /dev/binder
-    symlink /dev/binderfs/hwbinder /dev/hwbinder
-    symlink /dev/binderfs/vndbinder /dev/vndbinder
-    chmod 0666 /dev/binderfs/hwbinder
-    chmod 0666 /dev/binderfs/binder
-    chmod 0666 /dev/binderfs/vndbinder
 
 # Healthd can trigger a full boot from charger mode by signaling this
 # property when the power button is held.

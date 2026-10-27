@@ -7,10 +7,11 @@
 // Android's networking stack (netbpfload, netd, system_server's
 // connectivity code) needs eBPF maps, but a rootless session can't use real
 // eBPF. pivot-exec installs a seccomp filter on Android init that turns every
-// bpf() call into a user notification; this file is the supervisor that
-// answers them (it runs as a thread of pivot-exec, outside Android's
-// namespaces). seccomp catches the syscall itself, so it works for every
-// process and linker namespace, static binaries and JNI code included.
+// bpf() call into a user notification; the binder broker receives it and
+// forwards it to this file's serve thread, which answers it (it runs in
+// pivot-exec, outside Android's namespaces). seccomp catches the syscall
+// itself, so it works for every process and linker namespace, static binaries
+// and JNI code included.
 //
 // Model:
 //  - Objects (maps, programs, BTF, links) live in the supervisor. A process
@@ -33,6 +34,7 @@
 #include <linux/filter.h>
 #include <linux/openat2.h>
 #include <linux/seccomp.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -868,7 +870,7 @@ static long handle(struct seccomp_notif* req) {
 #define __NR_ioctl 16
 #endif
 
-int bpfemu_install_filter(int with_binder, int single_uid) {
+int bpfemu_install_filter(int single_uid) {
   // The syscall clauses (bpf, statfs, getxattr, getsockopt, prlimit, timerfd,
   // sched). All jumps are relative, and they target NOTIF/ALLOW, which sit
   // immediately after this block, so the whole block can be shifted down by a
@@ -916,25 +918,21 @@ int bpfemu_install_filter(int with_binder, int single_uid) {
     BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
   );
 
-  int openat_i = -1, ioctl_i = -1, typejeq_i = -1;
-  if (with_binder) {
-    // openat -> NOTIF (inject the binder memfd); ioctl of type 'b' -> NOTIF
-    // (serve the binder command). Both are forwarded to the broker helper.
-    openat_i = n;
-    f[n++] = (struct sock_filter)BPF_JUMP(
-      BPF_JMP | BPF_JEQ | BPF_K, __NR_openat, 0, 0
-    );
-    ioctl_i = n;
-    f[n++] =
-      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ioctl, 0, 0);
-    f[n++] = (struct sock_filter)BPF_STMT(
-      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])
-    );
-    f[n++] = (struct sock_filter)BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0xff00);
-    typejeq_i = n;
-    f[n++] =
-      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ('b' << 8), 0, 0);
-  }
+  // openat -> NOTIF (inject the binder memfd); ioctl of type 'b' -> NOTIF
+  // (serve the binder command). The broker serves both.
+  int openat_i = n;
+  f[n++] =
+    (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_openat, 0, 0);
+  int ioctl_i = n;
+  f[n++] =
+    (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ioctl, 0, 0);
+  f[n++] = (struct sock_filter)BPF_STMT(
+    BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])
+  );
+  f[n++] = (struct sock_filter)BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0xff00);
+  int typejeq_i = n;
+  f[n++] =
+    (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ('b' << 8), 0, 0);
 
   // Single-uid mode (virtual ids): the credential syscalls -> NOTIF, and
   // getsockopt(SOL_SOCKET, SO_PEERCRED) -> NOTIF; everything else falls
@@ -949,7 +947,7 @@ int bpfemu_install_filter(int with_binder, int single_uid) {
   int vid_start = n;  // where non-binder syscalls continue
   int vid_jumps[32], nvid_jumps = 0, peercred_i = -1, lstat_i = -1,
                      access_i = -1;
-  if (with_binder && single_uid) {
+  if (single_uid) {
     for (size_t i = 0; i < sizeof(kVidNrs) / sizeof(kVidNrs[0]); i++) {
       vid_jumps[nvid_jumps++] = n;
       f[n++] = (struct sock_filter)BPF_JUMP(
@@ -1024,14 +1022,12 @@ int bpfemu_install_filter(int with_binder, int single_uid) {
 
   // Patch relative jumps now that NOTIF/ALLOW positions are known.
   f[arch_jf].jf = allow - arch_jf - 1;
-  if (with_binder) {
-    f[openat_i].jt = notif - openat_i - 1;    // openat -> NOTIF
-    f[openat_i].jf = 0;                       // fall to ioctl check
-    f[ioctl_i].jt = 0;                        // fall to the type load
-    f[ioctl_i].jf = vid_start - ioctl_i - 1;  // not ioctl -> the rest
-    f[typejeq_i].jt = notif - typejeq_i - 1;  // type 'b' -> NOTIF
-    f[typejeq_i].jf = allow - typejeq_i - 1;  // other ioctl -> ALLOW
-  }
+  f[openat_i].jt = notif - openat_i - 1;    // openat -> NOTIF
+  f[openat_i].jf = 0;                       // fall to ioctl check
+  f[ioctl_i].jt = 0;                        // fall to the type load
+  f[ioctl_i].jf = vid_start - ioctl_i - 1;  // not ioctl -> the rest
+  f[typejeq_i].jt = notif - typejeq_i - 1;  // type 'b' -> NOTIF
+  f[typejeq_i].jf = allow - typejeq_i - 1;  // other ioctl -> ALLOW
   for (int i = 0; i < nvid_jumps; i++)
     f[vid_jumps[i]].jt = notif - vid_jumps[i] - 1;
   if (peercred_i >= 0) f[peercred_i].jt = notif - peercred_i - 1;
@@ -1040,23 +1036,22 @@ int bpfemu_install_filter(int with_binder, int single_uid) {
 
   struct sock_fprog prog = {.len = n, .filter = f};
   // Waits stay interruptible (no WAIT_KILLABLE_RECV): ptrace (debuggerd) and
-  // job control must be able to stop threads parked in a binder read. ubinder
-  // makes an interrupted, restarted BINDER_WRITE_READ idempotent instead.
+  // job control must be able to stop threads parked in a binder read. The
+  // broker makes an interrupted, restarted BINDER_WRITE_READ idempotent
+  // instead.
   return syscall(
     SYS_seccomp, SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER,
     &prog
   );
 }
 
-// ubinder mode: the Rust broker helper is the listener's only receiver (binder
-// ioctls and openat are hot; bpf and friends are rare), and it forwards the
-// notifications that are ours over this SOCK_SEQPACKET socket.
-static int binder_fwd = -1;
+// The broker is the listener's only receiver (binder ioctls and openat are
+// hot; bpf and friends are rare), and it forwards the notifications that are
+// ours over this SOCK_SEQPACKET socket.
+static int forwarded = -1;
 
-void bpfemu_set_binder_forward(int sock) { binder_fwd = sock; }
-
-void* bpfemu_serve(void* arg) {
-  notif_fd = (int)(intptr_t)arg;
+static void* serve(void* arg) {
+  (void)arg;
   long n = sysconf(_SC_NPROCESSORS_CONF);
   ncpus = n > 0 ? (int)n : 1;
   struct seccomp_notif_sizes sizes;
@@ -1068,16 +1063,10 @@ void* bpfemu_serve(void* arg) {
   struct seccomp_notif_resp* resp = calloc(1, sizes.seccomp_notif_resp);
   for (;;) {
     memset(req, 0, sizes.seccomp_notif);
-    if (binder_fwd >= 0) {
-      ssize_t got = recv(binder_fwd, req, sizes.seccomp_notif, 0);
-      if (got < 0 && errno == EINTR) continue;
-      if (got <= 0) {
-        LOG("forwarded notification: %s\n", got ? strerror(errno) : "EOF");
-        return NULL;
-      }
-    } else if (ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_RECV, req) != 0) {
-      if (errno == EINTR || errno == ENOENT) continue;
-      LOG("NOTIF_RECV: %s\n", strerror(errno));
+    ssize_t got = recv(forwarded, req, sizes.seccomp_notif, 0);
+    if (got < 0 && errno == EINTR) continue;
+    if (got <= 0) {
+      LOG("forwarded notification: %s\n", got ? strerror(errno) : "EOF");
       return NULL;
     }
     long r = handle(req);
@@ -1093,4 +1082,11 @@ void* bpfemu_serve(void* arg) {
     if (ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_SEND, resp) != 0 && errno != ENOENT)
       LOG("NOTIF_SEND: %s\n", strerror(errno));
   }
+}
+
+int bpfemu_start(int listener, int forwarded_sock) {
+  notif_fd = listener;
+  forwarded = forwarded_sock;
+  pthread_t t;
+  return pthread_create(&t, NULL, serve, NULL);
 }

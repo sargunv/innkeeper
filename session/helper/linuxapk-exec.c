@@ -1,10 +1,10 @@
 // linuxapk-exec: run a command as a descendant of Android init.
 //
-//   linuxapk-exec --serve SOCKET     (init service, ubinder mode only)
+//   linuxapk-exec --serve            (init service)
 //   linuxapk-exec CMD [ARGS...]      (client; used by `linuxapk-session exec`)
 //
-// In ubinder mode binder is served through the seccomp filter pivot-exec
-// installs on init, which only init's descendants inherit. `linuxapk-session
+// Binder is served through the seccomp filter pivot-exec installs on init,
+// which only init's descendants inherit. `linuxapk-session
 // exec` enters the session with nsenter, so its processes have no filter and
 // no binder (am, pm, cmd, dumpsys, service ...). The client instead hands its
 // argv, environment, working directory and stdio fds (SCM_RIGHTS) to this
@@ -31,6 +31,8 @@
 #include <unistd.h>
 
 extern char** environ;
+
+static const char kSocket[] = "/dev/socket/linuxapk-exec";
 
 #define MAX_MSG (1 << 20)
 
@@ -63,8 +65,7 @@ static int recv_all(int fd, void* buf, size_t len) {
 // sent together with the client's fds 0, 1, 2.
 
 static int client(int argc, char** argv) {
-  const char* path = getenv("LINUXAPK_EXEC_SOCKET");
-  if (!path) path = "/dev/socket/linuxapk-exec";
+  const char* path = kSocket;
   int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   struct sockaddr_un sa = {.sun_family = AF_UNIX};
   snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", path);
@@ -190,7 +191,8 @@ static void serve_one(int c) {
   _exit(0);
 }
 
-static int server(const char* path) {
+static int server(void) {
+  const char* path = kSocket;
   signal(SIGCHLD, SIG_IGN);  // reap connection handlers automatically
   signal(SIGPIPE, SIG_IGN);
   int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -223,9 +225,9 @@ static int server(const char* path) {
 }
 
 int main(int argc, char** argv) {
-  if (argc == 3 && strcmp(argv[1], "--serve") == 0) return server(argv[2]);
+  if (argc == 2 && strcmp(argv[1], "--serve") == 0) return server();
   if (argc < 2) {
-    fprintf(stderr, "usage: linuxapk-exec CMD [ARGS...] | --serve SOCKET\n");
+    fprintf(stderr, "usage: linuxapk-exec CMD [ARGS...] | --serve\n");
     return 2;
   }
   return client(argc - 1, argv + 1);
