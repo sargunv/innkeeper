@@ -27,6 +27,13 @@ scope.
   it's the best reference for Linux desktop integration: portals, MPRIS,
   notifications, AT-SPI through AccessKit, clipboard, and drag and drop.
 
+## Non-goals
+
+- **Virtual machines.** Linux.apk runs Android natively, as host processes
+  integrated with the desktop. VM-based Android already exists (the emulator,
+  Cuttlefish, Waydroid-like stacks, ChromeOS ARCVM); a VM or guest kernel is
+  never an acceptable architecture here.
+
 ## Core bet: real Android userspace, our own bottom layer and UX
 
 Android _is_ Linux. We run a real, near-stock AOSP x86_64 userspace (ART,
