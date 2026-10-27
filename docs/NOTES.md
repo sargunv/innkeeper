@@ -61,6 +61,8 @@ Rules:
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
+- input: Kotlin platform-signed system app (`dev.linuxapk.system`) that injects
+  the composer's Wayland input stream into Android. Docs: `docs/input.md`.
 - image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17` runs as
   systemd user unit `linuxapk-aosp-sync` (`~/aosp/sync-loop.sh`), build
   container `aosp/build-shell.sh`.
