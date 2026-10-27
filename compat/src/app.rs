@@ -58,7 +58,8 @@ pub struct AppResult {
     pub version_code: u64,
     pub result: Status,
     pub reason: String,
-    /// `am start -W` TotalTime (cold start).
+    /// Time to the first frame on a fresh install (ActivityTaskManager's
+    /// "Displayed").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_ms: Option<u64>,
     /// Total PSS of the app process after the interactions.
@@ -81,7 +82,7 @@ pub struct Run<'a> {
     checks: Vec<Check>,
     launch_ms: Option<u64>,
     pss_mb: Option<u64>,
-    /// The app's window (per-app window mode); None means display 0.
+    /// The app's window, once it is launched.
     win: Option<Win>,
     last_shot: std::cell::RefCell<Option<PathBuf>>,
     gesture_sh: PathBuf,
@@ -211,7 +212,7 @@ impl<'a> Run<'a> {
     }
 
     /// Opens the app in a window of its own through the window manager and
-    /// waits for its first frame ("Displayed" in the log, like `am start -W`).
+    /// waits for its first frame ("Displayed" in the log).
     fn launch_in_window(&mut self, component: &str) -> Result<(), Stop> {
         let pkg = self.app.package.clone();
         let o = self.s.run(
@@ -500,38 +501,8 @@ impl<'a> Run<'a> {
 
         // Launch from a clean slate.
         s.run(30, &["logcat", "-b", "main,system,crash", "-c"]);
-        if s.per_app_windows() {
-            self.launch_in_window(&component)?;
-        } else {
-            self.launch_on_display0(&component)?;
-        }
+        self.launch_in_window(&component)?;
         self.after_launch()
-    }
-
-    fn launch_on_display0(&mut self, component: &str) -> Result<(), Stop> {
-        let s = self.s;
-        let o = s.run(90, &["am", "start", "-W", "-n", component]);
-        self.save("am-start.txt", &o.text);
-        if o.text.contains("Error") || !o.text.contains("Status: ok") {
-            let why = o
-                .text
-                .lines()
-                .find(|l| l.contains("Error"))
-                .unwrap_or("timeout");
-            self.check("launch", false, why.trim());
-            return Err(Stop(Status::Broken, format!("launch: {}", why.trim())));
-        }
-        self.launch_ms = o
-            .text
-            .lines()
-            .find_map(|l| l.strip_prefix("TotalTime: "))
-            .and_then(|v| v.trim().parse().ok());
-        self.check(
-            "launch",
-            true,
-            format!("{} ms", self.launch_ms.unwrap_or(0)),
-        );
-        Ok(())
     }
 
     fn after_launch(&mut self) -> Result<(), Stop> {
@@ -549,9 +520,9 @@ impl<'a> Run<'a> {
         self.check("alive after launch", true, "");
 
         // Platform compatibility warnings ("built for an older version of
-        // Android") sit over a working app; note them and dismiss them. In
-        // per-app windows the window manager shows the first in the app's
-        // window (AppWarningActivity).
+        // Android") sit over a working app; note them and dismiss them. The
+        // window manager shows the first in the app's window
+        // (AppWarningActivity).
         let mut focus = self.focus();
         // The same goes for the system's "let app always run in the
         // background?" prompt that some apps raise at start.
@@ -809,8 +780,7 @@ impl<'a> Run<'a> {
                 // pinch|pan|doubletap X Y, as touch through Linux.apk System's
                 // input bridge (multi-touch, which `input` can't do).
                 "gesture" => {
-                    // In a per-app window: scale to its pixels and address its
-                    // display (protocol v2).
+                    // Scaled to the app window's pixels, on its display.
                     let mut a: Vec<String> = arg.split_whitespace().map(str::to_string).collect();
                     if let (Some(w), 3) = (&self.win, a.len()) {
                         let x: i32 = a[1].parse().unwrap_or(0);

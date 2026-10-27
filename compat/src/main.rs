@@ -1,13 +1,14 @@
 //! Linux.apk compat harness. See docs/compat-triage.md.
 //!
-//!   linuxapk-compat [run] [--window] [--only PKG,...] [--accept] [--no-finish]
+//!   linuxapk-compat [run] [--window] [--only PKG,...] [--accept]
 //!   linuxapk-compat fetch
 //!   linuxapk-compat report
 //!
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
-//! one if needed), runs every app, writes out/compat/, and then, unless an app
-//! that worked before got worse, compat/results.json and COMPATIBILITY.md.
-//! `--accept` records the results even with regressions.
+//! one if needed, and stopping it at the end), runs every app, writes
+//! out/compat/, and then, unless an app that worked before got worse,
+//! compat/results.json and COMPATIBILITY.md. `--accept` records the results
+//! even with regressions.
 
 mod app;
 mod corpus;
@@ -31,7 +32,6 @@ struct Opts {
     window: bool,
     only: Vec<String>,
     accept: bool,
-    finish: bool,
 }
 
 fn parse_args() -> Result<Opts> {
@@ -40,7 +40,6 @@ fn parse_args() -> Result<Opts> {
         window: false,
         only: vec![],
         accept: false,
-        finish: true,
     };
     let mut args = env::args().skip(1);
     while let Some(a) = args.next() {
@@ -48,7 +47,6 @@ fn parse_args() -> Result<Opts> {
             "run" | "fetch" | "report" => o.cmd = a,
             "--window" => o.window = true,
             "--accept" => o.accept = true,
-            "--no-finish" => o.finish = false,
             "--only" => {
                 let v = args.next().context("--only needs a value")?;
                 o.only.extend(v.split(',').map(str::to_string));
@@ -152,7 +150,7 @@ fn real_main() -> Result<ExitCode> {
     let mut new = Results {
         date: today(),
         build: s.getprop("ro.build.fingerprint"),
-        backend: s.backend(),
+        headless: s.headless(),
         session_mem_mb: session_mem_mb(),
         apps: vec![],
     };
@@ -182,32 +180,11 @@ fn real_main() -> Result<ExitCode> {
     } else {
         eprintln!("compat: baseline kept; results in out/compat/ (--accept to record)");
     }
-
-    if o.finish {
-        finish_with_window(&s);
-    }
     Ok(if regressions.is_empty() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     })
-}
-
-/// Leaves a booted session showing its window, for whoever is watching.
-fn finish_with_window(s: &Session) {
-    if s.pid().is_some() && s.backend() != "headless" {
-        return;
-    }
-    eprintln!("compat: restarting the session with its window");
-    s.stop();
-    if let Err(e) = s
-        .start(true)
-        .and_then(|_| s.wait_boot(Duration::from_secs(300)))
-    {
-        eprintln!("compat: could not start a windowed session: {e:#}");
-    } else {
-        s.prepare();
-    }
 }
 
 fn today() -> String {

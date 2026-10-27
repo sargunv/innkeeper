@@ -22,7 +22,7 @@ pub struct App {
     pub version_code: u64,
     pub version_name: String,
     pub native: String,
-    /// UI framework or engine, checked against the APK's contents.
+    /// UI framework or engine, for the report (not checked).
     pub framework: String,
     pub url: String,
     pub sha256: String,

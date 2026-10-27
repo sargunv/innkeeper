@@ -14,8 +14,8 @@ pub struct Results {
     pub date: String,
     /// `ro.build.fingerprint` of the image under test.
     pub build: String,
-    /// Composer backend during the run (`headless` or `wayland`).
-    pub backend: String,
+    /// Whether the session ran without host windows.
+    pub headless: bool,
     /// Session cgroup memory at the end of the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_mem_mb: Option<u64>,
@@ -87,14 +87,14 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
      optional per-app script. Failures are triaged in \
      [docs/compat-triage.md](docs/compat-triage.md). Generated: run \
      `compat/run.sh` (or `compat/run.sh report` to rewrite this file from \
-     `compat/results.json`). Start is `am start -W` TotalTime on a fresh \
-     install; memory is the app's total PSS after the interactions.\n\n",
+     `compat/results.json`). Start is the time to the first frame on a \
+     fresh install; memory is the app's total PSS after the interactions.\n\n",
     );
     md += &format!(
-        "Last run: {}, image `{}`, {} composer. {}.\n\n",
+        "Last run: {}, image `{}`, {} session. {}.\n\n",
         res.date,
         res.build,
-        res.backend,
+        if res.headless { "headless" } else { "windowed" },
         summary(&res.apps)
     );
     md += "| App | Version | Framework | Native code | Result | Start | Memory | Notes |\n";

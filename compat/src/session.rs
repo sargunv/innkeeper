@@ -1,5 +1,6 @@
 //! Driving the live Android session through `session/linuxapk-session`.
 
+use std::cell::Cell;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -8,8 +9,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+/// The session the harness drives. A session it started itself is stopped
+/// again when this is dropped, so a run leaves nothing running that it started.
 pub struct Session {
     launcher: PathBuf,
+    started: Cell<bool>,
 }
 
 pub struct Output {
@@ -19,7 +23,10 @@ pub struct Output {
 
 impl Session {
     pub fn new(launcher: PathBuf) -> Self {
-        Self { launcher }
+        Self {
+            launcher,
+            started: Cell::new(false),
+        }
     }
 
     /// Host pid of the session's Android init, if running.
@@ -142,19 +149,17 @@ impl Session {
     }
 
     /// Makes sure a session is running and booted. Starts one (headless unless
-    /// `window`) if none is running. Returns true if this call started it.
-    pub fn ensure(&self, window: bool) -> Result<bool> {
-        let mut started = false;
+    /// `window`) if none is running.
+    pub fn ensure(&self, window: bool) -> Result<()> {
         if self.pid().is_none() {
             self.start(window)?;
-            started = true;
         }
         self.wait_boot(Duration::from_secs(300))?;
         self.prepare();
-        Ok(started)
+        Ok(())
     }
 
-    pub fn start(&self, window: bool) -> Result<()> {
+    fn start(&self, window: bool) -> Result<()> {
         eprintln!(
             "compat: starting a session ({})",
             if window { "window" } else { "headless" }
@@ -164,18 +169,12 @@ impl Session {
         if !window {
             c.arg("--headless");
         }
+        self.started.set(true);
         let st = c.status()?;
         if !st.success() {
             bail!("session start failed");
         }
         Ok(())
-    }
-
-    pub fn stop(&self) {
-        let _ = Command::new(&self.launcher)
-            .arg("stop")
-            .stdout(Stdio::null())
-            .status();
     }
 
     pub fn wait_boot(&self, limit: Duration) -> Result<()> {
@@ -200,13 +199,6 @@ impl Session {
         self.run(30, &["logcat", "-G", "16M"]);
         self.run(15, &["input", "keyevent", "WAKEUP"]);
         self.run(15, &["wm", "dismiss-keyguard"]);
-    }
-
-    /// True when apps get windows of their own (docs/windowing.md): the
-    /// harness then launches through the window manager and drives the app's
-    /// display instead of display 0.
-    pub fn per_app_windows(&self) -> bool {
-        self.getprop("vendor.linuxapk.wm.mode") != "single"
     }
 
     /// Pid of Android's system_server, if running.
@@ -268,8 +260,20 @@ impl Session {
         bail!("Android did not come back in {limit:?}")
     }
 
-    /// "wayland" or "headless".
-    pub fn backend(&self) -> String {
-        self.getprop("vendor.linuxapk.hwc.backend")
+    /// Whether the composer runs without host windows.
+    pub fn headless(&self) -> bool {
+        self.getprop("vendor.linuxapk.hwc.backend") == "headless"
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if self.started.get() {
+            eprintln!("compat: stopping the session this run started");
+            let _ = Command::new(&self.launcher)
+                .arg("stop")
+                .stdout(Stdio::null())
+                .status();
+        }
     }
 }

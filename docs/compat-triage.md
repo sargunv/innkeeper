@@ -8,7 +8,7 @@ assignment.
 ## Harness
 
 ```sh
-compat/run.sh                    # whole corpus; headless session if none runs
+compat/run.sh                    # whole corpus; a headless session if none runs
 compat/run.sh --only org.wikipedia,de.sudoq
 compat/run.sh --window           # start the session with its window, to watch
 compat/run.sh fetch              # download and verify the corpus only
@@ -16,13 +16,13 @@ compat/run.sh report             # rewrite COMPATIBILITY.md from results.json
 ```
 
 Run it as a capped job on the lane's own session instance:
-`systemd-run --user --unit=compat-run --collect -p MemoryMax=4G -E LINUXAPK_INSTANCE=compat -- compat/run.sh --no-finish`.
+`systemd-run --user --unit=compat-run --collect -p MemoryMax=4G -E LINUXAPK_INSTANCE=compat -- compat/run.sh`.
 
 - **Corpus:** `compat/corpus.toml` holds pinned F-Droid APKs (version code, URL
   and SHA-256). They download into `out/corpus/` and are never committed. Each
-  entry also records the app's framework, checked against the APK's contents
-  (see "Frameworks" below), and optional `manual` notes for checks the harness
-  doesn't do.
+  entry also records the app's framework, identified by hand from the APK's
+  contents (see "Frameworks" below), and optional `manual` notes for checks the
+  harness doesn't do.
 - **Per app** (`compat/src/app.rs`):
   1. Copy the APK into `/data/local/tmp` and run `pm install -r -g`.
   2. Resolve the launcher activity (or a TV app's leanback one), then launch it.
@@ -72,12 +72,11 @@ Run it as a capped job on the lane's own session instance:
   the run (exit 1), and the baseline is left alone. `--accept` records it
   anyway.
 - **Session:** the harness uses this checkout's `session/linuxapk-session` if
-  `out/img` exists (lane worktrees symlink `img`, `root`, `vendor-overlay` and
-  `system_ext-overlay` from the main checkout's `out/`), else the main
-  checkout's. Set `LINUXAPK_INSTANCE` to use a session of your own. If no
-  session is running, it starts a headless one and waits for
-  `sys.boot_completed`. At the end it leaves a session showing its window
-  (`--no-finish` skips that).
+  the image it selects is prepared (`linuxapk-session image` prints its paths;
+  lane worktrees symlink `vendor-overlay` and `system_ext-overlay` from the main
+  checkout's `out/`), else the main checkout's. Set `LINUXAPK_INSTANCE` to use a
+  session of your own. If no session is running, it starts a headless one, waits
+  for `sys.boot_completed`, and stops it at the end.
 
 ## Results (2026-10-27)
 
@@ -97,7 +96,7 @@ committed).
 
 ### Frameworks
 
-Each framework is checked from the APK's contents.
+Each framework was identified by hand from the APK's contents.
 
 | Framework              | App (corpus)                                       | Evidence in the APK                                             | Result                               |
 | ---------------------- | -------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------ |

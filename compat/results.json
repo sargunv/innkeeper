@@ -1,7 +1,7 @@
 {
   "date": "2026-10-27",
   "build": "generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys",
-  "backend": "headless",
+  "headless": true,
   "session_mem_mb": 872,
   "apps": [
     {
