@@ -252,6 +252,7 @@ build_test() {
   glslangValidator -V --quiet --vn fill_comp -o "$t/fill_comp.h" "$here/test/fill.comp"
   "$cc" -O2 -Wall -I"$t" -o "$t/vkdriver_test" "$here/test/vkdriver_test.c" -ldl
   "$cc" -O2 -Wall -o "$t/gles_test" "$here/test/gles_test.c" -lEGL -lGLESv3
+  "$cc" -O2 -Wall -o "$t/swapchain_test" "$here/test/swapchain_test.c" -lvulkan -lmediandk -lnativewindow
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$t/libpropshim.so" "$here/test/propshim.c" -ldl
   # Integration helper for --anb-hal, from the hal lane's allocator sources.
   local hal=${HAL_SRC:-$repo/hal}
