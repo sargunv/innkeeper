@@ -33,7 +33,8 @@
   <!-- signature|privileged: listed in dev.linuxapk.system.xml. -->
   <uses-permission android:name="android.permission.REAL_GET_TASKS" />
   <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
-  <!-- signature|privileged: makes the Linux.apk Keyboard the default input method. -->
+  <!-- signature|privileged: makes the Linux.apk Keyboard the default input method, and applies
+       the desktop settings below. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
   <!-- Desktop integration (docs/bridge.md, "System service"). Holders get the "audio" group,
@@ -47,7 +48,6 @@
   <!-- Desktop settings: night mode, theme seed, contrast and animation scales, time zone,
        locales, 12/24-hour clock, font scale. -->
   <uses-permission android:name="android.permission.MODIFY_DAY_NIGHT_MODE" />
-  <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
   <uses-permission android:name="android.permission.WRITE_SETTINGS" />
   <uses-permission android:name="android.permission.SET_TIME_ZONE" />
   <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />

@@ -8,7 +8,6 @@ import android.content.Intent
 import android.os.LocaleList
 import android.provider.Settings
 import android.util.Log
-import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.integration.Wire
 import java.nio.ByteBuffer
 import java.util.TimeZone
@@ -53,15 +52,12 @@ data class DesktopSettings(
  * time zone, the locales, the 12/24-hour clock and the font scale. Each setting is applied when the
  * desktop's value changes (and once after connecting, if it differs from Android's), so a change
  * made inside Android lasts until the desktop changes that setting again.
- *
- * `persist.linuxapk.sync.settings=0` turns it off.
  */
 class HostSettings(private val context: Context) {
   private var last: DesktopSettings? = null
   private val cr = context.contentResolver
 
   fun apply(s: DesktopSettings) {
-    if (!SystemProps.getBoolean("persist.linuxapk.sync.settings", true)) return
     val prev = last
     last = s
     Log.i(TAG, "desktop settings: $s")

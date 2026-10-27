@@ -33,7 +33,7 @@ class LinuxApkSystemApp : Application() {
   override fun onCreate() {
     super.onCreate()
     Log.i(TAG, "starting")
-    val input = InputFeature(this).also { this.input = it }
+    val input = InputFeature().also { this.input = it }
     val wm = WindowManagerFeature(this) { input.bridge }
     // Desktop integration over the host bridge (docs/bridge.md, "System service").
     val integration = IntegrationFeature(this)

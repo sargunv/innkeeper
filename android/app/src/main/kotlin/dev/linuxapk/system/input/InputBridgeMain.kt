@@ -17,7 +17,7 @@ import android.util.Log
 object InputBridgeMain {
   @JvmStatic
   fun main(args: Array<String>) {
-    var socket = InputFeature.socketPath()
+    var socket = InputFeature.SOCKET
     var dryRun = false
     var stdin = false
     var i = 0

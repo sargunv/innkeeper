@@ -53,13 +53,9 @@ which is a signature permission. Hidden APIs are open to platform-signed apps
 `InputManagerGlobal.injectInputEvent` and `MotionEvent.setActionButton` are
 called by reflection.
 
-Properties, read when the feature starts:
-
-| Property                             | Default                      |
-| ------------------------------------ | ---------------------------- |
-| `vendor.linuxapk.input.socket`       | `/dev/socket/linuxapk-input` |
-| `persist.linuxapk.input.enabled`     | `true`                       |
-| `persist.linuxapk.input.escape_back` | `false`                      |
+The stream comes from `/dev/socket/linuxapk-input`.
+`persist.linuxapk.input.escape_back` (default `false`, read when the feature
+starts) sends BACK for Escape.
 
 ## Mapping
 
@@ -141,9 +137,8 @@ JVM, is in `android/input/.../ime/TextInputSession.kt`.
 
 - **Default, no soft keyboard:** `ImeFeature` enables it and makes it the
   default input method at every start, unless the user chose another one than
-  the stock LatinIME (`persist.linuxapk.ime=android` leaves the choice alone).
-  It never shows an input view, so nothing pops up on focus. The window
-  manager's per-display IME policy is now `local`: with `hide`,
+  the stock LatinIME. It never shows an input view, so nothing pops up on focus.
+  The window manager's per-display IME policy is now `local`: with `hide`,
   InputMethodManager binds no IME at all (`NO_IME`), so there would be no text
   input either.
 - **Keys:** injected key events still reach the app as before (the IME passes

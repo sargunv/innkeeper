@@ -341,8 +341,7 @@ Blob layouts (each starts with `u32 version` = 1): `services::notify::Note` and
 One watcher per bridge (`services/settings.rs`); each change sends a full
 `SETTINGS`. The app applies a setting when the desktop's value changes (and once
 after connecting, if Android differs), so a change made inside Android lasts
-until the desktop changes it again. `persist.linuxapk.sync.settings=0` turns it
-off.
+until the desktop changes it again.
 
 | Desktop (source)                                                         | Android                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -430,8 +429,7 @@ the compositor has no data control.
 - **Default browser** (`BrowserRole`): both images ship the WebView test shell
   (`org.chromium.webview_shell`), which apps would pick. The app turns its
   browser activity off and takes the browser role when nobody else holds it. A
-  browser installed later takes the role over. `persist.linuxapk.browser`:
-  `auto` (default), `host` (always ours), `android` (never).
+  browser installed later takes the role over.
 - The bridge accepts only absolute `http(s)` URLs with a host, in printable
   ASCII without spaces, quotes or backslashes, at most 8192 bytes and 5 per 10 s
   per connection; it logs each one (the first 512 bytes) and calls the OpenURI

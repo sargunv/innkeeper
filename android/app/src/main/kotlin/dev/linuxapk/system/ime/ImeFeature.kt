@@ -6,14 +6,11 @@ import android.content.Context
 import android.provider.Settings
 import android.util.Log
 import dev.linuxapk.system.Feature
-import dev.linuxapk.system.SystemProps
 
 /**
  * Makes [HostImeService] the default input method, so text fields use the host keyboard and input
- * methods and no on-screen keyboard appears (docs/input.md, "Text input").
- *
- * `persist.linuxapk.ime`: `host` (default) selects it at every start unless the user picked an
- * input method other than the image's stock LatinIME; `android` leaves the choice alone.
+ * methods and no on-screen keyboard appears (docs/input.md, "Text input"). It is selected at every
+ * start unless the user picked an input method other than the image's stock LatinIME.
  */
 class ImeFeature(private val context: Context) : Feature {
   override val name = "ime"
@@ -30,10 +27,9 @@ class ImeFeature(private val context: Context) : Feature {
         (ids + ours).joinToString(":"),
       )
     }
-    val mode = SystemProps.get("persist.linuxapk.ime", "host")
     val current = Settings.Secure.getString(cr, Settings.Secure.DEFAULT_INPUT_METHOD)
-    if (mode != "host" || current == ours) {
-      Log.i(TAG, "input method: $current (mode $mode)")
+    if (current == ours) {
+      Log.i(TAG, "input method: $current")
       return
     }
     if (current.isNullOrEmpty() || current.startsWith(STOCK_PREFIX)) {

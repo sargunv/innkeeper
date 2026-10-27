@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
-import dev.linuxapk.system.SystemProps
 
 /**
  * Makes [BrowserActivity] Android's default browser when no real browser has the role, so web links
@@ -17,9 +16,6 @@ import dev.linuxapk.system.SystemProps
  *
  * The image's WebView test shell would otherwise be the browser; its browser activity is turned off
  * (apps that pick a browser themselves, like Wikipedia, would choose it).
- *
- * `persist.linuxapk.browser`: `auto` (default), `host` (always take the role, keep it), `android`
- * (never take it).
  */
 object BrowserRole {
   /** Browsers that come with the image and aren't meant for users. */
@@ -32,11 +28,7 @@ object BrowserRole {
       ),
     )
 
-  private fun mode() = SystemProps.get("persist.linuxapk.browser", "auto")
-
   fun claim(context: Context) {
-    val mode = mode()
-    if (mode == "android") return
     for (c in TEST_SHELL_ACTIVITIES) {
       try {
         val pm = context.packageManager
@@ -64,7 +56,7 @@ object BrowserRole {
           .getMethod("getBrowserRoleHolder", Int::class.javaPrimitiveType)
           .invoke(rm, 0) as String?
       if (holder == context.packageName) return
-      if (mode != "host" && holder != null && holder !in TEST_SHELLS) {
+      if (holder != null && holder !in TEST_SHELLS) {
         Log.i(UrlOpener.TAG, "default browser is $holder; leaving it")
         return
       }
@@ -83,9 +75,9 @@ object BrowserRole {
     }
   }
 
-  /** A browser was installed: in `auto` mode it takes the role over from us. */
+  /** A browser was installed: it takes the role over from us. */
   fun onPackageAdded(context: Context, pkg: String) {
-    if (mode() != "auto" || pkg == context.packageName) return
+    if (pkg == context.packageName) return
     val probe =
       Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/"))
         .addCategory(Intent.CATEGORY_BROWSABLE)
