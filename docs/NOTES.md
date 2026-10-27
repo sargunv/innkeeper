@@ -35,6 +35,16 @@ current state, decisions, next steps. Put history in git.
   `/dev/dma_heap/system`. So memfd → udmabuf gives CPU-backed dma-bufs for a
   simple gralloc.
 
+## Lanes (worktrees in `~/Projects/linux.apk-wt/<lane>`, branch `lane/<lane>`, rebase then push to main)
+
+- session: namespace launcher, APEX flattening, init boot (M0a). Docs: `docs/m0-session.md`.
+- hal: allocator, mapper (stable-C v5), composer3, built with the NDK and
+  installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
+- gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
+  `out/vendor-overlay`. Docs: `docs/gpu.md`.
+- image builder: owned by the orchestrator. AOSP sync of `~/aosp/a17`, build
+  container `aosp/build-shell.sh`.
+
 ## Current state
 
 - 2026-10-26: repo created. M0 started.
