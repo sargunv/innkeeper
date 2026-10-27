@@ -73,6 +73,15 @@ ro_bind "$out/img/system/system" "$R/system"
 ro_bind "$out/img/system_ext" "$R/system_ext"
 ro_bind "$out/img/product" "$R/product"
 ro_bind "$out/root/apex" "$R/apex"
+if ((services)) && [[ ! -e $out/vendor-overlay/etc/vintf/manifest.xml ]]; then
+  # libvintf ignores manifest fragments (our allocator's) without a base device
+  # manifest; without it libui falls back to HIDL gralloc and waits for
+  # hwservicemanager. In a session the image's vendor manifest plays this role.
+  mkdir -p "$R/.svc-vendor/etc/vintf"
+  echo '<manifest version="1.0" type="device" target-level="202604"/>' \
+    >"$R/.svc-vendor/etc/vintf/manifest.xml"
+  extra_vendor+=("$R/.svc-vendor")
+fi
 if ((${#extra_vendor[@]})); then
   lower=$(
     IFS=:
