@@ -5,13 +5,15 @@
 //! (inherited by every process) that turns `bpf()`, `openat()` and binder
 //! `ioctl()`s into user notifications. Its C supervisor (`bpfemu.c`) forwards
 //! the binder ones over a SOCK_SEQPACKET socket to this serve loop, which runs
-//! in a separate helper process outside the Android namespaces with the host
-//! user's power, so every byte from Android is hostile.
+//! in a separate helper process outside the Android namespaces. It serves
+//! every Android process, so it checks sizes and bounds on everything they
+//! send: one bad call must not take binder down for the whole session.
 //!
 //!  * `openat` of a binder device path -> inject a memfd (`ADDFD`+`SEND`); the
 //!    process mmaps it as its receive region, and the broker writes
 //!    transactions there through its own shared mapping.
-//!  * `ioctl(fd, BINDER_*, argp)` -> serviced via `process_vm_{readv,writev}`.
+//!  * `ioctl(fd, BINDER_*, argp)` -> served through the opener's pinned
+//!    `/proc/<tid>/mem` (see [`PinnedMem`]).
 //!  * a blocking `BINDER_WRITE_READ` with no work is parked: we keep the
 //!    notification id and answer it when the broker wakes the thread. Waits
 //!    are interruptible (ptrace and job control must work), so a signal can
@@ -132,9 +134,8 @@ struct ProcState {
     fd: u32,
     memfd: OwnedFd,
     memfd_ino: u64,
-    /// The opener's address space, pinned while its notification was valid,
-    /// so a numeric pid that exec'd or was recycled is never written. All
-    /// of the process's memory goes through it.
+    /// The opener's address space, pinned while its notification was valid
+    /// (see [`PinnedMem`]). All of the process's memory goes through it.
     mem: PinnedMem,
     map: *mut u8,
     /// Target mapping (base, usable length), found in /proc/<pid>/maps.
@@ -267,6 +268,9 @@ unsafe impl Send for Supervisor {}
 
 // ---- libc helpers ------------------------------------------------------
 
+/// Read memory of task `pid` by number, unpinned. Only for reads that
+/// precede a SECCOMP_IOCTL_NOTIF_ID_VALID check, or that only decide whether a
+/// call needs a closer look.
 pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
@@ -287,204 +291,56 @@ pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if n == len as isize { Some(buf) } else { None }
 }
 
-/// A task's address space, pinned: `/proc/<tid>/mem` and `/proc/<tid>/maps`,
-/// opened from one `/proc/<tid>` directory. Both hold the mm the task had
-/// when they were opened, so after an exec they reach nothing. Callers open
-/// it and then check SECCOMP_IOCTL_NOTIF_ID_VALID: an mm switch (exec) or tid
-/// reuse only happens after the caller's notification is gone, so a valid
-/// id afterwards means both are the caller's.
-pub(crate) struct PinnedMem {
-    mem: OwnedFd,
-    maps: OwnedFd,
-}
+/// A task's address space, pinned: its `/proc/<tid>/mem`, which holds the mm
+/// the task had when it was opened, so after an exec it reaches nothing.
+/// Callers open it and then check SECCOMP_IOCTL_NOTIF_ID_VALID: an mm switch
+/// (exec) or tid reuse only happens after the caller's notification is gone,
+/// so a valid id afterwards means the mm is the caller's. Writes meant for a
+/// caller therefore never land in another process, or in the image it exec'd.
+///
+/// Accesses through it use FOLL_FORCE, so unlike `process_vm_*` they also
+/// reach the caller's read-only and PROT_NONE private pages (a write there
+/// breaks copy-on-write). That is fine under the desktop-parity threat model
+/// (docs/STRATEGY.md): the memory is the caller's own, which it can change
+/// itself.
+pub(crate) struct PinnedMem(OwnedFd);
 
-/// The raw fds of a [`PinnedMem`], for passing around under a borrow.
+/// The fd of a [`PinnedMem`], for passing around under a borrow.
 #[derive(Clone, Copy)]
-pub(crate) struct MemFds {
-    mem: RawFd,
-    maps: RawFd,
-}
+pub(crate) struct MemFd(RawFd);
 
 impl PinnedMem {
-    pub(crate) fn raw(&self) -> MemFds {
-        MemFds {
-            mem: self.mem.as_raw_fd(),
-            maps: self.maps.as_raw_fd(),
-        }
+    pub(crate) fn raw(&self) -> MemFd {
+        MemFd(self.0.as_raw_fd())
     }
 }
 
 pub(crate) fn open_mem(tid: i32) -> Option<PinnedMem> {
-    let dir = std::ffi::CString::new(format!("/proc/{tid}")).ok()?;
-    let d = unsafe {
-        libc::open(
-            dir.as_ptr(),
-            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if d < 0 {
-        return None;
-    }
-    let d = unsafe { OwnedFd::from_raw_fd(d) };
-    let at = |name: &std::ffi::CStr, flags| {
-        let fd = unsafe { libc::openat(d.as_raw_fd(), name.as_ptr(), flags | libc::O_CLOEXEC) };
-        (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
-    };
-    Some(PinnedMem {
-        mem: at(c"mem", libc::O_RDWR)?,
-        maps: at(c"maps", libc::O_RDONLY)?,
-    })
+    let path = std::ffi::CString::new(format!("/proc/{tid}/mem")).ok()?;
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+    (fd >= 0).then(|| PinnedMem(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
-const PROCMAP_QUERY: u64 = 0xc068_6611; // _IOWR('f', 17, struct procmap_query)
-const VMA_READABLE: u64 = 1;
-const VMA_WRITABLE: u64 = 2;
-
-#[repr(C)]
-#[derive(Default)]
-struct ProcmapQuery {
-    size: u64,
-    query_flags: u64,
-    query_addr: u64,
-    vma_start: u64,
-    vma_end: u64,
-    vma_flags: u64,
-    vma_page_size: u64,
-    vma_offset: u64,
-    inode: u64,
-    dev_major: u32,
-    dev_minor: u32,
-    vma_name_size: u32,
-    build_id_size: u32,
-    vma_name_addr: u64,
-    build_id_addr: u64,
-}
-
-/// Is [addr, addr+len) mapped with `need` (VMA_READABLE/VMA_WRITABLE) in the
-/// pinned mm? `/proc/<pid>/mem` accesses use FOLL_FORCE, which ignores page
-/// protections, so this is what keeps them to what the task could access
-/// itself (and what process_vm_* and the kernel's copy_to_user allow).
-fn accessible(maps: RawFd, addr: u64, len: usize, need: u64) -> bool {
-    let Some(end) = addr.checked_add(len as u64) else {
-        return false;
-    };
-    let mut a = addr;
-    while a < end {
-        let mut q = ProcmapQuery {
-            size: size_of::<ProcmapQuery>() as u64,
-            query_addr: a,
-            ..Default::default()
-        };
-        if unsafe { libc::ioctl(maps, PROCMAP_QUERY as _, &mut q) } != 0 {
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOTTY) {
-                return accessible_text(maps, addr, end, need);
-            }
-            return false;
-        }
-        if q.vma_start > a || q.vma_flags & need != need {
-            return false;
-        }
-        a = q.vma_end;
-    }
-    true
-}
-
-/// Lines and bytes of maps text the fallback reads at most per check (about
-/// 10 ms of work at the limit). After boot system_server has about 5,400
-/// mappings, SystemUI 4,000 and Launcher3 3,400; a caller with more than this
-/// many below the range gets EFAULT (pre-6.11 kernels only).
-const MAPS_MAX_LINES: usize = 16384;
-const MAPS_MAX_BYTES: usize = 4 << 20;
-
-/// `accessible` on kernels before 6.11 (no PROCMAP_QUERY): the maps text of
-/// the same pinned mm, streamed in fixed-size chunks (the caller controls how
-/// long it is) and parsed line by line until the range is decided. Over
-/// budget, it fails closed.
-fn accessible_text(maps: RawFd, addr: u64, end: u64, need: u64) -> bool {
-    let mut buf = [0u8; 8192];
-    // The start of the current line: "start-end perms" fits in 64 bytes.
-    let mut line = [0u8; 64];
-    let (mut ll, mut lines, mut read) = (0usize, 0usize, 0usize);
-    let mut a = addr;
-    while read < MAPS_MAX_BYTES {
-        let n = unsafe { libc::pread(maps, buf.as_mut_ptr() as *mut _, buf.len(), read as i64) };
-        if n <= 0 {
-            return false;
-        }
-        read += n as usize;
-        for &c in &buf[..n as usize] {
-            if c != b'\n' {
-                if ll < line.len() {
-                    line[ll] = c;
-                    ll += 1;
-                }
-                continue;
-            }
-            lines += 1;
-            if lines > MAPS_MAX_LINES {
-                return false;
-            }
-            if let Some(decided) = maps_line(&line[..ll], &mut a, end, need) {
-                return decided;
-            }
-            ll = 0;
-        }
-    }
-    false
-}
-
-/// One maps line against the part of the range still to cover, from `a`:
-/// Some(answer) once decided, None to read on.
-fn maps_line(line: &[u8], a: &mut u64, end: u64, need: u64) -> Option<bool> {
-    let line = std::str::from_utf8(line).ok()?;
-    let mut it = line.split_ascii_whitespace();
-    let (range, perms) = (it.next()?, it.next()?);
-    let (s, e) = range.split_once('-')?;
-    let (s, e) = (
-        u64::from_str_radix(s, 16).ok()?,
-        u64::from_str_radix(e, 16).ok()?,
-    );
-    if e <= *a {
-        return None;
-    }
-    let p = perms.as_bytes();
-    let ok = (need & VMA_READABLE == 0 || p.first() == Some(&b'r'))
-        && (need & VMA_WRITABLE == 0 || p.get(1) == Some(&b'w'));
-    if s > *a || !ok {
-        return Some(false);
-    }
-    *a = e;
-    (*a >= end).then_some(true)
-}
-
-/// Read target memory through its pinned address space (see [`PinnedMem`]),
-/// only where the task could read it itself.
-pub(crate) fn mem_read(m: MemFds, addr: u64, len: usize) -> Option<Vec<u8>> {
+/// Read target memory through its pinned address space.
+pub(crate) fn mem_read(m: MemFd, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
     }
     let off = i64::try_from(addr).ok().filter(|&a| a != 0)?;
-    if !accessible(m.maps, addr, len, VMA_READABLE) {
-        return None;
-    }
     let mut buf = vec![0u8; len];
-    let n = unsafe { libc::pread(m.mem, buf.as_mut_ptr() as *mut _, len, off) };
+    let n = unsafe { libc::pread(m.0, buf.as_mut_ptr() as *mut _, len, off) };
     (n == len as isize).then_some(buf)
 }
 
-/// Write target memory through its pinned address space, only where the
-/// task could write it itself.
-pub(crate) fn mem_write(m: MemFds, addr: u64, data: &[u8]) -> bool {
+/// Write target memory through its pinned address space.
+pub(crate) fn mem_write(m: MemFd, addr: u64, data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
     }
     let Some(off) = i64::try_from(addr).ok().filter(|&a| a != 0) else {
         return false;
     };
-    if !accessible(m.maps, addr, data.len(), VMA_WRITABLE) {
-        return false;
-    }
-    let n = unsafe { libc::pwrite(m.mem, data.as_ptr() as *const _, data.len(), off) };
+    let n = unsafe { libc::pwrite(m.0, data.as_ptr() as *const _, data.len(), off) };
     n == data.len() as isize
 }
 
@@ -495,7 +351,7 @@ pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
 }
 
 /// `read_path` through a pinned `/proc/<pid>/mem` fd.
-pub(crate) fn mem_read_path(mem: MemFds, addr: u64) -> Option<Vec<u8>> {
+pub(crate) fn mem_read_path(mem: MemFd, addr: u64) -> Option<Vec<u8>> {
     read_path_with(addr, |a, n| mem_read(mem, a, n))
 }
 
@@ -1474,7 +1330,7 @@ impl Supervisor {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
     /// Android gets the receive memfd writable; it must not be able to resize
@@ -1580,77 +1436,23 @@ pub(crate) mod tests {
         child.wait().unwrap();
     }
 
-    /// Two private pages filled with 0xAA, the second with `prot2`, the first
-    /// with `prot1`.
-    pub(crate) fn pages(prot1: i32, prot2: i32) -> *mut u8 {
+    /// Two shared pages, readable and writable. A shared page that is then
+    /// made read-only can't be written even through /proc/<pid>/mem
+    /// (FOLL_FORCE only overrides the protection of private, copy-on-write
+    /// pages): the tests use one for a bwr that can't be written back.
+    fn shared_pages() -> *mut u8 {
         let p = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
                 8192,
                 libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                libc::MAP_SHARED | libc::MAP_ANONYMOUS,
                 -1,
                 0,
             )
-        } as *mut u8;
-        assert_ne!(p as *mut libc::c_void, libc::MAP_FAILED);
-        unsafe {
-            std::ptr::write_bytes(p, 0xAA, 8192);
-            assert_eq!(libc::mprotect(p as *mut _, 4096, prot1), 0);
-            assert_eq!(libc::mprotect(p.add(4096) as *mut _, 4096, prot2), 0);
-        }
-        p
-    }
-
-    /// The pinned fd is /proc/<pid>/mem, whose accesses ignore page
-    /// protections (FOLL_FORCE). Transfers must still fail where the task
-    /// couldn't read or write itself, as process_vm_* and the kernel's own
-    /// copies do.
-    #[test]
-    fn pinned_mem_respects_page_protections() {
-        let pin = open_mem(unsafe { libc::gettid() }).unwrap();
-        let m = pin.raw();
-        let rw = libc::PROT_READ | libc::PROT_WRITE;
-        // Read-only page.
-        let p = pages(rw, libc::PROT_READ);
-        let ro = p as u64 + 4096;
-        assert!(!mem_write(m, ro, b"x"));
-        assert_eq!(unsafe { *p.add(4096) }, 0xAA);
-        assert_eq!(mem_read(m, ro, 1), Some(vec![0xAA]));
-        // A write that starts on a writable page and runs into it.
-        assert!(!mem_write(m, ro - 4, &[0; 8]));
-        assert_eq!(unsafe { *p.add(4092) }, 0xAA);
-        // The writable page still works.
-        assert!(mem_write(m, p as u64, &[1]));
-        assert_eq!(unsafe { *p }, 1);
-        // PROT_NONE: no reads, no writes.
-        let p = pages(rw, libc::PROT_NONE);
-        let none = p as u64 + 4096;
-        assert!(mem_read(m, none, 1).is_none());
-        assert!(mem_read(m, none - 4, 8).is_none());
-        assert!(mem_read_path(m, none).is_none());
-        assert!(!mem_write(m, none, b"x"));
-        unsafe { libc::mprotect(p.add(4096) as *mut _, 4096, libc::PROT_READ) };
-        assert_eq!(unsafe { *p.add(4096) }, 0xAA);
-        // Unmapped.
-        assert!(mem_read(m, 0x1000, 1).is_none());
-        // The pre-6.11 fallback (maps text) agrees.
-        let q = pages(rw, libc::PROT_READ) as u64;
-        for (a, len, need) in [
-            (q, 8, VMA_WRITABLE),
-            (q + 4092, 8, VMA_WRITABLE),
-            (q + 4092, 8, VMA_READABLE),
-            (none, 1, VMA_READABLE),
-            (0x1000, 1, VMA_READABLE),
-        ] {
-            assert_eq!(
-                accessible_text(m.maps, a, a + len, need),
-                accessible(m.maps, a, len as usize, need),
-                "{a:#x}+{len} need {need}"
-            );
-        }
-        assert!(accessible_text(m.maps, q, q + 8, VMA_WRITABLE));
-        assert!(!accessible_text(m.maps, q + 4092, q + 4100, VMA_WRITABLE));
+        };
+        assert_ne!(p, libc::MAP_FAILED);
+        p as *mut u8
     }
 
     /// A supervisor with one binder process: this test process, with its
@@ -1736,7 +1538,7 @@ pub(crate) mod tests {
             (true, rw, 0),
         ] {
             let (mut sup, procid) = test_supervisor();
-            let p = pages(rw, rw);
+            let p = shared_pages();
             let mut bwr = BinderWriteRead::default();
             if write {
                 unsafe { std::ptr::write_unaligned(p as *mut u32, BC_ENTER_LOOPER) };
@@ -1761,46 +1563,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// The pre-6.11 fallback's work is bounded by the caller's mapping count:
-    /// past MAPS_MAX_LINES lines it fails closed (EFAULT) even where
-    /// PROCMAP_QUERY would allow the access.
-    #[test]
-    fn maps_fallback_is_bounded() {
-        let pin = open_mem(unsafe { libc::gettid() }).unwrap();
-        let m = pin.raw();
-        // Many small mappings: alternate page protections in one region.
-        let n = 2 * MAPS_MAX_LINES + 256;
-        let p = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                n * 4096,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE,
-                -1,
-                0,
-            )
-        } as *mut u8;
-        assert_ne!(p as *mut libc::c_void, libc::MAP_FAILED);
-        for i in (0..n).step_by(2) {
-            unsafe { libc::mprotect(p.add(i * 4096) as *mut _, 4096, libc::PROT_READ) };
-        }
-        // An address above all of them: this thread's stack.
-        let local = 0u64;
-        let a = &local as *const u64 as u64;
-        assert!(a > p as u64);
-        assert!(accessible(m.maps, a, 8, VMA_READABLE));
-        let t = std::time::Instant::now();
-        assert!(!accessible_text(m.maps, a, a + 8, VMA_READABLE));
-        eprintln!("over budget after {:?}", t.elapsed());
-        // Below the budget the two agree.
-        let first = p as u64 + 4096;
-        assert!(
-            accessible_text(m.maps, first, first + 8, VMA_WRITABLE)
-                == accessible(m.maps, first, 8, VMA_WRITABLE)
-        );
-        unsafe { libc::munmap(p as *mut _, n * 4096) };
-    }
-
     /// A looper whose blocking read fails (its bwr can't be written back)
     /// must not stay registered as waiting: the next incoming transaction
     /// goes to a looper that is really reading, not to the failed one (where
@@ -1816,8 +1578,7 @@ pub(crate) mod tests {
         }
         // Looper 1001 parks first with a read-only bwr: its read blocks, and
         // the writeback before parking fails.
-        let rw = libc::PROT_READ | libc::PROT_WRITE;
-        let p = pages(rw, rw);
+        let p = shared_pages();
         let bwr = BinderWriteRead {
             read_size: 256,
             read_buffer: p as u64,

@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use crate::sys::{
-    MemFds, PinnedMem, SeccompNotif, mem_read, mem_read_path, mem_write, notif_id_valid, open_mem,
+    MemFd, PinnedMem, SeccompNotif, mem_read, mem_read_path, mem_write, notif_id_valid, open_mem,
     read_path, status_field, vm_read,
 };
 use crate::vid::{self, CredTable, Creds, SetId};
@@ -653,7 +653,7 @@ fn errno() -> i32 {
         .unwrap_or(libc::EIO)
 }
 
-fn write_ids(mem: MemFds, a: &[u64; 6], ids: [u32; 3]) -> Answer {
+fn write_ids(mem: MemFd, a: &[u64; 6], ids: [u32; 3]) -> Answer {
     for (i, id) in ids.iter().enumerate() {
         if !mem_write(mem, a[i], &id.to_ne_bytes()) {
             return Answer::Errno(libc::EFAULT);
@@ -858,7 +858,7 @@ fn recorded_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
 /// Emulate lstat(path, st) for a path that can carry a recorded owner.
 /// Paths with symlinks before the last component continue natively
 /// (RESOLVE_NO_SYMLINKS), so a lookup never wanders onto a FUSE mount.
-fn lstat(j: &Job, listener: RawFd, mem: MemFds) -> Answer {
+fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     let fd = match resolve_how(j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
         Ok(f) => f,
         Err(libc::ELOOP) | Err(libc::EXDEV) => return Answer::Continue,
@@ -958,7 +958,7 @@ fn access(j: &Job) -> Answer {
 }
 
 /// Emulate one chown-family call (see the module docs).
-fn chown(j: &Job, listener: RawFd, mem: MemFds) -> Answer {
+fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     let a = j.args;
     let (fd, uid, gid) = match j.nr {
         libc::SYS_fchown => (getfd(j.tid, a[0] as i32), a[1] as u32, a[2] as u32),
@@ -1093,30 +1093,5 @@ mod tests {
         assert_eq!(vm_read(pid, addr, 12).unwrap(), before);
         child.kill().unwrap();
         child.wait().unwrap();
-    }
-
-    /// The inline answers check page protections like the kernel would:
-    /// getresuid into a read-only or PROT_NONE page fails with EFAULT and
-    /// leaves it alone (the pinned /proc/<pid>/mem fd alone would write it).
-    #[test]
-    fn inline_writes_respect_page_protections() {
-        let pin = open_mem(unsafe { libc::gettid() }).unwrap();
-        let rw = libc::PROT_READ | libc::PROT_WRITE;
-        for prot in [libc::PROT_READ, libc::PROT_NONE] {
-            let p = crate::sys::tests::pages(rw, prot);
-            let a = [p as u64, p as u64 + 4, p as u64 + 4096, 0, 0, 0];
-            let r = write_ids(pin.raw(), &a, [1, 2, 3]);
-            assert!(matches!(r, Answer::Errno(libc::EFAULT)));
-            unsafe { libc::mprotect(p.add(4096) as *mut _, 4096, libc::PROT_READ) };
-            assert_eq!(unsafe { *p.add(4096) }, 0xAA);
-        }
-        // All writable: written.
-        let p = crate::sys::tests::pages(rw, rw);
-        let a = [p as u64, p as u64 + 4, p as u64 + 4096, 0, 0, 0];
-        assert!(matches!(
-            write_ids(pin.raw(), &a, [1, 2, 3]),
-            Answer::Val(0)
-        ));
-        assert_eq!(unsafe { *(p.add(4096) as *const u32) }, 3);
     }
 }

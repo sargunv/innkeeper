@@ -2,10 +2,9 @@
 
 > **Status (2026-10-27):** the cross-process broker stays. It will be simplified
 > for correctness and clarity (single owner for thread state, explicit operation
-> lifecycles), and guards that only defend against deliberately malicious
-> callers (e.g. the S11 maps/protection checks and the S12 fallback) will be
-> removed in the upcoming cleanup. See [STRATEGY.md](STRATEGY.md) "Threat
-> model".
+> lifecycles). Guards that only defend against deliberately malicious callers
+> go: the S11 page-protection checks and the S12 fallback are removed. See
+> [STRATEGY.md](STRATEGY.md) "Threat model".
 
 ubinder serves Android's binder IPC from a userspace broker instead of the
 kernel driver. **It is the session's default** (since 2026-10-27): a session
@@ -28,14 +27,14 @@ binder ioctls, and forwards the rest to the C bpf emulator thread
 (`session/helper/bpfemu.c`) over a SOCK_SEQPACKET socket. Either side answers on
 the shared listener.
 
-- **open:** `openat` of `/dev/{binder,hwbinder,vndbinder}` (or the binderfs
-  paths) gets a 4 MiB sparse memfd injected (`SECCOMP_IOCTL_NOTIF_ADDFD` with
-  `SEND`). The process mmaps it as its receive region; the broker finds the
-  mapping by inode in `/proc/<pid>/maps` and writes transactions through its own
-  shared mapping. Other paths continue without taking the broker lock. ns-init
-  creates readable dummy device nodes for libbinder's `access()` check.
-- **ioctl:** served with `process_vm_{readv,writev}`. Errors are negative
-  errnos, as from the driver.
+- **open:** `openat` of `/dev/{binder,hwbinder,vndbinder}` gets a 4 MiB sparse
+  memfd injected (`SECCOMP_IOCTL_NOTIF_ADDFD` with `SEND`). The process mmaps it
+  as its receive region; the broker finds the mapping by inode in
+  `/proc/<pid>/maps` and writes transactions through its own shared mapping.
+  Other paths continue without taking the broker lock. ns-init creates readable
+  dummy device nodes for libbinder's `access()` check.
+- **ioctl:** served through the opener's `/proc/<pid>/mem`, pinned at open (see
+  "Hardening"). Errors are negative errnos, as from the driver.
 - **blocking reads:** a `BINDER_WRITE_READ` with nothing to read is parked: the
   notification stays unanswered and the broker answers it when it wakes the
   thread. Waits stay interruptible, so ptrace (debuggerd) and job control work.
@@ -145,25 +144,21 @@ must survive anything Android sends. From a security review (2026-10-27):
 
 - The receive memfd is sealed against resizing (a truncate made the broker's
   writes SIGBUS). Transaction sizes are aligned with checked arithmetic.
-- A process's memory is read and written only through `/proc/<pid>/mem` and
-  `/proc/<pid>/maps`, opened at binder open before its notification is
-  validated. They pin its address space, so a thread killed by an exec, or a
-  recycled tid, never gets writes meant for the old image. `mem` ignores page
-  protections (FOLL_FORCE), so every transfer first checks its range with
-  `PROCMAP_QUERY` on the pinned `maps` (readable, or writable) and fails with
-  `EFAULT` otherwise, as `process_vm_*` and the driver would. Before Linux 6.11
-  the check streams the maps text instead, failing closed past 16,384 lines
-  (system_server has about 5,400). A bwr that can't be written back fails the
-  ioctl with `EFAULT`, as in the driver. Cost (`binderThroughputTest`,
-  interleaved runs on one machine): `-w 2 -p` median 11.5 µs before pinning,
-  12.5–14.8 µs with the pin, 13.6–14.6 µs with the check; `-w 8` all-to-all
-  65–70k → 53–57k transactions/s for the check. Boot time is unchanged. Queued
-  single-uid jobs are dropped once their notification is gone, and checked again
-  before they act. Single-uid calls that transfer memory (`getresuid`, group
-  lists, `SO_PEERCRED`, chown paths, lstat results) pin and check the same way,
-  per call; scalar `get*id` don't. Single-uid boot time is unchanged (fresh 4.87
-  s, warm 2.60 s, and 0.86 s of receive-thread time in the first 10 s, before
-  and after).
+- A process's memory is read and written only through its `/proc/<pid>/mem`,
+  opened at binder open before its notification is validated. That pins its
+  address space, so a thread killed by an exec, or a recycled tid, never gets
+  writes meant for the old image. `mem` uses FOLL_FORCE, so it also reaches the
+  caller's read-only and `PROT_NONE` private pages, where `process_vm_*` and the
+  driver fail with `EFAULT`. Under desktop parity that is fine: it is the
+  caller's own memory. The page-protection checks that used to prevent it
+  (`PROCMAP_QUERY`, or the maps text before Linux 6.11) were removed; that
+  raised `binderThroughputTest -w 8` all-to-all from 55.5–58.1k to 63.0–68.8k
+  transactions/s, median per transaction 90–95 µs to 76–84 µs (six interleaved
+  runs each on one loaded machine). A bwr that can't be written back fails the
+  ioctl with `EFAULT`, as in the driver. Queued single-uid jobs are dropped once
+  their notification is gone, and checked again before they act. Single-uid
+  calls that transfer memory (`getresuid`, group lists, `SO_PEERCRED`, chown
+  paths, lstat results) pin the same way, per call; scalar `get*id` don't.
 - Poll mode hands out an epoll fd, never the broker's eventfd (see "poll").
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.
