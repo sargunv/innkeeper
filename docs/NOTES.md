@@ -295,6 +295,21 @@ fixing them, each with a test. Round 2 reviews the fixes.
 
 ## Backlog (unassigned)
 
+- **Mode cleanup (user request, 2026-10-27; after hardening lands):** keep usage
+  simple.
+  - Remove `--kernel-binder` from the launcher (only the binder test harnesses
+    keep kernel binder) and the `selinux/` dev module.
+  - Remove the emulator image option.
+  - Remove `--single-window`.
+  - Remove the composer's in-process Wayland backend (the bridge presents
+    windows).
+  - Make single-uid automatic: subuid when the host has a range, single-uid
+    otherwise (no flag).
+  - Prune env knobs that have sensible defaults.
+  - Keep `--headless` and `LINUXAPK_INSTANCE` as test-only.
+  - The user surface is `linuxapk install/run/uninstall/list` plus the manager
+    app.
+
 - HAL: input protocol v2 (scroll source, repeat rate/delay, keymap for non-US
   layouts), host cursor on pointer enter, zero-copy attach of SurfaceFlinger
   buffers, per-layer subsurfaces, frame-callback vsync, present/release fences
