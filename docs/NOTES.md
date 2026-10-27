@@ -329,6 +329,23 @@ symlink-based host file creation through `BPF_OBJ_PIN` found along the way).
 
 ## Backlog (unassigned)
 
+- **Performance and latency benchmarks (user question, 2026-10-27; after the
+  cleanup, on a quiet machine):**
+  - Input-to-photon: a probe APK that changes colour on input; timestamps at the
+    bridge for input in and frame commit, plus Wayland presentation-time.
+    Baselines: the Android emulator and an equivalent native GTK app.
+  - Frame pacing: today the composer timer runs at 60 Hz while the display is
+    120 Hz. Drive vsync from Wayland frame callbacks; histograms for scrolling
+    and a game.
+  - Audio: round-trip and output latency against native PipeWire; implement our
+    own AIDL audio HAL stream to get under 50 ms (the 85 ms AOSP buffer).
+  - GPU: glmark2 (Android) against host glmark2 and the emulator.
+  - CPU and memory: idle and one-app breakdown against the emulator.
+  - Waydroid would need root to install, so it's only compared if the user
+    installs it.
+  - Known so far: audio ~86–93 ms (ours ~34 ms), binder 15 µs vs 3.8 µs kernel,
+    boot ~2.6 s warm, idle session ~0.8–1.3 GB.
+
 - **Settings in the manager app (user request, 2026-10-27; after the cleanup):**
   - The bridge exposes a session D-Bus service (e.g. `dev.linuxapk.Session`)
     that the manager and CLI call; the bridge relays to the system app over its
