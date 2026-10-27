@@ -1,0 +1,34 @@
+# linuxapk: the image's file plus LD_PRELOAD of the session shim (see
+# docs/image.md "Audio"). The HAL's stream worker threads call
+# setpriority(ANDROID_PRIORITY_AUDIO) and fail the stream open on EACCES (no
+# CAP_SYS_NICE over the initial namespace), which blocks audioserver and with
+# it system_server's AudioService. The shim makes priority changes
+# best-effort, as it does for init's services.
+# (/system/lib64 is in this APEX namespace's permitted paths; /vendor is not.)
+
+
+service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example
+    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    class hal
+    user audioserver
+    # media gid needed for /dev/fm (radio) and for /data/misc/media (tee)
+    group audio camera drmrpc inet media mediadrm net_bt net_bt_admin net_bw_acct wakelock context_hub
+    capabilities BLOCK_SUSPEND SYS_NICE
+    # setting RLIMIT_RTPRIO allows binder RT priority inheritance
+    rlimit rtprio 10 10
+    ioprio rt 4
+    task_profiles ProcessCapacityHigh HighPerformance
+    onrestart restart audioserver
+
+service vendor.audio-effect-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.effect.service-aidl.example
+    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    class hal
+    user audioserver
+    # media gid needed for /dev/fm (radio) and for /data/misc/media (tee)
+    group audio media
+    capabilities BLOCK_SUSPEND
+    # setting RLIMIT_RTPRIO allows binder RT priority inheritance
+    rlimit rtprio 10 10
+    ioprio rt 4
+    task_profiles ProcessCapacityHigh HighPerformance
+    onrestart restart audioserver

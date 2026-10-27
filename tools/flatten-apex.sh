@@ -5,15 +5,28 @@
 #   <out>/apex-info-list.xml       what apexd writes to /apex/apex-info-list.xml
 # Unprivileged: runs inside the host-tools container (tools/hosttools.sh).
 #
-# usage: flatten-apex.sh <extracted-image-dir> <out-dir>
+# usage: flatten-apex.sh <extracted-image-dir> <out-dir> [cmdline-file]
 #   e.g. flatten-apex.sh out/img out/root/apex
+#
+# Multi-install vendor APEXes (several files with one manifest name, e.g.
+# cuttlefish's keymint.rust_nonsecure / keymint.rust_cf_remote) are selected
+# the way apexd does it: androidboot.vendor.apex.<name>=<file without .apex>
+# (ro.boot.vendor.apex.*) picks one, and "none" drops a vendor APEX. The
+# selections are read from cmdline-file (whitespace-separated
+# androidboot.*=value tokens, # comments), the same file the session passes
+# to init.
 set -euo pipefail
 if [[ ! -e /run/.containerenv ]]; then
   exec "$(dirname "$0")/hosttools.sh" "$0" "$@"
 fi
 
-img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir>}")
-out=${2:?usage: flatten-apex.sh <img-dir> <out-dir>}
+img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir> [cmdline-file]}")
+out=${2:?usage: flatten-apex.sh <img-dir> <out-dir> [cmdline-file]}
+declare -A sel=()
+if [[ -n ${3:-} ]]; then
+  while read -r k v; do sel[$k]=$v; done < <(sed 's/#.*//' "$3" | tr -s ' \t' '\n' |
+    sed -n 's/^androidboot\.vendor\.apex\.\([^=]*\)=\(.*\)/\1 \2/p')
+fi
 mkdir -p "$out"
 out=$(realpath "$out")
 work=$(mktemp -d)
@@ -58,12 +71,13 @@ extract_fs() {
 }
 
 declare -A partition_of=(
-  [system / system / apex]=SYSTEM [system_ext / apex]=SYSTEM_EXT
-  [product / apex]=PRODUCT [vendor / apex]=VENDOR [odm / apex]=ODM)
+  ["system/system/apex"]=SYSTEM ["system_ext/apex"]=SYSTEM_EXT
+  ["product/apex"]=PRODUCT ["vendor/apex"]=VENDOR ["odm/apex"]=ODM)
 declare -A mountpoint_of=(
-  [system / system / apex]=/system/apex [system_ext / apex]=/system_ext/apex
-  [product / apex]=/product/apex [vendor / apex]=/vendor/apex [odm / apex]=/odm/apex)
+  ["system/system/apex"]=/system/apex ["system_ext/apex"]=/system_ext/apex
+  ["product/apex"]=/product/apex ["vendor/apex"]=/vendor/apex ["odm/apex"]=/odm/apex)
 
+declare -A seen=()
 list="$work/apex-info-list.xml"
 echo '<?xml version="1.0" encoding="utf-8"?>' >"$list"
 echo '<apex-info-list>' >>"$list"
@@ -81,6 +95,17 @@ for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex;
     mkdir -p "$work/x"
     (cd "$work/x" && python3 -Ic "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('.', ['apex_payload.img','apex_manifest.pb'])" "$apex")
     IFS=$'\t' read -r name version < <(manifest_info "$work/x/apex_manifest.pb")
+    if [[ -n ${sel[$name]:-} && ($rel == vendor/apex || $rel == odm/apex) ]]; then
+      if [[ ${sel[$name]} != "${file%.apex}" ]]; then
+        echo "skipping $file (androidboot.vendor.apex.$name=${sel[$name]})"
+        continue
+      fi
+    fi
+    if [[ -n ${seen[$name]:-} ]]; then
+      echo "two APEXes for $name: ${seen[$name]} and $file; select one with androidboot.vendor.apex.$name" >&2
+      exit 1
+    fi
+    seen[$name]=$file
     dest="$out/$name"
     rm -rf "$dest"
     mkdir -p "$dest"

@@ -1,15 +1,18 @@
 # M0a: the rootless session
 
-Boots the Android 17 emulator image (`out/img`) under real Android `init` in a
-rootless namespace on the dev host. Status: **M0a reached:
-`sys.boot_completed=1` with no root and no AOSP patches**, about 4 s from zygote
-start. system_server stays up with 289 binder services, and SystemUI and
-Launcher3 run. See "What boots" and "Open issues".
+Boots an Android 17 image under real Android `init` in a rootless namespace on
+the dev host. The default image is the AOSP CI cuttlefish build
+(`LINUXAPK_IMAGE=ci-16644040`, see [image.md](image.md)); this document was
+written against the SDK emulator image (`LINUXAPK_IMAGE=emulator`, `out/img`).
+Status: **M0a reached: `sys.boot_completed=1` with no root and no AOSP
+patches**, about 4 s from zygote start. system_server stays up with 289 binder
+services, and SystemUI and Launcher3 run. See "What boots" and "Open issues".
 
 ## How to run
 
 ```sh
-tools/extract-image.sh ~/Android/Sdk/system-images/android-37.0/default/x86_64 out/img  # once
+tools/fetch-image.sh                  # once: the pinned CI image (start also does it)
+tools/extract-image.sh ~/Android/Sdk/system-images/android-37.0/default/x86_64 out/img  # emulator image
 session/linuxapk-session start        # first run: builds the shim and iptables, flattens APEXes
 session/linuxapk-session start --headless   # no host Wayland window
 session/linuxapk-session start --single-window   # all of Android in one window (M1); default: a window per app

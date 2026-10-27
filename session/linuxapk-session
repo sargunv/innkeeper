@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux.apk session launcher: boots the Android userspace from out/img in a
+# Linux.apk session launcher: boots an Android image (LINUXAPK_IMAGE) in a
 # rootless user + mount + pid + cgroup namespace.
 #
 #   linuxapk-session start [-f] [--headless] [--single-window]
@@ -8,6 +8,7 @@
 #                                  (docs/windowing.md); --single-window shows
 #                                  all of Android in one window instead, and
 #                                  --headless opens no windows
+#   linuxapk-session prepare       fetch/extract/flatten the selected image only
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
 #   linuxapk-session status
 #   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
@@ -21,7 +22,10 @@
 #              LINUXAPK_DATA (default ~/.local/share/linuxapk/data[-<instance>]),
 #              LINUXAPK_AUDIO_SINK (PipeWire sink for the session's audio;
 #                default: the desktop's default output),
-#              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log)
+#              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log),
+#              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
+#                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
+#                emulator    SDK emulator image in out/img (tools/extract-image.sh)
 set -euo pipefail
 
 here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
@@ -42,6 +46,35 @@ die() {
   echo "linuxapk-session: $*" >&2
   exit 1
 }
+
+# Image selection. Each image is a set of extracted partitions ($img), its
+# flattened APEXes ($apexdir), and a kind whose overrides live in
+# session/image-overlay/<kind>/ (rootfs layers plus extra androidboot.* in
+# "cmdline"), layered above session/rootfs-overlay. See docs/image.md.
+images=${LINUXAPK_IMAGES:-$HOME/.local/share/linuxapk/images}
+pinned=$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$repo/image/pin.toml" 2>/dev/null || true)
+image=${LINUXAPK_IMAGE:-${pinned:-emulator}}
+case $image in
+  emulator) kind=emulator ;;
+  ci-[0-9]*) kind=cuttlefish ;;
+  *) die "unknown LINUXAPK_IMAGE: $image (ci-<build> or emulator)" ;;
+esac
+kind_ovl=$repo/session/image-overlay/$kind
+# Extra androidboot.* for this kind, one per line (e.g. the vendor APEX
+# selection androidboot.vendor.apex.<name>=<file>|none, which apexd and
+# tools/flatten-apex.sh both honour).
+kind_cmdline() {
+  [[ -f $kind_ovl/cmdline ]] || return 0
+  sed 's/#.*//' "$kind_ovl/cmdline" | tr -s ' \t' '\n' | grep . || true
+}
+if [[ $kind == emulator ]]; then
+  img=$out/img apexdir=$out/root/apex
+else
+  # Shared by all checkouts and instances, so each vendor APEX selection gets
+  # its own flattened tree (never rewritten under a running session).
+  img=$images/$image/img
+  apexdir=$images/$image/apex-$(kind_cmdline | grep '^androidboot\.vendor\.apex\.' | sha256sum | cut -c1-12)
+fi
 
 # Map root to the invoking user (so image files appear root-owned), and the
 # Android uid/gid ranges we need onto our subordinate ids:
@@ -77,6 +110,7 @@ cmdline() {
   cat <<EOF
 androidboot.hardware=linuxapk androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.veritymode=disabled androidboot.serialno=linuxapk0 androidboot.debuggable=1 androidboot.boot_devices=linuxapk androidboot.dalvik.vm.heapsize=512m
 EOF
+  kind_cmdline
 }
 
 # /vendor/build.prop = the image's plus graphics driver selection from
@@ -84,13 +118,11 @@ EOF
 # driven by amdgpu, else lavapipe.
 vendor_props() {
   local dst=$out/session/overlay/vendor/build.prop gpu=$out/vendor-overlay/etc/gpu.prop vk=lvp
-  local drv
+  local drv ours
   drv=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)")
   [[ $drv == amdgpu ]] && vk=radv
   mkdir -p "$(dirname "$dst")"
-  {
-    cat "$out/img/vendor/build.prop"
-    echo
+  ours=$(
     echo "# --- linuxapk-session: graphics (render node driver: ${drv:-none}) ---"
     if [[ -f $gpu ]]; then
       grep -v '^ro.hardware.vulkan=' "$gpu"
@@ -109,8 +141,45 @@ vendor_props() {
       echo "# --- linuxapk-session: audio ---"
       grep -v '^#' "$out/vendor-overlay/etc/audio.prop"
     fi
+    # Per-image-kind vendor properties (session/image-overlay/<kind>/vendor.prop).
+    if [[ -f $kind_ovl/vendor.prop ]]; then
+      echo "# --- linuxapk-session: $kind ---"
+      cat "$kind_ovl/vendor.prop"
+    fi
+  )
+  {
+    # The image's file minus every key set here, so ours take effect.
+    awk -F= 'NR == FNR { if ($0 !~ /^#/ && NF > 1) mine[$1] = 1; next } !($1 in mine)' \
+      <(echo "$ours") "$img/vendor/build.prop"
+    echo
+    echo "$ours"
   } >"$dst"
   chmod 0644 "$dst"
+}
+
+# Make sure the selected image is extracted and flattened, and the generated
+# overlay matches it.
+prepare() {
+  if [[ ! -d $img/system/system ]]; then
+    [[ $kind == emulator ]] && die "no image at $img (run tools/extract-image.sh)"
+    [[ $image == "$pinned" ]] || die "no image at $img (pin it in image/pin.toml and run tools/fetch-image.sh)"
+    "$repo/tools/fetch-image.sh"
+  fi
+  if [[ ! -f $apexdir/apex-info-list.xml ]]; then
+    mkdir -p "$out/session"
+    kind_cmdline >"$out/session/apex-select"
+    rm -rf "$apexdir.tmp$sfx"
+    "$repo/tools/flatten-apex.sh" "$img" "$apexdir.tmp$sfx" "$out/session/apex-select"
+    mv -T "$apexdir.tmp$sfx" "$apexdir" 2>/dev/null || rm -rf "$apexdir.tmp$sfx" # lost a race: fine
+  fi
+  # build.sh's generated overlay holds image-derived files (relaxed copies,
+  # APEX fs_config), so rebuild it when the image changes too.
+  if [[ ! -x $out/session/pivot-exec ]] ||
+    [[ "$img $apexdir" != "$(cat "$out/session/overlay/.image" 2>/dev/null)" ]] ||
+    [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
+    LINUXAPK_IMG=$img LINUXAPK_APEX=$apexdir "$here/build.sh"
+    echo "$img $apexdir" >"$out/session/overlay/.image"
+  fi
 }
 
 start() {
@@ -133,12 +202,7 @@ start() {
     [[ -S $wayland ]] || die "no Wayland socket at $wayland (use --headless)"
   fi
   if p=$(ns_pid); then die "already running (pid $p)"; fi
-  [[ -d $out/img/system/system ]] || die "no image at $out/img (run tools/extract-image.sh)"
-  [[ -f $out/root/apex/apex-info-list.xml ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
-  if [[ ! -x $out/session/pivot-exec ]] ||
-    [[ -n $(find "$here/shim" "$here/helper" "$here/build.sh" -newer "$out/session/pivot-exec") ]]; then
-    "$here/build.sh"
-  fi
+  prepare
 
   # The desktop bridge (audio to PipeWire; bridge/, Rust). Optional: without
   # it Android still boots, with audio going nowhere.
@@ -164,6 +228,7 @@ start() {
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
+    --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do
@@ -176,7 +241,7 @@ start() {
     cat "$run/session.out" >&2
     die "session failed to start"
   }
-  echo "session started: Android pid 1 = host pid $p; log: $run/kmsg.log"
+  echo "session started ($image): Android pid 1 = host pid $p; log: $run/kmsg.log"
   if ((fg)); then
     tail -n +1 --pid="$p" -f "$run/kmsg.log" || true
   fi
@@ -218,6 +283,7 @@ _run() {
   # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046
   env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
+    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_KIND_OVERLAY="$kind_ovl" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
     -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
   local ushare=$! outer="" inner=""
@@ -330,6 +396,7 @@ case ${1:-} in
     start "$@"
     ;;
   stop) stop ;;
+  prepare) prepare ;;
   _run)
     shift
     _run "$@"
@@ -347,7 +414,7 @@ case ${1:-} in
     ;;
   shell) exec_in /system/bin/sh -l ;;
   *)
-    sed -n '2,12s/^# \{0,1\}//p' "$0"
+    sed -n '2,15s/^# \{0,1\}//p' "$0"
     exit 1
     ;;
 esac

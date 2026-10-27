@@ -5,13 +5,18 @@
 # locked namespaces (see helper/pivot-exec.c).
 #
 # Inputs (environment): LINUXAPK_REPO LINUXAPK_OUT LINUXAPK_RUN LINUXAPK_DATA
+#                       LINUXAPK_IMG, LINUXAPK_APEX (the selected image's
+#                         partitions and flattened APEXes),
+#                       LINUXAPK_KIND_OVERLAY (session/image-overlay/<kind>)
 #                       LINUXAPK_HOLD=1 to stop before exec'ing init
 set -euo pipefail
 
 repo=$LINUXAPK_REPO out=$LINUXAPK_OUT run=$LINUXAPK_RUN data=$LINUXAPK_DATA
-img=$out/img
-apex=$out/root/apex
+img=${LINUXAPK_IMG:-$out/img}
+apex=${LINUXAPK_APEX:-$out/root/apex}
 ovl=$repo/session/rootfs-overlay
+# Per-image-kind overrides, above the common ones (absent dirs are skipped).
+kovl=${LINUXAPK_KIND_OVERLAY:-$ovl/none}
 
 log() { echo "ns-init: $*" >&2; }
 
@@ -56,12 +61,17 @@ layer_mount() {
 }
 
 # --- partitions -------------------------------------------------------------
-layer_mount "$R/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
-layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
-layer_mount "$R/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
-layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
-layer_mount "$R/odm" "$ovl/odm" "$out/session/overlay/odm" "$img/vendor/odm"
-[[ -d $img/system_dlkm ]] && layer_mount "$R/system_dlkm" "$img/system_dlkm"
+layer_mount "$R/system" "$kovl/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
+layer_mount "$R/vendor" "$kovl/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
+layer_mount "$R/system_ext" "$kovl/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
+layer_mount "$R/product" "$kovl/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
+# odm: its own partition (CI image), or a directory inside vendor (emulator).
+odm=$img/odm
+[[ -d $odm ]] || odm=$img/vendor/odm
+layer_mount "$R/odm" "$kovl/odm" "$ovl/odm" "$out/session/overlay/odm" "$odm"
+for p in system_dlkm vendor_dlkm odm_dlkm; do
+  if [[ -d $img/$p ]]; then layer_mount "$R/$p" "$img/$p"; fi
+done
 
 # Top-level entries of the system-as-root image (symlinks, init.environ.rc,
 # empty mount points). Partitions were handled above.
@@ -80,6 +90,7 @@ done
 rm -rf "$R/lost+found"
 # Root-level overrides (e.g. init.environ.rc additions).
 if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
+if [[ -d $kovl/root ]]; then cp -a "$kovl/root/." "$R/"; fi
 
 # --- /apex: pre-flattened APEXes instead of apexd ---------------------------
 # Init mounts an empty tmpfs over /apex early in second stage, so the tree is
@@ -88,7 +99,7 @@ if [[ -d $ovl/root ]]; then cp -a "$ovl/root/." "$R/"; fi
 # non-recursive views of it stay complete.
 # Overrides for APEX contents (e.g. rc files) layer on top like partitions.
 mkdir -p "$R/apex" "$R/bootstrap-apex"
-layer_mount "$R/linuxapk/apex" "$ovl/apex" "$out/session/overlay/apex" "$apex"
+layer_mount "$R/linuxapk/apex" "$kovl/apex" "$ovl/apex" "$out/session/overlay/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
@@ -98,10 +109,12 @@ sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]
 mkdir -p "$data"
 mount --bind "$data" "$R/data"
 for d in linkerconfig metadata cache mnt storage tmp data_mirror; do
+  # Images without a cache partition have /cache -> /data/cache.
+  [[ -L $R/$d ]] && continue
   mkdir -p "$R/$d"
   mount -t tmpfs -o mode=0755 "$d" "$R/$d"
 done
-chmod 0770 "$R/cache"
+[[ -L $R/cache ]] || chmod 0770 "$R/cache"
 
 # --- /dev -------------------------------------------------------------------
 mount -t tmpfs -o mode=0755,nosuid dev "$R/dev"

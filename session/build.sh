@@ -8,7 +8,9 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
 out=${LINUXAPK_OUT:-$repo/out}
-img=$out/img
+# The selected image (linuxapk-session passes these; default: emulator layout).
+img=${LINUXAPK_IMG:-$out/img}
+apex=${LINUXAPK_APEX:-$out/root/apex}
 
 ndk=${ANDROID_NDK_HOME:-}
 if [[ -z $ndk ]]; then
@@ -49,7 +51,7 @@ relax system "$img/system/system"
 relax vendor "$img/vendor"
 relax system_ext "$img/system_ext"
 relax product "$img/product"
-relax odm "$img/vendor/odm"
+if [[ -d $img/odm ]]; then relax odm "$img/odm"; else relax odm "$img/vendor/odm"; fi
 
 # fs_config ownership/modes that code verifies at runtime. Copies are chowned
 # inside "podman unshare", whose id map (0 = us, 1.. = /etc/subuid) matches the
@@ -61,7 +63,7 @@ apex_fs_config=(
 )
 for e in "${apex_fs_config[@]}"; do
   read -r rel mode uid gid <<<"$e"
-  src=$out/root/apex/$rel dst=$out/session/overlay/apex/$rel
+  src=$apex/$rel dst=$out/session/overlay/apex/$rel
   [[ -e $src ]] || continue
   mkdir -p "$(dirname "$dst")"
   if [[ -d $src ]]; then mkdir -p "$dst"; else cp -p "$src" "$dst"; fi

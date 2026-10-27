@@ -1,0 +1,31 @@
+# Vendor properties for the AOSP CI cuttlefish image, merged into the
+# generated /vendor/build.prop (replacing the image's values for these keys).
+
+# Cuttlefish userdebug builds turn on BPF map locking checks (OFD locks on map
+# fds, keyed on ro.product.board=cutf). netd aborts on them because the
+# session's emulated BPF maps aren't kernel objects. It is a dev-only
+# correctness check, so drop the board name.
+ro.product.board=linuxapk
+
+# No block devices in the session: no factory-reset-protection partition
+# (PersistentDataBlockService would fail on /dev/block/by-name/frp), and no
+# pmem device for the reboot escrow HAL.
+ro.frp.pst=
+ro.rebootescrow.device=
+
+# Cuttlefish's hwcomposer/display settings that don't apply to our composer.
+ro.vendor.hwcomposer.pmem=
+vendor.hwc.drm.device=
+
+# No lock screen (a session isn't a phone). The emulator image's setup leaves
+# the lock screen disabled; this is the same default for LockSettingsService.
+ro.lockscreen.disable.default=true
+
+# Cuttlefish lists arm64-v8a for its (absent here) native bridge; with
+# ro.dalvik.vm.native.bridge=0 arm64-only apps would install and then fail at
+# runtime. Advertise x86_64 only, as the emulator image does, until a
+# translator lands (M6). Set explicitly, init then skips deriving them from
+# ro.{product,odm,vendor,system}.product.cpu.abilist* (odm's would win).
+ro.product.cpu.abilist=x86_64
+ro.product.cpu.abilist64=x86_64
+ro.product.cpu.abilist32=
