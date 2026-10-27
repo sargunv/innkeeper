@@ -69,6 +69,10 @@ Rules:
 ## Current state
 
 - 2026-10-26: repo created. M0 started.
+- 2026-10-27: AOSP 17 synced (`~/aosp/a17`, 158 GB). First full build running as
+  systemd unit `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's
+  BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by
+  `~/aosp/build-full.sh`.
 
 ## Next
 
