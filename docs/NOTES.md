@@ -88,6 +88,15 @@ Causes:
   our own source-built image, and corpus parity. Relocating `/system` and
   `/apex` paths is only needed inside Flatpak, where nested user namespaces are
   blocked. Its feasibility is assessed in M4 and implemented in M5.
+- **Image source (2026-10-27):** boot an AOSP build from Android's public CI
+  instead of the emulator image (SDK license) or our own source build.
+  - Branch `aosp-android-latest-release`, build 16644040, target
+    `aosp_cf_x86_64_only_phone-userdebug` (CP2A.260605.016, test-keys).
+  - Users download it from ci.android.com at setup, so we never redistribute it.
+  - Its vendor APEXes supply the software KeyMint, gatekeeper, health and AIDL
+    audio HALs.
+  - The local AOSP build keeps running (the user's call); delete it once the
+    project is proven without it.
 - Concurrency: at most three agent lanes plus the capped AOSP build. Each lane
   uses its own `LINUXAPK_INSTANCE`.
 
@@ -105,6 +114,10 @@ Causes:
   Docs: `docs/audio.md` and `docs/bridge.md`. Instance `audio`.
 - ubinder (M4): userspace binder through the seccomp supervisor. Docs:
   `docs/ubinder.md`. Instance `ubinder`.
+- image: boot the CI cuttlefish build (`tools/fetch-image.sh`, image selection
+  in the session). Docs: `docs/image.md`. Instance `image`.
+- cli: the `linuxapk` host command (install, `.desktop` files, run). Docs:
+  `docs/cli.md`. Instance `cli`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
