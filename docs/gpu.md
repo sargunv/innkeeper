@@ -52,6 +52,49 @@ gpu/build.sh radv     # just RADV (about 2 min); also: lvp, llvm, test
      longer links libhardware.
 2. **lavapipe: link with the Vulkan ICD version script**, so it exports only
    `HMI` and not the 22k LLVM and libc++ symbols.
+3. **radv/android: deferred-allocation ANB swapchain images.** This fixes the
+   bootanimation crash (SIGSEGV at 0x60 in `vkAcquireNextImageKHR`), see below.
+4. **lavapipe: use the gralloc layout for deferred ANB images.** Before this,
+   deferred images got lavapipe's own row pitch (448 B instead of the gralloc's
+   512 B for 100 px).
+
+## Swapchains, the bootanimation crash, and fences
+
+**The crash.** ANGLE creates its swapchain with
+`VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_EXT`.
+
+- libvulkan then creates each image with only `VkImageSwapchainCreateInfoKHR`.
+- When `vkAcquireNextImageKHR` first dequeues a gralloc buffer, libvulkan binds
+  it with `vkBindImageMemory2(memory = VK_NULL_HANDLE)`, chaining
+  `VkNativeBufferANDROID` → `VkBindImageMemorySwapchainInfoKHR`.
+- RADV had no Android handling for this. It laid the image out as an ordinary
+  optimal image, then read `mem->alloc_size` through the NULL memory (offset
+  0x60) in `radv_BindImageMemory2`.
+- Patch 0003 makes RADV defer the layout (`vk_android_init_deferred_image`). At
+  bind time it lays the image out from the gralloc metadata
+  (`vk_android_get_anb_layout`, i.e. our IMapper v5) and binds the imported
+  dma-buf, the same way turnip does.
+- `vkdriver_test --anb --deferred` reproduces the crash in five calls: the same
+  fault at 0x60 before the patch, PASS after.
+
+**Fences: RADV needs no sw_sync.**
+
+- `vkQueueSignalReleaseImageANDROID` (Mesa's common implementation) exports the
+  release fence as a sync_file from an amdgpu DRM syncobj, a real kernel
+  dma_fence. Every presented frame in `swapchain_test` carried a real sync_file
+  to the BufferQueue consumer (120/120). That was true for lavapipe as well.
+- `vkAcquireImageANDROID` imports the dequeue fence as a temporary `SYNC_FD`
+  payload; `-1` means "already signalled", which is valid.
+- So producers hand SurfaceFlinger and the composer real sync_files, and the
+  composer can wait on them with `poll()`.
+- Only a component that must create fences from nothing needs sw_sync, e.g. the
+  composer's present/release fences. It can instead use the GPU
+  (`vkGetSemaphoreFdKHR(SYNC_FD)` on a submitted semaphore) or
+  `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` on the buffer.
+- RADV attaches implicit fences to dma-bufs it writes, because imported BOs
+  without `AMDGPU_GEM_CREATE_EXPLICIT_SYNC` get `RADEON_FLAG_IMPLICIT_SYNC`. So
+  `DMA_BUF_IOCTL_EXPORT_SYNC_FILE(DMA_BUF_SYNC_READ)` on a gralloc buffer gives
+  a fence for the GPU's pending writes. Not yet exercised by a test.
 
 ## Properties (`out/vendor-overlay/etc/gpu.prop`)
 
@@ -83,14 +126,16 @@ namespace, without booting Android:
 
 `gpu/test/vkdriver_test` covers the following (all PASS):
 
-| Test                                                                                                                              | RADV                                                          | lavapipe                                    |
-| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
-| HAL load like libvulkan (`android_load_sphal_library("vulkan.X.so")`, `HMI`, open `vk0`), instance and device                     | `AMD Radeon 8060S Graphics (RADV STRIX_HALO)`, Vulkan 1.4.354 | `llvmpipe (LLVM 19.1.7, 256 bits)`, 1.4.354 |
-| Compute dispatch of 1M invocations, host readback                                                                                 | 0 mismatches                                                  | 0 mismatches                                |
-| Import a memfd→udmabuf dma-buf as VkDeviceMemory, compute writes, check through the memfd mmap                                    | memoryTypeBits 0x420 (GTT), 0 mismatches                      | 0 mismatches                                |
-| `VkNativeBufferANDROID` image (the swapchain path) from a gralloc handle, GPU copy, check pixels and row padding through the mmap | PASS                                                          | PASS                                        |
-| Same, but with the hal lane's allocator code and the real `mapper.linuxapk.so` (`--anb-hal`)                                      | PASS                                                          | PASS                                        |
-| Through the system `libvulkan.so` (`--loader`, properties via `test/propshim.c`)                                                  | PASS                                                          |                                             |
+| Test                                                                                                                                                           | RADV                                                          | lavapipe                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
+| HAL load like libvulkan (`android_load_sphal_library("vulkan.X.so")`, `HMI`, open `vk0`), instance and device                                                  | `AMD Radeon 8060S Graphics (RADV STRIX_HALO)`, Vulkan 1.4.354 | `llvmpipe (LLVM 19.1.7, 256 bits)`, 1.4.354 |
+| Compute dispatch of 1M invocations, host readback                                                                                                              | 0 mismatches                                                  | 0 mismatches                                |
+| Import a memfd→udmabuf dma-buf as VkDeviceMemory, compute writes, check through the memfd mmap                                                                 | memoryTypeBits 0x420 (GTT), 0 mismatches                      | 0 mismatches                                |
+| `VkNativeBufferANDROID` image (the swapchain path) from a gralloc handle, GPU copy, check pixels and row padding through the mmap                              | PASS                                                          | PASS                                        |
+| Same, but with the hal lane's allocator code and the real `mapper.linuxapk.so` (`--anb-hal`)                                                                   | PASS                                                          | PASS                                        |
+| Through the system `libvulkan.so` (`--loader`, properties via `test/propshim.c`)                                                                               | PASS                                                          |                                             |
+| libvulkan's deferred-allocation bind (`--anb --deferred`, `--anb-hal --deferred`)                                                                              | PASS (crashed at 0x60 before patch 0003)                      | PASS (wrong pitch before patch 0004)        |
+| `swapchain_test`: 120-frame acquire, clear, present loop on an `AImageReader` window, consumer checks every frame (`run-bionic.sh -s`, eager and `--deferred`) | PASS, 120/120 real release fences                             | PASS                                        |
 
 The ANB test passes the driver a deliberately wrong pixel stride, so it can only
 pass if the driver got `PLANE_LAYOUTS` from the IMapper. Without a mapper,
@@ -117,10 +162,27 @@ from `/data/gputest`.
   - hal lane: fail allocations with GPU or composer usage rather than hand out
     memfd buffers.
 
+Later the same day, in a session with SurfaceFlinger and `/dev/udmabuf`, running
+the patched driver:
+
+- `swapchain_test` passes on RADV and lavapipe, eager and `--deferred`: 120
+  frames each, 0 bad pixels, and a real release sync_file on every frame.
+- `gles_test` (ANGLE on RADV) passes.
+- **bootanimation, the original crash, now runs.** I started it by hand with
+  `debug.sf.nobootanimation=0` from the shim. It ran until killed after 12 s,
+  with no tombstone. The composer's frame dump (`vendor.linuxapk.hwc.dump.dir`)
+  shows the "android" logo with its shimmer at 1280x800. It was drawn by ANGLE
+  on RADV and composited by SurfaceFlinger (copy in
+  `out/gpu/bootanimation-frame.png`).
+
 ```
 gpu/build.sh test
 TIMEOUT=120 gpu/test/run-bionic.sh -e MESA_GRALLOC_MAPPER_SUFFIX=linuxapk -- \
-  /data/gputest/vkdriver_test --hal vulkan.radv.so --udmabuf --anb-hal
+  /data/gputest/vkdriver_test --hal vulkan.radv.so --udmabuf --anb-hal --deferred
+# Swapchain loop without a session: -s starts servicemanager and our allocator.
+# test/fake_sf.c stands in for SurfaceFlinger's getDisplayStats.
+TIMEOUT=90 gpu/test/run-bionic.sh -s -e LINUXAPK_PROPS=ro.hardware.vulkan=radv -- \
+  /system/bin/sh -c '/data/gputest/fake_sf & sleep 0.5; /data/gputest/swapchain_test --deferred'
 ```
 
 ## Gralloc guidance for the hal lane
