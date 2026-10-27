@@ -37,9 +37,10 @@ the shared listener.
   failed (`ENOENT`) are stashed and returned by the thread's next read.
 - **poll:** a thread that sets up polling (a write-only `BC_ENTER_LOOPER`, which
   is `IPCThreadState::setupPolling`) gets its process's binder fd swapped for an
-  eventfd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive). The broker
-  sets it readable exactly when a polling thread has work (`binder_poll`).
-  Nothing traps `epoll_ctl`.
+  epoll fd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive) watching an
+  eventfd only the broker holds, so Android can't drain, saturate or block it.
+  The broker sets it readable exactly when a polling thread has work
+  (`binder_poll`). Nothing traps `epoll_ctl`.
 - **fds:** `BINDER_TYPE_FD`/`FDA` are captured from the sender with
   `pidfd_getfd` and installed into the reader during its own read (`ADDFD`),
   like `binder_apply_fd_fixups`.

@@ -298,6 +298,44 @@ fn stream_through_ring() {
     assert_eq!(unsafe { *(map.add(224) as *const u32) }, 2);
 }
 
+/// A client that makes its signalling fds blocking and saturates them can't
+/// hang the stream thread, so closing the stream still answers.
+#[test]
+fn stream_fds_cannot_block_the_bridge() {
+    let path = start(Limits::default(), true);
+    let mut c = Client::connect(&path);
+    c.hello();
+    let (status, body, fds) = c.call(&out_cfg(480, 4)).unwrap();
+    assert_eq!(status, 0);
+    let r = OpenOutputReply::decode(&body).unwrap();
+    let [memfd, data, space]: [OwnedFd; 3] = fds.try_into().unwrap();
+    for fd in [&data, &space] {
+        rustix::fs::fcntl_setfl(fd, rustix::fs::OFlags::empty()).unwrap();
+    }
+    // Saturate the space signal, if it is a counter we can write.
+    let _ = rustix::io::write(&space, &(u64::MAX - 1).to_ne_bytes());
+    // Queue a full ring so the stream consumes and signals space.
+    // SAFETY: test mapping of the ring we were given, of its advertised size.
+    let map = unsafe {
+        rustix::mm::mmap(
+            std::ptr::null_mut(),
+            r.map_size as usize,
+            rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
+            rustix::mm::MapFlags::SHARED,
+            &memfd,
+            0,
+        )
+        .unwrap()
+    } as *mut u8;
+    // SAFETY: header fields are 8-aligned inside the first page.
+    let write_pos = unsafe { &*(map.add(64) as *const std::sync::atomic::AtomicU64) };
+    write_pos.store(1920, Ordering::Release);
+    rustix::io::write(&data, &1u64.to_ne_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let closed = c.call(&Request::Close { stream: r.stream });
+    assert_eq!(closed.map(|r| r.0), Some(0), "close hung");
+}
+
 #[test]
 fn protocol_errors() {
     let path = start(Limits::default(), true);

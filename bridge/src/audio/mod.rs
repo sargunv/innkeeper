@@ -117,15 +117,20 @@ impl AudioService {
     fn spawn(&mut self, cfg: &OutputConfig, map_size: usize) -> anyhow::Result<Reply> {
         let ring = Ring::new(cfg.frame_bytes(), cfg.capacity_frames(), cfg.rate)?;
         debug_assert_eq!(ring.map_len(), map_size);
-        // Non-blocking on both sides: neither peer can stall the other by
-        // saturating a counter.
+        // The client shares the data eventfd's open file description, so it
+        // can clear O_NONBLOCK: the stream thread reads it with RWF_NOWAIT.
+        // Space is a pipe: the client gets the read end, and the write end's
+        // flags are ours alone (an eventfd write can't be made non-blocking
+        // per call, and a saturated counter would block it).
         let flags = EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK;
         let data = rustix::event::eventfd(0, flags)?;
-        let space = rustix::event::eventfd(0, flags)?;
+        let (space_rd, space) = rustix::pipe::pipe_with(
+            rustix::pipe::PipeFlags::CLOEXEC | rustix::pipe::PipeFlags::NONBLOCK,
+        )?;
         let send: Vec<OwnedFd> = vec![
             rustix::io::fcntl_dupfd_cloexec(ring.memfd(), 3)?,
             rustix::io::fcntl_dupfd_cloexec(data.as_fd(), 3)?,
-            rustix::io::fcntl_dupfd_cloexec(space.as_fd(), 3)?,
+            space_rd,
         ];
         let (out, latency_us): (Box<dyn Output>, u32) = match &self.backend {
             Backend::Pulse { sink } => match pulse::PulseOut::connect(cfg, sink.as_deref()) {

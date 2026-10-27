@@ -20,8 +20,9 @@
 //!    bytes whose response failed (ENOENT) are stashed and returned by the
 //!    thread's next `BINDER_WRITE_READ`.
 //!  * a thread that sets up polling (`IPCThreadState::setupPolling`) gets its
-//!    process's binder fd swapped for an eventfd (`ADDFD`+`SETFD`; the mapping
-//!    keeps the memfd alive) whose level the broker drives (`binder_poll`).
+//!    process's binder fd swapped for an epoll fd (`ADDFD`+`SETFD`; the mapping
+//!    keeps the memfd alive) watching a broker-only eventfd whose level the
+//!    broker drives (`binder_poll`).
 //!
 //! A monitor thread watches a pidfd per process (death) and periodically
 //! checks with `kcmp` that each process still holds its binder fd (close,
@@ -140,8 +141,11 @@ struct ProcState {
     live: HashMap<u64, (usize, usize)>,
     nonblock: bool,
     pidfd: Option<OwnedFd>,
-    /// Present once a thread polls: the fd in the target is this eventfd.
-    poll_evfd: Option<OwnedFd>,
+    /// Present once a thread polls: the eventfd whose level the broker
+    /// drives, and the epoll fd watching it, which the target holds instead
+    /// of its binder fd. The target can't reach the eventfd itself, so it
+    /// can't drain it, saturate it or clear its O_NONBLOCK under the broker.
+    poll_evfd: Option<(OwnedFd, OwnedFd)>,
     poll_level: bool,
 }
 
@@ -358,6 +362,34 @@ fn recv_memfd(name: &str) -> Option<OwnedFd> {
     (unsafe { libc::ftruncate(fd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } == 0
         && unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) } == 0)
         .then_some(fd)
+}
+
+/// A non-blocking eventfd and an epoll fd that watches it (see
+/// `ProcState::poll_evfd`).
+fn poll_pair() -> Option<(OwnedFd, OwnedFd)> {
+    let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    if efd < 0 {
+        return None;
+    }
+    let efd = unsafe { OwnedFd::from_raw_fd(efd) };
+    let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+    if epfd < 0 {
+        return None;
+    }
+    let epfd = unsafe { OwnedFd::from_raw_fd(epfd) };
+    let mut ev = libc::epoll_event {
+        events: libc::EPOLLIN as u32,
+        u64: 0,
+    };
+    let r = unsafe {
+        libc::epoll_ctl(
+            epfd.as_raw_fd(),
+            libc::EPOLL_CTL_ADD,
+            efd.as_raw_fd(),
+            &mut ev,
+        )
+    };
+    (r == 0).then_some((efd, epfd))
 }
 
 // ---- Mem over real processes ------------------------------------------
@@ -1029,7 +1061,8 @@ impl Supervisor {
         f(&mut self.broker, &mut mem)
     }
 
-    /// Swap the process's binder fd for an eventfd the broker drives.
+    /// Swap the process's binder fd for an epoll fd watching an eventfd the
+    /// broker drives.
     fn make_pollable(&mut self, procid: ProcId, notif_id: u64) {
         let Some(p) = self.procs.get(&procid) else {
             return;
@@ -1037,15 +1070,13 @@ impl Supervisor {
         if p.poll_evfd.is_some() {
             return;
         }
-        let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
-        if efd < 0 {
+        let Some((efd, epfd)) = poll_pair() else {
             return;
-        }
-        let efd = unsafe { OwnedFd::from_raw_fd(efd) };
+        };
         let r = self.addfd(&SeccompNotifAddfd {
             id: notif_id,
             flags: SECCOMP_ADDFD_FLAG_SETFD,
-            srcfd: efd.as_raw_fd() as u32,
+            srcfd: epfd.as_raw_fd() as u32,
             newfd: p.fd,
             newfd_flags: O_CLOEXEC,
         });
@@ -1055,7 +1086,7 @@ impl Supervisor {
         }
         dlog!("poll swap proc={procid} fd={}", p.fd);
         let p = self.procs.get_mut(&procid).unwrap();
-        p.poll_evfd = Some(efd);
+        p.poll_evfd = Some((efd, epfd));
         p.poll_level = false;
         self.dirty.insert(procid);
     }
@@ -1065,7 +1096,7 @@ impl Supervisor {
         let Some(p) = self.procs.get_mut(&proc) else {
             return;
         };
-        let Some(efd) = p.poll_evfd.as_ref() else {
+        let Some((efd, _)) = p.poll_evfd.as_ref() else {
             return;
         };
         if want == p.poll_level {
@@ -1177,7 +1208,11 @@ impl Supervisor {
     }
 
     fn still_open(&self, p: &ProcState) -> bool {
-        let ours = p.poll_evfd.as_ref().unwrap_or(&p.memfd).as_raw_fd();
+        let ours = p
+            .poll_evfd
+            .as_ref()
+            .map_or(&p.memfd, |(_, ep)| ep)
+            .as_raw_fd();
         kcmp_same_file(p.pid, ours, p.fd)
     }
 
@@ -1230,5 +1265,43 @@ mod tests {
             unsafe { libc::pwrite(fd, b"x".as_ptr() as *const _, 1, 0) },
             1
         );
+    }
+
+    fn readable(fd: RawFd) -> bool {
+        let mut p = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        unsafe { libc::poll(&mut p, 1, 0) == 1 }
+    }
+
+    /// The target polls the epoll fd; whatever it does to that fd, the
+    /// broker's eventfd stays non-blocking and only the broker drains it.
+    #[test]
+    fn poll_fd_is_not_the_brokers() {
+        let (efd, epfd) = poll_pair().unwrap();
+        let (e, ep) = (efd.as_raw_fd(), epfd.as_raw_fd());
+        assert!(!readable(ep));
+        let one = 1u64;
+        assert_eq!(
+            unsafe { libc::write(e, &one as *const u64 as *const _, 8) },
+            8
+        );
+        assert!(readable(ep));
+        // The target clears O_NONBLOCK and tries to drain or saturate it.
+        assert_eq!(unsafe { libc::fcntl(ep, libc::F_SETFL, 0) }, 0);
+        let mut b = [0u8; 8];
+        assert_eq!(unsafe { libc::read(ep, b.as_mut_ptr() as *mut _, 8) }, -1);
+        let max = u64::MAX - 1;
+        assert_eq!(
+            unsafe { libc::write(ep, &max as *const u64 as *const _, 8) },
+            -1
+        );
+        assert!(readable(ep));
+        // The broker lowers the level, twice: never blocks.
+        assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, 8);
+        assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, -1);
+        assert!(!readable(ep));
     }
 }

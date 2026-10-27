@@ -1,7 +1,8 @@
 //! One thread per output stream: waits on the client's "data" eventfd, the
 //! output's own fd (PipeWire socket or a timer) and a control eventfd, moves
-//! PCM from the ring to the output, and signals the client's "space"
-//! eventfd whenever it consumed frames.
+//! PCM from the ring to the output, and signals the client's "space" pipe
+//! whenever it consumed frames. The client can't make either block us: data
+//! is read with RWF_NOWAIT, and only we hold the space pipe's write end.
 
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
@@ -148,7 +149,7 @@ impl Drop for StreamHandle {
 }
 
 /// Starts a stream thread. `data` is the eventfd the client signals,
-/// `space` the one we signal.
+/// `space` the write end of the pipe we signal.
 pub fn spawn(
     name: String,
     ring: Ring,
@@ -180,9 +181,20 @@ pub fn spawn(
     })
 }
 
+/// Clears an eventfd without ever waiting, even if a peer sharing it
+/// cleared O_NONBLOCK (and drained it first).
 fn drain(fd: &OwnedFd) {
     let mut b = [0u8; 8];
-    let _ = rustix::io::read(fd, &mut b);
+    let mut io = [std::io::IoSliceMut::new(&mut b)];
+    let _ = rustix::io::preadv2(fd, &mut io, u64::MAX, rustix::io::ReadWriteFlags::NOWAIT);
+}
+
+/// Makes the space pipe readable, unless it already is (a client that
+/// doesn't read keeps one token, not a backlog of stale wakeups).
+fn signal(space: &OwnedFd) {
+    if rustix::io::ioctl_fionread(space).unwrap_or(0) == 0 {
+        let _ = rustix::io::write(space, &[1]);
+    }
 }
 
 fn run(
@@ -228,14 +240,25 @@ fn run(
                 consumed |= out.on_readable(&mut ring)?;
             }
             if consumed {
-                // Non-blocking: a client that saturated the counter only
-                // loses its own wakeups.
-                let _ = rustix::io::write(&space, &1u64.to_ne_bytes());
+                signal(&space);
             }
         }
     })();
     // Tell the client to reconnect, and wake it if it's waiting for space.
     ring.set_state(STATE_DEAD);
-    let _ = rustix::io::write(&space, &1u64.to_ne_bytes());
+    signal(&space);
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client sharing the data eventfd can clear O_NONBLOCK and drain it
+    /// between our poll and our read; the read must not wait.
+    #[test]
+    fn drain_never_waits() {
+        let fd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC).unwrap();
+        drain(&fd);
+    }
 }
