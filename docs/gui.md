@@ -158,6 +158,15 @@ nested in Flatpak (see STRATEGY M5). The plan:
   and `/data/data/<pkg>` stayed.
 - Errors: a text file named `.apk` shows "Not an Android App". ARM-only Open
   Sudoku shows the banner with Install disabled.
+- Handler: `linuxapk setup` (in a scratch XDG tree, then for real) wrote both
+  entries (`desktop-file-validate` clean) and made `dev.linuxapk.installer` the
+  default. `gio launch` of the entry with Read You's APK opened its install page
+  in the running GUI. The Preferences switch removed the handler and restored
+  it.
+- Screenshots:
+  [install page](https://github.com/user-attachments/assets/9d2ce18e-10f4-48ee-9d2f-99c12fceb322),
+  [list, with Wikipedia opened from it](https://github.com/user-attachments/assets/a078ed18-bc4d-4071-865b-bc8b9e73bb19),
+  [preferences](https://github.com/user-attachments/assets/d6e6ccd1-80b0-456f-8e1a-c76b52438d6e).
 
 ## Open issues
 
