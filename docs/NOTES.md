@@ -21,6 +21,20 @@ current state, decisions, next steps. Put history in git.
 - Prebuilt image: `~/Android/Sdk/system-images/android-37.0/default/x86_64`
 - Large working files: `~/Projects/linux.apk/out/` (gitignored)
 
+## Findings (graphics)
+
+- AOSP 17 `external/` includes mesa3d (26.1-devel; Android.bp builds only
+  lavapipe, zink and gfxstream, not RADV), minigbm (intel/msm/meson variants,
+  no amdgpu), drm_hwcomposer (has an hwc3 AIDL frontend), angle, swiftshader,
+  wayland and wayland-protocols, all buildable for Android.
+- RADV uses ACO and needs no LLVM, so it can be cross-built out of tree with
+  meson and the NDK. ANGLE (already in /system) provides GLES on top of
+  RADV/lavapipe Vulkan.
+- Device access for this user: `/dev/dri/renderD128` (world rw), and
+  `/dev/udmabuf` and `card1` (logind ACL). There's no access to
+  `/dev/dma_heap/system`. So memfd → udmabuf gives CPU-backed dma-bufs for a
+  simple gralloc.
+
 ## Current state
 
 - 2026-10-26: repo created. M0 started.
