@@ -309,7 +309,7 @@ pub(crate) fn vm_write(pid: i32, addr: u64, data: &[u8]) -> bool {
 /// Read target memory through a pinned `/proc/<pid>/mem` fd (see
 /// `ProcState::mem`). After an exec the old address space is gone and this
 /// fails.
-fn mem_read(mem: RawFd, addr: u64, len: usize) -> Option<Vec<u8>> {
+pub(crate) fn mem_read(mem: RawFd, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
     }
@@ -319,7 +319,7 @@ fn mem_read(mem: RawFd, addr: u64, len: usize) -> Option<Vec<u8>> {
     (n == len as isize).then_some(buf)
 }
 
-fn mem_write(mem: RawFd, addr: u64, data: &[u8]) -> bool {
+pub(crate) fn mem_write(mem: RawFd, addr: u64, data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
     }
@@ -330,7 +330,7 @@ fn mem_write(mem: RawFd, addr: u64, data: &[u8]) -> bool {
     n == data.len() as isize
 }
 
-fn open_mem(pid: i32) -> Option<OwnedFd> {
+pub(crate) fn open_mem(pid: i32) -> Option<OwnedFd> {
     let path = std::ffi::CString::new(format!("/proc/{pid}/mem")).ok()?;
     let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
@@ -339,12 +339,21 @@ fn open_mem(pid: i32) -> Option<OwnedFd> {
 /// Read a NUL-terminated path, never crossing into a page that need not be
 /// mapped before it is known to be needed.
 pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
+    read_path_with(addr, |a, n| vm_read(pid, a, n))
+}
+
+/// `read_path` through a pinned `/proc/<pid>/mem` fd.
+pub(crate) fn mem_read_path(mem: RawFd, addr: u64) -> Option<Vec<u8>> {
+    read_path_with(addr, |a, n| mem_read(mem, a, n))
+}
+
+fn read_path_with(addr: u64, read: impl Fn(u64, usize) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let mut a = addr;
     while out.len() < 4096 {
         let to_page_end = 4096 - (a as usize & 4095);
         let chunk = to_page_end.min(64);
-        let buf = vm_read(pid, a, chunk)?;
+        let buf = read(a, chunk)?;
         if let Some(p) = buf.iter().position(|&b| b == 0) {
             out.extend_from_slice(&buf[..p]);
             return Some(out);
@@ -1368,7 +1377,8 @@ mod tests {
 
     /// A process's pinned mem fd never reaches the image it exec'd into,
     /// though its numeric pid does (the broker's writes after a failed
-    /// response, or racing an exec, must not land there).
+    /// response, or racing an exec, must not land there). The binder path
+    /// and vidsys's workers (paths read, lstat results written) use it.
     #[test]
     fn pinned_mem_does_not_follow_exec() {
         use std::io::Write;
@@ -1381,6 +1391,8 @@ mod tests {
         let mem = open_mem(pid).unwrap();
         let before = first_mapping(pid);
         assert!(mem_read(mem.as_raw_fd(), before, 8).is_some());
+        // (The ELF header there has a NUL early on.)
+        assert!(mem_read_path(mem.as_raw_fd(), before).is_some());
         child.stdin.take().unwrap().write_all(b"go\n").unwrap();
         let exe = |p: i32| std::fs::read_link(format!("/proc/{p}/exe")).unwrap_or_default();
         for _ in 0..500 {
@@ -1392,7 +1404,9 @@ mod tests {
         assert!(exe(pid).ends_with("sleep"));
         let after = first_mapping(pid);
         assert!(vm_read(pid, after, 8).is_some());
+        assert!(read_path(pid, after).is_some());
         assert!(mem_read(mem.as_raw_fd(), after, 8).is_none());
+        assert!(mem_read_path(mem.as_raw_fd(), after).is_none());
         assert!(!mem_write(mem.as_raw_fd(), after, b"x"));
         child.kill().unwrap();
         child.wait().unwrap();
