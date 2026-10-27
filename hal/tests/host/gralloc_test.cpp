@@ -106,11 +106,11 @@ static void testLayouts() {
 
     CHECK(computeLayout(fmt::YV12, 640, 480, 1, 0, &l));
     CHECK_EQ(l.numPlanes, 3u);
-    CHECK_EQ(l.planes[0].stride, 768u);
-    CHECK_EQ(l.planes[1].stride, 384u);  // align(y_stride/2, 16)
-    CHECK_EQ(l.planes[1].offset, 768ull * 480);                    // Cr
-    CHECK_EQ(l.planes[2].offset, 768ull * 480 + 384ull * 240);     // Cb
-    CHECK_EQ(l.stridePixels, 768u);
+    CHECK_EQ(l.planes[0].stride, 1024u);  // 512-aligned so chroma rows stay 256-aligned
+    CHECK_EQ(l.planes[1].stride, 512u);   // align(y_stride/2, 16)
+    CHECK_EQ(l.planes[1].offset, 1024ull * 480);                    // Cr
+    CHECK_EQ(l.planes[2].offset, 1024ull * 480 + 512ull * 240);     // Cb
+    CHECK_EQ(l.stridePixels, 1024u);
 
     CHECK(computeLayout(fmt::YCBCR_420_888, 641, 481, 1, 0, &l));
     CHECK_EQ(l.fourcc, fourcc('N', 'V', '1', '2'));
@@ -338,6 +338,7 @@ static void testAllFormats() {
         // Touch the last byte of every plane: must be mapped.
         for (auto& pl : layouts) {
             CHECK(pl.offsetInBytes + pl.totalSizeInBytes <= int64_t(bh->layerSize.get()));
+            if (f != fmt::BLOB) CHECK(pl.strideInBytes % 256 == 0);
             CHECK(pl.strideInBytes * 8 >= pl.widthInSamples * pl.sampleIncrementInBits);
             static_cast<uint8_t*>(p)[pl.offsetInBytes + pl.totalSizeInBytes - 1] = 0x42;
         }
@@ -360,6 +361,18 @@ static void testAllFormats() {
         CHECK_EQ(gMapper->v5.importBuffer(big, &a), AIMAPPER_ERROR_NONE);
         gMapper->v5.freeBuffer(a);
         nativeHandleCloseAndDelete(big);
+    }
+    // Over the udmabuf size limit: CPU-only falls back to memfd, GPU usage fails.
+    if (udmabufAvailable()) {
+        native_handle_t* nh = nullptr;
+        CHECK(allocateBuffer({"huge-cpu", 8192, 4096, 1, fmt::RGBA_8888, 0x33, 0}, &nh) ==
+              AllocStatus::Ok);
+        if (nh) {
+            CHECK(!(asBufferHandle(nh)->flags & kFlagDmabuf));
+            nativeHandleCloseAndDelete(nh);
+        }
+        CHECK(allocateBuffer({"huge-gpu", 8192, 4096, 1, fmt::RGBA_8888, usage::GPU_TEXTURE, 0},
+                             &nh) == AllocStatus::NoResources);
     }
     native_handle_t* nh = nullptr;
     CHECK(allocateBuffer({"p", 64, 64, 1, fmt::RGBA_8888, usage::PROTECTED, 0}, &nh) ==
@@ -385,6 +398,26 @@ int main(int argc, char** argv) {
     CHECK_EQ(load(&gMapper), AIMAPPER_ERROR_NONE);
     CHECK_EQ(gMapper->version, AIMAPPER_VERSION_5);
 
+    if (getenv("LINUXAPK_UDMABUF")) {
+        // Run with LINUXAPK_UDMABUF=/nonexistent: CPU buffers fall back to
+        // memfd, GPU/composer buffers are refused.
+        printf("no-udmabuf mode\n");
+        native_handle_t* nh = nullptr;
+        CHECK(allocateBuffer({"cpu", 64, 64, 1, fmt::RGBA_8888, 0x33, 0}, &nh) == AllocStatus::Ok);
+        if (nh) {
+            CHECK(!(asBufferHandle(nh)->flags & kFlagDmabuf));
+            buffer_handle_t a;
+            CHECK_EQ(gMapper->v5.importBuffer(nh, &a), AIMAPPER_ERROR_NONE);
+            gMapper->v5.freeBuffer(a);
+            nativeHandleCloseAndDelete(nh);
+        }
+        CHECK(checkRequest({"gpu", 64, 64, 1, fmt::RGBA_8888, usage::GPU_TEXTURE, 0}) ==
+              AllocStatus::Unsupported);
+        CHECK(checkRequest({"ct", 64, 64, 1, fmt::RGBA_8888, usage::COMPOSER_CLIENT_TARGET, 0}) ==
+              AllocStatus::Unsupported);
+        printf("%d checks, %d failures\n", gChecks, gFailures);
+        return gFailures ? 1 : 0;
+    }
     printf("layouts\n");
     testLayouts();
     printf("mapper\n");

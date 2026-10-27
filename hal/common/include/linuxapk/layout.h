@@ -25,7 +25,14 @@ constexpr uint64_t CPU_READ_MASK = 0xf, CPU_WRITE_MASK = 0xf0, GPU_TEXTURE = 1 <
                    GPU_RENDER_TARGET = 1 << 9, COMPOSER_OVERLAY = 1 << 11,
                    COMPOSER_CLIENT_TARGET = 1 << 12, PROTECTED = 1 << 14,
                    VIDEO_ENCODER = 1 << 16, CAMERA_OUTPUT = 1 << 17, CAMERA_INPUT = 1 << 18,
-                   VIDEO_DECODER = 1 << 22, GPU_DATA_BUFFER = 1 << 24;
+                   VIDEO_DECODER = 1 << 22, GPU_DATA_BUFFER = 1 << 24,
+                   COMPOSER_CURSOR = 1 << 15, GPU_CUBE_MAP = 1 << 25,
+                   GPU_MIPMAP_COMPLETE = 1 << 26;
+// Usages whose consumers import the buffer as a dma-buf (GPU drivers, the
+// Wayland compositor): these must not get the memfd fallback.
+constexpr uint64_t NEEDS_DMABUF = GPU_TEXTURE | GPU_RENDER_TARGET | COMPOSER_OVERLAY |
+                                  COMPOSER_CLIENT_TARGET | COMPOSER_CURSOR | GPU_DATA_BUFFER |
+                                  GPU_CUBE_MAP | GPU_MIPMAP_COMPLETE;
 }
 enum class ChromaSiting : int64_t { NONE = 0, UNKNOWN = 1, SITED_INTERSTITIAL = 2 };
 
@@ -84,8 +91,9 @@ struct Layout {
     uint64_t pixelBytes;    // layerSize * layerCount
 };
 
-// Returns false for unsupported format/size. Rows are padded to 256-byte
-// multiples (except BLOB) so GPU drivers can import the buffer as linear.
+// Returns false for unsupported format/size. Every plane's rows are padded to
+// 256-byte multiples (except BLOB) so GPU drivers can import the buffer as
+// linear; for YV12 that means a 512-byte luma stride.
 bool computeLayout(int32_t format, uint32_t width, uint32_t height, uint32_t layerCount,
                    uint64_t usage, Layout* out);
 

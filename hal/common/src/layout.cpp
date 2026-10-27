@@ -50,6 +50,7 @@ const FormatInfo kFormats[] = {
          {packed(16, {Y, 6, 10}), {32, 2, 2, 2, {{CB, 6, 10}, {CR, 22, 10}}}}},
 };
 
+// RADV needs linear row pitches that are multiples of 256 bytes (measured, docs/gpu.md).
 constexpr uint64_t kRowAlign = 256;
 
 uint32_t divUp(uint32_t v, uint32_t d) { return (v + d - 1) / d; }
@@ -129,7 +130,10 @@ bool computeLayout(int32_t format, uint32_t width, uint32_t height, uint32_t lay
         stride0 = width;
     } else {
         // Smallest pixel multiple whose byte size is a multiple of kRowAlign.
-        const uint32_t pixelAlign = kRowAlign / std::gcd<uint64_t, uint64_t>(kRowAlign, bpp0);
+        // YV12 chroma rows are half the luma stride (Android's rule), so pad
+        // luma to 2x the alignment to keep every plane 256-byte aligned.
+        const uint64_t rowAlign = resolved == fmt::YV12 ? 2 * kRowAlign : kRowAlign;
+        const uint32_t pixelAlign = uint32_t(rowAlign / std::gcd<uint64_t, uint64_t>(rowAlign, bpp0));
         stride0 = uint32_t(alignUp(width, pixelAlign)) * bpp0;
     }
 

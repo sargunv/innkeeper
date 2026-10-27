@@ -49,6 +49,10 @@ AllocStatus checkRequest(const AllocRequest& req, Layout* outLayout) {
         return AllocStatus::BadDescriptor;
     }
     if (req.usage & usage::PROTECTED) return AllocStatus::Unsupported;
+    if ((req.usage & usage::NEEDS_DMABUF) && udmabufDevice() < 0) {
+        // GPU/composer consumers can't import a plain memfd.
+        return AllocStatus::Unsupported;
+    }
     Layout l;
     if (!computeLayout(req.format, req.width, req.height, req.layerCount, req.usage, &l)) {
         return AllocStatus::Unsupported;
@@ -106,10 +110,15 @@ AllocStatus allocateBuffer(const AllocRequest& req, native_handle_t** outHandle)
             flags |= kFlagDmabuf;
             close(memfd);
             gUdmabufOk = true;
-        } else {
+        } else if (req.usage & usage::NEEDS_DMABUF) {
             // e.g. larger than udmabuf.size_limit_mb (64 MiB by default)
-            LOGW("UDMABUF_CREATE(%llu bytes): %s; using memfd", (unsigned long long)total,
-                 strerror(errno));
+            LOGE("UDMABUF_CREATE(%llu bytes): %s; GPU/composer usage 0x%llx needs a dma-buf",
+                 (unsigned long long)total, strerror(errno), (unsigned long long)req.usage);
+            close(memfd);
+            return AllocStatus::NoResources;
+        } else {
+            LOGW("UDMABUF_CREATE(%llu bytes): %s; CPU-only buffer, using memfd",
+                 (unsigned long long)total, strerror(errno));
         }
     }
     if (bufFd < 0) {

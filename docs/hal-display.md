@@ -46,17 +46,23 @@ missing it re-runs itself in `tools/hosttools.sh`.
 ## Buffers (`hal/common`)
 
 - **Allocation:** each buffer is a sealed memfd turned into a dma-buf with
-  `UDMABUF_CREATE`. Above `udmabuf.size_limit_mb` (64 MiB), or without
-  `/dev/udmabuf`, it falls back to the plain memfd. Everything is linear and
-  CPU-mappable, and GPU drivers and linux-dmabuf can import fd 0 directly.
+  `UDMABUF_CREATE`. Everything is linear and CPU-mappable; RADV imports these
+  as GTT memory (docs/gpu.md), and linux-dmabuf can take fd 0 directly.
+  Without `/dev/udmabuf`, or above `udmabuf.size_limit_mb` (64 MiB), only
+  CPU-only usages fall back to a plain memfd. GPU and composer usages (any
+  `GPU_*`, `COMPOSER_*`) fail with UNSUPPORTED or NO_RESOURCES, because
+  their consumers can't import a memfd. The session must bind
+  `/dev/udmabuf`.
 - **Handle** (`gralloc_handle.h`): 1 fd + ints, holding size, format, DRM
   fourcc, usage, buffer id, and per-plane offset and stride.
 - **fd layout:** `[pixels, layerCount layers][4 KiB SharedMetadata][reserved region]`.
   Mutable metadata (dataspace, blend mode, SMPTE2086, CTA861.3, SMPTE2094-10,
   -40 and -50 blobs) lives in the buffer itself, so every importing process
   sees the same values.
-- **Rows** are padded to 256 bytes (AMD linear pitch alignment). BLOB rows
-  aren't padded.
+- **Rows:** every plane's row pitch is a multiple of 256 bytes, which RADV
+  needs for linear images. YV12 keeps Android's rule
+  (`c_stride = align(y_stride/2, 16)`) by padding luma to 512 bytes. BLOB
+  rows aren't padded.
 - **Formats:**
 
   | Android format | DRM fourcc |
@@ -145,7 +151,7 @@ presenter two things:
 
 | What | Command | Evidence |
 |---|---|---|
-| Host unit tests (layouts, every format, udmabuf alloc, mapper via `dlopen`, metadata get/set across imports and `fork`, sync_file acquire fence, PNG/PPM writer) | `hal/build.sh` (ctest) | `236 checks, 0 failures` |
+| Host unit tests (layouts, every format, 256-byte plane pitches, udmabuf alloc and the no-udmabuf policy, mapper via `dlopen`, metadata get/set across imports and `fork`, sync_file acquire fence, PNG/PPM writer) | `hal/build.sh` (ctest) | `260 + 8 checks, 0 failures` |
 | On-device gralloc | `hal/tests/run-android.sh -- /vendor/bin/gralloc_test` | IAllocator V3, 10 formats allocated as udmabufs, plus `AHardwareBuffer_allocate/lock/lockPlanes` through libui: `110 checks, 0 failures` |
 | On-device composer | `hal/tests/run-android.sh -e VENDOR_LINUXAPK_HWC_DUMP_DIR=/data/vendor/linuxapk/frames -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test` | hotplug, 60 vsyncs/s on a 16.667 ms grid, DEVICE→CLIENT, present, NOT_VALIDATED, slot cache, PNG in `out/hal-test/frames`: `55 checks, 0 failures` |
 
