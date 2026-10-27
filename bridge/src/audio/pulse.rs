@@ -53,6 +53,15 @@ pub struct PulseOut {
     volume: (f32, f32),
     master: (f32, bool),
     tmp: Vec<u8>,
+    stats: Stats,
+}
+
+/// Counters logged every few seconds in verbose mode.
+struct Stats {
+    since: Instant,
+    frames: u64,
+    requests: u32,
+    underflows: u32,
 }
 
 impl PulseOut {
@@ -81,6 +90,12 @@ impl PulseOut {
             volume: (1.0, 1.0),
             master: (1.0, false),
             tmp: vec![0; MAX_CHUNK - MAX_CHUNK % fb],
+            stats: Stats {
+                since: Instant::now(),
+                frames: 0,
+                requests: 0,
+                underflows: 0,
+            },
         };
 
         let cookie = pulseaudio::cookie_path_from_env()
@@ -211,6 +226,7 @@ impl PulseOut {
         };
         match cmd {
             Command::Request(r) if r.channel == self.channel => {
+                self.stats.requests += 1;
                 self.pending = self.pending.saturating_add(r.length as u64);
                 self.pump(ring)?;
             }
@@ -227,6 +243,7 @@ impl PulseOut {
                 crate::warn!("pulse: error reply to {seq}: {e:?}");
             }
             Command::Underflow(u) if u.channel == self.channel => {
+                self.stats.underflows += 1;
                 if self.standby && !self.corked && ring.available() == 0 {
                     self.cork(ring, true)?;
                 }
@@ -287,7 +304,29 @@ impl PulseOut {
             protocol::write_memblock(&mut buf, self.channel, &self.tmp[..got * fb], 0)?;
             self.sock.write_all(&buf)?;
             self.pending -= (got * fb) as u64;
+            self.stats.frames += got as u64;
             moved = true;
+        }
+        if crate::log::verbose() && self.stats.since.elapsed() >= Duration::from_secs(5) {
+            let s = &self.stats;
+            crate::debug!(
+                "pulse ch {}: {} frames in {:.1} s, {} requests, {} underflows, pending {} B, ring {}/{}{}",
+                self.channel,
+                s.frames,
+                s.since.elapsed().as_secs_f32(),
+                s.requests,
+                s.underflows,
+                self.pending,
+                ring.available(),
+                ring.capacity(),
+                if self.corked { ", corked" } else { "" }
+            );
+            self.stats = Stats {
+                since: Instant::now(),
+                frames: 0,
+                requests: 0,
+                underflows: 0,
+            };
         }
         if moved && self.timing_seq.is_none() && self.last_timing.elapsed() >= TIMING_INTERVAL {
             self.last_timing = Instant::now();

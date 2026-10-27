@@ -1,0 +1,8 @@
+{
+  global:
+    pcm_*;
+    mixer_*;
+    snd_utils_*;
+  local:
+    *;
+};

@@ -59,9 +59,11 @@ pub struct Config {
     pub max_clients: usize,
 }
 
-/// Creates the listening socket at `path` (mode 0600; the session launcher
-/// adjusts group and mode where it binds it into the session). An existing
-/// socket file there is replaced; any other file is an error.
+/// Creates the listening socket at `path`, mode 0666: access control is the
+/// directory it lives in (the session launcher makes that root:audio 0750
+/// inside the session) plus the uid allow-list. An existing socket file
+/// there is replaced, so a restarted bridge takes over; any other file is an
+/// error.
 pub fn listen(path: &Path) -> Result<OwnedFd> {
     use std::os::unix::fs::FileTypeExt;
     if let Ok(m) = std::fs::symlink_metadata(path) {
@@ -76,7 +78,7 @@ pub fn listen(path: &Path) -> Result<OwnedFd> {
         SocketFlags::CLOEXEC,
         None,
     )?;
-    let old = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o177));
+    let old = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o111));
     let r = rustix::net::bind(&fd, &SocketAddrUnix::new(path)?);
     rustix::process::umask(old);
     r.with_context(|| format!("bind {}", path.display()))?;

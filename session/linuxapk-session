@@ -18,7 +18,10 @@
 # Environment: LINUXAPK_OUT (default <repo>/out),
 #              LINUXAPK_INSTANCE (default empty: the main session; set a name
 #                to run an independent session, e.g. one per agent lane),
-#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data[-<instance>])
+#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data[-<instance>]),
+#              LINUXAPK_AUDIO_SINK (PipeWire sink for the session's audio;
+#                default: the desktop's default output),
+#              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log)
 set -euo pipefail
 
 here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
@@ -101,6 +104,11 @@ vendor_props() {
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
     # Windowing (docs/windowing.md): a window per app, or display 0 as one.
     echo "vendor.linuxapk.wm.mode=$wm_mode"
+    # Audio (audio lane): tinyalsa buffer sizing for the bridge-backed card.
+    if [[ -f $out/vendor-overlay/etc/audio.prop ]]; then
+      echo "# --- linuxapk-session: audio ---"
+      grep -v '^#' "$out/vendor-overlay/etc/audio.prop"
+    fi
   } >"$dst"
   chmod 0644 "$dst"
 }
@@ -132,6 +140,13 @@ start() {
     "$here/build.sh"
   fi
 
+  # The desktop bridge (audio to PipeWire; bridge/, Rust). Optional: without
+  # it Android still boots, with audio going nowhere.
+  local bridge=$repo/target/release/linuxapk-bridge
+  if [[ ! -x $bridge ]] || [[ -n $(find "$repo/bridge" -newer "$bridge" -name '*.rs' 2>/dev/null) ]]; then
+    (cd "$repo" && cargo build -q --release -j 8 -p linuxapk-bridge) || echo "linuxapk-session: bridge build failed; no audio" >&2
+  fi
+
   # iptables with the nf_tables backend (the image's legacy one can't work).
   [[ -x $out/session/iptables/system/bin/xtables-nft-multi ]] || "$here/iptables/build.sh"
   vendor_props
@@ -148,6 +163,7 @@ start() {
   systemd-run --user --quiet --collect --unit="$unit" -p Delegate=yes -p KillMode=control-group \
     -p "MemoryHigh=${LINUXAPK_MEMORY_HIGH:-6G}" -p "MemoryMax=${LINUXAPK_MEMORY_MAX:-8G}" -p MemorySwapMax=0 \
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
+    --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do
@@ -167,11 +183,37 @@ start() {
   return 0
 }
 
+# The desktop bridge runs on the host (glibc, outside the namespaces) in
+# this unit's cgroup, so "stop" ends it too, restarted if it exits. Its
+# socket directory is bound into the session as /dev/socket/linuxapk
+# (root:audio 0750, see ns-init.sh), and the bridge only accepts Android
+# root, system and audioserver (SO_PEERCRED, as host ids). docs/bridge.md.
+start_bridge() {
+  local bridge=$repo/target/release/linuxapk-bridge base
+  [[ -x $bridge ]] || return 0
+  read -r base _ < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" '$1==u || $1==n {print $2, $3; exit}' /etc/subuid)
+  mkdir -p "$run/bridge"
+  # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1.
+  local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)" --allow-uid $((base + 999))
+  --allow-uid $((base + 1040)) ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
+  while :; do
+    "$bridge" "${args[@]}" </dev/null >>"$run/bridge.log" 2>&1
+    echo "linuxapk-session: bridge exited ($?); restarting" >>"$run/bridge.log"
+    sleep 1
+  done &
+  for _ in $(seq 50); do
+    [[ -S $run/bridge/bridge.sock ]] && return 0
+    sleep 0.02
+  done
+  echo "linuxapk-session: the bridge did not start (see $run/bridge.log)" >&2
+}
+
 # Body of the systemd service (internal).
 _run() {
   out=$1 data=$2 run=$out/run$sfx
   # Reader holds the FIFO open read-write so writers never block or see EOF.
   cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
+  start_bridge
   # Outer namespaces: user (subuid map), mount, pid, cgroup. pivot-exec then
   # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046

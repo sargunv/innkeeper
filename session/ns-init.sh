@@ -123,6 +123,16 @@ if [[ -n ${LINUXAPK_WAYLAND:-} && -S $LINUXAPK_WAYLAND ]]; then
   touch "$R/dev/socket/wayland-host"
   mount --bind "$LINUXAPK_WAYLAND" "$R/dev/socket/wayland-host"
 fi
+# The desktop bridge's socket directory (the launcher started the bridge;
+# it may restart and recreate its socket in there). Group audio (AID 1005,
+# a subordinate gid on the host) can enter it: the audio HALs run as
+# audioserver with that group.
+if [[ -d $run/bridge ]]; then
+  chown 0:1005 "$run/bridge"
+  chmod 0750 "$run/bridge"
+  mkdir -p "$R/dev/socket/linuxapk"
+  mount --bind "$run/bridge" "$R/dev/socket/linuxapk"
+fi
 # Android init logs to /dev/kmsg: hand it the host-side FIFO instead.
 touch "$R/dev/kmsg"
 mount --bind "$run/kmsg" "$R/dev/kmsg"

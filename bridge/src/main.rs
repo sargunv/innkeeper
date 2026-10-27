@@ -3,6 +3,7 @@
 //! Listens on PATH for clients from the Android session. Only the given host
 //! uids may connect (default: our own uid). Audio plays to the desktop's
 //! default PipeWire sink, or `--sink NAME`; `--null` plays nowhere.
+//! `-v` (or `LINUXAPK_BRIDGE_VERBOSE=1`) logs per-stream statistics.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +32,9 @@ fn main() -> Result<()> {
             "-v" | "--verbose" => linuxapk_bridge::log::set_verbose(true),
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
+    }
+    if std::env::var_os("LINUXAPK_BRIDGE_VERBOSE").is_some_and(|v| v == "1") {
+        linuxapk_bridge::log::set_verbose(true);
     }
     let socket = socket.context("--socket is required")?;
     if allow.is_empty() {

@@ -1,0 +1,10 @@
+# Audio properties for the Linux.apk vendor overlay (audio lane), merged into
+# /vendor/build.prop by session/linuxapk-session. See docs/audio.md.
+
+# AOSP's alsa_utils (AIDL default HAL) and goldfish's HAL size their PCM
+# buffers from these. Our virtual card is fed by the host bridge, so the
+# emulator's 80 ms host latency and 4 x 2 period layout don't apply:
+# 2 periods of the HAL's buffer, and no extra latency.
+ro.hardware.audio.tinyalsa.host_latency_ms=0
+ro.hardware.audio.tinyalsa.period_count=2
+ro.hardware.audio.tinyalsa.period_size_multiplier=1
