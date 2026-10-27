@@ -48,6 +48,14 @@ out/         (gitignored) extracted image, flattened APEXes, vendor-overlay, bui
   get its own systemd unit/cgroup and network namespace, and must not bind host
   `/run/user`, `$HOME` or `/dev` wholesale. `session/linuxapk-session selftest`
   must pass. Never use sudo.
+- **Nested test desktops are fully isolated** (incident 2026-10-27: nested
+  portals opened dialogs on the user's real desktop, and a nested plasmashell
+  started kded, kdeconnect and akonadi against the user's real config and data).
+  Every nested compositor test gets a private `dbus-run-session`, a private
+  `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY` set to the nested socket, `DISPLAY`
+  unset, and temporary `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME` under
+  `out/`. Never start plasmashell, kded, akonadi or kdeconnect against the
+  user's real dirs, and kill everything you started when you're done.
 - **No root at runtime.** Never patch the prebuilt image in place. Prefer
   Android's stable boundaries (HAL AIDL, NDK APIs, overlays) over AOSP patches.
   Any AOSP patch needs a written reason.
