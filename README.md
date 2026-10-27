@@ -26,7 +26,7 @@ playback. Each app opens in its own window with sound. Next: desktop integration
 | M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games                                                                                                                  |
 | M2 GPU, audio, per-app windows, launcher                        | ✅ RADV/ANGLE GPU; one window per app (title bars on KDE, client-side on GNOME); PipeWire sound (≈90 ms); `linuxapk` CLI and manager app; 15/16 corpus in per-app mode                                                                                                              |
 | M3 Desktop integration (portals, notifications, MPRIS, IME)     | 🚧 dark mode + accent + locale/time zone sync, notifications (actions, reply), clipboard, links/OAuth in host browser, MPRIS, IME (`text-input-v3`), live scale changes ✅; file picker and app-menu mirroring landing; microG partial ([docs/integration.md](docs/integration.md)) |
-| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 AOSP CI image ✅ (default; no local AOSP build or redistribution needed); userspace binder in progress                                                                                                                                                                           |
+| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 userspace binder ✅ (default: no binderfs, no SELinux module; AOSP binder tests and corpus at parity); AOSP CI image ✅; single-uid mode (no subuid range) and relocation study in progress                                                                                      |
 | M5 Packaging (per-app Flatpak/AppImage, RPM), aarch64 hosts     | ⏳                                                                                                                                                                                                                                                                                  |
 | M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                                                                                                                                  |
 
@@ -56,15 +56,9 @@ open in the manager. See [docs/gui.md](docs/gui.md) and
 Install [mise](https://mise.jdx.dev), then run `mise install`. Agent and
 contributor context is in [AGENTS.md](AGENTS.md).
 
-Fedora's SELinux policy stops ordinary processes from becoming a binder context
-manager. Install the dev policy once:
-
-```sh
-cd selinux
-checkmodule -M -m -o linuxapk_dev.mod linuxapk_dev.te
-semodule_package -o linuxapk_dev.pp -m linuxapk_dev.mod
-sudo semodule -i linuxapk_dev.pp
-```
+No root is needed: binder is emulated in userspace (`docs/ubinder.md`). Only the
+legacy `--kernel-binder` mode needs the dev SELinux module in `selinux/`
+(`checkmodule`/`semodule_package`, then `sudo semodule -i linuxapk_dev.pp`).
 
 ## License
 
