@@ -9,7 +9,9 @@
 #
 # out/gpu/build/test is visible at /data/gputest (the linkerconfig [system]
 # section, like a platform binary; /data/local/tmp would be "unrestricted"). There is no init and no
-# property service: properties read as empty.
+# property service: properties read as empty (see propshim.c). Anything that
+# needs binder services (libui/AHardwareBuffer allocation, ANGLE's EGL init)
+# blocks here; test that in a session. TIMEOUT=<s> (default 300) kills the run.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && git rev-parse --path-format=absolute --git-common-dir | xargs dirname)
@@ -17,7 +19,16 @@ out=${OUT:-$repo/out}
 
 if [[ ${1:-} != --inner ]]; then
   [[ -d $out/root/apex/com.android.runtime ]] || "$repo/tools/flatten-apex.sh" "$out/img" "$out/root/apex"
-  exec unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
+  mkdir -p "$out/gpu/run"
+  export BIONIC_ROOT; BIONIC_ROOT=$(mktemp -d "$out/gpu/run/root.XXXXXX")
+  # SIGKILL on timeout: unshare does not forward SIGTERM, but --kill-child
+  # takes the whole pid namespace down when unshare dies.
+  rc=0
+  timeout -s KILL "${TIMEOUT:-300}" \
+    unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@" || rc=$?
+  rmdir "$BIONIC_ROOT" 2>/dev/null || true
+  (( rc == 137 )) && echo "run-bionic: killed after ${TIMEOUT:-300}s" >&2
+  exit $rc
 fi
 shift
 
@@ -32,7 +43,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mount --make-rprivate /
-mkdir -p "$out/gpu/run"; R=$(mktemp -d "$out/gpu/run/root.XXXXXX")
+R=$BIONIC_ROOT
 mount -t tmpfs -o mode=0755 root "$R"
 mkdir -p "$R"/{system,vendor,apex,linkerconfig,dev,proc,sys,data/gputest,tmp,product,system_ext,odm}
 
