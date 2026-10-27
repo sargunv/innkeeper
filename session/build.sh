@@ -12,10 +12,13 @@ img=$out/img
 
 ndk=${ANDROID_NDK_HOME:-}
 if [[ -z $ndk ]]; then
-  ndk=$(ls -d "$HOME"/Android/Sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+  ndk=$(printf '%s\n' "$HOME"/Android/Sdk/ndk/* | sort -V | tail -1)
 fi
 cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang"
-[[ -x $cc ]] || { echo "NDK clang not found (set ANDROID_NDK_HOME)" >&2; exit 1; }
+[[ -x $cc ]] || {
+  echo "NDK clang not found (set ANDROID_NDK_HOME)" >&2
+  exit 1
+}
 
 rm -rf "$out/session/overlay"
 mkdir -p "$out/session/overlay/system/lib64" "$out/session/overlay/vendor/lib64"
@@ -33,12 +36,12 @@ relax() {
   local part=$1 src=$2
   [[ -d $src ]] || return 0
   (cd "$src" && find . -type f \( ! -perm -o+r -o \( -perm -u+x ! -perm -o+x \) \) -print0) |
-  while IFS= read -r -d '' f; do
-    mkdir -p "$out/session/overlay/$part/$(dirname "$f")"
-    cp -p "$src/$f" "$out/session/overlay/$part/$f"
-    chmod o+r,g+r "$out/session/overlay/$part/$f"
-    if [[ -x $src/$f ]]; then chmod go+x "$out/session/overlay/$part/$f"; fi
-  done
+    while IFS= read -r -d '' f; do
+      mkdir -p "$out/session/overlay/$part/$(dirname "$f")"
+      cp -p "$src/$f" "$out/session/overlay/$part/$f"
+      chmod o+r,g+r "$out/session/overlay/$part/$f"
+      if [[ -x $src/$f ]]; then chmod go+x "$out/session/overlay/$part/$f"; fi
+    done
 }
 relax system "$img/system/system"
 relax vendor "$img/vendor"
