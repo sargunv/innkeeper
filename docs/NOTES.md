@@ -99,6 +99,12 @@ Causes:
   installed into `out/vendor-overlay`. Docs: `docs/hal-display.md`.
 - gpu: RADV plus a software Vulkan driver, cross-built with the NDK into
   `out/vendor-overlay`. Docs: `docs/gpu.md`.
+- win (M2): per-app windows through trusted virtual displays. Docs:
+  `docs/windowing.md`. Instance `win`.
+- audio (M2): Rust `bridge/` plus `audio.primary.linuxapk`, played to PipeWire.
+  Docs: `docs/audio.md` and `docs/bridge.md`. Instance `audio`.
+- ubinder (M4): userspace binder through the seccomp supervisor. Docs:
+  `docs/ubinder.md`. Instance `ubinder`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
