@@ -856,19 +856,12 @@ int bpfemu_install_filter(int with_binder) {
   );
 }
 
+// ubinder mode: the Rust broker helper is the listener's only receiver (binder
+// ioctls and openat are hot; bpf and friends are rare), and it forwards the
+// notifications that are ours over this SOCK_SEQPACKET socket.
 static int binder_fwd = -1;
 
 void bpfemu_set_binder_forward(int sock) { binder_fwd = sock; }
-
-// Is this notification a binder one (openat / ioctl of type 'b') to forward to
-// the ubinder broker helper rather than handle here?
-static int is_binder_notif(struct seccomp_notif* req) {
-  if (binder_fwd < 0) return 0;
-  if (req->data.nr == __NR_openat) return 1;
-  if (req->data.nr == __NR_ioctl)
-    return ((req->data.args[1] >> 8) & 0xff) == (unsigned)'b';
-  return 0;
-}
 
 void* bpfemu_serve(void* arg) {
   notif_fd = (int)(intptr_t)arg;
@@ -883,17 +876,17 @@ void* bpfemu_serve(void* arg) {
   struct seccomp_notif_resp* resp = calloc(1, sizes.seccomp_notif_resp);
   for (;;) {
     memset(req, 0, sizes.seccomp_notif);
-    if (ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_RECV, req) != 0) {
+    if (binder_fwd >= 0) {
+      ssize_t got = recv(binder_fwd, req, sizes.seccomp_notif, 0);
+      if (got < 0 && errno == EINTR) continue;
+      if (got <= 0) {
+        LOG("forwarded notification: %s\n", got ? strerror(errno) : "EOF");
+        return NULL;
+      }
+    } else if (ioctl(notif_fd, SECCOMP_IOCTL_NOTIF_RECV, req) != 0) {
       if (errno == EINTR || errno == ENOENT) continue;
       LOG("NOTIF_RECV: %s\n", strerror(errno));
       return NULL;
-    }
-    // Hand binder notifications to the Rust broker; it answers them via its own
-    // dup of the listener fd (SOCK_SEQPACKET preserves message boundaries).
-    if (is_binder_notif(req)) {
-      if (send(binder_fwd, req, sizes.seccomp_notif, 0) < 0 && errno != EINTR)
-        LOG("binder forward: %s\n", strerror(errno));
-      continue;
     }
     long r = handle(req);
     if (r == INJECTED) continue;

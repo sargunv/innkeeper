@@ -9,10 +9,10 @@
 // share this one filter.
 int bpfemu_install_filter(int with_binder);
 
-// Forward openat/binder-ioctl notifications to this SOCK_SEQPACKET fd (one
-// seccomp_notif per message) instead of handling them in C. The peer (the Rust
-// broker helper) answers them via its own dup of the listener fd. Call before
-// bpfemu_serve. -1 (default) disables forwarding.
+// ubinder mode: the broker helper receives every notification on the listener
+// and forwards the non-binder ones (one seccomp_notif per SOCK_SEQPACKET
+// message) to this socket; bpfemu_serve then reads from it instead of the
+// listener, and still answers via the listener. -1 (default) disables this.
 void bpfemu_set_binder_forward(int sock);
 
 // Serve notifications on the listener fd (passed as the pointer value).

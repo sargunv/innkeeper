@@ -43,8 +43,9 @@ extern char** environ;
 // Path to the Rust ubinder broker helper (ubinder/src/bin/broker.rs), or NULL.
 // When set (LINUXAPK_UBINDER), bpfemu installs one combined seccomp filter
 // (bpf + openat + binder-ioctl, since the kernel allows only one notification
-// listener per process) and the parent forks+execs the helper to serve the
-// forwarded binder notifications. The helper is a normal dynamic bionic binary,
+// listener per process) and the parent forks+execs the helper, which receives
+// every notification, serves the binder ones and forwards the rest to the bpf
+// thread. The helper is a normal dynamic bionic binary,
 // so pivot-exec stays a pure-C static binary (it is exec'd before pivot_root,
 // where no linker exists). Read in main() before clone(); the child sees a
 // copy.
@@ -53,8 +54,8 @@ static int ubinder_enabled;
 
 static void die(const char* what);
 
-// Fork+exec the Rust broker helper, which reads forwarded binder notifications
-// from `sock` and answers them via `listener`. Runs in the parent's (outer)
+// Fork+exec the Rust broker helper, which receives notifications on `listener`
+// and forwards non-binder ones to `sock`. Runs in the parent's (outer)
 // namespaces like the bpf thread, so it sees Android pids and can
 // process_vm_* them. Dynamic bionic; the parent is in the pivoted Android root,
 // so /system/bin/linker64 and libc.so resolve.
@@ -219,9 +220,9 @@ int main(int argc, char** argv) {
   memcpy(&listener, CMSG_DATA(cm), sizeof(int));
   close(sync_sock[1]);
 
-  // ubinder: forward binder notifications from the bpf serve loop to the broker
-  // helper over a SOCK_SEQPACKET pair; the helper answers them via its own dup
-  // of the listener. Wire the forward before starting the serve thread.
+  // ubinder: the broker helper receives all notifications and forwards the bpf
+  // ones to the serve thread over a SOCK_SEQPACKET pair. Wire it before
+  // starting the serve thread.
   if (ubinder_enabled) {
     int sp[2];
     if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)

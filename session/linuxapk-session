@@ -3,11 +3,14 @@
 # rootless user + mount + pid + cgroup namespace.
 #
 #   linuxapk-session start [-f] [--headless] [--single-window]
+#                          [--ubinder|--kernel-binder]
 #                                  boot (in the background unless -f). Each
 #                                  app gets its own host Wayland window
 #                                  (docs/windowing.md); --single-window shows
 #                                  all of Android in one window instead, and
-#                                  --headless opens no windows
+#                                  --headless opens no windows. --ubinder
+#                                  serves binder in userspace (no binderfs,
+#                                  docs/ubinder.md)
 #   linuxapk-session prepare       fetch/extract/flatten the selected image only
 #   linuxapk-session image         print the selected image and its paths
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
@@ -24,6 +27,7 @@
 #              LINUXAPK_AUDIO_SINK (PipeWire sink for the session's audio;
 #                default: the desktop's default output),
 #              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log),
+#              LINUXAPK_BINDER (kernel | ubinder: the default backend),
 #              LINUXAPK_IMAGE (default: the pin in image/pin.toml):
 #                ci-<build>  AOSP CI cuttlefish build (tools/fetch-image.sh)
 #                emulator    SDK emulator image in out/img (tools/extract-image.sh)
@@ -196,13 +200,21 @@ start() {
   # to the host Wayland socket itself); LINUXAPK_HWC_BACKEND=wayland skips
   # the bridge.
   hwc_backend=${LINUXAPK_HWC_BACKEND:-bridge} wm_mode=per-app
+  # Binder backend: kernel binder (a private binderfs) or ubinder (served in
+  # userspace, docs/ubinder.md). LINUXAPK_BINDER sets the default.
   ubinder=0
+  case ${LINUXAPK_BINDER:-kernel} in
+    ubinder) ubinder=1 ;;
+    kernel) ;;
+    *) die "LINUXAPK_BINDER must be kernel or ubinder" ;;
+  esac
   for a in "$@"; do
     case $a in
       -f) fg=1 ;;
       --headless) hwc_backend=headless ;;
       --single-window) wm_mode=single ;;
       --ubinder) ubinder=1 ;;
+      --kernel-binder) ubinder=0 ;;
       *) die "unknown start option: $a" ;;
     esac
   done
@@ -448,7 +460,7 @@ case ${1:-} in
     ;;
   shell) exec_in /system/bin/sh -l ;;
   *)
-    sed -n '2,18s/^# \{0,1\}//p' "$0"
+    sed -n '2,22s/^# \{0,1\}//p' "$0"
     exit 1
     ;;
 esac

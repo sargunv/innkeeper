@@ -1,205 +1,133 @@
-# ubinder: userspace binder for no-privilege mode (M4)
+# ubinder: userspace binder (M4)
 
-Status: **milestone 1 done and on main** (state machine + fuzz). **Milestone 2
-in progress on `lane/ubinder`:** the seccomp binding is implemented and
-`linuxapk-session start --ubinder` boots Android with **no binderfs** far enough
-that the userspace broker brings up `servicemanager`, `hwservicemanager`,
-`apexd`, `keystore2`, gatekeeper and keymint, serving real binder IPC
-(transactions, replies, death notifications, context manager, and
-binder/handle/fd/scatter-gather object translation) with zero transaction
-failures. Boot currently stalls before `zygote` (see "Boot bring-up"). Kernel
-binder stays the default; ubinder changes nothing until it reaches parity.
+ubinder serves Android's binder IPC from a userspace broker instead of the
+kernel driver. A session started with `--ubinder` (or `LINUXAPK_BINDER=ubinder`)
+needs **no binderfs mount and no SELinux module**. Android is unmodified; the
+session's seccomp supervisor intercepts the binder syscalls.
 
-## Boot bring-up (lane/ubinder)
+Status: **boots to `sys.boot_completed`, at parity with kernel binder** on
+AOSP's own binder tests, selftest and the compat corpus (numbers below). Kernel
+binder is still the default.
 
-`session/helper/` now installs one combined seccomp filter (bpf + openat +
-binder-ioctl + epoll_ctl; the kernel allows only one notification listener per
-process) and forwards the binder notifications over a SOCK_SEQPACKET pair to the
-Rust broker helper (`/system/bin/linuxapk-ubinder`, a dynamic bionic binary
-whose interpreter is the bootstrap linker so it runs before `/apex` is mounted).
-Bugs fixed to get real libbinder working, each a faithful-semantics gap:
+## How it works
 
-- **epoll**: a memfd is not epoll-able, but libbinder's Looper epolls the binder
-  fd. On `EPOLL_CTL_ADD` the broker swaps the fd for an eventfd (`ADDFD SETFD`)
-  that it signals/clears to reflect pending work (kernel `binder_poll`).
-- **access gate**: libbinder's `selfIfKernelBinderEnabled()` does
-  `access("/dev/binder", R_OK)` before opening; ns-init creates dummy readable
-  device nodes (real opens are still intercepted and injected).
-- **reply lifetime**: `BC_FREE_BUFFER` must free the buffer but keep the
-  transaction record alive until its reply (libbinder frees the incoming buffer
-  before replying).
-- **security context**: nodes with `FLAT_BINDER_FLAG_TXN_SECURITY_CTX`
-  (servicemanager) require `BR_TRANSACTION_SEC_CTX` with a non-null secctx; the
-  broker appends one (SELinux is hidden, so access checks are no-ops).
-- **poll readiness**: the eventfd is armed only when a thread could actually
-  service the work (kernel `binder_has_work`), else a Looper busy-loops.
+`pivot-exec` installs one seccomp filter on Android init, inherited by every
+Android process. It turns `bpf()` and friends, `openat()` and every `ioctl()`
+with type `'b'` into user notifications. The kernel allows only one listener per
+filter chain, so one process receives them all: the Rust broker helper
+(`/system/bin/linuxapk-ubinder`, `ubinder/src/sys.rs`). It serves `openat` and
+binder ioctls, and forwards the rest to the C bpf emulator thread
+(`session/helper/bpfemu.c`) over a SOCK_SEQPACKET socket. Either side answers on
+the shared listener.
 
-Remaining: boot stalls waiting for `android.security.maintenance` (a keystore2
-service) before `zygote`; needs further per-service debugging (likely another
-routing/threadpool edge case). Then: `selftest` 12/12, corpus parity, and
-throughput/latency + boot-time numbers vs kernel binder.
+- **open:** `openat` of `/dev/{binder,hwbinder,vndbinder}` (or the binderfs
+  paths) gets a 4 MiB sparse memfd injected (`SECCOMP_IOCTL_NOTIF_ADDFD` with
+  `SEND`). The process mmaps it as its receive region; the broker finds the
+  mapping by inode in `/proc/<pid>/maps` and writes transactions through its own
+  shared mapping. Other paths continue without taking the broker lock. ns-init
+  creates readable dummy device nodes for libbinder's `access()` check.
+- **ioctl:** served with `process_vm_{readv,writev}`. Errors are negative
+  errnos, as from the driver.
+- **blocking reads:** a `BINDER_WRITE_READ` with nothing to read is parked: the
+  notification stays unanswered and the broker answers it when it wakes the
+  thread. Waits stay interruptible, so ptrace (debuggerd) and job control work.
+  A signal makes the kernel restart the ioctl, so restarts are idempotent:
+  `write_consumed` is written back before parking, and read bytes whose answer
+  failed (`ENOENT`) are stashed and returned by the thread's next read.
+- **poll:** a thread that sets up polling (a write-only `BC_ENTER_LOOPER`, which
+  is `IPCThreadState::setupPolling`) gets its process's binder fd swapped for an
+  eventfd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive). The broker
+  sets it readable exactly when a polling thread has work (`binder_poll`).
+  Nothing traps `epoll_ctl`.
+- **fds:** `BINDER_TYPE_FD`/`FDA` are captured from the sender with
+  `pidfd_getfd` and installed into the reader during its own read (`ADDFD`),
+  like `binder_apply_fd_fixups`.
+- **lifetime:** a monitor thread polls a pidfd per process (death), and every
+  500 ms checks with `kcmp` that each process still holds its binder fd (close,
+  exec). A lost fd releases the broker process (`binder_deferred_release`),
+  which fires death notifications and fails pending calls.
+- **identity:** `sender_pid` is the pid in Android's pid namespace (`NSpid`),
+  `sender_euid` the opener's euid.
+- **`linuxapk-session exec`:** nsenter'd processes don't descend from init, so
+  they have no filter and no binder. In ubinder mode init runs `linuxapk-execd`
+  (`session/helper/linuxapk-exec.c`), and `exec` runs commands through it: argv,
+  env, cwd and stdio go over a 0600 socket on the session's `/dev`, like
+  `adb shell`.
 
-Enable broker tracing with
-`LINUXAPK_UBINDER_DEBUG=1 linuxapk-session start --ubinder` (logs to the
-session's `session.out`).
+The broker (`ubinder/src/broker.rs`) is a pure state machine with no syscalls;
+process access goes through a `Mem` trait. It follows `drivers/android/binder.c`
+closely, and its comments name the kernel functions:
+
+- per-process and per-thread work lists, with `process_todo` for deferred work;
+- thread selection from `waiting_threads`; only looper threads take process
+  work; `BR_SPAWN_LOOPER` replaces the leading `BR_NOOP`;
+- transactions and buffers are separate objects, and a buffer owns the refs
+  taken while translating it until `BC_FREE_BUFFER`;
+- node refcounts and the INCREFS/ACQUIRE/RELEASE/DECREFS handshake with
+  `BC_*_DONE`;
+- the death-notification states, failed-reply chains, `return_error` and
+  `reply_error`, per-node oneway queues, and async space with spam detection;
+- `BINDER_GET_NODE_INFO_FOR_REF` (servicemanager's client callbacks) and
+  extended errors.
+
+Not supported: freezing. `BINDER_FREEZE` and `BINDER_GET_FROZEN_INFO` return
+`EINVAL`, so Android disables its app freezer; freeze-notification commands are
+accepted and never fire. Priority inheritance is ignored too.
+
+## Proof
+
+```sh
+cargo test -p ubinder                                   # state machine + fuzz smoke
+cargo run --release -p ubinder --bin ubinder-fuzz -- 250000 <seed>
+ubinder/tests/run-binder-tests.sh [--ubinder] [TEST[:FILTER] ...]
+LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
+```
+
+- **Fuzzer:** 3 processes × 3 threads run random operations: grammar-built
+  `BC_*` streams (transactions with object arrays, replies to received calls,
+  refcounts, deaths, frees of real buffers), raw bytes, reads, thread exits and
+  process deaths. Broker invariants are checked after every step, and once all
+  processes are gone nothing may leak. 2M iterations (seeds 11–18): no panics.
+  It caught a refcount underflow when a process died holding unfreed buffers.
+- **AOSP binder tests** (android-17.0.0_r1 binaries, servicemanager running,
+  rootless namespace; `run-binder-tests.sh`):
+
+  | test                      | kernel binder           | ubinder                                                               |
+  | ------------------------- | ----------------------- | --------------------------------------------------------------------- |
+  | binderDriverInterfaceTest | 20/20                   | 17/17, 3 skipped (freeze notifications)                               |
+  | binderLibTest             | 68 pass, 5 fail, 15.6 s | 69 pass, the same 5 fail, 15.5 s (+1: no freeze-notification support) |
+  | binderSafeInterfaceTest   | 18/18                   | 18/18                                                                 |
+
+  The 5 binderLibTest failures are environmental in both modes: netlink, RT
+  scheduling, setuid and the SELinux access check.
+
+- **Boot:** `sys.boot_completed` with 305 binder services and Launcher3 resumed.
+  `selftest` 12/12. Warm boot (start to `boot_completed`, same data dir, three
+  runs each): kernel 21.6–21.7 s, ubinder 22.2–22.3 s.
+
+Tracing: `LINUXAPK_UBINDER_DEBUG=1` logs to the helper's stderr (`session.out`);
+any other value is a log file path inside the session root (for example
+`/data/ubinder.log`), rotated every 64 MiB.
+
+## Bugs found on the way (for the record)
+
+- `binder_handle_cookie` is `__packed` (12 bytes). The old 16-byte struct gave
+  `BC_REQUEST/CLEAR_DEATH_NOTIFICATION` the wrong command codes, so every
+  `linkToDeath` failed with `EINVAL`. This was the boot stall.
+- Errors went back as positive values (seccomp wants a negative errno), so
+  failed ioctls looked successful.
+- A `waiting_threads` list with stale entries suppressed `BR_SPAWN_LOOPER`.
+  Non-looper threads took process work. Whole processes went non-blocking once
+  one thread polled. `BC_*_DONE` never dropped the temporary node refs.
+  `sender_pid` was the supervisor's pid, not Android's.
+- Restarted ioctls replayed their write buffer. Killable waits would have made
+  debuggerd's ptrace attach wait out its 30 s timeout on every crash.
 
 ## Why
 
-Kernel mode (M0–M3) needs a private binderfs per session and, on Fedora, a
-one-time SELinux module so servicemanager can become the context manager.
+Kernel mode needs a private binderfs per session and, on Fedora, a one-time
+SELinux module so servicemanager can become the context manager.
 [STRATEGY.md](STRATEGY.md) ("Packaging") sets M4's bar: binder with **no host
-setup** — no binderfs mount, no SELinux module, and eventually inside sandboxes
-where nested user namespaces are blocked. Virtual uids (no subuid range) hang
-off the same broker. ubinder is a userspace reimplementation of the binder
-driver that the session serves through the seccomp user-notification supervisor
-it already runs for `bpf()` (see [m0-session.md](m0-session.md),
-`session/helper/bpfemu.c`).
-
-## Design
-
-One broker per session reimplements the kernel driver's semantics. Android
-processes are unmodified; the session's seccomp supervisor intercepts the binder
-syscalls and routes them to the broker:
-
-- **`openat` of `/dev/binder`, `/dev/hwbinder`, `/dev/vndbinder`** (and binderfs
-  paths): the supervisor injects a **memfd** with `SECCOMP_IOCTL_NOTIF_ADDFD`.
-  The process `mmap`s it; that becomes its receive-buffer region, exactly like
-  the kernel's binder mmap. libbinder maps it `PROT_READ, MAP_PRIVATE`
-  (`ProcessState.cpp`), never writes it, so the broker's writes through its own
-  handle to the memfd are visible to the process. The broker learns each
-  process's mmap base by scanning `/proc/<pid>/maps` for the injected memfd.
-- **`ioctl` with a binder command** (`BINDER_WRITE_READ`, `BINDER_VERSION`,
-  `BINDER_SET_MAX_THREADS`, `BINDER_SET_CONTEXT_MGR(_EXT)`,
-  `BINDER_THREAD_EXIT`, freeze/extended-error/node-debug, …) is matched in the
-  seccomp filter by the constant `cmd` (all share ioctl type `'b'`). The broker
-  services it by reading and writing the caller's memory with
-  `process_vm_{readv,writev}`.
-- **`BINDER_WRITE_READ`**: the broker parses the `write` command stream
-  (`BC_*`), performs object translation, and produces the `read` stream (`BR_*`)
-  it copies back. Transaction payloads are written into the **target's** memfd
-  region; the returned `data.ptr.buffer` is the target's mmap base + offset,
-  reproducing the kernel's semantics.
-
-### Blocking reads do not block the supervisor
-
-A `BINDER_WRITE_READ` whose read half has no work yet must not stall the single
-supervisor thread. The broker returns `blocked`; the supervisor stashes the
-seccomp **notification id** against `(proc, tid)` and leaves it unanswered. Any
-later call that enqueues work returns a list of `Wakeup{proc, tid}`; the
-supervisor re-runs the read for each woken thread and answers the stored id with
-`SECCOMP_IOCTL_NOTIF_SEND`. The kernel allows many outstanding notifications and
-answering them from any thread, so one dispatch thread plus deferred responses
-is enough. `SECCOMP_IOCTL_NOTIF_ID_VALID` guards against a target that died
-while parked (its `NOTIF_SEND` returns `ENOENT`, ignored).
-
-### fd translation
-
-`BINDER_TYPE_FD`/`BINDER_TYPE_FDA` objects are **captured** out of the sender at
-translate time with `pidfd_getfd` (so they survive the sender closing them) and
-**installed** into the target at delivery time with `SECCOMP_IOCTL_NOTIF_ADDFD`
-— which needs the target's outstanding notification, which we have because
-delivery happens inside the target's own `BINDER_WRITE_READ`. This mirrors the
-kernel's `binder_apply_fd_fixups`, which runs in the target's context. The
-broker records fd fixups on the transaction and patches the recv buffer with the
-new fd numbers just before emitting `BR_TRANSACTION`.
-
-### Virtual uids
-
-Each process has a broker-assigned `euid` reported as `sender_euid`. Today it is
-the real caller uid (kernel-mode parity). In a later single-host-uid mode the
-broker supplies the Android uid (system = 1000, apps 10000+) with no change to
-the transaction path — only how `euid` is chosen at `open()`.
-
-### Language
-
-Rust, per the AGENTS.md policy: the broker parses untrusted data from every
-Android process, so it is the archetypal security boundary. The state machine
-(`broker.rs`) is `#![no]`-syscall — all process access goes through the `Mem`
-trait — so it is fully host-testable and fuzzable. The syscall/seccomp layer is
-a thin Rust shim (planned `sys.rs`) that implements `Mem` over
-`process_vm_*`/`pidfd_getfd`/`ADDFD` and owns the dispatch loop. It integrates
-with the existing C supervisor (`session/helper/`) by either linking the crate's
-`staticlib` and calling it over a small C ABI, or running the binder dispatch on
-its own seccomp listener thread; the C bpf supervisor is left untouched so
-kernel binder stays the default. (Decision: keep the broker in Rust rather than
-grow the C supervisor, because every byte it parses is hostile.)
-
-## What is implemented and proven (milestone 1)
-
-`ubinder/` (workspace crate) — the full driver state machine:
-
-- contexts (binder/hwbinder/vndbinder) and the context manager
-  (`BINDER_SET_CONTEXT_MGR(_EXT)`, uid check, handle-0 routing);
-- per-process handle tables with smallest-free descriptor allocation (desc 0
-  reserved for the context manager), strong/weak ref counts;
-- node strong/weak refcounts and the `BR_INCREFS`/`ACQUIRE`/`RELEASE`/`DECREFS`
-  handshake with `BC_*_DONE`, delivered as deferred thread work so it rides with
-  the reply, as the kernel does;
-- object translation inside transactions: `BINDER_TYPE_BINDER`/`HANDLE` (both
-  directions, including handle→local-binder when the target owns the node),
-  `BINDER_TYPE_FD`, `BINDER_TYPE_FDA`, and scatter-gather `BINDER_TYPE_PTR`
-  buffers with `HAS_PARENT` pointer fixups (HIDL);
-- synchronous reply routing and nested-call routing via a per-thread transaction
-  stack, deferred `TRANSACTION_COMPLETE`;
-- per-node oneway queue with async-space accounting and oneway-spam detection;
-- death notifications (`BC_REQUEST/CLEAR_DEATH_NOTIFICATION`, `BR_DEAD_BINDER`,
-  `BC_DEAD_BINDER_DONE`, and firing on process death);
-- thread-pool growth (`BR_SPAWN_LOOPER`), `BINDER_SET_MAX_THREADS`, looper
-  state, `BINDER_THREAD_EXIT`;
-- `BINDER_VERSION` (8), extended error, node debug info; freeze ioctls accepted.
-
-Proof:
-
-```
-cargo test -p ubinder      # 8 state-machine tests + fuzz smoke, all green
-cargo clippy -p ubinder --all-targets   # clean under -D warnings (mise run check)
-```
-
-The tests drive the broker exactly as libbinder would (build a `BC_*` stream,
-decode the `BR_*` stream) and assert the kernel's observable behaviour:
-register-service + transact with a translated handle, sync call + reply routing,
-fd passing (capture/install), oneway, the node ref handshake, and death
-notification on peer death.
-
-Fuzzer (`ubinder-fuzz`, no external deps, deterministic SplitMix64): feeds
-random bytes as `write` buffers — the most attacker-controlled input — and
-asserts the broker never panics and always drains or cleanly rejects the stream.
-
-```
-cargo run --release -p ubinder --bin ubinder-fuzz -- 500000 <seed>
-# proven: 2,000,000 iterations across seeds 1..4, no panics
-```
-
-## Remaining work (gaps)
-
-1. **`sys.rs` seccomp binding**: the `Mem` impl over `process_vm_*` + `pidfd` +
-   `ADDFD`, `/proc/<pid>/maps` base discovery, and the dispatch/deferred-reply
-   loop. Backward-compatible integration with `session/helper/` (the bpf
-   supervisor must keep working; kernel binder stays default).
-2. **Session flag** `linuxapk-session start --ubinder`: install the extended
-   seccomp filter (trap `openat` on binder device paths and `ioctl` with type
-   `'b'`), skip the binderfs mount in `init.rc`, and start the broker thread.
-3. **Small integration test** (`ubinder/tests/run-ubinder.sh`, modelled on
-   `hal/tests/run-android.sh`): the image's `servicemanager` plus a tiny NDK
-   client/server under ubinder in a minimal namespace — register, lookup,
-   transact, nested call, fd passing, death. The same binaries run against
-   kernel binder for differential testing.
-4. **Full boot** under `--ubinder` to `sys.boot_completed=1` with no binderfs,
-   and the compat corpus (`compat/run.sh`) at parity with kernel binder. Measure
-   binder throughput/latency (ping-pong) and boot time vs kernel binder.
-5. **AOSP `binderLibTest`/`binderDriverInterfaceTest`** (the differential
-   oracle): the image-builder lane built these from android-17.0.0_r1 (the
-   image's release). `ubinder/tests/run-binder-tests.sh` runs them in a rootless
-   namespace over the image rootfs (the `hal/tests/run-android.sh` pattern),
-   against kernel binder today and ubinder once the binding lands (`--ubinder`,
-   currently SKIP). Copy the binaries into `$LINUXAPK_OUT/ubinder-tests/`.
-
-   Kernel-binder baseline in our rootless namespace (host 7.1.9):
-   `binderDriverInterfaceTest` = **13/20 pass**. The 7 failures are
-   environmental, not binder-semantics: `SetContextMgrBusy`/`Transaction`/
-   `IncRefs`/`RequestDeathNotification` cascade from `BINDER_SET_CONTEXT_MGR`
-   being gated (the exact SELinux restriction ubinder removes), and the three
-   `*FrozenNotification` tests need freeze-notification kernel support.
-   ubinder's differential target is to match-or-exceed this per test; because it
-   has no SELinux gate, it should also pass the context-manager/transaction
-   group.
+setup**, eventually inside sandboxes where nested user namespaces are blocked.
+Virtual uids (no subuid range) can hang off the same broker: only how `euid` is
+chosen at open changes.

@@ -438,10 +438,11 @@ impl Mem for SysMem<'_> {
 
 // ---- the serve loop ----------------------------------------------------
 
-/// Serve binder notifications forwarded by the bpf supervisor over `sock`
-/// (one `seccomp_notif` per SOCK_SEQPACKET message), answering them via
-/// `listener` (a dup of the single process listener). Called by the broker
-/// helper (`src/bin/broker.rs`).
+/// Receive every notification on `listener` (the session's single seccomp
+/// listener), serve `openat` and binder `ioctl`s, and forward the rest (bpf
+/// and friends, rare) to the C supervisor thread over `sock` as one
+/// `seccomp_notif` per SOCK_SEQPACKET message. Called by the broker helper
+/// (`src/bin/broker.rs`).
 pub fn serve(sock: RawFd, listener: RawFd) {
     crate::init_log();
     let mut sizes = SeccompNotifSizes::default();
@@ -474,22 +475,59 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         let sup = Arc::clone(&sup);
         std::thread::spawn(move || monitor(sup, rx));
     }
+    let recv_cmd = ioc(3, 0, notif_sz);
     let mut notif = vec![0u8; notif_sz];
     loop {
-        let n = unsafe { libc::recv(sock, notif.as_mut_ptr() as *mut _, notif_sz, 0) };
-        if n < 0 {
+        notif.fill(0);
+        if unsafe { libc::ioctl(listener, recv_cmd as _, notif.as_mut_ptr()) } != 0 {
             let e = std::io::Error::last_os_error();
-            if e.raw_os_error() == Some(libc::EINTR) {
+            if matches!(e.raw_os_error(), Some(libc::EINTR) | Some(libc::ENOENT)) {
                 continue;
             }
-            eprintln!("ubinder: recv: {e}");
-            return;
-        }
-        if n == 0 {
+            eprintln!("ubinder: NOTIF_RECV: {e}");
             return;
         }
         let req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
+        let nr = req.data.nr as i64;
+        let ours = nr == libc::SYS_openat
+            || (nr == libc::SYS_ioctl && is_binder_ioctl(req.data.args[1] as u32));
+        if !ours {
+            if unsafe { libc::send(sock, notif.as_ptr() as *const _, notif_sz, 0) } < 0 {
+                eprintln!("ubinder: forward: {}", std::io::Error::last_os_error());
+            }
+            continue;
+        }
+        // Every openat in the session lands here: let the ones that can't be a
+        // binder device through without taking the lock.
+        if nr == libc::SYS_openat && !maybe_dev_path(req.pid as i32, req.data.args[1]) {
+            send_continue(listener, resp_sz, req.id);
+            continue;
+        }
         sup.lock().unwrap().dispatch(req);
+    }
+}
+
+/// Could the path at `addr` start with "/dev/"? (Reads at most to the end of
+/// its page.)
+fn maybe_dev_path(pid: i32, addr: u64) -> bool {
+    let n = (4096 - (addr as usize & 4095)).min(5);
+    match vm_read(pid, addr, n) {
+        Some(b) => b"/dev/".starts_with(&b) || b == b"/dev/",
+        None => false,
+    }
+}
+
+fn send_continue(listener: RawFd, resp_sz: usize, id: u64) {
+    let resp = SeccompNotifResp {
+        id,
+        val: 0,
+        error: 0,
+        flags: SECCOMP_USER_NOTIF_FLAG_CONTINUE,
+    };
+    let mut buf = vec![0u8; resp_sz];
+    unsafe {
+        std::ptr::write_unaligned(buf.as_mut_ptr() as *mut SeccompNotifResp, resp);
+        libc::ioctl(listener, notif_send_cmd(resp_sz) as _, buf.as_mut_ptr());
     }
 }
 
