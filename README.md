@@ -16,7 +16,7 @@ audio, input), plus a desktop bridge for portals, notifications and MPRIS. See
 
 | Milestone | Status |
 |---|---|
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 in progress |
+| M0 Session boots (prebuilt image, rootless namespace, binderfs) | 🚧 init boots partway; GPU drivers done (RADV + lavapipe, GLES 3.2 via ANGLE verified); gralloc/composer HALs in progress; first AOSP source build running |
 | M1 Pixels in a Wayland window, first noarch apps | ⏳ |
 | M2 GPU, audio, per-app windows, launcher | ⏳ |
 | M3 Desktop integration (portals, notifications, MPRIS, IME) | ⏳ |
