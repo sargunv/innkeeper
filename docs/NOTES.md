@@ -27,10 +27,9 @@ Rules:
 - Run sessions in their own delegated systemd user unit, never in the caller's
   cgroup.
 - Don't bind-mount host `/run/user`, `$HOME` or `/dev` wholesale.
-- TODO (session lane): lock the masks against umount by entering a nested user
-  and mount namespace before exec'ing init.
-- TODO: give the session its own network namespace (pasta) so netd can't touch
-  the host network namespace.
+- Done (session lane): Android runs in nested user/mount/pid/net/ipc/uts
+  namespaces, so the masks are locked against umount; pasta gives it its own
+  network namespace. `session/linuxapk-session selftest` checks all of this.
 
 ## Locations
 
@@ -69,6 +68,11 @@ Rules:
 ## Current state
 
 - 2026-10-26: repo created. M0 started.
+- 2026-10-27 (session): real init boots rootless; SurfaceFlinger runs on the
+  display lane's HALs (ANGLE on RADV); system_server reaches
+  NetworkManagementService and blocks on netd, which needs eBPF plus legacy
+  iptables and can't get either rootless. Needs a decision; see
+  `docs/m0-session.md`.
 - 2026-10-27: AOSP 17 synced (`~/aosp/a17`, 158 GB). First full build running as
   systemd unit `linuxapk-aosp-build`: `aosp_x86_64-cp2a-userdebug` (the tree's
   BUILD_ID is CP2A.260605.016), log `~/aosp/a17-build.log`, driven by

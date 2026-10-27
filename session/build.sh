@@ -23,6 +23,8 @@ so="$out/session/overlay/system/lib64/liblinuxapk_shim.so"
 "$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -Wl,-soname,liblinuxapk_shim.so \
   -o "$so" "$here/shim/linuxapk_shim.c"
 cp "$so" "$out/session/overlay/vendor/lib64/"
+"$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -Wl,-soname,liblinuxapk_netd.so \
+  -o "$out/session/overlay/system/lib64/liblinuxapk_netd.so" "$here/shim/netd_shim.c"
 "$cc" -static -O2 -Wall -Werror -o "$out/session/pivot-exec" "$here/helper/pivot-exec.c"
 
 # The extracted image lost its fs_config ownership: every file is owned by
