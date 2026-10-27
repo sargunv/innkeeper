@@ -31,4 +31,7 @@ android {
   lint { abortOnError = false }
 }
 
-dependencies { implementation(project(":input")) }
+dependencies {
+  implementation(project(":input"))
+  compileOnly(project(":hidden"))
+}

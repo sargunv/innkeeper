@@ -3,7 +3,8 @@
 # composer's Wayland presenter (Android x86_64, static):
 #   - wayland 1.24.0: libwayland-client sources + core protocol
 #   - wayland-protocols 1.45: xdg-shell, viewporter, presentation-time,
-#     linux-dmabuf v1 (v4+ feedback), fractional-scale-v1, xdg-decoration
+#     linux-dmabuf v1 (v4+ feedback), fractional-scale-v1, xdg-decoration,
+#     xdg-activation-v1
 #   - libffi 3.5.2: cross-compiled to a static lib with the NDK
 # Protocol glue is generated with the host's wayland-scanner (>= 1.22).
 #
@@ -100,6 +101,7 @@ protocols=(
   "$wp/stable/linux-dmabuf/linux-dmabuf-v1.xml"
   "$wp/staging/fractional-scale/fractional-scale-v1.xml"
   "$wp/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
+  "$wp/staging/xdg-activation/xdg-activation-v1.xml"
 )
 for x in "${protocols[@]}"; do
   n=$(basename "$x" .xml)

@@ -9,18 +9,50 @@ import java.io.BufferedReader
 import java.io.IOException
 
 /**
- * Client of the composer's input stream. Reads lines on its own thread, translates them and hands
- * the Android events to [sink]. Reconnects (with backoff) when the composer is absent or restarts,
- * releasing anything held first.
+ * Client of the composer's socket. Reads lines on its own thread, translates them and hands the
+ * Android events to [sink]; every parsed event also goes to [listeners] (the window manager).
+ * [send] writes window-manager commands back (protocol v2). Reconnects (with backoff) when the
+ * composer is absent or restarts, releasing anything held first.
  */
 class InputBridge(
   private val socketPath: String,
   private val newTranslator: () -> InputTranslator,
   private val sink: (OutEvent) -> Unit,
 ) {
+  /** Gets every event on the bridge thread, plus [onConnectionChanged]. */
+  interface Listener {
+    fun onHostEvent(e: HostEvent)
+
+    fun onConnectionChanged(connected: Boolean) {}
+  }
+
   @Volatile private var running = false
   @Volatile private var socket: LocalSocket? = null
   private var thread: Thread? = null
+  private val listeners = java.util.concurrent.CopyOnWriteArrayList<Listener>()
+  private val writeLock = Any()
+
+  val connected: Boolean
+    get() = socket != null
+
+  fun addListener(l: Listener) {
+    listeners += l
+  }
+
+  /** Sends one command line; returns false if not connected or the write failed. */
+  fun send(line: String): Boolean {
+    val s = socket ?: return false
+    return try {
+      synchronized(writeLock) {
+        s.outputStream.write((line + "\n").toByteArray(Charsets.UTF_8))
+        s.outputStream.flush()
+      }
+      true
+    } catch (e: IOException) {
+      Log.w(TAG, "send failed: ${e.message}")
+      false
+    }
+  }
 
   fun start() {
     check(thread == null)
@@ -57,9 +89,12 @@ class InputBridge(
           s.connect(LocalSocketAddress(socketPath, LocalSocketAddress.Namespace.FILESYSTEM))
           socket = s
           Log.i(TAG, "connected to $socketPath")
+          listeners.forEach { it.onConnectionChanged(true) }
           lastError = null
           backoff = MIN_BACKOFF_MS
-          pump(s.inputStream.bufferedReader(Charsets.US_ASCII), translator, sink) { running }
+          pump(s.inputStream.bufferedReader(Charsets.UTF_8), translator, sink, ::dispatch) {
+            running
+          }
           Log.i(TAG, "input stream closed")
         }
       } catch (e: IOException) {
@@ -67,7 +102,10 @@ class InputBridge(
         if (msg != lastError) Log.i(TAG, "$socketPath: $msg (retrying)")
         lastError = msg
       } finally {
-        socket = null
+        if (socket != null) {
+          socket = null
+          listeners.forEach { it.onConnectionChanged(false) }
+        }
         translator.reset().forEach(sink)
       }
       if (!running) break
@@ -80,6 +118,16 @@ class InputBridge(
     }
   }
 
+  private fun dispatch(e: HostEvent) {
+    for (l in listeners) {
+      try {
+        l.onHostEvent(e)
+      } catch (t: RuntimeException) {
+        Log.e(TAG, "listener failed on $e", t)
+      }
+    }
+  }
+
   companion object {
     const val TAG = "LinuxApkInput"
 
@@ -88,6 +136,7 @@ class InputBridge(
       reader: BufferedReader,
       translator: InputTranslator,
       sink: (OutEvent) -> Unit,
+      events: (HostEvent) -> Unit = {},
       keepGoing: () -> Boolean = { true },
     ) {
       while (keepGoing()) {
@@ -101,6 +150,7 @@ class InputBridge(
           Log.w(TAG, "protocol version ${event.version}, expected ${HostEvent.PROTOCOL_VERSION}")
         }
         translator.handle(event).forEach(sink)
+        events(event)
       }
     }
 

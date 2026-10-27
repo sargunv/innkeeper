@@ -3,9 +3,13 @@
 <!-- Installed as /system_ext/etc/permissions/dev.linuxapk.system.xml. -->
 <permissions>
   <!-- ro.control_privapp_permissions=enforce: every privileged permission the
-       app requests must be listed here, or system_server refuses to boot.
-       None yet (INJECT_EVENTS is signature-only). -->
-  <privapp-permissions package="dev.linuxapk.system" />
+       app requests must be listed here, or system_server refuses to boot. The
+       platform key grants these too; the rest the app asks for are
+       signature-only. -->
+  <privapp-permissions package="dev.linuxapk.system">
+    <permission name="android.permission.REAL_GET_TASKS" />
+    <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+  </privapp-permissions>
 
   <!-- Holders run with the "input" group: the composer's input socket can then
        be 0660 system:input instead of world-readable. -->

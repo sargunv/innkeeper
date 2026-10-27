@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Broadcasts input events from the host compositor (wl_seat) to local
-// clients as newline-terminated text records on a Unix stream socket.
-// The format is documented in docs/hal-display.md ("Input event stream").
+// The composer's local socket (/dev/socket/linuxapk-input): broadcasts input
+// events from the host compositor (wl_seat) and window events to every client
+// as newline-terminated text records, and takes window manager commands from
+// clients (protocol v2). The format is in docs/hal-display.md ("Input event
+// stream").
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -14,7 +18,7 @@ namespace linuxapk::hwc {
 
 class InputServer {
  public:
-  static constexpr int kVersion = 1;
+  static constexpr int kVersion = 2;
 
   InputServer() = default;
   ~InputServer();
@@ -24,15 +28,28 @@ class InputServer {
   bool start(const std::string& path);
   void stop();
 
-  // Display size in pixels: sent in the hello line to new clients.
+  // Called on the server thread for every line a client sends (without the
+  // '\n'). It may call send().
+  void setCommandHandler(std::function<void(const std::string&)> f);
+
+  // Display 0's size in pixels: sent in the hello line to new clients.
   void setDisplaySize(uint32_t w, uint32_t h);
-  // Logical window size and scale: sent now and to new clients.
-  void setWindow(int32_t w, int32_t h, double scale);
+  // A window's logical size and scale: sent now and to new clients.
+  void setWindow(int32_t display, int32_t w, int32_t h, double scale);
+  void removeWindow(int32_t display);
 
   // Sends one line (without '\n') to every client; slow clients are dropped.
   void send(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
  private:
+  struct Client {
+    int fd;
+    std::string in;  // partial command line
+  };
+  struct WindowState {
+    int32_t w, h;
+    double scale;
+  };
   void loop();
   void sendLocked(const std::string& line);
   std::string helloLocked() const;
@@ -41,10 +58,10 @@ class InputServer {
   int mListenFd = -1;
   int mWakeFd = -1;
   std::thread mThread;
-  std::vector<int> mClients;
+  std::vector<Client> mClients;
+  std::function<void(const std::string&)> mHandler;
   uint32_t mDisplayW = 0, mDisplayH = 0;
-  int32_t mWinW = 0, mWinH = 0;
-  double mScale = 1.0;
+  std::map<int32_t, WindowState> mWindows;
 };
 
 }  // namespace linuxapk::hwc

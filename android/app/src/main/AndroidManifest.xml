@@ -17,6 +17,29 @@
   <!-- signature: granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
 
+  <!-- Window manager (docs/windowing.md). Trusted, always-unlocked virtual displays with their
+       own focus and display group; secure, so FLAG_SECURE windows aren't blacked out. -->
+  <uses-permission android:name="android.permission.ADD_TRUSTED_DISPLAY" />
+  <uses-permission android:name="android.permission.ADD_ALWAYS_UNLOCKED_DISPLAY" />
+  <uses-permission android:name="android.permission.CAPTURE_SECURE_VIDEO_OUTPUT" />
+  <!-- Launching onto any display, moving tasks between displays, display IME policy. -->
+  <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+  <!-- Task stack listener, focusTopTask; removing tasks; every app's tasks. -->
+  <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
+  <uses-permission android:name="android.permission.REMOVE_TASKS" />
+  <uses-permission android:name="android.permission.REORDER_TASKS" />
+  <!-- Labels and launch intents of the apps it opens. -->
+  <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+  <!-- signature|privileged: listed in dev.linuxapk.system.xml. -->
+  <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+  <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+
+  <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
+       "linuxapk-session exec") passes any permission check. -->
+  <permission
+    android:name="dev.linuxapk.permission.CONTROL_WINDOWS"
+    android:protectionLevel="signature" />
+
   <application
     android:name=".LinuxApkSystemApp"
     android:allowBackup="false"
@@ -30,5 +53,26 @@
       android:name=".input.InputProbeActivity"
       android:exported="true"
       android:label="@string/probe_name" />
+
+    <!-- The deprecated-target-SDK warning, in the app's window (see AppWarningActivity). -->
+    <activity
+      android:name=".wm.AppWarningActivity"
+      android:excludeFromRecents="true"
+      android:exported="false"
+      android:noHistory="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+    <receiver
+      android:name=".wm.ControlReceiver"
+      android:exported="true"
+      android:permission="dev.linuxapk.permission.CONTROL_WINDOWS">
+      <intent-filter>
+        <action android:name="dev.linuxapk.LAUNCH" />
+        <action android:name="dev.linuxapk.LIST" />
+        <action android:name="dev.linuxapk.CLOSE" />
+        <action android:name="dev.linuxapk.RESIZE" />
+      </intent-filter>
+    </receiver>
   </application>
 </manifest>

@@ -27,17 +27,21 @@ DisplayConfig DisplayConfig::fromProperties() {
 }
 
 Display::Display(
-  int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter
+  int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter,
+  bool isVirtual
 )
     : mId(id),
+      mVirtual(isVirtual),
       mConfig(config),
       mPresenter(std::move(presenter)),
       mVsync(id, config.vsyncPeriodNs) {
   LOGI(
-    "display %lld: %dx%d @ %.2f Hz, %d dpi, presenter=%s", (long long)id,
-    config.width, config.height, 1e9 / config.vsyncPeriodNs, config.dpi,
-    mPresenter->name()
+    "display %lld%s: %dx%d @ %.2f Hz, %d dpi, presenter=%s", (long long)id,
+    isVirtual ? " (virtual)" : "", config.width, config.height,
+    1e9 / config.vsyncPeriodNs, config.dpi, mPresenter->name()
   );
+  // SurfaceFlinger never sets a power mode on virtual displays.
+  if (isVirtual) mPower = c3::PowerMode::ON;
 }
 
 int64_t Display::createLayer() {
@@ -72,6 +76,16 @@ Error Display::setClientTarget(
   );
   mClientTarget.dataspace = dataspace;
   return Error::None;
+}
+
+Error Display::setOutputBuffer(const c3::Buffer& buffer) {
+  // The release fence only matters to a composer that writes the output
+  // buffer. Every layer is CLIENT, so SurfaceFlinger renders into this very
+  // buffer (it is also the client target) and we only read it.
+  BufferPtr b;
+  Error e = mOutputSlots.update(buffer, &b);
+  if (e == Error::None) mOutputBuffer = std::move(b);
+  return e;
 }
 
 Error Display::setPowerMode(c3::PowerMode mode) {
@@ -151,6 +165,7 @@ Error Display::present(PresentResult* out) {
   f.height = uint32_t(mConfig.height);
   f.frameNumber = ++mFrameNumber;
   f.clientTarget = &mClientTarget;
+  f.outputBuffer = mOutputBuffer;
   for (auto& [_, l] : mLayers) {
     f.layers.push_back(l.get());
     if (l->composition == c3::Composition::CLIENT) f.hasClientLayers = true;

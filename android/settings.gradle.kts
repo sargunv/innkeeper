@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "linuxapk-system"
 
-include(":input", ":app")
+include(":input", ":hidden", ":app")

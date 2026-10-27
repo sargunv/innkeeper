@@ -78,7 +78,7 @@ HeadlessPresenter::~HeadlessPresenter() = default;
 Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
   mPresented++;
   const int64_t now = nowNs();
-  if (now - mLastLogNs > 10'000'000'000) {
+  if (now - mLastLogNs > 60'000'000'000) {
     LOGI(
       "display %lld: %llu frames presented (headless)",
       (long long)frame.displayId, (unsigned long long)mPresented
@@ -105,7 +105,7 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
       snprintf(
         prefix, sizeof prefix, "display%lld", (long long)frame.displayId
       );
-      mWorker->submit(prefix, v);
+      mWorker->submit(mPrefix.empty() ? prefix : mPrefix, v);
     }
   }
   // Nothing holds the buffers after we return: no present/release fences.
@@ -113,30 +113,57 @@ Error HeadlessPresenter::present(FrameInput& frame, PresentResult* out) {
   return Error::None;
 }
 
+bool singleWindowMode() {
+  return getProperty("vendor.linuxapk.wm.mode", "per-app") == "single";
+}
+
+static std::unique_ptr<HeadlessPresenter> makeHeadless() {
+  return std::make_unique<HeadlessPresenter>(
+    std::make_unique<FrameDumper>(FrameDumper::configFromProperties())
+  );
+}
+
 std::unique_ptr<Presenter> createPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
   std::string backend = getProperty("vendor.linuxapk.hwc.backend", "headless");
-  auto headless = std::make_unique<HeadlessPresenter>(
-    std::make_unique<FrameDumper>(FrameDumper::configFromProperties())
-  );
 #ifdef LINUXAPK_HWC_WAYLAND
   if (backend == "wayland") {
-    if (
-      auto p =
-        createWaylandPresenter(displayId, width, height, std::move(headless))
-    ) {
-      return p;
+    setPrimaryDisplaySize(width, height);
+    if (!singleWindowMode()) {
+      LOGI(
+        "display %lld: per-app windows (vendor.linuxapk.wm.mode), no window",
+        (long long)displayId
+      );
+      return makeHeadless();
     }
+    if (
+      auto p = createWaylandPresenter(displayId, width, height, makeHeadless())
+    )
+      return p;
     LOGW("wayland backend unavailable; using headless");
-    return std::make_unique<HeadlessPresenter>(
-      std::make_unique<FrameDumper>(FrameDumper::configFromProperties())
-    );
+    return makeHeadless();
   }
 #endif
   if (backend != "headless")
     LOGW("unknown backend '%s'; using headless", backend.c_str());
-  return headless;
+  return makeHeadless();
+}
+
+std::unique_ptr<Presenter> createVirtualPresenter(
+  int64_t displayId, uint32_t width, uint32_t height
+) {
+#ifdef LINUXAPK_HWC_WAYLAND
+  if (getProperty("vendor.linuxapk.hwc.backend", "headless") == "wayland") {
+    if (
+      auto p =
+        createWaylandVirtualPresenter(displayId, width, height, makeHeadless())
+    ) {
+      return p;
+    }
+  }
+#endif
+  return makeHeadless();
 }
 
 }  // namespace linuxapk::hwc

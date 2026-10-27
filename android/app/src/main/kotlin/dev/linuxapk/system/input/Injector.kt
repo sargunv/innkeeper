@@ -38,12 +38,20 @@ class Injector {
     // InputManager.INJECT_INPUT_EVENT_MODE_ASYNC (hidden).
     private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 
+    // Hidden; injected events go to this display's focused window or the window under the pointer.
+    private val setDisplayId: Method by lazy {
+      InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+    }
+
     // Hidden (@TestApi); the public obtain() overloads have no action button.
     private val setActionButton: Method by lazy {
       MotionEvent::class.java.getMethod("setActionButton", Int::class.javaPrimitiveType)
     }
 
     fun toInputEvent(e: OutEvent): InputEvent =
+      build(e).also { if (e.displayId != 0) setDisplayId.invoke(it, e.displayId) }
+
+    private fun build(e: OutEvent): InputEvent =
       when (e) {
         is OutKey ->
           KeyEvent(

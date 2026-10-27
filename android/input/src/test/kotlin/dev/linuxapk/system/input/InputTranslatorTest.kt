@@ -11,7 +11,11 @@ import kotlin.test.assertTrue
 
 class InputTranslatorTest {
   private var now = 10_000L
-  private val verifier = StreamVerifier()
+  // InputDispatcher verifies each display's stream separately.
+  private val verifiers = HashMap<Int, StreamVerifier>()
+  private val verifier: StreamVerifier
+    get() = verifiers.getOrPut(0) { StreamVerifier() }
+
   private var tr = InputTranslator(now = { now })
 
   // Feeds protocol lines; checks every motion event against InputDispatcher's verifier rules.
@@ -20,7 +24,9 @@ class InputTranslatorTest {
     for (l in lines) {
       out += tr.handle(requireNotNull(HostEvent.parse(l)) { l })
     }
-    out.filterIsInstance<OutMotion>().forEach(verifier::check)
+    out.filterIsInstance<OutMotion>().forEach {
+      verifiers.getOrPut(it.displayId) { StreamVerifier() }.check(it)
+    }
     return out
   }
 
@@ -477,5 +483,61 @@ class InputTranslatorTest {
     }
     // Every mouse and touch action showed up at least once.
     assertTrue(seen.size >= 14, "only $seen") // 8 mouse + 6 touch actions
+  }
+
+  @Test
+  fun pointerFollowsTheWindowItEntered() {
+    feed("hello 2 1280 800", "window 800 600 1.500 5", "window 800 600 1.500 7")
+    val a = feed("pointer_enter 10.00 10.00 5", "pointer_frame")
+    assertEquals(listOf(5), a.map { it.displayId })
+    // Drag, then the pointer crosses into window 7 within one frame.
+    feed("pointer_button 2 272 1", "pointer_frame")
+    val cross = feed("pointer_leave 5", "pointer_enter 3.00 4.00 7", "pointer_frame")
+    assertEquals(
+      listOf("release(1) state=0", "up state=0", "hover_move state=0", "hover_exit state=0") +
+        listOf("hover_move state=0"),
+      names(cross),
+    )
+    assertEquals(listOf(5, 5, 5, 5, 7), cross.map { it.displayId })
+    assertTrue(verifiers.getValue(5).idle)
+    val click =
+      feed("pointer_button 3 272 1", "pointer_frame", "pointer_button 4 272 0", "pointer_frame")
+    assertTrue(click.all { it.displayId == 7 })
+  }
+
+  @Test
+  fun keysGoToTheFocusedWindow() {
+    feed("keyboard_enter 5")
+    assertEquals(5, feed("key 1 30 1").single().displayId)
+    // Focus moves to window 7 with A held: A is cancelled on 5.
+    val moved = feed("keyboard_leave 5", "keyboard_enter 7")
+    val up = moved.single() as OutKey
+    assertEquals(KeyEvent.ACTION_UP, up.action)
+    assertEquals(5, up.displayId)
+    assertTrue(up.flags and KeyEvent.FLAG_CANCELED != 0)
+    assertEquals(7, feed("key 2 48 1").single().displayId)
+  }
+
+  @Test
+  fun aTouchSequenceStaysOnItsWindow() {
+    val down = feed("touch_down 1 0 5.00 5.00 5", "touch_frame")
+    assertEquals(listOf(5), down.map { it.displayId })
+    // A second finger on another window is dropped, and so is its lift.
+    assertTrue(feed("touch_down 2 1 9.00 9.00 7", "touch_frame").isEmpty())
+    assertTrue(feed("touch_up 3 1", "touch_frame").isEmpty())
+    val up = feed("touch_up 4 0", "touch_frame")
+    assertEquals(listOf("up state=0"), names(up))
+    assertEquals(5, up.single().displayId)
+    // The next sequence may start anywhere.
+    assertEquals(7, feed("touch_down 5 1 1.00 1.00 7", "touch_frame").single().displayId)
+  }
+
+  @Test
+  fun smoothScrollUsesTheWindowScale() {
+    tr = InputTranslator(TranslatorConfig(scrollPixelsPerUnit = 64f), now = { now })
+    feed("window 800 600 2.000 5", "pointer_enter 1.00 1.00 5", "pointer_frame")
+    val e = feed("pointer_axis 1 0 16.000", "pointer_frame").single() as OutMotion
+    // 16 surface px = 32 display px = half a unit; Wayland down is VSCROLL -1.
+    assertEquals(-0.5f, e.pointers[0].vscroll)
   }
 }

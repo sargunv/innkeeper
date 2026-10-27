@@ -34,11 +34,15 @@ struct Layer : LayerState {
 
 class Display {
  public:
+  // Virtual displays (createVirtualDisplay) start powered on and get their
+  // frames' output buffer from setOutputBuffer.
   Display(
-    int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter
+    int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter,
+    bool isVirtual = false
   );
 
   int64_t id() const { return mId; }
+  bool isVirtual() const { return mVirtual; }
   const DisplayConfig& config() const { return mConfig; }
   VsyncThread& vsync() { return mVsync; }
 
@@ -50,6 +54,7 @@ class Display {
     mClientTargetSlots.resize(size_t(n));
   }
   Error setClientTarget(const c3::Buffer& buffer, common::Dataspace dataspace);
+  Error setOutputBuffer(const c3::Buffer& buffer);
   Error setPowerMode(c3::PowerMode mode);
   void setColorTransform(const std::vector<float>& m);
 
@@ -64,6 +69,7 @@ class Display {
   enum class State { NeedValidate, NeedAccept, ReadyToPresent };
 
   const int64_t mId;
+  const bool mVirtual;
   DisplayConfig mConfig;
   std::unique_ptr<Presenter> mPresenter;
   VsyncThread mVsync;
@@ -71,6 +77,8 @@ class Display {
   int64_t mNextLayerId = 1;
   BufferSlots mClientTargetSlots;
   ClientTargetState mClientTarget;
+  BufferSlots mOutputSlots;
+  BufferPtr mOutputBuffer;
   State mState = State::NeedValidate;
   std::vector<std::pair<int64_t, c3::Composition>> mPendingChanges;
   c3::PowerMode mPower = c3::PowerMode::OFF;

@@ -13,7 +13,7 @@ class HostEventTest {
         "hello 1 1280 800" to HostEvent.Hello(1, 1280, 800),
         "window 1280 800 1.700" to HostEvent.Window(1280, 800, 1.7),
         "pointer_enter 10.50 20.25" to HostEvent.PointerEnter(10.5f, 20.25f),
-        "pointer_leave" to HostEvent.PointerLeave,
+        "pointer_leave" to HostEvent.PointerLeave(),
         "pointer_motion 4294967295 501.49 564.17" to
           HostEvent.PointerMotion(4294967295L, 501.49f, 564.17f),
         "pointer_button 100 272 1" to HostEvent.PointerButton(100, 272, true),
@@ -22,8 +22,8 @@ class HostEventTest {
         "pointer_axis_value120 1 -240" to HostEvent.PointerAxisValue120(1, -240),
         "pointer_axis_stop 7 0" to HostEvent.PointerAxisStop(7, 0),
         "pointer_frame" to HostEvent.PointerFrame,
-        "keyboard_enter" to HostEvent.KeyboardEnter,
-        "keyboard_leave" to HostEvent.KeyboardLeave,
+        "keyboard_enter" to HostEvent.KeyboardEnter(),
+        "keyboard_leave" to HostEvent.KeyboardLeave(),
         "key 9 30 1" to HostEvent.Key(9, 30, true),
         "modifiers 1 0 2 0" to HostEvent.Modifiers(1, 0, 2, 0),
         "modifiers 4294967295 0 0 0" to HostEvent.Modifiers(-1, 0, 0, 0),
@@ -32,7 +32,28 @@ class HostEventTest {
         "touch_up 3 3" to HostEvent.TouchUp(3, 3),
         "touch_frame" to HostEvent.TouchFrame,
         "touch_cancel" to HostEvent.TouchCancel,
-        "close" to HostEvent.Close,
+        "close" to HostEvent.Close(),
+      )
+    for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
+  }
+
+  @Test
+  fun parsesVersion2DisplayIdsAndWindowReplies() {
+    val cases =
+      mapOf(
+        "hello 2 1280 800" to HostEvent.Hello(2, 1280, 800),
+        "window 1100 700 1.700 5" to HostEvent.Window(1100, 700, 1.7, 5),
+        "pointer_enter 10.50 20.25 5" to HostEvent.PointerEnter(10.5f, 20.25f, 5),
+        "pointer_leave 5" to HostEvent.PointerLeave(5),
+        "keyboard_enter 7" to HostEvent.KeyboardEnter(7),
+        "keyboard_leave 7" to HostEvent.KeyboardLeave(7),
+        "touch_down 1 3 1.00 2.00 9" to HostEvent.TouchDown(1, 3, 1f, 2f, 9),
+        "close 5" to HostEvent.Close(5),
+        "window_pending 5" to HostEvent.WindowPending(5),
+        "window_mapped 5 100" to HostEvent.WindowMapped(5, 100),
+        "window_gone 5" to HostEvent.WindowGone(5),
+        "window_failed 5 exists" to HostEvent.WindowFailed(5, "exists"),
+        "pong a b" to HostEvent.Pong("a b"),
       )
     for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
   }

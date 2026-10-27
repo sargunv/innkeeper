@@ -18,19 +18,22 @@ import dev.linuxapk.system.SystemProps
  */
 class InputFeature(@Suppress("unused") private val context: Context) : Feature {
   override val name = "input"
-  private var bridge: InputBridge? = null
+
+  /** The composer connection; the window manager shares it. */
+  @Volatile
+  var bridge: InputBridge? = null
+    private set
 
   override fun start() {
-    if (!SystemProps.getBoolean("persist.linuxapk.input.enabled", true)) {
-      Log.i(InputBridge.TAG, "disabled by persist.linuxapk.input.enabled")
-      return
-    }
+    // The connection also carries window events, so it runs even with injection disabled.
+    val enabled = SystemProps.getBoolean("persist.linuxapk.input.enabled", true)
+    if (!enabled) Log.i(InputBridge.TAG, "injection disabled by persist.linuxapk.input.enabled")
     val injector = Injector()
     val config = config()
     var failures = 0
     bridge =
       InputBridge(socketPath(), { InputTranslator(config, ::uptimeMillis) }) { e ->
-          if (!injector.inject(e) && failures++ % 100 == 0) {
+          if (enabled && !injector.inject(e) && failures++ % 100 == 0) {
             Log.w(InputBridge.TAG, "injection refused ($failures so far): $e")
           }
         }

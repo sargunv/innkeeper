@@ -26,6 +26,11 @@ data class TranslatorConfig(
  * sequence that starts while a mouse button is held is dropped, and mouse events during a touch
  * sequence are dropped (the hover resumes with the next motion).
  *
+ * Each window is one Android display (protocol v2). Events go to the display whose window the
+ * pointer, the keyboard focus or the first finger of a touch sequence entered; moving the pointer
+ * to another window ends the hover (and any drag) on the old display first. A touch sequence stays
+ * on one display: fingers that land on another window meanwhile are dropped.
+ *
  * Not thread-safe; feed it from one thread.
  */
 class InputTranslator(
@@ -41,7 +46,17 @@ class InputTranslator(
   var displayHeight = 0
     private set
 
-  private var windowWidth = 0
+  private val windowWidths = HashMap<Int, Int>() // logical width by display
+  private val windowScales = HashMap<Int, Double>()
+
+  /** Display that pointer, keyboard and touch events currently go to. */
+  var pointerDisplay = 0
+    private set
+
+  var keyDisplay = 0
+    private set
+
+  private var touchDisplay = 0
 
   // --- pointer state -------------------------------------------------------
   private var x = 0f
@@ -79,14 +94,23 @@ class InputTranslator(
         displayWidth = e.displayWidth
         displayHeight = e.displayHeight
       }
-      is HostEvent.Window -> windowWidth = e.width
+      is HostEvent.Window -> {
+        windowWidths[e.display] = e.width
+        windowScales[e.display] = e.scale
+      }
       is HostEvent.PointerEnter -> {
+        if (e.display != pointerDisplay && (left || hovering || buttons != 0)) {
+          // Finish on the old window first: button releases, HOVER_EXIT.
+          left = true
+          pointerFrame(out)
+        }
+        pointerDisplay = e.display
         x = e.x
         y = e.y
         moved = true
         left = false
       }
-      HostEvent.PointerLeave -> left = true
+      is HostEvent.PointerLeave -> left = true
       is HostEvent.PointerMotion -> {
         frameTime = clock.map(e.time)
         x = e.x
@@ -108,9 +132,12 @@ class InputTranslator(
         }
       is HostEvent.PointerAxisStop -> {}
       HostEvent.PointerFrame -> pointerFrame(out)
-      HostEvent.KeyboardEnter -> {}
-      HostEvent.KeyboardLeave -> keyboard.releaseAll(clock.untimed(), out)
-      is HostEvent.Key -> keyboard.key(e.code, e.pressed, clock.map(e.time), out)
+      is HostEvent.KeyboardEnter -> {
+        if (e.display != keyDisplay) keys(out) { keyboard.releaseAll(clock.untimed(), it) }
+        keyDisplay = e.display
+      }
+      is HostEvent.KeyboardLeave -> keys(out) { keyboard.releaseAll(clock.untimed(), it) }
+      is HostEvent.Key -> keys(out) { keyboard.key(e.code, e.pressed, clock.map(e.time), it) }
       is HostEvent.Modifiers -> keyboard.modifiers(e.depressed, e.latched, e.locked)
       is HostEvent.TouchDown -> {
         touchFrameTime = clock.map(e.time)
@@ -126,9 +153,21 @@ class InputTranslator(
       }
       HostEvent.TouchFrame -> touchFrame(out)
       HostEvent.TouchCancel -> touchCancel(out)
-      HostEvent.Close -> {}
+      is HostEvent.Close,
+      is HostEvent.WindowPending,
+      is HostEvent.WindowMapped,
+      is HostEvent.WindowGone,
+      is HostEvent.WindowFailed,
+      is HostEvent.Pong -> {}
     }
     return out
+  }
+
+  // Keyboard events go to the display with the keyboard focus.
+  private inline fun keys(out: MutableList<OutEvent>, f: (MutableList<OutEvent>) -> Unit) {
+    val tmp = ArrayList<OutEvent>(2)
+    f(tmp)
+    for (e in tmp) out += if (e is OutKey) e.copy(displayId = keyDisplay) else e
   }
 
   /** The stream ended (composer gone): release everything that is held. */
@@ -139,7 +178,7 @@ class InputTranslator(
     touchCancel(out)
     left = true
     pointerFrame(out)
-    keyboard.releaseAll(clock.untimed(), out)
+    keys(out) { keyboard.releaseAll(clock.untimed(), it) }
     suppressedButtons = 0
     return out
   }
@@ -248,8 +287,15 @@ class InputTranslator(
   private fun scrollUnits(axis: Int): Float {
     if (hasV120[axis]) return v120[axis] / 120f
     if (axisValue[axis] == 0.0) return 0f
+    // Display 0 has a fixed size (stretched over its window); the window manager sizes every
+    // other display to its window's logical size times the scale.
+    val windowWidth = windowWidths[pointerDisplay] ?: 0
     val toDisplay =
-      if (windowWidth > 0 && displayWidth > 0) displayWidth.toDouble() / windowWidth else 1.0
+      when {
+        pointerDisplay != 0 -> windowScales[pointerDisplay] ?: 1.0
+        windowWidth > 0 && displayWidth > 0 -> displayWidth.toDouble() / windowWidth
+        else -> 1.0
+      }
     return (axisValue[axis] * toDisplay / config.scrollPixelsPerUnit).toFloat()
   }
 
@@ -282,11 +328,12 @@ class InputTranslator(
       eventTime = t,
       pointers =
         listOf(OutPointer(0, MotionEvent.TOOL_TYPE_MOUSE, x, y, pressure, vscroll, hscroll)),
+      displayId = pointerDisplay,
     )
   }
 
   private fun sideKey(keyCode: Int, action: Int, t: Long, meta: Int) =
-    OutKey(action, keyCode, 0, meta, KeyEvent.FLAG_FROM_SYSTEM, t, t)
+    OutKey(action, keyCode, 0, meta, KeyEvent.FLAG_FROM_SYSTEM, t, t, pointerDisplay)
 
   // --- touch ---------------------------------------------------------------
 
@@ -310,8 +357,13 @@ class InputTranslator(
 
     for (d in downs) {
       if (touches.containsKey(d.id) || d.id in suppressedTouches) continue
-      // Drop a touch sequence that starts during a mouse drag, and pointers beyond the limit.
-      if ((touches.isEmpty() && buttons != 0) || touches.size >= MAX_POINTERS) {
+      // Drop a touch sequence that starts during a mouse drag, pointers beyond the limit and
+      // fingers on another window than the sequence's.
+      if (
+        (touches.isEmpty() && buttons != 0) ||
+          touches.size >= MAX_POINTERS ||
+          (touches.isNotEmpty() && d.display != touchDisplay)
+      ) {
         suppressedTouches += d.id
         continue
       }
@@ -319,6 +371,7 @@ class InputTranslator(
         if (hovering) out += mouse(MotionEvent.ACTION_HOVER_EXIT, 0, 0, t, meta)
         hovering = false
         touchDownTime = t
+        touchDisplay = d.display
       }
       val m = moves.lastOrNull { it.id == d.id }
       val tp = Touch(freePointerId(), m?.x ?: d.x, m?.y ?: d.y)
@@ -377,6 +430,7 @@ class InputTranslator(
         sortedTouches().map {
           OutPointer(it.pointerId, MotionEvent.TOOL_TYPE_FINGER, it.x, it.y, 1f)
         },
+      displayId = touchDisplay,
     )
 
   private companion object {

@@ -163,6 +163,7 @@ class ComposerClient : public BnComposerClient {
 
   std::mutex mMutex;
   std::map<int64_t, std::unique_ptr<Display>> mDisplays;
+  int64_t mNextVirtualDisplay = 0;
   std::shared_ptr<IComposerCallback> mCallback;
   std::function<void()> mOnDestroyed;
 };

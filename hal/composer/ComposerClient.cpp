@@ -11,7 +11,11 @@ namespace linuxapk::hwc {
 
 namespace {
 constexpr int64_t kPrimaryDisplay = 0;
-}
+// HWC ids of virtual displays (SurfaceFlinger maps them to its own ids). Never
+// reused, so a late command for a destroyed display can't hit a new one.
+constexpr int64_t kFirstVirtualDisplay = 100;
+constexpr int32_t kMaxVirtualDisplays = 32;
+}  // namespace
 
 class ComposerClient::Results {
  public:
@@ -32,6 +36,7 @@ class ComposerClient::Results {
 };
 
 ComposerClient::ComposerClient() {
+  mNextVirtualDisplay = kFirstVirtualDisplay;
   // One headless primary display. Hotplug of more displays (e.g. one per
   // Wayland output) would add entries here and call onHotplugEvent.
   const DisplayConfig config = DisplayConfig::fromProperties();
@@ -90,18 +95,63 @@ ndk::ScopedAStatus ComposerClient::destroyLayer(
   return toStatus(d->destroyLayer(layer));
 }
 
+// HWC-backed virtual displays (SurfaceFlinger uses them when
+// debug.sf.enable_hwc_vds=1, set by our .rc). Every layer stays CLIENT, so
+// SurfaceFlinger renders each frame straight into the sink's buffer and hands
+// it to us as both client target and output buffer; the presenter shows it in
+// the Wayland window that the window manager asked for (docs/windowing.md).
 ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
-  int32_t, int32_t, common::PixelFormat, int32_t, VirtualDisplay*
+  int32_t width, int32_t height, common::PixelFormat format,
+  int32_t outputSlotCount, VirtualDisplay* out
 ) {
-  return toStatus(Error::Unsupported);
+  if (width < 1 || height < 1 || width > 16384 || height > 16384)
+    return toStatus(Error::BadParameter);
+  std::lock_guard lock(mMutex);
+  size_t virtuals = 0;
+  for (auto& [id, d] : mDisplays) virtuals += d->isVirtual();
+  if (virtuals >= size_t(kMaxVirtualDisplays))
+    return toStatus(Error::NoResources);
+  const int64_t id = mNextVirtualDisplay++;
+  DisplayConfig config;
+  config.id = 0;
+  config.width = width;
+  config.height = height;
+  auto d = std::make_unique<Display>(
+    id, config, createVirtualPresenter(id, uint32_t(width), uint32_t(height)),
+    /*isVirtual=*/true
+  );
+  d->setClientTargetSlotCount(std::max(outputSlotCount, 1));
+  if (mCallback) d->vsync().setCallback(mCallback);
+  mDisplays.emplace(id, std::move(d));
+  out->display = id;
+  // The sink decides the format; "implementation defined" sinks (an
+  // ImageReader with PRIVATE format) get RGBA_8888 from our gralloc anyway.
+  out->format = format == common::PixelFormat::IMPLEMENTATION_DEFINED
+                  ? common::PixelFormat::RGBA_8888
+                  : format;
+  LOGI(
+    "virtual display %lld created: %dx%d format %d, %d output slots",
+    (long long)id, width, height, int(format), outputSlotCount
+  );
+  return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus ComposerClient::destroyVirtualDisplay(int64_t) {
-  return toStatus(Error::BadDisplay);
+ndk::ScopedAStatus ComposerClient::destroyVirtualDisplay(int64_t displayId) {
+  std::unique_ptr<Display> gone;
+  {
+    std::lock_guard lock(mMutex);
+    auto it = mDisplays.find(displayId);
+    if (it == mDisplays.end() || !it->second->isVirtual())
+      return toStatus(Error::BadDisplay);
+    gone = std::move(it->second);
+    mDisplays.erase(it);
+  }
+  LOGI("virtual display %lld destroyed", (long long)displayId);
+  return ndk::ScopedAStatus::ok();  // `gone` (and its window) go away here
 }
 
 ndk::ScopedAStatus ComposerClient::getMaxVirtualDisplayCount(int32_t* out) {
-  *out = 0;  // SurfaceFlinger composites virtual displays itself.
+  *out = kMaxVirtualDisplays;
   return ndk::ScopedAStatus::ok();
 }
 
@@ -143,7 +193,12 @@ void ComposerClient::executeDisplayCommand(
       d->setClientTarget(cmd.clientTarget->buffer, cmd.clientTarget->dataspace)
     );
   }
-  if (cmd.virtualDisplayOutputBuffer) results.error(Error::Unsupported);
+  if (cmd.virtualDisplayOutputBuffer) {
+    results.error(
+      d->isVirtual() ? d->setOutputBuffer(*cmd.virtualDisplayOutputBuffer)
+                     : Error::BadDisplay
+    );
+  }
 
   auto validate = [&](bool presentOrValidate) {
     std::optional<ChangedCompositionTypes> changes;
@@ -588,7 +643,7 @@ ndk::ScopedAStatus ComposerClient::registerCallback(
     mCallback = cb;
     for (auto& [id, d] : mDisplays) {
       d->vsync().setCallback(cb);
-      ids.push_back(id);
+      if (!d->isVirtual()) ids.push_back(id);
     }
   }
   if (first && cb) {

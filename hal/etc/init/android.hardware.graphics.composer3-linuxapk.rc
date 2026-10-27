@@ -16,3 +16,10 @@ service vendor.hwcomposer-3-linuxapk /vendor/bin/hw/android.hardware.graphics.co
 on post-fs-data
     mkdir /data/vendor/linuxapk 0775 system graphics
     mkdir /data/vendor/linuxapk/frames 0775 system graphics
+
+# HWC-backed virtual displays: SurfaceFlinger hands us each virtual display's
+# frames (createVirtualDisplay/setOutputBuffer), so the per-app windows of the
+# Linux.apk System app (docs/windowing.md) can show them. Set before
+# SurfaceFlinger starts; it reads the property once in init().
+on early-init
+    setprop debug.sf.enable_hwc_vds 1

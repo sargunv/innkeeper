@@ -8,6 +8,9 @@ package dev.linuxapk.system.input
  */
 sealed interface OutEvent {
   val eventTime: Long
+
+  /** Android display the event targets (`InputEvent.setDisplayId`). */
+  val displayId: Int
 }
 
 data class OutPointer(
@@ -30,6 +33,7 @@ data class OutMotion(
   val downTime: Long,
   override val eventTime: Long,
   val pointers: List<OutPointer>,
+  override val displayId: Int = 0,
 ) : OutEvent
 
 data class OutKey(
@@ -40,4 +44,5 @@ data class OutKey(
   val flags: Int,
   val downTime: Long,
   override val eventTime: Long,
+  override val displayId: Int = 0,
 ) : OutEvent

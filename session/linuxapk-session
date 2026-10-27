@@ -2,10 +2,12 @@
 # Linux.apk session launcher: boots the Android userspace from out/img in a
 # rootless user + mount + pid + cgroup namespace.
 #
-#   linuxapk-session start [-f] [--headless]
-#                                  boot (in the background unless -f); the
-#                                  composer opens a host Wayland window unless
-#                                  --headless
+#   linuxapk-session start [-f] [--headless] [--single-window]
+#                                  boot (in the background unless -f). Each
+#                                  app gets its own host Wayland window
+#                                  (docs/windowing.md); --single-window shows
+#                                  all of Android in one window instead, and
+#                                  --headless opens no windows
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
 #   linuxapk-session status
 #   linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
@@ -97,17 +99,20 @@ vendor_props() {
     echo "ro.logd.size=16M"
     # Composer backend (hal lane): a window on the host compositor, or none.
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
+    # Windowing (docs/windowing.md): a window per app, or display 0 as one.
+    echo "vendor.linuxapk.wm.mode=$wm_mode"
   } >"$dst"
   chmod 0644 "$dst"
 }
 
 start() {
   local fg=0 wayland=""
-  hwc_backend=wayland
+  hwc_backend=wayland wm_mode=per-app
   for a in "$@"; do
     case $a in
       -f) fg=1 ;;
       --headless) hwc_backend=headless ;;
+      --single-window) wm_mode=single ;;
       *) die "unknown start option: $a" ;;
     esac
   done

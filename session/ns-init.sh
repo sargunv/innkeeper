@@ -43,8 +43,15 @@ layer_mount() {
     mount --bind "${layers[0]}" "$dst"
     mount -o remount,bind,ro "$dst"
   else
-    local IFS=:
-    mount -t overlay overlay -o "ro,lowerdir=${layers[*]}" "$dst"
+    local IFS=: opts
+    opts="lowerdir=${layers[*]}"
+    # fsconfig(2) caps an option value at 256 bytes, which long checkout paths
+    # (lane worktrees) exceed; "lowerdir+" (Linux 6.8+) adds one layer each.
+    if ((${#opts} > 255)); then
+      opts=$(printf 'lowerdir+=%s,' "${layers[@]}")
+      opts=${opts%,}
+    fi
+    mount -t overlay overlay -o "ro,$opts" "$dst"
   fi
 }
 

@@ -60,7 +60,8 @@ struct FrameInput {
   uint32_t width, height;
   uint64_t frameNumber;
   ClientTargetState*
-    clientTarget;  // may have no buffer if every layer is DEVICE
+    clientTarget;          // may have no buffer if every layer is DEVICE
+  BufferPtr outputBuffer;  // virtual displays: the sink's buffer
   std::vector<LayerState*> layers;  // sorted by z
   bool hasClientLayers;
 };
@@ -91,6 +92,8 @@ class HeadlessPresenter : public Presenter {
   ~HeadlessPresenter() override;
   const char* name() const override { return "headless"; }
   Error present(FrameInput& frame, PresentResult* out) override;
+  // Dump file prefix (default "display<hwc id>").
+  void setDumpPrefix(std::string prefix) { mPrefix = std::move(prefix); }
 
  private:
   struct Worker;
@@ -98,12 +101,21 @@ class HeadlessPresenter : public Presenter {
   std::unique_ptr<Worker> mWorker;
   uint64_t mPresented = 0;
   int64_t mLastLogNs = 0;
+  std::string mPrefix;
 };
 
 // vendor.linuxapk.hwc.backend: "headless" (default) or "wayland" (needs
-// WaylandConnection::init() at startup; falls back to headless).
+// WaylandConnection::init() at startup; falls back to headless). Display 0
+// gets a Wayland window only in single-window mode
+// (vendor.linuxapk.wm.mode=single); in per-app mode (the default) only
+// virtual displays that the window manager asked for get windows.
 std::unique_ptr<Presenter> createPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );
+// A HWC-backed virtual display (ComposerClient::createVirtualDisplay).
+std::unique_ptr<Presenter> createVirtualPresenter(
+  int64_t displayId, uint32_t width, uint32_t height
+);
+bool singleWindowMode();
 
 }  // namespace linuxapk::hwc
