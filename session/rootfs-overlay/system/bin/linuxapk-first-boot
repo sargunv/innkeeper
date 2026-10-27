@@ -1,0 +1,8 @@
+#!/system/bin/sh
+# Desktop defaults applied once per /data (later changes inside Android stick):
+# no touch-click sounds or haptics, which desktop apps never have.
+marker=/data/system/linuxapk-defaults-v1
+[ -e "$marker" ] && exit 0
+settings put system sound_effects_enabled 0
+settings put system haptic_feedback_enabled 0
+touch "$marker"

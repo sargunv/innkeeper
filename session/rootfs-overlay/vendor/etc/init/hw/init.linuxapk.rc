@@ -34,3 +34,5 @@ on property:sys.boot_completed=1
     # as already confirmed.
     # (As root: "cmd settings" from uid system hits an NPE resolving the caller.)
     exec_background - root root -- /system/bin/settings put secure immersive_mode_confirmations confirmed
+    # Desktop defaults, once per /data (see the script).
+    exec_background - root root -- /system/bin/linuxapk-first-boot
