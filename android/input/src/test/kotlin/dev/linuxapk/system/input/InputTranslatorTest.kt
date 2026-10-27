@@ -59,7 +59,7 @@ class InputTranslatorTest {
 
   @Test
   fun hoverMoveIsAMouseHover() {
-    feed("hello 1 1280 800", "window 1280 800 1.000")
+    feed("hello 2", "window 1280 800 1.000")
     val e = feed("pointer_motion 1 100.50 200.25", "pointer_frame").single() as OutMotion
     assertEquals(MotionEvent.ACTION_HOVER_MOVE, e.action)
     assertEquals(InputDevice.SOURCE_MOUSE, e.source)
@@ -152,8 +152,8 @@ class InputTranslatorTest {
   @Test
   fun touchpadScrollIsInDisplayPixels() {
     tr = InputTranslator(TranslatorConfig(scrollPixelsPerUnit = 64f), now = { now })
-    // Window at half the display's size: 16 surface px = 32 display px = half a unit.
-    feed("hello 1 1280 800", "window 640 400 2.000", "pointer_motion 1 1.00 1.00", "pointer_frame")
+    // A window at scale 2: 16 surface px = 32 display px = half a unit.
+    feed("window 640 400 2.000 5", "pointer_enter 1.00 1.00 5", "pointer_frame")
     val e = feed("pointer_axis 2 0 16.000", "pointer_frame").single() as OutMotion
     assertEquals(-0.5f, e.pointers[0].vscroll)
   }
@@ -487,7 +487,7 @@ class InputTranslatorTest {
 
   @Test
   fun pointerFollowsTheWindowItEntered() {
-    feed("hello 2 1280 800", "window 800 600 1.500 5", "window 800 600 1.500 7")
+    feed("hello 2", "window 800 600 1.500 5", "window 800 600 1.500 7")
     val a = feed("pointer_enter 10.00 10.00 5", "pointer_frame")
     assertEquals(listOf(5), a.map { it.displayId })
     // Drag, then the pointer crosses into window 7 within one frame.

@@ -7,13 +7,12 @@ package dev.linuxapk.system.input
  * event targets, times are the compositor's millisecond clock (u32, wraps), buttons and keys are
  * Linux evdev codes.
  *
- * Version 2 adds the Android display id of the window to the lines that start a pointer, keyboard
- * or touch sequence (and to `window`, `close` and the leave lines), plus the window-manager replies
- * (`window_pending`, ...). Version 1 lines have no display id; it defaults to display 0, which is
- * what version 1 meant.
+ * Every window is an Android display: the lines that start a pointer, keyboard or touch sequence
+ * (and `window`, `close` and the leave lines) carry the display id of their window. The
+ * window-manager replies (`window_pending`, ...) answer the system app's requests.
  */
 sealed interface HostEvent {
-  data class Hello(val version: Int, val displayWidth: Int, val displayHeight: Int) : HostEvent
+  data class Hello(val version: Int) : HostEvent
 
   /** Window size in logical (surface) pixels and the output scale. */
   data class Window(val width: Int, val height: Int, val scale: Double, val display: Int = 0) :
@@ -68,20 +67,18 @@ sealed interface HostEvent {
   /** The user asked to close the window of [display]. */
   data class Close(val display: Int = 0) : HostEvent
 
-  // Window manager replies (v2), see WindowManagerFeature.
+  // Window manager replies, see WindowManagerFeature.
 
   /** A `window_new` request was queued; the virtual display may now get its surface. */
   data class WindowPending(val display: Int) : HostEvent
 
-  /** The window for [display] exists (composer display [hwcDisplay]). */
-  data class WindowMapped(val display: Int, val hwcDisplay: Long) : HostEvent
+  /** The window for [display] exists. */
+  data class WindowMapped(val display: Int) : HostEvent
 
   /** The window for [display] was destroyed. */
   data class WindowGone(val display: Int) : HostEvent
 
   data class WindowFailed(val display: Int, val reason: String) : HostEvent
-
-  data class Pong(val token: String) : HostEvent
 
   // Text input (docs/input.md, "Text input"): the host input method's results for the Linux.apk
   // IME, gathered until [TextDone]. Lengths and offsets are UTF-8 bytes; text is decoded.
@@ -130,11 +127,11 @@ sealed interface HostEvent {
 
       val args = f.size - 1
 
-      // Optional trailing display id (v2).
+      // Trailing display id; [default] if absent.
       fun display(i: Int, default: Int) = if (args >= i) int(i) else default
 
       return when (f[0]) {
-        "hello" -> need(args, 3) { Hello(int(1), int(2), int(3)) }
+        "hello" -> need(args, 1) { Hello(int(1)) }
         "window" -> need(args, 3) { Window(int(1), int(2), f[3].toDouble(), display(4, 0)) }
         "pointer_enter" -> need(args, 2) { PointerEnter(float(1), float(2), display(3, 0)) }
         "pointer_leave" -> PointerLeave(display(1, -1))
@@ -164,11 +161,10 @@ sealed interface HostEvent {
         "touch_cancel" -> TouchCancel
         "close" -> Close(display(1, 0))
         "window_pending" -> need(args, 1) { WindowPending(int(1)) }
-        "window_mapped" -> need(args, 1) { WindowMapped(int(1), if (args >= 2) time(2) else -1) }
+        "window_mapped" -> need(args, 1) { WindowMapped(int(1)) }
         "window_gone" -> need(args, 1) { WindowGone(int(1)) }
         "window_failed" ->
           need(args, 1) { WindowFailed(int(1), f.drop(2).joinToString(" ").ifEmpty { "?" }) }
-        "pong" -> Pong(f.drop(1).joinToString(" "))
         "ti_delete" -> need(args, 2) { TextDelete(int(1), int(2)) }
         "ti_commit" -> TextCommit(PercentText.decode(f.getOrElse(1) { "" }) ?: return null)
         "ti_preedit" ->

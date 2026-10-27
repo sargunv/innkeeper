@@ -19,6 +19,4 @@ public interface IActivityTaskManager extends android.os.IInterface {
   void moveRootTaskToDisplay(int taskId, int displayId) throws RemoteException;
 
   void focusTopTask(int displayId) throws RemoteException;
-
-  void setFocusedTask(int taskId) throws RemoteException;
 }

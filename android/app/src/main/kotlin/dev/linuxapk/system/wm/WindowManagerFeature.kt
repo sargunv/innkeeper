@@ -40,8 +40,8 @@ import kotlin.math.roundToInt
  * 3. Window events from the composer: a resize (`window`) resizes the display to the window's
  *    logical size times its scale, at 160 dpi times the scale; `close` removes the tasks and
  *    releases the display; `keyboard_enter` focuses the display's top task.
- * 4. A task stack listener closes the window when the display's last task is gone, and (per-app
- *    mode) moves any app task that shows up on display 0 into a window of its own.
+ * 4. A task stack listener closes the window when the display's last task is gone, and moves any
+ *    app task that shows up on display 0 into a window of its own.
  *
  * Everything runs on one handler thread; public methods post to it.
  */
@@ -50,9 +50,6 @@ class WindowManagerFeature(
   private val bridge: () -> InputBridge?,
 ) : Feature, InputBridge.Listener {
   override val name = "windows"
-
-  /** "per-app" (default): every app task gets a window; "single": display 0 is the window. */
-  val perApp = SystemProps.get("vendor.linuxapk.wm.mode", "per-app") != "single"
 
   private val thread = HandlerThread("linuxapk-wm")
   private lateinit var handler: Handler
@@ -68,11 +65,8 @@ class WindowManagerFeature(
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
   private val pending = ConcurrentHashMap<Int, CountDownLatch>() // window_pending replies
   // The scale new windows start at: the last one a window reported (kept across restarts, so the
-  // first window after boot opens at the desktop's scale), or persist.linuxapk.wm.scale.
-  private var scale =
-    SystemProps.get("persist.linuxapk.wm.scale", "").toDoubleOrNull()
-      ?: prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 }
-      ?: 1.0
+  // first window after boot opens at the desktop's scale).
+  private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
   private var refreshQueued = false
 
   private class AppWindow(
@@ -117,12 +111,10 @@ class WindowManagerFeature(
     frameHandler = Handler(frames.looper)
     bridge()?.addListener(this)
     atm.registerTaskStackListener(taskListener)
-    if (perApp) {
-      // AppWarnings shows these on the default display, which has no window in per-app mode;
-      // AppWarningActivity shows the same warning in the app's own window instead.
-      SystemProps.set("debug.wm.disable_deprecated_target_sdk_dialog", "true")
-    }
-    Log.i(TAG, "window manager started (${if (perApp) "per-app" else "single-window"} mode)")
+    // AppWarnings shows these on the default display, which has no window; AppWarningActivity
+    // shows the same warning in the app's own window instead.
+    SystemProps.set("debug.wm.disable_deprecated_target_sdk_dialog", "true")
+    Log.i(TAG, "window manager started")
     handler.post { refreshTasks() }
   }
 
@@ -162,13 +154,6 @@ class WindowManagerFeature(
     "closed display=${w.id} package=${w.pkg}"
   }
 
-  /** Resizes a window's display directly (logical size at the current scale), for tests. */
-  fun resize(display: Int, widthDp: Int, heightDp: Int): String = onWm {
-    val w = windows[display] ?: return@onWm "error: no such window"
-    applySize(w, widthDp, heightDp, scale)
-    "resized display=$display size=${w.width}x${w.height} dpi=${w.dpi}"
-  }
-
   private fun <T> onWm(f: () -> T): T {
     if (Thread.currentThread() == thread) return f()
     val task = FutureTask(f)
@@ -200,10 +185,6 @@ class WindowManagerFeature(
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
     // A desktop link is an untrusted-origin VIEW: only activities that accept web links.
     if (r.uri != null) intent.addCategory(Intent.CATEGORY_BROWSABLE)
-    if (!perApp) {
-      start(intent, DEFAULT_DISPLAY)
-      return "launched display=$DEFAULT_DISPLAY package=${r.pkg}"
-    }
 
     refreshTasks()
     windows.values
@@ -248,11 +229,7 @@ class WindowManagerFeature(
       } catch (e: Exception) {
         null
       }
-    return WindowSizing.of(
-      ai,
-      SystemProps.getInt("persist.linuxapk.wm.width", 1280),
-      SystemProps.getInt("persist.linuxapk.wm.height", 800),
-    )
+    return WindowSizing.of(ai)
   }
 
   private fun createWindow(pkg: String, label: String, sizing: WindowSizing): AppWindow? {
@@ -296,7 +273,7 @@ class WindowManagerFeature(
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing)
     windows[w.id] = w
     try {
-      wms.setDisplayImePolicy(w.id, imePolicy())
+      wms.setDisplayImePolicy(w.id, DISPLAY_IME_POLICY_LOCAL)
     } catch (e: Exception) {
       Log.w(TAG, "setDisplayImePolicy(${w.id}): $e")
     }
@@ -382,7 +359,7 @@ class WindowManagerFeature(
           if (windows[w.id] === w) applySize(w, e.width, e.height, e.scale)
         }
         w.resize = r
-        handler.postDelayed(r, RESIZE_DEBOUNCE_MS)
+        handler.postDelayed(r, SIZE_DEBOUNCE_MS)
       }
       is HostEvent.Close -> windows[e.display]?.let { close(it, finishTasks = true) }
       is HostEvent.KeyboardEnter -> windows[e.display]?.let { focus(it, activate = false) }
@@ -491,7 +468,6 @@ class WindowManagerFeature(
         }
       }
     }
-    if (!perApp) return
     for (t in byDisplay[DEFAULT_DISPLAY].orEmpty()) {
       if (!Tasks.isAppTask(t)) continue
       val pkg = (t.baseActivity ?: t.topActivity)?.packageName ?: continue
@@ -515,17 +491,6 @@ class WindowManagerFeature(
     }
   }
 
-  // LOCAL by default: the input method binds to editors in the window. The default one, the
-  // Linux.apk Keyboard (ime/), draws nothing; an Android IME the user picks shows inside the
-  // window.
-  // HIDE would keep any IME from binding (IMMS returns NO_IME), so no text input at all.
-  private fun imePolicy(): Int =
-    when (SystemProps.get("persist.linuxapk.wm.ime", "local")) {
-      "hide" -> 2 // WindowManager.DISPLAY_IME_POLICY_HIDE
-      "fallback" -> 1 // DISPLAY_IME_POLICY_FALLBACK_DISPLAY (on display 0)
-      else -> 0 // DISPLAY_IME_POLICY_LOCAL
-    }
-
   companion object {
     const val TAG = "LinuxApkWm"
     const val APP_ID_PREFIX = "dev.linuxapk."
@@ -534,8 +499,13 @@ class WindowManagerFeature(
     private const val DEFAULT_DISPLAY = 0
     private const val INVALID_DISPLAY = -1
     private const val MAX_TASKS = 200
-    private const val RESIZE_DEBOUNCE_MS = 120L
+    private const val SIZE_DEBOUNCE_MS = 120L
     private const val LAUNCH_TIMEOUT_MS = 20_000L
+
+    // WindowManager.DISPLAY_IME_POLICY_LOCAL: the input method binds to editors in the window. The
+    // default one, the Linux.apk Keyboard (ime/), draws nothing; an Android IME the user picks
+    // shows inside the window. HIDE would keep any IME from binding (IMMS returns NO_IME).
+    private const val DISPLAY_IME_POLICY_LOCAL = 0
 
     // DisplayManager.VIRTUAL_DISPLAY_FLAG_* (several are @SystemApi or hidden).
     private const val FLAG_SECURE = 1 shl 2 // CAPTURE_SECURE_VIDEO_OUTPUT: FLAG_SECURE windows show

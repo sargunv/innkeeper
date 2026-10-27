@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end input test against a running session that has reached
 # sys.boot_completed=1 (see docs/input.md). Checks that Linux.apk System is
-# installed and running, then injects android/e2e/probe-stream.txt (mouse,
-# wheel, keys, two-finger touch) through the app's own translator/injector into
-# InputProbeActivity and checks what the activity received.
-#
-# In per-app window mode (the default, docs/windowing.md) the probe opens in a
-# window of its own through the window manager's control command, and the
-# stream is rewritten to input protocol v2: the enter lines carry the probe's
-# display id, so every event must arrive there.
+# installed and running, opens InputProbeActivity in a window of its own through
+# the window manager's control command (docs/windowing.md), then injects
+# android/e2e/probe-stream.txt (mouse, wheel, keys, two-finger touch) through
+# the app's own translator/injector and checks what the activity received.
+# The stream's DISPLAY placeholders become the probe's display id, so every
+# event must arrive there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -52,33 +50,24 @@ else
 fi
 
 wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }
-display=0
-stream=$(cat "$here/probe-stream.txt")
-if [[ $(s getprop vendor.linuxapk.wm.mode | tr -d '\r') != single ]]; then
-  for p in ADD_TRUSTED_DISPLAY ADD_ALWAYS_UNLOCKED_DISPLAY INTERNAL_SYSTEM_WINDOW MANAGE_ACTIVITY_TASKS REAL_GET_TASKS; do
-    check "$p granted" "android.permission.$p: granted=true" "$pkg"
-  done
-  check "window manager answers" "result=-1" "$(wm LIST)"
-  wm CLOSE --es package dev.linuxapk.system >/dev/null || true
-  s logcat -c
-  out=$(wm LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.input.InputProbeActivity)
-  check "launch in a window" "result=-1, data=\"launched display=[0-9]+" "$out"
-  display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$out")
-  [[ -n $display ]] || display=0
-  sleep 2
-  check "listed as a window" "display=$display package=dev.linuxapk.system" "$(wm LIST)"
-  # v2: the enter lines say which window (display) the events belong to.
-  stream=$(sed -E -e "s/^hello 1 /hello 2 /" -e "s/^(window [0-9]+ [0-9]+ [0-9.]+)\$/\1 $display/" \
-    -e "s/^(pointer_enter [0-9.]+ [0-9.]+)\$/\1 $display/" -e "s/^(keyboard_enter)\$/\1 $display/" \
-    -e "s/^(touch_down [0-9]+ [0-9]+ [0-9.]+ [0-9.]+)\$/\1 $display/" <<<"$stream")
-  grep -q "^keyboard_enter" <<<"$stream" || stream="keyboard_enter $display"$'\n'"$stream"
-else
-  s logcat -c
-  s am start -W -n dev.linuxapk.system/.input.InputProbeActivity >/dev/null
+for p in ADD_TRUSTED_DISPLAY ADD_ALWAYS_UNLOCKED_DISPLAY INTERNAL_SYSTEM_WINDOW MANAGE_ACTIVITY_TASKS REAL_GET_TASKS; do
+  check "$p granted" "android.permission.$p: granted=true" "$pkg"
+done
+check "window manager answers" "result=-1" "$(wm LIST)"
+wm CLOSE --es package dev.linuxapk.system >/dev/null || true
+s logcat -c
+out=$(wm LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.input.InputProbeActivity)
+display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$out")
+if [[ -z $display ]]; then
+  bad "launch in a window: $out"
+  exit 1
 fi
+ok "launch in a window"
+sleep 2
+check "listed as a window" "display=$display package=dev.linuxapk.system" "$(wm LIST)"
 sleep 1
-s sh -c "CLASSPATH=$apk app_process / dev.linuxapk.system.input.InputBridgeMain --stdin" \
-  <<<"$stream" >/dev/null
+sed "s/DISPLAY/$display/" "$here/probe-stream.txt" |
+  s sh -c "CLASSPATH=$apk app_process / dev.linuxapk.system.input.InputBridgeMain --stdin" >/dev/null
 sleep 1
 log=$(s logcat -d -s LinuxApkProbe:I InputDispatcher:E)
 check "mouse hover" "generic .*ACTION_HOVER_MOVE.*source=0x2002" "$log"
@@ -89,16 +78,14 @@ check "shift+a" "key .*keyCode=KEYCODE_A.*META_SHIFT_ON" "$log"
 check "escape" "key .*keyCode=KEYCODE_ESCAPE" "$log"
 check "two-finger touch" "touch .*ACTION_POINTER_DOWN.*source=0x1002" "$log"
 if grep -q "Inconsistent event" <<<"$log"; then bad "dispatcher accepted every event"; else ok "dispatcher accepted every event"; fi
-if ((display != 0)); then
-  check "events carry the window's display" "displayId=$display" "$log"
-  if grep -E "LinuxApkProbe.*displayId=" <<<"$log" | grep -vq "displayId=$display"; then
-    bad "no event on another display"
-  else
-    ok "no event on another display"
-  fi
-  out=$(wm CLOSE --ei display "$display")
-  check "close the window" "closed display=$display" "$out"
-  sleep 1
-  if wm LIST | grep -q "display=$display "; then bad "window gone after close"; else ok "window gone after close"; fi
+check "events carry the window's display" "displayId=$display" "$log"
+if grep -E "LinuxApkProbe.*displayId=" <<<"$log" | grep -vq "displayId=$display"; then
+  bad "no event on another display"
+else
+  ok "no event on another display"
 fi
+out=$(wm CLOSE --ei display "$display")
+check "close the window" "closed display=$display" "$out"
+sleep 1
+if wm LIST | grep -q "display=$display "; then bad "window gone after close"; else ok "window gone after close"; fi
 exit $fail

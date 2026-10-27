@@ -26,10 +26,10 @@ data class TranslatorConfig(
  * sequence that starts while a mouse button is held is dropped, and mouse events during a touch
  * sequence are dropped (the hover resumes with the next motion).
  *
- * Each window is one Android display (protocol v2). Events go to the display whose window the
- * pointer, the keyboard focus or the first finger of a touch sequence entered; moving the pointer
- * to another window ends the hover (and any drag) on the old display first. A touch sequence stays
- * on one display: fingers that land on another window meanwhile are dropped.
+ * Each window is one Android display. Events go to the display whose window the pointer, the
+ * keyboard focus or the first finger of a touch sequence entered; moving the pointer to another
+ * window ends the hover (and any drag) on the old display first. A touch sequence stays on one
+ * display: fingers that land on another window meanwhile are dropped.
  *
  * Not thread-safe; feed it from one thread.
  */
@@ -40,14 +40,7 @@ class InputTranslator(
   private val clock = EventClock(now)
   private val keyboard = Keyboard(config.escapeAsBack)
 
-  var displayWidth = 0
-    private set
-
-  var displayHeight = 0
-    private set
-
-  private val windowWidths = HashMap<Int, Int>() // logical width by display
-  private val windowScales = HashMap<Int, Double>()
+  private val windowScales = HashMap<Int, Double>() // by display
 
   /** Display that pointer, keyboard and touch events currently go to. */
   var pointerDisplay = 0
@@ -90,14 +83,7 @@ class InputTranslator(
   fun handle(e: HostEvent): List<OutEvent> {
     val out = ArrayList<OutEvent>(2)
     when (e) {
-      is HostEvent.Hello -> {
-        displayWidth = e.displayWidth
-        displayHeight = e.displayHeight
-      }
-      is HostEvent.Window -> {
-        windowWidths[e.display] = e.width
-        windowScales[e.display] = e.scale
-      }
+      is HostEvent.Window -> windowScales[e.display] = e.scale
       is HostEvent.PointerEnter -> {
         if (e.display != pointerDisplay && (left || hovering || buttons != 0)) {
           // Finish on the old window first: button releases, HOVER_EXIT.
@@ -153,12 +139,12 @@ class InputTranslator(
       }
       HostEvent.TouchFrame -> touchFrame(out)
       HostEvent.TouchCancel -> touchCancel(out)
+      is HostEvent.Hello,
       is HostEvent.Close,
       is HostEvent.WindowPending,
       is HostEvent.WindowMapped,
       is HostEvent.WindowGone,
       is HostEvent.WindowFailed,
-      is HostEvent.Pong,
       is HostEvent.TextDelete,
       is HostEvent.TextCommit,
       is HostEvent.TextPreedit,
@@ -287,19 +273,12 @@ class InputTranslator(
   }
 
   // One detent is one unit. Without value120 (touchpads, kinetic scrolling) convert the
-  // surface-pixel distance to display pixels, then to units of scrollPixelsPerUnit.
+  // surface-pixel distance to display pixels, then to units of scrollPixelsPerUnit. The window
+  // manager sizes each display to its window's logical size times the window's scale.
   private fun scrollUnits(axis: Int): Float {
     if (hasV120[axis]) return v120[axis] / 120f
     if (axisValue[axis] == 0.0) return 0f
-    // Display 0 has a fixed size (stretched over its window); the window manager sizes every
-    // other display to its window's logical size times the scale.
-    val windowWidth = windowWidths[pointerDisplay] ?: 0
-    val toDisplay =
-      when {
-        pointerDisplay != 0 -> windowScales[pointerDisplay] ?: 1.0
-        windowWidth > 0 && displayWidth > 0 -> displayWidth.toDouble() / windowWidth
-        else -> 1.0
-      }
+    val toDisplay = windowScales[pointerDisplay] ?: 1.0
     return (axisValue[axis] * toDisplay / config.scrollPixelsPerUnit).toFloat()
   }
 

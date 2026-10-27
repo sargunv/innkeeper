@@ -1,6 +1,7 @@
-hello 1 1280 800
-window 1280 800 1.000
-pointer_enter 640.00 400.00
+hello 2
+window 1280 800 1.000 DISPLAY
+keyboard_enter DISPLAY
+pointer_enter 640.00 400.00 DISPLAY
 pointer_frame
 pointer_motion 1000 650.50 410.25
 pointer_frame
@@ -21,9 +22,9 @@ key 1080 42 0
 modifiers 0 0 0 0
 key 1090 1 1
 key 1095 1 0
-touch_down 1100 4 500.00 400.00
+touch_down 1100 4 500.00 400.00 DISPLAY
 touch_frame
-touch_down 1110 5 600.00 450.00
+touch_down 1110 5 600.00 450.00 DISPLAY
 touch_frame
 touch_motion 1120 4 510.00 410.00
 touch_motion 1120 5 610.00 460.00
@@ -32,5 +33,5 @@ touch_up 1130 4
 touch_frame
 touch_up 1140 5
 touch_frame
-pointer_leave
+pointer_leave DISPLAY
 pointer_frame

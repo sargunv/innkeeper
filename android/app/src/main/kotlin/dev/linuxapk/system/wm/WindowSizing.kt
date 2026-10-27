@@ -10,7 +10,7 @@ import android.content.res.Resources
  * 1. `<layout android:defaultWidth/defaultHeight>` (Android's own freeform sizing hints);
  * 2. else `android:screenOrientation`: portrait-only activities get a phone-sized portrait window,
  *    landscape-only ones a 16:9 landscape window;
- * 3. else a tablet-like 1280x800 (or `persist.linuxapk.wm.width/height`).
+ * 3. else a tablet-like 1280x800.
  *
  * `<layout android:minWidth/minHeight>` become the window's minimum size.
  */
@@ -25,8 +25,10 @@ data class WindowSizing(
     const val PHONE_H = 915
     const val WIDE_W = 1280
     const val WIDE_H = 720
+    const val TABLET_W = 1280
+    const val TABLET_H = 800
 
-    fun of(ai: ActivityInfo?, defaultW: Int, defaultH: Int): WindowSizing {
+    fun of(ai: ActivityInfo?): WindowSizing {
       // <layout> dimensions were parsed to pixels at the system density.
       val density = Resources.getSystem().displayMetrics.density.takeIf { it > 0f } ?: 1f
       fun dp(px: Int) = if (px > 0) (px / density).toInt() else 0
@@ -40,7 +42,7 @@ data class WindowSizing(
           lw > 0 && lh > 0 -> lw to lh
           ai != null && isPortrait(ai.screenOrientation) -> PHONE_W to PHONE_H
           ai != null && isLandscape(ai.screenOrientation) -> WIDE_W to WIDE_H
-          else -> defaultW to defaultH
+          else -> TABLET_W to TABLET_H
         }
       return WindowSizing(maxOf(w, minW), maxOf(h, minH), minW, minH)
     }

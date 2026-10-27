@@ -129,12 +129,11 @@ single-window mode is still there:
      touch events to that display (`InputEvent.setDisplayId`). It ends the hover
      or drag on the old window before the pointer starts on a new one, and it
      keeps a touch sequence on one window.
-   - **IME:** the display IME policy is `LOCAL` (`persist.linuxapk.wm.ime`:
-     `local`, `hide`, `fallback`). The default input method, the Linux.apk
-     Keyboard ([input.md](input.md#text-input)), draws nothing, so no soft
-     keyboard covers the window; an Android IME the user picks shows inside the
-     window. `hide` keeps every IME from binding, so text input through the
-     host's input methods stops working.
+   - **IME:** the display IME policy is `LOCAL`. The default input method, the
+     Linux.apk Keyboard ([input.md](input.md#text-input)), draws nothing, so no
+     soft keyboard covers the window; an Android IME the user picks shows inside
+     the window. `HIDE` would keep every IME from binding, so text input through
+     the host's input methods would stop working.
 5. **Display 0 in per-app mode** keeps running, headless:
    - Launcher3 is its home activity.
    - Any ordinary app task that appears there is moved into a window of its own
@@ -164,7 +163,7 @@ the window's scale.
 2. else `android:screenOrientation`: portrait-only activities (`portrait`,
    `sensorPortrait`, `userPortrait`, `reversePortrait`) get a phone-sized
    412x915 window, and landscape-only ones get 1280x720;
-3. else 1280x800 (`persist.linuxapk.wm.width/height`).
+3. else 1280x800.
 
 `<layout android:minWidth/minHeight>` become the toplevel's minimum size
 (`window_min_size`). Activities with `resizeableActivity=false` get no special
@@ -172,8 +171,7 @@ case: Android's size compatibility mode letterboxes them inside the window when
 its shape doesn't fit.
 
 The first window after boot is created at scale 1. Once the window reports its
-real scale it is resized, and later windows start at the last scale seen
-(`persist.linuxapk.wm.scale` presets it).
+real scale it is resized, and later windows start at the last scale seen.
 
 ## Control interface
 
@@ -188,7 +186,6 @@ am broadcast $C -a dev.linuxapk.LAUNCH --es package org.wikipedia \
   [--ei width DP --ei height DP]
 am broadcast $C -a dev.linuxapk.LIST
 am broadcast $C -a dev.linuxapk.CLOSE (--ei display 3 | --es package org.wikipedia)
-am broadcast $C -a dev.linuxapk.RESIZE --ei display 3 --ei width DP --ei height DP
 ```
 
 `am` prints `Broadcast completed: result=-1, data="..."`. `-1` means success and

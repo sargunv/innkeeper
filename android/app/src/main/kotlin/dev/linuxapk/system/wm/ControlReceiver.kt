@@ -20,15 +20,13 @@ import kotlin.concurrent.thread
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LIST
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.CLOSE \
  *   (--ei display ID | --es package PKG)
- * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.RESIZE \
- *   --ei display ID --ei width DP --ei height DP
  * ```
  *
  * The reply is the broadcast's result data (`am` prints `Broadcast completed: result=-1,
  * data="..."`): one line per window for LIST, else one line that starts with the outcome
- * (`launched`, `focused`, `closed`, `resized`) or `error:`. The result code is RESULT_OK (-1) on
- * success and RESULT_CANCELED (0) on error. The receiver requires
- * `dev.linuxapk.permission.CONTROL_WINDOWS` (signature), which root holds implicitly.
+ * (`launched`, `focused`, `closed`) or `error:`. The result code is RESULT_OK (-1) on success and
+ * RESULT_CANCELED (0) on error. The receiver requires `dev.linuxapk.permission.CONTROL_WINDOWS`
+ * (signature), which root holds implicitly.
  */
 class ControlReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -72,12 +70,6 @@ class ControlReceiver : BroadcastReceiver() {
         val display = if (i.hasExtra("display")) i.getIntExtra("display", -1) else null
         wm.close(display, i.getStringExtra("package"))
       }
-      ACTION_RESIZE ->
-        wm.resize(
-          i.getIntExtra("display", -1),
-          i.getIntExtra("width", 0),
-          i.getIntExtra("height", 0),
-        )
       else -> "error: unknown action ${i.action}"
     }
 
@@ -85,6 +77,5 @@ class ControlReceiver : BroadcastReceiver() {
     const val ACTION_LAUNCH = "dev.linuxapk.LAUNCH"
     const val ACTION_LIST = "dev.linuxapk.LIST"
     const val ACTION_CLOSE = "dev.linuxapk.CLOSE"
-    const val ACTION_RESIZE = "dev.linuxapk.RESIZE"
   }
 }
