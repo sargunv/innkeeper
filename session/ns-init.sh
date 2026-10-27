@@ -177,6 +177,18 @@ if [[ -d /dev/dri ]]; then
   mount --rbind /dev/dri "$R/dev/dri"
 fi
 mkdir -p "$R/dev/binderfs" # init mounts binderfs itself (init.rc "on init")
+# ubinder: no binderfs, so create dummy, readable binder device nodes here
+# (before the seccomp filter is installed). libbinder gates on
+# access("/dev/binder", R_OK) in selfIfKernelBinderEnabled(); the files must
+# exist and be readable. Real opens are intercepted by the supervisor, which
+# injects a memfd, so these files are never actually opened or read. init
+# cannot create them itself (its own open of /dev/binder is intercepted).
+if [[ -n ${LINUXAPK_UBINDER:-} ]]; then
+  for d in binder hwbinder vndbinder; do
+    : >"$R/dev/$d"
+    chmod 0666 "$R/dev/$d"
+  done
+fi
 
 # --- /proc, /sys -------------------------------------------------------------
 # A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested
@@ -242,9 +254,11 @@ fi
 # Preserve the ubinder helper path across the env wipe (pivot-exec reads it to
 # decide whether to install the binder seccomp filter and fork the broker).
 ubinder_helper=${LINUXAPK_UBINDER:-}
+ubinder_debug=${LINUXAPK_UBINDER_DEBUG:-}
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
 export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 [[ -n $ubinder_helper ]] && export LINUXAPK_UBINDER=$ubinder_helper
+[[ -n $ubinder_debug ]] && export LINUXAPK_UBINDER_DEBUG=$ubinder_debug
 exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage

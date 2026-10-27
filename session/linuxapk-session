@@ -247,7 +247,7 @@ start() {
     --setenv=LINUXAPK_INSTANCE="$inst" --setenv=LINUXAPK_HOLD="${LINUXAPK_HOLD:-}" --setenv=LINUXAPK_WAYLAND="$wayland" \
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_IMAGE="$image" --setenv=LINUXAPK_IMAGES="$images" \
-    --setenv=LINUXAPK_UBINDER="$ubinder_helper" \
+    --setenv=LINUXAPK_UBINDER="$ubinder_helper" --setenv=LINUXAPK_UBINDER_DEBUG="${LINUXAPK_UBINDER_DEBUG:-}" \
     -- "$here/linuxapk-session" _run "$out" "$data"
   # _run records the pids once Android init (or the hold process) is up.
   for _ in $(seq 100); do

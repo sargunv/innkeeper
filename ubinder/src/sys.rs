@@ -22,10 +22,23 @@
 
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::broker::{Broker, Mem, ProcId, Wakeup};
 use crate::defs::*;
+
+/// Verbose tracing, enabled by LINUXAPK_UBINDER_DEBUG. Logs go to the helper's
+/// stderr (the session's session.out).
+static DEBUG: AtomicBool = AtomicBool::new(false);
+macro_rules! dlog {
+    ($($a:tt)*) => {
+        if DEBUG.load(Ordering::Relaxed) {
+            eprint!("ubinder: ");
+            eprintln!($($a)*);
+        }
+    };
+}
 
 // ---- seccomp uapi (x86_64) --------------------------------------------
 
@@ -44,7 +57,10 @@ fn notif_addfd_cmd(sz: usize) -> u32 {
 }
 
 const SECCOMP_USER_NOTIF_FLAG_CONTINUE: u32 = 1;
+const SECCOMP_ADDFD_FLAG_SETFD: u32 = 1;
 const SECCOMP_ADDFD_FLAG_SEND: u32 = 2;
+
+const EPOLL_CTL_ADD: u64 = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -123,6 +139,11 @@ struct ProcState {
     /// live buffer allocations: user_addr -> (offset, len)
     live: HashMap<u64, (usize, usize)>,
     name: String,
+    /// Looper-based processes (servicemanager, system_server main thread) epoll
+    /// the binder fd. A memfd is not epoll-able, so on EPOLL_CTL_ADD we swap in
+    /// an eventfd (this broker-side copy) that we signal/clear to reflect
+    /// pending work. Present => the process is in poll mode.
+    poll_evfd: Option<OwnedFd>,
 }
 
 // Raw pointer in ProcState: the supervisor owns it exclusively under the lock.
@@ -367,6 +388,10 @@ impl Supervisor {
 /// `listener` (a dup of the single process listener). Spawns a death-monitor
 /// thread. Called by the broker helper (`src/bin/broker.rs`).
 pub fn serve(sock: RawFd, listener: RawFd) {
+    if std::env::var_os("LINUXAPK_UBINDER_DEBUG").is_some() {
+        DEBUG.store(true, Ordering::Relaxed);
+        crate::broker::DEBUG.store(true, Ordering::Relaxed);
+    }
     let mut sizes = SeccompNotifSizes::default();
     let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
     if r != 0 {
@@ -483,8 +508,89 @@ impl Supervisor {
             self.handle_openat(req);
         } else if nr == libc::SYS_ioctl {
             self.handle_ioctl(req);
+        } else if nr == libc::SYS_epoll_ctl {
+            self.handle_epoll_ctl(req);
         } else {
             self.respond(req.id, 0, 0, true); // continue; not ours
+        }
+    }
+
+    // A Looper adds the binder fd to its epoll set. A memfd can't be epolled,
+    // so replace the fd in the target with an eventfd (ADDFD SETFD) that we
+    // drive to signal pending work, then let the epoll_ctl proceed (CONTINUE).
+    fn handle_epoll_ctl(&mut self, req: SeccompNotif) {
+        let op = req.data.args[1];
+        let fd = req.data.args[2] as u32;
+        let tid = req.pid as i32;
+        let pid = tgid_of(tid).unwrap_or(tid);
+        let Some(&procid) = self.fd_index.get(&(pid, fd)) else {
+            self.respond(req.id, 0, 0, true);
+            return;
+        };
+        // Only the first ADD needs the swap; MOD/DEL act on the eventfd already.
+        if op != EPOLL_CTL_ADD
+            || self
+                .procs
+                .get(&procid)
+                .map(|p| p.poll_evfd.is_some())
+                .unwrap_or(true)
+        {
+            self.respond(req.id, 0, 0, true);
+            return;
+        }
+        if !self.id_valid(req.id) {
+            return;
+        }
+        let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        if efd < 0 {
+            self.respond(req.id, 0, 0, true); // give up the swap; let it fail naturally
+            return;
+        }
+        let efd = unsafe { OwnedFd::from_raw_fd(efd) };
+        let addfd = SeccompNotifAddfd {
+            id: req.id,
+            flags: SECCOMP_ADDFD_FLAG_SETFD,
+            srcfd: efd.as_raw_fd() as u32,
+            newfd: fd,
+            newfd_flags: O_CLOEXEC,
+        };
+        let r = unsafe {
+            libc::ioctl(
+                self.listener,
+                notif_addfd_cmd(self.addfd_sz) as _,
+                &addfd as *const _,
+            )
+        };
+        if r < 0 {
+            self.respond(req.id, 0, 0, true);
+            return;
+        }
+        if let Some(p) = self.procs.get_mut(&procid) {
+            p.poll_evfd = Some(efd);
+        }
+        dlog!("epoll swap proc={procid} fd={fd}");
+        self.sync_poll(procid);
+        // Let the kernel run epoll_ctl now that `fd` is a (pollable) eventfd.
+        self.respond(req.id, 0, 0, true);
+    }
+
+    /// Make the proc's poll eventfd level match whether it has pending work.
+    fn sync_poll(&self, proc: ProcId) {
+        let Some(p) = self.procs.get(&proc) else {
+            return;
+        };
+        let Some(efd) = p.poll_evfd.as_ref() else {
+            return;
+        };
+        let efd = efd.as_raw_fd();
+        // Drain, then re-arm only if a polling thread would actually see work
+        // (kernel binder_poll semantics); otherwise proc work with no available
+        // thread would busy-loop the Looper.
+        let mut buf = [0u8; 8];
+        unsafe { libc::read(efd, buf.as_mut_ptr() as *mut _, 8) };
+        if self.broker.proc_pollable(proc) {
+            let one: u64 = 1;
+            unsafe { libc::write(efd, &one as *const u64 as *const _, 8) };
         }
     }
 
@@ -573,10 +679,12 @@ impl Supervisor {
                 free: vec![(0, BINDER_VM_USABLE)],
                 live: HashMap::new(),
                 name,
+                poll_evfd: None,
             },
         );
         self.fd_index.insert((pid, newfd as u32), procid);
         self.ensure_pidfd(pid);
+        dlog!("open pid={pid} ctx={ctx} fd={newfd} proc={procid}");
         // ADDFD+SEND already delivered the syscall return; nothing more to send.
     }
 
@@ -633,12 +741,14 @@ impl Supervisor {
             }
             BINDER_SET_CONTEXT_MGR => {
                 let r = self.broker.set_context_mgr(procid, None);
+                dlog!("set_ctx_mgr proc={procid} ret={:?}", r);
                 self.respond(req.id, 0, errno_of(r), false);
             }
             BINDER_SET_CONTEXT_MGR_EXT => {
                 let fbo = unsafe { vm_read(pid, argp, size_of::<FlatBinderObject>()) }
                     .and_then(|b| read_pod::<FlatBinderObject>(&b, 0));
                 let r = self.broker.set_context_mgr(procid, fbo);
+                dlog!("set_ctx_mgr_ext proc={procid} ret={:?}", r);
                 self.respond(req.id, 0, errno_of(r), false);
             }
             BINDER_THREAD_EXIT => {
@@ -690,6 +800,14 @@ impl Supervisor {
         deliver.insert(procid, req.id); // this thread's own read may install fds
         let listener = self.listener;
         let addfd_sz = self.addfd_sz;
+        // Poll-mode processes drive reads off the eventfd/epoll, so an empty
+        // read must return EAGAIN rather than parking the (single) Looper
+        // thread. Threadpool-only processes block and defer.
+        let non_block = self
+            .procs
+            .get(&procid)
+            .map(|p| p.poll_evfd.is_some())
+            .unwrap_or(false);
 
         let res = {
             let mut mem = SysMem {
@@ -701,8 +819,14 @@ impl Supervisor {
                 next_token: &mut self.next_token,
                 deliver_notif: &deliver,
             };
-            self.broker
-                .write_read(procid, tid, &write, bwr.read_size as usize, false, &mut mem)
+            self.broker.write_read(
+                procid,
+                tid,
+                &write,
+                bwr.read_size as usize,
+                non_block,
+                &mut mem,
+            )
         };
 
         let wakeups = res.wakeups;
@@ -719,8 +843,10 @@ impl Supervisor {
                 },
             );
         } else {
+            // eagain => read_consumed 0 (poll mode); finish_read handles both.
             self.finish_read(pid, req.id, argp, bwr, &res.read);
         }
+        self.sync_poll(procid);
         self.deliver_wakeups(wakeups);
     }
 
@@ -751,6 +877,16 @@ impl Supervisor {
                 break;
             }
             let Some(waiter) = self.waiters.remove(&(w.proc, w.tid)) else {
+                // No parked blocking read. If the process polls the binder fd,
+                // signal its eventfd so its Looper wakes and reads.
+                if self
+                    .procs
+                    .get(&w.proc)
+                    .map(|p| p.poll_evfd.is_some())
+                    .unwrap_or(false)
+                {
+                    self.sync_poll(w.proc);
+                }
                 continue;
             };
             if !self.id_valid(waiter.notif_id) {

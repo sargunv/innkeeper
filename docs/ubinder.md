@@ -1,10 +1,47 @@
 # ubinder: userspace binder for no-privilege mode (M4)
 
-Status: **milestone 1 reached** — the driver state machine is implemented in
-Rust (`ubinder/`) and proven by unit tests and a fuzzer. The seccomp supervisor
-wiring (openat/ioctl interception) and full-boot integration are the remaining
-work. Kernel binder stays the default; ubinder changes nothing until it reaches
-parity.
+Status: **milestone 1 done and on main** (state machine + fuzz). **Milestone 2
+in progress on `lane/ubinder`:** the seccomp binding is implemented and
+`linuxapk-session start --ubinder` boots Android with **no binderfs** far enough
+that the userspace broker brings up `servicemanager`, `hwservicemanager`,
+`apexd`, `keystore2`, gatekeeper and keymint, serving real binder IPC
+(transactions, replies, death notifications, context manager, and
+binder/handle/fd/scatter-gather object translation) with zero transaction
+failures. Boot currently stalls before `zygote` (see "Boot bring-up"). Kernel
+binder stays the default; ubinder changes nothing until it reaches parity.
+
+## Boot bring-up (lane/ubinder)
+
+`session/helper/` now installs one combined seccomp filter (bpf + openat +
+binder-ioctl + epoll_ctl; the kernel allows only one notification listener per
+process) and forwards the binder notifications over a SOCK_SEQPACKET pair to the
+Rust broker helper (`/system/bin/linuxapk-ubinder`, a dynamic bionic binary
+whose interpreter is the bootstrap linker so it runs before `/apex` is mounted).
+Bugs fixed to get real libbinder working, each a faithful-semantics gap:
+
+- **epoll**: a memfd is not epoll-able, but libbinder's Looper epolls the binder
+  fd. On `EPOLL_CTL_ADD` the broker swaps the fd for an eventfd (`ADDFD SETFD`)
+  that it signals/clears to reflect pending work (kernel `binder_poll`).
+- **access gate**: libbinder's `selfIfKernelBinderEnabled()` does
+  `access("/dev/binder", R_OK)` before opening; ns-init creates dummy readable
+  device nodes (real opens are still intercepted and injected).
+- **reply lifetime**: `BC_FREE_BUFFER` must free the buffer but keep the
+  transaction record alive until its reply (libbinder frees the incoming buffer
+  before replying).
+- **security context**: nodes with `FLAT_BINDER_FLAG_TXN_SECURITY_CTX`
+  (servicemanager) require `BR_TRANSACTION_SEC_CTX` with a non-null secctx; the
+  broker appends one (SELinux is hidden, so access checks are no-ops).
+- **poll readiness**: the eventfd is armed only when a thread could actually
+  service the work (kernel `binder_has_work`), else a Looper busy-loops.
+
+Remaining: boot stalls waiting for `android.security.maintenance` (a keystore2
+service) before `zygote`; needs further per-service debugging (likely another
+routing/threadpool edge case). Then: `selftest` 12/12, corpus parity, and
+throughput/latency + boot-time numbers vs kernel binder.
+
+Enable broker tracing with
+`LINUXAPK_UBINDER_DEBUG=1 linuxapk-session start --ubinder` (logs to the
+session's `session.out`).
 
 ## Why
 

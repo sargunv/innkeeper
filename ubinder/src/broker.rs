@@ -17,8 +17,20 @@
 //! notifications, the context manager, and sender pid/euid (virtualizable).
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::defs::*;
+
+/// Verbose tracing of transaction failures, toggled by the syscall layer.
+pub static DEBUG: AtomicBool = AtomicBool::new(false);
+macro_rules! tlog {
+    ($($a:tt)*) => {
+        if DEBUG.load(Ordering::Relaxed) {
+            eprint!("ubinder/broker: ");
+            eprintln!($($a)*);
+        }
+    };
+}
 
 pub type ProcId = u32;
 pub type NodeId = u64;
@@ -218,6 +230,9 @@ struct Txn {
     /// fds captured from the sender, to be installed into the target at
     /// delivery: (offset into the recv buffer, capture token).
     fd_fixups: Vec<(usize, u64)>,
+    /// target address of the appended security context string (0 if none);
+    /// delivered via BR_TRANSACTION_SEC_CTX to nodes that requested it.
+    security_ctx: u64,
 }
 
 #[derive(Clone)]
@@ -369,6 +384,33 @@ impl Broker {
         self.nodes.insert(id, node);
         self.procs.get_mut(&proc).unwrap().nodes.insert(ptr, id);
         id
+    }
+
+    /// Does this process have any work queued (proc-wide or on any thread)?
+    pub fn proc_has_pending(&self, proc: ProcId) -> bool {
+        match self.procs.get(&proc) {
+            Some(p) => !p.todo.is_empty() || p.threads.values().any(|t| !t.todo.is_empty()),
+            None => false,
+        }
+    }
+
+    /// Would a Looper thread polling the binder fd see work right now? Mirrors
+    /// the kernel's `binder_poll`/`binder_has_work`: thread-directed ready work
+    /// (process_todo) counts always; process-wide work counts only if some
+    /// thread is available to service it (no transaction stack, empty todo).
+    /// Used to drive the poll eventfd so it doesn't busy-loop when proc work is
+    /// queued but every thread is mid-transaction.
+    pub fn proc_pollable(&self, proc: ProcId) -> bool {
+        let Some(p) = self.procs.get(&proc) else {
+            return false;
+        };
+        if p.threads.values().any(|t| t.process_todo) {
+            return true;
+        }
+        !p.todo.is_empty()
+            && p.threads
+                .values()
+                .any(|t| t.transaction_stack.is_none() && t.todo.is_empty())
     }
 
     // ---- handle table --------------------------------------------------
@@ -587,19 +629,25 @@ impl Broker {
                     out.push(Wakeup { proc: pid, tid });
                 }
             }
-            // proc work: wake one waiting thread
-            if !p.todo.is_empty()
-                && let Some(pos) = p
+            // proc work: wake one waiting thread, if any is parked.
+            if !p.todo.is_empty() {
+                let parked = p
                     .waiting_threads
                     .iter()
-                    .position(|&tid| p.threads.get(&tid).map(|t| t.waiting).unwrap_or(false))
-            {
-                let tid = p.waiting_threads.remove(pos).unwrap();
-                if let Some(t) = p.threads.get_mut(&tid) {
-                    t.waiting = false;
-                }
-                if !out.iter().any(|w| w.proc == pid && w.tid == tid) {
-                    out.push(Wakeup { proc: pid, tid });
+                    .position(|&tid| p.threads.get(&tid).map(|t| t.waiting).unwrap_or(false));
+                if let Some(pos) = parked {
+                    let tid = p.waiting_threads.remove(pos).unwrap();
+                    if let Some(t) = p.threads.get_mut(&tid) {
+                        t.waiting = false;
+                    }
+                    if !out.iter().any(|w| w.proc == pid && w.tid == tid) {
+                        out.push(Wakeup { proc: pid, tid });
+                    }
+                } else if !out.iter().any(|w| w.proc == pid) {
+                    // No parked thread (e.g. a Looper/epoll process that polls
+                    // the binder fd). Emit a proc-level wakeup (tid 0) so the
+                    // syscall layer can signal that process's poll eventfd.
+                    out.push(Wakeup { proc: pid, tid: 0 });
                 }
             }
         }
@@ -767,6 +815,14 @@ impl Broker {
     ) {
         let r = self.transaction_inner(proc, tid, td, reply, extra_buffers_size, mem, res);
         if let Err(err) = r {
+            tlog!(
+                "txn FAIL proc={proc} tid={tid} reply={reply} code={} handle={} dsz={} osz={} err={:#x}",
+                td.code,
+                td.target as u32,
+                td.data_size,
+                td.offsets_size,
+                err
+            );
             // Deliver the failure to the caller thread as a return error, and
             // if this was a reply, fail the original caller too.
             self.thread(proc, tid)
@@ -858,9 +914,26 @@ impl Broker {
         // Scatter-gather region lives after data+offsets, 8-aligned.
         let off_start = align_up(data_size, 8);
         let sg_start = align_up(off_start + offsets_size, 8);
-        let buffer_total = sg_start + align_up(extra_buffers_size, 8);
+        let sg_end = sg_start + align_up(extra_buffers_size, 8);
         let mut sg_bytes = vec![0u8; align_up(extra_buffers_size, 8)];
         let mut sg_cursor = 0usize;
+
+        // Nodes with FLAT_BINDER_FLAG_TXN_SECURITY_CTX (e.g. servicemanager)
+        // receive the sender's SELinux context appended after the buffer. The
+        // session hides SELinux, so synthesise a plausible, non-null context;
+        // servicemanager's access checks are no-ops while SELinux is disabled,
+        // but libbinder/servicemanager abort if the pointer is null.
+        let want_secctx = !reply
+            && target_node
+                .map(|n| self.nodes[&n].txn_security_ctx)
+                .unwrap_or(false);
+        const SECCTX: &[u8] = b"u:r:su:s0\0";
+        let secctx_off = sg_end;
+        let buffer_total = if want_secctx {
+            sg_end + align_up(SECCTX.len(), 8)
+        } else {
+            sg_end
+        };
 
         let accept_fds = if reply {
             in_reply_to
@@ -886,10 +959,12 @@ impl Broker {
             let obj_off =
                 u64::from_le_bytes(offsets_raw[i * 8..i * 8 + 8].try_into().unwrap()) as usize;
             if obj_off + 4 > data.len() || !obj_off.is_multiple_of(4) {
+                tlog!("xlate: bad obj_off={obj_off} dlen={}", data.len());
                 self.unwind(target_proc, buffer_addr, &release, &fd_fixups, mem);
                 return Err(BR_FAILED_REPLY);
             }
             let hdr: u32 = read_pod(&data, obj_off).unwrap();
+            tlog!("xlate obj[{i}] off={obj_off} hdr={hdr:#x}");
             match hdr {
                 BINDER_TYPE_BINDER | BINDER_TYPE_WEAK_BINDER => {
                     let mut fbo: FlatBinderObject =
@@ -914,9 +989,15 @@ impl Broker {
                     let mut fbo: FlatBinderObject =
                         read_pod(&data, obj_off).ok_or(BR_FAILED_REPLY)?;
                     let strong = hdr == BINDER_TYPE_HANDLE;
-                    let node = self
-                        .ref_node_of(proc, fbo.binder_or_handle as u32)
-                        .ok_or(BR_FAILED_REPLY)?;
+                    let h = fbo.binder_or_handle as u32;
+                    let node = match self.ref_node_of(proc, h) {
+                        Some(n) => n,
+                        None => {
+                            tlog!("xlate: handle {h} not found in proc={proc}");
+                            self.unwind(target_proc, buffer_addr, &release, &fd_fixups, mem);
+                            return Err(BR_FAILED_REPLY);
+                        }
+                    };
                     let owner = self.nodes[&node].proc;
                     if owner == target_proc {
                         // Handle resolves to a node the target owns: hand back
@@ -1061,11 +1142,17 @@ impl Broker {
             }
         }
 
-        // Assemble the final target buffer: data | offsets | sg.
+        // Assemble the final target buffer: data | offsets | sg | [secctx].
         let mut out = vec![0u8; buffer_total];
         out[..data_size].copy_from_slice(&data[..data_size]);
         out[off_start..off_start + offsets_size].copy_from_slice(&offsets_raw);
         out[sg_start..sg_start + sg_bytes.len()].copy_from_slice(&sg_bytes);
+        let security_ctx = if want_secctx {
+            out[secctx_off..secctx_off + SECCTX.len()].copy_from_slice(SECCTX);
+            buffer_addr + secctx_off as u64
+        } else {
+            0
+        };
         mem.write_recv(target_proc, buffer_addr, &out);
 
         // Build the transaction record. In both real-uid and virtual-uid mode
@@ -1097,6 +1184,7 @@ impl Broker {
             to_parent: in_reply_to,
             release,
             fd_fixups,
+            security_ctx,
         };
         self.txns.insert(txid, txn);
 
@@ -1252,9 +1340,15 @@ impl Broker {
                 return;
             }
         };
-        let (release, is_async, node, total) = {
+        let (release, is_async, is_reply, node, total) = {
             let t = &self.txns[&txid];
-            (t.release.clone(), t.is_async, t.target_node, t.buffer_total)
+            (
+                t.release.clone(),
+                t.is_async,
+                t.is_reply,
+                t.target_node,
+                t.buffer_total,
+            )
         };
         // Release contained strong refs the *target* now drops (handles/nodes).
         for item in &release {
@@ -1299,7 +1393,21 @@ impl Broker {
                 }
             }
         }
-        self.txns.remove(&txid);
+        // A synchronous *incoming* call is freed by the target before it sends
+        // the reply, but the transaction record must outlive the buffer: the
+        // target's BC_REPLY still needs it (it is on the target thread's
+        // transaction stack). Keep it (the reply path removes it); just detach
+        // the now-freed buffer so a later allocation at the same address can't
+        // match this record. Replies and oneway transactions are done, so drop.
+        if !is_reply && !is_async {
+            if let Some(t) = self.txns.get_mut(&txid) {
+                t.buffer_addr = u64::MAX;
+                t.release.clear();
+                t.fd_fixups.clear();
+            }
+        } else {
+            self.txns.remove(&txid);
+        }
     }
 
     fn deliver_async(&mut self, txid: TxnId, proc: ProcId) {
@@ -1739,11 +1847,12 @@ impl Broker {
         } else {
             BR_TRANSACTION
         };
+        let secctx_addr = t.security_ctx;
         write_pod(out, &cmd);
         if cmd == BR_TRANSACTION_SEC_CTX {
             let sc = BinderTransactionDataSecctx {
                 transaction_data: td,
-                secctx: 0,
+                secctx: secctx_addr,
             };
             write_pod(out, &sc);
         } else {
