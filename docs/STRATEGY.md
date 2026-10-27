@@ -133,6 +133,21 @@ running with no privileges anywhere:
 - **Cost:** an extra copy and hop through the broker. Measure it. Input events
   use sockets, not binder.
 
+## Languages
+
+Pick the language by where the code runs:
+- **C/C++ inside Android processes and on C ABIs:** the vendor HAL services
+  (the AIDL NDK backend generates C++), mapper and Vulkan `.so` files loaded
+  into every process, `LD_PRELOAD` shims, and Mesa patches. Keep these small.
+- **Rust for new standalone components,** especially at security boundaries:
+  - the ubinder broker (parses untrusted input from every Android process);
+  - the session launcher (namespace and mount setup; bash today, rewritten once
+    its design settles);
+  - the desktop bridge (zbus, ashpd, smithay-client-toolkit, AccessKit);
+  - the host launcher and packaging tools.
+- **Not Zig:** it has no binder/AIDL ecosystem, it's still pre-1.0, and the NDK
+  already covers cross-compiling C.
+
 ## Packaging and distros
 
 The goal is per-app bundles: each Android app shipped as its own Flatpak or
