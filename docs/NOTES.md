@@ -120,8 +120,6 @@ Causes:
   `docs/cli.md`. Instance `cli`.
 - compat: F-Droid corpus, automated runner, COMPATIBILITY.md, triage. Docs:
   `docs/compat-triage.md`.
-- cli (M3): host command `linuxapk` (`cli/`, Rust): install, run, `.desktop`
-  entries, APK open-with handler. Docs: `docs/cli.md`. Instance `cli`.
 - input (done, e2e 15/15): Kotlin platform-signed system app
   (`dev.linuxapk.system`) that injects the composer's Wayland input stream into
   Android. Docs: `docs/input.md`.
