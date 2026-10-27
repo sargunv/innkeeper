@@ -343,6 +343,23 @@ fn kcmp_same_file(pid: i32, ours: RawFd, theirs: u32) -> bool {
     r == 0
 }
 
+/// A receive-region memfd of BINDER_MEMFD_SIZE, sealed against resizing: the
+/// process gets it writable, and a shrink would make the broker's writes
+/// through its own mapping fault (SIGBUS).
+fn recv_memfd(name: &str) -> Option<OwnedFd> {
+    let cname = std::ffi::CString::new(name).ok()?;
+    let fd =
+        unsafe { libc::memfd_create(cname.as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if fd < 0 {
+        return None;
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let seals = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
+    (unsafe { libc::ftruncate(fd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } == 0
+        && unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) } == 0)
+        .then_some(fd)
+}
+
 // ---- Mem over real processes ------------------------------------------
 
 struct SysMem<'a> {
@@ -701,24 +718,13 @@ impl Supervisor {
         let flags = req.data.args[2] as u32;
         let name = format!("lxbinder-{}", self.next_memfd);
         self.next_memfd += 1;
-        let cname = std::ffi::CString::new(name).unwrap();
-        let memfd = unsafe { libc::memfd_create(cname.as_ptr(), libc::MFD_CLOEXEC) };
-        if memfd < 0 {
-            {
-                self.respond(req.id, 0, libc::ENOMEM, false);
-                return;
-            }
-        }
-        let memfd = unsafe { OwnedFd::from_raw_fd(memfd) };
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        if unsafe { libc::ftruncate(memfd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } != 0
-            || unsafe { libc::fstat(memfd.as_raw_fd(), &mut st) } != 0
-        {
-            {
-                self.respond(req.id, 0, libc::ENOMEM, false);
-                return;
-            }
-        }
+        let Some(memfd) =
+            recv_memfd(&name).filter(|m| unsafe { libc::fstat(m.as_raw_fd(), &mut st) } == 0)
+        else {
+            self.respond(req.id, 0, libc::ENOMEM, false);
+            return;
+        };
         let map = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -1194,5 +1200,31 @@ impl Supervisor {
             self.release_proc(id);
         }
         self.drain();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Android gets the receive memfd writable; it must not be able to resize
+    /// it under the broker's mapping.
+    #[test]
+    fn recv_memfd_is_sealed() {
+        let m = recv_memfd("lxbinder-test").unwrap();
+        let fd = m.as_raw_fd();
+        assert_eq!(unsafe { libc::ftruncate(fd, 0) }, -1);
+        assert_eq!(
+            unsafe { libc::ftruncate(fd, 2 * BINDER_MEMFD_SIZE as i64) },
+            -1
+        );
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::fstat(fd, &mut st) }, 0);
+        assert_eq!(st.st_size as usize, BINDER_MEMFD_SIZE);
+        // Writes through mappings still work.
+        assert_eq!(
+            unsafe { libc::pwrite(fd, b"x".as_ptr() as *const _, 1, 0) },
+            1
+        );
     }
 }
