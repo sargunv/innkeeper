@@ -22,6 +22,7 @@ session in a sandbox of its own) and `_userns` (a command as Android's root, for
 | `uid.rs`                           | the uid mode, the id maps, entering the session's user namespace                      |
 | `image.rs`, `layer.rs`             | preparing the image; the start-time layer, `/proc/cmdline` and `/proc/bootconfig`     |
 | `host.rs`, `nsroot.rs`             | host mode: the unit, pasta, the outer namespaces and the root of overlays they mount  |
+| `requirements.rs`, `appimage.rs`   | host mode: what the host lacks, named up front; running from the AppImage's copy      |
 | `flatpak.rs`, `control.rs`         | Flatpak mode: the composed root, the sandbox's `/`, the session's lifetime and socket |
 | `root.rs`, `init.rs`, `session.rs` | what both modes share: partitions, binder nodes, `/linuxapk`, pivot-exec, the bridge  |
 | `exec.rs`, `selftest.rs`           | `exec` (namespaces or the control socket, then the exec relay) and the probes         |
@@ -31,6 +32,7 @@ session in a sandbox of its own) and `_userns` (a command as Android's root, for
 | `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio                |
 | `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session          |
 | `LINUXAPK_OPEN_URLS`                               | tests: let a test session open links                            |
+| `LINUXAPK_APPIMAGE`                                | set by the AppImage's `AppRun`: desktop entries run through it  |
 | `LINUXAPK_DATA`, `LINUXAPK_IMAGES`, `LINUXAPK_PIN` | tests: Android's `/data`, the image cache, the pin              |
 | `LINUXAPK_SUBUID_FILE`, `LINUXAPK_SUBGID_FILE`     | tests: stand-ins for `/etc/sub[ug]id` when picking the uid mode |
 | `LINUXAPK_BRIDGE_VERBOSE`, `LINUXAPK_BROKER_DEBUG` | debugging: bridge stream stats; broker tracing                  |

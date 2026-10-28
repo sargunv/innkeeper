@@ -85,7 +85,9 @@ network through pasta ([session.md](session.md)).
 
 ## Packaging scope
 
-- Linux.apk itself ships as a Flatpak (an AppImage if practical). Per-app
+- Linux.apk itself ships as a Flatpak, and as an AppImage
+  ([packaging/appimage](../packaging/appimage/README.md)), which runs the
+  session in host mode and so needs from the host what a checkout does. Per-app
   Flatpaks are an optional extra, never a design constraint.
 - Installing anything never needs `sudo`: no RPM/deb/AUR packages, SELinux
   modules, AppArmor profiles or kernel modules.

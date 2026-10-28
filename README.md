@@ -110,6 +110,7 @@ flowchart LR
 | [android/microg](android/microg/README.md)                             | optional microG addon                                  | Android                                   | `install.sh`                   |
 | [tests](tests/README.md)                                               | test harnesses and suites                              | desktop, never shipped                    | its README                     |
 | [packaging/flatpak](packaging/flatpak/README.md)                       | prototype Flatpak of the staged prefix                 | build time                                | `build.sh`                     |
+| [packaging/appimage](packaging/appimage/README.md)                     | AppImage of the staged prefix                          | build time                                | `build.sh`, `AppRun`           |
 | [tools](tools/README.md)                                               | build container, staging, dev scripts                  | build time                                | `build/artifacts.toml`         |
 | [docs](docs/)                                                          | cross-cutting design                                   |                                           | `architecture.md`              |
 

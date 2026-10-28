@@ -13,7 +13,9 @@ use anyhow::{Context, Result, bail};
 use crate::conf::Config;
 use crate::paths::{Paths, Sandbox};
 use crate::uid::{self, Uids};
-use crate::{control, exec, flatpak, host, image, layer, requirements, selftest, session, sys};
+use crate::{
+    appimage, control, exec, flatpak, host, image, layer, requirements, selftest, session, sys,
+};
 
 const USAGE: &str = "\
 Linux.apk session launcher: boots the pinned Android image (image/pin.toml) in
@@ -53,7 +55,8 @@ after `mise run build`) and builds nothing. Its files:
     the documents service's grants
   $XDG_DATA_HOME/linuxapk/                 images/, data[-<instance>]/
     (Android's /data), addons/ (layers over the partitions, e.g. microG),
-    root[-<instance>]/ (Flatpak mode's composed root)
+    root[-<instance>]/ (Flatpak mode's composed root), appimage/ (the
+    prefix a session started from the AppImage runs from)
 
 Environment:
   LINUXAPK_AUDIO_SINK      PipeWire sink for the session's audio (default:
@@ -279,8 +282,17 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         bail!("already running (pid {p})");
     }
     check_kernel(paths.sandbox)?;
+    let mut exe = exe()?;
+    let copy;
+    let mut paths = paths;
     if paths.sandbox == Sandbox::Host {
         requirements::check(!headless)?;
+        // From the AppImage, the session runs from a copy of its prefix.
+        if let Some(prefix) = appimage::session_prefix(paths)? {
+            exe = prefix.join("libexec/linuxapk/linuxapk-session");
+            copy = Paths::new(&prefix)?;
+            paths = &copy;
+        }
     }
     let uids = uid::setup(&paths.data, paths.sandbox)?;
     // Windows go through the bridge's display service, which connects to the
@@ -291,7 +303,6 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         Some(wayland_socket(paths.sandbox)?)
     };
     let image = paths.image()?;
-    let exe = exe()?;
     image::prepare(paths, &image, &uids, &exe)?;
     let flatpak = paths.sandbox == Sandbox::Flatpak;
     if flatpak && !follow && !serve {

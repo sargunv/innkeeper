@@ -37,6 +37,11 @@ sequenceDiagram
   curl, Python 3.11+, read-write `/dev/udmabuf`) and name everything missing in
   one error, saying which ones the Flatpak avoids. Fixing any of them needs
   root. No PulseAudio socket only warns.
+- **From the AppImage** ([packaging/appimage](../packaging/appimage/README.md))
+  the prefix is a FUSE mount that ends with the CLI or manager that mounted it.
+  So `start` copies the prefix to `$XDG_DATA_HOME/linuxapk/appimage/<build>/`
+  (once per build) and runs the session from that copy. Copies that no process
+  runs from are removed.
 - **Second-stage init directly.** The launcher does first stage's job: it mounts
   `/dev`, `/proc` and `/sys`, and passes `androidboot.*` values through a fake
   `/proc/bootconfig` (`androidboot.hardware=linuxapk`, plus the vendor APEX
@@ -163,12 +168,12 @@ to `SO_PEERCRED`.
 
 ## Where things live
 
-| Dir                                      | Contents                                                                                                                                                                           |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/linuxapk/`               | `images/<build>/{img,apex-<hash>,derived}` (shared by every instance), `data[-<instance>]/` (Android's `/data`), `addons/`, `test-bin/` (dev), `root[-<instance>]/` (Flatpak mode) |
-| `$XDG_STATE_HOME/linuxapk[-<instance>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                        |
-| `$XDG_STATE_HOME/linuxapk/notices/`      | one-time notices already shown (shared by every instance)                                                                                                                          |
-| `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`; in Flatpak mode under `app/<app id>/`, with `control.sock`                                      |
+| Dir                                      | Contents                                                                                                                                                                                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `$XDG_DATA_HOME/linuxapk/`               | `images/<build>/{img,apex-<hash>,derived}` (shared by every instance), `data[-<instance>]/` (Android's `/data`), `addons/`, `test-bin/` (dev), `root[-<instance>]/` (Flatpak mode), `appimage/<build>/` (the AppImage's prefix, which its sessions run from) |
+| `$XDG_STATE_HOME/linuxapk[-<instance>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                                                                  |
+| `$XDG_STATE_HOME/linuxapk/notices/`      | one-time notices already shown (shared by every instance)                                                                                                                                                                                                    |
+| `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`; in Flatpak mode under `app/<app id>/`, with `control.sock`                                                                                                                |
 
 `LINUXAPK_INSTANCE` names an independent session for tests; its suffix goes on
 every per-instance path and the unit name.

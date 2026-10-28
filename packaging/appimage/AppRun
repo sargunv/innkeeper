@@ -1,0 +1,35 @@
+#!/bin/sh
+# The AppImage's entry point: the manager, or with `linuxapk` as the first
+# argument the CLI (`Linux.apk-x86_64.AppImage linuxapk install App.apk`).
+set -eu
+here=$(dirname "$(readlink -f "$0")")
+# Desktop entries for apps run them through the AppImage (host/core, paths.rs).
+export LINUXAPK_APPIMAGE="${APPIMAGE-}"
+if [ "${1-}" = linuxapk ]; then
+  shift
+  prog=$here/usr/bin/linuxapk
+else
+  prog=$here/usr/bin/linuxapk-manager
+fi
+
+# The shared libraries come from this computer: glibc, and GTK 4 and
+# libadwaita for the manager. Name what's missing rather than leave the
+# loader's error (or, from a desktop menu, nothing).
+lib=$here/usr/libexec/linuxapk
+missing=
+if command -v ldd >/dev/null; then
+  missing=$(for f in "$prog" "$lib/linuxapk-session" "$lib/linuxapk-bridge"; do
+    ldd "$f" 2>&1
+  done | grep 'not found' | sort -u) || :
+fi
+if [ -n "$missing" ]; then
+  msg="Linux.apk can't start: this computer lacks libraries it needs:
+$(printf '%s\n' "$missing" | sed 's/^[[:space:]]*/- /')
+It needs glibc @GLIBC@ or later, and for its window GTK 4.18 and libadwaita 1.7 or later. Linux.apk's Flatpak (dev.linuxapk.Manager) brings its own."
+  printf '%s\n' "$msg" >&2
+  if ! [ -t 2 ] && command -v notify-send >/dev/null; then
+    timeout 10 notify-send -a Linux.apk -i dialog-error "Linux.apk can't start" "$msg" || :
+  fi
+  exit 1
+fi
+exec "$prog" "$@"

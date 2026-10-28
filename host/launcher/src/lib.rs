@@ -2,6 +2,7 @@
 //! and what host/core reads of a session without running it: its paths, its
 //! status and its memory. docs/session.md describes the session.
 
+mod appimage;
 pub mod cli;
 mod conf;
 mod control;

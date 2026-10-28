@@ -11,6 +11,8 @@ lockfile = true
 "aqua:mvdan/sh" = "3.14.1"
 "aqua:ninja-build/ninja" = "1.13.2"
 "core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-linux-android" }
+"github:AppImage/appimagetool" = { version = "1.9.1", bin = "appimagetool" }
+"github:AppImage/type2-runtime" = { version = "20251108", asset_pattern = "runtime-x86_64", bin = "appimage-runtime-x86_64" }
 "github:jdx/hk" = "2.8.1"
 "core:java" = "zulu-25.36.205.0"
 
