@@ -96,7 +96,18 @@ artifacts = [
   "libexec/linuxapk/image/fetch.sh",
   "libexec/linuxapk/image/extract.sh",
   "libexec/linuxapk/image/flatten-apex.sh",
+  "libexec/linuxapk/image/fs-extract.sh",
   "libexec/linuxapk/image/derive.sh",
+]
+
+[module.image-tools]
+task = "build:image-tools"
+runs = "on the desktop, when the launcher prepares the image (static)"
+artifacts = [
+  "libexec/linuxapk/simg2img",
+  "libexec/linuxapk/lpunpack",
+  "libexec/linuxapk/fsck.erofs",
+  "libexec/linuxapk/debugfs",
 ]
 
 [overrides]

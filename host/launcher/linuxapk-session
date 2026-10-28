@@ -188,7 +188,7 @@ check_data_owner() {
 # uid mode.
 prepare() {
   local single=${1:-0} layer want
-  [[ -d $img/system/system ]] || "$here/image/fetch.sh" "$pin"
+  [[ -d $img/system/system ]] || "$here/image/fetch.sh" "$pin" "$images"
   if [[ ! -f $apexdir/apex-info-list.xml ]]; then
     rm -rf "$apexdir.tmp$sfx"
     "$here/image/flatten-apex.sh" "$img" "$share/image/bootconfig" "$apexdir.tmp$sfx"

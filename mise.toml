@@ -82,6 +82,10 @@ description = "LinuxApkSystem.apk, platform-signed"
 dir = "android/system-app"
 run = "./gradlew --console=plain -q :app:install"
 
+[tasks."build:image-tools"]
+description = "Static simg2img, lpunpack, fsck.erofs and debugfs for image setup (build container; skipped when unchanged)"
+run = "image/tools/build.sh"
+
 [tasks."build:data"]
 description = "The overlay (android/overlay) and the image's config and scripts"
 run = """
@@ -92,7 +96,6 @@ cp -a android/overlay/. out/build/overlay/install/share/linuxapk/android/
 i=out/build/image/install
 install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig image/vendor.prop
 install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
-install -D -m 644 -t $i/libexec/linuxapk/image image/Containerfile.hosttools
 """
 
 [tasks.stage]

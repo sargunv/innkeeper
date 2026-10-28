@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Download the pinned Android image from Android's public CI, verify it, and
 # extract its partitions (see docs/image.md):
-#   $LINUXAPK_IMAGES/<name>/dl/   artifacts from image/pin.toml (resumable)
-#   $LINUXAPK_IMAGES/<name>/img/  system, system_ext, product, vendor, odm,
-#                                 *_dlkm (image/extract.sh)
-# LINUXAPK_IMAGES defaults to $XDG_DATA_HOME/linuxapk/images. The session
-# flattens the APEXes itself (per vendor APEX selection), on first start.
+#   <images>/<name>/dl/   artifacts from image/pin.toml (resumable); the image
+#                         zip is deleted once extracted
+#   <images>/<name>/img/  system, system_ext, product, vendor, odm, *_dlkm
+#                         (image/extract.sh)
+# The session flattens the APEXes itself (per vendor APEX selection).
 #
-# usage: fetch.sh <pin.toml>
+# usage: fetch.sh <pin.toml> <images>
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-pin=${1:?usage: fetch.sh <pin.toml>}
-images=${LINUXAPK_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/images}
+usage="usage: fetch.sh <pin.toml> <images>"
+pin=${1:?$usage} images=${2:?$usage}
 
 die() {
   echo "fetch.sh: $*" >&2
@@ -38,12 +38,19 @@ mkdir -p "$dest/dl"
 exec 9>"$dest/.lock"
 flock 9
 
+zip=$(tail -n +2 <<<"$parsed" | cut -f2 | grep -- '-img-.*\.zip$' | head -1)
+zsha=$(tail -n +2 <<<"$parsed" | awk -F'\t' -v z="$zip" '$2 == z {print $4}')
+extracted() { [[ $(cat "$dest/img/.source" 2>/dev/null) == "$zsha" ]]; }
+
 verify() { # file size sha256
   [[ -f $1 && $(stat -c %s "$1") == "$2" ]] && [[ $(sha256sum "$1" | cut -d' ' -f1) == "$3" ]]
 }
 
 while IFS=$'\t' read -r url file size sha; do
   f=$dest/dl/$file
+  if [[ $file == "$zip" ]] && extracted; then
+    continue
+  fi
   if verify "$f" "$size" "$sha"; then
     echo "have $file"
     continue
@@ -61,10 +68,7 @@ while IFS=$'\t' read -r url file size sha; do
   mv "$f.part" "$f"
 done < <(tail -n +2 <<<"$parsed")
 
-# Extract once per verified image zip.
-zip=$(tail -n +2 <<<"$parsed" | cut -f2 | grep -- '-img-.*\.zip$' | head -1)
-zsha=$(tail -n +2 <<<"$parsed" | awk -F'\t' -v z="$zip" '$2 == z {print $4}')
-if [[ $(cat "$dest/img/.source" 2>/dev/null) == "$zsha" ]]; then
+if extracted; then
   echo "already extracted: $dest/img"
 else
   rm -rf "$dest/img.tmp"
@@ -74,3 +78,4 @@ else
   mv "$dest/img.tmp" "$dest/img"
   echo "extracted $name into $dest/img"
 fi
+rm -f "$dest/dl/$zip"

@@ -3,7 +3,7 @@
 # way apexd would mount them:
 #   <out>/<apex-name>/...          payload contents (name from apex_manifest.pb)
 #   <out>/apex-info-list.xml       what apexd writes to /apex/apex-info-list.xml
-# Unprivileged: runs inside the host-tools container (image/hosttools.sh).
+# Unprivileged, with the static tools from image/tools.
 #
 # usage: flatten-apex.sh <extracted-image-dir> <bootconfig> <out-dir>
 #
@@ -15,10 +15,7 @@
 # androidboot.*=value tokens, # comments), which the session also passes to
 # init.
 set -euo pipefail
-if [[ ! -e /run/.containerenv ]]; then
-  exec "$(dirname "$0")/hosttools.sh" "$0" "$@"
-fi
-
+here=$(cd "$(dirname "$0")" && pwd)
 usage="usage: flatten-apex.sh <img-dir> <bootconfig> <out-dir>"
 img=$(realpath "${1:?$usage}")
 bootconfig=${2:?$usage}
@@ -28,7 +25,8 @@ while read -r k v; do sel[$k]=$v; done < <(sed 's/#.*//' "$bootconfig" | tr -s '
   sed -n 's/^androidboot\.vendor\.apex\.\([^=]*\)=\(.*\)/\1 \2/p')
 mkdir -p "$out"
 out=$(realpath "$out")
-work=$(mktemp -d)
+work=$out/.work
+mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
 # Print "name<TAB>version" from an apex_manifest.pb (proto3: 1=name, 2=version).
@@ -57,16 +55,6 @@ while i < len(b):
     else: raise SystemExit(f'bad wire type {t}')
 print(f'{name}\t{ver}')
 EOF
-}
-
-extract_fs() {
-  local fsimg=$1 dest=$2
-  if [[ $(file -b "$fsimg") == *ext[24]* ]]; then
-    debugfs -R "rdump / $dest" "$fsimg" >/dev/null 2>&1
-    # rdump puts the image root's children directly in $dest.
-  else
-    fsck.erofs --extract="$dest" --no-preserve "$fsimg" >/dev/null
-  fi
 }
 
 declare -A partition_of=(
@@ -108,8 +96,7 @@ for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex;
     dest="$out/$name"
     rm -rf "$dest"
     mkdir -p "$dest"
-    extract_fs "$work/x/apex_payload.img" "$dest"
-    rm -rf "$dest/lost+found"
+    "$here/fs-extract.sh" "$work/x/apex_payload.img" "$dest"
     # apexd exposes the manifest at /apex/<name>/apex_manifest.pb; the payload
     # already carries it, but make sure.
     [[ -e $dest/apex_manifest.pb ]] || cp "$work/x/apex_manifest.pb" "$dest/"
