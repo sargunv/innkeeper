@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * The bridge's documents service (docs/bridge.md, "Documents service"): host files and folders the
+ * The bridge's documents service (host/bridge/src/documents/proto.rs): host files and folders the
  * user picks in the desktop's file chooser. Android only ever sees grant ids and file descriptors,
  * never host paths. One process-wide connection, shared by [PickerActivity] and
  * [HostDocumentsProvider].

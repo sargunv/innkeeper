@@ -13,7 +13,7 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<!-- Linux.apk (audio lane, docs/audio.md): the image's primary module without
+<!-- Linux.apk (android/vendor/audio/README.md): the image's primary module without
      its mmap_no_irq_* and compressed_offload mix ports. AOSP's default AIDL
      HAL serves those with silent stubs (StreamMmapStub, StreamOffloadStub),
      so low-latency AAudio and offloaded music played nothing. Everything now

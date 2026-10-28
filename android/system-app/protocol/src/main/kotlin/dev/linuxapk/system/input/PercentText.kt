@@ -4,7 +4,7 @@ package dev.linuxapk.system.input
 import java.io.ByteArrayOutputStream
 
 /**
- * Text in protocol lines (the bridge's `display/ime.rs`): bytes up to space, DEL and `%` are `%XX`;
+ * Text in protocol lines (the bridge's `input/ime.rs`): bytes up to space, DEL and `%` are `%XX`;
  * everything else, including non-ASCII UTF-8, is sent as is. The bridge refuses any other form, so
  * [encode] must match it exactly.
  */

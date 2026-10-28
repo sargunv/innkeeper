@@ -96,7 +96,7 @@ static int is_selinux_xattr(const char* name) {
   return name && strcmp(name, "security.selinux") == 0;
 }
 
-// Single-uid mode (docs/sandbox.md): the kernel rejects POSIX ACL entries
+// Single-uid mode (supervisor/README.md): the kernel rejects POSIX ACL entries
 // naming Android's uids and gids, which aren't mapped. vold gives
 // /data/media/<user> a default ACL (group media_rw/everybody) and fails user
 // storage preparation without it, and system_server then reboots to recovery
@@ -253,8 +253,8 @@ EXPORT int ioctl(int fd, int request, ...) {
   return rc;
 }
 
-// Single-uid mode (docs/sandbox.md): the kernel sees every file as owned by
-// uid 0, and the seccomp supervisor records the owner a chown asked for in
+// Single-uid mode (supervisor/README.md): the kernel sees every file as owned
+// by uid 0, and the seccomp supervisor records the owner a chown asked for in
 // the "user.linuxapk.owner" xattr ("uid:gid"). installd verifies the owners of
 // the app directories it prepares (fs_prepare_dir_strict, the cache dirs, the
 // fts walks of fixupAppData and clearAppCache) and treats a mismatch as a

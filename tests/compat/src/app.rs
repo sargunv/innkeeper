@@ -744,7 +744,7 @@ impl<'a> Run<'a> {
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
                 // Text the host bridge logged since the script started, e.g. a
                 // link a test session only logs instead of opening
-                // (docs/bridge.md, "Opening links").
+                // (host/bridge/src/system/openuri.rs).
                 "bridgelog" => {
                     let log = self.s.bridge_log(log_from);
                     if !log.contains(arg) {

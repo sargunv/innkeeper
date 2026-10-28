@@ -16,10 +16,10 @@ import dev.linuxapk.system.integration.IntegrationFeature
 import dev.linuxapk.system.wm.WindowManagerFeature
 
 /**
- * Active media sessions as desktop MPRIS players (docs/bridge.md, "Media"): each session's metadata
- * and playback state go to the bridge as `MEDIA`, and MPRIS calls (media keys, the desktop's media
- * widget) come back as transport controls. Runs on the integration thread. Needs the notification
- * listener enabled (or MEDIA_CONTENT_CONTROL) to see other apps' sessions.
+ * Active media sessions as desktop MPRIS players (host/bridge/src/system/mpris.rs): each session's
+ * metadata and playback state go to the bridge as `MEDIA`, and MPRIS calls (media keys, the
+ * desktop's media widget) come back as transport controls. Runs on the integration thread. Needs
+ * the notification listener enabled (or MEDIA_CONTENT_CONTROL) to see other apps' sessions.
  */
 class MediaSync(private val context: Context, private val feature: IntegrationFeature) {
   private inner class Player(val id: Int, val controller: MediaController) :

@@ -15,7 +15,7 @@ import kotlin.math.roundToInt
 
 /**
  * "Linux.apk Keyboard": the host's keyboard and input methods (IBus, Fcitx) for Android text
- * fields, through the bridge's `zwp_text_input_v3` (docs/input.md, "Text input").
+ * fields, through the bridge's `zwp_text_input_v3` (docs/input.md).
  *
  * It shows no keyboard. Keys still arrive as injected key events, which this service passes on
  * untouched. For each editor it tells the bridge to enable text input (with the content type), and

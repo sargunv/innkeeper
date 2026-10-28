@@ -10,7 +10,7 @@
 #                at runtime, chowned to that owner. Run it in a user namespace
 #                with the session's id maps (linuxapk-session does), so e.g.
 #                1029 here is AID_CLAT.
-#   single       apex/: the same files for single mode (docs/sandbox.md),
+#   single       apex/: the same files for single mode (supervisor/README.md),
 #                owned by us, with the Android owner in the
 #                user.linuxapk.owner xattr that the shim reports.
 #

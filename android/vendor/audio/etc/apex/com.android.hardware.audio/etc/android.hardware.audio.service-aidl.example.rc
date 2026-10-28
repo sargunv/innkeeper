@@ -1,5 +1,5 @@
 # linuxapk: the image's file plus LD_PRELOAD of the session shim (see
-# docs/image.md "Audio"). The HAL's stream worker threads call
+# android/vendor/audio/README.md). The HAL's stream worker threads call
 # setpriority(ANDROID_PRIORITY_AUDIO) and fail the stream open on EACCES (no
 # CAP_SYS_NICE over the initial namespace), which blocks audioserver and with
 # it system_server's AudioService. The shim makes priority changes

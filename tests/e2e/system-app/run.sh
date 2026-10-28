@@ -3,7 +3,7 @@
 # sys.boot_completed=1 (see docs/input.md). Checks that Linux.apk System is
 # installed and running and holds the bridge's input service, installs the
 # probes APK (out/test/probes), opens its InputProbeActivity in a window of its
-# own through the window manager's control command (docs/windowing.md), then
+# own through the window manager's control command (docs/display.md), then
 # injects tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger
 # touch) through the system app's translator and injector (the probes'
 # InputStdinHarness), as the input service's lines are, and checks what the

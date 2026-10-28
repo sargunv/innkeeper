@@ -1,6 +1,6 @@
 # Compatibility
 
-Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested by the compat harness (`mise run test:compat`): install, launch, a non-blank first frame, then a tap, a scroll and Back without a crash or ANR, plus an optional per-app script. Failures are triaged in [compat-triage.md](compat-triage.md). Generated: run `mise run test:compat` (or `mise run test:compat -- report` to rewrite this file from `tests/compat/results.json`). Start is the time to the first frame on a fresh install; memory is the app's total PSS after the interactions.
+Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested by the compat harness (`mise run test:compat`): install, launch, a non-blank first frame, then a tap, a scroll and Back without a crash or ANR, plus an optional per-app script. Failures are triaged in [tests/compat](../tests/compat/README.md). Generated: run `mise run test:compat` (or `mise run test:compat -- report` to rewrite this file from `tests/compat/results.json`). Start is the time to the first frame on a fresh install; memory is the app's total PSS after the interactions.
 
 Last run: 2026-10-27, image `generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys`, headless session. 31 apps: 30 work, 0 partly, 1 don't, 0 not tested.
 

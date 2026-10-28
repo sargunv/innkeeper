@@ -1,4 +1,4 @@
-//! Linux.apk compat harness. See docs/compat-triage.md.
+//! Linux.apk compat harness. See tests/compat/README.md.
 //!
 //!   mise run test:compat -- [run] [--window] [--only PKG,...] [--accept]
 //!   mise run test:compat -- fetch

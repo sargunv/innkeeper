@@ -10,7 +10,7 @@ import android.widget.TextView
 
 /**
  * Diagnostic window that logs every input event it receives (logcat tag `LinuxApkProbe`) and shows
- * the last one. Used by the end-to-end test in docs/input.md.
+ * the last one. Used by tests/e2e/system-app/run.sh.
  */
 class InputProbeActivity : Activity() {
   private lateinit var text: TextView

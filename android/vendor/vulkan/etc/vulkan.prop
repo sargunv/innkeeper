@@ -1,6 +1,6 @@
 # Graphics properties, staged as share/linuxapk/props.d/vulkan.prop and merged
 # into /vendor/build.prop by linuxapk-session at start, which also sets
-# ro.hardware.vulkan (radv on an amdgpu render node, else lvp). See docs/gpu.md.
+# ro.hardware.vulkan (radv on an amdgpu render node, else lvp). See android/vendor/vulkan/README.md.
 
 # GLES/EGL: ANGLE from /system/lib64 (libEGL_angle.so etc.) on top of Vulkan.
 ro.hardware.egl=angle

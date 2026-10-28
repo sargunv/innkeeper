@@ -446,7 +446,8 @@ pub fn refresh_entries() -> usize {
 /// Shown once, the first time a session runs in single-uid mode.
 pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
     this computer gives you no subordinate uid range (/etc/subuid), so they all run as your user.";
-pub const SINGLE_UID_DOCS: &str = "https://github.com/sargunv/linux.apk/blob/main/docs/sandbox.md";
+pub const SINGLE_UID_DOCS: &str =
+    "https://github.com/sargunv/linux.apk/blob/main/docs/security.md#single-uid-mode";
 
 /// [`SINGLE_UID_NOTICE`] if the session runs in single-uid `mode` and the
 /// notice hasn't been shown yet. It counts as shown from now on (a stamp in

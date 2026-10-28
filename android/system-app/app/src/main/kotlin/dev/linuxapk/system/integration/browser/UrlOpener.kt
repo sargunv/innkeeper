@@ -7,7 +7,7 @@ import dev.linuxapk.system.integration.IntegrationFeature
 
 /**
  * Hands http(s) links to the bridge, which opens them in the host browser through the OpenURI
- * portal (docs/bridge.md, "Opening links"). The URL is sent percent-encoded ASCII; the bridge
+ * portal (host/bridge/src/system/openuri.rs). The URL is sent percent-encoded ASCII; the bridge
  * checks it again.
  */
 class UrlOpener(private val feature: IntegrationFeature) {

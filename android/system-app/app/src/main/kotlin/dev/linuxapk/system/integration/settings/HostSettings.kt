@@ -13,7 +13,7 @@ import java.nio.ByteBuffer
 import java.util.TimeZone
 import org.json.JSONObject
 
-/** One `SETTINGS` event (docs/bridge.md); 0 or empty means unknown. */
+/** One `SETTINGS` event (host/bridge/src/system/proto.rs); 0 or empty means unknown. */
 data class DesktopSettings(
   val colorScheme: Int,
   val accent: Int?,

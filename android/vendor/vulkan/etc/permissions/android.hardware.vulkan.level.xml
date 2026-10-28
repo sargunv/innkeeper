@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Vulkan level feature advertised by the Linux.apk vendor overlay (docs/gpu.md). -->
+<!-- Vulkan level feature advertised by the Linux.apk vendor overlay (android/vendor/vulkan/README.md). -->
 <permissions>
     <feature name="android.hardware.vulkan.level" version="1" />
 </permissions>

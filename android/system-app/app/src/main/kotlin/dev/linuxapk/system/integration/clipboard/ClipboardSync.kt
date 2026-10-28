@@ -18,10 +18,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * The clipboard, both ways (docs/bridge.md, "Clipboard"): Android's primary clip goes to the host
- * selection, and host selections become Android's primary clip. Text both ways, and images (an
- * Android clip with an `image/` URI; a host PNG becomes a clip URI served by [ClipImageProvider]).
- * Each side remembers what it last got from the other, so a change never bounces back.
+ * The clipboard, both ways (host/bridge/src/system/clipboard.rs): Android's primary clip goes to
+ * the host selection, and host selections become Android's primary clip. Text both ways, and images
+ * (an Android clip with an `image/` URI; a host PNG becomes a clip URI served by
+ * [ClipImageProvider]). Each side remembers what it last got from the other, so a change never
+ * bounces back.
  *
  * `ClipDescription.EXTRA_IS_SENSITIVE` maps to KDE's password-manager hint and back.
  */

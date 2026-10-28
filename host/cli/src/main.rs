@@ -1,6 +1,6 @@
 //! `linuxapk`: install Android apps into the Linux.apk session with desktop
 //! entries and icons, run, list and uninstall them. A thin front end over
-//! `linuxapk-core` (shared with the `linuxapk-manager` manager). See docs/cli.md.
+//! `linuxapk-core` (shared with `linuxapk-manager`). See host/cli/README.md.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

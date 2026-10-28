@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # libtinyalsav2.so: the tinyalsa API backed by the host bridge, replacing the
-# image's copy in the AIDL audio HAL's APEX (docs/audio.md).
+# image's copy in the AIDL audio HAL's APEX (README.md).
 set(CMAKE_C_STANDARD 17)
 
 add_library(

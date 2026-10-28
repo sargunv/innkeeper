@@ -20,9 +20,9 @@ interface TextEditor {
 }
 
 /**
- * The Linux.apk IME's side of `zwp_text_input_v3` (docs/input.md, "Text input"), without Android
- * types: it builds the lines for the bridge (`ti_*`, parsed by the bridge's `display/ime.rs`) and
- * applies the host input method's results to a [TextEditor].
+ * The Linux.apk IME's side of `zwp_text_input_v3` (docs/input.md), without Android types: it builds
+ * the lines for the bridge (`ti_*`, parsed by the bridge's `input/ime.rs`) and applies the host
+ * input method's results to a [TextEditor].
  */
 class TextInputSession {
   /** The surrounding text last sent: what the bridge's byte offsets refer to. */

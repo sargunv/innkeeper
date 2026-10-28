@@ -20,7 +20,7 @@ import java.io.FileDescriptor
 import java.nio.ByteBuffer
 
 /**
- * Desktop integration over the host bridge's system service (docs/bridge.md, "System service"):
+ * Desktop integration over the host bridge's system service (host/bridge/src/system/proto.rs):
  * desktop settings into Android, notifications and media sessions out, the clipboard both ways, and
  * web links to the host browser. Events are handled on the feature's own thread.
  */

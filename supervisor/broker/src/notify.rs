@@ -283,7 +283,7 @@ pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
 /// Accesses through it use FOLL_FORCE, so unlike `process_vm_*` they also
 /// reach the caller's read-only and PROT_NONE private pages (a write there
 /// breaks copy-on-write). That is fine under the desktop-parity threat model
-/// (docs/STRATEGY.md): the memory is the caller's own, which it can change
+/// (docs/security.md): the memory is the caller's own, which it can change
 /// itself.
 pub(crate) struct PinnedMem(OwnedFd);
 
@@ -569,7 +569,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
     let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
     let (tx, rx) = mpsc::channel();
-    // Single-uid mode (docs/sandbox.md): virtual ids for every process.
+    // Single-uid mode (supervisor/README.md): virtual ids for every process.
     let vid = (std::env::var("LINUXAPK_SINGLE_UID").as_deref() == Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
     let sup = Arc::new(Mutex::new(Supervisor {

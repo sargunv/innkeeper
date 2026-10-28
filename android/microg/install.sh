@@ -2,7 +2,7 @@
 # Fetch microG (GmsCore, GsfProxy, FakeStore) from microG's own F-Droid repo,
 # verify it, and install it as privileged system apps into the microg addon,
 # a layer the session stacks over the partitions
-# ($XDG_DATA_HOME/linuxapk/addons/microg/system_ext; see docs/microg.md):
+# ($XDG_DATA_HOME/linuxapk/addons/microg/system_ext; see android/microg/README.md):
 #   priv-app/GmsCore/GmsCore.apk (+ lib/x86_64/, extracted)
 #   priv-app/GsfProxy/GsfProxy.apk
 #   priv-app/FakeStore/FakeStore.apk

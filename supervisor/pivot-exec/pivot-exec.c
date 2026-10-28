@@ -50,7 +50,7 @@ extern char** environ;
 // before pivot_root, where no linker exists).
 static const char* broker;
 // Single-uid mode (LINUXAPK_SINGLE_UID=1): the session maps only uid/gid 0,
-// and the broker emulates Android's uids (docs/sandbox.md).
+// and the broker emulates Android's uids (supervisor/README.md).
 static int single_uid;
 
 static void die(const char* what);

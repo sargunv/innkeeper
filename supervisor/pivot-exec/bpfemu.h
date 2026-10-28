@@ -9,7 +9,7 @@
 // it also traps the credential syscalls (set*id/get*id,
 // setgroups/getgroups, the chown family, getsockopt(SO_PEERCRED)), which the
 // broker emulates with virtual ids (supervisor/broker/src/creds/table.rs,
-// docs/sandbox.md).
+// supervisor/README.md).
 int bpfemu_install_filter(int single_uid);
 
 // The directory pins live in (the session's /sys/fs/bpf tmpfs), opened

@@ -68,7 +68,7 @@ python3 "$here/freq.py" "$T/tone.raw" --expect 440 | tee "$T/tone-freq.txt" || f
 echo "== game: $game"
 apk=$(find "$corpus/" -maxdepth 1 -name "${game}_*.apk" | head -1)
 if [[ -z $apk ]]; then
-  echo "no $game APK in $corpus (tests/compat/run.sh fetch)"
+  echo "no $game APK in $corpus (mise run test:compat -- fetch)"
   fail=1
 else
   "$S" exec sh -c 'cat > /data/local/tmp/e2e-game.apk' <"$apk"

@@ -18,8 +18,8 @@ import java.io.ByteArrayOutputStream
 /**
  * Apps installed inside Android (an app store, PackageInstaller, `pm install`) get a desktop entry
  * and icons on the host, and lose them on uninstall: package events go to the bridge's apps
- * service, which writes the entries with the same code as `linuxapk install` (docs/bridge.md, "Apps
- * service").
+ * service, which writes the entries with the same code as `linuxapk install`
+ * (host/bridge/src/apps/mod.rs).
  *
  * Only launchable, non-system apps are mirrored. On every connection the current set is checked
  * (HAVE), so installs made while the bridge was away are caught up; the bridge skips entries that

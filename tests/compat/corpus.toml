@@ -1,14 +1,14 @@
-# Compat corpus: pinned F-Droid APKs (see docs/compat-triage.md).
+# Compat corpus: pinned F-Droid APKs (see tests/compat/README.md).
 #
-# `tests/compat/run.sh fetch` downloads each APK into out/test/compat/corpus/
+# `mise run test:compat -- fetch` downloads each APK into out/test/compat/corpus/
 # and checks its SHA-256; the APKs are never committed. To bump an app, copy
 # the new version code, URL and SHA-256 from
 # https://f-droid.org/repo/index-v2.json. Prefer x86_64 or universal APKs
 # (`native` lists the ABIs the APK ships).
 #
 # Per app: framework = the UI framework or engine the APK is built with, for
-# COMPATIBILITY.md (identified by hand from its libs and assets, see
-# docs/compat-triage.md "Frameworks"; the harness doesn't check it).
+# docs/compatibility.md (identified by hand from its libs and assets, see
+# tests/compat/README.md; the harness doesn't check it).
 #
 # Per app, optional:
 #   settle = <seconds>  wait after launch before the first-frame check (default 8)
@@ -480,7 +480,7 @@ script = [
   "bridgelog:https://mastodon.social/oauth/authorize",
   "shot:oauth",
 ]
-manual = "Log in to a server (in the main session; test sessions only log links): the sign-in page opens in the host browser (the system app is the default browser, docs/bridge.md \"Opening links\"); does the redirect come back to the app through the CLI's scheme handler?"
+manual = "Log in to a server (in the main session; test sessions only log links): the sign-in page opens in the host browser (the system app is the default browser, host/bridge/src/system/openuri.rs); does the redirect come back to the app through the CLI's scheme handler?"
 
 [[app]]
 package = "com.github.mkalmousli.floating_mute"

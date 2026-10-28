@@ -1,4 +1,4 @@
-//! Single-uid mode's syscall side (docs/sandbox.md): answers the credential
+//! Single-uid mode's syscall side (supervisor/README.md): answers the credential
 //! syscalls that the session's seccomp filter traps when
 //! `LINUXAPK_SINGLE_UID=1`, using the model in [`crate::creds::table`].
 //!

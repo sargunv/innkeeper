@@ -4,7 +4,7 @@
 # Vendor APEX selection, the mechanism cuttlefish's launcher uses: apexd
 # activates only the file named by ro.boot.vendor.apex.<apex name>, and "none"
 # drops the APEX (its services, VINTF fragments and feature files with it).
-# image/flatten-apex.sh applies the same rule. See docs/image.md.
+# image/flatten-apex.sh applies the same rule. See image/README.md.
 
 # Software HALs (what launch_cvd selects for a guest without a TEE).
 androidboot.vendor.apex.com.android.hardware.keymint=com.android.hardware.keymint.rust_nonsecure

@@ -15,9 +15,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * One connection to a host bridge service (docs/bridge.md): HELLO for [service], then requests from
- * any thread, each answered by a reply that may carry fds, and events for [listener] on the reader
- * thread. Reconnects with backoff while running.
+ * One connection to a host bridge service (docs/bridge-protocol.md): HELLO for [service], then
+ * requests from any thread, each answered by a reply that may carry fds, and events for [listener]
+ * on the reader thread. Reconnects with backoff while running.
  *
  * [latencySensitive]: the reader thread runs at display priority (host input).
  */

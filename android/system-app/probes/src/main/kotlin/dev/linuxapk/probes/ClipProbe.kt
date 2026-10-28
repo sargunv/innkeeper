@@ -8,8 +8,8 @@ import android.os.Bundle
 import android.util.Log
 
 /**
- * Diagnostic for the clipboard sync (docs/bridge.md, "Clipboard"). Shows nothing; logs to tag
- * LinuxApkClipProbe.
+ * Diagnostic for the clipboard sync (host/bridge/src/system/clipboard.rs). Shows nothing; logs to
+ * tag LinuxApkClipProbe.
  * - `am start -n dev.linuxapk.probes/.ClipProbe --es text "copied in Android"` copies text;
  * - `am start -n dev.linuxapk.probes/.ClipProbe --ez image true` copies a test image;
  * - `am start -n dev.linuxapk.probes/.ClipProbe` logs the current clip.

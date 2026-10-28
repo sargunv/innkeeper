@@ -5,8 +5,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Resources
 
 /**
- * A new window's size in dp, from the launch activity's metadata (docs/windowing.md, "Window
- * size"):
+ * A new window's size in dp, from the launch activity's metadata (docs/display.md, "Window size"):
  * 1. `<layout android:defaultWidth/defaultHeight>` (Android's own freeform sizing hints);
  * 2. else `android:screenOrientation`: portrait-only activities get a phone-sized portrait window,
  *    landscape-only ones a 16:9 landscape window;

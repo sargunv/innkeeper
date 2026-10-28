@@ -16,7 +16,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * Diagnostic window for docs/windowing.md: shows (and logs, tag `LinuxApkProbe`) the window's
+ * Diagnostic window for docs/display.md: shows (and logs, tag `LinuxApkProbe`) the window's
  * system-bar and IME insets and its size, over a card with 24 dp elevation on a light background,
  * so a screenshot shows whether elevation shadows render.
  *

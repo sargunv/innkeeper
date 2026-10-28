@@ -9,8 +9,8 @@ import dev.linuxapk.system.Feature
 
 /**
  * Makes [HostImeService] the default input method, so text fields use the host keyboard and input
- * methods and no on-screen keyboard appears (docs/input.md, "Text input"). It is selected at every
- * start unless the user picked an input method other than the image's stock LatinIME.
+ * methods and no on-screen keyboard appears (docs/input.md). It is selected at every start unless
+ * the user picked an input method other than the image's stock LatinIME.
  */
 class ImeFeature(private val context: Context) : Feature {
   override val name = "ime"

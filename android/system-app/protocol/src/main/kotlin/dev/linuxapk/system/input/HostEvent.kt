@@ -72,7 +72,7 @@ sealed interface HostEvent {
   /** The window of [display] is gone: its HWC display went away, or it was destroyed. */
   data class WindowUnmapped(val display: Int) : HostEvent
 
-  // Text input (docs/input.md, "Text input"): the host input method's results for the Linux.apk
+  // Text input (docs/input.md): the host input method's results for the Linux.apk
   // IME, gathered until [TextDone]. Lengths and offsets are UTF-8 bytes; text is decoded.
 
   /** Delete [before] bytes before the cursor and [after] bytes after it. */

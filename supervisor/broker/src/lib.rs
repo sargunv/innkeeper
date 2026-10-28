@@ -11,7 +11,7 @@
 //!     answers.
 //!
 //! `LINUXAPK_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
-//! `docs/ubinder.md` and `docs/sandbox.md`.
+//! `supervisor/README.md`.
 
 pub mod binder;
 mod creds;

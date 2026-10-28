@@ -6,10 +6,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * The bridge protocol (docs/bridge.md, host/bridge/src/ipc/wire.rs): little-endian messages of at
- * most 512 bytes over SOCK_SEQPACKET, and the system service's types. Large payloads go in a sealed
- * memfd next to a small request. `host/bridge/src/ipc/wire-fixtures.txt` holds encodings both sides
- * are tested against.
+ * The bridge protocol (docs/bridge-protocol.md, host/bridge/src/ipc/wire.rs): little-endian
+ * messages of at most 512 bytes over SOCK_SEQPACKET, and the system service's types. Large payloads
+ * go in a sealed memfd next to a small request. `host/bridge/src/ipc/wire-fixtures.txt` holds
+ * encodings both sides are tested against.
  */
 object Wire {
   const val MAX_MSG = 512

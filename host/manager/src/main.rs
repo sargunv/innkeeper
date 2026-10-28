@@ -1,7 +1,7 @@
 //! `linuxapk-manager`: the Linux.apk manager. Install Android apps by drag and
 //! drop or from the file manager, open and remove them, and watch the
 //! session. A GTK 4 / libadwaita front end over `linuxapk-core`; see
-//! docs/gui.md.
+//! host/manager/README.md.
 
 mod errors;
 mod install;

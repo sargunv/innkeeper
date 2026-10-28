@@ -10,7 +10,7 @@
   <!-- signature: granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
 
-  <!-- Window manager (docs/windowing.md). Trusted, always-unlocked virtual displays with their
+  <!-- Window manager (docs/display.md). Trusted, always-unlocked virtual displays with their
        own focus and display group; secure, so FLAG_SECURE windows aren't blacked out. -->
   <uses-permission android:name="android.permission.ADD_TRUSTED_DISPLAY" />
   <uses-permission android:name="android.permission.ADD_ALWAYS_UNLOCKED_DISPLAY" />
@@ -30,7 +30,7 @@
        the desktop settings below. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
-  <!-- Desktop integration (docs/bridge.md, "System service"). Holders get the "audio" group,
+  <!-- Desktop integration (host/bridge/src/system/proto.rs). Holders get the "audio" group,
        which may enter the host bridge's socket directory (/dev/socket/linuxapk, root:audio 0750);
        the bridge then admits only this app's uid to its system service. -->
   <permission
@@ -76,7 +76,7 @@
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
     <!-- Linux.apk Keyboard: host keyboard and input methods through zwp_text_input_v3
-         (docs/input.md, "Text input"). -->
+         (docs/input.md). -->
     <service
       android:name=".ime.HostImeService"
       android:exported="true"
@@ -90,8 +90,8 @@
         android:resource="@xml/method" />
     </service>
 
-    <!-- Document picker: the desktop's file chooser (documents/; docs/bridge.md, "Documents
-         service"). Outranks DocumentsUI (priority 100). -->
+    <!-- Document picker: the desktop's file chooser (documents/;
+         host/bridge/src/documents/proto.rs). Outranks DocumentsUI (priority 100). -->
     <activity
       android:name=".documents.PickerActivity"
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"

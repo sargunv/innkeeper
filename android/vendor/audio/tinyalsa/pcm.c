@@ -3,7 +3,7 @@
 // (audio_service.c), and whose capture is silence for now.
 //
 // This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
-// HAL plays to the desktop without changes. See docs/audio.md.
+// HAL plays to the desktop without changes. See ../README.md.
 //
 // Behaviour notes:
 // - The bridge stream is opened lazily on the first write, so the HAL's

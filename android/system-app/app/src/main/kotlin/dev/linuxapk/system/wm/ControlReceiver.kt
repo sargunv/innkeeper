@@ -13,7 +13,7 @@ import kotlin.concurrent.thread
 
 /**
  * The window manager's control interface for the host (the `linuxapk` CLI), run inside the session
- * as root (docs/windowing.md):
+ * as root (docs/display.md):
  * ```
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LAUNCH --es package PKG \
  *   [--es component PKG/.Activity] [--es uri URI] [--ei width DP --ei height DP]

@@ -152,7 +152,7 @@ pub enum Launch {
     View { package: String, uri: String },
 }
 
-/// The window manager's control command (docs/windowing.md): opens the app
+/// The window manager's control command (docs/display.md): opens the app
 /// in a window of its own, or focuses the window it already has.
 pub fn wm_launch_args(l: &Launch) -> Vec<String> {
     let mut v: Vec<String> = [

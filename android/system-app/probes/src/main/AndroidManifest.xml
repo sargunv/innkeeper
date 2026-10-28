@@ -19,7 +19,7 @@
       android:exported="true"
       android:label="@string/input_probe_name" />
 
-    <!-- Insets and elevation-shadow check for app windows (docs/windowing.md). -->
+    <!-- Insets and elevation-shadow check for app windows (docs/display.md). -->
     <activity
       android:name=".WindowProbeActivity"
       android:exported="true"

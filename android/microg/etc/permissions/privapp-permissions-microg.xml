@@ -5,7 +5,7 @@
      signature|privileged permission a priv-app requests must be listed here
      (granted) or as deny-permission, or system_server refuses to boot. These
      are the privileged permissions microG requests that AOSP 17's
-     framework-res defines (aapt2 dump permissions, see docs/microg.md). -->
+     framework-res defines (aapt2 dump permissions, see android/microg/README.md). -->
 <permissions>
   <privapp-permissions package="com.google.android.gms">
     <permission name="android.permission.CHANGE_DEVICE_IDLE_TEMP_WHITELIST" />

@@ -1,5 +1,5 @@
 //! Virtual ids for single-uid sessions (`LINUXAPK_SINGLE_UID=1`,
-//! docs/sandbox.md).
+//! supervisor/README.md).
 //!
 //! In single-uid mode the session's user namespace maps only uid/gid 0 (the
 //! host user), so the kernel can't give Android's processes their own uids.

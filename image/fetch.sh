@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the pinned Android image from Android's public CI, verify it, and
-# extract its partitions (see docs/image.md):
+# extract its partitions (see image/README.md):
 #   <images>/<name>/dl/   artifacts from image/pin.toml (resumable); the image
 #                         zip is deleted once extracted
 #   <images>/<name>/img/  system, system_ext, product, vendor, odm, *_dlkm

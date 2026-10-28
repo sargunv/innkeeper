@@ -85,7 +85,7 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
      by the compat harness (`mise run test:compat`): install, launch, a \
      non-blank first frame, then a tap, a scroll and Back without a crash or \
      ANR, plus an optional per-app script. Failures are triaged in \
-     [compat-triage.md](compat-triage.md). Generated: run \
+     [tests/compat](../tests/compat/README.md). Generated: run \
      `mise run test:compat` (or `mise run test:compat -- report` to rewrite this \
      file from `tests/compat/results.json`). Start is the time to the first \
      frame on a fresh install; memory is the app's total PSS after the \

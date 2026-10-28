@@ -5,8 +5,8 @@
 #   linuxapk-session start [-f]    boot (in the background unless -f),
 #                                  preparing the image first if needed. Each
 #                                  app gets its own host Wayland window
-#                                  (docs/windowing.md); binder is served in
-#                                  userspace (docs/ubinder.md)
+#                                  (docs/display.md); binder is served in
+#                                  userspace (supervisor/README.md)
 #     --headless                   (tests only) open no windows
 #   linuxapk-session prepare       fetch, extract, flatten and derive the image
 #                                  without booting
@@ -19,7 +19,7 @@
 #   linuxapk-session shell         interactive /system/bin/sh inside
 #   linuxapk-session selftest      host-safety probes against the live session
 #
-# The uid mode is automatic (docs/sandbox.md). "subuid": Android's uids are
+# The uid mode is automatic (docs/session.md). "subuid": Android's uids are
 # subordinate ids of the host user, when /etc/subuid and /etc/subgid give it
 # at least 49999 each and newuidmap is installed. "single": otherwise; every
 # Android uid is the host user and the supervisor virtualizes them. An
@@ -85,7 +85,7 @@ conf=$run/session.conf
 # flattened APEXes ($apexdir) and the layers derived from them ($derived).
 # Our overrides are the staged Android tree (android/overlay and the built
 # modules), the extra androidboot.* values (image/bootconfig) and the vendor
-# properties (image/vendor.prop). See docs/image.md.
+# properties (image/vendor.prop). See image/README.md.
 images=${LINUXAPK_IMAGES:-$data_home/images}
 # The pin's top-level name: the keys before the first [table] header (the
 # [[artifact]] tables have names of their own).
@@ -311,7 +311,7 @@ start() {
 # bound into the session as /dev/socket/linuxapk (root:audio 0750, see
 # ns-init.sh), and it only accepts Android root, system and audioserver
 # (SO_PEERCRED, as host ids), plus the Linux.apk System app's uid (the owner
-# of its data directory) for the system service. docs/bridge.md.
+# of its data directory) for the system service. host/bridge/README.md.
 bridge_setup() {
   bridge_args=(--run-dir "$run" --state-dir "$state" --system-app-dir "$data/data/dev.linuxapk.system")
   bridge_args+=(--allow-uid "$(id -u)")
@@ -332,7 +332,7 @@ bridge_setup() {
     [[ -n $bus && $bus != "unix:path=/run/user/$(id -u)/bus" ]] || bridge_args+=(--no-desktop-presence)
   fi
   # The display service (windows, input) and the clipboard use the host
-  # compositor. The system service ("System service" in docs/bridge.md) uses
+  # compositor. The system service uses
   # the caller's session bus, and desktop entries for apps installed inside
   # Android ("Apps service") go to the caller's XDG_DATA_HOME.
   bridge_env=("WAYLAND_DISPLAY=$wayland")
@@ -386,9 +386,10 @@ _run() {
     # inbound port forwarding, and --no-map-gw keeps the host's loopback
     # services unreachable from Android. Android's EthernetService brings eth1
     # up (DHCP from pasta) as the default network, with default capabilities
-    # since the image's connectivity overlay is blanked (docs/image.md). DHCP
-    # hands out 169.254.1.1 as the resolver, which pasta forwards to the host's
-    # first IPv4 nameserver (with -D, pasta no longer picks it by itself).
+    # since the image's connectivity overlay is blanked
+    # (android/overlay/README.md). DHCP hands out 169.254.1.1 as the resolver,
+    # which pasta forwards to the host's first IPv4 nameserver (with -D, pasta
+    # no longer picks it by itself).
     local dns_host
     dns_host=$(awk '$1 == "nameserver" && $2 !~ /:/ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)
     pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw -I eth1 \
@@ -516,7 +517,7 @@ selftest() {
     grep -q "/$unit.service" "/proc/$p/cgroup" &&
       echo "ok   runs in $unit.service's cgroup" || echo "FAIL cgroup: $(cat "/proc/$p/cgroup")"
     if [[ $uid_mode == single ]]; then
-      # Single mode (docs/sandbox.md): without a subgid range the kernel
+      # Single mode (docs/security.md): without a subgid range the kernel
       # denies setgroups, so the host user's supplementary groups
       # can't be dropped. Check that they stay unusable instead: setgroups
       # is denied (no way to change them), they're unmapped inside, and no

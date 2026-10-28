@@ -90,7 +90,7 @@ ndk::ScopedAStatus ComposerClient::destroyLayer(
 // debug.sf.enable_hwc_vds=1, set by our .rc). Every layer stays CLIENT, so
 // SurfaceFlinger renders each frame straight into the sink's buffer and hands
 // it to us as both client target and output buffer; the presenter shows it in
-// the window that the window manager asked for (docs/windowing.md).
+// the window that the window manager asked for (docs/display.md).
 ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
   int32_t width, int32_t height, common::PixelFormat format,
   int32_t outputSlotCount, VirtualDisplay* out

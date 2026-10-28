@@ -29,8 +29,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
- * The window manager (docs/windowing.md). Each app task gets its own trusted virtual display, and
- * the bridge shows each display as its own Wayland window:
+ * The window manager (docs/display.md). Each app task gets its own trusted virtual display, and the
+ * bridge shows each display as its own Wayland window:
  * 1. [launch] creates the display without a surface, asks the bridge for a window
  *    ([HostInputClient.requestWindow]), then gives the display its ImageReader surface.
  *    SurfaceFlinger then creates the HWC virtual display, which gets the requested window.

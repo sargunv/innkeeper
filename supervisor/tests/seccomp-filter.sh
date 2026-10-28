@@ -2,7 +2,7 @@
 # The session's seccomp filter (pivot-exec/bpfemu.c) traps exactly the syscalls
 # each mode needs: bpf and friends, openat and binder ioctls always; the
 # credential syscalls, SO_PEERCRED, lstat-shaped newfstatat and W_OK access
-# checks in single-uid mode (docs/sandbox.md); and nothing hot besides.
+# checks in single-uid mode (supervisor/README.md); and nothing hot besides.
 # Builds into out/test/supervisor/seccomp-filter.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)

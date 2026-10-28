@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The bridge client's framing over a socketpair, with the test as the
-// bridge: messages encode as docs/bridge.md says, fds cross, and lxb_call
-// skips events to find its reply.
+// bridge: messages encode as docs/bridge-protocol.md says, fds cross, and
+// lxb_call skips events to find its reply.
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

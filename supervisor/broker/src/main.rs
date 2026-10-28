@@ -2,7 +2,7 @@
 //! `pivot-exec` forks and execs with two fds, the socket to its bpf emulator
 //! thread and the session's seccomp listener. It runs in the outer namespaces
 //! and serves binder for every Android process. See `src/notify.rs` and
-//! `docs/ubinder.md`.
+//! `supervisor/README.md`.
 
 fn main() {
     let mut args = std::env::args().skip(1);

@@ -25,7 +25,7 @@ import dev.linuxapk.system.integration.IntegrationFeature
 import dev.linuxapk.system.wm.WindowManagerFeature
 
 /**
- * Forwards Android notifications to the desktop (docs/bridge.md, "Notifications"): posted, updated
+ * Forwards Android notifications to the desktop (host/bridge/src/system/notify.rs): posted, updated
  * and removed notifications from [NotificationForwarder] become `NOTIFY`/`NOTIFY_CLOSE` requests,
  * and clicks, actions, inline replies and dismissals come back from the desktop. Runs on the
  * integration thread.

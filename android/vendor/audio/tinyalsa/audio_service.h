@@ -1,4 +1,4 @@
-// The bridge's audio service (docs/bridge.md, host/bridge/src/audio): one
+// The bridge's audio service (host/bridge/src/audio/proto.rs): one
 // shared connection per process, and output streams that write PCM into a
 // shared ring the bridge plays to PipeWire.
 //

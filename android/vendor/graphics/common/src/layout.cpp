@@ -99,7 +99,7 @@ const FormatInfo kFormats[] = {
 };
 
 // RADV needs linear row pitches that are multiples of 256 bytes (measured,
-// docs/gpu.md).
+// android/vendor/vulkan/README.md).
 constexpr uint64_t kRowAlign = 256;
 
 uint32_t divUp(uint32_t v, uint32_t d) { return (v + d - 1) / d; }

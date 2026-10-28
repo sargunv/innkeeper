@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The client side of the bridge protocol v1 (docs/bridge.md, "Protocol v1")
+// The client side of the bridge protocol v1 (docs/bridge-protocol.md)
 // for code inside Android: the C mirror of host/bridge/src/ipc/{wire,
 // transport,proto}.rs. It connects and says HELLO, builds messages, sends and
 // receives packets with fds, and matches replies to requests by tag. Each

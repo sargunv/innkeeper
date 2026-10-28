@@ -15,8 +15,8 @@ import android.util.Log
 
 /**
  * Diagnostic: posts a notification with a click target, an action and an inline reply, the way a
- * messaging app does, so the desktop round trip can be tested without one (docs/bridge.md,
- * "Notifications"). Shows nothing.
+ * messaging app does, so the desktop round trip can be tested without one
+ * (host/bridge/src/system/notify.rs). Shows nothing.
  *
  * am start -n dev.linuxapk.probes/.NotificationProbe
  *
