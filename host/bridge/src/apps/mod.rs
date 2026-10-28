@@ -1,13 +1,25 @@
 //! The apps service (id 5): apps installed or removed inside Android (an app
 //! store, PackageInstaller, `pm install`) get or lose their desktop entry and
 //! icons. The Linux.apk System app reports package events; the entries are
-//! written with `linuxapk-core`, the same code as `linuxapk install`
-//! (`docs/bridge.md`, "Apps service").
+//! written with `linuxapk-core`, the same code as `linuxapk install`.
+//!
+//! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
+//! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+//! | `0x0501` | HAVE    | name package, name version                                                                                | `u8`: 0 missing or outdated (send ADDED), 1 current, 2 not ours (leave it)                             |
+//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
+//! | `0x0503` | REMOVED | name package                                                                                              |                                                                                                        |
+//!
+//! At each connection the system app sends HAVE for every launchable user
+//! app, so installs made while the bridge was away catch up; then it follows
+//! package broadcasts.
 //!
 //! Entries this service writes say `X-LinuxApk-Origin=android`. An entry
 //! written by `linuxapk install` (which has more metadata, such as URL
 //! schemes) is never replaced; an entry for another session instance is never
-//! touched.
+//! touched; an uninstall inside Android removes this instance's entry,
+//! whoever wrote it. Without `--mirror-apps` (only the main session passes
+//! it) every request succeeds and does nothing, so test sessions don't fill
+//! the user's app menu.
 
 use std::os::fd::OwnedFd;
 use std::path::Path;

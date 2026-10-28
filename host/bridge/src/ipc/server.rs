@@ -4,7 +4,7 @@
 //! host uids, must start with HELLO naming one registered service, and is
 //! then handed to that service. A service is anything implementing
 //! [`Service`]; register a factory for its id in a [`Registry`] (see
-//! `main.rs` and `docs/bridge.md`).
+//! `main.rs`, and `docs/bridge-protocol.md` for the conventions).
 
 use std::os::fd::{BorrowedFd, OwnedFd};
 use std::sync::Arc;

@@ -1,6 +1,6 @@
 //! Payloads too big for one 512-byte message (notifications, clipboard
 //! contents, URLs, artwork) travel as a sealed memfd next to a small request
-//! or event. See `docs/bridge.md`, "System service".
+//! or event (the system and apps services).
 //!
 //! - **From a client** ([`read`]): the fd must be a memfd sealed against
 //!   writing, shrinking and growing, so its bytes can't change under us. It is

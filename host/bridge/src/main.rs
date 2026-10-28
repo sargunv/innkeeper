@@ -118,8 +118,7 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         })?;
-    // Host files the user picks for Android (docs/bridge.md, "Documents
-    // service").
+    // Host files the user picks for Android.
     let store = linuxapk_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
         Ok(Box::new(linuxapk_bridge::documents::DocumentsService::new(
@@ -128,8 +127,8 @@ fn main() -> Result<()> {
             events,
         )))
     });
-    // Apps installed inside Android get desktop entries (docs/bridge.md,
-    // "Apps service"); only with --mirror-apps (the default session).
+    // Apps installed inside Android get desktop entries; only with
+    // --mirror-apps (the main session).
     let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
     linuxapk_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
     services.register(service::APPS, "apps", move |peer, _events| {

@@ -32,7 +32,7 @@ wayland-protocols = { version = "0.32", features = [
   "unstable",
 ] }
 
-# Desktop integration (services/): D-Bus (portals, notifications, MPRIS),
+# Desktop integration (system/, documents/): D-Bus (portals, notifications, MPRIS),
 # the Wayland clipboard (ext-data-control), PNG for MPRIS artwork.
 png = "0.18"
 signal-hook = { version = "0.3", default-features = false, features = [

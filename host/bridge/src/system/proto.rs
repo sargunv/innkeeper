@@ -1,7 +1,31 @@
-//! System service messages (service id 3, requests `0x0301..`, events
-//! `0x4301..`; spec in `docs/bridge.md`, "System service"). Large payloads
-//! travel as sealed memfds (see `ipc::blob`); the messages here only
-//! carry their lengths.
+//! System service messages (id 3, types 0x0300..=0x03ff, events
+//! 0x4300..=0x43ff). The client is the Linux.apk System app
+//! (`BridgeConnection` plus its integration features): it sends `START`,
+//! then gets events. Anything that can exceed one message travels as a
+//! sealed memfd blob ([`crate::ipc::blob`]); the messages carry its length.
+//!
+//! | Type     | Request      | Body (fd)                                                                       | Reply                                                                                          |
+//! | -------- | ------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+//! | `0x0301` | START        | `u32 features` (1 settings, 2 clipboard, 4 notifications, 8 media, 16 links)    | `u32` features served; the current settings and host clipboard follow as events                |
+//! | `0x0302` | NOTIFY       | `u32 id` (≠ 0), `u32 len` ≤ 1 MiB (fd: notification blob)                       | `-EBUSY` over 64 per connection, `-EIO` if the server refused; posting an id again replaces it |
+//! | `0x0303` | NOTIFY_CLOSE | `u32 id`                                                                        |                                                                                                |
+//! | `0x0304` | CLIP_SET     | `u8 kind` (1 text, 2 image), `u8 sensitive`, `u16 0`, `u32 len` ≤ 1/16 MiB (fd) | `-ENOSYS` without data control                                                                 |
+//! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not http(s), `-EAGAIN` over 5 per 10 s                                            |
+//! | `0x0306` | MEDIA        | `u32 player` (≠ 0), `u32 len` ≤ 2 MiB (fd: media blob)                          | `-EBUSY` over 8 players per connection                                                         |
+//! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
+//!
+//! | Event    | Message      | Body (fd)                                                                                                                                                                                                |
+//! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+//! | `0x4301` | SETTINGS     | `u8 color_scheme` (0 none, 1 dark, 2 light), `u8 has_accent`, `u8 r, g, b`, `u8 contrast`, `u8 reduced_motion`, `u8 clock` (0, 1 12h, 2 24h), `f32 text_scale` (0 unknown), name time zone, name locales |
+//! | `0x4302` | NOTIFY_EVENT | `u32 id`, `u8 what` (1 clicked, 2 action, 3 dismissed, 4 reply), `u8 action`, `u16 0`, `u32 len` (fd: the reply text, for 4)                                                                             |
+//! | `0x4303` | CLIP         | `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len` (fd: the content)                                                                                                                                          |
+//! | `0x4304` | MEDIA_CMD    | `u32 player`, `u8 cmd` (1 play, 2 pause, 3 play/pause, 4 stop, 5 next, 6 previous, 7 seek by, 8 seek to, 9 raise), `u8 0`, `u16 0`, `i64 arg` (µs)                                                       |
+//!
+//! Blob contents start with `u32 version` (1); [`super::notify::Note`] and
+//! [`super::mpris::Media`] document theirs, and the system app's encoders
+//! (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is `u32 len` +
+//! UTF-8; images are `u16 width, u16 height` + raw RGBA8 rows, so nothing
+//! Android sends reaches a host image decoder.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 

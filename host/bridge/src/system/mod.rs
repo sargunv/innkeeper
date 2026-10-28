@@ -1,7 +1,7 @@
 //! The system service (id 3): the channel between the bridge and the
 //! Linux.apk System app. It carries desktop settings to Android, Android
 //! notifications, the clipboard both ways, web links to open, and media
-//! sessions (`docs/bridge.md`, "System service"). Each feature lives in its
+//! sessions (messages: [`proto`]). Each feature lives in its
 //! own module and talks to the desktop over D-Bus or Wayland:
 //!
 //! - `settings`: portal Settings (dark mode, accent, contrast, clock format,

@@ -1,7 +1,7 @@
 //! The host clipboard, both ways, through `ext-data-control-v1` on its own
 //! Wayland connection. Data control works without keyboard focus, so this
 //! doesn't need the display service's seat (KWin, wlroots compositors and
-//! others offer it; GNOME doesn't, see `docs/bridge.md`).
+//! others offer it; GNOME doesn't, so there the clipboard doesn't sync).
 //!
 //! - Host to Android: each new host selection with text (or, without text,
 //!   a PNG image) is read (capped), and sent to every subscribed system-app

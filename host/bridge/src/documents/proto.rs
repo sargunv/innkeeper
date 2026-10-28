@@ -1,5 +1,29 @@
-//! Documents service messages (types 0x0401..=0x04ff, events 0x44xx). Spec:
-//! `docs/bridge.md`, "Documents service".
+//! Documents service messages (id 4, types 0x0400..=0x04ff, events
+//! 0x4400..=0x44ff). The client is the Linux.apk System app's document
+//! picker (`PickerActivity.kt`) and DocumentsProvider
+//! (`HostDocumentsProvider.kt`); only its uid may open the service.
+//!
+//! | Type     | Request | Body                                                                                                                                                                                                   | Reply                                                                                                                                                         |
+//! | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+//! | `0x0401` | PICK    | `u32 request` (client's id), `u8 mode` (1 open, 2 open several, 3 save, 4 folder), `u8 write`, `u32 window` (Android display id, 0 none), name `title`, name `suggested`, `u8 n` (≤ 16) + n MIME names | At once; the result comes as events. `-EBUSY` with 4 picks open in the whole bridge (open until the user answers, even if the client is gone), `-ENOSYS` without a session bus |
+//! | `0x0402` | OPEN    | `u64 grant`, `u8 mode` (1 read, 2 write+truncate, 3 read-write, 4 append), path                                                                                                                        | fd: the open file                                                                                                                                             |
+//! | `0x0403` | STAT    | `u64 grant`, path                                                                                                                                                                                      | meta                                                                                                                                                          |
+//! | `0x0404` | LIST    | `u64 grant`, path (a folder)                                                                                                                                                                           | `u32 len`, `u32 count`; fd: sealed memfd with `count` metas (regular files and folders, ≤ 10000)                                                              |
+//! | `0x0405` | CREATE  | `u64 grant`, path (the folder), `u8 kind` (0 file, 1 folder), file name                                                                                                                                | `u16 len` + the name used (`name (1).ext` if taken)                                                                                                           |
+//! | `0x0406` | DELETE  | `u64 grant`, path                                                                                                                                                                                      | Only beneath a folder grant, never the picked item itself; folders only when empty                                                                           |
+//! | `0x0407` | RENAME  | `u64 grant`, path, new file name (same folder, never replacing)                                                                                                                                        |                                                                                                                                                               |
+//! | `0x0408` | FORGET  | `u64 grant`                                                                                                                                                                                            |                                                                                                                                                               |
+//!
+//! | Event    | Message   | Body                                                                                       |
+//! | -------- | --------- | ------------------------------------------------------------------------------------------ |
+//! | `0x4401` | PICKED    | `u32 request`, `u64 grant`, `u8 kind`, `u8 writable`, name (display name), one per item    |
+//! | `0x4402` | PICK_DONE | `u32 request`, `i32 status` (0, `-ECANCELED` when the user cancelled, `-EIO`), `u32 count` |
+//!
+//! Paths are relative to a folder grant: `u16 len` + `/`-separated UTF-8
+//! names, none empty, `.` or `..`, at most 400 bytes; names are at most 255
+//! bytes with no NUL or `/`. A meta is `u8 kind`, `u64 size`,
+//! `i64 mtime_ms`, `u8 writable`, `u16 len` + name. Writes, creates, deletes
+//! and renames need a grant made for writing.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 

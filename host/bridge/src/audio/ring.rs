@@ -1,25 +1,47 @@
 //! The shared PCM ring: one sealed memfd per output stream, created here and
-//! handed to the Android client. Layout (all little-endian, see
-//! `docs/bridge.md`):
+//! handed to the Android client with an eventfd ("data") and the read end of
+//! a pipe ("space"). Layout, all little-endian:
 //!
 //! ```text
 //!   0  u32 magic "LXAR"   4 u32 version   8 u32 frame_bytes  12 u32 capacity_frames
-//!  16  u32 rate          20 u32 data_offset
+//!  16  u32 rate          20 u32 data_offset (4096)
 //!  64  u64 write_pos      client-owned: frames written (monotonic)
 //! 128  u64 read_pos       bridge-owned: frames consumed
-//! 192  u64 timing_seq     bridge-owned seqlock (odd while updating)
+//! 192  u64 timing_seq     bridge-owned seqlock (odd while the next three change)
 //! 200  u64 played_frames  frames presented at ts_ns
-//! 208  u64 ts_ns          CLOCK_MONOTONIC of that estimate
+//! 208  u64 ts_ns          CLOCK_MONOTONIC of that estimate (shared with the session)
 //! 216  u64 latency_ns     downstream latency (PipeWire queue plus device)
-//! 224  u32 state          0 idle, 1 playing, 2 dead (client must reconnect)
+//! 224  u32 state          0 idle, 1 playing, 2 dead (client must reopen)
 //! 4096 PCM data, capacity_frames * frame_bytes bytes
 //! ```
+//!
+//! ```mermaid
+//! sequenceDiagram
+//!   participant C as libtinyalsav2 (HAL)
+//!   participant R as ring memfd
+//!   participant B as bridge stream thread
+//!   participant P as PipeWire (pulse)
+//!   C->>R: copy frames at write_pos % capacity, publish write_pos
+//!   C->>B: write 1 to the data eventfd
+//!   P->>B: wants frames
+//!   B->>R: read frames, advance read_pos, update timing (seqlock)
+//!   B->>C: one byte on the space pipe (unless one is pending)
+//!   Note over C: when full, poll the space pipe, then drain it
+//! ```
+//!
+//! - The client never gets more than `capacity` frames ahead of `read_pos`.
+//! - Presentation position at time `t` is
+//!   `played_frames + (t - ts_ns) * rate` while `state == 1`, capped at
+//!   `read_pos`; app-visible latency is written minus presented.
+//! - When the bridge drops a stream (PipeWire went away, or CLOSE) it sets
+//!   `state = 2` and signals space, so a blocked writer wakes up.
 //!
 //! The client can write anything into the mapping at any time, so the bridge
 //! never reads back what it owns: `read_pos` lives in this struct and is only
 //! mirrored out. The one client-owned value, `write_pos`, is clamped on every
-//! read. The memfd is sealed against shrinking, so a client cannot truncate it
-//! under our mapping (which would SIGBUS the bridge).
+//! read (behind `read_pos` is ignored, more than `capacity` ahead is
+//! clamped). The memfd is sealed against shrinking, so a client cannot
+//! truncate it under our mapping.
 
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr::NonNull;

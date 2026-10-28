@@ -1,6 +1,6 @@
 //! The core protocol: versions, the HELLO handshake and service ids. Each
-//! service defines its own message types in its module (see `docs/bridge.md`
-//! for the conventions and the type ranges).
+//! service defines its own message types in its module; framing, type ranges
+//! and the conventions for a new service are in `docs/bridge-protocol.md`.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 

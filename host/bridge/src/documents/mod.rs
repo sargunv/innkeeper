@@ -1,6 +1,6 @@
 //! The documents service (id 4): host files and folders the user picks in the
 //! FileChooser portal, for the Linux.apk System app's document picker and
-//! DocumentsProvider (`docs/bridge.md`, "Documents service").
+//! DocumentsProvider. Messages: [`proto`].
 //!
 //! The bridge is the only one that knows host paths. Android gets opaque
 //! grant ids and file descriptors:

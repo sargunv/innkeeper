@@ -1,4 +1,23 @@
-//! Audio service messages (types 0x0100..=0x01ff; spec in `docs/bridge.md`).
+//! Audio service messages (id 1, types 0x0100..=0x01ff). The client is
+//! `libtinyalsav2` in the AIDL audio HAL (`android/vendor/audio`); framing
+//! and HELLO are in `docs/bridge-protocol.md`.
+//!
+//! | Type     | Request      | Body                                                                                                                                               | Reply                                                                                                                                          |
+//! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+//! | `0x0101` | OPEN_OUTPUT  | `u32 rate` (8000–192000), `u8 channels` (1–2), `u8 format` (1 s16le, 2 f32le), `u16 0`, `u32 period_frames` (16–16384), `u32 periods` (2–16), name | `u32 stream`, `u32 capacity_frames`, `u32 data_offset`, `u32 map_size`, `u32 latency_us`; fds: ring memfd, data eventfd, space pipe (read end) |
+//! | `0x0102` | CLOSE        | `u32 stream`                                                                                                                                       |                                                                                                                                                |
+//! | `0x0103` | STANDBY      | `u32 stream`                                                                                                                                       | Once the ring drains and PipeWire underruns, the stream is corked so the sink can suspend                                                     |
+//! | `0x0104` | SET_VOLUME   | `u32 stream`, `f32 left`, `f32 right` (each 0–1)                                                                                                   |                                                                                                                                                |
+//! | `0x0105` | SET_MASTER   | `f32 volume` (0–1), `u8 muted` (0/1): every stream of the connection, current and future                                                           |                                                                                                                                                |
+//! | `0x0106` | SET_METADATA | `u32 stream`, `u32 usage` (Android `audio_usage_t`), label (empty: derived from usage)                                                             | Sets the PipeWire `media.name` and `media.role`                                                                                                |
+//!
+//! Limits: 8 streams and 8 MiB of rings per connection; 32 streams and 32
+//! connections in all. Over a stream limit OPEN_OUTPUT gets `-EBUSY`; over
+//! the connection limit the connection is closed. Unknown streams get
+//! `-ENOENT`.
+//!
+//! The PCM goes through a shared ring, not messages: its layout and who
+//! writes what are in [`super::ring`].
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
