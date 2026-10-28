@@ -1,6 +1,6 @@
-// Client side of the Linux.apk bridge protocol v1 (docs/bridge.md) for code
-// running inside Android: one shared connection per process, and output
-// streams that write PCM into a shared ring the bridge plays to PipeWire.
+// The bridge's audio service (docs/bridge.md, host/bridge/src/audio): one
+// shared connection per process, and output streams that write PCM into a
+// shared ring the bridge plays to PipeWire.
 //
 // Kept free of tinyalsa types so an AIDL StreamBridge can reuse it as is.
 #pragma once
@@ -12,9 +12,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Where the session binds the bridge socket.
-#define LXB_SOCKET_PATH "/dev/socket/linuxapk/bridge.sock"
 
 enum lxb_format { LXB_S16LE = 1, LXB_F32LE = 2 };
 

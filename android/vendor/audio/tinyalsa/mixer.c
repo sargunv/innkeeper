@@ -9,7 +9,7 @@
 #include <string.h>
 #include <tinyalsa/mixer.h>
 
-#include "bridge_client.h"
+#include "audio_service.h"
 
 #define API __attribute__((visibility("default")))
 

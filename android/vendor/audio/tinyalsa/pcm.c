@@ -1,6 +1,6 @@
 // tinyalsa PCM API for Linux.apk: one virtual card ("Linux.apk", card 0,
 // device 0) whose playback goes to the host bridge through a shared ring
-// (bridge_client.c), and whose capture is silence for now.
+// (audio_service.c), and whose capture is silence for now.
 //
 // This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
 // HAL plays to the desktop without changes. See docs/audio.md.
@@ -30,7 +30,8 @@
 #include <tinyalsa/pcm.h>
 #include <unistd.h>
 
-#include "bridge_client.h"
+#include "audio_service.h"
+#include "linuxapk/bridge_client.h"
 #include "log.h"
 
 #define API __attribute__((visibility("default")))
@@ -65,7 +66,7 @@ struct pcm {
   bool fallback;        // no bridge: virtual clock from fb_t0/fb_f0
   int64_t fb_t0;
   uint64_t fb_f0;
-  int64_t next_retry;
+  struct lxb_backoff retry;  // reopening the stream
   // Input (silence).
   int64_t in_t0;
   uint64_t in_frames;
@@ -291,10 +292,7 @@ static uint32_t ring_period(const struct pcm* p) {
 }
 
 static void connect_locked(struct pcm* p) {
-  if (p->s.map) return;
-  int64_t t = now_ns();
-  if (t < p->next_retry) return;
-  p->next_retry = t + 1000000000LL;
+  if (p->s.map || lxb_backoff_ms(&p->retry) != 0) return;
   struct lxb_out_cfg c = {
     .rate = p->config.rate,
     .channels = (uint8_t)p->config.channels,
@@ -352,7 +350,7 @@ API int pcm_writei(struct pcm* p, const void* data, unsigned int frames) {
   if (p->s.map && lxb_dead(&p->s)) {
     ALOGW("bridge dropped the stream; reconnecting");
     enter_fallback_locked(p);
-    p->next_retry = 0;
+    p->retry = (struct lxb_backoff){0};
   }
   connect_locked(p);
   bool connected = p->s.map != NULL;
@@ -436,7 +434,7 @@ API int pcm_prepare(struct pcm* p) {
   pthread_mutex_lock(&p->lock);
   if (p->s.map && lxb_dead(&p->s)) {
     enter_fallback_locked(p);
-    p->next_retry = 0;
+    p->retry = (struct lxb_backoff){0};
   }
   pthread_mutex_unlock(&p->lock);
   return 0;

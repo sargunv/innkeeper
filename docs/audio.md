@@ -71,8 +71,9 @@ Install points:
   - `pcm.c`: the PCM API.
   - `mixer.c`: "Master Playback Volume/Switch" forwarded as SET_MASTER, plus
     stored capture controls.
-  - `bridge_client.c`: the protocol client and ring writer. It has no tinyalsa
-    types, so an AIDL stream can reuse it.
+  - `audio_service.c`: the audio service's client and ring writer, on the shared
+    bridge client (`android/vendor/bridge-client`). It has no tinyalsa types, so
+    an AIDL stream can reuse it.
 - **PCM behaviour:**
   - The bridge stream opens lazily on the first write, so the HAL's open/close
     capability probes cost nothing.
@@ -172,7 +173,7 @@ Methods:
 
 On our own image we don't need the tinyalsa trick: add a bridge stream to AOSP's
 default AIDL HAL. `StreamCommonImpl` drivers implement `DriverInterface`, and
-each call maps onto `bridge_client.h`:
+each call maps onto `audio_service.h`:
 
 | `DriverInterface` (`hardware/interfaces/audio/aidl/default`) | Bridge client                                                                                 |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
