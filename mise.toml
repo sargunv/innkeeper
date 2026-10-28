@@ -143,8 +143,11 @@ description = "End-to-end suites against a headless test instance: audio, system
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
-description = "The compat corpus against a session (tests/compat)"
-run = "tests/compat/run.sh"
+description = "The compat corpus against a session (-- [--only PKG,...] [--window] [--accept] | fetch | report)"
+# A test session: links are only logged, and notifications and media players
+# stay off the real desktop.
+env = { LINUXAPK_TEST = "1" }
+run = "cargo run -q --release -p linuxapk-compat --"
 
 # ---- run ---------------------------------------------------------------------
 

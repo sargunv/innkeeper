@@ -1,21 +1,34 @@
-//! Driving the live Android session through the staged `linuxapk-session`.
+//! The live Android session the harness drives: core's launcher driver, plus
+//! what only the harness needs (output as text, Android restarts, the bridge
+//! log).
 
 use std::cell::Cell;
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use linuxapk_core::{launcher, paths};
 
-/// The session the harness drives. A session it started itself is stopped
-/// again when this is dropped, so a run leaves nothing running that it started.
+/// A session it started itself is stopped again when this is dropped, so a
+/// run leaves nothing running that it started.
 pub struct Session {
-    launcher: PathBuf,
+    core: launcher::Session,
     started: Cell<bool>,
 }
 
+impl Deref for Session {
+    type Target = launcher::Session;
+    fn deref(&self) -> &launcher::Session {
+        &self.core
+    }
+}
+
+/// A command's result: whether it exited 0, and its stdout followed by its
+/// stderr (pm and am print their failures there).
 pub struct Output {
     pub ok: bool,
     pub text: String,
@@ -24,49 +37,25 @@ pub struct Output {
 impl Session {
     pub fn new(launcher: PathBuf) -> Self {
         Self {
-            launcher,
+            core: launcher::Session::at(launcher),
             started: Cell::new(false),
         }
     }
 
-    /// Host pid of the session's Android init, if running.
-    pub fn pid(&self) -> Option<u32> {
-        let out = Command::new(&self.launcher).arg("status").output().ok()?;
-        let s = String::from_utf8_lossy(&out.stdout);
-        s.strip_prefix("running: host pid ")?.trim().parse().ok()
-    }
-
     /// Runs `cmd` inside the session as root, killed after `secs`.
     pub fn run(&self, secs: u64, cmd: &[&str]) -> Output {
-        self.run_with(secs, cmd, Stdio::null())
-    }
-
-    fn run_with(&self, secs: u64, cmd: &[&str], stdin: Stdio) -> Output {
-        let res = Command::new("timeout")
-            .args(["-k", "5", &secs.to_string()])
-            .arg(&self.launcher)
-            .arg("exec")
-            .args(cmd)
-            .stdin(stdin)
-            .output();
-        match res {
+        match self.exec(secs, cmd) {
             Ok(o) => {
-                let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
-                let err = String::from_utf8_lossy(&o.stderr);
-                // The session's linker warns on stderr for some binaries; keep the
-                // rest, it carries pm/am failure messages.
-                for l in err.lines().filter(|l| !l.contains("linker")) {
+                let mut text = o.text();
+                for l in o.stderr.lines() {
                     text.push_str(l);
                     text.push('\n');
                 }
-                Output {
-                    ok: o.status.success(),
-                    text,
-                }
+                Output { ok: o.ok(), text }
             }
             Err(e) => Output {
                 ok: false,
-                text: format!("spawn failed: {e}"),
+                text: format!("{e:#}"),
             },
         }
     }
@@ -76,11 +65,19 @@ impl Session {
         self.run(secs, &["sh", "-c", script])
     }
 
+    /// Copies a file out of the session.
+    pub fn pull(&self, src: &str, dst: &Path) -> Result<()> {
+        let o = self.exec(60, &["cat", src])?;
+        if !o.ok() {
+            bail!("pull {src} failed: {}", o.stderr.trim());
+        }
+        std::fs::write(dst, o.stdout)?;
+        Ok(())
+    }
+
     /// The host bridge's log, in the session's state directory.
     fn bridge_log_path(&self) -> PathBuf {
-        linuxapk_core::paths::state_dir()
-            .unwrap_or_default()
-            .join("bridge.log")
+        paths::state_dir().unwrap_or_default().join("bridge.log")
     }
 
     /// The bridge log's current size, so a step can look only at what comes
@@ -91,7 +88,6 @@ impl Session {
 
     /// The bridge log from byte `from` on (at most its last MiB).
     pub fn bridge_log(&self, from: u64) -> String {
-        use std::io::{Read, Seek, SeekFrom};
         let Ok(mut f) = File::open(self.bridge_log_path()) else {
             return String::new();
         };
@@ -104,89 +100,25 @@ impl Session {
         String::from_utf8_lossy(&b).into_owned()
     }
 
-    /// Copies a host file into the session.
-    pub fn push(&self, src: &Path, dst: &str) -> Result<()> {
-        let f = File::open(src).with_context(|| format!("open {}", src.display()))?;
-        let o = self.run_with(300, &["sh", "-c", &format!("cat > {dst}")], f.into());
-        if !o.ok {
-            bail!("push {} failed: {}", src.display(), o.text.trim());
-        }
-        Ok(())
-    }
-
-    /// Copies a file out of the session.
-    pub fn pull(&self, src: &str, dst: &Path) -> Result<()> {
-        let f = File::create(dst)?;
-        let st = Command::new("timeout")
-            .args(["-k", "5", "60"])
-            .arg(&self.launcher)
-            .args(["exec", "cat", src])
-            .stdin(Stdio::null())
-            .stdout(f)
-            .stderr(Stdio::null())
-            .status()?;
-        if !st.success() {
-            bail!("pull {src} failed");
-        }
-        Ok(())
-    }
-
-    pub fn getprop(&self, name: &str) -> String {
-        self.run(15, &["getprop", name]).text.trim().to_string()
-    }
-
-    pub fn booted(&self) -> bool {
-        self.getprop("sys.boot_completed") == "1"
-    }
-
     /// Makes sure a session is running and booted. Starts one (headless unless
     /// `window`) if none is running.
     pub fn ensure(&self, window: bool) -> Result<()> {
-        if self.pid().is_none() {
-            self.start(window)?;
+        let status = |m: &str| eprintln!("compat: {m}");
+        if !self.running() {
+            self.started.set(true);
+            self.start(!window, &status)?;
         }
-        self.wait_boot(Duration::from_secs(300))?;
-        self.prepare();
-        Ok(())
-    }
-
-    fn start(&self, window: bool) -> Result<()> {
-        eprintln!(
-            "compat: starting a session ({})",
-            if window { "window" } else { "headless" }
-        );
-        let mut c = Command::new(&self.launcher);
-        c.arg("start");
-        if !window {
-            c.arg("--headless");
-        }
-        self.started.set(true);
-        let st = c.status()?;
-        if !st.success() {
-            bail!("session start failed");
-        }
-        Ok(())
-    }
-
-    pub fn wait_boot(&self, limit: Duration) -> Result<()> {
         let t = Instant::now();
-        while t.elapsed() < limit {
-            if self.pid().is_none() {
-                bail!("session is not running");
-            }
-            if self.booted() {
-                if t.elapsed() > Duration::from_secs(1) {
-                    eprintln!("compat: session booted ({:.0?} wait)", t.elapsed());
-                }
-                return Ok(());
-            }
-            sleep(Duration::from_secs(2));
+        self.wait_booted(&status)?;
+        if t.elapsed() > Duration::from_secs(1) {
+            eprintln!("compat: session booted ({:.0?} wait)", t.elapsed());
         }
-        bail!("session did not reach sys.boot_completed=1 in {limit:?}")
+        self.prepare_android();
+        Ok(())
     }
 
     /// Per-boot setup: a bigger log buffer, screen awake and unlocked.
-    pub fn prepare(&self) {
+    fn prepare_android(&self) {
         self.run(30, &["logcat", "-G", "16M"]);
         self.run(15, &["input", "keyevent", "WAKEUP"]);
         self.run(15, &["wm", "dismiss-keyguard"]);
@@ -261,10 +193,9 @@ impl Drop for Session {
     fn drop(&mut self) {
         if self.started.get() {
             eprintln!("compat: stopping the session this run started");
-            let _ = Command::new(&self.launcher)
-                .arg("stop")
-                .stdout(Stdio::null())
-                .status();
+            if let Err(e) = self.stop() {
+                eprintln!("compat: {e:#}");
+            }
         }
     }
 }

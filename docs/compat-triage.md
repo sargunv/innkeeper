@@ -8,21 +8,21 @@ assignment.
 ## Harness
 
 ```sh
-compat/run.sh                    # whole corpus; a headless session if none runs
-compat/run.sh --only org.wikipedia,de.sudoq
-compat/run.sh --window           # start the session with its window, to watch
-compat/run.sh fetch              # download and verify the corpus only
-compat/run.sh report             # rewrite COMPATIBILITY.md from results.json
+mise run test:compat                            # whole corpus; a headless session if none runs
+mise run test:compat -- --only org.wikipedia,de.sudoq
+mise run test:compat -- --window                # start the session with windows, to watch
+mise run test:compat -- fetch                   # download and verify the corpus only
+mise run test:compat -- report                  # rewrite compatibility.md from results.json
 ```
 
-Run it as a capped job on the lane's own session instance:
-`systemd-run --user --unit=compat-run --collect -p MemoryMax=4G -E LINUXAPK_INSTANCE=compat -- compat/run.sh`.
+Run it on a session instance of its own:
+`LINUXAPK_INSTANCE=compat mise run test:compat`.
 
 - **Corpus:** `compat/corpus.toml` holds pinned F-Droid APKs (version code, URL
-  and SHA-256). They download into `out/corpus/` and are never committed. Each
-  entry also records the app's framework, identified by hand from the APK's
-  contents (see "Frameworks" below), and optional `manual` notes for checks the
-  harness doesn't do.
+  and SHA-256). They download into `out/test/compat/corpus/` and are never
+  committed. Each entry also records the app's framework, identified by hand
+  from the APK's contents (see "Frameworks" below), and optional `manual` notes
+  for checks the harness doesn't do.
 - **Per app** (`compat/src/app.rs`):
   1. Copy the APK into `/data/local/tmp` and run `pm install -r -g`.
   2. Resolve the launcher activity (or a TV app's leanback one), then launch it.
@@ -47,8 +47,8 @@ Run it as a capped job on the lane's own session instance:
        `linuxapk-session exec` inherit the caller's niceness, and uiautomator's
        handler thread, which sets its priority back to 0, dies with
        `SecurityException: Cannot set priority to 0` (crash buffer). zsh runs
-       background jobs (`cmd &`) at nice 5. `compat/run.sh` now restarts itself
-       at nice 0 through `systemd-run --user` when it finds itself niced;
+       background jobs (`cmd &`) at nice 5. The harness now restarts itself at
+       nice 0 through `systemd-run --user` when it finds itself niced;
      - `sh` runs a check in the session;
      - `bridgelog` checks that the host bridge logged a text since the script
        started (compat sessions only log links, docs/bridge.md);

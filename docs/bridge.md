@@ -435,8 +435,8 @@ the compositor has no data control.
   per connection; it logs each one (the first 512 bytes) and calls the OpenURI
   portal, or `xdg-open URL` without a shell if there is no portal.
 - **Test sessions** (a named `LINUXAPK_INSTANCE`, or `LINUXAPK_TEST=1`, which
-  `compat/run.sh` sets) never touch the user's real desktop. The launcher passes
-  `--no-open-urls`, so links are validated and logged
+  `mise run test:compat` sets) never touch the user's real desktop. The launcher
+  passes `--no-open-urls`, so links are validated and logged
   (`openuri: …: not opened (test session): URL`) but not opened, unless
   `LINUXAPK_OPEN_URLS=1`. It also passes `--no-desktop-presence` unless the
   session talks to a private bus (a nested test desktop): notifications and

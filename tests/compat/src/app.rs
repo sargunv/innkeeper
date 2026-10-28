@@ -72,7 +72,8 @@ const TMP_APK: &str = "/data/local/tmp/compat.apk";
 const UI_XML: &str = "/data/local/tmp/compat-ui.xml";
 /// How long one `uiautomator dump` may take (it waits for the UI to go idle).
 const UI_DUMP_SECS: u64 = 150;
-const GESTURE: &str = "/data/local/tmp/compat-gesture.sh";
+/// Writes a touch gesture as an input stream (runs inside the session).
+const GESTURE_SH: &str = include_str!("../android/gesture.sh");
 const BRIDGE_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
 
 pub struct Run<'a> {
@@ -85,7 +86,6 @@ pub struct Run<'a> {
     /// The app's window, once it is launched.
     win: Option<Win>,
     last_shot: std::cell::RefCell<Option<PathBuf>>,
-    gesture_sh: PathBuf,
 }
 
 /// An app window: its Android display, SurfaceFlinger's id for screencap and
@@ -169,7 +169,7 @@ fn parse_focus(text: &str, display: i32) -> Option<String> {
 struct Stop(Status, String);
 
 impl<'a> Run<'a> {
-    pub fn new(s: &'a Session, app: &'a App, out: &Path, gesture_sh: &Path) -> Self {
+    pub fn new(s: &'a Session, app: &'a App, out: &Path) -> Self {
         let dir = out.join(&app.package);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::create_dir_all(&dir);
@@ -182,7 +182,6 @@ impl<'a> Run<'a> {
             pss_mb: None,
             win: None,
             last_shot: Default::default(),
-            gesture_sh: gesture_sh.to_path_buf(),
         }
     }
 
@@ -413,7 +412,7 @@ impl<'a> Run<'a> {
         s.run(120, &["pm", "uninstall", &pkg]);
 
         // Install.
-        if let Err(e) = s.push(apk, TMP_APK) {
+        if let Err(e) = s.push_fixed(apk, TMP_APK) {
             return Err(Stop(Status::Error, format!("{e:#}")));
         }
         let o = s.run(
@@ -601,10 +600,6 @@ impl<'a> Run<'a> {
         self.refresh_window();
         // Per-app script, from a fresh first screen.
         let script = self.app.script.clone();
-        if script.iter().any(|st| st.starts_with("gesture:")) {
-            let _ = self.s.push(&self.gesture_sh, GESTURE);
-            self.s.run(10, &["chmod", "755", GESTURE]);
-        }
         if !script.is_empty() {
             let res = self.script(&script);
             self.check("script", res.is_ok(), res.err().unwrap_or_default());
@@ -789,14 +784,17 @@ impl<'a> Run<'a> {
                         a[2] = (y * w.h / REF_H).to_string();
                         a.extend([w.display.to_string(), w.w.to_string(), w.h.to_string()]);
                     }
-                    let o = self.s.sh(
-                        60,
-                        &format!(
-                            "{GESTURE} {} | CLASSPATH={BRIDGE_APK} app_process / \
-                             dev.linuxapk.system.input.InputBridgeMain --stdin",
-                            a.join(" ")
-                        ),
-                    );
+                    let mut argv = vec![
+                        "sh",
+                        "-c",
+                        "apk=$1 script=$2; shift 2; sh -c \"$script\" gesture.sh \"$@\" | \
+                         CLASSPATH=$apk app_process / dev.linuxapk.system.input.InputBridgeMain --stdin",
+                        "sh",
+                        BRIDGE_APK,
+                        GESTURE_SH,
+                    ];
+                    argv.extend(a.iter().map(String::as_str));
+                    let o = self.s.run(60, &argv);
                     if !o.text.contains("inject=true") {
                         return Err(format!("{step}: not injected: {}", o.text.trim()));
                     }

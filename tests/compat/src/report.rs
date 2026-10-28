@@ -82,11 +82,11 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
     let mut md = String::from(
         "# Compatibility\n\n\
      Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested \
-     by the compat harness (`tests/compat/run.sh`): install, launch, a \
+     by the compat harness (`mise run test:compat`): install, launch, a \
      non-blank first frame, then a tap, a scroll and Back without a crash or \
      ANR, plus an optional per-app script. Failures are triaged in \
      [compat-triage.md](compat-triage.md). Generated: run \
-     `tests/compat/run.sh` (or `tests/compat/run.sh report` to rewrite this \
+     `mise run test:compat` (or `mise run test:compat -- report` to rewrite this \
      file from `tests/compat/results.json`). Start is the time to the first \
      frame on a fresh install; memory is the app's total PSS after the \
      interactions.\n\n",

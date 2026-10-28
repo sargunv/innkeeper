@@ -1,8 +1,8 @@
 //! Linux.apk compat harness. See docs/compat-triage.md.
 //!
-//!   linuxapk-compat [run] [--window] [--only PKG,...] [--accept]
-//!   linuxapk-compat fetch
-//!   linuxapk-compat report
+//!   mise run test:compat -- [run] [--window] [--only PKG,...] [--accept]
+//!   mise run test:compat -- fetch
+//!   mise run test:compat -- report
 //!
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
 //! one if needed, and stopping it at the end), runs every app, writes
@@ -16,6 +16,8 @@ mod frame;
 mod report;
 mod session;
 
+use std::ffi::OsString;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
@@ -67,8 +69,59 @@ fn main() -> ExitCode {
     }
 }
 
+/// Android commands run through `linuxapk-session exec` inherit our
+/// niceness, and Android threads that set their priority back to 0 then fail:
+/// uiautomator dies at once with "SecurityException: Cannot set priority to
+/// 0" ("Killed"). zsh runs background jobs at nice 5 (BG_NICE). So a niced
+/// harness runs itself again at nice 0 through the user manager, which can
+/// raise priority back where we can't.
+fn run_at_nice_zero() -> Result<()> {
+    let stat = fs::read_to_string("/proc/self/stat")?;
+    // The fields after the command name (which may hold spaces), from
+    // field 3 (state) on: nice is field 19.
+    let nice: i32 = stat
+        .rsplit_once(')')
+        .and_then(|(_, f)| f.split_whitespace().nth(16))
+        .context("read /proc/self/stat")?
+        .parse()?;
+    if nice <= 0 || env::var_os("LINUXAPK_RENICED").is_some() {
+        return Ok(());
+    }
+    eprintln!("compat: running at nice {nice}; restarting at nice 0");
+    let mut c = Command::new("systemd-run");
+    c.args(["--user", "--quiet", "--pipe", "--wait", "--collect"])
+        .args(["-p", "Nice=0", "--same-dir"]);
+    for (k, v) in env::vars_os() {
+        let name = k.to_string_lossy();
+        if name.starts_with("LINUXAPK_")
+            || name.starts_with("XDG_")
+            || [
+                "WAYLAND_DISPLAY",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "HOME",
+                "PATH",
+            ]
+            .contains(&&*name)
+        {
+            let mut set = OsString::from("--setenv=");
+            set.push(&k);
+            set.push("=");
+            set.push(&v);
+            c.arg(set);
+        }
+    }
+    c.arg("--setenv=LINUXAPK_RENICED=1")
+        .arg("--")
+        .arg(env::current_exe()?)
+        .args(env::args_os().skip(1));
+    Err(c.exec()).context("systemd-run")
+}
+
 fn real_main() -> Result<ExitCode> {
     let o = parse_args()?;
+    if o.cmd == "run" {
+        run_at_nice_zero()?;
+    }
     // A dev tool: it runs against the checkout it was built in, and its staged
     // session.
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -120,8 +173,7 @@ fn real_main() -> Result<ExitCode> {
             }
             let pid = s.pid();
             let system = s.system_server_pid();
-            let mut r =
-                Run::new(&s, a, &out, &repo.join("tests/compat/android/gesture.sh")).run(apk);
+            let mut r = Run::new(&s, a, &out).run(apk);
             // Android's own restart (SurfaceFlinger or system_server died) in
             // the same session: the app triggered it, so it counts against the
             // app, and the next app waits until the system is back.
@@ -158,7 +210,7 @@ fn real_main() -> Result<ExitCode> {
         date: today(),
         build: s.getprop("ro.build.fingerprint"),
         headless: s.headless(),
-        session_mem_mb: session_mem_mb(),
+        session_mem_mb: s.status().memory.map(|b| b >> 20),
         apps: vec![],
     };
     // Merge: keep baseline entries for apps not run, or that hit a harness error.
@@ -200,15 +252,4 @@ fn today() -> String {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default()
-}
-
-/// Memory of the whole session unit (cgroup), in MiB.
-fn session_mem_mb() -> Option<u64> {
-    let unit = linuxapk_core::paths::unit_name().ok()?;
-    let o = Command::new("systemctl")
-        .args(["--user", "show", "-P", "MemoryCurrent", &unit])
-        .output()
-        .ok()?;
-    let b: u64 = String::from_utf8_lossy(&o.stdout).trim().parse().ok()?;
-    Some(b >> 20)
 }
