@@ -34,18 +34,6 @@ const CMDLINE: &[&str] = &[
     "androidboot.dalvik.vm.heapsize=512m",
 ];
 
-/// The host's resolvers, from /etc/resolv.conf.
-pub fn host_nameservers() -> Vec<String> {
-    fs::read_to_string("/etc/resolv.conf")
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| {
-            let mut w = l.split_whitespace();
-            (w.next() == Some("nameserver")).then(|| w.next().map(str::to_string))?
-        })
-        .collect()
-}
-
 /// The render node's kernel driver (`amdgpu`, `i915`...), if any.
 fn render_driver() -> Option<String> {
     let p = fs::canonicalize("/sys/class/drm/renderD128/device/driver").ok()?;
@@ -99,11 +87,8 @@ fn our_props(cfg: &Config) -> Result<String> {
         // No mounts, so zygote can't hide other apps' data dirs.
         s += "persist.zygote.app_data_isolation=false\n";
         // The host's network is Android's (the system app's
-        // HostNetworkFeature), with the host's resolvers.
-        s += &format!(
-            "ro.vendor.linuxapk.host_net.dns={}\n",
-            host_nameservers().join(",")
-        );
+        // HostNetworkFeature, which follows the sandbox's resolv.conf).
+        s += "ro.vendor.linuxapk.host_net=1\n";
     }
     s += "# --- linuxapk-session: image/vendor.prop ---\n";
     s += &fs::read_to_string(share.join("image/vendor.prop"))?;

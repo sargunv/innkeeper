@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::session::{self, append};
-use crate::{layer, nsroot, sys};
+use crate::{nsroot, sys};
 
 fn systemctl(args: &[&str]) -> Command {
     let mut c = Command::new("systemctl");
@@ -152,10 +152,7 @@ fn start_pasta(init: i32, log: &fs::File) -> Result<std::process::Child> {
         "--dns-forward",
         "169.254.1.1",
     ]);
-    if let Some(dns) = layer::host_nameservers()
-        .into_iter()
-        .find(|n| !n.contains(':'))
-    {
+    if let Some(dns) = host_nameservers().into_iter().find(|n| !n.contains(':')) {
         c.args(["--dns-host", &dns]);
     }
     c.args(["-t", "none", "-u", "none", "-T", "none", "-U", "none"])
@@ -222,4 +219,16 @@ pub fn cgroup(p: &crate::paths::Paths) -> Option<std::path::PathBuf> {
     let cg = fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     let path = cg.lines().find_map(|l| l.strip_prefix("0::"))?;
     Some(Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/')))
+}
+
+/// The host's resolvers, from /etc/resolv.conf.
+pub fn host_nameservers() -> Vec<String> {
+    fs::read_to_string("/etc/resolv.conf")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            (w.next() == Some("nameserver")).then(|| w.next().map(str::to_string))?
+        })
+        .collect()
 }
