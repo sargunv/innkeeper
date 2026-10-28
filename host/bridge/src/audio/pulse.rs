@@ -72,6 +72,9 @@ struct Stats {
     samples: u64,
 }
 
+/// The native protocol's cookie length.
+const COOKIE_LEN: usize = 256;
+
 impl PulseOut {
     pub fn connect(cfg: &OutputConfig, sink: Option<&str>) -> Result<PulseOut> {
         let path = pulseaudio::socket_path_from_env().context("no PulseAudio/PipeWire socket")?;
@@ -101,9 +104,13 @@ impl PulseOut {
             stats: Stats::default(),
         };
 
+        // Inside Flatpak there is no cookie file. pipewire-pulse refuses a
+        // cookie that isn't 256 bytes but doesn't check its value (local
+        // clients are authenticated by uid), so send zeros.
         let cookie = pulseaudio::cookie_path_from_env()
             .and_then(|p| std::fs::read(p).ok())
-            .unwrap_or_default();
+            .filter(|c| c.len() == COOKIE_LEN)
+            .unwrap_or_else(|| vec![0; COOKIE_LEN]);
         let seq = p.send(&Command::Auth(protocol::AuthParams {
             version: protocol::MAX_VERSION,
             supports_shm: false,
