@@ -61,7 +61,8 @@ fn br_payload_len(cmd: u32) -> usize {
         BR_TRANSACTION | BR_REPLY => std::mem::size_of::<BinderTransactionData>(),
         BR_TRANSACTION_SEC_CTX => std::mem::size_of::<BinderTransactionDataSecctx>(),
         BR_INCREFS | BR_ACQUIRE | BR_RELEASE | BR_DECREFS => std::mem::size_of::<BinderPtrCookie>(),
-        BR_DEAD_BINDER | BR_CLEAR_DEATH_NOTIFICATION_DONE => 8,
+        BR_DEAD_BINDER | BR_CLEAR_DEATH_NOTIFICATION_DONE | BR_CLEAR_FREEZE_NOTIFICATION_DONE => 8,
+        BR_FROZEN_BINDER => std::mem::size_of::<BinderFrozenStateInfo>(),
         BR_ERROR => 4,
         _ => 0,
     }
@@ -764,4 +765,279 @@ fn poll_setup_is_retried_by_the_restart() {
             .done(),
     );
     assert!(s.us.procs[&s.server].poll_ready);
+}
+
+// ---- the freezer --------------------------------------------------------
+
+/// `BINDER_FREEZE` of `pid` from the client's thread 3; returns the call.
+fn freeze(s: &mut Setup, pid: u32, enable: bool, timeout_ms: u32) -> Call {
+    let at = 0x9100_0000;
+    let info = BinderFreezeInfo {
+        pid,
+        enable: enable as u32,
+        timeout_ms,
+    };
+    s.us.poke(s.client, at, pod_bytes(&info));
+    let c = s.ioctl(s.client, 3, BINDER_FREEZE, at);
+    s.b.check_invariants();
+    c
+}
+
+fn freeze_errno(s: &mut Setup, pid: u32, enable: bool, timeout_ms: u32) -> i32 {
+    let c = freeze(s, pid, enable, timeout_ms);
+    s.us.outcome(c).errno
+}
+
+fn frozen_info(s: &mut Setup, pid: u32) -> Result<(u32, u32), i32> {
+    let at = 0x9100_1000;
+    let info = BinderFrozenStatusInfo {
+        pid,
+        ..Default::default()
+    };
+    s.us.poke(s.client, at, pod_bytes(&info));
+    let c = s.ioctl(s.client, 3, BINDER_GET_FROZEN_INFO, at);
+    match s.us.outcome(c).errno {
+        0 => {
+            let out: BinderFrozenStatusInfo = read_pod(
+                &s.us.peek(s.client, at, size_of::<BinderFrozenStatusInfo>()),
+                0,
+            )
+            .unwrap();
+            Ok((out.sync_recv, out.async_recv))
+        }
+        e => Err(e),
+    }
+}
+
+fn call_server(s: &mut Setup, flags: u32) -> Vec<(u32, Vec<u8>)> {
+    let mut td = BinderTransactionData::default();
+    td.flags = flags;
+    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
+    let c = s.wr(s.client, 1, &w, 256);
+    s.stream(c)
+}
+
+/// The kernel's BinderLibTest.Freeze and FreezeTxn: a frozen process fails
+/// synchronous calls with BR_FROZEN_REPLY, takes oneways with
+/// BR_TRANSACTION_PENDING_FROZEN, and reports both; thawed, it works again.
+#[test]
+fn frozen_process_fails_calls_and_queues_oneways() {
+    let mut s = setup();
+    assert_eq!(frozen_info(&mut s, 4242), Err(libc::EINVAL));
+    assert_eq!(freeze_errno(&mut s, 4242, true, 0), libc::EINVAL);
+    assert_eq!(freeze_errno(&mut s, 1000, true, 0), 0);
+    assert_eq!(frozen_info(&mut s, 1000), Ok((0, 0)));
+
+    let r = call_server(&mut s, 0);
+    assert!(find(&r, BR_FROZEN_REPLY).is_some());
+    assert!(find(&r, BR_TRANSACTION_COMPLETE).is_none());
+    let r = call_server(&mut s, TF_ONE_WAY);
+    assert!(find(&r, BR_TRANSACTION_PENDING_FROZEN).is_some());
+    // (Bit 1: the oneway is still outstanding.)
+    assert_eq!(frozen_info(&mut s, 1000), Ok((3, 1)));
+    // The oneway is queued for the server, which reads it once it runs.
+    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
+
+    assert_eq!(freeze_errno(&mut s, 1000, false, 0), 0);
+    assert_eq!(frozen_info(&mut s, 1000), Ok((0, 0)));
+    let w = Bc::default()
+        .cmd(BC_TRANSACTION)
+        .td(&BinderTransactionData::default())
+        .done();
+    s.write(s.client, 1, &w);
+    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
+}
+
+/// A freeze with a timeout waits for the target's queued transactions to be
+/// read, and fails with EAGAIN (thawing it) if they aren't in time. One
+/// without a timeout fails at once; so does one while the target serves a
+/// call, which GET_FROZEN_INFO reports as bit 1 of sync_recv.
+#[test]
+fn freeze_waits_for_outstanding_transactions() {
+    let mut s = setup();
+    // A queued oneway.
+    call_server(&mut s, TF_ONE_WAY);
+    assert_eq!(freeze_errno(&mut s, 1000, true, 0), libc::EAGAIN);
+    let f = freeze(&mut s, 1000, true, 1000);
+    assert!(s.us.is_pending(f));
+    // Reading it drains the server: the freeze succeeds.
+    let r = s.read(s.server, 2, 256);
+    let td = td_from(find(&r, BR_TRANSACTION).unwrap());
+    assert_eq!(s.us.outcome(f).errno, 0);
+    assert_eq!(s.us.timer, Some(1000));
+    s.write(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_FREE_BUFFER).u64(td.data_buffer).done(),
+    );
+    assert_eq!(freeze_errno(&mut s, 1000, false, 0), 0);
+
+    // One that doesn't drain in time.
+    call_server(&mut s, TF_ONE_WAY);
+    let f = freeze(&mut s, 1000, true, 1000);
+    s.us.advance(&mut s.b, 999);
+    assert!(s.us.is_pending(f));
+    s.us.advance(&mut s.b, 1);
+    s.b.check_invariants();
+    assert_eq!(s.us.outcome(f).errno, libc::EAGAIN);
+    // A failed freeze thaws: a call goes through (the client waits for its
+    // reply).
+    let w = Bc::default()
+        .cmd(BC_TRANSACTION)
+        .td(&BinderTransactionData::default())
+        .done();
+    let c = s.wr(s.client, 1, &w, 256);
+    assert!(s.us.is_pending(c));
+
+    // The server reads the oneway, then the call. Serving the call, it
+    // can't be frozen.
+    let r = s.read(s.server, 2, 256);
+    let td = td_from(find(&r, BR_TRANSACTION).unwrap());
+    assert_ne!(td.flags & TF_ONE_WAY, 0);
+    let free = Bc::default().cmd(BC_FREE_BUFFER).u64(td.data_buffer).done();
+    let c = s.wr(s.server, 2, &free, 256);
+    let td = td_from(find(&s.stream(c), BR_TRANSACTION).unwrap());
+    assert_eq!(td.flags & TF_ONE_WAY, 0);
+    assert_eq!(freeze_errno(&mut s, 1000, true, 0), libc::EAGAIN);
+    assert_eq!(frozen_info(&mut s, 1000), Ok((2, 0)));
+}
+
+/// A signal that ends a freeze's wait thaws its target; the restarted
+/// ioctl starts over.
+#[test]
+fn interrupted_freeze_thaws_its_target() {
+    let mut s = setup();
+    call_server(&mut s, TF_ONE_WAY);
+    let f = freeze(&mut s, 1000, true, 1000);
+    s.us.interrupt(f);
+    // Still marked frozen until the driver hears of it.
+    let f = s.us.restart(&mut s.b, f);
+    s.b.check_invariants();
+    assert!(s.us.is_pending(f));
+    s.us.interrupt(f);
+    // The driver finds the call gone at its deadline.
+    s.us.advance(&mut s.b, 1000);
+    s.b.check_invariants();
+    assert_eq!(s.b.freezer_state(), (0, false));
+}
+
+/// Two binder instances of one pid (/dev/binder and /dev/hwbinder) freeze
+/// together, the second once the first has drained.
+#[test]
+fn freeze_covers_every_instance_of_the_pid() {
+    let mut s = setup();
+    let hw = s.b.open(1000, 1000, 1, false);
+    s.us.add_proc(hw, 0xa000_0000);
+    call_server(&mut s, TF_ONE_WAY);
+    let f = freeze(&mut s, 1000, true, 100);
+    assert!(s.us.is_pending(f));
+    s.read(s.server, 2, 256);
+    assert_eq!(s.us.outcome(f).errno, 0);
+    assert_eq!(frozen_info(&mut s, 1000), Ok((0, 0)));
+    let r = call_server(&mut s, 0);
+    assert!(find(&r, BR_FROZEN_REPLY).is_some());
+    s.b.release_proc(hw, &mut s.us);
+    s.b.check_invariants();
+}
+
+fn frozen_state(r: &[(u32, Vec<u8>)]) -> Option<(u64, u32)> {
+    find(r, BR_FROZEN_BINDER).map(|p| {
+        let i: BinderFrozenStateInfo = read_pod(p, 0).unwrap();
+        (i.cookie, i.is_frozen)
+    })
+}
+
+fn handle_cookie(cmd: u32, handle: u32, cookie: u64) -> Vec<u8> {
+    let hc = BinderHandleCookie { handle, cookie };
+    let mut v = cmd.to_le_bytes().to_vec();
+    v.extend_from_slice(pod_bytes(&hc));
+    v
+}
+
+/// The kernel's freeze notifications (binderDriverInterfaceTest's
+/// RequestFrozenNotification, OverwritePendingFrozenNotification and
+/// ResendFrozenNotification): the state at once, then every change, with a
+/// change while one is unacknowledged sent again after the ack, and changes
+/// before a delivery coalesced.
+#[test]
+fn freeze_notifications() {
+    let mut s = setup();
+    // The client holds the context manager (handle 0) and watches it from
+    // a looper thread, which takes the notifications.
+    s.write(s.client, 2, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    s.write(s.client, 2, &Bc::default().cmd(BC_INCREFS).u32(0).done());
+    s.write(
+        s.client,
+        2,
+        &handle_cookie(BC_REQUEST_FREEZE_NOTIFICATION, 0, 77),
+    );
+    let w = handle_cookie(BC_REQUEST_FREEZE_NOTIFICATION, 0, 78);
+    let c = s.wr(s.client, 2, &w, 0);
+    assert_eq!(s.us.outcome(c).errno, libc::EINVAL, "one per ref");
+    assert_eq!(frozen_state(&s.read(s.client, 2, 256)), Some((77, 0)));
+    let ack = Bc::default()
+        .cmd(BC_FREEZE_NOTIFICATION_DONE)
+        .u64(77)
+        .done();
+    s.write(s.client, 2, &ack);
+    let c = s.wr(s.client, 2, &ack, 0);
+    assert_eq!(s.us.outcome(c).errno, libc::EINVAL, "nothing to ack");
+
+    freeze(&mut s, 1000, true, 0);
+    assert_eq!(frozen_state(&s.read(s.client, 2, 256)), Some((77, 1)));
+    // Changes while that is unacknowledged: sent again after the ack.
+    freeze(&mut s, 1000, false, 0);
+    assert!({
+        let c = s.client;
+        nothing_to_read(&mut s, c, 2)
+    });
+    s.write(s.client, 2, &ack);
+    assert_eq!(frozen_state(&s.read(s.client, 2, 256)), Some((77, 0)));
+    s.write(s.client, 2, &ack);
+    // Changes before a delivery coalesce into the latest state.
+    freeze(&mut s, 1000, true, 0);
+    freeze(&mut s, 1000, false, 0);
+    freeze(&mut s, 1000, true, 0);
+    let r = s.read(s.client, 2, 256);
+    assert_eq!(frozen_state(&r), Some((77, 1)));
+    assert_eq!(r.iter().filter(|(c, _)| *c == BR_FROZEN_BINDER).count(), 1);
+    // Cleared while unacknowledged: CLEAR_DONE after the ack.
+    s.write(
+        s.client,
+        2,
+        &handle_cookie(BC_CLEAR_FREEZE_NOTIFICATION, 0, 77),
+    );
+    assert!({
+        let c = s.client;
+        nothing_to_read(&mut s, c, 2)
+    });
+    s.write(s.client, 2, &ack);
+    let r = s.read(s.client, 2, 256);
+    assert_eq!(
+        find(&r, BR_CLEAR_FREEZE_NOTIFICATION_DONE),
+        Some(&77u64.to_le_bytes().to_vec())
+    );
+    assert_eq!(s.b.freezer_state().0, 0);
+    let w = handle_cookie(BC_CLEAR_FREEZE_NOTIFICATION, 0, 77);
+    let c = s.wr(s.client, 2, &w, 0);
+    assert_eq!(s.us.outcome(c).errno, libc::EINVAL, "not watched");
+    freeze(&mut s, 1000, false, 0);
+    // A request whose ref goes away goes with it.
+    s.write(
+        s.client,
+        2,
+        &handle_cookie(BC_REQUEST_FREEZE_NOTIFICATION, 0, 79),
+    );
+    s.write(s.client, 2, &Bc::default().cmd(BC_DECREFS).u32(0).done());
+    assert_eq!(s.b.freezer_state().0, 0);
+    assert!({
+        let c = s.client;
+        nothing_to_read(&mut s, c, 2)
+    });
+}
+
+/// A read from the thread blocks. (Its next ioctl abandons it.)
+fn nothing_to_read(s: &mut Setup, proc: ProcId, tid: u32) -> bool {
+    let c = s.wr(proc, tid, &[], 256);
+    s.us.is_pending(c)
 }

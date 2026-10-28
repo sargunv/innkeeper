@@ -141,6 +141,10 @@ pub struct FakeUserspace {
     /// an ioctl may still write into a call that ended during it (to roll a
     /// read back), but not into one that ended before.
     now: u64,
+    /// The driver's clock in milliseconds ([`FakeUserspace::advance`]), and
+    /// the earliest time it asked to be woken at.
+    pub clock_ms: u64,
+    pub timer: Option<u64>,
     /// Decides whether each fallible operation fails (never, if unset).
     pub fault: Option<Box<dyn FnMut(Fault) -> bool>>,
 }
@@ -268,6 +272,16 @@ impl FakeUserspace {
         assert!(matches!(r.status, Status::Interrupted));
         let (proc, tid, cmd, arg) = (r.proc, r.tid, r.cmd, r.arg);
         self.ioctl(b, proc, tid, cmd, arg)
+    }
+
+    /// Let `ms` milliseconds pass, firing the driver's timer if it is due.
+    pub fn advance(&mut self, b: &mut BinderDriver, ms: u64) {
+        self.clock_ms += ms;
+        if self.timer.is_some_and(|t| t <= self.clock_ms) {
+            self.now += 1;
+            self.timer = None;
+            b.expire(self);
+        }
     }
 
     /// A signal ends `call`'s wait: it can no longer be answered.
@@ -496,5 +510,13 @@ impl Userspace for FakeUserspace {
         {
             p.poll_ready = ready;
         }
+    }
+
+    fn now_ms(&mut self) -> u64 {
+        self.clock_ms
+    }
+
+    fn arm_timer(&mut self, at_ms: u64) {
+        self.timer = Some(self.timer.map_or(at_ms, |t| t.min(at_ms)));
     }
 }

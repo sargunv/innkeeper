@@ -175,6 +175,12 @@ for d in binder hwbinder vndbinder; do
   : >"$R/dev/$d"
   chmod 0666 "$R/dev/$d"
 done
+# What binderfs would report about the driver (libbinder reads these): the
+# broker implements each.
+mkdir -p "$R/dev/binderfs/features"
+for f in oneway_spam_detection extended_error freeze_notification; do
+  echo 1 >"$R/dev/binderfs/features/$f"
+done
 
 # --- /proc, /sys -------------------------------------------------------------
 # A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested

@@ -25,6 +25,15 @@
 //! blocking, and the first client one. One test
 //! injects random failures, signals and stops; the other fails each fallible
 //! operation of a fixed run in turn.
+//!
+//! With the freezer on, a controller (ActivityManager's CachedAppOptimizer)
+//! freezes and thaws the server and the clients with `BINDER_FREEZE`, with
+//! and without timeouts, and then sometimes stops their threads as the cgroup
+//! freezer does; the server watches the objects it holds with freeze
+//! notifications. Then also: calls to a frozen process fail with
+//! BR_FROZEN_REPLY, oneways to it are still received, every freeze is
+//! answered (on its deadline at the latest), and once everything is thawed
+//! the last state each notification reported is "not frozen".
 
 use std::collections::BTreeSet;
 
@@ -35,6 +44,9 @@ use crate::fake::{FakeUserspace, Fault, Rng, Status};
 /// Where a thread builds its transaction data (at `DATA + tid * 0x1_0000`).
 const DATA: u64 = 0x6000_0000;
 const READ_SIZE: usize = 256;
+/// Freeze notification cookies: this plus the handle (death ones are the
+/// handle).
+const FREEZE_COOKIE: u64 = 0x1_0000;
 
 struct Owed {
     code: u32,
@@ -72,6 +84,8 @@ struct Thread {
     stopped: bool,
     /// Its ioctl in flight is BINDER_THREAD_EXIT.
     exiting: bool,
+    /// Its process is in the frozen cgroup: it doesn't run.
+    frozen: bool,
     /// It exited, or its process died.
     dead: bool,
 }
@@ -96,6 +110,7 @@ impl Thread {
             owed: Vec::new(),
             stopped: false,
             exiting: false,
+            frozen: false,
             dead: false,
         }
     }
@@ -130,6 +145,31 @@ struct Seen {
     exited: u32,
     oneways_with_fds: u32,
     replies_with_fds: u32,
+    frozen_replies: u32,
+    pending_frozen: u32,
+    freezes: u32,
+    freezes_waited: u32,
+    freezes_failed: u32,
+    cgroup_frozen: u32,
+    freeze_notifications: u32,
+}
+
+/// The process that freezes the others, and its `BINDER_FREEZE` in flight.
+struct Freezer {
+    proc: ProcId,
+    call: Option<(Call, i32, bool)>,
+    /// Pids it froze (with `BINDER_FREEZE`; their threads may also be in
+    /// the frozen cgroup).
+    frozen: BTreeSet<i32>,
+}
+
+/// The pid each simulated process was opened with.
+fn pid_of(proc: ProcId, server: ProcId) -> i32 {
+    if proc == server {
+        1000
+    } else {
+        2000 + (proc - server - 1) as i32
+    }
 }
 
 struct Sim {
@@ -143,6 +183,14 @@ struct Sim {
     next_code: u32,
     /// Handles the server already holds refs and a death notification on.
     held: BTreeSet<u32>,
+    freezer: Option<Freezer>,
+    /// Handles the server watches with freeze notifications, the pid that
+    /// owns each, and the last state reported for each.
+    watched: BTreeSet<u32>,
+    owner: std::collections::BTreeMap<u32, i32>,
+    reported: std::collections::BTreeMap<u32, bool>,
+    /// Handles whose freeze notification is being cleared.
+    clearing: BTreeSet<u32>,
     /// Oneways their senders saw accepted, and the codes of those the
     /// server received.
     oneways_sent: Vec<Oneway>,
@@ -211,11 +259,153 @@ impl Sim {
             threads,
             next_code: 1,
             held: BTreeSet::new(),
+            freezer: None,
+            watched: BTreeSet::new(),
+            owner: Default::default(),
+            reported: Default::default(),
+            clearing: BTreeSet::new(),
             oneways_sent: Vec::new(),
             oneways_received: Vec::new(),
             faults: None,
             seen: Seen::default(),
         }
+    }
+
+    /// Turn the freezer on: a controller process freezes and thaws the
+    /// others.
+    fn with_freezer(mut self) -> Sim {
+        let proc = self.b.open(3000, 1000, 0, false);
+        self.us.add_proc(proc, 0x1_0000_0000 * 64);
+        self.freezer = Some(Freezer {
+            proc,
+            call: None,
+            frozen: BTreeSet::new(),
+        });
+        self
+    }
+
+    /// The controller's `BINDER_FREEZE` of `pid`.
+    fn freeze(&mut self, pid: i32, enable: bool, timeout_ms: u32) {
+        let fproc = self.freezer.as_ref().unwrap().proc;
+        let info = BinderFreezeInfo {
+            pid: pid as u32,
+            enable: enable as u32,
+            timeout_ms,
+        };
+        self.us.poke(fproc, DATA, pod_bytes(&info));
+        let c = self.us.ioctl(&mut self.b, fproc, 1, BINDER_FREEZE, DATA);
+        if self.us.is_pending(c) {
+            self.seen.freezes_waited += 1;
+        }
+        self.freezer.as_mut().unwrap().call = Some((c, pid, enable));
+    }
+
+    /// The live pids the controller may freeze.
+    fn live_pids(&self) -> Vec<i32> {
+        let mut v: Vec<i32> = self
+            .threads
+            .iter()
+            .filter(|t| !t.dead)
+            .map(|t| pid_of(t.proc, self.server))
+            .collect();
+        v.dedup();
+        v
+    }
+
+    /// Put `pid`'s threads in or out of the frozen cgroup. Freezing ends
+    /// their waits, as the cgroup freezer's signal does.
+    fn set_cgroup_frozen(&mut self, pid: i32, frozen: bool) {
+        let server = self.server;
+        let mut ended = Vec::new();
+        for t in self
+            .threads
+            .iter_mut()
+            .filter(|t| !t.dead && pid_of(t.proc, server) == pid)
+        {
+            t.frozen = frozen;
+            if let Some((c, _)) = &t.call {
+                ended.push(*c);
+            }
+        }
+        if frozen {
+            self.seen.cgroup_frozen += 1;
+            for c in ended {
+                if self.us.is_pending(c) {
+                    self.us.interrupt(c);
+                }
+            }
+        }
+    }
+
+    /// The controller's next move: handle the answer to its freeze, or (if
+    /// `act`) freeze or thaw a random process. True if it did something.
+    fn freezer_step(&mut self, act: bool) -> bool {
+        let Some(f) = &self.freezer else {
+            return false;
+        };
+        if let Some((call, pid, enable)) = f.call {
+            match self.us.status(call).clone() {
+                Status::Pending => return false,
+                Status::Interrupted => {
+                    let c = self.us.restart(&mut self.b, call);
+                    self.freezer.as_mut().unwrap().call = Some((c, pid, enable));
+                }
+                Status::Answered(o) => {
+                    self.freezer.as_mut().unwrap().call = None;
+                    match (enable, o.errno) {
+                        (true, 0) => {
+                            self.freezer.as_mut().unwrap().frozen.insert(pid);
+                            self.seen.freezes += 1;
+                            if self.rng.chance(50) {
+                                self.set_cgroup_frozen(pid, true);
+                            }
+                        }
+                        (true, libc::EAGAIN) => self.seen.freezes_failed += 1,
+                        (false, 0) | (false, libc::EINVAL) => {
+                            self.freezer.as_mut().unwrap().frozen.remove(&pid);
+                            self.set_cgroup_frozen(pid, false);
+                        }
+                        // Its process died, or reading the request failed
+                        // (nothing changed; a thaw is retried).
+                        (true, libc::EINVAL) | (_, libc::EFAULT) => {}
+                        (_, e) => panic!("BINDER_FREEZE of {pid} ({enable}): errno {e}"),
+                    }
+                }
+                Status::Abandoned => unreachable!(),
+            }
+            return true;
+        }
+        if !act {
+            return false;
+        }
+        let pids = self.live_pids();
+        let pid = pids[self.rng.below(pids.len() as u64) as usize];
+        let enable = !self.freezer.as_ref().unwrap().frozen.contains(&pid);
+        let timeout = [0, 0, 5, 50][self.rng.below(4) as usize];
+        self.freeze(pid, enable, timeout);
+        true
+    }
+
+    /// With the threads idle: let a pending freeze reach its deadline, or
+    /// thaw a frozen process. True if there was anything to do.
+    fn settle_freezer(&mut self) -> bool {
+        if self.freezer_step(false) {
+            return true;
+        }
+        let Some(f) = &self.freezer else {
+            return false;
+        };
+        if f.call.is_some() {
+            let at = self.us.timer.expect("a freeze waits with no timer armed");
+            let now = self.us.clock_ms;
+            self.us.advance(&mut self.b, at.saturating_sub(now).max(1));
+            return true;
+        }
+        if let Some(&pid) = f.frozen.iter().next() {
+            self.freeze(pid, false, 0);
+            return true;
+        }
+        false
     }
 
     fn code(&mut self) -> u32 {
@@ -227,7 +417,7 @@ impl Sim {
     /// False if it has nothing to do.
     fn step(&mut self, i: usize) -> bool {
         let t = &self.threads[i];
-        if t.dead || t.stopped {
+        if t.dead || t.stopped || t.frozen {
             return false;
         }
         if let Some((call, sent)) = t.call.clone() {
@@ -415,9 +605,10 @@ impl Sim {
                         .push(Thread::new(proc, tid, Some(BC_REGISTER_LOOPER), 0));
                     self.seen.spawned += 1;
                 }
-                BR_TRANSACTION_COMPLETE => {
+                BR_TRANSACTION_COMPLETE | BR_TRANSACTION_PENDING_FROZEN => {
                     // A oneway's acknowledgement (a synchronous call's comes
-                    // with its reply).
+                    // with its reply), also when its target is frozen.
+                    self.seen.pending_frozen += (cmd == BR_TRANSACTION_PENDING_FROZEN) as u32;
                     if let Some(sent) = self.threads[i].sending.take() {
                         self.seen.oneways_with_fds += sent.fd.is_some() as u32;
                         self.oneways_sent.push(sent);
@@ -448,6 +639,26 @@ impl Sim {
                             put(out, &h);
                             put(out, &(h as u64));
                         }
+                        // Watch its freezes (a synchronous call says whose it
+                        // is), sometimes stop, and watch again once that is
+                        // done.
+                        if self.freezer.is_some() && td.flags & TF_ONE_WAY == 0 {
+                            let cookie = FREEZE_COOKIE + h as u64;
+                            if !self.watched.contains(&h) && !self.clearing.contains(&h) {
+                                self.watched.insert(h);
+                                self.owner.insert(h, td.sender_pid);
+                                let out = &mut self.threads[i].out;
+                                put(out, &BC_REQUEST_FREEZE_NOTIFICATION);
+                                put(out, &BinderHandleCookie { handle: h, cookie });
+                            } else if self.watched.contains(&h) && self.rng.chance(20) {
+                                self.watched.remove(&h);
+                                self.reported.remove(&h);
+                                self.clearing.insert(h);
+                                let out = &mut self.threads[i].out;
+                                put(out, &BC_CLEAR_FREEZE_NOTIFICATION);
+                                put(out, &BinderHandleCookie { handle: h, cookie });
+                            }
+                        }
                         if self.rng.chance(40) {
                             call_back = Some(h);
                         }
@@ -467,8 +678,9 @@ impl Sim {
                     put(&mut t.out, &BC_FREE_BUFFER);
                     put(&mut t.out, &td.data_buffer);
                 }
-                BR_DEAD_REPLY | BR_FAILED_REPLY => {
+                BR_DEAD_REPLY | BR_FAILED_REPLY | BR_FROZEN_REPLY => {
                     // A oneway that wasn't sent, or the innermost call failed.
+                    self.seen.frozen_replies += (cmd == BR_FROZEN_REPLY) as u32;
                     let t = &mut self.threads[i];
                     if t.sending.take().is_none() {
                         assert!(t.awaiting.pop().is_some(), "failed reply to no call");
@@ -486,6 +698,21 @@ impl Sim {
                     put(out, &pc);
                 }
                 BR_RELEASE | BR_DECREFS | BR_CLEAR_DEATH_NOTIFICATION_DONE => {}
+                BR_FROZEN_BINDER => {
+                    let info: BinderFrozenStateInfo = read_pod(read, at).unwrap();
+                    let h = (info.cookie - FREEZE_COOKIE) as u32;
+                    if self.watched.contains(&h) {
+                        self.reported.insert(h, info.is_frozen != 0);
+                    }
+                    self.seen.freeze_notifications += 1;
+                    let out = &mut self.threads[i].out;
+                    put(out, &BC_FREEZE_NOTIFICATION_DONE);
+                    put(out, &info.cookie);
+                }
+                BR_CLEAR_FREEZE_NOTIFICATION_DONE => {
+                    let cookie: u64 = read_pod(read, at).unwrap();
+                    assert!(self.clearing.remove(&((cookie - FREEZE_COOKIE) as u32)));
+                }
                 BR_DEAD_BINDER => {
                     let cookie: u64 = read_pod(read, at).unwrap();
                     let out = &mut self.threads[i].out;
@@ -565,8 +792,25 @@ impl Sim {
                 let pending = self.us.pending_calls();
                 if !pending.is_empty() {
                     let call = pending[self.rng.below(pending.len() as u64) as usize];
-                    self.signal(call);
+                    if self
+                        .freezer
+                        .as_ref()
+                        .is_some_and(|f| f.call.is_some_and(|(c, ..)| c == call))
+                    {
+                        self.us.interrupt(call);
+                    } else {
+                        self.signal(call);
+                    }
                 }
+            }
+            let mut stepped = false;
+            if self.freezer.is_some() {
+                let act = faulty && self.rng.chance(3);
+                stepped |= self.freezer_step(act);
+                if self.rng.chance(20) {
+                    self.us.advance(&mut self.b, 1);
+                }
+                self.check();
             }
             if faulty
                 && self.rng.chance(1)
@@ -585,7 +829,6 @@ impl Sim {
                         }
                 })
                 .collect();
-            let mut stepped = false;
             let start = self.rng.below(ready.len() as u64) as usize;
             for k in 0..ready.len() {
                 if self.step(ready[(start + k) % ready.len()]) {
@@ -594,6 +837,10 @@ impl Sim {
                 }
             }
             self.check();
+            if !stepped && n >= fault_steps && self.settle_freezer() {
+                self.check();
+                continue;
+            }
             if !stepped && n >= fault_steps {
                 if !self.threads.iter().any(|t| t.stopped) {
                     return;
@@ -633,6 +880,26 @@ impl Sim {
             );
             assert!(t.owed.is_empty() && t.out.is_empty());
             assert!(!t.poller || t.polling);
+        }
+        // Every freeze was answered and undone, and each watched object's
+        // last notification says it isn't frozen (unless its owner died).
+        if let Some(f) = &self.freezer {
+            assert!(f.call.is_none() && f.frozen.is_empty());
+            assert!(!self.b.freezer_state().1, "a process left frozen");
+            for h in &self.watched {
+                let owner_alive = self
+                    .threads
+                    .iter()
+                    .any(|t| !t.dead && pid_of(t.proc, self.server) == self.owner[h]);
+                if owner_alive {
+                    assert_eq!(
+                        self.reported.get(h),
+                        Some(&false),
+                        "handle {h}: stale state"
+                    );
+                }
+            }
+            assert!(self.clearing.is_empty(), "a freeze notification clear lost");
         }
         // Each process with polling threads swapped its fd once.
         for t in self.threads.iter().filter(|t| t.poller && !t.dead) {
@@ -682,7 +949,8 @@ impl Sim {
             .filter(|t| !t.dead)
             .map(|t| t.proc)
             .collect();
-        for p in procs {
+        let freezer = self.freezer.as_ref().map(|f| f.proc);
+        for p in procs.into_iter().chain(freezer) {
             self.b.release_proc(p, &mut self.us);
             self.b.check_invariants();
         }
@@ -690,6 +958,11 @@ impl Sim {
             self.b.counts(),
             (0, 0, 0),
             "leaked transactions/buffers/nodes"
+        );
+        assert_eq!(
+            self.b.freezer_state(),
+            (0, false),
+            "leaked freeze notifications"
         );
         assert!(self.us.captured.is_empty(), "leaked captured fds");
         for (p, fp) in &self.us.procs {
@@ -769,5 +1042,51 @@ fn nothing_lost_when_any_one_operation_fails() {
             }
         }
         assert!(runs > 50, "seed {seed}: only {runs} fault points");
+    }
+}
+
+#[test]
+fn nothing_lost_with_frozen_targets() {
+    let mut total = Seen::default();
+    for seed in 0..300 {
+        eprintln!("seed {seed}"); // shown if it fails
+        let mut s = Sim::new(seed, 2, 6).with_freezer();
+        let mut fr = Rng(seed ^ 0xf2ee);
+        // Half the runs with userspace failing too.
+        let faulty = seed % 2 == 0;
+        s.us.fault = Some(Box::new(move |f| {
+            let pct = match f {
+                Fault::Signal => 30,
+                Fault::InstallFd => 50,
+                Fault::AllocRecv | Fault::CaptureFd => 20,
+                Fault::CopyFromUser => 10,
+                Fault::CopyToUser | Fault::CopyBwr => 0,
+            };
+            faulty && fr.below(1000) < pct
+        }));
+        s.faults = Some(Faults {
+            readonly_pct: if faulty { 5 } else { 0 },
+        });
+        s.run(800);
+        let seen = s.finish();
+        total.frozen_replies += seen.frozen_replies;
+        total.pending_frozen += seen.pending_frozen;
+        total.freezes += seen.freezes;
+        total.freezes_waited += seen.freezes_waited;
+        total.freezes_failed += seen.freezes_failed;
+        total.cgroup_frozen += seen.cgroup_frozen;
+        total.freeze_notifications += seen.freeze_notifications;
+    }
+    for (what, n) in [
+        ("BR_FROZEN_REPLY", total.frozen_replies),
+        ("BR_TRANSACTION_PENDING_FROZEN", total.pending_frozen),
+        ("freezes", total.freezes),
+        ("freezes that waited", total.freezes_waited),
+        ("freezes that failed", total.freezes_failed),
+        ("cgroup-frozen processes", total.cgroup_frozen),
+        ("freeze notifications", total.freeze_notifications),
+    ] {
+        eprintln!("{what}: {n}");
+        assert!(n > 0, "no {what}");
     }
 }

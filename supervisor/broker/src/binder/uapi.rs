@@ -262,10 +262,7 @@ pub struct BinderExtendedError {
     pub param: i32,
 }
 
-// The freezer (BINDER_FREEZE) is unsupported: the ioctls fail with EINVAL, so
-// Android disables its app freezer, and the broker acknowledges freeze
-// notification requests without ever sending one. These are the pieces an
-// implementation needs (binder freezer issue).
+// The freezer: BINDER_FREEZE and freeze notifications.
 pub const BINDER_FREEZE: u32 = iow(b'b', 14, size_of::<BinderFreezeInfo>());
 pub const BINDER_GET_FROZEN_INFO: u32 = iowr(b'b', 15, size_of::<BinderFrozenStatusInfo>());
 pub const BR_FROZEN_REPLY: u32 = ioc(IOC_NONE, b'r', 18, 0);

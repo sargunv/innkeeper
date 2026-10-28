@@ -4,8 +4,9 @@
 //! or built from the BC_* grammar with random arguments (so transactions with
 //! object arrays, refcount commands, death notifications and replies get deep
 //! into the state machine), plus reads, thread exits, context-manager setup,
-//! process death, and signals that interrupt blocked reads (which then
-//! restart). In most iterations userspace operations also fail at random:
+//! process death, signals that interrupt blocked calls (which then restart),
+//! freezing and thawing processes (`BINDER_FREEZE` with timeouts, as time
+//! passes) and freeze notifications. In most iterations userspace operations also fail at random:
 //! copies (`EFAULT`), allocations, fd captures and installs, and calls that
 //! a signal ends just before they are answered. After every step the
 //! broker's internal invariants are checked; any panic is a bug.
@@ -226,8 +227,17 @@ fn commands(
                 put(&mut w, &r.below(3));
             }
             10 => {
-                put(&mut w, &BC_REQUEST_FREEZE_NOTIFICATION);
-                put(&mut w, &(small(r) as u32));
+                if r.chance(70) {
+                    let c = if r.chance(60) {
+                        BC_REQUEST_FREEZE_NOTIFICATION
+                    } else {
+                        BC_CLEAR_FREEZE_NOTIFICATION
+                    };
+                    put(&mut w, &c);
+                    put(&mut w, &(small(r) as u32));
+                } else {
+                    put(&mut w, &BC_FREEZE_NOTIFICATION_DONE);
+                }
                 put(&mut w, &r.below(3));
             }
             _ => w.extend((0..r.below(16)).map(|_| r.byte())),
@@ -280,12 +290,13 @@ pub fn run(iterations: u64, seed: u64) {
         m.fault = Some(Box::new(move |_| fr.below(1000) < fault_pct));
         let mut procs: Vec<ProcId> = Vec::new();
         for i in 0..NPROC {
-            let p = b.open(
-                1000 + i as i32,
-                1000 + i as u32,
-                (r.below(8) == 0) as u8,
-                r.chance(10),
-            );
+            // Sometimes two binder instances of one pid.
+            let pid = if i > 0 && r.chance(15) {
+                1000
+            } else {
+                1000 + i as i32
+            };
+            let p = b.open(pid, 1000 + i as u32, (r.below(8) == 0) as u8, r.chance(10));
             m.add_proc(p, 0x1_0000_0000 * (i as u64 + 1));
             procs.push(p);
         }
@@ -309,7 +320,7 @@ pub fn run(iterations: u64, seed: u64) {
         for _ in 0..steps {
             let mut p = procs[r.below(procs.len() as u64) as usize];
             let mut tid = 1 + r.below(3) as u32;
-            let mut op = r.below(22);
+            let mut op = r.below(25);
             let mut must_reply = false;
             if !owe.is_empty() && r.chance(50) {
                 (p, tid) = owe.remove(r.below(owe.len() as u64) as usize);
@@ -352,6 +363,36 @@ pub fn run(iterations: u64, seed: u64) {
                         interrupted[r.below(interrupted.len() as u64) as usize],
                     );
                 }
+                22 => {
+                    let info = BinderFreezeInfo {
+                        pid: 1000 + r.below(4) as u32,
+                        enable: r.chance(70) as u32,
+                        timeout_ms: [0, 0, 1, 10, 1000][r.below(5) as usize],
+                    };
+                    let mut v = Vec::new();
+                    put(&mut v, &info);
+                    m.poke(p, DATA, &v);
+                    m.ioctl(&mut b, p, tid, BINDER_FREEZE, DATA);
+                }
+                23 => {
+                    let info = BinderFrozenStatusInfo {
+                        pid: 1000 + r.below(4) as u32,
+                        ..Default::default()
+                    };
+                    let mut v = Vec::new();
+                    put(&mut v, &info);
+                    m.poke(p, DATA, &v);
+                    m.ioctl(&mut b, p, tid, BINDER_GET_FROZEN_INFO, DATA);
+                }
+                24 => {
+                    // Time passes (freeze deadlines).
+                    let ms = if r.chance(50) {
+                        r.below(3)
+                    } else {
+                        r.below(1200)
+                    };
+                    m.advance(&mut b, ms);
+                }
                 _ => {
                     let w = commands(&mut r, &mut m, p, &bufs[p as usize], must_reply);
                     let size = if r.chance(70) {
@@ -377,12 +418,16 @@ pub fn run(iterations: u64, seed: u64) {
                 assert!(held.contains(&m.caller(c)), "call {} forgotten", c.id);
             }
         }
+        // Every freeze still waiting ends by its deadline.
+        m.advance(&mut b, 1001);
+        b.check_invariants();
         for p in procs {
             b.release_proc(p, &mut m);
             b.check_invariants();
         }
         // With every process gone, nothing may be left behind.
         assert_eq!(b.counts(), (0, 0, 0), "leaked transactions/buffers/nodes");
+        assert_eq!(b.freezer_state(), (0, false), "leaked freezer state");
         assert!(m.captured.is_empty(), "leaked captured fds");
         for (p, fp) in &m.procs {
             assert!(fp.live_recv.is_empty(), "proc {p} leaked receive buffers");

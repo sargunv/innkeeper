@@ -40,10 +40,19 @@ processes:
   work, and stays interruptible, so ptrace and job control work;
 - polling threads get an eventfd in place of their binder fd;
 - `sender_pid` is the pid in Android's namespace and `sender_euid` the opener's
-  (virtual, in single-uid mode).
+  (virtual, in single-uid mode);
+- the freezer works as in the kernel, so ActivityManager freezes cached apps
+  (`dumpsys activity` shows `use_freezer=true`): `BINDER_FREEZE` takes the pid
+  in Android's namespace (the kernel's is the host's), and one that waits for
+  its target to drain is answered when it drains or at its timeout
+  (`notify.rs`'s monitor thread runs the timer). The cgroup half of the freezer
+  is the session's delegated cgroup (`cgroup.freeze`), whose waits end the
+  broker's unanswered reads like a signal does. `/dev/binderfs/features` (made
+  by `ns-init.sh`) tells libbinder the broker has freeze notifications, extended
+  errors and oneway spam detection.
 
-Not supported: the freezer (`BINDER_FREEZE` returns `EINVAL`, so Android turns
-its app freezer off) and priority inheritance. Two deviations from the kernel:
+Not supported: priority inheritance, binder netlink reports and `TF_UPDATE_TXN`
+(Android 17 doesn't send it). Two deviations from the kernel:
 
 - `ADDFD` can't be undone, so if a transaction's later fd doesn't fit the
   reader's fd table, the fds already installed stay, and leak if the transaction
@@ -90,8 +99,9 @@ single-uid mode, and serves `/proc/config.gz` from the host's config.
 
 ## Tests
 
-- `cargo test -p linuxapk-broker` (driver, lifecycle properties, creds model)
-  and the bounded fuzzer run in `mise run test`; a long fuzz:
+- `cargo test -p linuxapk-broker` (driver, lifecycle properties with and without
+  the freezer, creds model) and the bounded fuzzer run in `mise run test`; a
+  long fuzz:
   `cargo run --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 500000 <seed>`.
 - `tests/bpfemu.sh` and `tests/seccomp-filter.sh` (in `mise run test`) check the
   emulator's bounds and exactly which syscalls notify in each mode.

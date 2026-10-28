@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -403,6 +403,21 @@ struct SeccompUserspace {
     procs: HashMap<ProcId, ProcState>,
     captured: HashMap<u64, OwnedFd>,
     next_token: u64,
+    timer: Arc<Timer>,
+}
+
+/// The driver's clock, and when it asked to be woken (`monitor` calls
+/// `BinderDriver::expire` then).
+struct Timer {
+    start: std::time::Instant,
+    /// Milliseconds since `start`; u64::MAX when unarmed.
+    at: AtomicU64,
+}
+
+impl Timer {
+    fn now_ms(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
 }
 
 impl SeccompUserspace {
@@ -549,6 +564,14 @@ impl Userspace for SeccompUserspace {
         }
         p.poll_ready = ready;
     }
+
+    fn now_ms(&mut self) -> u64 {
+        self.timer.now_ms()
+    }
+
+    fn arm_timer(&mut self, at_ms: u64) {
+        self.timer.at.fetch_min(at_ms, Ordering::Relaxed);
+    }
 }
 
 // ---- the serve loop ----------------------------------------------------
@@ -569,6 +592,10 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
     let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
     let (tx, rx) = mpsc::channel();
+    let timer = Arc::new(Timer {
+        start: std::time::Instant::now(),
+        at: AtomicU64::new(u64::MAX),
+    });
     // Single-uid mode (supervisor/README.md): virtual ids for every process.
     let vid = (std::env::var("LINUXAPK_SINGLE_UID").as_deref() == Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
@@ -581,6 +608,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
             procs: HashMap::new(),
             captured: HashMap::new(),
             next_token: 0,
+            timer: Arc::clone(&timer),
         },
         vid: vid.clone(),
         fd_index: HashMap::new(),
@@ -590,7 +618,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     }));
     {
         let sup = Arc::clone(&sup);
-        std::thread::spawn(move || monitor(sup, rx));
+        std::thread::spawn(move || monitor(sup, rx, timer));
     }
     let recv_cmd = ioc(3, 0, notif_sz);
     let mut notif = vec![0u8; notif_sz];
@@ -692,8 +720,9 @@ pub(crate) fn send_resp(
 }
 
 /// Watch for process death (pidfds) and for binder fds that were closed or
-/// lost across exec (kcmp sweep), and release those broker processes.
-fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>) {
+/// lost across exec (kcmp sweep), and release those broker processes; and
+/// fire the driver's timer (`BINDER_FREEZE` timeouts).
+fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>, timer: Arc<Timer>) {
     let mut watched: HashMap<i32, OwnedFd> = HashMap::new();
     let mut last_sweep = std::time::Instant::now();
     loop {
@@ -713,7 +742,11 @@ fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>) {
             })
             .collect();
         let pids: Vec<i32> = watched.keys().copied().collect();
-        unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as _, 100) };
+        let wait = timer
+            .at
+            .load(Ordering::Relaxed)
+            .saturating_sub(timer.now_ms());
+        unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as _, wait.min(100) as i32) };
         let dead: Vec<i32> = pfds
             .iter()
             .zip(&pids)
@@ -721,10 +754,17 @@ fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>) {
             .map(|(_, &pid)| pid)
             .collect();
         let sweep = last_sweep.elapsed() >= std::time::Duration::from_millis(500);
-        if dead.is_empty() && !sweep {
+        let due = timer.at.load(Ordering::Relaxed) <= timer.now_ms();
+        if dead.is_empty() && !sweep && !due {
             continue;
         }
         let mut s = sup.lock().unwrap();
+        if due {
+            // Disarm first: expire re-arms for the deadlines still ahead.
+            timer.at.store(u64::MAX, Ordering::Relaxed);
+            let s = &mut *s;
+            s.broker.expire(&mut s.us);
+        }
         for pid in &dead {
             watched.remove(pid);
             s.release_pid(*pid);

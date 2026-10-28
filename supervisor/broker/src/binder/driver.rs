@@ -26,7 +26,15 @@
 //!    set of incoming refs) and the INCREFS/ACQUIRE/RELEASE/DECREFS handshake
 //!    with `BC_*_DONE` are the kernel's;
 //!  * death notifications move through the same states (DEAD_BINDER,
-//!    DEAD_BINDER_AND_CLEAR, CLEAR_DEATH_NOTIFICATION, delivered).
+//!    DEAD_BINDER_AND_CLEAR, CLEAR_DEATH_NOTIFICATION, delivered);
+//!  * the freezer: `BINDER_FREEZE` marks every binder instance of a pid
+//!    frozen, after waiting up to its timeout for `outstanding_txns` to
+//!    drain; a synchronous transaction to a frozen process fails with
+//!    BR_FROZEN_REPLY, a oneway is queued and its sender gets
+//!    BR_TRANSACTION_PENDING_FROZEN (`binder_proc_transaction`), and freeze
+//!    notifications (`binder_ref_freeze`) are sent, coalesced and resent as
+//!    in `binder_add_freeze_work`. Reads of a frozen process are served as
+//!    usual: its threads stop in the cgroup freezer, which ends their waits.
 //!
 //! The driver serves whole ioctls ([`BinderDriver::ioctl`]) and owns every
 //! thread's place in them. Each `BINDER_WRITE_READ` read goes through one
@@ -51,6 +59,12 @@
 //!    is written to it then, unless the signal lands after that check), or
 //!    when process release answers it.
 //!
+//! A `BINDER_FREEZE` that waits for a target to drain is the thread's wait
+//! too (`Wait::Freezing`): it ends when the target's last outstanding
+//! transaction is freed or at its deadline ([`BinderDriver::expire`]), and
+//! a wait abandoned like a read's thaws the target, as the kernel does when
+//! a signal interrupts the ioctl.
+//!
 //! A write is consumed as it is processed, and its progress is written back
 //! whatever the read does (before a thread blocks, too), so a restarted
 //! ioctl never replays it.
@@ -73,6 +87,7 @@ pub type ProcId = u32;
 pub type NodeId = u64;
 pub type TxnId = u64;
 type DeathId = u64;
+type FreezeId = u64;
 
 /// One binder ioctl being served: the seccomp notification that answers it,
 /// and its argument (for `BINDER_WRITE_READ`, the address of the bwr).
@@ -130,6 +145,11 @@ pub trait Userspace {
     fn make_pollable(&mut self, proc: ProcId, call: Call) -> bool;
     /// Whether a poll of `proc`'s binder fd reports it readable.
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool);
+    /// Milliseconds on a monotonic clock (`BINDER_FREEZE` timeouts).
+    fn now_ms(&mut self) -> u64;
+    /// Call [`BinderDriver::expire`] once [`Userspace::now_ms`] reaches
+    /// `at_ms` (or later; an early call is harmless).
+    fn arm_timer(&mut self, at_ms: u64);
 }
 
 // Looper state flags (kernel BINDER_LOOPER_STATE_*).
@@ -158,12 +178,15 @@ enum Work {
     Transaction(TxnId),
     TransactionComplete,
     OnewaySpamSuspect,
+    /// A oneway's TRANSACTION_COMPLETE when its target is frozen.
+    TransactionPendingFrozen,
     ReturnError,
     ReplyError,
     /// A reply whose fds couldn't be installed: BR_FAILED_REPLY in its place.
     FailedReply,
     Node(NodeId),
     Death(DeathId),
+    Freeze(FreezeId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +203,35 @@ struct Death {
     queued: bool,
 }
 
+/// A freeze notification on a ref (`binder_ref_freeze`): its work item
+/// reports `is_frozen` (BR_FROZEN_BINDER) or, once cleared, that it is gone
+/// (BR_CLEAR_FREEZE_NOTIFICATION_DONE).
+struct FreezeListener {
+    cookie: u64,
+    is_frozen: bool,
+    /// Detached from its ref by BC_CLEAR_FREEZE_NOTIFICATION.
+    cleared: bool,
+    /// Delivered, waiting for BC_FREEZE_NOTIFICATION_DONE.
+    sent: bool,
+    /// Queue it again once the delivery is acknowledged.
+    resend: bool,
+    /// The work item is on the process's `todo` or `delivered_freeze`.
+    queued: bool,
+}
+
+/// A `BINDER_FREEZE` in progress: the thread waits for `targets[0]` to
+/// drain (`binder_ioctl_freeze`), then freezes the rest in turn.
+#[derive(Clone, Debug)]
+struct Freezing {
+    call: Call,
+    enable: bool,
+    timeout_ms: u32,
+    /// The binder instances of the pid still to freeze, in order.
+    targets: Vec<ProcId>,
+    /// `targets[0]` is marked frozen and waits until this time.
+    deadline: Option<u64>,
+}
+
 #[derive(Default)]
 struct Thread {
     looper: u32,
@@ -192,8 +244,8 @@ struct Thread {
     ee: BinderExtendedError,
 }
 
-/// A thread's wait in a blocking read (see the module docs).
-#[derive(Clone, Copy, Debug, Default)]
+/// A thread's wait in a blocking ioctl (see the module docs).
+#[derive(Clone, Debug, Default)]
 enum Wait {
     /// Not waiting in the driver.
     #[default]
@@ -208,6 +260,8 @@ enum Wait {
     },
     /// Work arrived: the read runs again before the current ioctl returns.
     Woken(Read),
+    /// In `BINDER_FREEZE`, waiting for its target to drain.
+    Freezing(Freezing),
 }
 
 /// A `BINDER_WRITE_READ` in its read phase: its call, and its bwr as of the
@@ -311,6 +365,7 @@ struct Ref {
     strong: i32,
     weak: i32,
     death: Option<DeathId>,
+    freeze: Option<FreezeId>,
 }
 
 #[derive(Default)]
@@ -331,7 +386,16 @@ struct Process {
     refs_by_desc: BTreeMap<u32, Ref>,
     node_to_desc: HashMap<NodeId, u32>,
     delivered_death: Vec<DeathId>,
+    delivered_freeze: Vec<FreezeId>,
     free_async_space: i64,
+    /// `BINDER_FREEZE`: synchronous transactions to it fail.
+    is_frozen: bool,
+    /// A synchronous or oneway transaction arrived while frozen.
+    sync_recv: bool,
+    async_recv: bool,
+    /// Transactions queued for it or being served by it, which a freeze
+    /// waits for (`outstanding_txns`).
+    outstanding_txns: u32,
 }
 
 struct Context {
@@ -351,6 +415,9 @@ struct Txn {
     code: u32,
     flags: u32,
     sender_euid: u32,
+    /// The process whose `outstanding_txns` counts it: its target, from
+    /// being queued until it is freed or its reader thread exits.
+    outstanding: Option<ProcId>,
 }
 
 #[derive(Clone, Copy)]
@@ -383,12 +450,16 @@ pub struct BinderDriver {
     txns: HashMap<TxnId, Txn>,
     buffers: HashMap<(ProcId, u64), Buffer>,
     deaths: HashMap<DeathId, Death>,
+    freezes: HashMap<FreezeId, FreezeListener>,
     next_proc: ProcId,
     next_id: u64,
     /// Threads woken during the current ioctl, in wake order.
     woken: VecDeque<(ProcId, u32)>,
     /// Processes whose poll readiness may have changed.
     poll_dirty: BTreeSet<ProcId>,
+    /// Frozen processes whose last outstanding transaction went away: a
+    /// freeze may be waiting for that.
+    drained: BTreeSet<ProcId>,
 }
 
 impl Default for BinderDriver {
@@ -413,10 +484,12 @@ impl BinderDriver {
             txns: HashMap::new(),
             buffers: HashMap::new(),
             deaths: HashMap::new(),
+            freezes: HashMap::new(),
             next_proc: 1,
             next_id: 1,
             woken: VecDeque::new(),
             poll_dirty: BTreeSet::new(),
+            drained: BTreeSet::new(),
         }
     }
 
@@ -608,8 +681,10 @@ impl BinderDriver {
                     t.process_todo = false;
                 }
             }
-            if let Work::Death(d) = w {
-                p.delivered_death.retain(|x| *x != d);
+            match w {
+                Work::Death(d) => p.delivered_death.retain(|x| *x != d),
+                Work::Freeze(f) => p.delivered_freeze.retain(|x| *x != f),
+                _ => {}
             }
         }
     }
@@ -779,6 +854,7 @@ impl BinderDriver {
                         strong: 0,
                         weak: 0,
                         death: None,
+                        freeze: None,
                     },
                 );
                 p.node_to_desc.insert(nid, desc);
@@ -891,6 +967,10 @@ impl BinderDriver {
             self.dequeue_work(proc, Work::Death(d));
             self.deaths.remove(&d);
         }
+        if let Some(f) = r.freeze {
+            self.dequeue_work(proc, Work::Freeze(f));
+            self.freezes.remove(&f);
+        }
     }
 
     // ---- ioctls and the read lifecycle -----------------------------------------
@@ -906,11 +986,15 @@ impl BinderDriver {
         // A thread runs one syscall at a time, so any wait it was in is over
         // (a signal interrupted it, and this may be its restart).
         let t = self.thread_mut(proc, tid);
-        if let Wait::Blocked { .. } = std::mem::take(&mut t.wait) {
-            tlog!("proc={proc} tid={tid} wait abandoned");
+        match std::mem::take(&mut t.wait) {
+            Wait::Blocked { .. } => tlog!("proc={proc} tid={tid} wait abandoned"),
+            Wait::Freezing(f) => self.freeze_interrupted(&f),
+            _ => {}
         }
         if cmd == BINDER_WRITE_READ {
             self.write_read(proc, tid, call, us);
+        } else if cmd == BINDER_FREEZE {
+            self.freeze_ioctl(proc, tid, call, us);
         } else {
             let errno = self.other_ioctl(proc, tid, cmd, call.arg, us);
             us.answer(call, errno);
@@ -985,7 +1069,13 @@ impl BinderDriver {
                 },
                 None => libc::EFAULT,
             },
-            // Freezing is unsupported: Android then disables its app freezer.
+            BINDER_GET_FROZEN_INFO => match get::<BinderFrozenStatusInfo>(us, proc, arg) {
+                Some(info) => match self.frozen_info(info.pid) {
+                    Some(out) => put(us, proc, arg, &out),
+                    None => libc::EINVAL,
+                },
+                None => libc::EFAULT,
+            },
             _ => libc::EINVAL,
         }
     }
@@ -1141,9 +1231,13 @@ impl BinderDriver {
             match work {
                 Work::ReturnError => self.thread_mut(proc, tid).return_error = BR_OK,
                 Work::ReplyError => self.thread_mut(proc, tid).reply_error = BR_OK,
-                Work::TransactionComplete | Work::OnewaySpamSuspect | Work::FailedReply => {}
+                Work::TransactionComplete
+                | Work::OnewaySpamSuspect
+                | Work::TransactionPendingFrozen
+                | Work::FailedReply => {}
                 Work::Node(nid) => self.apply_node_work(nid),
                 Work::Death(death) => self.commit_death(proc, death),
+                Work::Freeze(f) => self.commit_freeze(proc, f),
                 Work::Transaction(txid) => self.commit_transaction(proc, tid, txid),
             }
         }
@@ -1177,26 +1271,39 @@ impl BinderDriver {
     /// Serve the reads of the threads woken during this ioctl, then publish
     /// poll readiness.
     fn settle(&mut self, us: &mut dyn Userspace) {
-        while let Some((proc, tid)) = self.woken.pop_front() {
-            let Some(t) = self
-                .procs
-                .get_mut(&proc)
-                .and_then(|p| p.threads.get_mut(&tid))
-            else {
-                continue;
-            };
-            let Wait::Woken(read) = t.wait else {
-                continue;
-            };
-            t.wait = Wait::None;
-            if us.pending(read.call) {
-                self.serve_read(proc, tid, read, false, us);
-            } else {
-                // A signal ended its wait: the read is abandoned, and nothing
-                // is written to the thread, which may be stopped. It finds
-                // its own work when it restarts.
-                tlog!("proc={proc} tid={tid} woken, but its wait is over");
-                self.pass_on_proc_work(proc);
+        loop {
+            while let Some((proc, tid)) = self.woken.pop_front() {
+                let Some(t) = self
+                    .procs
+                    .get_mut(&proc)
+                    .and_then(|p| p.threads.get_mut(&tid))
+                else {
+                    continue;
+                };
+                let Wait::Woken(read) = t.wait else {
+                    continue;
+                };
+                t.wait = Wait::None;
+                if us.pending(read.call) {
+                    self.serve_read(proc, tid, read, false, us);
+                } else {
+                    // A signal ended its wait: the read is abandoned, and
+                    // nothing is written to the thread, which may be stopped.
+                    // It finds its own work when it restarts.
+                    tlog!("proc={proc} tid={tid} woken, but its wait is over");
+                    self.pass_on_proc_work(proc);
+                }
+            }
+            // Freezes waiting for a target that drained go on (which may
+            // queue freeze notifications, and wake readers).
+            if self.drained.is_empty() {
+                break;
+            }
+            let drained = std::mem::take(&mut self.drained);
+            for (proc, tid, target) in self.freezing() {
+                if drained.contains(&target) {
+                    self.resume_freeze(proc, tid, us);
+                }
             }
         }
         for proc in std::mem::take(&mut self.poll_dirty) {
@@ -1340,13 +1447,22 @@ impl BinderDriver {
                     self.dead_binder_done(proc, tid, cookie);
                 }
                 BC_REQUEST_FREEZE_NOTIFICATION | BC_CLEAR_FREEZE_NOTIFICATION => {
-                    // Freezing is not supported (BINDER_FREEZE fails), so no
-                    // freeze state ever changes; accept and ignore.
-                    let _target: u32 = arg!(u32);
-                    let _cookie: u64 = arg!(u64);
+                    let target: u32 = arg!(u32);
+                    let cookie: u64 = arg!(u64);
+                    let r = if cmd == BC_REQUEST_FREEZE_NOTIFICATION {
+                        self.request_freeze_notification(proc, target, cookie)
+                    } else {
+                        self.clear_freeze_notification(proc, target, cookie)
+                    };
+                    if let Err(e) = r {
+                        return (start, e);
+                    }
                 }
                 BC_FREEZE_NOTIFICATION_DONE => {
-                    let _cookie: u64 = arg!(u64);
+                    let cookie: u64 = arg!(u64);
+                    if let Err(e) = self.freeze_notification_done(proc, cookie) {
+                        return (start, e);
+                    }
                 }
                 _ => return (start, libc::EINVAL),
             }
@@ -1516,6 +1632,7 @@ impl BinderDriver {
                 code: td.code,
                 flags: td.flags,
                 sender_euid: self.procs[&proc].euid,
+                outstanding: None,
             },
         );
         self.buffers
@@ -1539,6 +1656,7 @@ impl BinderDriver {
             }
             self.pop_transaction(target_proc, ft, irt);
             self.enqueue_thread_work(target_proc, ft, Work::Transaction(txid));
+            self.count_outstanding(txid, target_proc);
             self.free_txn(irt);
         } else if !oneway {
             self.enqueue_deferred_thread_work(proc, tid, tc);
@@ -1554,7 +1672,10 @@ impl BinderDriver {
             }
         } else {
             match self.proc_transaction(txid, target_proc, None) {
-                Ok(()) => self.enqueue_thread_work(proc, tid, tc),
+                // The kernel reports a oneway to a frozen process in place of
+                // its TRANSACTION_COMPLETE (or ONEWAY_SPAM_SUSPECT).
+                Ok(true) => self.enqueue_thread_work(proc, tid, Work::TransactionPendingFrozen),
+                Ok(false) => self.enqueue_thread_work(proc, tid, tc),
                 Err(e) => {
                     self.abort_txn(txid, us);
                     self.txn_error(proc, tid, e, 0, None);
@@ -1584,13 +1705,14 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_proc_transaction`.
+    /// `binder_proc_transaction`. Ok(true): a oneway queued for a frozen
+    /// process (BR_TRANSACTION_PENDING_FROZEN).
     fn proc_transaction(
         &mut self,
         txid: TxnId,
         target_proc: ProcId,
         target_thread: Option<u32>,
-    ) -> Result<(), u32> {
+    ) -> Result<bool, u32> {
         let (oneway, node) = {
             let t = &self.txns[&txid];
             let node = t
@@ -1608,16 +1730,28 @@ impl BinderDriver {
                 n.has_async_transaction = true;
             }
         }
+        let mut frozen = false;
+        if let Some(p) = self.procs.get_mut(&target_proc)
+            && p.is_frozen
+        {
+            frozen = true;
+            p.sync_recv |= !oneway;
+            p.async_recv |= oneway;
+        }
         let dead = !self.procs.contains_key(&target_proc)
             || target_thread.is_some_and(|t| !self.procs[&target_proc].threads.contains_key(&t));
-        if dead {
+        if dead || (frozen && !oneway) {
             if oneway
                 && !pending_async
                 && let Some(n) = node
             {
                 self.nodes.get_mut(&n).unwrap().has_async_transaction = false;
             }
-            return Err(BR_DEAD_REPLY);
+            return Err(if frozen {
+                BR_FROZEN_REPLY
+            } else {
+                BR_DEAD_REPLY
+            });
         }
         // A call for a thread up the transaction stack goes on its list. Any
         // other goes on the process's and wakes the thread that waited
@@ -1632,7 +1766,33 @@ impl BinderDriver {
         } else {
             self.enqueue_proc_work(target_proc, Work::Transaction(txid));
         }
-        Ok(())
+        self.count_outstanding(txid, target_proc);
+        Ok(oneway && frozen)
+    }
+
+    /// The transaction is queued for `proc` (`outstanding_txns++`).
+    fn count_outstanding(&mut self, txid: TxnId, proc: ProcId) {
+        if let Some(t) = self.txns.get_mut(&txid)
+            && let Some(p) = self.procs.get_mut(&proc)
+        {
+            debug_assert!(t.outstanding.is_none());
+            t.outstanding = Some(proc);
+            p.outstanding_txns += 1;
+        }
+    }
+
+    /// A transaction `outstanding_txns` counted is done with
+    /// (`binder_free_transaction`, or its reader thread exited). A freeze
+    /// may be waiting for the last one.
+    fn uncount_outstanding(&mut self, proc: Option<ProcId>) {
+        if let Some(proc) = proc
+            && let Some(p) = self.procs.get_mut(&proc)
+        {
+            p.outstanding_txns -= 1;
+            if p.outstanding_txns == 0 && p.is_frozen {
+                self.drained.insert(proc);
+            }
+        }
     }
 
     /// `binder_pop_transaction_ilocked`.
@@ -1654,8 +1814,11 @@ impl BinderDriver {
     /// `binder_free_transaction`: drop the record; its buffer lives on until
     /// BC_FREE_BUFFER.
     fn free_txn(&mut self, txid: TxnId) {
-        if let Some(t) = self.txns.remove(&txid)
-            && let Some(key) = t.buffer
+        let Some(t) = self.txns.remove(&txid) else {
+            return;
+        };
+        self.uncount_outstanding(t.outstanding);
+        if let Some(key) = t.buffer
             && let Some(b) = self.buffers.get_mut(&key)
         {
             b.transaction = None;
@@ -2171,6 +2334,313 @@ impl BinderDriver {
         }
     }
 
+    // ---- the freezer ----------------------------------------------------------
+
+    /// `BINDER_FREEZE`: freeze or thaw every binder instance of a pid (in
+    /// Android's pid namespace), in turn.
+    fn freeze_ioctl(&mut self, proc: ProcId, tid: u32, call: Call, us: &mut dyn Userspace) {
+        let Some(info) = us
+            .read(proc, call.arg, size_of::<BinderFreezeInfo>())
+            .and_then(|b| read_pod::<BinderFreezeInfo>(&b, 0))
+        else {
+            us.answer(call, libc::EFAULT);
+            return;
+        };
+        let mut targets: Vec<ProcId> = self
+            .procs
+            .iter()
+            .filter(|(_, p)| p.ns_pid as u32 == info.pid)
+            .map(|(&id, _)| id)
+            .collect();
+        if targets.is_empty() {
+            us.answer(call, libc::EINVAL);
+            return;
+        }
+        targets.sort();
+        tlog!(
+            "proc={proc} tid={tid} freeze pid={} enable={} timeout={}",
+            info.pid,
+            info.enable,
+            info.timeout_ms
+        );
+        let f = Freezing {
+            call,
+            enable: info.enable != 0,
+            timeout_ms: info.timeout_ms,
+            targets,
+            deadline: None,
+        };
+        self.run_freeze(proc, tid, f, us);
+    }
+
+    /// `binder_ioctl_freeze` for each remaining target: answer the call, or
+    /// wait for a target to drain.
+    fn run_freeze(&mut self, proc: ProcId, tid: u32, mut f: Freezing, us: &mut dyn Userspace) {
+        while let Some(&target) = f.targets.first() {
+            let Some(p) = self.procs.get_mut(&target) else {
+                // Released (which thaws it): nothing left to freeze there.
+                f.targets.remove(0);
+                f.deadline = None;
+                continue;
+            };
+            if !f.enable {
+                p.sync_recv = false;
+                p.async_recv = false;
+                p.is_frozen = false;
+                self.add_freeze_work(target, false);
+                f.targets.remove(0);
+                continue;
+            }
+            let now = us.now_ms();
+            let deadline = *f.deadline.get_or_insert_with(|| {
+                p.sync_recv = false;
+                p.async_recv = false;
+                p.is_frozen = true;
+                now.saturating_add(f.timeout_ms as u64)
+            });
+            if p.outstanding_txns > 0 && now < deadline {
+                us.arm_timer(deadline);
+                self.thread_mut(proc, tid).wait = Wait::Freezing(f);
+                return;
+            }
+            if self.txns_pending(target) {
+                self.procs.get_mut(&target).unwrap().is_frozen = false;
+                us.answer(f.call, libc::EAGAIN);
+                return;
+            }
+            self.add_freeze_work(target, true);
+            f.targets.remove(0);
+            f.deadline = None;
+        }
+        us.answer(f.call, 0);
+    }
+
+    /// A freeze's target drained or its deadline passed: go on, unless the
+    /// call is gone.
+    fn resume_freeze(&mut self, proc: ProcId, tid: u32, us: &mut dyn Userspace) {
+        let Some(t) = self
+            .procs
+            .get_mut(&proc)
+            .and_then(|p| p.threads.get_mut(&tid))
+        else {
+            return;
+        };
+        if !matches!(t.wait, Wait::Freezing(_)) {
+            return;
+        }
+        let Wait::Freezing(f) = std::mem::take(&mut t.wait) else {
+            unreachable!()
+        };
+        if us.pending(f.call) {
+            self.run_freeze(proc, tid, f, us);
+        } else {
+            self.freeze_interrupted(&f);
+        }
+    }
+
+    /// A signal ended a freeze's wait (`-ERESTARTSYS`): its target thaws.
+    fn freeze_interrupted(&mut self, f: &Freezing) {
+        tlog!("freeze of {:?} interrupted", f.targets.first());
+        if f.deadline.is_some()
+            && let Some(p) = f.targets.first().and_then(|t| self.procs.get_mut(t))
+        {
+            p.is_frozen = false;
+        }
+    }
+
+    /// The threads waiting in `BINDER_FREEZE`, and the target each waits for.
+    fn freezing(&self) -> Vec<(ProcId, u32, ProcId)> {
+        let mut v = Vec::new();
+        for (&proc, p) in &self.procs {
+            for (&tid, t) in &p.threads {
+                if let Wait::Freezing(f) = &t.wait {
+                    v.push((proc, tid, f.targets[0]));
+                }
+            }
+        }
+        v.sort();
+        v
+    }
+
+    /// The timer [`Userspace::arm_timer`] asked for fired: freezes whose
+    /// deadline passed go on.
+    pub fn expire(&mut self, us: &mut dyn Userspace) {
+        let now = us.now_ms();
+        let mut next: Option<u64> = None;
+        for (proc, tid, _) in self.freezing() {
+            let Wait::Freezing(f) = &self.procs[&proc].threads[&tid].wait else {
+                continue;
+            };
+            match f.deadline {
+                Some(d) if d <= now => self.resume_freeze(proc, tid, us),
+                Some(d) => next = Some(next.map_or(d, |n| n.min(d))),
+                None => {}
+            }
+        }
+        if let Some(d) = next {
+            us.arm_timer(d);
+        }
+        self.settle(us);
+    }
+
+    /// `binder_txns_pending_ilocked`: transactions queued for `proc`, or one
+    /// of its threads serving a call.
+    fn txns_pending(&self, proc: ProcId) -> bool {
+        let p = &self.procs[&proc];
+        p.outstanding_txns > 0
+            || p.threads.iter().any(|(&tid, t)| {
+                t.transaction_stack
+                    .and_then(|x| self.txns.get(&x))
+                    .is_some_and(|x| x.to_thread == Some(tid) && x.to_proc == Some(proc))
+            })
+    }
+
+    /// `BINDER_GET_FROZEN_INFO` (bit 1 of `sync_recv`: transactions pending).
+    fn frozen_info(&self, pid: u32) -> Option<BinderFrozenStatusInfo> {
+        let mut info = BinderFrozenStatusInfo {
+            pid,
+            ..Default::default()
+        };
+        let mut found = false;
+        for (&id, p) in &self.procs {
+            if p.ns_pid as u32 == pid {
+                found = true;
+                info.sync_recv |= p.sync_recv as u32 | (self.txns_pending(id) as u32) << 1;
+                info.async_recv |= p.async_recv as u32;
+            }
+        }
+        found.then_some(info)
+    }
+
+    /// `binder_add_freeze_work`: tell every holder of a ref to `proc`'s
+    /// nodes that asked for it. A notification not delivered yet just takes
+    /// the new state; one delivered but not acknowledged is sent again.
+    fn add_freeze_work(&mut self, proc: ProcId, is_frozen: bool) {
+        let mut nodes: Vec<NodeId> = self.procs[&proc].nodes.values().copied().collect();
+        nodes.sort();
+        for nid in nodes {
+            let holders: Vec<ProcId> = self.nodes[&nid].refs.iter().copied().collect();
+            for h in holders {
+                let Some(f) = self.procs.get(&h).and_then(|hp| {
+                    let d = hp.node_to_desc.get(&nid)?;
+                    hp.refs_by_desc[d].freeze
+                }) else {
+                    continue;
+                };
+                let x = self.freezes.get_mut(&f).unwrap();
+                if !x.queued {
+                    x.is_frozen = is_frozen;
+                    x.queued = true;
+                    self.enqueue_proc_work(h, Work::Freeze(f));
+                } else {
+                    x.resend |= x.sent && x.is_frozen != is_frozen;
+                    x.is_frozen = is_frozen;
+                }
+            }
+        }
+    }
+
+    /// `BC_REQUEST_FREEZE_NOTIFICATION`: the current state is sent at once.
+    fn request_freeze_notification(
+        &mut self,
+        proc: ProcId,
+        desc: u32,
+        cookie: u64,
+    ) -> Result<(), i32> {
+        let r = self.procs[&proc]
+            .refs_by_desc
+            .get(&desc)
+            .ok_or(libc::EINVAL)?;
+        if r.freeze.is_some() {
+            return Err(libc::EINVAL);
+        }
+        let is_frozen = self.nodes[&r.node]
+            .proc
+            .and_then(|o| self.procs.get(&o))
+            .is_some_and(|o| o.is_frozen);
+        let f = self.id();
+        self.freezes.insert(
+            f,
+            FreezeListener {
+                cookie,
+                is_frozen,
+                cleared: false,
+                sent: false,
+                resend: false,
+                queued: true,
+            },
+        );
+        let p = self.procs.get_mut(&proc).unwrap();
+        p.refs_by_desc.get_mut(&desc).unwrap().freeze = Some(f);
+        self.enqueue_proc_work(proc, Work::Freeze(f));
+        Ok(())
+    }
+
+    /// `BC_CLEAR_FREEZE_NOTIFICATION`: detach it from its ref; its next
+    /// delivery is BR_CLEAR_FREEZE_NOTIFICATION_DONE.
+    fn clear_freeze_notification(
+        &mut self,
+        proc: ProcId,
+        desc: u32,
+        cookie: u64,
+    ) -> Result<(), i32> {
+        let r = self
+            .procs
+            .get_mut(&proc)
+            .unwrap()
+            .refs_by_desc
+            .get_mut(&desc)
+            .ok_or(libc::EINVAL)?;
+        let f = r.freeze.ok_or(libc::EINVAL)?;
+        if self.freezes[&f].cookie != cookie {
+            return Err(libc::EINVAL);
+        }
+        r.freeze = None;
+        let x = self.freezes.get_mut(&f).unwrap();
+        x.cleared = true;
+        if !x.queued {
+            x.queued = true;
+            self.enqueue_proc_work(proc, Work::Freeze(f));
+        } else if x.sent {
+            x.resend = true;
+        }
+        Ok(())
+    }
+
+    /// `BC_FREEZE_NOTIFICATION_DONE`.
+    fn freeze_notification_done(&mut self, proc: ProcId, cookie: u64) -> Result<(), i32> {
+        let p = self.procs.get_mut(&proc).unwrap();
+        let pos = p
+            .delivered_freeze
+            .iter()
+            .position(|f| self.freezes.get(f).is_some_and(|x| x.cookie == cookie))
+            .ok_or(libc::EINVAL)?;
+        let f = p.delivered_freeze.remove(pos);
+        let x = self.freezes.get_mut(&f).unwrap();
+        x.sent = false;
+        if x.resend {
+            x.resend = false;
+            self.enqueue_proc_work(proc, Work::Freeze(f));
+        } else {
+            x.queued = false;
+        }
+        Ok(())
+    }
+
+    /// A delivered freeze notification: a cleared one is done, a state waits
+    /// for BC_FREEZE_NOTIFICATION_DONE.
+    fn commit_freeze(&mut self, proc: ProcId, f: FreezeId) {
+        let Some(x) = self.freezes.get_mut(&f) else {
+            return;
+        };
+        if x.cleared {
+            self.freezes.remove(&f);
+        } else {
+            x.sent = true;
+            self.procs.get_mut(&proc).unwrap().delivered_freeze.push(f);
+        }
+    }
+
     // ---- thread / process release -------------------------------------------
 
     /// `binder_thread_release` (BINDER_THREAD_EXIT, or the process is going).
@@ -2182,6 +2652,9 @@ impl BinderDriver {
         else {
             return;
         };
+        if let Wait::Freezing(f) = &t.wait {
+            self.freeze_interrupted(f);
+        }
         let mut send_reply = None;
         let mut cur = t.transaction_stack;
         if let Some(c) = cur
@@ -2201,11 +2674,13 @@ impl BinderDriver {
                 tx.to_proc = None;
                 tx.to_thread = None;
                 cur = tx.to_parent;
+                let outstanding = tx.outstanding.take();
                 if let Some(key) = tx.buffer.take()
                     && let Some(b) = self.buffers.get_mut(&key)
                 {
                     b.transaction = None;
                 }
+                self.uncount_outstanding(outstanding);
             } else if tx.from == Some((proc, tid)) {
                 tx.from = None;
                 cur = tx.from_parent;
@@ -2256,6 +2731,15 @@ impl BinderDriver {
                         n.work_queued = false;
                     }
                 }
+                // A cleared notification is gone; one its ref holds stays
+                // until the ref goes.
+                Work::Freeze(f) => match self.freezes.get_mut(&f) {
+                    Some(x) if x.cleared => {
+                        self.freezes.remove(&f);
+                    }
+                    Some(x) => x.queued = false,
+                    None => {}
+                },
                 _ => {}
             }
         }
@@ -2268,9 +2752,11 @@ impl BinderDriver {
             return;
         };
         for t in p.threads.values() {
-            if let Wait::Blocked { read, .. } = t.wait {
-                us.answer(read.call, libc::EBADF);
-            }
+            match &t.wait {
+                Wait::Blocked { read, .. } => us.answer(read.call, libc::EBADF),
+                Wait::Freezing(f) => us.answer(f.call, libc::EBADF),
+                _ => true,
+            };
         }
         let ctx = p.context as usize;
         if let Some(n) = self.contexts[ctx].mgr_node
@@ -2332,11 +2818,16 @@ impl BinderDriver {
         }
         let todo = std::mem::take(&mut self.procs.get_mut(&proc).unwrap().todo);
         self.release_work(proc, todo);
-        let delivered: VecDeque<Work> =
-            std::mem::take(&mut self.procs.get_mut(&proc).unwrap().delivered_death)
-                .into_iter()
-                .map(Work::Death)
-                .collect();
+        let p = self.procs.get_mut(&proc).unwrap();
+        let delivered: VecDeque<Work> = std::mem::take(&mut p.delivered_death)
+            .into_iter()
+            .map(Work::Death)
+            .chain(
+                std::mem::take(&mut p.delivered_freeze)
+                    .into_iter()
+                    .map(Work::Freeze),
+            )
+            .collect();
         self.release_work(proc, delivered);
         // Buffers still held by the process.
         let keys: Vec<(ProcId, u64)> = self
@@ -2377,6 +2868,8 @@ impl BinderDriver {
             }
         }
         self.procs.remove(&proc);
+        // A freeze waiting for it to drain goes on to its next target.
+        self.drained.insert(proc);
         self.settle(us);
     }
 
@@ -2515,6 +3008,9 @@ impl BinderDriver {
                     }
                     Work::TransactionComplete => write_pod(out, &BR_TRANSACTION_COMPLETE),
                     Work::OnewaySpamSuspect => write_pod(out, &BR_ONEWAY_SPAM_SUSPECT),
+                    Work::TransactionPendingFrozen => {
+                        write_pod(out, &BR_TRANSACTION_PENDING_FROZEN)
+                    }
                     Work::FailedReply => {
                         // Like the reply it stands for, it ends the read.
                         write_pod(out, &BR_FAILED_REPLY);
@@ -2559,6 +3055,28 @@ impl BinderDriver {
                         write_pod(out, &death.cookie);
                         if dead_binder {
                             // DEAD_BINDER notifications can cause transactions.
+                            d.taken.push(taken);
+                            break 'retry;
+                        }
+                    }
+                    Work::Freeze(f) => {
+                        let Some(x) = self.freezes.get(&f) else {
+                            continue;
+                        };
+                        if x.cleared {
+                            write_pod(out, &BR_CLEAR_FREEZE_NOTIFICATION_DONE);
+                            write_pod(out, &x.cookie);
+                        } else {
+                            write_pod(out, &BR_FROZEN_BINDER);
+                            write_pod(
+                                out,
+                                &BinderFrozenStateInfo {
+                                    cookie: x.cookie,
+                                    is_frozen: x.is_frozen as u32,
+                                    reserved: 0,
+                                },
+                            );
+                            // Like BR_DEAD_BINDER, it can cause transactions.
                             d.taken.push(taken);
                             break 'retry;
                         }
@@ -2846,12 +3364,12 @@ impl BinderDriver {
                 }
             }
             for (&tid, t) in &p.threads {
-                match t.wait {
+                match &t.wait {
                     Wait::None => {}
                     // No work is ever left with a thread that waits instead
                     // of reading it, and only threads that can take process
                     // work wait for it.
-                    Wait::Blocked { proc_work, .. } => {
+                    &Wait::Blocked { proc_work, .. } => {
                         assert!(
                             !Self::has_work(p, t, proc_work),
                             "proc {pid} thread {tid} waits with work to read: todo {:?} \
@@ -2863,9 +3381,50 @@ impl BinderDriver {
                         assert!(!proc_work || Self::available_for_proc_work(t));
                     }
                     Wait::Woken(_) => panic!("proc {pid} thread {tid} woken but not served"),
+                    // A freeze waits for a live target it marked frozen. (As
+                    // in the kernel, another BINDER_FREEZE may thaw it
+                    // meanwhile; the wait then ends at its deadline.)
+                    Wait::Freezing(f) => {
+                        assert!(f.enable && f.deadline.is_some());
+                        assert!(self.procs.contains_key(&f.targets[0]));
+                    }
+                }
+            }
+            // outstanding_txns counts exactly the transactions queued for it
+            // or served by it.
+            let counted = self
+                .txns
+                .values()
+                .filter(|t| t.outstanding == Some(pid))
+                .count();
+            assert_eq!(
+                p.outstanding_txns as usize, counted,
+                "proc {pid} outstanding_txns"
+            );
+            for f in &p.delivered_freeze {
+                let x = &self.freezes[f];
+                assert!(x.sent && x.queued);
+            }
+        }
+        // A freeze notification belongs to one ref until cleared, and a
+        // cleared one only lives until it is delivered.
+        let mut attached = 0;
+        for p in self.procs.values() {
+            for r in p.refs_by_desc.values() {
+                if let Some(f) = r.freeze {
+                    assert!(!self.freezes[&f].cleared);
+                    attached += 1;
                 }
             }
         }
+        let cleared = self.freezes.values().filter(|x| x.cleared).count();
+        assert_eq!(
+            attached + cleared,
+            self.freezes.len(),
+            "freeze notifications leaked"
+        );
+        assert!(self.freezes.values().all(|x| !x.cleared || x.queued));
+        assert!(self.drained.is_empty());
         for (id, n) in &self.nodes {
             assert!(
                 n.internal_strong >= 0 && n.local_strong >= 0 && n.local_weak >= 0,
@@ -2899,6 +3458,12 @@ impl BinderDriver {
         (self.txns.len(), self.buffers.len(), self.nodes.len())
     }
 
+    /// Freeze notifications alive, and whether any binder instance is
+    /// frozen (leak checks).
+    pub fn freezer_state(&self) -> (usize, bool) {
+        (self.freezes.len(), self.procs.values().any(|p| p.is_frozen))
+    }
+
     /// Work items queued anywhere that a read would return for: process
     /// lists, and thread lists flagged `process_todo`.
     pub fn queued_work(&self) -> usize {
@@ -2915,7 +3480,7 @@ impl BinderDriver {
             .sum()
     }
 
-    /// The threads blocked in a read (tests).
+    /// The threads blocked in a read or a freeze (tests).
     pub fn blocked_threads(&self) -> Vec<(ProcId, u32)> {
         let mut v: Vec<(ProcId, u32)> = self
             .procs
@@ -2923,7 +3488,7 @@ impl BinderDriver {
             .flat_map(|(&p, proc)| {
                 proc.threads
                     .iter()
-                    .filter(|(_, t)| matches!(t.wait, Wait::Blocked { .. }))
+                    .filter(|(_, t)| matches!(t.wait, Wait::Blocked { .. } | Wait::Freezing(_)))
                     .map(move |(&tid, _)| (p, tid))
             })
             .collect();
