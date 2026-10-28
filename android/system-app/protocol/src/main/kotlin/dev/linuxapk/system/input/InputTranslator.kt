@@ -22,9 +22,15 @@ data class TranslatorConfig(
  * InputReader would produce for a real mouse, touchscreen and keyboard.
  *
  * InputDispatcher gives every injected event the same device id and checks the stream for
- * consistency (InputVerifier), so the mouse and the touchscreen must never overlap: a touch
- * sequence that starts while a mouse button is held is dropped, and mouse events during a touch
- * sequence are dropped (the hover resumes with the next motion).
+ * consistency (InputVerifier), so the mouse, the touchscreen and the pen must never overlap: a
+ * touch sequence or pen that starts while a mouse button is held or a touchpad gesture runs is
+ * dropped, and mouse events during a touch sequence or while the pen is in proximity are dropped
+ * (the hover resumes with the next motion).
+ *
+ * Touchpad scrolling (finger axis source) and gestures follow Android's own touchpad mapping,
+ * InputReader's GestureConverter: fake fingers from a mouse source with a classification, which
+ * apps scroll, fling and zoom with as they do for touch. The pen follows TouchInputMapper's stylus
+ * events.
  *
  * Each window is one Android display. Events go to the display whose window the pointer, the
  * keyboard focus or the first finger of a touch sequence entered; moving the pointer to another
@@ -40,7 +46,7 @@ class InputTranslator(
   private val clock = EventClock(now)
   private val keyboard = Keyboard(config.escapeAsBack)
 
-  private val windowScales = HashMap<Int, Double>() // by display
+  private val windows = HashMap<Int, HostEvent.Window>() // by display
 
   /** Display that pointer, keyboard and touch events currently go to. */
   var pointerDisplay = 0
@@ -67,6 +73,51 @@ class InputTranslator(
   private val v120 = IntArray(2)
   private val hasV120 = BooleanArray(2)
   private val axisValue = DoubleArray(2)
+  private var axisSource = -1
+  private var axisStop = false
+
+  // --- touchpad gestures: GestureConverter's fake fingers ------------------
+  private enum class Gesture {
+    NONE,
+    SCROLL,
+    PINCH,
+    SWIPE,
+  }
+
+  private var gesture = Gesture.NONE
+  private var gestureDownTime = 0L
+  private var gestureFingers = 0
+  private val fingerX = FloatArray(MAX_SWIPE_FINGERS)
+  private val fingerY = FloatArray(MAX_SWIPE_FINGERS)
+  private var pinchScale = 1.0 // since the begin
+  private var pinchAngle = 0.0 // radians, clockwise
+  private var pinchX = 0f
+  private var pinchY = 0f
+  private var flingMayBeInProgress = false
+
+  // --- pen (tablet tool) ---------------------------------------------------
+  private var penIn = false // in proximity, injected
+  private var penIgnored = false // in proximity, dropped (it came during a drag or touch)
+  private var penTool = MotionEvent.TOOL_TYPE_STYLUS
+  private var penDisplay = 0
+  private var penX = 0f
+  private var penY = 0f
+  private var penPressure = 0f
+  private var penDistance = -1f // -1: not reported
+  private var penTiltX = Double.NaN // degrees; NaN: not reported
+  private var penTiltY = 0.0
+  private var penDown = false
+  private var penHovering = false
+  private var penButtons = 0
+  private var penDownTime = 0L
+
+  // Pending changes, applied at tablet_frame.
+  private var penFrameTime = -1L
+  private var penEnter: HostEvent.TabletProximityIn? = null
+  private var penLeave = false
+  private var penTip: Boolean? = null
+  private var penChanged = false
+  private val penButtonChanges = ArrayList<Pair<Int, Boolean>>()
 
   // --- touch state ---------------------------------------------------------
   private class Touch(val pointerId: Int, var x: Float, var y: Float)
@@ -83,9 +134,12 @@ class InputTranslator(
   fun handle(e: HostEvent): List<OutEvent> {
     val out = ArrayList<OutEvent>(2)
     when (e) {
-      is HostEvent.Window -> windowScales[e.display] = e.scale
+      is HostEvent.Window -> windows[e.display] = e
       is HostEvent.PointerEnter -> {
-        if (e.display != pointerDisplay && (left || hovering || buttons != 0)) {
+        if (
+          e.display != pointerDisplay &&
+            (left || hovering || buttons != 0 || gesture != Gesture.NONE)
+        ) {
           // Finish on the old window first: button releases, HOVER_EXIT.
           left = true
           pointerFrame(out)
@@ -116,8 +170,50 @@ class InputTranslator(
           v120[e.axis] += e.v120
           hasV120[e.axis] = true
         }
-      is HostEvent.PointerAxisStop -> {}
+      is HostEvent.PointerAxisStop -> {
+        frameTime = clock.map(e.time)
+        axisStop = true
+      }
+      is HostEvent.PointerAxisSource -> axisSource = e.source
       HostEvent.PointerFrame -> pointerFrame(out)
+      is HostEvent.SwipeBegin -> swipeBegin(out, clock.map(e.time), e.fingers)
+      is HostEvent.SwipeUpdate -> swipeUpdate(out, clock.map(e.time), e.dx, e.dy)
+      is HostEvent.SwipeEnd -> gestureEnd(out, clock.map(e.time), Gesture.SWIPE, e.cancelled)
+      is HostEvent.PinchBegin -> pinchBegin(out, clock.map(e.time))
+      is HostEvent.PinchUpdate -> pinchUpdate(out, clock.map(e.time), e)
+      is HostEvent.PinchEnd -> gestureEnd(out, clock.map(e.time), Gesture.PINCH, e.cancelled)
+      is HostEvent.HoldBegin -> holdBegin(out, clock.map(e.time))
+      is HostEvent.HoldEnd -> {}
+      is HostEvent.TabletProximityIn -> {
+        penEnter = e
+        penLeave = false
+      }
+      HostEvent.TabletProximityOut -> penLeave = true
+      HostEvent.TabletDown -> penTip = true
+      HostEvent.TabletUp -> penTip = false
+      is HostEvent.TabletMotion -> {
+        penX = e.x
+        penY = e.y
+        penChanged = true
+      }
+      is HostEvent.TabletPressure -> {
+        penPressure = e.pressure.coerceIn(0, 65535) / 65535f
+        penChanged = true
+      }
+      is HostEvent.TabletDistance -> {
+        penDistance = e.distance.coerceIn(0, 65535) / 65535f
+        penChanged = true
+      }
+      is HostEvent.TabletTilt -> {
+        penTiltX = e.x
+        penTiltY = e.y
+        penChanged = true
+      }
+      is HostEvent.TabletButton -> penButtonChanges += e.button to e.pressed
+      is HostEvent.TabletFrame -> {
+        penFrameTime = clock.map(e.time)
+        penFrame(out)
+      }
       is HostEvent.KeyboardEnter -> {
         if (e.display != keyDisplay) keys(out) { keyboard.releaseAll(clock.untimed(), it) }
         keyDisplay = e.display
@@ -162,6 +258,9 @@ class InputTranslator(
     val out = ArrayList<OutEvent>()
     clearPointerFrame()
     clearTouchFrame()
+    clearPenFrame()
+    penLeave = true
+    penFrame(out)
     touchCancel(out)
     left = true
     pointerFrame(out)
@@ -172,8 +271,12 @@ class InputTranslator(
 
   // --- pointer -------------------------------------------------------------
 
+  // Mouse input waits while a touch sequence or the pen owns the stream.
+  private fun mouseBlocked() = touches.isNotEmpty() || penIn
+
   private fun pointerFrame(out: MutableList<OutEvent>) {
-    val t = if (frameTime >= 0) frameTime else clock.untimed()
+    // The newest time handed out: another device's frame may have come in between.
+    val t = if (frameTime >= 0) clock.current() else clock.untimed()
     val meta = keyboard.metaState
 
     // Side buttons are keys (like InputReader's synthesized BACK/FORWARD); the rest are buttons.
@@ -187,7 +290,7 @@ class InputTranslator(
       }
       val b = BUTTONS[code] ?: continue
       when {
-        pressed && touches.isNotEmpty() -> suppressedButtons = suppressedButtons or b
+        pressed && mouseBlocked() -> suppressedButtons = suppressedButtons or b
         pressed -> newButtons = newButtons or b
         suppressedButtons and b != 0 -> suppressedButtons = suppressedButtons and b.inv()
         else -> newButtons = newButtons and b.inv()
@@ -195,19 +298,49 @@ class InputTranslator(
     }
     if (left) newButtons = 0 // no releases arrive after wl_pointer.leave
 
+    // Finger scrolling moves a fake finger (unless a button is held: then it scrolls); the rest
+    // is ACTION_SCROLL. Not every frame of a finger scroll names its source.
+    val finger =
+      (axisSource == AXIS_SOURCE_FINGER || (axisSource < 0 && gesture == Gesture.SCROLL)) &&
+        buttons == 0 &&
+        newButtons == 0
     var vscroll = 0f
     var hscroll = 0f
+    var dx = 0f
+    var dy = 0f
     if (!left) {
-      vscroll = -scrollUnits(0)
-      hscroll = scrollUnits(1)
+      if (finger) {
+        dx = displayPixels(1)
+        dy = displayPixels(0)
+      } else {
+        vscroll = -scrollUnits(0)
+        hscroll = scrollUnits(1)
+      }
     }
+    val stop = axisStop
     clearPointerFrame()
+
+    // A touchpad gesture ends before anything else the pointer does.
+    if (
+      gesture != Gesture.NONE &&
+        (left ||
+          moved ||
+          newButtons != buttons ||
+          sideKeys.isNotEmpty() ||
+          vscroll != 0f ||
+          hscroll != 0f ||
+          (gesture != Gesture.SCROLL && (dx != 0f || dy != 0f)))
+    ) {
+      endGesture(out, t)
+    }
 
     for ((key, pressed) in sideKeys) if (pressed) out += sideKey(key, KeyEvent.ACTION_DOWN, t, meta)
 
-    if (touches.isEmpty()) {
+    if (!mouseBlocked()) {
       motionFrame(out, t, meta, newButtons, vscroll, hscroll)
+      if (dx != 0f || dy != 0f) scroll(out, t, dx, dy)
     }
+    if (stop && gesture == Gesture.SCROLL) endGesture(out, t)
     if (left) {
       if (hovering) out += mouse(MotionEvent.ACTION_HOVER_EXIT, 0, 0, t, meta)
       hovering = false
@@ -269,14 +402,18 @@ class InputTranslator(
     }
   }
 
-  // One detent is one unit. Without value120 (touchpads, kinetic scrolling) convert the
-  // surface-pixel distance to display pixels, then to units of scrollPixelsPerUnit. The window
-  // manager sizes each display to its window's logical size times the window's scale.
+  // One detent is one unit (a hi-res wheel's value120 gives fractions, as CursorInputMapper's
+  // hi-res scroll). Without value120 (continuous sources) convert the surface-pixel distance to
+  // display pixels, then to units of scrollPixelsPerUnit.
   private fun scrollUnits(axis: Int): Float {
     if (hasV120[axis]) return v120[axis] / 120f
+    return displayPixels(axis) / config.scrollPixelsPerUnit
+  }
+
+  // The window manager sizes each display to its window's logical size times the window's scale.
+  private fun displayPixels(axis: Int): Float {
     if (axisValue[axis] == 0.0) return 0f
-    val toDisplay = windowScales[pointerDisplay] ?: 1.0
-    return (axisValue[axis] * toDisplay / config.scrollPixelsPerUnit).toFloat()
+    return (axisValue[axis] * (windows[pointerDisplay]?.scale ?: 1.0)).toFloat()
   }
 
   private fun clearPointerFrame() {
@@ -285,6 +422,8 @@ class InputTranslator(
     v120.fill(0)
     hasV120.fill(false)
     axisValue.fill(0.0)
+    axisSource = -1
+    axisStop = false
   }
 
   private fun mouse(
@@ -315,10 +454,378 @@ class InputTranslator(
   private fun sideKey(keyCode: Int, action: Int, t: Long, meta: Int) =
     OutKey(action, keyCode, 0, meta, KeyEvent.FLAG_FROM_SYSTEM, t, t, pointerDisplay)
 
+  // --- touchpad gestures ---------------------------------------------------
+  // GestureConverter's state machine (handleScroll/endScroll, handleFling, handlePinch/endPinch,
+  // handleMultiFingerSwipe/Lift): the hover exits, fake fingers go down around the cursor, move,
+  // and lift, and the hover resumes. The fling is the app's own, from the fake finger's motion.
+
+  private fun gestureAllowed() = !left && buttons == 0 && touches.isEmpty() && !penIn && !penIgnored
+
+  private fun exitHover(out: MutableList<OutEvent>, t: Long) {
+    if (hovering) out += mouse(MotionEvent.ACTION_HOVER_EXIT, 0, 0, t, keyboard.metaState)
+    hovering = false
+  }
+
+  private fun enterHover(out: MutableList<OutEvent>, t: Long) {
+    out += mouse(MotionEvent.ACTION_HOVER_MOVE, 0, 0, t, keyboard.metaState)
+    hovering = true
+  }
+
+  // Two-finger scrolling: one fake finger that starts at the cursor and moves with the content,
+  // so it moves against the scroll (a scroll down drags content up).
+  private fun scroll(out: MutableList<OutEvent>, t: Long, dx: Float, dy: Float) {
+    if (gesture != Gesture.SCROLL) {
+      if (gesture != Gesture.NONE || !gestureAllowed()) return
+      exitHover(out, t)
+      start(Gesture.SCROLL, t, 1)
+      fingerX[0] = x
+      fingerY[0] = y
+      flingMayBeInProgress = false
+      out += fakeFingers(MotionEvent.ACTION_DOWN, t, 1)
+    }
+    fingerX[0] -= dx
+    fingerY[0] -= dy
+    out +=
+      fakeFingers(
+        MotionEvent.ACTION_MOVE,
+        t,
+        1,
+        mapOf(
+          MotionEvent.AXIS_GESTURE_SCROLL_X_DISTANCE to dx,
+          MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE to dy,
+        ),
+      )
+  }
+
+  // Fingers on the touchpad after a scroll may mean "stop the fling": GestureConverter's
+  // FLING_TAP_DOWN sends a fake finger down and cancels it.
+  private fun holdBegin(out: MutableList<OutEvent>, t: Long) {
+    if (gesture != Gesture.NONE || !flingMayBeInProgress || !gestureAllowed()) return
+    flingMayBeInProgress = false
+    exitHover(out, t)
+    start(Gesture.SCROLL, t, 1)
+    fingerX[0] = x
+    fingerY[0] = y
+    out += fakeFingers(MotionEvent.ACTION_DOWN, t, 1)
+    out += fakeFingers(MotionEvent.ACTION_CANCEL, t, 1)
+    gesture = Gesture.NONE
+    enterHover(out, t)
+  }
+
+  private fun pinchBegin(out: MutableList<OutEvent>, t: Long) {
+    endGesture(out, t)
+    if (!gestureAllowed()) return
+    exitHover(out, t)
+    start(Gesture.PINCH, t, 2)
+    pinchScale = 1.0
+    pinchAngle = 0.0
+    pinchX = x
+    pinchY = y
+    placePinchFingers()
+    out += fakeFingers(MotionEvent.ACTION_DOWN, t, 1, pinchFactor(1f))
+    out += fakeFingers(pointerAction(MotionEvent.ACTION_POINTER_DOWN, 1), t, 2, pinchFactor(1f))
+  }
+
+  // Wayland's scale is since the begin, Android's factor since the last event. The center
+  // follows the fingers' common motion, and rotation turns the fingers around it.
+  private fun pinchUpdate(out: MutableList<OutEvent>, t: Long, e: HostEvent.PinchUpdate) {
+    if (gesture != Gesture.PINCH) return
+    val scale = e.scale.coerceIn(MIN_PINCH_SCALE, MAX_PINCH_SCALE)
+    val factor = (scale / pinchScale).toFloat()
+    pinchScale = scale
+    pinchAngle += Math.toRadians(e.rotation)
+    pinchX += e.dx
+    pinchY += e.dy
+    placePinchFingers()
+    out += fakeFingers(MotionEvent.ACTION_MOVE, t, 2, pinchFactor(factor))
+  }
+
+  private fun placePinchFingers() {
+    val half = INITIAL_PINCH_SEPARATION_PX * pinchScale / 2
+    val hx = (half * Math.cos(pinchAngle)).toFloat()
+    val hy = (half * Math.sin(pinchAngle)).toFloat()
+    fingerX[0] = pinchX - hx
+    fingerY[0] = pinchY - hy
+    fingerX[1] = pinchX + hx
+    fingerY[1] = pinchY + hy
+  }
+
+  private fun pinchFactor(f: Float) = mapOf(MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR to f)
+
+  // Swipes of three or more fingers: fake fingers 100 px apart, centered on the cursor.
+  private fun swipeBegin(out: MutableList<OutEvent>, t: Long, fingers: Int) {
+    endGesture(out, t)
+    if (!gestureAllowed()) return
+    exitHover(out, t)
+    val n = fingers.coerceIn(2, MAX_SWIPE_FINGERS)
+    start(Gesture.SWIPE, t, n)
+    for (i in 0 until n) {
+      fingerX[i] = x + SWIPE_FINGER_SPACING_PX * (i - (n - 1) / 2f)
+      fingerY[i] = y
+    }
+    out += fakeFingers(MotionEvent.ACTION_DOWN, t, 1, swipeAxes(0f, 0f))
+    for (i in 1 until n) {
+      out +=
+        fakeFingers(pointerAction(MotionEvent.ACTION_POINTER_DOWN, i), t, i + 1, swipeAxes(0f, 0f))
+    }
+  }
+
+  private fun swipeUpdate(out: MutableList<OutEvent>, t: Long, dx: Float, dy: Float) {
+    if (gesture != Gesture.SWIPE) return
+    for (i in 0 until gestureFingers) {
+      fingerX[i] += dx
+      fingerY[i] += dy
+    }
+    // GestureConverter normalizes by the touchpad's size; the window's is the closest we have.
+    val w = windows[pointerDisplay]
+    val width = w?.let { (it.width * it.scale).toFloat() }?.takeIf { it > 0f } ?: 1000f
+    val height = w?.let { (it.height * it.scale).toFloat() }?.takeIf { it > 0f } ?: 1000f
+    out +=
+      fakeFingers(MotionEvent.ACTION_MOVE, t, gestureFingers, swipeAxes(dx / width, dy / height))
+  }
+
+  private fun swipeAxes(xOffset: Float, yOffset: Float) =
+    mapOf(
+      AXIS_GESTURE_SWIPE_FINGER_COUNT to gestureFingers.toFloat(),
+      MotionEvent.AXIS_GESTURE_X_OFFSET to xOffset,
+      MotionEvent.AXIS_GESTURE_Y_OFFSET to yOffset,
+    )
+
+  private fun gestureEnd(out: MutableList<OutEvent>, t: Long, kind: Gesture, cancelled: Boolean) {
+    if (gesture != kind) return
+    if (cancelled) {
+      out += fakeFingers(MotionEvent.ACTION_CANCEL, t, gestureFingers)
+      gesture = Gesture.NONE
+      enterHover(out, t)
+    } else {
+      endGesture(out, t)
+    }
+  }
+
+  /** Lifts the fake fingers of the gesture in progress, then hovers again (unless leaving). */
+  private fun endGesture(out: MutableList<OutEvent>, t: Long) {
+    when (gesture) {
+      Gesture.NONE -> return
+      Gesture.SCROLL -> {
+        out += fakeFingers(MotionEvent.ACTION_UP, t, 1)
+        // The app may fling now; the next hold stops it.
+        flingMayBeInProgress = true
+      }
+      Gesture.PINCH -> {
+        out += fakeFingers(pointerAction(MotionEvent.ACTION_POINTER_UP, 1), t, 2, pinchFactor(1f))
+        out += fakeFingers(MotionEvent.ACTION_UP, t, 1, pinchFactor(1f))
+      }
+      Gesture.SWIPE -> {
+        for (i in gestureFingers - 1 downTo 1) {
+          out +=
+            fakeFingers(
+              pointerAction(MotionEvent.ACTION_POINTER_UP, i),
+              t,
+              i + 1,
+              swipeAxes(0f, 0f),
+            )
+        }
+        out += fakeFingers(MotionEvent.ACTION_UP, t, 1, swipeAxes(0f, 0f))
+      }
+    }
+    gesture = Gesture.NONE
+    if (!left) enterHover(out, t)
+  }
+
+  private fun start(kind: Gesture, t: Long, fingers: Int) {
+    gesture = kind
+    gestureDownTime = t
+    gestureFingers = fingers
+  }
+
+  // As GestureConverter::makeMotionArgs: the mouse source, finger tools, the gesture's
+  // classification; gestures don't move the focus, and scrolls are marked as generated.
+  private fun fakeFingers(
+    action: Int,
+    t: Long,
+    n: Int,
+    axes: Map<Int, Float> = emptyMap(),
+  ): OutMotion {
+    val classification =
+      when (gesture) {
+        Gesture.NONE -> MotionEvent.CLASSIFICATION_NONE
+        Gesture.SCROLL -> MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE
+        Gesture.PINCH -> MotionEvent.CLASSIFICATION_PINCH
+        Gesture.SWIPE -> CLASSIFICATION_MULTI_FINGER_SWIPE
+      }
+    var flags = FLAG_NO_FOCUS_CHANGE
+    if (gesture == Gesture.SCROLL) flags = flags or FLAG_IS_GENERATED_GESTURE
+    return OutMotion(
+      source = InputDevice.SOURCE_MOUSE,
+      action = action,
+      actionButton = 0,
+      buttonState = 0,
+      metaState = keyboard.metaState,
+      downTime = gestureDownTime,
+      eventTime = t,
+      pointers =
+        (0 until n).map {
+          OutPointer(
+            it,
+            MotionEvent.TOOL_TYPE_FINGER,
+            fingerX[it],
+            fingerY[it],
+            1f,
+            axes = if (it == 0) axes else emptyMap(),
+          )
+        },
+      displayId = pointerDisplay,
+      classification = classification,
+      flags = flags,
+    )
+  }
+
+  // --- pen -----------------------------------------------------------------
+  // TouchInputMapper's stylus: HOVER_ENTER/MOVE/EXIT in proximity, DOWN/MOVE/UP on contact,
+  // stylus buttons as BUTTON_PRESS/RELEASE, in its sync order.
+
+  private fun penFrame(out: MutableList<OutEvent>) {
+    val t = if (penFrameTime >= 0) clock.current() else clock.untimed()
+    val enter = penEnter
+    val leave = penLeave
+    val tip = penTip
+    var changed = penChanged
+    val buttonChanges = penButtonChanges.toList()
+    clearPenFrame()
+
+    if (enter != null) {
+      if (penIn) penFrameOut(out, t)
+      penIgnored = false
+      if (buttons != 0 || touches.isNotEmpty() || gesture != Gesture.NONE) {
+        penIgnored = true
+      } else {
+        // The pen takes the stream over from the mouse.
+        exitHover(out, t)
+        penIn = true
+        penTool = PEN_TOOLS[enter.tool] ?: MotionEvent.TOOL_TYPE_STYLUS
+        penDisplay = enter.display
+        changed = true
+      }
+    }
+    if (penIgnored) {
+      if (leave) penIgnored = false
+      return
+    }
+    if (!penIn) return
+
+    var newButtons = penButtons
+    for ((code, pressed) in buttonChanges) {
+      val b = STYLUS_BUTTONS[code] ?: continue
+      newButtons = if (pressed) newButtons or b else newButtons and b.inv()
+    }
+    if (leave) newButtons = 0
+    val down = !leave && (tip ?: penDown)
+
+    // TouchInputMapper::sync: button releases, hover exit, touches, hover enter and move, presses.
+    for (b in STYLUS_BUTTON_ORDER) {
+      if (penButtons and b != 0 && newButtons and b == 0) {
+        penButtons = penButtons and b.inv()
+        out += pen(MotionEvent.ACTION_BUTTON_RELEASE, b, t)
+      }
+    }
+    if (penHovering && (down || leave)) {
+      out += pen(MotionEvent.ACTION_HOVER_EXIT, 0, t)
+      penHovering = false
+    }
+    if (!penDown && down) {
+      penDownTime = t
+      penDown = true
+      out += pen(MotionEvent.ACTION_DOWN, 0, t)
+    } else if (penDown && !down) {
+      if (changed) out += pen(MotionEvent.ACTION_MOVE, 0, t)
+      penDown = false
+      out += pen(MotionEvent.ACTION_UP, 0, t)
+      changed = true
+    } else if (penDown && changed) {
+      out += pen(MotionEvent.ACTION_MOVE, 0, t)
+    }
+    if (!down && !leave) {
+      if (!penHovering) {
+        out += pen(MotionEvent.ACTION_HOVER_ENTER, 0, t)
+        penHovering = true
+        changed = true
+      }
+      if (changed) out += pen(MotionEvent.ACTION_HOVER_MOVE, 0, t)
+    }
+    for (b in STYLUS_BUTTON_ORDER) {
+      if (penButtons and b == 0 && newButtons and b != 0) {
+        penButtons = penButtons or b
+        out += pen(MotionEvent.ACTION_BUTTON_PRESS, b, t)
+      }
+    }
+    if (leave) penFrameOut(out, t)
+  }
+
+  // The tool left (or another came in): lift, release and exit what is still held.
+  private fun penFrameOut(out: MutableList<OutEvent>, t: Long) {
+    for (b in STYLUS_BUTTON_ORDER) {
+      if (penButtons and b != 0) {
+        penButtons = penButtons and b.inv()
+        out += pen(MotionEvent.ACTION_BUTTON_RELEASE, b, t)
+      }
+    }
+    if (penDown) out += pen(MotionEvent.ACTION_UP, 0, t)
+    if (penHovering) out += pen(MotionEvent.ACTION_HOVER_EXIT, 0, t)
+    penIn = false
+    penDown = false
+    penHovering = false
+    penPressure = 0f
+    penDistance = -1f
+    penTiltX = Double.NaN
+  }
+
+  private fun clearPenFrame() {
+    penFrameTime = -1
+    penEnter = null
+    penLeave = false
+    penTip = null
+    penChanged = false
+    penButtonChanges.clear()
+  }
+
+  private fun pen(action: Int, actionButton: Int, t: Long): OutMotion {
+    val hover =
+      when (action) {
+        MotionEvent.ACTION_HOVER_ENTER,
+        MotionEvent.ACTION_HOVER_MOVE,
+        MotionEvent.ACTION_HOVER_EXIT -> true
+        MotionEvent.ACTION_DOWN,
+        MotionEvent.ACTION_MOVE,
+        MotionEvent.ACTION_UP -> false
+        else -> !penDown
+      }
+    val axes = HashMap<Int, Float>(4)
+    if (!penTiltX.isNaN()) {
+      // TouchInputMapper: the tilt from the perpendicular and the direction it leans.
+      val tx = Math.toRadians(penTiltX)
+      val ty = Math.toRadians(penTiltY)
+      axes[MotionEvent.AXIS_TILT] = Math.acos(Math.cos(tx) * Math.cos(ty)).toFloat()
+      axes[MotionEvent.AXIS_ORIENTATION] = Math.atan2(-Math.sin(tx), Math.sin(ty)).toFloat()
+    }
+    if (hover && penDistance >= 0f) axes[MotionEvent.AXIS_DISTANCE] = penDistance
+    return OutMotion(
+      source = InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_TOUCHSCREEN,
+      action = action,
+      actionButton = actionButton,
+      buttonState = penButtons,
+      metaState = keyboard.metaState,
+      downTime = penDownTime,
+      eventTime = t,
+      pointers =
+        listOf(OutPointer(0, penTool, penX, penY, if (hover) 0f else penPressure, axes = axes)),
+      displayId = penDisplay,
+    )
+  }
+
   // --- touch ---------------------------------------------------------------
 
   private fun touchFrame(out: MutableList<OutEvent>) {
-    val t = if (touchFrameTime >= 0) touchFrameTime else clock.untimed()
+    val t = if (touchFrameTime >= 0) clock.current() else clock.untimed()
     val meta = keyboard.metaState
     val downs = touchDowns.toList()
     val moves = touchMoves.values.toList()
@@ -340,7 +847,7 @@ class InputTranslator(
       // Drop a touch sequence that starts during a mouse drag, pointers beyond the limit and
       // fingers on another window than the sequence's.
       if (
-        (touches.isEmpty() && buttons != 0) ||
+        (touches.isEmpty() && (buttons != 0 || gesture != Gesture.NONE || penIn)) ||
           touches.size >= MAX_POINTERS ||
           (touches.isNotEmpty() && d.display != touchDisplay)
       ) {
@@ -413,9 +920,50 @@ class InputTranslator(
       displayId = touchDisplay,
     )
 
-  private companion object {
+  private fun pointerAction(action: Int, index: Int) = action or (index shl INDEX_SHIFT)
+
+  internal companion object {
     const val INDEX_SHIFT = MotionEvent.ACTION_POINTER_INDEX_SHIFT
     const val MAX_POINTERS = 16 // MAX_POINTERS in Android's Input.h
+
+    // wl_pointer.axis_source
+    const val AXIS_SOURCE_FINGER = 1
+
+    // GestureConverter
+    const val INITIAL_PINCH_SEPARATION_PX = 200.0
+    const val SWIPE_FINGER_SPACING_PX = 100f
+    const val MAX_SWIPE_FINGERS = 5
+    const val MIN_PINCH_SCALE = 0.01
+    const val MAX_PINCH_SCALE = 100.0
+
+    // Hidden MotionEvent constants.
+    const val FLAG_IS_GENERATED_GESTURE = 0x8
+    const val FLAG_NO_FOCUS_CHANGE = 0x40
+    const val AXIS_GESTURE_SWIPE_FINGER_COUNT = 53
+    const val CLASSIFICATION_MULTI_FINGER_SWIPE = 4
+
+    // linux/input-event-codes.h: tablet tools and stylus buttons.
+    const val BTN_TOOL_RUBBER = 0x141
+    const val BTN_TOOL_FINGER = 0x145
+    const val BTN_TOOL_MOUSE = 0x146
+    const val BTN_TOOL_LENS = 0x147
+    const val BTN_STYLUS = 0x14b
+    const val BTN_STYLUS2 = 0x14c
+
+    val PEN_TOOLS =
+      mapOf(
+        BTN_TOOL_RUBBER to MotionEvent.TOOL_TYPE_ERASER,
+        BTN_TOOL_FINGER to MotionEvent.TOOL_TYPE_FINGER,
+        BTN_TOOL_MOUSE to MotionEvent.TOOL_TYPE_MOUSE,
+        BTN_TOOL_LENS to MotionEvent.TOOL_TYPE_MOUSE,
+      )
+    val STYLUS_BUTTONS =
+      mapOf(
+        BTN_STYLUS to MotionEvent.BUTTON_STYLUS_PRIMARY,
+        BTN_STYLUS2 to MotionEvent.BUTTON_STYLUS_SECONDARY,
+      )
+    val STYLUS_BUTTON_ORDER =
+      intArrayOf(MotionEvent.BUTTON_STYLUS_PRIMARY, MotionEvent.BUTTON_STYLUS_SECONDARY)
 
     // linux/input-event-codes.h
     const val BTN_LEFT = 0x110

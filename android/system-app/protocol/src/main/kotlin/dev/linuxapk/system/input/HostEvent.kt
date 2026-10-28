@@ -32,7 +32,61 @@ sealed interface HostEvent {
 
   data class PointerAxisStop(val time: Long, val axis: Int) : HostEvent
 
+  /** What the frame's axis events come from: 0 wheel, 1 finger, 2 continuous, 3 wheel tilt. */
+  data class PointerAxisSource(val source: Int) : HostEvent
+
   data object PointerFrame : HostEvent
+
+  // Touchpad gestures, where the pointer is. Deltas are in display pixels.
+
+  data class SwipeBegin(val time: Long, val fingers: Int) : HostEvent
+
+  data class SwipeUpdate(val time: Long, val dx: Float, val dy: Float) : HostEvent
+
+  data class SwipeEnd(val time: Long, val cancelled: Boolean) : HostEvent
+
+  data class PinchBegin(val time: Long, val fingers: Int) : HostEvent
+
+  /** [scale] since the begin; [rotation] in degrees clockwise since the last update. */
+  data class PinchUpdate(
+    val time: Long,
+    val dx: Float,
+    val dy: Float,
+    val scale: Double,
+    val rotation: Double,
+  ) : HostEvent
+
+  data class PinchEnd(val time: Long, val cancelled: Boolean) : HostEvent
+
+  data class HoldBegin(val time: Long, val fingers: Int) : HostEvent
+
+  data class HoldEnd(val time: Long, val cancelled: Boolean) : HostEvent
+
+  // A tablet tool (pen, eraser), gathered until [TabletFrame].
+
+  /** [tool] is its `BTN_TOOL_*` code; later tablet events go to [display]. */
+  data class TabletProximityIn(val tool: Int, val display: Int = 0) : HostEvent
+
+  data object TabletProximityOut : HostEvent
+
+  data object TabletDown : HostEvent
+
+  data object TabletUp : HostEvent
+
+  data class TabletMotion(val x: Float, val y: Float) : HostEvent
+
+  /** 0..65535. */
+  data class TabletPressure(val pressure: Int) : HostEvent
+
+  /** 0..65535. */
+  data class TabletDistance(val distance: Int) : HostEvent
+
+  /** Degrees from the perpendicular along each axis. */
+  data class TabletTilt(val x: Double, val y: Double) : HostEvent
+
+  data class TabletButton(val button: Int, val pressed: Boolean) : HostEvent
+
+  data class TabletFrame(val time: Long) : HostEvent
 
   /** The window of [display] got the keyboard focus; later keys go there. */
   data class KeyboardEnter(val display: Int = 0) : HostEvent
@@ -129,7 +183,29 @@ sealed interface HostEvent {
         "pointer_axis" -> need(args, 3) { PointerAxis(time(1), int(2), f[3].toDouble()) }
         "pointer_axis_value120" -> need(args, 2) { PointerAxisValue120(int(1), int(2)) }
         "pointer_axis_stop" -> need(args, 2) { PointerAxisStop(time(1), int(2)) }
+        "pointer_axis_source" -> need(args, 1) { PointerAxisSource(int(1)) }
         "pointer_frame" -> PointerFrame
+        "gesture_swipe_begin" -> need(args, 2) { SwipeBegin(time(1), int(2)) }
+        "gesture_swipe_update" -> need(args, 3) { SwipeUpdate(time(1), float(2), float(3)) }
+        "gesture_swipe_end" -> need(args, 2) { SwipeEnd(time(1), bool(2)) }
+        "gesture_pinch_begin" -> need(args, 2) { PinchBegin(time(1), int(2)) }
+        "gesture_pinch_update" ->
+          need(args, 5) {
+            PinchUpdate(time(1), float(2), float(3), f[4].toDouble(), f[5].toDouble())
+          }
+        "gesture_pinch_end" -> need(args, 2) { PinchEnd(time(1), bool(2)) }
+        "gesture_hold_begin" -> need(args, 2) { HoldBegin(time(1), int(2)) }
+        "gesture_hold_end" -> need(args, 2) { HoldEnd(time(1), bool(2)) }
+        "tablet_proximity_in" -> need(args, 1) { TabletProximityIn(int(1), display(2, 0)) }
+        "tablet_proximity_out" -> TabletProximityOut
+        "tablet_down" -> TabletDown
+        "tablet_up" -> TabletUp
+        "tablet_motion" -> need(args, 2) { TabletMotion(float(1), float(2)) }
+        "tablet_pressure" -> need(args, 1) { TabletPressure(int(1)) }
+        "tablet_distance" -> need(args, 1) { TabletDistance(int(1)) }
+        "tablet_tilt" -> need(args, 2) { TabletTilt(f[1].toDouble(), f[2].toDouble()) }
+        "tablet_button" -> need(args, 2) { TabletButton(int(1), bool(2)) }
+        "tablet_frame" -> need(args, 1) { TabletFrame(time(1)) }
         "keyboard_enter" -> KeyboardEnter(display(1, 0))
         "keyboard_leave" -> KeyboardLeave(display(1, -1))
         "key" -> need(args, 3) { Key(time(1), int(2), bool(3)) }

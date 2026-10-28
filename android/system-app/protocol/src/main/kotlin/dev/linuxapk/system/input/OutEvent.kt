@@ -21,6 +21,8 @@ data class OutPointer(
   val pressure: Float,
   val vscroll: Float = 0f,
   val hscroll: Float = 0f,
+  /** Other axes (`MotionEvent.AXIS_*` to value), such as the touchpad gesture axes. */
+  val axes: Map<Int, Float> = emptyMap(),
 )
 
 data class OutMotion(
@@ -34,6 +36,10 @@ data class OutMotion(
   override val eventTime: Long,
   val pointers: List<OutPointer>,
   override val displayId: Int = 0,
+  /** `MotionEvent.CLASSIFICATION_*`. */
+  val classification: Int = 0,
+  /** `MotionEvent.FLAG_*` (FLAG_CANCELED is added for ACTION_CANCEL). */
+  val flags: Int = 0,
 ) : OutEvent
 
 data class OutKey(

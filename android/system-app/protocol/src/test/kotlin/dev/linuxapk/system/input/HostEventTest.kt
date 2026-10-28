@@ -47,6 +47,34 @@ class HostEventTest {
         "keyboard_leave 7" to HostEvent.KeyboardLeave(7),
         "touch_down 1 3 1.00 2.00 9" to HostEvent.TouchDown(1, 3, 1f, 2f, 9),
         "close 5" to HostEvent.Close(5),
+        "tablet_proximity_in 321 5" to HostEvent.TabletProximityIn(0x141, 5),
+      )
+    for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
+  }
+
+  @Test
+  fun parsesGesturesAndTablets() {
+    val cases =
+      mapOf(
+        "pointer_axis_source 1" to HostEvent.PointerAxisSource(1),
+        "gesture_swipe_begin 5 3" to HostEvent.SwipeBegin(5, 3),
+        "gesture_swipe_update 6 1.50 -2.00" to HostEvent.SwipeUpdate(6, 1.5f, -2f),
+        "gesture_swipe_end 7 1" to HostEvent.SwipeEnd(7, true),
+        "gesture_pinch_begin 5 2" to HostEvent.PinchBegin(5, 2),
+        "gesture_pinch_update 6 0.00 1.00 1.2500 -3.50" to
+          HostEvent.PinchUpdate(6, 0f, 1f, 1.25, -3.5),
+        "gesture_pinch_end 7 0" to HostEvent.PinchEnd(7, false),
+        "gesture_hold_begin 5 2" to HostEvent.HoldBegin(5, 2),
+        "gesture_hold_end 6 1" to HostEvent.HoldEnd(6, true),
+        "tablet_proximity_out" to HostEvent.TabletProximityOut,
+        "tablet_down" to HostEvent.TabletDown,
+        "tablet_up" to HostEvent.TabletUp,
+        "tablet_motion 1.50 2.00" to HostEvent.TabletMotion(1.5f, 2f),
+        "tablet_pressure 65535" to HostEvent.TabletPressure(65535),
+        "tablet_distance 12" to HostEvent.TabletDistance(12),
+        "tablet_tilt -30.00 12.50" to HostEvent.TabletTilt(-30.0, 12.5),
+        "tablet_button 331 1" to HostEvent.TabletButton(331, true),
+        "tablet_frame 99" to HostEvent.TabletFrame(99),
       )
     for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
   }

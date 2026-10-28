@@ -47,6 +47,7 @@ class InputTranslatorTest {
             MotionEvent.ACTION_HOVER_MOVE -> "hover_move"
             MotionEvent.ACTION_SCROLL -> "scroll"
             MotionEvent.ACTION_HOVER_EXIT -> "hover_exit"
+            MotionEvent.ACTION_HOVER_ENTER -> "hover_enter"
             MotionEvent.ACTION_BUTTON_PRESS -> "press(${e.actionButton})"
             MotionEvent.ACTION_BUTTON_RELEASE -> "release(${e.actionButton})"
             else -> "action$a"
@@ -439,7 +440,7 @@ class InputTranslatorTest {
         now += rnd.nextLong(0, 20)
         val x = "%.2f".format(rnd.nextDouble(0.0, 1280.0))
         val y = "%.2f".format(rnd.nextDouble(0.0, 800.0))
-        when (rnd.nextInt(12)) {
+        when (rnd.nextInt(17)) {
           0,
           1 -> line("pointer_motion $t $x $y")
           2 -> {
@@ -474,15 +475,48 @@ class InputTranslatorTest {
               fingers.clear()
             }
           11 -> line("key $t ${rnd.nextInt(1, 128)} ${rnd.nextInt(2)}")
+          12 -> {
+            line("pointer_axis_source ${rnd.nextInt(3)}")
+            if (rnd.nextInt(4) == 0) line("pointer_axis_stop $t ${rnd.nextInt(2)}")
+            else line("pointer_axis $t ${rnd.nextInt(2)} ${rnd.nextDouble(-30.0, 30.0)}")
+            line("pointer_frame")
+          }
+          13 -> {
+            val g = listOf("swipe", "pinch", "hold").random(rnd)
+            when (rnd.nextInt(3)) {
+              0 -> line("gesture_${g}_begin $t ${rnd.nextInt(2, 5)}")
+              1 -> line("gesture_${g}_end $t ${rnd.nextInt(2)}")
+              else ->
+                if (g == "pinch") line("gesture_pinch_update $t 1.00 -2.00 ${rnd.nextDouble()} 3.0")
+                else line("gesture_swipe_update $t 4.00 1.00")
+            }
+          }
+          14 -> {
+            when (rnd.nextInt(6)) {
+              0 -> line("tablet_proximity_in ${listOf(0x140, 0x141).random(rnd)}")
+              1 -> line("tablet_proximity_out")
+              2 -> line(if (rnd.nextBoolean()) "tablet_down" else "tablet_up")
+              3 -> line("tablet_motion $x $y")
+              4 -> line("tablet_pressure ${rnd.nextInt(65536)}")
+              else -> line("tablet_button ${listOf(0x14b, 0x14c).random(rnd)} ${rnd.nextInt(2)}")
+            }
+          }
+          15,
+          16 -> line("tablet_frame $t")
         }
       }
       line("pointer_frame")
       line("touch_frame")
+      line("tablet_frame $t")
       tr.reset().filterIsInstance<OutMotion>().forEach(v::check)
       assertTrue(v.idle, "not idle after reset")
     }
-    // Every mouse and touch action showed up at least once.
-    assertTrue(seen.size >= 14, "only $seen") // 8 mouse + 6 touch actions
+    // Every mouse, touch and stylus action showed up at least once (including the fake fingers'
+    // DOWN, POINTER_DOWN, MOVE, POINTER_UP, UP and CANCEL from the mouse source).
+    val stylus = InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_TOUCHSCREEN
+    assertTrue(seen.count { it / 100 == InputDevice.SOURCE_MOUSE } >= 11, "only $seen")
+    assertTrue(seen.count { it / 100 == InputDevice.SOURCE_TOUCHSCREEN } >= 6, "only $seen")
+    assertTrue(seen.count { it / 100 == stylus } >= 8, "only $seen")
   }
 
   @Test
@@ -539,5 +573,314 @@ class InputTranslatorTest {
     val e = feed("pointer_axis 1 0 16.000", "pointer_frame").single() as OutMotion
     // 16 surface px = 32 display px = half a unit; Wayland down is VSCROLL -1.
     assertEquals(-0.5f, e.pointers[0].vscroll)
+  }
+
+  @Test
+  fun hiResWheelStepsAreFractions() {
+    feed("pointer_motion 1 5.00 5.00", "pointer_frame")
+    val e =
+      feed(
+          "pointer_axis_source 0",
+          "pointer_axis_value120 0 60",
+          "pointer_axis 2 0 7.500",
+          "pointer_frame",
+        )
+        .single() as OutMotion
+    assertEquals(MotionEvent.ACTION_SCROLL, e.action)
+    assertEquals(-0.5f, e.pointers[0].vscroll)
+  }
+
+  private fun OutEvent.motion() = this as OutMotion
+
+  private fun axis(e: OutEvent, axis: Int, pointer: Int = 0) =
+    e.motion().pointers[pointer].axes[axis] ?: 0f
+
+  // GestureConverter's handleScroll/endScroll: a fake finger that moves against the scroll.
+  @Test
+  fun fingerScrollIsAFakeFingerSwipe() {
+    feed("window 640 400 2.000", "pointer_motion 1 100.00 100.00", "pointer_frame")
+    now += 10
+    val start = feed("pointer_axis_source 1", "pointer_axis 2 0 5.000", "pointer_frame")
+    assertEquals(listOf("hover_exit state=0", "down state=0", "move state=0"), names(start))
+    val down = start[1].motion()
+    assertEquals(InputDevice.SOURCE_MOUSE, down.source)
+    assertEquals(MotionEvent.TOOL_TYPE_FINGER, down.pointers.single().toolType)
+    assertEquals(MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE, down.classification)
+    assertEquals(100f, down.pointers[0].y)
+    assertEquals(1f, down.pointers[0].pressure)
+    // 5 surface px at scale 2 is 10 display px; scrolling down drags the content up.
+    val move = start[2].motion()
+    assertEquals(90f, move.pointers[0].y)
+    assertEquals(10f, axis(move, MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE))
+    assertEquals(0f, move.pointers[0].vscroll)
+
+    now += 10
+    val next = feed("pointer_axis_source 1", "pointer_axis 3 1 -2.000", "pointer_frame")
+    assertEquals(listOf("move state=0"), names(next))
+    assertEquals(104f, next[0].motion().pointers[0].x)
+    assertEquals(down.downTime, next[0].motion().downTime)
+
+    // The fingers lift: UP (the app flings from the finger's velocity), then the hover.
+    now += 10
+    val end =
+      feed(
+        "pointer_axis_source 1",
+        "pointer_axis_stop 4 0",
+        "pointer_axis_stop 4 1",
+        "pointer_frame",
+      )
+    assertEquals(listOf("up state=0", "hover_move state=0"), names(end))
+    assertEquals(MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE, end[0].motion().classification)
+    assertEquals(MotionEvent.CLASSIFICATION_NONE, end[1].motion().classification)
+    assertEquals(MotionEvent.TOOL_TYPE_MOUSE, end[1].motion().pointers[0].toolType)
+    assertEquals(100f, end[1].motion().pointers[0].y)
+  }
+
+  @Test
+  fun aFingerScrollContinuesWithoutTheSource() {
+    feed("pointer_motion 1 10.00 10.00", "pointer_frame")
+    feed("pointer_axis_source 1", "pointer_axis 2 0 5.000", "pointer_frame")
+    assertEquals(listOf("move state=0"), names(feed("pointer_axis 3 0 5.000", "pointer_frame")))
+    assertEquals(
+      listOf("up state=0", "hover_move state=0"),
+      names(feed("pointer_axis_stop 4 0", "pointer_frame")),
+    )
+  }
+
+  @Test
+  fun aHoldAfterAScrollStopsTheFling() {
+    feed("pointer_motion 1 10.00 10.00", "pointer_frame")
+    feed("pointer_axis_source 1", "pointer_axis 2 0 5.000", "pointer_frame")
+    feed("pointer_axis_source 1", "pointer_axis_stop 3 0", "pointer_frame")
+    val stop = feed("gesture_hold_begin 4 2")
+    assertEquals(
+      listOf("hover_exit state=0", "down state=0", "cancel state=0", "hover_move state=0"),
+      names(stop),
+    )
+    assertEquals(MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE, stop[1].motion().classification)
+    assertEquals(10f, stop[1].motion().pointers[0].y)
+    // Only once per scroll.
+    assertTrue(feed("gesture_hold_end 5 1", "gesture_hold_begin 6 2").isEmpty())
+  }
+
+  @Test
+  fun fingerScrollWhileDraggingScrolls() {
+    feed("pointer_motion 1 10.00 10.00", "pointer_frame", "pointer_button 2 272 1", "pointer_frame")
+    assertEquals(
+      listOf("scroll state=1"),
+      names(feed("pointer_axis_source 1", "pointer_axis 3 0 64.000", "pointer_frame")),
+    )
+  }
+
+  @Test
+  fun aClickEndsTheFingerScroll() {
+    feed("pointer_motion 1 10.00 10.00", "pointer_frame")
+    feed("pointer_axis_source 1", "pointer_axis 2 0 5.000", "pointer_frame")
+    assertEquals(
+      listOf("up state=0", "hover_move state=0", "down state=1", "press(1) state=1"),
+      names(feed("pointer_button 3 272 1", "pointer_frame")),
+    )
+  }
+
+  @Test
+  fun leavingEndsTheFingerScroll() {
+    feed("pointer_motion 1 10.00 10.00", "pointer_frame")
+    feed("pointer_axis_source 1", "pointer_axis 2 0 5.000", "pointer_frame")
+    assertEquals(listOf("up state=0"), names(feed("pointer_leave", "pointer_frame")))
+    assertTrue(verifier.idle)
+  }
+
+  // GestureConverter's handlePinch/endPinch: two fake fingers around the cursor.
+  @Test
+  fun pinchIsTwoFakeFingers() {
+    feed("pointer_motion 1 300.00 200.00", "pointer_frame")
+    val begin = feed("gesture_pinch_begin 2 2")
+    assertEquals(
+      listOf("hover_exit state=0", "down state=0", "pointer_down(1) state=0"),
+      names(begin),
+    )
+    val pd = begin[2].motion()
+    assertEquals(MotionEvent.CLASSIFICATION_PINCH, pd.classification)
+    assertEquals(listOf(200f, 400f), pd.pointers.map { it.x })
+    assertEquals(1f, axis(pd, MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR))
+
+    val zoom = feed("gesture_pinch_update 3 0.00 0.00 1.5000 0.00").single().motion()
+    assertEquals(MotionEvent.ACTION_MOVE, zoom.action)
+    assertEquals(1.5f, axis(zoom, MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR))
+    assertEquals(listOf(150f, 450f), zoom.pointers.map { it.x })
+    // The factor is since the last event; Wayland's scale is since the begin.
+    val back = feed("gesture_pinch_update 4 0.00 0.00 0.7500 0.00").single().motion()
+    assertEquals(0.5f, axis(back, MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR))
+
+    val end = feed("gesture_pinch_end 5 0")
+    assertEquals(
+      listOf("pointer_up(1) state=0", "up state=0", "hover_move state=0"),
+      names(end),
+    )
+    assertEquals(MotionEvent.CLASSIFICATION_PINCH, end[1].motion().classification)
+    assertEquals(begin[1].motion().downTime, end[1].motion().downTime)
+  }
+
+  @Test
+  fun pinchRotationTurnsTheFingers() {
+    feed("pointer_motion 1 300.00 200.00", "pointer_frame", "gesture_pinch_begin 2 2")
+    val turned = feed("gesture_pinch_update 3 0.00 0.00 1.0000 90.00").single().motion()
+    assertEquals(300f, turned.pointers[0].x, 0.01f)
+    assertEquals(100f, turned.pointers[0].y, 0.01f)
+    assertEquals(300f, turned.pointers[1].x, 0.01f)
+    assertEquals(300f, turned.pointers[1].y, 0.01f)
+  }
+
+  @Test
+  fun aCancelledPinchIsCancelled() {
+    feed("pointer_motion 1 30.00 20.00", "pointer_frame", "gesture_pinch_begin 2 2")
+    assertEquals(
+      listOf("cancel state=0", "hover_move state=0"),
+      names(feed("gesture_pinch_end 3 1")),
+    )
+  }
+
+  // GestureConverter's handleMultiFingerSwipe/Lift.
+  @Test
+  fun threeFingerSwipe() {
+    feed("window 1000 500 1.000", "pointer_motion 1 300.00 200.00", "pointer_frame")
+    val begin = feed("gesture_swipe_begin 2 3")
+    assertEquals(
+      listOf(
+        "hover_exit state=0",
+        "down state=0",
+        "pointer_down(1) state=0",
+        "pointer_down(2) state=0",
+      ),
+      names(begin),
+    )
+    assertEquals(listOf(200f, 300f, 400f), begin[3].motion().pointers.map { it.x })
+    assertEquals(
+      InputTranslator.CLASSIFICATION_MULTI_FINGER_SWIPE,
+      begin[3].motion().classification,
+    )
+    assertEquals(3f, axis(begin[1], InputTranslator.AXIS_GESTURE_SWIPE_FINGER_COUNT))
+    val move = feed("gesture_swipe_update 3 50.00 0.00").single()
+    assertEquals(listOf(250f, 350f, 450f), move.motion().pointers.map { it.x })
+    assertEquals(0.05f, axis(move, MotionEvent.AXIS_GESTURE_X_OFFSET))
+    assertEquals(
+      listOf("pointer_up(2) state=0", "pointer_up(1) state=0", "up state=0", "hover_move state=0"),
+      names(feed("gesture_swipe_end 4 0")),
+    )
+  }
+
+  @Test
+  fun touchDuringAGestureIsDroppedAndGesturesWaitForTouch() {
+    feed("pointer_motion 1 30.00 20.00", "pointer_frame", "gesture_pinch_begin 2 2")
+    assertTrue(feed("touch_down 3 1 1.00 1.00", "touch_frame").isEmpty())
+    feed("gesture_pinch_end 4 0", "touch_up 5 1", "touch_frame")
+    feed("touch_down 6 2 1.00 1.00", "touch_frame")
+    assertTrue(feed("gesture_pinch_begin 7 2", "gesture_pinch_update 8 0 0 2.0 0").isEmpty())
+    assertTrue(
+      feed("pointer_axis_source 1", "pointer_axis 9 0 5.000", "pointer_frame").isEmpty(),
+    )
+  }
+
+  // TouchInputMapper's stylus stream.
+  @Test
+  fun penHoverDownPressureUp() {
+    feed("pointer_motion 1 5.00 5.00", "pointer_frame")
+    val enter =
+      feed(
+        "tablet_proximity_in 320",
+        "tablet_motion 100.00 50.00",
+        "tablet_distance 6553",
+        "tablet_tilt 30.00 0.00",
+        "tablet_frame 2",
+      )
+    assertEquals(
+      listOf("hover_exit state=0", "hover_enter state=0", "hover_move state=0"),
+      names(enter),
+    )
+    val hover = enter[2].motion()
+    assertEquals(InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_TOUCHSCREEN, hover.source)
+    assertEquals(InputDevice.SOURCE_MOUSE, enter[0].motion().source)
+    val p = hover.pointers.single()
+    assertEquals(MotionEvent.TOOL_TYPE_STYLUS, p.toolType)
+    assertEquals(100f, p.x)
+    assertEquals(0f, p.pressure)
+    assertEquals(0.1f, axis(hover, MotionEvent.AXIS_DISTANCE), 0.001f)
+    assertEquals(Math.toRadians(30.0).toFloat(), axis(hover, MotionEvent.AXIS_TILT), 0.001f)
+
+    // The mouse waits while the pen is in proximity.
+    assertTrue(feed("pointer_motion 3 6.00 6.00", "pointer_frame").isEmpty())
+
+    val down = feed("tablet_down", "tablet_pressure 32768", "tablet_frame 4")
+    assertEquals(listOf("hover_exit state=0", "down state=0"), names(down))
+    assertEquals(0.5f, down[1].motion().pointers[0].pressure, 0.001f)
+    val stroke = feed("tablet_motion 110.00 55.00", "tablet_pressure 65535", "tablet_frame 5")
+    assertEquals(listOf("move state=0"), names(stroke))
+    assertEquals(1f, stroke[0].motion().pointers[0].pressure)
+    assertEquals(down[1].motion().downTime, stroke[0].motion().downTime)
+    val up = feed("tablet_up", "tablet_pressure 0", "tablet_frame 6")
+    assertEquals(
+      listOf("move state=0", "up state=0", "hover_enter state=0", "hover_move state=0"),
+      names(up),
+    )
+    assertEquals(
+      listOf("hover_exit state=0"),
+      names(feed("tablet_proximity_out", "tablet_frame 7")),
+    )
+    assertTrue(verifier.idle)
+    assertEquals(
+      listOf("hover_move state=0"),
+      names(feed("pointer_motion 8 6.00 6.00", "pointer_frame")),
+    )
+  }
+
+  @Test
+  fun eraserAndStylusButtons() {
+    val enter = feed("tablet_proximity_in 321 4", "tablet_motion 1.00 1.00", "tablet_frame 1")
+    assertEquals(MotionEvent.TOOL_TYPE_ERASER, enter.last().motion().pointers[0].toolType)
+    assertEquals(4, enter.last().displayId)
+    val press = feed("tablet_button 331 1", "tablet_frame 2")
+    assertEquals(listOf("press(${MotionEvent.BUTTON_STYLUS_PRIMARY}) state=32"), names(press))
+    assertEquals(
+      listOf("hover_exit state=32", "down state=32"),
+      names(feed("tablet_down", "tablet_pressure 1000", "tablet_frame 3")),
+    )
+    // Leaving with the tip down and the button held lifts and releases.
+    assertEquals(
+      listOf("release(32) state=0", "up state=0"),
+      names(feed("tablet_proximity_out", "tablet_frame 4")),
+    )
+    assertTrue(verifiers.getValue(4).idle)
+  }
+
+  @Test
+  fun penAndTouchAndDragNeverOverlap() {
+    feed("tablet_proximity_in 320", "tablet_motion 1.00 1.00", "tablet_frame 1")
+    assertTrue(feed("touch_down 2 1 5.00 5.00", "touch_frame").isEmpty())
+    feed("touch_up 3 1", "touch_frame", "tablet_proximity_out", "tablet_frame 4")
+    // A pen that comes during a drag is ignored until it leaves.
+    feed("pointer_motion 5 5.00 5.00", "pointer_frame", "pointer_button 6 272 1", "pointer_frame")
+    assertTrue(
+      feed("tablet_proximity_in 320", "tablet_motion 1.00 1.00", "tablet_frame 7").isEmpty(),
+    )
+    assertEquals(
+      listOf("release(1) state=0", "up state=0", "hover_move state=0"),
+      names(feed("pointer_button 8 272 0", "pointer_frame")),
+    )
+    assertTrue(feed("tablet_down", "tablet_frame 9", "tablet_up", "tablet_frame 10").isEmpty())
+    feed("tablet_proximity_out", "tablet_frame 11")
+    assertEquals(
+      listOf("hover_exit state=0", "hover_enter state=0", "hover_move state=0"),
+      names(feed("tablet_proximity_in 320", "tablet_motion 1.00 1.00", "tablet_frame 12")),
+    )
+  }
+
+  @Test
+  fun resetEndsGesturesAndThePen() {
+    feed("pointer_motion 1 30.00 20.00", "pointer_frame", "gesture_pinch_begin 2 2")
+    tr.reset().filterIsInstance<OutMotion>().forEach(verifier::check)
+    assertTrue(verifier.idle)
+    feed("tablet_proximity_in 320", "tablet_down", "tablet_motion 1.00 1.00", "tablet_frame 3")
+    tr.reset().filterIsInstance<OutMotion>().forEach(verifier::check)
+    assertTrue(verifier.idle)
   }
 }

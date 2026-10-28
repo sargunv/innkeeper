@@ -5,9 +5,9 @@
 # probes APK (out/test/probes), opens its InputProbeActivity in a window of its
 # own through the window manager's control command (docs/display.md), then
 # injects tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger
-# touch) through the system app's translator and injector (the probes'
-# InputStdinHarness), as the input service's lines are, and checks what the
-# activity received. The stream's DISPLAY placeholders become the probe's
+# touch, touchpad scroll and gestures, pen and eraser) through the system app's
+# translator and injector (the probes' InputStdinHarness), as the input
+# service's lines are, and checks what the activity received. The stream's DISPLAY placeholders become the probe's
 # display id, so every event must arrive there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -75,6 +75,17 @@ check "mouse wheel" "generic .*ACTION_SCROLL" "$log"
 check "shift+a" "key .*keyCode=KEYCODE_A.*META_SHIFT_ON" "$log"
 check "escape" "key .*keyCode=KEYCODE_ESCAPE" "$log"
 check "two-finger touch" "touch .*ACTION_POINTER_DOWN.*source=0x1002" "$log"
+# Touchpad scrolling and gestures are fake fingers from the mouse, with a classification.
+check "touchpad scroll: fake finger down" \
+  "touch .*ACTION_DOWN.*TOOL_TYPE_FINGER.*TWO_FINGER_SWIPE.*source=0x2002" "$log"
+check "touchpad scroll: moves with the scroll distance" "touch .*ACTION_MOVE.*TWO_FINGER_SWIPE.*scrollY" "$log"
+check "touchpad scroll: ends in UP" "touch .*ACTION_UP.*TWO_FINGER_SWIPE" "$log"
+check "a hold stops the fling" "touch .*ACTION_CANCEL.*TWO_FINGER_SWIPE" "$log"
+check "pinch: second finger" "touch .*ACTION_POINTER_DOWN.*classification=PINCH.*source=0x2002" "$log"
+check "pinch: scale factor" "touch .*ACTION_MOVE.*classification=PINCH.*pinch\[0\]=1\.5" "$log"
+check "pen hovers" "generic .*ACTION_HOVER_MOVE.*TOOL_TYPE_STYLUS.*source=0x5002.*distance\[0\]" "$log"
+check "pen pressure" "touch .*ACTION_MOVE.*TOOL_TYPE_STYLUS.*pressure\[0\]=0\.76" "$log"
+check "eraser" "touch .*ACTION_DOWN.*TOOL_TYPE_ERASER.*source=0x5002" "$log"
 if grep -q "Inconsistent event" <<<"$log"; then bad "dispatcher accepted every event"; else ok "dispatcher accepted every event"; fi
 check "events carry the window's display" "displayId=$display" "$log"
 if grep -E "LinuxApkProbe.*displayId=" <<<"$log" | grep -vq "displayId=$display"; then

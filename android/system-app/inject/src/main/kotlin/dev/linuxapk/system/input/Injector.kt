@@ -49,6 +49,34 @@ class Injector {
       MotionEvent::class.java.getMethod("setActionButton", Int::class.javaPrimitiveType)
     }
 
+    // Hidden; the public obtain() overloads have no display, flags or classification.
+    private val obtain: Method by lazy {
+      val i = Int::class.javaPrimitiveType
+      val l = Long::class.javaPrimitiveType
+      val f = Float::class.javaPrimitiveType
+      MotionEvent::class
+        .java
+        .getMethod(
+          "obtain",
+          l, // downTime
+          l, // eventTime
+          i, // action
+          i, // pointerCount
+          Array<MotionEvent.PointerProperties>::class.java,
+          Array<MotionEvent.PointerCoords>::class.java,
+          i, // metaState
+          i, // buttonState
+          f, // xPrecision
+          f, // yPrecision
+          i, // deviceId
+          i, // edgeFlags
+          i, // source
+          i, // displayId
+          i, // flags
+          i, // classification
+        )
+    }
+
     /**
      * Display pixels per AXIS_VSCROLL unit ([TranslatorConfig.scrollPixelsPerUnit]):
      * `ViewConfiguration.getScaledVerticalScrollFactor()` without a UI context, the framework's
@@ -61,23 +89,21 @@ class Injector {
     }
 
     fun toInputEvent(e: OutEvent): InputEvent =
-      build(e).also { if (e.displayId != 0) setDisplayId.invoke(it, e.displayId) }
-
-    private fun build(e: OutEvent): InputEvent =
       when (e) {
         is OutKey ->
           KeyEvent(
-            e.downTime,
-            e.eventTime,
-            e.action,
-            e.keyCode,
-            0, // repeat: InputDispatcher synthesizes repeats
-            e.metaState,
-            KeyCharacterMap.VIRTUAL_KEYBOARD,
-            e.scanCode,
-            e.flags,
-            InputDevice.SOURCE_KEYBOARD,
-          )
+              e.downTime,
+              e.eventTime,
+              e.action,
+              e.keyCode,
+              0, // repeat: InputDispatcher synthesizes repeats
+              e.metaState,
+              KeyCharacterMap.VIRTUAL_KEYBOARD,
+              e.scanCode,
+              e.flags,
+              InputDevice.SOURCE_KEYBOARD,
+            )
+            .also { if (e.displayId != 0) setDisplayId.invoke(it, e.displayId) }
         is OutMotion -> toMotionEvent(e)
       }
 
@@ -95,11 +121,17 @@ class Injector {
           if (p.pressure > 0f && p.toolType == MotionEvent.TOOL_TYPE_FINGER) 0.1f else 0f
         if (p.vscroll != 0f) coords[i].setAxisValue(MotionEvent.AXIS_VSCROLL, p.vscroll)
         if (p.hscroll != 0f) coords[i].setAxisValue(MotionEvent.AXIS_HSCROLL, p.hscroll)
+        for ((axis, v) in p.axes) coords[i].setAxisValue(axis, v)
       }
-      // obtain() sets the mouse cursor position (InputDispatcher targets mouse events by it) and
-      // FLAG_CANCELED for ACTION_CANCEL.
+      var flags = e.flags
+      if (e.action and MotionEvent.ACTION_MASK == MotionEvent.ACTION_CANCEL) {
+        flags = flags or MotionEvent.FLAG_CANCELED
+      }
+      // obtain() sets the mouse cursor position from the pointers (InputDispatcher targets mouse
+      // events by it).
       val m =
-        MotionEvent.obtain(
+        obtain.invoke(
+          null,
           e.downTime,
           e.eventTime,
           e.action,
@@ -113,8 +145,10 @@ class Injector {
           KeyCharacterMap.VIRTUAL_KEYBOARD,
           0,
           e.source,
-          0,
-        )
+          e.displayId,
+          flags,
+          e.classification,
+        ) as MotionEvent
       if (e.actionButton != 0) setActionButton.invoke(m, e.actionButton)
       return m
     }

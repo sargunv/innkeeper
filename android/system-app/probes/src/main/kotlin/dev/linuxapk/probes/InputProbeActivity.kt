@@ -27,9 +27,24 @@ class InputProbeActivity : Activity() {
   }
 
   private fun show(what: String, event: Any) {
-    val line = "$what $event"
+    val line = "$what $event" + if (event is MotionEvent) gesture(event) else ""
     Log.i(TAG, line)
     text.text = line
+  }
+
+  // What MotionEvent.toString leaves out: the classification and the touchpad gesture and
+  // stylus axes of each pointer.
+  private fun gesture(ev: MotionEvent): String {
+    val axes = ArrayList<String>()
+    for (i in 0 until ev.pointerCount) {
+      for ((name, axis) in AXES) {
+        val v = ev.getAxisValue(axis, i)
+        if (v != 0f) axes += "$name[$i]=$v"
+      }
+      if (ev.getPressure(i) != 0f) axes += "pressure[$i]=${ev.getPressure(i)}"
+    }
+    return " classification=${CLASSIFICATIONS[ev.classification] ?: ev.classification}" +
+      " axes={${axes.joinToString(", ")}}"
   }
 
   override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -49,5 +64,26 @@ class InputProbeActivity : Activity() {
 
   companion object {
     const val TAG = "LinuxApkProbe"
+
+    private val CLASSIFICATIONS =
+      mapOf(
+        MotionEvent.CLASSIFICATION_NONE to "NONE",
+        MotionEvent.CLASSIFICATION_AMBIGUOUS_GESTURE to "AMBIGUOUS_GESTURE",
+        MotionEvent.CLASSIFICATION_DEEP_PRESS to "DEEP_PRESS",
+        MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE to "TWO_FINGER_SWIPE",
+        4 to "MULTI_FINGER_SWIPE", // hidden
+        MotionEvent.CLASSIFICATION_PINCH to "PINCH",
+      )
+    private val AXES =
+      listOf(
+        "scrollX" to MotionEvent.AXIS_GESTURE_SCROLL_X_DISTANCE,
+        "scrollY" to MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE,
+        "pinch" to MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR,
+        "swipeFingers" to 53, // AXIS_GESTURE_SWIPE_FINGER_COUNT, hidden
+        "offsetX" to MotionEvent.AXIS_GESTURE_X_OFFSET,
+        "tilt" to MotionEvent.AXIS_TILT,
+        "orientation" to MotionEvent.AXIS_ORIENTATION,
+        "distance" to MotionEvent.AXIS_DISTANCE,
+      )
   }
 }
