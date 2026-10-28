@@ -161,10 +161,11 @@ two things:
    z-sorted layers. Each layer carries its `BufferRef`, acquire fence, frame,
    crop, transform and alpha.
 
-`createPresenter()` picks the backend from `vendor.linuxapk.hwc.backend`:
-`headless` (default) or `wayland`. If the Wayland backend can't start, it falls
-back to headless. In Wayland mode the headless presenter still runs alongside,
-so frame dumps keep working.
+`Presenter.cpp` picks the backend from `vendor.linuxapk.hwc.backend`: `headless`
+(default) or `bridge`, where virtual displays show in host windows through the
+bridge's display service (`BridgePresenter.cpp`). Display 0 is always headless,
+and a headless presenter runs alongside each bridge one, so frame dumps keep
+working.
 
 ## Wayland backend (`composer/WaylandPresenter.cpp`, M1)
 

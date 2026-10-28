@@ -97,6 +97,7 @@ if(ANDROID)
     composer/VsyncThread.cpp
     composer/Buffer.cpp
     composer/HeadlessPresenter.cpp
+    composer/Presenter.cpp
     composer/FrameDumper.cpp
     composer/Fence.cpp
     composer/Properties.cpp)

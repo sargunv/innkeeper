@@ -58,11 +58,15 @@ class HeadlessPresenter : public Presenter {
   std::string mPrefix;
 };
 
+// The presenters' backend, from vendor.linuxapk.hwc.backend, read once at
+// startup: "bridge" shows virtual displays in host windows through the
+// bridge's display service; "headless" (the default) shows none.
+void startPresenterBackend();
 // Display 0 never has a window: apps show in windows of the virtual
 // displays that the window manager (the Linux.apk System app) creates.
 std::unique_ptr<Presenter> createPrimaryPresenter();
 // A HWC-backed virtual display (ComposerClient::createVirtualDisplay): a
-// window if the bridge is started and has one for it.
+// window if the backend is "bridge" and the bridge has one for it.
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );

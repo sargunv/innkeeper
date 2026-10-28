@@ -8,10 +8,8 @@
 #include <pthread.h>
 #include <string.h>
 
-#include "BridgePresenter.h"
 #include "FrameDumper.h"
 #include "Presenter.h"
-#include "Properties.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
@@ -106,24 +104,6 @@ void HeadlessPresenter::present(const FrameInput& frame) {
       mWorker->submit(mPrefix.empty() ? prefix : mPrefix, v);
     }
   }
-}
-
-static std::unique_ptr<HeadlessPresenter> makeHeadless() {
-  return std::make_unique<HeadlessPresenter>(
-    std::make_unique<FrameDumper>(FrameDumper::dirFromProperty())
-  );
-}
-
-std::unique_ptr<Presenter> createPrimaryPresenter() { return makeHeadless(); }
-
-std::unique_ptr<Presenter> createVirtualPresenter(
-  int64_t displayId, uint32_t width, uint32_t height
-) {
-  if (bridgeStarted())
-    return createBridgeVirtualPresenter(
-      displayId, width, height, makeHeadless()
-    );
-  return makeHeadless();
 }
 
 }  // namespace linuxapk::hwc
