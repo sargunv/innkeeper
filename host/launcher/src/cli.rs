@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use crate::conf::Config;
 use crate::paths::{Paths, Sandbox};
 use crate::uid::{self, Uids};
-use crate::{control, exec, flatpak, host, image, layer, selftest, session, sys};
+use crate::{control, exec, flatpak, host, image, layer, requirements, selftest, session, sys};
 
 const USAGE: &str = "\
 Linux.apk session launcher: boots the pinned Android image (image/pin.toml) in
@@ -141,6 +141,9 @@ fn run(args: &[OsString]) -> Result<i32> {
             r.map(|_| 0)
         }
         "prepare" => {
+            if paths.sandbox == Sandbox::Host {
+                requirements::check(false)?;
+            }
             let uids = uid::setup(&paths.data, paths.sandbox)?;
             image::prepare(&paths, &paths.image()?, &uids, &exe()?)?;
             Ok(0)
@@ -276,6 +279,9 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         bail!("already running (pid {p})");
     }
     check_kernel(paths.sandbox)?;
+    if paths.sandbox == Sandbox::Host {
+        requirements::check(!headless)?;
+    }
     let uids = uid::setup(&paths.data, paths.sandbox)?;
     // Windows go through the bridge's display service, which connects to the
     // host compositor; --headless shows none.

@@ -13,7 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_session::Paths;
+use linuxapk_session::{Paths, Sandbox, requirements};
 
 use crate::paths::Prefix;
 use crate::proc;
@@ -34,6 +34,9 @@ fn clean_stderr(s: &str) -> String {
 /// subordinate ids (apps isolated from each other as on Android), or every
 /// Android uid the user (no isolation between apps).
 pub use linuxapk_session::UidMode;
+
+/// How the error for missing host requirements begins; the list follows it.
+pub use linuxapk_session::requirements::HEADLINE as MISSING_REQUIREMENTS;
 
 /// What [`Session::status`] reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -189,6 +192,11 @@ impl Session {
     /// Fetches and unpacks the image (about 1.2 GB to download). Its
     /// progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
+        self.check_host()?;
+        self.run_prepare()
+    }
+
+    fn run_prepare(&self) -> Result<()> {
         let st = Command::new(&self.launcher)
             .arg("prepare")
             .stdin(Stdio::null())
@@ -206,9 +214,10 @@ impl Session {
     /// Starts the session (headless: with no windows, for tests), preparing
     /// the image first if this is the first start. Progress goes to `status`.
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
+        self.check_host()?;
         if !self.image_ready() {
             status(PREPARING);
-            self.prepare()?;
+            self.run_prepare()?;
         }
         status("starting the Android session");
         let mut c = Command::new(&self.launcher);
@@ -218,6 +227,16 @@ impl Session {
         }
         if !c.status()?.success() {
             bail!("session start failed ({} start)", self.launcher.display());
+        }
+        Ok(())
+    }
+
+    /// In host mode, fails naming everything the host lacks for a session.
+    /// The launcher checks too; this makes the list the error itself, for the
+    /// manager to show, rather than a line on stderr.
+    fn check_host(&self) -> Result<()> {
+        if self.paths().is_some_and(|p| p.sandbox == Sandbox::Host) {
+            requirements::check(false)?;
         }
         Ok(())
     }

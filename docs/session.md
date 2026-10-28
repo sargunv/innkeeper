@@ -32,6 +32,11 @@ sequenceDiagram
 - **One config.** `start` decides everything once (paths, uid mode and id
   ranges, image, bridge arguments) and writes it as `session.conf` in the
   runtime dir, which the unit's processes and `selftest` read back.
+- **Host requirements first.** In host mode `prepare` and `start` check what the
+  host must provide (user namespaces that may mount, `systemd --user`, pasta,
+  curl, Python 3.11+, read-write `/dev/udmabuf`) and name everything missing in
+  one error, saying which ones the Flatpak avoids. Fixing any of them needs
+  root. No PulseAudio socket only warns.
 - **Second-stage init directly.** The launcher does first stage's job: it mounts
   `/dev`, `/proc` and `/sys`, and passes `androidboot.*` values through a fake
   `/proc/bootconfig` (`androidboot.hardware=linuxapk`, plus the vendor APEX

@@ -13,6 +13,7 @@ mod init;
 mod layer;
 mod nsroot;
 pub mod paths;
+pub mod requirements;
 mod root;
 mod selftest;
 mod session;
