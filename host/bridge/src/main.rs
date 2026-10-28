@@ -9,13 +9,14 @@
 //! `--sink NAME`.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
 //! seen from the host) admits the uid that owns DIR to the system, documents
-//! and apps services, and to the input service, which nobody else may use.
+//! and apps services, and to the input and a11y services, which nobody else
+//! may use.
 //! `--mirror-apps` turns on desktop entries for apps
 //! installed inside Android (`$XDG_DATA_HOME`). The documents service's
 //! grants (host files the user picked) persist in
 //! `<state-dir>/documents.grants`.
 //! `--no-open-urls` and `--no-desktop-presence` turn OpenURI, and
-//! notifications and MPRIS, into log-only sinks (test sessions).
+//! notifications, MPRIS and AT-SPI, into log-only sinks (test sessions).
 //! `-v` logs per-stream statistics.
 
 use std::path::PathBuf;
@@ -86,6 +87,7 @@ fn main() -> Result<()> {
     // the system app's side of them: window requests, the seat, the IME.
     let hub = Hub::new();
     let display_hub = hub.clone();
+    let a11y_hub = hub.clone();
     services.register(service::DISPLAY, "display", move |peer, events| {
         Ok(Box::new(DisplayService::new(
             DisplayLimits::default(),
@@ -118,6 +120,19 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         })?;
+    // Android apps' accessibility trees on AT-SPI, while the desktop's
+    // assistive technologies are on (never in a test session on the user's
+    // own bus).
+    let a11y = linuxapk_bridge::a11y::Shared::new(policy.presence);
+    let focus = a11y.clone();
+    a11y_hub.watch_focus(Box::new(move |w| focus.keyboard_focus(w)));
+    services.register(service::A11Y, "a11y", move |peer, events| {
+        Ok(Box::new(linuxapk_bridge::a11y::A11yService::new(
+            a11y.clone(),
+            peer,
+            events,
+        )))
+    });
     // Host files the user picks for Android.
     let store = linuxapk_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
@@ -150,6 +165,7 @@ fn main() -> Result<()> {
             service::DOCUMENTS,
             service::APPS,
             service::INPUT,
+            service::A11Y,
         ] {
             service_uids.push((id, check.clone()));
         }
@@ -157,7 +173,7 @@ fn main() -> Result<()> {
     let cfg = Config {
         allow_uids: allow,
         service_uids,
-        private_services: vec![service::INPUT],
+        private_services: vec![service::INPUT, service::A11Y],
         max_clients: 32,
         services,
     };

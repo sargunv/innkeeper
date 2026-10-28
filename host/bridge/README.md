@@ -13,6 +13,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 | system    | portal Settings, `org.freedesktop.Notifications`, `ext_data_control_v1`, OpenURI, MPRIS | `src/system/`    |
 | documents | the FileChooser portal, parented through `zxdg_exporter_v2`                             | `src/documents/` |
 | apps      | desktop entries through `linuxapk-core`                                                 | `src/apps/`      |
+| a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                     | `src/a11y/`      |
 
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
   the instance's XDG runtime and state dirs (socket, MPRIS artwork, document

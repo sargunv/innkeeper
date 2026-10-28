@@ -22,10 +22,14 @@ use crate::ipc::wire::errno::*;
 /// How long a request waits for its display.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Told where the seat's keyboard focus is: a window, or none of ours.
+pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
+
 #[derive(Default)]
 pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
+    focus_watch: Mutex<Option<FocusWatch>>,
 }
 
 #[derive(Default)]
@@ -169,6 +173,21 @@ impl Hub {
     pub fn input(&self, line: &str) {
         self.clients
             .broadcast(ty::INPUT, &event::input(line), &[], None);
+        // Keyboard focus also goes to the a11y service.
+        if line.starts_with("keyboard_")
+            && let Some(watch) = &*self.focus_watch.lock().unwrap()
+        {
+            if let Some(id) = line.strip_prefix("keyboard_enter ") {
+                watch(id.parse().ok());
+            } else if line.starts_with("keyboard_leave ") {
+                watch(None);
+            }
+        }
+    }
+
+    /// `watch` gets every keyboard focus change.
+    pub fn watch_focus(&self, watch: FocusWatch) {
+        *self.focus_watch.lock().unwrap() = Some(watch);
     }
 }
 

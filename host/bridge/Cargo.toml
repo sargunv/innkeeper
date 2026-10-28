@@ -43,5 +43,11 @@ zbus = { version = "5", default-features = false, features = [
   "async-io",
 ] }
 
+# Accessibility (a11y/): AccessKit trees on AT-SPI, over zbus like the rest.
+accesskit = "0.25"
+accesskit_unix = "0.24"
+
 [dev-dependencies]
+# Checks that every update the a11y service builds is one AccessKit accepts.
+accesskit_consumer = "0.39"
 proptest = "1.12"

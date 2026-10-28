@@ -11,8 +11,11 @@
 //! - `apps` (id 5): desktop entries for apps installed inside Android
 //! - `input` (id 6): window requests, the host seat and input methods, for
 //!   the Linux.apk System app
+//! - `a11y` (id 7): Android apps' accessibility trees on AT-SPI, for the
+//!   Linux.apk System app
 //! - `log`: stderr logging
 
+pub mod a11y;
 pub mod apps;
 pub mod audio;
 pub mod display;

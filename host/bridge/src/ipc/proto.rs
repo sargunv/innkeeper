@@ -33,6 +33,9 @@ pub mod service {
     /// The system app's window requests, the host seat and input methods
     /// (`input::proto`, types 0x0600..=0x06ff, events 0x4600..=0x46ff).
     pub const INPUT: u32 = 6;
+    /// Android apps' accessibility trees on AT-SPI, from the system app
+    /// (`a11y::proto`, types 0x0700..=0x07ff, events 0x4700..=0x47ff).
+    pub const A11Y: u32 = 7;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

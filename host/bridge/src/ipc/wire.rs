@@ -181,6 +181,10 @@ impl<'a> Reader<'a> {
     pub fn is_empty(&self) -> bool {
         self.b.is_empty()
     }
+    /// Bytes left to read.
+    pub fn remaining(&self) -> usize {
+        self.b.len()
+    }
     /// Fails unless the whole body was consumed.
     pub fn end(&self) -> Result<(), DecodeError> {
         if self.b.is_empty() {
