@@ -113,6 +113,10 @@ To add a service (the windowing lane's display service is id 2, types
 Transport: `AF_UNIX`, `SOCK_SEQPACKET`. One packet is one message. All integers
 are little-endian.
 
+Android-side C and C++ clients (the composer, `libtinyalsav2`) share its client
+half: `android/vendor/bridge-client`, a static library that connects, says
+HELLO, frames messages, passes fds and matches replies by tag.
+
 ```
 header (8 bytes)    u16 type, u16 flags (must be 0), u32 tag
 body                type-specific, at most 504 bytes (whole message <= 512)
