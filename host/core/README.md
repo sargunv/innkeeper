@@ -25,6 +25,13 @@ own; `cargo test -p linuxapk-core` tests it.
   `x-scheme-handler/*` (never `http(s)`, `file`, `content` or `intent`), and
   `Exec` pointing at this installation's `linuxapk`. `xdg::refresh_entries`
   repairs entries whose program moved.
+- **Inside the Flatpak** (`dynlauncher.rs`) those entries stay in the app's own
+  data dir as its record, and the app menu gets each one through the
+  DynamicLauncher portal, after the user confirms a dialog, as
+  `dev.linuxapk.Manager.<pkg>.desktop` running `flatpak run --command=linuxapk`,
+  which survives updates. Windows, notifications and MPRIS players use that id.
+  Entry repair (`linuxapk list`, manager start) offers an entry again when it is
+  missing or runs another command, unless the user declined it.
 - **Paths** (`paths.rs`): the prefix relative to the running executable and the
   XDG dirs; the session's own paths and the `LINUXAPK_INSTANCE` parser come from
   the launcher's library ([host/launcher](../launcher/README.md)).

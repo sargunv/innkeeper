@@ -77,6 +77,16 @@ network restrictions don't apply. Only single-uid mode exists, and there are no
 cgroups: a session has no memory cap of its own. `selftest` checks the sandbox's
 grants and what it shows Android.
 
+The Flatpak's grants are `--device=dri`, `--share=network`, `--share=ipc`,
+`--socket=wayland`, `--socket=pulseaudio` and talking to
+`org.freedesktop.Notifications` (the Notification portal can't replace a
+notification in place, show progress or take an inline reply). MPRIS players own
+names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which Flatpak grants
+every app for its own id. Links and files go through the same portals as
+outside, and clipboard sync needs a compositor that offers data control to
+sandboxed clients (KWin does). App-menu entries go through the DynamicLauncher
+portal, so the user confirms each one.
+
 ## Desktop exposure
 
 - **Links:** only absolute `http(s)` URLs, rate-limited, through the OpenURI

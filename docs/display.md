@@ -1,7 +1,8 @@
 # Display and windows
 
 Each Android app task gets its own Wayland window: titled with the app's label,
-`app_id` `dev.linuxapk.<package>` (the `StartupWMClass` of its desktop entry),
+`app_id` `dev.linuxapk.<package>` (inside the Flatpak
+`dev.linuxapk.Manager.<package>`; the `StartupWMClass` of its desktop entry),
 resized with the app, closed with its task. Android's default display 0 has no
 window; it keeps running headless with Launcher3 as home.
 

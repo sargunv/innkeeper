@@ -36,8 +36,11 @@ apps work ([docs/compatibility.md](docs/compatibility.md)): Compose, Flutter,
 React Native, Capacitor and Godot apps, StreetComplete's MapLibre map and video
 playback, each in its own window with sound. Desktop integration (M3) and the
 no-privilege mode (M4: userspace binder, automatic single-uid, the CI image) are
-done. Next: packaging Linux.apk as a Flatpak (M5) and ARM translation (M6); see
-the [milestones](https://github.com/sargunv/linux.apk/milestones).
+done. Linux.apk builds as a Flatpak that runs Android inside its own sandbox
+([packaging/flatpak](packaging/flatpak/README.md)) and as an AppImage
+([packaging/appimage](packaging/appimage/README.md)). Next: the rest of
+packaging (M5) and ARM translation (M6); see the
+[milestones](https://github.com/sargunv/linux.apk/milestones).
 
 Real apps running in Linux.apk on KDE Plasma (Wayland):
 
@@ -109,7 +112,7 @@ flowchart LR
 | [android/overlay](android/overlay/README.md)                           | config files over the image's partitions               | Android                                   | its README                     |
 | [android/microg](android/microg/README.md)                             | optional microG addon                                  | Android                                   | `install.sh`                   |
 | [tests](tests/README.md)                                               | test harnesses and suites                              | desktop, never shipped                    | its README                     |
-| [packaging/flatpak](packaging/flatpak/README.md)                       | prototype Flatpak of the staged prefix                 | build time                                | `build.sh`                     |
+| [packaging/flatpak](packaging/flatpak/README.md)                       | the Flatpak, `dev.linuxapk.Manager`                    | build time                                | `build.sh`                     |
 | [packaging/appimage](packaging/appimage/README.md)                     | AppImage of the staged prefix                          | build time                                | `build.sh`, `AppRun`           |
 | [tools](tools/README.md)                                               | build container, staging, dev scripts                  | build time                                | `build/artifacts.toml`         |
 | [docs](docs/)                                                          | cross-cutting design                                   |                                           | `architecture.md`              |

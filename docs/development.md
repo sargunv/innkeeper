@@ -55,6 +55,9 @@ flowchart LR
 - `out/stage/bin/linuxapk install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)); `out/stage/bin/linuxapk-manager`
   ([host/manager](../host/manager/README.md)).
+- `packaging/flatpak/build.sh` builds the Flatpak from the committed tree and
+  installs it into `FLATPAK_USER_DIR`; use a private one under `out/`
+  ([packaging/flatpak](../packaging/flatpak/README.md)).
 - `mise run install-dev` adds the staged manager to the app menu and makes it an
   APK handler. Do this only for a checkout you mean to use as your Linux.apk.
 - Use `LINUXAPK_INSTANCE=<name>` for anything experimental: it is a separate

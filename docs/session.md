@@ -144,27 +144,34 @@ signal, init's exit) the launcher stops and then kills everything it started,
 and, as the sandbox's main process, everything else in it: Android processes
 orphaned by a dying init would otherwise keep the sandbox alive.
 
-| Host mode                                     | Flatpak mode                                                                                                                                                                                                       |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| systemd unit, `start` returns                 | `start` spawns a sandbox for the session and returns; no memory cap of our own                                                                                                                                     |
-| `exec` joins init's namespaces                | `exec` asks the session's launcher, which starts the static exec relay with the caller's stdio (its child is under init's filter, so the linker sees Android paths)                                                |
-| user, mount, pid, net... namespaces           | the sandbox's; init is a child of pivot-exec, its subreaper; uid mode is single                                                                                                                                    |
-| overlayfs per partition                       | `$XDG_DATA_HOME/linuxapk/root[-<instance>]`: hardlinks to the read-only image cache plus copies of the layers, files read-only; composed again only when the image, the stage or an addon changes (`.compose-key`) |
-| the start-time layer, top of each overlay     | copied over the composed root at each start                                                                                                                                                                        |
-| the root, binds of `/data` and `/apex`        | symlinks in `/` (`/system`, `/apex`, `/data`...); `/etc` keeps the sandbox's files and gains `/system/etc`'s others                                                                                                |
-| `/proc` binds (bootconfig, sysctls)           | the broker injects memfds of `/linuxapk/proc/<path>` on `openat`, and apexd's `/proc/mounts`                                                                                                                       |
-| canonical paths are Android's                 | the broker rewrites `readlink` of `/proc/*/fd,exe,cwd` and `getcwd`, so the linker sees `/system/...`                                                                                                              |
-| root owns everything (user namespace)         | the broker shows the user's files as root's (`fstat`, emulated `lstat`); `mkdir`/`chmod` keep a directory's owner `rwx`                                                                                            |
-| capabilities                                  | `capset` and the capability `prctl`s are accepted, `capget` reports all; set\*id privilege is virtual root's                                                                                                       |
-| `mount`, `unshare`, `setns`, namespaced clone | the shim (in init, zygote, vold, netd...) treats a refused call as done                                                                                                                                            |
-| cgroup v2, delegated                          | a plain `/sys/fs/cgroup` dir: kills fall back to process groups, no freezer                                                                                                                                        |
-| own netns, pasta, EthernetService on `eth1`   | the host's network (`--share=network`); the system app offers it as Android's default network, with the host's resolvers                                                                                           |
-| netd's routes, rules, iptables, marks         | accepted and ignored: rtnetlink `EPERM` acks read as success (shim), no-op iptables, `SO_MARK` (bpfemu)                                                                                                            |
-| `/data/user/0` bind of `/data/data`           | a symlink, which the broker's `lstat` shows as the directory                                                                                                                                                       |
-| lmkd's 1 s PSI windows                        | widened to 2 s, the most an unprivileged process gets (shim); this needs Linux 6.5, and `start` warns on older kernels (both modes need 5.14)                                                                      |
+| Host mode                                        | Flatpak mode                                                                                                                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| systemd unit, `start` returns                    | `start` spawns a sandbox for the session and returns; no memory cap of our own (below)                                                                                                                             |
+| `exec` joins init's namespaces                   | `exec` asks the session's launcher, which starts the static exec relay with the caller's stdio (its child is under init's filter, so the linker sees Android paths)                                                |
+| user, mount, pid, net... namespaces              | the sandbox's; init is a child of pivot-exec, its subreaper; uid mode is single                                                                                                                                    |
+| overlayfs per partition                          | `$XDG_DATA_HOME/linuxapk/root[-<instance>]`: hardlinks to the read-only image cache plus copies of the layers, files read-only; composed again only when the image, the stage or an addon changes (`.compose-key`) |
+| the start-time layer, top of each overlay        | copied over the composed root at each start                                                                                                                                                                        |
+| the root, binds of `/data` and `/apex`           | symlinks in `/` (`/system`, `/apex`, `/data`...); `/etc` keeps the sandbox's files and gains `/system/etc`'s others                                                                                                |
+| `/proc` binds (bootconfig, sysctls)              | the broker injects memfds of `/linuxapk/proc/<path>` on `openat`, and apexd's `/proc/mounts`                                                                                                                       |
+| canonical paths are Android's                    | the broker rewrites `readlink` of `/proc/*/fd,exe,cwd` and `getcwd`, so the linker sees `/system/...`                                                                                                              |
+| root owns everything (user namespace)            | the broker shows the user's files as root's (`fstat`, emulated `lstat`); `mkdir`/`chmod` keep a directory's owner `rwx`                                                                                            |
+| capabilities                                     | `capset` and the capability `prctl`s are accepted, `capget` reports all; set\*id privilege is virtual root's                                                                                                       |
+| `mount`, `unshare`, `setns`, namespaced clone    | the shim (in init, zygote, vold, netd...) treats a refused call as done                                                                                                                                            |
+| cgroup v2, delegated                             | a plain `/sys/fs/cgroup` dir: kills fall back to process groups, no freezer                                                                                                                                        |
+| own netns, pasta, EthernetService on `eth1`      | the host's network (`--share=network`); the system app offers it as Android's default network, with the resolvers of the sandbox's `/etc/resolv.conf`, which Flatpak keeps current, and follows their changes      |
+| netd's routes, rules, iptables, marks            | accepted and ignored: rtnetlink `EPERM` acks read as success (shim), no-op iptables, `SO_MARK` (bpfemu)                                                                                                            |
+| `/data/user/0` bind of `/data/data`              | a symlink, which the broker's `lstat` shows as the directory                                                                                                                                                       |
+| MediaProvider's FUSE view at `/storage/emulated` | a link to `/data/media`, so shared storage is on disk; with no FUSE, vold reports the volume unmountable and MediaStore indexes nothing                                                                            |
+| lmkd's 1 s PSI windows                           | widened to 2 s, the most an unprivileged process gets (shim); this needs Linux 6.5, and `start` warns on older kernels (both modes need 5.14)                                                                      |
 
 Init still believes it is pid 1 where it matters: the broker shows it as pid 1
 to `SO_PEERCRED`.
+
+**No memory cap.** Flatpak puts each instance in a scope of its own, and a
+sandbox can create no units or cgroups, so the session can't cap itself. Android
+reacts to memory pressure through lmkd (PSI), and beyond that the host's OOM
+handling applies, as for any Flatpak app. Talking to systemd to get a cap would
+let the app start any unit, which is a sandbox escape.
 
 ## Where things live
 
@@ -223,9 +230,9 @@ Measured on the dev host (Strix Halo, RADV), headless, CI image 16644040:
   budgets the start time and idle memory
   ([compatibility.md](compatibility.md#budgets)).
 - Flatpak mode (same host, kernel 7.1.9, Flatpak 1.18.4, runtime
-  org.freedesktop.Platform 26.08), from `linuxapk-session start` in another
-  instance of the app to `sys.boot_completed`: about 5.5 s on a fresh `/data`
-  and root (composing it included), 2.5 s warm; `start` returns after 0.3 s;
-  0.84 GB idle in the prototype.
+  org.gnome.Platform 51), from `linuxapk-session start` in another instance of
+  the app to `sys.boot_completed`: about 5.5 s on a fresh `/data` and root
+  (composing it included), 2.7 s warm; `start` returns after 0.3 s. Idle and
+  headless, the session's scope uses 643 MiB (440 MiB anonymous).
 - Binder through the broker: 15 µs per round trip against 3.8 µs for kernel
   binder; the difference doesn't show in boot time or the compat corpus.
