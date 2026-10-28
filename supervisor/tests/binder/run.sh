@@ -32,7 +32,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=../../../tests/bionic/lib.sh
 . "$here/../../../tests/bionic/lib.sh"
-logs=$out/test/binder
+logs=$repo/out/test/binder
 
 case ${1:-} in
   --ns)
@@ -53,8 +53,7 @@ case ${1:-} in
       binderSafeInterfaceTest
       binderThroughputTest
     )
-    bionic_image
-    bionic_build
+    bionic_prepare
     mkdir -p "$logs"
     status=()
     for mode in broker kernel; do
@@ -62,7 +61,7 @@ case ${1:-} in
       rc=0
       systemd-run --user --quiet --collect --wait --pipe --same-dir \
         --unit="linuxapk-bindertest-$mode-$$" -p KillMode=control-group -p RuntimeMaxSec=3600 \
-        -p MemoryHigh=3G -p MemoryMax=4G -E LINUXAPK_OUT="$out" \
+        -p MemoryHigh=3G -p MemoryMax=4G \
         -E BIONIC_IMG="$img" -E BIONIC_APEX="$apex" -E BINDER_TESTS="$testbin" \
         -E BINDER_TEST_TIMEOUT="${BINDER_TEST_TIMEOUT:-300}" -E BINDER_TEST_ARGS="${BINDER_TEST_ARGS:-}" \
         -E LINUXAPK_BROKER_DEBUG="${LINUXAPK_BROKER_DEBUG:-}" -- "$0" --ns "$mode" "${tests[@]}" || rc=$?
@@ -86,12 +85,12 @@ timeout=$BINDER_TEST_TIMEOUT args=$BINDER_TEST_ARGS debug=$LINUXAPK_BROKER_DEBUG
 
 if [[ $mode == broker ]]; then
   bionic_broker_nodes "$R"
-  cp "$bin/linuxapk-broker" "$R/data/local/tmp/"
+  cp "$broker" "$R/data/local/tmp/"
   bionic_env
   export LINUXAPK_BROKER=/data/local/tmp/linuxapk-broker
   [[ -z $debug ]] || export LINUXAPK_BROKER_DEBUG=$debug
   export TEST_TIMEOUT=$timeout TEST_ARGS=$args
-  exec "$bin/pivot-exec" "$R" /system/bin/sh /in-root.sh "$mode" "$@"
+  exec "$pivot_exec" "$R" /system/bin/sh /in-root.sh "$mode" "$@"
 fi
 
 mkdir -p "$R/dev/binderfs"

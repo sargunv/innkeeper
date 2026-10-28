@@ -11,20 +11,25 @@
 # 3. Plays a 440 Hz tone with linuxapk-tone (AAudio, low-latency request)
 #    and checks the capture's dominant frequency with freq.py; prints the
 #    app-visible output latency.
-# 4. Installs and launches a game from out/corpus and checks that the
-#    capture during its title screen is not silent.
+# 4. Installs and launches a game from out/test/compat/corpus and checks that
+#    the capture during its title screen is not silent.
 # Leaves the session running (stop: LINUXAPK_INSTANCE=...
-# host/launcher/linuxapk-session stop).
+# mise run session -- stop).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-out=${LINUXAPK_OUT:-$repo/out}
+corpus=$repo/out/test/compat/corpus
+tone=$repo/out/build/android/tests/e2e/audio/linuxapk-tone
 game=io.anuke.mindustry
 [[ ${1:-} == --game ]] && game=$2
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-audio-e2e}
 export LINUXAPK_AUDIO_SINK=linuxapk_test
-S=$repo/host/launcher/linuxapk-session
-T=$out/audio-test
+S=$repo/out/stage/libexec/linuxapk/linuxapk-session
+T=$repo/out/test/audio
+[[ -x $S && -f $tone ]] || {
+  echo "no staged session or $tone (run \`mise run build\`)" >&2
+  exit 1
+}
 mkdir -p "$T"
 fail=0
 
@@ -42,7 +47,6 @@ record() { # seconds file
     --raw --latency-msec=20 >"$2" || true
 }
 
-"$repo/android/vendor/audio/build.sh" >/dev/null
 if ! "$S" status >/dev/null 2>&1; then
   "$S" start --headless
 fi
@@ -54,7 +58,7 @@ timeout 20 "$S" exec cmd media_session volume --stream 3 --set 15 >/dev/null 2>&
 
 echo "== 440 Hz tone (AAudio)"
 "$S" exec sh -c 'cat > /data/local/tmp/linuxapk-tone && chmod 755 /data/local/tmp/linuxapk-tone' \
-  <"$out/audio-build/linuxapk-tone"
+  <"$tone"
 record 7 "$T/tone.raw" &
 sleep 0.5
 timeout 30 "$S" exec /data/local/tmp/linuxapk-tone 5 440 1 | tee "$T/tone.txt"
@@ -62,9 +66,9 @@ wait
 python3 "$here/freq.py" "$T/tone.raw" --expect 440 | tee "$T/tone-freq.txt" || fail=1
 
 echo "== game: $game"
-apk=$(find "$out/corpus/" -maxdepth 1 -name "${game}_*.apk" | head -1)
+apk=$(find "$corpus/" -maxdepth 1 -name "${game}_*.apk" | head -1)
 if [[ -z $apk ]]; then
-  echo "no $game APK in $out/corpus (tests/compat/run.sh fetch)"
+  echo "no $game APK in $corpus (tests/compat/run.sh fetch)"
   fail=1
 else
   "$S" exec sh -c 'cat > /data/local/tmp/e2e-game.apk' <"$apk"

@@ -4,66 +4,45 @@
 # image in a throwaway root, without booting Android.
 #
 # Sourcing it sets:
-#   repo     this checkout
-#   out      LINUXAPK_OUT, default <main checkout>/out (where the graphics
-#            and vulkan builds install out/vendor-overlay)
-#   scratch  $out/test/bionic: everything the harnesses write
-#   bin      $scratch/bin: pivot-exec, the broker and the props shim
+#   repo        this checkout
+#   stage       out/stage: pivot-exec, the broker and our /vendor come from there
+#   scratch     out/test/bionic: everything the harnesses write
+#   pivot_exec, broker, stage_vendor, props_shim (tests/bionic/props-shim.c,
+#               from the NDK superbuild)
 
-repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-main=$(cd "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-out=${LINUXAPK_OUT:-$main/out}
-scratch=$out/test/bionic
-bin=$scratch/bin
+# shellcheck disable=SC2034 # for the scripts that source this
+{
+  repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  stage=$repo/out/stage
+  scratch=$repo/out/test/bionic
+  pivot_exec=$stage/libexec/linuxapk/pivot-exec
+  broker=$stage/share/linuxapk/android/system/bin/linuxapk-broker
+  stage_vendor=$stage/share/linuxapk/android/vendor
+  props_shim=$repo/out/build/android/tests/bionic/libprops_shim.so
+}
 
-# Set img and apex to the selected image's partitions and flattened APEXes
-# (the paths `linuxapk-session image` prints).
+# Check that the build is staged and the image prepared, and set img and apex
+# to the image's partitions and flattened APEXes (the paths
+# `linuxapk-session image` prints).
 img="" apex=""
-bionic_image() {
-  local k v
+bionic_prepare() {
+  local f k v
+  for f in "$pivot_exec" "$broker" "$props_shim"; do
+    [[ -e $f ]] || {
+      echo "no $f (run \`mise run build\`)" >&2
+      return 1
+    }
+  done
   while IFS='=' read -r k v; do
     case $k in
       img) img=$v ;;
       apex) apex=$v ;;
     esac
-  done < <(LINUXAPK_OUT=$out "$repo/host/launcher/linuxapk-session" image)
+  done < <("$stage/libexec/linuxapk/linuxapk-session" image)
   [[ -d $img/system/system && -f $apex/apex-info-list.xml ]] || {
-    echo "no prepared image at $img (run host/launcher/linuxapk-session prepare)" >&2
+    echo "image not prepared at $img (run \`mise run session -- prepare\`)" >&2
     return 1
   }
-}
-
-# Build what runs inside the root into $bin, when its sources changed:
-#   pivot-exec           the session's: pivots, installs the seccomp filter
-#                        and forks the broker
-#   linuxapk-broker      the broker (binder in userspace)
-#   libprops_shim.so     tests/bionic/props-shim.c
-bionic_build() {
-  local ndk=${ANDROID_NDK_HOME:-}
-  [[ -n $ndk ]] || ndk=$(printf '%s\n' "$HOME"/Android/Sdk/ndk/* | sort -V | tail -1)
-  local tc=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin
-  local cc=$tc/x86_64-linux-android30-clang
-  [[ -x $cc ]] || {
-    echo "NDK clang not found (set ANDROID_NDK_HOME)" >&2
-    return 1
-  }
-  mkdir -p "$bin"
-  local shim=$repo/tests/bionic/props-shim.c pivot=$repo/supervisor/pivot-exec
-  [[ $bin/libprops_shim.so -nt $shim ]] ||
-    "$cc" -shared -fPIC -O2 -Wall -Werror -fvisibility=hidden -o "$bin/libprops_shim.so" "$shim"
-  if [[ ! -x $bin/pivot-exec || -n $(find "$pivot" -newer "$bin/pivot-exec") ]]; then
-    "$cc" -static -O2 -Wall -Werror -o "$bin/pivot-exec" "$pivot/pivot-exec.c" "$pivot/bpfemu.c"
-  fi
-  # The bootstrap linker, as in supervisor/build.sh: the broker starts before
-  # anything mounts /apex.
-  (
-    cd "$repo" &&
-      env CC_x86_64_linux_android="$cc" AR_x86_64_linux_android="$tc/llvm-ar" \
-        CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$cc" \
-        RUSTFLAGS="-C link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64" \
-        cargo build -q -p linuxapk-broker --release --target x86_64-linux-android --bin linuxapk-broker -j8
-  )
-  cp -u "$repo/target/x86_64-linux-android/release/linuxapk-broker" "$bin/"
 }
 
 ro_bind() {
@@ -91,7 +70,7 @@ bionic_root() {
   ro_bind "$img/product" "$R/product"
   ro_bind "$apex" "$R/apex"
   mkdir -p "$R/.shim/lib64"
-  cp "$bin/libprops_shim.so" "$R/.shim/lib64/"
+  cp "$props_shim" "$R/.shim/lib64/"
   # lowerdir+= per layer: fsconfig caps a single option value at 256 bytes.
   mount -t overlay overlay -o "ro,lowerdir+=$R/.shim,lowerdir+=$img/system/system" "$R/system"
   mount -t overlay overlay -o "ro,lowerdir+=$R/.shim$(printf ',lowerdir+=%s' "$@")" "$R/vendor"

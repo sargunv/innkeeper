@@ -6,7 +6,11 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-session=$repo/host/launcher/linuxapk-session
+session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+[[ -x $session ]] || {
+  echo "no $session (run \`mise run build\`)" >&2
+  exit 1
+}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail=0
@@ -16,8 +20,7 @@ check() { # name expected actual
     fail=1
   fi
 }
-sel() { env LINUXAPK_IMAGES="$tmp/images" LINUXAPK_OUT="$tmp/out" "$@" "$session" image | sed -n 's/^image=//p'; }
-mkdir -p "$tmp/out"
+sel() { env LINUXAPK_IMAGES="$tmp/images" "$@" "$session" image | sed -n 's/^image=//p'; }
 
 cat >"$tmp/pin.toml" <<'PIN'
 # comment
@@ -33,7 +36,7 @@ sha256 = "00"
 name = "sbom/sbom.spdx.json"
 PIN
 check "the pin's top-level name" ci-123 "$(sel env LINUXAPK_PIN="$tmp/pin.toml")"
-if env LINUXAPK_PIN="$tmp/missing.toml" LINUXAPK_OUT="$tmp/out" "$session" image >/dev/null 2>&1; then
+if env LINUXAPK_PIN="$tmp/missing.toml" "$session" image >/dev/null 2>&1; then
   check "missing pin refused" refused accepted
 else
   check "missing pin refused" refused refused

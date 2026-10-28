@@ -4,21 +4,23 @@
 # Installs OpenCalc and Wikipedia, validates their desktop entries and icons,
 # launches them through gtk-launch and xdg-open (checking the resumed activity
 # with dumpsys), reinstalls (idempotent), then uninstalls and checks that no
-# desktop files or icons are left. Leaves the session running; stop it with
-# `LINUXAPK_INSTANCE=cli linuxapk session stop`.
+# desktop files or icons are left. Uses the staged build (out/stage), and
+# leaves the session running; stop it with
+# `LINUXAPK_INSTANCE=cli mise run session -- stop`.
 #
-# Environment: LINUXAPK_INSTANCE (default cli), LINUXAPK_SESSION (default: the
-# main checkout's launcher), LINUXAPK_CORPUS (default out/corpus, filled by
-# `tests/compat/run.sh fetch`).
+# Environment: LINUXAPK_INSTANCE (default cli), LINUXAPK_CORPUS (default
+# out/test/compat/corpus, filled by `tests/compat/run.sh fetch`).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-corpus=${1:-${LINUXAPK_CORPUS:-$repo/out/corpus}}
+corpus=${1:-${LINUXAPK_CORPUS:-$repo/out/test/compat/corpus}}
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-cli}
-if [[ -z ${LINUXAPK_SESSION:-} ]]; then
-  main=$(dirname "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)")
-  export LINUXAPK_SESSION=$main/host/launcher/linuxapk-session
-fi
+session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+la=$repo/out/stage/bin/linuxapk
+[[ -x $la ]] || {
+  echo "no $la (run \`mise run build\`)" >&2
+  exit 1
+}
 apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 icons=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor
 
@@ -28,16 +30,13 @@ fail() {
 }
 ok() { echo "ok   $*"; }
 
-if ! "$LINUXAPK_SESSION" status >/dev/null 2>&1; then
+if ! "$session" status >/dev/null 2>&1; then
   avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo)
   ((avail >= 12)) || fail "only ${avail} GB available; not starting a session"
 fi
 
-cargo build -q -j 4 --release --manifest-path "$repo/host/cli/Cargo.toml"
-la=$repo/target/release/linuxapk
-
 top() {
-  "$LINUXAPK_SESSION" exec dumpsys activity activities 2>/dev/null |
+  "$session" exec dumpsys activity activities 2>/dev/null |
     sed -n 's/.*topResumedActivity=ActivityRecord{[^ ]* u0 \([^ ]*\) .*/\1/p' | head -1
 }
 wait_top() { # package [activity-substring]
@@ -91,10 +90,10 @@ ok "list"
 
 # Launch through the desktop, as the app menu would (no lane env in scope:
 # the entry carries it).
-env -u LINUXAPK_INSTANCE -u LINUXAPK_SESSION gtk-launch dev.linuxapk.com.darkempire78.opencalculator
+env -u LINUXAPK_INSTANCE gtk-launch dev.linuxapk.com.darkempire78.opencalculator
 wait_top com.darkempire78.opencalculator
 ok "gtk-launch: OpenCalc resumed ($(top))"
-env -u LINUXAPK_INSTANCE -u LINUXAPK_SESSION xdg-open 'wikipedia://en.wikipedia.org/wiki/Linux'
+env -u LINUXAPK_INSTANCE xdg-open 'wikipedia://en.wikipedia.org/wiki/Linux'
 wait_top org.wikipedia PageActivity
 ok "xdg-open wikipedia://: Wikipedia resumed ($(top))"
 
@@ -108,7 +107,7 @@ if [[ ${KEEP:-} != 1 ]]; then
     "$la" uninstall "$pkg"
     [[ ! -e $apps/dev.linuxapk.$pkg.desktop ]] || fail "entry left for $pkg"
     [[ -z $(find "$icons" -name "dev.linuxapk.$pkg.png") ]] || fail "icons left for $pkg"
-    ! "$LINUXAPK_SESSION" exec cmd package path "$pkg" >/dev/null 2>&1 || fail "$pkg still installed"
+    ! "$session" exec cmd package path "$pkg" >/dev/null 2>&1 || fail "$pkg still installed"
   done
   ok "uninstalled cleanly"
 fi

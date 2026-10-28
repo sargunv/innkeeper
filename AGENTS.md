@@ -16,22 +16,30 @@ android/     runs inside Android: vendor HALs and drivers (graphics, vulkan,
              audio), system pieces (exec relay, iptables), the system app,
              the config overlay, microG
 tests/       cross-module tests: bionic harness, e2e suites, compat corpus
-tools/       dev tooling (dev/window-shot.sh)
+tools/       build and dev tooling: build/ (toolchain pin, artifacts, stage),
+             container/ (the build container), dev/window-shot.sh
 docs/        STRATEGY (plan), NOTES (live state), per-lane design docs
-out/         (gitignored) builds, generated overlays, test output
+out/         (gitignored) build output only: cargo/, build/<module>/,
+             stage/ (the installable prefix), test/
 ```
 
 ## Dev tool commands
 
-- `mise install`: tools (hk, dprint, clang-format, shellcheck, shfmt, Rust).
+- `mise install`: tools (hk, dprint, shellcheck, shfmt, Rust, Java, CMake,
+  Ninja). `tools/build/toolchain.env` pins the NDK, API and build-tools.
 - `mise run check` / `mise run fix`: lint and format everything (hk + dprint).
   The pre-commit hook runs hk on staged files.
-- `host/launcher/linuxapk-session prepare`: fetch, extract and flatten the
-  pinned image (`image/fetch.sh`, `image/flatten-apex.sh`).
-- `android/vendor/graphics/build.sh`, `android/vendor/vulkan/build.sh`: build
-  the HALs and drivers into `out/vendor-overlay` (each runs its tests).
-- `host/launcher/linuxapk-session start|stop|status|log|exec|shell|selftest`:
-  run the Android session.
+- `mise run build`: every `build:<module>` (each fills
+  `out/build/<module>/install`), then `stage` merges them into `out/stage`, the
+  installable prefix, checked against `tools/build/artifacts.toml`.
+  `mise run clean` removes build output. Nothing at runtime builds anything.
+- `mise run session -- start|stop|status|log|exec|shell|selftest|prepare`: the
+  staged launcher (`out/stage/libexec/linuxapk/linuxapk-session`). It keeps
+  runtime files in `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` and logs in
+  `$XDG_STATE_HOME/linuxapk[-<instance>]`, never in the checkout.
+- `mise run test` (unit), `test:bionic`, `test:binder`, `test:boot`, `test:e2e`,
+  `test:compat`: the test tiers; the integration ones need `mise run build` and
+  a prepared image.
 
 ## Project invariants
 
@@ -53,8 +61,8 @@ out/         (gitignored) builds, generated overlays, test output
 - **Host safety.** Inside our user namespace, Android "root" is the host user.
   Every namespace running Android code must mask and lock host sysfs submounts,
   get its own systemd unit/cgroup and network namespace, and must not bind host
-  `/run/user`, `$HOME` or `/dev` wholesale.
-  `host/launcher/linuxapk-session selftest` must pass. Never use sudo.
+  `/run/user`, `$HOME` or `/dev` wholesale. `linuxapk-session selftest` must
+  pass (`mise run test:boot`). Never use sudo.
 - **Nested test desktops are fully isolated** (incident 2026-10-27: nested
   portals opened dialogs on the user's real desktop, and a nested plasmashell
   started kded, kdeconnect and akonadi against the user's real config and data).

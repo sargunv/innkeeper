@@ -10,7 +10,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-session=${LINUXAPK_SESSION:-$repo/host/launcher/linuxapk-session}
+session=$repo/out/stage/libexec/linuxapk/linuxapk-session
 s() { "$session" exec "$@"; }
 apk=/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk
 fail=0
