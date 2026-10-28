@@ -1,40 +1,21 @@
 //! A standalone, dependency-free fuzzer for the broker. Each iteration runs a
 //! random sequence of operations over several processes and threads:
 //! `BINDER_WRITE_READ` with command streams that are either raw random bytes
-//! (the most attacker-controlled input) or built from the BC_* grammar with
-//! random arguments (so transactions with object arrays, refcount commands,
-//! death notifications and replies get deep into the state machine), plus
-//! reads, thread exits, context-manager setup and process death. After every
-//! step the broker's internal invariants are checked; any panic is a bug.
+//! or built from the BC_* grammar with random arguments (so transactions with
+//! object arrays, refcount commands, death notifications and replies get deep
+//! into the state machine), plus reads, thread exits, context-manager setup,
+//! process death, and signals that interrupt blocked reads (which then
+//! restart). In most iterations userspace operations also fail at random:
+//! copies (`EFAULT`), allocations, fd captures and installs, and calls that
+//! a signal ends just before they are answered. After every step the
+//! broker's internal invariants are checked; any panic is a bug.
 //!
 //! Run a bounded campaign:  `linuxapk-broker-fuzz [iterations] [seed]`
 //! It is also wired into `cargo test` via `fuzz::smoke` below.
 
 use linuxapk_broker::binder::driver::{BinderDriver, ProcId};
 use linuxapk_broker::binder::uapi::*;
-use linuxapk_broker::testmem::FakeMem;
-
-/// SplitMix64: a tiny deterministic PRNG, so a failing run is reproducible
-/// from its seed with no external crates.
-struct Rng(u64);
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-    fn below(&mut self, n: u64) -> u64 {
-        self.next() % n.max(1)
-    }
-    fn byte(&mut self) -> u8 {
-        (self.next() & 0xff) as u8
-    }
-    fn chance(&mut self, pct: u64) -> bool {
-        self.below(100) < pct
-    }
-}
+use linuxapk_broker::fake::{FakeUserspace, Rng};
 
 const NPROC: usize = 3;
 const DATA: u64 = 0x10_0000;
@@ -48,12 +29,16 @@ fn put<T: Copy>(v: &mut Vec<u8>, x: &T) {
 
 /// A small handle or descriptor, biased towards values that exist.
 fn small(r: &mut Rng) -> u64 {
-    if r.chance(90) { r.below(6) } else { r.next() }
+    if r.chance(90) {
+        r.below(6)
+    } else {
+        r.next_u64()
+    }
 }
 
 /// Write a random object array into `proc`'s memory and return
 /// (data_size, offsets_size, extra_buffers_size).
-fn objects(r: &mut Rng, m: &mut FakeMem, proc: ProcId, base: u64) -> (u64, u64, u64) {
+fn objects(r: &mut Rng, m: &mut FakeUserspace, proc: ProcId, base: u64) -> (u64, u64, u64) {
     let n = if r.chance(40) { 0 } else { r.below(5) as usize };
     let mut data = Vec::new();
     let mut offs = Vec::new();
@@ -79,7 +64,7 @@ fn objects(r: &mut Rng, m: &mut FakeMem, proc: ProcId, base: u64) -> (u64, u64, 
                     } else {
                         BINDER_TYPE_WEAK_BINDER
                     },
-                    flags: (r.next() as u32) & 0x11ff,
+                    flags: (r.next_u64() as u32) & 0x11ff,
                     binder_or_handle: 0x1000 + r.below(4) * 0x10,
                     cookie: r.below(3),
                 };
@@ -108,7 +93,11 @@ fn objects(r: &mut Rng, m: &mut FakeMem, proc: ProcId, base: u64) -> (u64, u64, 
                 put(&mut data, &fdo);
             }
             8 => {
-                let len = if r.chance(90) { r.below(64) } else { r.next() };
+                let len = if r.chance(90) {
+                    r.below(64)
+                } else {
+                    r.next_u64()
+                };
                 let bbo = BinderBufferObject {
                     hdr_type: BINDER_TYPE_PTR,
                     flags: if i > 0 && r.chance(50) {
@@ -144,13 +133,19 @@ fn objects(r: &mut Rng, m: &mut FakeMem, proc: ProcId, base: u64) -> (u64, u64, 
     let ob: Vec<u8> = offs.iter().flat_map(|o| o.to_le_bytes()).collect();
     m.poke(proc, base + (OFFS - DATA), &ob);
     if r.chance(10) {
-        extra = r.next() & 0xffff_fff8;
+        extra = r.next_u64() & 0xffff_fff8;
     }
     (data.len() as u64, ob.len() as u64, extra)
 }
 
 /// A random but well-formed BC_* stream.
-fn commands(r: &mut Rng, m: &mut FakeMem, proc: ProcId, bufs: &[u64], must_reply: bool) -> Vec<u8> {
+fn commands(
+    r: &mut Rng,
+    m: &mut FakeUserspace,
+    proc: ProcId,
+    bufs: &[u64],
+    must_reply: bool,
+) -> Vec<u8> {
     let mut w = Vec::new();
     for i in 0..1 + r.below(4) {
         let pick = if must_reply && i == 0 { 0 } else { r.below(12) };
@@ -161,7 +156,7 @@ fn commands(r: &mut Rng, m: &mut FakeMem, proc: ProcId, bufs: &[u64], must_reply
                 let td = BinderTransactionData {
                     target: if r.chance(50) { 0 } else { small(r) },
                     cookie: 0,
-                    code: r.next() as u32,
+                    code: r.next_u64() as u32,
                     flags: if r.chance(30) { TF_ONE_WAY } else { 0 }
                         | if r.chance(80) { TF_ACCEPT_FDS } else { 0 },
                     sender_pid: 0,
@@ -277,15 +272,25 @@ pub fn run(iterations: u64, seed: u64) {
             eprintln!("=== iteration {it}");
         }
         let mut b = BinderDriver::new();
-        let mut m = FakeMem::default();
+        let mut m = FakeUserspace::default();
+        // Userspace failures, each operation failing with probability
+        // fault_pct/1000.
+        let fault_pct = [0, 0, 5, 20, 80][r.below(5) as usize];
+        let mut fr = Rng(r.next_u64());
+        m.fault = Some(Box::new(move |_| fr.below(1000) < fault_pct));
         let mut procs: Vec<ProcId> = Vec::new();
         for i in 0..NPROC {
-            let p = b.open(1000 + i as i32, 1000 + i as u32, (r.below(8) == 0) as u8);
+            let p = b.open(
+                1000 + i as i32,
+                1000 + i as u32,
+                (r.below(8) == 0) as u8,
+                r.chance(10),
+            );
             m.add_proc(p, 0x1_0000_0000 * (i as u64 + 1));
             procs.push(p);
         }
         if r.chance(90) {
-            let _ = b.set_context_mgr(procs[0], None);
+            m.ioctl(&mut b, procs[0], 1, BINDER_SET_CONTEXT_MGR, 0);
         }
         // Most threads are loopers, as in a real thread pool.
         for &p in &procs {
@@ -293,7 +298,7 @@ pub fn run(iterations: u64, seed: u64) {
                 if r.chance(70) {
                     let mut w = Vec::new();
                     put(&mut w, &BC_ENTER_LOOPER);
-                    let _ = b.write_read(p, tid, &w, 0, false, &mut m);
+                    m.write_read(&mut b, p, tid, &w, 0);
                 }
             }
         }
@@ -304,16 +309,18 @@ pub fn run(iterations: u64, seed: u64) {
         for _ in 0..steps {
             let mut p = procs[r.below(procs.len() as u64) as usize];
             let mut tid = 1 + r.below(3) as u32;
-            let mut op = r.below(20);
+            let mut op = r.below(22);
             let mut must_reply = false;
             if !owe.is_empty() && r.chance(50) {
                 (p, tid) = owe.remove(r.below(owe.len() as u64) as usize);
-                op = 19;
+                op = 21;
                 must_reply = true;
             }
             if trace {
                 eprintln!("-- proc={p} tid={tid} op={op}");
             }
+            let pending = m.pending_calls();
+            let interrupted = m.interrupted_calls();
             match op {
                 0 => {
                     let n = r.below(256) as usize;
@@ -321,21 +328,29 @@ pub fn run(iterations: u64, seed: u64) {
                     if trace {
                         eprintln!("   raw {:02x?}", &buf[..buf.len().min(32)]);
                     }
-                    let _ = b.write_read(p, tid, &buf, 256, r.chance(50), &mut m);
+                    m.write_read(&mut b, p, tid, &buf, 256);
                 }
-                1 => b.thread_exit(p, tid),
-                2 if r.chance(20) => {
-                    let _ = b.release_proc(p, &mut m);
+                1 => {
+                    m.ioctl(&mut b, p, tid, BINDER_THREAD_EXIT, 0);
                 }
+                2 if r.chance(20) => b.release_proc(p, &mut m),
                 3 => {
-                    let _ = b.set_context_mgr(p, None);
+                    m.ioctl(&mut b, p, tid, BINDER_SET_CONTEXT_MGR, 0);
                 }
                 4..=8 => {
                     let size = [0usize, 8, 64, 256, 4096][r.below(5) as usize];
-                    let res = b.write_read(p, tid, &[], size, r.chance(50), &mut m);
-                    if harvest(&res.read, &mut bufs[p as usize]) {
-                        owe.push((p, tid));
-                    }
+                    m.write_read(&mut b, p, tid, &[], size);
+                }
+                9 | 10 if !pending.is_empty() => {
+                    // A signal ends a blocked read's wait.
+                    m.interrupt(pending[r.below(pending.len() as u64) as usize]);
+                }
+                11 | 12 if !interrupted.is_empty() => {
+                    // The kernel restarts an interrupted ioctl.
+                    m.restart(
+                        &mut b,
+                        interrupted[r.below(interrupted.len() as u64) as usize],
+                    );
                 }
                 _ => {
                     let w = commands(&mut r, &mut m, p, &bufs[p as usize], must_reply);
@@ -344,20 +359,34 @@ pub fn run(iterations: u64, seed: u64) {
                     } else {
                         r.below(300) as usize
                     };
-                    let res = b.write_read(p, tid, &w, size, r.chance(50), &mut m);
-                    if harvest(&res.read, &mut bufs[p as usize]) {
-                        owe.push((p, tid));
-                    }
+                    m.write_read(&mut b, p, tid, &w, size);
                 }
             }
             b.check_invariants();
+            // Every answered read hands its buffers and calls to its thread.
+            for c in m.take_answered() {
+                let o = m.outcome(c);
+                let (cp, ct) = m.caller(c);
+                if o.errno == 0 && harvest(&o.read, &mut bufs[cp as usize]) {
+                    owe.push((cp, ct));
+                }
+            }
+            // Every read still waiting for an answer is one the broker holds.
+            let held = b.blocked_threads();
+            for c in m.pending_calls() {
+                assert!(held.contains(&m.caller(c)), "call {} forgotten", c.id);
+            }
         }
         for p in procs {
-            let _ = b.release_proc(p, &mut m);
+            b.release_proc(p, &mut m);
             b.check_invariants();
         }
         // With every process gone, nothing may be left behind.
         assert_eq!(b.counts(), (0, 0, 0), "leaked transactions/buffers/nodes");
+        assert!(m.captured.is_empty(), "leaked captured fds");
+        for (p, fp) in &m.procs {
+            assert!(fp.live_recv.is_empty(), "proc {p} leaked receive buffers");
+        }
     }
 }
 

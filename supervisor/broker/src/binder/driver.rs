@@ -1,10 +1,10 @@
 //! Userspace reimplementation of the Android binder driver's semantics.
 //!
-//! This is a pure state machine: it never issues a syscall. All access to a
-//! process's memory, its receive buffer, and its file descriptors goes through
-//! the [`Mem`] trait, so the whole driver is exercised by `cargo test` against
-//! an in-memory fake (see `tests.rs` and `src/bin/fuzz.rs`). The syscall/seccomp
-//! binding that wires this to real Android processes lives in `src/notify.rs`.
+//! The driver makes no syscalls itself: process memory, receive buffers, fds
+//! and answering the caller go through the [`Userspace`] trait, so the whole
+//! driver is exercised by `cargo test` against an in-memory fake (see
+//! `tests.rs`, `lifecycle_tests.rs` and `src/bin/fuzz.rs`). The seccomp binding
+//! that wires it to real Android processes lives in `src/notify.rs`.
 //!
 //! The reference is the kernel's `drivers/android/binder.c`; function names in
 //! comments refer to it. The structure deliberately follows it:
@@ -13,10 +13,11 @@
 //!    `process_todo` flag (deferred work such as the TRANSACTION_COMPLETE of a
 //!    synchronous call is queued without it), per-node `async_todo`, and the
 //!    per-process `delivered_death` list;
-//!  * thread selection: a process-wide transaction goes straight to the first
-//!    thread in `waiting_threads` (`binder_select_thread_ilocked`), else to the
-//!    process `todo`, waking poll threads; only looper threads with an empty
-//!    stack and queue take process work (`binder_available_for_proc_work`);
+//!  * thread selection: a process-wide transaction goes straight to the
+//!    longest-waiting thread blocked for process work
+//!    (`binder_select_thread_ilocked`), else to the process `todo`, waking poll
+//!    threads; only looper threads with an empty stack and queue take process
+//!    work (`binder_available_for_proc_work`);
 //!  * transactions and buffers are separate objects: a buffer outlives its
 //!    transaction until `BC_FREE_BUFFER`, and owns the references taken while
 //!    translating the objects in it (released by
@@ -27,10 +28,30 @@
 //!  * death notifications move through the same states (DEAD_BINDER,
 //!    DEAD_BINDER_AND_CLEAR, CLEAR_DEATH_NOTIFICATION, delivered).
 //!
-//! Blocking is cooperative: a read with no work returns [`ReadOutcome::Blocked`]
-//! and marks the thread parked; any later enqueue that would have woken the
-//! kernel thread records a [`Wakeup`] which the syscall layer drains with
-//! [`BinderDriver::take_wakeups`], re-running that thread's read.
+//! The driver serves whole ioctls ([`BinderDriver::ioctl`]) and owns every
+//! thread's place in them. Each `BINDER_WRITE_READ` read goes through one
+//! lifecycle:
+//!
+//!  * **prepared**: the read takes work off its lists and renders the BR_*
+//!    stream, but changes nothing else yet (a `Delivery`);
+//!  * **blocked**: with nothing to read, the thread waits (`Wait::Blocked`),
+//!    holding its unanswered [`Call`]. Only a blocked thread is ever picked
+//!    for process work. Enqueueing work for it wakes it (`Wait::Woken`), and
+//!    its read runs again before the ioctl that woke it returns;
+//!  * **delivered**: the stream and the bwr are copied out and the call is
+//!    answered. Only then is the delivery committed (transactions pushed on
+//!    the stack, buffers handed over, node and death states advanced);
+//!  * **rolled back**: if a copy fails (`EFAULT`) or the call is gone (a
+//!    signal interrupted it, and the kernel restarts the ioctl), the work goes
+//!    back to the front of the lists it came from, so the restarted read, or
+//!    another thread, gets it again;
+//!  * **abandoned**: a new ioctl from a thread ends any wait it was in (a
+//!    thread runs one syscall at a time), and process release answers its
+//!    waiting threads.
+//!
+//! A write is consumed as it is processed, and its progress is written back
+//! whatever the read does (before a thread blocks, too), so a restarted
+//! ioctl never replays it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::Ordering;
@@ -51,13 +72,33 @@ pub type NodeId = u64;
 pub type TxnId = u64;
 type DeathId = u64;
 
-/// Access to process memory, receive buffers and fds. The real implementation
-/// (`src/notify.rs`) uses each process's pinned `/proc/<pid>/mem`, a per-process
-/// memfd, and `SECCOMP_IOCTL_NOTIF_ADDFD`/`pidfd_getfd`; tests use an
-/// in-memory fake.
-pub trait Mem {
+/// One binder ioctl being served: the seccomp notification that answers it,
+/// and its argument (for `BINDER_WRITE_READ`, the address of the bwr).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Call {
+    pub id: u64,
+    pub arg: u64,
+}
+
+/// Why an fd could not be installed into a reading thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallError {
+    /// The reader's call is gone (a signal interrupted it).
+    Interrupted,
+    /// The reader can't take the fd (for example, its fd table is full).
+    Failed,
+}
+
+/// The driver's access to the processes it serves (the kernel's
+/// `copy_{from,to}_user`, the binder mapping, `fd_install` and returning
+/// from the ioctl). The real implementation (`src/notify.rs`) uses each
+/// process's pinned `/proc/<pid>/mem`, a per-process memfd, `pidfd_getfd`
+/// and seccomp user notifications; tests use [`crate::fake`].
+pub trait Userspace {
     /// Read `len` bytes from `proc`'s address space at `addr`.
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>>;
+    /// Write `data` into `proc`'s address space at `addr`.
+    fn write(&mut self, proc: ProcId, addr: u64, data: &[u8]) -> bool;
     /// Size of `proc`'s mapped receive region (0 if not mapped yet).
     fn recv_size(&mut self, proc: ProcId) -> usize;
     /// Reserve `size` bytes in `proc`'s receive region and return the target
@@ -67,15 +108,22 @@ pub trait Mem {
     fn write_recv(&mut self, proc: ProcId, addr: u64, data: &[u8]);
     /// Release a receive region previously returned by `alloc_recv`.
     fn free_recv(&mut self, proc: ProcId, addr: u64);
-    /// Capture `fd` out of `from` into the broker, returning an opaque token.
-    /// The real implementation uses `pidfd_getfd`, so the fd survives even if
-    /// the sender closes it before the target reads the transaction.
+    /// Capture `fd` out of `from` into the broker, returning an opaque token,
+    /// so the fd survives even if the sender closes it before the target
+    /// reads the transaction.
     fn capture_fd(&mut self, from: ProcId, from_fd: u32) -> Option<u64>;
-    /// Install a previously captured fd into `to` (which is inside its own
-    /// `BINDER_WRITE_READ`), returning the new fd number.
-    fn install_fd(&mut self, to: ProcId, token: u64) -> Option<u32>;
-    /// Drop a captured fd that was never (or no longer) installed.
+    /// Install a captured fd into `to`, whose thread is reading in `call`,
+    /// returning the new fd number. The token stays valid.
+    fn install_fd(&mut self, to: ProcId, call: Call, token: u64) -> Result<u32, InstallError>;
+    /// Drop a captured fd.
     fn drop_fd(&mut self, token: u64);
+    /// End `call` with `errno` (0 for success). False if the call is gone.
+    fn answer(&mut self, call: Call, errno: i32) -> bool;
+    /// One of `proc`'s threads polls its binder fd from now on (`call` is
+    /// its write-only `BC_ENTER_LOOPER`).
+    fn make_pollable(&mut self, proc: ProcId, call: Call);
+    /// Whether a poll of `proc`'s binder fd reports it readable.
+    fn set_poll_ready(&mut self, proc: ProcId, ready: bool);
 }
 
 // Looper state flags (kernel BINDER_LOOPER_STATE_*).
@@ -83,13 +131,21 @@ const LOOPER_REGISTERED: u32 = 0x01;
 const LOOPER_ENTERED: u32 = 0x02;
 const LOOPER_EXITED: u32 = 0x04;
 const LOOPER_INVALID: u32 = 0x08;
-const LOOPER_WAITING: u32 = 0x10;
 const LOOPER_POLL: u32 = 0x20;
+
+/// Largest write buffer accepted in one `BINDER_WRITE_READ`.
+const MAX_WRITE: usize = 16 * 1024 * 1024;
 
 /// Size of the largest single item the read loop emits
 /// (`binder_transaction_data_secctx` plus its command word), which the kernel
 /// requires free before dequeuing any work.
 const MIN_READ_SPACE: usize = 4 + size_of::<BinderTransactionDataSecctx>();
+
+const NO_EXTENDED_ERROR: BinderExtendedError = BinderExtendedError {
+    id: 0,
+    command: BR_OK,
+    param: 0,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Work {
@@ -125,10 +181,94 @@ struct Thread {
     transaction_stack: Option<TxnId>,
     return_error: u32,
     reply_error: u32,
-    is_dead: bool,
-    /// Parked in a blocking read (the syscall layer holds its notification).
-    parked: bool,
+    wait: Wait,
     ee: BinderExtendedError,
+}
+
+/// A thread's wait in a blocking read (see the module docs).
+#[derive(Clone, Copy, Debug, Default)]
+enum Wait {
+    /// Not waiting in the driver.
+    #[default]
+    None,
+    /// Blocked with nothing to read. `proc_work`: it takes process work
+    /// (`binder_wait_for_work` on the process's `waiting_threads`); `since`
+    /// orders the threads that do, longest-waiting first.
+    Blocked {
+        read: Read,
+        proc_work: bool,
+        since: u64,
+    },
+    /// Work arrived: the read runs again before the current ioctl returns.
+    Woken(Read),
+}
+
+/// A `BINDER_WRITE_READ` in its read phase: its call, and its bwr as of the
+/// end of the write phase.
+#[derive(Clone, Copy, Debug)]
+struct Read {
+    call: Call,
+    bwr: BinderWriteRead,
+}
+
+/// The result of preparing a read.
+enum Prepared {
+    /// Nothing to read, and the caller doesn't block.
+    Again,
+    /// Nothing to read: the thread blocks.
+    Blocked { proc_work: bool },
+    /// A BR_* stream to copy out.
+    Ready(Delivery),
+    /// The call is gone (an fd could not be installed for that reason).
+    Interrupted(Delivery),
+}
+
+/// What a read took off its lists: the rendered BR_* stream, and the work
+/// to commit once the reader has it, or to put back if it never does.
+struct Delivery {
+    bytes: Vec<u8>,
+    taken: Vec<Taken>,
+    /// The thread's `process_todo` before the read.
+    process_todo: bool,
+    /// The stream starts with BR_SPAWN_LOOPER (commit: one more requested
+    /// thread).
+    spawn_looper: bool,
+}
+
+/// How a read takes a transaction.
+enum TxnRead {
+    /// Its BR_* item.
+    Rendered(Vec<u8>),
+    /// Gone, or failed for good: nothing to read.
+    Dropped,
+    /// Its fds can't be installed: it fails as the first item of the next
+    /// read.
+    NotFirst,
+    /// The reader's call is gone.
+    Interrupted,
+}
+
+/// What a node's work item reports to its owner, and whether the node is
+/// freed after.
+struct NodeChanges {
+    incref: bool,
+    acquire: bool,
+    release: bool,
+    decref: bool,
+    free: bool,
+}
+
+impl NodeChanges {
+    fn reports(&self) -> bool {
+        self.incref || self.acquire || self.release || self.decref
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Taken {
+    work: Work,
+    /// From the process's list rather than the thread's.
+    from_proc: bool,
 }
 
 struct Node {
@@ -167,14 +307,14 @@ struct Process {
     ns_pid: i32,
     euid: u32,
     context: u8,
-    dead: bool,
     max_threads: u32,
     requested_threads: u32,
     requested_threads_started: u32,
     oneway_spam_detection: bool,
     threads: BTreeMap<u32, Thread>,
+    /// The binder fd was opened `O_NONBLOCK`: reads never block.
+    nonblock: bool,
     todo: VecDeque<Work>,
-    waiting_threads: VecDeque<u32>,
     nodes: HashMap<u64, NodeId>,
     refs_by_desc: BTreeMap<u32, Ref>,
     node_to_desc: HashMap<NodeId, u32>,
@@ -185,42 +325,6 @@ struct Process {
 struct Context {
     mgr_node: Option<NodeId>,
     mgr_uid: Option<u32>,
-}
-
-/// A thread that was parked in a read and now has work (or must return). The
-/// supervisor maps `(proc, tid)` back to its stored seccomp notification and
-/// re-runs the read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Wakeup {
-    pub proc: ProcId,
-    pub tid: u32,
-}
-
-/// Result of a `BINDER_WRITE_READ`.
-#[derive(Debug, Default)]
-pub struct WriteRead {
-    /// Bytes to copy into the caller's `read_buffer` at `read_consumed`.
-    pub read: Vec<u8>,
-    /// Blocking read with nothing ready yet: the supervisor must defer the
-    /// seccomp response until a later [`Wakeup`] names this thread.
-    pub blocked: bool,
-    /// Non-blocking read with nothing ready: return `-EAGAIN`.
-    pub eagain: bool,
-    /// Bytes of the write buffer consumed.
-    pub write_consumed: usize,
-    /// errno for a failed write phase (0 = ok). The read phase is skipped.
-    pub write_err: i32,
-    /// This thread just became a polling (Looper) thread: the supervisor makes
-    /// the binder fd pollable.
-    pub became_poll: bool,
-    /// Parked threads made runnable by this call (drained from the broker).
-    pub wakeups: Vec<Wakeup>,
-}
-
-enum ReadOutcome {
-    Data(Vec<u8>),
-    Blocked,
-    Again,
 }
 
 struct Txn {
@@ -256,7 +360,7 @@ struct Buffer {
     objects: Vec<Obj>,
     /// Captured fds still to install: (offset of the fd in the buffer, token).
     fd_fixups: Vec<(usize, u64)>,
-    /// Captured fds already installed (the broker's copies to drop on free).
+    /// Address of the security context in the buffer (0: none).
     secctx: u64,
 }
 
@@ -269,7 +373,9 @@ pub struct BinderDriver {
     deaths: HashMap<DeathId, Death>,
     next_proc: ProcId,
     next_id: u64,
-    wakeups: Vec<Wakeup>,
+    /// Threads woken during the current ioctl, in wake order.
+    woken: VecDeque<(ProcId, u32)>,
+    /// Processes whose poll readiness may have changed.
     poll_dirty: BTreeSet<ProcId>,
 }
 
@@ -297,7 +403,7 @@ impl BinderDriver {
             deaths: HashMap::new(),
             next_proc: 1,
             next_id: 1,
-            wakeups: Vec::new(),
+            woken: VecDeque::new(),
             poll_dirty: BTreeSet::new(),
         }
     }
@@ -311,7 +417,7 @@ impl BinderDriver {
     /// Open a binder device for a process with pid `ns_pid` (in Android's pid
     /// namespace) and `euid`; `context` is 0=binder, 1=hwbinder,
     /// 2=vndbinder.
-    pub fn open(&mut self, ns_pid: i32, euid: u32, context: u8) -> ProcId {
+    pub fn open(&mut self, ns_pid: i32, euid: u32, context: u8, nonblock: bool) -> ProcId {
         let id = self.next_proc;
         self.next_proc += 1;
         self.procs.insert(
@@ -320,6 +426,7 @@ impl BinderDriver {
                 ns_pid,
                 euid,
                 context: context.min(2),
+                nonblock,
                 free_async_space: -1, // set from the mapping on first use
                 ..Default::default()
             },
@@ -327,52 +434,20 @@ impl BinderDriver {
         id
     }
 
-    pub fn protocol_version(&self) -> i32 {
-        BINDER_CURRENT_PROTOCOL_VERSION
-    }
-
     pub fn proc_exists(&self, proc: ProcId) -> bool {
-        self.procs.get(&proc).map(|p| !p.dead).unwrap_or(false)
-    }
-
-    pub fn set_max_threads(&mut self, proc: ProcId, n: u32) {
-        if let Some(p) = self.procs.get_mut(&proc) {
-            p.max_threads = n;
-        }
-    }
-
-    pub fn enable_oneway_spam_detection(&mut self, proc: ProcId, enable: bool) {
-        if let Some(p) = self.procs.get_mut(&proc) {
-            p.oneway_spam_detection = enable;
-        }
-    }
-
-    /// Drain the parked threads that became runnable.
-    pub fn take_wakeups(&mut self) -> Vec<Wakeup> {
-        std::mem::take(&mut self.wakeups)
-    }
-
-    /// Drain the processes whose poll readiness may have changed.
-    pub fn take_poll_dirty(&mut self) -> Vec<ProcId> {
-        std::mem::take(&mut self.poll_dirty).into_iter().collect()
+        self.procs.contains_key(&proc)
     }
 
     /// `BINDER_SET_CONTEXT_MGR(_EXT)`. `flat` is the optional flat_binder_object
-    /// (EXT form); pass `None` for the plain form. Returns a negative errno.
-    pub fn set_context_mgr(
-        &mut self,
-        proc: ProcId,
-        flat: Option<FlatBinderObject>,
-    ) -> Result<(), i32> {
-        let (ctx, euid) = {
-            let p = self.procs.get(&proc).ok_or(-libc::EINVAL)?;
-            (p.context as usize, p.euid)
-        };
+    /// (EXT form); pass `None` for the plain form.
+    fn set_context_mgr(&mut self, proc: ProcId, flat: Option<FlatBinderObject>) -> i32 {
+        let p = &self.procs[&proc];
+        let (ctx, euid) = (p.context as usize, p.euid);
         if self.contexts[ctx].mgr_node.is_some() {
-            return Err(-libc::EBUSY);
+            return libc::EBUSY;
         }
         match self.contexts[ctx].mgr_uid {
-            Some(want) if want != euid => return Err(-libc::EPERM),
+            Some(want) if want != euid => return libc::EPERM,
             Some(_) => {}
             None => self.contexts[ctx].mgr_uid = Some(euid),
         }
@@ -387,7 +462,7 @@ impl BinderDriver {
         n.has_strong_ref = true;
         n.has_weak_ref = true;
         self.contexts[ctx].mgr_node = Some(nid);
-        Ok(())
+        0
     }
 
     fn get_or_new_node(&mut self, proc: ProcId, ptr: u64, cookie: u64, flags: u32) -> NodeId {
@@ -433,11 +508,7 @@ impl BinderDriver {
                 looper_need_return: true,
                 return_error: BR_OK,
                 reply_error: BR_OK,
-                ee: BinderExtendedError {
-                    id: 0,
-                    command: BR_OK,
-                    param: 0,
-                },
+                ee: NO_EXTENDED_ERROR,
                 ..Default::default()
             })
     }
@@ -452,46 +523,42 @@ impl BinderDriver {
         t.process_todo || t.looper_need_return || (do_proc_work && !p.todo.is_empty())
     }
 
-    /// Wake a parked thread so the syscall layer re-runs its read.
+    /// Wake a blocked thread: its read runs again before the current ioctl
+    /// returns (see `settle`).
     fn wake_thread(&mut self, proc: ProcId, tid: u32) {
-        if let Some(p) = self.procs.get_mut(&proc)
-            && let Some(t) = p.threads.get_mut(&tid)
-            && t.parked
+        if let Some(t) = self
+            .procs
+            .get_mut(&proc)
+            .and_then(|p| p.threads.get_mut(&tid))
+            && let Wait::Blocked { read, .. } = t.wait
         {
-            t.parked = false;
-            p.waiting_threads.retain(|&x| x != tid);
-            self.wakeups.push(Wakeup { proc, tid });
+            t.wait = Wait::Woken(read);
+            self.woken.push_back((proc, tid));
         }
         self.poll_dirty.insert(proc);
     }
 
-    /// A thread whose read blocked won't wait after all (the syscall layer
-    /// failed the ioctl): undo its parking, so no work is routed to a thread
-    /// that isn't reading. Work already queued on it stays for its next read.
-    pub fn cancel_wait(&mut self, proc: ProcId, tid: u32) {
-        if let Some(p) = self.procs.get_mut(&proc)
-            && let Some(t) = p.threads.get_mut(&tid)
-        {
-            t.parked = false;
-            t.looper &= !LOOPER_WAITING;
-            p.waiting_threads.retain(|&x| x != tid);
-        }
-    }
-
-    /// `binder_select_thread_ilocked`: pop the first thread waiting for
-    /// process work.
-    fn select_thread(&mut self, proc: ProcId) -> Option<u32> {
-        let p = self.procs.get_mut(&proc)?;
-        while let Some(tid) = p.waiting_threads.pop_front() {
-            if p.threads.get(&tid).map(|t| t.parked).unwrap_or(false) {
-                return Some(tid);
-            }
-        }
-        None
+    /// `binder_select_thread_ilocked`: the thread that has waited longest
+    /// for process work.
+    fn select_thread(&self, proc: ProcId) -> Option<u32> {
+        self.procs
+            .get(&proc)?
+            .threads
+            .iter()
+            .filter_map(|(&tid, t)| match t.wait {
+                Wait::Blocked {
+                    proc_work: true,
+                    since,
+                    ..
+                } => Some((since, tid)),
+                _ => None,
+            })
+            .min()
+            .map(|(_, tid)| tid)
     }
 
     /// `binder_wakeup_proc_ilocked`: wake one waiting thread, else the poll
-    /// threads (the supervisor re-evaluates the poll eventfd).
+    /// threads.
     fn wakeup_proc(&mut self, proc: ProcId) {
         if let Some(tid) = self.select_thread(proc) {
             self.wake_thread(proc, tid);
@@ -537,7 +604,7 @@ impl BinderDriver {
     }
 
     /// Would a poll thread of `proc` see work now (`binder_poll`)?
-    pub fn proc_pollable(&self, proc: ProcId) -> bool {
+    fn proc_pollable(&self, proc: ProcId) -> bool {
         let Some(p) = self.procs.get(&proc) else {
             return false;
         };
@@ -815,63 +882,296 @@ impl BinderDriver {
         }
     }
 
-    // ---- top-level BINDER_WRITE_READ ----------------------------------------
+    // ---- ioctls and the read lifecycle -----------------------------------------
 
-    /// One `BINDER_WRITE_READ`: `write` is the unconsumed part of the write
-    /// buffer, `read_size` the free space in the read buffer.
-    pub fn write_read(
+    /// Serve binder ioctl `cmd` from thread `tid` of `proc` (`binder_ioctl`)
+    /// and answer `call`: now, or for a blocking read once there is work.
+    /// Threads it wakes are served before it returns.
+    pub fn ioctl(&mut self, proc: ProcId, tid: u32, cmd: u32, call: Call, us: &mut dyn Userspace) {
+        if !self.proc_exists(proc) {
+            us.answer(call, libc::EINVAL);
+            return;
+        }
+        // A thread runs one syscall at a time, so any wait it was in is over
+        // (a signal interrupted it, and this may be its restart).
+        let t = self.thread_mut(proc, tid);
+        if let Wait::Blocked { .. } = std::mem::take(&mut t.wait) {
+            tlog!("proc={proc} tid={tid} wait abandoned");
+        }
+        if cmd == BINDER_WRITE_READ {
+            self.write_read(proc, tid, call, us);
+        } else {
+            let errno = self.other_ioctl(proc, tid, cmd, call.arg, us);
+            self.finish(proc, tid, call, errno, us);
+        }
+        self.settle(us);
+    }
+
+    /// The ioctls other than `BINDER_WRITE_READ`. Returns an errno.
+    fn other_ioctl(
         &mut self,
         proc: ProcId,
         tid: u32,
-        write: &[u8],
-        read_size: usize,
-        non_block: bool,
-        mem: &mut dyn Mem,
-    ) -> WriteRead {
-        let mut res = WriteRead::default();
-        if !self.procs.contains_key(&proc) {
-            res.write_err = libc::EINVAL;
-            return res;
+        cmd: u32,
+        arg: u64,
+        us: &mut dyn Userspace,
+    ) -> i32 {
+        fn get<T: Copy>(us: &mut dyn Userspace, proc: ProcId, arg: u64) -> Option<T> {
+            us.read(proc, arg, size_of::<T>())
+                .and_then(|b| read_pod(&b, 0))
         }
-        self.thread_mut(proc, tid);
-        if !write.is_empty() {
-            let enter_only = read_size == 0;
-            let (consumed, err) = self.thread_write(proc, tid, write, mem);
-            res.write_consumed = consumed;
+        fn put<T: Copy>(us: &mut dyn Userspace, proc: ProcId, arg: u64, v: &T) -> i32 {
+            if us.write(proc, arg, pod_bytes(v)) {
+                0
+            } else {
+                libc::EFAULT
+            }
+        }
+        let p = self.procs.get_mut(&proc).unwrap();
+        match cmd {
+            BINDER_VERSION => {
+                let v = BinderVersion {
+                    protocol_version: BINDER_CURRENT_PROTOCOL_VERSION,
+                };
+                put(us, proc, arg, &v)
+            }
+            BINDER_SET_MAX_THREADS => match get::<u32>(us, proc, arg) {
+                Some(n) => {
+                    p.max_threads = n;
+                    0
+                }
+                None => libc::EFAULT,
+            },
+            BINDER_ENABLE_ONEWAY_SPAM_DETECTION => match get::<u32>(us, proc, arg) {
+                Some(on) => {
+                    p.oneway_spam_detection = on != 0;
+                    0
+                }
+                None => libc::EFAULT,
+            },
+            BINDER_SET_CONTEXT_MGR => self.set_context_mgr(proc, None),
+            BINDER_SET_CONTEXT_MGR_EXT => match get::<FlatBinderObject>(us, proc, arg) {
+                Some(f) => self.set_context_mgr(proc, Some(f)),
+                None => libc::EFAULT,
+            },
+            BINDER_THREAD_EXIT => {
+                self.thread_exit(proc, tid);
+                0
+            }
+            BINDER_GET_EXTENDED_ERROR => {
+                let t = self.thread_mut(proc, tid);
+                let ee = std::mem::replace(&mut t.ee, NO_EXTENDED_ERROR);
+                put(us, proc, arg, &ee)
+            }
+            BINDER_GET_NODE_DEBUG_INFO => match get::<BinderNodeDebugInfo>(us, proc, arg) {
+                Some(info) => put(us, proc, arg, &self.node_debug_info(proc, info.ptr)),
+                None => libc::EFAULT,
+            },
+            BINDER_GET_NODE_INFO_FOR_REF => match get::<BinderNodeInfoForRef>(us, proc, arg) {
+                Some(info) => match self.node_info_for_ref(proc, info) {
+                    Ok(out) => put(us, proc, arg, &out),
+                    Err(e) => e,
+                },
+                None => libc::EFAULT,
+            },
+            // Freezing is unsupported: Android then disables its app freezer.
+            _ => libc::EINVAL,
+        }
+    }
+
+    /// `binder_ioctl_write_read`: the write phase, then the read phase.
+    fn write_read(&mut self, proc: ProcId, tid: u32, call: Call, us: &mut dyn Userspace) {
+        let Some(mut bwr) = us
+            .read(proc, call.arg, size_of::<BinderWriteRead>())
+            .and_then(|b| read_pod::<BinderWriteRead>(&b, 0))
+        else {
+            self.finish(proc, tid, call, libc::EFAULT, us);
+            return;
+        };
+        let read_avail = bwr.read_size.saturating_sub(bwr.read_consumed);
+        if bwr.write_size > bwr.write_consumed {
+            let len = (bwr.write_size - bwr.write_consumed) as usize;
+            if len > MAX_WRITE {
+                self.finish(proc, tid, call, libc::EINVAL, us);
+                return;
+            }
+            let Some(write) = bwr
+                .write_buffer
+                .checked_add(bwr.write_consumed)
+                .and_then(|a| us.read(proc, a, len))
+            else {
+                self.finish(proc, tid, call, libc::EFAULT, us);
+                return;
+            };
+            let (consumed, err) = self.thread_write(proc, tid, &write, us);
+            bwr.write_consumed += consumed as u64;
             if err != 0 {
-                res.write_err = err;
-                self.ioctl_done(proc, tid);
-                res.wakeups = self.take_wakeups();
-                return res;
+                let errno = if put_bwr(proc, call, &bwr, us) {
+                    err
+                } else {
+                    libc::EFAULT
+                };
+                self.finish(proc, tid, call, errno, us);
+                return;
             }
             // A write-only BC_ENTER_LOOPER is IPCThreadState::setupPolling():
             // this thread will epoll the binder fd (kernel: binder_poll marks
             // it BINDER_LOOPER_STATE_POLL).
-            if enter_only && has_cmd(write, BC_ENTER_LOOPER) {
+            if read_avail == 0 && has_cmd(&write, BC_ENTER_LOOPER) {
                 let t = self.thread_mut(proc, tid);
                 if t.looper & LOOPER_POLL == 0 {
                     t.looper |= LOOPER_POLL;
-                    res.became_poll = true;
+                    us.make_pollable(proc, call);
                 }
                 self.poll_dirty.insert(proc);
             }
         }
-        if read_size > 0 {
-            match self.thread_read(proc, tid, read_size, non_block, mem) {
-                ReadOutcome::Data(d) => res.read = d,
-                ReadOutcome::Blocked => res.blocked = true,
-                ReadOutcome::Again => res.eagain = true,
-            }
+        if read_avail > 0 {
+            let nonblock = self.procs[&proc].nonblock;
+            self.serve_read(proc, tid, Read { call, bwr }, nonblock, us);
+        } else {
+            let errno = if put_bwr(proc, call, &bwr, us) {
+                0
+            } else {
+                libc::EFAULT
+            };
+            self.finish(proc, tid, call, errno, us);
         }
-        if !res.blocked {
-            self.ioctl_done(proc, tid);
-        }
-        res.wakeups = self.take_wakeups();
-        res
     }
 
-    /// End of `binder_ioctl` for this thread.
-    pub fn ioctl_done(&mut self, proc: ProcId, tid: u32) {
+    /// The read phase: deliver what there is to `tid`, or block it.
+    fn serve_read(
+        &mut self,
+        proc: ProcId,
+        tid: u32,
+        read: Read,
+        nonblock: bool,
+        us: &mut dyn Userspace,
+    ) {
+        let avail = read.bwr.read_size.saturating_sub(read.bwr.read_consumed) as usize;
+        match self.prepare_read(proc, tid, avail, nonblock, read.call, us) {
+            Prepared::Ready(d) => self.deliver(proc, tid, read, d, us),
+            Prepared::Blocked { proc_work } => {
+                // Record the write's progress first, so a restarted ioctl never
+                // replays it. A thread waits only once that has worked.
+                if !put_bwr(proc, read.call, &read.bwr, us) {
+                    self.finish(proc, tid, read.call, libc::EFAULT, us);
+                    return;
+                }
+                let since = self.id();
+                self.thread_mut(proc, tid).wait = Wait::Blocked {
+                    read,
+                    proc_work,
+                    since,
+                };
+            }
+            Prepared::Again => {
+                let errno = if put_bwr(proc, read.call, &read.bwr, us) {
+                    libc::EAGAIN
+                } else {
+                    libc::EFAULT
+                };
+                self.finish(proc, tid, read.call, errno, us);
+            }
+            Prepared::Interrupted(d) => {
+                // The restarted ioctl must not replay the write.
+                put_bwr(proc, read.call, &read.bwr, us);
+                self.rollback(proc, tid, d);
+                self.end_ioctl(proc, tid);
+            }
+        }
+        // Process work this read left (it was rolled back, or the buffer
+        // was full) is for another waiting thread, not for this one to come
+        // back for.
+        if !self.procs[&proc].todo.is_empty() {
+            self.wakeup_proc(proc);
+        }
+    }
+
+    /// Copy a prepared read out and answer its call. The delivery is
+    /// committed only if the thread got it, and rolled back otherwise.
+    fn deliver(&mut self, proc: ProcId, tid: u32, read: Read, d: Delivery, us: &mut dyn Userspace) {
+        let copied = read
+            .bwr
+            .read_buffer
+            .checked_add(read.bwr.read_consumed)
+            .is_some_and(|at| us.write(proc, at, &d.bytes));
+        if !copied {
+            // Like binder_ioctl_write_read, still report the write's progress.
+            put_bwr(proc, read.call, &read.bwr, us);
+            self.rollback(proc, tid, d);
+            self.finish(proc, tid, read.call, libc::EFAULT, us);
+            return;
+        }
+        let mut bwr = read.bwr;
+        bwr.read_consumed += d.bytes.len() as u64;
+        if !put_bwr(proc, read.call, &bwr, us) {
+            self.rollback(proc, tid, d);
+            self.finish(proc, tid, read.call, libc::EFAULT, us);
+        } else if self.finish(proc, tid, read.call, 0, us) {
+            self.commit(proc, tid, d);
+        } else {
+            // Interrupted: the restarted ioctl finds its bwr as it was after
+            // the write, and reads the same work again.
+            put_bwr(proc, read.call, &read.bwr, us);
+            self.rollback(proc, tid, d);
+        }
+    }
+
+    /// The reader has the delivery: apply what reading it means.
+    fn commit(&mut self, proc: ProcId, tid: u32, d: Delivery) {
+        for Taken { work, .. } in d.taken {
+            match work {
+                Work::ReturnError => self.thread_mut(proc, tid).return_error = BR_OK,
+                Work::ReplyError => self.thread_mut(proc, tid).reply_error = BR_OK,
+                Work::TransactionComplete | Work::OnewaySpamSuspect => {}
+                Work::Node(nid) => self.apply_node_work(nid),
+                Work::Death(death) => self.commit_death(proc, death),
+                Work::Transaction(txid) => self.commit_transaction(proc, tid, txid),
+            }
+        }
+        if d.spawn_looper {
+            self.procs.get_mut(&proc).unwrap().requested_threads += 1;
+        }
+    }
+
+    /// The reader never got the delivery: put its work back at the front of
+    /// the lists it came from.
+    fn rollback(&mut self, proc: ProcId, tid: u32, d: Delivery) {
+        tlog!(
+            "proc={proc} tid={tid} read rolled back: {} items",
+            d.taken.len()
+        );
+        let p = self.procs.get_mut(&proc).unwrap();
+        for Taken { work, from_proc } in d.taken.into_iter().rev() {
+            if from_proc {
+                p.todo.push_front(work);
+            } else {
+                p.threads.get_mut(&tid).unwrap().todo.push_front(work);
+            }
+        }
+        // Restore the flag the read cleared, keeping it set if work arrived
+        // for the thread meanwhile.
+        let t = p.threads.get_mut(&tid).unwrap();
+        t.process_todo = (d.process_todo || t.process_todo) && !t.todo.is_empty();
+        self.poll_dirty.insert(proc);
+    }
+
+    /// End `tid`'s ioctl and answer its call (the exit of `binder_ioctl`).
+    /// False if the call is gone.
+    fn finish(
+        &mut self,
+        proc: ProcId,
+        tid: u32,
+        call: Call,
+        errno: i32,
+        us: &mut dyn Userspace,
+    ) -> bool {
+        self.end_ioctl(proc, tid);
+        us.answer(call, errno)
+    }
+
+    fn end_ioctl(&mut self, proc: ProcId, tid: u32) {
         if let Some(t) = self
             .procs
             .get_mut(&proc)
@@ -881,13 +1181,37 @@ impl BinderDriver {
         }
     }
 
+    /// Serve the reads of the threads woken during this ioctl, then publish
+    /// poll readiness.
+    fn settle(&mut self, us: &mut dyn Userspace) {
+        while let Some((proc, tid)) = self.woken.pop_front() {
+            let Some(t) = self
+                .procs
+                .get_mut(&proc)
+                .and_then(|p| p.threads.get_mut(&tid))
+            else {
+                continue;
+            };
+            let Wait::Woken(read) = t.wait else {
+                continue;
+            };
+            t.wait = Wait::None;
+            self.serve_read(proc, tid, read, false, us);
+        }
+        for proc in std::mem::take(&mut self.poll_dirty) {
+            if self.procs.contains_key(&proc) {
+                us.set_poll_ready(proc, self.proc_pollable(proc));
+            }
+        }
+    }
+
     /// `binder_thread_write`. Returns (bytes consumed, errno).
     fn thread_write(
         &mut self,
         proc: ProcId,
         tid: u32,
         buf: &[u8],
-        mem: &mut dyn Mem,
+        us: &mut dyn Userspace,
     ) -> (usize, i32) {
         let mut off = 0usize;
         while off < buf.len() {
@@ -967,16 +1291,16 @@ impl BinderDriver {
                 BC_ATTEMPT_ACQUIRE | BC_ACQUIRE_RESULT => return (start, libc::EINVAL),
                 BC_FREE_BUFFER => {
                     let ptr: u64 = arg!(u64);
-                    self.free_buffer_cmd(proc, ptr, mem);
+                    self.free_buffer_cmd(proc, ptr, us);
                 }
                 BC_TRANSACTION_SG | BC_REPLY_SG => {
                     let td: BinderTransactionData = arg!(BinderTransactionData);
                     let extra: u64 = arg!(u64);
-                    self.transaction(proc, tid, &td, cmd == BC_REPLY_SG, extra, mem);
+                    self.transaction(proc, tid, &td, cmd == BC_REPLY_SG, extra, us);
                 }
                 BC_TRANSACTION | BC_REPLY => {
                     let td: BinderTransactionData = arg!(BinderTransactionData);
-                    self.transaction(proc, tid, &td, cmd == BC_REPLY, 0, mem);
+                    self.transaction(proc, tid, &td, cmd == BC_REPLY, 0, us);
                 }
                 BC_REGISTER_LOOPER => {
                     let p = self.procs.get_mut(&proc).unwrap();
@@ -1065,7 +1389,7 @@ impl BinderDriver {
         td: &BinderTransactionData,
         reply: bool,
         extra: u64,
-        mem: &mut dyn Mem,
+        us: &mut dyn Userspace,
     ) {
         let oneway = td.flags & TF_ONE_WAY != 0;
         tlog!(
@@ -1144,7 +1468,7 @@ impl BinderDriver {
                 }
             }
         }
-        if self.procs.get(&target_proc).map(|p| p.dead).unwrap_or(true) {
+        if !self.procs.contains_key(&target_proc) {
             return self.txn_error(proc, tid, BR_DEAD_REPLY, 0, in_reply_to);
         }
 
@@ -1163,7 +1487,7 @@ impl BinderDriver {
             target_node,
             in_reply_to,
             is_async,
-            mem,
+            us,
         );
         let (addr, spam) = match built {
             Ok(v) => v,
@@ -1207,14 +1531,9 @@ impl BinderDriver {
             self.enqueue_thread_work(proc, tid, tc);
             let ft = target_thread.unwrap();
             let irt = in_reply_to.unwrap();
-            if self.procs[&target_proc]
-                .threads
-                .get(&ft)
-                .map(|t| t.is_dead)
-                .unwrap_or(true)
-            {
+            if !self.procs[&target_proc].threads.contains_key(&ft) {
                 self.dequeue_tc(proc, tid);
-                self.abort_txn(txid, mem);
+                self.abort_txn(txid, us);
                 return self.txn_error(proc, tid, BR_DEAD_REPLY, 0, in_reply_to);
             }
             self.pop_transaction(target_proc, ft, irt);
@@ -1229,14 +1548,14 @@ impl BinderDriver {
                 // binder_pop_transaction_ilocked(thread, t)
                 self.thread_mut(proc, tid).transaction_stack = cur;
                 self.dequeue_tc(proc, tid);
-                self.abort_txn(txid, mem);
+                self.abort_txn(txid, us);
                 self.txn_error(proc, tid, e, 0, None);
             }
         } else {
             match self.proc_transaction(txid, target_proc, None) {
                 Ok(()) => self.enqueue_thread_work(proc, tid, tc),
                 Err(e) => {
-                    self.abort_txn(txid, mem);
+                    self.abort_txn(txid, us);
                     self.txn_error(proc, tid, e, 0, None);
                 }
             }
@@ -1256,11 +1575,11 @@ impl BinderDriver {
     }
 
     /// Undo a transaction that was built but never queued.
-    fn abort_txn(&mut self, txid: TxnId, mem: &mut dyn Mem) {
+    fn abort_txn(&mut self, txid: TxnId, us: &mut dyn Userspace) {
         if let Some(t) = self.txns.remove(&txid)
             && let Some(key) = t.buffer
         {
-            self.release_buffer(key, mem);
+            self.release_buffer(key, us);
         }
     }
 
@@ -1288,16 +1607,8 @@ impl BinderDriver {
                 n.has_async_transaction = true;
             }
         }
-        let dead = self.procs.get(&target_proc).map(|p| p.dead).unwrap_or(true)
-            || target_thread
-                .map(|t| {
-                    self.procs[&target_proc]
-                        .threads
-                        .get(&t)
-                        .map(|t| t.is_dead)
-                        .unwrap_or(true)
-                })
-                .unwrap_or(false);
+        let dead = !self.procs.contains_key(&target_proc)
+            || target_thread.is_some_and(|t| !self.procs[&target_proc].threads.contains_key(&t));
         if dead {
             if oneway
                 && !pending_async
@@ -1403,7 +1714,7 @@ impl BinderDriver {
         target_node: Option<NodeId>,
         in_reply_to: Option<TxnId>,
         is_async: bool,
-        mem: &mut dyn Mem,
+        us: &mut dyn Userspace,
     ) -> Result<(u64, bool), (u32, i32)> {
         let fail = (BR_FAILED_REPLY, -libc::EINVAL);
         let data_size = usize::try_from(td.data_size).map_err(|_| fail)?;
@@ -1427,7 +1738,7 @@ impl BinderDriver {
         }
         .max(8);
         // Bound everything by the target's mapped region before reading.
-        let space = mem.recv_size(target_proc);
+        let space = us.recv_size(target_proc);
         if total > space {
             return Err((BR_FAILED_REPLY, -libc::ENOSPC));
         }
@@ -1440,13 +1751,13 @@ impl BinderDriver {
                 return Err((BR_FAILED_REPLY, -libc::ENOSPC));
             }
         }
-        let mut data = mem
+        let mut data = us
             .read(proc, td.data_buffer, data_size)
             .ok_or((BR_FAILED_REPLY, -libc::EFAULT))?;
-        let offsets = mem
+        let offsets = us
             .read(proc, td.data_offsets, offsets_size)
             .ok_or((BR_FAILED_REPLY, -libc::EFAULT))?;
-        let addr = mem
+        let addr = us
             .alloc_recv(target_proc, total, is_async)
             .ok_or((BR_FAILED_REPLY, -libc::ENOSPC))?;
         let spam = {
@@ -1481,7 +1792,7 @@ impl BinderDriver {
             extra,
             key,
             in_reply_to,
-            mem,
+            us,
         );
         let mut out = match r {
             Ok(sg) => {
@@ -1494,7 +1805,7 @@ impl BinderDriver {
             Err(e) => {
                 // The caller drops the target-node ref it took.
                 self.buffers.get_mut(&key).unwrap().target_node = None;
-                self.release_buffer(key, mem);
+                self.release_buffer(key, us);
                 return Err(e);
             }
         };
@@ -1502,7 +1813,7 @@ impl BinderDriver {
             out[sg_end..sg_end + SECCTX.len()].copy_from_slice(SECCTX);
             self.buffers.get_mut(&key).unwrap().secctx = addr + sg_end as u64;
         }
-        mem.write_recv(target_proc, addr, &out);
+        us.write_recv(target_proc, addr, &out);
         Ok((addr, spam))
     }
 
@@ -1520,7 +1831,7 @@ impl BinderDriver {
         extra: usize,
         key: (ProcId, u64),
         in_reply_to: Option<TxnId>,
-        mem: &mut dyn Mem,
+        us: &mut dyn Userspace,
     ) -> Result<Vec<u8>, (u32, i32)> {
         let fail = (BR_FAILED_REPLY, -libc::EINVAL);
         let (target_proc, addr) = key;
@@ -1627,7 +1938,7 @@ impl BinderDriver {
                     if !allow_fds {
                         return Err((BR_FAILED_REPLY, -libc::EPERM));
                     }
-                    let tok = mem
+                    let tok = us
                         .capture_fd(proc, fdo.fd_or_pad as u32)
                         .ok_or((BR_FAILED_REPLY, -libc::EBADF))?;
                     self.buffers
@@ -1646,7 +1957,7 @@ impl BinderDriver {
                     if len > extra - sg_used {
                         return Err(fail);
                     }
-                    let payload = mem
+                    let payload = us
                         .read(proc, bbo.buffer, len)
                         .ok_or((BR_FAILED_REPLY, -libc::EFAULT))?;
                     let at = sg_used;
@@ -1683,7 +1994,7 @@ impl BinderDriver {
                     for k in 0..n {
                         let at = psg + po + k * 4;
                         let fd = u32::from_le_bytes(sg[at..at + 4].try_into().unwrap());
-                        let tok = mem
+                        let tok = us
                             .capture_fd(proc, fd)
                             .ok_or((BR_FAILED_REPLY, -libc::EBADF))?;
                         self.buffers
@@ -1708,7 +2019,7 @@ impl BinderDriver {
     // ---- buffers ------------------------------------------------------------
 
     /// `BC_FREE_BUFFER`.
-    fn free_buffer_cmd(&mut self, proc: ProcId, ptr: u64, mem: &mut dyn Mem) {
+    fn free_buffer_cmd(&mut self, proc: ProcId, ptr: u64, us: &mut dyn Userspace) {
         let key = (proc, ptr);
         let Some(b) = self.buffers.get(&key) else {
             tlog!("proc={proc} BC_FREE_BUFFER {ptr:#x} no match");
@@ -1732,11 +2043,11 @@ impl BinderDriver {
                 Some(next) => self.enqueue_proc_work(proc, Work::Transaction(next)),
             }
         }
-        self.release_buffer(key, mem);
+        self.release_buffer(key, us);
     }
 
     /// `binder_transaction_buffer_release` + `binder_alloc_free_buf`.
-    fn release_buffer(&mut self, key: (ProcId, u64), mem: &mut dyn Mem) {
+    fn release_buffer(&mut self, key: (ProcId, u64), us: &mut dyn Userspace) {
         let Some(b) = self.buffers.remove(&key) else {
             return;
         };
@@ -1758,14 +2069,14 @@ impl BinderDriver {
             }
         }
         for (_, tok) in b.fd_fixups {
-            mem.drop_fd(tok);
+            us.drop_fd(tok);
         }
         if b.is_async
             && let Some(p) = self.procs.get_mut(&proc)
         {
             p.free_async_space += b.total as i64;
         }
-        mem.free_recv(proc, addr);
+        us.free_recv(proc, addr);
     }
 
     // ---- death notifications ------------------------------------------------
@@ -1864,16 +2175,15 @@ impl BinderDriver {
 
     // ---- thread / process release -------------------------------------------
 
-    /// `binder_thread_release` (BINDER_THREAD_EXIT, or the thread vanished).
-    pub fn thread_exit(&mut self, proc: ProcId, tid: u32) {
-        let Some(p) = self.procs.get_mut(&proc) else {
+    /// `binder_thread_release` (BINDER_THREAD_EXIT, or the process is going).
+    fn thread_exit(&mut self, proc: ProcId, tid: u32) {
+        let Some(t) = self
+            .procs
+            .get_mut(&proc)
+            .and_then(|p| p.threads.remove(&tid))
+        else {
             return;
         };
-        let Some(mut t) = p.threads.remove(&tid) else {
-            return;
-        };
-        p.waiting_threads.retain(|&x| x != tid);
-        t.is_dead = true;
         let mut send_reply = None;
         let mut cur = t.transaction_stack;
         if let Some(c) = cur
@@ -1954,15 +2264,16 @@ impl BinderDriver {
     }
 
     /// The process closed its binder fd or died (`binder_deferred_release`).
-    /// Returns the parked threads made runnable.
-    pub fn release_proc(&mut self, proc: ProcId, mem: &mut dyn Mem) -> Vec<Wakeup> {
-        let Some(p) = self.procs.get_mut(&proc) else {
-            return self.take_wakeups();
+    /// Its waiting threads get `EBADF`; threads it wakes elsewhere are served.
+    pub fn release_proc(&mut self, proc: ProcId, us: &mut dyn Userspace) {
+        let Some(p) = self.procs.get(&proc) else {
+            return;
         };
-        if p.dead {
-            return self.take_wakeups();
+        for t in p.threads.values() {
+            if let Wait::Blocked { read, .. } = t.wait {
+                us.answer(read.call, libc::EBADF);
+            }
         }
-        p.dead = true;
         let ctx = p.context as usize;
         if let Some(n) = self.contexts[ctx].mgr_node
             && self
@@ -2048,9 +2359,9 @@ impl BinderDriver {
             // these buffers held died with the process's nodes and handles.
             if let Some(b) = self.buffers.remove(&k) {
                 for (_, tok) in b.fd_fixups {
-                    mem.drop_fd(tok);
+                    us.drop_fd(tok);
                 }
-                mem.free_recv(k.0, k.1);
+                us.free_recv(k.0, k.1);
             }
         }
         // Transactions still pointing at this proc as the target.
@@ -2068,26 +2379,12 @@ impl BinderDriver {
             }
         }
         self.procs.remove(&proc);
-        self.poll_dirty.remove(&proc);
-        let mut w = self.take_wakeups();
-        w.retain(|x| x.proc != proc);
-        w
+        self.settle(us);
     }
 
     // ---- small ioctls ---------------------------------------------------------
 
-    pub fn get_extended_error(&mut self, proc: ProcId, tid: u32) -> BinderExtendedError {
-        let t = self.thread_mut(proc, tid);
-        let ee = t.ee;
-        t.ee = BinderExtendedError {
-            id: 0,
-            command: BR_OK,
-            param: 0,
-        };
-        ee
-    }
-
-    pub fn node_debug_info(&self, proc: ProcId, after_ptr: u64) -> BinderNodeDebugInfo {
+    fn node_debug_info(&self, proc: ProcId, after_ptr: u64) -> BinderNodeDebugInfo {
         let mut best: Option<&Node> = None;
         if let Some(p) = self.procs.get(&proc) {
             for (&ptr, nid) in p.nodes.iter() {
@@ -2111,7 +2408,7 @@ impl BinderDriver {
     }
 
     /// `BINDER_GET_NODE_INFO_FOR_REF` (context manager only).
-    pub fn node_info_for_ref(
+    fn node_info_for_ref(
         &self,
         proc: ProcId,
         info: BinderNodeInfoForRef,
@@ -2122,18 +2419,18 @@ impl BinderDriver {
             || info.reserved2 != 0
             || info.reserved3 != 0
         {
-            return Err(-libc::EINVAL);
+            return Err(libc::EINVAL);
         }
-        let p = self.procs.get(&proc).ok_or(-libc::EINVAL)?;
+        let p = &self.procs[&proc];
         let mgr = self.contexts[p.context as usize]
             .mgr_node
-            .ok_or(-libc::EPERM)?;
+            .ok_or(libc::EPERM)?;
         if self.nodes.get(&mgr).and_then(|n| n.proc) != Some(proc) {
-            return Err(-libc::EPERM);
+            return Err(libc::EPERM);
         }
         let nid = self
             .ref_node(proc, info.handle, false)
-            .ok_or(-libc::EINVAL)?;
+            .ok_or(libc::EINVAL)?;
         let n = &self.nodes[&nid];
         Ok(BinderNodeInfoForRef {
             handle: info.handle,
@@ -2145,64 +2442,62 @@ impl BinderDriver {
 
     // ---- the read path ---------------------------------------------------------
 
-    /// `binder_thread_read`.
-    fn thread_read(
+    /// `binder_thread_read`, up to copying out: take work off the thread's
+    /// and (if it takes process work) the process's lists and render the
+    /// BR_* stream for `size` bytes. Work that renders nothing is consumed
+    /// here; the rest is committed or rolled back by the caller.
+    fn prepare_read(
         &mut self,
         proc: ProcId,
         tid: u32,
         size: usize,
-        non_block: bool,
-        mem: &mut dyn Mem,
-    ) -> ReadOutcome {
+        nonblock: bool,
+        call: Call,
+        us: &mut dyn Userspace,
+    ) -> Prepared {
+        let mut d = Delivery {
+            bytes: Vec::new(),
+            taken: Vec::new(),
+            process_todo: self.procs[&proc].threads[&tid].process_todo,
+            spawn_looper: false,
+        };
         if size < 4 {
-            return ReadOutcome::Data(Vec::new());
+            return Prepared::Ready(d);
         }
-        let mut out: Vec<u8> = Vec::with_capacity(size.min(512));
-        write_pod(&mut out, &BR_NOOP);
+        d.bytes.reserve(size.min(512));
+        write_pod(&mut d.bytes, &BR_NOOP);
         'retry: loop {
-            let (wait_for_proc_work, has_work) = {
+            let (proc_work, has_work) = {
                 let p = &self.procs[&proc];
                 let t = &p.threads[&tid];
                 let w = Self::available_for_proc_work(t);
                 (w, Self::has_work(p, t, w))
             };
             if !has_work {
-                if non_block {
-                    return ReadOutcome::Again;
-                }
-                let p = self.procs.get_mut(&proc).unwrap();
-                let t = p.threads.get_mut(&tid).unwrap();
-                t.parked = true;
-                t.looper |= LOOPER_WAITING;
-                if wait_for_proc_work && !p.waiting_threads.contains(&tid) {
-                    p.waiting_threads.push_back(tid);
-                }
-                return ReadOutcome::Blocked;
-            }
-            {
-                let p = self.procs.get_mut(&proc).unwrap();
-                p.waiting_threads.retain(|&x| x != tid);
-                let t = p.threads.get_mut(&tid).unwrap();
-                t.parked = false;
-                t.looper &= !LOOPER_WAITING;
+                debug_assert!(d.taken.is_empty());
+                return if nonblock {
+                    Prepared::Again
+                } else {
+                    Prepared::Blocked { proc_work }
+                };
             }
             loop {
-                let from_thread = !self.procs[&proc].threads[&tid].todo.is_empty();
-                if !from_thread && (self.procs[&proc].todo.is_empty() || !wait_for_proc_work) {
-                    if out.len() == 4 && !self.procs[&proc].threads[&tid].looper_need_return {
+                let from_proc = self.procs[&proc].threads[&tid].todo.is_empty();
+                if from_proc && (self.procs[&proc].todo.is_empty() || !proc_work) {
+                    if d.bytes.len() == 4 && !self.procs[&proc].threads[&tid].looper_need_return {
                         continue 'retry;
                     }
                     break 'retry;
                 }
-                if size - out.len() < MIN_READ_SPACE {
+                if size - d.bytes.len() < MIN_READ_SPACE {
                     break 'retry;
                 }
-                let w = {
+                let work = {
                     let p = self.procs.get_mut(&proc).unwrap();
-                    let w = if from_thread {
-                        p.threads.get_mut(&tid).unwrap().todo.pop_front()
-                    } else {
+                    let w = if from_proc {
                         p.todo.pop_front()
+                    } else {
+                        p.threads.get_mut(&tid).unwrap().todo.pop_front()
                     };
                     let t = p.threads.get_mut(&tid).unwrap();
                     if t.todo.is_empty() {
@@ -2211,148 +2506,232 @@ impl BinderDriver {
                     w.unwrap()
                 };
                 self.poll_dirty.insert(proc);
-                match w {
+                let taken = Taken { work, from_proc };
+                let out = &mut d.bytes;
+                match work {
                     Work::ReturnError => {
-                        let t = self.thread_mut(proc, tid);
-                        let cmd = std::mem::replace(&mut t.return_error, BR_OK);
-                        write_pod(&mut out, &cmd);
+                        write_pod(out, &self.procs[&proc].threads[&tid].return_error)
                     }
                     Work::ReplyError => {
-                        let t = self.thread_mut(proc, tid);
-                        let cmd = std::mem::replace(&mut t.reply_error, BR_OK);
-                        write_pod(&mut out, &cmd);
+                        write_pod(out, &self.procs[&proc].threads[&tid].reply_error)
                     }
-                    Work::TransactionComplete => write_pod(&mut out, &BR_TRANSACTION_COMPLETE),
-                    Work::OnewaySpamSuspect => write_pod(&mut out, &BR_ONEWAY_SPAM_SUSPECT),
-                    Work::Node(nid) => self.emit_node(nid, &mut out),
-                    Work::Death(d) => {
-                        let Some(death) = self.deaths.get(&d) else {
+                    Work::TransactionComplete => write_pod(out, &BR_TRANSACTION_COMPLETE),
+                    Work::OnewaySpamSuspect => write_pod(out, &BR_ONEWAY_SPAM_SUSPECT),
+                    Work::Node(nid) => {
+                        let Some(n) = self.nodes.get(&nid) else {
                             continue;
                         };
-                        let cookie = death.cookie;
-                        if death.kind == DeathKind::Clear {
-                            self.deaths.remove(&d);
-                            write_pod(&mut out, &BR_CLEAR_DEATH_NOTIFICATION_DONE);
-                            write_pod(&mut out, &cookie);
-                        } else {
-                            self.procs.get_mut(&proc).unwrap().delivered_death.push(d);
-                            write_pod(&mut out, &BR_DEAD_BINDER);
-                            write_pod(&mut out, &cookie);
+                        let ch = Self::node_changes(n);
+                        if !ch.reports() {
+                            self.apply_node_work(nid);
+                            continue;
+                        }
+                        for (cmd, report) in [
+                            (BR_INCREFS, ch.incref),
+                            (BR_ACQUIRE, ch.acquire),
+                            (BR_RELEASE, ch.release),
+                            (BR_DECREFS, ch.decref),
+                        ] {
+                            if report {
+                                write_pod(out, &cmd);
+                                write_pod(out, &n.ptr);
+                                write_pod(out, &n.cookie);
+                            }
+                        }
+                    }
+                    Work::Death(death) => {
+                        let Some(death) = self.deaths.get(&death) else {
+                            continue;
+                        };
+                        let dead_binder = death.kind != DeathKind::Clear;
+                        write_pod(
+                            out,
+                            &if dead_binder {
+                                BR_DEAD_BINDER
+                            } else {
+                                BR_CLEAR_DEATH_NOTIFICATION_DONE
+                            },
+                        );
+                        write_pod(out, &death.cookie);
+                        if dead_binder {
                             // DEAD_BINDER notifications can cause transactions.
+                            d.taken.push(taken);
                             break 'retry;
                         }
                     }
                     Work::Transaction(txid) => {
-                        if self.emit_transaction(proc, tid, txid, &mut out, mem) {
-                            break 'retry;
+                        match self.read_transaction(proc, tid, txid, call, d.taken.is_empty(), us) {
+                            TxnRead::Rendered(bytes) => {
+                                d.bytes.extend_from_slice(&bytes);
+                                d.taken.push(taken);
+                                break 'retry;
+                            }
+                            TxnRead::Dropped => continue,
+                            TxnRead::NotFirst => {
+                                self.put_back(proc, tid, taken);
+                                break 'retry;
+                            }
+                            TxnRead::Interrupted => {
+                                d.taken.push(taken);
+                                return Prepared::Interrupted(d);
+                            }
                         }
                     }
                 }
+                d.taken.push(taken);
             }
         }
         // Ask for another looper thread if none is idle.
         let p = &self.procs[&proc];
-        let t = &p.threads[&tid];
+        let looper = p.threads[&tid].looper & (LOOPER_REGISTERED | LOOPER_ENTERED) != 0;
+        let idle = p.threads.values().any(|t| {
+            matches!(
+                t.wait,
+                Wait::Blocked {
+                    proc_work: true,
+                    ..
+                }
+            )
+        });
         if p.requested_threads == 0
-            && p.waiting_threads.is_empty()
+            && !idle
             && p.requested_threads_started < p.max_threads
-            && t.looper & (LOOPER_REGISTERED | LOOPER_ENTERED) != 0
+            && looper
         {
-            self.procs.get_mut(&proc).unwrap().requested_threads += 1;
-            out[..4].copy_from_slice(&BR_SPAWN_LOOPER.to_le_bytes());
+            d.spawn_looper = true;
+            d.bytes[..4].copy_from_slice(&BR_SPAWN_LOOPER.to_le_bytes());
         }
-        ReadOutcome::Data(out)
+        Prepared::Ready(d)
     }
 
-    fn emit_node(&mut self, nid: NodeId, out: &mut Vec<u8>) {
+    /// Put a work item a read took back at the front of its list.
+    fn put_back(&mut self, proc: ProcId, tid: u32, taken: Taken) {
+        let p = self.procs.get_mut(&proc).unwrap();
+        if taken.from_proc {
+            p.todo.push_front(taken.work);
+        } else {
+            let t = p.threads.get_mut(&tid).unwrap();
+            t.todo.push_front(taken.work);
+            t.process_todo = true;
+        }
+    }
+
+    /// What a node's work item reports to its owner (BINDER_WORK_NODE in
+    /// `binder_thread_read`).
+    fn node_changes(n: &Node) -> NodeChanges {
+        let (strong, weak) = Self::node_wants(n);
+        NodeChanges {
+            incref: weak && !n.has_weak_ref,
+            acquire: strong && !n.has_strong_ref,
+            release: !strong && n.has_strong_ref,
+            decref: !weak && n.has_weak_ref,
+            free: !strong && !weak,
+        }
+    }
+
+    /// Apply a node's work item: the owner was told its changes.
+    fn apply_node_work(&mut self, nid: NodeId) {
         let Some(n) = self.nodes.get_mut(&nid) else {
             return;
         };
+        let ch = Self::node_changes(n);
         n.work_queued = false;
-        let (strong, weak) = Self::node_wants(n);
-        let had_weak = n.has_weak_ref;
-        let had_strong = n.has_strong_ref;
-        if weak && !had_weak {
+        if ch.incref {
             n.has_weak_ref = true;
             n.pending_weak = true;
             n.local_weak += 1;
         }
-        if strong && !had_strong {
+        if ch.acquire {
             n.has_strong_ref = true;
             n.pending_strong = true;
             n.local_strong += 1;
         }
-        if !strong && had_strong {
+        if ch.release {
             n.has_strong_ref = false;
         }
-        if !weak && had_weak {
+        if ch.decref {
             n.has_weak_ref = false;
         }
-        let (ptr, cookie) = (n.ptr, n.cookie);
-        if !weak && !strong {
+        if ch.free {
             self.free_node(nid);
-        }
-        let mut put = |cmd: u32| {
-            write_pod(out, &cmd);
-            write_pod(out, &ptr);
-            write_pod(out, &cookie);
-        };
-        if weak && !had_weak {
-            put(BR_INCREFS);
-        }
-        if strong && !had_strong {
-            put(BR_ACQUIRE);
-        }
-        if !strong && had_strong {
-            put(BR_RELEASE);
-        }
-        if !weak && had_weak {
-            put(BR_DECREFS);
         }
     }
 
-    /// Emit BR_TRANSACTION(_SEC_CTX) / BR_REPLY. Returns false if the
-    /// transaction was dropped (fd install failed) and reading continues.
-    fn emit_transaction(
+    /// A delivered death notification: a cleared one is done, a dead binder
+    /// waits for BC_DEAD_BINDER_DONE.
+    fn commit_death(&mut self, proc: ProcId, death: DeathId) {
+        if self.deaths[&death].kind == DeathKind::Clear {
+            self.deaths.remove(&death);
+        } else {
+            self.procs
+                .get_mut(&proc)
+                .unwrap()
+                .delivered_death
+                .push(death);
+        }
+    }
+
+    /// Render BR_TRANSACTION(_SEC_CTX) / BR_REPLY for a reader, installing
+    /// the buffer's fds into it first (`binder_apply_fd_fixups`). Fds that
+    /// can't be installed fail the transaction, which is only done as the
+    /// first item of a read, so it never reorders against work already taken.
+    fn read_transaction(
         &mut self,
         proc: ProcId,
         tid: u32,
         txid: TxnId,
-        out: &mut Vec<u8>,
-        mem: &mut dyn Mem,
-    ) -> bool {
+        call: Call,
+        first: bool,
+        us: &mut dyn Userspace,
+    ) -> TxnRead {
         let Some(t) = self.txns.get(&txid) else {
-            return false;
+            return TxnRead::Dropped;
         };
         let Some(key) = t.buffer else {
             self.free_txn(txid);
-            return false;
+            return TxnRead::Dropped;
         };
         let (code, flags, euid, from) = (t.code, t.flags, t.sender_euid, t.from);
-        // binder_apply_fd_fixups: install fds into the reader now.
-        let fixups = std::mem::take(&mut self.buffers.get_mut(&key).unwrap().fd_fixups);
-        let mut ok = true;
+        let fixups = self.buffers[&key].fd_fixups.clone();
+        let mut installed = 0;
+        let mut failure = None;
         for &(off, tok) in &fixups {
-            if ok {
-                match mem.install_fd(proc, tok) {
-                    Some(fd) => mem.write_recv(proc, key.1 + off as u64, &fd.to_le_bytes()),
-                    None => ok = false,
+            match us.install_fd(proc, call, tok) {
+                Ok(fd) => {
+                    us.write_recv(proc, key.1 + off as u64, &fd.to_le_bytes());
+                    installed += 1;
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    break;
                 }
             }
-            mem.drop_fd(tok);
         }
-        if !ok {
-            tlog!("proc={proc} fd fixups failed for txn {txid}");
-            if flags & TF_ONE_WAY == 0 && self.buffers[&key].target_node.is_some() {
-                self.send_failed_reply(txid, BR_FAILED_REPLY);
-            } else {
-                self.free_txn(txid);
+        // Installed fds are the reader's now.
+        for &(_, tok) in &fixups[..installed] {
+            us.drop_fd(tok);
+        }
+        self.buffers
+            .get_mut(&key)
+            .unwrap()
+            .fd_fixups
+            .drain(..installed);
+        match failure {
+            Some(InstallError::Interrupted) => return TxnRead::Interrupted,
+            Some(InstallError::Failed) if !first => return TxnRead::NotFirst,
+            Some(InstallError::Failed) => {
+                tlog!("proc={proc} fd fixups failed for txn {txid}");
+                if flags & TF_ONE_WAY == 0 && self.buffers[&key].target_node.is_some() {
+                    self.send_failed_reply(txid, BR_FAILED_REPLY);
+                } else {
+                    self.free_txn(txid);
+                }
+                self.release_buffer(key, us);
+                return TxnRead::Dropped;
             }
-            self.release_buffer(key, mem);
-            return false;
+            None => {}
         }
-        let b = self.buffers.get_mut(&key).unwrap();
-        b.allow_user_free = true;
+        let b = &self.buffers[&key];
         let mut td = BinderTransactionData::default();
         let cmd = match b.target_node {
             Some(n) => {
@@ -2378,20 +2757,31 @@ impl BinderDriver {
         td.offsets_size = b.offsets_size as u64;
         td.data_buffer = key.1;
         td.data_offsets = key.1 + align_up(b.data_size, 8) as u64;
-        write_pod(out, &cmd);
+        let mut out = Vec::new();
+        write_pod(&mut out, &cmd);
         if cmd == BR_TRANSACTION_SEC_CTX {
             write_pod(
-                out,
+                &mut out,
                 &BinderTransactionDataSecctx {
                     transaction_data: td,
                     secctx: b.secctx,
                 },
             );
         } else {
-            write_pod(out, &td);
+            write_pod(&mut out, &td);
         }
-        tlog!("emit proc={proc} tid={tid} txn={txid} cmd={cmd:#x} code={code:#x}");
-        if cmd != BR_REPLY && flags & TF_ONE_WAY == 0 {
+        tlog!("read proc={proc} tid={tid} txn={txid} cmd={cmd:#x} code={code:#x}");
+        TxnRead::Rendered(out)
+    }
+
+    /// The reader has a transaction: its buffer is the reader's to free, and
+    /// a synchronous call goes on the reader's stack until it replies.
+    fn commit_transaction(&mut self, proc: ProcId, tid: u32, txid: TxnId) {
+        let t = &self.txns[&txid];
+        let key = t.buffer.unwrap();
+        let b = self.buffers.get_mut(&key).unwrap();
+        b.allow_user_free = true;
+        if b.target_node.is_some() && t.flags & TF_ONE_WAY == 0 {
             let cur = self.procs[&proc].threads[&tid].transaction_stack;
             let tx = self.txns.get_mut(&txid).unwrap();
             tx.to_parent = cur;
@@ -2401,7 +2791,6 @@ impl BinderDriver {
         } else {
             self.free_txn(txid);
         }
-        true
     }
 
     // ---- introspection for tests ----------------------------------------------
@@ -2415,17 +2804,41 @@ impl BinderDriver {
             .map(|r| (r.strong, r.weak))
     }
 
-    /// Internal consistency checks (used by tests and the fuzzer).
+    /// Internal consistency checks between ioctls (used by tests and the
+    /// fuzzer).
     pub fn check_invariants(&self) {
+        assert!(self.woken.is_empty(), "woken threads left unserved");
+        let mut strong_refs: HashMap<NodeId, i32> = HashMap::new();
         for (&pid, p) in &self.procs {
             for (&d, r) in &p.refs_by_desc {
                 assert!(r.strong >= 0 && r.weak >= 0);
                 assert_eq!(p.node_to_desc.get(&r.node), Some(&d));
                 let n = self.nodes.get(&r.node).expect("ref to freed node");
                 assert!(n.refs.contains(&pid));
+                if r.strong > 0 {
+                    *strong_refs.entry(r.node).or_default() += 1;
+                }
             }
-            for &tid in &p.waiting_threads {
-                assert!(p.threads.get(&tid).map(|t| t.parked).unwrap_or(false));
+            for (&tid, t) in &p.threads {
+                match t.wait {
+                    Wait::None => {}
+                    // No work is ever left with a thread that waits instead
+                    // of reading it, and only threads that can take process
+                    // work wait for it.
+                    Wait::Blocked { proc_work, .. } => {
+                        assert!(
+                            !Self::has_work(p, t, proc_work),
+                            "proc {pid} thread {tid} waits with work to read: todo {:?} \
+                             (process_todo {}), need_return {}, proc todo {:?} (proc_work {proc_work})",
+                            t.todo,
+                            t.process_todo,
+                            t.looper_need_return,
+                            p.todo
+                        );
+                        assert!(!proc_work || Self::available_for_proc_work(t));
+                    }
+                    Wait::Woken(_) => panic!("proc {pid} thread {tid} woken but not served"),
+                }
             }
         }
         for (id, n) in &self.nodes {
@@ -2438,6 +2851,21 @@ impl BinderDriver {
                 n.local_strong,
                 n.local_weak
             );
+            // A node's internal strong count is the number of processes
+            // holding a strong ref to it, and its ref set is exactly theirs.
+            assert_eq!(
+                n.internal_strong,
+                strong_refs.get(id).copied().unwrap_or(0),
+                "node {id}: internal_strong vs strong refs"
+            );
+            for h in &n.refs {
+                assert!(
+                    self.procs
+                        .get(h)
+                        .is_some_and(|p| p.node_to_desc.contains_key(id)),
+                    "node {id} lists a ref from proc {h} that it doesn't hold"
+                );
+            }
         }
     }
 
@@ -2445,6 +2873,43 @@ impl BinderDriver {
     pub fn counts(&self) -> (usize, usize, usize) {
         (self.txns.len(), self.buffers.len(), self.nodes.len())
     }
+
+    /// Work items queued anywhere that a read would return for: process
+    /// lists, and thread lists flagged `process_todo`.
+    pub fn queued_work(&self) -> usize {
+        self.procs
+            .values()
+            .map(|p| {
+                p.todo.len()
+                    + p.threads
+                        .values()
+                        .filter(|t| t.process_todo)
+                        .map(|t| t.todo.len())
+                        .sum::<usize>()
+            })
+            .sum()
+    }
+
+    /// The threads blocked in a read (tests).
+    pub fn blocked_threads(&self) -> Vec<(ProcId, u32)> {
+        let mut v: Vec<(ProcId, u32)> = self
+            .procs
+            .iter()
+            .flat_map(|(&p, proc)| {
+                proc.threads
+                    .iter()
+                    .filter(|(_, t)| matches!(t.wait, Wait::Blocked { .. }))
+                    .map(move |(&tid, _)| (p, tid))
+            })
+            .collect();
+        v.sort();
+        v
+    }
+}
+
+/// Write `bwr` back to the caller of a `BINDER_WRITE_READ`.
+fn put_bwr(proc: ProcId, call: Call, bwr: &BinderWriteRead, us: &mut dyn Userspace) -> bool {
+    us.write(proc, call.arg, pod_bytes(bwr))
 }
 
 /// The (sg offset, length) of a validated PTR object `parent` (an index into

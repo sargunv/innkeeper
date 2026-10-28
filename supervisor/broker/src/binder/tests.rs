@@ -1,11 +1,12 @@
 //! Unit tests for the broker state machine. They drive the broker exactly as
-//! libbinder would: build a BC_* command stream, call `write_read`, and
-//! decode the BR_* stream, asserting the kernel's observable behaviour.
+//! libbinder would: build a BC_* command stream, issue `BINDER_WRITE_READ`
+//! through the fake userspace, and decode the BR_* stream the call is
+//! answered with, asserting the kernel's observable behaviour.
 #![allow(clippy::field_reassign_with_default)] // readable struct-by-field setup
 
 use crate::binder::driver::*;
 use crate::binder::uapi::*;
-use crate::testmem::FakeMem;
+use crate::fake::FakeUserspace;
 
 // ---- command-stream helpers -------------------------------------------
 
@@ -78,44 +79,100 @@ fn td_from(p: &[u8]) -> BinderTransactionData {
 // client. recv regions far apart so target addresses are unambiguous.
 struct Setup {
     b: BinderDriver,
-    m: FakeMem,
+    us: FakeUserspace,
     server: ProcId,
     client: ProcId,
 }
 
-fn setup() -> Setup {
-    let mut b = BinderDriver::new();
-    let mut m = FakeMem::default();
-    let server = b.open(1000, 1000, 0);
-    let client = b.open(1001, 10001, 0);
-    m.add_proc(server, 0x8000_0000);
-    m.add_proc(client, 0x9000_0000);
-    // server becomes context manager
-    b.set_context_mgr(server, None).unwrap();
-    // both enter the looper
-    // The server's thread 2 is a looper (joinThreadPool); the client's
-    // thread 1 is a plain caller.
-    let w = Bc::default().cmd(BC_ENTER_LOOPER).done();
-    b.write_read(server, 2, &w, 0, false, &mut m);
-    Setup {
-        b,
-        m,
-        server,
-        client,
+impl Setup {
+    /// Two processes, without a context manager.
+    fn bare() -> Setup {
+        let mut b = BinderDriver::new();
+        let mut us = FakeUserspace::default();
+        let server = b.open(1000, 1000, 0, false);
+        let client = b.open(1001, 10001, 0, false);
+        us.add_proc(server, 0x8000_0000);
+        us.add_proc(client, 0x9000_0000);
+        Setup {
+            b,
+            us,
+            server,
+            client,
+        }
     }
+
+    fn ioctl(&mut self, proc: ProcId, tid: u32, cmd: u32, arg: u64) -> Call {
+        self.us.ioctl(&mut self.b, proc, tid, cmd, arg)
+    }
+
+    fn wr(&mut self, proc: ProcId, tid: u32, write: &[u8], read_size: usize) -> Call {
+        let c = self.us.write_read(&mut self.b, proc, tid, write, read_size);
+        self.b.check_invariants();
+        c
+    }
+
+    /// A write-only BINDER_WRITE_READ that must succeed.
+    fn write(&mut self, proc: ProcId, tid: u32, write: &[u8]) {
+        let c = self.wr(proc, tid, write, 0);
+        assert_eq!(self.us.outcome(c).errno, 0);
+    }
+
+    /// The decoded stream `call` was answered with.
+    fn stream(&self, call: Call) -> Vec<(u32, Vec<u8>)> {
+        let o = self.us.outcome(call);
+        assert_eq!(o.errno, 0);
+        decode(&o.read)
+    }
+
+    /// A read that must not block.
+    fn read(&mut self, proc: ProcId, tid: u32, size: usize) -> Vec<(u32, Vec<u8>)> {
+        let c = self.wr(proc, tid, &[], size);
+        self.stream(c)
+    }
+}
+
+/// The server's thread 2 is a looper (joinThreadPool); the client's thread 1
+/// is a plain caller.
+fn setup() -> Setup {
+    let mut s = Setup::bare();
+    let c = s.ioctl(s.server, 2, BINDER_SET_CONTEXT_MGR, 0);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    s.write(s.server, 2, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    s
+}
+
+/// A transaction to the context manager whose data is `obj` (one object at
+/// offset 0), from the client's memory.
+fn txn_with_object(s: &mut Setup, obj: &[u8], flags: u32) -> BinderTransactionData {
+    let data_addr = 0x9001_0000u64;
+    let off_addr = 0x9002_0000u64;
+    s.us.poke(s.client, data_addr, obj);
+    s.us.poke(s.client, off_addr, &0u64.to_le_bytes());
+    let mut td = BinderTransactionData::default();
+    td.target = 0;
+    td.code = 1;
+    td.flags = flags;
+    td.data_size = obj.len() as u64;
+    td.offsets_size = 8;
+    td.data_buffer = data_addr;
+    td.data_offsets = off_addr;
+    td
 }
 
 // ---- tests ------------------------------------------------------------
 
 #[test]
 fn version_and_ctx_mgr() {
-    let mut b = BinderDriver::new();
-    assert_eq!(b.protocol_version(), 8);
-    let p = b.open(1000, 1000, 0);
-    assert!(b.set_context_mgr(p, None).is_ok());
-    // second attempt is EBUSY
-    let p2 = b.open(1000, 1000, 0);
-    assert_eq!(b.set_context_mgr(p2, None), Err(-libc::EBUSY));
+    let mut s = Setup::bare();
+    let c = s.ioctl(s.server, 1, BINDER_VERSION, 0x8100_0000);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    let v: BinderVersion = read_pod(&s.us.peek(s.server, 0x8100_0000, 4), 0).unwrap();
+    assert_eq!(v.protocol_version, 8);
+    let c = s.ioctl(s.server, 1, BINDER_SET_CONTEXT_MGR, 0);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    // A second context manager is EBUSY.
+    let c = s.ioctl(s.client, 1, BINDER_SET_CONTEXT_MGR, 0);
+    assert_eq!(s.us.outcome(c).errno, libc::EBUSY);
 }
 
 #[test]
@@ -123,44 +180,32 @@ fn register_service_and_transact() {
     let mut s = setup();
     // Client sends a transaction to the context manager (handle 0) that
     // contains one BINDER_TYPE_BINDER (registering a service object).
-    let data_addr = 0x9001_0000u64;
-    let off_addr = 0x9002_0000u64;
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.flags = FLAT_BINDER_FLAG_ACCEPTS_FDS;
     fbo.binder_or_handle = 0xBEEF_0000; // client's local BBinder ptr
     fbo.cookie = 0xCAFE;
-    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
-    s.m.poke(s.client, off_addr, &0u64.to_le_bytes()); // object at offset 0
+    let td = txn_with_object(&mut s, pod_bytes(&fbo), 0);
 
-    let mut td = BinderTransactionData::default();
-    td.target = 0; // context manager
-    td.code = 1;
-    td.flags = 0;
-    td.data_size = std::mem::size_of::<FlatBinderObject>() as u64;
-    td.offsets_size = 8;
-    td.data_buffer = data_addr;
-    td.data_offsets = off_addr;
+    // The server has a thread blocked in a read, as servicemanager does.
+    let park = s.wr(s.server, 2, &[], 256);
+    assert!(s.us.is_pending(park));
 
-    // The server has a thread parked in a read, as servicemanager does.
-    let park = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    assert!(park.blocked);
-
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    let r = s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
-    // The server should have become runnable.
-    assert!(r.wakeups.iter().any(|w| w.proc == s.server));
-
-    // Server reads: expect BR_TRANSACTION carrying a translated HANDLE.
-    let rd = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    let stream = decode(&rd.read);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    // The server's read was answered with BR_TRANSACTION carrying a
+    // translated HANDLE.
+    let stream = s.stream(park);
     let tp = find(&stream, BR_TRANSACTION).expect("server gets BR_TRANSACTION");
     let td2 = td_from(tp);
     assert_eq!(td2.code, 1);
     assert_eq!(td2.sender_pid, 1001);
     assert_eq!(td2.sender_euid, 10001);
     // The server's copy of the object is a HANDLE now.
-    let obj = s.m.peek(
+    let obj = s.us.peek(
         s.server,
         td2.data_buffer,
         std::mem::size_of::<FlatBinderObject>(),
@@ -174,17 +219,16 @@ fn register_service_and_transact() {
     assert_eq!(strong, 1);
 
     // Client is now blocked awaiting the reply (sync call).
-    let cblock = s.b.write_read(s.client, 1, &[], 256, false, &mut s.m);
-    assert!(cblock.blocked);
+    let cblock = s.wr(s.client, 1, &[], 256);
+    assert!(s.us.is_pending(cblock));
 
     // Server replies; client wakes and, on the same read, receives its
     // deferred node handshake (INCREFS/ACQUIRE), TRANSACTION_COMPLETE and REPLY.
     let mut rtd = BinderTransactionData::default();
     rtd.code = 0;
     let wr = Bc::default().cmd(BC_REPLY).td(&rtd).done();
-    s.b.write_read(s.server, 2, &wr, 256, false, &mut s.m);
-    let rc = s.b.write_read(s.client, 1, &[], 512, false, &mut s.m);
-    let cs = decode(&rc.read);
+    s.wr(s.server, 2, &wr, 256);
+    let cs = s.stream(cblock);
     assert!(find(&cs, BR_TRANSACTION_COMPLETE).is_some());
     assert!(find(&cs, BR_REPLY).is_some());
     assert!(
@@ -206,10 +250,13 @@ fn huge_data_size_fails() {
     td.target = 0;
     td.data_size = u64::MAX;
     td.data_buffer = 0x9001_0000;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
-    let r = s.b.write_read(s.client, 1, &[], 256, false, &mut s.m);
-    assert!(find(&decode(&r.read), BR_FAILED_REPLY).is_some());
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    let r = s.read(s.client, 1, 256);
+    assert!(find(&r, BR_FAILED_REPLY).is_some());
 }
 
 #[test]
@@ -219,97 +266,67 @@ fn sync_call_and_reply_routing() {
     let mut td = BinderTransactionData::default();
     td.target = 0;
     td.code = 42;
-    td.data_size = 0;
-    td.offsets_size = 0;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
 
     // Server receives the transaction.
-    let rd = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    let stream = decode(&rd.read);
+    let stream = s.read(s.server, 2, 256);
     assert!(find(&stream, BR_TRANSACTION).is_some());
 
     // Client, meanwhile, blocks waiting for the reply.
-    let rc = s.b.write_read(s.client, 1, &[], 256, false, &mut s.m);
-    assert!(rc.blocked, "client with no reply yet must block");
+    let rc = s.wr(s.client, 1, &[], 256);
+    assert!(s.us.is_pending(rc), "client with no reply yet must block");
 
-    // Server replies.
+    // Server replies, which answers the client's read with the reply.
     let mut rtd = BinderTransactionData::default();
     rtd.code = 0;
     let wr = Bc::default().cmd(BC_REPLY).td(&rtd).done();
-    let rs = s.b.write_read(s.server, 2, &wr, 256, false, &mut s.m);
-    // Replying wakes the client.
-    assert!(rs.wakeups.iter().any(|w| w.proc == s.client && w.tid == 1));
-
-    // Client reads the reply.
-    let rc2 = s.b.write_read(s.client, 1, &[], 256, false, &mut s.m);
-    let cs = decode(&rc2.read);
-    assert!(find(&cs, BR_REPLY).is_some(), "client gets BR_REPLY");
+    s.wr(s.server, 2, &wr, 256);
+    assert!(
+        find(&s.stream(rc), BR_REPLY).is_some(),
+        "client gets BR_REPLY"
+    );
 }
 
 #[test]
 fn fd_passing() {
-    let _s = setup();
-    // The server's receive node must accept fds. Register a service first so
-    // the client holds a handle to a server node that accepts fds.
-    // Simplify: client transacts to ctx-mgr node (which accepts fds? ctx mgr
-    // node flags=0). Give the client a direct node on the server instead by
-    // having the server register a node via reply. To keep it focused, we test
-    // fd translation through a transaction to a node created with ACCEPTS_FDS.
-
-    // Server registers a node by sending it to the client in a reply isn't
-    // set up here; instead create one: client -> ctxmgr won't accept fds.
-    // So: make a server-owned node with ACCEPTS_FDS and give client a handle.
-    // We do that by having the server send a transaction to the client first.
-    //
-    // Easiest: reuse register_service_and_transact's mechanism in reverse —
-    // the context-manager node is fine for routing; patch its accept_fds by
-    // registering a fresh ctx with ACCEPTS_FDS via SET_CONTEXT_MGR_EXT in a
-    // separate broker.
-    let mut b = BinderDriver::new();
-    let mut m = FakeMem::default();
-    let server = b.open(1000, 1000, 0);
-    let client = b.open(1001, 10001, 0);
-    m.add_proc(server, 0x8000_0000);
-    m.add_proc(client, 0x9000_0000);
+    // The context manager's node accepts fds (SET_CONTEXT_MGR_EXT).
+    let mut s = Setup::bare();
     let mut ext = FlatBinderObject::default();
     ext.flags = FLAT_BINDER_FLAG_ACCEPTS_FDS;
-    b.set_context_mgr(server, Some(ext)).unwrap();
-    let el = Bc::default().cmd(BC_ENTER_LOOPER).done();
-    b.write_read(server, 2, &el, 0, false, &mut m);
+    s.us.poke(s.server, 0x8100_0000, pod_bytes(&ext));
+    let c = s.ioctl(s.server, 2, BINDER_SET_CONTEXT_MGR_EXT, 0x8100_0000);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    s.write(s.server, 2, &Bc::default().cmd(BC_ENTER_LOOPER).done());
 
     // Client sends a transaction with a BINDER_TYPE_FD object.
-    let data_addr = 0x9001_0000u64;
-    let off_addr = 0x9002_0000u64;
     let mut fdo = BinderFdObject::default();
     fdo.hdr_type = BINDER_TYPE_FD;
     fdo.fd_or_pad = 7; // client's fd 7
-    m.poke(client, data_addr, pod_bytes(&fdo));
-    m.poke(client, off_addr, &0u64.to_le_bytes());
+    let td = txn_with_object(&mut s, pod_bytes(&fdo), TF_ACCEPT_FDS);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
 
-    let mut td = BinderTransactionData::default();
-    td.target = 0;
-    td.flags = TF_ACCEPT_FDS;
-    td.data_size = std::mem::size_of::<BinderFdObject>() as u64;
-    td.offsets_size = 8;
-    td.data_buffer = data_addr;
-    td.data_offsets = off_addr;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    b.write_read(client, 1, &w, 0, false, &mut m);
-
-    let rd = b.write_read(server, 2, &[], 256, false, &mut m);
-    let stream = decode(&rd.read);
+    let stream = s.read(s.server, 2, 256);
     let tp = find(&stream, BR_TRANSACTION).expect("server gets BR_TRANSACTION with fd");
     let td2 = td_from(tp);
-    let obj = m.peek(
-        server,
+    let obj = s.us.peek(
+        s.server,
         td2.data_buffer,
         std::mem::size_of::<BinderFdObject>(),
     );
     let fdo2: BinderFdObject = read_pod(&obj, 0).unwrap();
     let new_fd = fdo2.fd_or_pad as u32;
     assert_ne!(new_fd, 7);
-    assert!(m.procs[&server].installed_fds.contains(&new_fd));
+    assert!(s.us.procs[&s.server].installed_fds.contains(&new_fd));
+    // The broker no longer holds a copy of the installed fd.
+    assert!(s.us.captured.is_empty());
 }
 
 #[test]
@@ -318,38 +335,29 @@ fn oneway_does_not_block_and_completes() {
     let mut td = BinderTransactionData::default();
     td.target = 0;
     td.flags = TF_ONE_WAY;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    let r = s.b.write_read(s.client, 1, &w, 256, false, &mut s.m);
     // Oneway returns TRANSACTION_COMPLETE immediately to the caller.
-    let cs = decode(&r.read);
-    assert!(find(&cs, BR_TRANSACTION_COMPLETE).is_some());
+    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
+    let c = s.wr(s.client, 1, &w, 256);
+    assert!(find(&s.stream(c), BR_TRANSACTION_COMPLETE).is_some());
     // Server gets the transaction (as proc work).
-    let rd = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    assert!(find(&decode(&rd.read), BR_TRANSACTION).is_some());
+    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
 }
 
 #[test]
 fn death_notification_fires_on_release() {
     let mut s = setup();
     // Client registers a service object, so the server gets a handle to it.
-    let data_addr = 0x9001_0000u64;
-    let off_addr = 0x9002_0000u64;
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.binder_or_handle = 0xBEEF;
-    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
-    s.m.poke(s.client, off_addr, &0u64.to_le_bytes());
-    let mut td = BinderTransactionData::default();
-    td.target = 0;
-    td.data_size = std::mem::size_of::<FlatBinderObject>() as u64;
-    td.offsets_size = 8;
-    td.data_buffer = data_addr;
-    td.data_offsets = off_addr;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
-    let rd = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    let td2 = td_from(find(&decode(&rd.read), BR_TRANSACTION).unwrap());
-    let obj = s.m.peek(
+    let td = txn_with_object(&mut s, pod_bytes(&fbo), 0);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    let td2 = td_from(find(&s.read(s.server, 2, 256), BR_TRANSACTION).unwrap());
+    let obj = s.us.peek(
         s.server,
         td2.data_buffer,
         std::mem::size_of::<FlatBinderObject>(),
@@ -357,33 +365,32 @@ fn death_notification_fires_on_release() {
     let handle = read_pod::<FlatBinderObject>(&obj, 0)
         .unwrap()
         .binder_or_handle as u32;
-    // Server replies to the registration so its thread returns to proc work.
-    let mut rtd = BinderTransactionData::default();
-    rtd.code = 0;
-    let wr = Bc::default().cmd(BC_REPLY).td(&rtd).done();
-    // read_size>0 so the server consumes its own TRANSACTION_COMPLETE here.
-    s.b.write_read(s.server, 2, &wr, 256, false, &mut s.m);
+    // Server replies to the registration so its thread returns to proc work;
+    // it reads its own TRANSACTION_COMPLETE on the same call.
+    let rtd = BinderTransactionData::default();
+    s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
     // Drain the client so the outstanding call completes.
-    s.b.write_read(s.client, 1, &[], 512, false, &mut s.m);
+    s.read(s.client, 1, 512);
 
-    // Server requests a death notification on that handle, then parks.
+    // Server requests a death notification on that handle, then blocks.
     let cookie = 0x1234_5678u64;
     let w = Bc::default()
         .cmd(BC_REQUEST_DEATH_NOTIFICATION)
         .u32(handle)
         .u64(cookie)
         .done();
-    s.b.write_read(s.server, 2, &w, 0, false, &mut s.m);
-    let park = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    assert!(park.blocked);
+    s.write(s.server, 2, &w);
+    let park = s.wr(s.server, 2, &[], 256);
+    assert!(s.us.is_pending(park));
 
-    // Client dies.
-    let wk = s.b.release_proc(s.client, &mut s.m);
-    assert!(wk.iter().any(|w| w.proc == s.server));
-
-    // Server reads: expect BR_DEAD_BINDER with the cookie.
-    let rd = s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
-    let stream = decode(&rd.read);
+    // Client dies: the server's read is answered with BR_DEAD_BINDER.
+    s.b.release_proc(s.client, &mut s.us);
+    let stream = s.stream(park);
     let p = find(&stream, BR_DEAD_BINDER).expect("server gets BR_DEAD_BINDER");
     assert_eq!(u64::from_le_bytes(p[..8].try_into().unwrap()), cookie);
 }
@@ -391,43 +398,142 @@ fn death_notification_fires_on_release() {
 #[test]
 fn node_ref_handshake() {
     // When a node first gets an incoming ref, its owner must receive
-    // BR_INCREFS then BR_ACQUIRE; when the last ref drops, BR_RELEASE/DECREFS.
+    // BR_INCREFS then BR_ACQUIRE.
     let mut s = setup();
-    let data_addr = 0x9001_0000u64;
-    let off_addr = 0x9002_0000u64;
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.binder_or_handle = 0xABCD;
-    s.m.poke(s.client, data_addr, pod_bytes(&fbo));
-    s.m.poke(s.client, off_addr, &0u64.to_le_bytes());
-    let mut td = BinderTransactionData::default();
-    td.target = 0;
-    td.data_size = std::mem::size_of::<FlatBinderObject>() as u64;
-    td.offsets_size = 8;
-    td.data_buffer = data_addr;
-    td.data_offsets = off_addr;
-    let w = Bc::default().cmd(BC_TRANSACTION).td(&td).done();
-    s.b.write_read(s.client, 1, &w, 0, false, &mut s.m);
+    let td = txn_with_object(&mut s, pod_bytes(&fbo), 0);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
     // drive the server to translate (creates the incoming ref), then reply
-    s.b.write_read(s.server, 2, &[], 256, false, &mut s.m);
+    s.read(s.server, 2, 256);
     let rtd = BinderTransactionData::default();
-    let wr = Bc::default().cmd(BC_REPLY).td(&rtd).done();
-    s.b.write_read(s.server, 2, &wr, 256, false, &mut s.m);
+    s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
 
     // The client (owner) receives the deferred node handshake with the reply.
-    let rc = s.b.write_read(s.client, 1, &[], 512, false, &mut s.m);
-    let cs = decode(&rc.read);
+    let cs = s.read(s.client, 1, 512);
     assert!(find(&cs, BR_INCREFS).is_some(), "owner gets BR_INCREFS");
     assert!(find(&cs, BR_ACQUIRE).is_some(), "owner gets BR_ACQUIRE");
 }
 
 #[test]
 fn bad_command_is_einval() {
-    let mut b = BinderDriver::new();
-    let mut m = FakeMem::default();
-    let p = b.open(1, 1, 0);
-    m.add_proc(p, 0x1000);
-    let w = Bc::default().cmd(0xdead_beef).done();
-    let r = b.write_read(p, 1, &w, 0, false, &mut m);
-    assert_eq!(r.write_err, libc::EINVAL);
+    let mut s = Setup::bare();
+    let c = s.wr(s.client, 1, &Bc::default().cmd(0xdead_beef).done(), 0);
+    assert_eq!(s.us.outcome(c).errno, libc::EINVAL);
+}
+
+// ---- the read lifecycle ------------------------------------------------
+
+impl Setup {
+    /// Make the bwr and buffers of the next `wr` from `proc` read-only (as a
+    /// read-only shared page is, even through /proc/<pid>/mem).
+    fn readonly_next_call(&mut self, proc: ProcId) {
+        let span = self.us.next_call_memory();
+        self.us.procs.get_mut(&proc).unwrap().readonly = vec![span];
+    }
+}
+
+/// A bwr that can be read but not written back fails the ioctl with
+/// EFAULT, as binder_ioctl_write_read does, rather than succeeding with the
+/// caller's consumed counters left stale.
+#[test]
+fn bwr_writeback_failure_is_efault() {
+    for read_size in [0, 256] {
+        let mut s = setup();
+        s.readonly_next_call(s.client);
+        let c = s.wr(
+            s.client,
+            1,
+            &Bc::default().cmd(BC_ENTER_LOOPER).done(),
+            read_size,
+        );
+        assert_eq!(s.us.outcome(c).errno, libc::EFAULT, "read_size {read_size}");
+        assert_eq!(s.us.outcome(c).write_consumed, 0);
+    }
+}
+
+/// A looper whose blocking read fails (its bwr can't be written back) never
+/// waits: the next incoming transaction goes to a looper that is really
+/// reading, not to the failed one, where a synchronous caller would hang.
+#[test]
+fn failed_block_leaves_no_waiting_looper() {
+    let mut s = setup();
+    s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    s.readonly_next_call(s.server);
+    let failed = s.wr(s.server, 2, &[], 256);
+    assert_eq!(s.us.outcome(failed).errno, libc::EFAULT);
+    let good = s.wr(s.server, 3, &[], 256);
+    assert_eq!(s.b.blocked_threads(), vec![(s.server, 3)]);
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    assert!(find(&s.stream(good), BR_TRANSACTION).is_some());
+}
+
+/// A signal ends a blocked read's wait just as work arrives: the delivery
+/// is rolled back, and the restarted ioctl reads the same transaction.
+#[test]
+fn interrupted_delivery_is_read_again() {
+    let mut s = setup();
+    let park = s.wr(s.server, 2, &[], 256);
+    s.us.interrupt(park);
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    assert!(matches!(
+        s.us.status(park),
+        crate::fake::Status::Interrupted
+    ));
+    let again = s.us.restart(&mut s.b, park);
+    assert!(find(&s.stream(again), BR_TRANSACTION).is_some());
+    // It is on the server's stack once: the reply reaches the client.
+    let rtd = BinderTransactionData::default();
+    s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
+    assert!(find(&s.read(s.client, 1, 256), BR_REPLY).is_some());
+}
+
+/// Process work whose reader can't take it (its read buffer faults) goes
+/// back to the process, for the next looper that reads.
+#[test]
+fn undeliverable_process_work_goes_back_to_the_process() {
+    let mut s = setup();
+    s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    // Queued as process work: no server thread is waiting.
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    s.readonly_next_call(s.server);
+    let failed = s.wr(s.server, 2, &[], 256);
+    assert_eq!(s.us.outcome(failed).errno, libc::EFAULT);
+    assert!(find(&s.read(s.server, 3, 256), BR_TRANSACTION).is_some());
 }

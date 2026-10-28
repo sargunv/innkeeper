@@ -4,4 +4,6 @@ pub mod driver;
 pub mod uapi;
 
 #[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
 mod tests;
