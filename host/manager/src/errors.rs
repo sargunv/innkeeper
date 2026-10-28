@@ -103,7 +103,7 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
     if has("linuxapk-session not found") {
         return pair(
             "Linux.apk Isn’t Set Up",
-            "The Android session launcher wasn’t found. Set LINUXAPK_SESSION to host/launcher/linuxapk-session in your Linux.apk checkout.",
+            "This copy of Linux.apk is incomplete: the Android session launcher isn’t installed next to it. In a checkout, run `mise run build` and start out/stage/bin/linuxapk-manager.",
         );
     }
     if has("session start failed") || has("stopped while booting") || has("did not finish booting")

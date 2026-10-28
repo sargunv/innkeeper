@@ -5,22 +5,9 @@
 # Without a running session it starts a headless one, and stops it at the end.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-export LINUXAPK_REPO=$repo
 # A test session: links are only logged, and notifications and media players
-# stay off the real desktop (host/launcher/linuxapk-session, docs/bridge.md).
+# stay off the real desktop (linuxapk-session, docs/bridge.md).
 export LINUXAPK_TEST=1
-# Drive this checkout's session if its image is prepared, else the main
-# checkout's (a lane worktree's).
-image_ready() {
-  local paths img apex
-  paths=$("$1" image) || return 1
-  img=$(sed -n 's/^img=//p' <<<"$paths") apex=$(sed -n 's/^apex=//p' <<<"$paths")
-  [[ -d $img/system/system && -f $apex/apex-info-list.xml ]]
-}
-if [[ -z ${LINUXAPK_SESSION:-} ]] && ! image_ready "$repo/host/launcher/linuxapk-session"; then
-  main=$(dirname "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)")
-  export LINUXAPK_SESSION=$main/host/launcher/linuxapk-session
-fi
 # Android commands run through `linuxapk-session exec` inherit our niceness,
 # and Android threads that set their priority back to 0 then fail: uiautomator
 # dies at once with "SecurityException: Cannot set priority to 0" ("Killed").
@@ -37,5 +24,5 @@ if (($(awk '{print $19}' /proc/$$/stat) > 0)) && [[ -z ${LINUXAPK_RENICED:-} ]];
   exec systemd-run --user --quiet --pipe --wait --collect -p Nice=0 --same-dir \
     "${env_args[@]}" --setenv=LINUXAPK_RENICED=1 -- "$0" "$@"
 fi
-cargo build -q -j 8 --release --manifest-path "$repo/tests/compat/Cargo.toml"
-exec "$repo/target/release/linuxapk-compat" "$@"
+(cd "$repo" && cargo build -q --release -p linuxapk-compat)
+exec "$repo/out/cargo/release/linuxapk-compat" "$@"

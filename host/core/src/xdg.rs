@@ -1,7 +1,6 @@
 //! Host desktop integration: desktop entries, hicolor icons, the desktop and
 //! MIME databases, and default handlers in `mimeapps.list`.
 
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -10,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::desktop::{self, AppEntry, INSTALLER_ID, MANAGER_ID, PREFIX};
+use crate::paths::xdg_home;
 use crate::proc;
 
 /// Sizes we render icons at; all are hicolor theme directories.
@@ -23,23 +23,12 @@ pub struct Dirs {
     pub cache: PathBuf,
 }
 
-fn home() -> PathBuf {
-    PathBuf::from(env::var_os("HOME").unwrap_or_else(|| "/".into()))
-}
-
-fn xdg(var: &str, default: &str) -> PathBuf {
-    env::var_os(var)
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| home().join(default))
-}
-
 impl Dirs {
     pub fn from_env() -> Self {
         Self {
-            data: xdg("XDG_DATA_HOME", ".local/share"),
-            config: xdg("XDG_CONFIG_HOME", ".config"),
-            cache: xdg("XDG_CACHE_HOME", ".cache").join("linuxapk"),
+            data: xdg_home("XDG_DATA_HOME", ".local/share"),
+            config: xdg_home("XDG_CONFIG_HOME", ".config"),
+            cache: xdg_home("XDG_CACHE_HOME", ".cache").join("linuxapk"),
         }
     }
 
@@ -431,7 +420,7 @@ mod tests {
 
     #[test]
     fn app_files_roundtrip() {
-        let root = env::temp_dir().join(format!("linuxapk-xdg-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("linuxapk-xdg-{}", std::process::id()));
         let d = Dirs {
             data: root.join("share"),
             config: root.join("config"),

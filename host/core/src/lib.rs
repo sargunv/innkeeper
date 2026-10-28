@@ -9,17 +9,18 @@ pub mod desktop;
 pub mod launcher;
 pub mod manifest;
 pub mod ops;
+pub mod paths;
 pub mod proc;
 pub mod validate;
 pub mod xdg;
 
 /// Where tests find the compat corpus APKs (fetched by
 /// `tests/compat/run.sh fetch`, never committed): `$LINUXAPK_CORPUS`, else
-/// `<repo>/out/corpus`.
+/// `<repo>/out/test/compat/corpus`.
 #[cfg(test)]
 fn test_corpus() -> std::path::PathBuf {
     std::env::var_os("LINUXAPK_CORPUS").map_or_else(
-        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/corpus"),
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/test/compat/corpus"),
         std::path::PathBuf::from,
     )
 }

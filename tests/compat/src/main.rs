@@ -6,7 +6,7 @@
 //!
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
 //! one if needed, and stopping it at the end), runs every app, writes
-//! out/compat/, and then, unless an app that worked before got worse,
+//! out/test/compat/, and then, unless an app that worked before got worse,
 //! tests/compat/results.json and docs/compatibility.md. `--accept` records
 //! the results even with regressions.
 
@@ -16,7 +16,7 @@ mod frame;
 mod report;
 mod session;
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 use std::{env, fs};
@@ -69,10 +69,10 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<ExitCode> {
     let o = parse_args()?;
-    let repo = PathBuf::from(env::var("LINUXAPK_REPO").unwrap_or_else(|_| ".".into()));
-    let launcher = env::var("LINUXAPK_SESSION")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| repo.join("host/launcher/linuxapk-session"));
+    // A dev tool: it runs against the checkout it was built in, and its staged
+    // session.
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let launcher = repo.join("out/stage/libexec/linuxapk/linuxapk-session");
     let corpus = corpus::load(&repo.join("tests/compat/corpus.toml"))?;
     let baseline_path = repo.join("tests/compat/results.json");
     let baseline = Results::load(&baseline_path).unwrap_or_default();
@@ -90,7 +90,8 @@ fn real_main() -> Result<ExitCode> {
     if apps.is_empty() {
         bail!("no apps selected");
     }
-    let apk_dir = repo.join("out/corpus");
+    let out = repo.join("out/test/compat");
+    let apk_dir = out.join("corpus");
     let mut apks = vec![];
     for a in &apps {
         apks.push(corpus::fetch(a, &apk_dir)?);
@@ -99,9 +100,14 @@ fn real_main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
+    if !launcher.is_file() {
+        bail!(
+            "no staged session at {} (run `mise run build`)",
+            launcher.display()
+        );
+    }
     let s = Session::new(launcher);
     s.ensure(o.window)?;
-    let out = repo.join("out/compat");
     fs::create_dir_all(&out)?;
     let mut results: Vec<AppResult> = vec![];
     for (a, apk) in apps.iter().zip(&apks) {
@@ -179,7 +185,7 @@ fn real_main() -> Result<ExitCode> {
         report::write_markdown(&repo.join("docs/compatibility.md"), &new, &corpus)?;
         eprintln!("compat: wrote tests/compat/results.json and docs/compatibility.md");
     } else {
-        eprintln!("compat: baseline kept; results in out/compat/ (--accept to record)");
+        eprintln!("compat: baseline kept; results in out/test/compat/ (--accept to record)");
     }
     Ok(if regressions.is_empty() {
         ExitCode::SUCCESS
@@ -198,10 +204,7 @@ fn today() -> String {
 
 /// Memory of the whole session unit (cgroup), in MiB.
 fn session_mem_mb() -> Option<u64> {
-    let unit = match std::env::var("LINUXAPK_INSTANCE") {
-        Ok(i) if !i.is_empty() => format!("linuxapk-session-{i}"),
-        _ => "linuxapk-session".to_string(),
-    };
+    let unit = linuxapk_core::paths::unit_name().ok()?;
     let o = Command::new("systemctl")
         .args(["--user", "show", "-P", "MemoryCurrent", &unit])
         .output()

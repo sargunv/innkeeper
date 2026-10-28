@@ -4,9 +4,11 @@
 # pivot-exec pivots into it and starts Android init (second stage) in nested,
 # locked namespaces (see supervisor/pivot-exec/pivot-exec.c).
 #
-# Inputs (environment): LINUXAPK_REPO LINUXAPK_OUT LINUXAPK_RUN LINUXAPK_DATA
-#                       LINUXAPK_IMG, LINUXAPK_APEX (the image's partitions
-#                         and flattened APEXes)
+# Inputs (environment): LINUXAPK_RUN LINUXAPK_DATA (see linuxapk-session)
+#                       LINUXAPK_IMG, LINUXAPK_APEX, LINUXAPK_DERIVED (the
+#                         image's partitions, flattened APEXes and derived
+#                         layers)
+#                       LINUXAPK_ADDONS (addon layers, one dir each)
 #                       LINUXAPK_SINGLE_UID, LINUXAPK_BROKER_DEBUG
 set -euo pipefail
 
@@ -16,9 +18,15 @@ set -euo pipefail
 # force libmount to use it. Harmless for the other (tmpfs/bind/proc) mounts.
 export LIBMOUNT_FORCE_MOUNT2=always
 
-repo=$LINUXAPK_REPO out=$LINUXAPK_OUT run=$LINUXAPK_RUN data=$LINUXAPK_DATA
-img=$LINUXAPK_IMG apex=$LINUXAPK_APEX
-ovl=$repo/android/overlay
+here=$(cd "$(dirname "$0")" && pwd)
+android=$(cd "$here/../.." && pwd)/share/linuxapk/android
+run=$LINUXAPK_RUN data=$LINUXAPK_DATA
+img=$LINUXAPK_IMG apex=$LINUXAPK_APEX derived=$LINUXAPK_DERIVED
+# The derived layer for this uid mode (image/derive.sh).
+uid_layer=$derived/subuid
+[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && uid_layer=$derived/single-uid
+addons=()
+for a in "$LINUXAPK_ADDONS"/*/; do [[ -d $a ]] && addons+=("${a%/}"); done
 
 log() { echo "ns-init: $*" >&2; }
 
@@ -63,11 +71,17 @@ layer_mount() {
 }
 
 # --- partitions -------------------------------------------------------------
-layer_mount "$R/system" "$ovl/system" "$out/session/iptables/system" "$out/session/overlay/system" "$img/system/system"
-layer_mount "$R/vendor" "$ovl/vendor" "$out/vendor-overlay" "$out/session/overlay/vendor" "$img/vendor"
-layer_mount "$R/system_ext" "$ovl/system_ext" "$out/system_ext-overlay" "$out/session/overlay/system_ext" "$img/system_ext"
-layer_mount "$R/product" "$ovl/product" "$out/session/overlay/product" "$img/product"
-layer_mount "$R/odm" "$out/session/overlay/odm" "$img/odm"
+# Each partition's stack, top first: the start-time layer, the addons, our
+# Android tree, the layers derived from the image, the image.
+partition() { # name image-dir
+  local p=$1 a layers=("$run/layer/$1")
+  for a in "${addons[@]}"; do layers+=("$a/$p"); done
+  layer_mount "$R/$p" "${layers[@]}" "$android/$p" "$derived/common/$p" "$uid_layer/$p" "$2"
+}
+partition system "$img/system/system"
+for p in vendor system_ext product odm; do
+  partition "$p" "$img/$p"
+done
 for p in system_dlkm vendor_dlkm odm_dlkm; do
   layer_mount "$R/$p" "$img/$p"
 done
@@ -93,27 +107,11 @@ rm -rf "$R/lost+found"
 # staged at /linuxapk/apex and init.rc bind-mounts it over /apex in
 # early-init. It is one mount of the whole tree (no submounts), so
 # non-recursive views of it stay complete.
-# Overrides for APEX contents (e.g. rc files) layer on top like partitions.
+# Our files for APEX contents (e.g. libtinyalsav2.so for
+# com.android.hardware.audio, rc files) are in the start-time layer, for the
+# APEXes this image has (linuxapk-session).
 mkdir -p "$R/apex" "$R/bootstrap-apex"
-# Built files for APEX contents go in out/apex-overlay/<apex name>/ (like
-# out/vendor-overlay for /vendor; e.g. the audio lane's libtinyalsav2.so for
-# com.android.hardware.audio). Only APEXes this image has are staged, so the
-# tree gains no directories apexd and linkerconfig don't know about.
-aovl=$run/apex-overlay
-rm -rf "$aovl"
-mkdir -p "$aovl"
-if [[ -d $out/apex-overlay ]]; then
-  for d in "$out/apex-overlay"/*/; do
-    [[ -d $d ]] || continue
-    n=$(basename "$d")
-    if [[ -d $apex/$n ]]; then cp -a "$d" "$aovl/$n"; fi
-  done
-fi
-# Single-uid mode: host-owned copies of the files that overlay/ gives
-# subordinate owners (see supervisor/build.sh).
-su_apex=$out/session/overlay-su/apex
-[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] || su_apex=/nonexistent
-layer_mount "$R/linuxapk/apex" "$ovl/apex" "$aovl" "$su_apex" "$out/session/overlay/apex" "$apex"
+layer_mount "$R/linuxapk/apex" "$run/layer/apex" "$uid_layer/apex" "$apex"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
@@ -242,4 +240,4 @@ export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 export LINUXAPK_BROKER=/system/bin/linuxapk-broker
 [[ -n $broker_debug ]] && export LINUXAPK_BROKER_DEBUG=$broker_debug
 [[ $single_uid == 1 ]] && export LINUXAPK_SINGLE_UID=1
-exec "$out/session/pivot-exec" "$R" /system/bin/init second_stage
+exec "$here/pivot-exec" "$R" /system/bin/init second_stage

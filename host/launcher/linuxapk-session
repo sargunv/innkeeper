@@ -10,7 +10,7 @@
 #                                  (docs/ubinder.md). --single-uid maps only
 #                                  the host user (no /etc/subuid range) and
 #                                  virtualizes Android's uids (docs/sandbox.md)
-#   linuxapk-session prepare       fetch/extract/flatten the selected image only
+#   linuxapk-session prepare       fetch/extract/flatten/derive the image only
 #   linuxapk-session image         print the selected image and its paths
 #   linuxapk-session stop          kill the session (its pid 1) and clean up
 #   linuxapk-session status
@@ -19,62 +19,70 @@
 #   linuxapk-session shell         interactive /system/bin/sh inside
 #   linuxapk-session selftest      host-safety probes against the live session
 #
-# Environment: LINUXAPK_OUT (default <repo>/out),
-#              LINUXAPK_INSTANCE (default empty: the main session; set a name
-#                to run an independent session, e.g. one per agent lane),
-#              LINUXAPK_DATA (default ~/.local/share/linuxapk/data[-<instance>]),
+# It runs from an installed prefix (libexec/linuxapk; in a checkout,
+# out/stage after `mise run build`) and builds nothing. Its files:
+#   $XDG_RUNTIME_DIR/linuxapk[-<instance>]/  pid files, the kmsg FIFO, the
+#     bridge's socket, the start-time layer over the image
+#   $XDG_STATE_HOME/linuxapk[-<instance>]/   logs (session, kmsg, bridge) and
+#     the documents service's grants
+#   $XDG_DATA_HOME/linuxapk/                 images/, data[-<instance>]/
+#     (Android's /data), addons/ (layers over the partitions, e.g. microG)
+#
+# Environment: LINUXAPK_INSTANCE (default empty: the main session; set a name
+#                to run an independent session, e.g. one per test),
+#              LINUXAPK_DATA (default $XDG_DATA_HOME/linuxapk/data[-<instance>]),
 #              LINUXAPK_AUDIO_SINK (PipeWire sink for the session's audio;
 #                default: the desktop's default output),
-#              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in run/bridge.log),
+#              LINUXAPK_BRIDGE_VERBOSE=1 (per-stream stats in bridge.log),
 #              LINUXAPK_TEST=1 (a test session even without an instance),
 #              LINUXAPK_OPEN_URLS=1 (a test session opens links in the host
 #                browser; by default it only logs them, and it shows
 #                notifications and media players only on a private bus),
 #              LINUXAPK_SINGLE_UID=1 (same as start --single-uid),
 #              LINUXAPK_BROKER_DEBUG=1 (broker tracing, and single-uid syscall
-#                counters every 10 s, in session.out; another value is a log
+#                counters every 10 s, in session.log; another value is a log
 #                file path inside the session root)
 set -euo pipefail
-
-here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
-repo=$(cd "$here/../.." && pwd)
-out=${LINUXAPK_OUT:-$repo/out}
-out=$(realpath "$out")
-inst=${LINUXAPK_INSTANCE:-}
-[[ $inst =~ ^[a-z0-9-]*$ ]] || {
-  echo "linuxapk-session: bad LINUXAPK_INSTANCE" >&2
-  exit 1
-}
-sfx=${inst:+-$inst}
-run=$out/run$sfx
-data=${LINUXAPK_DATA:-$HOME/.local/share/linuxapk/data$sfx}
-unit=linuxapk-session$sfx
 
 die() {
   echo "linuxapk-session: $*" >&2
   exit 1
 }
 
-# The image: the pinned AOSP CI build's extracted partitions ($img) and its
-# flattened APEXes ($apexdir). Our overrides are android/overlay, the
-# extra androidboot.* values image/bootconfig and the vendor properties
-# image/vendor.prop. See docs/image.md.
-images=${LINUXAPK_IMAGES:-$HOME/.local/share/linuxapk/images}
+here=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+share=$(cd "$here/../.." && pwd)/share/linuxapk
+[[ -f $share/manifest.tsv ]] || die "no staged build next to $here (run \`mise run build\`)"
+inst=${LINUXAPK_INSTANCE:-}
+[[ $inst =~ ^[a-z0-9-]*$ ]] || die "bad LINUXAPK_INSTANCE"
+sfx=${inst:+-$inst}
+run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/linuxapk$sfx
+state=${XDG_STATE_HOME:-$HOME/.local/state}/linuxapk$sfx
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk
+data=${LINUXAPK_DATA:-$data_home/data$sfx}
+unit=linuxapk-session$sfx
+
+# The image: the pinned AOSP CI build's extracted partitions ($img), its
+# flattened APEXes ($apexdir) and the layers derived from them ($derived).
+# Our overrides are the staged Android tree (android/overlay and the built
+# modules), the extra androidboot.* values (image/bootconfig) and the vendor
+# properties (image/vendor.prop). See docs/image.md.
+images=${LINUXAPK_IMAGES:-$data_home/images}
 # The pin's top-level name: the keys before the first [table] header (the
 # [[artifact]] tables have names of their own).
-pin=${LINUXAPK_PIN:-$repo/image/pin.toml}
+pin=${LINUXAPK_PIN:-$share/image/pin.toml}
 image=$(awk -F'"' '/^[[:space:]]*\[/ { exit } /^name[[:space:]]*=/ { print $2; exit }' "$pin" 2>/dev/null || true)
 [[ -n $image ]] || die "no image name in $pin"
 # The extra androidboot.* values, one per line (e.g. the vendor APEX selection
 # androidboot.vendor.apex.<name>=<file>|none, which apexd and
 # image/flatten-apex.sh both honour).
 image_bootconfig() {
-  sed 's/#.*//' "$repo/image/bootconfig" | tr -s ' \t' '\n' | grep .
+  sed 's/#.*//' "$share/image/bootconfig" | tr -s ' \t' '\n' | grep .
 }
-# Shared by all checkouts and instances, so each vendor APEX selection gets its
-# own flattened tree (never rewritten under a running session).
+# Shared by all instances, so each vendor APEX selection gets its own
+# flattened tree (never rewritten under a running session).
 img=$images/$image/img
 apexdir=$images/$image/apex-$(image_bootconfig | grep '^androidboot\.vendor\.apex\.' | sha256sum | cut -c1-12)
+derived=$images/$image/derived
 
 # Map root to the invoking user (so image files appear root-owned), and the
 # Android uid/gid ranges we need onto our subordinate ids:
@@ -118,41 +126,47 @@ EOF
   image_bootconfig
 }
 
-# /vendor/build.prop = the image's plus graphics driver selection from
-# out/vendor-overlay/etc/vulkan.prop (android/vendor/vulkan). RADV only if the render node is
-# driven by amdgpu, else lavapipe.
-vendor_props() {
-  local dst=$out/session/overlay/vendor/build.prop gpu=$out/vendor-overlay/etc/vulkan.prop vk=lvp
-  local drv ours
+# The start-time layer, $run/layer (top of every partition's stack, see
+# ns-init.sh):
+#   vendor/build.prop  the image's, plus every props.d/*.prop (graphics,
+#                      audio), the driver selection and image/vendor.prop.
+#                      RADV only if the render node is driven by amdgpu,
+#                      else lavapipe.
+#   apex/<name>/       our files for the APEXes this image has (the stage's,
+#                      then the addons'), so the tree gains no directories
+#                      apexd and linkerconfig don't know about.
+runtime_layer() {
+  local layer=$run/layer drv vk=lvp ours p src d
+  [[ -f $share/props.d/vulkan.prop ]] || die "no graphics properties ($share/props.d/vulkan.prop)"
   drv=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)")
   [[ $drv == amdgpu ]] && vk=radv
-  mkdir -p "$(dirname "$dst")"
   ours=$(
-    echo "# --- linuxapk-session: graphics (render node driver: ${drv:-none}) ---"
-    if [[ -f $gpu ]]; then
-      grep -v '^ro.hardware.vulkan=' "$gpu"
-    else
-      printf 'ro.hardware.egl=angle\nro.opengles.version=196610\n'
-    fi
+    for p in "$share"/props.d/*.prop; do
+      echo "# --- linuxapk-session: $(basename "$p") ---"
+      grep -v '^#' "$p"
+    done
+    echo "# --- linuxapk-session: render node driver: ${drv:-none} ---"
     echo "ro.hardware.vulkan=$vk"
-    # Composer backend (hal lane): windows through the bridge, or none.
+    # Composer backend: windows through the bridge, or none.
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
-    # Audio (audio lane): tinyalsa buffer sizing for the bridge-backed card.
-    if [[ -f $out/vendor-overlay/etc/audio.prop ]]; then
-      echo "# --- linuxapk-session: audio ---"
-      grep -v '^#' "$out/vendor-overlay/etc/audio.prop"
-    fi
     echo "# --- linuxapk-session: image/vendor.prop ---"
-    cat "$repo/image/vendor.prop"
+    cat "$share/image/vendor.prop"
   )
+  mkdir -p "$layer/vendor" "$layer/apex"
   {
     # The image's file minus every key set here, so ours take effect.
     awk -F= 'NR == FNR { if ($0 !~ /^#/ && NF > 1) mine[$1] = 1; next } !($1 in mine)' \
       <(echo "$ours") "$img/vendor/build.prop"
     echo
     echo "$ours"
-  } >"$dst"
-  chmod 0644 "$dst"
+  } >"$layer/vendor/build.prop"
+  chmod 0644 "$layer/vendor/build.prop"
+  for src in "$share/android/apex" "$data_home"/addons/*/apex; do
+    for d in "$src"/*/; do
+      [[ -d $d && -d $apexdir/$(basename "$d") ]] && cp -a "$d" "$layer/apex/"
+    done
+  done
+  return 0
 }
 
 # /data's files belong to Android's uids: subordinate ids normally, the
@@ -169,27 +183,24 @@ check_data_owner() {
   fi
 }
 
-# Make sure the selected image is extracted and flattened, and the generated
-# overlay matches it.
+# Make sure the selected image is extracted and flattened, and its derived
+# layers (image/derive.sh) are current: the common one and the one for this
+# uid mode.
 prepare() {
-  [[ -d $img/system/system ]] || "$repo/image/fetch.sh" "$pin"
+  local single=${1:-0} layer want
+  [[ -d $img/system/system ]] || "$here/image/fetch.sh" "$pin"
   if [[ ! -f $apexdir/apex-info-list.xml ]]; then
     rm -rf "$apexdir.tmp$sfx"
-    "$repo/image/flatten-apex.sh" "$img" "$apexdir.tmp$sfx"
+    "$here/image/flatten-apex.sh" "$img" "$share/image/bootconfig" "$apexdir.tmp$sfx"
     mv -T "$apexdir.tmp$sfx" "$apexdir" 2>/dev/null || rm -rf "$apexdir.tmp$sfx" # lost a race: fine
   fi
-  # A stable name for the last-prepared tree, for tools that link against
-  # image libraries (e.g. android/vendor/audio/build.sh); sessions use $apexdir itself.
-  ln -sfn "$(basename "$apexdir")" "$images/$image/apex"
-  # supervisor/build.sh's generated overlay holds image-derived files (relaxed
-  # copies, APEX fs_config), so rebuild it when the image changes too.
-  if [[ ! -x $out/session/pivot-exec ]] ||
-    [[ "$img $apexdir" != "$(cat "$out/session/overlay/.image" 2>/dev/null)" ]] ||
-    [[ -n $(find "$repo/supervisor/pivot-exec" "$repo/supervisor/shim" "$repo/supervisor/build.sh" \
-      "$repo/supervisor/broker/src" "$repo/android/system/exec" -newer "$out/session/pivot-exec" 2>/dev/null) ]]; then
-    LINUXAPK_IMG=$img LINUXAPK_APEX=$apexdir "$repo/supervisor/build.sh"
-    echo "$img $apexdir" >"$out/session/overlay/.image"
-  fi
+  for layer in common "$( ((single)) && echo single-uid || echo subuid)"; do
+    want="$apexdir $(sha256sum <"$here/image/derive.sh")"
+    [[ $(cat "$derived/$layer.source" 2>/dev/null) == "$want" ]] && continue
+    rm -f "$derived/$layer.source"
+    "$here/image/derive.sh" "$layer" "$img" "$apexdir" "$derived/$layer"
+    echo "$want" >"$derived/$layer.source"
+  done
 }
 
 start() {
@@ -214,25 +225,14 @@ start() {
     [[ -S $wayland ]] || die "no Wayland socket at $wayland (use --headless)"
   fi
   if p=$(ns_pid); then die "already running (pid $p)"; fi
-  prepare
-
-  # The desktop bridge (host/bridge, Rust): windows, input, audio and desktop
-  # integration.
-  local bridge=$repo/target/release/linuxapk-bridge
-  if [[ ! -x $bridge ]] || [[ -n $(find "$repo/host/bridge" -newer "$bridge" -name '*.rs' 2>/dev/null) ]]; then
-    (cd "$repo" && cargo build -q --release -j 8 -p linuxapk-bridge) || die "bridge build failed"
-  fi
-
-  # iptables with the nf_tables backend (the image's legacy one can't work).
-  # Rebuilt when its front end (linuxapk-iptables) changes too.
-  local ipt=$out/session/iptables/system/bin/linuxapk-iptables
-  if [[ ! -x $ipt ]] || [[ -n $(find "$repo/android/system/iptables" -newer "$ipt" 2>/dev/null) ]]; then
-    "$repo/android/system/iptables/build.sh"
-  fi
-  vendor_props
+  prepare "$single_uid"
 
   rm -rf "$run"
-  mkdir -p "$run"
+  mkdir -p "$run" "$state"
+  : >"$state/session.log"
+  : >"$state/kmsg.log"
+  : >"$state/bridge.log"
+  runtime_layer
   echo "console=null" >"$run/cmdline"
   cmdline | tr ' ' '\n' | sed -n 's/^\(androidboot\.[^=]*\)=\(.*\)/\1 = "\2"/p' >"$run/bootconfig"
   mkfifo "$run/kmsg"
@@ -244,7 +244,7 @@ start() {
   # the caller's session bus, and desktop entries for apps installed inside
   # Android ("Apps service") go to the caller's XDG_DATA_HOME.
   local integ_env=() v
-  for v in DBUS_SESSION_BUS_ADDRESS XDG_DATA_HOME LINUXAPK_SESSION; do
+  for v in DBUS_SESSION_BUS_ADDRESS XDG_DATA_HOME; do
     [[ -n ${!v:-} ]] && integ_env+=("--setenv=$v=${!v}")
   done
   # Test sessions (any named instance, or LINUXAPK_TEST=1: lanes, the compat
@@ -264,7 +264,7 @@ start() {
     --setenv=LINUXAPK_AUDIO_SINK="${LINUXAPK_AUDIO_SINK:-}" --setenv=LINUXAPK_BRIDGE_VERBOSE="${LINUXAPK_BRIDGE_VERBOSE:-}" \
     --setenv=LINUXAPK_PIN="$pin" --setenv=LINUXAPK_IMAGES="$images" \
     --setenv=LINUXAPK_BROKER_DEBUG="${LINUXAPK_BROKER_DEBUG:-}" --setenv=LINUXAPK_SINGLE_UID="$single_uid" \
-    "${integ_env[@]}" -- "$here/linuxapk-session" _run "$out" "$data"
+    "${integ_env[@]}" -- "$here/linuxapk-session" _run "$run" "$state" "$data"
   # _run records the pids once Android init is up.
   for _ in $(seq 100); do
     [[ -s $run/pid ]] && break
@@ -273,12 +273,12 @@ start() {
   done
   local p
   p=$(ns_pid) || {
-    cat "$run/session.out" >&2
+    cat "$state/session.log" >&2
     die "session failed to start"
   }
-  echo "session started ($image): Android pid 1 = host pid $p; log: $run/kmsg.log"
+  echo "session started ($image): Android pid 1 = host pid $p; log: $state/kmsg.log"
   if ((fg)); then
-    tail -n +1 --pid="$p" -f "$run/kmsg.log" || true
+    tail -n +1 --pid="$p" -f "$state/kmsg.log" || true
   fi
   return 0
 }
@@ -291,16 +291,16 @@ start() {
 # System app's uid (the owner of its data directory) for the system service.
 # docs/bridge.md.
 start_bridge() {
-  local bridge=$repo/target/release/linuxapk-bridge base
+  local base
   mkdir -p "$run/bridge"
-  local args=(--socket "$run/bridge/bridge.sock" --allow-uid "$(id -u)")
+  local args=(--run-dir "$run" --state-dir "$state" --allow-uid "$(id -u)")
   if [[ ${LINUXAPK_SINGLE_UID:-} != 1 ]]; then
     # AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1. (In
     # single-uid mode every Android process is the invoking user.)
     read -r base _ < <(awk -F: -v u="$(id -un)" -v n="$(id -u)" '$1==u || $1==n {print $2, $3; exit}' /etc/subuid)
     args+=(--allow-uid $((base + 999)) --allow-uid $((base + 1040)))
   fi
-  args+=(--system-app-dir "$data/data/dev.linuxapk.system" --grants "$run/documents.grants"
+  args+=(--system-app-dir "$data/data/dev.linuxapk.system"
     ${LINUXAPK_AUDIO_SINK:+--sink "$LINUXAPK_AUDIO_SINK"})
   [[ ${LINUXAPK_BRIDGE_VERBOSE:-} == 1 ]] && args+=(-v)
   # Apps installed inside the main session get desktop entries.
@@ -313,8 +313,8 @@ start_bridge() {
   while :; do
     # The display service (windows, input) and the clipboard connect to the
     # host compositor.
-    WAYLAND_DISPLAY=${LINUXAPK_WAYLAND:-} "$bridge" "${args[@]}" </dev/null >>"$run/bridge.log" 2>&1
-    echo "linuxapk-session: bridge exited ($?); restarting" >>"$run/bridge.log"
+    WAYLAND_DISPLAY=${LINUXAPK_WAYLAND:-} "$here/linuxapk-bridge" "${args[@]}" </dev/null >>"$state/bridge.log" 2>&1
+    echo "linuxapk-session: bridge exited ($?); restarting" >>"$state/bridge.log"
     sleep 1
   done &
   for _ in $(seq 50); do
@@ -326,23 +326,23 @@ start_bridge() {
 
 # Body of the systemd service (internal).
 _run() {
-  out=$1 data=$2 run=$out/run$sfx
+  run=$1 state=$2 data=$3
   single_uid=0
   [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && single_uid=1
   # Reader holds the FIFO open read-write so writers never block or see EOF.
-  cat 0<>"$run/kmsg" >>"$run/kmsg.log" &
-  # start shows session.out when the session fails to come up.
+  cat 0<>"$run/kmsg" >>"$state/kmsg.log" &
+  # start shows session.log when the session fails to come up.
   start_bridge || {
-    echo "the bridge did not start (see $run/bridge.log)" >"$run/session.out"
+    echo "the bridge did not start (see $state/bridge.log)" >>"$state/session.log"
     return 1
   }
   # Outer namespaces: user (subuid map), mount, pid, cgroup. pivot-exec then
   # nests user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   # shellcheck disable=SC2046
-  env LINUXAPK_REPO="$repo" LINUXAPK_OUT="$out" LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" \
-    LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" LINUXAPK_SINGLE_UID="$single_uid" \
+  env LINUXAPK_RUN="$run" LINUXAPK_DATA="$data" LINUXAPK_IMG="$img" LINUXAPK_APEX="$apexdir" \
+    LINUXAPK_DERIVED="$derived" LINUXAPK_ADDONS="$data_home/addons" LINUXAPK_SINGLE_UID="$single_uid" \
     unshare $(idmaps users) $(idmaps groups) --mount --pid --cgroup --fork --kill-child \
-    -- "$here/ns-init.sh" </dev/null >"$run/session.out" 2>&1 &
+    -- "$here/ns-init.sh" </dev/null >>"$state/session.log" 2>&1 &
   local ushare=$! outer="" inner=""
   for _ in $(seq 200); do
     [[ -z $outer ]] && outer=$(pgrep -P "$ushare" | head -1 || true)
@@ -366,7 +366,7 @@ _run() {
     pasta --config-net --quiet --foreground --no-netns-quit --no-map-gw -I eth1 \
       -D 169.254.1.1 --dhcp-dns --dns-forward 169.254.1.1 ${dns_host:+--dns-host "$dns_host"} \
       -t none -u none -T none -U none \
-      --userns "/proc/$inner/ns/user" --netns "/proc/$inner/ns/net" >>"$run/session.out" 2>&1 &
+      --userns "/proc/$inner/ns/user" --netns "/proc/$inner/ns/net" >>"$state/session.log" 2>&1 &
     echo $! >"$run/pasta.pid"
   fi
   wait "$ushare"
@@ -502,7 +502,7 @@ case ${1:-} in
     start "$@"
     ;;
   stop) stop ;;
-  prepare) prepare ;;
+  prepare) prepare "$([[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && echo 1 || echo 0)" ;;
   image) printf 'image=%s\nimg=%s\napex=%s\n' "$image" "$img" "$apexdir" ;;
   _run)
     shift
@@ -512,7 +512,7 @@ case ${1:-} in
   selftest) selftest ;;
   log)
     shift
-    if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$run/kmsg.log"; else cat "$run/kmsg.log"; fi
+    if [[ ${1:-} == -f ]]; then exec tail -n +1 -f "$state/kmsg.log"; else cat "$state/kmsg.log"; fi
     ;;
   exec)
     shift
@@ -521,7 +521,7 @@ case ${1:-} in
     ;;
   shell) exec_in /system/bin/sh -l ;;
   *)
-    sed -n '2,20s/^# \{0,1\}//p' "$0"
+    sed -n '2,/^set -euo/{/^#/s/^# \{0,1\}//p}' "$0"
     exit 1
     ;;
 esac

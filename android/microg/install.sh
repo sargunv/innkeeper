@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Fetch microG (GmsCore, GsfProxy, FakeStore) from microG's own F-Droid repo,
-# verify it, and install it as privileged system apps into
-# out/system_ext-overlay, which the session layers over /system_ext (see
-# docs/microg.md):
+# verify it, and install it as privileged system apps into the microg addon,
+# a layer the session stacks over the partitions
+# ($XDG_DATA_HOME/linuxapk/addons/microg/system_ext; see docs/microg.md):
 #   priv-app/GmsCore/GmsCore.apk (+ lib/x86_64/, extracted)
 #   priv-app/GsfProxy/GsfProxy.apk
 #   priv-app/FakeStore/FakeStore.apk
 #   etc/permissions/privapp-permissions-microg.xml
 #   etc/default-permissions/default-permissions-microg.xml
 #   etc/sysconfig/microg.xml
-# Downloads go in out/microg/. Restart the session afterwards.
+# Downloads go in $XDG_CACHE_HOME/linuxapk/microg. Restart the session
+# afterwards.
 #
 #   android/microg/install.sh            # latest stable release
 #   android/microg/install.sh --beta     # latest release, including the Beta channel
-#   android/microg/install.sh --remove   # take microG out of the overlay again
+#   android/microg/install.sh --remove   # remove the addon again
 #
 # Trust chain: the repo's entry.jar must be signed by microG's published key
 # (SHA-256 9BD06727..., github.com/microg/GmsCore/wiki/Downloads), entry.json
@@ -21,13 +22,12 @@
 # apksigner checks that each APK is signed by the same microG key.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/../.." && pwd)
-out=${LINUXAPK_OUT:-$repo/out}
-bt=${ANDROID_HOME:-$HOME/Android/Sdk}/build-tools/37.0.0
+bt=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS
 url=https://microg.org/fdroid/repo
 key=9bd06727e62796c0130eb6dab39b73157451582cbd138e86c468acc395d14165
-dl=$out/microg
-dst=$out/system_ext-overlay
+dl=${XDG_CACHE_HOME:-$HOME/.cache}/linuxapk/microg
+addon=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/addons/microg
+dst=$addon/system_ext
 # package  priv-app name
 apps=(
   com.google.android.gms GmsCore
@@ -46,9 +46,8 @@ die() {
 }
 
 if [[ ${1:-} == --remove ]]; then
-  for ((i = 1; i < ${#apps[@]}; i += 2)); do rm -rf "${dst:?}/priv-app/${apps[i]}"; done
-  for x in "${xmls[@]}"; do rm -f "$dst/etc/$x"; done
-  echo "removed microG from $dst"
+  rm -rf "$addon"
+  echo "removed $addon"
   exit 0
 fi
 beta=0
@@ -117,5 +116,5 @@ for x in "${xmls[@]}"; do
   mkdir -p "$dst/etc/$(dirname "$x")"
   cp "$here/etc/$x" "$dst/etc/$x"
 done
-chmod -R go+rX "$dst"
-echo "installed microG into $dst; restart the session"
+chmod -R go+rX "$addon"
+echo "installed microG into $addon; restart the session"

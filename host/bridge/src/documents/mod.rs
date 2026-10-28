@@ -7,7 +7,7 @@
 //!
 //! - A grant is made only from a portal result, so only what the user picked
 //!   is reachable. Grants persist (the provider's URIs outlive the session)
-//!   in the instance's run directory, and FORGET drops one.
+//!   in the instance's state directory, and FORGET drops one.
 //! - A file grant opens only that file. A folder grant opens paths beneath it
 //!   through `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` from the
 //!   folder's fd, so `..`, absolute symlinks and `/proc` links can't leave

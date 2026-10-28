@@ -1,9 +1,10 @@
 # Compat corpus: pinned F-Droid APKs (see docs/compat-triage.md).
 #
-# `tests/compat/run.sh fetch` downloads each APK into out/corpus/ and checks its
-# SHA-256; the APKs are never committed. To bump an app, copy the new version
-# code, URL and SHA-256 from https://f-droid.org/repo/index-v2.json. Prefer
-# x86_64 or universal APKs (`native` lists the ABIs the APK ships).
+# `tests/compat/run.sh fetch` downloads each APK into out/test/compat/corpus/
+# and checks its SHA-256; the APKs are never committed. To bump an app, copy
+# the new version code, URL and SHA-256 from
+# https://f-droid.org/repo/index-v2.json. Prefer x86_64 or universal APKs
+# (`native` lists the ABIs the APK ships).
 #
 # Per app: framework = the UI framework or engine the APK is built with, for
 # COMPATIBILITY.md (identified by hand from its libs and assets, see

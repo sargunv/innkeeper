@@ -4,18 +4,17 @@
 #   $LINUXAPK_IMAGES/<name>/dl/   artifacts from image/pin.toml (resumable)
 #   $LINUXAPK_IMAGES/<name>/img/  system, system_ext, product, vendor, odm,
 #                                 *_dlkm (image/extract.sh)
-# LINUXAPK_IMAGES defaults to ~/.local/share/linuxapk/images. The session
+# LINUXAPK_IMAGES defaults to $XDG_DATA_HOME/linuxapk/images. The session
 # flattens the APEXes itself (per vendor APEX selection), on first start.
 #
-# usage: fetch-image.sh [pin.toml]     (default: image/pin.toml)
+# usage: fetch.sh <pin.toml>
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(dirname "$here")
-pin=${1:-$repo/image/pin.toml}
-images=${LINUXAPK_IMAGES:-$HOME/.local/share/linuxapk/images}
+pin=${1:?usage: fetch.sh <pin.toml>}
+images=${LINUXAPK_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/images}
 
 die() {
-  echo "fetch-image: $*" >&2
+  echo "fetch.sh: $*" >&2
   exit 1
 }
 

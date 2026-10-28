@@ -174,7 +174,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env(enabled: bool) -> Config {
-        let instance = std::env::var("LINUXAPK_INSTANCE").unwrap_or_default();
+        let instance = linuxapk_core::paths::instance().unwrap_or_default();
         let mut run = linuxapk_core::ops::command_for("linuxapk").unwrap_or_else(|e| {
             crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
             let mut v = vec![];

@@ -1,4 +1,4 @@
-//! Driving the live Android session through `host/launcher/linuxapk-session`.
+//! Driving the live Android session through the staged `linuxapk-session`.
 
 use std::cell::Cell;
 use std::fs::File;
@@ -76,20 +76,11 @@ impl Session {
         self.run(secs, &["sh", "-c", script])
     }
 
-    /// The host bridge's log: `out/run[-<instance>]/bridge.log`, where `out` is
-    /// `LINUXAPK_OUT` or the launcher's `<repo>/out`.
+    /// The host bridge's log, in the session's state directory.
     fn bridge_log_path(&self) -> PathBuf {
-        let out = std::env::var_os("LINUXAPK_OUT")
-            .map(PathBuf::from)
-            .or_else(|| Some(self.launcher.parent()?.parent()?.join("out")))
-            .unwrap_or_default();
-        let inst = std::env::var("LINUXAPK_INSTANCE").unwrap_or_default();
-        let run = if inst.is_empty() {
-            "run".to_string()
-        } else {
-            format!("run-{inst}")
-        };
-        out.join(run).join("bridge.log")
+        linuxapk_core::paths::state_dir()
+            .unwrap_or_default()
+            .join("bridge.log")
     }
 
     /// The bridge log's current size, so a step can look only at what comes

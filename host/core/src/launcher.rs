@@ -1,9 +1,8 @@
-//! Driving the Android session through `host/launcher/linuxapk-session`
+//! Driving the Android session through the prefix's `linuxapk-session`
 //! (modelled on `tests/compat/src/session.rs`). Commands run inside the
 //! session as argv through `linuxapk-session exec`, which ends in
 //! `exec "$@"`: no string is ever interpreted by a shell, host or Android.
 
-use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,81 +11,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+use crate::paths::{self, Prefix};
 use crate::proc;
 
 pub struct Session {
     launcher: PathBuf,
-}
-
-/// The launcher's path in a checkout.
-const LAUNCHER: &str = "host/launcher/linuxapk-session";
-
-/// Finds `linuxapk-session`: `$LINUXAPK_SESSION`; the checkout this binary
-/// runs from (`<repo>/target/*/linuxapk`) or was built in, or its main checkout
-/// if that is a git worktree whose image isn't prepared; or `linuxapk-session`
-/// on `PATH`.
-pub fn find_launcher() -> Result<PathBuf> {
-    if let Some(p) = env::var_os("LINUXAPK_SESSION") {
-        return Ok(PathBuf::from(p));
-    }
-    // The checkout this binary runs from, then the one it was built in.
-    let mut roots: Vec<PathBuf> = vec![];
-    if let Ok(exe) = env::current_exe().and_then(|p| p.canonicalize()) {
-        roots.extend(exe.ancestors().skip(1).map(Path::to_path_buf));
-    }
-    roots.extend(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .map(Path::to_path_buf),
-    );
-    for dir in roots {
-        let l = dir.join(LAUNCHER);
-        if !l.is_file() {
-            continue;
-        }
-        if image_ready(&l) {
-            return Ok(l);
-        }
-        if let Some(main) = main_checkout(&dir) {
-            let m = main.join(LAUNCHER);
-            if m.is_file() {
-                return Ok(m);
-            }
-        }
-        return Ok(l);
-    }
-    proc::which("linuxapk-session").context("linuxapk-session not found: set LINUXAPK_SESSION")
-}
-
-/// Whether the image `launcher` selects is extracted and flattened, at the
-/// paths `linuxapk-session image` prints.
-fn image_ready(launcher: &Path) -> bool {
-    let Ok(o) = proc::run(
-        Command::new(launcher).arg("image"),
-        Stdio::null(),
-        Duration::from_secs(10),
-    ) else {
-        return false;
-    };
-    let text = o.text();
-    let path = |key: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(key))
-            .map(PathBuf::from)
-    };
-    o.ok()
-        && path("img=").is_some_and(|p| p.join("system/system").is_dir())
-        && path("apex=").is_some_and(|p| p.join("apex-info-list.xml").is_file())
-}
-
-/// The main checkout of a git worktree (`.git` is a file naming
-/// `<main>/.git/worktrees/<name>`).
-fn main_checkout(dir: &Path) -> Option<PathBuf> {
-    let t = std::fs::read_to_string(dir.join(".git")).ok()?;
-    let gitdir = PathBuf::from(t.strip_prefix("gitdir:")?.trim());
-    let dotgit = gitdir.parent()?.parent()?;
-    (dotgit.file_name()? == ".git").then(|| dotgit.parent().map(Path::to_path_buf))?
 }
 
 /// Lines of session stderr worth keeping (the session's linker warns there).
@@ -106,27 +35,6 @@ pub struct Status {
     pub memory: Option<u64>,
 }
 
-/// `LINUXAPK_INSTANCE` if it is a valid instance name (as the launcher checks
-/// it), else an error.
-pub fn instance() -> Result<String> {
-    let inst = env::var("LINUXAPK_INSTANCE").unwrap_or_default();
-    if !inst
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        bail!("bad LINUXAPK_INSTANCE");
-    }
-    Ok(inst)
-}
-
-/// The systemd user unit the launcher runs the session in.
-pub fn unit_name() -> String {
-    match instance() {
-        Ok(i) if !i.is_empty() => format!("linuxapk-session-{i}"),
-        _ => "linuxapk-session".into(),
-    }
-}
-
 fn unit_memory(unit: &str) -> Option<u64> {
     let o = proc::run(
         Command::new("systemctl").args(["--user", "show", "-P", "MemoryCurrent", unit]),
@@ -138,9 +46,10 @@ fn unit_memory(unit: &str) -> Option<u64> {
 }
 
 impl Session {
+    /// The session of this program's prefix (and `LINUXAPK_INSTANCE`).
     pub fn find() -> Result<Self> {
         Ok(Self {
-            launcher: find_launcher()?,
+            launcher: Prefix::locate()?.launcher(),
         })
     }
 
@@ -236,7 +145,7 @@ impl Session {
         Status {
             running: true,
             booted: self.booted(),
-            memory: unit_memory(&unit_name()),
+            memory: paths::unit_name().ok().and_then(|u| unit_memory(&u)),
         }
     }
 
@@ -279,28 +188,5 @@ impl Session {
             let _ = self.exec(15, &["wm", "dismiss-keyguard"]);
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn worktree_main_checkout() {
-        let d = env::temp_dir().join(format!("linuxapk-wt-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(
-            d.join(".git"),
-            "gitdir: /home/u/Projects/linux.apk/.git/worktrees/cli\n",
-        )
-        .unwrap();
-        assert_eq!(
-            main_checkout(&d),
-            Some(PathBuf::from("/home/u/Projects/linux.apk"))
-        );
-        std::fs::write(d.join(".git"), "gitdir: /x/y\n").unwrap();
-        assert_eq!(main_checkout(&d), None);
-        std::fs::remove_dir_all(&d).unwrap();
     }
 }

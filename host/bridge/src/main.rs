@@ -1,15 +1,18 @@
-//! `linuxapk-bridge --socket PATH [--allow-uid UID]... [--system-app-dir DIR]
-//!                  [--mirror-apps] [--grants FILE] [--no-open-urls]
+//! `linuxapk-bridge --run-dir DIR --state-dir DIR [--allow-uid UID]...
+//!                  [--system-app-dir DIR] [--mirror-apps] [--no-open-urls]
 //!                  [--no-desktop-presence] [--sink NAME] [-v]`
 //!
-//! Listens on PATH for clients from the Android session. Only the given host
-//! uids may connect (default: our own uid). Audio plays to the desktop's
-//! default PipeWire sink, or `--sink NAME`.
+//! Listens on `<run-dir>/bridge/bridge.sock` for clients from the Android
+//! session (the launcher binds `<run-dir>/bridge` into it), and keeps MPRIS
+//! artwork in `<run-dir>/art`. Only the given host uids may connect (default:
+//! our own uid). Audio plays to the desktop's default PipeWire sink, or
+//! `--sink NAME`.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
 //! seen from the host) admits the uid that owns DIR to the system, documents
 //! and apps services. `--mirror-apps` turns on desktop entries for apps
-//! installed inside Android (`$XDG_DATA_HOME`). `--grants FILE` keeps the
-//! documents service's grants (host files the user picked) across restarts.
+//! installed inside Android (`$XDG_DATA_HOME`). The documents service's
+//! grants (host files the user picked) persist in
+//! `<state-dir>/documents.grants`.
 //! `--no-open-urls` and `--no-desktop-presence` turn OpenURI, and
 //! notifications and MPRIS, into log-only sinks (test sessions).
 //! `-v` logs per-stream statistics.
@@ -28,17 +31,20 @@ use linuxapk_bridge::ipc::transport;
 use linuxapk_bridge::system::{Shared, SystemService};
 
 fn main() -> Result<()> {
-    let mut socket: Option<PathBuf> = None;
+    let mut run_dir: Option<PathBuf> = None;
+    let mut state_dir: Option<PathBuf> = None;
     let mut allow = Vec::new();
     let mut sink = None;
     let mut system_app_dir: Option<PathBuf> = None;
     let mut mirror_apps = false;
     let mut policy = linuxapk_bridge::system::Policy::default();
-    let mut grants: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--socket" => socket = Some(args.next().context("--socket needs a path")?.into()),
+            "--run-dir" => run_dir = Some(args.next().context("--run-dir needs a path")?.into()),
+            "--state-dir" => {
+                state_dir = Some(args.next().context("--state-dir needs a path")?.into())
+            }
             "--allow-uid" => allow.push(
                 args.next()
                     .context("--allow-uid needs a uid")?
@@ -49,7 +55,6 @@ fn main() -> Result<()> {
             "--mirror-apps" => mirror_apps = true,
             "--no-open-urls" => policy.open_urls = false,
             "--no-desktop-presence" => policy.presence = false,
-            "--grants" => grants = Some(args.next().context("--grants needs a path")?.into()),
             "--system-app-dir" => {
                 system_app_dir = Some(args.next().context("--system-app-dir needs a path")?.into())
             }
@@ -57,7 +62,9 @@ fn main() -> Result<()> {
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
     }
-    let socket = socket.context("--socket is required")?;
+    let run_dir = run_dir.context("--run-dir is required")?;
+    let state_dir = state_dir.context("--state-dir is required")?;
+    let socket = run_dir.join("bridge/bridge.sock");
     if allow.is_empty() {
         allow.push(rustix::process::getuid().as_raw());
     }
@@ -81,14 +88,8 @@ fn main() -> Result<()> {
             events,
         )?))
     });
-    // Artwork for MPRIS goes next to the socket directory, not inside it (the
-    // socket directory is shared with Android).
-    let art_dir = std::path::absolute(&socket)?
-        .parent()
-        .and_then(|d| d.parent())
-        .map(|d| d.join("art"))
-        .unwrap_or_else(|| PathBuf::from("art"));
-    let shared = Shared::with_policy(art_dir, policy);
+    // Not in the socket directory, which is shared with Android.
+    let shared = Shared::with_policy(run_dir.join("art"), policy);
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))
@@ -109,8 +110,8 @@ fn main() -> Result<()> {
             }
         })?;
     // Host files the user picks for Android (docs/bridge.md, "Documents
-    // service"); grants persist in --grants FILE.
-    let store = linuxapk_bridge::documents::Store::new(grants);
+    // service").
+    let store = linuxapk_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
         Ok(Box::new(linuxapk_bridge::documents::DocumentsService::new(
             store.clone(),

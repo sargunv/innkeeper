@@ -5,13 +5,13 @@
 #   <out>/apex-info-list.xml       what apexd writes to /apex/apex-info-list.xml
 # Unprivileged: runs inside the host-tools container (image/hosttools.sh).
 #
-# usage: flatten-apex.sh <extracted-image-dir> <out-dir>
+# usage: flatten-apex.sh <extracted-image-dir> <bootconfig> <out-dir>
 #
 # Multi-install vendor APEXes (several files with one manifest name, e.g.
 # cuttlefish's keymint.rust_nonsecure / keymint.rust_cf_remote) are selected
 # the way apexd does it: androidboot.vendor.apex.<name>=<file without .apex>
 # (ro.boot.vendor.apex.*) picks one, and "none" drops a vendor APEX. The
-# selections are read from image/bootconfig (whitespace-separated
+# selections are read from <bootconfig> (image/bootconfig: whitespace-separated
 # androidboot.*=value tokens, # comments), which the session also passes to
 # init.
 set -euo pipefail
@@ -19,9 +19,10 @@ if [[ ! -e /run/.containerenv ]]; then
   exec "$(dirname "$0")/hosttools.sh" "$0" "$@"
 fi
 
-img=$(realpath "${1:?usage: flatten-apex.sh <img-dir> <out-dir>}")
-out=${2:?usage: flatten-apex.sh <img-dir> <out-dir>}
-bootconfig=$(dirname "$0")/bootconfig
+usage="usage: flatten-apex.sh <img-dir> <bootconfig> <out-dir>"
+img=$(realpath "${1:?$usage}")
+bootconfig=${2:?$usage}
+out=${3:?$usage}
 declare -A sel=()
 while read -r k v; do sel[$k]=$v; done < <(sed 's/#.*//' "$bootconfig" | tr -s ' \t' '\n' |
   sed -n 's/^androidboot\.vendor\.apex\.\([^=]*\)=\(.*\)/\1 \2/p')

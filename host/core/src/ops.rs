@@ -3,7 +3,6 @@
 //! thread; progress and warnings go to a [`Report`] callback.
 
 use std::collections::BTreeSet;
-use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -11,10 +10,11 @@ use anyhow::{Context, Result, bail};
 use crate::android::{self, Launch};
 use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
-use crate::launcher::{self, Session};
+use crate::launcher::Session;
 use crate::manifest::{self, Aapt2, Badging};
+use crate::paths::{self, Prefix};
+use crate::validate;
 use crate::xdg::{self, DesktopApp, Dirs};
-use crate::{proc, validate};
 
 /// Progress from a long operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,43 +30,18 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// The command line that runs `name` (`linuxapk` or `linuxapk-manager`) from a
-/// desktop entry: this binary if it is `name`, else `name` next to it, else
-/// `name` on `PATH`. It is the bare name if that's what `PATH` finds, else
-/// the absolute path; prefixed with the session selection
-/// (`LINUXAPK_INSTANCE`, `LINUXAPK_SESSION`) if set, so entries made from a
-/// lane's session keep using it.
+/// The command line a desktop entry runs `name` (`linuxapk` or
+/// `linuxapk-manager`) with: its absolute path in this program's prefix,
+/// after `env LINUXAPK_INSTANCE=<instance>` for a named instance.
 pub fn command_for(name: &str) -> Result<Vec<String>> {
     let mut v = vec![];
-    let inst = launcher::instance()?;
-    let sess = env::var("LINUXAPK_SESSION").unwrap_or_default();
-    if !inst.is_empty() || !sess.is_empty() {
-        v.push("env".to_string());
-        if !inst.is_empty() {
-            v.push(format!("LINUXAPK_INSTANCE={inst}"));
-        }
-        if !sess.is_empty() {
-            v.push(format!("LINUXAPK_SESSION={sess}"));
-        }
+    let inst = paths::instance()?;
+    if !inst.is_empty() {
+        v.push("env".into());
+        v.push(format!("LINUXAPK_INSTANCE={inst}"));
     }
-    let exe = env::current_exe()?.canonicalize()?;
-    let bin = if exe.file_name().is_some_and(|n| n == name) {
-        exe
-    } else if let Some(sib) = exe.parent().map(|d| d.join(name))
-        && sib.is_file()
-    {
-        sib.canonicalize()?
-    } else {
-        proc::which(name)
-            .and_then(|p| p.canonicalize().ok())
-            .with_context(|| format!("`{name}` not found next to this program or on PATH"))?
-    };
-    let on_path = proc::which(name).and_then(|p| p.canonicalize().ok());
-    if on_path.as_deref() == Some(bin.as_path()) {
-        v.push(name.into());
-    } else {
-        v.push(bin.to_str().context("binary path isn't UTF-8")?.to_string());
-    }
+    let bin = Prefix::locate()?.bin(name);
+    v.push(bin.to_str().context("program path isn't UTF-8")?.into());
     Ok(v)
 }
 
@@ -430,7 +405,7 @@ pub fn list(report: Report) -> Result<Vec<(String, Option<String>)>> {
 /// session needed). If `android` is given (the session's user packages),
 /// apps installed without an entry are added too.
 pub fn installed_apps(android: Option<&[String]>) -> Vec<DesktopApp> {
-    let inst = launcher::instance().unwrap_or_default();
+    let inst = paths::instance().unwrap_or_default();
     let mut v: Vec<DesktopApp> = xdg::desktop_apps(&Dirs::from_env())
         .into_iter()
         .filter(|a| a.instance == inst)
