@@ -1,9 +1,11 @@
 # tests
 
 Cross-module tests; they run on the host and are never shipped. Module-local
-tests live next to their code. Integration tiers need `mise run build` (and the
-first one a prepared image); each uses a fresh, named test instance with its
-data and logs under `out/test/<suite>/`.
+tests live next to their code. Every tier needs `mise run build` (the unit tier
+for the staged launcher), and the session tiers a prepared image. Their logs go
+under `out/test/<suite>/`. `boot` makes a fresh `/data` under `out/test/boot`;
+`e2e` and `compat` run a named instance (`e2e`, or `LINUXAPK_INSTANCE`) on that
+instance's usual `/data`, so set `LINUXAPK_DATA` for a fresh one.
 
 | Tier   | Task                   | What                                                                                                                                                                |
 | ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

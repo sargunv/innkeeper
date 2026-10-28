@@ -76,8 +76,10 @@ and `WAYLAND_DISPLAY` set to the nested socket before the bus starts, so
 whatever the bus activates (portals, kded) inherits it.
 
 ```sh
-N=$PWD/out/nested   # rt/ home/ config/ data/ cache/ state/; hold.sh writes $N/bus and sleeps
+N=$PWD/out/nested
 mkdir -p $N/{rt,home,config,data,cache,state} && chmod 700 $N/rt
+printf '#!/bin/sh\necho "$DBUS_SESSION_BUS_ADDRESS" >%s/bus\nexec sleep infinity\n' $N >$N/hold.sh
+chmod +x $N/hold.sh   # the session's command: publishes the nested bus, then waits
 E=(-u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS HOME=$N/home XDG_RUNTIME_DIR=$N/rt
    XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
    XDG_CURRENT_DESKTOP=KDE)

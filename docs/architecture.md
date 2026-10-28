@@ -96,9 +96,9 @@ network through pasta ([session.md](session.md)).
   so dev, test and packaged runs share one code path.
   [tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
   module stages and where it runs.
-- Inside Flatpak there are no nested user namespaces and no mounts. The plan
-  there is single-uid mode plus a symlink root (Flatpak's `/` is a writable
-  tmpfs), with no AOSP patches; it is tracked on GitHub for M5.
+- Inside Flatpak there are no nested user namespaces and no mounts, so a Flatpak
+  session needs single-uid mode and a root built from symlinks (Flatpak's `/` is
+  a writable tmpfs); that work is the M5 milestone.
 
 ## Non-goals
 

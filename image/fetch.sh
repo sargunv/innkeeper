@@ -34,7 +34,7 @@ name=$(head -1 <<<"$parsed")
 dest=$images/$name
 mkdir -p "$dest/dl"
 
-# One fetch per image at a time (sessions of several lanes may start at once).
+# One fetch per image at a time (several instances may start at once).
 exec 9>"$dest/.lock"
 flock 9
 

@@ -7,8 +7,9 @@
 # The tests are android-17.0.0_r1 builds (the image's release) of
 # binderDriverInterfaceTest, binderLibTest, binderSafeInterfaceTest and
 # binderThroughputTest, read from $XDG_DATA_HOME/linuxapk/test-bin/binder and
-# checked against test-bin.sha256 (the image-builder lane builds them; copy
-# them from out/target/product/<device>/data/nativetest64/<name>/<name>).
+# checked against test-bin.sha256 (build them in an AOSP checkout of that
+# release and copy them from
+# out/target/product/<device>/data/nativetest64/<name>/<name>).
 # They run with the image's servicemanager as the context manager, as on a
 # device, in a root from tests/bionic/lib.sh:
 #

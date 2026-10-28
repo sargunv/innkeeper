@@ -13,8 +13,8 @@
  * host-visible buffer and check the result.
  * --udmabuf: import a memfd/udmabuf dma-buf as VkDeviceMemory, write it from a
  *   compute shader, check through the memfd mapping.
- * --anb-hal: same, but the buffer comes from the hal lane's allocator code and
- *   is imported through the real mapper.linuxapk.so (libhalbuf.so).
+ * --anb-hal: same, but the buffer comes from the graphics HAL's allocator
+ *   code and is imported through the real mapper.linuxapk.so (libhalbuf.so).
  * --deferred: with --anb/--anb-hal, use libvulkan's deferred-allocation
  *   swapchain path (bind the gralloc buffer with vkBindImageMemory2).
  * --anb: create a VkImage from a gralloc-style native handle
@@ -610,7 +610,7 @@ static int test_udmabuf(void) {
   return bad != 0;
 }
 
-/* --anb-hal: buffer from the hal lane's allocator, imported by
+/* --anb-hal: buffer from the graphics HAL's allocator, imported by
  * mapper.linuxapk.so. */
 static const native_handle_t* hal_buffer(
   int width, int height, size_t* stride, size_t* size, void** map

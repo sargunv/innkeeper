@@ -156,7 +156,7 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
 }
 
 /// Encodes a request (the client side: tests, the example client, and the
-/// reference for `android/vendor/audio/tinyalsa/bridge_client.c`).
+/// reference for `android/vendor/audio/tinyalsa/audio_service.c`).
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match req {
         Request::OpenOutput(c) => {

@@ -115,7 +115,7 @@ want="Exec=env LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE $(realpath "$la") run org.ex
 rm "$stale"
 ok "list repairs a stale entry"
 
-# Launch through the desktop, as the app menu would (no lane env in scope:
+# Launch through the desktop, as the app menu would (LINUXAPK_INSTANCE unset:
 # the entry carries it).
 env -u LINUXAPK_INSTANCE gtk-launch dev.linuxapk.com.darkempire78.opencalculator
 wait_top com.darkempire78.opencalculator
