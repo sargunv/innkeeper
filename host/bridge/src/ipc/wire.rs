@@ -272,6 +272,74 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// `wire-fixtures.txt`, which the system app's tests also check: each
+    /// message built from its fields must match the hex, and read back.
+    #[test]
+    fn shared_fixtures() {
+        fn int(v: &str) -> i64 {
+            match v.strip_prefix("0x") {
+                Some(h) => i64::from_str_radix(h, 16).unwrap(),
+                None => v.parse().unwrap(),
+            }
+        }
+        fn text(v: &str) -> &str {
+            v.strip_prefix('"').unwrap().strip_suffix('"').unwrap()
+        }
+        let fixtures = include_str!("wire-fixtures.txt");
+        let mut lines = fixtures
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'));
+        let mut cases = 0;
+        while let Some(fields) = lines.next() {
+            let hex = lines.next().expect("a hex line after each message");
+            let want: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+            let fields: Vec<(&str, &str)> = fields
+                .split("; ")
+                .map(|f| f.split_once(' ').unwrap_or((f, "")))
+                .collect();
+            let mut w = Writer::default();
+            for &(op, v) in &fields {
+                match op {
+                    "message" => {
+                        let (ty, tag) = v.split_once(' ').unwrap();
+                        w.u16(int(ty) as u16).u16(0).u32(int(tag) as u32);
+                    }
+                    "u8" => _ = w.u8(int(v) as u8),
+                    "u16" => _ = w.u16(int(v) as u16),
+                    "u32" => _ = w.u32(int(v) as u32),
+                    "i32" => _ = w.i32(int(v) as i32),
+                    "u64" => _ = w.u64(int(v) as u64),
+                    "f32" => _ = w.f32(v.parse().unwrap()),
+                    "name" => _ = w.name(text(v)),
+                    _ => panic!("unknown field {op}"),
+                }
+            }
+            assert_eq!(w.0, want, "{fields:?}");
+
+            let h = decode_header(&want).unwrap();
+            let mut r = Reader::new(&want[HDR..]);
+            for &(op, v) in &fields {
+                match op {
+                    "message" => assert_eq!(format!("0x{:04x} {}", h.ty, h.tag), v),
+                    "u8" => assert_eq!(r.u8().unwrap() as i64, int(v)),
+                    "u16" => assert_eq!(r.u16().unwrap() as i64, int(v)),
+                    "u32" => assert_eq!(r.u32().unwrap() as i64, int(v)),
+                    "i32" => assert_eq!(r.i32().unwrap() as i64, int(v)),
+                    "u64" => assert_eq!(r.u64().unwrap() as i64, int(v)),
+                    "f32" => assert_eq!(r.f32().unwrap(), v.parse::<f32>().unwrap()),
+                    _ => assert_eq!(r.name().unwrap(), truncate(text(v), MAX_NAME)),
+                }
+            }
+            r.end().unwrap();
+            cases += 1;
+        }
+        assert!(cases > 0);
+    }
+
     #[test]
     fn header_checks() {
         assert_eq!(

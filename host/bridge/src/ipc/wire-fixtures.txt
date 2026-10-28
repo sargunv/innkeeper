@@ -1,0 +1,30 @@
+# Bridge messages that both ends must encode byte for byte the same. The tests
+# of host/bridge/src/ipc/wire.rs and of the system app's Wire
+# (android/system-app/protocol, WireFixturesTest) build each message from its
+# fields, compare the bytes with the hex line below it, then read the fields
+# back from those bytes.
+#
+# Fields, separated by "; ": message TYPE TAG (the 8-byte header), u8, u16, u32,
+# i32, u64 or f32 VALUE, and name "TEXT" (u16 length and UTF-8, written cut to
+# 96 bytes on a character boundary, so it reads back cut).
+
+message 0x0001 1; u16 1; u16 0; u32 6; name "Linux.apk System input"
+  0100000001000000010000000600000016004c696e75782e61706b2053797374656d20696e707574
+
+message 0x0502 7; name "org.wikipedia"; name "2.7.50612"; name "Wikipédia"; i32 -1; u8 0; u32 5
+  02050000070000000d006f72672e77696b6970656469610900322e372e35303631320a0057696b6970c3a9646961ffffffff0005000000
+
+message 0x8000 7; i32 -22
+  0080000007000000eaffffff
+
+message 0x0306 2147483647; u64 1234567890123; f32 0.5; f32 -1.25; u32 4294967295
+  06030000ffffff7fcb04fb711f0100000000003f0000a0bfffffffff
+
+message 0x0301 3; name "éééééééééééééééééééééééééééééééééééééééééééééééééé"
+  01030000030000006000c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9
+
+message 0x0301 4; name "aéééééééééééééééééééééééééééééééééééééééééééééééé"
+  01030000040000005f0061c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9
+
+message 0x0305 5; name ""
+  05030000050000000000

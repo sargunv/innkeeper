@@ -5,8 +5,6 @@ import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Process
 import android.util.Log
-import dev.linuxapk.system.integration.Blob
-import dev.linuxapk.system.integration.Wire
 import java.io.FileDescriptor
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -198,23 +196,14 @@ class BridgeConnection(
 
   private fun session(s: LocalSocket) {
     val buf = ByteArray(Wire.MAX_MSG + 1)
-    write(
-      s,
-      Wire.message(Wire.HELLO, HELLO_TAG).u16(1).u16(0).u32(service).name(name).bytes(),
-      null,
-    )
+    write(s, Wire.hello(HELLO_TAG, service, name), null)
     val input = s.inputStream
     while (running) {
       val n = input.read(buf)
       if (n <= 0) return
       var fds: Array<FileDescriptor> = s.ancillaryFileDescriptors ?: emptyArray()
       try {
-        if (n < Wire.HDR || n > Wire.MAX_MSG) throw IOException("bad packet ($n bytes)")
-        val r = ByteBuffer.wrap(buf, 0, n).order(ByteOrder.LITTLE_ENDIAN)
-        val type = r.short.toInt() and 0xffff
-        r.short
-        val tag = r.int
-        val body = ByteBuffer.wrap(buf.copyOfRange(r.position(), n)).order(ByteOrder.LITTLE_ENDIAN)
+        val (type, tag, body) = Wire.parse(buf, n) ?: throw IOException("bad packet ($n bytes)")
         if (type == Wire.REPLY) {
           val status = body.int
           if (tag == HELLO_TAG) {

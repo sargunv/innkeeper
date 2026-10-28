@@ -8,7 +8,7 @@ import android.content.Intent
 import android.os.LocaleList
 import android.provider.Settings
 import android.util.Log
-import dev.linuxapk.system.integration.Wire
+import dev.linuxapk.system.bridge.Wire
 import java.nio.ByteBuffer
 import java.util.TimeZone
 import org.json.JSONObject

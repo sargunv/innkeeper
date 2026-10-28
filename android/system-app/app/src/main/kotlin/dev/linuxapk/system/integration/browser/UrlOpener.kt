@@ -2,8 +2,8 @@
 package dev.linuxapk.system.integration.browser
 
 import android.util.Log
+import dev.linuxapk.system.bridge.Wire
 import dev.linuxapk.system.integration.IntegrationFeature
-import dev.linuxapk.system.integration.Wire
 
 /**
  * Hands http(s) links to the bridge, which opens them in the host browser through the OpenURI

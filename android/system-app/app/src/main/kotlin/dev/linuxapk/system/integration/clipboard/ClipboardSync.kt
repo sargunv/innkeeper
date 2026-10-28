@@ -11,8 +11,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
 import android.util.Log
+import dev.linuxapk.system.bridge.Wire
+import dev.linuxapk.system.bridge.toRgba
 import dev.linuxapk.system.integration.IntegrationFeature
-import dev.linuxapk.system.integration.Wire
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -101,7 +102,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
       while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_SIDE) sample *= 2
       val opts = BitmapFactory.Options().apply { inSampleSize = sample }
       val bmp = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-      bmp?.let { Wire.rgba(it, MAX_SIDE) }
+      bmp?.toRgba(MAX_SIDE)
     } catch (e: Exception) {
       Log.w(TAG, "reading clip image $uri: $e")
       null

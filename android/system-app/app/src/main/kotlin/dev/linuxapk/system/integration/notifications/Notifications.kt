@@ -19,8 +19,9 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import dev.linuxapk.system.LinuxApkSystemApp
+import dev.linuxapk.system.bridge.Wire
+import dev.linuxapk.system.bridge.toRgba
 import dev.linuxapk.system.integration.IntegrationFeature
-import dev.linuxapk.system.integration.Wire
 import dev.linuxapk.system.wm.WindowManagerFeature
 
 /**
@@ -256,7 +257,7 @@ class Notifications(private val context: Context, private val feature: Integrati
   private fun appIcon(pkg: String): Wire.Rgba? =
     icons.getOrPut(pkg) {
       try {
-        bitmap(context.packageManager.getApplicationIcon(pkg), 64)?.let { Wire.rgba(it, 64) }
+        bitmap(context.packageManager.getApplicationIcon(pkg), 64)?.toRgba(64)
       } catch (_: Exception) {
         null
       }
@@ -264,10 +265,10 @@ class Notifications(private val context: Context, private val feature: Integrati
 
   private fun picture(n: Notification): Wire.Rgba? {
     val big = n.extras.getParcelable(Notification.EXTRA_PICTURE, Bitmap::class.java)
-    if (big != null) return Wire.rgba(big, 256)
+    if (big != null) return big.toRgba(256)
     val icon = n.getLargeIcon() ?: return null
     return try {
-      icon.loadDrawable(context)?.let { bitmap(it, 128) }?.let { Wire.rgba(it, 128) }
+      icon.loadDrawable(context)?.let { bitmap(it, 128) }?.toRgba(128)
     } catch (_: Exception) {
       null
     }

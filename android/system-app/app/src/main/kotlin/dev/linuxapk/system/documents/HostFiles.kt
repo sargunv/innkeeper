@@ -3,8 +3,9 @@ package dev.linuxapk.system.documents
 
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import dev.linuxapk.system.bridge.Blob
 import dev.linuxapk.system.bridge.BridgeConnection
-import dev.linuxapk.system.integration.Blob
+import dev.linuxapk.system.bridge.Wire
 import java.io.FileDescriptor
 import java.io.FileNotFoundException
 import java.nio.ByteBuffer
@@ -257,7 +258,7 @@ object HostFiles {
   }
 
   /** u16 length + UTF-8 (paths and file names; the bridge checks them). */
-  private fun dev.linuxapk.system.integration.Wire.Writer.text16(s: String) {
+  private fun Wire.Writer.text16(s: String) {
     val b = s.toByteArray(Charsets.UTF_8)
     require(b.size <= 400) { "path too long" }
     u16(b.size)

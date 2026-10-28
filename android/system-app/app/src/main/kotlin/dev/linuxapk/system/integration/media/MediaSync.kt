@@ -10,8 +10,9 @@ import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.util.Log
 import dev.linuxapk.system.LinuxApkSystemApp
+import dev.linuxapk.system.bridge.Wire
+import dev.linuxapk.system.bridge.toRgba
 import dev.linuxapk.system.integration.IntegrationFeature
-import dev.linuxapk.system.integration.Wire
 import dev.linuxapk.system.wm.WindowManagerFeature
 
 /**
@@ -186,7 +187,7 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
       .u64(duration)
       .u64(position)
       .f32(if (speed.isFinite() && kotlin.math.abs(speed) <= 16f) speed else 1f)
-      .image(art?.let { Wire.rgba(it, 512) })
+      .image(art?.toRgba(512))
     val blob = w.bytes()
     feature.connection.send(
       Wire.MEDIA,
