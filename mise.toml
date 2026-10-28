@@ -147,6 +147,10 @@ run = ["tests/boot.sh", "tests/boot.sh --no-subids"]
 description = "End-to-end suites against a headless test instance: audio, system-app, cli"
 run = "tests/e2e/run.sh"
 
+[tasks."test:a11y"]
+description = "Android apps on AT-SPI: a nested KWin with its own AT-SPI bus, checked with pyatspi"
+run = "tests/a11y/run.sh"
+
 [tasks."test:compat"]
 description = "The compat corpus against a session (-- [--only PKG,...] [--window] [--accept] | fetch | report)"
 # A named instance (default compat), so a test session: links are only logged,

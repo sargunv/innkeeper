@@ -14,6 +14,7 @@ instance's usual `/data`, so set `LINUXAPK_DATA` for a fresh one.
 | binder | `mise run test:binder` | AOSP's binder gtests on the broker, then on kernel binder (`supervisor/tests/binder`)                                                                     |
 | boot   | `mise run test:boot`   | a fresh headless boot plus `selftest`, in subuid and single-uid mode (`boot.sh`)                                                                          |
 | e2e    | `mise run test:e2e`    | audio, system-app and CLI suites against one headless instance (`e2e/run.sh`)                                                                             |
+| a11y   | `mise run test:a11y`   | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                           |
 | compat | `mise run test:compat` | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
 
 - **`bionic/run.sh`** is the one runner for on-device binaries: it builds an
