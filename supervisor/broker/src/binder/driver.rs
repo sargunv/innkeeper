@@ -183,7 +183,6 @@ struct Thread {
     looper: u32,
     todo: VecDeque<Work>,
     process_todo: bool,
-    looper_need_return: bool,
     transaction_stack: Option<TxnId>,
     return_error: u32,
     reply_error: u32,
@@ -513,7 +512,6 @@ impl BinderDriver {
             .threads
             .entry(tid)
             .or_insert_with(|| Thread {
-                looper_need_return: true,
                 return_error: BR_OK,
                 reply_error: BR_OK,
                 ee: NO_EXTENDED_ERROR,
@@ -528,7 +526,7 @@ impl BinderDriver {
     }
 
     fn has_work(p: &Process, t: &Thread, do_proc_work: bool) -> bool {
-        t.process_todo || t.looper_need_return || (do_proc_work && !p.todo.is_empty())
+        t.process_todo || (do_proc_work && !p.todo.is_empty())
     }
 
     /// Wake a blocked thread: its read runs again before the current ioctl
@@ -910,7 +908,7 @@ impl BinderDriver {
             self.write_read(proc, tid, call, us);
         } else {
             let errno = self.other_ioctl(proc, tid, cmd, call.arg, us);
-            self.finish(proc, tid, call, errno, us);
+            us.answer(call, errno);
         }
         self.settle(us);
     }
@@ -993,14 +991,14 @@ impl BinderDriver {
             .read(proc, call.arg, size_of::<BinderWriteRead>())
             .and_then(|b| read_pod::<BinderWriteRead>(&b, 0))
         else {
-            self.finish(proc, tid, call, libc::EFAULT, us);
+            us.answer(call, libc::EFAULT);
             return;
         };
         let read_avail = bwr.read_size.saturating_sub(bwr.read_consumed);
         if bwr.write_size > bwr.write_consumed {
             let len = (bwr.write_size - bwr.write_consumed) as usize;
             if len > MAX_WRITE {
-                self.finish(proc, tid, call, libc::EINVAL, us);
+                us.answer(call, libc::EINVAL);
                 return;
             }
             let Some(write) = bwr
@@ -1008,7 +1006,7 @@ impl BinderDriver {
                 .checked_add(bwr.write_consumed)
                 .and_then(|a| us.read(proc, a, len))
             else {
-                self.finish(proc, tid, call, libc::EFAULT, us);
+                us.answer(call, libc::EFAULT);
                 return;
             };
             // A write-only BC_ENTER_LOOPER is IPCThreadState::setupPolling():
@@ -1021,7 +1019,7 @@ impl BinderDriver {
                 && has_cmd(&write, BC_ENTER_LOOPER)
             {
                 if !us.make_pollable(proc, call) {
-                    self.finish(proc, tid, call, libc::EINTR, us);
+                    us.answer(call, libc::EINTR);
                     return;
                 }
                 self.thread_mut(proc, tid).looper |= LOOPER_POLL;
@@ -1035,7 +1033,7 @@ impl BinderDriver {
                 } else {
                     libc::EFAULT
                 };
-                self.finish(proc, tid, call, errno, us);
+                us.answer(call, errno);
                 return;
             }
         }
@@ -1048,7 +1046,7 @@ impl BinderDriver {
             } else {
                 libc::EFAULT
             };
-            self.finish(proc, tid, call, errno, us);
+            us.answer(call, errno);
         }
     }
 
@@ -1068,7 +1066,7 @@ impl BinderDriver {
                 // Record the write's progress first, so a restarted ioctl never
                 // replays it. A thread waits only once that has worked.
                 if !put_bwr(proc, read.call, &read.bwr, us) {
-                    self.finish(proc, tid, read.call, libc::EFAULT, us);
+                    us.answer(read.call, libc::EFAULT);
                     return;
                 }
                 let since = self.id();
@@ -1084,14 +1082,9 @@ impl BinderDriver {
                 } else {
                     libc::EFAULT
                 };
-                self.finish(proc, tid, read.call, errno, us);
+                us.answer(read.call, errno);
             }
-            Prepared::Interrupted(d) => {
-                // The restarted ioctl must not replay the write.
-                put_bwr(proc, read.call, &read.bwr, us);
-                self.rollback(proc, tid, d);
-                self.end_ioctl(proc, tid);
-            }
+            Prepared::Interrupted(d) => self.abandon(proc, tid, read, d, us),
         }
         self.pass_on_proc_work(proc);
     }
@@ -1106,33 +1099,33 @@ impl BinderDriver {
     }
 
     /// Copy a prepared read out and answer its call. The delivery is
-    /// committed only if the thread got it, and rolled back otherwise.
+    /// committed only if the thread got it, and abandoned otherwise.
     fn deliver(&mut self, proc: ProcId, tid: u32, read: Read, d: Delivery, us: &mut dyn Userspace) {
-        let copied = read
+        let mut bwr = read.bwr;
+        bwr.read_consumed += d.bytes.len() as u64;
+        let delivered = read
             .bwr
             .read_buffer
             .checked_add(read.bwr.read_consumed)
-            .is_some_and(|at| us.write(proc, at, &d.bytes));
-        if !copied {
-            // Like binder_ioctl_write_read, still report the write's progress.
-            put_bwr(proc, read.call, &read.bwr, us);
-            self.rollback(proc, tid, d);
-            self.finish(proc, tid, read.call, libc::EFAULT, us);
-            return;
-        }
-        let mut bwr = read.bwr;
-        bwr.read_consumed += d.bytes.len() as u64;
-        if !put_bwr(proc, read.call, &bwr, us) {
-            self.rollback(proc, tid, d);
-            self.finish(proc, tid, read.call, libc::EFAULT, us);
-        } else if self.finish(proc, tid, read.call, 0, us) {
+            .is_some_and(|at| us.write(proc, at, &d.bytes))
+            && put_bwr(proc, read.call, &bwr, us)
+            && us.answer(read.call, 0);
+        if delivered {
             self.commit(proc, tid, d);
         } else {
-            // Interrupted: the restarted ioctl finds its bwr as it was after
-            // the write, and reads the same work again.
-            put_bwr(proc, read.call, &read.bwr, us);
-            self.rollback(proc, tid, d);
+            self.abandon(proc, tid, read, d, us);
         }
+    }
+
+    /// The reader never gets `d`: a copy failed, or its call is gone. Roll it
+    /// back, and end the call with EFAULT (a no-op if it is gone) and its bwr
+    /// as it was after the write, as binder_ioctl_write_read does: the
+    /// restarted ioctl then reads the same work again without replaying the
+    /// write.
+    fn abandon(&mut self, proc: ProcId, tid: u32, read: Read, d: Delivery, us: &mut dyn Userspace) {
+        self.rollback(proc, tid, d);
+        put_bwr(proc, read.call, &read.bwr, us);
+        us.answer(read.call, libc::EFAULT);
     }
 
     /// The reader has the delivery: apply what reading it means.
@@ -1172,30 +1165,6 @@ impl BinderDriver {
         let t = p.threads.get_mut(&tid).unwrap();
         t.process_todo = (d.process_todo || t.process_todo) && !t.todo.is_empty();
         self.poll_dirty.insert(proc);
-    }
-
-    /// End `tid`'s ioctl and answer its call (the exit of `binder_ioctl`).
-    /// False if the call is gone.
-    fn finish(
-        &mut self,
-        proc: ProcId,
-        tid: u32,
-        call: Call,
-        errno: i32,
-        us: &mut dyn Userspace,
-    ) -> bool {
-        self.end_ioctl(proc, tid);
-        us.answer(call, errno)
-    }
-
-    fn end_ioctl(&mut self, proc: ProcId, tid: u32) {
-        if let Some(t) = self
-            .procs
-            .get_mut(&proc)
-            .and_then(|p| p.threads.get_mut(&tid))
-        {
-            t.looper_need_return = false;
-        }
     }
 
     /// Serve the reads of the threads woken during this ioctl, then publish
@@ -2506,7 +2475,7 @@ impl BinderDriver {
             loop {
                 let from_proc = self.procs[&proc].threads[&tid].todo.is_empty();
                 if from_proc && (self.procs[&proc].todo.is_empty() || !proc_work) {
-                    if d.bytes.len() == 4 && !self.procs[&proc].threads[&tid].looper_need_return {
+                    if d.bytes.len() == 4 {
                         continue 'retry;
                     }
                     break 'retry;
@@ -2866,10 +2835,9 @@ impl BinderDriver {
                         assert!(
                             !Self::has_work(p, t, proc_work),
                             "proc {pid} thread {tid} waits with work to read: todo {:?} \
-                             (process_todo {}), need_return {}, proc todo {:?} (proc_work {proc_work})",
+                             (process_todo {}), proc todo {:?} (proc_work {proc_work})",
                             t.todo,
                             t.process_todo,
-                            t.looper_need_return,
                             p.todo
                         );
                         assert!(!proc_work || Self::available_for_proc_work(t));
