@@ -21,6 +21,13 @@ pub struct Config {
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland: Option<PathBuf>,
+    /// Seconds without activity before the session stops itself; 0: never
+    /// ([`crate::lifecycle`]).
+    #[serde(default)]
+    pub idle_grace: u64,
+    /// The environment a wakeup starts the session again with.
+    #[serde(default)]
+    pub start_env: BTreeMap<String, String>,
     /// `LINUXAPK_BROKER_DEBUG`, passed to the broker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_debug: Option<String>,
@@ -43,6 +50,8 @@ impl Config {
         let mut c = Config {
             headless,
             wayland,
+            idle_grace: crate::lifecycle::grace_secs(headless),
+            start_env: crate::lifecycle::start_env(),
             broker_debug: env::var("LINUXAPK_BROKER_DEBUG")
                 .ok()
                 .filter(|v| !v.is_empty()),

@@ -13,6 +13,7 @@
 //! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not http(s), `-EAGAIN` over 5 per 10 s                                            |
 //! | `0x0306` | MEDIA        | `u32 player` (≠ 0), `u32 len` ≤ 2 MiB (fd: media blob)                          | `-EBUSY` over 8 players per connection                                                         |
 //! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
+//! | `0x0308` | LIFECYCLE    | `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len` ≤ 16 KiB (fd if len > 0: background apps) | the session's activity, for idle shutdown ([`Lifecycle`])                              |
 //!
 //! | Event    | Message      | Body (fd)                                                                                                                                                                                                |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,6 +38,7 @@ pub mod ty {
     pub const OPEN_URI: u16 = 0x0305;
     pub const MEDIA: u16 = 0x0306;
     pub const MEDIA_CLOSE: u16 = 0x0307;
+    pub const LIFECYCLE: u16 = 0x0308;
 }
 
 pub mod ev {
@@ -63,6 +65,9 @@ pub mod limits {
     pub const CLIP_IMAGE: u32 = 16 << 20;
     pub const URI: u32 = 8192;
     pub const MEDIA_BLOB: u32 = 2 << 20;
+    /// LIFECYCLE's blob, and the background-allowed apps in it.
+    pub const LIFECYCLE_BLOB: u32 = 16 << 10;
+    pub const BACKGROUND_APPS: usize = 32;
 }
 
 /// Clipboard content kinds.
@@ -90,6 +95,42 @@ impl ClipKind {
     }
 }
 
+/// What keeps the session up, as the system app sees it (docs/session.md,
+/// "Lifecycle"). It sends one whenever a part changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lifecycle {
+    /// The window manager's windows (shown or starting).
+    pub windows: u32,
+    /// User apps' running foreground services.
+    pub services: u32,
+    /// The next alarm clock, in ms since the epoch (0: none).
+    pub wakeup_ms: u64,
+    /// The blob's length: the apps the user lets run in the background, one
+    /// `package<TAB>label` line each ([`background_apps`]). 0: none, and no fd.
+    pub len: u32,
+}
+
+/// The lines of a LIFECYCLE blob: (package, label), at most
+/// [`limits::BACKGROUND_APPS`].
+pub fn background_apps(blob: &[u8]) -> Result<Vec<(String, String)>, DecodeError> {
+    let text = std::str::from_utf8(blob).map_err(|_| DecodeError::Invalid("utf-8"))?;
+    let mut v = vec![];
+    for l in text.lines().filter(|l| !l.is_empty()) {
+        let (pkg, label) = l.split_once('\t').unwrap_or((l, l));
+        if !super::valid_package(pkg) {
+            return Err(DecodeError::Invalid("package"));
+        }
+        if v.len() == limits::BACKGROUND_APPS {
+            return Err(DecodeError::Invalid("too many background apps"));
+        }
+        v.push((
+            pkg.to_string(),
+            label.chars().filter(|c| !c.is_control()).collect(),
+        ));
+    }
+    Ok(v)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// `u32 features`. Reply: `u32 features` the bridge can serve.
@@ -111,6 +152,9 @@ pub enum Request {
     Media { player: u32, len: u32 },
     /// `u32 player`.
     MediaClose { player: u32 },
+    /// `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len`; fd (if len >
+    /// 0): background apps.
+    Lifecycle(Lifecycle),
 }
 
 impl Request {
@@ -122,7 +166,7 @@ impl Request {
                 | Request::ClipSet { .. }
                 | Request::OpenUri { .. }
                 | Request::Media { .. }
-        )
+        ) || matches!(self, Request::Lifecycle(l) if l.len > 0)
     }
 }
 
@@ -175,6 +219,12 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
         ty::MEDIA_CLOSE => Request::MediaClose {
             player: nonzero(r.u32()?, "player")?,
         },
+        ty::LIFECYCLE => Request::Lifecycle(Lifecycle {
+            windows: r.u32()?,
+            services: r.u32()?,
+            wakeup_ms: r.u64()?,
+            len: limited(r.u32()?, limits::LIFECYCLE_BLOB, "len")?,
+        }),
         t => return Err(DecodeError::UnknownType(t)),
     };
     r.end()?;
@@ -183,6 +233,11 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
 
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match *req {
+        Request::Lifecycle(l) => {
+            let mut w = Writer::message(ty::LIFECYCLE, tag);
+            w.u32(l.windows).u32(l.services).u64(l.wakeup_ms).u32(l.len);
+            w
+        }
         Request::Start { features } => {
             let mut w = Writer::message(ty::START, tag);
             w.u32(features);
@@ -377,6 +432,13 @@ mod tests {
                 len: 100,
             },
             Request::MediaClose { player: 1 },
+            Request::Lifecycle(Lifecycle::default()),
+            Request::Lifecycle(Lifecycle {
+                windows: 1,
+                services: 2,
+                wakeup_ms: 1_793_222_130_000,
+                len: 20,
+            }),
         ];
         for r in reqs {
             assert_eq!(roundtrip(&encode(1, &r)), Ok(r));
@@ -390,6 +452,13 @@ mod tests {
             (ty::CLIP_SET, &[1, 2, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 0, 1, 0, 1, 0, 0, 0]),
             (ty::START, &[0, 0, 0, 0, 0]),
+            // A blob over 16 KiB.
+            (
+                ty::LIFECYCLE,
+                &[
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x40, 0, 0,
+                ][..],
+            ),
         ] {
             assert!(decode(t, body).is_err(), "{t:#x} {body:?}");
         }
@@ -419,10 +488,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn background_blob() {
+        assert_eq!(
+            background_apps(b"me.ash.reader\tRead You\norg.x\n"),
+            Ok(vec![
+                ("me.ash.reader".into(), "Read You".into()),
+                ("org.x".into(), "org.x".into())
+            ])
+        );
+        assert_eq!(background_apps(b""), Ok(vec![]));
+        assert!(background_apps(b"../x\tX\n").is_err());
+        assert!(background_apps("a.b\tx\n".repeat(33).as_bytes()).is_err());
+        assert!(
+            Request::Lifecycle(Lifecycle {
+                len: 1,
+                ..Default::default()
+            })
+            .takes_fd()
+        );
+        assert!(!Request::Lifecycle(Lifecycle::default()).takes_fd());
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(20000))]
         #[test]
-        fn decode_arbitrary(t in 0x0300u16..0x0309, body in proptest::collection::vec(any::<u8>(), 0..24)) {
+        fn decode_arbitrary(t in 0x0300u16..0x030a, body in proptest::collection::vec(any::<u8>(), 0..40)) {
             if let Ok(req) = decode(t, &body) {
                 prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
             }

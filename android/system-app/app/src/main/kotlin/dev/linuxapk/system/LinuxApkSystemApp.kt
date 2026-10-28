@@ -43,7 +43,7 @@ class LinuxApkSystemApp : Application() {
         input,
         wm,
         ImeFeature(this),
-        IntegrationFeature(this),
+        IntegrationFeature(this, wm),
         AppMirrorFeature(this),
         HostNetworkFeature(this),
         HostStateFeature(this),

@@ -48,6 +48,8 @@ pub fn run(paths: &Paths, argv: &[&OsStr]) -> Result<i32> {
         return control::exec(&paths.control(), argv);
     }
     let pid = session::ns_pid(paths).context("not running")?;
+    // Keeps the session up while the command runs (crate::lifecycle).
+    let _running = crate::lifecycle::hold_exec_lock(&paths.exec_lock());
     // Join the session's cgroup, so nothing started here outlives `stop`.
     if let Some(cg) = crate::host::cgroup(paths) {
         let _ = fs::write(cg.join("cgroup.procs"), format!("{}\n", sys::pid()));

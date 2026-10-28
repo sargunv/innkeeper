@@ -3,8 +3,9 @@
 //!                  [--no-desktop-presence] [--sink NAME] [-v]`
 //!
 //! Listens on `<run-dir>/bridge/bridge.sock` for clients from the Android
-//! session (the launcher binds `<run-dir>/bridge` into it), and keeps MPRIS
-//! artwork in `<run-dir>/art`. Only the given host uids may connect (default:
+//! session (the launcher binds `<run-dir>/bridge` into it), keeps MPRIS
+//! artwork in `<run-dir>/art`, and writes the system app's activity reports
+//! to `<run-dir>/lifecycle` for the launcher. Only the given host uids may connect (default:
 //! our own uid). Audio plays to the desktop's default PipeWire sink, or
 //! `--sink NAME`.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
@@ -68,6 +69,8 @@ fn main() -> Result<()> {
     let run_dir = run_dir.context("--run-dir is required")?;
     let state_dir = state_dir.context("--state-dir is required")?;
     let socket = run_dir.join("bridge/bridge.sock");
+    // A report from before a restart is stale; the system app sends a new one.
+    let _ = std::fs::remove_file(run_dir.join("lifecycle"));
     if allow.is_empty() {
         allow.push(rustix::process::getuid().as_raw());
     }
@@ -100,7 +103,7 @@ fn main() -> Result<()> {
         Ok(Box::new(InputService::new(hub.clone(), peer, events)))
     });
     // Not in the socket directory, which is shared with Android.
-    let shared = Shared::with_policy(run_dir.join("art"), policy);
+    let shared = Shared::with_policy(&run_dir, policy);
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))

@@ -166,6 +166,7 @@
         <action android:name="dev.linuxapk.LAUNCH" />
         <action android:name="dev.linuxapk.LIST" />
         <action android:name="dev.linuxapk.CLOSE" />
+        <action android:name="dev.linuxapk.BACKGROUND" />
       </intent-filter>
     </receiver>
 

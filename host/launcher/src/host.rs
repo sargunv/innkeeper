@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::session::{self, append};
-use crate::{nsroot, sys};
+use crate::{lifecycle, nsroot, sys};
 
 fn systemctl(args: &[&str]) -> Command {
     let mut c = Command::new("systemctl");
@@ -118,8 +118,21 @@ pub fn run_unit(cfg: &Config, exe: &Path) -> Result<()> {
     if let Some((n, i)) = found {
         session::write_pids(p, n, i)?;
         pasta = Some(start_pasta(i, &log)?);
+        // Idle: leave a timer for the next alarm, then end the namespaces
+        // (and with them this unit).
+        let (c, exe) = (cfg.clone(), exe.to_path_buf());
+        lifecycle::watch(cfg, move |wakeup| {
+            if let Some(t) = wakeup
+                && let Err(e) = lifecycle::schedule_host(&c, &exe, t)
+            {
+                session::log(&c.paths, &format!("{e:#}"));
+            }
+            session::ENDING.store(true, std::sync::atomic::Ordering::SeqCst);
+            sys::kill(n, libc::SIGKILL);
+        });
     }
     outer.wait()?;
+    session::remove_pids(p);
     if let Some(mut pasta) = pasta {
         let _ = pasta.kill();
         let _ = pasta.wait();
@@ -188,9 +201,10 @@ pub fn outer(cfg: &Config) -> Result<i32> {
     Ok(sys::wait(child)?)
 }
 
-/// Kills the session and removes its unit.
+/// Kills the session and removes its unit, and any wakeup timer it left.
 pub fn stop(cfg_paths: &crate::paths::Paths) -> Result<()> {
     let p = cfg_paths;
+    lifecycle::cancel_host(p);
     for pid in [session::outer_pid(p), session::ns_pid(p)]
         .into_iter()
         .flatten()

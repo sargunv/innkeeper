@@ -233,6 +233,40 @@ pub fn launch(s: &Session, l: &Launch, o: &LaunchOptions) -> Result<String> {
     }
 }
 
+/// Sets whether `(package, allowed)` may run in the background, through the
+/// system app's control receiver. Returns the apps allowed.
+pub fn background(s: &Session, set: Option<(&str, bool)>) -> Result<Vec<String>> {
+    let mut argv = vec![
+        "am",
+        "broadcast",
+        "--user",
+        "current",
+        "-n",
+        "dev.linuxapk.system/.wm.ControlReceiver",
+        "-a",
+        "dev.linuxapk.BACKGROUND",
+    ];
+    if let Some((pkg, on)) = set {
+        argv.extend(["--es", "package", pkg, "--ez", "allowed"]);
+        argv.push(if on { "true" } else { "false" });
+    }
+    match wm_reply(&s.exec(30, &argv)?.text()) {
+        Some(Ok(r)) => Ok(background_reply(&r)),
+        Some(Err(e)) => bail!("{e}"),
+        None => bail!("Linux.apk System did not answer"),
+    }
+}
+
+/// `background PKG,PKG` (or `background -`): the packages.
+fn background_reply(r: &str) -> Vec<String> {
+    r.strip_prefix("background ")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|p| !p.is_empty() && *p != "-")
+        .map(str::to_string)
+        .collect()
+}
+
 /// What Android itself reports for an installed app.
 #[derive(Debug, Default)]
 pub struct AppInfo {
@@ -368,6 +402,12 @@ mod tests {
             Some(Err("error: no launcher activity".into()))
         );
         assert_eq!(wm_reply("Broadcast completed: result=0\n"), None);
+    }
+
+    #[test]
+    fn background_replies() {
+        assert_eq!(background_reply("background -"), Vec::<String>::new());
+        assert_eq!(background_reply("background a.b,c.d"), ["a.b", "c.d"]);
     }
 
     #[test]

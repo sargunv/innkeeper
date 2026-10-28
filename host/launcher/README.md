@@ -26,10 +26,12 @@ session in a sandbox of its own) and `_userns` (a command as Android's root, for
 | `flatpak.rs`, `control.rs`         | Flatpak mode: the composed root, the sandbox's `/`, the session's lifetime and socket |
 | `root.rs`, `init.rs`, `session.rs` | what both modes share: partitions, binder nodes, `/linuxapk`, pivot-exec, the bridge  |
 | `exec.rs`, `selftest.rs`           | `exec` (namespaces or the control socket, then the exec relay) and the probes         |
+| `lifecycle.rs`                     | stopping when idle, and the wakeup for the next alarm                                 |
 
 | Knob                                               | For                                                             |
 | -------------------------------------------------- | --------------------------------------------------------------- |
 | `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio                |
+| `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never)         |
 | `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session          |
 | `LINUXAPK_OPEN_URLS`                               | tests: let a test session open links                            |
 | `LINUXAPK_APPIMAGE`                                | set by the AppImage's `AppRun`: desktop entries run through it  |

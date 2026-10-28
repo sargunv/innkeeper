@@ -14,7 +14,8 @@ use crate::conf::Config;
 use crate::paths::{Paths, Sandbox};
 use crate::uid::{self, Uids};
 use crate::{
-    appimage, control, exec, flatpak, host, image, layer, requirements, selftest, session, sys,
+    appimage, control, exec, flatpak, host, image, layer, lifecycle, requirements, selftest,
+    session, sys,
 };
 
 const USAGE: &str = "\
@@ -61,6 +62,11 @@ after `mise run build`) and builds nothing. Its files:
 Environment:
   LINUXAPK_AUDIO_SINK      PipeWire sink for the session's audio (default:
                            the desktop's default output)
+  LINUXAPK_IDLE_GRACE      seconds without windows, foreground services,
+                           background-allowed apps, a near alarm or a running
+                           exec before the session stops itself, leaving a
+                           wakeup for its next alarm (default 120; 0: never;
+                           headless sessions never unless it is set)
 Tests only:
   LINUXAPK_INSTANCE        run an independent, named session (default: the
                            main one). Named sessions are test sessions: they
@@ -280,6 +286,15 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     }
     if let Some(p) = crate::status(paths).pid {
         bail!("already running (pid {p})");
+    }
+    // A wakeup left for an alarm isn't needed once the session runs.
+    if !serve {
+        match paths.sandbox {
+            Sandbox::Host => lifecycle::cancel_host(paths),
+            Sandbox::Flatpak => {
+                let _ = control::stop(&paths.control());
+            }
+        }
     }
     check_kernel(paths.sandbox)?;
     let mut exe = exe()?;

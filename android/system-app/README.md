@@ -11,7 +11,7 @@ restarts it if it dies.
 | --------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
 | `wm/`                                   | input          | one trusted virtual display and host window per app ([display](../../docs/display.md)) |
 | `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))          |
-| `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS                               |
+| `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up    |
 | `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))          |
 | `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked             |
 | `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |

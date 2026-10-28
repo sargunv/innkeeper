@@ -385,17 +385,35 @@ pub fn run(pkg: &str, uri: Option<&str>, opts: &LaunchOptions, report: Report) -
         .filter(|u| !u.is_empty())
         .map(validate::launch_uri)
         .transpose()?;
-    let s = session(report)?;
-    let l = match uri {
-        Some(u) => Launch::View {
-            package: pkg.into(),
-            uri: u.into(),
-        },
-        None => Launch::Main {
-            component: android::launcher_component(&s, pkg)?,
-        },
+    let launch = || -> Result<String> {
+        let s = session(report)?;
+        let l = match uri {
+            Some(u) => Launch::View {
+                package: pkg.into(),
+                uri: u.into(),
+            },
+            None => Launch::Main {
+                component: android::launcher_component(&s, pkg)?,
+            },
+        };
+        android::launch(&s, &l, opts)
     };
-    android::launch(&s, &l, opts)
+    match launch() {
+        // The session stopped for idleness just as this came: once more.
+        Err(_) if !Session::find()?.running() => launch(),
+        r => r,
+    }
+}
+
+/// Sets whether `(package, allowed)` may run in the background with no
+/// window open, keeping the session up (docs/session.md, "Lifecycle").
+/// Returns the apps allowed.
+pub fn background(set: Option<(&str, bool)>, report: Report) -> Result<Vec<String>> {
+    let s = session(report)?;
+    let set = set
+        .map(|(p, on)| validate::package(p).map(|p| (p, on)))
+        .transpose()?;
+    android::background(&s, set)
 }
 
 /// User apps in the session, with the `Name` of their desktop entry.

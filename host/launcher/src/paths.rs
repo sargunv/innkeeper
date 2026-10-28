@@ -181,6 +181,23 @@ impl Paths {
         self.run.join("control.sock")
     }
 
+    /// What the system app last reported about the session's activity
+    /// (written by the bridge, [`crate::lifecycle`]).
+    pub fn lifecycle(&self) -> PathBuf {
+        self.run.join("lifecycle")
+    }
+
+    /// Held shared by every running `exec`, which keeps the session up.
+    pub fn exec_lock(&self) -> PathBuf {
+        self.run.join("exec.lock")
+    }
+
+    /// The transient systemd timer (and its service) that starts the session
+    /// again for an alarm (host mode).
+    pub fn wake_unit(&self) -> String {
+        format!("{}-wake", self.unit)
+    }
+
     pub fn kmsg_log(&self) -> PathBuf {
         self.state.join("kmsg.log")
     }

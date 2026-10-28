@@ -24,6 +24,7 @@ import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.input.HostEvent
 import dev.linuxapk.system.input.HostInputClient
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
@@ -69,6 +70,22 @@ class WindowManagerFeature(
   // first window after boot opens at the desktop's scale).
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
   private var refreshQueued = false
+  private val changeListeners = CopyOnWriteArrayList<() -> Unit>()
+
+  /** Packages with a window, shown or starting (any thread). */
+  @Volatile
+  var packages: Set<String> = emptySet()
+    private set
+
+  /** Calls [l] on the window manager's thread whenever a window opens or closes. */
+  fun addChangeListener(l: () -> Unit) {
+    changeListeners += l
+  }
+
+  private fun changed() {
+    packages = windows.values.mapTo(HashSet()) { it.pkg }
+    changeListeners.forEach { it() }
+  }
 
   private class AppWindow(
     val pkg: String,
@@ -293,6 +310,7 @@ class WindowManagerFeature(
     }
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
     windows[w.id] = w
+    changed()
     try {
       wms.setDisplayImePolicy(w.id, DISPLAY_IME_POLICY_LOCAL)
     } catch (e: Exception) {
@@ -326,6 +344,7 @@ class WindowManagerFeature(
   private fun close(w: AppWindow, finishTasks: Boolean) {
     if (windows.remove(w.id) == null) return
     Log.i(TAG, "closing display ${w.id} (${w.pkg}), finishTasks=$finishTasks")
+    changed()
     w.resize?.let(handler::removeCallbacks)
     if (finishTasks) {
       for (t in w.tasks) {

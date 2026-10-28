@@ -12,6 +12,7 @@ mod host;
 mod image;
 mod init;
 mod layer;
+pub mod lifecycle;
 mod nsroot;
 pub mod paths;
 pub mod requirements;

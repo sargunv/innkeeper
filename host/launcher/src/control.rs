@@ -174,6 +174,9 @@ pub fn exec(path: &Path, argv: &[&OsStr]) -> Result<i32> {
 pub struct Served {
     /// The answer to `status`.
     pub status: String,
+    /// The lock a running exec holds shared ([`crate::lifecycle`]); none
+    /// for a waiter, which runs no commands.
+    pub exec_lock: Option<std::path::PathBuf>,
     /// Ends the session.
     pub stop: Box<dyn Fn() + Send + Sync>,
 }
@@ -229,6 +232,11 @@ fn handle(c: &OwnedFd, served: &Served) -> Result<()> {
         }
         Some(b"exec") => {
             let argv: Vec<&OsStr> = words.map(OsStr::from_bytes).collect();
+            let Some(lock) = &served.exec_lock else {
+                send(c.as_raw_fd(), b"127", &[])?;
+                return Ok(());
+            };
+            let _running = crate::lifecycle::hold_exec_lock(lock);
             let code = run_exec(c, &argv, fds).unwrap_or(127);
             send(c.as_raw_fd(), code.to_string().as_bytes(), &[])?;
         }

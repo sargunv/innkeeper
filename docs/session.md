@@ -3,7 +3,8 @@
 A session is one rootless Android instance: a transient systemd user unit that
 holds the bridge, pasta and two levels of namespaces with Android's real `init`
 inside. `linuxapk-session` ([host/launcher](../host/launcher/README.md)) starts
-it; `linuxapk run` and the manager start it on demand.
+it; `linuxapk run` and the manager start it on demand, and it stops itself when
+nothing needs it ([Lifecycle](#lifecycle)).
 
 ## Boot
 
@@ -173,6 +174,54 @@ reacts to memory pressure through lmkd (PSI), and beyond that the host's OOM
 handling applies, as for any Flatpak app. Talking to systemd to get a cap would
 let the app start any unit, which is a sandbox escape.
 
+## Lifecycle
+
+A session stops itself once nothing needs it, as a desktop app quits with its
+last window, and comes back for the next alarm.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Busy: start (linuxapk run, the manager, a wakeup)
+  Busy --> Idle: no windows, foreground services, background apps, exec or near alarm
+  Idle --> Busy: any of them again
+  Idle --> Stopped: grace period over
+  Stopped --> Busy: wakeup, a minute before the next alarm clock
+  Busy --> [*]: stop
+```
+
+- **Activity.** The system app sends the bridge's system service a `LIFECYCLE`
+  report whenever a part changes: its windows, user apps' running foreground
+  services, the next alarm clock and the background-allowed apps
+  (`integration/lifecycle/`). The bridge writes it to `<run>/lifecycle`, and the
+  launcher checks it every 5 s. No report yet (booting, the system app
+  restarting) counts as busy, and so do a running `exec` (it holds `exec.lock`
+  shared) and an alarm less than 3 minutes away or ago.
+- **Grace period.** `LINUXAPK_IDLE_GRACE` seconds of idleness (default 120; 0:
+  never) before the launcher stops the session as `stop` does. Headless sessions
+  (tests) never stop by themselves unless it is set. Apps not allowed in the
+  background stop with it, as if force-stopped: their jobs and syncs wait for
+  the next start.
+- **Foreground services** keep it up. A media app keeps playing after its window
+  closes; its session stays an MPRIS player, and its notification shows on the
+  desktop, resident, only while it has no window. Clicking that notification or
+  MPRIS `Raise` opens the window again.
+- **Background apps.** `linuxapk background PKG on` lets an app run with no
+  window open (off by default; the setting lives in the system app). While one
+  is installed the session doesn't stop, and the desktop shows a resident
+  "Running in the background" notification naming them.
+- **Wakeups.** Android forgets alarms when it stops, and apps set them again
+  from `BOOT_COMPLETED`, so the launcher starts the session a minute before the
+  next alarm clock (`AlarmManager.getNextAlarmClock`, which clock apps use).
+  Other exact alarms aren't visible through any API and don't wake a stopped
+  session. `start` and `stop` cancel a pending wakeup.
+  - Host mode: a transient systemd user timer, `<unit>-wake.timer`, runs `start`
+    with the environment the session was started with.
+  - Flatpak mode: a sandbox can't make timers, and the Background portal has
+    none, so the session's process stays in its sandbox as a waiter: it serves
+    `status` (`stopped`, `wakeup=<ms>`) and `stop` on `control.sock`, and runs
+    the session again at that time. With no window open (a waiter, a foreground
+    service, a background app) it asks the Background portal to keep running.
+
 ## Where things live
 
 | Dir                                      | Contents                                                                                                                                                                                                                                                     |
@@ -180,7 +229,7 @@ let the app start any unit, which is a sandbox escape.
 | `$XDG_DATA_HOME/linuxapk/`               | `images/<build>/{img,apex-<hash>,derived}` (shared by every instance), `data[-<instance>]/` (Android's `/data`), `addons/`, `test-bin/` (dev), `root[-<instance>]/` (Flatpak mode), `appimage/<build>/` (the AppImage's prefix, which its sessions run from) |
 | `$XDG_STATE_HOME/linuxapk[-<instance>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                                                                  |
 | `$XDG_STATE_HOME/linuxapk/notices/`      | one-time notices already shown (shared by every instance)                                                                                                                                                                                                    |
-| `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`; in Flatpak mode under `app/<app id>/`, with `control.sock`                                                                                                                |
+| `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock`                                                                                      |
 
 `LINUXAPK_INSTANCE` names an independent session for tests; its suffix goes on
 every per-instance path and the unit name.

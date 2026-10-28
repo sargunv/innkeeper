@@ -30,10 +30,16 @@ import dev.linuxapk.system.wm.WindowManagerFeature
  * and clicks, actions, inline replies and dismissals come back from the desktop. Runs on the
  * integration thread.
  *
- * Not forwarded: group summaries (the children are), media notifications (MPRIS shows those), and
- * notifications from the system itself (`android`, SystemUI).
+ * Not forwarded: group summaries (the children are), media notifications while their app has a
+ * window (MPRIS shows those; with no window, a media service's notification is what reopens it),
+ * and notifications from the system itself (`android`, SystemUI). Foreground services'
+ * notifications are resident on the desktop.
  */
-class Notifications(private val context: Context, private val feature: IntegrationFeature) {
+class Notifications(
+  private val context: Context,
+  private val feature: IntegrationFeature,
+  private val wm: WindowManagerFeature?,
+) {
   private class Entry(val id: Int, var sbn: StatusBarNotification, var sentAt: Long = 0) {
     /** Hash of the last blob sent: apps repost unchanged notifications often (timers). */
     var sentHash = 0
@@ -81,12 +87,17 @@ class Notifications(private val context: Context, private val feature: Integrati
 
   fun onConnected() = postAll()
 
+  /** Windows opened or closed: forwards or withdraws media notifications. */
+  fun refresh() {
+    if (feature.connection.connected) postAll(initial = false)
+  }
+
   fun onDisconnected() {
     // The bridge closed our desktop notifications; post them again on reconnect.
     for (e in byKey.values) e.sentAt = 0
   }
 
-  private fun postAll() {
+  private fun postAll(initial: Boolean = true) {
     val l = listener ?: return
     val active =
       try {
@@ -95,7 +106,7 @@ class Notifications(private val context: Context, private val feature: Integrati
         Log.w(TAG, "activeNotifications: $e")
         emptyArray()
       }
-    for (sbn in active) posted(sbn, initial = true)
+    for (sbn in active) posted(sbn, initial)
   }
 
   fun posted(sbn: StatusBarNotification, initial: Boolean = false) {
@@ -134,7 +145,10 @@ class Notifications(private val context: Context, private val feature: Integrati
     if (sbn.packageName in SKIP_PACKAGES) return false
     if (sbn.packageName == context.packageName) return false
     if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return false
-    if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return false
+    if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
+      val service = n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
+      if (!service || wm == null || sbn.packageName in wm.packages) return false
+    }
     return true
   }
 

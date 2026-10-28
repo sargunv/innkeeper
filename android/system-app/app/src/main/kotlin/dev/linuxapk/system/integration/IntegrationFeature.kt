@@ -12,19 +12,23 @@ import dev.linuxapk.system.bridge.Wire
 import dev.linuxapk.system.integration.browser.BrowserRole
 import dev.linuxapk.system.integration.browser.UrlOpener
 import dev.linuxapk.system.integration.clipboard.ClipboardSync
+import dev.linuxapk.system.integration.lifecycle.SessionLifecycle
 import dev.linuxapk.system.integration.media.MediaSync
 import dev.linuxapk.system.integration.notifications.Notifications
 import dev.linuxapk.system.integration.settings.DesktopSettings
 import dev.linuxapk.system.integration.settings.HostSettings
+import dev.linuxapk.system.wm.WindowManagerFeature
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
 
 /**
  * Desktop integration over the host bridge's system service (host/bridge/src/system/proto.rs):
- * desktop settings into Android, notifications and media sessions out, the clipboard both ways, and
- * web links to the host browser. Events are handled on the feature's own thread.
+ * desktop settings into Android, notifications and media sessions out, the clipboard both ways, web
+ * links to the host browser, and what keeps the session up. Events are handled on the feature's own
+ * thread.
  */
-class IntegrationFeature(private val context: Context) : Feature, BridgeConnection.Listener {
+class IntegrationFeature(private val context: Context, private val wm: WindowManagerFeature?) :
+  Feature, BridgeConnection.Listener {
   override val name = "integration"
 
   private val thread = HandlerThread("linuxapk-integ")
@@ -33,10 +37,11 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeConnecti
 
   val connection = BridgeConnection(BridgeConnection.SERVICE_SYSTEM, "Linux.apk System", this)
   private val settings = HostSettings(context)
-  val notifications = Notifications(context, this)
+  val notifications = Notifications(context, this, wm)
   val clipboard = ClipboardSync(context, this)
   val media = MediaSync(context, this)
   val urls = UrlOpener(this)
+  val lifecycle = SessionLifecycle(context, this, wm)
 
   override fun start() {
     thread.start()
@@ -45,6 +50,12 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeConnecti
     notifications.start()
     clipboard.start()
     media.start()
+    lifecycle.start()
+    // A media notification shows on the desktop only while its app has no window.
+    wm?.addChangeListener {
+      handler.post(notifications::refresh)
+      lifecycle.poke()
+    }
     connection.start()
     handler.post { BrowserRole.claim(context) }
     context.registerReceiver(
@@ -70,6 +81,7 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeConnecti
   override fun stop() {
     context.unregisterReceiver(packages)
     connection.stop()
+    lifecycle.stop()
     media.stop()
     clipboard.stop()
     instance = null
@@ -93,6 +105,7 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeConnecti
     handler.post {
       if (have and Wire.F_NOTIFICATIONS != 0) notifications.onConnected()
       media.onConnected()
+      lifecycle.onConnected()
     }
   }
 

@@ -10,6 +10,9 @@
 //! - `clipboard`: the Wayland clipboard through `ext-data-control-v1`
 //! - `openuri`: the OpenURI portal (http and https only)
 //! - `mpris`: MediaSessions as MPRIS players
+//! - lifecycle: what keeps the session up, written to `<run-dir>/lifecycle`
+//!   for the launcher's idle shutdown (docs/session.md, "Lifecycle"), and
+//!   the indicator for apps running in the background
 //!
 //! Only the system app's uid (and the static allow-list, which holds
 //! Android root for tests) may open it: `main.rs` resolves that uid from the
@@ -34,7 +37,7 @@ use clipboard::{Clip, ClipboardHub, Content};
 use mpris::{Media, MprisHub};
 use notify::{Note, NotifyHub};
 use openuri::RateLimit;
-use proto::{ClipKind, Request, feature};
+use proto::{ClipKind, Lifecycle, Request, feature};
 use settings::SettingsHub;
 
 /// What a session may do on the real desktop. Test sessions (named instances)
@@ -61,6 +64,9 @@ impl Default for Policy {
 /// time a client asks for it.
 pub struct Shared {
     art_dir: PathBuf,
+    /// `<run-dir>/lifecycle`, and the client whose report it holds.
+    lifecycle: PathBuf,
+    lifecycle_owner: std::sync::Mutex<Option<u64>>,
     policy: Policy,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     settings: OnceLock<Arc<SettingsHub>>,
@@ -71,13 +77,17 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// `art_dir`: where MPRIS artwork goes (not shared with Android).
-    pub fn with_policy(art_dir: PathBuf, policy: Policy) -> Arc<Shared> {
+    /// `run_dir`: the session's runtime dir (not the socket dir, which
+    /// Android shares): MPRIS artwork goes in `art/`, the lifecycle report in
+    /// `lifecycle`.
+    pub fn with_policy(run_dir: &std::path::Path, policy: Policy) -> Arc<Shared> {
         if policy != Policy::default() {
             crate::info!("system: test session: {policy:?} (log-only sinks)");
         }
         Arc::new(Shared {
-            art_dir,
+            art_dir: run_dir.join("art"),
+            lifecycle: run_dir.join("lifecycle"),
+            lifecycle_owner: Default::default(),
             policy,
             dbus: OnceLock::new(),
             settings: OnceLock::new(),
@@ -141,8 +151,35 @@ impl Shared {
     }
 }
 
+/// The background indicator's id among the system app's notifications
+/// (which number theirs from 1).
+const INDICATOR_ID: u32 = u32::MAX;
+
+/// The indicator: a resident notification naming the apps that keep the
+/// session running with no window open.
+fn background_note(labels: &[&str]) -> Note {
+    Note {
+        package: "dev.linuxapk.system".into(),
+        app_name: "Linux.apk".into(),
+        title: "Running in the background".into(),
+        body: format!(
+            "{} {} running with no window open.",
+            labels.join(", "),
+            if labels.len() == 1 { "keeps" } else { "keep" }
+        ),
+        flags: notify::flags::ONGOING | notify::flags::SILENT,
+        urgency: 0,
+        progress: -1,
+        actions: vec![],
+        icon: None,
+        picture: None,
+    }
+}
+
 pub struct SystemService {
     shared: Arc<Shared>,
+    /// The apps the background indicator names, while it shows.
+    indicator: Option<Vec<String>>,
     events: Events,
     label: String,
     /// This connection's key in the hubs.
@@ -160,6 +197,7 @@ impl SystemService {
             + 1;
         SystemService {
             shared,
+            indicator: None,
             events,
             label: peer.label.clone(),
             client,
@@ -300,6 +338,64 @@ impl SystemService {
         }
     }
 
+    /// Writes the report for the launcher, and shows the indicator while
+    /// only background-allowed apps keep the session up.
+    fn lifecycle(&mut self, l: &Lifecycle, background: &[(String, String)]) -> Reply {
+        let mut text = format!(
+            "windows={}\nservices={}\nwakeup={}\nbackground=",
+            l.windows, l.services, l.wakeup_ms
+        );
+        text.push_str(
+            &background
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        text.push('\n');
+        let path = &self.shared.lifecycle;
+        let tmp = path.with_extension("tmp");
+        let changed = std::fs::read_to_string(path).ok().as_deref() != Some(text.as_str());
+        if let Err(e) = std::fs::write(&tmp, &text).and_then(|()| std::fs::rename(&tmp, path)) {
+            crate::warn!("lifecycle: write {}: {e}", path.display());
+            return Reply::err(-EIO);
+        }
+        *self.shared.lifecycle_owner.lock().unwrap() = Some(self.client);
+        if changed {
+            crate::info!("lifecycle: {}", text.trim_end().replace('\n', " "));
+        }
+        // Shown while only background-allowed apps keep the session up.
+        let want = (l.windows == 0 && l.services == 0 && !background.is_empty()).then(|| {
+            background
+                .iter()
+                .map(|(_, n)| n.clone())
+                .collect::<Vec<_>>()
+        });
+        if want == self.indicator {
+            return Reply::ok();
+        }
+        if !self.shared.policy.presence {
+            crate::info!("lifecycle: background indicator {want:?} (test session)");
+        } else if let Some(hub) = self.shared.notify() {
+            match &want {
+                Some(labels) => {
+                    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+                    if let Err(e) = hub.post(
+                        self.client,
+                        &self.events,
+                        INDICATOR_ID,
+                        &background_note(&labels),
+                    ) {
+                        crate::warn!("lifecycle: indicator: {e:#}");
+                    }
+                }
+                None => hub.close(self.client, INDICATOR_ID),
+            }
+        }
+        self.indicator = want;
+        Reply::ok()
+    }
+
     fn media(&mut self, player: u32, len: u32, fd: &OwnedFd) -> Reply {
         let b = match blob::read(fd, len, proto::limits::MEDIA_BLOB as usize) {
             Ok(b) => b,
@@ -365,6 +461,18 @@ impl Service for SystemService {
                 }
                 Reply::ok()
             }
+            Request::Lifecycle(l) => {
+                let apps = if l.len == 0 {
+                    Ok(vec![])
+                } else {
+                    blob::read(fd(), l.len, proto::limits::LIFECYCLE_BLOB as usize)
+                        .and_then(|b| proto::background_apps(&b).map_err(|e| e.status()))
+                };
+                match apps {
+                    Ok(apps) => self.lifecycle(&l, &apps),
+                    Err(e) => Reply::err(e),
+                }
+            }
         }
     }
 }
@@ -382,6 +490,12 @@ impl Drop for SystemService {
         }
         if let Some(m) = self.shared.mpris.get() {
             m.remove_all(self.client);
+        }
+        // No report means busy to the launcher, until the system app is back.
+        let mut owner = self.shared.lifecycle_owner.lock().unwrap();
+        if *owner == Some(self.client) {
+            *owner = None;
+            let _ = std::fs::remove_file(&self.shared.lifecycle);
         }
         crate::info!("system: {}: closed", self.label);
     }

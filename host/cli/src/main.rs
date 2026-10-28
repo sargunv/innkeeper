@@ -44,6 +44,13 @@ enum Cmd {
     },
     /// List installed (user) apps.
     List,
+    /// Let an app run in the background with no window open (keeping the
+    /// session up), or not; with no setting, list the apps allowed.
+    Background {
+        package: Option<String>,
+        #[arg(value_parser = ["on", "off"])]
+        setting: Option<String>,
+    },
 }
 
 /// Progress and warnings on stderr.
@@ -129,6 +136,17 @@ fn run(pkg: &str, uri: Option<&str>, token: Option<String>) -> Result<()> {
 /// window background).
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
+fn background(pkg: Option<&str>, setting: Option<&str>) -> Result<()> {
+    let allowed = ops::background(pkg.zip(setting.map(|s| s == "on")), &stderr)?;
+    if allowed.is_empty() {
+        println!("no apps run in the background");
+    }
+    for p in allowed {
+        println!("{p}");
+    }
+    Ok(())
+}
+
 fn list() -> Result<()> {
     for (p, l) in ops::list(&stderr)? {
         match l {
@@ -156,6 +174,13 @@ fn main() -> ExitCode {
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
         Cmd::Run { package, uri } => run(&package, uri.as_deref(), token),
         Cmd::List => list(),
+        Cmd::Background { package, setting } => {
+            if package.is_some() != setting.is_some() {
+                Err(anyhow::anyhow!("give a package and on or off, or neither"))
+            } else {
+                background(package.as_deref(), setting.as_deref())
+            }
+        }
     };
     if let Some(n) = Session::find()
         .ok()

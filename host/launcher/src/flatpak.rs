@@ -20,6 +20,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
@@ -32,7 +33,7 @@ use crate::image::walk_files;
 use crate::paths::Paths;
 use crate::root::{self, LAYERED, PARTITIONS};
 use crate::session::{self, append};
-use crate::{control, init, sys};
+use crate::{control, init, lifecycle, sys};
 
 /// Bumped when the composition below changes.
 const COMPOSE_VERSION: &str = "1";
@@ -287,9 +288,13 @@ fn teardown(p: &Paths) {
     session::remove_pids(p);
 }
 
+/// How a session that ended by itself went idle: `Some(wakeup)` once idle.
+type Idle = Arc<Mutex<Option<Option<u64>>>>;
+
 /// Runs the session in this sandbox until init exits; with `follow`, shows
 /// its log meanwhile. It ends with this process: on a signal, `stop`, or
-/// init's exit.
+/// init's exit. When it stops for idleness with an alarm ahead, this process
+/// stays as the waiter that starts it again ([`wait_to_wake`]).
 pub fn run(cfg: &Config, follow: bool) -> Result<()> {
     let sigs = sys::block_signals(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]);
     let p = cfg.paths.clone();
@@ -298,12 +303,90 @@ pub fn run(cfg: &Config, follow: bool) -> Result<()> {
         teardown(&p);
         std::process::exit(128 + sig);
     });
-    let r = run_session(cfg, follow);
+    let idle = Idle::default();
+    let r = run_session(cfg, follow, &idle);
     teardown(&cfg.paths);
-    r
+    let wakeup = *idle.lock().unwrap();
+    match wakeup {
+        Some(Some(at)) if r.is_ok() => wait_to_wake(cfg, at),
+        _ => r,
+    }
 }
 
-fn run_session(cfg: &Config, follow: bool) -> Result<()> {
+/// Stays in the sandbox, stopped, until shortly before `at_ms` (ms since the
+/// epoch), then starts the session again here. `status` reports it stopped,
+/// and `stop` (or a new `start`) ends it.
+fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
+    let p = &cfg.paths;
+    request_background(p);
+    let at = at_ms.saturating_sub(lifecycle::WAKE_LEAD.as_millis() as u64);
+    let sock = p.control();
+    let gone = sock.clone();
+    control::serve(
+        &sock,
+        control::Served {
+            status: format!(
+                "stopped\nuid-mode={}\nwakeup={at_ms}\n",
+                cfg.uids.mode.name()
+            ),
+            exec_lock: None,
+            stop: Box::new(move || {
+                let _ = fs::remove_file(&gone);
+                std::process::exit(0);
+            }),
+        },
+    )?;
+    session::log(
+        p,
+        &format!(
+            "waiting to start again at {}",
+            lifecycle::calendar(at / 1000)
+        ),
+    );
+    // Wall-clock time, checked often: a suspended host wakes late, not never.
+    loop {
+        let now = lifecycle::now_ms();
+        if now >= at {
+            break;
+        }
+        sleep(Duration::from_millis((at - now).min(30_000)));
+    }
+    let _ = fs::remove_file(&sock);
+    let mut c = Command::new(env::current_exe()?);
+    c.arg("_serve");
+    if cfg.headless {
+        c.arg("--headless");
+    }
+    let e = c.exec();
+    bail!("start the session again: {e}")
+}
+
+/// Asks the Background portal to let Linux.apk run with no window open
+/// (media, alarms, background work), so the desktop doesn't stop it. Best
+/// effort, without waiting for the answer: `gdbus` is in the Flatpak runtime.
+pub fn request_background(p: &Paths) {
+    let opts = "{'reason': <'Android apps keep playing media, run foreground services and ring \
+                alarms with no window open'>, 'autostart': <false>}";
+    let r = Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest=org.freedesktop.portal.Desktop",
+            "--object-path=/org/freedesktop/portal/desktop",
+            "--method=org.freedesktop.portal.Background.RequestBackground",
+            "",
+            opts,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    if let Err(e) = r {
+        session::log(p, &format!("Background portal: {e}"));
+    }
+}
+
+fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
     let p = &cfg.paths;
     compose(cfg).context("compose the root")?;
     apply_run_layer(cfg).context("add the start-time layer")?;
@@ -354,9 +437,15 @@ fn run_session(cfg: &Config, follow: bool) -> Result<()> {
                 "running: host pid {init}\nuid-mode={}\n",
                 cfg.uids.mode.name()
             ),
+            exec_lock: Some(p.exec_lock()),
             stop: Box::new(move || teardown(&paths)),
         },
     )?;
+    let idle = idle.clone();
+    lifecycle::watch(cfg, move |wakeup| {
+        *idle.lock().unwrap() = Some(wakeup);
+        sys::kill(outer, libc::SIGKILL);
+    });
     println!(
         "session started ({}, uid mode {}, in Flatpak): Android init = pid {init}; log: {}",
         cfg.image.name,

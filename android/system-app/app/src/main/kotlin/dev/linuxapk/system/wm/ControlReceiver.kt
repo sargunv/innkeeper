@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import dev.linuxapk.system.LinuxApkSystemApp
+import dev.linuxapk.system.integration.IntegrationFeature
 import kotlin.concurrent.thread
 
 /**
@@ -21,10 +22,14 @@ import kotlin.concurrent.thread
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LIST
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.CLOSE \
  *   (--ei display ID | --es package PKG)
+ * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.BACKGROUND \
+ *   [--es package PKG --ez allowed BOOL]
  * ```
  *
  * LAUNCH with `wait` replies once a new window shows its first frame (at most
- * [FIRST_FRAME_TIMEOUT_MS]; `shown=no` after the reply if it didn't).
+ * [FIRST_FRAME_TIMEOUT_MS]; `shown=no` after the reply if it didn't). BACKGROUND sets whether an
+ * app may run with no window open, keeping the session up (docs/session.md, "Lifecycle"), and
+ * replies with the apps allowed.
  *
  * The reply is the broadcast's result data (`am` prints `Broadcast completed: result=-1,
  * data="..."`): one line per window for LIST, else one line that starts with the outcome
@@ -82,6 +87,19 @@ class ControlReceiver : BroadcastReceiver() {
         val display = if (i.hasExtra("display")) i.getIntExtra("display", -1) else null
         wm.close(display, i.getStringExtra("package"))
       }
+      ACTION_BACKGROUND -> {
+        val lifecycle =
+          IntegrationFeature.instance?.lifecycle ?: return "error: integration not running"
+        val pkg = i.getStringExtra("package")
+        if (pkg != null) {
+          if (!i.hasExtra("allowed")) return "error: --ez allowed BOOL is required"
+          lifecycle.background.set(pkg, i.getBooleanExtra("allowed", false))?.let {
+            return "error: $it"
+          }
+          lifecycle.poke()
+        }
+        "background " + lifecycle.background.allowed().joinToString(",").ifEmpty { "-" }
+      }
       else -> "error: unknown action ${i.action}"
     }
 
@@ -89,6 +107,7 @@ class ControlReceiver : BroadcastReceiver() {
     const val ACTION_LAUNCH = "dev.linuxapk.LAUNCH"
     const val ACTION_LIST = "dev.linuxapk.LIST"
     const val ACTION_CLOSE = "dev.linuxapk.CLOSE"
+    const val ACTION_BACKGROUND = "dev.linuxapk.BACKGROUND"
     const val FIRST_FRAME_TIMEOUT_MS = 25_000L
     private val LAUNCHED = Regex("^launched display=(\\d+)")
   }

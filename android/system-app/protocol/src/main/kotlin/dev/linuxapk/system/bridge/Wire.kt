@@ -30,6 +30,7 @@ object Wire {
   const val OPEN_URI = 0x0305
   const val MEDIA = 0x0306
   const val MEDIA_CLOSE = 0x0307
+  const val LIFECYCLE = 0x0308
 
   // System service events.
   const val EV_SETTINGS = 0x4301
