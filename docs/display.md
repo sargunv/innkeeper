@@ -1,0 +1,132 @@
+# Display and windows
+
+Each Android app task gets its own Wayland window: titled with the app's label,
+`app_id` `dev.linuxapk.<package>` (the `StartupWMClass` of its desktop entry),
+resized with the app, closed with its task. Android's default display 0 has no
+window; it keeps running headless with Launcher3 as home.
+
+## Frame path
+
+```mermaid
+sequenceDiagram
+  participant WM as System app window manager
+  participant SF as SurfaceFlinger
+  participant HWC as composer (HWC3)
+  participant BR as bridge (display + input)
+  participant WL as host compositor
+  WM->>WM: create a trusted VirtualDisplay, no surface yet
+  WM->>BR: input service WINDOW_REQUEST (display id, size, dpi, app id, title)
+  WM->>SF: attach the ImageReader surface
+  SF->>HWC: createVirtualDisplay(w, h)
+  HWC->>BR: display service DISPLAY_ADD(w, h)
+  BR->>WL: xdg_toplevel for the oldest request of that size
+  BR-->>WM: WINDOW_MAPPED
+  loop every frame
+    SF->>HWC: validate (all layers CLIENT), present with the output buffer
+    HWC->>HWC: copy into one of 3 udmabufs for the display
+    HWC->>BR: FRAME (buffer id, damage)
+    BR->>WL: attach the linux-dmabuf buffer, viewporter to the logical size
+    BR-->>HWC: RELEASE when wl_buffer.release arrives
+  end
+```
+
+- **The window manager** (`wm/WindowManagerFeature.kt`) creates each display
+  with `TRUSTED`, `OWN_DISPLAY_GROUP`, `ALWAYS_UNLOCKED`, `OWN_FOCUS`,
+  `OWN_CONTENT_ONLY`, `SUPPORTS_TOUCH`, `DESTROY_CONTENT_ON_REMOVAL` and
+  `SECURE`, with no system decorations (apps see zero system-bar insets), and
+  starts the app on it with `setLaunchDisplayId`. Its sink is a `PRIVATE`
+  ImageReader that drops every frame; it exists because a virtual display needs
+  a consumer.
+- **HWC-backed virtual displays.** The composer's rc sets
+  `debug.sf.enable_hwc_vds=1` and reports 32 virtual displays, so SurfaceFlinger
+  hands the composer every frame. Every layer stays CLIENT: RenderEngine renders
+  into the sink buffer, which is both client target and output buffer.
+- **Matching a display to its window.** HWC3's `createVirtualDisplay` carries
+  only a size, so the window manager orders things: request the window first,
+  then attach the surface, so SurfaceFlinger's next commit creates the HWC
+  display, and the bridge gives it the oldest request of that size (requests
+  expire after 10 s). Displays nobody asked for (`screenrecord`,
+  MediaProjection) stay headless. A foreign display of exactly the same size
+  created in the same commit could take the window; that is unlikely and
+  accepted.
+- **Why a copy, not zero-copy.** The sink buffer returns to SurfaceFlinger as
+  soon as the ImageReader drops it, so showing it directly would tear. The copy
+  of a 2176x1360 frame costs 1 to 2 ms; RGBA goes as XBGR8888 so it is a plain
+  `memcpy`.
+- **The bridge is the Wayland client**, because the composer is a Bionic process
+  with no libdecor, GTK or host fonts. Decorations are server-side where
+  xdg-decoration exists (KDE), else an Adwaita-style frame (`sctk-adwaita`,
+  GNOME). If the compositor goes away the bridge ends the composer's connection;
+  the composer reconnects every second and adds its displays again.
+
+## Window semantics
+
+- **Resize and scale.** `configure` and the fractional (or integer) scale come
+  to the window manager as `window <w> <h> <scale> <display>`. After a 120 ms
+  debounce it calls `VirtualDisplay.resize(w×scale, h×scale, 160×scale)`, so the
+  app renders at the window's physical pixels and stays sharp at fractional
+  scales; `wp_viewporter` stretches the old frame until a new one arrives. The
+  last scale seen is kept, so later windows open at it.
+- **Close.** `xdg_toplevel.close` removes every task on the display and releases
+  it. When the display's last task goes (Back on a root activity), a
+  `TaskStackListener` closes the window; a window whose app never starts a task
+  closes after 20 s.
+- **Focus.** `keyboard_enter` makes the window's top task Android's focused one.
+  Launching an app that has a window activates it through `xdg_activation_v1`;
+  compositors may only flag it without a fresh input serial.
+- **Display 0.** Any ordinary app task that appears there (`am start` without a
+  display, notification `PendingIntent`s) moves into a window of its own; home,
+  recents, dream and assistant tasks stay.
+
+### Window size
+
+From the launch activity's metadata (`wm/WindowSizing.kt`), in dp times the
+window's scale:
+
+1. `<layout android:defaultWidth/defaultHeight>`;
+2. else portrait-only activities get 412x915 and landscape-only ones 1280x720;
+3. else 1280x800.
+
+`<layout android:minWidth/minHeight>` become the toplevel's minimum size.
+`resizeableActivity=false` gets no special case: Android letterboxes it.
+
+### System dialogs
+
+- Runtime permission prompts, the share sheet, PackageInstaller, crash and ANR
+  dialogs start in the app's task or on its display, so they show in its window.
+- The "built for an older Android" warning always targets display 0, so the
+  window manager disables it and shows the same text in the app's window
+  (`AppWarningActivity`).
+- Other `AppWarnings` and SystemUI dialogs not tied to an activity (volume, USB)
+  still go to display 0, unseen.
+
+## Buffers
+
+The allocator ([android/vendor/graphics](../android/vendor/graphics/README.md))
+makes every buffer a sealed memfd turned into a dma-buf through `/dev/udmabuf`:
+linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
+
+- **Row pitch is a multiple of 256 bytes on every plane**, which RADV requires
+  for linear images. YV12 keeps Android's rule
+  (`c_stride = align(y_stride / 2, 16)`) by padding luma to 512.
+- All planes of a YUV buffer share one dma-buf; offsets and strides are in
+  `PLANE_LAYOUTS`, and `DATASPACE` carries the colour model (unset means BT.601
+  narrow range).
+- GPU and composer usages fail rather than fall back to a plain memfd, which
+  their consumers can't import.
+
+## Fences
+
+The composer reports `PRESENT_FENCE_IS_NOT_RELIABLE` and returns no present or
+release fences ("already signalled"): it copies the client target before
+`present` returns, waiting on the acquire fence first. The Vulkan drivers hand
+SurfaceFlinger real sync_files (amdgpu syncobjs), so no sw_sync is needed. Real
+present fences would come from `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` or a GPU
+semaphore.
+
+## Control interface
+
+The host launches and lists windows with the window manager's
+`dev.linuxapk.LAUNCH`, `LIST` and `CLOSE` broadcasts, run as root inside the
+session; `wm/ControlReceiver.kt` documents the arguments and replies, and
+`linuxapk-core`'s `android::launch` is the one caller.

@@ -1,36 +1,43 @@
 # Linux.apk
 
 Run Android apps on desktop Linux as native-feeling apps. Each app gets its own
-Wayland window and follows the desktop's dark mode, notifications, file pickers
-and media controls. There's no VM, no visible Android device, and no root at
-runtime.
+Wayland window and follows the desktop's dark mode, notifications, file pickers,
+clipboard and media controls. There's no VM, no visible Android device, and no
+root, ever.
 
-How it works: a real AOSP (Android 17) userspace runs in a rootless, on-demand
-session. The image is Google's own AOSP build from Android's public CI,
-downloaded and checksummed at setup ([docs/image.md](docs/image.md)). Our code
-plugs in at Android's stable vendor interfaces (display, GPU, audio, input),
-plus a desktop bridge for portals, notifications and MPRIS. See
-[docs/STRATEGY.md](docs/STRATEGY.md).
+A real AOSP (Android 17) userspace runs in a rootless, on-demand session. The
+image is Google's own AOSP build from Android's public CI, downloaded and
+checksummed on your machine. Our code plugs in at Android's stable vendor
+interfaces (display, GPU, audio, input), plus a desktop bridge for portals,
+notifications and MPRIS. See [docs/architecture.md](docs/architecture.md).
+
+## Use it
+
+Open an APK with the **Linux.apk** manager: it shows what the app is and which
+permissions it wants, installs it, and adds it to your app menu. Each app then
+opens in its own window. The same is scriptable:
+
+```sh
+linuxapk install App.apk        # also .apks, .xapk, .apkm bundles
+linuxapk run org.wikipedia      # or click its app-menu entry
+linuxapk uninstall org.wikipedia
+linuxapk list
+```
+
+The first use downloads the Android image (about 1.2 GB). On a host without a
+subordinate uid range (such as inside Flatpak) apps share one uid and are not
+isolated from each other, as native desktop apps aren't
+([docs/security.md](docs/security.md#single-uid-mode)).
 
 ## Status
 
-**Pre-alpha.** Android 17 boots rootless and 30 of 31 test apps work
-([docs/compatibility.md](docs/compatibility.md)), across Compose, Flutter, React
-Native, Capacitor and Godot apps, including StreetComplete's MapLibre map and
-video playback. Each app opens in its own window with sound. Next: desktop
-integration (M3) and no-privilege mode (M4).
-
-| Milestone                                                       | Status                                                                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 Session boots (prebuilt image, rootless namespace, binderfs) | ✅ `sys.boot_completed` rootless in ~16 s cold / ~4 s warm; no AOSP patches; netd via userspace eBPF emulation + nftables iptables                                                                                                                                                                                          |
-| M1 Pixels in a Wayland window, first noarch apps                | ✅ display in a KDE Wayland window (dmabuf), mouse/keyboard/touch input, networking, media decode; 15/16 corpus apps work, including Compose apps and x86_64 games                                                                                                                                                          |
-| M2 GPU, audio, per-app windows, launcher                        | ✅ RADV/ANGLE GPU; one window per app (title bars on KDE, client-side on GNOME); PipeWire sound (≈90 ms); `linuxapk` CLI and manager app; 15/16 corpus in per-app mode                                                                                                                                                      |
-| M3 Desktop integration (portals, notifications, MPRIS, IME)     | ✅ dark mode + accent + locale/time zone, notifications (actions, reply), clipboard, links/OAuth in host browser, MPRIS, IME (`text-input-v3`, IBus/CJK), file picker (portal), F-Droid installs in app menu, live scaling; gaps: share sheet, microG needs signature spoofing ([docs/integration.md](docs/integration.md)) |
-| M4 No-privilege mode (userspace binder, AOSP CI image)          | 🚧 userspace binder ✅ (default: no binderfs, no SELinux module; AOSP binder tests and corpus at parity); AOSP CI image ✅; single-uid mode (no subuid range) and relocation study in progress                                                                                                                              |
-| M5 Packaging (Linux.apk as a Flatpak, no sudo), aarch64 hosts   | ⏳                                                                                                                                                                                                                                                                                                                          |
-| M6 ARM translation on x86_64                                    | ⏳                                                                                                                                                                                                                                                                                                                          |
-
-Progress log: [docs/NOTES.md](docs/NOTES.md).
+**Pre-alpha.** Android 17 boots rootless in about 3 s warm, and 30 of 31 test
+apps work ([docs/compatibility.md](docs/compatibility.md)): Compose, Flutter,
+React Native, Capacitor and Godot apps, StreetComplete's MapLibre map and video
+playback, each in its own window with sound. Desktop integration (M3) and the
+no-privilege mode (M4: userspace binder, automatic single-uid, the CI image) are
+done. Next: packaging Linux.apk as a Flatpak (M5) and ARM translation (M6); see
+the [milestones](https://github.com/sargunv/linux.apk/milestones).
 
 Real apps running in Linux.apk on KDE Plasma (Wayland):
 
@@ -42,22 +49,86 @@ Real apps running in Linux.apk on KDE Plasma (Wayland):
 | **Tomato** (Jetpack Compose)                                                                                                  | **OpenCalc**                                                                                                             |
 | ![Tomato (Jetpack Compose) in Linux.apk](https://github.com/user-attachments/assets/3229708b-5d53-4cc7-a8df-d096d7d5812f)     | ![OpenCalc in Linux.apk](https://github.com/user-attachments/assets/4ff9dca7-6851-4285-93ca-1e3c2250c66d)                |
 
-## Try it
+## How it fits together
 
-Open an APK with the **Linux.apk** manager app (GTK4/libadwaita): it shows what
-the app is and which permissions it wants, installs it, and adds it to your app
-menu. Each app then opens in its own window. The same is scriptable with the
-`linuxapk` CLI: `linuxapk install|run|uninstall|list`. See
-[docs/gui.md](docs/gui.md) and [docs/cli.md](docs/cli.md).
+```mermaid
+flowchart LR
+  subgraph host["host/ : your desktop (glibc, runs as you)"]
+    cli["linuxapk (host/cli)"]
+    mgr["linuxapk-manager (host/manager)"]
+    core["linuxapk-core (host/core)"]
+    launcher["linuxapk-session + ns-init.sh (host/launcher)"]
+    bridge["linuxapk-bridge (host/bridge)"]
+    desk["Wayland, PipeWire, portals, D-Bus"]
+  end
+  subgraph img["image/ : pinned AOSP CI image (fetched at first use)"]
+    aosp["system, vendor, product, APEXes"]
+  end
+  subgraph sup["supervisor/ : syscall boundary (outer namespaces)"]
+    pivot["pivot-exec + bpfemu (supervisor/pivot-exec)"]
+    broker["linuxapk-broker: binder + credentials (supervisor/broker)"]
+  end
+  subgraph and["android/ : inside the Android session"]
+    shim["liblinuxapk_shim.so (supervisor/shim)"]
+    sysapp["LinuxApkSystem.apk (android/system-app)"]
+    hwc["composer + gralloc (android/vendor/graphics)"]
+    vk["RADV / lavapipe (android/vendor/vulkan)"]
+    snd["libtinyalsav2 (android/vendor/audio)"]
+    sysbin["linuxapk-exec, iptables (android/system)"]
+  end
+  cli --> core
+  mgr --> core
+  core -->|"start, exec"| launcher
+  launcher -->|"systemd unit, namespaces, overlay stack"| pivot
+  launcher --> bridge
+  aosp -.->|"lowest layer"| and
+  pivot -->|"pivot_root, exec init"| and
+  pivot -->|"seccomp notify fd"| broker
+  broker <-->|"trapped binder and credential syscalls"| and
+  hwc -->|"display service: dma-buf frames"| bridge
+  snd -->|"audio service: memfd ring"| bridge
+  sysapp <-->|"input, system, documents, apps services"| bridge
+  bridge <--> desk
+```
 
-## Dev setup (Fedora)
+| Dir                                                                    | Artifact                                               | Runs                                      | Start reading at               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- | ------------------------------ |
+| [host/core](host/core/README.md)                                       | `linuxapk-core` (library)                              | inside the CLI, manager and bridge        | `src/ops.rs`                   |
+| [host/cli](host/cli/README.md)                                         | `bin/linuxapk`                                         | desktop, as you                           | `src/main.rs`                  |
+| [host/manager](host/manager/README.md)                                 | `bin/linuxapk-manager`                                 | desktop, as you                           | `src/window.rs`                |
+| [host/bridge](host/bridge/README.md)                                   | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's unit            | `src/main.rs`, `src/ipc/`      |
+| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`, `ns-init.sh`      | desktop, then outer namespaces            | `linuxapk-session`             |
+| [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | outer namespaces; the shim inside Android | `broker/src/notify.rs`         |
+| [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared       | `fetch.sh`, `pin.toml`         |
+| [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                         | `composer/Display.cpp`         |
+| [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.lvp.so`                      | Android, in every Vulkan user             | `build.sh`, `patches/mesa/`    |
+| [android/vendor/audio](android/vendor/audio/README.md)                 | `libtinyalsav2.so`                                     | Android, in the audio HAL                 | `tinyalsa/pcm.c`               |
+| [android/vendor/bridge-client](android/vendor/bridge-client/README.md) | static library                                         | linked into the composer and audio        | `bridge_client.c`              |
+| [android/system](android/system/README.md)                             | `linuxapk-exec`, nf_tables iptables                    | Android `/system`                         | `exec/linuxapk-exec.c`         |
+| [android/system-app](android/system-app/README.md)                     | `LinuxApkSystem.apk`                                   | Android, as a privileged app              | `app/.../LinuxApkSystemApp.kt` |
+| [android/overlay](android/overlay/README.md)                           | config files over the image's partitions               | Android                                   | its README                     |
+| [android/microg](android/microg/README.md)                             | optional microG addon                                  | Android                                   | `install.sh`                   |
+| [tests](tests/README.md)                                               | test harnesses and suites                              | desktop, never shipped                    | its README                     |
+| [tools](tools/README.md)                                               | build container, staging, dev scripts                  | build time                                | `build/artifacts.toml`         |
+| [docs](docs/)                                                          | cross-cutting design                                   |                                           | `architecture.md`              |
 
-Install [mise](https://mise.jdx.dev), then run `mise install`. Agent and
-contributor context is in [AGENTS.md](AGENTS.md).
+## Develop
 
-No root is needed: binder is emulated in userspace (`docs/ubinder.md`). Only the
-legacy `--kernel-binder` mode needs the dev SELinux module in `selinux/`
-(`checkmodule`/`semodule_package`, then `sudo semodule -i linuxapk_dev.pp`).
+Build prerequisites: [mise](https://mise.jdx.dev), the Android SDK with NDK r30
+and build-tools 37, podman, clang, and the GTK 4 and libadwaita development
+files. A session needs a Wayland desktop, `systemd --user`, pasta, util-linux
+`unshare` (plus `newuidmap` for subuid mode), read-write `/dev/udmabuf` and
+pipewire-pulse. Details: [docs/development.md](docs/development.md).
+
+```sh
+mise install                    # toolchains and the pre-commit hook
+mise run build                  # everything, staged into out/stage
+mise run install-dev            # the manager in your app menu, as the APK handler
+out/stage/bin/linuxapk install app.apk
+mise run test                   # unit tests; test:boot, test:e2e, test:compat need a session
+```
+
+Contributor and agent rules: [AGENTS.md](AGENTS.md).
 
 ## License
 
