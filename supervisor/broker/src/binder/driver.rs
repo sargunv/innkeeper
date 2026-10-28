@@ -2585,22 +2585,25 @@ impl BinderDriver {
                 d.taken.push(taken);
             }
         }
-        // Ask for another looper thread if none is idle (still waiting: a
-        // signal may have ended a wait the driver hasn't seen end).
+        // Ask for another looper thread if none is idle. (A waiter a signal
+        // stopped still counts until it is woken and found gone: that only
+        // delays a request, and checking every waiter would cost a syscall
+        // on every read.)
         let p = &self.procs[&proc];
         let looper = p.threads[&tid].looper & (LOOPER_REGISTERED | LOOPER_ENTERED) != 0;
-        let mut idle = p.threads.values().filter_map(|t| match t.wait {
-            Wait::Blocked {
-                read,
-                proc_work: true,
-                ..
-            } => Some(read.call),
-            _ => None,
+        let idle = p.threads.values().any(|t| {
+            matches!(
+                t.wait,
+                Wait::Blocked {
+                    proc_work: true,
+                    ..
+                }
+            )
         });
         if p.requested_threads == 0
+            && !idle
             && p.requested_threads_started < p.max_threads
             && looper
-            && !idle.any(|call| us.pending(call))
         {
             d.spawn_looper = true;
             d.bytes[..4].copy_from_slice(&BR_SPAWN_LOOPER.to_le_bytes());

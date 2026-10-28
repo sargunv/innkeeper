@@ -688,29 +688,6 @@ fn process_work_skips_a_stopped_looper() {
     assert!(s.us.is_pending(again));
 }
 
-/// A looper whose wait a signal ended doesn't count as idle: the next
-/// looper to read is asked to spawn another.
-#[test]
-fn a_stopped_looper_is_not_idle() {
-    let mut s = setup();
-    set_max_threads(&mut s, 1);
-    s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
-    let stopped = s.wr(s.server, 2, &[], 256);
-    s.us.interrupt(stopped);
-    // Thread 3 reads its own work: a call to a handle it doesn't have fails.
-    let mut td = BinderTransactionData::default();
-    td.target = 99;
-    let c = s.wr(
-        s.server,
-        3,
-        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
-        256,
-    );
-    let got = s.stream(c);
-    assert_eq!(got[0].0, BR_SPAWN_LOOPER);
-    assert!(find(&got, BR_FAILED_REPLY).is_some());
-}
-
 /// A BR_SPAWN_LOOPER whose read is rolled back is asked for again by the
 /// restarted read, and only one is outstanding once a read delivers it.
 #[test]

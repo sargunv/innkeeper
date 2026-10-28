@@ -114,11 +114,13 @@ all of a transaction's fds or none, but `ADDFD` can't be undone, so if a later
 fd doesn't fit the reader's fd table, the ones already installed stay, and leak
 if the transaction fails for good (it fails when it is the first item of a read:
 a oneway is dropped, a call gets `BR_FAILED_REPLY`, and so does the reader of a
-reply). `src/binder/lifecycle_tests.rs` drives libbinder-like threads through
-every failure point, stopped threads and thread exits, and checks that no work
-waits with a thread that isn't reading it, every synchronous call gets its reply
-or a failed reply, every oneway sent is received, no ended call's memory is
-written, and nothing leaks.
+reply). Another: a looper whose wait a signal ended still counts as idle until
+work wakes it and finds it gone, which can delay a `BR_SPAWN_LOOPER`; checking
+every waiter would cost a syscall on every read. `src/binder/lifecycle_tests.rs`
+drives libbinder-like threads through every failure point, stopped threads and
+thread exits, and checks that no work waits with a thread that isn't reading it,
+every synchronous call gets its reply or a failed reply, every oneway sent is
+received, no ended call's memory is written, and nothing leaks.
 
 Not supported: freezing. `BINDER_FREEZE` and `BINDER_GET_FROZEN_INFO` return
 `EINVAL`, so Android disables its app freezer; freeze-notification commands are
@@ -180,12 +182,11 @@ mise run test:boot                               # fresh headless boot + selftes
   payloads, and 18 against 20 µs for one pair (both noisy).
 
   Not writing to a thread whose wait a signal ended costs a
-  `SECCOMP_IOCTL_NOTIF_ID_VALID` per woken read, and one per looper read that
-  could ask for a looper (to skip such waiters as idle). Against the broker
-  before that (2026-10-28, 18 interleaved runs each, loaded machine): one pair
-  went from 106k/s and 12.7 µs to 96k/s and 15.6 µs, `-w 8` from 66.9k/s and
-  77.8 µs to 62.6k/s and 83.5 µs, and 16 KiB payloads didn't change (62.5k/s
-  against 65.0k/s, 15.2 µs).
+  `SECCOMP_IOCTL_NOTIF_ID_VALID` per woken read. Against the broker before that
+  (2026-10-28, six interleaved runs each, load average 20–40): one pair 110k/s
+  and 13.1 µs against 107k/s and 13.4 µs, 16 KiB payloads 68.6k/s against
+  64.7k/s, and `-w 8` 60.3k/s against 52.1k/s in one round but 31.9k/s against
+  31.5k/s in the next, so within the noise there.
 
   The broker is one thread, so it tops out around 70–90k transactions/s
   session-wide. A desktop session uses a small fraction of that. If it ever
