@@ -362,9 +362,14 @@ pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstall
 }
 
 /// Launches an app (in a window of its own), optionally opening a URI in it.
+/// An empty URI is none: the DynamicLauncher portal quotes `%U` in the
+/// entries it writes (`'%U'`), which launchers expand to an empty argument.
 pub fn run(pkg: &str, uri: Option<&str>, report: Report) -> Result<()> {
     let pkg = validate::package(pkg)?;
-    let uri = uri.map(validate::launch_uri).transpose()?;
+    let uri = uri
+        .filter(|u| !u.is_empty())
+        .map(validate::launch_uri)
+        .transpose()?;
     let s = session(report)?;
     let l = match uri {
         Some(u) => Launch::View {
@@ -438,6 +443,10 @@ pub fn refresh_entries() -> usize {
 /// Shown once, the first time a session runs in single-uid mode.
 pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
     this computer gives you no subordinate uid range (/etc/subuid), so they all run as your user.";
+/// [`SINGLE_UID_NOTICE`] inside the Flatpak, where single-uid mode is the
+/// only one.
+pub const SINGLE_UID_NOTICE_FLATPAK: &str = "Android apps are not isolated from each other: \
+    inside Flatpak they all run as your user, as desktop apps do.";
 pub const SINGLE_UID_DOCS: &str =
     "https://github.com/sargunv/linux.apk/blob/main/docs/security.md#single-uid-mode";
 
@@ -455,7 +464,11 @@ fn notice_once(dir: &Path, mode: Option<UidMode>) -> Option<&'static str> {
     fs::create_dir_all(dir).ok()?;
     // Whoever creates the stamp shows the notice.
     fs::File::create_new(dir.join("single-uid")).ok()?;
-    Some(SINGLE_UID_NOTICE)
+    Some(if crate::desktop::flatpak_app_id().is_some() {
+        SINGLE_UID_NOTICE_FLATPAK
+    } else {
+        SINGLE_UID_NOTICE
+    })
 }
 
 #[cfg(test)]
