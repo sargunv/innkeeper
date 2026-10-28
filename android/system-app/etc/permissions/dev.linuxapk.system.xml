@@ -16,6 +16,10 @@
     <permission name="android.permission.MODIFY_DAY_NIGHT_MODE" />
     <permission name="android.permission.SET_TIME_ZONE" />
     <permission name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- Host state: location providers. -->
+    <permission name="android.permission.INSTALL_LOCATION_PROVIDER" />
+    <permission name="android.permission.INTERACT_ACROSS_USERS" />
+    <permission name="android.permission.LOCATION_HARDWARE" />
   </privapp-permissions>
 
   <!-- Holders run with the "audio" group, which may enter the host bridge's socket directory

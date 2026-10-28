@@ -52,6 +52,13 @@
   <!-- Default browser role (BrowserRole), when no real browser has it. -->
   <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
   <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+  <!-- Host state (integration/HostStateFeature.kt): the network location provider and its gps
+       test provider (granting itself the mock location app op), and the battery saver. -->
+  <uses-permission android:name="android.permission.INSTALL_LOCATION_PROVIDER" />
+  <uses-permission android:name="android.permission.LOCATION_HARDWARE" />
+  <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" />
+  <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
+  <uses-permission android:name="android.permission.DEVICE_POWER" />
   <!-- Flatpak mode: the host's network as Android's (net/HostNetworkFeature.kt). -->
   <uses-permission android:name="android.permission.NETWORK_FACTORY" />
 
@@ -198,6 +205,21 @@
       <intent-filter>
         <action android:name="android.support.customtabs.action.CustomTabsService" />
       </intent-filter>
+    </service>
+
+    <!-- The desktop's location as Android's network provider (integration/location/). Version 0:
+         microG's provider, when installed, outranks it. -->
+    <service
+      android:name=".integration.location.HostLocationService"
+      android:directBootAware="true"
+      android:exported="true"
+      android:permission="android.permission.INSTALL_LOCATION_PROVIDER">
+      <intent-filter>
+        <action android:name="com.android.location.service.v3.NetworkLocationProvider" />
+      </intent-filter>
+      <meta-data
+        android:name="serviceVersion"
+        android:value="0" />
     </service>
 
     <!-- Images copied on the desktop, pasted into Android apps. -->

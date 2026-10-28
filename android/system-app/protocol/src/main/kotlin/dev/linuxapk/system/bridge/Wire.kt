@@ -44,6 +44,19 @@ object Wire {
   const val F_MEDIA = 8
   const val F_OPEN_URI = 16
 
+  // Host state service (host/bridge/src/hoststate/proto.rs).
+  const val HS_START = 0x0801
+  const val HS_LOCATION_START = 0x0802
+  const val HS_LOCATION_STOP = 0x0803
+  const val EV_BATTERY = 0x4801
+  const val EV_POWER_SAVER = 0x4802
+  const val EV_NETWORK = 0x4803
+  const val EV_LOCATION = 0x4804
+  const val EV_LOCATION_STATUS = 0x4805
+  const val HS_F_POWER_SAVER = 2
+  const val HS_F_NETWORK = 4
+  const val HS_F_LOCATION = 8
+
   const val CLIP_TEXT = 1
   const val CLIP_IMAGE = 2
 

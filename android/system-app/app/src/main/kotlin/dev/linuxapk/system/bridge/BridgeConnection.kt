@@ -254,6 +254,7 @@ class BridgeConnection(
     const val SERVICE_DOCUMENTS = 4
     const val SERVICE_APPS = 5
     const val SERVICE_INPUT = 6
+    const val SERVICE_HOSTSTATE = 8
     private const val HELLO_TAG = 1
     private const val MIN_BACKOFF_MS = 250L
     private const val MAX_BACKOFF_MS = 5000L

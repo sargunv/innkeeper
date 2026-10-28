@@ -7,15 +7,16 @@ privileged app that is Android's side of the desktop.
 `/system_ext/etc/permissions/`; system_server starts it at `systemReady` and
 restarts it if it dies.
 
-| Feature (`app/.../system/`) | Bridge service | What it does                                                                           |
-| --------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| `wm/`                       | input          | one trusted virtual display and host window per app ([display](../../docs/display.md)) |
-| `input/`, `ime/`            | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))          |
-| `integration/`              | system         | desktop settings, notifications, clipboard, links, MPRIS                               |
-| `documents/`                | documents      | the document picker and a DocumentsProvider for host files the user picked             |
-| `apps/`                     | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |
-| `net/`                      | none           | Flatpak mode: the host's network as Android's default network                          |
-| `a11y/`                     | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI  |
+| Feature (`app/.../system/`)             | Bridge service | What it does                                                                           |
+| --------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
+| `wm/`                                   | input          | one trusted virtual display and host window per app ([display](../../docs/display.md)) |
+| `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))          |
+| `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS                               |
+| `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))          |
+| `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked             |
+| `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |
+| `net/`                                  | none           | Flatpak mode: the host's network as Android's default network                          |
+| `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI  |
 
 Gradle modules:
 
@@ -46,6 +47,32 @@ Notes:
   APK for `linuxapk install`, so the host needs no Android SDK to render icons.
 - `tools/gen-keymap.py` regenerates `EvdevKeymap.kt` from AOSP's `Generic.kl`.
 
+## Host state
+
+`integration/HostStateFeature.kt` follows the bridge's hoststate service (the
+battery goes to the Health HAL,
+[android/vendor/health](../vendor/health/README.md)):
+
+- **Location:** `HostLocationService` is Android's network location provider
+  (`serviceVersion` 0, so microG's provider wins when the microG addon is
+  installed), and a `gps` test provider gets the same fixes, since the session
+  has no GNSS HAL; FusedLocation combines them. Android's requests start and
+  stop one desktop session, at the most precise accuracy asked for. A refusal on
+  the desktop turns both providers off for the session.
+- **Power saver:** the desktop's power-saver profile is Android's battery saver
+  (`setPowerSaveModeEnabled`), applied at each connect and change.
+- **Metered:** applied only in Flatpak mode, to `net/HostNetworkFeature.kt`'s
+  network agent.
+
+Known limits:
+
+- In host mode the network is EthernetService's, and only automotive builds may
+  change an Ethernet network's capabilities (`updateConfiguration`), so a
+  metered host connection still reads as unmetered there.
+- `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL HAL would
+  remove that.
+
 Tests: `:protocol` unit tests (`mise run test`); `tests/e2e/system-app`
 (`mise run test:e2e`) checks the app's permissions, its bridge connections,
-windows through `dev.linuxapk.LAUNCH` and input injection with the probes.
+windows through `dev.linuxapk.LAUNCH` and input injection with the probes;
+`tests/hoststate` checks host state against mocked desktop services.

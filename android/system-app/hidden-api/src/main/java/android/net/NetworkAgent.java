@@ -26,6 +26,10 @@ public abstract class NetworkAgent {
     throw new UnsupportedOperationException("stub");
   }
 
+  public void sendNetworkCapabilities(NetworkCapabilities nc) {
+    throw new UnsupportedOperationException("stub");
+  }
+
   public void sendLinkProperties(LinkProperties lp) {
     throw new UnsupportedOperationException("stub");
   }

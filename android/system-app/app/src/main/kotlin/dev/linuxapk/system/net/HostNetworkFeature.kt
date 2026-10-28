@@ -25,20 +25,27 @@ import java.net.InetAddress
  *
  * The resolvers come from the sandbox's `/etc/resolv.conf`, which Flatpak keeps current (a link
  * into `/run/host/monitor`), and are sent again whenever it changes, such as when the host joins a
- * VPN or another Wi-Fi network.
+ * VPN or another Wi-Fi network. The host connection's metering ([setMetered], from the host state
+ * service) is the agent's `NOT_METERED`.
  */
 class HostNetworkFeature(private val context: Context) : Feature {
   override val name = "host network"
 
   private var thread: HandlerThread? = null
-  private var agent: NetworkAgent? = null
+  @Volatile private var agent: NetworkAgent? = null
+  @Volatile private var metered = false
   private var watch: FileObserver? = null
   private var dns: List<InetAddress> = emptyList()
+
+  /** Whether the host network agent is up (Flatpak mode). */
+  val running
+    get() = agent != null
 
   override fun start() {
     if (!SystemProps.getBoolean(FLAG_PROP, false)) return
     val t = HandlerThread("HostNetwork").also { it.start() }
     thread = t
+    instance = this
     dns = resolvers()
     val a =
       object :
@@ -59,7 +66,20 @@ class HostNetworkFeature(private val context: Context) : Feature {
     watch(Handler(t.looper))
   }
 
+  /** Marks the host network metered or not, live. */
+  fun setMetered(m: Boolean) {
+    val t = thread ?: return
+    Handler(t.looper).post {
+      val a = agent ?: return@post
+      if (m == metered) return@post
+      metered = m
+      a.sendNetworkCapabilities(capabilities())
+      Log.i(TAG, "host network ${if (m) "metered" else "not metered"}")
+    }
+  }
+
   override fun stop() {
+    instance = null
     watch?.stopWatching()
     watch = null
     agent?.unregister()
@@ -130,7 +150,6 @@ class HostNetworkFeature(private val context: Context) : Feature {
     for (cap in
       listOf(
         NetworkCapabilities.NET_CAPABILITY_INTERNET,
-        NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
         NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED,
         NetworkCapabilities.NET_CAPABILITY_TRUSTED,
         NetworkCapabilities.NET_CAPABILITY_NOT_VPN,
@@ -139,17 +158,24 @@ class HostNetworkFeature(private val context: Context) : Feature {
         NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED,
         NET_CAPABILITY_NOT_VCN_MANAGED,
       )) c.getMethod("addCapability", Int::class.java).invoke(b, cap)
+    if (!metered) {
+      c.getMethod("addCapability", Int::class.java)
+        .invoke(b, NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
     c.getMethod("setLinkUpstreamBandwidthKbps", Int::class.java).invoke(b, LINK_KBPS)
     c.getMethod("setLinkDownstreamBandwidthKbps", Int::class.java).invoke(b, LINK_KBPS)
     return c.getMethod("build").invoke(b) as NetworkCapabilities
   }
 
-  private companion object {
-    const val TAG = "LinuxApkHostNetwork"
-    const val FLAG_PROP = "ro.vendor.linuxapk.host_net"
-    const val RESOLV_CONF = "/etc/resolv.conf"
-    const val LINK_KBPS = 1_000_000
+  companion object {
+    /** The started feature, for the host state's metering. */
+    @Volatile var instance: HostNetworkFeature? = null
+
+    private const val TAG = "LinuxApkHostNetwork"
+    private const val FLAG_PROP = "ro.vendor.linuxapk.host_net"
+    private const val RESOLV_CONF = "/etc/resolv.conf"
+    private const val LINK_KBPS = 1_000_000
     /** NetworkCapabilities.NET_CAPABILITY_NOT_VCN_MANAGED (a system API constant). */
-    const val NET_CAPABILITY_NOT_VCN_MANAGED = 28
+    private const val NET_CAPABILITY_NOT_VCN_MANAGED = 28
   }
 }
