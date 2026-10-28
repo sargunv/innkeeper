@@ -6,7 +6,7 @@
 #
 # The tests are android-17.0.0_r1 builds (the image's release) of
 # binderDriverInterfaceTest, binderLibTest, binderSafeInterfaceTest and
-# binderThroughputTest, read from ~/.local/share/linuxapk/test-bin/binder and
+# binderThroughputTest, read from $XDG_DATA_HOME/linuxapk/test-bin/binder and
 # checked against test-bin.sha256 (the image-builder lane builds them; copy
 # them from out/target/product/<device>/data/nativetest64/<name>/<name>).
 # They run with the image's servicemanager as the context manager, as on a
@@ -34,43 +34,35 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../../tests/bionic/lib.sh"
 logs=$repo/out/test/binder
 
-case ${1:-} in
-  --ns)
-    shift
-    exec unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
-    ;;
-  --inner) shift ;;
-  *)
-    testbin=$HOME/.local/share/linuxapk/test-bin/binder
-    (cd "$testbin" && sha256sum --quiet -c "$here/test-bin.sha256") || {
-      echo "$testbin does not match supervisor/tests/binder/test-bin.sha256; refusing to run" >&2
-      exit 1
-    }
-    tests=("$@")
-    ((${#tests[@]})) || tests=(
-      binderDriverInterfaceTest
-      binderLibTest:-BinderLibTest.BinderNetlinkFailedReply:BinderLibTest.CheckServiceAccessNotOk:BinderLibTest.GetCallingUidWithSetuid:BinderLibTest.InheritRt:BinderLibTest.SchedPolicySet
-      binderSafeInterfaceTest
-      binderThroughputTest
-    )
-    bionic_prepare
-    mkdir -p "$logs"
-    status=()
-    for mode in broker kernel; do
-      echo "=== $mode binder"
-      rc=0
-      systemd-run --user --quiet --collect --wait --pipe --same-dir \
-        --unit="linuxapk-bindertest-$mode-$$" -p KillMode=control-group -p RuntimeMaxSec=3600 \
-        -p MemoryHigh=3G -p MemoryMax=4G \
-        -E BIONIC_IMG="$img" -E BIONIC_APEX="$apex" -E BINDER_TESTS="$testbin" \
-        -E BINDER_TEST_TIMEOUT="${BINDER_TEST_TIMEOUT:-300}" -E BINDER_TEST_ARGS="${BINDER_TEST_ARGS:-}" \
-        -E LINUXAPK_BROKER_DEBUG="${LINUXAPK_BROKER_DEBUG:-}" -- "$0" --ns "$mode" "${tests[@]}" || rc=$?
-      status+=("$rc")
-    done
-    ((status[0])) && exit "${status[0]}"
-    exit "${status[1]}"
-    ;;
-esac
+if [[ ${1:-} == --inner ]]; then
+  shift
+else
+  testbin=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/test-bin/binder
+  (cd "$testbin" && sha256sum --quiet -c "$here/test-bin.sha256") || {
+    echo "$testbin does not match supervisor/tests/binder/test-bin.sha256; refusing to run" >&2
+    exit 1
+  }
+  tests=("$@")
+  ((${#tests[@]})) || tests=(
+    binderDriverInterfaceTest
+    binderLibTest:-BinderLibTest.BinderNetlinkFailedReply:BinderLibTest.CheckServiceAccessNotOk:BinderLibTest.GetCallingUidWithSetuid:BinderLibTest.InheritRt:BinderLibTest.SchedPolicySet
+    binderSafeInterfaceTest
+    binderThroughputTest
+  )
+  bionic_prepare
+  mkdir -p "$logs"
+  status=()
+  for mode in broker kernel; do
+    echo "=== $mode binder"
+    rc=0
+    bionic_unit "linuxapk-bindertest-$mode" 3600 -E BINDER_TESTS="$testbin" \
+      -E BINDER_TEST_TIMEOUT="${BINDER_TEST_TIMEOUT:-300}" -E BINDER_TEST_ARGS="${BINDER_TEST_ARGS:-}" \
+      -E LINUXAPK_BROKER_DEBUG="${LINUXAPK_BROKER_DEBUG:-}" -- "$mode" "${tests[@]}" || rc=$?
+    status+=("$rc")
+  done
+  ((status[0])) && exit "${status[0]}"
+  exit "${status[1]}"
+fi
 
 img=$BIONIC_IMG apex=$BIONIC_APEX
 mode=$1

@@ -31,22 +31,14 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib.sh"
 timeout=${TIMEOUT:-300}
 
-case ${1:-} in
-  --ns)
-    shift
-    exec unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
-    ;;
-  --inner) shift ;;
-  *)
-    bionic_prepare
-    mkdir -p "$scratch/frames"
-    exec systemd-run --user --quiet --collect --wait --pipe --same-dir \
-      --unit="linuxapk-bionictest-$$" -p KillMode=control-group \
-      -p RuntimeMaxSec=$((timeout + 60)) -p MemoryHigh=3G -p MemoryMax=4G \
-      -E TIMEOUT="$timeout" -E BIONIC_IMG="$img" -E BIONIC_APEX="$apex" \
-      -- "$0" --ns "$@"
-    ;;
-esac
+if [[ ${1:-} == --inner ]]; then
+  shift
+else
+  bionic_prepare
+  mkdir -p "$scratch/frames"
+  bionic_unit linuxapk-bionictest $((timeout + 60)) -E TIMEOUT="$timeout" -- "$@"
+  exit
+fi
 
 img=$BIONIC_IMG apex=$BIONIC_APEX
 envs=() vendor=() tests=""

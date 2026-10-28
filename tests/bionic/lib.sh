@@ -6,7 +6,7 @@
 # Sourcing it sets:
 #   repo        this checkout
 #   stage       out/stage: pivot-exec, the broker and our /vendor come from there
-#   scratch     out/test/bionic: everything the harnesses write
+#   scratch     out/test/bionic: the harnesses' roots and run.sh's output
 #   pivot_exec, broker, stage_vendor, props_shim (tests/bionic/props-shim.c,
 #               from the NDK superbuild)
 
@@ -43,6 +43,26 @@ bionic_prepare() {
     echo "image not prepared at $img (run \`mise run session -- prepare\`)" >&2
     return 1
   }
+}
+
+# bionic_unit NAME MAX_SECONDS [-E VAR=val]... -- ARG...: rerun the calling
+# script as `SCRIPT --inner ARG...`, as root of a private user, mount and pid
+# namespace, in a transient systemd user unit with a memory cap and a run time
+# limit. The unit gets BIONIC_IMG and BIONIC_APEX (from bionic_prepare) and
+# each -E.
+bionic_unit() {
+  local name=$1 max=$2 envs=()
+  shift 2
+  while [[ $1 == -E ]]; do
+    envs+=(-E "$2")
+    shift 2
+  done
+  shift
+  systemd-run --user --quiet --collect --wait --pipe --same-dir \
+    --unit="$name-$$" -p KillMode=control-group -p RuntimeMaxSec="$max" \
+    -p MemoryHigh=3G -p MemoryMax=4G \
+    -E BIONIC_IMG="$img" -E BIONIC_APEX="$apex" "${envs[@]}" \
+    -- unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
 }
 
 ro_bind() {
