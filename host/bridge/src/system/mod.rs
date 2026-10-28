@@ -37,8 +37,8 @@ use openuri::RateLimit;
 use proto::{ClipKind, Request, feature};
 use settings::SettingsHub;
 
-/// What a session may do on the real desktop. Test sessions (lane instances,
-/// the compat runner) get log-only sinks, so nothing opens in the user's
+/// What a session may do on the real desktop. Test sessions (named instances)
+/// get log-only sinks, so nothing opens in the user's
 /// browser and nothing appears in their notifications or media controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Policy {

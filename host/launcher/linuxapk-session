@@ -39,11 +39,10 @@
 #                            the desktop's default output)
 # Tests only:
 #   LINUXAPK_INSTANCE        run an independent, named session (default: the
-#                            main one). Named sessions are test sessions.
-#   LINUXAPK_TEST=1          make the main session a test session. Test
-#                            sessions only log links, and also notifications
-#                            and media players unless they talk to a private
-#                            bus (a nested test desktop).
+#                            main one). Named sessions are test sessions: they
+#                            only log links, and also notifications and media
+#                            players unless they talk to a private bus (a
+#                            nested test desktop).
 #   LINUXAPK_OPEN_URLS=1     a test session opens links in the host browser
 #   LINUXAPK_DATA            Android's /data (default
 #                            $XDG_DATA_HOME/linuxapk/data[-<instance>])
@@ -322,11 +321,11 @@ bridge_setup() {
   [[ ${LINUXAPK_BRIDGE_VERBOSE:-} == 1 ]] && bridge_args+=(-v)
   # Apps installed inside the main session get desktop entries.
   [[ -n $inst ]] || bridge_args+=(--mirror-apps)
-  # Test sessions (any named instance, or LINUXAPK_TEST=1: lanes, the compat
-  # runner) never reach the user's real desktop: links are only logged (unless
-  # LINUXAPK_OPEN_URLS=1), and so are notifications and media players unless
-  # the session talks to a private bus (a nested test desktop).
-  if [[ -n $inst || ${LINUXAPK_TEST:-} == 1 ]]; then
+  # Test sessions (any named instance) never reach the user's real desktop:
+  # links are only logged (unless LINUXAPK_OPEN_URLS=1), and so are
+  # notifications and media players unless the session talks to a private bus
+  # (a nested test desktop).
+  if [[ -n $inst ]]; then
     [[ ${LINUXAPK_OPEN_URLS:-} == 1 ]] || bridge_args+=(--no-open-urls)
     local bus=${DBUS_SESSION_BUS_ADDRESS:-}
     [[ -n $bus && $bus != "unix:path=/run/user/$(id -u)/bus" ]] || bridge_args+=(--no-desktop-presence)

@@ -20,11 +20,11 @@ Play services). Logs and screenshots go to `out/test/compat/<pkg>/`.
 - **Gate:** an app worse than in `results.json` fails the run and leaves the
   baseline alone; `--accept` records it anyway. `-- report` rewrites
   `docs/compatibility.md` from `results.json`.
-- **Session:** it uses a running session (set `LINUXAPK_INSTANCE`), or starts a
-  headless one and stops it at the end; `--window` shows windows. It is a test
-  session (`LINUXAPK_TEST=1`), so links are only logged. Run it at nice 0:
-  uiautomator dies when it can't reset its thread priority, so the harness
-  re-runs itself at nice 0 when it finds itself niced.
+- **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
+  is running, or else one it starts (headless unless `--window`) and stops at
+  the end. A named instance is a test session, so links are only logged. Run it
+  at nice 0: uiautomator dies when it can't reset its thread priority, so the
+  harness re-runs itself at nice 0 when it finds itself niced.
 - **Frameworks** in the corpus were identified by hand from each APK's libraries
   and assets (`libflutter.so`, `libhermes.so`, `assets/capacitor.config.json`,
   `libgodot_android.so`, Compose classes, `libgdx.so`, `libmaplibre.so`); there

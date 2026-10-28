@@ -198,8 +198,9 @@ fn real_main() -> Result<ExitCode> {
                     eprintln!("compat: {e:#}");
                 }
             }
-            // Another lane may restart the session under us; that's not the app's
-            // fault, so retry once on a fresh session.
+            // The session restarted or died under us (something else stopped
+            // the instance, or a host-side crash): not the app's fault, so retry
+            // once on a fresh session.
             if pid.is_none() || s.pid() != pid || !s.booted() {
                 r.result = Status::Error;
                 r.reason = "session restarted or died during the run".into();

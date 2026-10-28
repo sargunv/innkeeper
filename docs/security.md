@@ -85,9 +85,9 @@ but that is policy enforced by Android's own processes, not by the kernel.
 
 ## Test sessions
 
-A named `LINUXAPK_INSTANCE`, or `LINUXAPK_TEST=1`, makes a test session that
-leaves the user's desktop alone: links are logged, not opened (unless
-`LINUXAPK_OPEN_URLS=1`), notifications and MPRIS players are only logged unless
-the session talks to a private bus (a nested test desktop), and apps installed
-inside Android get no desktop entries. Clipboard sync and the FileChooser portal
-still reach the real desktop; that is tracked on GitHub.
+A named `LINUXAPK_INSTANCE` makes a test session that leaves the user's desktop
+alone: links are logged, not opened (unless `LINUXAPK_OPEN_URLS=1`),
+notifications and MPRIS players are only logged unless the session talks to a
+private bus (a nested test desktop), and apps installed inside Android get no
+desktop entries. Clipboard sync and the FileChooser portal still reach the real
+desktop; that is tracked on GitHub.

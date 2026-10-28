@@ -147,9 +147,9 @@ run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
 description = "The compat corpus against a session (-- [--only PKG,...] [--window] [--accept] | fetch | report)"
-# A test session: links are only logged, and notifications and media players
-# stay off the real desktop.
-env = { LINUXAPK_TEST = "1" }
+# A named instance (default compat), so a test session: links are only logged,
+# and notifications and media players stay off the real desktop.
+env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') }}" }
 run = "cargo run -q --release -p linuxapk-compat --"
 
 # ---- run ---------------------------------------------------------------------
