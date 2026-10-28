@@ -104,7 +104,10 @@ read goes through one lifecycle:
 - **abandoned:** a wait ends without a read when the thread issues another
   ioctl, when it is woken but its call is gone (a signal stopped it, or it will
   restart: nothing is written to it, and its process work goes to the next
-  looper), or when process release answers it with `EBADF`.
+  looper), or when process release answers it with `EBADF`. That holds for a
+  call that ended before the wake; a signal landing just after the check can
+  still see the read written to its buffer and bwr, harmlessly (the restart
+  rereads the same work).
 
 A write is consumed as it is processed and its progress written back whatever
 the read does, before blocking too, so a restarted ioctl never replays it. Fds
@@ -116,11 +119,14 @@ if the transaction fails for good (it fails when it is the first item of a read:
 a oneway is dropped, a call gets `BR_FAILED_REPLY`, and so does the reader of a
 reply). Another: a looper whose wait a signal ended still counts as idle until
 work wakes it and finds it gone, which can delay a `BR_SPAWN_LOOPER`; checking
-every waiter would cost a syscall on every read. `src/binder/lifecycle_tests.rs`
-drives libbinder-like threads through every failure point, stopped threads and
-thread exits, and checks that no work waits with a thread that isn't reading it,
-every synchronous call gets its reply or a failed reply, every oneway sent is
-received, no ended call's memory is written, and nothing leaks.
+every waiter would cost a syscall on every read. The delay is bounded: the
+request waits at most until that thread enters the ioctl again, and only in the
+worst case (a cycle of nested callbacks that needs a new looper) does progress
+wait for its restart. `src/binder/lifecycle_tests.rs` drives libbinder-like
+threads through every failure point, stopped threads and thread exits, and
+checks that no work waits with a thread that isn't reading it, every synchronous
+call gets its reply or a failed reply, every oneway sent is received, no ended
+call's memory is written, and nothing leaks.
 
 Not supported: freezing. `BINDER_FREEZE` and `BINDER_GET_FROZEN_INFO` return
 `EINVAL`, so Android disables its app freezer; freeze-notification commands are
