@@ -40,10 +40,7 @@ ComposerClient::ComposerClient() {
   const DisplayConfig config;
   mDisplays.emplace(
     kPrimaryDisplay,
-    std::make_unique<Display>(
-      kPrimaryDisplay, config,
-      createPrimaryPresenter(uint32_t(config.width), uint32_t(config.height))
-    )
+    std::make_unique<Display>(kPrimaryDisplay, config, createPrimaryPresenter())
   );
 }
 

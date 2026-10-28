@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # End-to-end input test against a running session that has reached
 # sys.boot_completed=1 (see docs/input.md). Checks that Linux.apk System is
-# installed and running, opens InputProbeActivity in a window of its own through
-# the window manager's control command (docs/windowing.md), then injects
-# tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger touch) through
-# the app's own translator/injector and checks what the activity received.
-# The stream's DISPLAY placeholders become the probe's display id, so every
-# event must arrive there.
+# installed and running and holds the bridge's input service, opens
+# InputProbeActivity in a window of its own through the window manager's
+# control command (docs/windowing.md), then injects
+# tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger touch)
+# through the app's own translator and injector, as the input service's lines
+# are, and checks what the activity received. The stream's DISPLAY placeholders
+# become the probe's display id, so every event must arrive there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
@@ -29,25 +30,14 @@ check() { if grep -qE "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
 pkg=$(s dumpsys package dev.linuxapk.system)
 check "installed as a privileged system app" "codePath=/system_ext/priv-app/LinuxApkSystem" "$pkg"
 check "INJECT_EVENTS granted" "android.permission.INJECT_EVENTS: granted=true" "$pkg"
-check "HOST_INPUT granted" "dev.linuxapk.permission.HOST_INPUT: granted=true" "$pkg"
-if pid=$(s pidof dev.linuxapk.system); then
-  ok "persistent process running"
-  # HOST_INPUT maps to gid input (1004), for a 0660 system:input socket.
-  check "holds gid input" "^Groups:.*\b1004\b" "$(s cat "/proc/${pid//[^0-9]/}/status")"
-else
-  bad "persistent process running"
-fi
+if s pidof dev.linuxapk.system >/dev/null; then ok "persistent process running"; else bad "persistent process running"; fi
 check "service started" "started input" "$(s logcat -d -s LinuxApkSystem:I)"
+# The input service (id 6) admits only the system app's uid.
+check "connected to the bridge's input service" "connected to bridge service 6" \
+  "$(s logcat -d -s LinuxApkBridge:I)"
 # Text input (docs/input.md): the Linux.apk Keyboard is the input method, so no soft keyboard.
 check "Linux.apk Keyboard is the default input method" "^dev.linuxapk.system/.ime.HostImeService" \
   "$(s settings get secure default_input_method)"
-input_log=$(s logcat -d -s LinuxApkInput:I)
-if grep -q "connected to" <<<"$input_log"; then
-  ok "connected to the composer's input socket"
-else
-  echo "note: not connected to the input socket (headless composer?):"
-  tail -n 2 <<<"$input_log"
-fi
 
 wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }
 for p in ADD_TRUSTED_DISPLAY ADD_ALWAYS_UNLOCKED_DISPLAY INTERNAL_SYSTEM_WINDOW MANAGE_ACTIVITY_TASKS REAL_GET_TASKS; do
@@ -67,7 +57,7 @@ sleep 2
 check "listed as a window" "display=$display package=dev.linuxapk.system" "$(wm LIST)"
 sleep 1
 sed "s/DISPLAY/$display/" "$here/probe-stream.txt" |
-  s sh -c "CLASSPATH=$apk app_process / dev.linuxapk.system.input.InputBridgeMain --stdin" >/dev/null
+  s sh -c "CLASSPATH=$apk app_process / dev.linuxapk.system.input.StdinInjector" >/dev/null
 sleep 1
 log=$(s logcat -d -s LinuxApkProbe:I InputDispatcher:E)
 check "mouse hover" "generic .*ACTION_HOVER_MOVE.*source=0x2002" "$log"

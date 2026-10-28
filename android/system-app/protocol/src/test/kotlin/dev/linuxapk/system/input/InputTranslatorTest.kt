@@ -59,7 +59,7 @@ class InputTranslatorTest {
 
   @Test
   fun hoverMoveIsAMouseHover() {
-    feed("hello 2", "window 1280 800 1.000")
+    feed("window 1280 800 1.000")
     val e = feed("pointer_motion 1 100.50 200.25", "pointer_frame").single() as OutMotion
     assertEquals(MotionEvent.ACTION_HOVER_MOVE, e.action)
     assertEquals(InputDevice.SOURCE_MOUSE, e.source)
@@ -487,7 +487,7 @@ class InputTranslatorTest {
 
   @Test
   fun pointerFollowsTheWindowItEntered() {
-    feed("hello 2", "window 800 600 1.500 5", "window 800 600 1.500 7")
+    feed("window 800 600 1.500 5", "window 800 600 1.500 7")
     val a = feed("pointer_enter 10.00 10.00 5", "pointer_frame")
     assertEquals(listOf(5), a.map { it.displayId })
     // Drag, then the pointer crosses into window 7 within one frame.

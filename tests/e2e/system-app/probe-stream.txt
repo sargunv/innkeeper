@@ -1,4 +1,3 @@
-hello 2
 window 1280 800 1.000 DISPLAY
 keyboard_enter DISPLAY
 pointer_enter 640.00 400.00 DISPLAY

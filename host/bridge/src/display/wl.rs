@@ -1,6 +1,6 @@
 //! The display service's Wayland side: one host Wayland connection per
-//! composer connection, one `xdg_toplevel` per window, dma-buf frames, and
-//! the seat turned into input-protocol v2 lines (docs/hal-display.md).
+//! composer connection, one `xdg_toplevel` per window and dma-buf frames.
+//! The connection's seat is the input service's (`input::seat`).
 //!
 //! Decorations: server-side when the compositor offers xdg-decoration (KDE),
 //! else an Adwaita-style client-side frame from `sctk-adwaita` (GNOME,
@@ -20,11 +20,10 @@ use sctk::compositor::{CompositorHandler, CompositorState};
 use sctk::dmabuf::{DmabufFeedback, DmabufHandler, DmabufState};
 use sctk::output::{OutputHandler, OutputState};
 use sctk::reexports::calloop_wayland_source::WaylandSource;
+use sctk::reexports::client::backend::ObjectId;
 use sctk::reexports::client::globals::{GlobalList, registry_queue_init};
-use sctk::reexports::client::protocol::{
-    wl_buffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_touch,
-};
-use sctk::reexports::client::{Connection, Proxy, QueueHandle, WEnum};
+use sctk::reexports::client::protocol::{wl_buffer, wl_output, wl_seat, wl_surface};
+use sctk::reexports::client::{Connection, Proxy, QueueHandle};
 use sctk::reexports::csd_frame::{DecorationsFrame, FrameAction, FrameClick};
 use sctk::reexports::protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1,
@@ -52,34 +51,30 @@ use wayland_protocols::xdg::activation::v1::client::{
     xdg_activation_v1::XdgActivationV1,
 };
 
-use super::ime;
-use super::proto::{BufferSpec, WindowSpec, event, ty};
+use super::proto::{BufferSpec, event, ty};
+use crate::input::proto::WindowRequest;
+use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
 
 mod foreign;
-mod text_input;
 
 /// Work for the Wayland thread.
 pub enum Cmd {
-    Create(WindowSpec, std::sync::mpsc::Sender<i32>),
+    Create(WindowRequest, std::sync::mpsc::Sender<i32>),
     Destroy(u32),
-    Title(u32, String),
-    MinSize(u32, u32, u32),
     Activate(u32),
-    BufferAdd(BufferSpec, OwnedFd),
+    /// A buffer of the window's display.
+    BufferAdd(BufferSpec, u32, OwnedFd),
     BufferRemove(u32),
     Frame {
         window: u32,
         buffer: u32,
         damage: [i32; 4],
     },
-    /// A request from the Linux.apk IME (through the composer).
+    /// A request from the Linux.apk IME.
     TextInput(ime::Req),
     Quit,
 }
-
-/// evdev KEY_F11.
-const KEY_F11: u32 = 87;
 
 /// Default minimum logical window size.
 const MIN_W: u32 = 240;
@@ -116,7 +111,7 @@ struct Win {
     shown_size: (u32, u32),
 }
 
-struct State {
+pub(crate) struct State {
     registry: RegistryState,
     seat_state: SeatState,
     output_state: OutputState,
@@ -131,33 +126,23 @@ struct State {
     exporter:
         Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2>,
     qh: QueueHandle<State>,
+    /// The composer's connection (buffer releases).
     events: Events,
+    /// Window and input lines go to the input service's clients.
+    pub(crate) hub: Arc<Hub>,
 
     windows: HashMap<u32, Win>,
     buffers: HashMap<u32, Buf>,
     /// zwp_linux_buffer_params_v1 being created -> buffer id.
-    params: HashMap<sctk::reexports::client::backend::ObjectId, u32>,
-
-    seat: Option<wl_seat::WlSeat>,
-    pointer: Option<wl_pointer::WlPointer>,
-    keyboard: Option<wl_keyboard::WlKeyboard>,
-    touch: Option<wl_touch::WlTouch>,
-    /// Where the pointer is: a window's content, or a window's frame.
-    pointer_focus: Option<(u32, bool)>,
-    /// The surface the pointer entered (decoration parts are subsurfaces).
-    pointer_surface: Option<sctk::reexports::client::backend::ObjectId>,
-    keyboard_focus: Option<u32>,
-    touch_focus: HashMap<i32, u32>,
-    /// zwp_text_input_v3 for the IME (`text_input.rs`).
-    text: text_input::TextInput,
-    last_serial: u32,
+    params: HashMap<ObjectId, u32>,
+    pub(crate) seat: Seat,
     quit: bool,
 }
 
 // ---- globals we bind ourselves ------------------------------------------------
 
 /// User data for objects whose events we ignore or handle inline.
-struct Unit;
+pub(crate) struct Unit;
 
 impl Dispatch2<WpViewporter, State> for Unit {
     fn event(
@@ -247,21 +232,11 @@ impl Dispatch2<XdgActivationTokenV1, State> for TokenFor {
     }
 }
 
-// ---- seat devices: raw events, turned into protocol v2 lines -------------------
-
-struct Ptr;
-struct Kbd;
-struct Tch;
+// ---- what the seat needs from the windows ------------------------------------
 
 impl State {
-    fn input(&self, line: String) {
-        if let Err(e) = self.events.try_send(ty::INPUT, &event::input(&line), &[]) {
-            crate::debug!("display: input event dropped: {e}");
-        }
-    }
-
     /// Which window `s` belongs to, and whether it is the window's frame.
-    fn window_of(&self, s: &wl_surface::WlSurface) -> Option<(u32, bool)> {
+    pub(crate) fn window_of(&self, s: &wl_surface::WlSurface) -> Option<(u32, bool)> {
         for w in self.windows.values() {
             if w.window.wl_surface() == s {
                 return Some((w.id, false));
@@ -278,7 +253,7 @@ impl State {
     }
 
     /// Surface-local logical -> the shown frame's pixels.
-    fn to_display(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
+    pub(crate) fn to_display(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
         match self.windows.get(&id) {
             Some(w) if w.width > 0 && w.height > 0 && w.shown_size.0 > 0 => (
                 x * w.shown_size.0 as f64 / w.width as f64,
@@ -288,17 +263,74 @@ impl State {
         }
     }
 
+    /// The window's scale × 120.
+    pub(crate) fn scale120(&self, id: u32) -> u32 {
+        self.windows.get(&id).map_or(120, |w| w.scale120.max(1))
+    }
+
+    pub(crate) fn toggle_fullscreen(&self, id: u32) {
+        if let Some(w) = self.windows.get(&id) {
+            if w.fullscreen {
+                w.window.unset_fullscreen();
+            } else {
+                w.window.set_fullscreen(None);
+            }
+        }
+    }
+
+    // The pointer over a window's client-side frame drives the frame.
+
+    pub(crate) fn frame_pointer_moved(
+        &mut self,
+        id: u32,
+        surface: &ObjectId,
+        time: Duration,
+        x: f64,
+        y: f64,
+    ) {
+        if let Some(f) = self.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
+            f.click_point_moved(time, surface, x, y);
+        }
+    }
+
+    pub(crate) fn frame_pointer_left(&mut self, id: u32) {
+        if let Some(f) = self.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
+            f.click_point_left();
+        }
+    }
+
+    pub(crate) fn frame_click(
+        &mut self,
+        id: u32,
+        time: Duration,
+        button: u32,
+        pressed: bool,
+        serial: u32,
+    ) {
+        let click = match button {
+            0x110 => FrameClick::Normal,
+            0x111 => FrameClick::Alternate,
+            _ => return,
+        };
+        let action = self
+            .windows
+            .get_mut(&id)
+            .and_then(|w| w.frame.as_mut())
+            .and_then(|f| f.on_click(time, click, pressed));
+        if let Some(a) = action {
+            self.frame_action(id, a, serial);
+        }
+    }
+
     fn frame_action(&mut self, id: u32, action: FrameAction, serial: u32) {
         let Some(w) = self.windows.get(&id) else {
             return;
         };
-        let Some(seat) = self.seat.clone() else {
+        let Some(seat) = self.seat.wl_seat.clone() else {
             return;
         };
         match action {
-            FrameAction::Close => {
-                let _ = self.events.try_send(ty::CLOSE, &event::close(id), &[]);
-            }
+            FrameAction::Close => self.hub.input(&format!("close {id}")),
             FrameAction::Minimize => w.window.set_minimized(),
             FrameAction::Maximize => w.window.set_maximized(),
             FrameAction::UnMaximize => w.window.unset_maximized(),
@@ -325,255 +357,6 @@ impl State {
     }
 }
 
-impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
-    fn event(
-        &self,
-        st: &mut State,
-        _: &wl_pointer::WlPointer,
-        e: wl_pointer::Event,
-        _: &Connection,
-        _: &QueueHandle<State>,
-    ) {
-        use wl_pointer::Event as E;
-        match e {
-            E::Enter {
-                serial,
-                surface,
-                surface_x,
-                surface_y,
-            } => {
-                st.last_serial = serial;
-                let f = st.window_of(&surface);
-                st.pointer_focus = f;
-                st.pointer_surface = Some(surface.id());
-                match f {
-                    Some((id, false)) => {
-                        let (x, y) = st.to_display(id, surface_x, surface_y);
-                        st.input(format!("pointer_enter {x:.2} {y:.2} {id}"));
-                    }
-                    Some((id, true)) => {
-                        if let Some(fr) = st.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
-                            fr.click_point_moved(
-                                Duration::ZERO,
-                                &surface.id(),
-                                surface_x,
-                                surface_y,
-                            );
-                        }
-                    }
-                    None => {}
-                }
-            }
-            E::Leave { .. } => {
-                st.pointer_surface = None;
-                let focus = st.pointer_focus.take();
-                match focus {
-                    Some((id, false)) => st.input(format!("pointer_leave {id}")),
-                    Some((id, true)) => {
-                        if let Some(fr) = st.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
-                            fr.click_point_left();
-                        }
-                    }
-                    None => {}
-                }
-            }
-            E::Motion {
-                time,
-                surface_x,
-                surface_y,
-            } => match st.pointer_focus {
-                Some((id, false)) => {
-                    let (x, y) = st.to_display(id, surface_x, surface_y);
-                    st.input(format!("pointer_motion {time} {x:.2} {y:.2}"));
-                }
-                Some((id, true)) => {
-                    let sid = st.pointer_surface.clone();
-                    if let (Some(sid), Some(fr)) =
-                        (sid, st.windows.get_mut(&id).and_then(|w| w.frame.as_mut()))
-                    {
-                        fr.click_point_moved(
-                            Duration::from_millis(time as u64),
-                            &sid,
-                            surface_x,
-                            surface_y,
-                        );
-                    }
-                }
-                None => {}
-            },
-            E::Button {
-                serial,
-                time,
-                button,
-                state,
-            } => {
-                st.last_serial = serial;
-                let pressed = matches!(state, WEnum::Value(wl_pointer::ButtonState::Pressed));
-                match st.pointer_focus {
-                    Some((_, false)) => {
-                        st.input(format!("pointer_button {time} {button} {}", pressed as u8))
-                    }
-                    Some((id, true)) => {
-                        let click = match button {
-                            0x110 => FrameClick::Normal,
-                            0x111 => FrameClick::Alternate,
-                            _ => return,
-                        };
-                        let action = st
-                            .windows
-                            .get_mut(&id)
-                            .and_then(|w| w.frame.as_mut())
-                            .and_then(|f| {
-                                f.on_click(Duration::from_millis(time as u64), click, pressed)
-                            });
-                        if let Some(a) = action {
-                            st.frame_action(id, a, serial);
-                        }
-                    }
-                    None => {}
-                }
-            }
-            E::Axis { time, axis, value } => {
-                if matches!(st.pointer_focus, Some((_, false))) {
-                    let a: u32 = axis.into();
-                    st.input(format!("pointer_axis {time} {a} {value:.3}"));
-                }
-            }
-            E::AxisStop { time, axis } => {
-                if matches!(st.pointer_focus, Some((_, false))) {
-                    let a: u32 = axis.into();
-                    st.input(format!("pointer_axis_stop {time} {a}"));
-                }
-            }
-            E::AxisValue120 { axis, value120 } => {
-                if matches!(st.pointer_focus, Some((_, false))) {
-                    let a: u32 = axis.into();
-                    st.input(format!("pointer_axis_value120 {a} {value120}"));
-                }
-            }
-            E::Frame if !matches!(st.pointer_focus, Some((_, true))) => {
-                st.input("pointer_frame".into());
-            }
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
-    fn event(
-        &self,
-        st: &mut State,
-        _: &wl_keyboard::WlKeyboard,
-        e: wl_keyboard::Event,
-        _: &Connection,
-        _: &QueueHandle<State>,
-    ) {
-        use wl_keyboard::Event as E;
-        match e {
-            E::Keymap { fd, .. } => drop(fd),
-            E::Enter {
-                serial, surface, ..
-            } => {
-                st.last_serial = serial;
-                let id = st.window_of(&surface).map(|(id, _)| id);
-                st.keyboard_focus = id;
-                if let Some(id) = id {
-                    st.input(format!("keyboard_enter {id}"));
-                }
-            }
-            E::Leave { .. } => {
-                if let Some(id) = st.keyboard_focus.take() {
-                    st.input(format!("keyboard_leave {id}"));
-                }
-            }
-            E::Key {
-                serial,
-                time,
-                key,
-                state,
-            } => {
-                st.last_serial = serial;
-                let Some(id) = st.keyboard_focus else { return };
-                let s: u32 = state.into();
-                // F11 toggles fullscreen, as in desktop apps; Android never
-                // sees it.
-                if key == KEY_F11 {
-                    if s == 1
-                        && let Some(w) = st.windows.get(&id)
-                    {
-                        if w.fullscreen {
-                            w.window.unset_fullscreen();
-                        } else {
-                            w.window.set_fullscreen(None);
-                        }
-                    }
-                    return;
-                }
-                st.input(format!("key {time} {key} {}", (s == 1) as u8));
-            }
-            E::Modifiers {
-                mods_depressed,
-                mods_latched,
-                mods_locked,
-                group,
-                ..
-            } => {
-                st.input(format!(
-                    "modifiers {mods_depressed} {mods_latched} {mods_locked} {group}"
-                ));
-            }
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch2<wl_touch::WlTouch, State> for Tch {
-    fn event(
-        &self,
-        st: &mut State,
-        _: &wl_touch::WlTouch,
-        e: wl_touch::Event,
-        _: &Connection,
-        _: &QueueHandle<State>,
-    ) {
-        use wl_touch::Event as E;
-        match e {
-            E::Down {
-                serial,
-                time,
-                surface,
-                id,
-                x,
-                y,
-            } => {
-                st.last_serial = serial;
-                if let Some((w, false)) = st.window_of(&surface) {
-                    st.touch_focus.insert(id, w);
-                    let (x, y) = st.to_display(w, x, y);
-                    st.input(format!("touch_down {time} {id} {x:.2} {y:.2} {w}"));
-                }
-            }
-            E::Up { time, id, .. } => {
-                if st.touch_focus.remove(&id).is_some() {
-                    st.input(format!("touch_up {time} {id}"));
-                }
-            }
-            E::Motion { time, id, x, y } => {
-                if let Some(&w) = st.touch_focus.get(&id) {
-                    let (x, y) = st.to_display(w, x, y);
-                    st.input(format!("touch_motion {time} {id} {x:.2} {y:.2}"));
-                }
-            }
-            E::Frame => st.input("touch_frame".into()),
-            E::Cancel => {
-                st.touch_focus.clear();
-                st.input("touch_cancel".into());
-            }
-            _ => {}
-        }
-    }
-}
-
 // ---- window handling --------------------------------------------------------------
 
 impl State {
@@ -590,20 +373,19 @@ impl State {
         let Some(w) = self.windows.get(&id) else {
             return;
         };
-        if !w.configured {
-            return;
-        }
-        let body = event::configure(id, w.width, w.height, w.scale120);
-        if let Err(e) = self.events.try_send(ty::CONFIGURE, &body, &[]) {
-            crate::warn!("display: configure of window {id} lost: {e}");
+        if w.configured {
+            let scale = w.scale120 as f64 / 120.0;
+            self.hub
+                .input(&format!("window {} {} {scale:.3} {id}", w.width, w.height));
         }
     }
 
-    fn create(&mut self, s: WindowSpec) -> i32 {
+    fn create(&mut self, s: WindowRequest) -> i32 {
         use crate::ipc::wire::errno::*;
         if self.windows.contains_key(&s.window) {
             return -EBUSY;
         }
+        let (width, height) = s.logical_size();
         let qh = self.qh.clone();
         let surface = self.compositor.create_surface(&qh);
         let window = self
@@ -623,12 +405,10 @@ impl State {
         let exported = foreign::export(self.exporter.as_ref(), window.wl_surface(), s.window, &qh);
         window.commit();
         crate::info!(
-            "display: window {} \"{}\" ({}) {}x{}",
+            "display: window {} \"{}\" ({}) {width}x{height}",
             s.window,
             s.title,
             s.app_id,
-            s.width,
-            s.height
         );
         self.windows.insert(
             s.window,
@@ -641,8 +421,8 @@ impl State {
                 frame: None,
                 title: s.title,
                 app_id: s.app_id,
-                width: s.width,
-                height: s.height,
+                width,
+                height,
                 scale120: 120,
                 configured: false,
                 fullscreen: false,
@@ -675,20 +455,13 @@ impl State {
         for b in gone {
             self.remove_buffer(b);
         }
-        if self.pointer_focus.is_some_and(|(p, _)| p == id) {
-            self.pointer_focus = None;
-        }
-        if self.keyboard_focus == Some(id) {
-            self.keyboard_focus = None;
-        }
-        self.touch_focus.retain(|_, w| *w != id);
-        self.text.forget(id);
+        self.seat.forget(id);
         crate::info!("display: window {id} closed");
         drop(w);
     }
 
-    fn add_buffer(&mut self, b: BufferSpec, fd: OwnedFd) {
-        if self.buffers.contains_key(&b.buffer) || !self.windows.contains_key(&b.window) {
+    fn add_buffer(&mut self, b: BufferSpec, window: u32, fd: OwnedFd) {
+        if self.buffers.contains_key(&b.buffer) || !self.windows.contains_key(&window) {
             return;
         }
         let params = match self.dmabuf.create_params(&self.qh) {
@@ -709,7 +482,7 @@ impl State {
         self.buffers.insert(
             b.buffer,
             Buf {
-                window: b.window,
+                window,
                 width: b.width,
                 height: b.height,
                 wl: None,
@@ -772,12 +545,12 @@ impl State {
             return;
         };
         let t = a.get_activation_token(&self.qh, TokenFor(id));
-        if let Some(seat) = &self.seat
-            && self.last_serial != 0
+        if let Some(seat) = &self.seat.wl_seat
+            && self.seat.last_serial != 0
         {
-            t.set_serial(self.last_serial, seat);
+            t.set_serial(self.seat.last_serial, seat);
         }
-        if let Some(f) = self.keyboard_focus.and_then(|f| self.windows.get(&f)) {
+        if let Some(f) = self.seat.keyboard_focus.and_then(|f| self.windows.get(&f)) {
             t.set_surface(f.window.wl_surface());
         }
         t.set_app_id(w.app_id.clone());
@@ -791,23 +564,8 @@ impl State {
                 let _ = reply.send(r);
             }
             Cmd::Destroy(id) => self.destroy(id),
-            Cmd::Title(id, t) => {
-                if let Some(w) = self.windows.get_mut(&id) {
-                    w.window.set_title(t.clone());
-                    if let Some(f) = w.frame.as_mut() {
-                        f.set_title(t.clone());
-                    }
-                    w.title = t;
-                }
-            }
-            Cmd::MinSize(id, mw, mh) => {
-                if let Some(w) = self.windows.get(&id) {
-                    w.window.set_min_size(Some((mw.max(MIN_W), mh.max(MIN_H))));
-                    w.window.commit();
-                }
-            }
             Cmd::Activate(id) => self.activate(id),
-            Cmd::BufferAdd(b, fd) => self.add_buffer(b, fd),
+            Cmd::BufferAdd(b, window, fd) => self.add_buffer(b, window, fd),
             Cmd::BufferRemove(id) => self.remove_buffer(id),
             Cmd::Frame {
                 window,
@@ -823,7 +581,7 @@ impl State {
 impl WindowHandler for State {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
         if let Some(w) = self.windows.values().find(|w| &w.window == window) {
-            let _ = self.events.try_send(ty::CLOSE, &event::close(w.id), &[]);
+            self.hub.input(&format!("close {}", w.id));
         }
     }
 
@@ -1009,20 +767,7 @@ impl SeatHandler for State {
         seat: wl_seat::WlSeat,
         cap: Capability,
     ) {
-        if self.seat.is_none() {
-            self.seat = Some(seat.clone());
-        }
-        match cap {
-            Capability::Pointer if self.pointer.is_none() => {
-                self.pointer = Some(seat.get_pointer(qh, Ptr))
-            }
-            Capability::Keyboard if self.keyboard.is_none() => {
-                self.keyboard = Some(seat.get_keyboard(qh, Kbd));
-                self.text.attach(&seat, qh);
-            }
-            Capability::Touch if self.touch.is_none() => self.touch = Some(seat.get_touch(qh, Tch)),
-            _ => {}
-        }
+        self.seat.add_capability(seat, cap, qh);
     }
     fn remove_capability(
         &mut self,
@@ -1031,25 +776,7 @@ impl SeatHandler for State {
         _: wl_seat::WlSeat,
         cap: Capability,
     ) {
-        match cap {
-            Capability::Pointer => {
-                if let Some(p) = self.pointer.take() {
-                    p.release();
-                }
-            }
-            Capability::Keyboard => {
-                if let Some(k) = self.keyboard.take() {
-                    k.release();
-                }
-                self.text.detach();
-            }
-            Capability::Touch => {
-                if let Some(t) = self.touch.take() {
-                    t.release();
-                }
-            }
-            _ => {}
-        }
+        self.seat.remove_capability(cap);
     }
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
 }
@@ -1144,7 +871,7 @@ pub(super) fn foreign_handles(window: u32) -> Option<String> {
 }
 
 /// Runs the Wayland side until [`Cmd::Quit`] or the compositor goes away.
-pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<()> {
+pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events, hub: Arc<Hub>) -> Result<()> {
     let (globals, queue) = registry_queue_init::<State>(&conn).context("registry")?;
     let qh = queue.handle();
     let compositor = CompositorState::bind(&globals, &qh).context("wl_compositor")?;
@@ -1165,19 +892,11 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<(
         exporter: bind_opt(&globals, &qh, 1),
         qh: qh.clone(),
         events,
+        hub,
         windows: HashMap::new(),
         buffers: HashMap::new(),
         params: HashMap::new(),
-        seat: None,
-        pointer: None,
-        keyboard: None,
-        touch: None,
-        pointer_focus: None,
-        pointer_surface: None,
-        keyboard_focus: None,
-        touch_focus: HashMap::new(),
-        text: text_input::TextInput::new(bind_opt(&globals, &qh, 1)),
-        last_serial: 0,
+        seat: Seat::new(bind_opt(&globals, &qh, 1)),
         quit: false,
     };
     crate::info!(
@@ -1186,7 +905,7 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events) -> Result<(
         st.viewporter.is_some(),
         st.fractional.is_some(),
         st.activation.is_some(),
-        st.text.available()
+        st.seat.text.available()
     );
     let mut ev: EventLoop<State> = EventLoop::try_new().context("event loop")?;
     WaylandSource::new(conn, queue)

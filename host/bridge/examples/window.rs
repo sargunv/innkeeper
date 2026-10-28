@@ -1,8 +1,13 @@
-//! Opens a window through a running bridge's display service, the way the
-//! composer does (a udmabuf pool, BUFFER_ADD, FRAME, RELEASE), animates a test
-//! pattern and prints the events (configure, input lines, close).
+//! Opens a window through a running bridge the way Android does: asks for it
+//! on the input service as the window manager does (WINDOW_REQUEST), then adds
+//! a display of that size on the display service as the composer does
+//! (DISPLAY_ADD, a udmabuf pool, BUFFER_ADD, FRAME, RELEASE). It animates a
+//! test pattern and prints the input service's events.
 //!
 //!   cargo run -p linuxapk-bridge --example window -- SOCKET [SECONDS]
+//!
+//! Only the system app may use the input service: run the bridge with
+//! `--system-app-dir` pointing at a directory you own.
 
 use std::io::IoSliceMut;
 use std::mem::MaybeUninit;
@@ -10,7 +15,8 @@ use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::display::proto::{self as d, BufferSpec, Request, WindowSpec, fourcc, ty};
+use linuxapk_bridge::display::proto::{self as d, BufferSpec, Request, fourcc};
+use linuxapk_bridge::input::proto::{self as input, WindowRequest};
 use linuxapk_bridge::ipc::proto::{Hello, service};
 use linuxapk_bridge::ipc::wire;
 use rustix::net::{
@@ -20,6 +26,8 @@ use rustix::net::{
 
 const W: u32 = 640;
 const H: u32 = 400;
+const WINDOW: u32 = 42;
+const DISPLAY: u32 = 7;
 
 struct Conn {
     sock: OwnedFd,
@@ -29,43 +37,79 @@ struct Conn {
 }
 
 impl Conn {
+    fn connect(path: &str, service: u32) -> Result<Conn> {
+        let sock = rustix::net::socket_with(
+            AddressFamily::UNIX,
+            SocketType::SEQPACKET,
+            SocketFlags::CLOEXEC,
+            None,
+        )?;
+        rustix::net::connect(&sock, &SocketAddrUnix::new(path)?)?;
+        let mut c = Conn {
+            sock,
+            tag: 1,
+            released: vec![],
+            closed: false,
+        };
+        let hello = Hello {
+            major: 1,
+            minor: 0,
+            service,
+            name: "window example".into(),
+        };
+        rustix::net::send(&c.sock, &hello.encode(1), SendFlags::NOSIGNAL)?;
+        loop {
+            if let Some((_, st)) = c.read(None)? {
+                if st != 0 {
+                    bail!("HELLO for service {service}: {st}");
+                }
+                return Ok(c);
+            }
+        }
+    }
+
     fn handle_event(&mut self, ty: u16, body: &[u8]) {
         let u32_at = |i: usize| u32::from_le_bytes(body[i..i + 4].try_into().unwrap());
         match ty {
-            ty::CONFIGURE => println!(
-                "configure window {} {}x{} scale {:.2}",
-                u32_at(0),
-                u32_at(4),
-                u32_at(8),
-                u32_at(12) as f64 / 120.0
-            ),
-            ty::CLOSE => {
-                println!("close window {}", u32_at(0));
-                self.closed = true;
-            }
-            ty::RELEASE => self.released.push(u32_at(0)),
-            ty::INPUT => {
+            d::ty::RELEASE => self.released.push(u32_at(0)),
+            input::ty::INPUT => {
                 let n = u16::from_le_bytes([body[0], body[1]]) as usize;
-                println!("input: {}", String::from_utf8_lossy(&body[2..2 + n]));
+                let line = String::from_utf8_lossy(&body[2..2 + n]);
+                println!("input: {line}");
+                self.closed |= line == format!("close {WINDOW}");
             }
+            input::ty::WINDOW_MAPPED => println!("window {} mapped", u32_at(0)),
+            input::ty::WINDOW_UNMAPPED => println!("window {} unmapped", u32_at(0)),
             t => println!("event {t:#x}"),
         }
     }
 
+    fn readable(&self, t: Duration) -> Result<bool> {
+        let mut p = [rustix::event::PollFd::new(
+            &self.sock,
+            rustix::event::PollFlags::IN,
+        )];
+        let ts = rustix::time::Timespec {
+            tv_sec: t.as_secs() as i64,
+            tv_nsec: t.subsec_nanos() as i64,
+        };
+        Ok(rustix::event::poll(&mut p, Some(&ts))? > 0)
+    }
+
+    /// Handles the events that are waiting.
+    fn drain(&mut self) -> Result<()> {
+        while self.readable(Duration::ZERO)? {
+            self.read(None)?;
+        }
+        Ok(())
+    }
+
     /// Reads one packet; events are handled, a reply is returned.
     fn read(&mut self, timeout: Option<Duration>) -> Result<Option<(u32, i32)>> {
-        if let Some(t) = timeout {
-            let mut p = [rustix::event::PollFd::new(
-                &self.sock,
-                rustix::event::PollFlags::IN,
-            )];
-            let ts = rustix::time::Timespec {
-                tv_sec: t.as_secs() as i64,
-                tv_nsec: t.subsec_nanos() as i64,
-            };
-            if rustix::event::poll(&mut p, Some(&ts))? == 0 {
-                return Ok(None);
-            }
+        if let Some(t) = timeout
+            && !self.readable(t)?
+        {
+            return Ok(None);
         }
         let mut buf = vec![0u8; 1024];
         let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(4))];
@@ -88,9 +132,9 @@ impl Conn {
         Ok(None)
     }
 
-    fn call(&mut self, req: &Request, fd: Option<&OwnedFd>) -> Result<i32> {
+    fn call(&mut self, encode: impl Fn(u32) -> Vec<u8>, fd: Option<&OwnedFd>) -> Result<i32> {
         self.tag += 1;
-        let msg = d::encode(self.tag, req);
+        let msg = encode(self.tag);
         let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(1))];
         let mut anc = SendAncillaryBuffer::new(&mut space);
         let fds;
@@ -177,72 +221,49 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let path = args.get(1).context("usage: window SOCKET [SECONDS]")?;
     let secs: f64 = args.get(2).map_or(Ok(10.0), |s| s.parse())?;
-    let sock = rustix::net::socket_with(
-        AddressFamily::UNIX,
-        SocketType::SEQPACKET,
-        SocketFlags::CLOEXEC,
-        None,
-    )?;
-    rustix::net::connect(&sock, &SocketAddrUnix::new(path.as_str())?)?;
-    let mut c = Conn {
-        sock,
-        tag: 0,
-        released: vec![],
-        closed: false,
+    let mut wm = Conn::connect(path, service::INPUT)?;
+    let mut c = Conn::connect(path, service::DISPLAY)?;
+    let request = input::Request::WindowRequest(WindowRequest {
+        window: WINDOW,
+        width: W,
+        height: H,
+        dpi: 160,
+        min_width: 0,
+        min_height: 0,
+        app_id: "dev.linuxapk.example".into(),
+        title: "Bridge window example".into(),
+    });
+    let st = wm.call(|t| input::encode(t, &request), None)?;
+    println!("WINDOW_REQUEST: {st}");
+    let add = Request::DisplayAdd {
+        display: DISPLAY,
+        width: W,
+        height: H,
     };
-    let hello = Hello {
-        major: 1,
-        minor: 0,
-        service: service::DISPLAY,
-        name: "window example".into(),
-    };
-    rustix::net::send(&c.sock, &hello.encode(1), SendFlags::NOSIGNAL)?;
-    c.tag = 1;
-    loop {
-        if let Some((_, st)) = c.read(None)? {
-            if st != 0 {
-                bail!("HELLO: {st}");
-            }
-            break;
-        }
-    }
-    let st = c.call(
-        &Request::WindowCreate(WindowSpec {
-            window: 42,
-            width: W,
-            height: H,
-            min_width: 0,
-            min_height: 0,
-            app_id: "dev.linuxapk.example".into(),
-            title: "Bridge window example".into(),
-        }),
-        None,
-    )?;
-    println!("WINDOW_CREATE: {st}");
+    let st = c.call(|t| d::encode(t, &add), None)?;
+    println!("DISPLAY_ADD: {st}");
     let stride = W * 4;
     let size = (stride * H) as usize;
     let mut bufs = vec![];
     for i in 0..3u32 {
         let (fd, map) = udmabuf(size)?;
-        let st = c.call(
-            &Request::BufferAdd(BufferSpec {
-                buffer: i,
-                window: 42,
-                width: W,
-                height: H,
-                fourcc: fourcc::XBGR8888,
-                stride,
-                offset: 0,
-                modifier: 0,
-            }),
-            Some(&fd),
-        )?;
+        let add = Request::BufferAdd(BufferSpec {
+            buffer: i,
+            display: DISPLAY,
+            width: W,
+            height: H,
+            fourcc: fourcc::XBGR8888,
+            stride,
+            offset: 0,
+            modifier: 0,
+        });
+        let st = c.call(|t| d::encode(t, &add), Some(&fd))?;
         println!("BUFFER_ADD {i}: {st}");
         bufs.push((map, true));
     }
     let start = Instant::now();
     let mut n = 0u32;
-    while start.elapsed().as_secs_f64() < secs && !c.closed {
+    while start.elapsed().as_secs_f64() < secs && !wm.closed {
         for r in std::mem::take(&mut c.released) {
             bufs[r as usize].1 = true;
         }
@@ -258,17 +279,16 @@ fn main() -> Result<()> {
                 }
             }
             bufs[i].1 = false;
-            c.call(
-                &Request::Frame {
-                    window: 42,
-                    buffer: i as u32,
-                    damage: [0; 4],
-                },
-                None,
-            )?;
+            let frame = Request::Frame {
+                display: DISPLAY,
+                buffer: i as u32,
+                damage: [0; 4],
+            };
+            c.call(|t| d::encode(t, &frame), None)?;
             n += 1;
         }
         let _ = c.read(Some(Duration::from_millis(16)))?;
+        wm.drain()?;
     }
     println!("{n} frames");
     Ok(())

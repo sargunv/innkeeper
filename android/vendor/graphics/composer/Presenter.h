@@ -60,11 +60,9 @@ class HeadlessPresenter : public Presenter {
 
 // Display 0 never has a window: apps show in windows of the virtual
 // displays that the window manager (the Linux.apk System app) creates.
-std::unique_ptr<Presenter> createPrimaryPresenter(
-  uint32_t width, uint32_t height
-);
+std::unique_ptr<Presenter> createPrimaryPresenter();
 // A HWC-backed virtual display (ComposerClient::createVirtualDisplay): a
-// window if the bridge is started and the window manager asked for one.
+// window if the bridge is started and has one for it.
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );

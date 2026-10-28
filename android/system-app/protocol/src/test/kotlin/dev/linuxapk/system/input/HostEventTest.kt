@@ -10,7 +10,6 @@ class HostEventTest {
   fun parsesEveryLineInTheProtocol() {
     val cases =
       mapOf(
-        "hello 2" to HostEvent.Hello(2),
         "window 1280 800 1.700" to HostEvent.Window(1280, 800, 1.7),
         "pointer_enter 10.50 20.25" to HostEvent.PointerEnter(10.5f, 20.25f),
         "pointer_leave" to HostEvent.PointerLeave(),
@@ -38,10 +37,9 @@ class HostEventTest {
   }
 
   @Test
-  fun parsesDisplayIdsAndWindowReplies() {
+  fun parsesDisplayIds() {
     val cases =
       mapOf(
-        "hello 2 1280 800" to HostEvent.Hello(2),
         "window 1100 700 1.700 5" to HostEvent.Window(1100, 700, 1.7, 5),
         "pointer_enter 10.50 20.25 5" to HostEvent.PointerEnter(10.5f, 20.25f, 5),
         "pointer_leave 5" to HostEvent.PointerLeave(5),
@@ -49,10 +47,6 @@ class HostEventTest {
         "keyboard_leave 7" to HostEvent.KeyboardLeave(7),
         "touch_down 1 3 1.00 2.00 9" to HostEvent.TouchDown(1, 3, 1f, 2f, 9),
         "close 5" to HostEvent.Close(5),
-        "window_pending 5" to HostEvent.WindowPending(5),
-        "window_mapped 5 100" to HostEvent.WindowMapped(5),
-        "window_gone 5" to HostEvent.WindowGone(5),
-        "window_failed 5 exists" to HostEvent.WindowFailed(5, "exists"),
       )
     for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
   }

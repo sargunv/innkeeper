@@ -114,24 +114,15 @@ static std::unique_ptr<HeadlessPresenter> makeHeadless() {
   );
 }
 
-std::unique_ptr<Presenter> createPrimaryPresenter(
-  uint32_t width, uint32_t height
-) {
-  bridgeSetPrimaryDisplaySize(width, height);
-  return makeHeadless();
-}
+std::unique_ptr<Presenter> createPrimaryPresenter() { return makeHeadless(); }
 
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
-  if (bridgeStarted()) {
-    if (
-      auto p =
-        createBridgeVirtualPresenter(displayId, width, height, makeHeadless())
-    ) {
-      return p;
-    }
-  }
+  if (bridgeStarted())
+    return createBridgeVirtualPresenter(
+      displayId, width, height, makeHeadless()
+    );
   return makeHeadless();
 }
 

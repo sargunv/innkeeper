@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Windows through the host bridge's display service (docs/bridge.md,
-// "Display service"; docs/windowing.md): the composer keeps the HWC side and
-// the window registry, and the bridge (linuxapk-bridge, Rust, on the host)
-// owns the host compositor connection, decorations (server- or client-side) and
-// the seat. Frames go over as dma-buf fds of the composer's own udmabuf pool;
-// input comes back as protocol v2 lines, which the composer relays on its
-// input socket unchanged.
+// HWC virtual displays shown in host windows through the host bridge's
+// display service (linuxapk-bridge, Rust, on the host; host/bridge/src/
+// display/proto.rs). The composer only presents: it adds each virtual display
+// to the bridge, and the bridge shows it in the window that the window
+// manager (the Linux.apk System app) asked for at that size, if any. Frames
+// go over as dma-buf fds of the composer's own udmabuf pool.
 #pragma once
 
 #include <memory>
@@ -16,16 +15,14 @@ namespace linuxapk::hwc {
 
 class HeadlessPresenter;
 
-// Serves the input socket (/dev/socket/linuxapk-input), and connects to the
-// bridge (/dev/socket/linuxapk/bridge.sock) in the background: windows wait
-// while it is unreachable or restarting.
+// Connects to the bridge (/dev/socket/linuxapk/bridge.sock) in the
+// background, and again whenever the connection drops: displays wait while it
+// is unreachable or restarting.
 void startBridge();
 bool bridgeStarted();
 
-// Display 0's size, for the input stream's hello line.
-void bridgeSetPrimaryDisplaySize(uint32_t width, uint32_t height);
-// A virtual display's window, if the window manager asked for one of this
-// size; nullptr otherwise. `secondary` gets every frame too (frame dumps).
+// A virtual display, shown if the bridge has a window for it. `secondary`
+// gets every frame too (frame dumps).
 std::unique_ptr<Presenter> createBridgeVirtualPresenter(
   int64_t hwcDisplayId, uint32_t width, uint32_t height,
   std::unique_ptr<HeadlessPresenter> secondary

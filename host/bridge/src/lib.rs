@@ -4,17 +4,20 @@
 //!
 //! - `ipc`: framing, transport, HELLO, the server and blobs
 //! - `audio` (id 1): the audio service (PipeWire output)
-//! - `display` (id 2): host windows and input for the composer
+//! - `display` (id 2): the composer's displays in host windows
 //! - `system` (id 3): desktop settings, notifications, the clipboard, web
 //!   links and media sessions, for the Linux.apk System app
 //! - `documents` (id 4): host files the user picks in the FileChooser portal
 //! - `apps` (id 5): desktop entries for apps installed inside Android
+//! - `input` (id 6): window requests, the host seat and input methods, for
+//!   the Linux.apk System app
 //! - `log`: stderr logging
 
 pub mod apps;
 pub mod audio;
 pub mod display;
 pub mod documents;
+pub mod input;
 pub mod ipc;
 pub mod log;
 pub mod system;

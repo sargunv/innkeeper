@@ -90,7 +90,6 @@ if(ANDROID)
   add_executable(
     composer
     composer/BridgePresenter.cpp
-    composer/InputServer.cpp
     composer/main.cpp
     composer/Composer.cpp
     composer/ComposerClient.cpp

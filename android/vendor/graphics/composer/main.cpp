@@ -15,9 +15,9 @@
 
 int main() {
   using namespace linuxapk::hwc;
-  // vendor.linuxapk.hwc.backend: "bridge" shows windows through the host
-  // bridge's display service (docs/bridge.md); "headless" (the default) has
-  // none.
+  // vendor.linuxapk.hwc.backend: "bridge" shows virtual displays in host
+  // windows through the bridge's display service; "headless" (the default)
+  // has none.
   const std::string backend =
     getProperty("vendor.linuxapk.hwc.backend", "headless");
   if (backend == "bridge") {

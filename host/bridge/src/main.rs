@@ -9,7 +9,8 @@
 //! `--sink NAME`.
 //! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
 //! seen from the host) admits the uid that owns DIR to the system, documents
-//! and apps services. `--mirror-apps` turns on desktop entries for apps
+//! and apps services, and to the input service, which nobody else may use.
+//! `--mirror-apps` turns on desktop entries for apps
 //! installed inside Android (`$XDG_DATA_HOME`). The documents service's
 //! grants (host files the user picked) persist in
 //! `<state-dir>/documents.grants`.
@@ -25,6 +26,7 @@ use std::sync::atomic::AtomicUsize;
 
 use linuxapk_bridge::audio::{AudioService, Backend, Limits};
 use linuxapk_bridge::display::{DisplayService, Limits as DisplayLimits};
+use linuxapk_bridge::input::{Hub, InputService};
 use linuxapk_bridge::ipc::proto::service;
 use linuxapk_bridge::ipc::server::{self, Config, Registry, UidCheck};
 use linuxapk_bridge::ipc::transport;
@@ -80,13 +82,20 @@ fn main() -> Result<()> {
             peer,
         )))
     });
-    // Windows for the composer (docs/windowing.md); needs $WAYLAND_DISPLAY.
-    services.register(service::DISPLAY, "display", |peer, events| {
+    // The composer's displays in host windows (needs $WAYLAND_DISPLAY), and
+    // the system app's side of them: window requests, the seat, the IME.
+    let hub = Hub::new();
+    let display_hub = hub.clone();
+    services.register(service::DISPLAY, "display", move |peer, events| {
         Ok(Box::new(DisplayService::new(
             DisplayLimits::default(),
+            display_hub.clone(),
             peer,
             events,
         )?))
+    });
+    services.register(service::INPUT, "input", move |peer, events| {
+        Ok(Box::new(InputService::new(hub.clone(), peer, events)))
     });
     // Not in the socket directory, which is shared with Android.
     let shared = Shared::with_policy(run_dir.join("art"), policy);
@@ -137,13 +146,19 @@ fn main() -> Result<()> {
             use std::os::unix::fs::MetadataExt;
             std::fs::metadata(&dir).is_ok_and(|m| m.uid() == uid)
         });
-        for id in [service::SYSTEM, service::DOCUMENTS, service::APPS] {
+        for id in [
+            service::SYSTEM,
+            service::DOCUMENTS,
+            service::APPS,
+            service::INPUT,
+        ] {
             service_uids.push((id, check.clone()));
         }
     }
     let cfg = Config {
         allow_uids: allow,
         service_uids,
+        private_services: vec![service::INPUT],
         max_clients: 32,
         services,
     };

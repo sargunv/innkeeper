@@ -10,7 +10,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import dev.linuxapk.system.LinuxApkSystemApp
 import dev.linuxapk.system.input.HostEvent
-import dev.linuxapk.system.input.InputBridge
+import dev.linuxapk.system.input.HostInputClient
 import kotlin.math.roundToInt
 
 /**
@@ -20,30 +20,30 @@ import kotlin.math.roundToInt
  * It shows no keyboard. Keys still arrive as injected key events, which this service passes on
  * untouched. For each editor it tells the bridge to enable text input (with the content type), and
  * keeps the bridge up to date with the surrounding text and the cursor rectangle; the host input
- * method's preedit, commit and delete come back as `ti_*` lines on the composer's input stream and
+ * method's preedit, commit and delete come back as `ti_*` lines from the bridge's input service and
  * are applied here through the `InputConnection`.
  */
-class HostImeService : InputMethodService(), InputBridge.Listener {
+class HostImeService : InputMethodService(), HostInputClient.Listener {
   private val main = Handler(Looper.getMainLooper())
   private val session = TextInputSession()
   private var active = false
   private val pts = FloatArray(4)
 
-  private fun bridge(): InputBridge? = (application as? LinuxApkSystemApp)?.inputBridge
+  private val input
+    get() = (application as LinuxApkSystemApp).input
 
   private fun send(vararg lines: String) {
-    val b = bridge() ?: return
-    for (l in lines) if (!b.send(l)) return
+    for (l in lines) if (!input.textInput(l)) return
   }
 
   override fun onCreate() {
     super.onCreate()
-    bridge()?.addListener(this)
+    input.addListener(this)
     Log.i(TAG, "created")
   }
 
   override fun onDestroy() {
-    bridge()?.removeListener(this)
+    input.removeListener(this)
     super.onDestroy()
   }
 

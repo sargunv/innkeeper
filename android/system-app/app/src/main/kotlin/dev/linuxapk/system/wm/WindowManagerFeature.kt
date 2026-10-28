@@ -23,23 +23,21 @@ import android.view.WindowManagerGlobal
 import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.input.HostEvent
-import dev.linuxapk.system.input.InputBridge
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
+import dev.linuxapk.system.input.HostInputClient
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
  * The window manager (docs/windowing.md). Each app task gets its own trusted virtual display, and
- * the composer shows each display as its own Wayland window:
- * 1. [launch] creates the display without a surface, asks the composer for a window (`window_new`),
- *    waits for `window_pending`, then gives the display its ImageReader surface. SurfaceFlinger
- *    then creates the HWC virtual display, which the composer matches to the request.
+ * the bridge shows each display as its own Wayland window:
+ * 1. [launch] creates the display without a surface, asks the bridge for a window
+ *    ([HostInputClient.requestWindow]), then gives the display its ImageReader surface.
+ *    SurfaceFlinger then creates the HWC virtual display, which gets the requested window.
  * 2. The app starts there (`ActivityOptions.setLaunchDisplayId`).
- * 3. Window events from the composer: a resize (`window`) resizes the display to the window's
- *    logical size times its scale, at 160 dpi times the scale; `close` removes the tasks and
- *    releases the display; `keyboard_enter` focuses the display's top task.
+ * 3. Window events: a resize (`window`) resizes the display to the window's logical size times its
+ *    scale, at 160 dpi times the scale; `close` removes the tasks and releases the display;
+ *    `keyboard_enter` focuses the display's top task.
  * 4. A task stack listener closes the window when the display's last task is gone, and moves any
  *    app task that shows up on display 0 into a window of its own.
  *
@@ -47,8 +45,8 @@ import kotlin.math.roundToInt
  */
 class WindowManagerFeature(
   private val context: Context,
-  private val bridge: () -> InputBridge?,
-) : Feature, InputBridge.Listener {
+  private val input: HostInputClient,
+) : Feature, HostInputClient.Listener {
   override val name = "windows"
 
   private val thread = HandlerThread("linuxapk-wm")
@@ -63,7 +61,6 @@ class WindowManagerFeature(
   }
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
-  private val pending = ConcurrentHashMap<Int, CountDownLatch>() // window_pending replies
   // The scale new windows start at: the last one a window reported (kept across restarts, so the
   // first window after boot opens at the desktop's scale).
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
@@ -109,7 +106,7 @@ class WindowManagerFeature(
     handler = Handler(thread.looper)
     frames.start()
     frameHandler = Handler(frames.looper)
-    bridge()?.addListener(this)
+    input.addListener(this)
     atm.registerTaskStackListener(taskListener)
     // AppWarnings shows these on the default display, which has no window; AppWarningActivity
     // shows the same warning in the app's own window instead.
@@ -282,23 +279,19 @@ class WindowManagerFeature(
     return w
   }
 
-  // Asks the composer for the window, then gives the display its surface: SurfaceFlinger creates
-  // the HWC virtual display at that point, and the composer gives it the pending window.
+  // Asks the bridge for the window, then gives the display its surface: SurfaceFlinger creates
+  // the HWC virtual display at that point, and the bridge shows it in the requested window.
   private fun attachSurface(w: AppWindow) {
-    val b = bridge()
-    if (b != null && b.connected) {
-      val latch = CountDownLatch(1)
-      pending[w.id] = latch
-      b.send("window_new ${w.id} ${w.width} ${w.height} ${w.dpi} $APP_ID_PREFIX${w.pkg} ${w.label}")
-      if (w.sizing.minWidthDp > 0 || w.sizing.minHeightDp > 0) {
-        b.send("window_min_size ${w.id} ${w.sizing.minWidthDp} ${w.sizing.minHeightDp}")
-      }
-      // window_pending arrives on the bridge thread; this thread only waits for it.
-      if (!latch.await(2, TimeUnit.SECONDS)) Log.w(TAG, "display ${w.id}: no window_pending")
-      pending.remove(w.id)
-    } else {
-      Log.i(TAG, "display ${w.id}: composer not connected; no window")
-    }
+    input.requestWindow(
+      w.id,
+      w.width,
+      w.height,
+      w.dpi,
+      w.sizing.minWidthDp,
+      w.sizing.minHeightDp,
+      APP_ID_PREFIX + w.pkg,
+      w.label,
+    )
     w.display.surface = w.reader.surface
   }
 
@@ -317,31 +310,29 @@ class WindowManagerFeature(
         }
       }
     }
-    bridge()?.send("window_destroy ${w.id}")
+    input.destroyWindow(w.id)
     // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
     w.display.release()
     w.reader.close()
   }
 
-  // ---- composer events -------------------------------------------------------------
+  // ---- window events -------------------------------------------------------------
 
-  // On the bridge thread.
+  // On the input connection's thread.
   override fun onHostEvent(e: HostEvent) {
     when (e) {
-      is HostEvent.WindowPending -> pending[e.display]?.countDown()
       is HostEvent.Window,
       is HostEvent.Close,
       is HostEvent.KeyboardEnter,
       is HostEvent.WindowMapped,
-      is HostEvent.WindowGone,
-      is HostEvent.WindowFailed -> handler.post { onWindowEvent(e) }
+      is HostEvent.WindowUnmapped -> handler.post { onWindowEvent(e) }
       else -> {}
     }
   }
 
-  override fun onConnectionChanged(connected: Boolean) {
-    // A new composer connection (the composer restarted): ask for the windows again.
-    if (connected) handler.post { windows.values.forEach(::remap) }
+  // A new connection (the bridge restarted, without our windows): ask for them again.
+  override fun onConnected() {
+    handler.post { windows.values.forEach(::remap) }
   }
 
   private fun onWindowEvent(e: HostEvent) {
@@ -364,14 +355,13 @@ class WindowManagerFeature(
       is HostEvent.Close -> windows[e.display]?.let { close(it, finishTasks = true) }
       is HostEvent.KeyboardEnter -> windows[e.display]?.let { focus(it, activate = false) }
       is HostEvent.WindowMapped -> windows[e.display]?.mapped = true
-      is HostEvent.WindowGone -> {
-        // Our own window_destroy, or the composer lost the window (its HWC display went away).
+      is HostEvent.WindowUnmapped -> {
+        // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
         val w = windows[e.display] ?: return
         w.mapped = false
         Log.w(TAG, "window of display ${w.id} disappeared; requesting it again")
         remap(w)
       }
-      is HostEvent.WindowFailed -> Log.w(TAG, "window of display ${e.display}: ${e.reason}")
       else -> {}
     }
   }
@@ -402,7 +392,7 @@ class WindowManagerFeature(
     } catch (e: Exception) {
       Log.w(TAG, "focusTopTask(${w.id}): $e")
     }
-    if (activate) bridge()?.send("window_activate ${w.id}")
+    if (activate) input.activateWindow(w.id)
   }
 
   // ---- tasks ---------------------------------------------------------------------

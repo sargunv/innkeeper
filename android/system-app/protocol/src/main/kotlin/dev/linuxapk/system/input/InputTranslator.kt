@@ -139,12 +139,9 @@ class InputTranslator(
       }
       HostEvent.TouchFrame -> touchFrame(out)
       HostEvent.TouchCancel -> touchCancel(out)
-      is HostEvent.Hello,
       is HostEvent.Close,
-      is HostEvent.WindowPending,
       is HostEvent.WindowMapped,
-      is HostEvent.WindowGone,
-      is HostEvent.WindowFailed,
+      is HostEvent.WindowUnmapped,
       is HostEvent.TextDelete,
       is HostEvent.TextCommit,
       is HostEvent.TextPreedit,

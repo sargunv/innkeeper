@@ -153,13 +153,32 @@ impl Registry {
 pub type UidCheck = Arc<dyn Fn(u32) -> bool + Send + Sync>;
 
 pub struct Config {
-    /// Host uids allowed to connect (SO_PEERCRED) and use any service.
+    /// Host uids allowed to connect (SO_PEERCRED) and use any service but
+    /// the private ones.
     pub allow_uids: Vec<u32>,
     /// Extra uids admitted to one service only (service id, check): for
     /// example the system app, whose uid is only known once it's installed.
     pub service_uids: Vec<(u32, UidCheck)>,
+    /// Services only their `service_uids` may use, not the allow-list.
+    pub private_services: Vec<u32>,
     pub max_clients: usize,
     pub services: Registry,
+}
+
+impl Config {
+    /// May host uid `uid` connect at all?
+    fn may_connect(&self, uid: u32) -> bool {
+        self.allow_uids.contains(&uid) || self.service_uids.iter().any(|(_, ok)| ok(uid))
+    }
+
+    /// May host uid `uid` use `service`?
+    pub fn may_use(&self, uid: u32, service: u32) -> bool {
+        (self.allow_uids.contains(&uid) && !self.private_services.contains(&service))
+            || self
+                .service_uids
+                .iter()
+                .any(|(id, ok)| *id == service && ok(uid))
+    }
 }
 
 /// Accept loop; returns only if accept fails hard.
@@ -172,7 +191,7 @@ pub fn serve(listener: OwnedFd, cfg: Arc<Config>) -> Result<()> {
             Err(e) => return Err(e).context("accept"),
         };
         let (uid, pid) = (cred.uid.as_raw(), cred.pid.as_raw_nonzero().get());
-        if !cfg.allow_uids.contains(&uid) && !cfg.service_uids.iter().any(|(_, ok)| ok(uid)) {
+        if !cfg.may_connect(uid) {
             crate::warn!("refused connection from uid {uid} (pid {pid})");
             continue;
         }
@@ -237,12 +256,7 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
                 send_reply(&sock, h.tag, &Reply::err(-EPROTO))?;
                 bail!("protocol {}.{} not supported", hello.major, hello.minor);
             }
-            let allowed = cfg.allow_uids.contains(&peer.uid)
-                || cfg
-                    .service_uids
-                    .iter()
-                    .any(|(id, ok)| *id == hello.service && ok(peer.uid));
-            if !allowed {
+            if !cfg.may_use(peer.uid, hello.service) {
                 send_reply(&sock, h.tag, &Reply::err(-EACCES))?;
                 bail!("uid {} may not use service {}", peer.uid, hello.service);
             }
@@ -280,4 +294,35 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
         send_reply(&sock, h.tag, &r)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The input service carries the user's keystrokes: only the system app
+    /// may open it, even where another uid may use everything else.
+    #[test]
+    fn private_services_ignore_the_allow_list() {
+        const SYSTEM_APP: u32 = 10089;
+        const ROOT: u32 = 1000;
+        let system_app: UidCheck = Arc::new(|uid| uid == SYSTEM_APP);
+        let cfg = Config {
+            allow_uids: vec![ROOT],
+            service_uids: vec![
+                (proto::service::SYSTEM, system_app.clone()),
+                (proto::service::INPUT, system_app),
+            ],
+            private_services: vec![proto::service::INPUT],
+            max_clients: 1,
+            services: Registry::default(),
+        };
+        assert!(cfg.may_use(ROOT, proto::service::DISPLAY));
+        assert!(cfg.may_use(ROOT, proto::service::SYSTEM));
+        assert!(!cfg.may_use(ROOT, proto::service::INPUT));
+        assert!(cfg.may_use(SYSTEM_APP, proto::service::INPUT));
+        assert!(cfg.may_use(SYSTEM_APP, proto::service::SYSTEM));
+        assert!(!cfg.may_use(SYSTEM_APP, proto::service::DISPLAY));
+        assert!(cfg.may_connect(SYSTEM_APP) && !cfg.may_connect(SYSTEM_APP + 1));
+    }
 }

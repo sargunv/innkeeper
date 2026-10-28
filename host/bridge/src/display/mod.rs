@@ -1,22 +1,24 @@
-//! The display service (id 2): host windows for the composer (the Android
-//! HWC HAL). See `docs/bridge.md`, "Display service", and
-//! `docs/windowing.md`.
+//! The display service (id 2): the composer's HWC virtual displays shown in
+//! host windows. The wire spec is in [`proto`].
 //!
 //! Each composer connection gets its own host Wayland connection and thread
-//! ([`wl`]); this connection thread only validates requests and forwards them.
+//! ([`wl`]), whose seat feeds the input service; this connection thread only
+//! validates requests and forwards them.
 
-pub mod ime;
 pub mod proto;
-mod wl;
+pub(crate) mod wl;
 
+use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use anyhow::{Context, Result};
 use calloop::channel::Sender;
 
+use crate::input::Hub;
 use crate::ipc::server::{Events, Peer, Reply, Service};
-use crate::ipc::wire::errno::*;
+use crate::ipc::wire::{Writer, errno::*};
 use proto::Request;
 use wl::Cmd;
 
@@ -29,54 +31,66 @@ pub fn foreign_handle(window: u32) -> Option<String> {
 /// Per-connection caps.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
-    pub windows: usize,
+    pub displays: usize,
     pub buffers: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            windows: 32,
+            displays: 32,
             buffers: 32 * 4,
         }
     }
 }
 
 pub struct DisplayService {
+    hub: Arc<Hub>,
+    /// This connection's key in the hub.
+    conn: u64,
     cmd: Sender<Cmd>,
     thread: Option<JoinHandle<()>>,
     limits: Limits,
-    windows: std::collections::HashSet<u32>,
-    buffers: std::collections::HashMap<u32, u32>, // buffer -> window
+    /// HWC display -> the window it shows.
+    displays: HashMap<u32, u32>,
+    /// Buffer -> its HWC display.
+    buffers: HashMap<u32, u32>,
     label: String,
 }
 
 impl DisplayService {
     /// Connects to the host compositor (`$WAYLAND_DISPLAY`).
-    pub fn new(limits: Limits, peer: &Peer, events: Events) -> Result<DisplayService> {
+    pub fn new(
+        limits: Limits,
+        hub: Arc<Hub>,
+        peer: &Peer,
+        events: Events,
+    ) -> Result<DisplayService> {
         let conn = wayland_client::Connection::connect_to_env()
             .context("connecting to the host Wayland compositor")?;
         let (tx, rx) = calloop::channel::channel();
         let ender = events.clone();
-        let label = peer.label.clone();
+        let seat_hub = hub.clone();
         let thread = std::thread::Builder::new()
             .name("display".into())
             .spawn(move || {
-                if let Err(e) = wl::run(conn, rx, events) {
+                if let Err(e) = wl::run(conn, rx, events, seat_hub) {
                     crate::warn!("display: {e:#}");
                 }
                 // Without its compositor connection the service is useless:
-                // drop the client, which reconnects and asks for its windows
+                // drop the client, which reconnects and adds its displays
                 // again.
                 ender.shutdown();
             })?;
         Ok(DisplayService {
+            conn: hub.add_display_connection(tx.clone()),
+            hub,
             cmd: tx,
             thread: Some(thread),
             limits,
-            windows: Default::default(),
-            buffers: Default::default(),
-            label,
+            displays: HashMap::new(),
+            buffers: HashMap::new(),
+            label: peer.label.clone(),
         })
     }
 
@@ -85,6 +99,40 @@ impl DisplayService {
             Ok(()) => Reply::ok(),
             Err(_) => Reply::err(-EIO),
         }
+    }
+
+    fn add_display(&mut self, display: u32, width: u32, height: u32) -> Reply {
+        if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
+            return Reply::err(-EBUSY);
+        }
+        let Some(req) = self.hub.claim(width, height) else {
+            return Reply::err(-ENOENT);
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        if self.cmd.send(Cmd::Create(req.clone(), tx)).is_err() {
+            return Reply::err(-EIO);
+        }
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(0) => {}
+            Ok(e) => return Reply::err(e),
+            Err(_) => return Reply::err(-EIO),
+        }
+        self.displays.insert(display, req.window);
+        self.hub.mapped(self.conn, display, &req);
+        let mut w = Writer::default();
+        w.u32(req.window);
+        Reply::with_body(w.into_vec())
+    }
+
+    fn remove_display(&mut self, display: u32) -> Reply {
+        let Some(window) = self.displays.remove(&display) else {
+            return Reply::err(-ENOENT);
+        };
+        self.buffers.retain(|_, d| *d != display);
+        if self.hub.unmap(self.conn, display, window) {
+            return self.send(Cmd::Destroy(window));
+        }
+        Reply::ok()
     }
 }
 
@@ -101,57 +149,23 @@ impl Service for DisplayService {
         };
         // Only BUFFER_ADD (the dma-buf) and FRAME (an acquire fence) carry fds.
         let max_fds = match req {
-            Request::BufferAdd(_) => 1,
-            Request::Frame { .. } => 1,
+            Request::BufferAdd(_) | Request::Frame { .. } => 1,
             _ => 0,
         };
         if fds.len() > max_fds {
             return Reply::err(-EPROTO);
         }
         match req {
-            Request::WindowCreate(s) => {
-                if self.windows.contains(&s.window) {
-                    return Reply::err(-EBUSY);
-                }
-                if self.windows.len() >= self.limits.windows {
-                    return Reply::err(-EBUSY);
-                }
-                let id = s.window;
-                let (tx, rx) = std::sync::mpsc::channel();
-                if self.cmd.send(Cmd::Create(s, tx)).is_err() {
-                    return Reply::err(-EIO);
-                }
-                match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-                    Ok(0) => {
-                        self.windows.insert(id);
-                        Reply::ok()
-                    }
-                    Ok(e) => Reply::err(e),
-                    Err(_) => Reply::err(-EIO),
-                }
-            }
-            Request::WindowDestroy { window } => {
-                if !self.windows.remove(&window) {
-                    return Reply::err(-ENOENT);
-                }
-                self.buffers.retain(|_, w| *w != window);
-                self.send(Cmd::Destroy(window))
-            }
-            Request::WindowSetTitle { window, title } if self.windows.contains(&window) => {
-                self.send(Cmd::Title(window, title))
-            }
-            Request::WindowSetMinSize {
-                window,
+            Request::DisplayAdd {
+                display,
                 width,
                 height,
-            } if self.windows.contains(&window) => self.send(Cmd::MinSize(window, width, height)),
-            Request::WindowActivate { window } if self.windows.contains(&window) => {
-                self.send(Cmd::Activate(window))
-            }
+            } => self.add_display(display, width, height),
+            Request::DisplayRemove { display } => self.remove_display(display),
             Request::BufferAdd(b) => {
-                if !self.windows.contains(&b.window) {
+                let Some(&window) = self.displays.get(&b.display) else {
                     return Reply::err(-ENOENT);
-                }
+                };
                 if self.buffers.contains_key(&b.buffer) || self.buffers.len() >= self.limits.buffers
                 {
                     return Reply::err(-EBUSY);
@@ -165,8 +179,8 @@ impl Service for DisplayService {
                     Some(n) if n >= b.bytes() => {}
                     _ => return Reply::err(-EINVAL),
                 }
-                self.buffers.insert(b.buffer, b.window);
-                self.send(Cmd::BufferAdd(b, fd))
+                self.buffers.insert(b.buffer, b.display);
+                self.send(Cmd::BufferAdd(b, window, fd))
             }
             Request::BufferRemove { buffer } => {
                 if self.buffers.remove(&buffer).is_none() {
@@ -175,24 +189,22 @@ impl Service for DisplayService {
                 self.send(Cmd::BufferRemove(buffer))
             }
             Request::Frame {
-                window,
+                display,
                 buffer,
                 damage,
             } => {
-                if self.buffers.get(&buffer) != Some(&window) {
+                if self.buffers.get(&buffer) != Some(&display) {
                     return Reply::err(-ENOENT);
                 }
                 // An acquire fence, if any, is ignored: the composer only
                 // sends frames it has finished writing.
                 drop(fds);
                 self.send(Cmd::Frame {
-                    window,
+                    window: self.displays[&display],
                     buffer,
                     damage,
                 })
             }
-            Request::TextInput(r) => self.send(Cmd::TextInput(r)),
-            _ => Reply::err(-ENOENT),
         }
     }
 }
@@ -203,6 +215,7 @@ impl Drop for DisplayService {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+        self.hub.remove_display_connection(self.conn);
         crate::info!("{}: display connection closed", self.label);
     }
 }

@@ -2,9 +2,9 @@
 //!
 //! One text input per seat. It follows the keyboard focus: the compositor
 //! sends `enter`/`leave` for our windows' surfaces. The IME's state arrives
-//! as [`ime::Req`]s through the composer and is applied to the window that
-//! has text-input focus; the compositor's input-method results (preedit,
-//! commit, delete) go back to the IME as input lines at each `done`.
+//! as [`Req`]s on the input service and is applied to the window that has
+//! text-input focus; the compositor's input-method results (preedit, commit,
+//! delete) go back to the IME as input lines at each `done`.
 //!
 //! Without a host input method (IBus, Fcitx), enabling changes nothing and
 //! keys keep arriving as `wl_keyboard` keys.
@@ -17,11 +17,11 @@ use wayland_protocols::wp::text_input::zv3::client::{
     zwp_text_input_v3::{self, ChangeCause, ContentHint, ContentPurpose, ZwpTextInputV3},
 };
 
-use super::State;
-use crate::display::ime::{Done, Req};
+use super::ime::{Done, Req};
+use crate::display::wl::State;
 
 #[derive(Default)]
-pub(super) struct TextInput {
+pub(crate) struct TextInput {
     manager: Option<ZwpTextInputManagerV3>,
     ti: Option<ZwpTextInputV3>,
     /// The window whose surface has text-input focus.
@@ -33,19 +33,19 @@ pub(super) struct TextInput {
 }
 
 impl TextInput {
-    pub(super) fn new(manager: Option<ZwpTextInputManagerV3>) -> TextInput {
+    pub(crate) fn new(manager: Option<ZwpTextInputManagerV3>) -> TextInput {
         TextInput {
             manager,
             ..Default::default()
         }
     }
 
-    pub(super) fn available(&self) -> bool {
+    pub(crate) fn available(&self) -> bool {
         self.manager.is_some()
     }
 
     /// Creates the seat's text input once there is a seat.
-    pub(super) fn attach(&mut self, seat: &wl_seat::WlSeat, qh: &QueueHandle<State>) {
+    pub(crate) fn attach(&mut self, seat: &wl_seat::WlSeat, qh: &QueueHandle<State>) {
         if self.ti.is_none()
             && let Some(m) = &self.manager
         {
@@ -53,7 +53,7 @@ impl TextInput {
         }
     }
 
-    pub(super) fn detach(&mut self) {
+    pub(crate) fn detach(&mut self) {
         if let Some(t) = self.ti.take() {
             t.destroy();
         }
@@ -62,7 +62,7 @@ impl TextInput {
     }
 
     /// The window `id` is gone.
-    pub(super) fn forget(&mut self, id: u32) {
+    pub(crate) fn forget(&mut self, id: u32) {
         if self.entered == Some(id) {
             self.entered = None;
             self.enabled = false;
@@ -72,23 +72,21 @@ impl TextInput {
 
 impl State {
     /// A request from the IME, applied to the focused window's text input.
-    pub(super) fn text_input(&mut self, req: Req) {
-        let Some(id) = self.text.entered else {
-            return;
-        };
-        let Some(ti) = self.text.ti.clone() else {
+    pub(crate) fn text_input(&mut self, req: Req) {
+        let text = &mut self.seat.text;
+        let (Some(id), Some(ti)) = (text.entered, text.ti.clone()) else {
             return;
         };
         match req {
             Req::Enable => {
                 ti.enable();
-                self.text.enabled = true;
+                text.enabled = true;
             }
             Req::Disable => {
                 ti.disable();
-                self.text.enabled = false;
+                text.enabled = false;
             }
-            _ if !self.text.enabled => {}
+            _ if !text.enabled => {}
             Req::Content { hint, purpose } => ti.set_content_type(
                 ContentHint::from_bits_truncate(hint),
                 ContentPurpose::try_from(purpose).unwrap_or(ContentPurpose::Normal),
@@ -107,7 +105,7 @@ impl State {
             }
             Req::Cursor { x, y, w, h } => {
                 // Display pixels to surface-local (logical) coordinates.
-                let s = self.windows.get(&id).map_or(120, |w| w.scale120.max(1)) as i64;
+                let s = self.scale120(id) as i64;
                 let f = |v: i32| (v as i64 * 120 / s) as i32;
                 ti.set_cursor_rectangle(f(x), f(y), f(w).max(1), f(h).max(1));
             }
@@ -117,15 +115,15 @@ impl State {
 
     fn text_lines(&self, lines: Vec<String>) {
         for l in lines {
-            self.input(l);
+            self.hub.input(&l);
         }
     }
 }
 
 /// User data of the seat's text input.
-pub(super) struct Ti;
+pub(crate) struct Ti;
 
-impl Dispatch2<ZwpTextInputManagerV3, State> for super::Unit {
+impl Dispatch2<ZwpTextInputManagerV3, State> for crate::display::wl::Unit {
     fn event(
         &self,
         _: &mut State,
@@ -151,43 +149,43 @@ impl Dispatch2<ZwpTextInputV3, State> for Ti {
             E::Enter { surface } => {
                 // A frame's decoration surface is not a text field.
                 let id = window_content(st, &surface);
-                st.text.entered = id;
-                st.text.enabled = false;
-                st.text.pending = Done::default();
+                st.seat.text.entered = id;
+                st.seat.text.enabled = false;
+                st.seat.text.pending = Done::default();
             }
             E::Leave { .. } => {
                 // The compositor dropped our state; the IME clears any
                 // preedit it shows (the protocol asks clients to reset it).
-                if let Some(id) = st.text.entered.take()
-                    && st.text.enabled
+                if let Some(id) = st.seat.text.entered.take()
+                    && st.seat.text.enabled
                 {
                     st.text_lines(Done::default().to_lines(id));
                 }
-                st.text.enabled = false;
-                st.text.pending = Done::default();
+                st.seat.text.enabled = false;
+                st.seat.text.pending = Done::default();
             }
             E::PreeditString {
                 text,
                 cursor_begin,
                 cursor_end,
             } => {
-                st.text.pending.preedit =
+                st.seat.text.pending.preedit =
                     Some((text.unwrap_or_default(), cursor_begin, cursor_end));
             }
             E::CommitString { text } => {
-                st.text.pending.commit = text;
+                st.seat.text.pending.commit = text;
             }
             E::DeleteSurroundingText {
                 before_length,
                 after_length,
             } => {
-                st.text.pending.delete = Some((before_length, after_length));
+                st.seat.text.pending.delete = Some((before_length, after_length));
             }
             E::Done { .. } => {
-                let done = std::mem::take(&mut st.text.pending);
+                let done = std::mem::take(&mut st.seat.text.pending);
                 // Results for a window that lost focus meanwhile are dropped.
-                if let Some(id) = st.text.entered
-                    && st.text.enabled
+                if let Some(id) = st.seat.text.entered
+                    && st.seat.text.enabled
                 {
                     st.text_lines(done.to_lines(id));
                 }

@@ -7,13 +7,6 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-  <!-- Holders get the "input" group (gid mapping in dev.linuxapk.system.xml),
-       so the composer's input socket can be 0660 system:input. -->
-  <permission
-    android:name="dev.linuxapk.permission.HOST_INPUT"
-    android:protectionLevel="signature" />
-
-  <uses-permission android:name="dev.linuxapk.permission.HOST_INPUT" />
   <!-- signature: granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
 

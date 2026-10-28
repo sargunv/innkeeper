@@ -18,12 +18,6 @@
     <permission name="android.permission.WRITE_SECURE_SETTINGS" />
   </privapp-permissions>
 
-  <!-- Holders run with the "input" group: the composer's input socket can then
-       be 0660 system:input instead of world-readable. -->
-  <permission name="dev.linuxapk.permission.HOST_INPUT">
-    <group gid="input" />
-  </permission>
-
   <!-- Holders run with the "audio" group, which may enter the host bridge's socket directory
        (/dev/socket/linuxapk, root:audio 0750). The bridge also checks the uid. -->
   <permission name="dev.linuxapk.permission.HOST_BRIDGE">

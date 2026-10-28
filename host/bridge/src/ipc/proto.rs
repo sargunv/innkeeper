@@ -16,8 +16,8 @@ pub const HELLO: u16 = 0x0001;
 pub mod service {
     /// Audio output to PipeWire (`audio::proto`, types 0x0100..=0x01ff).
     pub const AUDIO: u32 = 1;
-    /// Host windows for the composer (`display::proto`, types
-    /// 0x0200..=0x02ff).
+    /// The composer's displays in host windows (`display::proto`, types
+    /// 0x0200..=0x02ff, events 0x4200..=0x42ff).
     pub const DISPLAY: u32 = 2;
     /// The Linux.apk System app's channel: settings, notifications,
     /// clipboard, links, media (`system`, types 0x0300..=0x03ff,
@@ -30,6 +30,9 @@ pub mod service {
     /// Apps installed inside Android, mirrored to desktop entries
     /// (`apps`, types 0x0500..=0x05ff).
     pub const APPS: u32 = 5;
+    /// The system app's window requests, the host seat and input methods
+    /// (`input::proto`, types 0x0600..=0x06ff, events 0x4600..=0x46ff).
+    pub const INPUT: u32 = 6;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

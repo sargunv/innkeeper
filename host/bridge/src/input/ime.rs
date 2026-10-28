@@ -1,17 +1,30 @@
 //! The text-input line protocol between the Linux.apk IME (an
-//! `InputMethodService` in the system app) and the display service's
-//! `zwp_text_input_v3` (`wl/text_input.rs`). Spec: `docs/bridge.md`, "Text
-//! input", and `docs/input.md`.
+//! `InputMethodService` in the system app) and the seat's `zwp_text_input_v3`
+//! (`text_input.rs`).
 //!
-//! The IME's lines reach the bridge through the composer (display request
-//! `TEXT_INPUT`); the bridge's lines go back as ordinary input lines (`INPUT`
-//! events), so they stay ordered with the keys. Everything here is pure and
-//! tested; the IME is untrusted, so parsing is strict and canonical.
+//! The IME's lines arrive as input requests (`TEXT_INPUT`); the bridge's go
+//! back as ordinary input lines (`INPUT` events), so they stay ordered with
+//! the keys. Everything here is pure and tested; parsing is strict and
+//! canonical.
+//!
+//! | IME line                                         | Effect                                                                                                         |
+//! | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+//! | `ti_enable` / `ti_disable`                       | `enable` / `disable`                                                                                           |
+//! | `ti_content <hint> <purpose>`                    | `set_content_type` (hint ≤ `0x3ff`, purpose ≤ 13)                                                              |
+//! | `ti_surrounding <cursor> <anchor> <0\|1> <text>` | `set_surrounding_text`; byte offsets on char boundaries; 1 also sets the change cause to `other`               |
+//! | `ti_cursor <x> <y> <w> <h>`                      | `set_cursor_rectangle`, from the display's pixels divided by the window's scale                                |
+//! | `ti_apply`                                       | `commit`                                                                                                       |
+//!
+//! At each `done` the IME gets `ti_delete <before> <after>` (bytes),
+//! `ti_commit <text>` (repeated for long text; the IME appends),
+//! `ti_preedit <begin> <end> [<text>]` (always; no text means no preedit),
+//! then `ti_done <window>`. On `leave` it gets an empty preedit and
+//! `ti_done`, as the protocol asks.
 //!
 //! Text is percent-encoded: bytes up to space, DEL and `%` become `%XX`;
 //! everything else (including non-ASCII UTF-8) is sent as is.
 
-/// Longest line the IME may send (the display request's body limit).
+/// Longest line the IME may send.
 pub const MAX_LINE: usize = 480;
 /// Longest text chunk the bridge puts in one line (input lines are at most
 /// 400 bytes).
