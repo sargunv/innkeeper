@@ -4,6 +4,7 @@
 //! building blocks. See host/core/README.md.
 
 pub mod android;
+pub mod apk;
 pub mod bundle;
 pub mod desktop;
 pub mod launcher;
