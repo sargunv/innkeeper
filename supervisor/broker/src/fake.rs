@@ -7,7 +7,10 @@
 //! calling process's memory, and its answer is recorded with what the
 //! driver copied out. Any fallible operation can be made to fail through
 //! [`FakeUserspace::fault`], and a call's wait can be interrupted like a
-//! signal does, so every rollback path is reachable.
+//! signal does, so every rollback path is reachable. Once a call has ended
+//! (answered, interrupted or abandoned), the driver must not write into its
+//! bwr or buffers in any later ioctl: the thread may be stopped, or already
+//! using that memory again.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Range;
@@ -50,8 +53,11 @@ impl Rng {
 pub enum Fault {
     /// Reading user memory (`EFAULT`).
     CopyFromUser,
-    /// Writing user memory (`EFAULT`).
+    /// Writing user memory other than a call's bwr (`EFAULT`).
     CopyToUser,
+    /// Writing a call's bwr back (`EFAULT`). libbinder then can't tell what
+    /// its write consumed and resends all of it, under the kernel too.
+    CopyBwr,
     /// Allocating in a receive region (`ENOSPC`).
     AllocRecv,
     /// Capturing a sender's fd (`EBADF`).
@@ -107,6 +113,8 @@ struct CallRecord {
     cmd: u32,
     arg: u64,
     status: Status,
+    /// When it stopped being pending (see `FakeUserspace::now`).
+    ended: Option<u64>,
 }
 
 #[derive(Default)]
@@ -120,9 +128,13 @@ pub struct FakeUserspace {
     /// Calls answered since the last [`FakeUserspace::take_answered`].
     answered: Vec<Call>,
     bwr_addrs: HashSet<u64>,
-    /// The last bwr the driver wrote back to each call's address, whether or
-    /// not the write landed.
-    bwr_writes: HashMap<u64, BinderWriteRead>,
+    /// The latest call whose bwr and buffers are at each `bwr_addrs` address
+    /// (a restart reuses its call's).
+    call_at: HashMap<u64, u64>,
+    /// A clock that advances at every ioctl and every signal from outside:
+    /// an ioctl may still write into a call that ended during it (to roll a
+    /// read back), but not into one that ended before.
+    now: u64,
     /// Decides whether each fallible operation fails (never, if unset).
     pub fault: Option<Box<dyn FnMut(Fault) -> bool>>,
 }
@@ -175,12 +187,14 @@ impl FakeUserspace {
         cmd: u32,
         arg: u64,
     ) -> Call {
+        self.now += 1;
         // A thread runs one syscall at a time.
         for r in self.calls.values_mut() {
             if (r.proc, r.tid) == (proc, tid)
                 && matches!(r.status, Status::Pending | Status::Interrupted)
             {
                 r.status = Status::Abandoned;
+                r.ended.get_or_insert(self.now);
             }
         }
         self.next_call += 1;
@@ -196,8 +210,12 @@ impl FakeUserspace {
                 cmd,
                 arg,
                 status: Status::Pending,
+                ended: None,
             },
         );
+        if self.bwr_addrs.contains(&arg) {
+            self.call_at.insert(arg, call.id);
+        }
         b.ioctl(proc, tid, cmd, call, self);
         call
     }
@@ -248,9 +266,15 @@ impl FakeUserspace {
 
     /// A signal ends `call`'s wait: it can no longer be answered.
     pub fn interrupt(&mut self, call: Call) {
+        self.now += 1;
+        self.end(call, Status::Interrupted);
+    }
+
+    fn end(&mut self, call: Call, status: Status) {
         let r = self.calls.get_mut(&call.id).unwrap();
         if matches!(r.status, Status::Pending) {
-            r.status = Status::Interrupted;
+            r.status = status;
+            r.ended = Some(self.now);
         }
     }
 
@@ -274,12 +298,6 @@ impl FakeUserspace {
     pub fn caller(&self, call: Call) -> (ProcId, u32) {
         let r = &self.calls[&call.id];
         (r.proc, r.tid)
-    }
-
-    /// The last bwr the driver wrote back for `call` (or the call it
-    /// restarts), even if the write failed: what libbinder would have seen.
-    pub fn last_bwr(&self, call: Call) -> Option<BinderWriteRead> {
-        self.bwr_writes.get(&call.arg).copied()
     }
 
     /// The calls waiting for an answer (blocked in a read).
@@ -313,8 +331,17 @@ impl FakeUserspace {
     /// A signal arriving now, if the fault hook says so.
     fn signal(&mut self, call: Call) {
         if self.pending_call(call).is_some() && self.fails(Fault::Signal) {
-            self.interrupt(call);
+            self.end(call, Status::Interrupted);
         }
+    }
+
+    /// The call whose bwr or buffers are at `addr`, if it ended before the
+    /// current ioctl.
+    fn ended_call_at(&self, addr: u64) -> Option<u64> {
+        let base = SCRATCH + addr.checked_sub(SCRATCH)? / CALL_SPAN * CALL_SPAN;
+        let id = *self.call_at.get(&base)?;
+        let ended = self.calls[&id].ended?;
+        (ended != self.now).then_some(id)
     }
 }
 
@@ -327,15 +354,20 @@ impl Userspace for FakeUserspace {
     }
 
     fn write(&mut self, proc: ProcId, addr: u64, data: &[u8]) -> bool {
-        if data.len() == size_of::<BinderWriteRead>() && self.bwr_addrs.contains(&addr) {
-            self.bwr_writes.insert(addr, read_pod(data, 0).unwrap());
+        if let Some(id) = self.ended_call_at(addr) {
+            panic!("the driver wrote into the memory of call {id}, which has ended");
         }
         let end = addr.saturating_add(data.len() as u64);
         let Some(p) = self.procs.get(&proc) else {
             return false;
         };
-        if p.readonly.iter().any(|r| r.start < end && addr < r.end) || self.fails(Fault::CopyToUser)
-        {
+        let bwr = data.len() == size_of::<BinderWriteRead>() && self.bwr_addrs.contains(&addr);
+        let fault = if bwr {
+            Fault::CopyBwr
+        } else {
+            Fault::CopyToUser
+        };
+        if p.readonly.iter().any(|r| r.start < end && addr < r.end) || self.fails(fault) {
             return false;
         }
         self.poke(proc, addr, data);
@@ -425,7 +457,7 @@ impl Userspace for FakeUserspace {
             out.read = self.peek(proc, bwr.read_buffer, bwr.read_consumed as usize);
             out.write_consumed = bwr.write_consumed;
         }
-        self.calls.get_mut(&call.id).unwrap().status = Status::Answered(out);
+        self.end(call, Status::Answered(out));
         self.answered.push(call);
         true
     }
@@ -448,7 +480,9 @@ impl Userspace for FakeUserspace {
     }
 
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool) {
-        if let Some(p) = self.procs.get_mut(&proc) {
+        if let Some(p) = self.procs.get_mut(&proc)
+            && p.pollable
+        {
             p.poll_ready = ready;
         }
     }

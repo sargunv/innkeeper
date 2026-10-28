@@ -6,17 +6,25 @@
 //!    after every ioctl), and every read a thread is blocked in is one the
 //!    driver holds;
 //!  * every synchronous transaction is answered, with its reply or a failed
-//!    reply;
+//!    reply, and every oneway that was sent is received once (unless its fd
+//!    couldn't be installed, which drops it, as in the kernel);
+//!  * while a signal keeps a looper stopped, the other threads still drain
+//!    all of the process's work;
 //!  * refcounts, buffers and fds are conserved: once the threads are idle
 //!    nothing is queued or in flight, and once every process is gone
 //!    nothing is left.
 //!
-//! The threads behave like libbinder: they resend what a write didn't
-//! consume, restart interrupted calls, free every buffer they get, ack node
-//! and death work, and reply to every call. A server, the context manager,
-//! takes refs and death notifications on the objects its clients send and
-//! sometimes calls them back before replying. One test injects random
-//! failures; the other fails each fallible operation of a fixed run in turn.
+//! The threads behave like libbinder: they resend what their bwr says a
+//! write didn't consume, restart interrupted calls, free every buffer they
+//! get, ack node and death work, reply to every call, and start the looper
+//! they are asked for. A server, the context manager, takes refs and death
+//! notifications on the objects its clients send, sometimes calls them back
+//! before replying, and sometimes replies with an fd. Clients make
+//! synchronous and oneway calls, some with fds, and their calling thread
+//! exits when it is done. The server and the first client have a thread
+//! that polls instead of blocking. One test
+//! injects random failures, signals and stops; the other fails each fallible
+//! operation of a fixed run in turn.
 
 use std::collections::BTreeSet;
 
@@ -24,13 +32,15 @@ use crate::binder::driver::*;
 use crate::binder::uapi::*;
 use crate::fake::{FakeUserspace, Fault, Rng, Status};
 
-/// Where a caller builds its transaction data.
+/// Where a thread builds its transaction data (at `DATA + tid * 0x1_0000`).
 const DATA: u64 = 0x6000_0000;
 const READ_SIZE: usize = 256;
 
 struct Owed {
     code: u32,
     buffer: u64,
+    /// The call accepts fds in its reply.
+    accept_fds: bool,
     /// A handle to call before replying, and the code of that call once made.
     call_back: Option<u32>,
     nested: Option<u32>,
@@ -40,7 +50,12 @@ struct Thread {
     proc: ProcId,
     tid: u32,
     looper: bool,
-    /// Synchronous calls still to make to the context manager.
+    /// It polls its binder fd (a write-only BC_ENTER_LOOPER sets that up) and
+    /// reads only when the fd is readable.
+    poller: bool,
+    /// Its poll setup is done.
+    polling: bool,
+    /// Calls still to make to the context manager.
     calls_left: u32,
     /// The ioctl in flight, and the commands it was issued with.
     call: Option<(Call, Vec<u8>)>,
@@ -48,9 +63,51 @@ struct Thread {
     out: Vec<u8>,
     /// Codes of this thread's unanswered synchronous calls, innermost last.
     awaiting: Vec<u32>,
+    /// A oneway it sent that isn't acknowledged yet: its code, and whether
+    /// it carries an fd.
+    sending: Option<(u32, bool)>,
     /// Calls this thread received and hasn't replied to, innermost last.
     owed: Vec<Owed>,
+    /// A signal stopped it in a read (SIGSTOP, ptrace): it doesn't restart
+    /// until the faults end.
+    stopped: bool,
+    /// Its ioctl in flight is BINDER_THREAD_EXIT.
+    exiting: bool,
+    /// It exited, or its process died.
     dead: bool,
+}
+
+impl Thread {
+    fn new(proc: ProcId, tid: u32, first: Option<u32>, calls_left: u32) -> Thread {
+        let mut out = Vec::new();
+        if let Some(cmd) = first {
+            put(&mut out, &cmd);
+        }
+        Thread {
+            proc,
+            tid,
+            looper: first.is_some(),
+            poller: false,
+            polling: false,
+            calls_left,
+            call: None,
+            out,
+            awaiting: Vec::new(),
+            sending: None,
+            owed: Vec::new(),
+            stopped: false,
+            exiting: false,
+            dead: false,
+        }
+    }
+
+    /// Whether its next ioctl reads.
+    fn reads(&self, poll_ready: bool) -> bool {
+        (self.looper && (!self.poller || (self.polling && poll_ready)))
+            || !self.awaiting.is_empty()
+            || self.sending.is_some()
+            || !self.owed.is_empty()
+    }
 }
 
 struct Faults {
@@ -58,20 +115,45 @@ struct Faults {
     readonly_pct: u64,
 }
 
+/// What a run exercised, so the random test can tell it covered each case.
+#[derive(Default)]
+struct Seen {
+    spawned: u32,
+    stopped: u32,
+    exited: u32,
+    oneways_with_fds: u32,
+    replies_with_fds: u32,
+}
+
 struct Sim {
     b: BinderDriver,
     us: FakeUserspace,
     rng: Rng,
     server: ProcId,
+    /// The client that may die.
+    victim: Option<ProcId>,
     threads: Vec<Thread>,
     next_code: u32,
     /// Handles the server already holds refs and a death notification on.
     held: BTreeSet<u32>,
+    /// Oneways their senders saw accepted (code, carries an fd), and the
+    /// codes of those the server received.
+    oneways_sent: Vec<(u32, bool)>,
+    oneways_received: Vec<u32>,
     faults: Option<Faults>,
+    seen: Seen,
 }
 
 fn put<T: Copy>(v: &mut Vec<u8>, x: &T) {
     v.extend_from_slice(pod_bytes(x));
+}
+
+fn fd_object(fd: u32) -> BinderFdObject {
+    BinderFdObject {
+        hdr_type: BINDER_TYPE_FD,
+        fd_or_pad: fd as u64,
+        ..Default::default()
+    }
 }
 
 impl Sim {
@@ -87,41 +169,44 @@ impl Sim {
         us.poke(server, DATA, pod_bytes(&ext));
         let c = us.ioctl(&mut b, server, 1, BINDER_SET_CONTEXT_MGR_EXT, DATA);
         assert_eq!(us.outcome(c).errno, 0);
-        let mut threads = Vec::new();
-        let mut thread = |proc, tid, looper, calls_left| {
-            let mut out = Vec::new();
-            if looper {
-                put(&mut out, &BC_ENTER_LOOPER);
-            }
-            threads.push(Thread {
-                proc,
-                tid,
-                looper,
-                calls_left,
-                call: None,
-                out,
-                awaiting: Vec::new(),
-                owed: Vec::new(),
-                dead: false,
-            });
+        // The server may start one more looper.
+        us.poke(server, DATA, &1u32.to_le_bytes());
+        let c = us.ioctl(&mut b, server, 1, BINDER_SET_MAX_THREADS, DATA);
+        assert_eq!(us.outcome(c).errno, 0);
+        let poller = |proc| Thread {
+            poller: true,
+            ..Thread::new(proc, 3, Some(BC_ENTER_LOOPER), 0)
         };
-        thread(server, 1, true, 0);
-        thread(server, 2, true, 0);
+        let mut threads = vec![
+            Thread::new(server, 1, Some(BC_ENTER_LOOPER), 0),
+            Thread::new(server, 2, Some(BC_ENTER_LOOPER), 0),
+            poller(server),
+        ];
+        let mut victim = None;
         for i in 0..clients {
             let p = b.open(2000 + i as i32, 10_000 + i as u32, 0, false);
             us.add_proc(p, 0x1_0000_0000 * (i as u64 + 2));
-            thread(p, 1, true, 0);
-            thread(p, 2, false, calls);
+            threads.push(Thread::new(p, 1, Some(BC_ENTER_LOOPER), 0));
+            threads.push(Thread::new(p, 2, None, calls));
+            if i == 0 {
+                threads.push(poller(p));
+            } else {
+                victim = Some(p);
+            }
         }
         Sim {
             b,
             us,
             rng: Rng(seed),
             server,
+            victim,
             threads,
             next_code: 1,
             held: BTreeSet::new(),
+            oneways_sent: Vec::new(),
+            oneways_received: Vec::new(),
             faults: None,
+            seen: Seen::default(),
         }
     }
 
@@ -134,7 +219,7 @@ impl Sim {
     /// False if it has nothing to do.
     fn step(&mut self, i: usize) -> bool {
         let t = &self.threads[i];
-        if t.dead {
+        if t.dead || t.stopped {
             return false;
         }
         if let Some((call, sent)) = t.call.clone() {
@@ -145,14 +230,18 @@ impl Sim {
                     self.threads[i].call = Some((c, sent));
                 }
                 Status::Answered(o) => {
-                    // What the write consumed, as the driver reported it.
-                    let consumed = self.us.last_bwr(call).map_or(0, |b| b.write_consumed) as usize;
+                    // What the write consumed, as its bwr says.
+                    let consumed = o.write_consumed as usize;
                     let t = &mut self.threads[i];
                     t.call = None;
                     let mut out = sent[consumed..].to_vec();
                     out.append(&mut t.out);
                     t.out = out;
-                    if o.errno == 0 {
+                    if t.exiting {
+                        t.dead = true;
+                        self.seen.exited += 1;
+                    } else if o.errno == 0 {
+                        t.polling |= t.poller;
                         self.handle_read(i, &o.read);
                     }
                 }
@@ -162,11 +251,19 @@ impl Sim {
         }
         self.plan(i);
         let t = &self.threads[i];
-        let reads = t.looper || !t.awaiting.is_empty() || !t.owed.is_empty();
-        if !reads && t.out.is_empty() {
-            return false;
-        }
         let (proc, tid) = (t.proc, t.tid);
+        let reads = t.reads(self.us.procs[&proc].poll_ready);
+        if !reads && t.out.is_empty() {
+            if t.looper || t.calls_left > 0 {
+                return false;
+            }
+            // A calling thread that is done exits.
+            let c = self.us.ioctl(&mut self.b, proc, tid, BINDER_THREAD_EXIT, 0);
+            let t = &mut self.threads[i];
+            t.exiting = true;
+            t.call = Some((c, Vec::new()));
+            return true;
+        }
         if let Some(f) = &self.faults
             && self.rng.chance(f.readonly_pct)
         {
@@ -193,6 +290,8 @@ impl Sim {
     /// its next call.
     fn plan(&mut self, i: usize) {
         let t = &self.threads[i];
+        let (proc, tid) = (t.proc, t.tid);
+        let at = DATA + tid as u64 * 0x1_0000;
         if let Some(o) = t.owed.last() {
             match (o.call_back, o.nested) {
                 (Some(h), None) => {
@@ -210,12 +309,22 @@ impl Sim {
                 }
                 (_, Some(n)) if t.awaiting.contains(&n) => {}
                 _ => {
-                    let t = &mut self.threads[i];
-                    let o = t.owed.pop().unwrap();
-                    let td = BinderTransactionData {
+                    let o = self.threads[i].owed.pop().unwrap();
+                    let mut td = BinderTransactionData {
                         code: o.code,
                         ..Default::default()
                     };
+                    // Sometimes with an fd.
+                    if o.accept_fds && self.rng.chance(40) {
+                        self.us.poke(proc, at, pod_bytes(&fd_object(4)));
+                        self.us.poke(proc, at + 0x8000, &0u64.to_le_bytes());
+                        td.data_size = size_of::<BinderFdObject>() as u64;
+                        td.offsets_size = 8;
+                        td.data_buffer = at;
+                        td.data_offsets = at + 0x8000;
+                        self.seen.replies_with_fds += 1;
+                    }
+                    let t = &mut self.threads[i];
                     put(&mut t.out, &BC_REPLY);
                     put(&mut t.out, &td);
                     put(&mut t.out, &BC_FREE_BUFFER);
@@ -224,9 +333,9 @@ impl Sim {
             }
             return;
         }
-        if t.calls_left > 0 && t.awaiting.is_empty() {
-            let (proc, tid) = (t.proc, t.tid);
+        if t.calls_left > 0 && t.awaiting.is_empty() && t.sending.is_none() {
             let code = self.code();
+            let oneway = self.rng.chance(30);
             // Mostly with an object of the caller's, sometimes with an fd.
             let mut data = Vec::new();
             let mut offsets = Vec::new();
@@ -242,25 +351,18 @@ impl Sim {
                     },
                 );
             }
-            if self.rng.chance(40) {
+            let fd = self.rng.chance(40);
+            if fd {
                 offsets.push(data.len() as u64);
-                put(
-                    &mut data,
-                    &BinderFdObject {
-                        hdr_type: BINDER_TYPE_FD,
-                        fd_or_pad: 3,
-                        ..Default::default()
-                    },
-                );
+                put(&mut data, &fd_object(3));
             }
             let offs: Vec<u8> = offsets.iter().flat_map(|o| o.to_le_bytes()).collect();
-            let at = DATA + tid as u64 * 0x1_0000;
             self.us.poke(proc, at, &data);
             self.us.poke(proc, at + 0x8000, &offs);
             let td = BinderTransactionData {
                 target: 0,
                 code,
-                flags: TF_ACCEPT_FDS,
+                flags: TF_ACCEPT_FDS | if oneway { TF_ONE_WAY } else { 0 },
                 data_size: data.len() as u64,
                 offsets_size: offs.len() as u64,
                 data_buffer: at,
@@ -270,7 +372,11 @@ impl Sim {
             let t = &mut self.threads[i];
             put(&mut t.out, &BC_TRANSACTION);
             put(&mut t.out, &td);
-            t.awaiting.push(code);
+            if oneway {
+                t.sending = Some((code, fd));
+            } else {
+                t.awaiting.push(code);
+            }
             t.calls_left -= 1;
         }
     }
@@ -285,10 +391,31 @@ impl Sim {
             let at = off;
             off += ((cmd >> 16) & 0x3fff) as usize;
             match cmd {
-                BR_NOOP | BR_SPAWN_LOOPER | BR_TRANSACTION_COMPLETE | BR_OK => {}
+                BR_NOOP | BR_OK => {}
+                BR_SPAWN_LOOPER => {
+                    // IPCThreadState::spawnPooledThread.
+                    let tid = 100 + self.threads.len() as u32;
+                    self.threads
+                        .push(Thread::new(proc, tid, Some(BC_REGISTER_LOOPER), 0));
+                    self.seen.spawned += 1;
+                }
+                BR_TRANSACTION_COMPLETE => {
+                    // A oneway's acknowledgement (a synchronous call's comes
+                    // with its reply).
+                    if let Some(sent) = self.threads[i].sending.take() {
+                        self.seen.oneways_with_fds += sent.1 as u32;
+                        self.oneways_sent.push(sent);
+                    }
+                }
                 BR_TRANSACTION | BR_TRANSACTION_SEC_CTX => {
                     let td: BinderTransactionData = read_pod(read, at).unwrap();
-                    assert_eq!(td.flags & TF_ONE_WAY, 0);
+                    if td.flags & TF_ONE_WAY != 0 {
+                        self.oneways_received.push(td.code);
+                        let out = &mut self.threads[i].out;
+                        put(out, &BC_FREE_BUFFER);
+                        put(out, &td.data_buffer);
+                        continue;
+                    }
                     let handle = self.first_handle(proc, &td);
                     let mut call_back = None;
                     if let Some(h) = handle
@@ -312,6 +439,7 @@ impl Sim {
                     self.threads[i].owed.push(Owed {
                         code: td.code,
                         buffer: td.data_buffer,
+                        accept_fds: td.flags & TF_ACCEPT_FDS != 0,
                         call_back,
                         nested: None,
                     });
@@ -324,8 +452,11 @@ impl Sim {
                     put(&mut t.out, &td.data_buffer);
                 }
                 BR_DEAD_REPLY | BR_FAILED_REPLY => {
+                    // A oneway that wasn't sent, or the innermost call failed.
                     let t = &mut self.threads[i];
-                    assert!(t.awaiting.pop().is_some(), "failed reply to no call");
+                    if t.sending.take().is_none() {
+                        assert!(t.awaiting.pop().is_some(), "failed reply to no call");
+                    }
                 }
                 BR_INCREFS | BR_ACQUIRE => {
                     let pc: BinderPtrCookie = read_pod(read, at).unwrap();
@@ -372,6 +503,27 @@ impl Sim {
         }
     }
 
+    /// A signal ends a blocked read's wait. Sometimes it stops the thread, if
+    /// it is a server looper waiting for work and no other is stopped.
+    fn signal(&mut self, call: Call) {
+        self.us.interrupt(call);
+        let i = self
+            .threads
+            .iter()
+            .position(|t| t.call.as_ref().is_some_and(|(c, _)| *c == call))
+            .unwrap();
+        let t = &self.threads[i];
+        let idle_looper = t.proc == self.server
+            && t.looper
+            && !t.poller
+            && t.owed.is_empty()
+            && t.awaiting.is_empty();
+        if idle_looper && !self.threads.iter().any(|t| t.stopped) && self.rng.chance(50) {
+            self.threads[i].stopped = true;
+            self.seen.stopped += 1;
+        }
+    }
+
     /// After every ioctl: the driver's own invariants, and every read a
     /// thread is blocked in is one the driver holds.
     fn check(&self) {
@@ -383,8 +535,9 @@ impl Sim {
     }
 
     /// Run until every thread is idle. With random faults, the first
-    /// `fault_steps` steps also have signals interrupt blocked reads and a
-    /// client may die; then all faults stop.
+    /// `fault_steps` steps also have signals interrupt (or stop) blocked
+    /// reads, and a client may die; then all faults stop. Stopped threads
+    /// resume once the others are idle.
     fn run(&mut self, fault_steps: usize) {
         for n in 0.. {
             assert!(n < 100_000, "no quiescence: livelock");
@@ -395,16 +548,16 @@ impl Sim {
             if faulty && self.rng.chance(5) {
                 let pending = self.us.pending_calls();
                 if !pending.is_empty() {
-                    self.us
-                        .interrupt(pending[self.rng.below(pending.len() as u64) as usize]);
+                    let call = pending[self.rng.below(pending.len() as u64) as usize];
+                    self.signal(call);
                 }
             }
-            if faulty && self.rng.chance(1) && self.threads.len() > 4 {
-                let victim = self.threads.last().unwrap().proc;
-                if !self.threads.last().unwrap().dead {
-                    self.kill(victim);
-                    self.check();
-                }
+            if faulty
+                && self.rng.chance(1)
+                && let Some(victim) = self.victim.take()
+            {
+                self.kill(victim);
+                self.check();
             }
             let ready: Vec<usize> = (0..self.threads.len())
                 .filter(|&i| {
@@ -426,24 +579,68 @@ impl Sim {
             }
             self.check();
             if !stepped && n >= fault_steps {
-                return;
+                if !self.threads.iter().any(|t| t.stopped) {
+                    return;
+                }
+                self.check_drained();
+                for t in &mut self.threads {
+                    t.stopped = false;
+                }
             }
         }
     }
 
-    /// Every call answered, nothing queued or in flight; then, once every
-    /// process is gone, nothing left at all.
-    fn finish(mut self) {
+    /// With a looper stopped and the others idle, nothing waits for it: every
+    /// call is done and no work is queued.
+    fn check_drained(&self) {
+        assert_eq!(self.b.queued_work(), 0, "work waits for a stopped thread");
+        for t in self.threads.iter().filter(|t| !t.dead && !t.stopped) {
+            assert!(
+                t.calls_left == 0 && t.awaiting.is_empty() && t.sending.is_none(),
+                "proc {} thread {}: calls wait for a stopped thread",
+                t.proc,
+                t.tid
+            );
+        }
+    }
+
+    /// Every call answered, every oneway received, nothing queued or in
+    /// flight; then, once every process is gone, nothing left at all.
+    fn finish(mut self) -> Seen {
         for t in self.threads.iter().filter(|t| !t.dead) {
             assert_eq!(t.calls_left, 0);
             assert!(
-                t.awaiting.is_empty(),
+                t.awaiting.is_empty() && t.sending.is_none(),
                 "proc {} thread {}: calls unanswered",
                 t.proc,
                 t.tid
             );
             assert!(t.owed.is_empty() && t.out.is_empty());
+            assert!(!t.poller || (t.polling && self.us.procs[&t.proc].pollable));
         }
+        let mut received = self.oneways_received.clone();
+        received.sort();
+        assert!(
+            received.windows(2).all(|w| w[0] != w[1]),
+            "a oneway received twice"
+        );
+        for &(code, fd) in &self.oneways_sent {
+            assert!(
+                fd || received.binary_search(&code).is_ok(),
+                "oneway {code} lost"
+            );
+        }
+        // The server asked for one looper at most, and only once: a request
+        // a rollback took back was asked for again.
+        assert!(
+            self.seen.spawned <= 1,
+            "more loopers requested than allowed"
+        );
+        assert_eq!(
+            self.b.requested_threads(self.server),
+            0,
+            "looper requests lost"
+        );
         let blocked: Vec<(ProcId, u32)> = self
             .threads
             .iter()
@@ -475,11 +672,13 @@ impl Sim {
         for (p, fp) in &self.us.procs {
             assert!(fp.live_recv.is_empty(), "proc {p} leaked receive buffers");
         }
+        self.seen
     }
 }
 
 #[test]
 fn nothing_lost_under_random_failures() {
+    let mut total = Seen::default();
     for seed in 0..300 {
         eprintln!("seed {seed}"); // shown if it fails
         let mut s = Sim::new(seed, 2, 4);
@@ -491,27 +690,47 @@ fn nothing_lost_under_random_failures() {
                 Fault::AllocRecv | Fault::CaptureFd => 20,
                 Fault::CopyFromUser => 10,
                 // Copies out fail through read-only memory, which stays so.
-                Fault::CopyToUser => 0,
+                // (A bwr libbinder can't read back makes it resend its write.)
+                Fault::CopyToUser | Fault::CopyBwr => 0,
             };
             fr.below(1000) < pct
         }));
         s.faults = Some(Faults { readonly_pct: 5 });
         s.run(600);
-        s.finish();
+        let seen = s.finish();
+        total.spawned += seen.spawned;
+        total.stopped += seen.stopped;
+        total.exited += seen.exited;
+        total.oneways_with_fds += seen.oneways_with_fds;
+        total.replies_with_fds += seen.replies_with_fds;
+    }
+    // Every case was exercised.
+    for (what, n) in [
+        ("spawned loopers", total.spawned),
+        ("stopped loopers", total.stopped),
+        ("thread exits", total.exited),
+        ("oneways with fds", total.oneways_with_fds),
+        ("replies with fds", total.replies_with_fds),
+    ] {
+        assert!(n > 0, "no {what}");
     }
 }
 
 #[test]
 fn nothing_lost_when_any_one_operation_fails() {
     // For each scenario: a fault-free run, then the same run failing its
-    // k-th fallible operation, for every k.
+    // k-th fallible operation, for every k. (Not bwr write-backs: libbinder
+    // would resend the whole write.)
     for seed in 0..8 {
         let mut runs = 0;
         for k in 0.. {
             let fired = std::rc::Rc::new(std::cell::Cell::new(false));
             let mut s = Sim::new(seed, 1, 3);
             let (mut n, f) = (0, fired.clone());
-            s.us.fault = Some(Box::new(move |_| {
+            s.us.fault = Some(Box::new(move |op| {
+                if op == Fault::CopyBwr {
+                    return false;
+                }
                 n += 1;
                 let hit = n == k + 1;
                 f.set(f.get() || hit);

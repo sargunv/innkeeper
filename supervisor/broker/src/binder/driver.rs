@@ -2802,6 +2802,11 @@ impl BinderDriver {
     // ---- introspection for tests ----------------------------------------------
 
     #[cfg(test)]
+    pub(crate) fn requested_threads(&self, proc: ProcId) -> u32 {
+        self.procs[&proc].requested_threads
+    }
+
+    #[cfg(test)]
     pub(crate) fn ref_counts(&self, proc: ProcId, desc: u32) -> Option<(i32, i32)> {
         self.procs
             .get(&proc)?
