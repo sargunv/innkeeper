@@ -96,7 +96,7 @@ static uint32_t map_id(int fd) {
   return bpf(BPF_OBJ_GET_INFO_BY_FD, &a) == 0 ? info.id : 0;
 }
 
-static void tests(const char* tmp) {
+static void tests(const char* outside_dir) {
   // A working map, pinned and fetched back.
   long m = map_create(BPF_MAP_TYPE_HASH, 4, 8, 16);
   uint32_t k = 7;
@@ -137,8 +137,8 @@ static void tests(const char* tmp) {
   mkfifo("/sys/fs/bpf/fifo", 0600);
   CHECK(get("/sys/fs/bpf/fifo") == -EINVAL, "get of a FIFO: EINVAL, no hang");
   char esc[512];
-  snprintf(esc, sizeof(esc), "%s/escaped", tmp);
-  symlink(tmp, "/sys/fs/bpf/link");
+  snprintf(esc, sizeof(esc), "%s/escaped", outside_dir);
+  symlink(outside_dir, "/sys/fs/bpf/link");
   CHECK(
     pin(m, "/sys/fs/bpf/link/escaped") == -ELOOP && access(esc, F_OK) != 0,
     "pin through a symlink: ELOOP, nothing created outside"
@@ -147,7 +147,7 @@ static void tests(const char* tmp) {
   CHECK(get("/sys/fs/bpf/flink") == -ELOOP, "get of a symlink: ELOOP");
   CHECK(get("/sys/fs/bpf/../../../etc/passwd") == -EXDEV, "get with ..: EXDEV");
   char outside[512];
-  snprintf(outside, sizeof(outside), "%s/m", tmp);
+  snprintf(outside, sizeof(outside), "%s/m", outside_dir);
   CHECK(pin(m, outside) == -EINVAL, "pin outside /sys/fs/bpf: EINVAL");
   struct statfs sfs;
   CHECK(
@@ -235,7 +235,7 @@ static void* serve_as_broker(void* arg) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 2) return fprintf(stderr, "usage: %s TMPDIR\n", argv[0]), 2;
+  if (argc < 2) return fprintf(stderr, "usage: %s OUTSIDE_DIR\n", argv[0]), 2;
   // Room for more objects than the cap (each holds a memfd).
   struct rlimit rl;
   getrlimit(RLIMIT_NOFILE, &rl);
