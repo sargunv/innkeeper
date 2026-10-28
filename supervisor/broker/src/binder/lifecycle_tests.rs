@@ -760,6 +760,8 @@ fn nothing_lost_when_any_one_operation_fails() {
                 hit
             }));
             s.run(0);
+            // Without a fault, no oneway may be dropped for its fd.
+            assert!(fired.get() || s.us.never_installed.is_empty());
             s.finish();
             runs += 1;
             if !fired.get() {
