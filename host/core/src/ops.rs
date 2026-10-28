@@ -250,7 +250,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
             validate::truncate(&man.package, 80)
         );
     }
-    let info = android::app_info(&s, &pkg, xdg::ICON_SIZES, &dirs.cache).unwrap_or_else(|e| {
+    let info = android::app_info(&s, &pkg, xdg::ICON_SIZES).unwrap_or_else(|e| {
         report(Event::Warning(format!(
             "couldn't render the icon in Android ({e:#}); using the APK's PNG if it has one"
         )));

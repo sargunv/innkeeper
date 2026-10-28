@@ -15,8 +15,7 @@ Building needs the GTK 4 (4.18+) and libadwaita (1.7+) development files
 (`pkg-config gtk4 libadwaita-1`); this Fedora 44 host has them, and its runtime
 libraries (GTK 4.22, libadwaita 1.9). Without them, build in a rootless
 container (`registry.fedoraproject.org/fedora:44` plus `gtk4-devel`,
-`libadwaita-devel`, `cargo`). Like the CLI, the build embeds the icon helper, so
-it also wants `javac` and the Android SDK.
+`libadwaita-devel`, `cargo`).
 
 ## Architecture
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end test of `linuxapk` against a real session (its own instance).
 #   tests/e2e/cli/run.sh [corpus-dir]
-# Installs OpenCalc and Wikipedia, validates their desktop entries and icons,
-# launches them through gtk-launch and gio open (checking the resumed activity
-# with dumpsys), reinstalls (idempotent), repairs a stale entry on `list`, then
-# uninstalls and checks that no desktop files or icons are left. Uses the
+# Installs OpenCalc and Wikipedia, validates their desktop entries and icons
+# (rendered in Android by the system app's IconDump), launches them through
+# gtk-launch and gio open (checking the resumed activity with dumpsys),
+# reinstalls (idempotent), repairs a stale entry on `list`, then uninstalls
+# and checks that no desktop files or icons are left. Uses the
 # staged build (out/stage). Desktop entries, icons and caches go to a scratch
 # XDG tree in out/test/cli, never the user's. Leaves the session running; stop
 # it with `LINUXAPK_INSTANCE=cli mise run session -- stop`.
@@ -64,7 +65,9 @@ declare -A apk=(
 )
 for pkg in "${!apk[@]}"; do
   [[ -f ${apk[$pkg]} ]] || fail "missing corpus APK ${apk[$pkg]}"
-  "$la" install "${apk[$pkg]}"
+  out=$("$la" install "${apk[$pkg]}" 2>&1) || fail "install $pkg: $out"
+  echo "$out"
+  ! grep -q "couldn't render the icon" <<<"$out" || fail "$pkg: Android didn't render the icon"
   d=$apps/dev.linuxapk.$pkg.desktop
   [[ -f $d ]] || fail "no $d"
   if command -v desktop-file-validate >/dev/null; then
@@ -83,7 +86,7 @@ for pkg in "${!apk[@]}"; do
     file "$icons/${s}x$s/apps/dev.linuxapk.$pkg.png" | grep -q "PNG image data, $s x $s" ||
       fail "icon ${s}px"
   done
-  ok "$pkg: icons 48-512 px"
+  ok "$pkg: icons 48-512 px, rendered by Android"
 done
 grep -q '^MimeType=x-scheme-handler/wikipedia;$' "$apps/dev.linuxapk.org.wikipedia.desktop" ||
   fail "wikipedia scheme handler"

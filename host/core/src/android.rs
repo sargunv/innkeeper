@@ -1,5 +1,5 @@
 //! Package and activity operations inside the session (`cmd package`,
-//! `cmd activity`, and the embedded icon helper under `app_process`).
+//! `cmd activity`, and the system app's icon helper under `app_process`).
 
 use std::fs::File;
 use std::path::Path;
@@ -10,10 +10,8 @@ use base64::Engine as _;
 use crate::launcher::Session;
 use crate::validate;
 
-/// The icon helper dex jar, built from `android/IconDump.java` by `build.rs`
-/// (empty if the SDK wasn't available at build time).
-const ICON_HELPER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-helper.jar"));
-const ICON_HELPER_PATH: &str = "/data/local/tmp/linuxapk-icon.jar";
+/// The system app, whose `IconDump` renders app icons (and reports labels).
+const SYSTEM_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
 
 /// `Success: created install session [1234]` -> 1234.
 pub fn parse_session_id(out: &str) -> Option<u32> {
@@ -248,25 +246,16 @@ pub fn parse_helper_output(out: &str) -> AppInfo {
 }
 
 /// Asks Android to render the app's launcher icon at `sizes` (and report its
-/// label and category), via the embedded helper under `app_process`.
-pub fn app_info(s: &Session, pkg: &str, sizes: &[u32], work: &Path) -> Result<AppInfo> {
-    if ICON_HELPER.is_empty() {
-        bail!("this build has no icon helper (the Android SDK wasn't found at build time)");
-    }
-    std::fs::create_dir_all(work)?;
-    let jar = work.join(format!("icon-helper-{}.jar", std::process::id()));
-    std::fs::write(&jar, ICON_HELPER)?;
-    let pushed = s.push_fixed(&jar, ICON_HELPER_PATH);
-    let _ = std::fs::remove_file(&jar);
-    pushed?;
+/// label and category), via the system app's `IconDump` under `app_process`.
+pub fn app_info(s: &Session, pkg: &str, sizes: &[u32]) -> Result<AppInfo> {
     let sizes: Vec<String> = sizes.iter().map(u32::to_string).collect();
-    let cp = format!("CLASSPATH={ICON_HELPER_PATH}");
+    let cp = format!("CLASSPATH={SYSTEM_APK}");
     let mut argv = vec![
         "env",
         &cp,
         "app_process",
-        "/system/bin",
-        "dev.linuxapk.cli.IconDump",
+        "/",
+        "dev.linuxapk.system.apps.IconDump",
         pkg,
     ];
     argv.extend(sizes.iter().map(String::as_str));
@@ -277,7 +266,15 @@ pub fn app_info(s: &Session, pkg: &str, sizes: &[u32], work: &Path) -> Result<Ap
             validate::truncate(o.stderr.trim(), 600)
         );
     }
-    Ok(parse_helper_output(&o.text()))
+    let info = parse_helper_output(&o.text());
+    if info.icons.len() < sizes.len() {
+        bail!(
+            "the icon helper rendered {} of {} icons",
+            info.icons.len(),
+            sizes.len()
+        );
+    }
+    Ok(info)
 }
 
 #[cfg(test)]
@@ -337,13 +334,5 @@ mod tests {
         assert_eq!(i.category, Some(-1));
         assert_eq!(i.icons.len(), 1);
         assert_eq!(i.icons[0].0, 48);
-    }
-
-    #[test]
-    fn helper_embedded() {
-        // The SDK is present on dev hosts; the jar is a zip with classes.dex.
-        if !ICON_HELPER.is_empty() {
-            assert!(ICON_HELPER.starts_with(b"PK"));
-        }
     }
 }

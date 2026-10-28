@@ -26,8 +26,7 @@ declares the APK and bundle MIME types ([gui.md](gui.md)).
 `install`, `run`, `uninstall` and `list` start the session if it isn't running
 and wait for boot. The first start downloads and unpacks the Android image
 (about 1.2 GB) through `linuxapk-session prepare`, with its progress on stderr.
-Building needs `javac` and the Android SDK (for the embedded icon helper);
-running `install` needs the SDK's `aapt2`.
+Running `install` needs the Android SDK's `aapt2`; building needs no SDK.
 
 ## What `install` does
 
@@ -46,13 +45,14 @@ running `install` needs the SDK's `aapt2`.
    then one `install-write -S <size> … -` per APK, streamed through stdin (no
    copy inside the session), then `install-commit`. On failure it runs
    `install-abandon`. Reinstalling replaces the app and keeps its data.
-4. **Asks Android for the icon.** The embedded helper
-   (`cli/android/IconDump.java`, compiled to dex by `cli/build.rs`) is copied to
-   `/data/local/tmp/linuxapk-icon.jar` and run under `app_process`. It loads the
-   launcher activity's icon at xxxhdpi (an `activity-alias` icon wins, as in
-   Launcher3) and draws it at 48, 64, 128, 256 and 512 px. The framework does
-   the rendering, so adaptive icons get the system mask and vector drawables
-   just work. If that fails, the APK's own PNG launcher icons are used.
+4. **Asks Android for the icon.** The system app's `IconDump`
+   (`android/system-app/app/…/apps/IconDump.kt`) runs under `app_process` from
+   the installed `LinuxApkSystem.apk`. It loads the launcher activity's icon at
+   xxxhdpi (an `activity-alias` icon wins, as in Launcher3) and draws it at 48,
+   64, 128, 256 and 512 px with the same renderer as the apps the bridge
+   mirrors. The framework does the rendering, so adaptive icons get the system
+   mask and vector drawables just work. If that fails, the APK's own PNG
+   launcher icons are used.
 5. **Reads the manifest** (`aapt2 dump xmltree`). It takes
    `appCategory`/`isGame` for Categories, plus intent filters of exported
    activities and aliases with `VIEW` + `BROWSABLE` and no `mimeType`. Custom

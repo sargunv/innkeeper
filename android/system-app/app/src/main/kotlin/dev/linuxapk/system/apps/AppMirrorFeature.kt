@@ -7,8 +7,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -156,19 +154,14 @@ class AppMirrorFeature(private val context: Context) : Feature {
 
   /** The app's icon as PNGs: repeated `u32 size`, `u32 len`, bytes (the bridge's layout). */
   private fun icons(ai: ApplicationInfo): ByteArray {
-    val d = pm.getApplicationIcon(ai)
+    val icon = AppIcons.load(pm, ai, AppIcons.launcherActivity(pm, ai.packageName))
     val out = ByteArrayOutputStream(64 * 1024)
     fun u32(v: Int) = repeat(4) { out.write(v ushr (8 * it)) }
     for (size in SIZES) {
-      val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-      d.setBounds(0, 0, size, size)
-      d.draw(Canvas(bmp))
-      val png = ByteArrayOutputStream()
-      bmp.compress(Bitmap.CompressFormat.PNG, 100, png)
-      bmp.recycle()
+      val png = AppIcons.png(icon, size)
       u32(size)
-      u32(png.size())
-      png.writeTo(out)
+      u32(png.size)
+      out.write(png)
     }
     return out.toByteArray()
   }
