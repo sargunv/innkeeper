@@ -2,8 +2,8 @@
 //! Linux.apk's own sandbox, which allows no namespaces, mounts or systemd
 //! units, but whose `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!
-//! - The root is composed on disk: per partition, hardlinks to the (read-only)
-//!   image cache plus copies of the layers above it, files read-only. It is
+//! - The root is composed on disk: per partition, reflink copies of the
+//!   image cache plus the layers above it, files read-only. It is
 //!   composed once per image, stage and addons, and only the start-time layer
 //!   goes on at each start.
 //! - `/` gets symlinks to it, the binder nodes and socket dirs; the broker
@@ -47,7 +47,7 @@ fn cp(args: &[&std::ffi::OsStr]) -> Result<()> {
 }
 
 /// A layer's files over the composed tree. `--remove-destination` unlinks a
-/// hardlinked file before replacing it, so the image cache is never written.
+/// file before replacing it, so read-only layers can be overlaid.
 fn over(layer: &Path, dst: &Path) -> Result<()> {
     if !layer.is_dir() {
         return Ok(());
@@ -146,7 +146,12 @@ fn compose(cfg: &Config) -> Result<()> {
             continue;
         }
         let dst = r.join(part);
-        cp(&["-al".as_ref(), src.as_os_str(), dst.as_os_str()])?;
+        cp(&[
+            "-a".as_ref(),
+            "--reflink=auto".as_ref(),
+            src.as_os_str(),
+            dst.as_os_str(),
+        ])?;
         if LAYERED.contains(part) {
             let mut layers = vec![
                 cfg.image.derived.join("common").join(part),
@@ -161,7 +166,8 @@ fn compose(cfg: &Config) -> Result<()> {
     }
     let apex = r.join("apex");
     cp(&[
-        "-al".as_ref(),
+        "-a".as_ref(),
+        "--reflink=auto".as_ref(),
         cfg.image.apexdir.as_os_str(),
         apex.as_os_str(),
     ])?;
@@ -474,7 +480,16 @@ pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Res
     let p = cfg_paths;
     let mut c = Command::new("flatpak-spawn");
     for (k, v) in env::vars_os() {
-        if k.to_string_lossy().starts_with("LINUXAPK_") {
+        let name = k.to_string_lossy();
+        if name.starts_with("LINUXAPK_")
+            || [
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_STATE_HOME",
+            ]
+            .contains(&name.as_ref())
+        {
             let mut a = OsString::from("--env=");
             a.push(&k);
             a.push("=");

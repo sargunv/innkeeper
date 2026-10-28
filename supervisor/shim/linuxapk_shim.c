@@ -253,6 +253,11 @@ EXPORT int setns(int fd, int nstype) {
 // as every desktop app does.
 #include <linux/netlink.h>
 #include <sys/socket.h>
+
+#include "netlink.h"
+EXPORT int bind(int fd, const struct sockaddr* addr, socklen_t len) {
+  return linuxapk_netlink_bind(fd, addr, len, flatpak());
+}
 static int netlink_accept_state = -1;
 static void netlink_accept(int fd, void* buf, long n) {
   if (n <= 0 || !flatpak()) return;

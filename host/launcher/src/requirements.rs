@@ -34,6 +34,11 @@ pub fn check(sound: bool) -> Result<()> {
         need(e, true);
     }
     if !Command::new("systemctl")
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path=/run/user/{}/bus", sys::uid()),
+        )
+        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()))
         .args(["--user", "show-environment"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

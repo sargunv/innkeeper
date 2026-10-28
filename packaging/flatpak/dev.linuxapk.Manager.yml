@@ -20,6 +20,11 @@ finish-args:
   # Android's notifications, with replace-in-place, progress and inline reply,
   # which the Notification portal lacks.
   - --talk-name=org.freedesktop.Notifications
+  # The desktop's assistive-technology switch (Flatpak's AT-SPI proxy alone
+  # exposes GetAddress, not org.a11y.Status properties).
+  - --talk-name=org.a11y.Bus
+  # No battery portal exists on the supported desktop baseline.
+  - --system-talk-name=org.freedesktop.UPower
 modules:
   # Bionic and static binaries, Android's partitions and the image scripts:
   # nothing in them links the runtime.

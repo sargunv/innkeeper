@@ -26,7 +26,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::paths::Paths;
-use crate::session;
+use crate::{session, sys};
 
 /// The grace period of a session with windows, unless `LINUXAPK_IDLE_GRACE`
 /// says otherwise.
@@ -274,6 +274,11 @@ pub fn calendar(secs: u64) -> String {
 
 fn systemctl(args: &[&str]) -> Command {
     let mut c = Command::new("systemctl");
+    c.env(
+        "DBUS_SESSION_BUS_ADDRESS",
+        format!("unix:path=/run/user/{}/bus", sys::uid()),
+    )
+    .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()));
     c.arg("--user")
         .args(args)
         .stdin(Stdio::null())
@@ -289,6 +294,11 @@ pub fn schedule_host(cfg: &Config, exe: &Path, at_ms: u64) -> Result<()> {
     let at = (at_ms / 1000).saturating_sub(WAKE_LEAD.as_secs());
     cancel_host(p);
     let mut c = Command::new("systemd-run");
+    c.env(
+        "DBUS_SESSION_BUS_ADDRESS",
+        format!("unix:path=/run/user/{}/bus", sys::uid()),
+    )
+    .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()));
     c.args(["--user", "--quiet", "--collect"])
         .arg(format!("--unit={}", p.wake_unit()))
         .arg(format!("--on-calendar={}", calendar(at)))

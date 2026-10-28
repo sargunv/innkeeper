@@ -17,6 +17,13 @@ use crate::{lifecycle, nsroot, sys};
 fn systemctl(args: &[&str]) -> Command {
     let mut c = Command::new("systemctl");
     c.arg("--user").args(args).stdin(Stdio::null());
+    // Tests may use a nested desktop's bus and runtime dir. Its user manager
+    // is still the host manager; only the bridge belongs on the private bus.
+    c.env(
+        "DBUS_SESSION_BUS_ADDRESS",
+        format!("unix:path=/run/user/{}/bus", sys::uid()),
+    )
+    .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()));
     c
 }
 
@@ -32,6 +39,11 @@ pub fn start(cfg: &Config, exe: &Path, follow: bool) -> Result<()> {
     let p = &cfg.paths;
     // Delegate=yes gives the session a cgroup subtree of its own.
     let st = Command::new("systemd-run")
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path=/run/user/{}/bus", sys::uid()),
+        )
+        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()))
         .args(["--user", "--quiet", "--collect"])
         .arg(format!("--unit={}", p.unit))
         .args(["-p", "Delegate=yes", "-p", "KillMode=control-group"])
