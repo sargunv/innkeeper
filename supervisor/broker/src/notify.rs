@@ -17,9 +17,8 @@
 //!    job control must work): a signal ends the notification and the kernel
 //!    restarts the ioctl, which the driver makes idempotent.
 //!  * a thread that sets up polling (`IPCThreadState::setupPolling`) gets its
-//!    process's binder fd swapped for an epoll fd (`ADDFD`+`SETFD`; the mapping
-//!    keeps the memfd alive) watching a broker-only eventfd whose level the
-//!    broker drives (`binder_poll`).
+//!    process's binder fd swapped for an eventfd (`ADDFD`+`SETFD`; the mapping
+//!    keeps the memfd alive) whose level the broker drives (`binder_poll`).
 //!
 //! A monitor thread watches a pidfd per process (death) and periodically
 //! checks with `kcmp` that each process still holds its binder fd (close,
@@ -136,11 +135,9 @@ struct ProcState {
     free: Vec<(usize, usize)>,
     live: HashMap<u64, (usize, usize)>,
     pidfd: Option<OwnedFd>,
-    /// Present once a thread polls: the eventfd whose level the broker
-    /// drives, and the epoll fd watching it, which the target holds instead
-    /// of its binder fd. The target can't reach the eventfd itself, so it
-    /// can't drain it, saturate it or clear its O_NONBLOCK under the broker.
-    poll: Option<(OwnedFd, OwnedFd)>,
+    /// Once a thread polls: the eventfd the process holds instead of its
+    /// binder fd, readable when a polling thread has work.
+    poll: Option<OwnedFd>,
     poll_ready: bool,
 }
 
@@ -157,11 +154,7 @@ impl ProcState {
     /// Does the process still hold its binder fd (not closed, nor lost
     /// across exec)?
     fn still_open(&self) -> bool {
-        let ours = self
-            .poll
-            .as_ref()
-            .map_or(&self.memfd, |(_, ep)| ep)
-            .as_raw_fd();
+        let ours = self.poll.as_ref().unwrap_or(&self.memfd).as_raw_fd();
         kcmp_same_file(self.pid, ours, self.fd)
     }
 
@@ -379,49 +372,15 @@ fn kcmp_same_file(pid: i32, ours: RawFd, theirs: u32) -> bool {
     r == 0
 }
 
-/// A receive-region memfd of BINDER_MEMFD_SIZE, sealed against resizing: the
-/// process gets it writable, and a shrink would make the broker's writes
-/// through its own mapping fault (SIGBUS).
+/// A receive-region memfd of BINDER_MEMFD_SIZE.
 fn recv_memfd(name: &str) -> Option<OwnedFd> {
     let cname = std::ffi::CString::new(name).ok()?;
-    let fd =
-        unsafe { libc::memfd_create(cname.as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    let fd = unsafe { libc::memfd_create(cname.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {
         return None;
     }
     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    let seals = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
-    (unsafe { libc::ftruncate(fd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } == 0
-        && unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) } == 0)
-        .then_some(fd)
-}
-
-/// A non-blocking eventfd and an epoll fd that watches it (see
-/// `ProcState::poll_evfd`).
-fn poll_pair() -> Option<(OwnedFd, OwnedFd)> {
-    let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
-    if efd < 0 {
-        return None;
-    }
-    let efd = unsafe { OwnedFd::from_raw_fd(efd) };
-    let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
-    if epfd < 0 {
-        return None;
-    }
-    let epfd = unsafe { OwnedFd::from_raw_fd(epfd) };
-    let mut ev = libc::epoll_event {
-        events: libc::EPOLLIN as u32,
-        u64: 0,
-    };
-    let r = unsafe {
-        libc::epoll_ctl(
-            epfd.as_raw_fd(),
-            libc::EPOLL_CTL_ADD,
-            efd.as_raw_fd(),
-            &mut ev,
-        )
-    };
-    (r == 0).then_some((efd, epfd))
+    (unsafe { libc::ftruncate(fd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } == 0).then_some(fd)
 }
 
 // ---- Userspace over real processes ------------------------------------
@@ -531,13 +490,15 @@ impl Userspace for SeccompUserspace {
         let Some(p) = self.procs.get(&proc) else {
             return;
         };
-        let Some((efd, epfd)) = poll_pair() else {
+        let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        if efd < 0 {
             return;
-        };
+        }
+        let efd = unsafe { OwnedFd::from_raw_fd(efd) };
         let r = self.addfd(&SeccompNotifAddfd {
             id: call.id,
             flags: SECCOMP_ADDFD_FLAG_SETFD,
-            srcfd: epfd.as_raw_fd() as u32,
+            srcfd: efd.as_raw_fd() as u32,
             newfd: p.fd,
             newfd_flags: O_CLOEXEC,
         });
@@ -547,14 +508,14 @@ impl Userspace for SeccompUserspace {
         }
         dlog!("poll swap proc={proc} fd={}", p.fd);
         let p = self.procs.get_mut(&proc).unwrap();
-        p.poll = Some((efd, epfd));
+        p.poll = Some(efd);
         p.poll_ready = false;
     }
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool) {
         let Some(p) = self.procs.get_mut(&proc) else {
             return;
         };
-        let Some((efd, _)) = p.poll.as_ref() else {
+        let Some(efd) = p.poll.as_ref() else {
             return;
         };
         if ready == p.poll_ready {
@@ -948,65 +909,6 @@ impl Supervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Android gets the receive memfd writable; it must not be able to resize
-    /// it under the broker's mapping.
-    #[test]
-    fn recv_memfd_is_sealed() {
-        let m = recv_memfd("lxbinder-test").unwrap();
-        let fd = m.as_raw_fd();
-        assert_eq!(unsafe { libc::ftruncate(fd, 0) }, -1);
-        assert_eq!(
-            unsafe { libc::ftruncate(fd, 2 * BINDER_MEMFD_SIZE as i64) },
-            -1
-        );
-        let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        assert_eq!(unsafe { libc::fstat(fd, &mut st) }, 0);
-        assert_eq!(st.st_size as usize, BINDER_MEMFD_SIZE);
-        // Writes through mappings still work.
-        assert_eq!(
-            unsafe { libc::pwrite(fd, b"x".as_ptr() as *const _, 1, 0) },
-            1
-        );
-    }
-
-    fn readable(fd: RawFd) -> bool {
-        let mut p = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        unsafe { libc::poll(&mut p, 1, 0) == 1 }
-    }
-
-    /// The target polls the epoll fd; whatever it does to that fd, the
-    /// broker's eventfd stays non-blocking and only the broker drains it.
-    #[test]
-    fn poll_fd_is_not_the_brokers() {
-        let (efd, epfd) = poll_pair().unwrap();
-        let (e, ep) = (efd.as_raw_fd(), epfd.as_raw_fd());
-        assert!(!readable(ep));
-        let one = 1u64;
-        assert_eq!(
-            unsafe { libc::write(e, &one as *const u64 as *const _, 8) },
-            8
-        );
-        assert!(readable(ep));
-        // The target clears O_NONBLOCK and tries to drain or saturate it.
-        assert_eq!(unsafe { libc::fcntl(ep, libc::F_SETFL, 0) }, 0);
-        let mut b = [0u8; 8];
-        assert_eq!(unsafe { libc::read(ep, b.as_mut_ptr() as *mut _, 8) }, -1);
-        let max = u64::MAX - 1;
-        assert_eq!(
-            unsafe { libc::write(ep, &max as *const u64 as *const _, 8) },
-            -1
-        );
-        assert!(readable(ep));
-        // The broker lowers the level, twice: never blocks.
-        assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, 8);
-        assert_eq!(unsafe { libc::read(e, b.as_mut_ptr() as *mut _, 8) }, -1);
-        assert!(!readable(ep));
-    }
 
     /// The first mapping of `pid` (an address that is mapped).
     fn first_mapping(pid: i32) -> u64 {
