@@ -365,8 +365,10 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let iters: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(200_000);
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    // Printed first, so a panic's output says how to reproduce it.
+    println!("linuxapk-broker-fuzz: {iters} iterations from seed {seed}");
     run(iters, seed);
-    println!("linuxapk-broker-fuzz: {iters} iterations from seed {seed}: no panics");
+    println!("linuxapk-broker-fuzz: no panics");
 }
 
 #[cfg(test)]
