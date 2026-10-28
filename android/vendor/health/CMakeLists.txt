@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The Health HAL (IHealth AIDL V5), part of the root superbuild. With the NDK:
+# the vendor service. Natively (preset "host-tests"): the BATTERY event
+# decoder and its HealthInfo mapping.
+set(HEALTH ${CMAKE_CURRENT_SOURCE_DIR})
+set(GRAPHICS ${CMAKE_SOURCE_DIR}/android/vendor/graphics)
+
+add_library(lapk_health_battery STATIC src/battery.c)
+target_include_directories(lapk_health_battery PUBLIC src)
+set_target_properties(
+  lapk_health_battery
+  PROPERTIES C_STANDARD 17 POSITION_INDEPENDENT_CODE ON)
+target_compile_options(lapk_health_battery PRIVATE -Wall -Wextra -Werror)
+
+if(ANDROID)
+  # NDK-backend C++ for the frozen IHealth snapshot, generated at configure
+  # time with the graphics HALs' script and linked against their
+  # libbinder_ndk stub.
+  set(HEALTH_AIDL_GEN ${CMAKE_CURRENT_BINARY_DIR}/aidl)
+  file(GLOB_RECURSE HEALTH_AIDL CONFIGURE_DEPENDS third_party/aosp/aidl/*.aidl)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HEALTH_AIDL})
+  execute_process(
+    COMMAND
+      ${GRAPHICS}/tools/gen-aidl.sh ${HEALTH_AIDL_GEN}
+      ${HEALTH}/third_party/aosp/aidl OUTPUT_QUIET
+    COMMAND_ERROR_IS_FATAL ANY)
+  file(GLOB_RECURSE HEALTH_AIDL_SRCS ${HEALTH_AIDL_GEN}/src/*.cpp)
+
+  add_executable(health src/main.cpp ${HEALTH_AIDL_SRCS})
+  set_target_properties(
+    health
+    PROPERTIES
+      OUTPUT_NAME android.hardware.health-service.linuxapk CXX_STANDARD 20)
+  target_include_directories(
+    health
+    PRIVATE
+      ${HEALTH_AIDL_GEN}/include ${GRAPHICS}/third_party/aosp/include
+      ${GRAPHICS}/common/include)
+  target_link_libraries(
+    health
+    PRIVATE lapk_health_battery linuxapk_bridge_client binder_ndk_stub log)
+
+  set(VENDOR ${LINUXAPK_ANDROID}/vendor)
+  install(TARGETS health RUNTIME DESTINATION ${VENDOR}/bin/hw COMPONENT health)
+  install(
+    FILES etc/init/android.hardware.health-service.linuxapk.rc
+    DESTINATION ${VENDOR}/etc/init
+    COMPONENT health)
+  install(
+    FILES etc/vintf/android.hardware.health-service.linuxapk.xml
+    DESTINATION ${VENDOR}/etc/vintf/manifest
+    COMPONENT health)
+else()
+  add_executable(health_battery_test tests/battery_test.c)
+  target_link_libraries(health_battery_test PRIVATE lapk_health_battery)
+  add_test(NAME health_battery COMMAND health_battery_test)
+endif()

@@ -17,6 +17,10 @@ androidboot.vendor.apex.com.android.hardware.graphics.composer=none
 androidboot.vendor.apex.com.google.cf.gralloc=none
 androidboot.vendor.apex.com.google.cf.vulkan=none
 
+# Health: ours (android/vendor/health) reports the host's battery; cuttlefish's
+# fakes a charging one.
+androidboot.vendor.apex.com.google.cf.health=none
+
 # Devices that only exist in the cuttlefish VM (virtio consoles, vsock to the
 # host's cuttlefish services, the modem simulator, virtual Wi-Fi/BT/NFC).
 androidboot.vendor.apex.com.google.cf.bt=none

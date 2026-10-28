@@ -42,6 +42,14 @@ artifacts = [
   "share/linuxapk/android/vendor/lib64/hw/mapper.linuxapk.so",
 ]
 
+[module.health]
+task = "build:health"
+runs = "in Android, as a /vendor HAL service"
+artifacts = [
+  "share/linuxapk/android/vendor/bin/hw/android.hardware.health-service.linuxapk",
+  "share/linuxapk/android/vendor/etc/vintf/manifest/android.hardware.health-service.linuxapk.xml",
+]
+
 [module.vulkan]
 task = "build:vulkan"
 runs = "in Android, loaded by apps through libvulkan"
