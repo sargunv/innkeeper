@@ -7,9 +7,11 @@
 # The tests are android-17.0.0_r1 builds (the image's release) of
 # binderDriverInterfaceTest, binderLibTest, binderSafeInterfaceTest and
 # binderThroughputTest, read from $XDG_DATA_HOME/linuxapk/test-bin/binder and
-# checked against test-bin.sha256 (build them in an AOSP checkout of that
-# release and copy them from
-# out/target/product/<device>/data/nativetest64/<name>/<name>).
+# checked against test-bin.sha256. Android's CI doesn't publish them: the
+# image's branch (aosp-android-latest-release) builds only `droid dist`, whose
+# artifacts have no test suites, and binderThroughputTest is in no suite at
+# all. Build them in an AOSP checkout of that release (`m <name>`) and copy
+# them from out/target/product/<device>/data/nativetest64/<name>/<name>.
 # They run with the image's servicemanager as the context manager, as on a
 # device, in a root from tests/bionic/lib.sh:
 #
@@ -20,9 +22,12 @@
 #           unavailable on this host: <reason>" and exits 77 after the broker
 #           run.
 #
-# By default binderLibTest skips the 5 tests that fail in both modes for
-# environmental reasons: netlink, RT scheduling, setuid and the SELinux
-# access check.
+# By default binderLibTest skips the tests that fail for environmental
+# reasons: binder netlink reports (only kernel binder sends them, and the
+# oracle can't receive them), RT scheduling, setuid and the SELinux access
+# check. The freezer tests run in the unit's delegated cgroup; on kernel
+# binder they skip, since BINDER_FREEZE takes host pids and the tests run in
+# a pid namespace.
 #
 # Env: BINDER_TEST_TIMEOUT (seconds per binary, default 300),
 #      BINDER_TEST_ARGS (extra arguments for every binary, e.g. for
@@ -41,12 +46,13 @@ else
   testbin=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/test-bin/binder
   (cd "$testbin" && sha256sum --quiet -c "$here/test-bin.sha256") || {
     echo "$testbin does not match supervisor/tests/binder/test-bin.sha256; refusing to run" >&2
+    echo "(the binaries come from an AOSP build; see the top of $0)" >&2
     exit 1
   }
   tests=("$@")
   ((${#tests[@]})) || tests=(
     binderDriverInterfaceTest
-    binderLibTest:-BinderLibTest.BinderNetlinkFailedReply:BinderLibTest.CheckServiceAccessNotOk:BinderLibTest.GetCallingUidWithSetuid:BinderLibTest.InheritRt:BinderLibTest.SchedPolicySet
+    binderLibTest:-BinderLibTest.BinderNetlink*:BinderLibTest.CheckServiceAccessNotOk:BinderLibTest.GetCallingUidWithSetuid:BinderLibTest.InheritRt:BinderLibTest.SchedPolicySet
     binderSafeInterfaceTest
     binderThroughputTest
   )
@@ -70,6 +76,12 @@ mode=$1
 shift
 R=$scratch/root
 bionic_root "$R" "$img/vendor"
+# The unit's own cgroup, for the freezer tests: libprocessgroup's
+# FreezerState is cgroup.freeze there, and its process groups live under
+# system/ and apps/ (init makes those on a device).
+mkdir -p "$R/sys/fs/cgroup"
+mount -t cgroup2 -o nosuid,nodev,noexec cgroup2 "$R/sys/fs/cgroup"
+mkdir -p "$R/sys/fs/cgroup/system" "$R/sys/fs/cgroup/apps"
 mkdir -p "$R/data/nativetest64" "$R/logs"
 ro_bind "$BINDER_TESTS" "$R/data/nativetest64"
 mount --bind "$logs" "$R/logs"

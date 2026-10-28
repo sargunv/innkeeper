@@ -46,10 +46,11 @@ bionic_prepare() {
 }
 
 # bionic_unit NAME MAX_SECONDS [-E VAR=val]... -- ARG...: rerun the calling
-# script as `SCRIPT --inner ARG...`, as root of a private user, mount and pid
-# namespace, in a transient systemd user unit with a memory cap and a run time
-# limit. The unit gets BIONIC_IMG and BIONIC_APEX (from bionic_prepare) and
-# each -E.
+# script as `SCRIPT --inner ARG...`, as root of a private user, mount, pid
+# and cgroup namespace, in a transient systemd user unit with a memory cap and
+# a run time limit. The unit's cgroup is delegated, so a harness may mount it
+# (cgroup2) as the root's /sys/fs/cgroup. The unit gets BIONIC_IMG and
+# BIONIC_APEX (from bionic_prepare) and each -E.
 bionic_unit() {
   local name=$1 max=$2 envs=()
   shift 2
@@ -60,9 +61,9 @@ bionic_unit() {
   shift
   systemd-run --user --quiet --collect --wait --pipe --same-dir \
     --unit="$name-$$" -p KillMode=control-group -p RuntimeMaxSec="$max" \
-    -p MemoryHigh=3G -p MemoryMax=4G \
+    -p MemoryHigh=3G -p MemoryMax=4G -p Delegate=yes \
     -E BIONIC_IMG="$img" -E BIONIC_APEX="$apex" "${envs[@]}" \
-    -- unshare --user --map-root-user --mount --pid --fork --kill-child -- "$0" --inner "$@"
+    -- unshare --user --map-root-user --mount --pid --cgroup --fork --kill-child -- "$0" --inner "$@"
 }
 
 ro_bind() {
@@ -114,13 +115,18 @@ bionic_root() {
   return 0
 }
 
-# Readable stand-ins for libbinder's access("/dev/binder") check. The seccomp
-# filter routes every open of them to the broker.
+# Readable stand-ins for libbinder's access("/dev/binder") check (the seccomp
+# filter routes every open of them to the broker), and the driver features
+# binderfs would report, as host/launcher/ns-init.sh makes them.
 bionic_broker_nodes() {
   local d
   for d in binder hwbinder vndbinder; do
     : >"$1/dev/$d"
     chmod 0666 "$1/dev/$d"
+  done
+  mkdir -p "$1/dev/binderfs/features"
+  for d in oneway_spam_detection extended_error freeze_notification; do
+    echo 1 >"$1/dev/binderfs/features/$d"
   done
 }
 

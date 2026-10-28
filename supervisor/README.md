@@ -107,9 +107,12 @@ single-uid mode, and serves `/proc/config.gz` from the host's config.
   emulator's bounds and exactly which syscalls notify in each mode.
 - `mise run test:binder` (`tests/binder/run.sh`) runs AOSP's binder gtests
   against the broker, then against kernel binder as the oracle (exit 77 when the
-  host forbids binderfs). The binaries come from
+  host forbids binderfs), in a root with the test unit's own cgroup for the
+  freezer cases. The binaries come from
   `$XDG_DATA_HOME/linuxapk/test-bin/binder`, checked against
-  `tests/binder/test-bin.sha256`.
+  `tests/binder/test-bin.sha256`; Android's CI doesn't publish them for the
+  image's release, so they are built from AOSP (the header of `run.sh` says
+  how).
 - `mise run test:boot` boots both uid modes and runs `selftest`.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
