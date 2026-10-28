@@ -67,6 +67,15 @@ but that is policy enforced by Android's own processes, not by the kernel.
   checks admit any app to every service, including input. That matches desktop
   parity: a native app running as the user can reach the same desktop services.
 
+## Flatpak mode
+
+The Flatpak sandbox is the boundary, as for any Flatpak app
+([session.md](session.md#flatpak-mode)). Android has no network namespace of its
+own there: it uses the host's network, as a native app with `--share=network`
+does, and netd's routing and firewall rules are accepted and ignored, so per-app
+network restrictions don't apply. Only single-uid mode exists, and there are no
+cgroups: a session has no memory cap of its own.
+
 ## Desktop exposure
 
 - **Links:** only absolute `http(s)` URLs, rate-limited, through the OpenURI

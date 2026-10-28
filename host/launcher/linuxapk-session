@@ -25,10 +25,15 @@
 # Android uid is the host user and the supervisor virtualizes them. An
 # existing /data keeps the mode it was made in.
 #
+# Inside a Flatpak (Flatpak mode, docs/session.md) the session runs in the
+# app's own sandbox: single uid mode, no namespaces or mounts, and start stays
+# in the foreground, since the session lives as long as the sandbox does.
+#
 # It runs from an installed prefix (libexec/linuxapk; in a checkout,
 # out/stage after `mise run build`) and builds nothing. Its files:
 #   $XDG_RUNTIME_DIR/linuxapk[-<instance>]/  session.conf, pid files, the kmsg
 #     FIFO, the bridge's socket, the start-time layer over the image
+#   $XDG_DATA_HOME/linuxapk/root[-<instance>]/  Flatpak mode's composed root
 #   $XDG_STATE_HOME/linuxapk[-<instance>]/   logs (session, kmsg, bridge) and
 #     the documents service's grants
 #   $XDG_DATA_HOME/linuxapk/                 images/, data[-<instance>]/
@@ -80,6 +85,12 @@ addons=$data_home/addons
 android=$share/android
 unit=linuxapk-session$sfx
 conf=$run/session.conf
+# Flatpak mode: the session runs inside this app's own sandbox, which allows
+# no mounts, namespaces or systemd units (docs/session.md). Its composed root
+# lives on disk.
+sandbox=""
+[[ -f /.flatpak-info ]] && sandbox=flatpak
+root=$data_home/root$sfx
 # The image: the pinned AOSP CI build's extracted partitions ($img), its
 # flattened APEXes ($apexdir) and the layers derived from them ($derived).
 # Our overrides are the staged Android tree (android/overlay and the built
@@ -154,7 +165,7 @@ uid_setup() {
 # Runs a command in a user namespace with the session's id maps, where it acts
 # as Android's root and its files can belong to Android's uids.
 as_android() {
-  unshare "${idmap[@]}" -- "$@"
+  if [[ $sandbox == flatpak ]]; then "$@"; else unshare "${idmap[@]}" -- "$@"; fi
 }
 
 # The live session's configuration (written by start).
@@ -201,6 +212,13 @@ runtime_layer() {
     echo "ro.hardware.vulkan=$vk"
     # Composer backend: windows through the bridge, or none.
     echo "vendor.linuxapk.hwc.backend=$hwc_backend"
+    if [[ $sandbox == flatpak ]]; then
+      # No mounts, so zygote can't hide other apps' data dirs.
+      echo "persist.zygote.app_data_isolation=false"
+      # The host's network is Android's (the system app's HostNetworkFeature),
+      # with the host's resolvers.
+      echo "ro.vendor.linuxapk.host_net.dns=$(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf | paste -sd, -)"
+    fi
     echo "# --- linuxapk-session: image/vendor.prop ---"
     cat "$share/image/vendor.prop"
   )
@@ -279,7 +297,12 @@ start() {
   broker_debug=${LINUXAPK_BROKER_DEBUG:-}
   # What _run and ns-init.sh need, as globals wherever it's sourced.
   declare -p inst unit run state data img apexdir derived addons android uid_mode idmap \
-    bridge_args bridge_env broker_debug | sed 's/^declare /declare -g /' >"$conf"
+    bridge_args bridge_env broker_debug sandbox root | sed 's/^declare /declare -g /' >"$conf"
+
+  if [[ $sandbox == flatpak ]]; then
+    start_in_sandbox "$fg"
+    return
+  fi
 
   # Everything (log reader, bridge, unshare, the namespace) runs in one
   # transient systemd user service, so it outlives this shell and "stop" can
@@ -303,6 +326,28 @@ start() {
     tail -n +1 --pid="$p" -f "$state/kmsg.log" || true
   fi
   return 0
+}
+
+# Flatpak mode: the session lives as long as this process, which holds the
+# sandbox open, so start always waits for it (with -f, showing the log).
+start_in_sandbox() {
+  local p runner
+  "$here/linuxapk-session" _run "$conf" &
+  runner=$!
+  for _ in $(seq 300); do
+    [[ -s $run/pid ]] && break
+    kill -0 "$runner" 2>/dev/null || break
+    sleep 0.1
+  done
+  p=$(ns_pid) || {
+    cat "$state/session.log" >&2
+    die "session failed to start"
+  }
+  echo "session started ($image, uid mode $uid_mode, in Flatpak): Android init = pid $p; log: $state/kmsg.log"
+  if (($1)); then
+    tail -n +1 --pid="$p" -f "$state/kmsg.log" || true
+  fi
+  wait "$runner"
 }
 
 # The desktop bridge's arguments and environment. It runs on the host (glibc,
@@ -366,6 +411,24 @@ _run() {
     echo "the bridge did not start (see $state/bridge.log)" >>"$state/session.log"
     return 1
   }
+  if [[ $sandbox == flatpak ]]; then
+    # No namespaces: ns-init.sh builds the root and execs pivot-exec, whose
+    # child is init. The sandbox's network is the host's (no pasta).
+    "$here/ns-init.sh" "$conf" </dev/null >>"$state/session.log" 2>&1 &
+    local outer=$! inner=""
+    for _ in $(seq 300); do
+      inner=$(pgrep -P "$outer" -x init | head -1 || true)
+      [[ -n $inner ]] && break
+      kill -0 "$outer" 2>/dev/null || break
+      sleep 0.05
+    done
+    if [[ -n $inner ]]; then
+      echo "$outer" >"$run/outer.pid"
+      echo "$inner" >"$run/pid"
+    fi
+    wait "$outer"
+    return 0
+  fi
   # Outer namespaces: user, mount, pid, cgroup. pivot-exec then nests
   # user/mount/pid/cgroup/net/ipc/uts namespaces for Android itself.
   unshare "${idmap[@]}" --mount --pid --cgroup --fork --kill-child \
@@ -407,6 +470,11 @@ stop() {
   for f in outer.pid pid; do
     [[ -f $run/$f ]] && p=$(<"$run/$f") && [[ -d /proc/$p ]] && kill -KILL "$p" 2>/dev/null
   done
+  if [[ $sandbox == flatpak ]]; then
+    rm -f "$run/pid" "$run/outer.pid"
+    echo "session stopped"
+    return 0
+  fi
   systemctl --user stop "$unit" 2>/dev/null || true
   systemctl --user reset-failed "$unit" 2>/dev/null || true
   for _ in $(seq 50); do
@@ -445,24 +513,33 @@ reset() {
 # Run a command inside the session (root in the user ns), with the Android
 # environment from init.environ.rc and the derived classpath.
 exec_in() {
-  local p
+  local p enter relay
   p=$(ns_pid) || die "not running"
-  # Join the session's own cgroup so nothing started here outlives "stop".
-  local cg
-  cg=$(systemctl --user show -P ControlGroup "$unit")
-  [[ -n $cg ]] && echo $$ >"/sys/fs/cgroup$cg/cgroup.procs"
+  # Binder needs the seccomp filter that only descendants of init have, so
+  # the command runs through the exec relay.
+  if [[ $sandbox == flatpak ]]; then
+    # Android's root is this sandbox's, but only processes under the filter
+    # see Android paths for it (supervisor/broker/src/flat.rs), which the
+    # linker needs: start with the (static) relay.
+    enter=(env -i /system/bin/linuxapk-exec)
+    relay=""
+  else
+    # Join the session's own cgroup so nothing started here outlives "stop".
+    local cg
+    cg=$(systemctl --user show -P ControlGroup "$unit")
+    [[ -n $cg ]] && echo $$ >"/sys/fs/cgroup$cg/cgroup.procs"
+    enter=(nsenter -t "$p" -U -m -p -C -n -i -u --preserve-credentials -r -w)
+    relay=/system/bin/linuxapk-exec
+  fi
   # shellcheck disable=SC2016 # expanded by the session's shell
-  exec nsenter -t "$p" -U -m -p -C -n -i -u --preserve-credentials -r -w \
-    /system/bin/sh -c '
+  exec "${enter[@]}" /system/bin/sh -c '
       for f in /init.environ.rc /data/system/environ/classpath; do
         [ -r "$f" ] && eval "$(sed -n "s/^ *export \([^ ]*\) \(.*\)/export \1=\"\2\"/p" "$f")"
       done
       export PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin
       export HOME=/data/local/tmp TMPDIR=/data/local/tmp
       cd /
-      # Binder needs the seccomp filter that only descendants of init have,
-      # so run the command through the exec relay.
-      exec /system/bin/linuxapk-exec "$@"' sh "$@"
+      exec '"$relay"' "$@"' sh "$@"
 }
 
 # selftest's group probes for a single-mode session (pid 1 = $1).
@@ -506,6 +583,7 @@ single_mode_groups() {
 # Host-safety probes against a live session; each must report "ok".
 selftest() {
   local p
+  [[ $sandbox != flatpak ]] || die "selftest has no Flatpak-mode probes yet (#25)"
   p=$(ns_pid) || die "not running"
   load_conf
   {

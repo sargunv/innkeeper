@@ -9,7 +9,8 @@
 # session.conf (written by linuxapk-session start) sets: run, data; img,
 # apexdir, derived (the image's partitions, flattened APEXes and derived
 # layers); android (our Android tree); addons (addon layers, one dir each);
-# uid_mode; broker_debug.
+# uid_mode; broker_debug; sandbox (flatpak or empty) and root (Flatpak mode's
+# composed root).
 # shellcheck disable=SC2154 # session.conf's variables
 set -euo pipefail
 
@@ -28,6 +29,130 @@ addon_layers=()
 for a in "$addons"/*/; do [[ -d $a ]] && addon_layers+=("${a%/}"); done
 
 log() { echo "ns-init: $*" >&2; }
+
+# Starts Android init (second stage) through pivot-exec in root $1, with a
+# clean environment plus what pivot-exec, the broker and the shim read.
+start_init() {
+  local v root=$1
+  shift
+  for v in $(compgen -e); do unset "$v"; done
+  export PATH=/system/bin:/system/xbin:/vendor/bin
+  # Absolute path: a bare name is not found from APEX linker namespaces.
+  export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
+  export LINUXAPK_BROKER=/system/bin/linuxapk-broker
+  [[ -n $broker_debug ]] && export LINUXAPK_BROKER_DEBUG=$broker_debug
+  [[ $uid_mode == single ]] && export LINUXAPK_SINGLE_UID=1
+  for v in "$@"; do export "${v?}"; done
+  exec "$here/pivot-exec" "$root" /system/bin/init second_stage
+}
+
+# Binder is served in userspace (supervisor/README.md), so /dev ($1) gets
+# dummy, readable binder device nodes, made before the seccomp filter is
+# installed: libbinder gates on access("/dev/binder", R_OK) in
+# selfIfKernelBinderEnabled(), the supervisor intercepts real opens and
+# injects a memfd, and init cannot create them itself (its own open of
+# /dev/binder is intercepted). binderfs/features says what binderfs would
+# report about the driver (libbinder reads these): the broker implements each.
+binder_nodes() {
+  local d
+  for d in binder hwbinder vndbinder; do
+    : >"$1/$d"
+    chmod 0666 "$1/$d"
+  done
+  mkdir -p "$1/binderfs/features"
+  for d in oneway_spam_detection extended_error freeze_notification; do
+    echo 1 >"$1/binderfs/features/$d"
+  done
+}
+
+# --- Flatpak mode ---------------------------------------------------------------
+# The sandbox has no mounts or namespaces to give, but its "/", /dev and /sys
+# are writable tmpfs dirs of its own. The partitions are composed on disk
+# (hardlinks to the image cache, copies of the layers above it), and "/"
+# gets symlinks to them; the broker shows the Android paths behind them
+# (supervisor/broker/src/flat.rs).
+if [[ $sandbox == flatpak ]]; then
+  R=$root
+  # A layer's files over the composed tree (cp unlinks a hardlinked file
+  # before replacing it, so the image cache is never written).
+  over() {
+    if [[ -d $1 ]]; then cp -a --reflink=auto --remove-destination "$1/." "$2/"; fi
+  }
+  [[ -d $R ]] && chmod -R u+w "$R"
+  rm -rf "$R"
+  mkdir -p "$R"
+  # Each partition's stack, bottom first (see the overlay stack below).
+  for p in system vendor system_ext product odm system_dlkm vendor_dlkm odm_dlkm; do
+    src=$img/$p
+    [[ $p == system ]] && src=$img/system/system
+    cp -al "$src" "$R/$p"
+    for l in "$derived/common/$p" "$uid_layer/$p" "$android/$p" "${addon_layers[@]/%//$p}" "$run/layer/$p"; do
+      over "$l" "$R/$p"
+    done
+  done
+  cp -al "$apexdir" "$R/apex"
+  over "$uid_layer/apex" "$R/apex"
+  over "$run/layer/apex" "$R/apex"
+  # Read-only files, as on read-only mounts: ART refuses to load a dex file
+  # its process could write. (The hardlinked image cache is never written
+  # either.) The uid mode's layer sets exact modes code verifies (clatd's
+  # 06755), so it goes on again.
+  find "$R" -type f -perm /222 -exec chmod a-w {} +
+  over "$uid_layer/apex" "$R/apex"
+  mkdir -p "$R/linuxapk/proc/sys/vm"
+  ln -s /apex "$R/linuxapk/apex"
+  sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
+    "$apexdir/apex-info-list.xml" >"$R/linuxapk/apexd-mounts"
+  cp "$run/cmdline" "$run/bootconfig" "$R/linuxapk/proc/"
+  echo 32 >"$R/linuxapk/proc/sys/vm/mmap_rnd_bits"
+  # system_server needs a kernel config (see shim/); the sandbox can't read
+  # /boot. The one option it reads, as every x86_64 distro kernel sets it.
+  echo CONFIG_VMAP_STACK=y | gzip -c >"$R/linuxapk/config.gz"
+  # No cgroup tree in the sandbox: /sys/fs/cgroup is a plain directory, so
+  # process groups are bookkeeping only and kills fall back to the process
+  # group (pgid). netd attaches its (emulated) eBPF programs there.
+  mkdir -p /sys/fs/cgroup/system /sys/fs/cgroup/apps
+  # The BPF sysctls netbpfload sets (linuxapk-bpfload binds the same).
+  mkdir -p "$R/linuxapk/proc/sys/kernel" "$R/linuxapk/proc/sys/net/core"
+  echo 2 >"$R/linuxapk/proc/sys/kernel/unprivileged_bpf_disabled"
+  echo 1 >"$R/linuxapk/proc/sys/net/core/bpf_jit_enable"
+  echo 0 >"$R/linuxapk/proc/sys/net/core/bpf_jit_kallsyms"
+
+  for p in system vendor system_ext product odm system_dlkm vendor_dlkm odm_dlkm apex linuxapk; do
+    ln -sfn "$R/$p" "/$p"
+  done
+  mkdir -p "$data"
+  ln -sfn "$data" /data
+  # vold bind-mounts /data/data onto /data/user/0, where apps' data dirs are
+  # (the broker's lstat shows the symlink as that directory).
+  mkdir -p "$data/user" "$data/data"
+  [[ -L $data/user/0 ]] || ln -s /data/data "$data/user/0"
+  # The image's other top-level entries, where the sandbox has none (its /etc
+  # and /bin stay).
+  for e in "$img/system"/* "$img/system"/.[!.]*; do
+    [[ -e $e || -L $e ]] || continue
+    n=$(basename "$e")
+    [[ -e /$n || -L /$n ]] && continue
+    if [[ -L $e ]]; then cp -P "$e" "/$n"; elif [[ -d $e ]]; then mkdir "/$n"; else cp -p "$e" "/$n"; fi
+  done
+  # Android's /etc is /system/etc; the sandbox's /etc stays (the glibc side
+  # needs it) and gains the entries it lacks, such as task_profiles.json:
+  # dirs as symlinks, files as copies (libbase opens files O_NOFOLLOW).
+  for e in "$R/system/etc"/*; do
+    n=$(basename "$e")
+    [[ -e /etc/$n || -L /etc/$n ]] && continue
+    if [[ -d $e && ! -L $e ]]; then ln -s "/system/etc/$n" "/etc/$n"; else cp -P -p "$e" "/etc/$n"; fi
+  done
+  binder_nodes /dev
+  chmod 0700 "$run/bridge"
+  mkdir -p /dev/socket
+  ln -sfn "$run/bridge" /dev/socket/linuxapk
+  ln -sfn "$run/kmsg" /dev/kmsg
+  mkdir -p /sys/fs/bpf
+  chmod 1777 /sys/fs/bpf
+  start_init / LINUXAPK_FLATPAK=1 "LINUXAPK_ROOT_MAP=$R=/
+$data=/data"
+fi
 
 # Safety: never run Android init outside a fresh pid namespace.
 if [[ $$ != 1 ]]; then
@@ -165,22 +290,7 @@ if [[ -d /dev/dri ]]; then
   mkdir -p "$R/dev/dri"
   mount --rbind /dev/dri "$R/dev/dri"
 fi
-# Binder is served in userspace, so create dummy, readable binder device nodes
-# here (before the seccomp filter is installed). libbinder gates on
-# access("/dev/binder", R_OK) in selfIfKernelBinderEnabled(); the files must
-# exist and be readable. Real opens are intercepted by the supervisor, which
-# injects a memfd, so these files are never actually opened or read. init
-# cannot create them itself (its own open of /dev/binder is intercepted).
-for d in binder hwbinder vndbinder; do
-  : >"$R/dev/$d"
-  chmod 0666 "$R/dev/$d"
-done
-# What binderfs would report about the driver (libbinder reads these): the
-# broker implements each.
-mkdir -p "$R/dev/binderfs/features"
-for f in oneway_spam_detection extended_error freeze_notification; do
-  echo 1 >"$R/dev/binderfs/features/$f"
-done
+binder_nodes "$R/dev"
 
 # --- /proc, /sys -------------------------------------------------------------
 # A clean procfs for this (outer) pid namespace. pivot-exec mounts the nested
@@ -234,13 +344,4 @@ if touch "$R/sys/.linuxapk-rw-probe" 2>/dev/null; then
 fi
 
 # --- go -----------------------------------------------------------------------
-# Android starts with a clean environment, plus what pivot-exec, the broker
-# and the shim read.
-for v in $(compgen -e); do unset "$v"; done
-export PATH=/system/bin:/system/xbin:/vendor/bin
-# Absolute path: a bare name is not found from APEX linker namespaces.
-export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
-export LINUXAPK_BROKER=/system/bin/linuxapk-broker
-[[ -n $broker_debug ]] && export LINUXAPK_BROKER_DEBUG=$broker_debug
-[[ $uid_mode == single ]] && export LINUXAPK_SINGLE_UID=1
-exec "$here/pivot-exec" "$R" /system/bin/init second_stage
+start_init "$R"

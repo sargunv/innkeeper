@@ -96,9 +96,11 @@ network through pasta ([session.md](session.md)).
   so dev, test and packaged runs share one code path.
   [tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
   module stages and where it runs.
-- Inside Flatpak there are no nested user namespaces and no mounts, so a Flatpak
-  session needs single-uid mode and a root built from symlinks (Flatpak's `/` is
-  a writable tmpfs); that work is the M5 milestone.
+- Inside Flatpak there are no nested user namespaces, mounts or capabilities, so
+  the session runs in the app's own sandbox in single-uid mode, with a root
+  built from symlinks (Flatpak's `/` is a writable tmpfs) and the host's network
+  ([Flatpak mode](session.md#flatpak-mode)). No `flatpak-spawn --host`: that is
+  a sandbox escape.
 
 ## Non-goals
 
