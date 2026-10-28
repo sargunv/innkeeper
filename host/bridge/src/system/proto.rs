@@ -16,7 +16,7 @@
 //!
 //! | Event    | Message      | Body (fd)                                                                                                                                                                                                |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-//! | `0x4301` | SETTINGS     | `u8 color_scheme` (0 none, 1 dark, 2 light), `u8 has_accent`, `u8 r, g, b`, `u8 contrast`, `u8 reduced_motion`, `u8 clock` (0, 1 12h, 2 24h), `f32 text_scale` (0 unknown), name time zone, name locales |
+//! | `0x4301` | SETTINGS     | `u8 color_scheme` (0 none, 1 dark, 2 light), `u8 has_accent`, `u8 r, g, b`, `u8 contrast`, `u8 reduced_motion`, `u8 clock` (0, 1 12h, 2 24h), `f32 text_scale` (0 unknown), name time zone, name locales, name LC_TIME locale, name LC_MEASUREMENT locale |
 //! | `0x4302` | NOTIFY_EVENT | `u32 id`, `u8 what` (1 clicked, 2 action, 3 dismissed, 4 reply), `u8 action`, `u16 0`, `u32 len` (fd: the reply text, for 4)                                                                             |
 //! | `0x4303` | CLIP         | `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len` (fd: the content)                                                                                                                                          |
 //! | `0x4304` | MEDIA_CMD    | `u32 player`, `u8 cmd` (1 play, 2 pause, 3 play/pause, 4 stop, 5 next, 6 previous, 7 seek by, 8 seek to, 9 raise), `u8 0`, `u16 0`, `i64 arg` (µs)                                                       |
@@ -249,6 +249,11 @@ pub struct Settings {
     pub timezone: String,
     /// BCP 47 language tags in preference order, comma-separated.
     pub locales: String,
+    /// The `LC_TIME` locale as a BCP 47 tag (week start, regional
+    /// preferences); empty if unset.
+    pub time_locale: String,
+    /// The `LC_MEASUREMENT` locale as a BCP 47 tag (temperature unit).
+    pub measure_locale: String,
 }
 
 impl Settings {
@@ -265,7 +270,9 @@ impl Settings {
             .u8(self.clock)
             .f32(self.text_scale)
             .name(&self.timezone)
-            .name(&self.locales);
+            .name(&self.locales)
+            .name(&self.time_locale)
+            .name(&self.measure_locale);
         w.into_vec()
     }
 
@@ -283,6 +290,8 @@ impl Settings {
             text_scale: r.f32()?,
             timezone: r.name()?,
             locales: r.name()?,
+            time_locale: r.name()?,
+            measure_locale: r.name()?,
         };
         r.end()?;
         Ok(s)
@@ -398,6 +407,8 @@ mod tests {
             text_scale: 1.25,
             timezone: "Europe/Berlin".into(),
             locales: "de-DE,en-US".into(),
+            time_locale: "en-GB".into(),
+            measure_locale: "en-US".into(),
         };
         let b = s.encode();
         assert!(b.len() <= crate::ipc::wire::MAX_MSG - HDR);

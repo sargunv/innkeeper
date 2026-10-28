@@ -5,11 +5,14 @@ import android.app.AlarmManager
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.icu.util.LocaleData
+import android.icu.util.ULocale
 import android.os.LocaleList
 import android.provider.Settings
 import android.util.Log
 import dev.linuxapk.system.bridge.Wire
 import java.nio.ByteBuffer
+import java.util.Locale
 import java.util.TimeZone
 import org.json.JSONObject
 
@@ -23,6 +26,8 @@ data class DesktopSettings(
   val textScale: Float,
   val timezone: String,
   val locales: String,
+  val timeLocale: String,
+  val measureLocale: String,
 ) {
   companion object {
     fun decode(r: ByteBuffer): DesktopSettings {
@@ -41,6 +46,8 @@ data class DesktopSettings(
         textScale = r.float,
         timezone = Wire.name(r),
         locales = Wire.name(r),
+        timeLocale = Wire.name(r),
+        measureLocale = Wire.name(r),
       )
     }
   }
@@ -49,9 +56,10 @@ data class DesktopSettings(
 /**
  * Applies the desktop's settings to Android, live: dark mode (UiModeManager), the accent color as
  * the Material You seed (SystemUI's theme customization setting), contrast, reduced motion, the
- * time zone, the locales, the 12/24-hour clock and the font scale. Each setting is applied when the
- * desktop's value changes (and once after connecting, if it differs from Android's), so a change
- * made inside Android lasts until the desktop changes that setting again.
+ * time zone, the locales with their regional preferences, the 12/24-hour clock and the font scale.
+ * Each setting is applied when the desktop's value changes (and once after connecting, if it
+ * differs from Android's), so a change made inside Android lasts until the desktop changes that
+ * setting again.
  */
 class HostSettings(private val context: Context) {
   private var last: DesktopSettings? = null
@@ -67,7 +75,11 @@ class HostSettings(private val context: Context) {
     step("contrast") { if (changed { it.contrast }) contrast(s.contrast, prev == null) }
     step("motion") { if (changed { it.reducedMotion }) motion(s.reducedMotion, prev == null) }
     step("time zone") { if (changed { it.timezone }) timezone(s.timezone) }
-    step("locales") { if (changed { it.locales }) locales(s.locales) }
+    step("locales") {
+      if (changed { Triple(it.locales, it.timeLocale, it.measureLocale) }) {
+        locales(s.locales, s.timeLocale, s.measureLocale)
+      }
+    }
     step("clock") { if (changed { it.clock }) clock(s.clock) }
     step("font scale") { if (changed { it.textScale }) fontScale(s.textScale) }
   }
@@ -167,16 +179,71 @@ class HostSettings(private val context: Context) {
     Log.i(TAG, "time zone -> $tz")
   }
 
-  private fun locales(tags: String) {
+  /**
+   * The desktop's languages, with its regional formats as Android's regional preferences: the
+   * Unicode extensions Settings writes (`fw` first day of week from `LC_TIME`, `mu` temperature
+   * unit from `LC_MEASUREMENT`), on every locale and in `locale_preferences`, when they differ from
+   * the language's own defaults.
+   */
+  private fun locales(tags: String, time: String, measure: String) {
     if (tags.isEmpty()) return
-    val list = LocaleList.forLanguageTags(tags)
-    if (list.isEmpty || list.toLanguageTags() == LocaleList.getDefault().toLanguageTags()) return
+    val base = LocaleList.forLanguageTags(tags)
+    if (base.isEmpty) return
+    val prefs = regional(base[0], time, measure)
+    val list =
+      if (prefs.isEmpty()) base
+      else
+        LocaleList(
+          *Array(base.size()) { i ->
+            val b = Locale.Builder().setLocale(base[i])
+            for ((k, v) in prefs) b.setUnicodeLocaleKeyword(k, v)
+            b.build()
+          },
+        )
+    val und = Locale.Builder().setLanguage("und")
+    for ((k, v) in prefs) und.setUnicodeLocaleKeyword(k, v)
+    val prefTag = if (prefs.isEmpty()) "" else und.build().toLanguageTag()
+    try {
+      if (Settings.System.getString(cr, LOCALE_PREFERENCES).orEmpty() != prefTag) {
+        Settings.System.putString(cr, LOCALE_PREFERENCES, prefTag)
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "locale preferences: $e")
+    }
+    if (list.toLanguageTags() == LocaleList.getDefault().toLanguageTags()) return
     // com.android.internal.app.LocalePicker.updateLocales (CHANGE_CONFIGURATION).
     Class.forName("com.android.internal.app.LocalePicker")
       .getMethod("updateLocales", LocaleList::class.java)
       .invoke(null, list)
     Log.i(TAG, "locales -> ${list.toLanguageTags()}")
   }
+
+  /** Unicode keywords for [time]'s week start and [measure]'s unit where [lang] differs. */
+  private fun regional(lang: Locale, time: String, measure: String): Map<String, String> {
+    val out = linkedMapOf<String, String>()
+    val l = ULocale.forLocale(lang)
+    if (time.isNotEmpty()) {
+      val fw = firstDay(ULocale.forLanguageTag(time))
+      if (fw != firstDay(l)) out["fw"] = DAYS[fw - 1]
+    }
+    if (measure.isNotEmpty()) {
+      val mu = temperature(ULocale.forLanguageTag(measure))
+      if (mu != temperature(l)) out["mu"] = mu
+    }
+    return out
+  }
+
+  private fun firstDay(l: ULocale): Int = android.icu.util.Calendar.getInstance(l).firstDayOfWeek
+
+  private fun temperature(l: ULocale): String =
+    if (
+      LocaleData.getMeasurementSystem(ULocale.addLikelySubtags(l)) ==
+        LocaleData.MeasurementSystem.US
+    ) {
+      "fahrenhe"
+    } else {
+      "celsius"
+    }
 
   private fun clock(c: Int) {
     val value =
@@ -209,6 +276,9 @@ class HostSettings(private val context: Context) {
   companion object {
     const val TAG = "LinuxApkSettings"
     private const val THEME_KEY = "theme_customization_overlay_packages"
+    /** Settings.System.LOCALE_PREFERENCES (hidden): what Settings shows as regional preferences. */
+    private const val LOCALE_PREFERENCES = "locale_preferences"
+    private val DAYS = arrayOf("sun", "mon", "tue", "wed", "thu", "fri", "sat")
     private const val PALETTE = "android.theme.customization.system_palette"
     private const val ACCENT = "android.theme.customization.accent_color"
     private const val SOURCE = "android.theme.customization.color_source"

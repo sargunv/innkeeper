@@ -1,6 +1,8 @@
 //! Desktop settings for Android: dark mode, accent color, contrast, reduced
 //! motion, the clock format and text scale (portal Settings), plus the time
-//! zone (`/etc/localtime`) and the locale (the session environment).
+//! zone (`/etc/localtime`) and the locale: the session environment, and on
+//! KDE `plasma-localerc`, which System Settings edits while the session runs
+//! (the environment only changes at the next login).
 //!
 //! One watcher thread per bridge. Each change is sent as a full `SETTINGS`
 //! event to every subscribed system-app connection.
@@ -22,37 +24,53 @@ const APPEARANCE: &str = "org.freedesktop.appearance";
 const GNOME_IFACE: &str = "org.gnome.desktop.interface";
 
 pub struct SettingsHub {
-    state: Mutex<Settings>,
+    state: Mutex<Desktop>,
     subs: Subscribers,
+}
+
+/// The settings sent, plus the two desktop switches reduced motion follows:
+/// the portal's `reduced-motion` (GNOME's accessibility "Reduce Animation",
+/// KDE's animation speed) and GNOME's `enable-animations`, which the portal
+/// doesn't map.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Desktop {
+    s: Settings,
+    reduce_motion: bool,
+    animations_off: bool,
 }
 
 impl SettingsHub {
     /// Reads the current settings and starts watching them.
     pub fn start(dbus: Option<zbus::blocking::Connection>) -> Arc<SettingsHub> {
         let hub = Arc::new(SettingsHub {
-            state: Mutex::new(Settings::default()),
+            state: Mutex::new(Desktop::default()),
             subs: Subscribers::default(),
         });
-        hub.update(|s| {
-            s.timezone = timezone();
-            s.locales = locales();
+        hub.update(|d| {
+            d.s.timezone = timezone();
+            set_locales(&mut d.s);
         });
         if let Some(conn) = dbus {
             let h = hub.clone();
             spawn("settings-portal", move || h.watch_portal(conn));
         }
+        // Polled: the zone is a symlink and plasma-localerc is rewritten
+        // whole, and both rarely change.
         let h = hub.clone();
         spawn("settings-tz", move || {
             loop {
                 std::thread::sleep(Duration::from_secs(5));
-                h.update(|s| s.timezone = timezone());
+                h.update(|d| {
+                    d.s.timezone = timezone();
+                    set_locales(&mut d.s);
+                });
             }
         });
         hub
     }
 
     pub fn current(&self) -> Settings {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap().s.clone()
     }
 
     /// Subscribes `e` and sends it the current settings.
@@ -66,17 +84,19 @@ impl SettingsHub {
         self.subs.remove(k);
     }
 
-    fn update(&self, f: impl FnOnce(&mut Settings)) {
+    fn update(&self, f: impl FnOnce(&mut Desktop)) {
         let body = {
             let mut st = self.state.lock().unwrap();
             let mut next = st.clone();
             f(&mut next);
-            if next == *st {
+            next.s.reduced_motion = (next.reduce_motion || next.animations_off) as u8;
+            let changed = next.s != st.s;
+            *st = next;
+            if !changed {
                 return;
             }
-            crate::info!("settings: {next:?}");
-            *st = next;
-            st.encode()
+            crate::info!("settings: {:?}", st.s);
+            st.s.encode()
         };
         self.subs.broadcast(ev::SETTINGS, &body, &[], None);
     }
@@ -91,10 +111,10 @@ impl SettingsHub {
         let all: zbus::Result<HashMap<String, HashMap<String, OwnedValue>>> =
             proxy.call("ReadAll", &(vec![APPEARANCE, GNOME_IFACE],));
         match all {
-            Ok(all) => self.update(|s| {
+            Ok(all) => self.update(|d| {
                 for (ns, kv) in &all {
                     for (k, v) in kv {
-                        apply(s, ns, k, v);
+                        apply(d, ns, k, v);
                     }
                 }
             }),
@@ -109,7 +129,7 @@ impl SettingsHub {
             let Ok((ns, key, value)) = body.deserialize::<(String, String, OwnedValue)>() else {
                 continue;
             };
-            self.update(|s| apply(s, &ns, &key, &value));
+            self.update(|d| apply(d, &ns, &key, &value));
         }
         crate::warn!("settings: portal signal stream ended");
     }
@@ -122,11 +142,12 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 /// Applies one portal setting. Unknown keys and malformed values are ignored.
-fn apply(s: &mut Settings, ns: &str, key: &str, v: &Value<'_>) {
+fn apply(d: &mut Desktop, ns: &str, key: &str, v: &Value<'_>) {
     // Some portal versions wrap values in an extra variant.
     if let Value::Value(inner) = v {
-        return apply(s, ns, key, inner);
+        return apply(d, ns, key, inner);
     }
+    let s = &mut d.s;
     match (ns, key) {
         (APPEARANCE, "color-scheme") => {
             if let Ok(n) = u32::try_from(v) {
@@ -141,7 +162,12 @@ fn apply(s: &mut Settings, ns: &str, key: &str, v: &Value<'_>) {
         }
         (APPEARANCE, "reduced-motion") => {
             if let Ok(n) = u32::try_from(v) {
-                s.reduced_motion = (n == 1) as u8;
+                d.reduce_motion = n == 1;
+            }
+        }
+        (GNOME_IFACE, "enable-animations") => {
+            if let Ok(on) = bool::try_from(v) {
+                d.animations_off = !on;
             }
         }
         (GNOME_IFACE, "clock-format") => {
@@ -217,19 +243,75 @@ fn timezone() -> String {
     }
 }
 
-/// The session's languages: `LANGUAGE` (a preference list), then `LC_ALL`,
-/// `LC_MESSAGES`, `LANG`.
-fn locales() -> String {
-    let mut list: Vec<String> = Vec::new();
-    for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
-        if let Ok(v) = std::env::var(var)
-            && !v.is_empty()
+/// The locale variables: the session's environment, overridden on KDE by
+/// `$XDG_CONFIG_HOME/plasma-localerc` (`[Formats]` `LANG` and `LC_*`,
+/// `[Translations]` `LANGUAGE`), which Plasma exports at login.
+fn locale_env() -> impl Fn(&str) -> Option<String> {
+    let kde = std::env::var("XDG_CURRENT_DESKTOP")
+        .is_ok_and(|d| d.split(':').any(|d| d.eq_ignore_ascii_case("KDE")));
+    let plasma = if kde {
+        let dir = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
+        dir.and_then(|d| std::fs::read_to_string(d.join("plasma-localerc")).ok())
+            .map(|t| plasma_localerc(&t))
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+    move |var: &str| {
+        plasma
+            .get(var)
+            .cloned()
+            .or_else(|| std::env::var(var).ok())
+            .filter(|v| !v.is_empty())
+    }
+}
+
+/// `[Formats]` and `[Translations]` keys of a `plasma-localerc`.
+fn plasma_localerc(text: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let mut group = "";
+    for line in text.lines().map(str::trim) {
+        if let Some(g) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            group = g;
+        } else if let Some((k, v)) = line.split_once('=')
+            && matches!(group, "Formats" | "Translations")
+            && (k == "LANG" || k == "LANGUAGE" || k.starts_with("LC_"))
         {
-            list.push(v);
-            break;
+            out.insert(k.trim().to_owned(), v.trim().to_owned());
         }
     }
-    if let Ok(l) = std::env::var("LANGUAGE") {
+    out
+}
+
+fn set_locales(s: &mut Settings) {
+    let env = locale_env();
+    s.locales = locales(&env);
+    let category = |var: &str| {
+        ["LC_ALL", var, "LANG"]
+            .iter()
+            .find_map(|v| env(v))
+            .and_then(|p| posix_to_bcp47(&p))
+            .and_then(|t| bcp47_list(std::iter::once(t)))
+            .unwrap_or_default()
+    };
+    s.time_locale = category("LC_TIME");
+    s.measure_locale = category("LC_MEASUREMENT");
+}
+
+/// The session's languages: `LANGUAGE` (a preference list), then `LC_ALL`,
+/// `LC_MESSAGES`, `LANG`.
+fn locales(env: &impl Fn(&str) -> Option<String>) -> String {
+    let mut list: Vec<String> = Vec::new();
+    if let Some(v) = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|v| env(v))
+    {
+        list.push(v);
+    }
+    if let Some(l) = env("LANGUAGE") {
         let mut pref: Vec<String> = l.split(':').map(str::to_owned).collect();
         pref.append(&mut list);
         list = pref;
@@ -302,41 +384,67 @@ mod tests {
 
     #[test]
     fn portal_values() {
-        let mut s = Settings::default();
-        apply(&mut s, APPEARANCE, "color-scheme", &Value::from(1u32));
+        let mut d = Desktop::default();
+        apply(&mut d, APPEARANCE, "color-scheme", &Value::from(1u32));
         apply(
-            &mut s,
+            &mut d,
             APPEARANCE,
             "accent-color",
             &Value::from((0.239216f64, 0.682353f64, 0.913725f64)),
         );
-        apply(&mut s, GNOME_IFACE, "clock-format", &Value::from("24h"));
+        apply(&mut d, GNOME_IFACE, "clock-format", &Value::from("24h"));
         apply(
-            &mut s,
+            &mut d,
             GNOME_IFACE,
             "text-scaling-factor",
             &Value::from(1.25f64),
         );
-        assert_eq!(s.color_scheme, 1);
-        assert_eq!(s.accent, Some([0x3d, 0xae, 0xe9]));
-        assert_eq!(s.clock, 2);
-        assert_eq!(s.text_scale, 1.25);
+        assert_eq!(d.s.color_scheme, 1);
+        assert_eq!(d.s.accent, Some([0x3d, 0xae, 0xe9]));
+        assert_eq!(d.s.clock, 2);
+        assert_eq!(d.s.text_scale, 1.25);
         apply(
-            &mut s,
+            &mut d,
             APPEARANCE,
             "accent-color",
             &Value::from((2.0f64, 0.5f64, 0.5f64)),
         );
-        assert_eq!(s.accent, None);
-        apply(&mut s, APPEARANCE, "color-scheme", &Value::from(7u32));
-        assert_eq!(s.color_scheme, 0);
+        assert_eq!(d.s.accent, None);
+        apply(&mut d, APPEARANCE, "color-scheme", &Value::from(7u32));
+        assert_eq!(d.s.color_scheme, 0);
         apply(
-            &mut s,
+            &mut d,
             GNOME_IFACE,
             "text-scaling-factor",
             &Value::from(40.0f64),
         );
-        assert_eq!(s.text_scale, 0.0);
+        assert_eq!(d.s.text_scale, 0.0);
+    }
+
+    #[test]
+    fn plasma() {
+        let rc = "[Formats]\nLANG=de_DE.UTF-8\nLC_TIME=en_GB.UTF-8\n\n[Other]\nLANG=xx\n[Translations]\nLANGUAGE=fr:en_US\n";
+        let m = plasma_localerc(rc);
+        assert_eq!(m.get("LANG").map(String::as_str), Some("de_DE.UTF-8"));
+        assert_eq!(m.get("LC_TIME").map(String::as_str), Some("en_GB.UTF-8"));
+        let env = |v: &str| m.get(v).cloned();
+        assert_eq!(locales(&env), "fr,en-US,de-DE");
+    }
+
+    #[test]
+    fn reduced_motion() {
+        let hub = SettingsHub {
+            state: Mutex::new(Desktop::default()),
+            subs: Subscribers::default(),
+        };
+        let set = |ns, key, v: Value<'_>| hub.update(|d| apply(d, ns, key, &v));
+        set(GNOME_IFACE, "enable-animations", Value::from(false));
+        assert_eq!(hub.current().reduced_motion, 1);
+        set(APPEARANCE, "reduced-motion", Value::from(1u32));
+        set(GNOME_IFACE, "enable-animations", Value::from(true));
+        assert_eq!(hub.current().reduced_motion, 1);
+        set(APPEARANCE, "reduced-motion", Value::from(0u32));
+        assert_eq!(hub.current().reduced_motion, 0);
     }
 
     #[test]

@@ -153,8 +153,18 @@ impl Config {
         if let Some(b) = bus {
             e.insert("DBUS_SESSION_BUS_ADDRESS".into(), b);
         }
-        if let Some(d) = env::var("XDG_DATA_HOME").ok().filter(|v| !v.is_empty()) {
-            e.insert("XDG_DATA_HOME".into(), d);
+        // The host state service reads UPower, power-profiles-daemon and
+        // NetworkManager on the caller's system bus, and the settings
+        // service the desktop's locale (plasma-localerc on KDE).
+        for v in [
+            "XDG_DATA_HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_CURRENT_DESKTOP",
+            "DBUS_SYSTEM_BUS_ADDRESS",
+        ] {
+            if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
+                e.insert(v.into(), d);
+            }
         }
         // From the AppImage, those entries run apps through it, as the CLI's
         // and the manager's do.
