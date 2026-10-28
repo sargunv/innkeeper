@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use linuxapk_core::launcher::Session;
 use linuxapk_core::ops::{self, Event, LaunchOptions};
-use linuxapk_core::{validate, xdg};
+use linuxapk_core::{desktop, validate, xdg};
 
 mod splash;
 use splash::Splash;
@@ -101,7 +101,7 @@ fn run(pkg: &str, uri: Option<&str>, token: Option<String>) -> Result<()> {
             });
             Splash::show(
                 splash::Look {
-                    app_id: format!("dev.linuxapk.{pkg}"),
+                    app_id: desktop::app_id(pkg),
                     title: name,
                     color,
                     width,
