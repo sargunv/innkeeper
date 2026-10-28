@@ -35,6 +35,10 @@ out/         (gitignored) builds, generated overlays, test output
 
 ## Project invariants
 
+- **The user runs no main session (2026-10-27).** Don't start, restore or
+  reinstall one, and don't install host integration (`~/.local/bin`, desktop
+  entries, mime handlers) unless the user asks. Tests use named instances.
+
 - **Memory safety for the host** (incident 2026-10-27: a global OOM crashed the
   user's desktop). `/tmp` is RAM-backed tmpfs on the dev machine, so never write
   large files (logcat dumps, downloads, build trees) there; use `out/`. Every
