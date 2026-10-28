@@ -28,6 +28,7 @@ use super::Hub;
 use super::gestures::Gestures;
 use super::tablet::Tablets;
 use super::text_input::TextInput;
+use super::xkb::{Typed, Xkb};
 use crate::display::wl::State;
 
 /// evdev KEY_F11.
@@ -56,6 +57,9 @@ pub(crate) struct Seat {
     pub(crate) tablets: Tablets,
     /// The newest input serial (window moves, resizes and activation).
     pub(crate) last_serial: u32,
+    /// The compositor's keymap; None until it sends one, or without
+    /// libxkbcommon (then keys go out as evdev codes only).
+    xkb: Option<Xkb>,
 }
 
 impl Seat {
@@ -81,6 +85,7 @@ impl Seat {
             gestures: Gestures::bind(globals, qh),
             tablets: Tablets::bind(globals, qh),
             last_serial: 0,
+            xkb: None,
         };
         crate::info!(
             "input: cursor-shape {}, pointer-gestures v{}, tablets {}",
@@ -361,11 +366,29 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
     ) {
         use wl_keyboard::Event as E;
         match e {
-            E::Keymap { fd, .. } => drop(fd),
+            E::Keymap { format, fd, size } => {
+                if format != WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                    st.seat.xkb = None;
+                    return;
+                }
+                if st.seat.xkb.is_none() {
+                    st.seat.xkb = Xkb::new();
+                }
+                if let Some(x) = &mut st.seat.xkb
+                    && !x.set_keymap_fd(fd, size)
+                {
+                    crate::info!(
+                        "input: the compositor's keymap didn't compile; keys stay physical"
+                    );
+                }
+            }
             E::Enter {
                 serial, surface, ..
             } => {
                 st.seat.last_serial = serial;
+                if let Some(x) = &mut st.seat.xkb {
+                    x.reset_compose();
+                }
                 let id = st.window_of(&surface).map(|(id, _)| id);
                 st.seat.keyboard_focus = id;
                 if let Some(id) = id {
@@ -373,6 +396,9 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 }
             }
             E::Leave { .. } => {
+                if let Some(x) = &mut st.seat.xkb {
+                    x.reset_compose();
+                }
                 if let Some(id) = st.seat.keyboard_focus.take() {
                     st.hub.input(&format!("keyboard_leave {id}"));
                 }
@@ -387,17 +413,24 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 let Some(id) = st.seat.keyboard_focus else {
                     return;
                 };
-                let s: u32 = state.into();
+                // wl_keyboard v10: a compositor that sent a repeat rate of 0
+                // repeats keys itself.
+                use wl_keyboard::KeyState as K;
+                let state = match state {
+                    WEnum::Value(K::Pressed) => KeyLine::Press,
+                    WEnum::Value(K::Repeated) => KeyLine::Repeat,
+                    _ => KeyLine::Release,
+                };
                 // F11 toggles fullscreen, as in desktop apps; Android never
                 // sees it.
                 if key == KEY_F11 {
-                    if s == 1 {
+                    if state == KeyLine::Press {
                         st.toggle_fullscreen(id);
                     }
                     return;
                 }
                 st.hub
-                    .input(&format!("key {time} {key} {}", (s == 1) as u8));
+                    .input(&key_line(st.seat.xkb.as_mut(), time, key, state));
             }
             E::Modifiers {
                 mods_depressed,
@@ -406,13 +439,45 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 group,
                 ..
             } => {
+                if let Some(x) = &mut st.seat.xkb {
+                    x.update_mask(mods_depressed, mods_latched, mods_locked, group);
+                }
                 st.hub.input(&format!(
                     "modifiers {mods_depressed} {mods_latched} {mods_locked} {group}"
                 ));
             }
+            E::RepeatInfo { rate, delay } => st.hub.repeat_info(rate, delay),
             _ => {}
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyLine {
+    Release = 0,
+    Press = 1,
+    Repeat = 2,
+}
+
+/// The `key` line ([`super::proto`]): with a keymap, a press or repeat also
+/// carries the key's level-1 keysym and what it types. Repeats don't feed
+/// compose.
+fn key_line(xkb: Option<&mut Xkb>, time: u32, key: u32, state: KeyLine) -> String {
+    let mut l = format!("key {time} {key} {}", state as u8);
+    let resolved = xkb.and_then(|x| match state {
+        KeyLine::Press => x.press(key),
+        KeyLine::Repeat => x.repeat(key),
+        KeyLine::Release => None,
+    });
+    if let Some(p) = resolved {
+        l += &format!(" {}", p.sym);
+        match p.typed {
+            Typed::Nothing => {}
+            Typed::Text(t) => l += &format!(" text {}", super::ime::encode(&t)),
+            Typed::Compose => l += " compose",
+        }
+    }
+    l
 }
 
 impl Dispatch2<wl_touch::WlTouch, State> for Tch {
@@ -461,5 +526,27 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_lines_carry_the_layout() {
+        use KeyLine::*;
+        let line = |x: Option<&mut Xkb>, key, state| key_line(x, 7, key, state);
+        assert_eq!(line(None, 16, Press), "key 7 16 1");
+        let Some(mut fr) = Xkb::new() else { return };
+        assert!(fr.set_keymap_names("fr", "", ""));
+        assert_eq!(line(Some(&mut fr), 16, Press), "key 7 16 1 97 text a");
+        assert_eq!(line(Some(&mut fr), 16, Repeat), "key 7 16 2 97 text a");
+        assert_eq!(line(Some(&mut fr), 16, Release), "key 7 16 0");
+        assert_eq!(line(Some(&mut fr), 3, Press), "key 7 3 1 233 text é");
+        // The dead circumflex, then a space: the circumflex itself.
+        assert_eq!(line(Some(&mut fr), 26, Press), "key 7 26 1 65106 compose");
+        assert_eq!(line(Some(&mut fr), 57, Press), "key 7 57 1 32 text ^");
+        assert_eq!(line(Some(&mut fr), 28, Press), "key 7 28 1 65293");
     }
 }

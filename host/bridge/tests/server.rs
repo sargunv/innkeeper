@@ -48,6 +48,19 @@ impl Service for Echo {
     }
 }
 
+/// A test service that greets each connection with event 0x4002.
+const GREET: u32 = 14;
+struct Greet(Events);
+impl Service for Greet {
+    fn handle(&mut self, _: u16, _: &[u8], _: Vec<OwnedFd>) -> Reply {
+        Reply::err(-ENOSYS)
+    }
+
+    fn connected(&mut self) {
+        self.0.try_send(0x4002, b"hi", &[]).unwrap();
+    }
+}
+
 /// Who may use the echo service, besides the allow-list.
 #[derive(Clone, Copy, PartialEq)]
 enum EchoAccess {
@@ -82,6 +95,7 @@ fn start_with(limits: Limits, allow_self: bool, echo: EchoAccess) -> PathBuf {
         )))
     });
     services.register(ECHO, "echo", |_peer, events| Ok(Box::new(Echo(events))));
+    services.register(GREET, "greet", |_peer, events| Ok(Box::new(Greet(events))));
     let cfg = Config {
         allow_uids: if allow_self {
             vec![me]
@@ -564,4 +578,15 @@ fn service_events() {
             .0,
         -EINVAL
     );
+}
+
+#[test]
+fn connected_events_follow_the_hello_reply() {
+    let path = start(Limits::default(), true);
+    let mut c = Client::connect(&path);
+    // call_with reads the next message as the reply: the greeting can't come first.
+    assert_eq!(c.call_with(|t| hello(1, GREET).encode(t)).unwrap().0, 0);
+    let (b, _) = c.recv().unwrap();
+    assert_eq!(wire::decode_header(&b).unwrap().ty, 0x4002);
+    assert_eq!(&b[wire::HDR..], b"hi");
 }

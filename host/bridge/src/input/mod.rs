@@ -13,6 +13,7 @@ pub mod proto;
 pub(crate) mod seat;
 pub(crate) mod tablet;
 pub(crate) mod text_input;
+pub mod xkb;
 
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -26,15 +27,17 @@ use proto::Request;
 pub struct InputService {
     hub: Arc<Hub>,
     subscription: u64,
+    events: Events,
     label: String,
 }
 
 impl InputService {
     pub fn new(hub: Arc<Hub>, peer: &Peer, events: Events) -> InputService {
-        let subscription = hub.subscribe(events);
+        let subscription = hub.subscribe(events.clone());
         InputService {
             hub,
             subscription,
+            events,
             label: peer.label.clone(),
         }
     }
@@ -79,6 +82,10 @@ impl Service for InputService {
                 Reply::ok()
             }
         }
+    }
+
+    fn connected(&mut self) {
+        self.hub.replay(&self.events);
     }
 }
 

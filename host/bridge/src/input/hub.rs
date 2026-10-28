@@ -30,6 +30,8 @@ pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
     focus_watch: Mutex<Option<FocusWatch>>,
+    /// The seat's newest `repeat_info` line, for connections that come later.
+    repeat: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -51,6 +53,15 @@ impl Hub {
 
     pub fn subscribe(&self, events: Events) -> u64 {
         self.clients.add(events)
+    }
+
+    /// What a new connection needs: the newest `repeat_info` line. Locked
+    /// with [`Hub::repeat_info`], so a newer line can't go out first.
+    pub fn replay(&self, events: &Events) {
+        let repeat = self.repeat.lock().unwrap();
+        if let Some(l) = &*repeat {
+            let _ = events.try_send(ty::INPUT, &event::input(l), &[]);
+        }
     }
 
     pub fn unsubscribe(&self, key: u64) {
@@ -167,6 +178,16 @@ impl Hub {
         let body = event::window_unmapped(window);
         self.clients
             .broadcast(ty::WINDOW_UNMAPPED, &body, &[], None);
+    }
+
+    /// The keyboard's repeat rate (per second; 0: no repeat) and delay
+    /// (ms), now and for every later connection.
+    pub fn repeat_info(&self, rate: i32, delay: i32) {
+        let l = format!("repeat_info {rate} {delay}");
+        crate::info!("input: key {l}");
+        let mut repeat = self.repeat.lock().unwrap();
+        self.input(&l);
+        *repeat = Some(l);
     }
 
     /// One input line to every input connection.

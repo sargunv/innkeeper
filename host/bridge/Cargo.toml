@@ -31,6 +31,8 @@ wayland-protocols = { version = "0.32", features = [
   "staging",
   "unstable",
 ] }
+# The host keyboard layout and compose (input/xkb.rs), loaded at run time.
+xkbcommon-dl = "0.4"
 
 # Desktop integration (system/, documents/): D-Bus (portals, notifications, MPRIS),
 # the Wayland clipboard (ext-data-control), PNG for MPRIS artwork.

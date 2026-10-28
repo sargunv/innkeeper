@@ -115,6 +115,10 @@ impl Events {
 /// Dropping the service is the connection's cleanup.
 pub trait Service: Send {
     fn handle(&mut self, ty: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply;
+
+    /// Called once the HELLO reply is out: the client drops events that come
+    /// before it, so state a new connection needs goes out from here.
+    fn connected(&mut self) {}
 }
 
 type Factory = Box<dyn Fn(&Peer, Events) -> Result<Box<dyn Service>> + Send + Sync>;
@@ -284,6 +288,9 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
                 hello.service
             );
             send_reply(&sock, h.tag, &Reply::with_body(proto::hello_reply_body()))?;
+            if let Some(s) = svc.as_mut() {
+                s.connected();
+            }
             continue;
         };
         let r = if h.ty == proto::HELLO || h.ty >= wire::EVENT_MIN {

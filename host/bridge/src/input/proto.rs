@@ -57,8 +57,20 @@
 //!   `tablet_tilt <x> <y>` (degrees), `tablet_button <button> <0|1>`, each
 //!   group ended by `tablet_frame <t>`.
 //! - `keyboard_enter <display>`, `keyboard_leave <display>`,
-//!   `key <t> <keycode> <0|1>`,
-//!   `modifiers <depressed> <latched> <locked> <group>` (xkb masks).
+//!   `key <t> <keycode> <0|1|2> [<sym> [text <text> | compose]]` (2: a
+//!   repeat, from a wl_keyboard v10 compositor that repeats keys itself;
+//!   KWin also repeats a key whose press a host input method turned into a
+//!   press and release),
+//!   `modifiers <depressed> <latched> <locked> <group>` (xkb masks),
+//!   `repeat_info <rate> <delay>` (`wl_keyboard.repeat_info`: repeats per
+//!   second, 0 when the compositor repeats or there is no repeat, and ms;
+//!   also sent to each new connection).
+//!   Under the compositor's keymap ([`super::xkb`]) a press also carries
+//!   `<sym>`, the key's level-1 keysym in the active layout (decimal), and
+//!   what it types: `text` and the percent-encoded text (as `ti_commit`),
+//!   `compose` for a step of a compose sequence (it types nothing), or
+//!   neither (a repeat never feeds compose). Without a keymap, and on
+//!   release, only the evdev code.
 //! - `touch_down <t> <id> <x> <y> <display>`, `touch_motion <t> <id> <x> <y>`,
 //!   `touch_up <t> <id>`, `touch_frame`, `touch_cancel`.
 //! - `ti_delete`, `ti_commit`, `ti_preedit`, `ti_done <display>`: the host
