@@ -5,11 +5,11 @@
 as `/dev/socket/linuxapk/bridge.sock`. This file is the cross-language spec;
 each service's messages are in the module doc of its Rust `proto.rs`.
 
-| Implementation | Where                                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| Rust (server)  | [host/bridge/src/ipc](../host/bridge/src/ipc): `wire.rs`, `transport.rs`, `proto.rs`, `server.rs`     |
-| C (client)     | [android/vendor/bridge-client](../android/vendor/bridge-client/README.md), for the composer and audio |
-| Kotlin         | `Wire.kt` and `BridgeConnection.kt` in [android/system-app](../android/system-app/README.md)          |
+| Implementation | Where                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| Rust (server)  | [host/bridge/src/ipc](../host/bridge/src/ipc): `wire.rs`, `transport.rs`, `proto.rs`, `server.rs`             |
+| C (client)     | [android/vendor/bridge-client](../android/vendor/bridge-client/README.md), for the composer, audio and health |
+| Kotlin         | `Wire.kt` and `BridgeConnection.kt` in [android/system-app](../android/system-app/README.md)                  |
 
 `host/bridge/src/ipc/wire-fixtures.txt` and
 `host/bridge/src/a11y/snapshot-fixture.txt` hold encodings that the Rust and
@@ -74,6 +74,7 @@ sequenceDiagram
 | 5   | apps      | `0x05xx`            | the system app (app mirror)             | [apps/mod.rs](../host/bridge/src/apps/mod.rs)                        |
 | 6   | input     | `0x06xx` / `0x46xx` | the system app only (WM, injector, IME) | [input/proto.rs](../host/bridge/src/input/proto.rs)                  |
 | 7   | a11y      | `0x07xx` / `0x47xx` | the system app only (accessibility)     | [a11y/proto.rs](../host/bridge/src/a11y/proto.rs), `a11y/wire.rs`    |
+| 8   | hoststate | `0x08xx` / `0x48xx` | the Health HAL, the system app          | [hoststate/proto.rs](../host/bridge/src/hoststate/proto.rs)          |
 
 Who may open which service: [security.md](security.md#the-bridge-socket).
 

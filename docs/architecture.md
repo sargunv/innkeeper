@@ -20,7 +20,7 @@ flowchart LR
   end
   subgraph droid["Android (nested, locked namespaces)"]
     init["init, servicemanager, system_server, zygote, apps"]
-    hal["vendor HALs: composer, gralloc, Vulkan, audio"]
+    hal["vendor HALs: composer, gralloc, Vulkan, audio, health"]
     sysapp["Linux.apk System app"]
   end
   cli -->|"start, exec"| launcher
@@ -29,8 +29,8 @@ flowchart LR
   pivot -->|"pivot_root, exec init"| init
   init -. "seccomp user notifications: binder, bpf, credentials" .-> broker
   broker -->|"non-binder notifications"| pivot
-  hal -->|"bridge.sock: display, audio"| bridge
-  sysapp <-->|"bridge.sock: input, system, documents, apps"| bridge
+  hal -->|"bridge.sock: display, audio, hoststate"| bridge
+  sysapp <-->|"bridge.sock: input, system, documents, apps, hoststate"| bridge
   bridge <--> host
 ```
 

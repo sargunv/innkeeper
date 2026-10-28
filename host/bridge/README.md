@@ -14,6 +14,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 | documents | the FileChooser portal, parented through `zxdg_exporter_v2`                             | `src/documents/` |
 | apps      | desktop entries through `linuxapk-core`                                                 | `src/apps/`      |
 | a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                     | `src/a11y/`      |
+| hoststate | UPower, power-profiles-daemon, NetworkMonitor or NetworkManager, the Location portal    | `src/hoststate/` |
 
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
   the instance's XDG runtime and state dirs (socket, MPRIS artwork, document
@@ -22,8 +23,9 @@ starts it inside the session's systemd unit (so it shares the memory cap and
   test session ([docs/security.md](../../docs/security.md#test-sessions)).
 - **Environment:** `LINUXAPK_AUDIO_SINK` (one PipeWire sink),
   `LINUXAPK_BRIDGE_VERBOSE=1` (per-stream stats), and the caller's
-  `WAYLAND_DISPLAY` and `DBUS_SESSION_BUS_ADDRESS`, which the launcher passes
-  on.
+  `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`,
+  `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's `plasma-localerc`), which
+  the launcher passes on.
 - **Conventions:** a client can never block the bridge (events never wait, long
   work runs on service threads), every decoder is bounded and proptested, and
   shared memory the bridge hands out is sealed and never read back.
@@ -31,5 +33,5 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 Protocol: [docs/bridge-protocol.md](../../docs/bridge-protocol.md); each
 service's messages are its `proto.rs` module doc. Tests:
 `cargo test -p linuxapk-bridge` (protocol, ring, a live server with hostile
-clients); `examples/{tone,window,system}.rs` drive a running bridge the way the
-Android clients do.
+clients); `examples/{tone,window,system,hoststate}.rs` drive a running bridge
+the way the Android clients do.

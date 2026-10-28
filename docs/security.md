@@ -46,8 +46,9 @@ flowchart LR
 - `SO_PEERCRED` is checked against an allow-list: Android root (the user),
   `system` and `audioserver` (their subordinate uids in subuid mode).
 - The system app's uid (the owner of its data directory) is admitted to the
-  system, documents and apps services. The **input and a11y services are the
-  system app's alone**: input's lines are the user's keystrokes, and a11y's
+  system, documents, apps and hoststate services; `system` (the Health HAL)
+  reaches hoststate through the allow-list. The **input and a11y services are
+  the system app's alone**: input's lines are the user's keystrokes, and a11y's
   trees are every app's screen contents and its actions click for the user.
 - One service per connection (HELLO); anything else gets `-EACCES` or `-EPROTO`
   and is closed.
@@ -109,12 +110,25 @@ portal, so the user confirms each one.
 - **Desktop entries:** names, schemes and URIs from APKs are validated and
   escaped; `http(s)`, `file`, `content` and `intent` schemes are never
   registered.
+- **Host state:** the battery (UPower), the power saver (power-profiles-daemon
+  or the PowerProfileMonitor portal) and the network's metering (the
+  NetworkMonitor portal or NetworkManager) are read-only state any desktop app
+  can read; every Android app sees them.
+- **Location** has two consents. Android's runtime permission comes first: the
+  bridge asks the Location portal only once an app Android allowed asks for a
+  location, through one portal session for all of Android. If the user says no
+  there, or location is off on the desktop, Android's location providers stay
+  off until the bridge restarts, and apps keep their Android permission. GeoClue
+  is used directly only when there is no portal and the bridge isn't sandboxed,
+  and never after a refusal.
 
 ## Test sessions
 
 A named `LINUXAPK_INSTANCE` makes a test session that leaves the user's desktop
 alone: links are logged, not opened (unless `LINUXAPK_OPEN_URLS=1`),
-notifications, MPRIS players and AT-SPI trees stay off the desktop unless the
-session talks to a private bus (a nested test desktop), and apps installed
-inside Android get no desktop entries. Clipboard sync and the FileChooser portal
-still reach the real desktop; that is tracked on GitHub.
+notifications, MPRIS players and AT-SPI trees stay off the desktop and location
+is off unless the session talks to a private bus (a nested test desktop), and
+apps installed inside Android get no desktop entries. Battery, power saver and
+metering come from the caller's system bus (`DBUS_SYSTEM_BUS_ADDRESS`), which
+tests point at mocks. Clipboard sync and the FileChooser portal still reach the
+real desktop; that is tracked on GitHub.
