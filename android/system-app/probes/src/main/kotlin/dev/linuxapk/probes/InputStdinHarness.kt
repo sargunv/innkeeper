@@ -3,9 +3,11 @@ package dev.linuxapk.probes
 
 import android.os.SystemClock
 import android.util.Log
+import android.view.KeyCharacterMap
 import dev.linuxapk.system.input.HostEvent
 import dev.linuxapk.system.input.Injector
 import dev.linuxapk.system.input.InputTranslator
+import dev.linuxapk.system.input.KeyChars
 import dev.linuxapk.system.input.OutEvent
 import dev.linuxapk.system.input.TranslatorConfig
 
@@ -18,7 +20,9 @@ import dev.linuxapk.system.input.TranslatorConfig
  *
  * `--dry-run` prints each MotionEvent/KeyEvent instead of injecting it; otherwise the caller needs
  * INJECT_EVENTS (root or shell in the session). Escape stays Escape: the system app's
- * `persist.linuxapk.input.escape_back` doesn't apply here.
+ * `persist.linuxapk.input.escape_back` doesn't apply here. Window shortcuts are on, and a close
+ * request is printed (there is no window manager here); text keys reach the app as keys only, since
+ * committing their text is the system app's IME.
  */
 object InputStdinHarness {
   private const val TAG = "LinuxApkInputHarness"
@@ -34,8 +38,17 @@ object InputStdinHarness {
           return
         }
       }
-    val config = TranslatorConfig(scrollPixelsPerUnit = Injector.scrollPixelsPerUnit())
-    val translator = InputTranslator(config, SystemClock::uptimeMillis)
+    val config =
+      TranslatorConfig(
+        scrollPixelsPerUnit = Injector.scrollPixelsPerUnit(),
+        keyChars = KeyChars(KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)::get),
+        windowShortcuts = true,
+      )
+    val translator =
+      InputTranslator(config, SystemClock::uptimeMillis) { display ->
+        println("close display=$display")
+        Log.i(TAG, "close display=$display")
+      }
     println("config=$config dryRun=$dryRun")
     val injector = if (dryRun) null else Injector()
     val sink: (OutEvent) -> Unit = { e ->

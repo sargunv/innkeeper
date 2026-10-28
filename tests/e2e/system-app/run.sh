@@ -5,9 +5,10 @@
 # probes APK (out/test/probes), opens its InputProbeActivity in a window of its
 # own through the window manager's control command (docs/display.md), then
 # injects tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger
-# touch, touchpad scroll and gestures, pen and eraser) through the system app's
-# translator and injector (the probes' InputStdinHarness), as the input
-# service's lines are, and checks what the activity received. The stream's DISPLAY placeholders become the probe's
+# touch, touchpad scroll and gestures, pen and eraser, a layout key and the
+# window shortcuts) through the system app's translator and injector (the
+# probes' InputStdinHarness), as the input service's lines are, and checks what
+# the activity received. The stream's DISPLAY placeholders become the probe's
 # display id, so every event must arrive there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -67,13 +68,17 @@ sleep 1
 sed "s/DISPLAY/$display/" "$here/probe-stream.txt" |
   s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >/dev/null
 sleep 1
-log=$(s logcat -d -s LinuxApkProbe:I InputDispatcher:E)
+log=$(s logcat -d -s LinuxApkProbe:I InputDispatcher:E LinuxApkInputHarness:I)
 check "mouse hover" "generic .*ACTION_HOVER_MOVE.*source=0x2002" "$log"
 check "mouse click" "touch .*ACTION_DOWN.*buttonState=BUTTON_PRIMARY.*source=0x2002" "$log"
 check "mouse button press" "touch .*ACTION_BUTTON_PRESS|generic .*ACTION_BUTTON_PRESS" "$log"
 check "mouse wheel" "generic .*ACTION_SCROLL" "$log"
 check "shift+a" "key .*keyCode=KEYCODE_A.*META_SHIFT_ON" "$log"
 check "escape" "key .*keyCode=KEYCODE_ESCAPE" "$log"
+# The AZERTY Z key: KEYCODE_Z from the layout, the physical scan code.
+check "layout keycode" "key .*keyCode=KEYCODE_Z.*scanCode=17" "$log"
+check "alt+left is back" "LinuxApkProbe: back" "$log"
+check "ctrl+w asks to close the window" "close display=$display" "$log"
 check "two-finger touch" "touch .*ACTION_POINTER_DOWN.*source=0x1002" "$log"
 # Touchpad scrolling and gestures are fake fingers from the mouse, with a classification.
 check "touchpad scroll: fake finger down" \
@@ -87,7 +92,7 @@ check "pen hovers" "generic .*ACTION_HOVER_MOVE.*TOOL_TYPE_STYLUS.*source=0x5002
 check "pen pressure" "touch .*ACTION_MOVE.*TOOL_TYPE_STYLUS.*pressure\[0\]=0\.76" "$log"
 check "eraser" "touch .*ACTION_DOWN.*TOOL_TYPE_ERASER.*source=0x5002" "$log"
 if grep -q "Inconsistent event" <<<"$log"; then bad "dispatcher accepted every event"; else ok "dispatcher accepted every event"; fi
-check "events carry the window's display" "displayId=$display" "$log"
+check "events carry the window's display" "LinuxApkProbe.*displayId=$display" "$log"
 if grep -E "LinuxApkProbe.*displayId=" <<<"$log" | grep -vq "displayId=$display"; then
   bad "no event on another display"
 else

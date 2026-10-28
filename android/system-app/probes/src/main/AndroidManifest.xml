@@ -19,6 +19,12 @@
       android:exported="true"
       android:label="@string/input_probe_name" />
 
+    <!-- A focused text field that logs its text and keys (tag LinuxApkProbe). -->
+    <activity
+      android:name=".TextProbeActivity"
+      android:exported="true"
+      android:label="@string/text_probe_name" />
+
     <!-- Insets and elevation-shadow check for app windows (docs/display.md). -->
     <activity
       android:name=".WindowProbeActivity"

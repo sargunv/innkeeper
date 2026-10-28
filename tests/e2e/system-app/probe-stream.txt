@@ -77,3 +77,17 @@ tablet_proximity_out
 tablet_frame 1390
 pointer_leave DISPLAY
 pointer_frame
+key 1400 17 1 122 text z
+key 1405 17 0
+key 1410 56 1 65513
+modifiers 8 0 0 0
+key 1415 105 1 65361
+key 1420 105 0
+key 1425 56 0
+modifiers 0 0 0 0
+key 1430 29 1 65507
+modifiers 4 0 0 0
+key 1435 17 1 119
+key 1440 17 0
+key 1445 29 0
+modifiers 0 0 0 0

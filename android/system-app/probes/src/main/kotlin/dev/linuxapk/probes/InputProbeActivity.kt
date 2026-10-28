@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.TextView
+import android.window.OnBackInvokedDispatcher
 
 /**
  * Diagnostic window that logs every input event it receives (logcat tag `LinuxApkProbe`) and shows
@@ -24,6 +25,14 @@ class InputProbeActivity : Activity() {
         text = "input probe"
       }
     setContentView(text)
+    // Back (predictive back takes KEYCODE_BACK before dispatchKeyEvent) is logged, not acted on,
+    // so the window stays for the rest of a test.
+    onBackInvokedDispatcher.registerOnBackInvokedCallback(
+      OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+    ) {
+      Log.i(TAG, "back")
+      text.text = "back"
+    }
   }
 
   private fun show(what: String, event: Any) {
