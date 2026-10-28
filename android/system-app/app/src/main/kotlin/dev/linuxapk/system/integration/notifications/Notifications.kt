@@ -70,7 +70,7 @@ class Notifications(private val context: Context, private val feature: Integrati
 
   fun onListenerConnected(l: NotificationListenerService) {
     listener = l
-    feature.handler.post { if (feature.client.connected) postAll() }
+    feature.handler.post { if (feature.connection.connected) postAll() }
     feature.media.onListenerConnected()
   }
 
@@ -125,7 +125,7 @@ class Notifications(private val context: Context, private val feature: Integrati
     val e = byKey.remove(key) ?: return
     byId.remove(e.id)
     feature.handler.removeCallbacksAndMessages(e)
-    if (e.sentAt != 0L) feature.client.request(Wire.NOTIFY_CLOSE, { u32(e.id) })
+    if (e.sentAt != 0L) feature.connection.send(Wire.NOTIFY_CLOSE) { u32(e.id) }
   }
 
   private fun wanted(sbn: StatusBarNotification): Boolean {
@@ -139,7 +139,7 @@ class Notifications(private val context: Context, private val feature: Integrati
   }
 
   private fun send(e: Entry, update: Boolean) {
-    if (!feature.client.connected) return
+    if (!feature.connection.connected) return
     val blob =
       try {
         encode(e.sbn, update)
@@ -151,8 +151,12 @@ class Notifications(private val context: Context, private val feature: Integrati
     if (e.sentAt != 0L && hash == e.sentHash) return
     e.sentHash = hash
     e.sentAt = SystemClock.uptimeMillis()
-    feature.client.request(Wire.NOTIFY, { u32(e.id).u32(blob.size) }, blob) { status, _ ->
-      if (status != 0) Log.w(TAG, "notify ${e.id} (${e.sbn.packageName}): $status")
+    feature.connection.send(
+      Wire.NOTIFY,
+      blob,
+      onReply = { if (!it.ok) Log.w(TAG, "notify ${e.id} (${e.sbn.packageName}): ${it.status}") },
+    ) {
+      u32(e.id).u32(blob.size)
     }
   }
 

@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import dev.linuxapk.system.Feature
+import dev.linuxapk.system.bridge.BridgeConnection
 import dev.linuxapk.system.integration.browser.BrowserRole
 import dev.linuxapk.system.integration.browser.UrlOpener
 import dev.linuxapk.system.integration.clipboard.ClipboardSync
@@ -21,23 +22,14 @@ import java.nio.ByteBuffer
  * desktop settings into Android, notifications and media sessions out, the clipboard both ways, and
  * web links to the host browser. Events are handled on the feature's own thread.
  */
-class IntegrationFeature(private val context: Context) : Feature, BridgeClient.Listener {
+class IntegrationFeature(private val context: Context) : Feature, BridgeConnection.Listener {
   override val name = "integration"
 
   private val thread = HandlerThread("linuxapk-integ")
   lateinit var handler: Handler
     private set
 
-  val client =
-    BridgeClient(
-      BridgeClient.SOCKET,
-      Wire.F_SETTINGS or
-        Wire.F_CLIPBOARD or
-        Wire.F_NOTIFICATIONS or
-        Wire.F_MEDIA or
-        Wire.F_OPEN_URI,
-      this,
-    )
+  val connection = BridgeConnection(BridgeConnection.SERVICE_SYSTEM, "Linux.apk System", this)
   private val settings = HostSettings(context)
   val notifications = Notifications(context, this)
   val clipboard = ClipboardSync(context, this)
@@ -51,7 +43,7 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeClient.L
     notifications.start()
     clipboard.start()
     media.start()
-    client.start()
+    connection.start()
     handler.post { BrowserRole.claim(context) }
     context.registerReceiver(
       packages,
@@ -75,17 +67,29 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeClient.L
 
   override fun stop() {
     context.unregisterReceiver(packages)
-    client.stop()
+    connection.stop()
     media.stop()
     clipboard.stop()
     instance = null
     thread.quitSafely()
   }
 
-  override fun onConnected(features: Int) {
+  // The settings and the host clipboard come as events while START is handled, so the reset goes
+  // first. START can take a while: the bridge starts each desktop service it needs.
+  override fun onConnected() {
+    handler.post { settings.reset() }
+    connection.send(Wire.START, onReply = ::onStarted) { u32(FEATURES) }
+  }
+
+  private fun onStarted(r: BridgeConnection.Reply) {
+    if (!r.ok) {
+      Log.w(TAG, "the system service refused START: ${r.status}")
+      return
+    }
+    val have = if (r.body.remaining() >= 4) r.body.int else 0
+    Log.i(TAG, "started (features 0x${have.toString(16)})")
     handler.post {
-      settings.reset()
-      if (features and Wire.F_NOTIFICATIONS != 0) notifications.onConnected()
+      if (have and Wire.F_NOTIFICATIONS != 0) notifications.onConnected()
       media.onConnected()
     }
   }
@@ -137,6 +141,8 @@ class IntegrationFeature(private val context: Context) : Feature, BridgeClient.L
 
   companion object {
     const val TAG = "LinuxApkInteg"
+    private const val FEATURES =
+      Wire.F_SETTINGS or Wire.F_CLIPBOARD or Wire.F_NOTIFICATIONS or Wire.F_MEDIA or Wire.F_OPEN_URI
 
     /** The running feature, for the components Android starts (listener, activities). */
     @Volatile var instance: IntegrationFeature? = null

@@ -13,7 +13,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import dev.linuxapk.system.Feature
-import dev.linuxapk.system.host.HostChannel
+import dev.linuxapk.system.bridge.BridgeConnection
 import dev.linuxapk.system.integration.Blob
 import java.io.ByteArrayOutputStream
 
@@ -34,7 +34,13 @@ class AppMirrorFeature(private val context: Context) : Feature {
   private lateinit var handler: Handler
   private val pm = context.packageManager
   private val channel =
-    HostChannel(HostChannel.SERVICE_APPS, "Linux.apk System apps", onConnected = ::onConnected)
+    BridgeConnection(
+      BridgeConnection.SERVICE_APPS,
+      "Linux.apk System apps",
+      object : BridgeConnection.Listener {
+        override fun onConnected() = this@AppMirrorFeature.onConnected()
+      },
+    )
 
   private val receiver =
     object : BroadcastReceiver() {

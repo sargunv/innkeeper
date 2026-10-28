@@ -3,7 +3,7 @@ package dev.linuxapk.system.documents
 
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import dev.linuxapk.system.host.HostChannel
+import dev.linuxapk.system.bridge.BridgeConnection
 import dev.linuxapk.system.integration.Blob
 import java.io.FileDescriptor
 import java.io.FileNotFoundException
@@ -66,11 +66,15 @@ object HostFiles {
   private val requests = AtomicInteger(1)
   private val pending = ConcurrentHashMap<Int, Pending>()
   private val channel by lazy {
-    HostChannel(
-        HostChannel.SERVICE_DOCUMENTS,
+    BridgeConnection(
+        BridgeConnection.SERVICE_DOCUMENTS,
         "Linux.apk System documents",
-        onDisconnected = ::failAll,
-        onEvent = ::onEvent,
+        object : BridgeConnection.Listener {
+          override fun onDisconnected() = failAll()
+
+          override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) =
+            this@HostFiles.onEvent(type, body, fds)
+        },
       )
       .also { it.start() }
   }

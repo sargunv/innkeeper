@@ -105,12 +105,12 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
   private fun remove(p: Player) {
     if (players.remove(p.controller.sessionToken) == null) return
     p.controller.unregisterCallback(p)
-    feature.client.request(Wire.MEDIA_CLOSE, { u32(p.id) })
+    feature.connection.send(Wire.MEDIA_CLOSE) { u32(p.id) }
     Log.i(TAG, "session ${p.id} gone")
   }
 
   private fun send(p: Player) {
-    if (!feature.client.connected) return
+    if (!feature.connection.connected) return
     val c = p.controller
     val md = c.metadata
     val ps = c.playbackState
@@ -188,8 +188,12 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
       .f32(if (speed.isFinite() && kotlin.math.abs(speed) <= 16f) speed else 1f)
       .image(art?.let { Wire.rgba(it, 512) })
     val blob = w.bytes()
-    feature.client.request(Wire.MEDIA, { u32(p.id).u32(blob.size) }, blob) { status, _ ->
-      if (status != 0) Log.w(TAG, "media ${p.id}: $status")
+    feature.connection.send(
+      Wire.MEDIA,
+      blob,
+      onReply = { if (!it.ok) Log.w(TAG, "media ${p.id}: ${it.status}") },
+    ) {
+      u32(p.id).u32(blob.size)
     }
   }
 

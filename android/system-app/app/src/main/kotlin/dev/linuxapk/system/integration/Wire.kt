@@ -19,7 +19,8 @@ object Wire {
   const val HDR = 8
   const val REPLY = 0x8000
   const val HELLO = 0x0001
-  const val SERVICE_SYSTEM = 3
+  const val EVENT_MIN = 0x4000
+  const val EVENT_MAX = 0x7fff
 
   // Requests.
   const val START = 0x0301
@@ -68,6 +69,13 @@ object Wire {
     /** A message name: u16 length, at most 96 bytes of UTF-8. */
     fun name(s: String) = apply {
       val b = truncateUtf8(s, 96)
+      u16(b.size)
+      out.write(b)
+    }
+
+    /** A line: u16 length, then UTF-8 (at most [max] bytes). */
+    fun line(s: String, max: Int) = apply {
+      val b = truncateUtf8(s, max)
       u16(b.size)
       out.write(b)
     }

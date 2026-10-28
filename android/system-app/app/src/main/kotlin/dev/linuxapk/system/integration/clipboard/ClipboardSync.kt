@@ -82,12 +82,12 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
 
   private fun send(kind: Int, sensitive: Boolean, blob: ByteArray) {
     val ok =
-      feature.client.request(
+      feature.connection.send(
         Wire.CLIP_SET,
-        { u8(kind).u8(if (sensitive) 1 else 0).u16(0).u32(blob.size) },
         blob,
-      ) { status, _ ->
-        if (status != 0) Log.w(TAG, "clipboard to the host: $status")
+        onReply = { if (!it.ok) Log.w(TAG, "clipboard to the host: ${it.status}") },
+      ) {
+        u8(kind).u8(if (sensitive) 1 else 0).u16(0).u32(blob.size)
       }
     if (ok) Log.i(TAG, "clip to the host (kind $kind, ${blob.size} bytes)")
   }

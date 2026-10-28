@@ -19,8 +19,12 @@ class UrlOpener(private val feature: IntegrationFeature) {
     if (ascii.length > MAX) return false
     val b = ascii.toByteArray(Charsets.US_ASCII)
     Log.i(TAG, "opening on the desktop: ${ascii.take(200)}")
-    return feature.client.request(Wire.OPEN_URI, { u32(b.size) }, b) { status, _ ->
-      if (status != 0) Log.w(TAG, "the bridge refused to open the link: $status")
+    return feature.connection.send(
+      Wire.OPEN_URI,
+      b,
+      onReply = { if (!it.ok) Log.w(TAG, "the bridge refused to open the link: ${it.status}") },
+    ) {
+      u32(b.size)
     }
   }
 
