@@ -13,11 +13,11 @@
 //!    `process_todo` flag (deferred work such as the TRANSACTION_COMPLETE of a
 //!    synchronous call is queued without it), per-node `async_todo`, and the
 //!    per-process `delivered_death` list;
-//!  * thread selection: a process-wide transaction goes straight to the
-//!    longest-waiting thread blocked for process work
-//!    (`binder_select_thread_ilocked`), else to the process `todo`, waking poll
-//!    threads; only looper threads with an empty stack and queue take process
-//!    work (`binder_available_for_proc_work`);
+//!  * thread selection: process work goes on the process `todo` and wakes
+//!    the longest-waiting thread blocked for it
+//!    (`binder_select_thread_ilocked`), else the poll threads; only looper
+//!    threads with an empty stack and queue take process work
+//!    (`binder_available_for_proc_work`);
 //!  * transactions and buffers are separate objects: a buffer outlives its
 //!    transaction until `BC_FREE_BUFFER`, and owns the references taken while
 //!    translating the objects in it (released by
@@ -119,6 +119,9 @@ pub trait Userspace {
     fn drop_fd(&mut self, token: u64);
     /// End `call` with `errno` (0 for success). False if the call is gone.
     fn answer(&mut self, call: Call, errno: i32) -> bool;
+    /// Whether `call` still waits for its answer: false once a signal ended
+    /// it (the thread is stopped, or will restart the ioctl).
+    fn pending(&mut self, call: Call) -> bool;
     /// One of `proc`'s threads polls its binder fd from now on (`call` is
     /// its write-only `BC_ENTER_LOOPER`).
     fn make_pollable(&mut self, proc: ProcId, call: Call);
@@ -1080,9 +1083,13 @@ impl BinderDriver {
                 self.end_ioctl(proc, tid);
             }
         }
-        // Process work this read left (it was rolled back, or the buffer
-        // was full) is for another waiting thread, not for this one to come
-        // back for.
+        self.pass_on_proc_work(proc);
+    }
+
+    /// Process work a read left (it was rolled back, the buffer was full, or
+    /// the reader is gone) is for another waiting thread, not for that one to
+    /// come back for.
+    fn pass_on_proc_work(&mut self, proc: ProcId) {
         if !self.procs[&proc].todo.is_empty() {
             self.wakeup_proc(proc);
         }
@@ -1196,7 +1203,15 @@ impl BinderDriver {
                 continue;
             };
             t.wait = Wait::None;
-            self.serve_read(proc, tid, read, false, us);
+            if us.pending(read.call) {
+                self.serve_read(proc, tid, read, false, us);
+            } else {
+                // A signal ended its wait: the read is abandoned, and nothing
+                // is written to the thread, which may be stopped. It finds
+                // its own work when it restarts.
+                tlog!("proc={proc} tid={tid} woken, but its wait is over");
+                self.pass_on_proc_work(proc);
+            }
         }
         for proc in std::mem::take(&mut self.poll_dirty) {
             if self.procs.contains_key(&proc) {
@@ -1618,23 +1633,18 @@ impl BinderDriver {
             }
             return Err(BR_DEAD_REPLY);
         }
-        let thread = if target_thread.is_none() && !pending_async {
-            self.select_thread(target_proc)
-        } else {
-            target_thread
-        };
-        if let Some(th) = thread {
+        // A call for a thread up the transaction stack goes on its list. Any
+        // other goes on the process's and wakes the thread that waited
+        // longest. (The kernel queues it on that thread's own list, but here
+        // a waiting thread may be gone without the driver knowing yet: then
+        // its read is abandoned, and the work stays for the next one.)
+        if let Some(th) = target_thread {
             self.enqueue_thread_work(target_proc, th, Work::Transaction(txid));
-        } else if !pending_async {
-            self.procs
-                .get_mut(&target_proc)
-                .unwrap()
-                .todo
-                .push_back(Work::Transaction(txid));
-            self.poll_dirty.insert(target_proc);
-        } else {
+        } else if pending_async {
             let n = node.unwrap();
             self.nodes.get_mut(&n).unwrap().async_todo.push_back(txid);
+        } else {
+            self.enqueue_proc_work(target_proc, Work::Transaction(txid));
         }
         Ok(())
     }
@@ -2581,22 +2591,22 @@ impl BinderDriver {
                 d.taken.push(taken);
             }
         }
-        // Ask for another looper thread if none is idle.
+        // Ask for another looper thread if none is idle (still waiting: a
+        // signal may have ended a wait the driver hasn't seen end).
         let p = &self.procs[&proc];
         let looper = p.threads[&tid].looper & (LOOPER_REGISTERED | LOOPER_ENTERED) != 0;
-        let idle = p.threads.values().any(|t| {
-            matches!(
-                t.wait,
-                Wait::Blocked {
-                    proc_work: true,
-                    ..
-                }
-            )
+        let mut idle = p.threads.values().filter_map(|t| match t.wait {
+            Wait::Blocked {
+                read,
+                proc_work: true,
+                ..
+            } => Some(read.call),
+            _ => None,
         });
         if p.requested_threads == 0
-            && !idle
             && p.requested_threads_started < p.max_threads
             && looper
+            && !idle.any(|call| us.pending(call))
         {
             d.spawn_looper = true;
             d.bytes[..4].copy_from_slice(&BR_SPAWN_LOOPER.to_le_bytes());

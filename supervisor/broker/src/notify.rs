@@ -486,6 +486,9 @@ impl Userspace for SeccompUserspace {
     fn answer(&mut self, call: Call, errno: i32) -> bool {
         send_resp(self.listener, self.resp_sz, call.id, 0, -errno, false)
     }
+    fn pending(&mut self, call: Call) -> bool {
+        notif_id_valid(self.listener, call.id)
+    }
     fn make_pollable(&mut self, proc: ProcId, call: Call) {
         let Some(p) = self.procs.get(&proc) else {
             return;

@@ -430,6 +430,11 @@ impl Userspace for FakeUserspace {
         true
     }
 
+    fn pending(&mut self, call: Call) -> bool {
+        self.signal(call);
+        self.pending_call(call).is_some()
+    }
+
     fn make_pollable(&mut self, proc: ProcId, call: Call) {
         if self.pending_call(call).is_some()
             && let Some(p) = self.procs.get_mut(&proc)

@@ -537,3 +537,71 @@ fn undeliverable_process_work_goes_back_to_the_process() {
     assert_eq!(s.us.outcome(failed).errno, libc::EFAULT);
     assert!(find(&s.read(s.server, 3, 256), BR_TRANSACTION).is_some());
 }
+
+/// The server asks for up to `n` looper threads.
+fn set_max_threads(s: &mut Setup, n: u32) {
+    let at = 0x8100_0000;
+    s.us.poke(s.server, at, &n.to_le_bytes());
+    let c = s.ioctl(s.server, 1, BINDER_SET_MAX_THREADS, at);
+    assert_eq!(s.us.outcome(c).errno, 0);
+}
+
+/// What `call`'s read buffer holds (the driver must not write it once the
+/// call is gone).
+fn read_buffer(s: &Setup, proc: ProcId, call: Call, len: usize) -> Vec<u8> {
+    let bwr: BinderWriteRead =
+        read_pod(&s.us.peek(proc, call.arg, size_of::<BinderWriteRead>()), 0).unwrap();
+    s.us.peek(proc, bwr.read_buffer, len)
+}
+
+/// The longest-waiting looper's wait was ended by a signal that stopped it
+/// (SIGSTOP, ptrace) without the driver knowing. Process work goes to the
+/// other looper, and nothing is written into the stopped one's memory.
+#[test]
+fn process_work_skips_a_stopped_looper() {
+    let mut s = setup();
+    s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    let stopped = s.wr(s.server, 2, &[], 256);
+    let live = s.wr(s.server, 3, &[], 256);
+    s.us.interrupt(stopped);
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    assert!(
+        !s.us.is_pending(live),
+        "the transaction waits for the stopped thread"
+    );
+    assert!(find(&s.stream(live), BR_TRANSACTION).is_some());
+    assert_eq!(read_buffer(&s, s.server, stopped, 8), vec![0; 8]);
+    // Restarted, the stopped thread just waits again.
+    let again = s.us.restart(&mut s.b, stopped);
+    assert!(s.us.is_pending(again));
+}
+
+/// A looper whose wait a signal ended doesn't count as idle: the next
+/// looper to read is asked to spawn another.
+#[test]
+fn a_stopped_looper_is_not_idle() {
+    let mut s = setup();
+    set_max_threads(&mut s, 1);
+    s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    let stopped = s.wr(s.server, 2, &[], 256);
+    s.us.interrupt(stopped);
+    // Thread 3 reads its own work: a call to a handle it doesn't have fails.
+    let mut td = BinderTransactionData::default();
+    td.target = 99;
+    let c = s.wr(
+        s.server,
+        3,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+        256,
+    );
+    let got = s.stream(c);
+    assert_eq!(got[0].0, BR_SPAWN_LOOPER);
+    assert!(find(&got, BR_FAILED_REPLY).is_some());
+}
