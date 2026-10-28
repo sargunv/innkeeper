@@ -28,6 +28,9 @@ pub(crate) struct Gestures {
     /// The window each gesture in progress began on; only those are
     /// forwarded.
     on: [Option<u32>; 3],
+    /// The newest gesture event's time, for the ends [`Gestures::forget`]
+    /// sends.
+    last_time: u32,
 }
 
 const SWIPE: usize = 0;
@@ -77,7 +80,7 @@ impl Gestures {
         for (g, on) in self.on.iter_mut().enumerate() {
             if *on == Some(id) {
                 *on = None;
-                hub.input(&format!("gesture_{}_end 0 1", NAMES[g]));
+                hub.input(&format!("gesture_{}_end {} 1", NAMES[g], self.last_time));
             }
         }
     }
@@ -89,6 +92,7 @@ impl State {
             return;
         };
         self.seat.gestures.on[g] = Some(w);
+        self.seat.gestures.last_time = time;
         self.hub
             .input(&format!("gesture_{}_begin {time} {fingers}", NAMES[g]));
     }
@@ -135,6 +139,7 @@ impl Dispatch2<ZwpPointerGestureSwipeV1, State> for G {
             } => st.gesture_begin(SWIPE, time, &surface, fingers),
             E::Update { time, dx, dy } => {
                 if let Some(w) = st.seat.gestures.on[SWIPE] {
+                    st.seat.gestures.last_time = time;
                     let (dx, dy) = st.to_display(w, dx, dy);
                     st.hub
                         .input(&format!("gesture_swipe_update {time} {dx:.2} {dy:.2}"));
@@ -173,6 +178,7 @@ impl Dispatch2<ZwpPointerGesturePinchV1, State> for G {
                 rotation,
             } => {
                 if let Some(w) = st.seat.gestures.on[PINCH] {
+                    st.seat.gestures.last_time = time;
                     let (dx, dy) = st.to_display(w, dx, dy);
                     st.hub.input(&format!(
                         "gesture_pinch_update {time} {dx:.2} {dy:.2} {scale:.4} {rotation:.2}"
