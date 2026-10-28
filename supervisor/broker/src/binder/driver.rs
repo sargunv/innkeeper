@@ -236,8 +236,8 @@ struct Delivery {
     taken: Vec<Taken>,
     /// The thread's `process_todo` before the read.
     process_todo: bool,
-    /// The stream starts with BR_SPAWN_LOOPER (commit: one more requested
-    /// thread).
+    /// The stream starts with BR_SPAWN_LOOPER, already counted in
+    /// `requested_threads` (until a rollback).
     spawn_looper: bool,
 }
 
@@ -1147,9 +1147,6 @@ impl BinderDriver {
                 Work::Transaction(txid) => self.commit_transaction(proc, tid, txid),
             }
         }
-        if d.spawn_looper {
-            self.procs.get_mut(&proc).unwrap().requested_threads += 1;
-        }
     }
 
     /// The reader never got the delivery: put its work back at the front of
@@ -1160,6 +1157,9 @@ impl BinderDriver {
             d.taken.len()
         );
         let p = self.procs.get_mut(&proc).unwrap();
+        if d.spawn_looper {
+            p.requested_threads -= 1;
+        }
         for Taken { work, from_proc } in d.taken.into_iter().rev() {
             if from_proc {
                 p.todo.push_front(work);
@@ -2631,6 +2631,7 @@ impl BinderDriver {
         {
             d.spawn_looper = true;
             d.bytes[..4].copy_from_slice(&BR_SPAWN_LOOPER.to_le_bytes());
+            self.procs.get_mut(&proc).unwrap().requested_threads += 1;
         }
         Prepared::Ready(d)
     }

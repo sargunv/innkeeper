@@ -711,6 +711,40 @@ fn a_stopped_looper_is_not_idle() {
     assert!(find(&got, BR_FAILED_REPLY).is_some());
 }
 
+/// A BR_SPAWN_LOOPER whose read is rolled back is asked for again by the
+/// restarted read, and only one is outstanding once a read delivers it.
+#[test]
+fn spawn_request_survives_rollback_once() {
+    let mut s = setup();
+    set_max_threads(&mut s, 1);
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    let lost = {
+        s.readonly_next_call(s.server);
+        s.wr(s.server, 2, &[], 256)
+    };
+    assert_eq!(s.us.outcome(lost).errno, libc::EFAULT);
+    s.us.procs.get_mut(&s.server).unwrap().readonly.clear();
+    let got = s.read(s.server, 2, 256);
+    assert_eq!(got[0].0, BR_SPAWN_LOOPER);
+    assert!(find(&got, BR_TRANSACTION).is_some());
+    // Reply; the next read finds the request outstanding and asks no more.
+    let rtd = BinderTransactionData::default();
+    let c = s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
+    assert_eq!(s.stream(c)[0].0, BR_NOOP);
+}
+
 /// A poll setup (a write-only BC_ENTER_LOOPER) whose call a signal ends
 /// before the fd is made pollable is redone by the restarted ioctl.
 #[test]
