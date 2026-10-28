@@ -179,6 +179,14 @@ mise run test:boot                               # fresh headless boot + selftes
   74 µs against 65.4k/s and 80 µs for `-w 8`, 17.0 against 17.3 µs for 16 KiB
   payloads, and 18 against 20 µs for one pair (both noisy).
 
+  Not writing to a thread whose wait a signal ended costs a
+  `SECCOMP_IOCTL_NOTIF_ID_VALID` per woken read, and one per looper read that
+  could ask for a looper (to skip such waiters as idle). Against the broker
+  before that (2026-10-28, 18 interleaved runs each, loaded machine): one pair
+  went from 106k/s and 12.7 µs to 96k/s and 15.6 µs, `-w 8` from 66.9k/s and
+  77.8 µs to 62.6k/s and 83.5 µs, and 16 KiB payloads didn't change (62.5k/s
+  against 65.0k/s, 15.2 µs).
+
   The broker is one thread, so it tops out around 70–90k transactions/s
   session-wide. A desktop session uses a small fraction of that. If it ever
   matters, sharding by context, or by process with a lock per process, is next.
