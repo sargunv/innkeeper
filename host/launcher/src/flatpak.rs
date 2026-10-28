@@ -441,10 +441,11 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
             stop: Box::new(move || teardown(&paths)),
         },
     )?;
-    let idle = idle.clone();
+    let (idle, paths) = (idle.clone(), p.clone());
     lifecycle::watch(cfg, move |wakeup| {
         *idle.lock().unwrap() = Some(wakeup);
-        sys::kill(outer, libc::SIGKILL);
+        // As `stop` does: killing pivot-exec alone would orphan init.
+        teardown(&paths);
     });
     println!(
         "session started ({}, uid mode {}, in Flatpak): Android init = pid {init}; log: {}",
