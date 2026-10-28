@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "android",
+      "displayName": "Android x86_64 (the NDK pin)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/android",
+      "toolchainFile": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ANDROID_ABI": "x86_64",
+        "ANDROID_PLATFORM": "android-$env{ANDROID_API}",
+        "ANDROID_STL": "c++_static"
+      }
+    },
+    {
+      "name": "host-tests",
+      "displayName": "Host unit tests (glibc)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/host-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "android", "configurePreset": "android" },
+    { "name": "host-tests", "configurePreset": "host-tests" }
+  ],
+  "testPresets": [
+    {
+      "name": "host-tests",
+      "configurePreset": "host-tests",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

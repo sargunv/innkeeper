@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Linux.apk display HALs. Configure twice (see build.sh):
-#   - with the NDK toolchain: vendor binaries for the Android session;
-#   - natively: host (glibc) unit tests of the buffer/mapper code.
-cmake_minimum_required(VERSION 3.22)
-project(linuxapk_hal C CXX)
-
+# Linux.apk display HALs, part of the root superbuild. With the NDK (preset
+# "android"): the vendor binaries and on-device tests. Natively (preset
+# "host-tests"): host (glibc) unit tests of the buffer/mapper code.
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -13,11 +10,20 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 add_compile_options(-Wall -Wextra -Wno-unused-parameter
                     -Wno-missing-field-initializers)
 
-if(NOT AIDL_GEN_DIR)
-  message(
-    FATAL_ERROR
-      "AIDL_GEN_DIR not set (run tools/gen-aidl.sh; build.sh does this)")
-endif()
+# NDK-backend C++ for the frozen AIDL snapshots, generated at configure time
+# with the build-tools pin's aidl.
+set(AIDL_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/aidl)
+file(GLOB_RECURSE AIDL_INPUTS CONFIGURE_DEPENDS third_party/aosp/aidl/*.aidl)
+set_property(
+  DIRECTORY
+  APPEND
+  PROPERTY
+    CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen-aidl.sh
+    ${AIDL_INPUTS})
+execute_process(
+  COMMAND
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen-aidl.sh ${AIDL_GEN_DIR} OUTPUT_QUIET
+  COMMAND_ERROR_IS_FATAL ANY)
 
 set(HAL ${CMAKE_CURRENT_SOURCE_DIR})
 set(HAL_INCLUDES ${HAL}/common/include ${HAL}/third_party/aosp/include
@@ -102,13 +108,33 @@ if(ANDROID)
   # libz is not LL-NDK: link the NDK's static copy.
   target_link_libraries(composer PRIVATE lapk_common lapk_aidl -l:libz.a)
 
-  # On-device tests (not installed into /vendor/bin/hw).
+  # On-device tests (never installed).
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
   target_link_libraries(
     gralloc_test
     PRIVATE lapk_common lapk_aidl dl nativewindow)
   add_executable(hwc_test tests/android/hwc_test.cpp)
   target_link_libraries(hwc_test PRIVATE lapk_common lapk_aidl)
+  # A /vendor layer for tests/bionic/run.sh -v.
+  set_target_properties(
+    gralloc_test hwc_test
+    PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-vendor/bin)
+
+  set(VENDOR ${LINUXAPK_ANDROID}/vendor)
+  install(
+    TARGETS allocator composer
+    RUNTIME DESTINATION ${VENDOR}/bin/hw COMPONENT graphics)
+  install(
+    TARGETS mapper
+    LIBRARY DESTINATION ${VENDOR}/lib64/hw COMPONENT graphics)
+  file(GLOB INIT_RCS etc/init/*.rc)
+  install(FILES ${INIT_RCS} DESTINATION ${VENDOR}/etc/init COMPONENT graphics)
+  file(GLOB VINTF_XMLS etc/vintf/*.xml)
+  install(
+    FILES ${VINTF_XMLS}
+    DESTINATION ${VENDOR}/etc/vintf/manifest
+    COMPONENT graphics)
 else()
   add_executable(gralloc_host_test tests/host/gralloc_test.cpp)
   target_link_libraries(gralloc_host_test PRIVATE lapk_common dl)
@@ -116,7 +142,6 @@ else()
                  composer/FrameDumper.cpp composer/Properties.cpp)
   target_include_directories(dump_host_test PRIVATE ${HAL}/composer)
   target_link_libraries(dump_host_test PRIVATE lapk_common z)
-  enable_testing()
   add_test(NAME gralloc COMMAND gralloc_host_test $<TARGET_FILE:mapper>)
   add_test(
     NAME gralloc_no_udmabuf

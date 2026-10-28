@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Cross-build upstream iptables with the nf_tables backend (plus libmnl and
-# libnftnl) for Android x86_64 with the NDK, out of tree, and stage it into
-# out/session/iptables/system/bin (layered over /system by the session), with
+# Part of build:system. Cross-build upstream iptables with the nf_tables backend
+# (plus libmnl and libnftnl) for Android x86_64 with the NDK pin, in the build
+# container, and install it into out/build/system/install's /system/bin, with
 # the linuxapk-iptables front end in place of the iptables commands netd runs.
 #
 # Why: the image's iptables is the legacy x_tables flavour, whose kernel
 # modules a rootless session can't load. The session owns its network
 # namespace, where nf_tables works.
-#
-# Runs itself inside the build container (tools.sh); no sudo needed.
 set -euo pipefail
 
 # ---- pins -------------------------------------------------------------------
@@ -16,29 +14,24 @@ LIBMNL=libmnl-1.0.5
 LIBNFTNL=libnftnl-1.2.8
 IPTABLES=iptables-1.8.11
 URL=https://www.netfilter.org/projects
-NDK_VERSION=30.0.16248370
-API=30
 # -----------------------------------------------------------------------------
 
 here=$(cd "$(dirname "$0")" && pwd)
+repo=$(cd "$here/../../.." && pwd)
 if [[ ! -e /run/.containerenv ]]; then
-  repo=$(cd "$here" && git rev-parse --path-format=absolute --git-common-dir | xargs dirname)
-  exec "$here/tools.sh" env LINUXAPK_OUT="${LINUXAPK_OUT:-$repo/out}" "$here/build.sh" "$@"
+  exec "$repo/tools/container/run.sh" "$here/build.sh"
 fi
 
-NDK=${NDK:-$HOME/Android/Sdk/ndk/$NDK_VERSION}
-bin=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
-out=$LINUXAPK_OUT
-work=$out/session/iptables-build
-stage=$work/stage
-dest=$out/session/iptables
-mkdir -p "$work/src" "$stage"
+bin=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin
+work=$repo/out/build/iptables
+deps=$work/deps
+dest=$repo/out/build/system/install/share/linuxapk/android/system/bin
+mkdir -p "$work/src" "$deps"
 
-export CC="$bin/x86_64-linux-android$API-clang"
+export CC="$bin/x86_64-linux-android$ANDROID_API-clang"
 export AR="$bin/llvm-ar" RANLIB="$bin/llvm-ranlib" STRIP="$bin/llvm-strip"
-export PKG_CONFIG_LIBDIR=$stage/lib/pkgconfig PKG_CONFIG_PATH=
+export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig PKG_CONFIG_PATH=
 host=x86_64-linux-android
-jobs=$(nproc)
 
 fetch() {
   local name=$1 proj=$2 ext=xz
@@ -51,11 +44,11 @@ fetch() {
 build_lib() {
   local name=$1 proj=$2
   fetch "$name" "$proj"
-  [[ -f $stage/lib/$proj.a ]] && return
+  [[ -f $deps/lib/$proj.a ]] && return
   (cd "$work/src/$name" &&
-    ./configure --host=$host --prefix="$stage" --enable-static --disable-shared \
+    ./configure --host=$host --prefix="$deps" --enable-static --disable-shared \
       CFLAGS="-O2 -fPIC" >/dev/null &&
-    make -j"$jobs" >/dev/null && make install >/dev/null)
+    make -j"$JOBS" >/dev/null && make install >/dev/null)
 }
 
 build_lib $LIBMNL libmnl
@@ -73,18 +66,17 @@ sed -i 's/\bindex(/strchr(/g' "$work/src/$IPTABLES/extensions/libebt_among.c" # 
     --disable-libipq --disable-nfsynproxy --disable-bpf-compiler \
     --disable-connlabel --without-kernel \
     CFLAGS="-O2 -include inttypes.h" LDFLAGS="-static" >/dev/null &&
-  make -j"$jobs" >/dev/null)
+  make -j"$JOBS" >/dev/null)
 
-rm -rf "$dest"
-mkdir -p "$dest/system/bin"
-cp "$work/src/$IPTABLES/iptables/xtables-nft-multi" "$dest/system/bin/"
-"$STRIP" "$dest/system/bin/xtables-nft-multi"
-for n in iptables iptables-restore iptables-save ip6tables ip6tables-restore ip6tables-save; do
-  ln -sf xtables-nft-multi "$dest/system/bin/$n"
+mkdir -p "$dest"
+cp "$work/src/$IPTABLES/iptables/xtables-nft-multi" "$dest/"
+"$STRIP" "$dest/xtables-nft-multi"
+for n in iptables-save ip6tables-save; do
+  ln -sf xtables-nft-multi "$dest/$n"
 done
-# The front end, and its links over the nft ones above.
-install -m 755 "$here/linuxapk-iptables" "$dest/system/bin/"
+# The front end, and the commands netd runs, linked to it.
+install -m 755 "$here/linuxapk-iptables" "$dest/"
 for n in iptables iptables-restore ip6tables ip6tables-restore; do
-  cp -P "$here/$n" "$dest/system/bin/"
+  cp -P "$here/$n" "$dest/"
 done
-file "$dest/system/bin/xtables-nft-multi"
+file "$dest/xtables-nft-multi"

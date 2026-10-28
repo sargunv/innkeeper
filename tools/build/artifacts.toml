@@ -1,0 +1,101 @@
+# What each module installs into the stage prefix (out/stage): its build task,
+# where its artifacts run, and the artifacts `stage` requires. A module may
+# install more than it declares; a declared artifact that's missing fails
+# the stage, so nothing boots silently without its drivers or broker.
+#
+# Two modules writing one path also fail the stage, unless [overrides] maps
+# that path to the module whose copy wins.
+
+[module.host]
+task = "build:host"
+runs = "on the desktop, as the user (glibc)"
+artifacts = [
+  "bin/linuxapk",
+  "bin/linuxapk-manager",
+  "libexec/linuxapk/linuxapk-bridge",
+  "share/applications/dev.linuxapk.Manager.desktop",
+  "share/metainfo/dev.linuxapk.Manager.metainfo.xml",
+  "share/icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg",
+]
+
+[module.launcher]
+task = "build:host"
+runs = "on the desktop, then as pid 1 of the session's outer namespaces"
+artifacts = ["libexec/linuxapk/linuxapk-session", "libexec/linuxapk/ns-init.sh"]
+
+[module.supervisor]
+task = "build:supervisor"
+runs = "pivot-exec in the outer namespaces; the broker beside Android with host-user privileges; the shim in every Android process"
+artifacts = [
+  "libexec/linuxapk/pivot-exec",
+  "share/linuxapk/android/system/bin/linuxapk-broker",
+  "share/linuxapk/android/system/lib64/liblinuxapk_shim.so",
+]
+
+[module.graphics]
+task = "build:graphics"
+runs = "in Android, as /vendor HAL services"
+artifacts = [
+  "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk",
+  "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk",
+  "share/linuxapk/android/vendor/lib64/hw/mapper.linuxapk.so",
+]
+
+[module.vulkan]
+task = "build:vulkan"
+runs = "in Android, loaded by apps through libvulkan"
+artifacts = [
+  "share/linuxapk/android/vendor/lib64/hw/vulkan.radv.so",
+  "share/linuxapk/android/vendor/lib64/hw/vulkan.lvp.so",
+  "share/linuxapk/props.d/vulkan.prop",
+]
+
+[module.audio]
+task = "build:audio"
+runs = "in Android, loaded by the AIDL audio HAL"
+artifacts = [
+  "share/linuxapk/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so",
+  "share/linuxapk/android/vendor/etc/primary_audio_policy_configuration.xml",
+  "share/linuxapk/props.d/audio.prop",
+]
+
+[module.system]
+task = "build:system"
+runs = "in Android, as /system binaries"
+artifacts = [
+  "share/linuxapk/android/system/bin/linuxapk-exec",
+  "share/linuxapk/android/system/etc/init/linuxapk-exec.rc",
+  "share/linuxapk/android/system/bin/xtables-nft-multi",
+  "share/linuxapk/android/system/bin/linuxapk-iptables",
+]
+
+[module.system-app]
+task = "build:system-app"
+runs = "in Android, as a privileged system app"
+artifacts = [
+  "share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk",
+  "share/linuxapk/android/system_ext/etc/permissions/dev.linuxapk.system.xml",
+]
+
+[module.overlay]
+task = "build:data"
+runs = "in Android: config files layered over the image's partitions"
+artifacts = [
+  "share/linuxapk/android/system/etc/init/hw/init.rc",
+  "share/linuxapk/android/vendor/etc/init/hw/init.linuxapk.rc",
+]
+
+[module.image]
+task = "build:data"
+runs = "on the desktop, when the launcher prepares the image"
+artifacts = [
+  "share/linuxapk/image/pin.toml",
+  "share/linuxapk/image/bootconfig",
+  "share/linuxapk/image/vendor.prop",
+  "libexec/linuxapk/image/fetch.sh",
+  "libexec/linuxapk/image/extract.sh",
+  "libexec/linuxapk/image/flatten-apex.sh",
+  "libexec/linuxapk/image/derive.sh",
+]
+
+[overrides]

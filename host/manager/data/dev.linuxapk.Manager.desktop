@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Linux.apk
+GenericName=Android App Manager
+Comment=Install, run and remove Android apps
+Icon=dev.linuxapk.Manager
+Exec=linuxapk-manager %f
+Terminal=false
+StartupNotify=true
+StartupWMClass=dev.linuxapk.Manager
+MimeType=application/vnd.android.package-archive;
+Categories=System;PackageManager;
+Keywords=Android;APK;

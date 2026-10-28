@@ -3,7 +3,7 @@
 # usage: gen-aidl.sh OUT_DIR   (writes OUT_DIR/include and OUT_DIR/src)
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
-AIDL=${AIDL:-$HOME/Android/Sdk/build-tools/37.0.0/aidl}
+AIDL=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aidl
 out=$1
 root=$here/third_party/aosp/aidl
 rm -rf "$out/include" "$out/src"

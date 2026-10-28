@@ -1,0 +1,9 @@
+# The build container: tools for cross-compiling Mesa, libdrm, LLVM and
+# iptables for Android. The NDK comes from the host (tools/container/run.sh
+# mounts $HOME), pinned in tools/build/toolchain.env.
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf -y install \
+      meson ninja-build cmake make pkgconf-pkg-config git patch patchelf file \
+      python3 python3-mako python3-pyyaml python3-packaging \
+      glslang bison flex gcc gcc-c++ diffutils curl tar xz bzip2 \
+    && dnf clean all

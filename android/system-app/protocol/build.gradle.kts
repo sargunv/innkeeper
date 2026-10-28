@@ -6,11 +6,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins { id("org.jetbrains.kotlin.jvm") }
 
-val androidJar =
-  providers
-    .environmentVariable("ANDROID_HOME")
-    .getOrElse("${System.getProperty("user.home")}/Android/Sdk") +
-    "/platforms/android-37.0/android.jar"
+val androidJar = extra["androidJar"] as String
 
 java {
   sourceCompatibility = JavaVersion.VERSION_17

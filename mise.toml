@@ -6,11 +6,172 @@ lockfile = true
 [tools]
 "aqua:dprint/dprint" = "0.64.3"
 "aqua:jdx/jactionlint" = "2.3.0"
+"aqua:Kitware/CMake" = "4.4.4"
 "aqua:koalaman/shellcheck" = "0.11.0"
 "aqua:mvdan/sh" = "3.14.1"
+"aqua:ninja-build/ninja" = "1.13.2"
 "core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-linux-android" }
 "github:jdx/hk" = "2.8.1"
 "core:java" = "zulu-25.36.205.0"
+
+[env]
+_.file = "tools/build/toolchain.env"
+ANDROID_HOME = "{{ env.ANDROID_HOME | default(value=env.HOME ~ '/Android/Sdk') }}"
+ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.ANDROID_NDK_VERSION }}"
+CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "{{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android{{ env.ANDROID_API }}-clang"
+
+# ---- build -------------------------------------------------------------------
+# Each build:<module> fills out/build/<module>/install/, a tree of paths
+# relative to the stage prefix; `stage` merges them into out/stage.
+
+[tasks.build]
+description = "Build every module and stage them into out/stage"
+depends = ["build:*"]
+run = "tools/build/stage.sh"
+
+[tasks."build:host"]
+description = "linuxapk, linuxapk-manager, linuxapk-bridge, the launcher, the manager's desktop data"
+run = "tools/build/host.sh"
+
+# The NDK superbuild (CMakeLists.txt) that the modules below install from.
+[tasks.ndk]
+hide = true
+run = """
+set -euo pipefail
+cmake --preset android >/dev/null
+cmake --build --preset android
+"""
+
+[tasks."build:supervisor"]
+description = "pivot-exec, the shim and the broker"
+depends = ["ndk"]
+run = """
+set -euo pipefail
+tools/build/install-component.sh supervisor
+cargo build -q --release --target x86_64-linux-android -p linuxapk-broker --bin linuxapk-broker
+install -D -m 755 -s --strip-program="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
+  out/cargo/x86_64-linux-android/release/linuxapk-broker \
+  out/build/supervisor/install/share/linuxapk/android/system/bin/linuxapk-broker
+"""
+
+[tasks."build:graphics"]
+description = "The display HALs: allocator, mapper, composer"
+depends = ["ndk"]
+run = "tools/build/install-component.sh graphics"
+
+[tasks."build:vulkan"]
+description = "Mesa RADV and lavapipe (build container; skipped when its inputs are unchanged)"
+run = "android/vendor/vulkan/build.sh"
+
+[tasks."build:audio"]
+description = "libtinyalsav2 for the audio HAL's APEX, the policy XML and audio.prop"
+depends = ["ndk"]
+run = "tools/build/install-component.sh audio"
+
+[tasks."build:system"]
+description = "The exec relay and iptables (nf_tables, build container)"
+depends = ["ndk"]
+run = """
+set -euo pipefail
+tools/build/install-component.sh system
+android/system/iptables/build.sh
+"""
+
+[tasks."build:system-app"]
+description = "LinuxApkSystem.apk, platform-signed"
+dir = "android/system-app"
+run = "./gradlew --console=plain -q :app:install"
+
+[tasks."build:data"]
+description = "The overlay (android/overlay) and the image's config and scripts"
+run = """
+set -euo pipefail
+rm -rf out/build/{overlay,image}/install
+mkdir -p out/build/overlay/install/share/linuxapk/android
+cp -a android/overlay/. out/build/overlay/install/share/linuxapk/android/
+i=out/build/image/install
+install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig image/vendor.prop
+install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
+install -D -m 644 -t $i/libexec/linuxapk/image image/Containerfile.hosttools
+"""
+
+[tasks.stage]
+description = "Merge the module install trees into out/stage (and write its manifest)"
+run = "tools/build/stage.sh"
+
+[tasks.clean]
+description = "Remove build output (out/build, out/stage, out/cargo); keeps out/test"
+run = "rm -rf out/build out/stage out/cargo"
+
+# ---- test --------------------------------------------------------------------
+
+[tasks.test]
+description = "Unit tests: Rust, the broker fuzzer, the protocol, the HAL host tests, supervisor and image scripts"
+run = """
+set -euo pipefail
+cargo test -q --workspace
+cargo run -q --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 20000 1
+(cd android/system-app && ./gradlew --console=plain -q :protocol:test)
+cmake --preset host-tests >/dev/null
+cmake --build --preset host-tests
+ctest --preset host-tests
+for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
+"""
+
+[tasks."test:bionic"]
+description = "Android test binaries against the HALs and drivers, without booting (needs the image)"
+run = """
+set -euo pipefail
+v=out/build/android/android/vendor/graphics/test-vendor
+tests/bionic/run.sh -v "$v" -- /vendor/bin/gralloc_test
+tests/bionic/run.sh -v "$v" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
+  -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
+android/vendor/vulkan/tests/run.sh
+android/vendor/audio/tests/abi.sh
+"""
+
+[tasks."test:binder"]
+description = "AOSP's binder tests against the broker, then kernel binder (77: unavailable here)"
+run = "supervisor/tests/binder/run.sh"
+
+[tasks."test:boot"]
+description = "Boot a fresh headless test instance and run selftest, in each uid mode"
+run = ["tests/boot.sh", "tests/boot.sh --single-uid"]
+
+[tasks."test:e2e"]
+description = "End-to-end suites against a headless test instance: audio, system-app, cli"
+run = "tests/e2e/run.sh"
+
+[tasks."test:compat"]
+description = "The compat corpus against a session (tests/compat)"
+run = "tests/compat/run.sh"
+
+# ---- run ---------------------------------------------------------------------
+
+[tasks.session]
+description = "The staged session launcher (mise run session -- start|stop|status|...)"
+run = "out/stage/libexec/linuxapk/linuxapk-session"
+
+[tasks.install-dev]
+description = "Add the staged manager to your app menu and APK handlers"
+run = '''
+set -euo pipefail
+s=$PWD/out/stage
+[[ -f $s/share/linuxapk/manifest.tsv ]] || { echo 'run `mise run build` first' >&2; exit 1; }
+data=${XDG_DATA_HOME:-$HOME/.local/share}
+install -D -m 644 -t "$data/icons/hicolor/scalable/apps" "$s/share/icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg"
+mkdir -p "$data/applications"
+sed "s|^Exec=linuxapk-manager|Exec=$s/bin/linuxapk-manager|" "$s/share/applications/dev.linuxapk.Manager.desktop" \
+  >"$data/applications/dev.linuxapk.Manager.desktop"
+update-desktop-database -q "$data/applications" || true
+echo "installed $data/applications/dev.linuxapk.Manager.desktop"
+'''
+
+[tasks.microg]
+description = "Install microG as an addon layer (-- --beta | --remove)"
+run = "android/microg/install.sh"
+
+# ---- lint --------------------------------------------------------------------
 
 [tasks.check]
 run = "hk check --all"

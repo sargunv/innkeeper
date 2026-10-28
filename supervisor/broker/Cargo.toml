@@ -9,7 +9,7 @@ description = "Linux.apk broker: Android's binder driver reimplemented in usersp
 libc = "0.2"
 
 # The dynamic bionic binary pivot-exec forks to serve the session's seccomp
-# listener. supervisor/build.sh installs it as /system/bin/linuxapk-broker.
+# listener. build:supervisor installs it as /system/bin/linuxapk-broker.
 [[bin]]
 name = "linuxapk-broker"
 path = "src/main.rs"

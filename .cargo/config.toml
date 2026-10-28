@@ -1,0 +1,12 @@
+[build]
+target-dir = "out/cargo"
+
+# The broker (supervisor/broker), a dynamic bionic binary. pivot-exec runs it
+# before init mounts /apex, so it links against Android's bootstrap linker in
+# /system rather than the APEX one. The linker itself is the NDK pin's clang
+# (CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER, set in mise.toml).
+[target.x86_64-linux-android]
+rustflags = [
+  "-C",
+  "link-arg=-Wl,--dynamic-linker=/system/bin/bootstrap/linker64",
+]

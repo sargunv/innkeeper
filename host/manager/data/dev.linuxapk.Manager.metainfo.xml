@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.linuxapk.Manager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Linux.apk</name>
+  <summary>Run Android apps on the Linux desktop</summary>
+  <description>
+    <p>
+      Linux.apk runs Android apps as desktop apps: each app gets its own window,
+      app-menu entry and icon, with sound, clipboard, notifications and file
+      access through the desktop. Android itself runs rootless, in a sandboxed
+      session of its own.
+    </p>
+    <p>Open an APK file to install it, then launch the app from the app menu.</p>
+  </description>
+  <launchable type="desktop-id">dev.linuxapk.Manager.desktop</launchable>
+  <provides>
+    <binary>linuxapk</binary>
+    <binary>linuxapk-manager</binary>
+    <mediatype>application/vnd.android.package-archive</mediatype>
+  </provides>
+  <url type="homepage">https://github.com/sargunv/linux.apk</url>
+  <developer id="dev.linuxapk">
+    <name>Sargun Vohra</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+</component>

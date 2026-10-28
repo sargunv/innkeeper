@@ -6,11 +6,7 @@
 // platform-signed apps). Signatures match android-17.0.0_r1.
 plugins { `java-library` }
 
-val androidJar =
-  providers
-    .environmentVariable("ANDROID_HOME")
-    .getOrElse("${System.getProperty("user.home")}/Android/Sdk") +
-    "/platforms/android-37.0/android.jar"
+val androidJar = extra["androidJar"] as String
 
 java {
   sourceCompatibility = JavaVersion.VERSION_17
