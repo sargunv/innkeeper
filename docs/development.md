@@ -94,8 +94,10 @@ WAYLAND_DISPLAY=$N/rt/lapk-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
   `HOME`, nested `WAYLAND_DISPLAY`) before testing. Never start plasmashell,
   kded, akonadi or kdeconnect against the real dirs, and stop every unit you
   started when done.
-- KWin's `org_kde_kwin_fake_input` gives real seat input (the client needs a
-  `.desktop` file with `X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input`);
-  `spectacle -b -n` with the nested bus captures screenshots.
+- KWin's `org_kde_kwin_fake_input` gives real seat input. KWin offers it only to
+  a client whose resolved executable (e.g. `/usr/bin/python3.14`, not the
+  symlink) is the `Exec` of a `.desktop` file in `$N/data/applications` with
+  `X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input`. `spectacle -b -n` with the
+  nested bus captures screenshots.
 - A fake `x-scheme-handler/https` handler in `$N/data/applications` logs what
   OpenURI opens, and a null sink (`LINUXAPK_AUDIO_SINK`) keeps media silent.
