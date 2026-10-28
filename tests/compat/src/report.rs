@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::app::{AppResult, Status};
+use crate::budget::{Budgets, Measured};
 use crate::corpus::{App, Corpus};
 
 #[derive(Serialize, Deserialize, Default)]
@@ -19,6 +20,9 @@ pub struct Results {
     /// Session cgroup memory at the end of the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_mem_mb: Option<u64>,
+    /// The budgeted measurements (the last run that took each).
+    #[serde(flatten)]
+    pub measured: Measured,
     pub apps: Vec<AppResult>,
 }
 
@@ -78,7 +82,12 @@ fn kind(a: &App) -> String {
     }
 }
 
-pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()> {
+pub fn write_markdown(
+    path: &Path,
+    res: &Results,
+    corpus: &Corpus,
+    budgets: &Budgets,
+) -> Result<()> {
     let mut md = String::from(
         "# Compatibility\n\n\
      Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested \
@@ -121,6 +130,31 @@ pub fn write_markdown(path: &Path, res: &Results, corpus: &Corpus) -> Result<()>
     }
     if let Some(mb) = res.session_mem_mb {
         md += &format!("\nSession memory (cgroup) at the end of the run: {mb} MiB.\n");
+    }
+    md += "\n## Budgets\n\n\
+         A run fails when a measurement is over its budget by more than the \
+         margin (`tests/compat/budgets.toml`). Cold session start is `start` to \
+         `sys.boot_completed` with no session running, on a `/data` that has \
+         booted before. Warm app start is the median start of the apps that \
+         work, in the running session (full runs only). Idle session memory \
+         is the session cgroup's memory without page cache, 90 s after a \
+         cold start. Session start and idle memory are measured only when the \
+         run starts the session itself.\n\n\
+         | Measure | Budget | Margin | Fails above | Last measured |\n\
+         | --- | --- | --- | --- | --- |\n";
+    for l in budgets.lines(&res.measured) {
+        let m = l
+            .measured
+            .map(|m| format!("{m} {}", l.unit))
+            .unwrap_or_default();
+        md += &format!(
+            "| {} | {} {u} | {:.0}% | {} {u} | {m} |\n",
+            l.name,
+            l.budget,
+            l.margin * 100.0,
+            l.limit,
+            u = l.unit
+        );
     }
     fs::write(path, md)?;
     Ok(())

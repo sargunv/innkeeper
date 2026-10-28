@@ -11,6 +11,7 @@
 //! the results even with regressions.
 
 mod app;
+mod budget;
 mod corpus;
 mod frame;
 mod report;
@@ -26,6 +27,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, bail};
 
 use app::{AppResult, Run, Status};
+use budget::Budgets;
 use report::Results;
 use session::Session;
 
@@ -129,9 +131,15 @@ fn real_main() -> Result<ExitCode> {
     let corpus = corpus::load(&repo.join("tests/compat/corpus.toml"))?;
     let baseline_path = repo.join("tests/compat/results.json");
     let baseline = Results::load(&baseline_path).unwrap_or_default();
+    let budgets = Budgets::load(&repo.join("tests/compat/budgets.toml"))?;
 
     if o.cmd == "report" {
-        report::write_markdown(&repo.join("docs/compatibility.md"), &baseline, &corpus)?;
+        report::write_markdown(
+            &repo.join("docs/compatibility.md"),
+            &baseline,
+            &corpus,
+            &budgets,
+        )?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -167,7 +175,7 @@ fn real_main() -> Result<ExitCode> {
         );
     }
     let s = Session::new(launcher, probes);
-    s.ensure(o.window)?;
+    let mut measured = s.start_measured(o.window)?;
     fs::create_dir_all(&out)?;
     let mut results: Vec<AppResult> = vec![];
     for (a, apk) in apps.iter().zip(&apks) {
@@ -214,11 +222,22 @@ fn real_main() -> Result<ExitCode> {
         }
     }
 
+    // A median over part of the corpus isn't comparable.
+    if o.only.is_empty() {
+        measured.app_start_ms = budget::median(
+            results
+                .iter()
+                .filter(|r| r.result == Status::Works)
+                .filter_map(|r| r.launch_ms)
+                .collect(),
+        );
+    }
     let mut new = Results {
         date: today(),
         build: s.getprop("ro.build.fingerprint"),
         headless: s.headless(),
         session_mem_mb: s.status().memory.map(|b| b >> 20),
+        measured: measured.or(baseline.measured),
         apps: vec![],
     };
     // Merge: keep baseline entries for apps not run, or that hit a harness error.
@@ -233,16 +252,31 @@ fn real_main() -> Result<ExitCode> {
         }
     }
     new.save(&out.join("results.json"))?;
-    report::write_markdown(&out.join("COMPATIBILITY.md"), &new, &corpus)?;
+    report::write_markdown(&out.join("COMPATIBILITY.md"), &new, &corpus, &budgets)?;
 
-    let regressions = report::regressions(&baseline, &results);
+    let mut regressions = report::regressions(&baseline, &results);
+    for l in budgets.lines(&measured) {
+        let Some(m) = l.measured else {
+            eprintln!("compat: {}: not measured", l.name);
+            continue;
+        };
+        let what = format!(
+            "{}: {m} {} (budget {} {}, limit {})",
+            l.name, l.unit, l.budget, l.unit, l.limit
+        );
+        if l.over() {
+            regressions.push(format!("over budget: {what}"));
+        } else {
+            eprintln!("compat: {what}");
+        }
+    }
     for r in &regressions {
         eprintln!("compat: REGRESSION {r}");
     }
     println!("{}", report::summary(&results));
     if regressions.is_empty() || o.accept {
         new.save(&baseline_path)?;
-        report::write_markdown(&repo.join("docs/compatibility.md"), &new, &corpus)?;
+        report::write_markdown(&repo.join("docs/compatibility.md"), &new, &corpus, &budgets)?;
         eprintln!("compat: wrote tests/compat/results.json and docs/compatibility.md");
     } else {
         eprintln!("compat: baseline kept; results in out/test/compat/ (--accept to record)");

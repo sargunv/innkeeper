@@ -17,14 +17,18 @@ Play services). Logs and screenshots go to `out/test/compat/<pkg>/`.
 - **Results:** works, partly works (the first frame was fine, a later check
   failed), or doesn't work. A session restart during an app is retried once and
   never counts against it.
-- **Gate:** an app worse than in `results.json` fails the run and leaves the
+- **Gate:** an app worse than in `results.json`, or a measurement over its
+  budget by more than its margin ([budgets.toml](budgets.toml): cold session
+  start, warm app start, idle session memory), fails the run and leaves the
   baseline alone; `--accept` records it anyway. `-- report` rewrites
   `docs/compatibility.md` from `results.json`.
 - **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
   is running, or else one it starts (headless unless `--window`) and stops at
-  the end. A named instance is a test session, so links are only logged. Run it
-  at nice 0: uiautomator dies when it can't reset its thread priority, so the
-  harness re-runs itself at nice 0 when it finds itself niced.
+  the end. Only a session it starts gets its start time and idle memory
+  measured: it boots, restarts to time a cold start, and idles 90 s. A named
+  instance is a test session, so links are only logged. Run it at nice 0:
+  uiautomator dies when it can't reset its thread priority, so the harness
+  re-runs itself at nice 0 when it finds itself niced.
 - **Frameworks** in the corpus were identified by hand from each APK's libraries
   and assets (`libflutter.so`, `libhermes.so`, `assets/capacitor.config.json`,
   `libgodot_android.so`, Compose classes, `libgdx.so`, `libmaplibre.so`); there

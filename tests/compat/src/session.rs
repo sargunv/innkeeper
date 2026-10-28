@@ -3,15 +3,23 @@
 //! log).
 
 use std::cell::Cell;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use linuxapk_core::{launcher, paths};
+use linuxapk_core::{launcher, paths, proc};
+
+use crate::budget::Measured;
+
+/// How long the session idles after a cold start before its memory is read:
+/// past the 60 s after boot in which Android keeps the processes the boot
+/// broadcasts started (init.linuxapk.rc).
+const IDLE_SETTLE: Duration = Duration::from_secs(90);
 
 /// A session it started itself is stopped again when this is dropped, so a
 /// run leaves nothing running that it started.
@@ -74,7 +82,7 @@ impl Session {
         if !o.ok() {
             bail!("pull {src} failed: {}", o.stderr.trim());
         }
-        std::fs::write(dst, o.stdout)?;
+        fs::write(dst, o.stdout)?;
         Ok(())
     }
 
@@ -86,7 +94,7 @@ impl Session {
     /// The bridge log's current size, so a step can look only at what comes
     /// after.
     pub fn bridge_log_len(&self) -> u64 {
-        std::fs::metadata(self.bridge_log_path()).map_or(0, |m| m.len())
+        fs::metadata(self.bridge_log_path()).map_or(0, |m| m.len())
     }
 
     /// The bridge log from byte `from` on (at most its last MiB).
@@ -101,6 +109,78 @@ impl Session {
             let _ = f.read_to_end(&mut b);
         }
         String::from_utf8_lossy(&b).into_owned()
+    }
+
+    /// Starts the run's session (headless unless `window`) and measures it,
+    /// or uses the one running (and measures nothing). A fresh /data's first
+    /// boot does extra work, so the cold start timed is a second start; idle
+    /// memory is read [`IDLE_SETTLE`] after it.
+    pub fn start_measured(&self, window: bool) -> Result<Measured> {
+        if self.running() {
+            eprintln!("compat: using the running session; not measuring its start or idle memory");
+            self.ensure(window)?;
+            return Ok(Measured::default());
+        }
+        self.started.set(true);
+        let first = self.boot_timed(window)?;
+        eprintln!("compat: session booted in {first:.1?}; restarting it to time a cold start");
+        self.stop()?;
+        let cold = self.boot_timed(window)?;
+        eprintln!("compat: cold session start {cold:.1?}; idle for {IDLE_SETTLE:?}");
+        sleep(IDLE_SETTLE);
+        let idle = self.memory_without_cache();
+        if let Some(mib) = idle {
+            eprintln!("compat: idle session memory {mib} MiB");
+        }
+        self.prepare_android();
+        Ok(Measured {
+            session_start_ms: Some(cold.as_millis() as u64),
+            idle_memory_mib: idle,
+            app_start_ms: None,
+        })
+    }
+
+    /// Starts the session and waits until Android has booted, polling more
+    /// often than [`launcher::Session::wait_booted`] does.
+    fn boot_timed(&self, window: bool) -> Result<Duration> {
+        let t = Instant::now();
+        self.start(!window, &|m: &str| eprintln!("compat: {m}"))?;
+        while !self.booted() {
+            if !self.running() {
+                bail!("the session stopped while booting (see `linuxapk-session log`)");
+            }
+            if t.elapsed() > Duration::from_secs(300) {
+                bail!("the session did not finish booting in 300 s");
+            }
+            sleep(Duration::from_millis(100));
+        }
+        Ok(t.elapsed())
+    }
+
+    /// The session cgroup's memory without page cache (`memory.current`
+    /// less the file pages that aren't shmem), in MiB. Page cache is charged
+    /// to whichever cgroup read a file first, so it depends on what else has
+    /// read the image.
+    pub fn memory_without_cache(&self) -> Option<u64> {
+        let unit = paths::unit_name().ok()?;
+        let o = proc::run(
+            Command::new("systemctl").args(["--user", "show", "-P", "ControlGroup", &unit]),
+            Stdio::null(),
+            Duration::from_secs(10),
+        )
+        .ok()?;
+        let cg = Path::new("/sys/fs/cgroup").join(o.text().trim().trim_start_matches('/'));
+        let current: u64 = fs::read_to_string(cg.join("memory.current"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()?;
+        let stat = fs::read_to_string(cg.join("memory.stat")).ok()?;
+        let field = |k: &str| {
+            stat.lines()
+                .find_map(|l| l.strip_prefix(k)?.strip_prefix(' ')?.parse::<u64>().ok())
+        };
+        Some((current - field("file")? + field("shmem")?) >> 20)
     }
 
     /// Makes sure a session is running and booted. Starts one (headless unless
