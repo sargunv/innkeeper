@@ -40,3 +40,17 @@ androidboot.vendor.apex.com.google.cf.light=none
 androidboot.vendor.apex.com.google.cf.disabled=none
 # Thread radio HAL: expects a cuttlefish instance node id (aborts with 0).
 androidboot.vendor.apex.com.android.hardware.threadnetwork=none
+
+# Example HALs for hardware a desktop session doesn't have, each a resident
+# process for nothing (#28). Their clients cope with an absent HAL.
+# NNAPI's sample drivers (three processes); NNAPI runs on its own CPU path.
+androidboot.vendor.apex.com.android.hardware.neuralnetworks=none
+androidboot.vendor.apex.com.android.hardware.contexthub=none
+androidboot.vendor.apex.com.android.hardware.ir=none
+androidboot.vendor.apex.com.android.hardware.vibrator=none
+androidboot.vendor.apex.com.android.hardware.cas=none
+androidboot.vendor.apex.com.android.hardware.tetheroffload=none
+androidboot.vendor.apex.com.android.hardware.net.nlinterceptor=none
+androidboot.vendor.apex.com.android.hardware.rebootescrow=none
+androidboot.vendor.apex.com.android.hardware.authsecret=none
+androidboot.vendor.apex.com.android.hardware.input.processor=none
