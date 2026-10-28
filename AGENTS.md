@@ -53,6 +53,12 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
   user's on exit (this broke `flatpak run` for half an hour once). Always pair a
   private bus with a private `XDG_RUNTIME_DIR`, or use a bus that can't activate
   services. Never restart the user's own portal or D-Bus services.
+- **Desktop baseline: current major distro releases only.** Support the oldest
+  desktop stack a current release of Debian, Ubuntu, Fedora, openSUSE or Arch
+  ships. As of 2026-10 that is Debian 13: GNOME 48, Plasma 6.3,
+  xdg-desktop-portal 1.20. Use portals and freedesktop specs first. Add a
+  desktop-specific path only where a baseline desktop has no standard one, and
+  no fallback for anything older than the baseline.
 - **Stable boundaries only.** Never patch the image in place; prefer HAL AIDL,
   NDK APIs, rc and overlay files. Any AOSP patch needs a written reason.
 - **Vendor binaries link only LL-NDK system libraries** plus what we ship in
