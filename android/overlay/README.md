@@ -45,3 +45,25 @@ must be diffed against the image's copies whenever the pin moves
 | `vendor/etc/vintf/manifest/mapper.minigbm.xml`                                                                                    | the minigbm mapper; ours replaces it                                       |
 | `vendor/priv-app/CuttlefishService`, `system_ext/priv-app/CFSatelliteService`                                                     | cuttlefish-only apps                                                       |
 | `vendor/overlay/cuttlefish_overlay_connectivity.apk`                                                                              | an RRO that made pasta's `eth1` a restricted network, so apps were offline |
+| `vendor/etc/init/motioncontext-service-default.rc`, `vendor/etc/vintf/manifest/motioncontext-service-default.xml`                 | a sample sensor-hub HAL; the session has no sensors                        |
+
+## Removed for idle memory
+
+Apps the boot broadcasts start, which then stay resident, for features a desktop
+session doesn't have (#28). Each is blanked like the files above;
+`tools/dev/footprint.sh` shows what a session holds.
+
+| File                                                                                                          | Why                                                       |
+| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `system/priv-app/CellBroadcastLegacyApp`, `apex/com.android.cellbroadcast/priv-app/*`                         | emergency alerts arrive over a modem                      |
+| `product/app/messaging`, `product/priv-app/ImsServiceEntitlement`                                             | SMS and carrier IMS need a modem                          |
+| `product/app/Camera2`                                                                                         | no camera                                                 |
+| `product/app/QuickSearchBox`                                                                                  | the home screen's search widget; nobody sees the launcher |
+| `system/app/Traceur`, `system/priv-app/DeviceDiagnostics`, `system/priv-app/DynamicSystemInstallationService` | on-device tracing, trade-in diagnostics, GSI installs     |
+
+APK paths inside APEXes carry the build id (`CellBroadcastApp@CP2A.260605.016`),
+so check them when the pin moves; the compat run's idle-memory budget fails if
+one stops matching. Sample HALs for hardware the session lacks are dropped with
+the vendor APEX selection in [image/bootconfig](../../image/bootconfig), and
+[init.linuxapk.rc](vendor/etc/init/hw/init.linuxapk.rc) caps how many idle
+processes Android keeps.

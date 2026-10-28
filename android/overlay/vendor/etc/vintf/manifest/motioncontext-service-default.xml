@@ -1,0 +1,2 @@
+<!-- linuxapk: a sensor-hub HAL sample; the session has no sensors (see android/overlay/README.md) -->
+<manifest version="9.0" type="device"/>
