@@ -158,6 +158,8 @@ enum Work {
     OnewaySpamSuspect,
     ReturnError,
     ReplyError,
+    /// A reply whose fds couldn't be installed: BR_FAILED_REPLY in its place.
+    FailedReply,
     Node(NodeId),
     Death(DeathId),
 }
@@ -245,6 +247,8 @@ enum TxnRead {
     Rendered(Vec<u8>),
     /// Gone, or failed for good: nothing to read.
     Dropped,
+    /// A reply that failed for good: the reader gets BR_FAILED_REPLY.
+    FailedReply,
     /// Its fds can't be installed: it fails as the first item of the next
     /// read.
     NotFirst,
@@ -1137,7 +1141,7 @@ impl BinderDriver {
             match work {
                 Work::ReturnError => self.thread_mut(proc, tid).return_error = BR_OK,
                 Work::ReplyError => self.thread_mut(proc, tid).reply_error = BR_OK,
-                Work::TransactionComplete | Work::OnewaySpamSuspect => {}
+                Work::TransactionComplete | Work::OnewaySpamSuspect | Work::FailedReply => {}
                 Work::Node(nid) => self.apply_node_work(nid),
                 Work::Death(death) => self.commit_death(proc, death),
                 Work::Transaction(txid) => self.commit_transaction(proc, tid, txid),
@@ -2045,18 +2049,20 @@ impl BinderDriver {
             tlog!("proc={proc} BC_FREE_BUFFER {ptr:#x} not freeable");
             return;
         }
-        if let Some(t) = b.transaction
-            && let Some(tx) = self.txns.get_mut(&t)
-        {
-            tx.buffer = None;
-        }
-        if b.is_async
+        self.free_buf(key, us);
+    }
+
+    /// `binder_free_buf`: the reader is done with a buffer. If it held a
+    /// oneway, the next one queued for its node becomes process work.
+    fn free_buf(&mut self, key: (ProcId, u64), us: &mut dyn Userspace) {
+        if let Some(b) = self.buffers.get(&key)
+            && b.is_async
             && let Some(n) = b.target_node
             && let Some(node) = self.nodes.get_mut(&n)
         {
             match node.async_todo.pop_front() {
                 None => node.has_async_transaction = false,
-                Some(next) => self.enqueue_proc_work(proc, Work::Transaction(next)),
+                Some(next) => self.enqueue_proc_work(key.0, Work::Transaction(next)),
             }
         }
         self.release_buffer(key, us);
@@ -2533,6 +2539,7 @@ impl BinderDriver {
                     }
                     Work::TransactionComplete => write_pod(out, &BR_TRANSACTION_COMPLETE),
                     Work::OnewaySpamSuspect => write_pod(out, &BR_ONEWAY_SPAM_SUSPECT),
+                    Work::FailedReply => write_pod(out, &BR_FAILED_REPLY),
                     Work::Node(nid) => {
                         let Some(n) = self.nodes.get(&nid) else {
                             continue;
@@ -2583,6 +2590,14 @@ impl BinderDriver {
                                 break 'retry;
                             }
                             TxnRead::Dropped => continue,
+                            TxnRead::FailedReply => {
+                                let failed = Taken {
+                                    work: Work::FailedReply,
+                                    from_proc,
+                                };
+                                self.put_back(proc, tid, failed);
+                                continue;
+                            }
                             TxnRead::NotFirst => {
                                 self.put_back(proc, tid, taken);
                                 break 'retry;
@@ -2737,13 +2752,18 @@ impl BinderDriver {
             Some(InstallError::Failed) if !first => return TxnRead::NotFirst,
             Some(InstallError::Failed) => {
                 tlog!("proc={proc} fd fixups failed for txn {txid}");
-                if flags & TF_ONE_WAY == 0 && self.buffers[&key].target_node.is_some() {
+                let reply = self.buffers[&key].target_node.is_none();
+                if flags & TF_ONE_WAY == 0 && !reply {
                     self.send_failed_reply(txid, BR_FAILED_REPLY);
                 } else {
                     self.free_txn(txid);
                 }
-                self.release_buffer(key, us);
-                return TxnRead::Dropped;
+                self.free_buf(key, us);
+                return if reply {
+                    TxnRead::FailedReply
+                } else {
+                    TxnRead::Dropped
+                };
             }
             None => {}
         }

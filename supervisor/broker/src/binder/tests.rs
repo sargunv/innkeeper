@@ -538,6 +538,30 @@ fn undeliverable_process_work_goes_back_to_the_process() {
     assert!(find(&s.read(s.server, 3, 256), BR_TRANSACTION).is_some());
 }
 
+/// `setup()` with a context manager whose node accepts fds.
+fn setup_accepting_fds() -> Setup {
+    let mut s = Setup::bare();
+    let mut ext = FlatBinderObject::default();
+    ext.flags = FLAT_BINDER_FLAG_ACCEPTS_FDS;
+    s.us.poke(s.server, 0x8100_0000, pod_bytes(&ext));
+    let c = s.ioctl(s.server, 2, BINDER_SET_CONTEXT_MGR_EXT, 0x8100_0000);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    s.write(s.server, 2, &Bc::default().cmd(BC_ENTER_LOOPER).done());
+    s
+}
+
+fn fd_object(fd: u32) -> BinderFdObject {
+    let mut fdo = BinderFdObject::default();
+    fdo.hdr_type = BINDER_TYPE_FD;
+    fdo.fd_or_pad = fd as u64;
+    fdo
+}
+
+/// Fail every operation of kind `f` from now on.
+fn always_fail(s: &mut Setup, f: Fault) {
+    s.us.fault = Some(Box::new(move |g| g == f));
+}
+
 /// Fail the next operation of kind `f`.
 fn fail_once(s: &mut Setup, f: Fault) {
     let mut armed = true;
@@ -558,6 +582,81 @@ fn read_buffer(s: &Setup, proc: ProcId, call: Call, len: usize) -> Vec<u8> {
     let bwr: BinderWriteRead =
         read_pod(&s.us.peek(proc, call.arg, size_of::<BinderWriteRead>()), 0).unwrap();
     s.us.peek(proc, bwr.read_buffer, len)
+}
+
+/// A oneway dropped because its fd can't be installed frees its buffer like
+/// BC_FREE_BUFFER does, so the next oneway to the node is delivered.
+#[test]
+fn dropped_oneway_unblocks_the_async_queue() {
+    let mut s = setup_accepting_fds();
+    let td = txn_with_object(&mut s, pod_bytes(&fd_object(7)), TF_ONE_WAY | TF_ACCEPT_FDS);
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    let mut td2 = BinderTransactionData::default();
+    td2.flags = TF_ONE_WAY;
+    td2.code = 2;
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td2).done(),
+    );
+    fail_once(&mut s, Fault::InstallFd);
+    let c = s.wr(s.server, 2, &[], 256);
+    assert!(
+        !s.us.is_pending(c),
+        "the second oneway is stuck in the async queue"
+    );
+    let td = td_from(find(&s.stream(c), BR_TRANSACTION).unwrap());
+    assert_eq!(td.code, 2);
+}
+
+/// A reply whose fd can't be installed fails the caller with
+/// BR_FAILED_REPLY, as binder_thread_read does, rather than leaving it
+/// waiting.
+#[test]
+fn reply_whose_fd_cannot_be_installed_fails_the_caller() {
+    let mut s = setup_accepting_fds();
+    let mut td = BinderTransactionData::default();
+    td.flags = TF_ACCEPT_FDS;
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    let got = s.read(s.server, 2, 256);
+    assert!(find(&got, BR_TRANSACTION).is_some());
+    let waiting = s.wr(s.client, 1, &[], 256);
+    assert!(s.us.is_pending(waiting));
+    // The reply carries one fd.
+    let (data, offsets) = (0x8001_0000u64, 0x8002_0000u64);
+    s.us.poke(s.server, data, pod_bytes(&fd_object(5)));
+    s.us.poke(s.server, offsets, &0u64.to_le_bytes());
+    let mut rtd = BinderTransactionData::default();
+    rtd.data_size = size_of::<BinderFdObject>() as u64;
+    rtd.offsets_size = 8;
+    rtd.data_buffer = data;
+    rtd.data_offsets = offsets;
+    always_fail(&mut s, Fault::InstallFd);
+    s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
+    // The transaction-complete item comes first; the reply only fails as the
+    // first item of a read.
+    assert!(find(&s.stream(waiting), BR_TRANSACTION_COMPLETE).is_some());
+    let c = s.wr(s.client, 1, &[], 256);
+    assert!(
+        !s.us.is_pending(c),
+        "the caller waits for a reply that was dropped"
+    );
+    assert!(find(&s.stream(c), BR_FAILED_REPLY).is_some());
+    s.us.fault = None;
+    assert_eq!(s.b.counts().0, 0, "transactions left");
 }
 
 /// The longest-waiting looper's wait was ended by a signal that stopped it
