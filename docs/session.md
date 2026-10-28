@@ -133,8 +133,13 @@ session must keep it passing.
 
 Measured on the dev host (Strix Halo, RADV), headless, CI image 16644040:
 
-- Boot to `sys.boot_completed`: about 4.9 s on a fresh `/data`, 2.6 s warm, in
-  both uid modes.
-- Idle session: `memory.current` 0.8 to 1.3 GB (about 520 MiB anonymous).
+- Boot to `sys.boot_completed`: about 4.5 to 5 s on a fresh `/data`; 2.1 s warm
+  in subuid mode, 2.6 s in single-uid mode.
+- Idle session, 90 s after a warm boot: 84 processes, 750 MiB total PSS, and 560
+  to 575 MiB of cgroup memory without page cache (400 MiB anonymous, 105 MiB
+  kernel, mostly page tables). Page cache is charged to whichever session read
+  the image first, so `memory.current` varies more. `tools/dev/footprint.sh`
+  lists it per process; the compat run budgets the start time and idle memory
+  ([compatibility.md](compatibility.md#budgets)).
 - Binder through the broker: 15 µs per round trip against 3.8 µs for kernel
   binder; the difference doesn't show in boot time or the compat corpus.
