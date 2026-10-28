@@ -35,19 +35,20 @@
 //!  * **prepared**: the read takes work off its lists and renders the BR_*
 //!    stream, but changes nothing else yet (a `Delivery`);
 //!  * **blocked**: with nothing to read, the thread waits (`Wait::Blocked`),
-//!    holding its unanswered [`Call`]. Only a blocked thread is ever picked
-//!    for process work. Enqueueing work for it wakes it (`Wait::Woken`), and
-//!    its read runs again before the ioctl that woke it returns;
-//!  * **delivered**: the stream and the bwr are copied out and the call is
-//!    answered. Only then is the delivery committed (transactions pushed on
+//!    holding its unanswered [`Call`]. Work for it, or process work it is
+//!    the longest-waiting thread for, wakes it (`Wait::Woken`), and its read
+//!    runs again before the ioctl that woke it returns;
+//!  * **committed**: once the stream and the bwr are copied out and the
+//!    call is answered, the delivery takes effect (transactions pushed on
 //!    the stack, buffers handed over, node and death states advanced);
 //!  * **rolled back**: if a copy fails (`EFAULT`) or the call is gone (a
 //!    signal interrupted it, and the kernel restarts the ioctl), the work goes
-//!    back to the front of the lists it came from, so the restarted read, or
-//!    another thread, gets it again;
-//!  * **abandoned**: a new ioctl from a thread ends any wait it was in (a
-//!    thread runs one syscall at a time), and process release answers its
-//!    waiting threads.
+//!    back to the front of the lists it came from (`abandon`): thread work
+//!    for the thread's restarted read, process work for the next looper;
+//!  * **abandoned**: a wait ends without a read when the thread issues
+//!    another ioctl (a thread runs one syscall at a time), when it is woken
+//!    but its call is gone (a signal stopped it, or it will restart; nothing
+//!    is written to it then), or when process release answers it.
 //!
 //! A write is consumed as it is processed, and its progress is written back
 //! whatever the read does (before a thread blocks, too), so a restarted
@@ -249,7 +250,10 @@ enum TxnRead {
     /// A reply that failed for good: the reader gets BR_FAILED_REPLY.
     FailedReply,
     /// Its fds can't be installed: it fails as the first item of the next
-    /// read.
+    /// read. Unlike the kernel, which installs all of a transaction's fds or
+    /// none, fds already installed stay in the reader, and leak if the
+    /// transaction then fails for good (an fd installed with ADDFD can't be
+    /// taken back).
     NotFirst,
     /// The reader's call is gone.
     Interrupted,

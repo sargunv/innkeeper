@@ -124,6 +124,11 @@ struct ProcState {
     pid: i32,
     /// The binder fd number in the target.
     fd: u32,
+    /// The receive region, which the process maps and the broker writes
+    /// through `map`. The process can resize it: if it shrinks it, the
+    /// broker's next write there faults (SIGBUS) and kills the broker, taking
+    /// binder down for the whole session. Desktop parity accepts that (a
+    /// desktop app can kill the user's session too).
     memfd: OwnedFd,
     memfd_ino: u64,
     /// The opener's address space, pinned while its notification was valid
@@ -136,7 +141,11 @@ struct ProcState {
     live: HashMap<u64, (usize, usize)>,
     pidfd: Option<OwnedFd>,
     /// Once a thread polls: the eventfd the process holds instead of its
-    /// binder fd, readable when a polling thread has work.
+    /// binder fd, readable when a polling thread has work. The process shares
+    /// its open file, flags included: if it clears O_NONBLOCK and drains or
+    /// fills the counter, the broker's next read or write of it blocks, under
+    /// its lock, and binder stops for the whole session. Desktop parity
+    /// accepts that too.
     poll: Option<OwnedFd>,
     poll_ready: bool,
 }

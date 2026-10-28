@@ -1,11 +1,13 @@
 # ubinder: userspace binder (M4)
 
-> **Status (2026-10-27):** the cross-process broker stays, simplified for
+> **Status (2026-10-28):** the cross-process broker stays, simplified for
 > correctness and clarity: the driver owns every thread's place in an ioctl, and
 > a read is committed only once the reader has it (see "The read lifecycle").
 > Guards that only defended against deliberately malicious callers are gone (the
 > S11 page-protection checks, the S12 fallback, the sealed receive memfd and the
-> epoll indirection for poll). See [STRATEGY.md](STRATEGY.md) "Threat model".
+> epoll indirection for poll), so such a process can now take binder down for
+> the whole session (see "Bounds and process pinning"), as a desktop app can
+> kill the user's session. See [STRATEGY.md](STRATEGY.md) "Threat model".
 
 ubinder serves Android's binder IPC from a userspace broker instead of the
 kernel driver. **It is the session's default** (since 2026-10-27): a session
@@ -41,11 +43,12 @@ answers on the shared listener.
   Waits stay interruptible, so ptrace (debuggerd) and job control work. A signal
   makes the kernel restart the ioctl, which is idempotent (see "The read
   lifecycle").
-- **poll:** a thread that sets up polling (a write-only `BC_ENTER_LOOPER`, which
-  is `IPCThreadState::setupPolling`) gets its process's binder fd swapped for an
-  eventfd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive). The broker
-  sets it readable exactly when a polling thread has work (`binder_poll`).
-  Nothing traps `epoll_ctl`.
+- **poll:** when a thread sets up polling (a write-only `BC_ENTER_LOOPER`, which
+  is `IPCThreadState::setupPolling`), its process's binder fd is swapped for an
+  eventfd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive), once per
+  process and before the write is consumed, so a restarted ioctl retries a swap
+  that failed. The broker sets it readable exactly when a polling thread has
+  work (`binder_poll`). Nothing traps `epoll_ctl`.
 - **fds:** `BINDER_TYPE_FD`/`FDA` are captured from the sender with
   `pidfd_getfd` and installed into the reader during its own read (`ADDFD`),
   like `binder_apply_fd_fixups`.
@@ -89,24 +92,33 @@ read goes through one lifecycle:
 - **prepared:** the read takes work off its lists and renders the `BR_*` stream,
   changing nothing else yet;
 - **blocked:** with nothing to read, the thread waits holding its unanswered
-  call. Only a blocked thread is picked for process work; enqueueing work for it
-  wakes it, and its read runs again before the ioctl that woke it returns;
+  call. Work for it wakes it, and so does process work, which goes on the
+  process's list and wakes the blocked looper that waited longest; the woken
+  read runs again before the ioctl that woke it returns;
 - **committed:** once the stream and the bwr are copied out and the call is
   answered, the delivery takes effect (transactions go on the reader's stack,
   buffers become the reader's, node and death states advance);
 - **rolled back:** if a copy fails (`EFAULT`) or the call is gone (a signal),
-  the work goes back to the front of the lists it came from, so the restarted
-  read, or another looper, gets it again;
-- **abandoned:** a thread's next ioctl ends any wait it was in, and process
-  release answers its blocked threads with `EBADF`.
+  the work goes back to the front of the lists it came from: thread work for the
+  thread's restarted read, process work for the next looper that reads;
+- **abandoned:** a wait ends without a read when the thread issues another
+  ioctl, when it is woken but its call is gone (a signal stopped it, or it will
+  restart: nothing is written to it, and its process work goes to the next
+  looper), or when process release answers it with `EBADF`.
 
 A write is consumed as it is processed and its progress written back whatever
 the read does, before blocking too, so a restarted ioctl never replays it. Fds
 installed for a rolled-back transaction stay installed and their numbers stay in
-the buffer, so a reread reports the same fds. `src/binder/lifecycle_tests.rs`
-drives libbinder-like threads through every failure point and checks that no
-work waits with a thread that isn't reading it, every synchronous call gets its
-reply or a failed reply, and nothing leaks.
+the buffer, so a reread reports the same fds. One deviation: the kernel installs
+all of a transaction's fds or none, but `ADDFD` can't be undone, so if a later
+fd doesn't fit the reader's fd table, the ones already installed stay, and leak
+if the transaction fails for good (it fails when it is the first item of a read:
+a oneway is dropped, a call gets `BR_FAILED_REPLY`, and so does the reader of a
+reply). `src/binder/lifecycle_tests.rs` drives libbinder-like threads through
+every failure point, stopped threads and thread exits, and checks that no work
+waits with a thread that isn't reading it, every synchronous call gets its reply
+or a failed reply, every oneway sent is received, no ended call's memory is
+written, and nothing leaks.
 
 Not supported: freezing. `BINDER_FREEZE` and `BINDER_GET_FROZEN_INFO` return
 `EINVAL`, so Android disables its app freezer; freeze-notification commands are
@@ -199,6 +211,14 @@ callers. From a security review (2026-10-27), what remains:
   is gone, and checked again before they act. Single-uid calls that transfer
   memory (`getresuid`, group lists, `SO_PEERCRED`, chown paths, lstat results)
   pin the same way, per call; scalar `get*id` don't.
+- What a misbehaving process can do to the broker, accepted under desktop
+  parity: it can resize its receive memfd, and a shrink makes the broker's next
+  write through its own mapping fault (SIGBUS, which kills the broker), and it
+  shares its poll eventfd's open file with the broker, so if it clears
+  `O_NONBLOCK` and drains or fills the counter, the broker's next read or write
+  of it blocks under the broker's lock. Either way binder stops for the whole
+  session. Sealing the memfd and an epoll fd in front of the eventfd prevented
+  both; they were dropped as complexity serving only that case.
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.
 - `bpfemu.c`: element operations need a map with tables (not ring buffers), LPM
