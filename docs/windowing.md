@@ -14,19 +14,23 @@ single-window mode is still there:
 
 ## How it works
 
-```
- host compositor (KWin)            ┌───────────────── Android session ──────────────────┐
-  ┌────────────┐  ┌────────────┐   │ Linux.apk System app (window manager)              │
-  │ Calculator │  │ Wikipedia  │   │   VirtualDisplay 2  ─┐   VirtualDisplay 3  ─┐      │
-  └─────▲──────┘  └─────▲──────┘   │   (ImageReader sink) │   (ImageReader sink) │      │
-        │ xdg_toplevel  │          │                      ▼                      ▼      │
-  ┌─────┴───────────────┴──────┐   │ SurfaceFlinger: HWC virtual displays 100, 101 ...  │
-  │ composer (HWC3 HAL):       │◄──┤   renders each frame into the sink buffer and     │
-  │ one window per virtual     │   │   hands it to the composer (client target =       │
-  │ display, input tagged with │   │   output buffer)                                  │
-  │ the display id             │──►│ /dev/socket/linuxapk-input (protocol v2): input    │
-  └────────────────────────────┘   │   events + window events ⇄ window-manager commands │
-                                   └────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph host[Host]
+    kwin[Compositor: one xdg_toplevel per app]
+    bridge[linuxapk-bridge]
+  end
+  subgraph android[Android session]
+    wm[Linux.apk System app: window manager, injector, IME]
+    sf[SurfaceFlinger: HWC virtual displays]
+    hwc[composer: HWC3 HAL]
+  end
+  wm -- "VirtualDisplay per app (ImageReader sink)" --> sf
+  sf -- "frames (client target = output buffer)" --> hwc
+  hwc -- "display service: DISPLAY_ADD, BUFFER_ADD, FRAME" --> bridge
+  wm -- "input service: WINDOW_REQUEST, TEXT_INPUT" --> bridge
+  bridge -- "input lines, WINDOW_MAPPED" --> wm
+  bridge <--> kwin
 ```
 
 1. **The window manager** is the persistent Linux.apk System app
@@ -78,20 +82,21 @@ single-window mode is still there:
    2176x1360 frame costs about 1 to 2 ms.
 
 3. **Matching a display to its window.** HWC3's `createVirtualDisplay` carries
-   only a size and a format, so the composer can't tell whose display it is. The
-   window manager therefore orders things:
+   only a size and a format, so nobody can tell whose display it is. The window
+   manager therefore orders things:
    1. It creates the virtual display without a surface. SurfaceFlinger keeps
       such displays dormant, with no HWC display.
-   2. It sends `window_new <display> <w> <h> <dpi> <app_id> <title>` and waits
-      for `window_pending`.
+   2. It asks the bridge's input service for a window (`WINDOW_REQUEST`: its
+      display id, size, density, app id and title) and waits for the reply.
    3. Only then does it attach the surface.
 
-   SurfaceFlinger's next commit creates the HWC display, and the composer gives
-   it the oldest pending request of that size (requests expire after 10 s).
-   Virtual displays nobody asked for, such as `screenrecord` and
-   MediaProjection, stay headless. If the window disappears while the display
-   lives (`window_gone`), the window manager requests it again and re-attaches
-   the surface, which makes SurfaceFlinger create a fresh HWC display.
+   SurfaceFlinger's next commit creates the HWC display; the composer adds it to
+   the bridge's display service (`DISPLAY_ADD`), and the bridge gives it the
+   oldest request of that size (requests expire after 10 s). Virtual displays
+   nobody asked for, such as `screenrecord` and MediaProjection, stay headless.
+   If the window disappears while the display lives (`WINDOW_UNMAPPED`), the
+   window manager requests it again and re-attaches the surface, which makes
+   SurfaceFlinger create a fresh HWC display.
 
 4. **Window semantics**:
    - **Resize and scale:** the window's `configure` and `wp_fractional_scale_v1`
@@ -235,31 +240,24 @@ title bar. So the Wayland client lives in the Rust host bridge
 bridge instead of the compositor (`vendor.linuxapk.hwc.backend=bridge`, the
 session default; `composer/BridgePresenter.cpp`):
 
-- **Composer:** HWC, virtual displays and the window registry, as above. On a
-  claimed display it sends `WINDOW_CREATE`; each frame is copied into one of
-  three udmabufs per window, added once (`BUFFER_ADD` with the dma-buf fd), and
-  shown with `FRAME`; `RELEASE` hands the buffer back, the way
-  `wl_buffer.release` did. RGBA frames go as XBGR8888 and BGRA as XRGB8888, so
-  the copy is a plain `memcpy`. If the bridge restarts, the composer reconnects
-  and asks for its windows again. If the bridge is unreachable at boot, it falls
-  back to being the Wayland client itself (`backend=wayland`, still available
-  with `LINUXAPK_HWC_BACKEND=wayland`).
+- **Composer:** a pure HWC. It adds each virtual display to the bridge
+  (`DISPLAY_ADD`); once the bridge says the display shows in a window, each
+  frame is copied into one of three udmabufs per display, added once
+  (`BUFFER_ADD` with the dma-buf fd), and shown with `FRAME`; `RELEASE` hands
+  the buffer back, the way `wl_buffer.release` does. RGBA frames go as XBGR8888
+  and BGRA as XRGB8888, so the copy is a plain `memcpy`. If the bridge restarts,
+  the composer reconnects and adds its displays again.
 - **Bridge:** one host Wayland connection per composer connection; one
   `xdg_toplevel` per window with linux-dmabuf buffers, `wp_viewporter`,
   fractional scale and xdg-activation. Decorations are server-side where
   xdg-decoration is offered (KDE) and otherwise an Adwaita-style client-side
   frame (`sctk-adwaita`: title, minimize, maximize, close, move, resize, window
   menu). The seat becomes protocol v2 lines.
-- **Input path (a deviation, on purpose):** the bridge sends the lines to the
-  composer (`INPUT` events), and the composer relays them on
-  `/dev/socket/linuxapk-input` as before. The composer is the one place that
-  knows which HWC display is which window, the system app keeps its 0660
-  `system:input` socket and stays unchanged, and the bridge needs no extra
-  allowed uid. Relaying costs one local hop.
-- The composer no longer needs the host Wayland socket or root for this path;
-  its `.rc` still starts it as root for the fallback, and it keeps the `audio`
-  group after dropping to `system`, for the bridge socket directory
-  (`root:audio 0750`).
+- **Input path:** the system app holds the bridge's input service, which only
+  its uid may open: it gets the seat's lines, the window events and the host
+  input methods' results there, and sends its window requests and IME state.
+  Which window shows which HWC display is the bridge's business; the composer
+  never sees input.
 
 ## Testing
 

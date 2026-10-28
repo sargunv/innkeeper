@@ -1,11 +1,12 @@
 # Input: host seat to Android input events
 
 "Linux.apk System" (`dev.linuxapk.system`, sources in `android/`) is our
-privileged system app. Its first feature reads the composer's input stream
-(`/dev/socket/linuxapk-input`, format in [hal-display.md](hal-display.md)) and
-injects real `MotionEvent`s and `KeyEvent`s into InputDispatcher. Later
-desktop-integration features (dark mode, notifications, file pickers, clipboard;
-M3) go into the same app as more `Feature`s.
+privileged system app. Its first feature reads the host seat from the bridge's
+input service (lines in `host/bridge/src/input/proto.rs`;
+[bridge.md](bridge.md#input-service-id-6)) and injects real `MotionEvent`s and
+`KeyEvent`s into InputDispatcher. Later desktop-integration features (dark mode,
+notifications, file pickers, clipboard; M3) go into the same app as more
+`Feature`s.
 
 ## Build and install
 
@@ -53,9 +54,9 @@ which is a signature permission. Hidden APIs are open to platform-signed apps
 `InputManagerGlobal.injectInputEvent` and `MotionEvent.setActionButton` are
 called by reflection.
 
-The stream comes from `/dev/socket/linuxapk-input`.
-`persist.linuxapk.input.escape_back` (default `false`, read when the feature
-starts) sends BACK for Escape.
+The lines come from the bridge's input service, which only the app's uid may
+open (`input/HostInputClient.kt`). `persist.linuxapk.input.escape_back` (default
+`false`, read when the feature starts) sends BACK for Escape.
 
 ## Mapping
 
@@ -192,10 +193,10 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
 
 ## Tests
 
-| What                                                                                                                                                                                                   | How                                 | Result                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------------- |
-| Parser (v1 and v2), keymap, translator (incl. per-display routing); model of AOSP's InputVerifier (per display) run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`                  | 41 tests, 0 failures                   |
-| Real framework classes: `app_process` builds every event from `android/e2e/probe-stream.txt` in the live session                                                                                       | `InputBridgeMain --dry-run --stdin` | MotionEvent/KeyEvent dumps as expected |
+| What                                                                                                                                                                                                   | How                       | Result                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- | -------------------------------------- |
+| Parser (v1 and v2), keymap, translator (incl. per-display routing); model of AOSP's InputVerifier (per display) run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`        | 41 tests, 0 failures                   |
+| Real framework classes: `app_process` builds every event from `tests/e2e/system-app/probe-stream.txt` in the live session                                                                              | `StdinInjector --dry-run` | MotionEvent/KeyEvent dumps as expected |
 
 ### Proof (2026-10-27, live session, system_server up to NetworkManagementService)
 
@@ -231,9 +232,9 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
    display id (see [windowing.md](windowing.md)). It checks the following and
    exits non-zero on any FAIL:
    - the package is a system_ext priv-app;
-   - `INJECT_EVENTS` and `HOST_INPUT` are granted;
+   - `INJECT_EVENTS` is granted;
    - the persistent process runs and logged `started input`;
-   - the client connected to the socket.
+   - it connected to the bridge's input service.
 
    It then opens `InputProbeActivity` and injects `probe-stream.txt` through the
    app's translator and injector. It expects the activity's log
@@ -261,22 +262,14 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
     `vendor.linuxapk.wayland.socket` at it.
   - Set `vendor.linuxapk.hwc.backend=wayland`, for example from the launcher's
     `vendor_props`.
-  - The composer then serves `/dev/socket/linuxapk-input`.
-- **HAL (composer):**
-  1. Tighten the socket. Today it is `0666`, so any app can read every host
-     keystroke. Use `socket linuxapk-input stream 0660 system input` in the
-     composer `.rc`; the composer already picks up `$ANDROID_SOCKET_*`.
-     Alternatively, `chown(system, input)` plus `chmod 0660` after the bind. Our
-     app should then hold gid `input` through
-     `dev.linuxapk.permission.HOST_INPUT`, a signature permission mapped to
-     `input` in our permissions XML (`e2e.sh` checks the process's groups).
-  2. Forward these protocol additions (version 2):
+- **Bridge (input service):**
+  1. Forward these protocol additions (version 2):
      - `axis_source` (wheel or finger), so touchpad scrolling isn't guessed from
        a missing `value120`;
      - `repeat_info <rate> <delay>`, so the bridge can set Android's key repeat
        settings;
      - the keymap or keysyms, for non-US layouts.
-  3. Set a host cursor on `wl_pointer.enter`, through `wp_cursor_shape_v1` or a
+  2. Set a host cursor on `wl_pointer.enter`, through `wp_cursor_shape_v1` or a
      cursor surface. Today the cursor over the window is undefined.
 - **With SELinux enforcing** (our own build, later): the app's domain needs
   `connectto` on the composer's socket.

@@ -30,7 +30,8 @@ and it shares the unit's memory cap. If it exits, a shell loop restarts it.
   is admitted to the system, documents and apps services only: its uid is
   assigned at install time, so the bridge takes the owner of its data directory
   (`--system-app-dir <data>/data/dev.linuxapk.system`, created by installd) at
-  connect time. The app reaches the directory through the `audio` group, which
+  connect time. The input service is the system app's alone: no allow-listed uid
+  may open it. The app reaches the directory through the `audio` group, which
   its `dev.linuxapk.permission.HOST_BRIDGE` permission maps to.
 - **Log:** `out/run[-<instance>]/bridge.log`. Set `LINUXAPK_BRIDGE_VERBOSE=1`
   for per-stream statistics every 5 s.
@@ -150,9 +151,9 @@ service; a client that needs two services opens two connections.
 - A wrong major gets `-EPROTO`, and an unknown service gets `-ENOSYS`. Either
   way the connection is closed.
 - Any other first message gets `-EPROTO` and also closes it.
-- Service ids: 1 audio, 2 display, 3 system, 4 documents, 5 apps. A uid admitted
-  to some services only (see "Allow-list") that asks for another gets `-EACCES`
-  and is closed.
+- Service ids: 1 audio, 2 display, 3 system, 4 documents, 5 apps, 6 input. A uid
+  admitted to some services only (see "Allow-list") that asks for another gets
+  `-EACCES` and is closed.
 
 ### Audio service (id 1)
 
@@ -205,33 +206,16 @@ sides:
 
 ### Display service (id 2)
 
-Host windows for the composer (the Android HWC HAL), which is the only client:
-it connects as `system` from inside the session. The composer keeps the HWC and
-virtual-display side and the window registry ([windowing.md](windowing.md)); the
-bridge owns the Wayland connection (one per client connection, on its own thread
-with a calloop loop; `bridge/src/display/wl.rs`), the toplevels, their
-decorations and the seat. Windows are named by the Android display id they show;
-buffers by ids the composer picks. The bridge needs `$WAYLAND_DISPLAY`, which
+The composer's HWC virtual displays in host windows. The composer (the Android
+HWC HAL) is the only client; it connects as root from inside the session and
+only presents: it adds each virtual display (`DISPLAY_ADD`) and sends its frames
+as dma-bufs of its own udmabuf pool. The bridge owns the Wayland connection (one
+per composer connection, on its own thread with a calloop loop;
+`host/bridge/src/display/wl.rs`), the toplevels, their decorations and the seat.
+A display gets a window only if the window manager asked for one of its size on
+the input service; the rest stay headless. The wire spec is the module doc of
+`host/bridge/src/display/proto.rs`. The bridge needs `$WAYLAND_DISPLAY`, which
 the session launcher sets to the host socket.
-
-| Type     | Message             | Body                                                                                                                                                                               | Notes                                                                                                                                         |
-| -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0x0201` | WINDOW_CREATE       | `u32 window`, `u32 width`, `u32 height` (logical, 1–16384), `u32 min_width`, `u32 min_height` (0–16384, 0: 240x160), name `app_id`, name `title`                                   | Replies once the toplevel exists; `-EBUSY` for a duplicate id or over the limit                                                               |
-| `0x0202` | WINDOW_DESTROY      | `u32 window`                                                                                                                                                                       | Drops the window's buffers too                                                                                                                |
-| `0x0203` | WINDOW_SET_TITLE    | `u32 window`, name                                                                                                                                                                 |                                                                                                                                               |
-| `0x0204` | WINDOW_SET_MIN_SIZE | `u32 window`, `u32 width`, `u32 height` (logical)                                                                                                                                  |                                                                                                                                               |
-| `0x0205` | WINDOW_ACTIVATE     | `u32 window`                                                                                                                                                                       | `xdg_activation_v1` with the newest input serial                                                                                              |
-| `0x0206` | BUFFER_ADD          | `u32 buffer`, `u32 window`, `u32 width`, `u32 height`, `u32 fourcc` (XBGR/ABGR/XRGB/ARGB8888), `u32 stride` (≥ 4×width), `u32 offset`, `u64 modifier` (0, LINEAR); fd: the dma-buf | The fd's size (`lseek`) must cover `offset + stride × height`; the compositor imports it through linux-dmabuf                                 |
-| `0x0207` | BUFFER_REMOVE       | `u32 buffer`                                                                                                                                                                       |                                                                                                                                               |
-| `0x0208` | FRAME               | `u32 window`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's until RELEASE; a frame for a window that isn't configured yet, or a buffer not imported yet, is released at once |
-| `0x0209` | TEXT_INPUT          | `u16 len` + one `ti_*` line from the Linux.apk IME (≤ 480 bytes), relayed by the composer                                                                                          | Applied to the window with text-input focus; see "Text input" below                                                                           |
-
-| Event    | Message   | Body                                                                                   |
-| -------- | --------- | -------------------------------------------------------------------------------------- |
-| `0x4201` | CONFIGURE | `u32 window`, `u32 width`, `u32 height` (logical), `u32 scale×120`                     |
-| `0x4202` | CLOSE     | `u32 window` (the user closed it: title bar button or compositor)                      |
-| `0x4203` | RELEASE   | `u32 buffer` (mirrors `wl_buffer.release`)                                             |
-| `0x4204` | INPUT     | `u16 len` + one input protocol v2 line (≤ 400 bytes, [hal-display.md](hal-display.md)) |
 
 - **Decorations:** server-side through xdg-decoration where the compositor
   offers it (KDE); else client-side, an Adwaita-style frame from `sctk-adwaita`
@@ -240,46 +224,54 @@ the session launcher sets to the host socket.
 - **Frames:** each buffer is shown through `wp_viewporter` at the window's
   logical size (fractional scale through `wp_fractional_scale_v1`); input
   coordinates map from surface units to the shown buffer's pixels.
-- **Input:** the bridge turns `wl_pointer`, `wl_keyboard` and `wl_touch` into
-  protocol v2 lines with the window id on the enter lines; pointer events on the
-  client-side frame drive the frame instead. The composer relays the lines on
-  `/dev/socket/linuxapk-input`, so the Linux.apk System app is unchanged.
-- **Limits** per connection: 32 windows, 128 buffers. Unknown windows or buffers
-  get `-ENOENT`.
+- **Limits** per connection: 32 displays, 128 buffers. Unknown displays or
+  buffers get `-ENOENT`.
 - **Compositor gone:** the service shuts the client connection; the composer
-  reconnects every second and asks for its windows again (its buffers are
-  re-added with the next frame).
-- **Test:** `cargo run -p linuxapk-bridge --example window -- SOCKET` opens a
-  window with a udmabuf pool the way the composer does and prints the events.
+  reconnects every second and adds its displays again (its buffers are re-added
+  with the next frame).
+- **Test:** `cargo run -p linuxapk-bridge --example window -- SOCKET` asks for a
+  window on the input service the way the window manager does, then adds a
+  display with a udmabuf pool the way the composer does, and prints the input
+  service's events. The input service needs the bridge's `--system-app-dir` to
+  be a directory you own.
 - **Scale:** `wp_fractional_scale_v1` where the compositor has it; otherwise the
   integer `wl_surface.preferred_buffer_scale` (or the outputs' scale), with
   `wl_surface.set_buffer_scale` when there is no viewporter. Either way a change
-  sends CONFIGURE with the new `scale×120`.
+  sends a `window` line with the new scale.
+
+### Input service (id 6)
+
+The Linux.apk System app's side of the windows: its window manager asks for
+windows (`WINDOW_REQUEST`, matched to the composer's next display of that size),
+its injector gets the host seat as protocol v2 input lines, and its IME drives
+the host's input methods. Only the system app's uid may open it, even where the
+allow-list admits a uid to every other service (`Config::private_services`): the
+lines are the user's keystrokes. The wire spec, including every input line, is
+the module doc of `host/bridge/src/input/proto.rs`; `input/hub.rs` is what it
+shares with the display service.
+
+- **Input:** the seat (`input/seat.rs`) turns `wl_pointer`, `wl_keyboard` and
+  `wl_touch` into lines with the window's Android display id on the enter lines;
+  pointer events on a client-side frame drive the frame instead. Window size
+  changes and close requests are lines too, so they stay in order with the
+  input.
+- **Windows:** a request waits up to 10 s for its display. `WINDOW_MAPPED` and
+  `WINDOW_UNMAPPED` tell the window manager when a display shows in its window
+  and when that ends (the display went away, or the composer did); it then asks
+  again.
 
 #### Text input
 
-The display service drives `zwp_text_input_v3` for the Linux.apk IME
-(`display/ime.rs` is the line protocol, `display/wl/text_input.rs` the Wayland
+The seat drives `zwp_text_input_v3` for the Linux.apk IME (`input/ime.rs` is the
+line protocol, with its table of lines, and `input/text_input.rs` the Wayland
 side; [input.md](input.md#text-input) has the Android side). There is one text
 input per seat, and it follows the keyboard focus: the compositor sends
 `enter`/`leave` for our windows' surfaces.
 
-- **IME to bridge** (TEXT_INPUT, through the composer), applied only while a
-  window has text-input focus and in order:
-
-  | Line                                             | Effect                                                                                                                                |
-  | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-  | `ti_enable` / `ti_disable`                       | `enable` / `disable`                                                                                                                  |
-  | `ti_content <hint> <purpose>`                    | `set_content_type` (hint ≤ `0x3ff`, purpose ≤ 13)                                                                                     |
-  | `ti_surrounding <cursor> <anchor> <0\|1> <text>` | `set_surrounding_text`; byte offsets on char boundaries; 1 also sets the change cause to `other` (the user or the app moved the text) |
-  | `ti_cursor <x> <y> <w> <h>`                      | `set_cursor_rectangle`, from the display's pixels divided by the window's scale                                                       |
-  | `ti_apply`                                       | `commit`                                                                                                                              |
-
-- **Bridge to IME**, as ordinary INPUT lines at each `done`, so they stay in
-  order with the keys: `ti_delete <before> <after>` (bytes), `ti_commit <text>`
-  (repeated for long text; the IME appends), `ti_preedit <begin> <end> [<text>]`
-  (always sent; no text means no preedit), then `ti_done <window>`. On `leave`
-  the IME gets an empty preedit and `ti_done`, as the protocol asks.
+- **IME to bridge:** `TEXT_INPUT` requests, applied only while a window has
+  text-input focus and in order.
+- **Bridge to IME:** ordinary input lines at each `done`, so they stay in order
+  with the keys.
 - **Text encoding:** bytes up to space, DEL and `%` are `%XX`; everything else
   (UTF-8) goes as is. The parser accepts only that canonical form (each line
   must re-encode to itself), bounded lengths and numbers, and no NUL.
@@ -292,11 +284,11 @@ The channel to the Linux.apk System app (`dev.linuxapk.system`,
 `android/app/src/main/kotlin/dev/linuxapk/system/integration/`). It carries
 desktop settings into Android; notifications, media sessions and web links out;
 and the clipboard both ways. Bridge side: `bridge/src/services/`. The app opens
-one connection (`BridgeClient`, reconnecting with backoff), sends `START`, and
-gets events from then on. Each feature starts the first time a client asks for
-it. When the connection ends, its notifications are closed and its MPRIS players
-removed; on SIGTERM (session stop) the bridge closes every desktop notification
-before it exits.
+one connection (`BridgeConnection`, reconnecting with backoff), sends `START`,
+and gets events from then on. Each feature starts the first time a client asks
+for it. When the connection ends, its notifications are closed and its MPRIS
+players removed; on SIGTERM (session stop) the bridge closes every desktop
+notification before it exits.
 
 **Blobs.** Anything that can exceed a 512-byte message (notifications, clipboard
 contents, URLs, artwork) goes as a sealed memfd next to a small request or event

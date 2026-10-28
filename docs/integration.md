@@ -87,7 +87,7 @@ ubinder supervisor work.
 
 - [x] **Buttons, hover, enter/leave** · done · P0 · input
   - Now: `android/input/.../InputTranslator.kt`; stream from
-    `hal/composer/InputServer.cpp`; e2e in `android/e2e/e2e.sh`.
+    `host/bridge/src/input/`; e2e in `tests/e2e/system-app/run.sh`.
   - Linux: `wl_pointer` (enter, leave, motion, button, frame).
   - Android: injected `SOURCE_MOUSE` MotionEvents (hover, `BUTTON_PRESS`).
     BTN_SIDE/EXTRA become BACK/FORWARD.
@@ -276,7 +276,7 @@ ubinder supervisor work.
       bridge
   - Now: done (integb). "Linux.apk Keyboard" (`android/app/.../ime/`) is the
     default IME and shows nothing; the bridge's display service drives
-    `zwp_text_input_v3` (`bridge/src/display/ime.rs`, `wl/text_input.rs`).
+    `zwp_text_input_v3` (`host/bridge/src/input/ime.rs`, `text_input.rs`).
     Proven with IBus Pinyin and dead keys in nested KWin
     ([input.md](input.md#text-input)). Left: a preedit cursor inside the text
     shows at its end.
