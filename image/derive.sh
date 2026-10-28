@@ -7,16 +7,16 @@
 #                session), so a file meant for e.g. "0550 logd logd" is
 #                unusable by its real owner.
 #   subuid       apex/: APEX files whose fs_config owner and mode code verifies
-#                at runtime, chowned to that owner inside "podman unshare",
-#                whose id map (0 = us, 1.. = /etc/subuid) matches the
-#                session's, so e.g. 1029 here is AID_CLAT.
-#   single-uid   apex/: the same files for single-uid mode (docs/sandbox.md),
+#                at runtime, chowned to that owner. Run it in a user namespace
+#                with the session's id maps (linuxapk-session does), so e.g.
+#                1029 here is AID_CLAT.
+#   single       apex/: the same files for single mode (docs/sandbox.md),
 #                owned by us, with the Android owner in the
 #                user.linuxapk.owner xattr that the shim reports.
 #
-# usage: derive.sh common|subuid|single-uid <img-dir> <apex-dir> <out-dir>
+# usage: derive.sh common|subuid|single <img-dir> <apex-dir> <out-dir>
 set -euo pipefail
-usage="usage: derive.sh common|subuid|single-uid <img-dir> <apex-dir> <out-dir>"
+usage="usage: derive.sh common|subuid|single <img-dir> <apex-dir> <out-dir>"
 layer=${1:?$usage} img=${2:?$usage} apex=${3:?$usage} out=${4:?$usage}
 
 relax() {
@@ -57,18 +57,18 @@ case $layer in
     relax odm "$img/odm"
     ;;
   subuid)
-    # Owned by subordinate ids: remove it from inside a matching user namespace.
-    podman unshare rm -rf "$out"
+    rm -rf "$out"
     mkdir -p "$out"
     copy_apex_files
     # In reverse, so files are done before their (possibly 0750) parents.
     for ((i = ${#apex_fs_config[@]} - 1; i >= 0; i--)); do
       read -r rel mode uid gid <<<"${apex_fs_config[i]}"
-      podman unshare sh -c '[ -e "$4" ] || exit 0; chown "$1:$2" "$4" && chmod "$3" "$4"' \
-        _ "$uid" "$gid" "$mode" "$out/apex/$rel"
+      [[ -e $out/apex/$rel ]] || continue
+      chown "$uid:$gid" "$out/apex/$rel"
+      chmod "$mode" "$out/apex/$rel"
     done
     ;;
-  single-uid)
+  single)
     rm -rf "$out"
     mkdir -p "$out"
     copy_apex_files
@@ -76,7 +76,8 @@ case $layer in
       read -r rel mode uid gid <<<"$e"
       [[ -e $out/apex/$rel ]] || continue
       chmod "$mode" "$out/apex/$rel"
-      setfattr -n user.linuxapk.owner -v "$uid:$gid" "$out/apex/$rel"
+      python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.linuxapk.owner", sys.argv[2].encode())' \
+        "$out/apex/$rel" "$uid:$gid"
     done
     ;;
   *)

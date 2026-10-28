@@ -4,12 +4,13 @@
 # pivot-exec pivots into it and starts Android init (second stage) in nested,
 # locked namespaces (see supervisor/pivot-exec/pivot-exec.c).
 #
-# Inputs (environment): LINUXAPK_RUN LINUXAPK_DATA (see linuxapk-session)
-#                       LINUXAPK_IMG, LINUXAPK_APEX, LINUXAPK_DERIVED (the
-#                         image's partitions, flattened APEXes and derived
-#                         layers)
-#                       LINUXAPK_ADDONS (addon layers, one dir each)
-#                       LINUXAPK_SINGLE_UID, LINUXAPK_BROKER_DEBUG
+#   ns-init.sh <session.conf>
+#
+# session.conf (written by linuxapk-session start) sets: run, data; img,
+# apexdir, derived (the image's partitions, flattened APEXes and derived
+# layers); android (our Android tree); addons (addon layers, one dir each);
+# uid_mode; broker_debug.
+# shellcheck disable=SC2154 # session.conf's variables
 set -euo pipefail
 
 # util-linux 2.41.5's fd-based mount API (fsopen/fsconfig/fsmount) fails
@@ -19,14 +20,12 @@ set -euo pipefail
 export LIBMOUNT_FORCE_MOUNT2=always
 
 here=$(cd "$(dirname "$0")" && pwd)
-android=$(cd "$here/../.." && pwd)/share/linuxapk/android
-run=$LINUXAPK_RUN data=$LINUXAPK_DATA
-img=$LINUXAPK_IMG apex=$LINUXAPK_APEX derived=$LINUXAPK_DERIVED
+# shellcheck source=/dev/null
+source "${1:?usage: ns-init.sh <session.conf>}"
 # The derived layer for this uid mode (image/derive.sh).
-uid_layer=$derived/subuid
-[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && uid_layer=$derived/single-uid
-addons=()
-for a in "$LINUXAPK_ADDONS"/*/; do [[ -d $a ]] && addons+=("${a%/}"); done
+uid_layer=$derived/$uid_mode
+addon_layers=()
+for a in "$addons"/*/; do [[ -d $a ]] && addon_layers+=("${a%/}"); done
 
 log() { echo "ns-init: $*" >&2; }
 
@@ -75,7 +74,7 @@ layer_mount() {
 # Android tree, the layers derived from the image, the image.
 partition() { # name image-dir
   local p=$1 a layers=("$run/layer/$1")
-  for a in "${addons[@]}"; do layers+=("$a/$p"); done
+  for a in "${addon_layers[@]}"; do layers+=("$a/$p"); done
   layer_mount "$R/$p" "${layers[@]}" "$android/$p" "$derived/common/$p" "$uid_layer/$p" "$2"
 }
 partition system "$img/system/system"
@@ -111,11 +110,11 @@ rm -rf "$R/lost+found"
 # com.android.hardware.audio, rc files) are in the start-time layer, for the
 # APEXes this image has (linuxapk-session).
 mkdir -p "$R/apex" "$R/bootstrap-apex"
-layer_mount "$R/linuxapk/apex" "$run/layer/apex" "$uid_layer/apex" "$apex"
+layer_mount "$R/linuxapk/apex" "$run/layer/apex" "$uid_layer/apex" "$apexdir"
 # For /system/bin/linuxapk-apexd: what apexd would see in /proc/mounts had it
 # mounted each APEX itself (erofs file-backed: "<file> /apex/<name>@<ver>").
 sed -n 's/.*moduleName="\([^"]*\)" modulePath="\([^"]*\)".* versionCode="\([0-9]*\)".*/\2 \/apex\/\1@\3 erofs ro,fsoffset=0 0 0/p' \
-  "$apex/apex-info-list.xml" >"$R/linuxapk/apexd-mounts"
+  "$apexdir/apex-info-list.xml" >"$R/linuxapk/apexd-mounts"
 
 # --- writable state -----------------------------------------------------------
 mkdir -p "$data"
@@ -144,8 +143,8 @@ fi
 # it may restart and recreate its socket in there). Group audio (AID 1005,
 # a subordinate gid on the host) can enter it: the audio HALs run as
 # audioserver with that group.
-if [[ ${LINUXAPK_SINGLE_UID:-} == 1 ]]; then
-  # Single-uid mode: every Android process is uid 0 to the kernel.
+if [[ $uid_mode == single ]]; then
+  # Single mode: every Android process is uid 0 to the kernel.
   chmod 0700 "$run/bridge"
 else
   chown 0:1005 "$run/bridge"
@@ -157,9 +156,9 @@ mount --bind "$run/bridge" "$R/dev/socket/linuxapk"
 touch "$R/dev/kmsg"
 mount --bind "$run/kmsg" "$R/dev/kmsg"
 mkdir -p "$R/dev/pts" "$R/dev/socket"
-# gid 5 (tty) isn't mapped in single-uid mode.
+# gid 5 (tty) isn't mapped in single mode.
 pts_gid=5
-[[ ${LINUXAPK_SINGLE_UID:-} == 1 ]] && pts_gid=0
+[[ $uid_mode == single ]] && pts_gid=0
 mount -t devpts -o newinstance,ptmxmode=0666,mode=0620,gid=$pts_gid devpts "$R/dev/pts"
 ln -s pts/ptmx "$R/dev/ptmx"
 if [[ -d /dev/dri ]]; then
@@ -229,15 +228,13 @@ if touch "$R/sys/.linuxapk-rw-probe" 2>/dev/null; then
 fi
 
 # --- go -----------------------------------------------------------------------
-# Android starts with a clean environment, plus what pivot-exec and the broker
-# read.
-broker_debug=${LINUXAPK_BROKER_DEBUG:-}
-single_uid=${LINUXAPK_SINGLE_UID:-}
+# Android starts with a clean environment, plus what pivot-exec, the broker
+# and the shim read.
 for v in $(compgen -e); do unset "$v"; done
 export PATH=/system/bin:/system/xbin:/vendor/bin
 # Absolute path: a bare name is not found from APEX linker namespaces.
 export LD_PRELOAD=/system/lib64/liblinuxapk_shim.so
 export LINUXAPK_BROKER=/system/bin/linuxapk-broker
 [[ -n $broker_debug ]] && export LINUXAPK_BROKER_DEBUG=$broker_debug
-[[ $single_uid == 1 ]] && export LINUXAPK_SINGLE_UID=1
+[[ $uid_mode == single ]] && export LINUXAPK_SINGLE_UID=1
 exec "$here/pivot-exec" "$R" /system/bin/init second_stage

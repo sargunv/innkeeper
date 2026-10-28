@@ -109,7 +109,7 @@ run = "rm -rf out/build out/stage out/cargo"
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit tests: Rust, the broker fuzzer, the protocol, the HAL host tests, supervisor and image scripts"
+description = "Unit tests: Rust, the broker fuzzer, the protocol, the HAL host tests, supervisor, launcher and image scripts"
 run = """
 set -euo pipefail
 cargo test -q --workspace
@@ -118,7 +118,7 @@ cargo run -q --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 20000 1
 cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
 ctest --preset host-tests
-for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
+for t in supervisor/tests/*.sh host/launcher/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
 """
 
 [tasks."test:bionic"]
@@ -138,8 +138,8 @@ description = "AOSP's binder tests against the broker, then kernel binder (77: u
 run = "supervisor/tests/binder/run.sh"
 
 [tasks."test:boot"]
-description = "Boot a fresh headless test instance and run selftest, in each uid mode"
-run = ["tests/boot.sh", "tests/boot.sh --single-uid"]
+description = "Boot a fresh headless test instance and run selftest: subuid mode, then single (subordinate ids hidden)"
+run = ["tests/boot.sh", "tests/boot.sh --no-subids"]
 
 [tasks."test:e2e"]
 description = "End-to-end suites against a headless test instance: audio, system-app, cli"
