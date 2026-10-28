@@ -5,6 +5,7 @@ import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.KeyEvent
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -17,17 +18,20 @@ import kotlin.math.roundToInt
  * "Linux.apk Keyboard": the host's keyboard and input methods (IBus, Fcitx) for Android text
  * fields, through the bridge's `zwp_text_input_v3` (docs/input.md).
  *
- * It shows no keyboard. Keys still arrive as injected key events, which this service passes on
- * untouched. For each editor it tells the bridge to enable text input (with the content type), and
- * keeps the bridge up to date with the surrounding text and the cursor rectangle; the host input
- * method's preedit, commit and delete come back as `ti_*` lines from the bridge's input service and
- * are applied here through the `InputConnection`.
+ * It shows no keyboard. Keys still arrive as injected key events, which this service passes on,
+ * except those whose character Android's key character map would get wrong under the host layout
+ * (accented letters, dead keys, Compose): for those it commits the host's text instead
+ * ([HostInputClient.keyText]). For each editor it tells the bridge to enable text input (with the
+ * content type), and keeps the bridge up to date with the surrounding text and the cursor
+ * rectangle; the host input method's preedit, commit and delete come back as `ti_*` lines from the
+ * bridge's input service and are applied here through the `InputConnection`.
  */
 class HostImeService : InputMethodService(), HostInputClient.Listener {
   private val main = Handler(Looper.getMainLooper())
   private val session = TextInputSession()
   private var active = false
   private val pts = FloatArray(4)
+  private val committedKeys = HashSet<Int>() // scan codes whose down committed text instead
 
   private val input
     get() = (application as LinuxApkSystemApp).input
@@ -115,6 +119,23 @@ class HostImeService : InputMethodService(), HostInputClient.Listener {
     matrix.mapPoints(pts)
     val h = (pts[3] - pts[1]).roundToInt().coerceAtLeast(1)
     send("ti_cursor ${pts[0].roundToInt()} ${pts[1].roundToInt()} 1 $h", "ti_apply")
+  }
+
+  // Keys reach the IME before the app, in order, so committing here keeps typing order.
+  override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+    val ic = currentInputConnection
+    val text = if (ic != null) input.keyText(event) else null
+    if (ic == null || text == null) return super.onKeyDown(keyCode, event)
+    // Repeats (InputDispatcher's) commit again; a dead key commits nothing.
+    if (text.isNotEmpty()) ic.commitText(text, 1)
+    committedKeys += event.scanCode
+    return true
+  }
+
+  override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+    input.keyTextDone(event)
+    if (committedKeys.remove(event.scanCode)) return true
+    return super.onKeyUp(keyCode, event)
   }
 
   /** The surrounding-text line for the editor's current state, or null if it can't be read. */

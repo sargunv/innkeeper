@@ -15,6 +15,10 @@ data class TranslatorConfig(
    * scrolling, which the host reports in surface pixels, into scroll units.
    */
   val scrollPixelsPerUnit: Float = 64f,
+  /** What the injected keys' key character map types ([Keyboard]). */
+  val keyChars: KeyChars = KeyChars { _, _ -> 0 },
+  /** Ctrl+W and Ctrl+Q close the window, Alt+Left is BACK ([Keyboard]). */
+  val windowShortcuts: Boolean = false,
 )
 
 /**
@@ -42,9 +46,20 @@ data class TranslatorConfig(
 class InputTranslator(
   private val config: TranslatorConfig = TranslatorConfig(),
   now: () -> Long = { System.nanoTime() / 1_000_000 },
+  /** Whether the app on this display keeps Ctrl+W (a web browser closes a tab with it). */
+  private val keepsCtrlW: (display: Int) -> Boolean = { false },
+  /** A window shortcut asked to close the window of this display. */
+  private val onClose: (display: Int) -> Unit = {},
 ) {
   private val clock = EventClock(now)
-  private val keyboard = Keyboard(config.escapeAsBack)
+  private val keyboard =
+    Keyboard(
+      config.escapeAsBack,
+      config.keyChars,
+      config.windowShortcuts,
+      keepCtrlW = { keepsCtrlW(keyDisplay) },
+      onClose = { onClose(keyDisplay) },
+    )
 
   private val windows = HashMap<Int, HostEvent.Window>() // by display
 
@@ -220,7 +235,9 @@ class InputTranslator(
         keyDisplay = e.display
       }
       is HostEvent.KeyboardLeave -> keys(out) { keyboard.releaseAll(clock.untimed(), it) }
-      is HostEvent.Key -> keys(out) { keyboard.key(e.code, e.pressed, clock.map(e.time), it) }
+      // A compositor's repeats may carry the press's time; they happen now.
+      is HostEvent.Key ->
+        keys(out) { keyboard.key(e, if (e.repeat) clock.untimed() else clock.map(e.time), it) }
       is HostEvent.Modifiers -> keyboard.modifiers(e.depressed, e.latched, e.locked)
       is HostEvent.TouchDown -> {
         touchFrameTime = clock.map(e.time)
@@ -237,6 +254,7 @@ class InputTranslator(
       HostEvent.TouchFrame -> touchFrame(out)
       HostEvent.TouchCancel -> touchCancel(out)
       is HostEvent.Close,
+      is HostEvent.RepeatInfo,
       is HostEvent.WindowMapped,
       is HostEvent.WindowUnmapped,
       is HostEvent.TextDelete,

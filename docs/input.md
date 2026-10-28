@@ -63,11 +63,22 @@ The mapping follows what InputReader produces for real devices
 - **Cursor.** The bridge sets the default arrow on every pointer enter and
   tablet proximity, and the frame's resize shapes over a client-side frame
   (`wp_cursor_shape_v1`).
-- **Keys.** Keycodes come from AOSP's `Generic.kl`
-  (`android/system-app/tools/gen-keymap.py` generates `EvdevKeymap.kt`), with
-  the evdev code as scan code. Meta state comes from the modifier keys and the
-  xkb masks. Wayland sends no repeats; InputDispatcher synthesizes them for
-  injected key downs.
+- **Keys** follow the host layout (see [Keyboard layout](#keyboard-layout)). The
+  scan code is always the evdev code. Meta state comes from the modifier keys
+  and the xkb masks.
+- **Repeat.** InputDispatcher synthesizes repeats for injected key downs. The
+  bridge forwards `wl_keyboard.repeat_info`, and the system app writes it to
+  Android's `key_repeat_timeout` (the delay, clamped to 150–2000 ms),
+  `key_repeat_delay` (1000 / rate, 20–2000 ms) and `key_repeat_enabled` secure
+  settings. A compositor that repeats keys itself (`wl_keyboard` v10, after a
+  rate of 0, as KWin 6 does) sends repeated keys, which become downs with a
+  repeat count. KWin also repeats a key that a host input method (such as
+  plasma-keyboard) passed on as a press and release; each repeat is then a tap.
+- **Window shortcuts.** Ctrl+W and Ctrl+Q close the window, as its close button
+  does, and Alt+Left sends BACK to it; none of them reaches the app. Web
+  browsers (apps that open any https link) keep Ctrl+W, which closes a tab. F11
+  toggles fullscreen in the bridge. `persist.linuxapk.input.window_shortcuts=0`
+  turns Ctrl+W, Ctrl+Q and Alt+Left off.
 - **Escape stays Escape.** Android 17 already closes dialogs and popups on it;
   mapping it to BACK would break apps that use Escape. The mouse back button and
   the Back key send BACK; `persist.linuxapk.input.escape_back=1` opts in.
@@ -76,6 +87,44 @@ The mapping follows what InputReader produces for real devices
 - **Why injection.** uinput isn't available rootless and would create a
   host-global device the compositor picks up; VirtualDeviceManager's input
   devices sit on uinput too.
+
+## Keyboard layout
+
+The bridge loads the compositor's xkb keymap with libxkbcommon (opened at run
+time, `input/xkb.rs`, after winit's `common/xkb`) and keeps its state from the
+`modifiers` events. Each press goes out with the key's level-1 keysym in the
+active layout and what it types, composed from dead keys and the Compose key
+with the locale's compose table. The system app's `Keyboard.kt` then follows
+Mac.apk's host keymap:
+
+```mermaid
+flowchart LR
+  key["wl_keyboard key<br/>(evdev code)"] --> xkb["bridge: xkb state + compose"]
+  xkb -->|"key t code 1 sym text|compose"| kb["Keyboard.kt"]
+  kb -->|"keycode from the keysym<br/>(letters, digits, punctuation)"| inj["injected KeyEvent"]
+  kb -->|"text Virtual.kcm would get wrong"| ime["Linux.apk Keyboard<br/>commitText"]
+  inj --> ime
+  ime -->|"other keys, unchanged"| app["app"]
+```
+
+- **Keycodes.** A character key whose level-1 keysym is a Latin letter, a digit
+  or one of Android's punctuation keys gets that keycode, so shortcuts follow
+  the layout: the AZERTY Z key is `KEYCODE_Z`, and Ctrl+Z undoes. Every other
+  key keeps its physical keycode from AOSP's `Generic.kl`
+  (`android/system-app/tools/gen-keymap.py` generates `EvdevKeymap.kt`):
+  AZERTY's é key is `KEYCODE_2`, and Cyrillic layouts keep the QWERTY positions
+  for shortcuts.
+- **Text.** Injected keys type through `Virtual.kcm`, which is US. When the
+  host's text for a press differs from what `Virtual.kcm` gives its keycode and
+  meta state (é, Shift+& on AZERTY, ö, AltGr characters, composed characters),
+  the key down carries that text, and the Linux.apk Keyboard, which sees every
+  key before the app, commits it instead of passing the key on. Dead keys and
+  the Compose key's steps type nothing. Ctrl and Meta chords are never text, and
+  neither is an Alt chord whose text is the key's own.
+- **Without the IME** (another input method chosen, or no text field) the app
+  gets the key event alone, with the keycode above.
+- **With a host input method** (IBus, Fcitx) it handles compose itself, so the
+  keys it consumes never reach the bridge.
 
 ## Text input
 
@@ -88,8 +137,8 @@ logic is `TextInputSession.kt` in `:protocol`.
   input view, so no soft keyboard covers the window. The window manager's
   per-display IME policy is `LOCAL`: `HIDE` would bind no IME at all, and text
   input would stop.
-- **Keys** still arrive as injected key events, which the IME passes through, so
-  without a host input method nothing changes.
+- **Keys** still arrive as injected key events, which the IME passes through,
+  except those whose text it commits ([Keyboard layout](#keyboard-layout)).
 - **With a host input method** (CJK, dead keys, compose): for each editor the
   IME sends `ti_enable`, the content type (password, email, number, …), the
   surrounding text (up to 120 UTF-16 units each side) and the cursor rectangle,
@@ -102,8 +151,13 @@ logic is `TextInputSession.kt` in `:protocol`.
 
 ## Known limits
 
-- Android sees no physical keyboard (`Configuration.keyboard`), and characters
-  come from `Virtual.kcm`, so the host's xkb layout is ignored (US only).
+- Android sees no physical keyboard (`Configuration.keyboard`), and key events
+  still carry `Virtual.kcm`'s characters: apps that read
+  `KeyEvent.getUnicodeChar()` outside a text field (games, terminals' key
+  handlers) see US characters for non-US keys. A KCM matching the host layout
+  needs a real input device (#5).
+- Window shortcuts are on or off for every app except browsers' Ctrl+W, until
+  per-app settings exist (#24).
 - Android draws no pointer for injected events, and pointer-icon changes aren't
   forwarded; the host cursor is the only cursor, and it stays the arrow (text
   fields show no I-beam, games can't hide it). Without `wp_cursor_shape_v1` the
@@ -117,9 +171,16 @@ logic is `TextInputSession.kt` in `:protocol`.
 
 - `:protocol` unit tests (in `mise run test`): the line parser, keymap and
   translator, with a model of AOSP's InputVerifier run over every test plus
-  random streams.
+  random streams; `KeyboardTest` covers layouts, text, compose and the
+  shortcuts. `cargo test -p linuxapk-bridge` resolves keys under keymaps
+  compiled from RMLVO names (`fr`, `de`, `us` with `compose:ralt`).
 - `tests/e2e/system-app/run.sh` (in `mise run test:e2e`): opens the probes APK's
   `InputProbeActivity` in its own window, injects `probe-stream.txt` through the
   app's translator and injector, and checks the events (hover, click, scroll,
-  Shift+A, Escape, two fingers, touchpad scroll, fling stop, pinch, pen and
-  eraser) and that the dispatcher reported no inconsistent event.
+  Shift+A, Escape, a layout key, Alt+Left, Ctrl+W, two fingers, touchpad scroll,
+  fling stop, pinch, pen and eraser) and that the dispatcher reported no
+  inconsistent event.
+- The IME's text commits and the repeat settings need the bridge's seat: they
+  are checked in a nested KWin with `org_kde_kwin_fake_input`
+  ([development.md](development.md#a-nested-isolated-desktop)) and the probes'
+  `TextProbeActivity`.

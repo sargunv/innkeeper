@@ -96,7 +96,7 @@ class Injector {
               e.eventTime,
               e.action,
               e.keyCode,
-              0, // repeat: InputDispatcher synthesizes repeats
+              e.repeatCount, // nonzero only for a compositor's own repeats
               e.metaState,
               KeyCharacterMap.VIRTUAL_KEYBOARD,
               e.scanCode,

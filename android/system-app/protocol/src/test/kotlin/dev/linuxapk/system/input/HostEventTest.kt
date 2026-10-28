@@ -24,6 +24,14 @@ class HostEventTest {
         "keyboard_enter" to HostEvent.KeyboardEnter(),
         "keyboard_leave" to HostEvent.KeyboardLeave(),
         "key 9 30 1" to HostEvent.Key(9, 30, true),
+        "key 9 16 1 97 text a" to HostEvent.Key(9, 16, true, 97, "a"),
+        "key 9 57 1 32 text %20" to HostEvent.Key(9, 57, true, 32, " "),
+        "key 9 3 1 233 text é" to HostEvent.Key(9, 3, true, 233, "é"),
+        "key 9 26 1 65106 compose" to HostEvent.Key(9, 26, true, 65106, compose = true),
+        "key 9 28 1 65293" to HostEvent.Key(9, 28, true, 65293),
+        "key 9 30 2" to HostEvent.Key(9, 30, true, repeat = true),
+        "key 9 30 2 97 text a" to HostEvent.Key(9, 30, true, 97, "a", repeat = true),
+        "repeat_info 25 600" to HostEvent.RepeatInfo(25, 600),
         "modifiers 1 0 2 0" to HostEvent.Modifiers(1, 0, 2, 0),
         "modifiers 4294967295 0 0 0" to HostEvent.Modifiers(-1, 0, 0, 0),
         "touch_down 1 3 1.00 2.00" to HostEvent.TouchDown(1, 3, 1f, 2f),
@@ -81,13 +89,24 @@ class HostEventTest {
 
   @Test
   fun toleratesWhitespaceAndExtraFields() {
-    assertEquals(HostEvent.Key(9, 30, true), HostEvent.parse("  key 9 30 1 extra\r"))
+    assertEquals(HostEvent.Key(9, 30, true, 97), HostEvent.parse("  key 9 30 1 97 extra\r"))
   }
 
   @Test
   fun rejectsMalformedAndUnknownLines() {
     for (line in
-      listOf("", "   ", "bogus 1 2", "key 9 30", "key x 30 1", "pointer_button 1 272 2")) {
+      listOf(
+        "",
+        "   ",
+        "bogus 1 2",
+        "key 9 30",
+        "key x 30 1",
+        "key 9 30 1 x",
+        "key 9 30 3",
+        "key 9 30 1 97 text %zz",
+        "repeat_info 25",
+        "pointer_button 1 272 2",
+      )) {
       assertNull(HostEvent.parse(line), line)
     }
   }

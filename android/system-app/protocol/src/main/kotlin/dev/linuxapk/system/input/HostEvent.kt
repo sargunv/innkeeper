@@ -93,7 +93,24 @@ sealed interface HostEvent {
 
   data class KeyboardLeave(val display: Int = -1) : HostEvent
 
-  data class Key(val time: Long, val code: Int, val pressed: Boolean) : HostEvent
+  /**
+   * Key [code] (evdev). Under the host's keymap a press also carries [sym], the key's level-1
+   * keysym in the active layout (0: unknown), and what it types: [text], or [compose] for a step of
+   * a compose sequence (a dead key), which types nothing. [repeat]: the compositor repeated a held
+   * key (wl_keyboard v10, after a repeat rate of 0).
+   */
+  data class Key(
+    val time: Long,
+    val code: Int,
+    val pressed: Boolean,
+    val sym: Int = 0,
+    val text: String? = null,
+    val compose: Boolean = false,
+    val repeat: Boolean = false,
+  ) : HostEvent
+
+  /** The host's key repeat: [rate] per second (0: off) after [delay] ms. */
+  data class RepeatInfo(val rate: Int, val delay: Int) : HostEvent
 
   /** xkb modifier masks in the compositor's keymap. */
   data class Modifiers(val depressed: Int, val latched: Int, val locked: Int, val group: Int) :
@@ -162,12 +179,7 @@ sealed interface HostEvent {
 
       fun float(i: Int) = f[i].toFloat()
 
-      fun bool(i: Int) =
-        when (f[i]) {
-          "1" -> true
-          "0" -> false
-          else -> throw NumberFormatException(f[i])
-        }
+      fun bool(i: Int) = flag(f[i])
 
       val args = f.size - 1
 
@@ -208,7 +220,8 @@ sealed interface HostEvent {
         "tablet_frame" -> need(args, 1) { TabletFrame(time(1)) }
         "keyboard_enter" -> KeyboardEnter(display(1, 0))
         "keyboard_leave" -> KeyboardLeave(display(1, -1))
-        "key" -> need(args, 3) { Key(time(1), int(2), bool(3)) }
+        "key" -> need(args, 3) { key(f) ?: return null }
+        "repeat_info" -> need(args, 2) { RepeatInfo(int(1), int(2)) }
         "modifiers" ->
           need(args, 4) {
             Modifiers(
@@ -235,6 +248,26 @@ sealed interface HostEvent {
         else -> null
       }
     }
+
+    // `key <t> <code> <0|1|2> [<sym> [text <text> | compose]]`; null if the text is malformed.
+    private fun key(f: List<String>): Key? {
+      val repeat = f[3] == "2"
+      val pressed = repeat || flag(f[3])
+      val sym = f.getOrNull(4)?.toLong()?.toInt() ?: 0
+      val k = Key(f[1].toLong(), f[2].toInt(), pressed, sym, repeat = repeat)
+      return when (f.getOrNull(5)) {
+        "text" -> k.copy(text = PercentText.decode(f.getOrElse(6) { "" }) ?: return null)
+        "compose" -> k.copy(compose = true)
+        else -> k
+      }
+    }
+
+    private fun flag(s: String) =
+      when (s) {
+        "1" -> true
+        "0" -> false
+        else -> throw NumberFormatException(s)
+      }
 
     // Extra trailing fields are accepted (forward compatibility); missing ones are not.
     private inline fun need(args: Int, n: Int, make: () -> HostEvent): HostEvent? =

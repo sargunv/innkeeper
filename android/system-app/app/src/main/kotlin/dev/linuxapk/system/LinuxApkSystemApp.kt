@@ -22,7 +22,7 @@ class LinuxApkSystemApp : Application() {
   private val features = mutableListOf<Feature>()
 
   /** The bridge's input service: window requests, host input, the host's input methods. */
-  val input = HostInputClient()
+  val input = HostInputClient(this)
 
   /** Android apps on the desktop's AT-SPI bus; its accessibility service finds it here. */
   val a11y = A11yFeature(this)

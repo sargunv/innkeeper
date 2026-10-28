@@ -51,4 +51,12 @@ data class OutKey(
   val downTime: Long,
   override val eventTime: Long,
   override val displayId: Int = 0,
+  /**
+   * For a key down: the text the Linux.apk Keyboard commits instead of the key's character, which
+   * Android's key character map would get wrong (empty: the key types nothing). Not part of the
+   * injected event.
+   */
+  val text: String? = null,
+  /** A key down's repeat count: nonzero only for repeats the compositor sends itself. */
+  val repeatCount: Int = 0,
 ) : OutEvent
