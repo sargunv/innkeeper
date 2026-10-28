@@ -2,14 +2,15 @@
 # End-to-end test of `linuxapk` against a real session (its own instance).
 #   tests/e2e/cli/run.sh [corpus-dir]
 # Installs OpenCalc and Wikipedia, validates their desktop entries and icons,
-# launches them through gtk-launch and xdg-open (checking the resumed activity
-# with dumpsys), reinstalls (idempotent), then uninstalls and checks that no
-# desktop files or icons are left. Uses the staged build (out/stage), and
-# leaves the session running; stop it with
-# `LINUXAPK_INSTANCE=cli mise run session -- stop`.
+# launches them through gtk-launch and gio open (checking the resumed activity
+# with dumpsys), reinstalls (idempotent), repairs a stale entry on `list`, then
+# uninstalls and checks that no desktop files or icons are left. Uses the
+# staged build (out/stage). Desktop entries, icons and caches go to a scratch
+# XDG tree in out/test/cli, never the user's. Leaves the session running; stop
+# it with `LINUXAPK_INSTANCE=cli mise run session -- stop`.
 #
 # Environment: LINUXAPK_INSTANCE (default cli), LINUXAPK_CORPUS (default
-# out/test/compat/corpus, filled by `tests/compat/run.sh fetch`).
+# out/test/compat/corpus, filled by `mise run test:compat -- fetch`).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
@@ -21,8 +22,17 @@ la=$repo/out/stage/bin/linuxapk
   echo "no $la (run \`mise run build\`)" >&2
   exit 1
 }
-apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
-icons=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor
+
+# The session keeps the launcher's usual image and /data; only the desktop
+# side moves to the scratch tree.
+real=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk
+export LINUXAPK_IMAGES=${LINUXAPK_IMAGES:-$real/images}
+export LINUXAPK_DATA=${LINUXAPK_DATA:-$real/data-$LINUXAPK_INSTANCE}
+xdg=$repo/out/test/cli
+rm -rf "$xdg"
+export XDG_DATA_HOME=$xdg/data XDG_CONFIG_HOME=$xdg/config XDG_CACHE_HOME=$xdg/cache
+apps=$XDG_DATA_HOME/applications
+icons=$XDG_DATA_HOME/icons/hicolor
 
 fail() {
   echo "FAIL $*" >&2
@@ -85,17 +95,31 @@ before=$(sha256sum "$apps/dev.linuxapk.org.wikipedia.desktop")
 [[ $(sha256sum "$apps/dev.linuxapk.org.wikipedia.desktop") == "$before" ]] || fail "reinstall changed the entry"
 ok "reinstall is idempotent"
 
+# An entry from an older Linux.apk (LINUXAPK_SESSION, a program that's gone)
+# is pointed at this linuxapk by `list`, keeping its instance.
+stale=$apps/dev.linuxapk.org.example.stale.desktop
+cat >"$stale" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Stale
+Exec=env LINUXAPK_SESSION=/gone/linuxapk-session LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE /gone/linuxapk run org.example.stale %U
+X-LinuxApk-Package=org.example.stale
+EOF
 "$la" list | grep -q $'^org.wikipedia\tWikipedia$' || fail "list"
 ok "list"
+want="Exec=env LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE $(realpath "$la") run org.example.stale %U"
+[[ $(grep '^Exec=' "$stale") == "$want" ]] || fail "stale entry not repaired: $(grep '^Exec=' "$stale")"
+rm "$stale"
+ok "list repairs a stale entry"
 
 # Launch through the desktop, as the app menu would (no lane env in scope:
 # the entry carries it).
 env -u LINUXAPK_INSTANCE gtk-launch dev.linuxapk.com.darkempire78.opencalculator
 wait_top com.darkempire78.opencalculator
 ok "gtk-launch: OpenCalc resumed ($(top))"
-env -u LINUXAPK_INSTANCE xdg-open 'wikipedia://en.wikipedia.org/wiki/Linux'
+env -u LINUXAPK_INSTANCE gio open 'wikipedia://en.wikipedia.org/wiki/Linux'
 wait_top org.wikipedia PageActivity
-ok "xdg-open wikipedia://: Wikipedia resumed ($(top))"
+ok "gio open wikipedia://: Wikipedia resumed ($(top))"
 
 # Untrusted input is refused.
 ! "$la" run org.wikipedia 'file:///etc/passwd' 2>/dev/null || fail "file: URI accepted"
