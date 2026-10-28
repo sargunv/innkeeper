@@ -8,7 +8,6 @@ pub mod apk;
 pub mod bundle;
 pub mod desktop;
 pub mod launcher;
-pub mod manifest;
 pub mod ops;
 pub mod paths;
 pub mod proc;

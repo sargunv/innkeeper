@@ -1,5 +1,5 @@
-//! User-level operations shared by the CLI and the GUI. They block (aapt2,
-//! the session, Android's package manager), so the GUI runs them off its UI
+//! User-level operations shared by the CLI and the GUI. They block (reading
+//! APKs, the session, Android's package manager), so the GUI runs them off its UI
 //! thread; progress and warnings go to a [`Report`] callback.
 
 use std::collections::BTreeSet;
@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::android::{self, Launch};
+use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
 use crate::launcher::{Session, UidMode};
-use crate::manifest::{self, Aapt2, Badging};
 use crate::paths::{self, Prefix};
 use crate::validate;
 use crate::xdg::{self, DesktopApp, Dirs};
@@ -69,16 +69,16 @@ pub struct Package {
     /// Adaptive (XML) icons are only rendered by Android after install.
     pub icon: Option<Vec<u8>>,
     input: Input,
-    /// Badging of each member of `input`, in order.
-    badging: Vec<Badging>,
+    /// Metadata of each member of `input`, in order.
+    info: Vec<ApkInfo>,
     base: usize,
 }
 
 impl Package {
-    fn base(&self) -> (&Path, &Badging) {
+    fn base(&self) -> (&Path, &ApkInfo) {
         (
             self.input.apks[self.base].path.as_path(),
-            &self.badging[self.base],
+            &self.info[self.base],
         )
     }
 
@@ -98,7 +98,6 @@ impl Package {
 
 /// Reads an APK or bundle (no session needed).
 pub fn inspect(file: &Path, report: Report) -> Result<Package> {
-    let aapt = Aapt2::find()?;
     let size = file
         .metadata()
         .with_context(|| format!("open {}", file.display()))?
@@ -110,15 +109,15 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
             validate::truncate(s, 120)
         )));
     }
-    let mut badging = vec![];
+    let mut info = vec![];
     for m in &input.apks {
-        badging.push(
-            aapt.badging(&m.path)
+        info.push(
+            apk::read(&m.path)
                 .with_context(|| format!("read {}", validate::truncate(&m.origin, 120)))?,
         );
     }
-    let bases: Vec<usize> = (0..badging.len())
-        .filter(|i| badging[*i].split.is_empty())
+    let bases: Vec<usize> = (0..info.len())
+        .filter(|i| info[*i].split.is_empty())
         .collect();
     if bases.len() != 1 {
         bail!(
@@ -127,9 +126,9 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
             bases.len()
         );
     }
-    let base = &badging[bases[0]];
+    let base = &info[bases[0]];
     let pkg = validate::package(&base.package)?.to_string();
-    if let Some(b) = badging.iter().find(|b| b.package != pkg) {
+    if let Some(b) = info.iter().find(|b| b.package != pkg) {
         bail!(
             "bundle mixes packages ({pkg} and {})",
             validate::truncate(&b.package, 80)
@@ -137,20 +136,13 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     }
     let label = validate::label(&base.label).unwrap_or_else(|| pkg.clone());
     let mut abis: BTreeSet<String> = base.native_code.iter().cloned().collect();
-    abis.extend(badging.iter().filter_map(|b| bundle::split_abi(&b.split)));
+    abis.extend(info.iter().filter_map(|b| bundle::split_abi(&b.split)));
     let mut permissions: BTreeSet<String> = BTreeSet::new();
-    for b in &badging {
+    for b in &info {
         permissions.extend(b.permissions.iter().cloned());
     }
-    let base_apk = &input.apks[bases[0]].path;
-    let mut icon = largest_bitmap_icon(base_apk, &base.icons);
-    // An adaptive (XML) icon: try the legacy bitmaps of the same resource.
-    if icon.is_none()
-        && let Some((_, xml)) = base.icons.iter().max_by_key(|(d, _)| *d)
-        && let Ok(res) = aapt.resources(base_apk)
-    {
-        icon = largest_bitmap_icon(base_apk, &manifest::bitmap_variants(&res, xml));
-    }
+    // An adaptive (XML) icon falls back to its legacy bitmaps.
+    let icon = largest_bitmap_icon(&input.apks[bases[0]].path, &base.icons);
     Ok(Package {
         file: file.to_path_buf(),
         label,
@@ -163,7 +155,7 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
         icon,
         package: pkg,
         input,
-        badging,
+        info,
         base: bases[0],
     })
 }
@@ -188,7 +180,6 @@ pub struct Installed {
 /// and adds it to the app menu.
 pub fn install(p: &Package, report: Report) -> Result<Installed> {
     let dirs = Dirs::from_env();
-    let aapt = Aapt2::find()?;
     let pkg = p.package.clone();
     let s = session(report)?;
     let abis: Vec<String> = s
@@ -201,7 +192,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
     let (base_path, base) = p.base();
     let mut apks: Vec<&Path> = vec![base_path];
     let mut abi_splits = 0;
-    for (m, b) in p.input.apks.iter().zip(&p.badging) {
+    for (m, b) in p.input.apks.iter().zip(&p.info) {
         if b.split.is_empty() {
             continue;
         }
@@ -215,7 +206,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
     }
     if abi_splits > 0
         && !p
-            .badging
+            .info
             .iter()
             .any(|b| bundle::split_abi(&b.split).is_some_and(|a| abis.contains(&a)))
     {
@@ -243,13 +234,6 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
     android::install(&s, &apks)?;
 
     report(Event::Status("adding it to the app menu".into()));
-    let man = aapt.manifest(base_path)?;
-    if man.package != pkg {
-        bail!(
-            "manifest package {:?} doesn't match {pkg}",
-            validate::truncate(&man.package, 80)
-        );
-    }
     let info = android::app_info(&s, &pkg, xdg::ICON_SIZES).unwrap_or_else(|e| {
         report(Event::Warning(format!(
             "couldn't render the icon in Android ({e:#}); using the APK's PNG if it has one"
@@ -285,9 +269,9 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         run,
         icon: None,
         version: p.version.clone(),
-        categories: desktop::categories_for(man.app_category.or(info.category), man.is_game),
-        schemes: man.schemes.clone(),
-        web_hosts: man.web_hosts.clone(),
+        categories: desktop::categories_for(base.app_category.or(info.category), base.is_game),
+        schemes: base.schemes.clone(),
+        web_hosts: base.web_hosts.clone(),
         origin: None,
     };
     let path = xdg::install_app(&dirs, &mut entry, &icons)?;
@@ -501,8 +485,8 @@ mod tests {
     #[test]
     fn inspects_corpus_apk() {
         let apk = crate::test_corpus().join("com.darkempire78.opencalculator_53.apk");
-        if !apk.is_file() || Aapt2::find().is_err() {
-            eprintln!("skipping: no corpus APK or aapt2");
+        if !apk.is_file() {
+            eprintln!("skipping: no corpus APK {}", apk.display());
             return;
         }
         let p = inspect(&apk, &quiet).unwrap();

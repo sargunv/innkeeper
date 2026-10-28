@@ -17,10 +17,10 @@ remove it from a list. `bin/linuxapk-manager` plus its desktop data in `data/`
   booting Android, and a directory monitor follows CLI changes. At startup it
   repairs stale entries as `linuxapk list` does.
 - Every core call runs on a worker thread (`worker.rs`); the UI thread never
-  blocks on aapt2, the session or the package manager.
+  blocks on reading APKs, the session or the package manager.
 
 Start reading at `src/window.rs` (list, session, drag and drop) and
 `src/install.rs` (the confirmation page). Tests:
-`cargo test -p linuxapk-manager` (error texts, permission names, the
-adaptive-icon fallback). For screenshots, use the nested desktop in
+`cargo test -p linuxapk-manager` (error texts, permission names, progress
+texts). For screenshots, use the nested desktop in
 [docs/development.md](../../docs/development.md).

@@ -36,12 +36,6 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
     let app = name.unwrap_or("the app");
     let has = |s: &str| d.contains(s);
     let pair = |h: &str, b: &str| (h.to_string(), b.to_string());
-    if has("aapt2 not found") {
-        return pair(
-            "Android Build Tools Missing",
-            "Linux.apk reads APK files with aapt2 from the Android SDK build tools. Install them, or set LINUXAPK_AAPT2 to aapt2’s path.",
-        );
-    }
     if has("is not an APK or APK bundle") {
         return pair(
             "Not an Android App",
@@ -89,7 +83,12 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
             "There isn’t enough free disk space to install this app.",
         );
     }
-    if has("INSTALL_PARSE_FAILED") || has("INSTALL_FAILED_INVALID_APK") || has("read zip") {
+    if has("INSTALL_PARSE_FAILED")
+        || has("INSTALL_FAILED_INVALID_APK")
+        || has("read zip")
+        || has("read the manifest of")
+        || has("has no AndroidManifest.xml")
+    {
         return pair(
             "Damaged APK",
             "This file couldn’t be read as an Android app. It may be incomplete or corrupt; try downloading it again.",
@@ -185,6 +184,14 @@ mod tests {
             )
             .heading,
             "Not an Android App"
+        );
+        assert_eq!(
+            h(
+                Op::Read,
+                "read b.apk: read the manifest of /a/b.apk: truncated resource data"
+            )
+            .heading,
+            "Damaged APK"
         );
         assert_eq!(
             h(

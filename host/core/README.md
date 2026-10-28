@@ -7,9 +7,16 @@ own; `cargo test -p linuxapk-core` tests it.
   progress through a callback so front ends choose how to show it. Install has
   two steps (`inspect`, then `install`), so the manager can confirm in between.
 - **Install pipeline:** APKs and bundles (`.apks`, `.xapk`, `.apkm`;
-  `bundle.rs`) are read with `aapt2` (`manifest.rs`); ABI splits are filtered to
-  the session's `ro.product.cpu.abilist`; one PackageInstaller session streams
-  every APK through `install-write -` with no copy inside Android.
+  `bundle.rs`) are read in-process, without the Android SDK (`apk/`); ABI splits
+  are filtered to the session's `ro.product.cpu.abilist`; one PackageInstaller
+  session streams every APK through `install-write -` with no copy inside
+  Android.
+- **APK metadata** (`apk/`): the binary `AndroidManifest.xml` and the
+  `resources.arsc` values it refers to, parsed per AOSP's `ResourceTypes.h`.
+  Labels are picked per locale the way Android picks them (same language, same
+  script, the closest region), so a desktop entry's `Name[xx]` matches what the
+  app shows in that locale. Only what an install uses is decoded; anything
+  malformed is an error, never a panic.
 - **Icons** come from Android: the system app's `IconDump` runs under
   `app_process` and renders the launcher icon at 48 to 512 px, so adaptive and
   vector icons get the system mask. The APK's own PNGs are the fallback.

@@ -78,7 +78,7 @@ pub fn label(s: &str) -> Option<String> {
     Some(t.to_string())
 }
 
-/// A locale tag from aapt2 (`de`, `pt-BR`) as a desktop-entry locale
+/// A locale tag from an APK (`de`, `pt-BR`) as a desktop-entry locale
 /// (`de`, `pt_BR`). Other forms (`b+sr+Latn`) are skipped.
 pub fn desktop_locale(tag: &str) -> Option<String> {
     let (lang, region) = match tag.split_once('-') {

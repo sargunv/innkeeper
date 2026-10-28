@@ -65,8 +65,7 @@ pub struct ApkInfo {
 /// Reads an APK's metadata.
 pub fn read(apk: &Path) -> Result<ApkInfo> {
     let f = File::open(apk).with_context(|| format!("open {}", apk.display()))?;
-    let mut zip =
-        zip::ZipArchive::new(f).with_context(|| format!("{} is not an APK", apk.display()))?;
+    let mut zip = zip::ZipArchive::new(f).with_context(|| format!("read zip {}", apk.display()))?;
     let files: Vec<String> = zip
         .file_names()
         .filter_map(|n| n.ok().map(|n| n.into_owned()))
