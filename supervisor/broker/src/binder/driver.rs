@@ -123,8 +123,9 @@ pub trait Userspace {
     /// it (the thread is stopped, or will restart the ioctl).
     fn pending(&mut self, call: Call) -> bool;
     /// One of `proc`'s threads polls its binder fd from now on (`call` is
-    /// its write-only `BC_ENTER_LOOPER`).
-    fn make_pollable(&mut self, proc: ProcId, call: Call);
+    /// its write-only `BC_ENTER_LOOPER`): make the fd pollable, once per
+    /// process. False if that failed (the call is gone).
+    fn make_pollable(&mut self, proc: ProcId, call: Call) -> bool;
     /// Whether a poll of `proc`'s binder fd reports it readable.
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool);
 }
@@ -1006,6 +1007,22 @@ impl BinderDriver {
                 self.finish(proc, tid, call, libc::EFAULT, us);
                 return;
             };
+            // A write-only BC_ENTER_LOOPER is IPCThreadState::setupPolling():
+            // this thread will epoll the binder fd (kernel: binder_poll marks
+            // it BINDER_LOOPER_STATE_POLL). The fd is made pollable before
+            // anything is consumed, so if that fails, the restarted ioctl (or
+            // libbinder's retry on EINTR) does it all again.
+            if read_avail == 0
+                && self.thread_mut(proc, tid).looper & LOOPER_POLL == 0
+                && has_cmd(&write, BC_ENTER_LOOPER)
+            {
+                if !us.make_pollable(proc, call) {
+                    self.finish(proc, tid, call, libc::EINTR, us);
+                    return;
+                }
+                self.thread_mut(proc, tid).looper |= LOOPER_POLL;
+                self.poll_dirty.insert(proc);
+            }
             let (consumed, err) = self.thread_write(proc, tid, &write, us);
             bwr.write_consumed += consumed as u64;
             if err != 0 {
@@ -1016,17 +1033,6 @@ impl BinderDriver {
                 };
                 self.finish(proc, tid, call, errno, us);
                 return;
-            }
-            // A write-only BC_ENTER_LOOPER is IPCThreadState::setupPolling():
-            // this thread will epoll the binder fd (kernel: binder_poll marks
-            // it BINDER_LOOPER_STATE_POLL).
-            if read_avail == 0 && has_cmd(&write, BC_ENTER_LOOPER) {
-                let t = self.thread_mut(proc, tid);
-                if t.looper & LOOPER_POLL == 0 {
-                    t.looper |= LOOPER_POLL;
-                    us.make_pollable(proc, call);
-                }
-                self.poll_dirty.insert(proc);
             }
         }
         if read_avail > 0 {

@@ -489,13 +489,18 @@ impl Userspace for SeccompUserspace {
     fn pending(&mut self, call: Call) -> bool {
         notif_id_valid(self.listener, call.id)
     }
-    fn make_pollable(&mut self, proc: ProcId, call: Call) {
+    fn make_pollable(&mut self, proc: ProcId, call: Call) -> bool {
         let Some(p) = self.procs.get(&proc) else {
-            return;
+            return false;
         };
+        // Once per process: swapping again would replace the eventfd under
+        // the other polling threads' epoll registrations.
+        if p.poll.is_some() {
+            return true;
+        }
         let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         if efd < 0 {
-            return;
+            return false;
         }
         let efd = unsafe { OwnedFd::from_raw_fd(efd) };
         let r = self.addfd(&SeccompNotifAddfd {
@@ -507,12 +512,13 @@ impl Userspace for SeccompUserspace {
         });
         if r < 0 {
             dlog!("poll swap failed proc={proc}");
-            return;
+            return false;
         }
         dlog!("poll swap proc={proc} fd={}", p.fd);
         let p = self.procs.get_mut(&proc).unwrap();
         p.poll = Some(efd);
         p.poll_ready = false;
+        true
     }
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool) {
         let Some(p) = self.procs.get_mut(&proc) else {

@@ -6,7 +6,7 @@
 
 use crate::binder::driver::*;
 use crate::binder::uapi::*;
-use crate::fake::FakeUserspace;
+use crate::fake::{FakeUserspace, Fault};
 
 // ---- command-stream helpers -------------------------------------------
 
@@ -538,6 +538,12 @@ fn undeliverable_process_work_goes_back_to_the_process() {
     assert!(find(&s.read(s.server, 3, 256), BR_TRANSACTION).is_some());
 }
 
+/// Fail the next operation of kind `f`.
+fn fail_once(s: &mut Setup, f: Fault) {
+    let mut armed = true;
+    s.us.fault = Some(Box::new(move |g| g == f && std::mem::take(&mut armed)));
+}
+
 /// The server asks for up to `n` looper threads.
 fn set_max_threads(s: &mut Setup, n: u32) {
     let at = 0x8100_0000;
@@ -604,4 +610,31 @@ fn a_stopped_looper_is_not_idle() {
     let got = s.stream(c);
     assert_eq!(got[0].0, BR_SPAWN_LOOPER);
     assert!(find(&got, BR_FAILED_REPLY).is_some());
+}
+
+/// A poll setup (a write-only BC_ENTER_LOOPER) whose call a signal ends
+/// before the fd is made pollable is redone by the restarted ioctl.
+#[test]
+fn poll_setup_is_retried_by_the_restart() {
+    let mut s = Setup::bare();
+    let c = s.ioctl(s.server, 1, BINDER_SET_CONTEXT_MGR, 0);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    fail_once(&mut s, Fault::Signal);
+    let enter = Bc::default().cmd(BC_ENTER_LOOPER).done();
+    let c = s.wr(s.server, 3, &enter, 0);
+    assert!(matches!(s.us.status(c), crate::fake::Status::Interrupted));
+    assert!(!s.us.procs[&s.server].pollable);
+    let c = s.us.restart(&mut s.b, c);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    assert!(s.us.procs[&s.server].pollable);
+    // The thread polls: work for the process makes its fd readable.
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData::default())
+            .done(),
+    );
+    assert!(s.us.procs[&s.server].poll_ready);
 }
