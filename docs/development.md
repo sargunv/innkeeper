@@ -9,7 +9,7 @@ from the host; none of it needs root.
 | For               | What                                                                                                                                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | building          | Android SDK at `$ANDROID_HOME` (default `~/Android/Sdk`) with NDK `30.0.16248370`, build-tools `37.0.0` and `platforms;android-37.0`; podman; clang; GTK 4 (4.18+) and libadwaita (1.7+) development files |
-| running a session | a Wayland desktop, `systemd --user`, pasta (passt), util-linux `unshare`, read-write `/dev/udmabuf` (a logind ACL) and pipewire-pulse                                                                      |
+| running a session | a Wayland desktop, `systemd --user`, pasta (passt), read-write `/dev/udmabuf` (a logind ACL) and pipewire-pulse                                                                                            |
 | subuid mode       | `newuidmap`/`newgidmap` and a range of at least 49999 ids in `/etc/subuid` and `/etc/subgid`; without them the session runs in single-uid mode                                                             |
 
 ## Build

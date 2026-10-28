@@ -50,7 +50,7 @@ processes:
   (`notify.rs`'s monitor thread runs the timer). The cgroup half of the freezer
   is the session's delegated cgroup (`cgroup.freeze`), whose waits end the
   broker's unanswered reads like a signal does. `/dev/binderfs/features` (made
-  by `ns-init.sh`) tells libbinder the broker has freeze notifications, extended
+  by the launcher) tells libbinder the broker has freeze notifications, extended
   errors and oneway spam detection.
 
 Not supported: priority inheritance, binder netlink reports and `TF_UPDATE_TXN`

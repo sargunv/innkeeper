@@ -7,14 +7,14 @@ under `out/test/<suite>/`. `boot` makes a fresh `/data` under `out/test/boot`;
 `e2e` and `compat` run a named instance (`e2e`, or `LINUXAPK_INSTANCE`) on that
 instance's usual `/data`, so set `LINUXAPK_DATA` for a fresh one.
 
-| Tier   | Task                   | What                                                                                                                                                                |
-| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| unit   | `mise run test`        | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor, launcher and image shell tests |
-| bionic | `mise run test:bionic` | Android test binaries against our HALs and drivers without booting (`bionic/run.sh`)                                                                                |
-| binder | `mise run test:binder` | AOSP's binder gtests on the broker, then on kernel binder (`supervisor/tests/binder`)                                                                               |
-| boot   | `mise run test:boot`   | a fresh headless boot plus `selftest`, in subuid and single-uid mode (`boot.sh`)                                                                                    |
-| e2e    | `mise run test:e2e`    | audio, system-app and CLI suites against one headless instance (`e2e/run.sh`)                                                                                       |
-| compat | `mise run test:compat` | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                              |
+| Tier   | Task                   | What                                                                                                                                                      |
+| ------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unit   | `mise run test`        | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests |
+| bionic | `mise run test:bionic` | Android test binaries against our HALs and drivers without booting (`bionic/run.sh`)                                                                      |
+| binder | `mise run test:binder` | AOSP's binder gtests on the broker, then on kernel binder (`supervisor/tests/binder`)                                                                     |
+| boot   | `mise run test:boot`   | a fresh headless boot plus `selftest`, in subuid and single-uid mode (`boot.sh`)                                                                          |
+| e2e    | `mise run test:e2e`    | audio, system-app and CLI suites against one headless instance (`e2e/run.sh`)                                                                             |
+| compat | `mise run test:compat` | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
 
 - **`bionic/run.sh`** is the one runner for on-device binaries: it builds an
   image-rooted namespace (the image's `/system` and flattened `/apex`, the

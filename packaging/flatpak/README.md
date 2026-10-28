@@ -15,11 +15,14 @@ flatpak run --command=/app/libexec/linuxapk/linuxapk-session \
 ```
 
 The session runs inside the sandbox
-([Flatpak mode](../../docs/session.md#flatpak-mode)). Its permissions:
-`--device=dri` (the render node and `/dev/udmabuf`; `--device=all` would bind
-the host's `/dev` over the sandbox's writable one), `--share=network`,
-`--socket=wayland`, `--socket=pulseaudio` and `--share=ipc`. Never
-`flatpak-spawn --host` or `--talk-name=org.freedesktop.Flatpak`.
+([Flatpak mode](../../docs/session.md#flatpak-mode)): `start -f` in the sandbox
+`flatpak run` made, plain `start` in one of its own through the Flatpak portal's
+Spawn, and the other commands (`status`, `exec`, `selftest`, `stop`) from any
+instance of the app. Its permissions: `--device=dri` (the render node and
+`/dev/udmabuf`; `--device=all` would bind the host's `/dev` over the sandbox's
+writable one), `--share=network`, `--socket=wayland`, `--socket=pulseaudio` and
+`--share=ipc`. Never `flatpak-spawn --host` or
+`--talk-name=org.freedesktop.Flatpak`.
 
 Flatpak moves `flatpak run` into its own systemd scope, out of any unit it was
 started in; to cap a test session's memory, set `MemoryMax` on that

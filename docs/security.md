@@ -74,7 +74,8 @@ The Flatpak sandbox is the boundary, as for any Flatpak app
 own there: it uses the host's network, as a native app with `--share=network`
 does, and netd's routing and firewall rules are accepted and ignored, so per-app
 network restrictions don't apply. Only single-uid mode exists, and there are no
-cgroups: a session has no memory cap of its own.
+cgroups: a session has no memory cap of its own. `selftest` checks the sandbox's
+grants and what it shows Android.
 
 ## Desktop exposure
 

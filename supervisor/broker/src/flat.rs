@@ -1,7 +1,7 @@
 //! Flatpak mode (`LINUXAPK_FLATPAK=1`): the session runs in the sandbox's own
 //! namespaces, with no mounts. Android's root is the sandbox's `/`, where
 //! `/system`, `/apex`, `/data`... are symlinks into a composed tree on disk
-//! (`host/launcher/ns-init.sh`). The broker covers what the mounts did:
+//! (`host/launcher/src/flatpak.rs`). The broker covers what the mounts did:
 //!
 //!  * `readlink` of `/proc` magic links (`/proc/self/fd/N`, `exe`, `cwd`) and
 //!    `getcwd` name the host path behind a symlink, which the linker and
@@ -111,7 +111,7 @@ pub(crate) fn init_as_pid1(pid: i32) -> i32 {
 }
 
 /// In Flatpak mode, the Android path a symlink (O_PATH fd) that stands in
-/// for a bind mount inside /data points to (see ns-init.sh).
+/// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
     std::env::var_os("LINUXAPK_FLATPAK").filter(|v| v == "1")?;
     let mut buf = [0u8; 256];

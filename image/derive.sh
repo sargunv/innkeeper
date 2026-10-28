@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Derive one of the layers the session stacks right above the image
-# (ns-init.sh), into <out-dir>:
+# (host/launcher/src/nsroot.rs), into <out-dir>:
 #   common       <partition>/: copies of image files with read/exec bits
 #                added. The extracted image lost its fs_config ownership:
 #                every file belongs to the invoking user (root in the

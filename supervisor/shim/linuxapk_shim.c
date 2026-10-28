@@ -212,7 +212,7 @@ __attribute__((constructor)) static void linuxapk_shim_init(void) {
 // Flatpak mode (LINUXAPK_FLATPAK=1, which init passes on like
 // LINUXAPK_SINGLE_UID): the sandbox's seccomp filter fails mount, umount,
 // unshare and setns with EPERM, ahead of any filter of ours. Android's root is
-// already assembled (symlinks, see host/launcher/ns-init.sh) and has no
+// already assembled (symlinks, see host/launcher/src/flatpak.rs) and has no
 // namespaces to make, so a refused call is treated as done: init's mounts,
 // zygote's per-app mount namespace and storage views, vold's binds.
 #include <dlfcn.h>

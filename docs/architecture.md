@@ -10,7 +10,7 @@ Android's stable boundaries, so routine work never needs an AOSP build.
 flowchart LR
   subgraph desk["Desktop (glibc, runs as the user)"]
     cli["linuxapk / linuxapk-manager"]
-    launcher["linuxapk-session + ns-init.sh"]
+    launcher["linuxapk-session"]
     bridge["linuxapk-bridge"]
     host["Wayland, PipeWire, portals, D-Bus"]
   end
@@ -77,9 +77,8 @@ network through pasta ([session.md](session.md)).
 - **Languages by where code runs.** C or C++ for code loaded into Android
   processes or on C ABIs (HALs, the mapper and Vulkan `.so`, the shim, Mesa
   patches), kept small. Rust for standalone components, especially at trust
-  boundaries (broker, bridge, host tools); the launcher is bash until its Rust
-  rewrite. Kotlin for the system app. Not Zig: no binder/AIDL ecosystem, and the
-  NDK already cross-compiles C.
+  boundaries (broker, bridge, launcher, host tools). Kotlin for the system app.
+  Not Zig: no binder/AIDL ecosystem, and the NDK already cross-compiles C.
 - **x86_64 first.** In a 47-app sample (2026-10), 77% of non-game apps ship
   x86_64 but only 14% of top games do (Unity and Unreal default to arm64), so
   ARM translation through a NativeBridge is a later milestone.

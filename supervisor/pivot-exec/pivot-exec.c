@@ -1,7 +1,8 @@
 // pivot-exec NEWROOT PROG [ARGS...]
 //
 // Final step of the session launcher (runs as pid 1 of the session's outer
-// user/mount/pid namespaces, after ns-init.sh assembled NEWROOT):
+// user/mount/pid namespaces, after host/launcher/src/nsroot.rs assembled
+// NEWROOT):
 //
 //  1. Make NEWROOT the root and detach the old (host) root.
 //  2. Clone a child into nested user, mount, pid, cgroup, network, IPC and
@@ -233,7 +234,7 @@ int main(int argc, char** argv) {
     if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
   }
 
-  // The session's bpffs tmpfs (ns-init.sh), for the bpf emulator's pins:
+  // The session's bpffs tmpfs (the launcher's), for the bpf emulator's pins:
   // opened now, before Android can mount anything over it.
   int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
   if (pins < 0)

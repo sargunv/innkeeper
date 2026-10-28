@@ -241,7 +241,7 @@ on init
     chown system package_info /config/sdcardfs
 
     # linuxapk: binder isn't mounted here. The userspace broker serves
-    # /dev/{binder,hwbinder,vndbinder} by path (ns-init.sh creates the nodes).
+    # /dev/{binder,hwbinder,vndbinder} by path (the launcher creates the nodes).
 
     # Mount fusectl
     mount fusectl none /sys/fs/fuse/connections

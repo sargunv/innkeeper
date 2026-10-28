@@ -57,7 +57,7 @@ flowchart LR
     cli["linuxapk (host/cli)"]
     mgr["linuxapk-manager (host/manager)"]
     core["linuxapk-core (host/core)"]
-    launcher["linuxapk-session + ns-init.sh (host/launcher)"]
+    launcher["linuxapk-session (host/launcher)"]
     bridge["linuxapk-bridge (host/bridge)"]
     desk["Wayland, PipeWire, portals, D-Bus"]
   end
@@ -97,7 +97,7 @@ flowchart LR
 | [host/cli](host/cli/README.md)                                         | `bin/linuxapk`                                         | desktop, as you                           | `src/main.rs`                  |
 | [host/manager](host/manager/README.md)                                 | `bin/linuxapk-manager`                                 | desktop, as you                           | `src/window.rs`                |
 | [host/bridge](host/bridge/README.md)                                   | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's unit            | `src/main.rs`, `src/ipc/`      |
-| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`, `ns-init.sh`      | desktop, then outer namespaces            | `linuxapk-session`             |
+| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`                    | desktop, then outer namespaces            | `src/cli.rs`                   |
 | [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | outer namespaces; the shim inside Android | `broker/src/notify.rs`         |
 | [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared       | `fetch.sh`, `pin.toml`         |
 | [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                         | `composer/Display.cpp`         |
@@ -117,9 +117,9 @@ flowchart LR
 
 Build prerequisites: [mise](https://mise.jdx.dev), the Android SDK with NDK r30
 and build-tools 37, podman, clang, and the GTK 4 and libadwaita development
-files. A session needs a Wayland desktop, `systemd --user`, pasta, util-linux
-`unshare` (plus `newuidmap` for subuid mode), read-write `/dev/udmabuf` and
-pipewire-pulse. Details: [docs/development.md](docs/development.md).
+files. A session needs a Wayland desktop, `systemd --user`, pasta (plus
+`newuidmap` for subuid mode), read-write `/dev/udmabuf` and pipewire-pulse.
+Details: [docs/development.md](docs/development.md).
 
 ```sh
 mise install                    # toolchains and the pre-commit hook

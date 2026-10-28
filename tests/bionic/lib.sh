@@ -117,7 +117,7 @@ bionic_root() {
 
 # Readable stand-ins for libbinder's access("/dev/binder") check (the seccomp
 # filter routes every open of them to the broker), and the driver features
-# binderfs would report, as host/launcher/ns-init.sh makes them.
+# binderfs would report, as host/launcher/src/root.rs makes them.
 bionic_broker_nodes() {
   local d
   for d in binder hwbinder vndbinder; do

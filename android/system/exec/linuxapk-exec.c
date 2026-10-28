@@ -5,7 +5,7 @@
 //
 // Binder is served through the seccomp filter pivot-exec installs on init,
 // which only init's descendants inherit. `linuxapk-session
-// exec` enters the session with nsenter, so its processes have no filter and
+// exec` joins the session's namespaces, so its processes have no filter and
 // no binder (am, pm, cmd, dumpsys, service ...). The client instead hands its
 // argv, environment, working directory and stdio fds (SCM_RIGHTS) to this
 // server, which init started; the server forks the command with those fds,
@@ -14,7 +14,7 @@
 //
 // Built static with the NDK (build:system). The socket lives on the
 // session's private /dev, mode 0600 root, so only root inside the session can
-// use it, and it grants nothing nsenter doesn't already give.
+// use it, and it grants nothing joining the namespaces doesn't already give.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
