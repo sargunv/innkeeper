@@ -16,11 +16,13 @@ sequenceDiagram
   participant BR as bridge (display + input)
   participant WL as host compositor
   WM->>WM: create a trusted VirtualDisplay, no surface yet
-  WM->>BR: input service WINDOW_REQUEST (display id, size, dpi, app id, title)
+  WM->>BR: input service WINDOW_REQUEST (display id, size, dpi, app id, title, token)
   WM->>SF: attach the ImageReader surface
   SF->>HWC: createVirtualDisplay(w, h)
   HWC->>BR: display service DISPLAY_ADD(w, h)
   BR->>WL: xdg_toplevel for the oldest request of that size
+  HWC->>BR: the first FRAME
+  BR->>WL: xdg_activation_v1 with the launch's token
   BR-->>WM: WINDOW_MAPPED
   loop every frame
     SF->>HWC: validate (all layers CLIENT), present with the output buffer
@@ -73,7 +75,8 @@ sequenceDiagram
   `TaskStackListener` closes the window; a window whose app never starts a task
   closes after 20 s.
 - **Focus.** `keyboard_enter` makes the window's top task Android's focused one.
-  Launching an app that has a window activates it through `xdg_activation_v1`;
+  Launching an app that has a window activates it through `xdg_activation_v1`,
+  with the launch's token ([Launch feedback](#launch-feedback)); without one,
   compositors may only flag it without a fresh input serial.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
@@ -90,6 +93,46 @@ window's scale:
 
 `<layout android:minWidth/minHeight>` become the toplevel's minimum size.
 `resizeableActivity=false` gets no special case: Android letterboxes it.
+
+### Launch feedback
+
+```mermaid
+sequenceDiagram
+  participant D as desktop launcher
+  participant C as linuxapk run
+  participant WL as host compositor
+  participant WM as window manager
+  participant BR as bridge
+  D->>C: Exec, XDG_ACTIVATION_TOKEN
+  C->>WL: splash toplevel (app id, splash colour, icon), activate with the token
+  C->>WL: a token of the focused splash's
+  C->>C: start the session, wait for boot
+  C->>WM: LAUNCH token, wait
+  WM->>BR: WINDOW_REQUEST with the token
+  BR->>WL: the app's first frame, activate with the token
+  WM-->>C: launched (after WINDOW_MAPPED)
+  C->>WL: destroy the splash
+```
+
+- **The splash.** `linuxapk run` on a stopped session maps a toplevel of its own
+  at once (`host/cli/src/splash.rs`), with the app's app id and title, filled
+  with its splash colour, its icon in the middle, at the size its window will
+  open at. `linuxapk install` records the colour and size in the desktop entry
+  (`X-LinuxApk-Splash`, `X-LinuxApk-Window`): the launcher activity theme's
+  `windowSplashScreenBackground`, else its window background colour, else
+  `colorBackground`, and [its window size](#window-size). It asks for
+  server-side decorations only, so on GNOME it has no frame.
+- **Activation.** The splash uses the desktop's `XDG_ACTIVATION_TOKEN`, which
+  ends the launch's startup feedback, and once focused asks for a token of its
+  own for the app's window. The bridge activates the window with it on its first
+  frame, and `LAUNCH`'s `wait` makes the window manager answer only then, so the
+  splash goes as the app's window takes focus. On a running session there is no
+  splash, and the desktop's token goes straight through (`WINDOW_REQUEST` for a
+  new window, `WINDOW_ACTIVATE` for a shown one); the manager passes a token
+  from its own window.
+- **Android's SplashScreen** (Android 12's starting window) doesn't show on the
+  window manager's displays: no starting window is added there, so the first
+  frame is the app's own.
 
 ### System dialogs
 
@@ -128,6 +171,7 @@ semaphore.
 ## Control interface
 
 The host launches and lists windows with the window manager's
-`dev.linuxapk.LAUNCH`, `LIST` and `CLOSE` broadcasts, run as root inside the
-session; `wm/ControlReceiver.kt` documents the arguments and replies, and
-`linuxapk-core`'s `android::launch` is the one caller.
+`dev.linuxapk.LAUNCH`, `LIST` and `CLOSE` broadcasts, and sets the background
+setting ([session](session.md#lifecycle)) with `BACKGROUND`, run as root inside
+the session; `wm/ControlReceiver.kt` documents the arguments and replies, and
+`linuxapk-core`'s `android` module is the one caller.

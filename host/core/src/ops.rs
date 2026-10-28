@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
+pub use crate::android::LaunchOptions;
 use crate::android::{self, Launch};
 use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
@@ -53,6 +54,11 @@ fn session(report: Report) -> Result<Session> {
     let s = Session::find()?;
     s.ensure(&|m| report(Event::Status(m.to_string())))?;
     Ok(s)
+}
+
+/// Starts the session if it isn't running, and waits for it to boot.
+pub fn ensure_session(report: Report) -> Result<()> {
+    session(report).map(drop)
 }
 
 /// An APK or bundle, read and checked but not installed yet: what an install
@@ -281,6 +287,14 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         schemes: base.schemes.clone(),
         web_hosts: base.web_hosts.clone(),
         origin: None,
+        splash: info
+            .splash
+            .zip(info.window)
+            .map(|(color, (width, height))| desktop::Splash {
+                color,
+                width,
+                height,
+            }),
     };
     let menu = xdg::install_app(&dirs, &mut entry, &icons)?;
     Ok(Installed {
@@ -364,7 +378,8 @@ pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstall
 /// Launches an app (in a window of its own), optionally opening a URI in it.
 /// An empty URI is none: the DynamicLauncher portal quotes `%U` in the
 /// entries it writes (`'%U'`), which launchers expand to an empty argument.
-pub fn run(pkg: &str, uri: Option<&str>, report: Report) -> Result<()> {
+/// Returns the window manager's reply.
+pub fn run(pkg: &str, uri: Option<&str>, opts: &LaunchOptions, report: Report) -> Result<String> {
     let pkg = validate::package(pkg)?;
     let uri = uri
         .filter(|u| !u.is_empty())
@@ -380,7 +395,7 @@ pub fn run(pkg: &str, uri: Option<&str>, report: Report) -> Result<()> {
             component: android::launcher_component(&s, pkg)?,
         },
     };
-    android::launch(&s, &l)
+    android::launch(&s, &l, opts)
 }
 
 /// User apps in the session, with the `Name` of their desktop entry.

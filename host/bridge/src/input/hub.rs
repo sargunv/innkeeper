@@ -81,11 +81,13 @@ impl Hub {
         Ok(())
     }
 
-    pub fn activate(&self, window: u32) -> Result<(), i32> {
+    /// Activates a shown window, with `token` if not empty.
+    pub fn activate(&self, window: u32, token: String) -> Result<(), i32> {
         let s = self.state.lock().unwrap();
         let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
+        let token = (!token.is_empty()).then_some(token);
         s.displays[conn]
-            .send(Cmd::Activate(window))
+            .send(Cmd::Activate(window, token))
             .map_err(|_| -EIO)
     }
 
@@ -157,7 +159,11 @@ impl Hub {
             .shown
             .insert(r.window, (conn, display));
         crate::info!("input: window {} shows display {display}", r.window);
-        let body = event::window_mapped(r.window);
+    }
+
+    /// The window's first frame is on screen.
+    pub fn first_frame(&self, window: u32) {
+        let body = event::window_mapped(window);
         self.clients.broadcast(ty::WINDOW_MAPPED, &body, &[], None);
     }
 
@@ -226,6 +232,7 @@ mod tests {
             min_height: 0,
             app_id: "dev.linuxapk.test".into(),
             title: "Test".into(),
+            token: String::new(),
         }
     }
 
@@ -248,12 +255,12 @@ mod tests {
         let r = hub.claim(1280, 800).unwrap();
         hub.mapped(conn, 2, &r);
         assert_eq!(hub.request(request(5, 1280)), Err(-EBUSY));
-        hub.activate(5).unwrap();
-        assert!(matches!(rx.try_recv(), Ok(Cmd::Activate(5))));
+        hub.activate(5, "t".into()).unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Cmd::Activate(5, Some(t))) if t == "t"));
         // Another display of this connection never showed it.
         assert!(!hub.unmap(conn, 3, 5));
         assert!(hub.unmap(conn, 2, 5));
-        assert_eq!(hub.activate(5), Err(-ENOENT));
+        assert_eq!(hub.activate(5, String::new()), Err(-ENOENT));
         hub.request(request(5, 1280)).unwrap();
     }
 

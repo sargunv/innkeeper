@@ -152,9 +152,19 @@ pub enum Launch {
     View { package: String, uri: String },
 }
 
+/// How a launch's window comes up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaunchOptions {
+    /// An activation token for the window (validated), so the compositor
+    /// focuses it.
+    pub token: Option<String>,
+    /// Return only once a new window shows its first frame.
+    pub wait: bool,
+}
+
 /// The window manager's control command (docs/display.md): opens the app
 /// in a window of its own, or focuses the window it already has.
-pub fn wm_launch_args(l: &Launch) -> Vec<String> {
+pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
     let mut v: Vec<String> = [
         "am",
         "broadcast",
@@ -178,6 +188,12 @@ pub fn wm_launch_args(l: &Launch) -> Vec<String> {
             v.extend(["--es", "package", package, "--es", "uri", uri].map(String::from));
         }
     }
+    if let Some(t) = &o.token {
+        v.extend(["--es", "token", t].map(String::from));
+    }
+    if o.wait {
+        v.extend(["--ez", "wait", "true"].map(String::from));
+    }
     v
 }
 
@@ -197,13 +213,14 @@ fn wm_reply(text: &str) -> Option<Result<String, String>> {
     }
 }
 
-/// Starts an app through the window manager (one window per app).
-pub fn launch(s: &Session, l: &Launch) -> Result<()> {
-    let args = wm_launch_args(l);
+/// Starts an app through the window manager (one window per app). Returns
+/// its reply (`launched display=N ...` or `focused ...`).
+pub fn launch(s: &Session, l: &Launch, o: &LaunchOptions) -> Result<String> {
+    let args = wm_launch_args(l, o);
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let o = s.exec(60, &argv)?;
+    let o = s.exec(90, &argv)?;
     match wm_reply(&o.text()) {
-        Some(Ok(_)) => Ok(()),
+        Some(Ok(r)) => Ok(r),
         Some(Err(e)) => bail!("launch failed: {e}"),
         None => bail!(
             "launch failed: Linux.apk System's window manager did not answer (Android {})",
@@ -221,6 +238,10 @@ pub fn launch(s: &Session, l: &Launch) -> Result<()> {
 pub struct AppInfo {
     pub label: String,
     pub category: Option<i32>,
+    /// Its launcher activity's splash background (`0xRRGGBB`) and window
+    /// size in dp.
+    pub splash: Option<u32>,
+    pub window: Option<(u32, u32)>,
     /// (size, PNG bytes)
     pub icons: Vec<(u32, Vec<u8>)>,
 }
@@ -233,6 +254,19 @@ pub fn parse_helper_output(out: &str) -> AppInfo {
             info.label = v.to_string();
         } else if let Some(v) = l.strip_prefix("category ") {
             info.category = v.trim().parse().ok();
+        } else if let Some(v) = l.strip_prefix("splash ") {
+            // AARRGGBB; a transparent one shows whatever is behind.
+            info.splash = u32::from_str_radix(v.trim(), 16)
+                .ok()
+                .filter(|c| c >> 24 != 0)
+                .map(|c| c & 0xff_ffff);
+        } else if let Some(v) = l.strip_prefix("window ")
+            && let Some((w, h)) = v.trim().split_once(' ')
+            && let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>())
+            && (1..=16384).contains(&w)
+            && (1..=16384).contains(&h)
+        {
+            info.window = Some((w, h));
         } else if let Some(v) = l.strip_prefix("icon ")
             && let Some((size, data)) = v.split_once(' ')
             && let Ok(size) = size.parse::<u32>()
@@ -292,9 +326,13 @@ mod tests {
 
     #[test]
     fn wm_args_and_reply() {
-        let m = wm_launch_args(&Launch::Main {
-            component: "org.wikipedia/.main.MainActivity".into(),
-        });
+        let m = wm_launch_args(
+            &Launch::Main {
+                component: "org.wikipedia/.main.MainActivity".into(),
+            },
+            &LaunchOptions::default(),
+        );
+        assert!(!m.iter().any(|a| a == "token" || a == "wait"));
         assert!(
             m.windows(3)
                 .any(|w| w == ["--es", "package", "org.wikipedia"])
@@ -303,10 +341,18 @@ mod tests {
             m.windows(3)
                 .any(|w| w == ["--es", "component", "org.wikipedia/.main.MainActivity"])
         );
-        let v = wm_launch_args(&Launch::View {
-            package: "org.wikipedia".into(),
-            uri: "https://en.wikipedia.org/wiki/Linux".into(),
-        });
+        let v = wm_launch_args(
+            &Launch::View {
+                package: "org.wikipedia".into(),
+                uri: "https://en.wikipedia.org/wiki/Linux".into(),
+            },
+            &LaunchOptions {
+                token: Some("kwin-3".into()),
+                wait: true,
+            },
+        );
+        assert!(v.windows(3).any(|w| w == ["--es", "token", "kwin-3"]));
+        assert!(v.windows(3).any(|w| w == ["--ez", "wait", "true"]));
         assert!(
             v.windows(3)
                 .any(|w| w == ["--es", "uri", "https://en.wikipedia.org/wiki/Linux"])
@@ -328,10 +374,12 @@ mod tests {
     fn helper_output() {
         let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
         let i = parse_helper_output(&format!(
-            "component org.x/.Main\nlabel Calc\ncategory -1\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
+            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
         ));
         assert_eq!(i.label, "Calc");
         assert_eq!(i.category, Some(-1));
+        assert_eq!(i.splash, Some(0x202124));
+        assert_eq!(i.window, Some((412, 915)));
         assert_eq!(i.icons.len(), 1);
         assert_eq!(i.icons[0].0, 48);
     }

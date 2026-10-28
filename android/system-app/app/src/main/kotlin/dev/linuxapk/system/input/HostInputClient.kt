@@ -80,7 +80,9 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   /**
    * Asks for a window for display [window] (its size in pixels and density, the window's minimum
-   * size in dp), which the next HWC display of that size gets. Returns once the bridge queued it.
+   * size in dp), which the next HWC display of that size gets. [token] is the launch's
+   * `xdg_activation_v1` token, used when the window shows its first frame (empty: none). Returns
+   * once the bridge queued it.
    */
   fun requestWindow(
     window: Int,
@@ -91,19 +93,23 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     minHeightDp: Int,
     appId: String,
     title: String,
+    token: String = "",
   ): Boolean {
     val r =
       connection.call(WINDOW_REQUEST, timeoutMs = 2000) {
         u32(window).u32(width).u32(height).u32(dpi).u32(minWidthDp).u32(minHeightDp)
         name(appId)
         name(title.filter { it >= ' ' && it != '\u007f' })
+        name(token)
       }
     r?.closeFds()
     if (r?.ok != true) Log.w(TAG, "window for display $window: refused (${r?.status})")
     return r?.ok == true
   }
 
-  fun activateWindow(window: Int) = connection.send(WINDOW_ACTIVATE) { u32(window) }
+  /** Focuses a shown window, with the launch's activation [token] if there is one. */
+  fun activateWindow(window: Int, token: String = "") =
+    connection.send(WINDOW_ACTIVATE) { u32(window).name(token) }
 
   fun destroyWindow(window: Int) = connection.send(WINDOW_DESTROY) { u32(window) }
 

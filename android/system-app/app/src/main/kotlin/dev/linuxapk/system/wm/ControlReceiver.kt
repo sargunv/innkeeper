@@ -16,11 +16,15 @@ import kotlin.concurrent.thread
  * as root (docs/display.md):
  * ```
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LAUNCH --es package PKG \
- *   [--es component PKG/.Activity] [--es uri URI] [--ei width DP --ei height DP]
+ *   [--es component PKG/.Activity] [--es uri URI] [--ei width DP --ei height DP] \
+ *   [--es token XDG_ACTIVATION_TOKEN] [--ez wait true]
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LIST
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.CLOSE \
  *   (--ei display ID | --es package PKG)
  * ```
+ *
+ * LAUNCH with `wait` replies once a new window shows its first frame (at most
+ * [FIRST_FRAME_TIMEOUT_MS]; `shown=no` after the reply if it didn't).
  *
  * The reply is the broadcast's result data (`am` prints `Broadcast completed: result=-1,
  * data="..."`): one line per window for LIST, else one line that starts with the outcome
@@ -55,15 +59,23 @@ class ControlReceiver : BroadcastReceiver() {
           i.getStringExtra("component")?.let {
             ComponentName.unflattenFromString(it) ?: return "error: bad component $it"
           }
-        wm.launch(
-          WindowManagerFeature.LaunchRequest(
-            pkg,
-            component,
-            i.getStringExtra("uri")?.let(Uri::parse),
-            i.getIntExtra("width", 0),
-            i.getIntExtra("height", 0),
-          ),
-        )
+        val reply =
+          wm.launch(
+            WindowManagerFeature.LaunchRequest(
+              pkg,
+              component,
+              i.getStringExtra("uri")?.let(Uri::parse),
+              i.getIntExtra("width", 0),
+              i.getIntExtra("height", 0),
+              i.getStringExtra("token").orEmpty(),
+            ),
+          )
+        val display = LAUNCHED.find(reply)?.groupValues?.get(1)?.toInt()
+        if (i.getBooleanExtra("wait", false) && display != null) {
+          if (wm.awaitFirstFrame(display, FIRST_FRAME_TIMEOUT_MS)) reply else "$reply shown=no"
+        } else {
+          reply
+        }
       }
       ACTION_LIST -> wm.list().joinToString("\n").ifEmpty { "no windows" }
       ACTION_CLOSE -> {
@@ -77,5 +89,7 @@ class ControlReceiver : BroadcastReceiver() {
     const val ACTION_LAUNCH = "dev.linuxapk.LAUNCH"
     const val ACTION_LIST = "dev.linuxapk.LIST"
     const val ACTION_CLOSE = "dev.linuxapk.CLOSE"
+    const val FIRST_FRAME_TIMEOUT_MS = 25_000L
+    private val LAUNCHED = Regex("^launched display=(\\d+)")
   }
 }

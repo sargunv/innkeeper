@@ -72,7 +72,7 @@ impl Service for InputService {
                 );
                 status(self.hub.request(r))
             }
-            Request::WindowActivate { window } => status(self.hub.activate(window)),
+            Request::WindowActivate { window, token } => status(self.hub.activate(window, token)),
             Request::WindowDestroy { window } => {
                 self.hub.destroy(window);
                 Reply::ok()

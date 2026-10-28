@@ -259,6 +259,7 @@ impl AppsService {
             schemes: vec![],
             web_hosts: vec![],
             origin: Some("android".into()),
+            splash: None,
         };
         let cfg = self.cfg.clone();
         let label = self.label.clone();

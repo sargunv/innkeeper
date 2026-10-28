@@ -530,10 +530,19 @@ impl Window {
     /// Opens an app in its own window (starting the session if needed).
     pub fn launch(&self, pkg: &str, name: &str) {
         let toast = self.say(&format!("Opening {name}…"));
+        // An activation token from our window (which has focus), so the
+        // app's window may take it.
+        let token = gio::prelude::AppLaunchContextExt::startup_notify_id(
+            &gtk::prelude::WidgetExt::display(&self.0.win).app_launch_context(),
+            None::<&gio::AppInfo>,
+            &[],
+        )
+        .and_then(|t| linuxapk_core::validate::activation_token(&t).map(str::to_string));
+        let opts = ops::LaunchOptions { token, wait: false };
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {
             let p = pkg.clone();
-            let r = worker::run(move |rep| ops::run(&p, None, rep), |_| {}).await;
+            let r = worker::run(move |rep| ops::run(&p, None, &opts, rep), |_| {}).await;
             toast.dismiss();
             if let Err(e) = r {
                 w.show_error(Op::Open, Some(&name), &e);

@@ -232,6 +232,7 @@ fn main() -> Result<()> {
         min_height: 0,
         app_id: "dev.linuxapk.example".into(),
         title: "Bridge window example".into(),
+        token: String::new(),
     });
     let st = wm.call(|t| input::encode(t, &request), None)?;
     println!("WINDOW_REQUEST: {st}");

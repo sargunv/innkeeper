@@ -24,6 +24,7 @@ import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.input.HostEvent
 import dev.linuxapk.system.input.HostInputClient
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
@@ -40,6 +41,9 @@ import kotlin.math.roundToInt
  *    `keyboard_enter` focuses the display's top task.
  * 4. A task stack listener closes the window when the display's last task is gone, and moves any
  *    app task that shows up on display 0 into a window of its own.
+ *
+ * A launch may carry the desktop's activation token (docs/display.md, "Launch feedback"): a new
+ * window uses it on its first frame, a shown one when it is focused.
  *
  * Everything runs on one handler thread; public methods post to it.
  */
@@ -75,8 +79,12 @@ class WindowManagerFeature(
     var height: Int,
     var dpi: Int,
     val sizing: WindowSizing,
+    /** The launch's activation token, until the window is requested with it. */
+    var token: String,
   ) {
     val id: Int = display.display.displayId
+    /** Counted down once the window shows its first frame. */
+    val shown = CountDownLatch(1)
     val created = SystemClock.uptimeMillis()
     var tasks: List<Int> = emptyList()
     var hadTask = false
@@ -130,10 +138,21 @@ class WindowManagerFeature(
     val uri: Uri? = null,
     val widthDp: Int = 0,
     val heightDp: Int = 0,
+    /** The desktop's `xdg_activation_v1` token for this launch (empty: none). */
+    val token: String = "",
   )
 
   /** Opens [r]'s app in a new window, or focuses its window. Returns a one-line result. */
   fun launch(r: LaunchRequest): String = onWm { launchLocked(r) }
+
+  /**
+   * Waits up to [timeoutMs] for the window of [display] to show its first frame. Returns false on
+   * timeout or if it has no window. Not on the window manager's thread.
+   */
+  fun awaitFirstFrame(display: Int, timeoutMs: Long): Boolean {
+    val latch = onWm { windows[display]?.shown } ?: return false
+    return latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+  }
 
   fun list(): List<WindowInfo> = onWm {
     refreshTasks()
@@ -190,14 +209,14 @@ class WindowManagerFeature(
         // A link or another activity opens in the app's window; its launcher activity just
         // brings the task back.
         if (r.uri != null || r.component != null) start(intent, w.id)
-        focus(w, activate = true)
+        focus(w, activate = true, token = r.token)
         return "focused display=${w.id} package=${r.pkg}"
       }
 
     val sizing =
       if (r.widthDp > 0 && r.heightDp > 0) WindowSizing(r.widthDp, r.heightDp, 0, 0)
       else sizingFor(intent)
-    val w = createWindow(r.pkg, label, sizing) ?: return "error: no virtual display"
+    val w = createWindow(r.pkg, label, sizing, r.token) ?: return "error: no virtual display"
     // An existing task (say, started on display 0) moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
     if (existing != null && r.uri == null) {
@@ -229,7 +248,12 @@ class WindowManagerFeature(
     return WindowSizing.of(ai)
   }
 
-  private fun createWindow(pkg: String, label: String, sizing: WindowSizing): AppWindow? {
+  private fun createWindow(
+    pkg: String,
+    label: String,
+    sizing: WindowSizing,
+    token: String = "",
+  ): AppWindow? {
     val s = scale
     val width = (sizing.widthDp * s).roundToInt()
     val height = (sizing.heightDp * s).roundToInt()
@@ -267,7 +291,7 @@ class WindowManagerFeature(
       reader.close()
       return null
     }
-    val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing)
+    val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
     windows[w.id] = w
     try {
       wms.setDisplayImePolicy(w.id, DISPLAY_IME_POLICY_LOCAL)
@@ -291,7 +315,9 @@ class WindowManagerFeature(
       w.sizing.minHeightDp,
       APP_ID_PREFIX + w.pkg,
       w.label,
+      w.token,
     )
+    w.token = "" // used once
     w.display.surface = w.reader.surface
   }
 
@@ -354,7 +380,11 @@ class WindowManagerFeature(
       }
       is HostEvent.Close -> windows[e.display]?.let { close(it, finishTasks = true) }
       is HostEvent.KeyboardEnter -> windows[e.display]?.let { focus(it, activate = false) }
-      is HostEvent.WindowMapped -> windows[e.display]?.mapped = true
+      is HostEvent.WindowMapped ->
+        windows[e.display]?.let {
+          it.mapped = true
+          it.shown.countDown()
+        }
       is HostEvent.WindowUnmapped -> {
         // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
         val w = windows[e.display] ?: return
@@ -386,13 +416,13 @@ class WindowManagerFeature(
     w.display.resize(width, height, dpi)
   }
 
-  private fun focus(w: AppWindow, activate: Boolean) {
+  private fun focus(w: AppWindow, activate: Boolean, token: String = "") {
     try {
       atm.focusTopTask(w.id)
     } catch (e: Exception) {
       Log.w(TAG, "focusTopTask(${w.id}): $e")
     }
-    if (activate) input.activateWindow(w.id)
+    if (activate) input.activateWindow(w.id, token)
   }
 
   // ---- tasks ---------------------------------------------------------------------

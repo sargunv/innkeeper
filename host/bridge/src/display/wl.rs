@@ -62,7 +62,8 @@ mod foreign;
 pub enum Cmd {
     Create(WindowRequest, std::sync::mpsc::Sender<i32>),
     Destroy(u32),
-    Activate(u32),
+    /// Activate a window, with this activation token if there is one.
+    Activate(u32, Option<String>),
     /// A buffer of the window's display.
     BufferAdd(BufferSpec, u32, OwnedFd),
     BufferRemove(u32),
@@ -109,6 +110,8 @@ struct Win {
     /// Buffer shown now (its size maps input), and the last one asked for.
     shown: Option<u32>,
     shown_size: (u32, u32),
+    /// The launch's activation token, used with the first frame.
+    token: Option<String>,
 }
 
 pub(crate) struct State {
@@ -428,6 +431,7 @@ impl State {
                 fullscreen: false,
                 shown: None,
                 shown_size: (0, 0),
+                token: (!s.token.is_empty()).then_some(s.token),
             },
         );
         0
@@ -529,6 +533,7 @@ impl State {
         if let Some(v) = &w.viewport {
             v.set_destination(w.width as i32, w.height as i32);
         }
+        let first = w.shown.is_none();
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
         if let Some(f) = w.frame.as_mut()
@@ -538,12 +543,27 @@ impl State {
             f.draw();
         }
         surface.commit();
+        if first {
+            // Mapped now: the launch's token can focus it.
+            if let (Some(t), Some(a)) = (w.token.take(), &self.activation) {
+                a.activate(t, &surface);
+            }
+            crate::info!("display: window {id} shows its first frame");
+            self.hub.first_frame(id);
+        }
     }
 
-    fn activate(&self, id: u32) {
+    /// Activates a window with `token`, or else with a token for the
+    /// newest input serial (which compositors may only grant as "demands
+    /// attention").
+    fn activate(&self, id: u32, token: Option<String>) {
         let (Some(a), Some(w)) = (&self.activation, self.windows.get(&id)) else {
             return;
         };
+        if let Some(t) = token {
+            a.activate(t, w.window.wl_surface());
+            return;
+        }
         let t = a.get_activation_token(&self.qh, TokenFor(id));
         if let Some(seat) = &self.seat.wl_seat
             && self.seat.last_serial != 0
@@ -564,7 +584,7 @@ impl State {
                 let _ = reply.send(r);
             }
             Cmd::Destroy(id) => self.destroy(id),
-            Cmd::Activate(id) => self.activate(id),
+            Cmd::Activate(id, token) => self.activate(id, token),
             Cmd::BufferAdd(b, window, fd) => self.add_buffer(b, window, fd),
             Cmd::BufferRemove(id) => self.remove_buffer(id),
             Cmd::Frame {

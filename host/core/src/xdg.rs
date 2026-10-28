@@ -262,6 +262,19 @@ pub fn app_label(d: &Dirs, pkg: &str) -> Option<String> {
     desktop::read_key(&t, "Name")
 }
 
+/// What a launch shows before the app's first frame: its name, splash and
+/// icon, from its desktop entry. None if it has no entry.
+pub fn launch_look(
+    d: &Dirs,
+    pkg: &str,
+) -> Option<(String, Option<desktop::Splash>, Option<PathBuf>)> {
+    let t = fs::read_to_string(d.app_desktop(pkg)).ok()?;
+    let name = desktop::read_key(&t, "Name")?;
+    let splash = desktop::read_key(&t, "X-LinuxApk-Splash")
+        .and_then(|c| desktop::Splash::parse(&c, &desktop::read_key(&t, "X-LinuxApk-Window")?));
+    Some((name, splash, largest_icon(d, &format!("{PREFIX}{pkg}"))))
+}
+
 /// An app installed by Linux.apk, as its desktop entry describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopApp {
@@ -413,6 +426,7 @@ mod tests {
             schemes: vec![],
             web_hosts: vec![],
             origin: None,
+            splash: None,
         };
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());

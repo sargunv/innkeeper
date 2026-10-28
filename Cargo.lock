@@ -1262,6 +1262,8 @@ dependencies = [
  "anyhow",
  "clap",
  "linuxapk-core",
+ "png",
+ "smithay-client-toolkit",
 ]
 
 [[package]]

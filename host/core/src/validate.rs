@@ -130,6 +130,13 @@ pub fn launch_uri(u: &str) -> Result<&str> {
     Ok(u)
 }
 
+/// An `xdg_activation_v1` token from the desktop (`XDG_ACTIVATION_TOKEN`):
+/// opaque, but printable ASCII without spaces, and short enough for the
+/// bridge's window messages (96 bytes).
+pub fn activation_token(t: &str) -> Option<&str> {
+    (!t.is_empty() && t.len() <= 96 && t.bytes().all(|b| b.is_ascii_graphic())).then_some(t)
+}
+
 /// For error messages: at most `n` chars, with forbidden characters escaped.
 pub fn truncate(s: &str, n: usize) -> String {
     let mut out: String = s

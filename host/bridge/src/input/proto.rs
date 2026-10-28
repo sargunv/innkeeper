@@ -5,15 +5,15 @@
 //!
 //! | Type     | Request        | Body                                                                                                                                         | Reply                                                     |
 //! | -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-//! | `0x0601` | WINDOW_REQUEST | `u32 window` (the Android display id), `u32 width`, `u32 height` (display pixels), `u32 dpi`, `u32 min_width`, `u32 min_height` (dp, 0: 240x160), name `app_id`, name `title` | 0: queued; `-EBUSY`: the window is shown already |
-//! | `0x0602` | WINDOW_ACTIVATE | `u32 window`                                                                                                                                | `-ENOENT` if not shown; else `xdg_activation_v1` with the newest input serial |
+//! | `0x0601` | WINDOW_REQUEST | `u32 window` (the Android display id), `u32 width`, `u32 height` (display pixels), `u32 dpi`, `u32 min_width`, `u32 min_height` (dp, 0: 240x160), name `app_id`, name `title`, name `token` | 0: queued; `-EBUSY`: the window is shown already |
+//! | `0x0602` | WINDOW_ACTIVATE | `u32 window`, name `token`                                                                                                                  | `-ENOENT` if not shown; else `xdg_activation_v1` with `token`, or one for the newest input serial |
 //! | `0x0603` | WINDOW_DESTROY | `u32 window`                                                                                                                                 | Drops a queued request, or closes the window now (its display may stay, headless) |
 //! | `0x0604` | TEXT_INPUT     | `u16 len` + one `ti_*` line from the IME (≤ 480 bytes, [`super::ime`])                                                                       | Applied to the window with text-input focus               |
 //!
 //! | Event    | Message         | Body                                                                 |
 //! | -------- | --------------- | -------------------------------------------------------------------- |
 //! | `0x4601` | INPUT           | `u16 len` + one input line (≤ 400 bytes, below)                      |
-//! | `0x4602` | WINDOW_MAPPED   | `u32 window`: a display shows in it                                  |
+//! | `0x4602` | WINDOW_MAPPED   | `u32 window`: its first frame is on screen                           |
 //! | `0x4603` | WINDOW_UNMAPPED | `u32 window`: its display went away, or it was destroyed               |
 //!
 //! **Windows.** A queued request waits up to 10 s for the composer to add an
@@ -22,6 +22,12 @@
 //! the display's size in dp. The window manager queues the request before it
 //! gives its VirtualDisplay a surface, which is what makes SurfaceFlinger
 //! create the HWC display.
+//!
+//! **Activation.** `token` is an `xdg_activation_v1` token from the desktop
+//! launch (`XDG_ACTIVATION_TOKEN`, or one the launch's splash window asked
+//! for); empty: none. A new window uses it once its first frame is on
+//! screen, so the compositor focuses it without flagging it as demanding
+//! attention.
 //!
 //! **Input lines** are protocol v2: ASCII, space-separated fields, in the
 //! order the seat produced them.
@@ -113,6 +119,8 @@ pub struct WindowRequest {
     pub min_height: u32,
     pub app_id: String,
     pub title: String,
+    /// An activation token for the new window (empty: none).
+    pub token: String,
 }
 
 impl WindowRequest {
@@ -127,7 +135,7 @@ impl WindowRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     WindowRequest(WindowRequest),
-    WindowActivate { window: u32 },
+    WindowActivate { window: u32, token: String },
     WindowDestroy { window: u32 },
     TextInput(ime::Req),
 }
@@ -144,8 +152,12 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             min_height: r.u32_in(0..=limits::MAX_DIM, "minimum height")?,
             app_id: r.name()?,
             title: r.name()?,
+            token: r.name()?,
         }),
-        ty::WINDOW_ACTIVATE => Request::WindowActivate { window: r.u32()? },
+        ty::WINDOW_ACTIVATE => Request::WindowActivate {
+            window: r.u32()?,
+            token: r.name()?,
+        },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
         ty::TEXT_INPUT => {
             let n = r.u16()? as usize;
@@ -174,11 +186,12 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(s.min_width)
                 .u32(s.min_height)
                 .name(&s.app_id)
-                .name(&s.title);
+                .name(&s.title)
+                .name(&s.token);
         }
-        Request::WindowActivate { window } => {
+        Request::WindowActivate { window, token } => {
             w = Writer::message(ty::WINDOW_ACTIVATE, tag);
-            w.u32(*window);
+            w.u32(*window).name(token);
         }
         Request::WindowDestroy { window } => {
             w = Writer::message(ty::WINDOW_DESTROY, tag);
@@ -239,6 +252,7 @@ mod tests {
             min_height: 0,
             app_id: "dev.linuxapk.org.wikipedia".into(),
             title: "Wikipedia".into(),
+            token: "kwin-12".into(),
         }
     }
 
@@ -246,7 +260,10 @@ mod tests {
     fn roundtrips() {
         for req in [
             Request::WindowRequest(request(272)),
-            Request::WindowActivate { window: 3 },
+            Request::WindowActivate {
+                window: 3,
+                token: String::new(),
+            },
             Request::WindowDestroy { window: 3 },
             Request::TextInput(ime::Req::Surrounding {
                 text: "日本語 text".into(),

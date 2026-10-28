@@ -166,6 +166,35 @@ pub struct AppEntry {
     /// Who wrote the entry, as `X-LinuxApk-Origin` (`android`: the bridge, for
     /// an app installed inside Android). None: `linuxapk install`.
     pub origin: Option<String>,
+    /// What its launch splash looks like, as `X-LinuxApk-Splash` and
+    /// `X-LinuxApk-Window`.
+    pub splash: Option<Splash>,
+}
+
+/// An app's launch splash: the window its launcher activity opens in, in
+/// logical pixels, filled with its splash background colour (`0xRRGGBB`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Splash {
+    pub color: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Splash {
+    /// From an entry's `X-LinuxApk-Splash=#rrggbb` and `X-LinuxApk-Window=WxH`.
+    pub fn parse(color: &str, window: &str) -> Option<Splash> {
+        let color = u32::from_str_radix(color.strip_prefix('#')?, 16)
+            .ok()
+            .filter(|c| *c <= 0xff_ffff)?;
+        let (w, h) = window.split_once('x')?;
+        let (width, height) = (w.parse().ok()?, h.parse().ok()?);
+        let ok = |v: u32| (1..=16384).contains(&v);
+        (ok(width) && ok(height)).then_some(Splash {
+            color,
+            width,
+            height,
+        })
+    }
 }
 
 impl AppEntry {
@@ -190,7 +219,9 @@ impl AppEntry {
         let mut run = self.run.clone();
         run.push(self.package.clone());
         writeln!(s, "Exec={}", exec_line(&run, Some("%U"))?)?;
-        s.push_str("Terminal=false\n");
+        // The launcher then passes an activation token (XDG_ACTIVATION_TOKEN),
+        // which `run` hands on to the app's window.
+        s.push_str("Terminal=false\nStartupNotify=true\n");
         writeln!(
             s,
             "StartupWMClass={}",
@@ -217,6 +248,10 @@ impl AppEntry {
         }
         if let Some(o) = &self.origin {
             writeln!(s, "X-LinuxApk-Origin={}", escape_value(o)?)?;
+        }
+        if let Some(sp) = &self.splash {
+            writeln!(s, "X-LinuxApk-Splash=#{:06x}", sp.color & 0xff_ffff)?;
+            writeln!(s, "X-LinuxApk-Window={}x{}", sp.width, sp.height)?;
         }
         Ok(s)
     }
@@ -334,6 +369,11 @@ mod tests {
             schemes: vec!["wikipedia".into()],
             web_hosts: vec!["*.wikipedia.org".into()],
             origin: None,
+            splash: Some(Splash {
+                color: 0xf8f9fa,
+                width: 1280,
+                height: 800,
+            }),
         }
     }
 
@@ -346,11 +386,22 @@ mod tests {
              Name[de]=Wikipedia DE\nName[pt_BR]=Wikipédia\nComment=Android app (org.wikipedia)\n\
              Icon=dev.linuxapk.org.wikipedia\n\
              Exec=\"/opt/linux apk/bin/linuxapk\" run org.wikipedia %U\nTerminal=false\n\
-             StartupWMClass=dev.linuxapk.org.wikipedia\nCategories=Utility;\n\
+             StartupNotify=true\nStartupWMClass=dev.linuxapk.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
              X-LinuxApk-Package=org.wikipedia\nX-LinuxApk-Version=2.7.50\n\
-             X-LinuxApk-Web-Hosts=*.wikipedia.org;\n"
+             X-LinuxApk-Web-Hosts=*.wikipedia.org;\nX-LinuxApk-Splash=#f8f9fa\n\
+             X-LinuxApk-Window=1280x800\n"
         );
+        assert_eq!(
+            Splash::parse(
+                &read_key(&s, "X-LinuxApk-Splash").unwrap(),
+                &read_key(&s, "X-LinuxApk-Window").unwrap()
+            ),
+            entry().splash
+        );
+        assert_eq!(Splash::parse("#1000000", "1x1"), None);
+        assert_eq!(Splash::parse("#000000", "0x1"), None);
+        assert_eq!(Splash::parse("000000", "1x1"), None);
         assert!(!s.contains("x-scheme-handler/http"));
     }
 
