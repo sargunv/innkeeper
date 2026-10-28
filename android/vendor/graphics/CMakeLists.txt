@@ -105,7 +105,9 @@ if(ANDROID)
     PROPERTIES OUTPUT_NAME android.hardware.graphics.composer3-service.linuxapk)
   target_include_directories(composer PRIVATE ${HAL}/composer)
   # libz is not LL-NDK: link the NDK's static copy.
-  target_link_libraries(composer PRIVATE lapk_common lapk_aidl -l:libz.a)
+  target_link_libraries(
+    composer
+    PRIVATE lapk_common lapk_aidl linuxapk_bridge_client -l:libz.a)
 
   # On-device tests (never installed).
   add_executable(gralloc_test tests/android/gralloc_test.cpp)

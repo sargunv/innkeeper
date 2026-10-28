@@ -2,6 +2,7 @@
 #define LOG_TAG "linuxapk-hwc"
 #include <algorithm>
 #include <atomic>
+#include <initializer_list>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -10,17 +11,15 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/udmabuf.h>
-#include <poll.h>
 #include <pthread.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include "BridgePresenter.h"
 
+#include "linuxapk/bridge_client.h"
 #include "linuxapk/layout.h"
 #include "linuxapk/log.h"
 
@@ -28,53 +27,24 @@ namespace linuxapk::hwc {
 
 namespace {
 
-// The bridge protocol's framing and the display service (id 2).
-constexpr uint16_t kHello = 0x0001;
-constexpr uint16_t kReply = 0x8000;
-constexpr uint32_t kServiceDisplay = 2;
+// The display service's messages (host/bridge/src/display/proto.rs).
 constexpr uint16_t kDisplayAdd = 0x0201;
 constexpr uint16_t kDisplayRemove = 0x0202;
 constexpr uint16_t kBufferAdd = 0x0203;
 constexpr uint16_t kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205;
 constexpr uint16_t kEvRelease = 0x4201;
-constexpr int32_t kENOENT = 2;
-constexpr size_t kMaxMsg = 512;
 constexpr int kPoolSize = 3;
 constexpr uint32_t kXBGR8888 = fourcc('X', 'B', '2', '4');  // R,G,B,X bytes
 constexpr uint32_t kXRGB8888 = fourcc('X', 'R', '2', '4');  // B,G,R,X bytes
 
-struct Msg {
-  std::vector<uint8_t> b;
-  Msg(uint16_t type, uint32_t tag) {
-    u16(type);
-    u16(0);
-    u32(tag);
-  }
-  Msg& u16(uint16_t v) {
-    b.push_back(uint8_t(v));
-    b.push_back(uint8_t(v >> 8));
-    return *this;
-  }
-  Msg& u32(uint32_t v) {
-    for (int i = 0; i < 4; i++) b.push_back(uint8_t(v >> (8 * i)));
-    return *this;
-  }
-  Msg& u64(uint64_t v) {
-    for (int i = 0; i < 8; i++) b.push_back(uint8_t(v >> (8 * i)));
-    return *this;
-  }
-  Msg& name(const char* s) {
-    const size_t n = strlen(s);
-    u16(uint16_t(n));
-    b.insert(b.end(), s, s + n);
-    return *this;
-  }
-};
-
-uint32_t rd32(const uint8_t* p) {
-  return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 |
-         uint32_t(p[3]) << 24;
+lxb_msg message(
+  uint16_t type, uint32_t tag, std::initializer_list<uint32_t> fields
+) {
+  lxb_msg m;
+  lxb_msg_init(&m, type, tag);
+  for (uint32_t v : fields) lxb_put_u32(&m, v);
+  return m;
 }
 
 }  // namespace
@@ -136,11 +106,10 @@ class Bridge {
   std::mutex mutex;  // displays, their window and pool state
   std::atomic<uint32_t> nextBuffer{1};
 
-  bool send(Msg& m, int fd = -1);
+  bool send(const lxb_msg& m, int fd = -1);
   uint32_t tag() { return mTag.fetch_add(1) + 1; }
   // Connects in the background, and again whenever the connection drops.
-  void start(std::string path) {
-    mPath = std::move(path);
+  void start() {
     mThread = std::thread([this] { loop(); });
   }
   bool connected() const { return mSock.load() >= 0; }
@@ -151,12 +120,9 @@ class Bridge {
 
  private:
   void loop();
-  int connect(std::string* error);
-  void handle(const uint8_t* m, size_t n);
+  void handle(const lxb_packet& p);
   void sendAdd(const BridgeDisplay& d);
-  std::string mPath;
   std::atomic<int> mSock{-1};
-  std::mutex mSendMutex;
   std::atomic<uint32_t> mTag{1};
   std::map<uint32_t, std::shared_ptr<BridgeDisplay>> mDisplays;
   std::map<uint32_t, uint32_t> mAdds;  // tag of DISPLAY_ADD -> display
@@ -168,68 +134,11 @@ static Bridge* gBridge = nullptr;
 // ---- connection
 // ------------------------------------------------------------------
 
-// Returns the socket after the display service accepted our HELLO, or -1
-// with the reason in *error.
-int Bridge::connect(std::string* error) {
-  int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-  if (fd < 0 || mPath.size() >= sizeof(addr.sun_path)) {
-    *error = "socket: " + std::string(strerror(fd < 0 ? errno : ENAMETOOLONG));
-    if (fd >= 0) close(fd);
-    return -1;
-  }
-  memcpy(addr.sun_path, mPath.c_str(), mPath.size() + 1);
-  if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0) {
-    *error = "connect " + mPath + ": " + strerror(errno);
-    close(fd);
-    return -1;
-  }
-  Msg hello(kHello, 1);
-  hello.u16(1).u16(0).u32(kServiceDisplay).name("composer");
-  uint8_t buf[kMaxMsg];
-  ssize_t n = -1;
-  if (
-    ::send(fd, hello.b.data(), hello.b.size(), MSG_NOSIGNAL) ==
-    ssize_t(hello.b.size())
-  ) {
-    pollfd p{fd, POLLIN, 0};
-    if (poll(&p, 1, 5000) == 1) n = recv(fd, buf, sizeof buf, 0);
-  }
-  // Reply: type, flags, tag, then i32 status.
-  if (
-    n < 12 || (buf[0] | buf[1] << 8) != kReply || int32_t(rd32(buf + 8)) != 0
-  ) {
-    *error = "the display service refused us (" +
-             (n < 12 ? std::string("no reply")
-                     : std::to_string(int32_t(rd32(buf + 8)))) +
-             ")";
-    close(fd);
-    return -1;
-  }
-  return fd;
-}
-
-bool Bridge::send(Msg& m, int fd) {
-  int s = mSock.load();
-  if (s < 0 || m.b.size() > kMaxMsg) return false;
-  iovec iov{m.b.data(), m.b.size()};
-  msghdr h{};
-  h.msg_iov = &iov;
-  h.msg_iovlen = 1;
-  alignas(cmsghdr) char ctl[CMSG_SPACE(sizeof(int))];
-  if (fd >= 0) {
-    h.msg_control = ctl;
-    h.msg_controllen = sizeof ctl;
-    cmsghdr* c = CMSG_FIRSTHDR(&h);
-    c->cmsg_level = SOL_SOCKET;
-    c->cmsg_type = SCM_RIGHTS;
-    c->cmsg_len = CMSG_LEN(sizeof(int));
-    memcpy(CMSG_DATA(c), &fd, sizeof fd);
-  }
-  std::lock_guard lock(mSendMutex);
-  if (sendmsg(s, &h, MSG_NOSIGNAL) != ssize_t(m.b.size())) {
-    LOGW("bridge: send: %s", strerror(errno));
+bool Bridge::send(const lxb_msg& m, int fd) {
+  const int s = mSock.load();
+  if (s < 0) return false;
+  if (const int r = lxb_send(s, &m, fd); r != 0) {
+    LOGW("bridge: send: %s", strerror(-r));
     return false;
   }
   return true;
@@ -238,10 +147,9 @@ bool Bridge::send(Msg& m, int fd) {
 // Bridge lock held.
 void Bridge::sendAdd(const BridgeDisplay& d) {
   const uint32_t t = tag();
-  Msg m(kDisplayAdd, t);
-  m.u32(d.id()).u32(d.width()).u32(d.height());
   mAdds[t] = d.id();
-  if (!send(m)) mAdds.erase(t);
+  if (!send(message(kDisplayAdd, t, {d.id(), d.width(), d.height()})))
+    mAdds.erase(t);
 }
 
 void Bridge::addDisplay(std::shared_ptr<BridgeDisplay> d) {
@@ -262,45 +170,36 @@ void Bridge::removeDisplay(uint32_t id) {
   }
   // Even if not shown yet: the bridge may be showing it by now. It drops
   // the display's buffers with it.
-  Msg m(kDisplayRemove, tag());
-  m.u32(id);
-  send(m);
+  send(message(kDisplayRemove, tag(), {id}));
 }
 
-void Bridge::handle(const uint8_t* m, size_t n) {
-  if (n < 8) return;
-  const uint16_t type = uint16_t(m[0] | m[1] << 8);
-  const uint8_t* body = m + 8;
-  const size_t len = n - 8;
-  if (type == kReply) {
-    if (len < 4) return;
-    const uint32_t t = rd32(m + 4);
-    const int32_t status = int32_t(rd32(body));
+void Bridge::handle(const lxb_packet& p) {
+  if (p.type == LXB_REPLY) {
     std::lock_guard lock(mutex);
-    auto add = mAdds.find(t);
+    auto add = mAdds.find(p.tag);
     if (add == mAdds.end()) {
       // -ENOENT: a display or buffer the bridge already dropped.
-      if (status != 0 && status != -kENOENT)
-        LOGW("bridge: request %u failed: %d", t, status);
+      if (p.status != 0 && p.status != -ENOENT)
+        LOGW("bridge: request %u failed: %d", p.tag, p.status);
       return;
     }
     const uint32_t id = add->second;
     mAdds.erase(add);
     auto it = mDisplays.find(id);
     if (it == mDisplays.end()) return;
-    if (status == 0 && len >= 8) {
-      const uint32_t window = rd32(body + 4);
+    if (p.status == 0 && p.len >= 4) {
+      const uint32_t window = lxb_u32(p.body);
       it->second->setWindow(window);
       LOGI("virtual display %u: shown in window %u", id, window);
-    } else if (status == -kENOENT) {
+    } else if (p.status == -ENOENT) {
       LOGI("virtual display %u: no window asked for; headless", id);
     } else {
-      LOGW("virtual display %u: the bridge refused it: %d", id, status);
+      LOGW("virtual display %u: the bridge refused it: %d", id, p.status);
     }
     return;
   }
-  if (type == kEvRelease && len >= 4) {
-    const uint32_t buffer = rd32(body);
+  if (p.type == kEvRelease && p.len >= 4) {
+    const uint32_t buffer = lxb_u32(p.body);
     std::lock_guard lock(mutex);
     for (auto& [id, d] : mDisplays) d->onRelease(buffer);
   }
@@ -310,32 +209,37 @@ void Bridge::handle(const uint8_t* m, size_t n) {
 // may start before or after the composer, and may restart.
 void Bridge::loop() {
   pthread_setname_np(pthread_self(), "hwc-bridge");
-  uint8_t buf[kMaxMsg + 1];
-  std::string lastError;
+  lxb_backoff backoff{};
+  int lastError = 0;
   while (true) {
     if (const int s = mSock.load(); s >= 0) {
-      ssize_t n = recv(s, buf, sizeof buf, 0);
-      if (n > 0) {
-        handle(buf, size_t(n));
+      lxb_packet p;
+      const int r = lxb_recv(s, &p);
+      if (r == 0) {
+        handle(p);
+        lxb_close_fds(&p);
         continue;
       }
-      if (n < 0 && errno == EINTR) continue;
-      LOGW("bridge: connection lost; reconnecting");
+      LOGW("bridge: connection lost (%s); reconnecting", strerror(-r));
       mSock = -1;
       close(s);
-      sleep(1);
     }
-    std::string error;
-    const int fd = connect(&error);
-    if (fd < 0) {
-      if (error != lastError)
-        LOGW("bridge: %s; retrying every second", error.c_str());
-      lastError = std::move(error);
-      sleep(1);
+    if (const int ms = lxb_backoff_ms(&backoff); ms > 0) {
+      usleep(useconds_t(ms) * 1000);
       continue;
     }
-    lastError.clear();
-    LOGI("bridge: display service on %s", mPath.c_str());
+    const int fd = lxb_connect(LXB_SERVICE_DISPLAY, "composer");
+    if (fd < 0) {
+      if (fd != lastError)
+        LOGW(
+          "bridge: connect %s: %s; retrying every second", LXB_SOCKET_PATH,
+          strerror(-fd)
+        );
+      lastError = fd;
+      continue;
+    }
+    lastError = 0;
+    LOGI("bridge: display service on %s", LXB_SOCKET_PATH);
     // The bridge has none of our displays or buffers: add them again.
     std::lock_guard lock(mutex);
     mSock = fd;
@@ -357,11 +261,7 @@ BridgeDisplay::~BridgeDisplay() {
 
 void BridgeDisplay::freePool(Pool& p, bool tellBridge) {
   for (auto& buf : p.bufs) {
-    if (tellBridge) {
-      Msg m(kBufferRemove, b->tag());
-      m.u32(buf.id);
-      b->send(m);
-    }
+    if (tellBridge) b->send(message(kBufferRemove, b->tag(), {buf.id}));
     if (buf.map) munmap(buf.map, buf.size);
     if (buf.memfd >= 0) close(buf.memfd);
   }
@@ -410,15 +310,10 @@ bool BridgeDisplay::makePool(
       ok = dmabuf >= 0;
     }
     if (ok) {
-      Msg m(kBufferAdd, b->tag());
-      m.u32(buf.id)
-        .u32(mId)
-        .u32(w)
-        .u32(h)
-        .u32(format)
-        .u32(pool.stride)
-        .u32(0)
-        .u64(0);  // LINEAR
+      lxb_msg m = message(
+        kBufferAdd, b->tag(), {buf.id, mId, w, h, format, pool.stride, 0}
+      );
+      lxb_put_u64(&m, 0);  // modifier: LINEAR
       ok = b->send(m, dmabuf);
     }
     if (dmabuf >= 0) close(dmabuf);
@@ -503,9 +398,7 @@ void BridgeDisplay::present(const FrameInput& frame) {
     );
   }
   mLast = idx;
-  Msg m(kFrame, b->tag());
-  m.u32(mId).u32(id).u32(0).u32(0).u32(0).u32(0);
-  if (!b->send(m)) {
+  if (!b->send(message(kFrame, b->tag(), {mId, id, 0, 0, 0, 0}))) {
     std::lock_guard lock(b->mutex);
     mPool.bufs[size_t(idx)].busy = false;
   }
@@ -546,7 +439,7 @@ class BridgeVirtualPresenter : public Presenter {
 
 void startBridge() {
   gBridge = new Bridge();
-  gBridge->start("/dev/socket/linuxapk/bridge.sock");
+  gBridge->start();
 }
 
 bool bridgeStarted() { return gBridge != nullptr; }
