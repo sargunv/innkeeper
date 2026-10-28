@@ -1,10 +1,11 @@
 # ubinder: userspace binder (M4)
 
-> **Status (2026-10-27):** the cross-process broker stays. It will be simplified
-> for correctness and clarity (single owner for thread state, explicit operation
-> lifecycles). Guards that only defend against deliberately malicious callers
-> go: the S11 page-protection checks and the S12 fallback are removed. See
-> [STRATEGY.md](STRATEGY.md) "Threat model".
+> **Status (2026-10-27):** the cross-process broker stays, simplified for
+> correctness and clarity: the driver owns every thread's place in an ioctl, and
+> a read is committed only once the reader has it (see "The read lifecycle").
+> Guards that only defended against deliberately malicious callers are gone (the
+> S11 page-protection checks, the S12 fallback, the sealed receive memfd and the
+> epoll indirection for poll). See [STRATEGY.md](STRATEGY.md) "Threat model".
 
 ubinder serves Android's binder IPC from a userspace broker instead of the
 kernel driver. **It is the session's default** (since 2026-10-27): a session
@@ -22,10 +23,10 @@ show at the system level (numbers below).
 Android process. It turns `bpf()` and friends, `openat()` and every `ioctl()`
 with type `'b'` into user notifications. The kernel allows only one listener per
 filter chain, so one process receives them all: the Rust broker helper
-(`/system/bin/linuxapk-ubinder`, `ubinder/src/sys.rs`). It serves `openat` and
-binder ioctls, and forwards the rest to the C bpf emulator thread
-(`session/helper/bpfemu.c`) over a SOCK_SEQPACKET socket. Either side answers on
-the shared listener.
+(`/system/bin/linuxapk-broker`, `supervisor/broker/src/notify.rs`). It serves
+`openat` and binder ioctls, and forwards the rest to the C bpf emulator thread
+(`supervisor/pivot-exec/bpfemu.c`) over a SOCK_SEQPACKET socket. Either side
+answers on the shared listener.
 
 - **open:** `openat` of `/dev/{binder,hwbinder,vndbinder}` gets a 4 MiB sparse
   memfd injected (`SECCOMP_IOCTL_NOTIF_ADDFD` with `SEND`). The process mmaps it
@@ -34,19 +35,17 @@ the shared listener.
   Other paths continue without taking the broker lock. ns-init creates readable
   dummy device nodes for libbinder's `access()` check.
 - **ioctl:** served through the opener's `/proc/<pid>/mem`, pinned at open (see
-  "Hardening"). Errors are negative errnos, as from the driver.
-- **blocking reads:** a `BINDER_WRITE_READ` with nothing to read is parked: the
-  notification stays unanswered and the broker answers it when it wakes the
-  thread. Waits stay interruptible, so ptrace (debuggerd) and job control work.
-  A signal makes the kernel restart the ioctl, so restarts are idempotent:
-  `write_consumed` is written back before parking, and read bytes whose answer
-  failed (`ENOENT`) are stashed and returned by the thread's next read.
+  "Bounds and process pinning"). Errors are negative errnos, as from the driver.
+- **blocking reads:** a `BINDER_WRITE_READ` with nothing to read blocks: the
+  notification stays unanswered and the driver answers it once there is work.
+  Waits stay interruptible, so ptrace (debuggerd) and job control work. A signal
+  makes the kernel restart the ioctl, which is idempotent (see "The read
+  lifecycle").
 - **poll:** a thread that sets up polling (a write-only `BC_ENTER_LOOPER`, which
   is `IPCThreadState::setupPolling`) gets its process's binder fd swapped for an
-  epoll fd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive) watching an
-  eventfd only the broker holds, so Android can't drain, saturate or block it.
-  The broker sets it readable exactly when a polling thread has work
-  (`binder_poll`). Nothing traps `epoll_ctl`.
+  eventfd (`ADDFD` with `SETFD`; the mapping keeps the memfd alive). The broker
+  sets it readable exactly when a polling thread has work (`binder_poll`).
+  Nothing traps `epoll_ctl`.
 - **fds:** `BINDER_TYPE_FD`/`FDA` are captured from the sender with
   `pidfd_getfd` and installed into the reader during its own read (`ADDFD`),
   like `binder_apply_fd_fixups`.
@@ -63,13 +62,15 @@ the shared listener.
   env, cwd and stdio go over a 0600 socket on the session's `/dev`, like
   `adb shell`.
 
-The broker (`ubinder/src/broker.rs`) is a pure state machine with no syscalls;
-process access goes through a `Mem` trait. It follows `drivers/android/binder.c`
-closely, and its comments name the kernel functions:
+The driver (`supervisor/broker/src/binder/driver.rs`) is a state machine that
+makes no syscalls: process memory, receive buffers, fds and answering a call go
+through its `Userspace` trait, which `notify.rs` implements over seccomp and the
+tests over an in-memory fake (`src/fake.rs`). It follows
+`drivers/android/binder.c` closely, and its comments name the kernel functions:
 
 - per-process and per-thread work lists, with `process_todo` for deferred work;
-- thread selection from `waiting_threads`; only looper threads take process
-  work; `BR_SPAWN_LOOPER` replaces the leading `BR_NOOP`;
+- thread selection: the longest-blocked thread that takes process work; only
+  looper threads do; `BR_SPAWN_LOOPER` replaces the leading `BR_NOOP`;
 - transactions and buffers are separate objects, and a buffer owns the refs
   taken while translating it until `BC_FREE_BUFFER`;
 - node refcounts and the INCREFS/ACQUIRE/RELEASE/DECREFS handshake with
@@ -79,6 +80,34 @@ closely, and its comments name the kernel functions:
 - `BINDER_GET_NODE_INFO_FOR_REF` (servicemanager's client callbacks) and
   extended errors.
 
+### The read lifecycle
+
+The driver serves whole ioctls (`BinderDriver::ioctl`) and is the only owner of
+a thread's state in them: the seccomp layer keeps no waiters and no stash. Each
+read goes through one lifecycle:
+
+- **prepared:** the read takes work off its lists and renders the `BR_*` stream,
+  changing nothing else yet;
+- **blocked:** with nothing to read, the thread waits holding its unanswered
+  call. Only a blocked thread is picked for process work; enqueueing work for it
+  wakes it, and its read runs again before the ioctl that woke it returns;
+- **committed:** once the stream and the bwr are copied out and the call is
+  answered, the delivery takes effect (transactions go on the reader's stack,
+  buffers become the reader's, node and death states advance);
+- **rolled back:** if a copy fails (`EFAULT`) or the call is gone (a signal),
+  the work goes back to the front of the lists it came from, so the restarted
+  read, or another looper, gets it again;
+- **abandoned:** a thread's next ioctl ends any wait it was in, and process
+  release answers its blocked threads with `EBADF`.
+
+A write is consumed as it is processed and its progress written back whatever
+the read does, before blocking too, so a restarted ioctl never replays it. Fds
+installed for a rolled-back transaction stay installed and their numbers stay in
+the buffer, so a reread reports the same fds. `src/binder/lifecycle_tests.rs`
+drives libbinder-like threads through every failure point and checks that no
+work waits with a thread that isn't reading it, every synchronous call gets its
+reply or a failed reply, and nothing leaks.
+
 Not supported: freezing. `BINDER_FREEZE` and `BINDER_GET_FROZEN_INFO` return
 `EINVAL`, so Android disables its app freezer; freeze-notification commands are
 accepted and never fire. Priority inheritance is ignored too.
@@ -86,18 +115,22 @@ accepted and never fire. Priority inheritance is ignored too.
 ## Proof
 
 ```sh
-cargo test -p ubinder                                   # state machine + fuzz smoke
-cargo run --release -p ubinder --bin ubinder-fuzz -- 250000 <seed>
-ubinder/tests/run-binder-tests.sh [TEST[:FILTER] ...]          # broker, then kernel
-LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
+cargo test -p linuxapk-broker                    # driver, lifecycle properties, fuzz smoke
+cargo run --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 500000 <seed>
+supervisor/tests/binder/run.sh [TEST[:FILTER] ...]  # broker, then kernel (mise run test:binder)
+mise run test:boot                               # fresh headless boot + selftest, both uid modes
 ```
 
 - **Fuzzer:** 3 processes × 3 threads run random operations: grammar-built
   `BC_*` streams (transactions with object arrays, replies to received calls,
-  refcounts, deaths, frees of real buffers), raw bytes, reads, thread exits and
-  process deaths. Broker invariants are checked after every step, and once all
-  processes are gone nothing may leak. 2M iterations (seeds 11–18): no panics.
-  It caught a refcount underflow when a process died holding unfreed buffers.
+  refcounts, deaths, frees of real buffers), raw bytes, reads, thread exits,
+  process deaths, and signals that interrupt blocked reads, which then restart.
+  In most iterations userspace also fails at random under the driver: copies,
+  receive allocations, fd captures and installs, and answers. Driver invariants
+  are checked after every step, and once all processes are gone nothing may leak
+  (transactions, buffers, nodes, captured fds, receive space). 500k iterations
+  (seed 1): no panics. It caught a refcount underflow when a process died
+  holding unfreed buffers.
 - **AOSP binder tests** (android-17.0.0_r1 binaries, servicemanager running,
   rootless namespace; `run-binder-tests.sh`):
 
@@ -129,21 +162,27 @@ LINUXAPK_INSTANCE=ubinder session/linuxapk-session start --ubinder --headless
   | same, 16 KiB payload (`-s 16384`) | 3.6 µs         | 13.3 µs        |
   | 8 workers all-to-all (`-w 8`)     | 7.2 µs, 819k/s | 78.5 µs, 66k/s |
 
+  The read-lifecycle rewrite (2026-10-28) kept these: four interleaved runs each
+  against the broker before it, on a loaded machine, gave medians of 69.4k/s and
+  74 µs against 65.4k/s and 80 µs for `-w 8`, 17.0 against 17.3 µs for 16 KiB
+  payloads, and 18 against 20 µs for one pair (both noisy).
+
   The broker is one thread, so it tops out around 70–90k transactions/s
   session-wide. A desktop session uses a small fraction of that. If it ever
   matters, sharding by context, or by process with a lock per process, is next.
 
-Tracing: `LINUXAPK_UBINDER_DEBUG=1` logs to the helper's stderr (`session.out`);
+Tracing: `LINUXAPK_BROKER_DEBUG=1` logs to the helper's stderr (`session.out`);
 any other value is a log file path inside the session root (for example
-`/data/ubinder.log`), rotated every 64 MiB.
+`/data/broker.log`), rotated every 64 MiB.
 
-## Hardening against hostile Android processes
+## Bounds and process pinning
 
-The broker helper and the C supervisor run with the host user's power, so they
-must survive anything Android sends. From a security review (2026-10-27):
+The broker helper and the C supervisor run with the host user's power. Under
+desktop parity they keep simple bounds and correctness checks, and never write
+into the wrong process; they don't defend against deliberately malicious
+callers. From a security review (2026-10-27), what remains:
 
-- The receive memfd is sealed against resizing (a truncate made the broker's
-  writes SIGBUS). Transaction sizes are aligned with checked arithmetic.
+- Transaction sizes are aligned with checked arithmetic.
 - A process's memory is read and written only through its `/proc/<pid>/mem`,
   opened at binder open before its notification is validated. That pins its
   address space, so a thread killed by an exec, or a recycled tid, never gets
@@ -155,11 +194,11 @@ must survive anything Android sends. From a security review (2026-10-27):
   raised `binderThroughputTest -w 8` all-to-all from 55.5–58.1k to 63.0–68.8k
   transactions/s, median per transaction 90–95 µs to 76–84 µs (six interleaved
   runs each on one loaded machine). A bwr that can't be written back fails the
-  ioctl with `EFAULT`, as in the driver. Queued single-uid jobs are dropped once
-  their notification is gone, and checked again before they act. Single-uid
-  calls that transfer memory (`getresuid`, group lists, `SO_PEERCRED`, chown
-  paths, lstat results) pin the same way, per call; scalar `get*id` don't.
-- Poll mode hands out an epoll fd, never the broker's eventfd (see "poll").
+  ioctl with `EFAULT`, as in the driver, and the read it carried is rolled back
+  rather than lost. Queued single-uid jobs are dropped once their notification
+  is gone, and checked again before they act. Single-uid calls that transfer
+  memory (`getresuid`, group lists, `SO_PEERCRED`, chown paths, lstat results)
+  pin the same way, per call; scalar `get*id` don't.
 - The broker forwards to the C supervisor without waiting (`MSG_DONTWAIT`),
   failing the call with `EAGAIN` if it is behind, so binder never waits on it.
 - `bpfemu.c`: element operations need a map with tables (not ring buffers), LPM
@@ -169,7 +208,7 @@ must survive anything Android sends. From a security review (2026-10-27):
   mount FUSE over it: no symlinks, no `..`, no other mounts, non-blocking, and
   regular files only. Objects are capped at 4096 and map memory at 128 MiB plus
   2 MiB per CPU (a boot creates about 250 objects and 25 MB on 32 CPUs), and
-  failed creations are unwound. `session/tests/bpfemu.sh` covers these.
+  failed creations are unwound. `supervisor/tests/bpfemu.sh` covers these.
 
 ## Bugs found on the way (for the record)
 
