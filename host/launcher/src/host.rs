@@ -161,9 +161,14 @@ fn start_pasta(init: i32, log: &fs::File) -> Result<std::process::Child> {
         .arg("--netns")
         .arg(format!("/proc/{init}/ns/net"))
         .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log.try_clone()?);
-    c.spawn().context("start pasta")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().context("start pasta")?;
+    // Copied through a pipe: Fedora's SELinux policy for pasta forbids
+    // appending to a file in the user's state dir.
+    let (mut err, mut log) = (child.stderr.take().unwrap(), log.try_clone()?);
+    std::thread::spawn(move || std::io::copy(&mut err, &mut log));
+    Ok(child)
 }
 
 /// `_outer`: makes the outer namespaces, then forks their pid 1, which builds

@@ -82,7 +82,7 @@ android/system/iptables/build.sh
 [tasks."build:system-app"]
 description = "LinuxApkSystem.apk, platform-signed; LinuxApkProbes.apk for the tests (out/test/probes)"
 dir = "android/system-app"
-run = "./gradlew --console=plain -q :app:install :probes:install"
+run = "./gradlew --console=plain -q -Pkotlin.project.persistent.dir={{config_root}}/out/build/system-app/kotlin :app:install :probes:install"
 
 [tasks."build:image-tools"]
 description = "Static simg2img, lpunpack, fsck.erofs and debugfs for image setup (build container; skipped when unchanged)"
@@ -116,7 +116,7 @@ run = """
 set -euo pipefail
 cargo test -q --workspace
 cargo run -q --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 20000 1
-(cd android/system-app && ./gradlew --console=plain -q :protocol:test)
+(cd android/system-app && ./gradlew --console=plain -q -Pkotlin.project.persistent.dir={{config_root}}/out/build/system-app/kotlin :protocol:test)
 cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
 ctest --preset host-tests
