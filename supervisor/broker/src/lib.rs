@@ -9,6 +9,8 @@
 //!     user notifications and serves binder ioctls to real Android processes.
 //!   * `creds`: single-uid mode's credential model and the syscalls it
 //!     answers.
+//!   * `flat`: what Flatpak mode's missing mounts did (Android paths for
+//!     /proc magic links, faked /proc files).
 //!
 //! `LINUXAPK_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
 //! `supervisor/README.md`.
@@ -16,6 +18,7 @@
 pub mod binder;
 mod creds;
 pub mod fake;
+mod flat;
 pub mod notify;
 
 use std::io::Write;

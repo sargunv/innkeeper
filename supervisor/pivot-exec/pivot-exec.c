@@ -21,6 +21,12 @@
 //     status, so the whole session ends when Android init does.
 //
 // Built static with the NDK so it keeps working after the host root is gone.
+//
+// Flatpak mode (LINUXAPK_FLATPAK=1, NEWROOT "/"): the sandbox forbids mounts
+// and namespaces, and the launcher already built Android's root out of
+// symlinks in the sandbox's own "/". Steps 1 and 2 are skipped: init is a
+// plain child, and this process becomes its subreaper instead of pid 1. The
+// broker fakes the /proc entries step 4 would bind.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -31,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -49,6 +56,8 @@ extern char** environ;
 // bionic binary, so pivot-exec stays a pure-C static binary (it is exec'd
 // before pivot_root, where no linker exists).
 static const char* broker;
+// Flatpak mode (see the header).
+static int flat;
 // Single-uid mode (LINUXAPK_SINGLE_UID=1): the session maps only uid/gid 0,
 // and the broker emulates Android's uids (supervisor/README.md).
 static int single_uid;
@@ -60,10 +69,16 @@ static void die(const char* what);
 // like the bpf thread, so it sees Android pids and can process_vm_* them.
 // Dynamic bionic; the parent is in the pivoted Android root, so
 // /system/bin/linker64 and libc.so resolve.
-static void spawn_broker(int sock, int listener) {
+static void spawn_broker(int sock, int listener, pid_t init) {
   pid_t p = fork();
   if (p < 0) die("fork broker");
   if (p != 0) return;
+  // Flatpak mode: init's pid, which the broker shows as 1.
+  if (flat) {
+    char pid[16];
+    snprintf(pid, sizeof(pid), "%d", init);
+    setenv("LINUXAPK_INIT_PID", pid, 1);
+  }
   // Inherited fds must survive exec; clear CLOEXEC.
   fcntl(sock, F_SETFD, 0);
   fcntl(listener, F_SETFD, 0);
@@ -132,20 +147,27 @@ static int child_main(void* arg) {
   close(sync_sock[1]);
   if (read(sync_sock[0], &c, 1) != 1) die("wait for id maps");
 
-  // Fresh procfs for the nested pid namespace, then the fake entries.
-  if (
-    mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL) != 0
-  )
-    die("mount /proc");
-  bind_if_present("/linuxapk/proc/cmdline", "/proc/cmdline");
-  bind_if_present("/linuxapk/proc/bootconfig", "/proc/bootconfig");
-  bind_if_present(
-    "/linuxapk/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
-  );
+  if (!flat) {
+    // Fresh procfs for the nested pid namespace, then the fake entries.
+    if (
+      mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL) !=
+      0
+    )
+      die("mount /proc");
+    bind_if_present("/linuxapk/proc/cmdline", "/proc/cmdline");
+    bind_if_present("/linuxapk/proc/bootconfig", "/proc/bootconfig");
+    bind_if_present(
+      "/linuxapk/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
+    );
+  } else {
+    // The shim's cue that this process is init (it isn't pid 1 here): init
+    // keeps the shim, its services don't inherit it.
+    setenv("LINUXAPK_SHIM_INIT", "1", 1);
+  }
 
   // Route Android's bpf(), openat and binder ioctls to the supervisor via one
   // seccomp notification listener, then hand it the fd.
-  int listener = bpfemu_install_filter(single_uid);
+  int listener = bpfemu_install_filter(single_uid, flat);
   if (listener < 0) die("install seccomp filter");
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
@@ -183,19 +205,33 @@ int main(int argc, char** argv) {
   }
   const char* su = getenv("LINUXAPK_SINGLE_UID");
   single_uid = su != NULL && strcmp(su, "1") == 0;
+  const char* fp = getenv("LINUXAPK_FLATPAK");
+  flat = fp != NULL && strcmp(fp, "1") == 0;
 
-  if (chdir(argv[1]) != 0) die("chdir newroot");
-  // pivot_root(".", "."): the old root ends up stacked on top of the new
-  // one; detaching "." then removes it.
-  if (syscall(SYS_pivot_root, ".", ".") != 0) die("pivot_root");
-  if (umount2(".", MNT_DETACH) != 0) die("umount old root");
-  if (chdir("/") != 0) die("chdir /");
+  if (flat) {
+    if (strcmp(argv[1], "/") != 0 || !single_uid) {
+      fprintf(
+        stderr, "pivot-exec: Flatpak mode needs NEWROOT / and single-uid\n"
+      );
+      return 2;
+    }
+    if (chdir("/") != 0) die("chdir /");
+    // Orphaned Android processes come back to us, not the sandbox's pid 1.
+    if (prctl(PR_SET_CHILD_SUBREAPER, 1) != 0) die("subreaper");
+  } else {
+    if (chdir(argv[1]) != 0) die("chdir newroot");
+    // pivot_root(".", "."): the old root ends up stacked on top of the new
+    // one; detaching "." then removes it.
+    if (syscall(SYS_pivot_root, ".", ".") != 0) die("pivot_root");
+    if (umount2(".", MNT_DETACH) != 0) die("umount old root");
+    if (chdir("/") != 0) die("chdir /");
 
-  // Drop the host user's supplementary groups (wheel etc.): they are
-  // unmapped here but would still grant access to host files.
-  // (Test harnesses run under `unshare --map-root-user`, where setgroups is
-  // denied; their supplementary groups are already unmapped.)
-  if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
+    // Drop the host user's supplementary groups (wheel etc.): they are
+    // unmapped here but would still grant access to host files.
+    // (Test harnesses run under `unshare --map-root-user`, where setgroups is
+    // denied; their supplementary groups are already unmapped.)
+    if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
+  }
 
   // The session's bpffs tmpfs (ns-init.sh), for the bpf emulator's pins:
   // opened now, before Android can mount anything over it.
@@ -209,11 +245,14 @@ int main(int argc, char** argv) {
   static char stack[256 * 1024] __attribute__((aligned(16)));
   int flags = CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWCGROUP |
               CLONE_NEWNET | CLONE_NEWIPC | CLONE_NEWUTS | SIGCHLD;
+  if (flat) flags = SIGCHLD;
   pid_t pid = clone(child_main, stack + sizeof(stack), flags, NULL);
   if (pid < 0) die("clone");
   close(sync_sock[0]);
-  write_identity_map(pid, "uid_map");
-  write_identity_map(pid, "gid_map");
+  if (!flat) {
+    write_identity_map(pid, "uid_map");
+    write_identity_map(pid, "gid_map");
+  }
   if (write(sync_sock[1], "x", 1) != 1) die("release child");
 
   // Receive the child's single seccomp listener.
@@ -238,11 +277,12 @@ int main(int argc, char** argv) {
   int sp[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)
     die("broker socketpair");
-  spawn_broker(sp[1], listener);
+  spawn_broker(sp[1], listener, pid);
   close(sp[1]);
   if (bpfemu_start(listener, sp[0]) != 0) die("bpfemu thread");
 
-  // We are pid 1 of the outer pid namespace: reap until the child is gone.
+  // We are pid 1 of the outer pid namespace (Flatpak mode: init's
+  // subreaper): reap until the child is gone.
   int status;
   for (;;) {
     pid_t w = waitpid(-1, &status, 0);

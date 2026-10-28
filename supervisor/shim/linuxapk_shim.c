@@ -200,8 +200,193 @@ EXPORT int prlimit(
 // them fail to link. init's forked children still run the shim between fork
 // and exec, which is where init needs it. Services that need it themselves
 // get "setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so" in their rc.
+// In Flatpak mode init isn't pid 1; pivot-exec marks it with
+// LINUXAPK_SHIM_INIT instead.
 __attribute__((constructor)) static void linuxapk_shim_init(void) {
-  if (syscall(SYS_getpid) == 1) unsetenv("LD_PRELOAD");
+  if (syscall(SYS_getpid) == 1 || getenv("LINUXAPK_SHIM_INIT")) {
+    unsetenv("LD_PRELOAD");
+    unsetenv("LINUXAPK_SHIM_INIT");
+  }
+}
+
+// Flatpak mode (LINUXAPK_FLATPAK=1, which init passes on like
+// LINUXAPK_SINGLE_UID): the sandbox's seccomp filter fails mount, umount,
+// unshare and setns with EPERM, ahead of any filter of ours. Android's root is
+// already assembled (symlinks, see host/launcher/ns-init.sh) and has no
+// namespaces to make, so a refused call is treated as done: init's mounts,
+// zygote's per-app mount namespace and storage views, vold's binds.
+#include <dlfcn.h>
+#include <sys/mount.h>
+static int flatpak_state = -1;
+static int flatpak(void) {
+  if (flatpak_state < 0) {
+    const char* e = getenv("LINUXAPK_FLATPAK");
+    flatpak_state = e && !strcmp(e, "1");
+  }
+  return flatpak_state;
+}
+static long refused_ok(long rc) {
+  return rc != 0 && errno == EPERM && flatpak() ? 0 : rc;
+}
+EXPORT int mount(
+  const char* src, const char* dst, const char* type, unsigned long flags,
+  const void* data
+) {
+  return refused_ok(syscall(SYS_mount, src, dst, type, flags, data));
+}
+EXPORT int umount2(const char* target, int flags) {
+  return refused_ok(syscall(SYS_umount2, target, flags));
+}
+EXPORT int umount(const char* target) { return umount2(target, 0); }
+EXPORT int unshare(int flags) {
+  return refused_ok(syscall(SYS_unshare, flags));
+}
+EXPORT int setns(int fd, int nstype) {
+  return refused_ok(syscall(SYS_setns, fd, nstype));
+}
+// netd in Flatpak mode (its rc sets LINUXAPK_NETLINK_ACCEPT=1): the session
+// shares the host's network namespace, where netd may change nothing. The
+// kernel answers its rtnetlink requests (rules, routes, addresses) with
+// EPERM, and netd won't start without its routing rules: report them done.
+// Its routing then means nothing, as its marks (SO_MARK, bpfemu) and
+// iptables rules (linuxapk-iptables) don't; sockets use the host's routes,
+// as every desktop app does.
+#include <linux/netlink.h>
+#include <sys/socket.h>
+static int netlink_accept_state = -1;
+static void netlink_accept(int fd, void* buf, long n) {
+  if (n <= 0 || !flatpak()) return;
+  if (netlink_accept_state < 0) {
+    const char* e = getenv("LINUXAPK_NETLINK_ACCEPT");
+    netlink_accept_state = e && !strcmp(e, "1");
+  }
+  if (!netlink_accept_state) return;
+  int domain;
+  socklen_t l = sizeof(domain);
+  if (
+    getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &l) != 0 ||
+    domain != AF_NETLINK
+  )
+    return;
+  // An ack may be cut short: netd reads just the header and error code.
+  char* p = buf;
+  while (n >= (long)(NLMSG_HDRLEN + sizeof(int))) {
+    struct nlmsghdr* h = (struct nlmsghdr*)p;
+    if (h->nlmsg_type == NLMSG_ERROR) {
+      struct nlmsgerr* e = NLMSG_DATA(h);
+      if (e->error == -EPERM || e->error == -EACCES) e->error = 0;
+    }
+    long step = NLMSG_ALIGN(h->nlmsg_len);
+    if (h->nlmsg_len < NLMSG_HDRLEN || step > n) break;
+    p += step;
+    n -= step;
+  }
+}
+EXPORT ssize_t recvfrom(
+  int fd, void* buf, size_t len, int flags, struct sockaddr* addr,
+  socklen_t* alen
+) {
+  long n = syscall(SYS_recvfrom, fd, buf, len, flags, addr, alen);
+  netlink_accept(fd, buf, n);
+  return n;
+}
+EXPORT ssize_t recv(int fd, void* buf, size_t len, int flags) {
+  return recvfrom(fd, buf, len, flags, NULL, NULL);
+}
+// netdutils reads XFRM acks with read().
+EXPORT ssize_t read(int fd, void* buf, size_t len) {
+  long n = syscall(SYS_read, fd, buf, len);
+  if (n > 0 && netlink_accept_state != 0) netlink_accept(fd, buf, n);
+  return n;
+}
+// What FORTIFY makes of recv() with a known buffer size.
+EXPORT ssize_t __recvfrom_chk(
+  int fd, void* buf, size_t len, size_t buf_size, int flags,
+  struct sockaddr* addr, socklen_t* alen
+) {
+  if (len > buf_size) abort();
+  return recvfrom(fd, buf, len, flags, addr, alen);
+}
+
+// lmkd in Flatpak mode (its rc sets LINUXAPK_PSI_WINDOW=1): the kernel takes
+// PSI triggers with a window under 2 s (lmkd asks for 1 s) only from a
+// process with CAP_SYS_RESOURCE, which the sandbox never has. Widen the
+// window to 2 s; lmkd still polls the same memory pressure.
+#include <fcntl.h>
+#include <stdio.h>
+static int psi_window_state = -1;
+static long psi_write(int fd, const void* buf, size_t n) {
+  char kind[8], link[64], path[32], out[64];
+  unsigned stall, window;
+  if (psi_window_state < 0) {
+    const char* e = getenv("LINUXAPK_PSI_WINDOW");
+    psi_window_state = e && !strcmp(e, "1") && flatpak();
+  }
+  if (
+    !psi_window_state || n < 8 || n > 48 ||
+    (memcmp(buf, "some ", 5) && memcmp(buf, "full ", 5))
+  )
+    return -2;
+  memcpy(out, buf, n);
+  out[n] = 0;
+  if (sscanf(out, "%4s %u %u", kind, &stall, &window) != 3) return -2;
+  snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+  long l = syscall(SYS_readlinkat, AT_FDCWD, link, path, sizeof(path) - 1);
+  if (l <= 0) return -2;
+  path[l] = 0;
+  if (strncmp(path, "/proc/pressure/", 15) || window % 2000000 == 0) return -2;
+  window = (window / 2000000 + 1) * 2000000;
+  int m = snprintf(out, sizeof(out), "%s %u %u", kind, stall, window);
+  return syscall(SYS_write, fd, out, m + 1) < 0 ? -1 : (long)n;
+}
+static long do_write(int fd, const void* buf, size_t n) {
+  long r = psi_write(fd, buf, n);
+  return r != -2 ? r : syscall(SYS_write, fd, buf, n);
+}
+EXPORT ssize_t write(int fd, const void* buf, size_t n) {
+  return do_write(fd, buf, n);
+}
+// (Not through write(): FORTIFY turns that call back into this one.)
+EXPORT ssize_t __write_chk(int fd, const void* buf, size_t n, size_t buf_size) {
+  if (n > buf_size) abort();
+  return do_write(fd, buf, n);
+}
+
+// socket(AF_KEY) in Flatpak mode: the sandbox refuses the family before our
+// seccomp filter sees the call. The connectivity stack opens and closes one
+// only to wait for an RCU grace period after swapping eBPF maps, which
+// emulated maps don't need (supervisor/pivot-exec/bpfemu.c).
+#include <sys/eventfd.h>
+EXPORT int socket(int domain, int type, int protocol) {
+  long r = syscall(SYS_socket, domain, type, protocol);
+  if (r < 0 && errno == EAFNOSUPPORT && domain == AF_KEY && flatpak())
+    return eventfd(0, (type & SOCK_CLOEXEC) ? EFD_CLOEXEC : 0);
+  return r;
+}
+
+// init forks services with "namespace mnt|pid" through clone(); without the
+// namespaces they share the session's.
+#include <sched.h>
+#include <stdarg.h>
+#define CLONE_NEW_ALL                                                        \
+  (CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWIPC | \
+   CLONE_NEWUSER | CLONE_NEWCGROUP)
+EXPORT int clone(int (*fn)(void*), void* stack, int flags, void* arg, ...) {
+  static int (*real)(int (*)(void*), void*, int, void*, ...);
+  if (!real)
+    real = (int (*)(int (*)(void*), void*, int, void*, ...))dlsym(
+      RTLD_NEXT, "clone"
+    );
+  va_list ap;
+  va_start(ap, arg);
+  pid_t* ptid = va_arg(ap, pid_t*);
+  void* tls = va_arg(ap, void*);
+  pid_t* ctid = va_arg(ap, pid_t*);
+  va_end(ap);
+  int r = real(fn, stack, flags, arg, ptid, tls, ctid);
+  if (r == -1 && errno == EPERM && flatpak() && (flags & CLONE_NEW_ALL))
+    r = real(fn, stack, flags & ~CLONE_NEW_ALL, arg, ptid, tls, ctid);
+  return r;
 }
 
 // /proc/config.gz: system_server (Debug.isVmapStack, via libvintf's

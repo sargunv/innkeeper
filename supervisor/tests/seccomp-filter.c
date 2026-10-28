@@ -1,6 +1,6 @@
 // Which syscalls does the session's seccomp filter (pivot-exec/bpfemu.c) turn
 // into user notifications? Built and run by seccomp-filter.sh on the host.
-// A child installs the filter (subuid and single-uid variants) and
+// A child installs the filter (subuid, single-uid and Flatpak variants) and
 // serves its listener; a grandchild makes each probe syscall, and the child
 // records which ones arrived as notifications and lets them continue.
 #define _GNU_SOURCE
@@ -45,13 +45,23 @@ static struct probe probes[] = {
   {"stat", __NR_newfstatat, {AT_FDCWD, (long)"/", 0, 0}},
   {"fstat", __NR_fstat, {0, 0}},
   {"getpid", __NR_getpid},
+  {"readlinkat", __NR_readlinkat, {AT_FDCWD, (long)"/nonexistent", 0, 0}},
+  {"getcwd", __NR_getcwd, {0, 0}},
+  {"setsockopt SO_MARK", __NR_setsockopt, {-1, SOL_SOCKET, SO_MARK}},
+  {"setsockopt SO_RCVBUF", __NR_setsockopt, {-1, SOL_SOCKET, SO_RCVBUF}},
+  {"capget", __NR_capget, {0, 0}},
+  {"capset", __NR_capset, {0, 0}},
+  {"mkdirat", __NR_mkdirat, {AT_FDCWD, (long)"/nonexistent/x", 0}},
+  {"fchmodat", __NR_fchmodat, {AT_FDCWD, (long)"/nonexistent", 0}},
+  {"prctl PR_CAPBSET_DROP", __NR_prctl, {PR_CAPBSET_DROP, 63}},
+  {"prctl PR_SET_NAME", __NR_prctl, {PR_SET_NAME, 0}},
 };
 #define NPROBES (int)(sizeof(probes) / sizeof(probes[0]))
 
 // Prints one line per probe: "<name> <0|1>" (1 = notified).
-static int run(int single_uid) {
+static int run(int single_uid, int flat) {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-  int lfd = bpfemu_install_filter(single_uid);
+  int lfd = bpfemu_install_filter(single_uid, flat);
   if (lfd < 0) return perror("filter"), 1;
   static struct stat st;
   for (int i = 0; i < NPROBES; i++)
@@ -88,7 +98,12 @@ static int run(int single_uid) {
         probes[i].nr == __NR_ioctl && (long)(unsigned)req->data.args[1] != a[1]
       )
         continue;
-      if (probes[i].nr == __NR_getsockopt && (long)req->data.args[2] != a[2])
+      if (
+        (probes[i].nr == __NR_getsockopt || probes[i].nr == __NR_setsockopt) &&
+        (long)req->data.args[2] != a[2]
+      )
+        continue;
+      if (probes[i].nr == __NR_prctl && (long)req->data.args[0] != a[0])
         continue;
       if (probes[i].nr == __NR_newfstatat && (long)req->data.args[3] != a[3])
         continue;
@@ -101,11 +116,14 @@ static int run(int single_uid) {
     resp->flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
     ioctl(lfd, SECCOMP_IOCTL_NOTIF_SEND, resp);
   }
-  for (int i = 0; i < NPROBES; i++) printf("%s %d\n", probes[i].name, seen[i]);
+  // dprintf: stdio would fstat stdout, which Flatpak mode traps, under this
+  // process's own filter.
+  for (int i = 0; i < NPROBES; i++)
+    dprintf(1, "%s %d\n", probes[i].name, seen[i]);
   return 0;
 }
 
 int main(int argc, char** argv) {
-  if (argc != 2) return 2;
-  return run(atoi(argv[1]));
+  if (argc != 3) return 2;
+  return run(atoi(argv[1]), atoi(argv[2]));
 }

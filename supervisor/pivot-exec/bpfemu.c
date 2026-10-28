@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/bpf.h>
+#include <linux/capability.h>
 #include <linux/filter.h>
 #include <linux/openat2.h>
 #include <linux/seccomp.h>
@@ -522,6 +523,25 @@ static int open_pin(pid_t pid, uint64_t uaddr, int flags, mode_t mode) {
   if (strncmp(p, "/sys/fs/bpf/", 12) != 0) return -EINVAL;
   int fd =
     open_beneath(p + 12, flags | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY, mode);
+  if (fd == -EACCES && !(flags & O_CREAT)) {
+    // Without a user namespace (Flatpak mode) there is no CAP_DAC_OVERRIDE,
+    // and netbpfload makes pins such as 0060: read ours with the owner's
+    // read bit set for the open.
+    int pfd = open_beneath(p + 12, O_PATH | O_NOFOLLOW, 0);
+    struct stat st;
+    char self[32];
+    if (pfd < 0) return fd;
+    snprintf(self, sizeof(self), "/proc/self/fd/%d", pfd);
+    if (
+      fstat(pfd, &st) == 0 && S_ISREG(st.st_mode) &&
+      chmod(self, (st.st_mode & 07777) | 0400) == 0
+    ) {
+      fd = open(self, O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOCTTY);
+      if (fd < 0) fd = -errno;
+      chmod(self, st.st_mode & 07777);
+    }
+    close(pfd);
+  }
   if (fd < 0) return fd;
   struct stat st;
   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
@@ -784,6 +804,21 @@ static long handle_sched(struct seccomp_notif* req) {
   return 0;
 }
 
+// capget, Flatpak mode only: every capability, as capset pretended to keep
+// (system_server checks it may block suspend before it reads input).
+static long handle_capget(struct seccomp_notif* req) {
+  struct __user_cap_header_struct hdr;
+  if (rd(req->pid, req->data.args[0], &hdr, sizeof(hdr))) return -EFAULT;
+  if (hdr.version != _LINUX_CAPABILITY_VERSION_3 || !req->data.args[1])
+    return CONTINUE;
+  struct __user_cap_data_struct d[2] = {
+    {.effective = ~0u, .permitted = ~0u},
+    {.effective = (1u << (CAP_LAST_CAP - 31)) - 1,
+     .permitted = (1u << (CAP_LAST_CAP - 31)) - 1},
+  };
+  return wr(req->pid, req->data.args[1], d, sizeof(d)) ? -EFAULT : 0;
+}
+
 static long handle(struct seccomp_notif* req) {
   if (req->data.nr == __NR_sched_setscheduler) return handle_sched(req);
   if (req->data.nr == __NR_timerfd_create) return handle_timerfd(req);
@@ -793,6 +828,14 @@ static long handle(struct seccomp_notif* req) {
   if (req->data.nr == __NR_prlimit64 || req->data.nr == __NR_setrlimit)
     return handle_memlock(req);
   if (req->data.nr == __NR_getsockopt) return handle_getsockopt(req);
+  // setsockopt(SO_MARK), Flatpak mode only: the session shares the host's
+  // network namespace, where netd's per-network routing marks mean nothing.
+  if (req->data.nr == __NR_setsockopt) return 0;
+  // capset, prctl(PR_SET_SECUREBITS, PR_CAPBSET_DROP, PR_CAP_AMBIENT): Flatpak
+  // mode only. The sandbox has no capabilities to raise, keep or drop; under
+  // desktop parity every process has the user's power anyway.
+  if (req->data.nr == __NR_capset || req->data.nr == __NR_prctl) return 0;
+  if (req->data.nr == __NR_capget) return handle_capget(req);
   pid_t pid = req->pid;
   int cmd = (int)req->data.args[0];
   uint64_t uattr = req->data.args[1];
@@ -870,7 +913,7 @@ static long handle(struct seccomp_notif* req) {
 #define __NR_ioctl 16
 #endif
 
-int bpfemu_install_filter(int single_uid) {
+int bpfemu_install_filter(int single_uid, int flat) {
   // The syscall clauses (bpf, statfs, getxattr, getsockopt, prlimit, timerfd,
   // sched). All jumps are relative, and they target NOTIF/ALLOW, which sit
   // immediately after this block, so the whole block can be shifted down by a
@@ -1014,6 +1057,79 @@ int bpfemu_install_filter(int single_uid) {
     );
   }
 
+  // Flatpak mode (no namespaces): readlink of /proc magic links, which show
+  // the composed root's host paths (the broker rewrites them), fstat (the
+  // user's files shown as root's), mkdir and chmod (the owner keeps rwx),
+  // capget, capset and the capability prctls (there are no capabilities to
+  // give or drop; bpfemu accepts them and reports a full set), and
+  // setsockopt(SO_MARK), which needs CAP_NET_ADMIN (bpfemu accepts and
+  // ignores it, as it does netd's other per-network policy).
+  int flat_jumps[16], nflat_jumps = 0, mark_i = -1, prctl_i[3] = {-1, -1, -1};
+  if (flat) {
+    flat_jumps[nflat_jumps++] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_readlinkat, 0, 0
+    );
+    flat_jumps[nflat_jumps++] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_readlink, 0, 0
+    );
+    flat_jumps[nflat_jumps++] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_getcwd, 0, 0
+    );
+    flat_jumps[nflat_jumps++] = n;
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_fstat, 0, 0);
+    static const int kFlatNrs[] = {
+      __NR_capget, __NR_capset, __NR_mkdir,    __NR_mkdirat,
+      __NR_chmod,  __NR_fchmod, __NR_fchmodat, 452 /* fchmodat2 */,
+    };
+    for (size_t i = 0; i < sizeof(kFlatNrs) / sizeof(kFlatNrs[0]); i++) {
+      flat_jumps[nflat_jumps++] = n;
+      f[n++] = (struct sock_filter)BPF_JUMP(
+        BPF_JMP | BPF_JEQ | BPF_K, kFlatNrs[i], 0, 0
+      );
+    }
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_prctl, 0, 5);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])
+    );
+    prctl_i[0] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, PR_SET_SECUREBITS, 0, 0
+    );
+    prctl_i[1] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, PR_CAPBSET_DROP, 0, 0
+    );
+    prctl_i[2] = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, PR_CAP_AMBIENT, 0, 0
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+    );
+    f[n++] = (struct sock_filter)BPF_JUMP(
+      BPF_JMP | BPF_JEQ | BPF_K, __NR_setsockopt, 0, 5
+    );
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])
+    );
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOL_SOCKET, 0, 2);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])
+    );
+    mark_i = n;
+    f[n++] =
+      (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SO_MARK, 0, 0);
+    f[n++] = (struct sock_filter)BPF_STMT(
+      BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)
+    );
+  }
+
   // The bpf clauses follow.
   for (int i = 0; i < nclauses; i++) f[n++] = clauses[i];
   int notif = n;
@@ -1035,6 +1151,11 @@ int bpfemu_install_filter(int single_uid) {
   if (peercred_i >= 0) f[peercred_i].jt = notif - peercred_i - 1;
   if (lstat_i >= 0) f[lstat_i].jt = notif - lstat_i - 1;
   if (access_i >= 0) f[access_i].jt = notif - access_i - 1;
+  for (int i = 0; i < nflat_jumps; i++)
+    f[flat_jumps[i]].jt = notif - flat_jumps[i] - 1;
+  if (mark_i >= 0) f[mark_i].jt = notif - mark_i - 1;
+  for (int i = 0; i < 3; i++)
+    if (prctl_i[i] >= 0) f[prctl_i[i]].jt = notif - prctl_i[i] - 1;
 
   struct sock_fprog prog = {.len = n, .filter = f};
   // Waits stay interruptible (no WAIT_KILLABLE_RECV): ptrace (debuggerd) and

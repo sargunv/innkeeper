@@ -9,8 +9,10 @@
 // it also traps the credential syscalls (set*id/get*id,
 // setgroups/getgroups, the chown family, getsockopt(SO_PEERCRED)), which the
 // broker emulates with virtual ids (supervisor/broker/src/creds/table.rs,
-// supervisor/README.md).
-int bpfemu_install_filter(int single_uid);
+// supervisor/README.md). If flat is nonzero (Flatpak mode: no namespaces), it
+// also traps readlink/readlinkat and getcwd (the broker shows Android paths
+// for the composed root) and setsockopt(SO_MARK).
+int bpfemu_install_filter(int single_uid, int flat);
 
 // The directory pins live in (the session's /sys/fs/bpf tmpfs), opened
 // before any Android code runs. Without it, pins fail with ENOENT.

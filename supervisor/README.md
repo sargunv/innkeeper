@@ -18,6 +18,8 @@ an unprivileged namespace can't do into user notifications.
 | `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                                             | broker (binder)   | binder in userspace: no binderfs, no SELinux module                    |
 | `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling                        | bpfemu (C thread) | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
 | single-uid only: `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)    | virtual Android uids without a subordinate id range                    |
+| Flatpak mode only: `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                          | broker (`flat`)   | no mounts or user namespace in the sandbox (docs/session.md)           |
+| Flatpak mode only: `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                          | bpfemu            | no capabilities in the sandbox; the host's network                     |
 
 The kernel allows one listener per filter chain, so the broker receives every
 notification. It forwards the non-binder, non-credential ones to bpfemu over a
@@ -96,6 +98,14 @@ Hidden SELinux breaks call sites in init and a few services that assume a policy
 into no-ops. It also makes priority and rlimit changes best-effort, treats
 vold's refused quota-project ioctl as success, skips POSIX ACL xattrs in
 single-uid mode, and serves `/proc/config.gz` from the host's config.
+
+In Flatpak mode the sandbox's own seccomp filter refuses some calls before ours
+sees them, so the shim covers them where it is loaded: `mount`, `umount`,
+`unshare`, `setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)`
+(which the connectivity stack only opens and closes) gets an eventfd; netd's
+refused rtnetlink requests read as done (`LINUXAPK_NETLINK_ACCEPT`); and lmkd's
+PSI trigger windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1
+there, so pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
 ## Tests
 

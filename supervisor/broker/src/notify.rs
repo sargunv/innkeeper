@@ -599,6 +599,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     // Single-uid mode (supervisor/README.md): virtual ids for every process.
     let vid = (std::env::var("LINUXAPK_SINGLE_UID").as_deref() == Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
+    let flat = crate::flat::Flat::from_env(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {
         broker: BinderDriver::new(),
         us: SeccompUserspace {
@@ -640,6 +641,12 @@ pub fn serve(sock: RawFd, listener: RawFd) {
             v.serve(&req);
             continue;
         }
+        if let Some(f) = &flat
+            && crate::flat::is_flat_syscall(nr)
+        {
+            f.serve(&req);
+            continue;
+        }
         if !is_binder_syscall(nr, &req.data.args) {
             // Never wait for the C supervisor: if it is stuck (or behind),
             // binder must keep working, so the forwarded call fails instead.
@@ -654,6 +661,12 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         if nr == libc::SYS_openat
             && let Some(v) = &vid
             && v.proc_status(&req)
+        {
+            continue;
+        }
+        if nr == libc::SYS_openat
+            && let Some(f) = &flat
+            && f.openat(&req)
         {
             continue;
         }

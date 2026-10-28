@@ -6,7 +6,8 @@
 //!  * `set*id`/`setgroups`: the kernel's rules, applied to the virtual
 //!    credentials; the new ones are interned and stored in the process's soft
 //!    `RLIMIT_RTTIME` (see `table.rs`). Privilege is the caller's real effective
-//!    CAP_SETUID/CAP_SETGID, so capabilities dropped with capset stay dropped.
+//!    CAP_SETUID/CAP_SETGID, so capabilities dropped with capset stay dropped
+//!    (in Flatpak mode, which has no capabilities, virtual root's euid).
 //!  * `chown` family: unmapped ids would fail with EINVAL, so the call is
 //!    emulated: the file is resolved in the caller's root, a no-op
 //!    `fchownat(-1, -1)` keeps the kernel's checks (EROFS, ENOENT, ...), and
@@ -425,7 +426,7 @@ impl Vid {
             }
             _ => return Answer::Errno(libc::ENOSYS),
         };
-        match table::apply(&c, &op, caps(tid)) {
+        match table::apply(&c, &op, caps(tid, &c)) {
             Err(e) => Answer::Errno(e),
             Ok((new, ret)) => {
                 if new != c
@@ -636,7 +637,7 @@ impl Vid {
                     uc.gid = AID_NOBODY;
                 }
             }
-            uc.pid = ns_pid(peer).unwrap_or(0);
+            uc.pid = ns_pid(peer).map_or(0, crate::flat::init_as_pid1);
         }
         let n = (len as usize).min(size_of::<libc::ucred>());
         let bytes: [u8; 12] = unsafe { std::mem::transmute(uc) };
@@ -700,8 +701,18 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
     if r == 0 { Ok(()) } else { Err(errno()) }
 }
 
-/// The thread's real effective CAP_SETUID/CAP_SETGID.
-fn caps(tid: i32) -> table::Caps {
+/// The thread's real effective CAP_SETUID/CAP_SETGID. In Flatpak mode
+/// (`LINUXAPK_FLATPAK=1`) no process has capabilities, so virtual root has
+/// both.
+fn caps(tid: i32, c: &Creds) -> table::Caps {
+    static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *FLAT.get_or_init(|| std::env::var("LINUXAPK_FLATPAK").as_deref() == Ok("1")) && c.euid == 0
+    {
+        return table::Caps {
+            setgid: true,
+            setuid: true,
+        };
+    }
     let eff = status_field(tid, "CapEff:")
         .and_then(|v| u64::from_str_radix(&v, 16).ok())
         .unwrap_or(0);
@@ -783,7 +794,8 @@ fn resolve_how(
     // from the directory itself.
     let mut abs: Option<Vec<u8>> = None;
     if path[0] == b'/' {
-        abs = Some(path.to_vec());
+        // Flatpak mode: /data is a symlink to its host dir.
+        abs = Some(crate::flat::to_host(path).unwrap_or_else(|| path.to_vec()));
     } else {
         let link = if dirfd == AT_FDCWD {
             format!("/proc/{tid}/cwd")
@@ -859,7 +871,7 @@ fn recorded_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
 /// Paths with symlinks before the last component continue natively
 /// (RESOLVE_NO_SYMLINKS), so a lookup never wanders onto a FUSE mount.
 fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
-    let fd = match resolve_how(j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
+    let mut fd = match resolve_how(j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
         Ok(f) => f,
         Err(libc::ELOOP) | Err(libc::EXDEV) => return Answer::Continue,
         Err(e) => return Answer::Errno(e),
@@ -869,12 +881,23 @@ fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     if r != 0 {
         return Answer::Errno(errno());
     }
+    // Flatpak mode: a bind mount inside /data is a symlink to another /data
+    // dir (/data/user/0 -> /data/data); show what it stands for.
+    if st.st_mode & libc::S_IFMT == libc::S_IFLNK
+        && let Some(target) = crate::flat::bind_target(&fd)
+        && let Ok(t) = resolve_how(j.tid, AT_FDCWD, &target, true, RESOLVE_NO_SYMLINKS)
+        && unsafe { libc::fstatat(t.as_raw_fd(), c"".as_ptr(), &mut st, AT_EMPTY_PATH as i32) } == 0
+    {
+        fd = t;
+    }
     let fmt = st.st_mode & libc::S_IFMT;
     if (fmt == libc::S_IFREG || fmt == libc::S_IFDIR)
         && let Some((u, g)) = recorded_owner(&fd)
     {
         st.st_uid = u;
         st.st_gid = g;
+    } else {
+        crate::flat::root_ids(&mut st);
     }
     let b = unsafe {
         std::slice::from_raw_parts(
@@ -1037,11 +1060,13 @@ fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     let new = table::chown_owner(cur, uid, gid);
     if new == (0, 0) {
         if n > 0 {
-            unsafe { libc::removexattr(path.as_ptr(), name.as_ptr()) };
+            owner_writable(&path, || unsafe {
+                libc::removexattr(path.as_ptr(), name.as_ptr())
+            });
         }
     } else if new != cur {
         let v = table::format_owner(new.0, new.1);
-        unsafe {
+        owner_writable(&path, || unsafe {
             libc::setxattr(
                 path.as_ptr(),
                 name.as_ptr(),
@@ -1049,9 +1074,29 @@ fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
                 v.len(),
                 0,
             )
-        };
+        });
     }
     Answer::Val(0)
+}
+
+/// Run `f` (an xattr write on `path`); if it fails with EACCES, retry with
+/// the owner's write bit set for the call. Without a user namespace (Flatpak
+/// mode) Android's root has no CAP_DAC_OVERRIDE, and a user.* xattr needs
+/// write permission, which a 0440 file such as an eBPF pin doesn't give.
+fn owner_writable(path: &CString, f: impl Fn() -> libc::c_int) {
+    if f() == 0 || errno() != libc::EACCES {
+        return;
+    }
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::stat(path.as_ptr(), &mut st) } != 0 || st.st_uid != unsafe { libc::getuid() }
+    {
+        return;
+    }
+    let mode = st.st_mode & 0o7777;
+    if unsafe { libc::chmod(path.as_ptr(), mode | 0o200) } == 0 {
+        f();
+        unsafe { libc::chmod(path.as_ptr(), mode) };
+    }
 }
 
 #[cfg(test)]
