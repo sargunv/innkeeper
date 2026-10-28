@@ -3,11 +3,18 @@ members = [
   "host/bridge",
   "host/cli",
   "host/core",
+  "host/launcher",
   "host/manager",
   "supervisor/broker",
   "tests/compat",
 ]
 # A plain `cargo build` builds only what runs on the desktop: the broker is a
 # bionic binary (`mise run build:supervisor`) and compat is a test harness.
-default-members = ["host/bridge", "host/cli", "host/core", "host/manager"]
+default-members = [
+  "host/bridge",
+  "host/cli",
+  "host/core",
+  "host/launcher",
+  "host/manager",
+]
 resolver = "3"

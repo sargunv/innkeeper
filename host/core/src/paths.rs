@@ -1,11 +1,11 @@
 //! Where things are: the install prefix this program runs from, the session
-//! instance it works with (the only reader and writer of `LINUXAPK_INSTANCE`),
-//! and the XDG base directories.
+//! instance it works with (parsed by the launcher library, the only reader of
+//! `LINUXAPK_INSTANCE`), and the XDG base directories.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 /// The session launcher, relative to the prefix.
 const LAUNCHER: &str = "libexec/linuxapk/linuxapk-session";
@@ -45,28 +45,18 @@ impl Prefix {
     }
 }
 
-/// `LINUXAPK_INSTANCE` if it is a valid instance name (as the launcher checks
-/// it), else an error. Empty for the main session.
-pub fn instance() -> Result<String> {
-    let inst = env::var("LINUXAPK_INSTANCE").unwrap_or_default();
-    if !inst
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        bail!("bad LINUXAPK_INSTANCE");
-    }
-    Ok(inst)
-}
+/// `LINUXAPK_INSTANCE` if it is a valid instance name, else an error. Empty
+/// for the main session.
+pub use linuxapk_session::paths::instance;
+
+/// An XDG base directory: `$var` if it is absolute, else `default` under
+/// `$HOME`.
+pub use linuxapk_session::paths::xdg_home;
 
 /// `name`, suffixed with `-<instance>` for a named instance: the session's
 /// systemd unit and its XDG directories are named this way.
 fn per_instance(name: &str) -> Result<String> {
-    let inst = instance()?;
-    Ok(if inst.is_empty() {
-        name.into()
-    } else {
-        format!("{name}-{inst}")
-    })
+    Ok(linuxapk_session::paths::per_instance(name, &instance()?))
 }
 
 /// The argv that runs `program` against session `instance`: prefixed with
@@ -124,17 +114,6 @@ pub fn state_dir() -> Result<PathBuf> {
 /// `$XDG_STATE_HOME/linuxapk/notices` (shared by every instance).
 pub fn notices_dir() -> PathBuf {
     xdg_home("XDG_STATE_HOME", ".local/state").join("linuxapk/notices")
-}
-
-/// An XDG base directory: `$var` if it is absolute, else `default` under
-/// `$HOME`.
-pub fn xdg_home(var: &str, default: &str) -> PathBuf {
-    env::var_os(var)
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            Path::new(&env::var_os("HOME").unwrap_or_else(|| "/".into())).join(default)
-        })
 }
 
 #[cfg(test)]

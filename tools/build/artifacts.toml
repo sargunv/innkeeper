@@ -21,8 +21,8 @@ artifacts = [
 
 [module.launcher]
 task = "build:host"
-runs = "on the desktop, then as pid 1 of the session's outer namespaces"
-artifacts = ["libexec/linuxapk/linuxapk-session", "libexec/linuxapk/ns-init.sh"]
+runs = "on the desktop (glibc), then as pid 1 of the session's outer namespaces; in Flatpak, in the app's sandbox"
+artifacts = ["libexec/linuxapk/linuxapk-session"]
 
 [module.supervisor]
 task = "build:supervisor"

@@ -8,6 +8,7 @@ description = "Linux.apk host library: install, run and manage Android apps and 
 [dependencies]
 anyhow = "1.0.104"
 base64 = "0.23.1"
+linuxapk-session = { path = "../launcher" }
 zip = { version = "9.1.2", default-features = false, features = [
   "deflate-flate2-zlib-rs",
 ] }

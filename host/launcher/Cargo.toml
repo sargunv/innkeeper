@@ -1,0 +1,22 @@
+[package]
+name = "linuxapk-session"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Linux.apk session launcher: boots the Android image in rootless namespaces, or inside the Flatpak sandbox"
+
+[lib]
+name = "linuxapk_session"
+path = "src/lib.rs"
+
+[[bin]]
+name = "linuxapk-session"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+flate2 = "1.1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
+toml = "1"

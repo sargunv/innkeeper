@@ -1193,6 +1193,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "linuxapk-session",
  "zip",
 ]
 
@@ -1205,6 +1206,18 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "linuxapk-core",
+]
+
+[[package]]
+name = "linuxapk-session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "libc",
+ "serde",
+ "sha2",
+ "toml",
 ]
 
 [[package]]

@@ -463,22 +463,16 @@ mod tests {
 
     #[test]
     fn single_uid_notice_shows_once() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = crate::test_dir("single-uid-notice");
-        let launcher = dir.join("linuxapk-session");
-        fs::write(
-            &launcher,
-            "#!/bin/sh\n[ \"$1\" = status ] && printf 'running: host pid 1\\nuid-mode=single\\n'\n",
-        )
-        .unwrap();
-        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
-        let s = Session::at(launcher);
-        assert_eq!(s.pid(), Some(1));
         let notices = dir.join("notices");
-        assert_eq!(notice_once(&notices, s.uid_mode()), Some(SINGLE_UID_NOTICE));
-        assert_eq!(notice_once(&notices, s.uid_mode()), None);
+        assert_eq!(
+            notice_once(&notices, Some(UidMode::Single)),
+            Some(SINGLE_UID_NOTICE)
+        );
+        assert_eq!(notice_once(&notices, Some(UidMode::Single)), None);
         assert!(notices.join("single-uid").is_file());
         assert_eq!(notice_once(&dir.join("other"), Some(UidMode::Subuid)), None);
+        assert_eq!(notice_once(&dir.join("none"), None), None);
         fs::remove_dir_all(&dir).unwrap();
     }
 

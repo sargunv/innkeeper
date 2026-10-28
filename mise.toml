@@ -30,7 +30,7 @@ depends = ["build:*"]
 run = "tools/build/stage.sh"
 
 [tasks."build:host"]
-description = "linuxapk, linuxapk-manager, linuxapk-bridge, the launcher, the manager's desktop data"
+description = "linuxapk, linuxapk-manager, linuxapk-bridge, linuxapk-session, the manager's desktop data"
 run = "tools/build/host.sh"
 
 # The NDK superbuild (CMakeLists.txt) that the modules below install from.
@@ -109,7 +109,7 @@ run = "rm -rf out/build out/stage out/cargo out/test/probes"
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit tests: Rust, the broker fuzzer, the system app's protocol and wire, the HAL host tests, supervisor, launcher and image scripts"
+description = "Unit tests: Rust, the broker fuzzer, the system app's protocol and wire, the HAL host tests, supervisor and image scripts"
 run = """
 set -euo pipefail
 cargo test -q --workspace
@@ -118,7 +118,7 @@ cargo run -q --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 20000 1
 cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
 ctest --preset host-tests
-for t in supervisor/tests/*.sh host/launcher/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
+for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
 """
 
 [tasks."test:bionic"]

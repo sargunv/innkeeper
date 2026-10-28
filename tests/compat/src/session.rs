@@ -7,12 +7,11 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use linuxapk_core::{launcher, paths, proc};
+use linuxapk_core::{launcher, paths};
 
 use crate::budget::Measured;
 
@@ -162,14 +161,7 @@ impl Session {
     /// to whichever cgroup read a file first, so it depends on what else has
     /// read the image.
     pub fn memory_without_cache(&self) -> Option<u64> {
-        let unit = paths::unit_name().ok()?;
-        let o = proc::run(
-            Command::new("systemctl").args(["--user", "show", "-P", "ControlGroup", &unit]),
-            Stdio::null(),
-            Duration::from_secs(10),
-        )
-        .ok()?;
-        let cg = Path::new("/sys/fs/cgroup").join(o.text().trim().trim_start_matches('/'));
+        let cg = self.cgroup()?;
         let current: u64 = fs::read_to_string(cg.join("memory.current"))
             .ok()?
             .trim()

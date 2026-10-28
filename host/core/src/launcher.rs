@@ -1,7 +1,9 @@
 //! Driving the Android session through `linuxapk-session` (the prefix's, or
-//! any launcher for test harnesses). Commands run inside the session as argv
-//! through `linuxapk-session exec`, which ends in `exec "$@"`: no string is
-//! ever interpreted by a shell, host or Android.
+//! any launcher for test harnesses). Its state (running, uid mode, memory,
+//! the image) comes from the launcher's library; starting, stopping and
+//! commands go through the launcher itself. Commands run inside the session
+//! as argv through `linuxapk-session exec`, which hands them to the exec
+//! relay as argv: no string is ever interpreted by a shell, host or Android.
 
 use std::fs::File;
 use std::io;
@@ -11,8 +13,9 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use linuxapk_session::Paths;
 
-use crate::paths::{self, Prefix};
+use crate::paths::Prefix;
 use crate::proc;
 
 pub struct Session {
@@ -27,16 +30,10 @@ fn clean_stderr(s: &str) -> String {
         .join("\n")
 }
 
-/// How Android's uids map to host ids (`uid-mode=` in the launcher's
-/// status).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UidMode {
-    /// Each Android uid is one of the user's subordinate ids: apps are
-    /// isolated from each other as on Android.
-    Subuid,
-    /// Every Android uid is the user: no isolation between apps.
-    Single,
-}
+/// How Android's uids map to host ids: each Android uid one of the user's
+/// subordinate ids (apps isolated from each other as on Android), or every
+/// Android uid the user (no isolation between apps).
+pub use linuxapk_session::UidMode;
 
 /// What [`Session::status`] reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -46,24 +43,6 @@ pub struct Status {
     /// The session unit's memory use (cgroup `memory.current`), in bytes.
     pub memory: Option<u64>,
     pub uid_mode: Option<UidMode>,
-}
-
-/// The value of the `key=value` or `key: value` line of launcher output.
-fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-    text.lines().find_map(|l| {
-        l.strip_prefix(key)
-            .and_then(|v| v.strip_prefix('=').or_else(|| v.strip_prefix(": ")))
-    })
-}
-
-fn unit_memory(unit: &str) -> Option<u64> {
-    let o = proc::run(
-        Command::new("systemctl").args(["--user", "show", "-P", "MemoryCurrent", unit]),
-        Stdio::null(),
-        Duration::from_secs(10),
-    )
-    .ok()?;
-    o.text().trim().parse().ok()
 }
 
 impl Session {
@@ -77,32 +56,35 @@ impl Session {
         Self { launcher }
     }
 
-    /// The launcher's `status` output while the session runs.
-    fn launcher_status(&self) -> Option<String> {
-        let o = proc::run(
-            Command::new(&self.launcher).arg("status"),
-            Stdio::null(),
-            Duration::from_secs(30),
-        )
-        .ok()?;
-        o.ok().then(|| o.text())
+    /// The launcher library's view of this launcher's session.
+    fn paths(&self) -> Option<Paths> {
+        let prefix = self.launcher.parent()?.parent()?.parent()?;
+        Paths::new(prefix).ok()
+    }
+
+    fn state(&self) -> Option<linuxapk_session::Status> {
+        Some(linuxapk_session::status(&self.paths()?))
     }
 
     pub fn running(&self) -> bool {
-        self.launcher_status().is_some()
+        self.pid().is_some()
     }
 
-    /// Host pid of the session's Android init (it changes when the session
+    /// Pid of the session's Android init (it changes when the session
     /// restarts).
     pub fn pid(&self) -> Option<u32> {
-        field(&self.launcher_status()?, "running")?
-            .strip_prefix("host pid ")?
-            .parse()
-            .ok()
+        self.state()?.pid.map(|p| p as u32)
     }
 
+    /// The running session's uid mode.
     pub fn uid_mode(&self) -> Option<UidMode> {
-        uid_mode(&self.launcher_status()?)
+        let s = self.state()?;
+        s.pid.map(|_| s.uid_mode)
+    }
+
+    /// The session's cgroup dir (host mode), for memory accounting.
+    pub fn cgroup(&self) -> Option<PathBuf> {
+        linuxapk_session::cgroup(&self.paths()?)
     }
 
     /// Runs argv inside the session as root; returns (success, stdout, stderr).
@@ -177,14 +159,18 @@ impl Session {
     /// Running state, boot state, memory use and uid mode, for status
     /// displays.
     pub fn status(&self) -> Status {
-        let Some(out) = self.launcher_status() else {
+        let Some(paths) = self.paths() else {
             return Status::default();
         };
+        let s = linuxapk_session::status(&paths);
+        if s.pid.is_none() {
+            return Status::default();
+        }
         Status {
             running: true,
             booted: self.booted(),
-            memory: paths::unit_name().ok().and_then(|u| unit_memory(&u)),
-            uid_mode: uid_mode(&out),
+            memory: linuxapk_session::memory(&paths),
+            uid_mode: Some(s.uid_mode),
         }
     }
 
@@ -195,20 +181,9 @@ impl Session {
     /// Whether the image is fetched, extracted and flattened (so starting
     /// doesn't download it first).
     pub fn image_ready(&self) -> bool {
-        let Ok(o) = proc::run(
-            Command::new(&self.launcher).arg("image"),
-            Stdio::null(),
-            Duration::from_secs(30),
-        ) else {
-            return false;
-        };
-        let text = o.text();
-        let (Some(img), Some(apex)) = (field(&text, "img"), field(&text, "apex")) else {
-            return false;
-        };
-        o.ok()
-            && Path::new(img).join("system/system").is_dir()
-            && Path::new(apex).join("apex-info-list.xml").is_file()
+        self.paths().and_then(|p| p.image().ok()).is_some_and(|i| {
+            i.img.join("system/system").is_dir() && i.apexdir.join("apex-info-list.xml").is_file()
+        })
     }
 
     /// Fetches and unpacks the image (about 1.2 GB to download). Its
@@ -285,28 +260,3 @@ impl Session {
 
 /// The status line for a first start's image download.
 pub const PREPARING: &str = "preparing Android (first run: downloading about 1.2 GB)";
-
-fn uid_mode(status: &str) -> Option<UidMode> {
-    match field(status, "uid-mode")? {
-        "subuid" => Some(UidMode::Subuid),
-        "single" => Some(UidMode::Single),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_status() {
-        let out = "running: host pid 4242\nuid-mode=single\n";
-        assert_eq!(field(out, "running"), Some("host pid 4242"));
-        assert_eq!(uid_mode(out), Some(UidMode::Single));
-        assert_eq!(
-            uid_mode("running: host pid 1\nuid-mode=subuid"),
-            Some(UidMode::Subuid)
-        );
-        assert_eq!(uid_mode("running: host pid 1\n"), None);
-    }
-}

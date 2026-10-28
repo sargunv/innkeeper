@@ -2,9 +2,9 @@
 # build:host: what runs on the desktop. Two install trees:
 #   host      bin/{linuxapk,linuxapk-manager}, libexec/linuxapk/linuxapk-bridge,
 #             the manager's desktop entry, metainfo, icon and MIME types
-#   launcher  libexec/linuxapk/{linuxapk-session,ns-init.sh}
+#   launcher  libexec/linuxapk/linuxapk-session
 set -euo pipefail
-cargo build -q --release -p linuxapk -p linuxapk-manager -p linuxapk-bridge
+cargo build -q --release -p linuxapk -p linuxapk-manager -p linuxapk-bridge -p linuxapk-session
 bin=out/cargo/release
 data=host/manager/data
 
@@ -19,4 +19,4 @@ install -D -m 644 -t "$h/share/mime/packages" "$data/dev.linuxapk.Manager.xml"
 
 l=out/build/launcher/install
 rm -rf "$l"
-install -D -m 755 -t "$l/libexec/linuxapk" host/launcher/linuxapk-session host/launcher/ns-init.sh
+install -D -m 755 -s -t "$l/libexec/linuxapk" "$bin/linuxapk-session"
