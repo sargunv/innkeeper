@@ -1,0 +1,349 @@
+//! The host state service (id 8): the desktop's battery, power saver,
+//! network and location for Android (messages: [`proto`]). Each kind of
+//! state is watched by one bridge-wide thread, started the first time a
+//! client asks for it, and sent to every connection that subscribed:
+//!
+//! - `power`: UPower's `DisplayDevice` (the Health HAL's battery) and the
+//!   power saver (the PowerProfileMonitor portal, else power-profiles-daemon)
+//! - `network`: the NetworkMonitor portal, else NetworkManager
+//! - `location`: one shared Location portal session (GeoClue only when
+//!   there is no portal and the bridge isn't sandboxed)
+//!
+//! Battery, power saver and network are read-only state the desktop shows
+//! any app. Location asks the user (the portal's dialog), so test sessions
+//! that talk to the real session bus get none (`allow_location`).
+
+pub mod location;
+pub mod network;
+pub mod power;
+pub mod proto;
+
+use std::os::fd::OwnedFd;
+use std::sync::{Arc, Mutex, Once, OnceLock};
+
+use crate::ipc::Subscribers;
+use crate::ipc::server::{Events, Peer, Reply, Service};
+use crate::ipc::wire::errno::*;
+use proto::{Battery, Network, Request, ev, feature};
+
+/// One kind of state: its last value and who wants it. Identical updates
+/// (the portal and NetworkManager both repeat themselves) are dropped.
+pub struct Topic<T> {
+    what: &'static str,
+    event: u16,
+    state: Mutex<Option<T>>,
+    subs: Subscribers,
+    started: Once,
+}
+
+impl<T: Clone + PartialEq + std::fmt::Debug> Topic<T> {
+    fn new(what: &'static str, event: u16) -> Topic<T> {
+        Topic {
+            what,
+            event,
+            state: Mutex::new(None),
+            subs: Subscribers::default(),
+            started: Once::new(),
+        }
+    }
+
+    /// Subscribes `e` and sends it the current value, if known; `start`
+    /// runs once per bridge, for the first subscriber.
+    fn subscribe(&self, e: Events, encode: fn(&T) -> Vec<u8>, start: impl FnOnce()) -> u64 {
+        self.started.call_once(start);
+        let k = self.subs.add(e.clone());
+        if let Some(v) = self.state.lock().unwrap().as_ref() {
+            let _ = e.try_send(self.event, &encode(v), &[]);
+        }
+        k
+    }
+
+    pub fn set(&self, v: T, encode: fn(&T) -> Vec<u8>) {
+        let body = {
+            let mut st = self.state.lock().unwrap();
+            if st.as_ref() == Some(&v) {
+                return;
+            }
+            crate::info!("hoststate: {}: {v:?}", self.what);
+            let body = encode(&v);
+            *st = Some(v);
+            body
+        };
+        self.subs.broadcast(self.event, &body, &[], None);
+    }
+
+    pub fn get(&self) -> Option<T> {
+        self.state.lock().unwrap().clone()
+    }
+}
+
+/// Bridge-wide state, created once in `main.rs`.
+pub struct HostState {
+    allow_location: bool,
+    system: OnceLock<Option<zbus::blocking::Connection>>,
+    session: OnceLock<Option<zbus::blocking::Connection>>,
+    pub battery: Topic<Battery>,
+    pub saver: Topic<bool>,
+    pub network: Topic<Network>,
+    location: OnceLock<Arc<location::Hub>>,
+    next_client: std::sync::atomic::AtomicU64,
+}
+
+fn encode_saver(on: &bool) -> Vec<u8> {
+    proto::encode_u8(*on as u8)
+}
+
+impl HostState {
+    /// `allow_location`: whether the Location portal may be asked (not in a
+    /// test session on the real desktop).
+    pub fn new(allow_location: bool) -> Arc<HostState> {
+        Arc::new(HostState {
+            allow_location,
+            system: OnceLock::new(),
+            session: OnceLock::new(),
+            battery: Topic::new("battery", ev::BATTERY),
+            saver: Topic::new("power saver", ev::POWER_SAVER),
+            network: Topic::new("network", ev::NETWORK),
+            location: OnceLock::new(),
+            next_client: Default::default(),
+        })
+    }
+
+    fn system(&self) -> Option<zbus::blocking::Connection> {
+        self.system
+            .get_or_init(|| {
+                zbus::blocking::Connection::system()
+                    .map_err(|e| crate::warn!("hoststate: no system bus: {e}"))
+                    .ok()
+            })
+            .clone()
+    }
+
+    fn session(&self) -> Option<zbus::blocking::Connection> {
+        self.session
+            .get_or_init(|| {
+                zbus::blocking::Connection::session()
+                    .map_err(|e| crate::warn!("hoststate: no session bus: {e}"))
+                    .ok()
+            })
+            .clone()
+    }
+
+    fn location(&self) -> &Arc<location::Hub> {
+        self.location
+            .get_or_init(|| location::Hub::new(self.session(), self.system()))
+    }
+}
+
+/// Spawns a named watcher thread.
+fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
+    if let Err(e) = std::thread::Builder::new().name(name.into()).spawn(f) {
+        crate::warn!("spawn {name}: {e}");
+    }
+}
+
+pub struct HostStateService {
+    shared: Arc<HostState>,
+    events: Events,
+    label: String,
+    client: u64,
+    subs: Vec<(&'static str, u64)>,
+    location: bool,
+}
+
+impl HostStateService {
+    pub fn new(shared: Arc<HostState>, peer: &Peer, events: Events) -> HostStateService {
+        let client = shared
+            .next_client
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        HostStateService {
+            shared,
+            events,
+            label: peer.label.clone(),
+            client,
+            subs: Vec::new(),
+            location: false,
+        }
+    }
+
+    fn start(&mut self, want: u32) -> Reply {
+        let s = self.shared.clone();
+        let mut have = 0;
+        let has = |subs: &[(&str, u64)], w: &str| subs.iter().any(|(k, _)| *k == w);
+        if want & feature::BATTERY != 0 && !has(&self.subs, "battery") {
+            let st = s.clone();
+            let k = s
+                .battery
+                .subscribe(self.events.clone(), Battery::encode, || {
+                    spawn("hoststate-battery", move || {
+                        power::watch_battery(st.system(), &st.battery)
+                    })
+                });
+            self.subs.push(("battery", k));
+        }
+        if want & feature::POWER_SAVER != 0 && !has(&self.subs, "saver") {
+            let st = s.clone();
+            let k = s.saver.subscribe(self.events.clone(), encode_saver, || {
+                spawn("hoststate-saver", move || {
+                    power::watch_saver(st.session(), st.system(), &st.saver, encode_saver)
+                })
+            });
+            self.subs.push(("saver", k));
+        }
+        if want & feature::NETWORK != 0 && !has(&self.subs, "network") {
+            let st = s.clone();
+            let k = s
+                .network
+                .subscribe(self.events.clone(), Network::encode, || {
+                    spawn("hoststate-network", move || {
+                        network::watch(st.session(), st.system(), &st.network)
+                    })
+                });
+            self.subs.push(("network", k));
+        }
+        have |= feature::BATTERY | feature::POWER_SAVER | feature::NETWORK;
+        if self.shared.allow_location {
+            have |= feature::LOCATION;
+        }
+        crate::info!(
+            "hoststate: {}: started (wants {want:#x}, has {have:#x})",
+            self.label
+        );
+        let mut w = crate::ipc::wire::Writer::default();
+        w.u32(have & want);
+        Reply::with_body(w.into_vec())
+    }
+}
+
+impl Service for HostStateService {
+    fn handle(&mut self, t: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply {
+        let req = match proto::decode(t, body) {
+            Ok(r) => r,
+            Err(e) => return Reply::err(e.status()),
+        };
+        if !fds.is_empty() {
+            return Reply::err(-EPROTO);
+        }
+        match req {
+            Request::Start { features } => self.start(features),
+            Request::LocationStart { precise } => {
+                if !self.shared.allow_location {
+                    return Reply::err(-ENOSYS);
+                }
+                crate::info!(
+                    "hoststate: {}: location start (precise {precise})",
+                    self.label
+                );
+                self.location = true;
+                self.shared
+                    .location()
+                    .join(self.client, self.events.clone(), precise);
+                Reply::ok()
+            }
+            Request::LocationStop => {
+                if self.location {
+                    crate::info!("hoststate: {}: location stop", self.label);
+                    self.location = false;
+                    self.shared.location().leave(self.client);
+                }
+                Reply::ok()
+            }
+        }
+    }
+}
+
+impl Drop for HostStateService {
+    fn drop(&mut self) {
+        for (what, k) in &self.subs {
+            match *what {
+                "battery" => self.shared.battery.subs.remove(*k),
+                "saver" => self.shared.saver.subs.remove(*k),
+                _ => self.shared.network.subs.remove(*k),
+            }
+        }
+        if self.location {
+            self.shared.location().leave(self.client);
+        }
+        crate::info!("hoststate: {}: closed", self.label);
+    }
+}
+
+/// Reads one property dictionary (`org.freedesktop.DBus.Properties.GetAll`).
+fn get_all(
+    conn: &zbus::blocking::Connection,
+    dest: &str,
+    path: &str,
+    iface: &str,
+) -> zbus::Result<std::collections::HashMap<String, zbus::zvariant::OwnedValue>> {
+    let p = zbus::blocking::fdo::PropertiesProxy::builder(conn)
+        .destination(dest.to_owned())?
+        .path(path.to_owned())?
+        .build()?;
+    let iface = zbus::names::InterfaceName::try_from(iface.to_owned())?;
+    Ok(p.get_all(iface)?)
+}
+
+/// Signals with this interface and member on `path` (any sender: services
+/// restart under new unique names).
+fn signals(
+    conn: &zbus::blocking::Connection,
+    path: &str,
+    iface: &str,
+    member: &str,
+) -> zbus::Result<zbus::blocking::MessageIterator> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .path(path.to_owned())?
+        .interface(iface.to_owned())?
+        .member(member.to_owned())?
+        .build();
+    zbus::blocking::MessageIterator::for_match_rule(rule, conn, Some(64))
+}
+
+/// Whether a D-Bus error means the service or interface simply isn't there
+/// (rather than refusing or failing).
+fn is_missing(e: &zbus::Error) -> bool {
+    let name = match e {
+        zbus::Error::MethodError(name, _, _) => name.as_str().to_owned(),
+        zbus::Error::FDO(f) => match f.as_ref() {
+            zbus::fdo::Error::ServiceUnknown(_) => "org.freedesktop.DBus.Error.ServiceUnknown",
+            zbus::fdo::Error::NameHasNoOwner(_) => "org.freedesktop.DBus.Error.NameHasNoOwner",
+            zbus::fdo::Error::UnknownInterface(_) => "org.freedesktop.DBus.Error.UnknownInterface",
+            zbus::fdo::Error::UnknownMethod(_) => "org.freedesktop.DBus.Error.UnknownMethod",
+            zbus::fdo::Error::UnknownObject(_) => "org.freedesktop.DBus.Error.UnknownObject",
+            zbus::fdo::Error::UnknownProperty(_) => "org.freedesktop.DBus.Error.UnknownProperty",
+            zbus::fdo::Error::InvalidArgs(_) => "org.freedesktop.DBus.Error.InvalidArgs",
+            _ => return false,
+        }
+        .to_owned(),
+        _ => return false,
+    };
+    matches!(
+        name.as_str(),
+        "org.freedesktop.DBus.Error.ServiceUnknown"
+            | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            | "org.freedesktop.DBus.Error.UnknownInterface"
+            | "org.freedesktop.DBus.Error.UnknownMethod"
+            | "org.freedesktop.DBus.Error.UnknownObject"
+            | "org.freedesktop.DBus.Error.UnknownProperty"
+            | "org.freedesktop.DBus.Error.InvalidArgs"
+            | "org.freedesktop.DBus.Error.Spawn.ServiceNotFound"
+    )
+}
+
+/// Like [`signals`], for every object under `path`.
+fn signals_under(
+    conn: &zbus::blocking::Connection,
+    path: &str,
+    iface: &str,
+    member: &str,
+) -> zbus::Result<zbus::blocking::MessageIterator> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .path_namespace(path.to_owned())?
+        .interface(iface.to_owned())?
+        .member(member.to_owned())?
+        .build();
+    zbus::blocking::MessageIterator::for_match_rule(rule, conn, Some(64))
+}

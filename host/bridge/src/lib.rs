@@ -13,6 +13,8 @@
 //!   the Linux.apk System app
 //! - `a11y` (id 7): Android apps' accessibility trees on AT-SPI, for the
 //!   Linux.apk System app
+//! - `hoststate` (id 8): battery, power saver, network and location, for the
+//!   Health HAL and the Linux.apk System app
 //! - `log`: stderr logging
 
 pub mod a11y;
@@ -20,6 +22,7 @@ pub mod apps;
 pub mod audio;
 pub mod display;
 pub mod documents;
+pub mod hoststate;
 pub mod input;
 pub mod ipc;
 pub mod log;

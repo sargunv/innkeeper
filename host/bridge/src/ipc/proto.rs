@@ -36,6 +36,10 @@ pub mod service {
     /// Android apps' accessibility trees on AT-SPI, from the system app
     /// (`a11y::proto`, types 0x0700..=0x07ff, events 0x4700..=0x47ff).
     pub const A11Y: u32 = 7;
+    /// The host's battery, power saver, network and location, for the
+    /// Health HAL and the system app (`hoststate::proto`, types
+    /// 0x0800..=0x08ff, events 0x4800..=0x48ff).
+    pub const HOSTSTATE: u32 = 8;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -133,6 +133,16 @@ fn main() -> Result<()> {
             events,
         )))
     });
+    // The host's battery, power saver, network and location. Location asks
+    // the user, so a test session on the real desktop gets none.
+    let host_state = linuxapk_bridge::hoststate::HostState::new(policy.presence);
+    services.register(service::HOSTSTATE, "hoststate", move |peer, events| {
+        Ok(Box::new(linuxapk_bridge::hoststate::HostStateService::new(
+            host_state.clone(),
+            peer,
+            events,
+        )))
+    });
     // Host files the user picks for Android.
     let store = linuxapk_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
@@ -166,6 +176,7 @@ fn main() -> Result<()> {
             service::APPS,
             service::INPUT,
             service::A11Y,
+            service::HOSTSTATE,
         ] {
             service_uids.push((id, check.clone()));
         }
