@@ -6,39 +6,39 @@ Last run: 2026-10-28, image `generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:
 
 | App | Version | Framework | Native code | Result | Start | Memory | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| OpenCalc | 3.2.0 | Android Views | none | Works | 104 ms | 33 MB |  |
+| OpenCalc | 3.2.0 | Android Views | none | Works | 111 ms | 35 MB |  |
 | Open Sudoku | 4.11.3 | Android Views | arm64-v8a only | Doesn't work |  |  | install: INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113 |
-| SudoQ | 3.3.3 | Android Views | none | Works | 2687 ms | 30 MB |  |
-| Unit Converter Ultimate | 5.7.3 | Android Views | none | Works | 100 ms | 42 MB |  |
-| Simple Solitaire Collection | 3.13 | Android Views | none | Works | 158 ms | 56 MB |  |
-| Wikipedia | r/50612-r-2026-10-19 | Views + Compose, MapLibre | x86_64 | Works | 190 ms | 123 MB |  |
-| AntennaPod - Podcast Player | 3.12.3 | Android Views | x86_64 | Works | 201 ms | 59 MB |  |
-| Thunderbird: Free Your Inbox | 24.0 | Jetpack Compose | x86_64 | Works | 232 ms | 44 MB |  |
-| Aurora Store | 4.8.4 | Jetpack Compose | x86_64 | Works | 170 ms | 44 MB |  |
-| F-Droid | 2.0.2 | Jetpack Compose | x86_64 | Works | 258 ms | 104 MB |  |
-| Read You | 0.16.2 | Jetpack Compose | x86_64 | Works | 170 ms | 71 MB |  |
-| Tomato | 2.0.1 | Jetpack Compose | x86_64 | Works | 265 ms | 60 MB |  |
-| Mindustry | 8-fdroid-160.7 | Arc (libGDX-like) | x86_64 | Works | 238 ms | 123 MB |  |
-| Shattered Pixel Dungeon | 4.0.2 | libGDX | x86_64 | Works | 146 ms | 52 MB |  |
-| Unciv | 4.22.13 | libGDX | x86_64 | Works | 215 ms | 66 MB |  |
-| OpenTTD | 14.1.rev128 | SDL 1.2 (C++) | x86_64 | Works | 97 ms | 233 MB |  |
-| StreetComplete | 63.4 | Compose + MapLibre Native (GLES) | x86_64 | Works | 240 ms | 153 MB |  |
-| Saber | 1.36.3 | Flutter | x86_64 | Works | 187 ms | 106 MB |  |
-| Ente Auth - 2FA Authenticator | 4.4.26 | Flutter | x86_64 | Works | 365 ms | 106 MB |  |
-| Joplin | 3.7.8 | React Native (Hermes) | x86_64 | Works | 105 ms | 234 MB |  |
-| Logseq | 0.10.15 | Capacitor (WebView) | x86_64 | Works | 785 ms | 95 MB |  |
-| Pomodorot | 0.13.3 | Godot 4 | x86_64 | Works | 121 ms | 179 MB |  |
-| Droid-ify | 0.7.8 | Jetpack Compose | x86_64 | Works | 171 ms | 62 MB |  |
-| VLC | 3.7.2 | Android Views + libVLC | x86_64 | Works | 144 ms | 76 MB |  |
-| NewPipe | 0.29.1 | Android Views | x86_64 | Works | 173 ms | 151 MB |  |
-| Fennec F-Droid | 158.0.2 | GeckoView + Compose | x86_64 | Works | 165 ms | 299 MB |  |
-| FlorisBoard | 0.5.2 | Jetpack Compose (IME) | x86_64 | Works | 92 ms | 41 MB |  |
-| Rethink: DNS + Firewall + VPN | v0.5.8 | Android Views + Go | x86_64 | Works | 173 ms | 99 MB |  |
-| Jellyfin for Android TV | 0.19.10 | Leanback / Compose for TV | x86_64 | Works | 115 ms | 78 MB |  |
-| Mastodon | 2.13.4 | Android Views | none | Works | 127 ms | 45 MB |  |
-| Floating Mute | 4.0.1 | Android Views (overlay) | none | Works | 162 ms | 32 MB |  |
+| SudoQ | 3.3.3 | Android Views | none | Works | 2683 ms | 29 MB |  |
+| Unit Converter Ultimate | 5.7.3 | Android Views | none | Works | 96 ms | 41 MB |  |
+| Simple Solitaire Collection | 3.13 | Android Views | none | Works | 131 ms | 56 MB |  |
+| Wikipedia | r/50612-r-2026-10-19 | Views + Compose, MapLibre | x86_64 | Works | 177 ms | 130 MB |  |
+| AntennaPod - Podcast Player | 3.12.3 | Android Views | x86_64 | Works | 292 ms | 59 MB |  |
+| Thunderbird: Free Your Inbox | 24.0 | Jetpack Compose | x86_64 | Works | 231 ms | 44 MB |  |
+| Aurora Store | 4.8.4 | Jetpack Compose | x86_64 | Works | 174 ms | 54 MB |  |
+| F-Droid | 2.0.2 | Jetpack Compose | x86_64 | Works | 268 ms | 68 MB |  |
+| Read You | 0.16.2 | Jetpack Compose | x86_64 | Works | 168 ms | 71 MB |  |
+| Tomato | 2.0.1 | Jetpack Compose | x86_64 | Works | 279 ms | 60 MB |  |
+| Mindustry | 8-fdroid-160.7 | Arc (libGDX-like) | x86_64 | Works | 258 ms | 116 MB |  |
+| Shattered Pixel Dungeon | 4.0.2 | libGDX | x86_64 | Works | 135 ms | 53 MB |  |
+| Unciv | 4.22.13 | libGDX | x86_64 | Works | 240 ms | 66 MB |  |
+| OpenTTD | 14.1.rev128 | SDL 1.2 (C++) | x86_64 | Works | 95 ms | 233 MB |  |
+| StreetComplete | 63.4 | Compose + MapLibre Native (GLES) | x86_64 | Works | 227 ms | 153 MB |  |
+| Saber | 1.36.3 | Flutter | x86_64 | Works | 209 ms | 105 MB |  |
+| Ente Auth - 2FA Authenticator | 4.4.26 | Flutter | x86_64 | Works | 404 ms | 106 MB |  |
+| Joplin | 3.7.8 | React Native (Hermes) | x86_64 | Works | 96 ms | 234 MB |  |
+| Logseq | 0.10.15 | Capacitor (WebView) | x86_64 | Works | 754 ms | 95 MB |  |
+| Pomodorot | 0.13.3 | Godot 4 | x86_64 | Works | 97 ms | 178 MB |  |
+| Droid-ify | 0.7.8 | Jetpack Compose | x86_64 | Works | 177 ms | 44 MB |  |
+| VLC | 3.7.2 | Android Views + libVLC | x86_64 | Works | 107 ms | 76 MB |  |
+| NewPipe | 0.29.1 | Android Views | x86_64 | Works | 163 ms | 141 MB |  |
+| Fennec F-Droid | 158.0.2 | GeckoView + Compose | x86_64 | Works | 175 ms | 296 MB |  |
+| FlorisBoard | 0.5.2 | Jetpack Compose (IME) | x86_64 | Works | 151 ms | 39 MB |  |
+| Rethink: DNS + Firewall + VPN | v0.5.8 | Android Views + Go | x86_64 | Works | 156 ms | 94 MB |  |
+| Jellyfin for Android TV | 0.19.10 | Leanback / Compose for TV | x86_64 | Works | 167 ms | 77 MB |  |
+| Mastodon | 2.13.4 | Android Views | none | Works | 132 ms | 45 MB |  |
+| Floating Mute | 4.0.1 | Android Views (overlay) | none | Works | 163 ms | 32 MB |  |
 
-Session memory (cgroup) at the end of the run: 660 MiB.
+Session memory (cgroup) at the end of the run: 954 MiB.
 
 ## Budgets
 
@@ -46,6 +46,6 @@ A run fails when a measurement is over its budget by more than the margin (`test
 
 | Measure | Budget | Margin | Fails above | Last measured |
 | --- | --- | --- | --- | --- |
-| cold session start | 2500 ms | 25% | 3125 ms | 2302 ms |
-| warm app start | 200 ms | 25% | 250 ms | 170 ms |
-| idle session memory | 575 MiB | 10% | 633 MiB | 562 MiB |
+| cold session start | 2500 ms | 25% | 3125 ms | 2162 ms |
+| warm app start | 200 ms | 25% | 250 ms | 171 ms |
+| idle session memory | 575 MiB | 10% | 633 MiB | 542 MiB |
