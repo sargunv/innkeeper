@@ -236,13 +236,16 @@ impl Hub {
     }
 
     /// The session is gone: every member hears why and must start again.
+    /// The user's answer counts even if its session was replaced or closed
+    /// while the dialog was up: it then ends the current session too.
     fn fail(&self, generation: u64, st: u8, why: &str) {
         let run = {
             let mut h = self.inner.lock().unwrap();
-            if !h.run.as_ref().is_some_and(|r| r.generation == generation) {
+            let sticky = st == status::DENIED || st == status::DISABLED;
+            if !sticky && !h.run.as_ref().is_some_and(|r| r.generation == generation) {
                 return;
             }
-            if st == status::DENIED {
+            if sticky {
                 h.denied = true;
             }
             crate::info!("hoststate: location: {why} (status {st})");
