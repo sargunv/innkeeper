@@ -63,9 +63,9 @@ but that is policy enforced by Android's own processes, not by the kernel.
 - The host user's supplementary groups can't be dropped without a subgid range;
   `selftest` checks that they are unmapped inside and that no bound host path
   belongs to one of them.
-- **Known gap:** the bridge sees every Android process as the user, so its uid
-  checks admit any app to every service, including input. Authenticating the
-  system app in single-uid mode is tracked on GitHub.
+- **Accepted:** the bridge sees every Android process as the user, so its uid
+  checks admit any app to every service, including input. That matches desktop
+  parity: a native app running as the user can reach the same desktop services.
 
 ## Desktop exposure
 
