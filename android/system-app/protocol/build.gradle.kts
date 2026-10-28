@@ -27,5 +27,8 @@ tasks.test {
   val wireFixtures = rootDir.resolve("../../host/bridge/src/ipc/wire-fixtures.txt").normalize()
   inputs.file(wireFixtures)
   systemProperty("wireFixtures", wireFixtures.path)
+  val a11yFixture = rootDir.resolve("../../host/bridge/src/a11y/snapshot-fixture.txt").normalize()
+  inputs.file(a11yFixture)
+  systemProperty("a11yFixture", a11yFixture.path)
   testLogging { events("failed") }
 }

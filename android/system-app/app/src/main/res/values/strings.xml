@@ -4,4 +4,6 @@
   <string name="app_name">Linux.apk System</string>
   <string name="ime_name">Linux.apk Keyboard</string>
   <string name="browser_name">Desktop browser</string>
+  <string name="a11y_name">Desktop assistive technologies</string>
+  <string name="a11y_description">Shows Android apps to the desktop\'s screen reader and other assistive technologies. Linux.apk turns it on only while one is running.</string>
 </resources>

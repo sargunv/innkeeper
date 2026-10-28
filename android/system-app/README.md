@@ -15,6 +15,7 @@ restarts it if it dies.
 | `documents/`                | documents      | the document picker and a DocumentsProvider for host files the user picked             |
 | `apps/`                     | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |
 | `net/`                      | none           | Flatpak mode: the host's network as Android's default network                          |
+| `a11y/`                     | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI  |
 
 Gradle modules:
 
