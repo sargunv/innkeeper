@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package dev.linuxapk.system.input
 
+import android.content.res.Resources
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.KeyCharacterMap
@@ -46,6 +47,17 @@ class Injector {
     // Hidden (@TestApi); the public obtain() overloads have no action button.
     private val setActionButton: Method by lazy {
       MotionEvent::class.java.getMethod("setActionButton", Int::class.javaPrimitiveType)
+    }
+
+    /**
+     * Display pixels per AXIS_VSCROLL unit ([TranslatorConfig.scrollPixelsPerUnit]):
+     * `ViewConfiguration.getScaledVerticalScrollFactor()` without a UI context, the framework's
+     * config_verticalScrollFactor (64 dp unless overlaid).
+     */
+    fun scrollPixelsPerUnit(): Float {
+      val res = Resources.getSystem()
+      val id = res.getIdentifier("config_verticalScrollFactor", "dimen", "android")
+      return if (id != 0) res.getDimension(id) else 64f * res.displayMetrics.density
     }
 
     fun toInputEvent(e: OutEvent): InputEvent =

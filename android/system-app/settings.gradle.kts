@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "linuxapk-system"
 
-include(":protocol", ":hidden-api", ":app")
+include(":protocol", ":hidden-api", ":inject", ":app", ":probes")

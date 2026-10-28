@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// LinuxApkProbes.apk (dev.linuxapk.probes): diagnostic activities and the input
+// harness for the end-to-end and compat tests. Platform-signed like the system
+// app, but never staged: `:probes:install` puts it in out/test/probes, and the
+// tests install it into their session.
+plugins { id("com.android.application") }
+
+val sdk = extra["compileSdk"] as Int
+val buildTools = extra["buildTools"] as String
+
+android {
+  namespace = "dev.linuxapk.probes"
+  compileSdk = sdk
+  buildToolsVersion = File(buildTools).name
+
+  defaultConfig {
+    applicationId = "dev.linuxapk.probes"
+    minSdk = sdk
+    targetSdk = sdk
+    versionCode = 1
+    versionName = "0.1"
+  }
+
+  buildTypes {
+    release {
+      isMinifyEnabled = false
+      signingConfig = null
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  lint { abortOnError = false }
+}
+
+dependencies { implementation(project(":inject")) }
+
+tasks.register<Sync>("install") {
+  description = "Signs the release APK and installs it into out/test/probes."
+  into(rootDir.resolve("../../out/test/probes"))
+  from(tasks.named("signRelease")) { rename { "LinuxApkProbes.apk" } }
+}

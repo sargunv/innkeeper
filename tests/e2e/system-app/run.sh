@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # End-to-end input test against a running session that has reached
 # sys.boot_completed=1 (see docs/input.md). Checks that Linux.apk System is
-# installed and running and holds the bridge's input service, opens
-# InputProbeActivity in a window of its own through the window manager's
-# control command (docs/windowing.md), then injects
-# tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger touch)
-# through the app's own translator and injector, as the input service's lines
-# are, and checks what the activity received. The stream's DISPLAY placeholders
-# become the probe's display id, so every event must arrive there.
+# installed and running and holds the bridge's input service, installs the
+# probes APK (out/test/probes), opens its InputProbeActivity in a window of its
+# own through the window manager's control command (docs/windowing.md), then
+# injects tests/e2e/system-app/probe-stream.txt (mouse, wheel, keys, two-finger
+# touch) through the system app's translator and injector (the probes'
+# InputStdinHarness), as the input service's lines are, and checks what the
+# activity received. The stream's DISPLAY placeholders become the probe's
+# display id, so every event must arrive there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
 session=$repo/out/stage/libexec/linuxapk/linuxapk-session
 s() { "$session" exec "$@"; }
-apk=/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk
+probes=$repo/out/test/probes/LinuxApkProbes.apk
 fail=0
 ok() { echo "ok   $1"; }
 bad() {
@@ -24,6 +25,10 @@ check() { if grep -qE "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
 
 [[ $(s getprop sys.boot_completed | tr -d '\r') == 1 ]] || {
   echo "session has not booted (sys.boot_completed != 1)" >&2
+  exit 2
+}
+[[ -f $probes ]] || {
+  echo "no $probes (run \`mise run build\`)" >&2
   exit 2
 }
 
@@ -44,9 +49,12 @@ for p in ADD_TRUSTED_DISPLAY ADD_ALWAYS_UNLOCKED_DISPLAY INTERNAL_SYSTEM_WINDOW 
   check "$p granted" "android.permission.$p: granted=true" "$pkg"
 done
 check "window manager answers" "result=-1" "$(wm LIST)"
-wm CLOSE --es package dev.linuxapk.system >/dev/null || true
+size=$(stat -c %s "$probes")
+check "probes installed" "^Success" "$(s cmd package install -r -g -S "$size" <"$probes")"
+harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
+wm CLOSE --es package dev.linuxapk.probes >/dev/null || true
 s logcat -c
-out=$(wm LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.input.InputProbeActivity)
+out=$(wm LAUNCH --es package dev.linuxapk.probes --es component dev.linuxapk.probes/.InputProbeActivity)
 display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$out")
 if [[ -z $display ]]; then
   bad "launch in a window: $out"
@@ -54,10 +62,10 @@ if [[ -z $display ]]; then
 fi
 ok "launch in a window"
 sleep 2
-check "listed as a window" "display=$display package=dev.linuxapk.system" "$(wm LIST)"
+check "listed as a window" "display=$display package=dev.linuxapk.probes" "$(wm LIST)"
 sleep 1
 sed "s/DISPLAY/$display/" "$here/probe-stream.txt" |
-  s sh -c "CLASSPATH=$apk app_process / dev.linuxapk.system.input.StdinInjector" >/dev/null
+  s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >/dev/null
 sleep 1
 log=$(s logcat -d -s LinuxApkProbe:I InputDispatcher:E)
 check "mouse hover" "generic .*ACTION_HOVER_MOVE.*source=0x2002" "$log"

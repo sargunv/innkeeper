@@ -2,8 +2,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <resources>
   <string name="app_name">Linux.apk System</string>
-  <string name="probe_name">Linux.apk input probe</string>
-  <string name="window_probe_name">Linux.apk window probe</string>
   <string name="ime_name">Linux.apk Keyboard</string>
   <string name="browser_name">Desktop browser</string>
 </resources>

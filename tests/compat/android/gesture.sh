@@ -1,12 +1,12 @@
 #!/system/bin/sh
 # Touch gestures for compat scripts, as input lines (protocol v2,
 # host/bridge/src/input/proto.rs) paced in real time. Runs inside the session
-# and is piped into dev.linuxapk.system.input.StdinInjector.
+# and is piped into the probes APK's dev.linuxapk.probes.InputStdinHarness.
 #   gesture.sh pinch|pan|doubletap X Y DISPLAY W H
 # X Y are in the pixels of the app's W x H window on Android display DISPLAY.
 g=$1 x=$2 y=$3 t=1000 d=$4 w=$5 h=$6
 echo "window $w $h 1.000 $d"
-# The injector (app_process) needs about a second to start reading. Events that
+# The harness (app_process) needs about a second to start reading. Events that
 # reach it in a burst are clamped to its clock, which squeezes a double tap's
 # gap below GestureDetector's 40 ms minimum, so wait before the timed part.
 sleep 1.5

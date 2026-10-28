@@ -380,9 +380,9 @@ repost every second; KDE refuses "similar notifications in quick succession").
   (expired) keeps both: the server may keep it in its history, where updates and
   actions still reach it. KDE reports closing a popup as "expired" too; removing
   it from the history (bell) reports "dismissed".
-- Diagnostic:
-  `am start -n dev.linuxapk.system/.integration.notifications.NotificationProbe`
-  posts a message-style notification with an action and an inline reply.
+- Diagnostic (the probes APK, `out/test/probes`):
+  `am start -n dev.linuxapk.probes/.NotificationProbe` posts a message-style
+  notification with an action and an inline reply.
 
 #### Clipboard
 
@@ -410,8 +410,8 @@ the compositor has no data control.
 - Sensitive clips (`ClipDescription.EXTRA_IS_SENSITIVE`) carry
   `x-kde-passwordManagerHint: secret`, which keeps them out of Klipper's
   history; host clips with that hint arrive marked sensitive.
-- Diagnostic:
-  `am start -n dev.linuxapk.system/.integration.clipboard.ClipProbe [--es text T | --ez image true]`
+- Diagnostic (the probes APK, `out/test/probes`):
+  `am start -n dev.linuxapk.probes/.ClipProbe [--es text T | --ez image true]`
   sets the clip, or logs it.
 
 #### Opening links

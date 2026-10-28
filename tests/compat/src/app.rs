@@ -74,7 +74,9 @@ const UI_XML: &str = "/data/local/tmp/compat-ui.xml";
 const UI_DUMP_SECS: u64 = 150;
 /// Writes a touch gesture as an input stream (runs inside the session).
 const GESTURE_SH: &str = include_str!("../android/gesture.sh");
-const SYSTEM_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
+/// The probes APK, copied in for its input harness (app_process loads it from
+/// there; it isn't installed).
+const PROBES_APK: &str = "/data/local/tmp/linuxapk-probes.apk";
 
 pub struct Run<'a> {
     s: &'a Session,
@@ -773,8 +775,12 @@ impl<'a> Run<'a> {
                     sleep(Duration::from_secs(1));
                 }
                 // pinch|pan|doubletap X Y, as touch through Linux.apk System's
-                // translator and injector (multi-touch, which `input` can't do).
+                // translator and injector (the probes' input harness;
+                // multi-touch, which `input` can't do).
                 "gesture" => {
+                    self.s
+                        .push_fixed(&self.s.probes, PROBES_APK)
+                        .map_err(|e| format!("{step}: {e:#}"))?;
                     // Scaled to the app window's pixels, on its display.
                     let mut a: Vec<String> = arg.split_whitespace().map(str::to_string).collect();
                     if let (Some(w), 3) = (&self.win, a.len()) {
@@ -788,9 +794,9 @@ impl<'a> Run<'a> {
                         "sh",
                         "-c",
                         "apk=$1 script=$2; shift 2; sh -c \"$script\" gesture.sh \"$@\" | \
-                         CLASSPATH=$apk app_process / dev.linuxapk.system.input.StdinInjector",
+                         CLASSPATH=$apk app_process / dev.linuxapk.probes.InputStdinHarness",
                         "sh",
-                        SYSTEM_APK,
+                        PROBES_APK,
                         GESTURE_SH,
                     ];
                     argv.extend(a.iter().map(String::as_str));

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-package dev.linuxapk.system.input
+package dev.linuxapk.probes
 
 import android.app.Activity
 import android.os.Bundle

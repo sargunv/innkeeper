@@ -3,7 +3,7 @@
 <!--
   Linux.apk System: privileged, platform-signed, persistent. Installed in
   /system_ext/priv-app/LinuxApkSystem with
-  /system_ext/etc/permissions/dev.linuxapk.system.xml (see android/build.sh).
+  /system_ext/etc/permissions/dev.linuxapk.system.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -52,8 +52,6 @@
   <!-- Default browser role (BrowserRole), when no real browser has it. -->
   <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
   <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
-  <!-- The notification probe posts one. -->
-  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
        "linuxapk-session exec") passes any permission check. -->
@@ -67,19 +65,6 @@
     android:directBootAware="true"
     android:label="@string/app_name"
     android:persistent="true">
-
-    <!-- Diagnostic: logs every input event it receives (tag LinuxApkProbe).
-         am start -n dev.linuxapk.system/.input.InputProbeActivity -->
-    <activity
-      android:name=".input.InputProbeActivity"
-      android:exported="true"
-      android:label="@string/probe_name" />
-
-    <!-- Insets and elevation-shadow check for app windows (docs/windowing.md). -->
-    <activity
-      android:name=".wm.WindowProbeActivity"
-      android:exported="true"
-      android:label="@string/window_probe_name" />
 
     <!-- The deprecated-target-SDK warning, in the app's window (see AppWarningActivity). -->
     <activity
@@ -170,25 +155,6 @@
         <action android:name="android.service.notification.NotificationListenerService" />
       </intent-filter>
     </service>
-
-    <!-- Diagnostic: a notification with an action and an inline reply (NotificationProbe). -->
-    <activity
-      android:name=".integration.notifications.NotificationProbe"
-      android:excludeFromRecents="true"
-      android:exported="true"
-      android:noHistory="true"
-      android:theme="@android:style/Theme.NoDisplay" />
-    <receiver
-      android:name=".integration.notifications.NotificationProbe$Receiver"
-      android:exported="false" />
-
-    <!-- Diagnostic: sets or logs the clipboard (ClipProbe). -->
-    <activity
-      android:name=".integration.clipboard.ClipProbe"
-      android:excludeFromRecents="true"
-      android:exported="true"
-      android:noHistory="true"
-      android:theme="@android:style/Theme.NoDisplay" />
 
     <!-- Fallback browser: http(s) links nothing else handles open in the host browser. The low
          priority (honoured for privileged apps) lets real browsers and app links win. -->

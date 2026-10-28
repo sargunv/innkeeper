@@ -193,10 +193,10 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
 
 ## Tests
 
-| What                                                                                                                                                                                                   | How                       | Result                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- | -------------------------------------- |
-| Parser (v1 and v2), keymap, translator (incl. per-display routing); model of AOSP's InputVerifier (per display) run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`        | 41 tests, 0 failures                   |
-| Real framework classes: `app_process` builds every event from `tests/e2e/system-app/probe-stream.txt` in the live session                                                                              | `StdinInjector --dry-run` | MotionEvent/KeyEvent dumps as expected |
+| What                                                                                                                                                                                                   | How                                        | Result                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | -------------------------------------- |
+| Parser (v1 and v2), keymap, translator (incl. per-display routing); model of AOSP's InputVerifier (per display) run over every test, plus 200 random streams × 300 events (all 14 mouse/touch actions) | `android/build.sh`                         | 41 tests, 0 failures                   |
+| Real framework classes: `app_process` builds every event from `tests/e2e/system-app/probe-stream.txt` in the live session                                                                              | `InputStdinHarness --dry-run` (probes APK) | MotionEvent/KeyEvent dumps as expected |
 
 ### Proof (2026-10-27, live session, system_server up to NetworkManagementService)
 
@@ -236,9 +236,10 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
    - the persistent process runs and logged `started input`;
    - it connected to the bridge's input service.
 
-   It then opens `InputProbeActivity` and injects `probe-stream.txt` through the
-   app's translator and injector. It expects the activity's log
-   (`LinuxApkProbe`) to show:
+   It then installs the probes APK (`out/test/probes/LinuxApkProbes.apk`), opens
+   its `InputProbeActivity` and injects `probe-stream.txt` through the app's
+   translator and injector (the probes' `InputStdinHarness`). It expects the
+   activity's log (`LinuxApkProbe`) to show:
    - mouse hover, click and button press (`source=0x2002`);
    - wheel scroll;
    - Shift+A with `META_SHIFT_ON`;
@@ -247,11 +248,12 @@ the app's display (`mViewVisibility=GONE`), so no soft keyboard appeared.
    - no `Inconsistent event` from the dispatcher.
 
 4. Manual check with real hardware:
-   1. `session/linuxapk-session exec am start -n dev.linuxapk.system/.input.InputProbeActivity`.
+   1. Install `out/test/probes/LinuxApkProbes.apk`, then
+      `linuxapk-session exec am start -n dev.linuxapk.probes/.InputProbeActivity`.
    2. Over the "Linux.apk" window, move the mouse, click, scroll, type, and
       press Escape.
-   3. `session/linuxapk-session exec logcat -s LinuxApkProbe LinuxApkInput`
-      shows each event. The probe window also shows the last one.
+   3. `linuxapk-session exec logcat -s LinuxApkProbe LinuxApkInput` shows each
+      event. The probe window also shows the last one.
    4. `dumpsys input` lists the recent events under `RecentQueue`.
 
 ## Needed from other lanes

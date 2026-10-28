@@ -132,8 +132,7 @@ class Notifications(private val context: Context, private val feature: Integrati
   private fun wanted(sbn: StatusBarNotification): Boolean {
     val n = sbn.notification
     if (sbn.packageName in SKIP_PACKAGES) return false
-    if (sbn.packageName == context.packageName && n.channelId != NotificationProbe.CHANNEL)
-      return false
+    if (sbn.packageName == context.packageName) return false
     if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return false
     if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return false
     return true

@@ -281,8 +281,8 @@ session default; `composer/BridgePresenter.cpp`):
     disappear; that was the `--window` 13/16 (OpenCalc's "15", and Wikipedia's
     "Skip").
   - reads focus from the window's display.
-- The window probe
-  (`LAUNCH --es package dev.linuxapk.system --es component dev.linuxapk.system/.wm.WindowProbeActivity`)
+- The window probe in the probes APK (`out/test/probes`;
+  `LAUNCH --es package dev.linuxapk.probes --es component dev.linuxapk.probes/.WindowProbeActivity`)
   shows and logs the window's insets over a card with 24 dp elevation.
 - Without a desktop to spare (or with the user's screen locked), run a nested
   compositor and point the session at it (`WAYLAND_DISPLAY`, a name or an

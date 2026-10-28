@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-package dev.linuxapk.system.wm
+package dev.linuxapk.probes
 
 import android.app.Activity
 import android.graphics.Color
@@ -21,7 +21,7 @@ import android.widget.TextView
  * so a screenshot shows whether elevation shadows render.
  *
  * `am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LAUNCH --es package
- * dev.linuxapk.system --es component dev.linuxapk.system/.wm.WindowProbeActivity`
+ * dev.linuxapk.probes --es component dev.linuxapk.probes/.WindowProbeActivity`
  */
 class WindowProbeActivity : Activity() {
   private lateinit var text: TextView

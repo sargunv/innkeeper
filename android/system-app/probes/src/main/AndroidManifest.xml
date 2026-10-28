@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  Linux.apk probes: diagnostics for the tests and docs, never shipped. No launcher activity, so the
+  system app doesn't mirror it to the desktop.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- NotificationProbe posts one (the tests install with -g). -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+  <application
+    android:allowBackup="false"
+    android:label="@string/app_name">
+
+    <!-- Logs every input event it receives (tag LinuxApkProbe). -->
+    <activity
+      android:name=".InputProbeActivity"
+      android:exported="true"
+      android:label="@string/input_probe_name" />
+
+    <!-- Insets and elevation-shadow check for app windows (docs/windowing.md). -->
+    <activity
+      android:name=".WindowProbeActivity"
+      android:exported="true"
+      android:label="@string/window_probe_name" />
+
+    <!-- A notification with an action and an inline reply. -->
+    <activity
+      android:name=".NotificationProbe"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.NoDisplay" />
+    <receiver
+      android:name=".NotificationProbe$Receiver"
+      android:exported="false" />
+
+    <!-- Sets or logs the clipboard. -->
+    <activity
+      android:name=".ClipProbe"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.NoDisplay" />
+    <provider
+      android:name=".ClipImageProbe"
+      android:authorities="dev.linuxapk.probes.clip"
+      android:exported="false"
+      android:grantUriPermissions="true" />
+  </application>
+</manifest>

@@ -159,7 +159,14 @@ fn real_main() -> Result<ExitCode> {
             launcher.display()
         );
     }
-    let s = Session::new(launcher);
+    let probes = repo.join("out/test/probes/LinuxApkProbes.apk");
+    if !probes.is_file() {
+        bail!(
+            "no probes APK at {} (run `mise run build`)",
+            probes.display()
+        );
+    }
+    let s = Session::new(launcher, probes);
     s.ensure(o.window)?;
     fs::create_dir_all(&out)?;
     let mut results: Vec<AppResult> = vec![];

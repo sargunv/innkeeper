@@ -18,6 +18,8 @@ use linuxapk_core::{launcher, paths};
 pub struct Session {
     core: launcher::Session,
     started: Cell<bool>,
+    /// LinuxApkProbes.apk (out/test/probes), for its input harness.
+    pub probes: PathBuf,
 }
 
 impl Deref for Session {
@@ -35,10 +37,11 @@ pub struct Output {
 }
 
 impl Session {
-    pub fn new(launcher: PathBuf) -> Self {
+    pub fn new(launcher: PathBuf, probes: PathBuf) -> Self {
         Self {
             core: launcher::Session::at(launcher),
             started: Cell::new(false),
+            probes,
         }
     }
 

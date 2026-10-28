@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-package dev.linuxapk.system.integration.clipboard
+package dev.linuxapk.probes
 
 import android.app.Activity
 import android.content.ClipData
@@ -8,13 +8,11 @@ import android.os.Bundle
 import android.util.Log
 
 /**
- * Diagnostic for the clipboard sync (docs/bridge.md, "Clipboard"). Shows nothing.
- *
- * am start -n dev.linuxapk.system/.integration.clipboard.ClipProbe --es text "copied in Android" am
- * start -n dev.linuxapk.system/.integration.clipboard.ClipProbe --ez image true # a test image am
- * start -n dev.linuxapk.system/.integration.clipboard.ClipProbe # logs the current clip
- *
- * Output goes to logcat, tag LinuxApkClipProbe.
+ * Diagnostic for the clipboard sync (docs/bridge.md, "Clipboard"). Shows nothing; logs to tag
+ * LinuxApkClipProbe.
+ * - `am start -n dev.linuxapk.probes/.ClipProbe --es text "copied in Android"` copies text;
+ * - `am start -n dev.linuxapk.probes/.ClipProbe --ez image true` copies a test image;
+ * - `am start -n dev.linuxapk.probes/.ClipProbe` logs the current clip.
  */
 class ClipProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,10 +20,7 @@ class ClipProbe : Activity() {
     val cm = getSystemService(ClipboardManager::class.java)
     val text = intent.getStringExtra("text")
     if (intent.getBooleanExtra("image", false)) {
-      val bmp =
-        android.graphics.Bitmap.createBitmap(64, 48, android.graphics.Bitmap.Config.ARGB_8888)
-      bmp.eraseColor(android.graphics.Color.rgb(0x3d, 0xdc, 0x84))
-      val uri = ClipImageProvider.store(this, bmp)
+      val uri = ClipImageProbe.store(this)
       cm.setPrimaryClip(ClipData.newUri(contentResolver, "probe image", uri))
       Log.i(TAG, "set image: $uri")
     } else if (text != null) {

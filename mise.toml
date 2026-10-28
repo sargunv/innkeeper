@@ -78,9 +78,9 @@ android/system/iptables/build.sh
 """
 
 [tasks."build:system-app"]
-description = "LinuxApkSystem.apk, platform-signed"
+description = "LinuxApkSystem.apk, platform-signed; LinuxApkProbes.apk for the tests (out/test/probes)"
 dir = "android/system-app"
-run = "./gradlew --console=plain -q :app:install"
+run = "./gradlew --console=plain -q :app:install :probes:install"
 
 [tasks."build:image-tools"]
 description = "Static simg2img, lpunpack, fsck.erofs and debugfs for image setup (build container; skipped when unchanged)"
@@ -103,13 +103,13 @@ description = "Merge the module install trees into out/stage (and write its mani
 run = "tools/build/stage.sh"
 
 [tasks.clean]
-description = "Remove build output (out/build, out/stage, out/cargo); keeps out/test"
-run = "rm -rf out/build out/stage out/cargo"
+description = "Remove build output (out/build, out/stage, out/cargo, the probes APK in out/test/probes); keeps test results"
+run = "rm -rf out/build out/stage out/cargo out/test/probes"
 
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit tests: Rust, the broker fuzzer, the protocol, the HAL host tests, supervisor, launcher and image scripts"
+description = "Unit tests: Rust, the broker fuzzer, the system app's protocol and wire, the HAL host tests, supervisor, launcher and image scripts"
 run = """
 set -euo pipefail
 cargo test -q --workspace

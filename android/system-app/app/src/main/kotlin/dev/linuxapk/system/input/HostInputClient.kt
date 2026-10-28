@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package dev.linuxapk.system.input
 
-import android.content.res.Resources
 import android.os.SystemClock
 import android.util.Log
 import dev.linuxapk.system.Feature
@@ -145,20 +144,13 @@ class HostInputClient : Feature, BridgeConnection.Listener {
     private const val WINDOW_UNMAPPED = 0x4603
     private const val MAX_TEXT_INPUT_LINE = 480
 
-    fun newTranslator() = InputTranslator(config(), SystemClock::uptimeMillis)
-
-    fun config() =
-      TranslatorConfig(
-        escapeAsBack = SystemProps.getBoolean("persist.linuxapk.input.escape_back", false),
-        scrollPixelsPerUnit = scrollFactor(),
+    private fun newTranslator() =
+      InputTranslator(
+        TranslatorConfig(
+          escapeAsBack = SystemProps.getBoolean("persist.linuxapk.input.escape_back", false),
+          scrollPixelsPerUnit = Injector.scrollPixelsPerUnit(),
+        ),
+        SystemClock::uptimeMillis,
       )
-
-    // ViewConfiguration.getScaledVerticalScrollFactor() without a UI context: the framework's
-    // config_verticalScrollFactor (64 dp unless overlaid).
-    private fun scrollFactor(): Float {
-      val res = Resources.getSystem()
-      val id = res.getIdentifier("config_verticalScrollFactor", "dimen", "android")
-      return if (id != 0) res.getDimension(id) else 64f * res.displayMetrics.density
-    }
   }
 }
