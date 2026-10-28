@@ -9,7 +9,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 | --------- | --------------------------------------------------------------------------------------- | ---------------- |
 | audio     | PipeWire through its Pulse server (pure-Rust `pulseaudio` crate, no C deps)             | `src/audio/`     |
 | display   | Wayland: one `xdg_toplevel` per window, linux-dmabuf, viewporter, decorations           | `src/display/`   |
-| input     | the Wayland seat and `zwp_text_input_v3`                                                | `src/input/`     |
+| input     | the seat, pointer gestures, tablets, cursor shape and `zwp_text_input_v3`               | `src/input/`     |
 | system    | portal Settings, `org.freedesktop.Notifications`, `ext_data_control_v1`, OpenURI, MPRIS | `src/system/`    |
 | documents | the FileChooser portal, parented through `zxdg_exporter_v2`                             | `src/documents/` |
 | apps      | desktop entries through `linuxapk-core`                                                 | `src/apps/`      |
