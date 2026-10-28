@@ -39,7 +39,23 @@
 //!   `pointer_motion <t> <x> <y>`, `pointer_button <t> <button> <0|1>`,
 //!   `pointer_axis <t> <axis> <value>` (axis 0 vertical, 1 horizontal; value
 //!   in surface units), `pointer_axis_value120 <axis> <v120>` (120 = one
-//!   detent), `pointer_axis_stop <t> <axis>`, `pointer_frame`.
+//!   detent), `pointer_axis_source <source>` (0 wheel, 1 finger,
+//!   2 continuous, 3 wheel tilt; at most one per frame; the values already
+//!   include natural scrolling), `pointer_axis_stop <t> <axis>`,
+//!   `pointer_frame`.
+//! - Touchpad gestures over a window's content, which go where the pointer
+//!   is: `gesture_swipe_begin <t> <fingers>`, `gesture_swipe_update <t> <dx>
+//!   <dy>`, `gesture_pinch_begin <t> <fingers>`, `gesture_pinch_update <t>
+//!   <dx> <dy> <scale> <rotation>` (the center's motion in display pixels,
+//!   the scale since the begin, degrees clockwise since the last update),
+//!   `gesture_hold_begin <t> <fingers>`, and `gesture_{swipe,pinch,hold}_end
+//!   <t> <0|1>` (1: cancelled).
+//! - A tablet tool: `tablet_proximity_in <tool> <display>` (the tool is its
+//!   `BTN_TOOL_*` code: 0x140 pen, 0x141 eraser, …), `tablet_proximity_out`,
+//!   `tablet_down`, `tablet_up`, `tablet_motion <x> <y>`,
+//!   `tablet_pressure <0..65535>`, `tablet_distance <0..65535>`,
+//!   `tablet_tilt <x> <y>` (degrees), `tablet_button <button> <0|1>`, each
+//!   group ended by `tablet_frame <t>`.
 //! - `keyboard_enter <display>`, `keyboard_leave <display>`,
 //!   `key <t> <keycode> <0|1>`,
 //!   `modifiers <depressed> <latched> <locked> <group>` (xkb masks).

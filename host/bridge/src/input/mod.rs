@@ -6,10 +6,12 @@
 //! seat events to [`seat`] and [`text_input`], whose lines go to every input
 //! connection through the [`Hub`].
 
+pub(crate) mod gestures;
 mod hub;
 pub mod ime;
 pub mod proto;
 pub(crate) mod seat;
+pub(crate) mod tablet;
 pub(crate) mod text_input;
 
 use std::os::fd::OwnedFd;

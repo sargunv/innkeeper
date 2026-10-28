@@ -1,18 +1,32 @@
 //! The host seat, turned into input lines ([`super::proto`]). The display
 //! service owns the Wayland connection; its seat's pointer, keyboard and
-//! touch events land here. Pointer events over a window's client-side frame
-//! go back to the display service, which drives the frame.
+//! touch events land here, and [`super::gestures`] and [`super::tablet`]
+//! add touchpad gestures and tablets. Pointer events over a window's
+//! client-side frame go back to the display service, which drives the frame.
+//!
+//! The cursor is always defined: the default arrow over a window's content
+//! and the frame's own shapes over its edges (`wp_cursor_shape_v1`, where
+//! the compositor has it). Android draws no pointer of its own.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use sctk::dispatch2::Dispatch2;
 use sctk::reexports::client::backend::ObjectId;
+use sctk::reexports::client::globals::GlobalList;
 use sctk::reexports::client::protocol::{wl_keyboard, wl_pointer, wl_seat, wl_touch};
 use sctk::reexports::client::{Connection, Proxy, QueueHandle, WEnum};
+use sctk::reexports::csd_frame::CursorIcon;
 use sctk::seat::Capability;
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1},
+    wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+};
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
 
+use super::Hub;
+use super::gestures::Gestures;
+use super::tablet::Tablets;
 use super::text_input::TextInput;
 use crate::display::wl::State;
 
@@ -22,6 +36,12 @@ const KEY_F11: u32 = 87;
 pub(crate) struct Seat {
     pub(crate) wl_seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
+    pub(crate) cursor_shape: Option<WpCursorShapeManagerV1>,
+    /// The pointer's cursor-shape device, the serial of its last enter and
+    /// the shape set since.
+    cursor: Option<WpCursorShapeDeviceV1>,
+    enter_serial: u32,
+    shape: Option<Shape>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     touch: Option<wl_touch::WlTouch>,
     /// Where the pointer is: a window's content, or a window's frame.
@@ -32,15 +52,25 @@ pub(crate) struct Seat {
     touch_focus: HashMap<i32, u32>,
     /// zwp_text_input_v3 for the IME.
     pub(crate) text: TextInput,
+    pub(crate) gestures: Gestures,
+    pub(crate) tablets: Tablets,
     /// The newest input serial (window moves, resizes and activation).
     pub(crate) last_serial: u32,
 }
 
 impl Seat {
-    pub(crate) fn new(text_input: Option<ZwpTextInputManagerV3>) -> Seat {
-        Seat {
+    pub(crate) fn new(
+        text_input: Option<ZwpTextInputManagerV3>,
+        globals: &GlobalList,
+        qh: &QueueHandle<State>,
+    ) -> Seat {
+        let seat = Seat {
             wl_seat: None,
             pointer: None,
+            cursor_shape: globals.bind(qh, 1..=1, Cursor).ok(),
+            cursor: None,
+            enter_serial: 0,
+            shape: None,
             keyboard: None,
             touch: None,
             pointer_focus: None,
@@ -48,8 +78,17 @@ impl Seat {
             keyboard_focus: None,
             touch_focus: HashMap::new(),
             text: TextInput::new(text_input),
+            gestures: Gestures::bind(globals, qh),
+            tablets: Tablets::bind(globals, qh),
             last_serial: 0,
-        }
+        };
+        crate::info!(
+            "input: cursor-shape {}, pointer-gestures v{}, tablets {}",
+            seat.cursor_shape.is_some(),
+            seat.gestures.version(),
+            seat.tablets.available()
+        );
+        seat
     }
 
     pub(crate) fn add_capability(
@@ -60,10 +99,17 @@ impl Seat {
     ) {
         if self.wl_seat.is_none() {
             self.wl_seat = Some(seat.clone());
+            self.tablets.attach(&seat, qh);
         }
         match cap {
             Capability::Pointer if self.pointer.is_none() => {
-                self.pointer = Some(seat.get_pointer(qh, Ptr))
+                let p = seat.get_pointer(qh, Ptr);
+                self.cursor = self
+                    .cursor_shape
+                    .as_ref()
+                    .map(|m| m.get_pointer(&p, qh, Cursor));
+                self.gestures.attach(&p, qh);
+                self.pointer = Some(p);
             }
             Capability::Keyboard if self.keyboard.is_none() => {
                 self.keyboard = Some(seat.get_keyboard(qh, Kbd));
@@ -77,6 +123,10 @@ impl Seat {
     pub(crate) fn remove_capability(&mut self, cap: Capability) {
         match cap {
             Capability::Pointer => {
+                if let Some(c) = self.cursor.take() {
+                    c.destroy();
+                }
+                self.gestures.detach();
                 if let Some(p) = self.pointer.take() {
                     p.release();
                 }
@@ -100,8 +150,20 @@ impl Seat {
         matches!(self.pointer_focus, Some((_, false)))
     }
 
-    /// The window `id` is gone.
-    pub(crate) fn forget(&mut self, id: u32) {
+    /// Sets the pointer's cursor (after an enter).
+    fn set_cursor(&mut self, shape: Shape) {
+        if let Some(c) = &self.cursor
+            && self.shape != Some(shape)
+        {
+            c.set_shape(self.enter_serial, shape);
+            self.shape = Some(shape);
+        }
+    }
+
+    /// The window `id` is gone; gestures and a tablet tool over it end.
+    pub(crate) fn forget(&mut self, id: u32, hub: &Hub) {
+        self.gestures.forget(id, hub);
+        self.tablets.forget(id, hub);
         if self.pointer_focus.is_some_and(|(p, _)| p == id) {
             self.pointer_focus = None;
         }
@@ -116,6 +178,56 @@ impl Seat {
 struct Ptr;
 struct Kbd;
 struct Tch;
+
+/// User data of the cursor-shape manager and devices (no events).
+pub(crate) struct Cursor;
+
+impl Dispatch2<WpCursorShapeManagerV1, State> for Cursor {
+    fn event(
+        &self,
+        _: &mut State,
+        _: &WpCursorShapeManagerV1,
+        _: <WpCursorShapeManagerV1 as Proxy>::Event,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+    }
+}
+
+impl Dispatch2<WpCursorShapeDeviceV1, State> for Cursor {
+    fn event(
+        &self,
+        _: &mut State,
+        _: &WpCursorShapeDeviceV1,
+        _: <WpCursorShapeDeviceV1 as Proxy>::Event,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+    }
+}
+
+/// The shape for a client-side frame's cursor (edges resize, the rest is
+/// the arrow).
+fn frame_shape(icon: CursorIcon) -> Shape {
+    use CursorIcon as C;
+    match icon {
+        C::NResize => Shape::NResize,
+        C::SResize => Shape::SResize,
+        C::EResize => Shape::EResize,
+        C::WResize => Shape::WResize,
+        C::NeResize => Shape::NeResize,
+        C::NwResize => Shape::NwResize,
+        C::SeResize => Shape::SeResize,
+        C::SwResize => Shape::SwResize,
+        C::EwResize => Shape::EwResize,
+        C::NsResize => Shape::NsResize,
+        C::NeswResize => Shape::NeswResize,
+        C::NwseResize => Shape::NwseResize,
+        C::Pointer => Shape::Pointer,
+        C::Move => Shape::Move,
+        _ => Shape::Default,
+    }
+}
 
 impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
     fn event(
@@ -136,21 +248,27 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 surface_y,
             } => {
                 st.seat.last_serial = serial;
+                st.seat.enter_serial = serial;
+                st.seat.shape = None;
                 let f = st.window_of(&surface);
                 st.seat.pointer_focus = f;
                 st.seat.pointer_surface = Some(surface.id());
                 match f {
                     Some((id, false)) => {
+                        st.seat.set_cursor(Shape::Default);
                         let (x, y) = st.to_display(id, surface_x, surface_y);
                         st.hub.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
                     }
-                    Some((id, true)) => st.frame_pointer_moved(
-                        id,
-                        &surface.id(),
-                        Duration::ZERO,
-                        surface_x,
-                        surface_y,
-                    ),
+                    Some((id, true)) => {
+                        let icon = st.frame_pointer_moved(
+                            id,
+                            &surface.id(),
+                            Duration::ZERO,
+                            surface_x,
+                            surface_y,
+                        );
+                        st.seat.set_cursor(icon.map_or(Shape::Default, frame_shape));
+                    }
                     None => {}
                 }
             }
@@ -173,8 +291,11 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                         .input(&format!("pointer_motion {time} {x:.2} {y:.2}"));
                 }
                 Some((id, true)) => {
-                    if let Some(sid) = st.seat.pointer_surface.clone() {
-                        st.frame_pointer_moved(id, &sid, ms(time), surface_x, surface_y);
+                    if let Some(sid) = st.seat.pointer_surface.clone()
+                        && let Some(icon) =
+                            st.frame_pointer_moved(id, &sid, ms(time), surface_x, surface_y)
+                    {
+                        st.seat.set_cursor(frame_shape(icon));
                     }
                 }
                 None => {}
@@ -205,6 +326,12 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 if st.seat.over_content() {
                     let a: u32 = axis.into();
                     st.hub.input(&format!("pointer_axis_stop {time} {a}"));
+                }
+            }
+            E::AxisSource { axis_source } => {
+                if st.seat.over_content() {
+                    let s: u32 = axis_source.into();
+                    st.hub.input(&format!("pointer_axis_source {s}"));
                 }
             }
             E::AxisValue120 { axis, value120 } => {

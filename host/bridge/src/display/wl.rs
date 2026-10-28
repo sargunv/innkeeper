@@ -280,6 +280,7 @@ impl State {
 
     // The pointer over a window's client-side frame drives the frame.
 
+    /// Returns the cursor the frame wants.
     pub(crate) fn frame_pointer_moved(
         &mut self,
         id: u32,
@@ -287,10 +288,9 @@ impl State {
         time: Duration,
         x: f64,
         y: f64,
-    ) {
-        if let Some(f) = self.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
-            f.click_point_moved(time, surface, x, y);
-        }
+    ) -> Option<sctk::reexports::csd_frame::CursorIcon> {
+        let f = self.windows.get_mut(&id)?.frame.as_mut()?;
+        f.click_point_moved(time, surface, x, y)
     }
 
     pub(crate) fn frame_pointer_left(&mut self, id: u32) {
@@ -455,7 +455,7 @@ impl State {
         for b in gone {
             self.remove_buffer(b);
         }
-        self.seat.forget(id);
+        self.seat.forget(id, &self.hub);
         crate::info!("display: window {id} closed");
         drop(w);
     }
@@ -896,7 +896,7 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events, hub: Arc<Hu
         windows: HashMap::new(),
         buffers: HashMap::new(),
         params: HashMap::new(),
-        seat: Seat::new(bind_opt(&globals, &qh, 1)),
+        seat: Seat::new(bind_opt(&globals, &qh, 1), &globals, &qh),
         quit: false,
     };
     crate::info!(
