@@ -14,8 +14,23 @@
 # response timeout per process (iptables and ip6tables, twice): a ~20 s stall
 # of system_server's NetworkStatsService at every boot. Without the rules a
 # quota is never exceeded, so alerts never fire and limits never block.
+#
+# Flatpak mode (LINUXAPK_FLATPAK=1) shares the host's network namespace,
+# where the session may change nothing, as for any desktop app: accept every
+# rule and change nothing. The restore commands still answer netd's "#PING"
+# lines, as -v does.
 name=${0##*/}
 real=/system/bin/xtables-nft-multi
+if [ "$LINUXAPK_FLATPAK" = 1 ]; then
+  case $name in
+    *-restore)
+      while IFS= read -r l; do
+        case $l in '#'*) echo "$l" ;; esac
+      done
+      ;;
+  esac
+  exit 0
+fi
 case $name in
   *-restore)
     # Line-buffered so netd's "#PING" handshake (echoed by -v) gets through.

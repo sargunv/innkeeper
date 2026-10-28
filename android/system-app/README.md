@@ -14,6 +14,7 @@ restarts it if it dies.
 | `integration/`              | system         | desktop settings, notifications, clipboard, links, MPRIS                               |
 | `documents/`                | documents      | the document picker and a DocumentsProvider for host files the user picked             |
 | `apps/`                     | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |
+| `net/`                      | none           | Flatpak mode: the host's network as Android's default network                          |
 
 Gradle modules:
 

@@ -29,6 +29,10 @@ service netd /system/bin/netd
     # netd is not updatable, but depends on libs provided by tethering apex.
     # Mark it as updatable so init won't start it until all APEX packages are ready.
     updatable
+    # linuxapk: in Flatpak mode the session shares the host's network, where
+    # netd's routing rules are refused; the shim reports them done.
+    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LINUXAPK_NETLINK_ACCEPT 1
     # linuxapk: netd aborts without its eBPF programs (unavailable in a user
     # namespace). Run it once instead of crash-looping, and don't take zygote
     # down with it.

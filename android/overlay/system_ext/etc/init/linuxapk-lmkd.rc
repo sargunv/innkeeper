@@ -1,0 +1,14 @@
+# linuxapk: the image's lmkd service (system/etc/init/lmkd.rc), plus the shim.
+# In Flatpak mode lmkd's 1 s PSI windows need a capability the sandbox lacks;
+# the shim widens them to 2 s (LINUXAPK_PSI_WINDOW). No effect otherwise.
+service lmkd /system/bin/lmkd
+    class core
+    user lmkd
+    group lmkd system readproc
+    capabilities DAC_OVERRIDE KILL IPC_LOCK SYS_NICE SYS_RESOURCE
+    critical
+    socket lmkd seqpacket+passcred 0660 system system
+    task_profiles ServiceCapacityLow
+    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LINUXAPK_PSI_WINDOW 1
+    override

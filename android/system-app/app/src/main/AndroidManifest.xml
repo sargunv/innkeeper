@@ -52,6 +52,8 @@
   <!-- Default browser role (BrowserRole), when no real browser has it. -->
   <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
   <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+  <!-- Flatpak mode: the host's network as Android's (net/HostNetworkFeature.kt). -->
+  <uses-permission android:name="android.permission.NETWORK_FACTORY" />
 
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
        "linuxapk-session exec") passes any permission check. -->

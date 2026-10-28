@@ -7,6 +7,7 @@ import dev.linuxapk.system.apps.AppMirrorFeature
 import dev.linuxapk.system.ime.ImeFeature
 import dev.linuxapk.system.input.HostInputClient
 import dev.linuxapk.system.integration.IntegrationFeature
+import dev.linuxapk.system.net.HostNetworkFeature
 import dev.linuxapk.system.wm.WindowManagerFeature
 
 /**
@@ -14,7 +15,7 @@ import dev.linuxapk.system.wm.WindowManagerFeature
  * unlocked: the app is direct-boot aware) and restarts it if it dies. Each desktop-integration area
  * is a [Feature]: host input, then the window manager and the IME, which share its connection to
  * the bridge's input service, then desktop integration (settings, notifications, clipboard, links,
- * media) and the app mirror.
+ * media), the app mirror and, in Flatpak mode, the host network.
  */
 class LinuxApkSystemApp : Application() {
   private val features = mutableListOf<Feature>()
@@ -32,7 +33,14 @@ class LinuxApkSystemApp : Application() {
     Log.i(TAG, "starting")
     val wm = WindowManagerFeature(this, input)
     for (f in
-      listOf(input, wm, ImeFeature(this), IntegrationFeature(this), AppMirrorFeature(this))) {
+      listOf(
+        input,
+        wm,
+        ImeFeature(this),
+        IntegrationFeature(this),
+        AppMirrorFeature(this),
+        HostNetworkFeature(this),
+      )) {
       try {
         f.start()
         features += f

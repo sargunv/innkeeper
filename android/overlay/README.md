@@ -18,7 +18,7 @@ must be diffed against the image's copies whenever the pin moves
 | `system/etc/init/hw/init.zygote64.rc`               | preloads the shim (`selinux_android_setcon`)                                                                                                   |
 | `system/etc/init/{servicemanager,vold,installd}.rc` | preload the shim (SELinux status and labels); installd also sets `LINUXAPK_VSTAT`                                                              |
 | `system/etc/init/apexd.rc`                          | runs `linuxapk-apexd`, which shows apexd the pre-mounted APEXes                                                                                |
-| `system/etc/init/netd.rc`                           | `netd1shot` is a no-op; netd runs once instead of crash-looping                                                                                |
+| `system/etc/init/netd.rc`                           | `netd1shot` is a no-op; netd runs once instead of crash-looping, and preloads the shim (Flatpak mode's refused rtnetlink requests)             |
 | `system/etc/cgroups.json`                           | cgroup2 only: the session has no v1 hierarchies                                                                                                |
 | `apex/com.android.tethering/etc/netbpfload.35rc`    | runs netbpfload through `linuxapk-bpfload` against the emulated `bpf()`                                                                        |
 
@@ -31,6 +31,7 @@ must be diffed against the image's copies whenever the pin moves
 | `system/bin/linuxapk-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                    |
 | `product/overlay/config/config.xml`                        | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar |
 | `vendor/etc/permissions/linuxapk-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop          |
+| `system_ext/etc/init/linuxapk-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service  |
 
 ## Blanked files
 
