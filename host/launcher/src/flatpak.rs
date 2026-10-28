@@ -228,6 +228,15 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     // The image's other top-level entries, where the sandbox has none (its
     // /etc and /bin stay).
     root::copy_top_level(&cfg.image.img, slash, false)?;
+    // Shared storage without FUSE (vold can't mount MediaProvider's, nor bind
+    // /mnt/user/0 over /storage): apps reach /data/media directly, so it is
+    // on disk rather than in the sandbox's tmpfs.
+    link(Path::new("/data/media"), Path::new("/storage/emulated"))?;
+    fs::create_dir_all("/storage/self")?;
+    link(
+        Path::new("/storage/emulated/0"),
+        Path::new("/storage/self/primary"),
+    )?;
     // Android's /etc is /system/etc. The sandbox's /etc stays (the glibc side
     // needs it) and gains the entries it lacks, such as task_profiles.json:
     // dirs as symlinks, files as copies (libbase opens files O_NOFOLLOW).
