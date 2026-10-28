@@ -260,16 +260,31 @@ impl AppsService {
             web_hosts: vec![],
             origin: Some("android".into()),
         };
-        match xdg::install_app(&self.cfg.dirs, &mut entry, &icons) {
-            Ok(p) => {
-                crate::info!("apps: {}: added {} ({})", self.label, pkg, p.display());
+        let cfg = self.cfg.clone();
+        let label = self.label.clone();
+        let mut add = move || match xdg::install_app(&cfg.dirs, &mut entry, &icons) {
+            Ok(m) => {
+                crate::info!("apps: {label}: added {pkg} ({m})");
                 Reply::ok()
             }
             Err(e) => {
                 crate::warn!("apps: {pkg}: {e:#}");
                 Reply::err(-EIO)
             }
+        };
+        if self.cfg.dirs.portal.is_none() {
+            return add();
         }
+        // Through the portal the user answers a dialog first; the record is
+        // written before it shows, so a HAVE meanwhile finds it current.
+        if let Err(e) = std::thread::Builder::new()
+            .name("apps-portal".into())
+            .spawn(move || drop(add()))
+        {
+            crate::warn!("apps: spawn: {e}");
+            return Reply::err(-EIO);
+        }
+        Reply::ok()
     }
 
     fn removed(&self, pkg: &str) -> Reply {
@@ -408,6 +423,7 @@ mod tests {
                 data: tmp.join("data"),
                 config: tmp.join("config"),
                 cache: tmp.join("cache"),
+                portal: None,
             },
             instance: "t".into(),
             run: [

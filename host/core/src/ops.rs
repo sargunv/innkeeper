@@ -32,12 +32,20 @@ pub type Report<'a> = &'a dyn Fn(Event);
 pub fn quiet(_: Event) {}
 
 /// The command line desktop entries run `linuxapk` with: this
-/// installation's ([`Prefix::cli`]), for this session instance.
+/// installation's ([`Prefix::cli`]), for this session instance. Inside the
+/// Flatpak it is plain `linuxapk`, which the DynamicLauncher portal runs as
+/// `flatpak run --command=linuxapk`.
 pub fn cli_command() -> Result<Vec<String>> {
-    Ok(paths::command(
-        &Prefix::locate()?.cli(),
-        &paths::instance()?,
-    ))
+    Ok(paths::command(&linuxapk()?, &paths::instance()?))
+}
+
+/// The `linuxapk` desktop entries run: this installation's, or the Flatpak's
+/// command.
+fn linuxapk() -> Result<Vec<String>> {
+    if Dirs::from_env().portal.is_some() {
+        return Ok(vec!["linuxapk".into()]);
+    }
+    Ok(Prefix::locate()?.cli())
 }
 
 /// The running session, after starting it if needed.
@@ -172,7 +180,7 @@ fn version_name(v: &str) -> String {
 pub struct Installed {
     pub package: String,
     pub name: String,
-    pub desktop: PathBuf,
+    pub menu: xdg::Menu,
     pub schemes: Vec<String>,
 }
 
@@ -274,11 +282,11 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         web_hosts: base.web_hosts.clone(),
         origin: None,
     };
-    let path = xdg::install_app(&dirs, &mut entry, &icons)?;
+    let menu = xdg::install_app(&dirs, &mut entry, &icons)?;
     Ok(Installed {
         package: pkg,
         name,
-        desktop: path,
+        menu,
         schemes: entry.schemes,
     })
 }
@@ -419,11 +427,12 @@ pub fn android_packages() -> Option<Vec<String>> {
     android::user_packages(&s).ok()
 }
 
-/// Points app entries that can no longer run (see
-/// [`xdg::refresh_entries`]) at this installation's `linuxapk`
-/// ([`Prefix::cli`]). Returns how many.
+/// Repairs app entries (see [`xdg::refresh_entries`]): those that can no
+/// longer run point at this installation's `linuxapk`, and inside the
+/// Flatpak missing app-menu entries are offered again. Returns how many
+/// entries were rewritten.
 pub fn refresh_entries() -> usize {
-    Prefix::locate().map_or(0, |p| xdg::refresh_entries(&Dirs::from_env(), &p.cli()))
+    linuxapk().map_or(0, |l| xdg::refresh_entries(&Dirs::from_env(), &l))
 }
 
 /// Shown once, the first time a session runs in single-uid mode.

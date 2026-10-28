@@ -235,7 +235,7 @@ impl NotifyHub {
             actions.extend([key.clone(), a.label.clone()]);
             keys.push(key);
         }
-        let entry = format!("dev.linuxapk.{}", note.package);
+        let entry = linuxapk_core::desktop::app_id(&note.package);
         let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
         hints.insert("desktop-entry", Value::from(entry.as_str()));
         hints.insert("x-kde-display-appname", Value::from(note.app_name.as_str()));

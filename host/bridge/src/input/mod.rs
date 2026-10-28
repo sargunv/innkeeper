@@ -57,7 +57,8 @@ impl Service for InputService {
             Err(e) => return Reply::err(e.status()),
         };
         match req {
-            Request::WindowRequest(r) => {
+            Request::WindowRequest(mut r) => {
+                r.app_id = linuxapk_core::desktop::desktop_app_id(&r.app_id);
                 crate::info!(
                     "input: window {} requested: {}x{} @ {} dpi, {}",
                     r.window,

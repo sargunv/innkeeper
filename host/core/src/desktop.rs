@@ -17,6 +17,34 @@ pub const MANAGER_ID: &str = "dev.linuxapk.Manager";
 /// The manager's icon (also used where an app has no icon of its own).
 pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.linuxapk.Manager.svg");
 
+/// Linux.apk's Flatpak app id when it runs inside its Flatpak (where app-menu
+/// entries go through the DynamicLauncher portal), else None.
+pub fn flatpak_app_id() -> Option<String> {
+    (linuxapk_session::Sandbox::detect() == linuxapk_session::Sandbox::Flatpak)
+        .then(|| std::env::var("FLATPAK_ID").unwrap_or_else(|_| MANAGER_ID.into()))
+}
+
+/// The id desktops match an app's windows (`app_id`, `StartupWMClass`),
+/// notifications and MPRIS players to its menu entry by:
+/// `dev.linuxapk.<pkg>`, or inside the Flatpak `<app id>.<pkg>`, the id the
+/// portal gives the entry and the only prefix a compositor lets a sandboxed
+/// client's windows claim.
+pub fn app_id(pkg: &str) -> String {
+    match flatpak_app_id() {
+        Some(id) => format!("{id}.{pkg}"),
+        None => format!("{PREFIX}{pkg}"),
+    }
+}
+
+/// [`app_id`] for an id Android sent (`dev.linuxapk.<pkg>`, the system
+/// app's window ids); anything else is kept.
+pub fn desktop_app_id(android: &str) -> String {
+    match android.strip_prefix(PREFIX) {
+        Some(pkg) if !pkg.is_empty() => app_id(pkg),
+        _ => android.to_string(),
+    }
+}
+
 /// Escapes a `string`/`localestring` value. Refuses control characters other
 /// than the ones the spec has escapes for (we never write those either, but
 /// the escaping must hold on its own).
@@ -163,7 +191,11 @@ impl AppEntry {
         run.push(self.package.clone());
         writeln!(s, "Exec={}", exec_line(&run, Some("%U"))?)?;
         s.push_str("Terminal=false\n");
-        writeln!(s, "StartupWMClass={}", escape_value(&self.id())?)?;
+        writeln!(
+            s,
+            "StartupWMClass={}",
+            escape_value(&app_id(&self.package))?
+        )?;
         if !self.categories.is_empty() {
             writeln!(s, "Categories={}", list(&self.categories)?)?;
         }

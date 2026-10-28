@@ -9,6 +9,11 @@ description = "Linux.apk host library: install, run and manage Android apps and 
 anyhow = "1.0.104"
 base64 = "0.23.1"
 linuxapk-session = { path = "../launcher" }
+# The DynamicLauncher portal (dynlauncher.rs), as the bridge uses zbus.
+zbus = { version = "5", default-features = false, features = [
+  "blocking-api",
+  "async-io",
+] }
 zip = { version = "9.1.2", default-features = false, features = [
   "deflate-flate2-zlib-rs",
 ] }

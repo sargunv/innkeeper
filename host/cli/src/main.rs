@@ -53,7 +53,7 @@ fn install(file: &Path) -> Result<()> {
     let p = ops::inspect(file, &stderr)?;
     let i = ops::install(&p, &stderr)?;
     println!("installed {} as \"{}\"", i.package, i.name);
-    println!("  desktop entry: {}", i.desktop.display());
+    println!("  app menu: {}", i.menu);
     if !i.schemes.is_empty() {
         println!("  URI schemes: {}", i.schemes.join(", "));
     }

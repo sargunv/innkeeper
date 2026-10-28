@@ -7,6 +7,7 @@ pub mod android;
 pub mod apk;
 pub mod bundle;
 pub mod desktop;
+pub mod dynlauncher;
 pub mod launcher;
 pub mod ops;
 pub mod paths;

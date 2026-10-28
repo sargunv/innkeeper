@@ -1,14 +1,17 @@
 //! Host desktop integration: app desktop entries, their hicolor icons, and the
-//! desktop database.
+//! desktop database. Inside the Flatpak the entries in `applications` are the
+//! app's own record (in its private data dir); the app menu gets them through
+//! the DynamicLauncher portal ([`crate::dynlauncher`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
-use crate::desktop::{self, AppEntry, PREFIX};
+use crate::desktop::{self, AppEntry, MANAGER_ICON_SVG, PREFIX};
+use crate::dynlauncher::{self, Answer};
 use crate::paths::{self, xdg_home};
 use crate::proc;
 
@@ -21,7 +24,14 @@ pub struct Dirs {
     pub data: PathBuf,
     pub config: PathBuf,
     pub cache: PathBuf,
+    /// The app menu is reached through the DynamicLauncher portal (inside the
+    /// Flatpak), as `<app id>.<pkg>.desktop`.
+    pub portal: Option<String>,
 }
+
+/// The `Key=value` an app's record carries when the user declined its
+/// app-menu entry, so repairs don't ask again (an install does).
+const DECLINED: &str = "X-LinuxApk-Menu";
 
 impl Dirs {
     pub fn from_env() -> Self {
@@ -29,7 +39,13 @@ impl Dirs {
             data: xdg_home("XDG_DATA_HOME", ".local/share"),
             config: xdg_home("XDG_CONFIG_HOME", ".config"),
             cache: xdg_home("XDG_CACHE_HOME", ".cache").join("linuxapk"),
+            portal: desktop::flatpak_app_id(),
         }
+    }
+
+    /// The portal's id for `pkg`'s entry (`<app id>.<pkg>.desktop`).
+    fn portal_id(&self, pkg: &str) -> Option<String> {
+        Some(format!("{}.{pkg}.desktop", self.portal.as_ref()?))
     }
 
     pub fn applications(&self) -> PathBuf {
@@ -79,6 +95,9 @@ fn tool(name: &str, args: &[&std::ffi::OsStr]) {
 }
 
 pub fn update_desktop_database(d: &Dirs) {
+    if d.portal.is_some() {
+        return;
+    }
     tool("update-desktop-database", &[d.applications().as_os_str()]);
 }
 
@@ -86,7 +105,7 @@ fn update_icon_cache(d: &Dirs) {
     let h = d.hicolor();
     // Only if a cache already exists: a stale one hides new icons, but we don't
     // create one where the desktop doesn't use it.
-    if h.join("icon-theme.cache").is_file() {
+    if d.portal.is_none() && h.join("icon-theme.cache").is_file() {
         tool(
             "gtk-update-icon-cache",
             &["-q".as_ref(), "-f".as_ref(), "-t".as_ref(), h.as_os_str()],
@@ -118,9 +137,32 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
+/// Where an app's menu entry went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Menu {
+    /// A desktop file in the user's `applications` dir.
+    File(PathBuf),
+    /// Added through the DynamicLauncher portal, as this id.
+    Portal(String),
+    /// The user declined the portal's dialog.
+    Declined,
+}
+
+impl std::fmt::Display for Menu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Menu::File(p) => write!(f, "{}", p.display()),
+            Menu::Portal(id) => write!(f, "{id} (through the desktop portal)"),
+            Menu::Declined => write!(f, "none (declined)"),
+        }
+    }
+}
+
 /// Installs an app's icons and desktop entry, replacing any previous ones.
 /// `icons` are (size, PNG); sizes that aren't hicolor directories are skipped.
-pub fn install_app(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) -> Result<PathBuf> {
+/// Inside the Flatpak the entry is the app's record, and the user is asked to
+/// add it to the app menu unless the menu already runs it.
+pub fn install_app(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) -> Result<Menu> {
     let id = entry.id();
     remove_icons(d, &id);
     let mut wrote = false;
@@ -136,14 +178,75 @@ pub fn install_app(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) -> 
         "android-package-archive".into()
     });
     let path = d.app_desktop(&entry.package);
-    write_atomic(&path, entry.render()?.as_bytes())?;
+    let text = entry.render()?;
+    write_atomic(&path, text.as_bytes())?;
+    if d.portal.is_some() {
+        return add_to_menu(d, &entry.package, &text, false);
+    }
     update_icon_cache(d);
     update_desktop_database(d);
-    Ok(path)
+    Ok(Menu::File(path))
+}
+
+/// The portal's entry for record `text` of `pkg`: unless the app menu
+/// already has one that runs the record's command, asks the user to add it.
+/// With `repair`, a record whose entry the user declined is left alone.
+fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu> {
+    let (Some(app_id), Some(id)) = (d.portal.as_deref(), d.portal_id(pkg)) else {
+        bail!("no portal");
+    };
+    let exec = desktop::read_key(text, "Exec").context("record without Exec")?;
+    let want = desktop::exec_args(&exec);
+    if let Some(have) = dynlauncher::get(&id)? {
+        let runs =
+            desktop::read_key(&have, "Exec").and_then(|e| dynlauncher::app_command(&e, app_id));
+        if runs.as_ref() == Some(&want) {
+            return Ok(Menu::Portal(id));
+        }
+    } else if repair && desktop::read_key(text, DECLINED).as_deref() == Some("declined") {
+        return Ok(Menu::Declined);
+    }
+    let name = desktop::read_key(text, "Name").unwrap_or_else(|| pkg.to_string());
+    // The largest PNG the portal takes (512 px), else the manager's icon.
+    let icon = HICOLOR_SIZES
+        .iter()
+        .rev()
+        .filter(|s| **s <= 512)
+        .find_map(|s| fs::read(d.icon_path(*s, &format!("{PREFIX}{pkg}"))).ok())
+        .unwrap_or_else(|| MANAGER_ICON_SVG.as_bytes().to_vec());
+    // The portal sets Name and Icon from its dialog; the record's own keys
+    // (DECLINED) stay out.
+    let entry: String = text
+        .lines()
+        .filter(|l| !l.starts_with("Icon=") && !l.starts_with(&format!("{DECLINED}=")))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let answer = dynlauncher::install(&id, &name, &icon, &entry)?;
+    let mut record = text
+        .lines()
+        .filter(|l| !l.starts_with(&format!("{DECLINED}=")))
+        .map(|l| format!("{l}\n"))
+        .collect::<String>();
+    if answer == Answer::Declined {
+        record.push_str(&format!("{DECLINED}=declined\n"));
+    }
+    if record != text {
+        write_atomic(&d.app_desktop(pkg), record.as_bytes())?;
+    }
+    Ok(match answer {
+        Answer::Added => Menu::Portal(id),
+        Answer::Declined => Menu::Declined,
+    })
 }
 
 /// Removes an app's desktop entry and icons. Returns whether anything existed.
 pub fn remove_app(d: &Dirs, pkg: &str) -> bool {
+    if let Some(id) = d.portal_id(pkg)
+        && let Ok(Some(_)) = dynlauncher::get(&id)
+        && let Err(e) = dynlauncher::uninstall(&id)
+    {
+        eprintln!("linuxapk: {e:#}");
+    }
     let had_entry = fs::remove_file(d.app_desktop(pkg)).is_ok();
     let icons = remove_icons(d, &format!("{PREFIX}{pkg}"));
     if icons > 0 {
@@ -222,34 +325,43 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     v
 }
 
-/// Repairs the `Exec` of our app entries that can no longer run: their
-/// program is gone (Linux.apk, or its AppImage, moved or was reinstalled
-/// elsewhere), or they set variables an older Linux.apk used
-/// (`LINUXAPK_SESSION`). They are pointed at `linuxapk` (this installation's
-/// command line), keeping their instance. Returns how many were rewritten.
+/// Repairs our app entries. The `Exec` of one that can no longer run is
+/// pointed at `linuxapk` (this installation's command line, keeping its
+/// instance): its program is gone (Linux.apk, or its AppImage, moved or was
+/// reinstalled elsewhere), it sets variables an older Linux.apk used
+/// (`LINUXAPK_SESSION`), or, inside the Flatpak, it runs anything but
+/// `linuxapk`. Inside the Flatpak, a record whose app-menu entry is missing or
+/// runs another command is offered to the portal again, unless the user
+/// declined it. Returns how many were rewritten.
 pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
     let mut n = 0;
-    for (pkg, path, text) in app_entries(d) {
+    for (pkg, path, mut text) in app_entries(d) {
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
         let args = desktop::exec_args(&exec);
         let inv = paths::invocation(&args);
         let missing = inv
             .program
             .is_some_and(|p| Path::new(p).is_absolute() && !Path::new(p).exists());
-        if !(missing || inv.foreign_env || inv.program.is_none()) {
-            continue;
+        let elsewhere = d.portal.is_some() && inv.program != linuxapk.first().map(String::as_str);
+        if missing || elsewhere || inv.foreign_env || inv.program.is_none() {
+            let mut run = paths::command(linuxapk, inv.instance);
+            run.extend(["run".into(), pkg.clone()]);
+            let Some(new) = desktop::exec_line(&run, Some("%U"))
+                .ok()
+                .and_then(|line| desktop::replace_key(&text, "Exec", &line))
+            else {
+                continue;
+            };
+            match write_atomic(&path, new.as_bytes()) {
+                Ok(()) => n += 1,
+                Err(e) => eprintln!("linuxapk: {e:#}"),
+            }
+            text = new;
         }
-        let mut run = paths::command(linuxapk, inv.instance);
-        run.extend(["run".into(), pkg]);
-        let Ok(line) = desktop::exec_line(&run, Some("%U")) else {
-            continue;
-        };
-        let Some(new) = desktop::replace_key(&text, "Exec", &line) else {
-            continue;
-        };
-        match write_atomic(&path, new.as_bytes()) {
-            Ok(()) => n += 1,
-            Err(e) => eprintln!("linuxapk: {e:#}"),
+        if d.portal.is_some()
+            && let Err(e) = add_to_menu(d, &pkg, &text, true)
+        {
+            eprintln!("linuxapk: {pkg}: app menu: {e:#}");
         }
     }
     if n > 0 {
@@ -288,6 +400,7 @@ mod tests {
             data: root.join("share"),
             config: root.join("config"),
             cache: root.join("cache"),
+            portal: None,
         };
         let mut e = AppEntry {
             package: "org.example.app".into(),
@@ -305,7 +418,11 @@ mod tests {
         png.extend(48u32.to_be_bytes());
         png.extend(48u32.to_be_bytes());
         // A wrong-size PNG is skipped rather than misfiled.
-        let p = install_app(&d, &mut e, &[(48, png.clone()), (64, png.clone())]).unwrap();
+        let Menu::File(p) =
+            install_app(&d, &mut e, &[(48, png.clone()), (64, png.clone())]).unwrap()
+        else {
+            panic!("not a file");
+        };
         assert!(p.ends_with("applications/dev.linuxapk.org.example.app.desktop"));
         assert!(d.icon_path(48, "dev.linuxapk.org.example.app").is_file());
         assert!(!d.icon_path(64, "dev.linuxapk.org.example.app").exists());
@@ -336,6 +453,7 @@ mod tests {
             data: root.join("share"),
             config: root.join("config"),
             cache: root.join("cache"),
+            portal: None,
         };
         // This installation is an AppImage (Prefix::cli).
         let appimage = root.join("Linux.apk.AppImage");

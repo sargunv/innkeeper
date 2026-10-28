@@ -4,8 +4,8 @@
 //! The system app sends a media blob per active `MediaSession` (keyed by its
 //! own nonzero player id) whenever its metadata or state changes. Each player
 //! is its own session-bus connection owning
-//! `org.mpris.MediaPlayer2.dev_linuxapk_<package>` (plus `.instance<N>` if
-//! the package has two), serving `/org/mpris/MediaPlayer2`. MPRIS calls come
+//! `org.mpris.MediaPlayer2.dev.linuxapk.Manager.<package, _ for .>` (plus
+//! `.instance<N>` if the package has two), serving `/org/mpris/MediaPlayer2`. MPRIS calls come
 //! back as `MEDIA_CMD` events. Artwork arrives as RGBA and is written as our
 //! own PNG encoding to a private directory (`mpris:artUrl` must be a URL).
 
@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use linuxapk_core::desktop::MANAGER_ID;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
@@ -216,7 +217,7 @@ impl Root {
     }
     #[zbus(property)]
     fn desktop_entry(&self) -> String {
-        format!("dev.linuxapk.{}", self.st.lock().unwrap().media.package)
+        linuxapk_core::desktop::app_id(&self.st.lock().unwrap().media.package)
     }
     #[zbus(property)]
     fn supported_uri_schemes(&self) -> Vec<String> {
@@ -457,8 +458,9 @@ impl MprisHub {
         }
         let mut art_file = None;
         let art_url = self.write_art(client, player, art.as_ref(), &mut art_file);
+        // Under the manager's id, which Flatpak lets the app own.
         let base = format!(
-            "org.mpris.MediaPlayer2.dev_linuxapk_{}",
+            "org.mpris.MediaPlayer2.{MANAGER_ID}.{}",
             media.package.replace('.', "_")
         );
         let base = crate::ipc::wire::truncate(&base, 200).to_owned();
