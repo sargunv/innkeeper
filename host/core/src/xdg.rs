@@ -223,11 +223,11 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 }
 
 /// Repairs the `Exec` of our app entries that can no longer run: their
-/// program is gone (Linux.apk moved or was reinstalled elsewhere), or they
-/// set variables an older Linux.apk used (`LINUXAPK_SESSION`). They are
-/// pointed at `linuxapk` (this installation's), keeping their instance.
-/// Returns how many were rewritten.
-pub fn refresh_entries(d: &Dirs, linuxapk: &Path) -> usize {
+/// program is gone (Linux.apk, or its AppImage, moved or was reinstalled
+/// elsewhere), or they set variables an older Linux.apk used
+/// (`LINUXAPK_SESSION`). They are pointed at `linuxapk` (this installation's
+/// command line), keeping their instance. Returns how many were rewritten.
+pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
     let mut n = 0;
     for (pkg, path, text) in app_entries(d) {
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn instance_of_exec() {
         for (program, instance) in [("/x/linuxapk", "gui"), ("/a b/linuxapk", "")] {
-            let mut run = paths::command(Path::new(program), instance);
+            let mut run = paths::command(&[program.into()], instance);
             run.extend(["run".into(), "a.b".into()]);
             let exec = desktop::exec_line(&run, Some("%U")).unwrap();
             assert_eq!(exec_instance(&exec), instance);
@@ -337,9 +337,10 @@ mod tests {
             config: root.join("config"),
             cache: root.join("cache"),
         };
-        let linuxapk = root.join("bin/linuxapk");
-        fs::create_dir_all(linuxapk.parent().unwrap()).unwrap();
-        fs::write(&linuxapk, "").unwrap();
+        // This installation is an AppImage (Prefix::cli).
+        let appimage = root.join("Linux.apk.AppImage");
+        fs::write(&appimage, "").unwrap();
+        let cli = vec![appimage.to_string_lossy().into_owned(), "linuxapk".into()];
         let entry = |pkg: &str, exec: &str| {
             let p = d.app_desktop(pkg);
             let text =
@@ -348,37 +349,34 @@ mod tests {
             p
         };
         let exec_of = |p: &Path| desktop::read_key(&fs::read_to_string(p).unwrap(), "Exec");
-        let mut old = paths::command(Path::new("/gone/linuxapk"), "cli");
+        let want = |pkg: &str, instance: &str| {
+            let mut run = paths::command(&cli, instance);
+            run.extend(["run".into(), pkg.into()]);
+            Some(desktop::exec_line(&run, Some("%U")).unwrap())
+        };
+        let mut old = paths::command(&["/gone/linuxapk".into()], "cli");
         old.insert(1, "LINUXAPK_SESSION=/gone/session".into());
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
         let moved = entry("org.ex.moved", "/gone/linuxapk run org.ex.moved %U");
-        let mut fine = paths::command(&linuxapk, "");
-        fine.extend(["run".into(), "org.ex.fine".into()]);
-        let fine_line = desktop::exec_line(&fine, Some("%U")).unwrap();
-        let fine = entry("org.ex.fine", &fine_line);
+        let moved_appimage = entry(
+            "org.ex.ai",
+            "env LINUXAPK_INSTANCE=t /gone/Linux.apk.AppImage linuxapk run org.ex.ai %U",
+        );
+        let fine = entry("org.ex.fine", &want("org.ex.fine", "").unwrap());
         let on_path = entry("org.ex.path", "linuxapk run org.ex.path %U");
 
-        assert_eq!(refresh_entries(&d, &linuxapk), 2);
-        let mut want = paths::command(&linuxapk, "cli");
-        want.extend(["run".into(), "org.ex.old".into()]);
-        assert_eq!(
-            exec_of(&old),
-            Some(desktop::exec_line(&want, Some("%U")).unwrap())
-        );
+        assert_eq!(refresh_entries(&d, &cli), 3);
+        assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
         assert_eq!(exec_instance(&exec_of(&old).unwrap()), "cli");
-        let mut want = paths::command(&linuxapk, "");
-        want.extend(["run".into(), "org.ex.moved".into()]);
-        assert_eq!(
-            exec_of(&moved),
-            Some(desktop::exec_line(&want, Some("%U")).unwrap())
-        );
-        assert_eq!(exec_of(&fine), Some(fine_line));
+        assert_eq!(exec_of(&moved), want("org.ex.moved", ""));
+        assert_eq!(exec_of(&moved_appimage), want("org.ex.ai", "t"));
+        assert_eq!(exec_of(&fine), want("org.ex.fine", ""));
         assert_eq!(
             exec_of(&on_path).as_deref(),
             Some("linuxapk run org.ex.path %U")
         );
-        assert_eq!(refresh_entries(&d, &linuxapk), 0);
+        assert_eq!(refresh_entries(&d, &cli), 0);
         fs::remove_dir_all(&root).unwrap();
     }
 }

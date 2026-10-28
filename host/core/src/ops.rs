@@ -31,11 +31,11 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// The command line desktop entries run `linuxapk` with: this prefix's, for
-/// this session instance.
+/// The command line desktop entries run `linuxapk` with: this
+/// installation's ([`Prefix::cli`]), for this session instance.
 pub fn cli_command() -> Result<Vec<String>> {
     Ok(paths::command(
-        &Prefix::locate()?.bin("linuxapk"),
+        &Prefix::locate()?.cli(),
         &paths::instance()?,
     ))
 }
@@ -420,11 +420,10 @@ pub fn android_packages() -> Option<Vec<String>> {
 }
 
 /// Points app entries that can no longer run (see
-/// [`xdg::refresh_entries`]) at this prefix's `linuxapk`. Returns how many.
+/// [`xdg::refresh_entries`]) at this installation's `linuxapk`
+/// ([`Prefix::cli`]). Returns how many.
 pub fn refresh_entries() -> usize {
-    Prefix::locate().map_or(0, |p| {
-        xdg::refresh_entries(&Dirs::from_env(), &p.bin("linuxapk"))
-    })
+    Prefix::locate().map_or(0, |p| xdg::refresh_entries(&Dirs::from_env(), &p.cli()))
 }
 
 /// Shown once, the first time a session runs in single-uid mode.

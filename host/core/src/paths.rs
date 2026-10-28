@@ -3,7 +3,7 @@
 //! `LINUXAPK_INSTANCE`), and the XDG base directories.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
@@ -43,6 +43,20 @@ impl Prefix {
     pub fn bin(&self, name: &str) -> PathBuf {
         self.0.join("bin").join(name)
     }
+
+    /// The command that runs this installation's `linuxapk` from anywhere,
+    /// as desktop entries do: `bin/linuxapk`, or from the AppImage, the
+    /// AppImage itself with `linuxapk` (its mount is gone once it exits).
+    /// Its `AppRun` sets `LINUXAPK_APPIMAGE` (packaging/appimage).
+    pub fn cli(&self) -> Vec<String> {
+        match env::var_os("LINUXAPK_APPIMAGE")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute() && p.is_file())
+        {
+            Some(a) => vec![a.to_string_lossy().into_owned(), "linuxapk".into()],
+            None => vec![self.bin("linuxapk").to_string_lossy().into_owned()],
+        }
+    }
 }
 
 /// `LINUXAPK_INSTANCE` if it is a valid instance name, else an error. Empty
@@ -59,16 +73,17 @@ fn per_instance(name: &str) -> Result<String> {
     Ok(linuxapk_session::paths::per_instance(name, &instance()?))
 }
 
-/// The argv that runs `program` against session `instance`: prefixed with
-/// `env LINUXAPK_INSTANCE=<instance>` for a named instance, so a desktop entry
-/// reaches the session it was made for.
-pub fn command(program: &Path, instance: &str) -> Vec<String> {
+/// The argv that runs `program` (a command line, such as [`Prefix::cli`])
+/// against session `instance`: prefixed with `env LINUXAPK_INSTANCE=<instance>`
+/// for a named instance, so a desktop entry reaches the session it was made
+/// for.
+pub fn command(program: &[String], instance: &str) -> Vec<String> {
     let mut v = vec![];
     if !instance.is_empty() {
         v.push("env".into());
         v.push(format!("LINUXAPK_INSTANCE={instance}"));
     }
-    v.push(program.to_string_lossy().into_owned());
+    v.extend_from_slice(program);
     v
 }
 
@@ -126,13 +141,17 @@ mod tests {
 
     #[test]
     fn commands_read_back() {
-        let named = command(Path::new("/x/linuxapk"), "cli");
+        let named = command(&argv("/x/linuxapk"), "cli");
         assert_eq!(named.join(" "), "env LINUXAPK_INSTANCE=cli /x/linuxapk");
         let i = invocation(&named);
         assert_eq!((i.instance, i.program), ("cli", Some("/x/linuxapk")));
         assert!(!i.foreign_env);
-        let main = command(Path::new("/x/linuxapk"), "");
+        let main = command(&argv("/x/linuxapk"), "");
         assert_eq!(invocation(&main).instance, "");
+        // The AppImage: the program is the AppImage, `linuxapk` an argument.
+        let appimage = command(&argv("/a/Linux.apk.AppImage linuxapk"), "");
+        let i = invocation(&appimage);
+        assert_eq!((i.instance, i.program), ("", Some("/a/Linux.apk.AppImage")));
 
         let old = argv("env LINUXAPK_SESSION=/s LINUXAPK_INSTANCE=cli linuxapk run a.b");
         let old = invocation(&old);

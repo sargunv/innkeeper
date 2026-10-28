@@ -22,7 +22,6 @@
 //! the user's app menu.
 
 use std::os::fd::OwnedFd;
-use std::path::Path;
 use std::sync::Arc;
 
 use linuxapk_core::desktop::{self, AppEntry};
@@ -190,7 +189,7 @@ impl Config {
         let instance = paths::instance().unwrap_or_default();
         let mut run = ops::cli_command().unwrap_or_else(|e| {
             crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
-            paths::command(Path::new("linuxapk"), &instance)
+            paths::command(&["linuxapk".into()], &instance)
         });
         run.push("run".into());
         Config {
@@ -412,7 +411,7 @@ mod tests {
             },
             instance: "t".into(),
             run: [
-                paths::command(Path::new("linuxapk"), "t"),
+                paths::command(&["linuxapk".into()], "t"),
                 vec!["run".into()],
             ]
             .concat(),

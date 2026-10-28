@@ -156,5 +156,10 @@ impl Config {
         if let Some(d) = env::var("XDG_DATA_HOME").ok().filter(|v| !v.is_empty()) {
             e.insert("XDG_DATA_HOME".into(), d);
         }
+        // From the AppImage, those entries run apps through it, as the CLI's
+        // and the manager's do.
+        if let Some(a) = env::var("LINUXAPK_APPIMAGE").ok().filter(|v| !v.is_empty()) {
+            e.insert("LINUXAPK_APPIMAGE".into(), a);
+        }
     }
 }
