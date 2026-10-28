@@ -218,9 +218,11 @@ stateDiagram-v2
     with the environment the session was started with.
   - Flatpak mode: a sandbox can't make timers, and the Background portal has
     none, so the session's process stays in its sandbox as a waiter: it serves
-    `status` (`stopped`, `wakeup=<ms>`) and `stop` on `control.sock`, and runs
-    the session again at that time. With no window open (a waiter, a foreground
-    service, a background app) it asks the Background portal to keep running.
+    `status` (`stopped`, `wakeup=<ms>`) and `stop` on `control.sock`, and at
+    that time runs `start`, which starts the session in a new sandbox (this
+    one's `/` holds the last boot's runtime files). With no window open (a
+    waiter, a foreground service, a background app) it asks the Background
+    portal to keep running.
 
 ## Where things live
 

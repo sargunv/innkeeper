@@ -314,8 +314,9 @@ pub fn run(cfg: &Config, follow: bool) -> Result<()> {
 }
 
 /// Stays in the sandbox, stopped, until shortly before `at_ms` (ms since the
-/// epoch), then starts the session again here. `status` reports it stopped,
-/// and `stop` (or a new `start`) ends it.
+/// epoch), then starts the session again as `start` does, in a new sandbox:
+/// this one's `/` holds the last boot's runtime files. `status` reports it
+/// stopped, and `stop` (or a new `start`) ends it.
 fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     let p = &cfg.paths;
     request_background(p);
@@ -351,14 +352,18 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
         }
         sleep(Duration::from_millis((at - now).min(30_000)));
     }
+    // Not waiting any more, so `start` doesn't stop this process first.
     let _ = fs::remove_file(&sock);
     let mut c = Command::new(env::current_exe()?);
-    c.arg("_serve");
+    c.arg("start");
     if cfg.headless {
         c.arg("--headless");
     }
-    let e = c.exec();
-    bail!("start the session again: {e}")
+    let st = c.stdin(Stdio::null()).status().context("run start")?;
+    if !st.success() {
+        bail!("start the session again: {st}");
+    }
+    Ok(())
 }
 
 /// Asks the Background portal to let Linux.apk run with no window open
