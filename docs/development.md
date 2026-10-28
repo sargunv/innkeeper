@@ -79,17 +79,26 @@ whatever the bus activates (portals, kded) inherits it.
 
 ```sh
 N=$PWD/out/nested
-mkdir -p $N/{rt,home,config,data,cache,state} && chmod 700 $N/rt
+mkdir -p $N/{home,config,data,cache,state}
+# A short runtime dir: a socket path must fit in 108 bytes, which a deep
+# checkout's out/ can exceed (KWin then dumps core). Remove it when done.
+RT=$(mktemp -d -p "$XDG_RUNTIME_DIR" lapk-XXXXXX)
 printf '#!/bin/sh\necho "$DBUS_SESSION_BUS_ADDRESS" >%s/bus\nexec sleep infinity\n' $N >$N/hold.sh
 chmod +x $N/hold.sh   # the session's command: publishes the nested bus, then waits
-E=(-u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS HOME=$N/home XDG_RUNTIME_DIR=$N/rt
+E=(-u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS HOME=$N/home XDG_RUNTIME_DIR=$RT
    XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
    XDG_CURRENT_DESKTOP=KDE)
 systemd-run --user --unit linuxapk-nested-kwin -p MemoryMax=3G -- env "${E[@]}" WAYLAND_DISPLAY=lapk-nested \
   dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket lapk-nested \
   --width 1920 --height 1080 --exit-with-session $N/hold.sh
-WAYLAND_DISPLAY=$N/rt/lapk-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
+WAYLAND_DISPLAY=$RT/lapk-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
   LINUXAPK_INSTANCE=nested mise run session -- start
+# linuxapk writes desktop entries under XDG_DATA_HOME for every instance, so
+# point it at $N while keeping the session's image and /data:
+D=(XDG_DATA_HOME=$N/data XDG_CONFIG_HOME=$N/config LINUXAPK_INSTANCE=nested
+   LINUXAPK_IMAGES=$HOME/.local/share/linuxapk/images
+   LINUXAPK_DATA=$HOME/.local/share/linuxapk/data-nested)
+env "${D[@]}" out/stage/bin/linuxapk install some.apk
 ```
 
 - Check `/proc/<pid>/environ` of every process on the nested bus (private
@@ -101,5 +110,9 @@ WAYLAND_DISPLAY=$N/rt/lapk-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
   symlink) is the `Exec` of a `.desktop` file in `$N/data/applications` with
   `X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input`. `spectacle -b -n` with the
   nested bus captures screenshots.
+- Inside Android, plain `screencap` shows only the launcher: each app window is
+  its own virtual display, named `linuxapk:<package>`. Capture one with
+  `screencap -d <id> -p <file>`, taking the id from
+  `dumpsys SurfaceFlinger --display-id`, as tests/compat does.
 - A fake `x-scheme-handler/https` handler in `$N/data/applications` logs what
   OpenURI opens, and a null sink (`LINUXAPK_AUDIO_SINK`) keeps media silent.
