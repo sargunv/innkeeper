@@ -16,6 +16,7 @@ artifacts = [
   "share/applications/dev.linuxapk.Manager.desktop",
   "share/metainfo/dev.linuxapk.Manager.metainfo.xml",
   "share/icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg",
+  "share/mime/packages/dev.linuxapk.Manager.xml",
 ]
 
 [module.launcher]

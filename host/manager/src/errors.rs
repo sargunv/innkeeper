@@ -9,7 +9,8 @@ pub enum Op {
     Open,
     Uninstall,
     Session,
-    Settings,
+    /// Downloading and unpacking the Android image.
+    Prepare,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +139,7 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
         Op::Open => format!("Couldn’t Open {}", cap(app)),
         Op::Uninstall => format!("Couldn’t Uninstall {}", cap(app)),
         Op::Session => "Couldn’t Control the Android Session".into(),
-        Op::Settings => "Couldn’t Change the Setting".into(),
+        Op::Prepare => "Couldn’t Download Android".into(),
     };
     let first = d.split(": ").last().unwrap_or(d).trim();
     let body = if first.is_empty() {

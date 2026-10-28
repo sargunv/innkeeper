@@ -1,5 +1,5 @@
 //! `linuxapk`: install Android apps into the Linux.apk session with desktop
-//! entries and icons, run them, and manage the session. A thin front end over
+//! entries and icons, run, list and uninstall them. A thin front end over
 //! `linuxapk-core` (shared with the `linuxapk-manager` manager). See docs/cli.md.
 
 use std::path::{Path, PathBuf};
@@ -26,6 +26,11 @@ struct Cli {
 enum Cmd {
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
     Install { file: PathBuf },
+    /// Launch an app, optionally opening a URI in it.
+    Run {
+        package: String,
+        uri: Option<String>,
+    },
     /// Uninstall an app and remove its desktop entry and icons.
     Uninstall {
         package: String,
@@ -33,32 +38,8 @@ enum Cmd {
         #[arg(long)]
         keep_data: bool,
     },
-    /// Launch an app, optionally opening a URI in it.
-    Run {
-        package: String,
-        uri: Option<String>,
-    },
     /// List installed (user) apps.
     List,
-    /// Start, stop or query the Android session.
-    Session {
-        #[command(subcommand)]
-        action: SessionCmd,
-    },
-    /// Register the Linux.apk manager as the handler for APK files
-    /// (double-click to install), and add it to the app menu.
-    Setup {
-        /// Unregister and remove the handler.
-        #[arg(long)]
-        remove: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum SessionCmd {
-    Start,
-    Stop,
-    Status,
 }
 
 /// Progress and warnings on stderr.
@@ -105,20 +86,6 @@ fn list() -> Result<()> {
     Ok(())
 }
 
-fn setup(remove: bool) -> Result<()> {
-    if remove {
-        ops::unsetup()?;
-        println!("removed the APK handler");
-        return Ok(());
-    }
-    let files = ops::setup()?;
-    println!("APK files now open in Linux.apk (linuxapk-manager):");
-    for f in files {
-        println!("  {}", f.display());
-    }
-    Ok(())
-}
-
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let res = match cli.cmd {
@@ -126,22 +93,13 @@ fn main() -> ExitCode {
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
         Cmd::Run { package, uri } => ops::run(&package, uri.as_deref(), &stderr),
         Cmd::List => list(),
-        Cmd::Session { action } => {
-            let r = Session::find().and_then(|s| match action {
-                SessionCmd::Start => s.passthrough(&["start"]),
-                SessionCmd::Stop => s.passthrough(&["stop"]),
-                SessionCmd::Status => s.passthrough(&["status"]),
-            });
-            return match r {
-                Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
-                Err(e) => {
-                    eprintln!("linuxapk: {e:#}");
-                    ExitCode::FAILURE
-                }
-            };
-        }
-        Cmd::Setup { remove } => setup(remove),
     };
+    if let Some(n) = Session::find()
+        .ok()
+        .and_then(|s| ops::single_uid_notice(s.uid_mode()))
+    {
+        eprintln!("linuxapk: note: {n} See {}", ops::SINGLE_UID_DOCS);
+    }
     match res {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

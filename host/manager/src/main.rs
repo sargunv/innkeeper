@@ -6,7 +6,6 @@
 mod errors;
 mod install;
 mod permissions;
-mod settings;
 mod window;
 mod worker;
 
@@ -61,7 +60,6 @@ fn main() -> glib::ExitCode {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
         app.set_accels_for_action("win.open", &["<Control>o"]);
-        app.set_accels_for_action("app.preferences", &["<Control>comma"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);
         let quit = gio::SimpleAction::new("quit", None);
@@ -80,10 +78,6 @@ fn main() -> glib::ExitCode {
                 return w.clone();
             }
             let w = Window::new(app);
-            let prefs = gio::SimpleAction::new("preferences", None);
-            let w2 = w.clone();
-            prefs.connect_activate(move |_, _| settings::present(&w2));
-            app.add_action(&prefs);
             let about = gio::SimpleAction::new("about", None);
             let w2 = w.clone();
             about.connect_activate(move |_, _| about_dialog(&w2));

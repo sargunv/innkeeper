@@ -3,6 +3,7 @@
 //! thread; progress and warnings go to a [`Report`] callback.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -10,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use crate::android::{self, Launch};
 use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
-use crate::launcher::Session;
+use crate::launcher::{Session, UidMode};
 use crate::manifest::{self, Aapt2, Badging};
 use crate::paths::{self, Prefix};
 use crate::validate;
@@ -30,19 +31,20 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// The command line a desktop entry runs `name` (`linuxapk` or
-/// `linuxapk-manager`) with: its absolute path in this program's prefix,
-/// after `env LINUXAPK_INSTANCE=<instance>` for a named instance.
-pub fn command_for(name: &str) -> Result<Vec<String>> {
-    let mut v = vec![];
-    let inst = paths::instance()?;
-    if !inst.is_empty() {
-        v.push("env".into());
-        v.push(format!("LINUXAPK_INSTANCE={inst}"));
-    }
-    let bin = Prefix::locate()?.bin(name);
-    v.push(bin.to_str().context("program path isn't UTF-8")?.into());
-    Ok(v)
+/// The command line desktop entries run `linuxapk` with: this prefix's, for
+/// this session instance.
+pub fn cli_command() -> Result<Vec<String>> {
+    Ok(paths::command(
+        &Prefix::locate()?.bin("linuxapk"),
+        &paths::instance()?,
+    ))
+}
+
+/// The running session, after starting it if needed.
+fn session(report: Report) -> Result<Session> {
+    let s = Session::find()?;
+    s.ensure(&|m| report(Event::Status(m.to_string())))?;
+    Ok(s)
 }
 
 /// An APK or bundle, read and checked but not installed yet: what an install
@@ -188,8 +190,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
     let dirs = Dirs::from_env();
     let aapt = Aapt2::find()?;
     let pkg = p.package.clone();
-    let s = Session::find()?;
-    s.ensure(&|m| report(Event::Status(m.to_string())))?;
+    let s = session(report)?;
     let abis: Vec<String> = s
         .getprop("ro.product.cpu.abilist")
         .split(',')
@@ -275,7 +276,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         .filter_map(|(tag, l)| Some((validate::desktop_locale(tag)?, validate::label(l)?)))
         .filter(|(loc, l)| *l != name && seen.insert(loc.clone()))
         .collect();
-    let mut run = command_for("linuxapk")?;
+    let mut run = cli_command()?;
     run.push("run".into());
     let mut entry = AppEntry {
         package: pkg.clone(),
@@ -356,8 +357,7 @@ pub struct Uninstalled {
 /// entry and icons.
 pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstalled> {
     let pkg = validate::package(pkg)?;
-    let s = Session::find()?;
-    s.ensure(&|m| report(Event::Status(m.to_string())))?;
+    let s = session(report)?;
     let from_android = android::user_packages(&s)?.iter().any(|p| p == pkg);
     if from_android {
         android::uninstall(&s, pkg, keep_data)?;
@@ -373,8 +373,7 @@ pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstall
 pub fn run(pkg: &str, uri: Option<&str>, report: Report) -> Result<()> {
     let pkg = validate::package(pkg)?;
     let uri = uri.map(validate::launch_uri).transpose()?;
-    let s = Session::find()?;
-    s.ensure(&|m| report(Event::Status(m.to_string())))?;
+    let s = session(report)?;
     let l = match uri {
         Some(u) => Launch::View {
             package: pkg.into(),
@@ -389,8 +388,8 @@ pub fn run(pkg: &str, uri: Option<&str>, report: Report) -> Result<()> {
 
 /// User apps in the session, with the `Name` of their desktop entry.
 pub fn list(report: Report) -> Result<Vec<(String, Option<String>)>> {
-    let s = Session::find()?;
-    s.ensure(&|m| report(Event::Status(m.to_string())))?;
+    refresh_entries();
+    let s = session(report)?;
     let d = Dirs::from_env();
     Ok(android::user_packages(&s)?
         .into_iter()
@@ -436,34 +435,34 @@ pub fn android_packages() -> Option<Vec<String>> {
     android::user_packages(&s).ok()
 }
 
-/// `linuxapk setup`: makes the manager (`linuxapk-manager`, next to this program
-/// or on `PATH`) the APK handler and adds it to the app menu. Returns the
-/// files written.
-pub fn setup() -> Result<Vec<PathBuf>> {
-    let d = Dirs::from_env();
-    let g = command_for("linuxapk-manager")?;
-    let mut files = xdg::setup(&d, &g)?;
-    files.extend(xdg::install_manager(&d, &g)?);
-    Ok(files)
+/// Points app entries that can no longer run (see
+/// [`xdg::refresh_entries`]) at this prefix's `linuxapk`. Returns how many.
+pub fn refresh_entries() -> usize {
+    Prefix::locate().map_or(0, |p| {
+        xdg::refresh_entries(&Dirs::from_env(), &p.bin("linuxapk"))
+    })
 }
 
-/// `linuxapk setup --remove`: the handler and the manager's entry.
-pub fn unsetup() -> Result<()> {
-    let d = Dirs::from_env();
-    xdg::unsetup(&d)?;
-    xdg::remove_manager(&d);
-    Ok(())
+/// Shown once, the first time a session runs in single-uid mode.
+pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
+    this computer gives you no subordinate uid range (/etc/subuid), so they all run as your user.";
+pub const SINGLE_UID_DOCS: &str = "https://github.com/sargunv/linux.apk/blob/main/docs/sandbox.md";
+
+/// [`SINGLE_UID_NOTICE`] if the session runs in single-uid `mode` and the
+/// notice hasn't been shown yet. It counts as shown from now on (a stamp in
+/// [`paths::notices_dir`]).
+pub fn single_uid_notice(mode: Option<UidMode>) -> Option<&'static str> {
+    notice_once(&paths::notices_dir(), mode)
 }
 
-/// The manager's "open APK files" setting. On: the GUI (this program, or
-/// `linuxapk-manager` next to it) becomes the APK handler and gets its app-menu
-/// entry. Off: the handler is removed (the menu entry stays).
-pub fn set_gui_handler(on: bool) -> Result<()> {
-    if on {
-        setup().map(drop)
-    } else {
-        xdg::unsetup(&Dirs::from_env())
+fn notice_once(dir: &Path, mode: Option<UidMode>) -> Option<&'static str> {
+    if mode != Some(UidMode::Single) {
+        return None;
     }
+    fs::create_dir_all(dir).ok()?;
+    // Whoever creates the stamp shows the notice.
+    fs::File::create_new(dir.join("single-uid")).ok()?;
+    Some(SINGLE_UID_NOTICE)
 }
 
 #[cfg(test)]
@@ -475,6 +474,27 @@ mod tests {
         assert_eq!(version_name(" 2.7.50-r-2024 "), "2.7.50-r-2024");
         assert_eq!(version_name("1.0\u{202E}"), "");
         assert_eq!(version_name(&"9".repeat(100)).chars().count(), 64);
+    }
+
+    #[test]
+    fn single_uid_notice_shows_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::test_dir("single-uid-notice");
+        let launcher = dir.join("linuxapk-session");
+        fs::write(
+            &launcher,
+            "#!/bin/sh\n[ \"$1\" = status ] && printf 'running: host pid 1\\nuid-mode=single\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let s = Session::at(launcher);
+        assert_eq!(s.pid(), Some(1));
+        let notices = dir.join("notices");
+        assert_eq!(notice_once(&notices, s.uid_mode()), Some(SINGLE_UID_NOTICE));
+        assert_eq!(notice_once(&notices, s.uid_mode()), None);
+        assert!(notices.join("single-uid").is_file());
+        assert_eq!(notice_once(&dir.join("other"), Some(UidMode::Subuid)), None);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

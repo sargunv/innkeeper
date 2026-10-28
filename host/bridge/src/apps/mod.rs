@@ -10,10 +10,11 @@
 //! touched.
 
 use std::os::fd::OwnedFd;
+use std::path::Path;
 use std::sync::Arc;
 
 use linuxapk_core::desktop::{self, AppEntry};
-use linuxapk_core::{validate, xdg};
+use linuxapk_core::{ops, paths, validate, xdg};
 
 use crate::ipc::blob;
 use crate::ipc::server::{Peer, Reply, Service};
@@ -165,7 +166,7 @@ pub struct Config {
     /// Off: every request is a no-op (other instances' sessions, tests).
     pub enabled: bool,
     pub dirs: xdg::Dirs,
-    /// The session instance (`LINUXAPK_INSTANCE`) entries are made for.
+    /// The session instance entries are made for (see `paths::instance`).
     pub instance: String,
     /// `Exec` prefix: `linuxapk run` (with the instance), the package and
     /// `%U` are appended.
@@ -174,15 +175,10 @@ pub struct Config {
 
 impl Config {
     pub fn from_env(enabled: bool) -> Config {
-        let instance = linuxapk_core::paths::instance().unwrap_or_default();
-        let mut run = linuxapk_core::ops::command_for("linuxapk").unwrap_or_else(|e| {
+        let instance = paths::instance().unwrap_or_default();
+        let mut run = ops::cli_command().unwrap_or_else(|e| {
             crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
-            let mut v = vec![];
-            if !instance.is_empty() {
-                v = vec!["env".into(), format!("LINUXAPK_INSTANCE={instance}")];
-            }
-            v.push("linuxapk".into());
-            v
+            paths::command(Path::new("linuxapk"), &instance)
         });
         run.push("run".into());
         Config {
@@ -394,8 +390,7 @@ mod tests {
 
     #[test]
     fn mirror_writes_and_removes_only_its_own_entries() {
-        let tmp = std::env::temp_dir().join(format!("linuxapk-apps-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = crate::test_dir("apps-mirror");
         let cfg = Arc::new(Config {
             enabled: true,
             dirs: xdg::Dirs {
@@ -404,13 +399,17 @@ mod tests {
                 cache: tmp.join("cache"),
             },
             instance: "t".into(),
-            run: vec![
-                "env".into(),
-                "LINUXAPK_INSTANCE=t".into(),
-                "linuxapk".into(),
-                "run".into(),
-            ],
+            run: [
+                paths::command(Path::new("linuxapk"), "t"),
+                vec!["run".into()],
+            ]
+            .concat(),
         });
+        let exec = |pkg: &str| {
+            let mut run = cfg.run.clone();
+            run.push(pkg.into());
+            desktop::exec_line(&run, Some("%U")).unwrap()
+        };
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
         assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
@@ -426,7 +425,7 @@ mod tests {
         let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
         assert!(text.contains("X-LinuxApk-Origin=android"), "{text}");
         assert!(
-            text.contains("Exec=env LINUXAPK_INSTANCE=t linuxapk run org.ex.a %U"),
+            text.contains(&format!("Exec={}\n", exec("org.ex.a"))),
             "{text}"
         );
         assert!(cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").is_file());
@@ -434,8 +433,7 @@ mod tests {
         assert_eq!(cfg.have("org.ex.a", "2"), have::MISSING);
         // An entry from `linuxapk install` is left alone, and so is another
         // instance's.
-        let cli =
-            "[Desktop Entry]\nName=B\nExec=env LINUXAPK_INSTANCE=t linuxapk run org.ex.b %U\n";
+        let cli = format!("[Desktop Entry]\nName=B\nExec={}\n", exec("org.ex.b"));
         std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
         assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
         let other =

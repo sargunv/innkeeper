@@ -6,9 +6,9 @@ libadwaita (`gui/`), a thin front end over the same library as the `linuxapk`
 CLI. The CLI stays the scriptable path.
 
 ```sh
-cargo build --release -p linuxapk -p linuxapk-gui
-target/release/linuxapk-gui [App.apk]      # opens the install page for a file
-linuxapk setup                             # APK files open in the GUI; adds it to the app menu
+mise run build
+out/stage/bin/linuxapk-manager [App.apk]   # opens the install page for a file
+mise run install-dev                       # app menu entry and APK handler, for the staged build
 ```
 
 Building needs the GTK 4 (4.18+) and libadwaita (1.7+) development files
@@ -40,10 +40,10 @@ it also wants `javac` and the Android SDK.
     if needed.
 - **`cli/`** is clap plus printing. Its output and tests are unchanged, apart
   from one new progress line ("adding it to the app menu").
-- **`gui/`**: `window.rs` (list, session, drag and drop), `install.rs` (the
-  confirmation page), `settings.rs`, `errors.rs` (messages for people),
-  `permissions.rs` (plain names), `worker.rs`. Every core call runs on a
-  `gio::spawn_blocking` thread. Its progress events come back over an async
+- **`gui/`**: `window.rs` (list, session, drag and drop, the first run's
+  download), `install.rs` (the confirmation page), `errors.rs` (messages for
+  people), `permissions.rs` (plain names), `worker.rs`. Every core call runs on
+  a `gio::spawn_blocking` thread. Its progress events come back over an async
   channel to the UI thread, which never blocks on aapt2, the session or the
   package manager.
 
@@ -76,35 +76,41 @@ it also wants `javac` and the Android SDK.
   `MemoryCurrent`. It's polled every 3 s off the UI thread. Start runs
   `Session::ensure` (start and wait for boot) and Stop runs
   `linuxapk-session stop`.
-- **Preferences:** "Open APK Files With Linux.apk" switches the handler (below).
+- **First run:** without the Android image, the window shows "Preparing Android"
+  while `linuxapk-session prepare` downloads (about 1.2 GB) and unpacks it, with
+  "Try Again" if that fails. APKs opened meanwhile wait for it.
+- **Single-uid notice:** the first time the session runs in single-uid mode (no
+  subordinate uid range on the host), a banner says that apps are not isolated
+  from each other, with "Learn More" for [sandbox.md](sandbox.md). It shares its
+  stamp with the CLI's notice, so it shows once.
+- **Entry repair:** at startup the manager points app entries that can no longer
+  run at this installation's `linuxapk`, as `linuxapk list` does
+  ([cli.md](cli.md)).
 - **Errors** are an alert (or the install page itself) with a heading and a
   sentence for known cases: not an APK, ARM only, signature conflict, downgrade,
   an older Android, damaged APK, missing aapt2, Android not starting, no
   launcher activity. Other errors get a generic heading. The raw error chain
   sits under "Details".
 
-## APK handler and registration (decision)
+## APK handler (decision)
 
-Only the manager handles APK files. `linuxapk setup` registers `linuxapk-gui`,
-found next to `linuxapk` or on `PATH`, and fails without it.
+Only the manager handles APK files, through the files it ships (installed with
+the package, or by `mise run install-dev` for a checkout's stage):
 
-| file                                                   | contents                                                                                               |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `applications/dev.linuxapk.installer.desktop`          | `Exec=linuxapk-gui %f`, `Icon=dev.linuxapk.Manager`, `NoDisplay`, the APK MIME types; default for them |
-| `applications/dev.linuxapk.Manager.desktop`            | the app-menu entry "Linux.apk" (`Exec=linuxapk-gui`, `StartupWMClass=dev.linuxapk.Manager`)            |
-| `icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg` | the manager's icon (`core/data/`)                                                                      |
-| `mime/packages/dev.linuxapk.xml`                       | `.apks`, `.xapk`, `.apkm` types                                                                        |
+| file                                                   | contents                                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `applications/dev.linuxapk.Manager.desktop`            | the app-menu entry "Linux.apk": `Exec=linuxapk-manager %f`, the APK and bundle types |
+| `icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg` | the manager's icon                                                                   |
+| `mime/packages/dev.linuxapk.Manager.xml`               | the `.apks`, `.xapk` and `.apkm` types                                               |
 
 - The GUI is a single instance (`GApplication`, app ID `dev.linuxapk.Manager`,
   `HANDLES_OPEN`). Opening an APK while it runs pushes a new install page into
   the open window.
-- `setup --remove` removes the handler and the manager's menu entry. The
-  Preferences switch turns the handler on (GUI handler plus menu entry) or off
-  (handler only). The menu entry stays, because you're using it.
-- Both IDs have one segment after `dev.linuxapk.`, so no Android package (two or
-  more segments) can collide with them.
-- Entries carry `LINUXAPK_INSTANCE`/`LINUXAPK_SESSION` if they were set, as the
-  CLI's do. The app ID doesn't, so one GUI process serves one instance.
+- Whether it is the default for APKs is the desktop's choice ("Open With").
+- The ID has one segment after `dev.linuxapk.`, so no Android package (two or
+  more segments) can collide with it.
+- App entries carry `LINUXAPK_INSTANCE` if it was set, as the CLI's do. The app
+  ID doesn't, so one GUI process serves one instance.
 
 ## Flatpak (later)
 

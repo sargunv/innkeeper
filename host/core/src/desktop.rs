@@ -10,10 +10,9 @@ use crate::validate::is_forbidden_char;
 
 /// Desktop-file ID and icon name prefix; `StartupWMClass` uses it too.
 pub const PREFIX: &str = "dev.linuxapk.";
-pub const INSTALLER_ID: &str = "dev.linuxapk.installer";
 /// The manager app (`linuxapk-manager`): its application ID, desktop-file ID and
 /// icon name. One segment after the prefix, so no Android package (which
-/// has at least two) can collide with it or with `INSTALLER_ID`.
+/// has at least two) can collide with it.
 pub const MANAGER_ID: &str = "dev.linuxapk.Manager";
 /// The manager's icon (also used where an app has no icon of its own).
 pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.linuxapk.Manager.svg");
@@ -86,6 +85,36 @@ pub fn exec_line(args: &[String], field_code: Option<&str>) -> Result<String> {
         parts.push(f.to_string());
     }
     escape_value(&parts.join(" "))
+}
+
+/// Splits an Exec value (already string-unescaped, as [`read_key`] returns
+/// it) back into arguments: the reverse of [`exec_line`]'s quoting. Field
+/// codes stay as they are.
+pub fn exec_args(exec: &str) -> Vec<String> {
+    let mut args = vec![];
+    let mut it = exec.chars().peekable();
+    loop {
+        while it.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+        let Some(&first) = it.peek() else {
+            return args;
+        };
+        let mut arg = String::new();
+        if first == '"' {
+            it.next();
+            while let Some(c) = it.next() {
+                match c {
+                    '"' => break,
+                    '\\' => arg.extend(it.next()),
+                    c => arg.push(c),
+                }
+            }
+        } else {
+            while let Some(c) = it.next_if(|c| *c != ' ' && *c != '\t') {
+                arg.push(c);
+            }
+        }
+        args.push(arg.replace("%%", "%"));
+    }
 }
 
 /// An installed Android app's launcher entry.
@@ -161,67 +190,14 @@ impl AppEntry {
     }
 }
 
-/// MIME types handled by `linuxapk setup`'s installer entry.
+/// The package formats the manager opens: plain APKs, and the bundle formats
+/// its MIME definitions (`share/mime/packages/dev.linuxapk.Manager.xml`) add.
 pub const PACKAGE_MIME_TYPES: &[&str] = &[
     "application/vnd.android.package-archive",
     "application/x-android-apks",
     "application/x-android-xapk",
     "application/x-android-apkm",
 ];
-
-/// The "Install with Linux.apk" handler for APK files: `manager` (the
-/// `linuxapk-manager` command line) opens them on its install page.
-pub fn installer_entry(manager: &[String]) -> Result<String> {
-    let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
-    s.push_str("Name=Linux.apk Installer\n");
-    s.push_str("GenericName=Android app installer\n");
-    s.push_str("Comment=Install Android apps on this desktop\n");
-    writeln!(s, "Icon={MANAGER_ID}")?;
-    writeln!(s, "StartupWMClass={MANAGER_ID}")?;
-    writeln!(s, "Exec={}", exec_line(manager, Some("%f"))?)?;
-    s.push_str("Terminal=false\nNoDisplay=true\n");
-    writeln!(s, "MimeType={}", list(PACKAGE_MIME_TYPES)?)?;
-    s.push_str("Categories=Settings;PackageManager;\n");
-    Ok(s)
-}
-
-/// The manager's own app-menu entry ("Linux.apk").
-pub fn manager_entry(cmd: &[String]) -> Result<String> {
-    let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
-    s.push_str("Name=Linux.apk\n");
-    s.push_str("GenericName=Android App Manager\n");
-    s.push_str("Comment=Install, run and remove Android apps\n");
-    writeln!(s, "Icon={MANAGER_ID}")?;
-    writeln!(s, "Exec={}", exec_line(cmd, None)?)?;
-    s.push_str("Terminal=false\nStartupNotify=true\n");
-    writeln!(s, "StartupWMClass={MANAGER_ID}")?;
-    s.push_str("Categories=System;PackageManager;\n");
-    s.push_str("Keywords=Android;APK;\n");
-    Ok(s)
-}
-
-/// shared-mime-info definitions for the bundle formats (plain APKs already
-/// have `application/vnd.android.package-archive`).
-pub const MIME_PACKAGE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!-- Installed and removed by linuxapk setup (dev.linuxapk). -->
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/x-android-apks">
-    <comment>Android app bundle (APK set)</comment>
-    <sub-class-of type="application/zip"/>
-    <glob pattern="*.apks"/>
-  </mime-type>
-  <mime-type type="application/x-android-xapk">
-    <comment>Android app bundle (XAPK)</comment>
-    <sub-class-of type="application/zip"/>
-    <glob pattern="*.xapk"/>
-  </mime-type>
-  <mime-type type="application/x-android-apkm">
-    <comment>Android app bundle (APKM)</comment>
-    <sub-class-of type="application/zip"/>
-    <glob pattern="*.apkm"/>
-  </mime-type>
-</mime-info>
-"#;
 
 /// Category mapping for `ApplicationInfo.category` / `android:appCategory`.
 pub fn categories_for(app_category: Option<i32>, is_game: bool) -> Vec<String> {
@@ -280,6 +256,31 @@ pub fn read_key(text: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// `text` with the value of `key` in the `[Desktop Entry]` group replaced by
+/// `value` (already escaped); every other line is kept as it is. None if the
+/// key isn't there.
+pub fn replace_key(text: &str, key: &str, value: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut in_group = false;
+    let mut found = false;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with('[') {
+            in_group = line.trim_end() == "[Desktop Entry]";
+        } else if in_group
+            && !found
+            && line
+                .split_once('=')
+                .is_some_and(|(k, _)| k.trim_end() == key)
+        {
+            found = true;
+            out.push_str(&format!("{key}={value}\n"));
+            continue;
+        }
+        out.push_str(line);
+    }
+    found.then_some(out)
 }
 
 #[cfg(test)]
@@ -370,18 +371,25 @@ mod tests {
         assert!(quote_exec_arg("a\nb").is_err());
         // Backslash: quoted (\\) then string-escaped (\\\\).
         assert_eq!(exec_line(&["a\\b".into()], None).unwrap(), "\"a\\\\\\\\b\"");
-        assert_eq!(
-            exec_line(
-                &[
-                    "env".into(),
-                    "LINUXAPK_INSTANCE=cli".into(),
-                    "/x/linuxapk".into()
-                ],
-                Some("%f")
-            )
-            .unwrap(),
-            "env LINUXAPK_INSTANCE=cli /x/linuxapk %f"
-        );
+    }
+
+    #[test]
+    fn exec_round_trip() {
+        let args: Vec<String> = [
+            "/opt/linux apk/bin/linuxapk",
+            "a\\b",
+            "50%",
+            "$HOME",
+            "",
+            "x\"y",
+        ]
+        .map(String::from)
+        .into();
+        let line = exec_line(&args, Some("%U")).unwrap();
+        let mut back = args.clone();
+        back.push("%U".into());
+        let unescaped = read_key(&format!("[Desktop Entry]\nExec={line}\n"), "Exec").unwrap();
+        assert_eq!(exec_args(&unescaped), back);
     }
 
     #[test]
@@ -390,30 +398,16 @@ mod tests {
     }
 
     #[test]
-    fn installer() {
-        let g = installer_entry(&["linuxapk-manager".into()]).unwrap();
-        assert!(g.contains("Exec=linuxapk-manager %f\n"));
-        assert!(g.contains("Icon=dev.linuxapk.Manager\n"));
-        assert!(g.contains("MimeType=application/vnd.android.package-archive;"));
-        assert!(g.contains("NoDisplay=true"));
-        let m = manager_entry(&[
-            "env".into(),
-            "LINUXAPK_INSTANCE=gui".into(),
-            "/x/linuxapk-manager".into(),
-        ])
-        .unwrap();
-        assert!(m.contains("Exec=env LINUXAPK_INSTANCE=gui /x/linuxapk-manager\n"));
-        assert!(!m.contains("NoDisplay"));
-        assert!(!m.contains("MimeType"));
-    }
-
-    #[test]
-    fn mime_xml_is_well_formed_enough() {
-        // update-mime-database rejects "--" inside comments (and exits 0).
-        for c in MIME_PACKAGE_XML.split("<!--").skip(1) {
-            let body = c.split("-->").next().unwrap();
-            assert!(!body.contains("--"), "{body}");
-        }
+    fn replaces_one_key() {
+        let t = "[Desktop Entry]\nName=A\nExec=old\n[Desktop Action x]\nExec=other\n";
+        assert_eq!(
+            replace_key(t, "Exec", "new").as_deref(),
+            Some("[Desktop Entry]\nName=A\nExec=new\n[Desktop Action x]\nExec=other\n")
+        );
+        assert_eq!(
+            replace_key("[Desktop Entry]\nName=A\n", "Exec", "new"),
+            None
+        );
     }
 
     #[test]

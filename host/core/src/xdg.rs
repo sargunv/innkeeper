@@ -1,5 +1,5 @@
-//! Host desktop integration: desktop entries, hicolor icons, the desktop and
-//! MIME databases, and default handlers in `mimeapps.list`.
+//! Host desktop integration: app desktop entries, their hicolor icons, and the
+//! desktop database.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::desktop::{self, AppEntry, INSTALLER_ID, MANAGER_ID, PREFIX};
-use crate::paths::xdg_home;
+use crate::desktop::{self, AppEntry, PREFIX};
+use crate::paths::{self, xdg_home};
 use crate::proc;
 
 /// Sizes we render icons at; all are hicolor theme directories.
@@ -159,117 +159,23 @@ pub fn app_label(d: &Dirs, pkg: &str) -> Option<String> {
     desktop::read_key(&t, "Name")
 }
 
-fn installer_desktop(d: &Dirs) -> PathBuf {
-    d.applications().join(format!("{INSTALLER_ID}.desktop"))
-}
-
-fn mime_package(d: &Dirs) -> PathBuf {
-    d.data.join("mime/packages/dev.linuxapk.xml")
-}
-
-/// Whether the APK handler entry is registered and opens the manager.
-pub fn handler_registered(d: &Dirs) -> bool {
-    fs::read_to_string(installer_desktop(d))
-        .is_ok_and(|t| desktop::read_key(&t, "Icon").as_deref() == Some(MANAGER_ID))
-}
-
-fn manager_desktop(d: &Dirs) -> PathBuf {
-    d.applications().join(format!("{MANAGER_ID}.desktop"))
-}
-
-fn manager_icon(d: &Dirs) -> PathBuf {
-    d.hicolor().join(format!("scalable/apps/{MANAGER_ID}.svg"))
-}
-
-/// Adds the manager (`linuxapk-manager`) to the app menu, with its icon.
-pub fn install_manager(d: &Dirs, cmd: &[String]) -> Result<Vec<PathBuf>> {
-    let icon = manager_icon(d);
-    write_atomic(&icon, desktop::MANAGER_ICON_SVG.as_bytes())?;
-    update_icon_cache(d);
-    let desk = manager_desktop(d);
-    write_atomic(&desk, desktop::manager_entry(cmd)?.as_bytes())?;
-    update_desktop_database(d);
-    Ok(vec![desk, icon])
-}
-
-/// Removes the manager's app-menu entry and icon.
-pub fn remove_manager(d: &Dirs) {
-    let _ = fs::remove_file(manager_desktop(d));
-    if fs::remove_file(manager_icon(d)).is_ok() {
-        update_icon_cache(d);
-    }
-    update_desktop_database(d);
-}
-
-/// `linuxapk setup`: the APK open-with handler for `manager` (the
-/// `linuxapk-manager` command line), bundle MIME types, defaults.
-pub fn setup(d: &Dirs, manager: &[String]) -> Result<Vec<PathBuf>> {
-    let desk = installer_desktop(d);
-    write_atomic(&desk, desktop::installer_entry(manager)?.as_bytes())?;
-    let mime = mime_package(d);
-    write_atomic(&mime, desktop::MIME_PACKAGE_XML.as_bytes())?;
-    tool("update-mime-database", &[d.data.join("mime").as_os_str()]);
-    update_desktop_database(d);
-    let file = format!("{INSTALLER_ID}.desktop");
-    let mut args: Vec<&std::ffi::OsStr> = vec!["default".as_ref(), file.as_ref()];
-    args.extend(
-        desktop::PACKAGE_MIME_TYPES
-            .iter()
-            .map(|m| std::ffi::OsStr::new(*m)),
-    );
-    if proc::which("xdg-mime").is_some() {
-        tool("xdg-mime", &args);
-    } else {
-        set_defaults(
-            &d.config.join("mimeapps.list"),
-            &file,
-            desktop::PACKAGE_MIME_TYPES,
-        )?;
-    }
-    Ok(vec![desk, mime])
-}
-
-/// `linuxapk setup --remove` (the handler part; see [`remove_manager`]).
-pub fn unsetup(d: &Dirs) -> Result<()> {
-    let _ = fs::remove_file(installer_desktop(d));
-    if fs::remove_file(mime_package(d)).is_ok() {
-        tool("update-mime-database", &[d.data.join("mime").as_os_str()]);
-    }
-    let file = format!("{INSTALLER_ID}.desktop");
-    for list in [
-        d.config.join("mimeapps.list"),
-        d.applications().join("mimeapps.list"),
-    ] {
-        if let Ok(t) = fs::read_to_string(&list) {
-            let new = remove_handler(&t, &file);
-            if new != t {
-                write_atomic(&list, new.as_bytes())?;
-            }
-        }
-    }
-    update_desktop_database(d);
-    Ok(())
-}
-
 /// An app installed by Linux.apk, as its desktop entry describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopApp {
     pub package: String,
     pub name: String,
     pub version: Option<String>,
-    /// The session instance the entry runs in (`LINUXAPK_INSTANCE` baked into
-    /// its `Exec`), empty for the default session.
+    /// The session instance the entry runs in (baked into its `Exec`), empty
+    /// for the main session.
     pub instance: String,
     /// The largest icon file, if any.
     pub icon: Option<PathBuf>,
 }
 
-/// The `LINUXAPK_INSTANCE=` value an `Exec` line sets, if any.
+/// The session instance an entry's `Exec` runs against.
 pub fn exec_instance(exec: &str) -> String {
-    exec.split_whitespace()
-        .take_while(|w| *w == "env" || w.contains('='))
-        .find_map(|w| w.strip_prefix("LINUXAPK_INSTANCE="))
-        .unwrap_or_default()
+    paths::invocation(&desktop::exec_args(exec))
+        .instance
         .to_string()
 }
 
@@ -282,93 +188,74 @@ pub fn largest_icon(d: &Dirs, id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Our app entries: (package, path, text) for every `dev.linuxapk.<pkg>`
+/// desktop file that says it is `pkg`'s.
+fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
+    let Ok(rd) = fs::read_dir(d.applications()) else {
+        return vec![];
+    };
+    rd.flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let pkg = name.strip_prefix(PREFIX)?.strip_suffix(".desktop")?;
+            crate::validate::package(pkg).ok()?;
+            let text = fs::read_to_string(e.path()).ok()?;
+            (desktop::read_key(&text, "X-LinuxApk-Package").as_deref() == Some(pkg))
+                .then(|| (pkg.to_string(), e.path(), text))
+        })
+        .collect()
+}
+
 /// Apps with a Linux.apk desktop entry (any instance), sorted by name.
 pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
-    let mut v = vec![];
-    let Ok(rd) = fs::read_dir(d.applications()) else {
-        return v;
-    };
-    for e in rd.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        let Some(pkg) = name
-            .strip_prefix(PREFIX)
-            .and_then(|n| n.strip_suffix(".desktop"))
-        else {
-            continue;
-        };
-        if crate::validate::package(pkg).is_err() {
-            continue;
-        }
-        let Ok(t) = fs::read_to_string(e.path()) else {
-            continue;
-        };
-        if desktop::read_key(&t, "X-LinuxApk-Package").as_deref() != Some(pkg) {
-            continue;
-        }
-        v.push(DesktopApp {
-            package: pkg.to_string(),
-            name: desktop::read_key(&t, "Name").unwrap_or_else(|| pkg.to_string()),
+    let mut v: Vec<DesktopApp> = app_entries(d)
+        .into_iter()
+        .map(|(pkg, _, t)| DesktopApp {
+            name: desktop::read_key(&t, "Name").unwrap_or_else(|| pkg.clone()),
             version: desktop::read_key(&t, "X-LinuxApk-Version"),
             instance: exec_instance(&desktop::read_key(&t, "Exec").unwrap_or_default()),
             icon: largest_icon(d, &format!("{PREFIX}{pkg}")),
-        });
-    }
+            package: pkg,
+        })
+        .collect();
     v.sort_by_key(|a| (a.name.to_lowercase(), a.package.clone()));
     v
 }
 
-/// Drops `id` from every association in a `mimeapps.list`, and keys left
-/// without handlers. Other lines are kept byte for byte.
-pub fn remove_handler(text: &str, id: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let body = line.trim_end_matches('\n');
-        if !body.starts_with('[')
-            && !body.starts_with('#')
-            && let Some((k, v)) = body.split_once('=')
-            && v.split(';').any(|x| x.trim() == id)
-        {
-            let rest: Vec<&str> = v
-                .split(';')
-                .map(str::trim)
-                .filter(|x| !x.is_empty() && *x != id)
-                .collect();
-            if !rest.is_empty() {
-                out.push_str(&format!("{k}={};\n", rest.join(";")));
-            }
+/// Repairs the `Exec` of our app entries that can no longer run: their
+/// program is gone (Linux.apk moved or was reinstalled elsewhere), or they
+/// set variables an older Linux.apk used (`LINUXAPK_SESSION`). They are
+/// pointed at `linuxapk` (this installation's), keeping their instance.
+/// Returns how many were rewritten.
+pub fn refresh_entries(d: &Dirs, linuxapk: &Path) -> usize {
+    let mut n = 0;
+    for (pkg, path, text) in app_entries(d) {
+        let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
+        let args = desktop::exec_args(&exec);
+        let inv = paths::invocation(&args);
+        let missing = inv
+            .program
+            .is_some_and(|p| Path::new(p).is_absolute() && !Path::new(p).exists());
+        if !(missing || inv.foreign_env || inv.program.is_none()) {
             continue;
         }
-        out.push_str(line);
-    }
-    out
-}
-
-/// Minimal `xdg-mime default` fallback: sets `[Default Applications]` keys.
-fn set_defaults(list: &Path, id: &str, types: &[&str]) -> Result<()> {
-    let t = fs::read_to_string(list).unwrap_or_default();
-    let mut lines: Vec<String> = t.lines().map(str::to_string).collect();
-    let start = match lines
-        .iter()
-        .position(|l| l.trim() == "[Default Applications]")
-    {
-        Some(i) => i,
-        None => {
-            lines.push("[Default Applications]".into());
-            lines.len() - 1
+        let mut run = paths::command(linuxapk, inv.instance);
+        run.extend(["run".into(), pkg]);
+        let Ok(line) = desktop::exec_line(&run, Some("%U")) else {
+            continue;
+        };
+        let Some(new) = desktop::replace_key(&text, "Exec", &line) else {
+            continue;
+        };
+        match write_atomic(&path, new.as_bytes()) {
+            Ok(()) => n += 1,
+            Err(e) => eprintln!("linuxapk: {e:#}"),
         }
-    };
-    let end = lines[start + 1..]
-        .iter()
-        .position(|l| l.starts_with('['))
-        .map_or(lines.len(), |i| start + 1 + i);
-    let mut group: Vec<String> = lines[start + 1..end]
-        .iter()
-        .filter(|l| !types.iter().any(|ty| l.starts_with(&format!("{ty}="))))
-        .cloned()
-        .collect();
-    group.extend(types.iter().map(|ty| format!("{ty}={id};")));
-    lines.splice(start + 1..end, group);
-    write_atomic(list, (lines.join("\n") + "\n").as_bytes())
+    }
+    if n > 0 {
+        update_desktop_database(d);
+    }
+    n
 }
 
 #[cfg(test)]
@@ -376,37 +263,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mimeapps_removal() {
-        let t = "[Default Applications]\n\
-                 application/vnd.android.package-archive=dev.linuxapk.installer.desktop;\n\
-                 text/plain=dev.zed.Zed.desktop;\n\
-                 application/x-android-apks=a.desktop;dev.linuxapk.installer.desktop;\n\
-                 [Added Associations]\n\
-                 application/x-android-xapk=dev.linuxapk.installer.desktop\n";
-        assert_eq!(
-            remove_handler(t, "dev.linuxapk.installer.desktop"),
-            "[Default Applications]\ntext/plain=dev.zed.Zed.desktop;\n\
-             application/x-android-apks=a.desktop;\n[Added Associations]\n"
-        );
-        let other = "[Default Applications]\ntext/plain=dev.linuxapk.installer.desktop.bak;\n";
-        assert_eq!(
-            remove_handler(other, "dev.linuxapk.installer.desktop"),
-            other
-        );
-    }
-
-    #[test]
     fn instance_of_exec() {
-        assert_eq!(
-            exec_instance("env LINUXAPK_INSTANCE=gui /x/linuxapk run a.b %U"),
-            "gui"
-        );
-        assert_eq!(
-            exec_instance("env LINUXAPK_SESSION=/s LINUXAPK_INSTANCE=cli linuxapk run a.b %U"),
-            "cli"
-        );
-        assert_eq!(exec_instance("linuxapk run a.b %U"), "");
-        assert_eq!(exec_instance("linuxapk run LINUXAPK_INSTANCE=x"), "");
+        for (program, instance) in [("/x/linuxapk", "gui"), ("/a b/linuxapk", "")] {
+            let mut run = paths::command(Path::new(program), instance);
+            run.extend(["run".into(), "a.b".into()]);
+            let exec = desktop::exec_line(&run, Some("%U")).unwrap();
+            assert_eq!(exec_instance(&exec), instance);
+        }
     }
 
     #[test]
@@ -420,7 +283,7 @@ mod tests {
 
     #[test]
     fn app_files_roundtrip() {
-        let root = std::env::temp_dir().join(format!("linuxapk-xdg-{}", std::process::id()));
+        let root = crate::test_dir("xdg-app-files");
         let d = Dirs {
             data: root.join("share"),
             config: root.join("config"),
@@ -463,20 +326,59 @@ mod tests {
         assert!(remove_app(&d, "org.example.app"));
         assert!(!p.exists());
         assert!(!remove_app(&d, "org.example.app"));
-        // Defaults fallback.
-        let list = d.config.join("mimeapps.list");
-        fs::create_dir_all(&d.config).unwrap();
-        fs::write(
-            &list,
-            "[Default Applications]\ntext/plain=z.desktop;\n[Added Associations]\nx/y=q.desktop;\n",
-        )
-        .unwrap();
-        set_defaults(&list, "dev.linuxapk.installer.desktop", &["a/b"]).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stale_entries_are_repaired() {
+        let root = crate::test_dir("xdg-refresh");
+        let d = Dirs {
+            data: root.join("share"),
+            config: root.join("config"),
+            cache: root.join("cache"),
+        };
+        let linuxapk = root.join("bin/linuxapk");
+        fs::create_dir_all(linuxapk.parent().unwrap()).unwrap();
+        fs::write(&linuxapk, "").unwrap();
+        let entry = |pkg: &str, exec: &str| {
+            let p = d.app_desktop(pkg);
+            let text =
+                format!("[Desktop Entry]\nName={pkg}\nExec={exec}\nX-LinuxApk-Package={pkg}\n");
+            write_atomic(&p, text.as_bytes()).unwrap();
+            p
+        };
+        let exec_of = |p: &Path| desktop::read_key(&fs::read_to_string(p).unwrap(), "Exec");
+        let mut old = paths::command(Path::new("/gone/linuxapk"), "cli");
+        old.insert(1, "LINUXAPK_SESSION=/gone/session".into());
+        old.extend(["run".into(), "org.ex.old".into()]);
+        let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
+        let moved = entry("org.ex.moved", "/gone/linuxapk run org.ex.moved %U");
+        let mut fine = paths::command(&linuxapk, "");
+        fine.extend(["run".into(), "org.ex.fine".into()]);
+        let fine_line = desktop::exec_line(&fine, Some("%U")).unwrap();
+        let fine = entry("org.ex.fine", &fine_line);
+        let on_path = entry("org.ex.path", "linuxapk run org.ex.path %U");
+
+        assert_eq!(refresh_entries(&d, &linuxapk), 2);
+        let mut want = paths::command(&linuxapk, "cli");
+        want.extend(["run".into(), "org.ex.old".into()]);
         assert_eq!(
-            fs::read_to_string(&list).unwrap(),
-            "[Default Applications]\ntext/plain=z.desktop;\na/b=dev.linuxapk.installer.desktop;\n\
-             [Added Associations]\nx/y=q.desktop;\n"
+            exec_of(&old),
+            Some(desktop::exec_line(&want, Some("%U")).unwrap())
         );
+        assert_eq!(exec_instance(&exec_of(&old).unwrap()), "cli");
+        let mut want = paths::command(&linuxapk, "");
+        want.extend(["run".into(), "org.ex.moved".into()]);
+        assert_eq!(
+            exec_of(&moved),
+            Some(desktop::exec_line(&want, Some("%U")).unwrap())
+        );
+        assert_eq!(exec_of(&fine), Some(fine_line));
+        assert_eq!(
+            exec_of(&on_path).as_deref(),
+            Some("linuxapk run org.ex.path %U")
+        );
+        assert_eq!(refresh_entries(&d, &linuxapk), 0);
         fs::remove_dir_all(&root).unwrap();
     }
 }

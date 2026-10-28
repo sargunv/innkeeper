@@ -229,8 +229,7 @@ mod tests {
 
     #[test]
     fn plain_apk_in_place() {
-        let dir = std::env::temp_dir().join(format!("linuxapk-test-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dir("bundle-plain-apk");
         let p = dir.join("x.apk");
         {
             let mut w = zip::ZipWriter::new(File::create(&p).unwrap());
@@ -266,10 +265,9 @@ mod tests {
         }
         assert!(!work.exists());
         assert!(!dir.join("evil.apk").exists());
-        fs::remove_dir_all(&dir).unwrap();
-        let notzip = std::env::temp_dir().join(format!("linuxapk-test-{}.apk", std::process::id()));
+        let notzip = dir.join("notzip.apk");
         fs::write(&notzip, b"hello").unwrap();
-        assert!(open(&notzip, &dir).is_err());
-        fs::remove_file(&notzip).unwrap();
+        assert!(open(&notzip, &dir.join("work")).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

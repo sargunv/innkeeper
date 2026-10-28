@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Android app bundle formats the manager opens (plain APKs already have
+     application/vnd.android.package-archive in shared-mime-info). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-android-apks">
+    <comment>Android app bundle (APK set)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.apks"/>
+  </mime-type>
+  <mime-type type="application/x-android-xapk">
+    <comment>Android app bundle (XAPK)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.xapk"/>
+  </mime-type>
+  <mime-type type="application/x-android-apkm">
+    <comment>Android app bundle (APKM)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.apkm"/>
+  </mime-type>
+</mime-info>

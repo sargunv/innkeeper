@@ -9,6 +9,6 @@ Exec=linuxapk-manager %f
 Terminal=false
 StartupNotify=true
 StartupWMClass=dev.linuxapk.Manager
-MimeType=application/vnd.android.package-archive;
+MimeType=application/vnd.android.package-archive;application/x-android-apks;application/x-android-xapk;application/x-android-apkm;
 Categories=System;PackageManager;
 Keywords=Android;APK;

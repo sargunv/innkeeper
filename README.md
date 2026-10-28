@@ -47,9 +47,8 @@ Real apps running in Linux.apk on KDE Plasma (Wayland):
 Open an APK with the **Linux.apk** manager app (GTK4/libadwaita): it shows what
 the app is and which permissions it wants, installs it, and adds it to your app
 menu. Each app then opens in its own window. The same is scriptable with the
-`linuxapk` CLI: `linuxapk install some.apk`, and `linuxapk setup` makes APKs
-open in the manager. See [docs/gui.md](docs/gui.md) and
-[docs/cli.md](docs/cli.md).
+`linuxapk` CLI: `linuxapk install|run|uninstall|list`. See
+[docs/gui.md](docs/gui.md) and [docs/cli.md](docs/cli.md).
 
 ## Dev setup (Fedora)
 

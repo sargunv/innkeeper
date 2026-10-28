@@ -1,9 +1,10 @@
-//! Driving the Android session through the prefix's `linuxapk-session`
-//! (modelled on `tests/compat/src/session.rs`). Commands run inside the
-//! session as argv through `linuxapk-session exec`, which ends in
-//! `exec "$@"`: no string is ever interpreted by a shell, host or Android.
+//! Driving the Android session through `linuxapk-session` (the prefix's, or
+//! any launcher for test harnesses). Commands run inside the session as argv
+//! through `linuxapk-session exec`, which ends in `exec "$@"`: no string is
+//! ever interpreted by a shell, host or Android.
 
 use std::fs::File;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -26,6 +27,17 @@ fn clean_stderr(s: &str) -> String {
         .join("\n")
 }
 
+/// How Android's uids map to host ids (`uid-mode=` in the launcher's
+/// status).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UidMode {
+    /// Each Android uid is one of the user's subordinate ids: apps are
+    /// isolated from each other as on Android.
+    Subuid,
+    /// Every Android uid is the user: no isolation between apps.
+    Single,
+}
+
 /// What [`Session::status`] reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Status {
@@ -33,6 +45,15 @@ pub struct Status {
     pub booted: bool,
     /// The session unit's memory use (cgroup `memory.current`), in bytes.
     pub memory: Option<u64>,
+    pub uid_mode: Option<UidMode>,
+}
+
+/// The value of the `key=value` or `key: value` line of launcher output.
+fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().find_map(|l| {
+        l.strip_prefix(key)
+            .and_then(|v| v.strip_prefix('=').or_else(|| v.strip_prefix(": ")))
+    })
 }
 
 fn unit_memory(unit: &str) -> Option<u64> {
@@ -46,26 +67,42 @@ fn unit_memory(unit: &str) -> Option<u64> {
 }
 
 impl Session {
-    /// The session of this program's prefix (and `LINUXAPK_INSTANCE`).
+    /// The session of this program's prefix and instance.
     pub fn find() -> Result<Self> {
-        Ok(Self {
-            launcher: Prefix::locate()?.launcher(),
-        })
+        Ok(Self::at(Prefix::locate()?.launcher()))
     }
 
-    /// Runs a launcher subcommand with inherited stdio (for `session ...`).
-    pub fn passthrough(&self, args: &[&str]) -> Result<i32> {
-        let st = Command::new(&self.launcher).args(args).status()?;
-        Ok(st.code().unwrap_or(1))
+    /// The session `launcher` runs (for harnesses outside a prefix).
+    pub fn at(launcher: PathBuf) -> Self {
+        Self { launcher }
+    }
+
+    /// The launcher's `status` output while the session runs.
+    fn launcher_status(&self) -> Option<String> {
+        let o = proc::run(
+            Command::new(&self.launcher).arg("status"),
+            Stdio::null(),
+            Duration::from_secs(30),
+        )
+        .ok()?;
+        o.ok().then(|| o.text())
     }
 
     pub fn running(&self) -> bool {
-        Command::new(&self.launcher)
-            .arg("status")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+        self.launcher_status().is_some()
+    }
+
+    /// Host pid of the session's Android init (it changes when the session
+    /// restarts).
+    pub fn pid(&self) -> Option<u32> {
+        field(&self.launcher_status()?, "running")?
+            .strip_prefix("host pid ")?
+            .parse()
+            .ok()
+    }
+
+    pub fn uid_mode(&self) -> Option<UidMode> {
+        uid_mode(&self.launcher_status()?)
     }
 
     /// Runs argv inside the session as root; returns (success, stdout, stderr).
@@ -137,15 +174,17 @@ impl Session {
         Ok(())
     }
 
-    /// Running state, boot state and memory use, for status displays.
+    /// Running state, boot state, memory use and uid mode, for status
+    /// displays.
     pub fn status(&self) -> Status {
-        if !self.running() {
+        let Some(out) = self.launcher_status() else {
             return Status::default();
-        }
+        };
         Status {
             running: true,
             booted: self.booted(),
             memory: paths::unit_name().ok().and_then(|u| unit_memory(&u)),
+            uid_mode: uid_mode(&out),
         }
     }
 
@@ -153,19 +192,63 @@ impl Session {
         self.getprop("sys.boot_completed") == "1"
     }
 
-    /// Makes sure a session is running and booted, starting one if needed.
-    /// Progress goes to `status`.
-    pub fn ensure(&self, status: &dyn Fn(&str)) -> Result<()> {
-        if !self.running() {
-            status("starting the Android session");
-            let st = Command::new(&self.launcher)
-                .arg("start")
-                .stdout(Stdio::null())
-                .status()?;
-            if !st.success() {
-                bail!("session start failed ({} start)", self.launcher.display());
-            }
+    /// Whether the image is fetched, extracted and flattened (so starting
+    /// doesn't download it first).
+    pub fn image_ready(&self) -> bool {
+        let Ok(o) = proc::run(
+            Command::new(&self.launcher).arg("image"),
+            Stdio::null(),
+            Duration::from_secs(30),
+        ) else {
+            return false;
+        };
+        let text = o.text();
+        let (Some(img), Some(apex)) = (field(&text, "img"), field(&text, "apex")) else {
+            return false;
+        };
+        o.ok()
+            && Path::new(img).join("system/system").is_dir()
+            && Path::new(apex).join("apex-info-list.xml").is_file()
+    }
+
+    /// Fetches and unpacks the image (about 1.2 GB to download). Its
+    /// progress goes to stderr.
+    pub fn prepare(&self) -> Result<()> {
+        let st = Command::new(&self.launcher)
+            .arg("prepare")
+            .stdin(Stdio::null())
+            .stdout(io::stderr())
+            .status()?;
+        if !st.success() {
+            bail!(
+                "preparing the Android image failed ({} prepare)",
+                self.launcher.display()
+            );
         }
+        Ok(())
+    }
+
+    /// Starts the session (headless: with no windows, for tests), preparing
+    /// the image first if this is the first start. Progress goes to `status`.
+    pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
+        if !self.image_ready() {
+            status(PREPARING);
+            self.prepare()?;
+        }
+        status("starting the Android session");
+        let mut c = Command::new(&self.launcher);
+        c.arg("start").stdin(Stdio::null()).stdout(Stdio::null());
+        if headless {
+            c.arg("--headless");
+        }
+        if !c.status()?.success() {
+            bail!("session start failed ({} start)", self.launcher.display());
+        }
+        Ok(())
+    }
+
+    /// Waits until Android has booted. Progress goes to `status`.
+    pub fn wait_booted(&self, status: &dyn Fn(&str)) -> Result<()> {
         let t = Instant::now();
         let limit = Duration::from_secs(300);
         let mut said = false;
@@ -188,5 +271,42 @@ impl Session {
             let _ = self.exec(15, &["wm", "dismiss-keyguard"]);
         }
         Ok(())
+    }
+
+    /// Makes sure a session is running and booted, starting one (with
+    /// windows) if needed. Progress goes to `status`.
+    pub fn ensure(&self, status: &dyn Fn(&str)) -> Result<()> {
+        if !self.running() {
+            self.start(false, status)?;
+        }
+        self.wait_booted(status)
+    }
+}
+
+/// The status line for a first start's image download.
+pub const PREPARING: &str = "preparing Android (first run: downloading about 1.2 GB)";
+
+fn uid_mode(status: &str) -> Option<UidMode> {
+    match field(status, "uid-mode")? {
+        "subuid" => Some(UidMode::Subuid),
+        "single" => Some(UidMode::Single),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_status() {
+        let out = "running: host pid 4242\nuid-mode=single\n";
+        assert_eq!(field(out, "running"), Some("host pid 4242"));
+        assert_eq!(uid_mode(out), Some(UidMode::Single));
+        assert_eq!(
+            uid_mode("running: host pid 1\nuid-mode=subuid"),
+            Some(UidMode::Subuid)
+        );
+        assert_eq!(uid_mode("running: host pid 1\n"), None);
     }
 }

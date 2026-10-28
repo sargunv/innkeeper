@@ -7,6 +7,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use gtk::{gdk, glib};
 use linuxapk_core::desktop::MANAGER_ID;
+use linuxapk_core::launcher;
 use linuxapk_core::ops::{self, Event, Package};
 
 use crate::errors::{self, Op};
@@ -19,7 +20,9 @@ const SHOWN_PERMISSIONS: usize = 6;
 
 /// Progress text for a core status message.
 pub fn status_text(m: &str) -> String {
-    if m.starts_with("starting the Android session") {
+    if m == launcher::PREPARING {
+        "Downloading Android (about 1.2 GB)…".into()
+    } else if m.starts_with("starting the Android session") {
         "Starting Android…".into()
     } else if m.starts_with("waiting for Android to boot") {
         "Waiting for Android to start…".into()

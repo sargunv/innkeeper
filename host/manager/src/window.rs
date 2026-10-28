@@ -1,5 +1,5 @@
-//! The main window: installed apps, the session's status, drag and drop, and
-//! the navigation to the install page.
+//! The main window: installed apps, the session's status, drag and drop, the
+//! navigation to the install page, and the first run's image download.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -25,7 +25,11 @@ pub struct Inner {
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
+    /// "empty", "list", or "preparing" while the image downloads.
     stack: gtk::Stack,
+    preparing: Preparing,
+    /// The one-time single-uid notice.
+    banner: adw::Banner,
     apps: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
     installed: RefCell<Vec<DesktopApp>>,
@@ -37,6 +41,49 @@ pub struct Inner {
     /// Watches the desktop entries, so installs from the CLI show up.
     monitor: RefCell<Option<gio::FileMonitor>>,
     refresh_pending: Cell<bool>,
+}
+
+/// The first run's "Preparing Android" page, shown while the image downloads.
+struct Preparing {
+    page: adw::StatusPage,
+    spinner: adw::Spinner,
+    retry: gtk::Button,
+    active: Cell<bool>,
+    /// Files opened meanwhile, shown once the image is ready.
+    opened: RefCell<Vec<gio::File>>,
+}
+
+impl Preparing {
+    fn new() -> Self {
+        let spinner = adw::Spinner::builder()
+            .width_request(32)
+            .height_request(32)
+            .build();
+        let retry = gtk::Button::builder()
+            .label("_Try Again")
+            .use_underline(true)
+            .halign(gtk::Align::Center)
+            .css_classes(["pill", "suggested-action"])
+            .visible(false)
+            .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 24);
+        content.append(&spinner);
+        content.append(&retry);
+        let page = adw::StatusPage::builder()
+            .icon_name("folder-download-symbolic")
+            .title("Preparing Android")
+            .description("Downloading Android (about 1.2 GB). This happens only once.")
+            .child(&content)
+            .vexpand(true)
+            .build();
+        Self {
+            page,
+            spinner,
+            retry,
+            active: Cell::new(false),
+            opened: RefCell::default(),
+        }
+    }
 }
 
 impl std::ops::Deref for Window {
@@ -162,13 +209,19 @@ impl Window {
         list.add(&apps);
         list.add(&sessions[1].group);
 
+        let preparing = Preparing::new();
         let stack = gtk::Stack::new();
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&list, Some("list"));
+        stack.add_named(&preparing.page, Some("preparing"));
+
+        let banner = adw::Banner::builder()
+            .button_label("_Learn More")
+            .use_markup(false)
+            .build();
 
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
-        section.append(Some("_Preferences"), Some("app.preferences"));
         section.append(Some("_About Linux.apk"), Some("app.about"));
         menu.append_section(None, &section);
         let header = adw::HeaderBar::new();
@@ -189,6 +242,7 @@ impl Window {
         );
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
+        main.add_top_bar(&banner);
         main.set_content(Some(&stack));
         let main_page = adw::NavigationPage::builder()
             .title("Linux.apk")
@@ -230,6 +284,8 @@ impl Window {
             toasts,
             nav,
             stack,
+            preparing,
+            banner,
             apps,
             rows: RefCell::default(),
             installed: RefCell::default(),
@@ -250,6 +306,17 @@ impl Window {
             let w2 = w.clone();
             s.button.connect_clicked(move |_| w2.toggle_session());
         }
+        let w2 = w.clone();
+        w.preparing.retry.connect_clicked(move |_| w2.prepare());
+        let w2 = w.clone();
+        w.banner.connect_button_clicked(move |b| {
+            b.set_revealed(false);
+            gtk::UriLauncher::new(ops::SINGLE_UID_DOCS).launch(
+                Some(&w2.win),
+                gio::Cancellable::NONE,
+                |_| {},
+            );
+        });
 
         let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
         let r = reveal.clone();
@@ -273,7 +340,12 @@ impl Window {
         w.win.add_controller(drop);
 
         w.watch_entries();
-        w.refresh();
+        let w2 = w.clone();
+        glib::spawn_future_local(async move {
+            worker::run_quiet(ops::refresh_entries).await;
+            w2.refresh();
+        });
+        w.prepare_if_needed();
         w.poll_session();
         let weak = Rc::downgrade(&w.0);
         glib::timeout_add_seconds_local(POLL_SECS, move || match weak.upgrade() {
@@ -340,8 +412,13 @@ impl Window {
     }
 
     /// Shows the install page for `file` (drag and drop, the file chooser, or
-    /// the desktop's "open with").
+    /// the desktop's "open with"); after the first run's download, if that is
+    /// still going.
     pub fn open_file(&self, file: &gio::File) {
+        if self.preparing.active.get() {
+            self.preparing.opened.borrow_mut().push(file.clone());
+            return;
+        }
         match file.path() {
             Some(p) => {
                 let page = install::page(self, p);
@@ -406,8 +483,10 @@ impl Window {
         for r in self.rows.borrow_mut().drain(..) {
             self.apps.remove(&r);
         }
-        self.stack
-            .set_visible_child_name(if apps.is_empty() { "empty" } else { "list" });
+        if !self.preparing.active.get() {
+            self.stack
+                .set_visible_child_name(if apps.is_empty() { "empty" } else { "list" });
+        }
         let mut rows = self.rows.borrow_mut();
         for a in &apps {
             let row = self.app_row(a);
@@ -512,14 +591,62 @@ impl Window {
         }
     }
 
-    /// Reads the session's status off the UI thread and shows it.
+    /// Downloads the image if it isn't there yet (the first run).
+    fn prepare_if_needed(&self) {
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            let ready = worker::run_quiet(|| Session::find().map(|s| s.image_ready())).await;
+            // No launcher: the session row says so.
+            if ready.is_ok_and(|r| !r) {
+                w.prepare();
+            }
+        });
+    }
+
+    fn prepare(&self) {
+        let p = &self.preparing;
+        p.active.set(true);
+        p.spinner.set_visible(true);
+        p.retry.set_visible(false);
+        self.stack.set_visible_child_name("preparing");
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            let r = worker::run_quiet(|| Session::find()?.prepare()).await;
+            let p = &w.preparing;
+            p.spinner.set_visible(false);
+            match r {
+                Ok(()) => {
+                    p.active.set(false);
+                    w.refresh();
+                    for f in p.opened.take() {
+                        w.open_file(&f);
+                    }
+                }
+                Err(e) => {
+                    p.retry.set_visible(true);
+                    w.show_error(Op::Prepare, None, &e);
+                }
+            }
+        });
+    }
+
+    /// Reads the session's status off the UI thread and shows it, and the
+    /// single-uid notice the first time the session runs in that mode.
     pub fn poll_session(&self) {
         if self.polling.replace(true) {
             return;
         }
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let st = worker::run_quiet(|| Session::find().ok().map(|s| s.status())).await;
+            let (st, notice) = worker::run_quiet(|| {
+                let st = Session::find().ok().map(|s| s.status());
+                (st, ops::single_uid_notice(st.and_then(|s| s.uid_mode)))
+            })
+            .await;
+            if let Some(n) = notice {
+                w.banner.set_title(n);
+                w.banner.set_revealed(true);
+            }
             w.polling.set(false);
             if w.session_busy.get() {
                 return;

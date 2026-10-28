@@ -1,34 +1,33 @@
 # `linuxapk`: the host command
 
-`linuxapk` (Rust, `cli/`) is the user-facing host command. It installs Android
-apps into the session and gives them desktop entries and icons, launches them,
-and wraps the session launcher. It runs on the host (glibc) and drives Android
-only through `session/linuxapk-session exec`. The logic lives in the
-`linuxapk-core` library (`core/`), which the GUI manager ([gui.md](gui.md))
-shares; `cli/` is the command line on top.
+`linuxapk` (Rust, `host/cli/`) is the user-facing host command. It installs
+Android apps into the session and gives them desktop entries and icons, runs,
+lists and uninstalls them. It runs on the host (glibc) and drives Android only
+through `linuxapk-session exec`. The logic lives in the `linuxapk-core` library
+(`host/core/`), which the manager ([gui.md](gui.md)) shares; `host/cli/` is the
+command line on top.
 
 ## Usage
 
 ```sh
-cargo build --release -p linuxapk          # -> target/release/linuxapk
+mise run build                             # -> out/stage/bin/linuxapk
 linuxapk install App.apk                   # also .apks, .xapk, .apkm
 linuxapk run org.wikipedia                 # launch (starts the session if needed)
 linuxapk run org.wikipedia https://en.wikipedia.org/wiki/Linux
-linuxapk list                              # user-installed apps
 linuxapk uninstall org.wikipedia [--keep-data]
-linuxapk session start | stop | status
-linuxapk setup [--remove]                  # double-click APKs to install them in the GUI
+linuxapk list                              # user-installed apps
 ```
 
 After `install`, the app is in the desktop's app menu ("Calculator", with its
 own icon). Its custom URL schemes open in it: `xdg-open wikipedia://…` launches
-Wikipedia. `linuxapk setup` registers an "open with" handler for APK files and
-bundles. Double-clicking one in Dolphin opens the GUI's install page
-(`linuxapk-gui` must be installed).
+Wikipedia. Opening APK files is the manager's job: its shipped desktop entry
+declares the APK and bundle MIME types ([gui.md](gui.md)).
 
 `install`, `run`, `uninstall` and `list` start the session if it isn't running
-and wait for boot. Building needs `javac` and the Android SDK (for the embedded
-icon helper); running `install` needs the SDK's `aapt2`.
+and wait for boot. The first start downloads and unpacks the Android image
+(about 1.2 GB) through `linuxapk-session prepare`, with its progress on stderr.
+Building needs `javac` and the Android SDK (for the embedded icon helper);
+running `install` needs the SDK's `aapt2`.
 
 ## What `install` does
 
@@ -87,12 +86,12 @@ X-LinuxApk-Version=2.7.50        # versionName, if it is a safe label
 X-LinuxApk-Web-Hosts=*.wikipedia.org;
 ```
 
-`Exec` is `linuxapk` if that's what `PATH` finds, else the binary's absolute
-path. If `LINUXAPK_INSTANCE` or `LINUXAPK_SESSION` were set at install time,
-they are baked in (`env LINUXAPK_INSTANCE=cli … run …`), so a lane's entries
-keep using its session.
+`Exec` runs `linuxapk` by its absolute path in the installed prefix. A named
+instance (`LINUXAPK_INSTANCE`, for tests) is baked in
+(`env LINUXAPK_INSTANCE=cli … run …`), so a test's entries keep using its
+session.
 
-## `run`, `uninstall`, `list`, `setup`
+## `run`, `uninstall`, `list`
 
 - **`run <pkg> [uri]`.** Without a URI it resolves the launcher activity
   (`cmd package resolve-activity`) and starts it with `MAIN`/`LAUNCHER` and
@@ -108,15 +107,18 @@ keep using its session.
   `pm list packages -3`, so system apps are refused. It runs
   `cmd package uninstall [-k]`, then removes the entry and every
   `hicolor/*/apps/dev.linuxapk.<pkg>.png`.
-- **`list`** prints the user packages with the `Name` of their entry.
-- **`setup`** writes `dev.linuxapk.installer.desktop` (`NoDisplay`) for
-  `application/vnd.android.package-archive` plus three types it defines in
-  `~/.local/share/mime/packages/dev.linuxapk.xml`: `application/x-android-apks`
-  (`*.apks`), `-xapk` and `-apkm`. It then runs `update-mime-database` and
-  `xdg-mime default`. The entry runs `linuxapk-gui %f`, the GUI found next to
-  the CLI or on `PATH`, and `setup` also adds the GUI's app-menu entry (see
-  [gui.md](gui.md)); without the GUI it fails. `setup --remove` deletes these
-  files (and the GUI's menu entry) and drops the handler from `mimeapps.list`.
+- **`list`** prints the user packages with the `Name` of their entry. First it
+  repairs our entries that can no longer run, as the manager does at startup
+  (`xdg::refresh_entries`): an entry whose program is gone (Linux.apk moved) or
+  that sets `LINUXAPK_SESSION` (an older Linux.apk) gets this `linuxapk` in its
+  `Exec`, keeping its instance.
+
+The first time a command finds the session in single-uid mode (`uid-mode=single`
+in `linuxapk-session status`: the host gives the user no subordinate uid range),
+it notes on stderr that apps are not isolated from each other, with a link to
+[sandbox.md](sandbox.md). The stamp
+`$XDG_STATE_HOME/linuxapk/notices/single-uid` keeps it from showing again (the
+manager shares it).
 
 ## Safety
 
@@ -145,19 +147,23 @@ APKs, and URIs passed to `run`, are untrusted input.
 ## Tests
 
 - `cargo test -p linuxapk-core` covers desktop entry generation and escaping,
-  Exec quoting, package, scheme, label, locale and URI validation, badging and
-  xmltree parsing, bundle member selection and ABI filtering, `mimeapps.list`
-  editing, and the icon and entry files in a temp `XDG` tree. Corpus fixtures
+  Exec quoting and parsing, package, scheme, label, locale and URI validation,
+  badging and xmltree parsing, bundle member selection and ABI filtering, entry
+  repair, the single-uid notice (against a stub launcher), and the icon and
+  entry files in an `XDG` tree under `out/test/core`. Corpus fixtures
   (Wikipedia, OpenCalc, Thunderbird, Shattered Pixel Dungeon) are read by path
-  from `$LINUXAPK_CORPUS` (default `out/corpus`, where `compat/run.sh fetch`
-  puts them). They're skipped if absent, and never committed.
-- `cli/tests/integration.sh` runs against a real session
-  (`LINUXAPK_INSTANCE=cli` by default). It installs OpenCalc and Wikipedia, runs
-  `desktop-file-validate` (via podman if the tool is missing) and checks icon
-  sizes, the idempotent reinstall and `list`. It launches OpenCalc with
-  `gtk-launch` and Wikipedia with `xdg-open wikipedia://…`, checks the `dumpsys`
-  top resumed activity, checks that bad input is refused, and uninstalls with a
-  check that nothing is left. `KEEP=1` skips the uninstall.
+  from `$LINUXAPK_CORPUS` (default `out/test/compat/corpus`, where
+  `mise run test:compat -- fetch` puts them). They're skipped if absent, and
+  never committed.
+- `tests/e2e/cli/run.sh` (part of `mise run test:e2e`) runs against a real
+  session (`LINUXAPK_INSTANCE=cli` by default), with its desktop files in a
+  scratch XDG tree under `out/test/cli`. It installs OpenCalc and Wikipedia,
+  runs `desktop-file-validate` (via podman if the tool is missing) and checks
+  icon sizes, the idempotent reinstall, `list` and its repair of a stale entry.
+  It launches OpenCalc with `gtk-launch` and Wikipedia with
+  `gio open wikipedia://…`, checks the `dumpsys` top resumed activity, checks
+  that bad input is refused, and uninstalls with a check that nothing is left.
+  `KEEP=1` skips the uninstall.
 
 ## Windowing integration (M2)
 
