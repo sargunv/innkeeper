@@ -47,6 +47,12 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
   plasmashell, kded, Akonadi or KDE Connect against the user's real dirs, and
   kill everything you started. Recipe:
   [docs/development.md](docs/development.md#a-nested-isolated-desktop).
+- **Test buses must not reach the user's runtime dir.** A private D-Bus that can
+  activate services while `XDG_RUNTIME_DIR` is the real one starts a second
+  `xdg-document-portal`, which takes over `/run/user/$UID/doc` and unmounts the
+  user's on exit (this broke `flatpak run` for half an hour once). Always pair a
+  private bus with a private `XDG_RUNTIME_DIR`, or use a bus that can't activate
+  services. Never restart the user's own portal or D-Bus services.
 - **Stable boundaries only.** Never patch the image in place; prefer HAL AIDL,
   NDK APIs, rc and overlay files. Any AOSP patch needs a written reason.
 - **Vendor binaries link only LL-NDK system libraries** plus what we ship in
