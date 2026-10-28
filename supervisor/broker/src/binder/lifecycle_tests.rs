@@ -21,8 +21,8 @@
 //! notifications on the objects its clients send, sometimes calls them back
 //! before replying, and sometimes replies with an fd. Clients make
 //! synchronous and oneway calls, some with fds, and their calling thread
-//! exits when it is done. The server and the first client have a thread
-//! that polls instead of blocking. One test
+//! exits when it is done. The server has two threads that poll instead of
+//! blocking, and the first client one. One test
 //! injects random failures, signals and stops; the other fails each fallible
 //! operation of a fixed run in turn.
 
@@ -63,9 +63,8 @@ struct Thread {
     out: Vec<u8>,
     /// Codes of this thread's unanswered synchronous calls, innermost last.
     awaiting: Vec<u32>,
-    /// A oneway it sent that isn't acknowledged yet: its code, and whether
-    /// it carries an fd.
-    sending: Option<(u32, bool)>,
+    /// A oneway it sent that isn't acknowledged yet.
+    sending: Option<Oneway>,
     /// Calls this thread received and hasn't replied to, innermost last.
     owed: Vec<Owed>,
     /// A signal stopped it in a read (SIGSTOP, ptrace): it doesn't restart
@@ -110,6 +109,14 @@ impl Thread {
     }
 }
 
+/// A oneway call: its sender, its code, and the sender's fd it carries.
+#[derive(Clone, Copy)]
+struct Oneway {
+    from: ProcId,
+    code: u32,
+    fd: Option<u32>,
+}
+
 struct Faults {
     /// Percent of reads whose read buffer can't be written.
     readonly_pct: u64,
@@ -136,9 +143,9 @@ struct Sim {
     next_code: u32,
     /// Handles the server already holds refs and a death notification on.
     held: BTreeSet<u32>,
-    /// Oneways their senders saw accepted (code, carries an fd), and the
-    /// codes of those the server received.
-    oneways_sent: Vec<(u32, bool)>,
+    /// Oneways their senders saw accepted, and the codes of those the
+    /// server received.
+    oneways_sent: Vec<Oneway>,
     oneways_received: Vec<u32>,
     faults: Option<Faults>,
     seen: Seen,
@@ -173,14 +180,15 @@ impl Sim {
         us.poke(server, DATA, &1u32.to_le_bytes());
         let c = us.ioctl(&mut b, server, 1, BINDER_SET_MAX_THREADS, DATA);
         assert_eq!(us.outcome(c).errno, 0);
-        let poller = |proc| Thread {
+        let poller = |proc, tid| Thread {
             poller: true,
-            ..Thread::new(proc, 3, Some(BC_ENTER_LOOPER), 0)
+            ..Thread::new(proc, tid, Some(BC_ENTER_LOOPER), 0)
         };
         let mut threads = vec![
             Thread::new(server, 1, Some(BC_ENTER_LOOPER), 0),
             Thread::new(server, 2, Some(BC_ENTER_LOOPER), 0),
-            poller(server),
+            poller(server, 3),
+            poller(server, 4),
         ];
         let mut victim = None;
         for i in 0..clients {
@@ -189,7 +197,7 @@ impl Sim {
             threads.push(Thread::new(p, 1, Some(BC_ENTER_LOOPER), 0));
             threads.push(Thread::new(p, 2, None, calls));
             if i == 0 {
-                threads.push(poller(p));
+                threads.push(poller(p, 3));
             } else {
                 victim = Some(p);
             }
@@ -351,10 +359,14 @@ impl Sim {
                     },
                 );
             }
-            let fd = self.rng.chance(40);
-            if fd {
+            // A oneway's fd number is its own, to tell which were dropped.
+            let fd = self
+                .rng
+                .chance(40)
+                .then_some(if oneway { 0x1_0000 + code } else { 3 });
+            if let Some(fd) = fd {
                 offsets.push(data.len() as u64);
-                put(&mut data, &fd_object(3));
+                put(&mut data, &fd_object(fd));
             }
             let offs: Vec<u8> = offsets.iter().flat_map(|o| o.to_le_bytes()).collect();
             self.us.poke(proc, at, &data);
@@ -373,7 +385,11 @@ impl Sim {
             put(&mut t.out, &BC_TRANSACTION);
             put(&mut t.out, &td);
             if oneway {
-                t.sending = Some((code, fd));
+                t.sending = Some(Oneway {
+                    from: proc,
+                    code,
+                    fd,
+                });
             } else {
                 t.awaiting.push(code);
             }
@@ -403,7 +419,7 @@ impl Sim {
                     // A oneway's acknowledgement (a synchronous call's comes
                     // with its reply).
                     if let Some(sent) = self.threads[i].sending.take() {
-                        self.seen.oneways_with_fds += sent.1 as u32;
+                        self.seen.oneways_with_fds += sent.fd.is_some() as u32;
                         self.oneways_sent.push(sent);
                     }
                 }
@@ -616,7 +632,11 @@ impl Sim {
                 t.tid
             );
             assert!(t.owed.is_empty() && t.out.is_empty());
-            assert!(!t.poller || (t.polling && self.us.procs[&t.proc].pollable));
+            assert!(!t.poller || t.polling);
+        }
+        // Each process with polling threads swapped its fd once.
+        for t in self.threads.iter().filter(|t| t.poller && !t.dead) {
+            assert_eq!(self.us.procs[&t.proc].poll_swaps, 1);
         }
         let mut received = self.oneways_received.clone();
         received.sort();
@@ -624,9 +644,12 @@ impl Sim {
             received.windows(2).all(|w| w[0] != w[1]),
             "a oneway received twice"
         );
-        for &(code, fd) in &self.oneways_sent {
+        // Every accepted oneway was received, but one whose fd was never
+        // installed: it failed for good in its reader, which drops it.
+        for &Oneway { from, code, fd } in &self.oneways_sent {
+            let dropped = fd.is_some_and(|fd| self.us.never_installed.contains(&(from, fd)));
             assert!(
-                fd || received.binary_search(&code).is_ok(),
+                dropped || received.binary_search(&code).is_ok(),
                 "oneway {code} lost"
             );
         }

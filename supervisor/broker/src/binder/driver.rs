@@ -48,7 +48,8 @@
 //!  * **abandoned**: a wait ends without a read when the thread issues
 //!    another ioctl (a thread runs one syscall at a time), when it is woken
 //!    but its call is gone (a signal stopped it, or it will restart; nothing
-//!    is written to it then), or when process release answers it.
+//!    is written to it then, unless the signal lands after that check), or
+//!    when process release answers it.
 //!
 //! A write is consumed as it is processed, and its progress is written back
 //! whatever the read does (before a thread blocks, too), so a restarted
@@ -1023,6 +1024,8 @@ impl BinderDriver {
                 && has_cmd(&write, BC_ENTER_LOOPER)
             {
                 if !us.make_pollable(proc, call) {
+                    // A failure that persists (the broker out of fds) makes
+                    // libbinder retry at once, in a loop; that is accepted.
                     us.answer(call, libc::EINTR);
                     return;
                 }
@@ -2512,7 +2515,12 @@ impl BinderDriver {
                     }
                     Work::TransactionComplete => write_pod(out, &BR_TRANSACTION_COMPLETE),
                     Work::OnewaySpamSuspect => write_pod(out, &BR_ONEWAY_SPAM_SUSPECT),
-                    Work::FailedReply => write_pod(out, &BR_FAILED_REPLY),
+                    Work::FailedReply => {
+                        // Like the reply it stands for, it ends the read.
+                        write_pod(out, &BR_FAILED_REPLY);
+                        d.taken.push(taken);
+                        break 'retry;
+                    }
                     Work::Node(nid) => {
                         let Some(n) = self.nodes.get(&nid) else {
                             continue;

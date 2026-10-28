@@ -649,12 +649,29 @@ fn reply_whose_fd_cannot_be_installed_fails_the_caller() {
     // The transaction-complete item comes first; the reply only fails as the
     // first item of a read.
     assert!(find(&s.stream(waiting), BR_TRANSACTION_COMPLETE).is_some());
-    let c = s.wr(s.client, 1, &[], 256);
+    // The caller's next read also queues work behind the reply (a call to a
+    // handle it doesn't have fails). The failed reply ends the read, as a
+    // reply does.
+    let mut bad = BinderTransactionData::default();
+    bad.target = 99;
+    let c = s.wr(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&bad).done(),
+        256,
+    );
     assert!(
         !s.us.is_pending(c),
         "the caller waits for a reply that was dropped"
     );
-    assert!(find(&s.stream(c), BR_FAILED_REPLY).is_some());
+    let got: Vec<u32> = s.stream(c).iter().map(|(cmd, _)| *cmd).collect();
+    assert_eq!(got, [BR_NOOP, BR_FAILED_REPLY]);
+    let got: Vec<u32> = s
+        .read(s.client, 1, 256)
+        .iter()
+        .map(|(cmd, _)| *cmd)
+        .collect();
+    assert_eq!(got, [BR_NOOP, BR_FAILED_REPLY]);
     s.us.fault = None;
     assert_eq!(s.b.counts().0, 0, "transactions left");
 }
@@ -733,10 +750,10 @@ fn poll_setup_is_retried_by_the_restart() {
     let enter = Bc::default().cmd(BC_ENTER_LOOPER).done();
     let c = s.wr(s.server, 3, &enter, 0);
     assert!(matches!(s.us.status(c), crate::fake::Status::Interrupted));
-    assert!(!s.us.procs[&s.server].pollable);
+    assert_eq!(s.us.procs[&s.server].poll_swaps, 0);
     let c = s.us.restart(&mut s.b, c);
     assert_eq!(s.us.outcome(c).errno, 0);
-    assert!(s.us.procs[&s.server].pollable);
+    assert_eq!(s.us.procs[&s.server].poll_swaps, 1);
     // The thread polls: work for the process makes its fd readable.
     s.write(
         s.client,

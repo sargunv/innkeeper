@@ -80,8 +80,9 @@ pub struct FakeProc {
     pub installed_fds: Vec<u32>,
     /// Address ranges where writes fail, like read-only shared pages.
     pub readonly: Vec<Range<u64>>,
-    /// Its binder fd was made pollable, and whether a poll reports it ready.
-    pub pollable: bool,
+    /// How many times its binder fd was swapped for a pollable one (once at
+    /// most, as in notify.rs), and whether a poll reports it ready.
+    pub poll_swaps: u32,
     pub poll_ready: bool,
 }
 
@@ -122,6 +123,11 @@ pub struct FakeUserspace {
     pub procs: HashMap<ProcId, FakeProc>,
     /// Captured fd tokens not dropped yet -> (source proc, source fd).
     pub captured: HashMap<u64, (ProcId, u32)>,
+    /// Captured tokens installed into a reader at least once.
+    installed: HashSet<u64>,
+    /// Captured fds dropped without ever being installed (source proc,
+    /// source fd): their transaction failed or was dropped.
+    pub never_installed: Vec<(ProcId, u32)>,
     next_token: u64,
     calls: BTreeMap<u64, CallRecord>,
     next_call: u64,
@@ -431,14 +437,16 @@ impl Userspace for FakeUserspace {
         let fd = p.next_fd;
         p.next_fd += 1;
         p.installed_fds.push(fd);
+        self.installed.insert(token);
         Ok(fd)
     }
 
     fn drop_fd(&mut self, token: u64) {
-        assert!(
-            self.captured.remove(&token).is_some(),
-            "fd token {token} dropped twice"
-        );
+        let source = self.captured.remove(&token);
+        assert!(source.is_some(), "fd token {token} dropped twice");
+        if !self.installed.remove(&token) {
+            self.never_installed.extend(source);
+        }
     }
 
     fn answer(&mut self, call: Call, errno: i32) -> bool {
@@ -475,13 +483,16 @@ impl Userspace for FakeUserspace {
         let Some(p) = self.procs.get_mut(&proc) else {
             return false;
         };
-        p.pollable = true;
+        // Once per process, as in notify.rs.
+        if p.poll_swaps == 0 {
+            p.poll_swaps = 1;
+        }
         true
     }
 
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool) {
         if let Some(p) = self.procs.get_mut(&proc)
-            && p.pollable
+            && p.poll_swaps > 0
         {
             p.poll_ready = ready;
         }
