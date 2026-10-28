@@ -817,11 +817,11 @@ class InputTranslatorTest {
     assertEquals(listOf("move state=0"), names(stroke))
     assertEquals(1f, stroke[0].motion().pointers[0].pressure)
     assertEquals(down[1].motion().downTime, stroke[0].motion().downTime)
-    val up = feed("tablet_up", "tablet_pressure 0", "tablet_frame 6")
-    assertEquals(
-      listOf("move state=0", "up state=0", "hover_enter state=0", "hover_move state=0"),
-      names(up),
-    )
+    // The lift repeats the last contact; the new position hovers.
+    val up = feed("tablet_up", "tablet_motion 112.00 56.00", "tablet_pressure 0", "tablet_frame 6")
+    assertEquals(listOf("up state=0", "hover_enter state=0", "hover_move state=0"), names(up))
+    assertEquals(stroke[0].motion().pointers, up[0].motion().pointers)
+    assertEquals(112f, up[2].motion().pointers[0].x)
     assertEquals(
       listOf("hover_exit state=0"),
       names(feed("tablet_proximity_out", "tablet_frame 7")),

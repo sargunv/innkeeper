@@ -51,13 +51,15 @@ The mapping follows what InputReader produces for real devices
   fingers 200 px apart around the cursor (`CLASSIFICATION_PINCH`,
   `AXIS_GESTURE_PINCH_SCALE_FACTOR`) that spread with the scale, turn with the
   rotation and follow the center; a swipe of three or more fingers is fake
-  fingers 100 px apart (`MULTI_FINGER_SWIPE`). A cancelled gesture is
-  `ACTION_CANCEL`.
+  fingers 100 px apart (`MULTI_FINGER_SWIPE`), which InputDispatcher gives only
+  to system gesture monitors, never to apps, as with Android's own touchpads. A
+  cancelled gesture is `ACTION_CANCEL`.
 - **Pen.** A tablet tool in proximity is `SOURCE_STYLUS | SOURCE_TOUCHSCREEN`
   with `TOOL_TYPE_STYLUS` or `TOOL_TYPE_ERASER`: `HOVER_*` with `AXIS_DISTANCE`,
-  `DOWN`/`MOVE`/`UP` with pressure, `AXIS_TILT` and `AXIS_ORIENTATION` from the
-  two tilt angles, and the stylus buttons as `BUTTON_STYLUS_PRIMARY` and
-  `SECONDARY`, in TouchInputMapper's order.
+  `DOWN`/`MOVE`/`UP` with pressure (the lift repeats the last contact),
+  `AXIS_TILT` and `AXIS_ORIENTATION` from the two tilt angles, and the stylus
+  buttons as `BUTTON_STYLUS_PRIMARY` and `SECONDARY`, in TouchInputMapper's
+  order.
 - **Cursor.** The bridge sets the default arrow on every pointer enter and
   tablet proximity, and the frame's resize shapes over a client-side frame
   (`wp_cursor_shape_v1`).

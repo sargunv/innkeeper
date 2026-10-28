@@ -107,6 +107,7 @@ class InputTranslator(
   private var penTiltX = Double.NaN // degrees; NaN: not reported
   private var penTiltY = 0.0
   private var penDown = false
+  private var penLast: OutPointer? = null // the last sample in contact, which the lift repeats
   private var penHovering = false
   private var penButtons = 0
   private var penDownTime = 0L
@@ -737,9 +738,10 @@ class InputTranslator(
       penDown = true
       out += pen(MotionEvent.ACTION_DOWN, 0, t)
     } else if (penDown && !down) {
-      if (changed) out += pen(MotionEvent.ACTION_MOVE, 0, t)
-      penDown = false
+      // As TouchInputMapper: the lift repeats the last contact, and this frame's position (and
+      // the usual zero pressure) goes to the hover that follows.
       out += pen(MotionEvent.ACTION_UP, 0, t)
+      penDown = false
       changed = true
     } else if (penDown && changed) {
       out += pen(MotionEvent.ACTION_MOVE, 0, t)
@@ -770,6 +772,7 @@ class InputTranslator(
       }
     }
     if (penDown) out += pen(MotionEvent.ACTION_UP, 0, t)
+    penLast = null
     if (penHovering) out += pen(MotionEvent.ACTION_HOVER_EXIT, 0, t)
     penIn = false
     penDown = false
@@ -808,6 +811,11 @@ class InputTranslator(
       axes[MotionEvent.AXIS_ORIENTATION] = Math.atan2(-Math.sin(tx), Math.sin(ty)).toFloat()
     }
     if (hover && penDistance >= 0f) axes[MotionEvent.AXIS_DISTANCE] = penDistance
+    val last = penLast
+    val pointer =
+      if (action == MotionEvent.ACTION_UP && last != null) last
+      else OutPointer(0, penTool, penX, penY, if (hover) 0f else penPressure, axes = axes)
+    if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) penLast = pointer
     return OutMotion(
       source = InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_TOUCHSCREEN,
       action = action,
@@ -816,8 +824,7 @@ class InputTranslator(
       metaState = keyboard.metaState,
       downTime = penDownTime,
       eventTime = t,
-      pointers =
-        listOf(OutPointer(0, penTool, penX, penY, if (hover) 0f else penPressure, axes = axes)),
+      pointers = listOf(pointer),
       displayId = penDisplay,
     )
   }
