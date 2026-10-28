@@ -46,8 +46,9 @@ flowchart LR
 - `SO_PEERCRED` is checked against an allow-list: Android root (the user),
   `system` and `audioserver` (their subordinate uids in subuid mode).
 - The system app's uid (the owner of its data directory) is admitted to the
-  system, documents and apps services. The **input service is the system app's
-  alone**, since its lines are the user's keystrokes.
+  system, documents and apps services. The **input and a11y services are the
+  system app's alone**: input's lines are the user's keystrokes, and a11y's
+  trees are every app's screen contents and its actions click for the user.
 - One service per connection (HELLO); anything else gets `-EACCES` or `-EPROTO`
   and is closed.
 
@@ -99,6 +100,12 @@ portal, so the user confirms each one.
   password-manager hint.
 - **Notifications and MPRIS:** labels and images from apps; images are raw RGBA,
   so nothing Android sends reaches a host image decoder.
+- **Accessibility:** while the desktop's assistive technologies are on
+  (`org.a11y.Status`), the system app's accessibility service sends every app
+  window's AccessibilityNodeInfo tree to the bridge, which shows it on the
+  AT-SPI bus. Any AT-SPI client then reads the screen text of Android apps as it
+  does that of native apps, and can act on them; password fields are masked.
+  Otherwise the Android service stays off.
 - **Desktop entries:** names, schemes and URIs from APKs are validated and
   escaped; `http(s)`, `file`, `content` and `intent` schemes are never
   registered.
@@ -107,7 +114,7 @@ portal, so the user confirms each one.
 
 A named `LINUXAPK_INSTANCE` makes a test session that leaves the user's desktop
 alone: links are logged, not opened (unless `LINUXAPK_OPEN_URLS=1`),
-notifications and MPRIS players are only logged unless the session talks to a
-private bus (a nested test desktop), and apps installed inside Android get no
-desktop entries. Clipboard sync and the FileChooser portal still reach the real
-desktop; that is tracked on GitHub.
+notifications, MPRIS players and AT-SPI trees stay off the desktop unless the
+session talks to a private bus (a nested test desktop), and apps installed
+inside Android get no desktop entries. Clipboard sync and the FileChooser portal
+still reach the real desktop; that is tracked on GitHub.
