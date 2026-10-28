@@ -6,8 +6,11 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-  <!-- NotificationProbe posts one (the tests install with -g). -->
+  <!-- NotificationProbe posts one, LocationProbe asks for locations (the tests install with
+       -g). -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
   <application
     android:allowBackup="false"
@@ -60,5 +63,11 @@
       android:authorities="dev.linuxapk.probes.clip"
       android:exported="false"
       android:grantUriPermissions="true" />
+
+    <!-- Asks for locations and logs them (host location). -->
+    <activity
+      android:name=".LocationProbe"
+      android:excludeFromRecents="true"
+      android:exported="true" />
   </application>
 </manifest>

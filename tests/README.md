@@ -7,15 +7,16 @@ under `out/test/<suite>/`. `boot` makes a fresh `/data` under `out/test/boot`;
 `e2e` and `compat` run a named instance (`e2e`, or `LINUXAPK_INSTANCE`) on that
 instance's usual `/data`, so set `LINUXAPK_DATA` for a fresh one.
 
-| Tier   | Task                   | What                                                                                                                                                      |
-| ------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| unit   | `mise run test`        | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests |
-| bionic | `mise run test:bionic` | Android test binaries against our HALs and drivers without booting (`bionic/run.sh`)                                                                      |
-| binder | `mise run test:binder` | AOSP's binder gtests on the broker, then on kernel binder (`supervisor/tests/binder`)                                                                     |
-| boot   | `mise run test:boot`   | a fresh headless boot plus `selftest`, in subuid and single-uid mode (`boot.sh`)                                                                          |
-| e2e    | `mise run test:e2e`    | audio, system-app and CLI suites against one headless instance (`e2e/run.sh`)                                                                             |
-| a11y   | `mise run test:a11y`   | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                           |
-| compat | `mise run test:compat` | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
+| Tier       | Task                     | What                                                                                                                                                      |
+| ---------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unit       | `mise run test`          | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests |
+| bionic     | `mise run test:bionic`   | Android test binaries against our HALs and drivers without booting (`bionic/run.sh`)                                                                      |
+| binder     | `mise run test:binder`   | AOSP's binder gtests on the broker, then on kernel binder (`supervisor/tests/binder`)                                                                     |
+| boot       | `mise run test:boot`     | a fresh headless boot plus `selftest`, in subuid and single-uid mode (`boot.sh`)                                                                          |
+| e2e        | `mise run test:e2e`      | audio, system-app and CLI suites against one headless instance (`e2e/run.sh`)                                                                             |
+| a11y       | `mise run test:a11y`     | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                           |
+| compat     | `mise run test:compat`   | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
+| host state | `tests/hoststate/run.sh` | battery, power saver, metering, live locale and location against python-dbusmock and a mock Location portal on private buses (`--deny`: a portal refusal) |
 
 - **`bionic/run.sh`** is the one runner for on-device binaries: it builds an
   image-rooted namespace (the image's `/system` and flattened `/apex`, the
