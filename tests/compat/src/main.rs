@@ -177,7 +177,7 @@ fn real_main() -> Result<ExitCode> {
             probes.display()
         );
     }
-    let s = Session::new(launcher, probes);
+    let s = Session::new(launcher, probes)?;
     let mut measured = s.start_measured(o.window)?;
     fs::create_dir_all(&out)?;
     let mut results: Vec<AppResult> = vec![];

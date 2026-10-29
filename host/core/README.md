@@ -43,7 +43,3 @@ own; `cargo test -p linuxapk-core` tests it.
   single-threaded process.
 - **Untrusted input** (`validate.rs`): package names, labels, schemes, locales
   and URIs are validated before they reach a path, an entry or a command.
-
-External harness drivers can expose `status`, `image` and `cgroup`; the core
-queries them when the driver has no installed prefix. This lets compat use the
-staged Flatpak dev driver without assuming a host session unit.

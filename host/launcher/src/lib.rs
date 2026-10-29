@@ -1,6 +1,6 @@
 //! The Linux.apk session launcher (`linuxapk-session`, host/launcher/README.md)
 //! and what host/core reads of a session without running it: its paths, its
-//! status and its memory. docs/session.md describes the session.
+//! status and its cgroup. docs/session.md describes the session.
 
 mod appimage;
 pub mod cli;
@@ -25,8 +25,6 @@ mod uid;
 pub use paths::{Paths, Sandbox};
 pub use uid::UidMode;
 
-use std::fs;
-
 /// A session's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
@@ -45,6 +43,19 @@ impl Status {
             None => "stopped".into(),
         };
         format!("{head}\nuid-mode={}\n", self.uid_mode.name())
+    }
+
+    /// The state in [`Status::text`]'s output.
+    pub fn parse(text: &str) -> Self {
+        Status {
+            pid: field(text, "running")
+                .and_then(|v| v.strip_prefix("host pid "))
+                .and_then(|v| v.parse().ok()),
+            uid_mode: match field(text, "uid-mode") {
+                Some("subuid") => UidMode::Subuid,
+                _ => UidMode::Single,
+            },
+        }
     }
 }
 
@@ -65,15 +76,7 @@ pub fn status(paths: &Paths) -> Status {
                 uid_mode: detect(),
             };
         };
-        return Status {
-            pid: field(&text, "running")
-                .and_then(|v| v.strip_prefix("host pid "))
-                .and_then(|v| v.parse().ok()),
-            uid_mode: match field(&text, "uid-mode") {
-                Some("subuid") => UidMode::Subuid,
-                _ => UidMode::Single,
-            },
-        };
+        return Status::parse(&text);
     }
     match session::ns_pid(paths) {
         Some(pid) => Status {
@@ -85,17 +88,6 @@ pub fn status(paths: &Paths) -> Status {
             uid_mode: detect(),
         },
     }
-}
-
-/// The session's memory use (its cgroup's `memory.current`), in bytes. Host
-/// mode only: a Flatpak session has no cgroup of its own.
-pub fn memory(paths: &Paths) -> Option<u64> {
-    let cg = host::cgroup(paths)?;
-    fs::read_to_string(cg.join("memory.current"))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
 }
 
 /// The session's cgroup dir (host mode).
@@ -121,5 +113,6 @@ mod tests {
             uid_mode: UidMode::Subuid,
         };
         assert_eq!(s.text(), "stopped\nuid-mode=subuid\n");
+        assert_eq!(Status::parse(&s.text()), s);
     }
 }

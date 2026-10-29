@@ -1,7 +1,9 @@
 //! Driving the Android session through `linuxapk-session` (the prefix's, or
 //! any launcher for test harnesses). Its state (running, uid mode, memory,
-//! the image) comes from the launcher's library; starting, stopping and
-//! commands go through the launcher itself. Commands run inside the session
+//! the image) comes from the launcher's library, or, for a launcher outside a
+//! prefix (the dev driver, tools/dev/session.sh), from its `status`, `cgroup`
+//! and `image`; starting, stopping and commands go through the launcher
+//! itself. Commands run inside the session
 //! as argv through `linuxapk-session exec`, which hands them to the exec
 //! relay as argv: no string is ever interpreted by a shell, host or Android.
 
@@ -66,23 +68,10 @@ impl Session {
     }
 
     fn state(&self) -> Option<linuxapk_session::Status> {
-        if let Some(paths) = self.paths() {
-            return Some(linuxapk_session::status(&paths));
+        match self.paths() {
+            Some(paths) => Some(linuxapk_session::status(&paths)),
+            None => Some(linuxapk_session::Status::parse(&self.query("status")?)),
         }
-        // An external dev/test driver runs outside the installed prefix and
-        // may reach a session in another sandbox. Query that driver instead.
-        let o = Command::new(&self.launcher).arg("status").output().ok()?;
-        let text = String::from_utf8_lossy(&o.stdout);
-        Some(linuxapk_session::Status {
-            pid: text
-                .lines()
-                .find_map(|l| l.strip_prefix("running: host pid ")?.parse().ok()),
-            uid_mode: if text.lines().any(|l| l == "uid-mode=subuid") {
-                UidMode::Subuid
-            } else {
-                UidMode::Single
-            },
-        })
     }
 
     pub fn running(&self) -> bool {
@@ -101,15 +90,22 @@ impl Session {
         s.pid.map(|_| s.uid_mode)
     }
 
-    /// The session's cgroup dir (host mode), for memory accounting.
-    pub fn cgroup(&self) -> Option<PathBuf> {
-        if let Some(paths) = self.paths() {
-            return linuxapk_session::cgroup(&paths);
-        }
-        let o = Command::new(&self.launcher).arg("cgroup").output().ok()?;
+    /// The output of a launcher command that only reads state, if it
+    /// succeeds.
+    fn query(&self, command: &str) -> Option<String> {
+        let o = Command::new(&self.launcher).arg(command).output().ok()?;
         o.status
             .success()
-            .then(|| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+            .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    }
+
+    /// The session's cgroup dir (host mode, or the dev driver's Flatpak
+    /// scope), for memory accounting.
+    pub fn cgroup(&self) -> Option<PathBuf> {
+        match self.paths() {
+            Some(paths) => linuxapk_session::cgroup(&paths),
+            None => Some(self.query("cgroup")?.trim().into()),
+        }
     }
 
     /// Runs argv inside the session as root; returns (success, stdout, stderr).
@@ -211,24 +207,20 @@ impl Session {
     /// Whether the image is fetched, extracted and flattened (so starting
     /// doesn't download it first).
     pub fn image_ready(&self) -> bool {
-        if let Some(paths) = self.paths() {
-            return paths.image().is_ok_and(|i| {
-                i.img.join("system/system").is_dir()
-                    && i.apexdir.join("apex-info-list.xml").is_file()
-            });
-        }
-        let Ok(o) = Command::new(&self.launcher).arg("image").output() else {
-            return false;
+        let dirs = match self.paths() {
+            Some(paths) => paths.image().ok().map(|i| (i.img, i.apexdir)),
+            None => self.query("image").and_then(|text| {
+                let dir = |key: &str| {
+                    text.lines()
+                        .find_map(|l| l.strip_prefix(key))
+                        .map(PathBuf::from)
+                };
+                Some((dir("img=")?, dir("apex=")?))
+            }),
         };
-        let text = String::from_utf8_lossy(&o.stdout);
-        let path = |key: &str| {
-            text.lines()
-                .find_map(|l| l.strip_prefix(key))
-                .map(PathBuf::from)
-        };
-        o.status.success()
-            && path("img=").is_some_and(|p| p.join("system/system").is_dir())
-            && path("apex=").is_some_and(|p| p.join("apex-info-list.xml").is_file())
+        dirs.is_some_and(|(img, apex)| {
+            img.join("system/system").is_dir() && apex.join("apex-info-list.xml").is_file()
+        })
     }
 
     /// Fetches and unpacks the image (about 1.2 GB to download). Its

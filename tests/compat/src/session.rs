@@ -11,8 +11,8 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
-use linuxapk_core::{launcher, paths};
+use anyhow::{Context, Result, bail};
+use linuxapk_core::launcher;
 
 use crate::budget::Measured;
 
@@ -26,7 +26,10 @@ const IDLE_SETTLE: Duration = Duration::from_secs(90);
 pub struct Session {
     core: launcher::Session,
     started: Cell<bool>,
+    /// The dev driver (tools/dev/session.sh) that `core` runs.
     driver: PathBuf,
+    /// The host bridge's log, in the session's state directory.
+    bridge_log: PathBuf,
     /// LinuxApkProbes.apk (out/test/probes), for its input harness.
     pub probes: PathBuf,
 }
@@ -46,13 +49,18 @@ pub struct Output {
 }
 
 impl Session {
-    pub fn new(launcher: PathBuf, probes: PathBuf) -> Self {
-        Self {
-            core: launcher::Session::at(launcher.clone()),
-            driver: launcher,
+    pub fn new(driver: PathBuf, probes: PathBuf) -> Result<Self> {
+        let o = Command::new(&driver).arg("paths").output()?;
+        let paths: serde_json::Value = serde_json::from_slice(&o.stdout)
+            .with_context(|| format!("{} paths", driver.display()))?;
+        let state = paths["state"].as_str().context("no state dir")?;
+        Ok(Self {
+            core: launcher::Session::at(driver.clone()),
+            bridge_log: Path::new(state).join("bridge.log"),
+            driver,
             started: Cell::new(false),
             probes,
-        }
+        })
     }
 
     /// Runs `cmd` inside the session as root, killed after `secs`.
@@ -88,34 +96,15 @@ impl Session {
         Ok(())
     }
 
-    /// The host bridge's log, in the session's state directory.
-    fn bridge_log_path(&self) -> PathBuf {
-        let state = Command::new(&self.driver)
-            .arg("paths")
-            .output()
-            .ok()
-            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
-            .and_then(|v| v["state"].as_str().map(PathBuf::from));
-        state
-            .map(|s| {
-                s.join(format!(
-                    "linuxapk-{}",
-                    paths::instance().unwrap_or_default()
-                ))
-            })
-            .unwrap_or_else(|| paths::state_dir().unwrap_or_default())
-            .join("bridge.log")
-    }
-
     /// The bridge log's current size, so a step can look only at what comes
     /// after.
     pub fn bridge_log_len(&self) -> u64 {
-        fs::metadata(self.bridge_log_path()).map_or(0, |m| m.len())
+        fs::metadata(&self.bridge_log).map_or(0, |m| m.len())
     }
 
     /// The bridge log from byte `from` on (at most its last MiB).
     pub fn bridge_log(&self, from: u64) -> String {
-        let Ok(mut f) = File::open(self.bridge_log_path()) else {
+        let Ok(mut f) = File::open(&self.bridge_log) else {
             return String::new();
         };
         let len = f.metadata().map_or(0, |m| m.len());
