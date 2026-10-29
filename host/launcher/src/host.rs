@@ -14,16 +14,21 @@ use crate::conf::Config;
 use crate::session::{self, append};
 use crate::{lifecycle, nsroot, sys};
 
+/// `systemctl --user` or `systemd-run --user`. A test on a nested desktop has
+/// its bus and runtime dir; its user manager is still the host's (only the
+/// bridge belongs on the private bus).
+pub fn user_manager(program: &str) -> Command {
+    let run = format!("/run/user/{}", sys::uid());
+    let mut c = Command::new(program);
+    c.env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={run}/bus"))
+        .env("XDG_RUNTIME_DIR", run)
+        .arg("--user");
+    c
+}
+
 fn systemctl(args: &[&str]) -> Command {
-    let mut c = Command::new("systemctl");
-    c.arg("--user").args(args).stdin(Stdio::null());
-    // Tests may use a nested desktop's bus and runtime dir. Its user manager
-    // is still the host manager; only the bridge belongs on the private bus.
-    c.env(
-        "DBUS_SESSION_BUS_ADDRESS",
-        format!("unix:path=/run/user/{}/bus", sys::uid()),
-    )
-    .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()));
+    let mut c = user_manager("systemctl");
+    c.args(args).stdin(Stdio::null());
     c
 }
 
@@ -38,13 +43,8 @@ fn unit_active(unit: &str) -> bool {
 pub fn start(cfg: &Config, exe: &Path, follow: bool) -> Result<()> {
     let p = &cfg.paths;
     // Delegate=yes gives the session a cgroup subtree of its own.
-    let st = Command::new("systemd-run")
-        .env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path=/run/user/{}/bus", sys::uid()),
-        )
-        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()))
-        .args(["--user", "--quiet", "--collect"])
+    let st = user_manager("systemd-run")
+        .args(["--quiet", "--collect"])
         .arg(format!("--unit={}", p.unit))
         .args(["-p", "Delegate=yes", "-p", "KillMode=control-group"])
         .args([

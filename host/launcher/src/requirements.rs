@@ -33,13 +33,8 @@ pub fn check(sound: bool) -> Result<()> {
     if let Err(e) = userns() {
         need(e, true);
     }
-    if !Command::new("systemctl")
-        .env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path=/run/user/{}/bus", sys::uid()),
-        )
-        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", sys::uid()))
-        .args(["--user", "show-environment"])
+    if !crate::host::user_manager("systemctl")
+        .arg("show-environment")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
