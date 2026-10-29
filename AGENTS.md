@@ -88,8 +88,9 @@ runs), then [docs/architecture.md](docs/architecture.md).
   messages; `mise run check` passes before every push. Never force-push `main`.
 - The repo is public: never commit secrets, image contents or third-party APKs.
   Generated files go in `out/`. Post nothing outside this repo.
-- Never commit media. Upload screenshots to the README media issue with
-  `gh issue comment 1 --attach <file>#<alt>` and link the user-attachments URL;
+- Never commit media. A visual change needs screenshots on its own PR:
+  `gh issue comment <pr> --attach <file>#<alt>`, linked from the description.
+  README images go on the README media issue (#1) the same way.
   `tools/dev/window-shot.sh` captures just the Linux.apk window.
 - Plans and open work are GitHub issues, not docs. Docs say what is true now and
   why; code comments say what the code can't.
