@@ -30,7 +30,9 @@
 //! attention.
 //!
 //! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
-//! 1 portrait, 2 landscape), u32 automatic fullscreen (0 or 1). The Android
+//! 1 portrait, 2 landscape), u32 automatic fullscreen (0 or 1), u32 immersive
+//! request (both bars hidden, 0 or 1). The separate immersive cycle preserves a
+//! manual fullscreen exit across orientation eligibility changes. The Android
 //! window manager sends the current policy when mapped and when it changes.
 //! The bridge reshapes floating toplevels and translates fullscreen to xdg-shell.
 //!
@@ -144,6 +146,7 @@ pub struct WindowPolicy {
     pub window: u32,
     pub orientation: u32,
     pub fullscreen: bool,
+    pub immersive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +181,7 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             window: r.u32()?,
             orientation: r.u32_in(0..=2, "orientation")?,
             fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
+            immersive: r.u32_in(0..=1, "immersive")? != 0,
         }),
         ty::TEXT_INPUT => {
             let n = r.u16()? as usize;
@@ -221,7 +225,8 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             w = Writer::message(ty::WINDOW_POLICY, tag);
             w.u32(p.window)
                 .u32(p.orientation)
-                .u32(u32::from(p.fullscreen));
+                .u32(u32::from(p.fullscreen))
+                .u32(u32::from(p.immersive));
         }
         Request::TextInput(r) => {
             w = Writer::message(ty::TEXT_INPUT, tag);
@@ -301,6 +306,7 @@ mod tests {
                 window: 3,
                 orientation: 1,
                 fullscreen: true,
+                immersive: true,
             }),
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
@@ -320,6 +326,7 @@ mod tests {
                     window: 3,
                     orientation: 3,
                     fullscreen: false,
+                    immersive: false,
                 })
             ))
             .is_err()

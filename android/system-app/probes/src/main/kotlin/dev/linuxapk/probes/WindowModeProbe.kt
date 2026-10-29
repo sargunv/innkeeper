@@ -42,6 +42,14 @@ class WindowModeProbe : Activity() {
     applyAction(intent.getStringExtra("action") ?: "portrait")
   }
 
+  /** Covers returning to an activity whose runtime request differs from its manifest. */
+  class ReturnActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+      super.onCreate(savedInstanceState)
+      setContentView(TextView(this).apply { text = "Portrait activity; Back returns to landscape" })
+    }
+  }
+
   private fun applyAction(action: String) {
     when (action) {
       "portrait" -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

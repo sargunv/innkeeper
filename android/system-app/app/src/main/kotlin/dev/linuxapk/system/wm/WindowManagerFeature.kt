@@ -112,6 +112,7 @@ class WindowManagerFeature(
     var resize: Runnable? = null
     var requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     var topActivity: ComponentName? = null
+    val orientations = HashMap<Pair<Int, ComponentName>, Int>()
     var requestedVisibleTypes = WindowInsets.Type.systemBars()
     var insetComponent: ComponentName? = null
     var game = false
@@ -489,12 +490,13 @@ class WindowManagerFeature(
           ActivityInfo.SCREEN_ORIENTATION_FULL_USER,
         )
     val bars = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+    val immersive = w.requestedVisibleTypes and bars == 0
     val fullscreen =
       w.game &&
         w.insetComponent?.packageName == w.pkg &&
-        w.requestedVisibleTypes and bars == 0 &&
+        immersive &&
         (orientation == 2 || sensorOrientation)
-    input.windowPolicy(w.id, orientation, fullscreen)
+    input.windowPolicy(w.id, orientation, fullscreen, immersive)
   }
 
   private fun focus(w: AppWindow, activate: Boolean, token: String = "") {
@@ -516,6 +518,7 @@ class WindowManagerFeature(
           val w = windows[Tasks.displayId(t)] ?: return@post
           if (allTasks().firstOrNull { Tasks.displayId(it) == w.id }?.taskId != taskId) return@post
           w.topActivity = t.topActivity
+          t.topActivity?.let { w.orientations[taskId to it] = requestedOrientation }
           w.requestedOrientation = requestedOrientation
           Log.i(TAG, "display ${w.id}: requested orientation=$requestedOrientation task=$taskId")
           sendPolicy(w)
@@ -571,12 +574,15 @@ class WindowManagerFeature(
           it.topActivity?.className != AppWarningActivity::class.java.name
         }
       w.tasks = ts.map { it.taskId }
+      w.orientations.keys.retainAll { it.first in w.tasks }
       val top = ts.firstOrNull()
       if (top?.topActivity != w.topActivity) {
         w.topActivity = top?.topActivity
         w.requestedOrientation =
-          top?.let(Tasks::topActivityInfo)?.screenOrientation
-            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+          top?.let { t ->
+            t.topActivity?.let { w.orientations[t.taskId to it] }
+              ?: Tasks.topActivityInfo(t)?.screenOrientation
+          } ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         sendPolicy(w)
       }
       when {

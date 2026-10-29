@@ -111,6 +111,9 @@ struct Win {
     scale120: u32,
     configured: bool,
     fullscreen: bool,
+    constrained: bool,
+    app_immersive: bool,
+    manual_fullscreen_choice: bool,
     /// The last requested Android orientation; manual Rotate does not change it.
     orientation: u32,
     /// True only if Android, rather than the user, entered fullscreen.
@@ -289,6 +292,7 @@ impl State {
     pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
         if let Some(w) = self.windows.get_mut(&id) {
             w.app_fullscreen = false;
+            w.manual_fullscreen_choice = true;
             if w.fullscreen {
                 w.window.unset_fullscreen();
             } else {
@@ -303,7 +307,7 @@ impl State {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
-        if w.fullscreen {
+        if w.fullscreen || w.constrained {
             return;
         }
         std::mem::swap(&mut w.width, &mut w.height);
@@ -335,8 +339,11 @@ impl State {
         let Some(w) = self.windows.get_mut(&p.window) else {
             return;
         };
-        if p.fullscreen != w.app_requested_fullscreen {
-            w.app_requested_fullscreen = p.fullscreen;
+        if p.immersive && !w.app_immersive {
+            w.manual_fullscreen_choice = false;
+        }
+        w.app_immersive = p.immersive;
+        if p.fullscreen != w.app_requested_fullscreen && !w.manual_fullscreen_choice {
             if p.fullscreen && !w.fullscreen {
                 w.app_fullscreen = true;
                 w.window.set_fullscreen(None);
@@ -345,6 +352,7 @@ impl State {
                 w.window.unset_fullscreen();
             }
         }
+        w.app_requested_fullscreen = p.fullscreen;
         if w.orientation != p.orientation {
             w.orientation = p.orientation;
             w.orientation_pending = true;
@@ -356,7 +364,7 @@ impl State {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
-        if !w.orientation_pending || w.fullscreen || w.app_fullscreen {
+        if !w.orientation_pending || w.fullscreen || w.constrained || w.app_fullscreen {
             return;
         }
         w.orientation_pending = false;
@@ -513,6 +521,9 @@ impl State {
                 scale120: 120,
                 configured: false,
                 fullscreen: false,
+                constrained: false,
+                app_immersive: false,
+                manual_fullscreen_choice: false,
                 orientation: 0,
                 app_fullscreen: false,
                 app_requested_fullscreen: false,
@@ -791,6 +802,7 @@ impl WindowHandler for State {
         w.height = height;
         w.configured = true;
         w.fullscreen = c.is_fullscreen();
+        w.constrained = c.is_maximized() || c.is_tiled();
         if let Some(v) = &w.viewport {
             v.set_destination(width as i32, height as i32);
         }

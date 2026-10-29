@@ -111,8 +111,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   fun activateWindow(window: Int, token: String = "") =
     connection.send(WINDOW_ACTIVATE) { u32(window).name(token) }
 
-  fun windowPolicy(window: Int, orientation: Int, fullscreen: Boolean) =
-    connection.send(WINDOW_POLICY) { u32(window).u32(orientation).u32(if (fullscreen) 1 else 0) }
+  fun windowPolicy(window: Int, orientation: Int, fullscreen: Boolean, immersive: Boolean) =
+    connection.send(WINDOW_POLICY) {
+      u32(window).u32(orientation).u32(if (fullscreen) 1 else 0).u32(if (immersive) 1 else 0)
+    }
 
   fun destroyWindow(window: Int) = connection.send(WINDOW_DESTROY) { u32(window) }
 
