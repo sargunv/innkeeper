@@ -32,3 +32,8 @@ ro.product.cpu.abilist32=
 # Desktop audio: Android shouldn't attenuate media itself; the desktop mixer is
 # the volume control (Linux.apk shows up there as its own stream).
 ro.config.media_vol_default=15
+
+# There is no tracefs in the session. libcutils disables atrace when opening
+# trace_marker fails; silence its per-process error without faking tracing or
+# exposing the host's tracefs. Other tags keep their normal log levels.
+log.tag.cutils-trace=S

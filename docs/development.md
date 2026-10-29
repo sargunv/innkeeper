@@ -74,6 +74,41 @@ flowchart LR
 Test tiers and their mise tasks are in [tests/README.md](../tests/README.md).
 `mise run check` (hk and dprint) is the pre-commit gate; `mise run fix` formats.
 
+## Android logs
+
+Use a bounded snapshot inside a named session:
+
+```sh
+LINUXAPK_INSTANCE=debug mise run session -- exec timeout 10 logcat -b all -d -t 100
+```
+
+`logcat -b all` streams until interrupted; waiting for it to exit is expected.
+`-b` selects buffers, `-d` dumps and exits, and `-t 100` also implies `-d`
+(unlike `-T 100`, which keeps streaming). The timeout bounds a stalled reader.
+In the #49 investigation, each buffer (`main`, `system`, `crash`, `events`,
+`radio`, `stats`, `security`, `kernel`) and the combined dump returned within
+one second in a fresh session. No buffer deadlock was reproduced.
+
+The `kernel` buffer is empty: logd cannot read the host's `/proc/kmsg`, and the
+supervisor does not emulate that stream. Android init's `/dev/kmsg` writes go to
+the launcher's FIFO reader instead (`session -- log`). Empty `kernel` and
+`security` buffers do not hold a dump open; `security` also requires Android's
+device-owner logging configuration.
+
+There is no tracefs. libcutils turns off atrace after failing to open
+`trace_marker`; `image/vendor.prop` silences the resulting per-process
+`cutils-trace: Error opening trace file` through `log.tag.cutils-trace=S`. This
+leaves tracing unavailable and avoids exposing host tracefs or pretending that
+trace markers were recorded.
+
+OpenTTD 14.1.rev128's `Setting the swap interval is not supported` is expected
+from its bundled `libsdl-1.2.so`. Its
+[`SDL_GL_SetSwapInterval`](https://github.com/pelya/commandergenius/blob/sdl_android/project/jni/sdl-1.2/src/video/android/SDL_video.c)
+reports this when the video driver has no `GL_SetSwapInterval` callback, before
+calling EGL. This reports an unavailable SDL setting rather than an ANGLE
+`eglSwapInterval` failure. Changing the bundled SDL belongs upstream, so we
+leave that app diagnostic visible.
+
 ## A nested, isolated desktop
 
 Features that open windows, portals or notifications are tested in a nested
