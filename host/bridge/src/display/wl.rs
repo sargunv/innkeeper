@@ -94,6 +94,49 @@ struct Buf {
     busy: bool,
 }
 
+/// Per-window request/choice state, independent of the Wayland objects.
+#[derive(Default)]
+struct FullscreenPolicy {
+    immersive: bool,
+    requested: bool,
+    manual_choice: bool,
+    /// True only if Android, rather than the user, entered fullscreen.
+    app_fullscreen: bool,
+    restore_pending: bool,
+}
+
+impl FullscreenPolicy {
+    fn request(&mut self, immersive: bool, requested: bool, fullscreen: bool) -> Option<bool> {
+        if immersive && !self.immersive {
+            self.manual_choice = false;
+        }
+        self.immersive = immersive;
+        let mut change = None;
+        if requested != self.requested && !self.manual_choice {
+            if requested && !fullscreen {
+                self.app_fullscreen = true;
+                self.restore_pending = false;
+                change = Some(true);
+            } else if !requested && self.app_fullscreen {
+                self.app_fullscreen = false;
+                self.restore_pending = true;
+                change = Some(false);
+            }
+        }
+        self.requested = requested;
+        change
+    }
+
+    fn exited(&mut self) {
+        // Only our automatic restore may exit without recording the user's choice.
+        if !self.restore_pending {
+            self.manual_choice = true;
+        }
+        self.restore_pending = false;
+        self.app_fullscreen = false;
+    }
+}
+
 struct Win {
     id: u32,
     window: Window,
@@ -112,13 +155,9 @@ struct Win {
     configured: bool,
     fullscreen: bool,
     constrained: bool,
-    app_immersive: bool,
-    manual_fullscreen_choice: bool,
+    fullscreen_policy: FullscreenPolicy,
     /// The last requested Android orientation; manual Rotate does not change it.
     orientation: u32,
-    /// True only if Android, rather than the user, entered fullscreen.
-    app_fullscreen: bool,
-    app_requested_fullscreen: bool,
     orientation_pending: bool,
     /// Last windowed content size, restored if the compositor leaves size unspecified.
     windowed_size: (u32, u32),
@@ -291,8 +330,9 @@ impl State {
 
     pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
         if let Some(w) = self.windows.get_mut(&id) {
-            w.app_fullscreen = false;
-            w.manual_fullscreen_choice = true;
+            w.fullscreen_policy.manual_choice = true;
+            w.fullscreen_policy.app_fullscreen = false;
+            w.fullscreen_policy.restore_pending = false;
             if w.fullscreen {
                 w.window.unset_fullscreen();
             } else {
@@ -339,20 +379,16 @@ impl State {
         let Some(w) = self.windows.get_mut(&p.window) else {
             return;
         };
-        if p.immersive && !w.app_immersive {
-            w.manual_fullscreen_choice = false;
-        }
-        w.app_immersive = p.immersive;
-        if p.fullscreen != w.app_requested_fullscreen && !w.manual_fullscreen_choice {
-            if p.fullscreen && !w.fullscreen {
-                w.app_fullscreen = true;
+        if let Some(fullscreen) =
+            w.fullscreen_policy
+                .request(p.immersive, p.fullscreen, w.fullscreen)
+        {
+            if fullscreen {
                 w.window.set_fullscreen(None);
-            } else if !p.fullscreen && w.app_fullscreen {
-                w.app_fullscreen = false;
+            } else {
                 w.window.unset_fullscreen();
             }
         }
-        w.app_requested_fullscreen = p.fullscreen;
         if w.orientation != p.orientation {
             w.orientation = p.orientation;
             w.orientation_pending = true;
@@ -364,7 +400,11 @@ impl State {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
-        if !w.orientation_pending || w.fullscreen || w.constrained || w.app_fullscreen {
+        if !w.orientation_pending
+            || w.fullscreen
+            || w.constrained
+            || w.fullscreen_policy.app_fullscreen
+        {
             return;
         }
         w.orientation_pending = false;
@@ -522,11 +562,8 @@ impl State {
                 configured: false,
                 fullscreen: false,
                 constrained: false,
-                app_immersive: false,
-                manual_fullscreen_choice: false,
+                fullscreen_policy: FullscreenPolicy::default(),
                 orientation: 0,
-                app_fullscreen: false,
-                app_requested_fullscreen: false,
                 orientation_pending: false,
                 windowed_size: (width, height),
                 shown: None,
@@ -738,10 +775,7 @@ impl WindowHandler for State {
         );
         let w = self.windows.get_mut(&id).unwrap();
         if w.fullscreen && !c.is_fullscreen() {
-            if w.app_fullscreen {
-                w.manual_fullscreen_choice = true;
-            }
-            w.app_fullscreen = false;
+            w.fullscreen_policy.exited();
             (w.width, w.height) = w.windowed_size;
         } else if !w.fullscreen && c.is_fullscreen() {
             w.windowed_size = (w.width, w.height);
@@ -1075,4 +1109,27 @@ pub fn run(
         st.destroy(id);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FullscreenPolicy;
+
+    #[test]
+    fn native_fullscreen_exit_survives_landscape_request() {
+        let mut policy = FullscreenPolicy::default();
+        // Immersive portrait, then the user enters fullscreen through the native menu.
+        assert_eq!(policy.request(true, false, false), None);
+        assert_eq!(policy.request(true, false, true), None);
+        // The native menu exits. Landscape in the same hidden-bars cycle must stay windowed.
+        policy.exited();
+        assert_eq!(policy.request(true, true, false), None);
+        // A fresh immersive cycle allows automatic entry again.
+        assert_eq!(policy.request(false, false, false), None);
+        assert_eq!(policy.request(true, true, false), Some(true));
+        // Our automatic restore must not latch a manual choice.
+        assert_eq!(policy.request(false, false, true), Some(false));
+        policy.exited();
+        assert!(!policy.manual_choice);
+    }
 }
