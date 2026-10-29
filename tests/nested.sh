@@ -96,4 +96,10 @@ done
 DBUS_SESSION_BUS_ADDRESS=$(cat "$N/bus")
 export XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=lapk-nested DBUS_SESSION_BUS_ADDRESS
 export LINUXAPK_NESTED=1
+gdbus call --session --dest org.kde.KWin --object-path /KWin \
+  --method org.kde.KWin.supportInformation >"$N/kwin-support.txt"
+if [[ ${GITHUB_ACTIONS:-} == true ]] && ! grep -q 'Compositing Type: OpenGL' "$N/kwin-support.txt"; then
+  echo "nested KWin needs OpenGL and a DRM device; see $N/kwin-support.txt" >&2
+  exit 1
+fi
 "$@"

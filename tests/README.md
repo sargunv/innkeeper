@@ -40,9 +40,12 @@ never uses the main session or the user's desktop configuration.
 
 The CI desktop uses KWin's OpenGL compositor with Mesa software rendering
 (`KWIN_COMPOSE=O2 LIBGL_ALWAYS_SOFTWARE=1`). QPainter (`KWIN_COMPOSE=Q`) does
-not advertise linux-dmabuf, so Android's windows cannot map there. The nested
-runner forwards these renderer overrides only to its private desktop. To
-reproduce CI locally with a prepared image and CI stage:
+not advertise linux-dmabuf, so Android's windows cannot map there. KWin's
+virtual OpenGL backend also needs a DRM device: CI provisions vgem, while local
+development uses the host's existing device. The nested runner forwards renderer
+overrides only to its private desktop and saves KWin's support information in
+`kwin-support.txt`. CI fails before starting Android if KWin fell back from
+OpenGL. To reproduce locally with a prepared image and CI stage:
 
 ```sh
 GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \

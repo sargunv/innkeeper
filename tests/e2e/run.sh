@@ -129,6 +129,21 @@ if [[ ${1:-} == --group ]]; then
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped
+      # Keep the absolute seat coordinates inside/outside a known rectangle.
+      cat >"$T/input-window.js" <<'JS'
+for (const w of workspace.windowList()) {
+  if (String(w.resourceClass).includes("dev.linuxapk.probes")) {
+    w.frameGeometry = {x: 300, y: 100, width: 1280, height: 800};
+    workspace.activeWindow = w;
+  }
+}
+JS
+      script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.loadScript "$T/input-window.js" linuxapk-input-window | grep -oE '[0-9]+')
+      gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
+        --method org.kde.kwin.Script.run >/dev/null
+      gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.unloadScript linuxapk-input-window >/dev/null
       # Activity resume precedes InputDispatcher's focused-window publication.
       # Wait for the actual input target before submitting the burst.
       # shellcheck disable=SC2329 # invoked through until_ok
@@ -147,6 +162,14 @@ if [[ ${1:-} == --group ]]; then
       /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
       seat_pid=$!
       exec {seat_fd}>"$T/seat"
+      # A submitted first frame precedes KWin mapping/focusing the surface.
+      # Establish real pointer delivery before the uninterrupted test stream.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      pointer_ready() {
+        printf 'abs:100,300\nabs:900,300\n' >&"$seat_fd"
+        log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display"
+      }
+      until_ok pointer_ready
       printf '%s\n' key:30,1 key:30,0 \
         abs:900,300 abs:100,300 abs:900,300 button:272,1 \
         key:42,1 abs:1000,320 key:42,0 abs:1100,340 button:272,0 >&"$seat_fd"
@@ -302,12 +325,17 @@ sys.exit(1)
       until_ok file_has "$bridge_log" 'handoff: .*mailto:e2e@example.com'
       s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
       until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
-      s pm enable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
+      s am broadcast -n "dev.linuxapk.probes/.HandoffProbe\$HandlerControl" --ez enabled true >/dev/null
+      # shellcheck disable=SC2329 # invoked by the EXIT trap
+      reset_handler() { s am broadcast -n "dev.linuxapk.probes/.HandoffProbe\$HandlerControl" --ez enabled false >/dev/null; }
+      trap reset_handler EXIT
       s am start -a android.intent.action.VIEW -d mailto:android-handler@example.com >/dev/null
       until_ok log_has LinuxApkHandoffProbe 'Android handler: mailto:android-handler@example.com'
-      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
+      # NEW_TASK | CLEAR_TASK re-runs onCreate without killing the probe process.
+      s am start -f 0x10008000 -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
       until_ok log_has LinuxApkHandoffProbe 'Android handler: content://dev.linuxapk.probes.handoff/shared.odt'
-      s pm disable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
+      reset_handler
+      trap - EXIT
       s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY >/dev/null
       until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
       for mode in progress style indeterminate style-indeterminate ongoing no-badge; do

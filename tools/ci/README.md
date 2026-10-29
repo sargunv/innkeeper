@@ -49,6 +49,13 @@ run under that default without host configuration. A missing udmabuf module
 fails setup: software Vulkan still needs real dma-buf allocations, so a fake
 device or skipping the runtime tests would not test Android graphics.
 
+The hosted GPU-less VM also needs the in-kernel `vgem` DRM device for KWin's
+virtual OpenGL backend. Setup installs the matching kernel's extra modules if
+vgem is absent, loads it, and grants the runner access to its card node. This
+provides buffer allocation for the software compositor; Android still uses
+lavapipe and udmabuf. This provisioning is confined to disposable hosted
+runners. Contributors use their existing DRM device without host setup.
+
 The test tasks run the stage through the repository's Flatpak development
 driver. `test:e2e` starts its own isolated desktop; both compatibility modes use
 `tests/nested.sh`. That runner provides virtual KWin, a private bus, runtime

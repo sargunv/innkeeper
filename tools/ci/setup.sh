@@ -24,6 +24,22 @@ if [[ ! -e /dev/udmabuf ]]; then
 fi
 sudo chmod 666 /dev/udmabuf
 test -r /dev/udmabuf && test -w /dev/udmabuf
+# KWin's virtual OpenGL backend still needs a DRM allocation device. The
+# hosted VM has no GPU; vgem supplies buffers for Mesa's software renderer.
+if ! modinfo vgem >/dev/null 2>&1; then
+  sudo apt-get install -y --no-install-recommends "linux-modules-extra-$(uname -r)"
+fi
+sudo modprobe vgem
+vgem_node=""
+for card in /sys/class/drm/card[0-9]*; do
+  target=$(readlink -f "$card/device")
+  if [[ ${target##*/} == vgem ]]; then
+    vgem_node=/dev/dri/${card##*/}
+    sudo chmod 666 "$vgem_node"
+    break
+  fi
+done
+test -r "$vgem_node" && test -w "$vgem_node"
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"
