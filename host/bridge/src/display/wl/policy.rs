@@ -13,6 +13,8 @@ pub(super) struct Policy {
     // A windowed choice expires on immersive entry; user-entered fullscreen lasts until exit.
     user_override: Option<bool>,
     pending_shape: u32,
+    // Last fullscreen request until acknowledged; other configures may belong to older requests.
+    requested_fullscreen: Option<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -36,7 +38,7 @@ pub(super) fn desired_window_state(
     mut policy: Policy,
     event: Event,
     compositor: WindowState,
-) -> (Policy, WindowState, bool) {
+) -> (Policy, WindowState, Option<bool>) {
     let previous_fullscreen = policy.user_override.unwrap_or(policy.app.fullscreen);
     match event {
         Event::App(app) => {
@@ -52,15 +54,26 @@ pub(super) fn desired_window_state(
         Event::Rotate if !compositor.fullscreen && !compositor.constrained => {
             policy.pending_shape = 3 - compositor.shape;
         }
-        Event::Configure { was_fullscreen }
-            if compositor.fullscreen != was_fullscreen
-                && compositor.fullscreen != previous_fullscreen =>
-        {
-            policy.user_override = Some(compositor.fullscreen);
+        Event::Configure { was_fullscreen } => {
+            if let Some(requested) = policy.requested_fullscreen {
+                if compositor.fullscreen == requested {
+                    policy.requested_fullscreen = None;
+                }
+            } else if compositor.fullscreen != was_fullscreen
+                && compositor.fullscreen != previous_fullscreen
+            {
+                policy.user_override = Some(compositor.fullscreen);
+            }
         }
         _ => {}
     }
     let fullscreen = policy.user_override.unwrap_or(policy.app.fullscreen);
+    let request = (fullscreen != previous_fullscreen
+        && (policy.requested_fullscreen.is_some() || fullscreen != compositor.fullscreen))
+        .then_some(fullscreen);
+    if request.is_some() {
+        policy.requested_fullscreen = request;
+    }
     let shape = if fullscreen || compositor.fullscreen || compositor.constrained {
         0
     } else {
@@ -71,7 +84,7 @@ pub(super) fn desired_window_state(
         shape,
         ..compositor
     };
-    (policy, desired, fullscreen != previous_fullscreen)
+    (policy, desired, request)
 }
 
 #[cfg(test)]
@@ -112,6 +125,16 @@ mod tests {
             was_fullscreen: true,
         };
         let cases: &[(&str, &[Step])] = &[
+            (
+                "fullscreen reversal before acknowledgement",
+                &[
+                    (app(true, true, 2), land, (true, 0, Some(true))),
+                    (app(false, false, 2), land, (false, 2, Some(false))),
+                    (was_windowed, full, (false, 0, None)),
+                    (was_fullscreen, land, (false, 0, None)),
+                    (app(true, true, 2), land, (true, 0, Some(true))),
+                ],
+            ),
             (
                 "normal immersive app offers fullscreen",
                 &[
@@ -180,7 +203,7 @@ mod tests {
                 &[
                     (app(true, true, 2), land, (true, 0, Some(true))),
                     (was_windowed, full, (true, 0, None)),
-                    (was_fullscreen, land, (false, 2, Some(false))),
+                    (was_fullscreen, land, (false, 2, None)),
                     (app(true, false, 1), land, (false, 1, None)),
                     (app(true, true, 2), port, (false, 2, None)),
                 ],
@@ -189,8 +212,8 @@ mod tests {
                 "native exit from user-entered fullscreen persists",
                 &[
                     (app(true, false, 1), port, (false, 1, None)),
-                    (was_windowed, full, (true, 0, Some(true))),
-                    (was_fullscreen, port, (false, 0, Some(false))),
+                    (was_windowed, full, (true, 0, None)),
+                    (was_fullscreen, port, (false, 0, None)),
                     (app(true, true, 2), port, (false, 2, None)),
                     (app(false, false, 2), land, (false, 0, None)),
                     (app(true, true, 2), land, (true, 0, Some(true))),
@@ -219,13 +242,9 @@ mod tests {
         for (name, steps) in cases {
             let mut policy = Policy::default();
             for (index, &(event, compositor, expected)) in steps.iter().enumerate() {
-                let (next, desired, changed) = desired_window_state(policy, event, compositor);
+                let (next, desired, request) = desired_window_state(policy, event, compositor);
                 assert_eq!(
-                    (
-                        desired.fullscreen,
-                        desired.shape,
-                        changed.then_some(desired.fullscreen)
-                    ),
+                    (desired.fullscreen, desired.shape, request),
                     expected,
                     "{name}, step {index}",
                 );

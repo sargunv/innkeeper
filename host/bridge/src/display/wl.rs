@@ -343,11 +343,11 @@ impl State {
             shape: if w.width <= w.height { 1 } else { 2 },
             constrained: w.constrained,
         };
-        let (policy, desired, fullscreen_changed) =
+        let (policy, desired, fullscreen_request) =
             desired_window_state(w.policy, event, compositor);
         w.policy = policy;
-        if fullscreen_changed && desired.fullscreen != w.fullscreen {
-            if desired.fullscreen {
+        if let Some(fullscreen) = fullscreen_request {
+            if fullscreen {
                 w.window.set_fullscreen(None);
             } else {
                 w.window.unset_fullscreen();
