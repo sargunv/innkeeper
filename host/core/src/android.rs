@@ -24,12 +24,7 @@ pub fn parse_session_id(out: &str) -> Option<u32> {
 /// Installs one app from its APKs (base first) in one PackageInstaller
 /// session, streaming each file through stdin (no copies in the session).
 pub fn install(s: &Session, apks: &[&Path]) -> Result<()> {
-    install_apks(s, apks).map_err(
-        |e| match crate::errors::install_failure(&format!("{e:#}")) {
-            Some(kind) => e.context(kind),
-            None => e,
-        },
-    )
+    install_apks(s, apks).map_err(crate::errors::classify_install_error)
 }
 
 fn install_apks(s: &Session, apks: &[&Path]) -> Result<()> {
@@ -81,10 +76,7 @@ fn install_apks(s: &Session, apks: &[&Path]) -> Result<()> {
         let o = s.exec(600, &["cmd", "package", "install-commit", &sid_s])?;
         let t = o.text();
         if !t.lines().any(|l| l.trim() == "Success") {
-            bail!(
-                "{}",
-                validate::truncate(format!("{} {}", t.trim(), o.stderr.trim()).trim(), 600)
-            );
+            bail!("{} {}", t.trim(), o.stderr.trim());
         }
         Ok(())
     })();

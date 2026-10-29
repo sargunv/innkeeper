@@ -42,6 +42,16 @@ pub fn install_failure(text: &str) -> Option<ErrorKind> {
         .map(|s| ErrorKind::InstallFailed(s.to_string()))
 }
 
+/// Keep PackageManager's code even when its diagnostic needs shortening. Other
+/// failures retain their original chain (including Timeout context).
+pub(crate) fn classify_install_error(err: anyhow::Error) -> anyhow::Error {
+    let text = format!("{err:#}");
+    match install_failure(&text) {
+        Some(kind) => anyhow::anyhow!(crate::validate::truncate(text.trim(), 600)).context(kind),
+        None => err,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,6 +76,19 @@ mod tests {
         ] {
             assert_eq!(install_failure(text), None);
         }
+        let long = format!(
+            "{} Failure [INSTALL_FAILED_INVALID_APK: detail]",
+            "prefix ".repeat(100)
+        );
+        let err = classify_install_error(anyhow::anyhow!(long));
+        assert_eq!(
+            err.downcast_ref::<ErrorKind>(),
+            Some(&ErrorKind::InstallFailed(
+                "INSTALL_FAILED_INVALID_APK".into()
+            ))
+        );
+        assert!(err.root_cause().to_string().len() < 650);
+
         let err = anyhow::anyhow!("diagnostic changed")
             .context(ErrorKind::WrongAbi)
             .context("install");
