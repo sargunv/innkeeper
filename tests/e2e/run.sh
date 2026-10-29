@@ -160,6 +160,7 @@ until_ok file_has "$desktop_log" ready
 # Hold exec's existing busy lock while the other groups run. Lifecycle releases
 # it after scheduling its alarm, so no extra boot is needed to change timers.
 until_ok booted
+: >"$T/keeper.log"
 s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' >"$T/keeper.log" &
 keeper=$!
 until_ok file_has "$T/keeper.log" '^ready$'
