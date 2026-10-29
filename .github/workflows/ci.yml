@@ -27,12 +27,24 @@ jobs:
   checks:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
-    timeout-minutes: 60 # Cold Mesa/LLVM builds; warm runs reuse the input cache.
+    timeout-minutes: 120 # Cold Mesa/LLVM builds; warm runs reuse the saved build.
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
+        id: setup
       - run: mise run check
       - run: mise run build
+      - name: Save the Mesa/LLVM and image-tools build
+        if: steps.setup.outputs.android-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            out/build/vulkan/install
+            out/build/vulkan/.stamp
+            out/build/vulkan/deps/llvm
+            out/build/image-tools/install
+            out/build/image-tools/.stamp
+          key: ${{ steps.setup.outputs.android-key }}
       - run: mise run test
       - name: Prepare the image and private Flatpak for the timed run
         run: mise run session -- prepare
@@ -59,8 +71,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
+        id: setup
       - name: Build the stage and Flatpak
         run: mise run package:flatpak
+      - name: Save the Mesa/LLVM and image-tools build
+        if: steps.setup.outputs.android-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            out/build/vulkan/install
+            out/build/vulkan/.stamp
+            out/build/vulkan/deps/llvm
+            out/build/image-tools/install
+            out/build/image-tools/.stamp
+          key: ${{ steps.setup.outputs.android-key }}
       - name: Stage manifest
         uses: actions/upload-artifact@v4
         with:

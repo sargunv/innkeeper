@@ -1,6 +1,13 @@
 name: Linux.apk runner
 description:
   Toolchains, build caches and runtime prerequisites for hosted Linux runners
+outputs:
+  android-key:
+    description: Cache key of the Mesa/LLVM and image-tools build
+    value: ${{ steps.android.outputs.cache-primary-key }}
+  android-hit:
+    description: Whether that build was restored
+    value: ${{ steps.android.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -34,7 +41,10 @@ runs:
           }}
         restore-keys: |
           compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}-
-    - uses: actions/cache@v4
+    # Restore only: the workflow saves right after `mise run build`, so a cold
+    # Mesa/LLVM build is kept even if a later step fails.
+    - uses: actions/cache/restore@v4
+      id: android
       with:
         path: |
           out/build/vulkan/install
