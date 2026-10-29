@@ -277,8 +277,8 @@ session must keep it passing.
 
 ## Numbers
 
-Same-stage measurements on 2026-10-28, Strix Halo with RADV, kernel 7.1.9, CI
-image 16644040, Flatpak 1.18.4 and org.gnome.Platform 51. Windowed runs use an
+Harness measurements on 2026-10-28, Strix Halo with RADV, kernel 7.1.9, CI image
+16644040, Flatpak 1.18.4 and org.gnome.Platform 51. Windowed runs use an
 isolated KWin 6.7.5 desktop; the host has xdg-desktop-portal 1.22.1. These are
 individual runs on a shared development machine, without dropping the host's
 page cache. Host mode uses subuids; Flatpak uses single-uid mode.
@@ -304,3 +304,67 @@ windowed run's partly working app was Mastodon: its live OAuth check did not
 emit a desktop URL. The host headless run passed that check. Both full headless
 runs exceeded the cold-start limit; neither timing is discarded. Raw results are
 in `out/test/compat/m6-{host,flatpak}-{headless,window}/`.
+
+A focused host-windowed Mastodon retest also passed, at 2766 ms cold start and
+562 MiB idle. It does not replace the original full-run failure.
+
+A later targeted Flatpak headless run (OpenCalc only) passed startup and memory
+limits: 2915 ms cold start, 527 MiB idle, 121 ms app launch. A subset run does
+not measure the corpus launch median or replace the full-run result.
+
+The paired windowed probe (`tools/dev/benchmark.sh`) used the identical staged
+manifest, SHA-256
+`b49047a4b6c67f9a3512d05a7973b6dd0848d11fadfea0fc9d4c14db8e34130a`. The image,
+composed root and host file cache were prepared already; the first boot has
+fresh Android `/data`, and the restart reuses it. Idle memory is taken 90 s
+after that restart. Binder uses the pinned Android 17
+`binderThroughputTest -w 2 -i 20000 -p`. These are single trials on the shared
+host, including scheduling delays, rather than an isolated CPU comparison.
+
+| Measurement                                     |    Host | Flatpak |
+| ----------------------------------------------- | ------: | ------: |
+| Fresh `/data` boot to `sys.boot_completed` (ms) |    4180 |    3264 |
+| Cold restart to `sys.boot_completed` (ms)       |    2318 |    2811 |
+| Idle memory without page cache (MiB)            |     560 |     525 |
+| Binder iterations/s                             | 33538.7 |   53274 |
+| Binder mean round trip (µs)                     |   46.49 |   29.39 |
+| Binder p99 round trip (µs)                      |  370.04 |   43.91 |
+
+Android UI rendering timings from `dumpsys gfxinfo <package> framestats` include
+startup and the same ten tap/scroll cycles per app. The table uses each
+process's aggregate histogram, not individual window sections. It measures UI
+rendering, not compositor presentation or input-to-display latency; 5 ms is the
+histogram's lowest bucket. Tomato's 200 ms p99 remains in both samples.
+
+| App       | Runtime | Frames | Janky frames | p95 (ms) | p99 (ms) |
+| --------- | ------- | -----: | -----------: | -------: | -------: |
+| OpenCalc  | Host    |    551 |    2 (0.36%) |        8 |       15 |
+| OpenCalc  | Flatpak |    550 |    1 (0.18%) |        5 |        5 |
+| Wikipedia | Host    |    641 |    5 (0.78%) |        5 |       22 |
+| Wikipedia | Flatpak |    642 |    4 (0.62%) |        5 |       24 |
+| Tomato    | Host    |    172 |    1 (0.58%) |        5 |      200 |
+| Tomato    | Flatpak |    173 |    1 (0.58%) |        5 |      200 |
+
+Raw boot, memory, Binder and frame outputs, together with each run's manifest,
+are in `out/test/benchmark/m6-{host,flatpak}-bench/`.
+
+The M5 probes on the isolated desktop verified Flatpak installation, a native
+Mindustry window with audio, Android HTTPS returning 200, and launching OpenCalc
+through its existing menu entry after refreshing the private deployment.
+DynamicLauncher dialogs used the GTK backend: the installed KDE 6.7.5 backend's
+dialog failed with missing QML properties. Desktop custom-scheme association
+remains unverified in Flatpak because DynamicLauncher does not rebuild the MIME
+cache; explicit CLI URI launch passed.
+
+The lifecycle probe kept 439.99 Hz foreground audio playing after its activity
+closed, stopped with a 10 s idle grace period, and restarted the current stage
+under an 8 GiB host scope cap a minute before its alarm. The boot-rescheduled
+alarm fired 3 ms after its requested time. Cold-launch splash buffer submission
+was 149.9 ms in Flatpak and 27.8 ms in host mode (limit 200 ms); these are the
+first Wayland buffer attach/commit, not physical display presentation times.
+
+The full Flatpak bionic task passed gralloc (110 checks), composer (55 checks),
+Vulkan on lavapipe and RADV, and the audio ABI check. The configured Binder task
+passed 110 gtests, with 10 upstream skips (nine freezer cases and the Binder
+observer integration test). It exits 77 after those tests because the kernel
+binder oracle needs a binderfs mount, which Flatpak forbids.

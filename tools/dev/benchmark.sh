@@ -8,6 +8,7 @@ if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@";
 S=$repo/tools/dev/session.sh
 T=$repo/out/test/benchmark/$LINUXAPK_INSTANCE
 mkdir -p "$T"
+cp "$repo/out/stage/share/linuxapk/manifest.tsv" "$T/manifest.tsv"
 # shellcheck disable=SC2329 # invoked by EXIT
 cleanup() {
   "$S" stop >/dev/null 2>&1 || true
@@ -61,12 +62,12 @@ for pkg in com.darkempire78.opencalculator org.wikipedia org.nsh07.pomodoro; do
   # Fresh install: include startup frames and the same tap/scroll sequence.
   "$S" exec sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do input -d $display tap 400 300; input -d $display swipe 600 650 600 150 500; input -d $display swipe 600 150 600 650 500; done"
   "$S" exec dumpsys gfxinfo "$pkg" framestats >"$T/gfxinfo-$pkg.txt"
-  frames=$(sed -n 's/^Total frames rendered: //p' "$T/gfxinfo-$pkg.txt" | head -1)
+  frames=$(sed -n '/^Total frames rendered:/ {s/^Total frames rendered: //; p; q;}' "$T/gfxinfo-$pkg.txt")
   [[ -n $frames && $frames -gt 0 ]] || {
     echo "FAIL no frame timing for $pkg"
     exit 1
   }
   echo "$pkg"
-  sed -n '/Total frames rendered:/,/HISTOGRAM:/p' "$T/gfxinfo-$pkg.txt" | head -n 10
+  sed -n '/^Total frames rendered:/,+9p' "$T/gfxinfo-$pkg.txt"
   "$S" exec am force-stop "$pkg"
 done
