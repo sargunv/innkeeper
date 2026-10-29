@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -741,6 +742,38 @@ impl<'a> Run<'a> {
         for step in steps {
             let (op, arg) = step.split_once(':').ok_or(format!("bad step {step}"))?;
             match op {
+                "audio" => {
+                    let sink = std::env::var("LINUXAPK_AUDIO_SINK")
+                        .map_err(|_| "audio: no LINUXAPK_AUDIO_SINK".to_string())?;
+                    let path = self.dir.join("audio.raw");
+                    let file = fs::File::create(&path).map_err(|e| e.to_string())?;
+                    // Bound the recorder and its artifact to three seconds of PCM.
+                    let status = Command::new("timeout")
+                        .args([
+                            "--kill-after=1",
+                            "3",
+                            "parec",
+                            "-d",
+                            &format!("{sink}.monitor"),
+                        ])
+                        .args(["--format=s16le", "--rate=48000", "--channels=2", "--raw"])
+                        .stdout(Stdio::from(file))
+                        .status()
+                        .map_err(|e| format!("audio capture: {e}"))?;
+                    if status.code() != Some(124) {
+                        return Err(format!("audio capture: {status}"));
+                    }
+                    let analysis = Command::new("/usr/bin/python3")
+                        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../e2e/audio/freq.py"))
+                        .arg(&path)
+                        .output()
+                        .map_err(|e| format!("audio analysis: {e}"))?;
+                    let detail = String::from_utf8_lossy(&analysis.stdout);
+                    self.save_append("audio.txt", &detail);
+                    if !analysis.status.success() {
+                        return Err(format!("audio: silent output: {detail}"));
+                    }
+                }
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
                 // Text the host bridge logged since the script started, e.g. a
                 // link a test session only logs instead of opening

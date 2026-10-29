@@ -23,6 +23,7 @@
 #                       "intent:<uri>"  VIEW <uri> in the app
 #                       "bridgelog:<text>" the host bridge logged <text> since
 #                                       the script started (links compat only logs)
+#                       "audio:"       non-silent PCM on the private session sink
 #                       "gesture:<pinch|pan|doubletap> X Y"  multi-touch via
 #                                       Linux.apk System's input bridge
 #                       "shot:<name>"   screenshot, must not be blank
@@ -210,6 +211,7 @@ url = "https://f-droid.org/repo/com.shatteredpixel.shatteredpixeldungeon_922.apk
 sha256 = "ceef4cdd4beddcb3d85379ac004cb4ab5d918b89dc7366b4ce9c4a3585a5e78e"
 note = "M2 target; libGDX, GLES"
 settle = 15
+script = ["audio:"]
 
 [[app]]
 package = "com.unciv.app"

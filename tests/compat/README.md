@@ -16,6 +16,14 @@ the log for known failure signatures (MediaCodec, WebView, GL/EGL/Vulkan errors,
 Play services). The last UI dump is saved as `ui.xml` for script failures. Logs
 and screenshots go to `out/test/compat/<instance>/<pkg>/`.
 
+Compat audio goes to a private null sink, `linuxapk_compat_<instance>` (override
+with `LINUXAPK_AUDIO_SINK`). The `audio:` script step records up to three
+seconds of its monitor and asserts non-silent PCM above -60 dBFS; `audio.raw`
+and `audio.txt` keep the capture and level analysis. Run it while the app's
+background music is playing, before taps or sound effects. A session started
+outside the harness must use the same sink. `pactl` and `parec` must be
+available for a run.
+
 - **Results:** works, partly works (the first frame was fine, a later check
   failed), or doesn't work. A session restart during an app is retried once and
   never counts against it.
