@@ -39,7 +39,7 @@ export async function run() {
   control = Gio.DBusExportedObject.wrapJSObject(
     `<node><interface name="dev.linuxapk.TestDesktop">
       <method name="Input"><arg type="s" direction="in"/></method>
-      <method name="Position"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
+      <method name="Position"><arg type="b" direction="out"/></method>
     </interface></node>`,
     {
       Input(action) {
@@ -77,31 +77,21 @@ export async function run() {
             throw new Error(`Unknown test seat action: ${action}`);
         }
       },
-      async PositionAsync([two], invocation) {
-        let x = two ? 0 : 300;
+      async PositionAsync(_args, invocation) {
         let positioned = 0;
         for (const actor of global.get_window_actors()) {
           if (!actor.mapped) continue;
           const window = actor.meta_window;
-          if (
-            !String(window.get_wm_class()).includes(
-              two ? "dev.linuxapk." : "dev.linuxapk.probes",
-            )
-          )
+          if (!String(window.get_wm_class()).includes("dev.linuxapk.probes"))
             continue;
           window.unminimize();
-          window.move_frame(false, x, 100);
-          if (!two) window.activate(global.get_current_time());
-          x += 1600;
+          window.move_frame(false, 300, 100);
+          window.activate(global.get_current_time());
           positioned++;
         }
         await new Promise((resolve) => global.run_at_leisure(resolve));
-        console.log(
-          `test desktop: positioned ${positioned} windows (two=${two})`,
-        );
-        invocation.return_value(
-          new GLib.Variant("(b)", [positioned >= (two ? 2 : 1)]),
-        );
+        console.log(`test desktop: positioned ${positioned} windows`);
+        invocation.return_value(new GLib.Variant("(b)", [positioned >= 1]));
       },
     },
   );

@@ -323,3 +323,23 @@ impl Drop for A11yService {
         crate::info!("{}: a11y connection closed", self.label);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_start_stays_inactive_without_watching_the_desktop() {
+        let shared = Shared::new(false);
+        let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut service = A11yService::new(
+            shared.clone(),
+            &Peer::test(),
+            Events::new(Arc::new(socket.into())),
+        );
+        let reply = service.handle(proto::ty::START, &[], vec![]);
+        assert_eq!(reply.status, 0);
+        assert_eq!(reply.body, [0]);
+        assert!(shared.watching.get().is_none());
+    }
+}

@@ -326,6 +326,15 @@ impl Default for Devices {
     }
 }
 
+impl Devices {
+    fn remove(&mut self, device: u32, dir: &std::path::Path) {
+        self.keys.remove(&device);
+        self.pads.remove(&device);
+        self.clients.retain(|c| c.device != device);
+        let _ = std::fs::remove_file(dir.join(format!("linuxapk-event{device}")));
+    }
+}
+
 // Drain before an ioctl too: a following erase/update must not overtake
 // EV_FF writes that the caller already queued on its installed socket.
 fn drain_writes(client: &Client, state: &mut Devices) {
@@ -488,10 +497,7 @@ impl Input {
                             let _ = std::fs::write(path, []);
                         }
                     } else {
-                        s.keys.remove(&device);
-                        s.pads.remove(&device);
-                        s.clients.retain(|c| c.device != device);
-                        let _ = std::fs::remove_file(path);
+                        s.remove(device, dir);
                     }
                     continue;
                 }
@@ -1025,6 +1031,33 @@ mod tests {
             answer(8, get(0x22, 8), &[], &[])
         );
     }
+    #[test]
+    fn removing_one_display_mouse_keeps_the_other_live() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../out/test/broker-mouse-removal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = Devices::default();
+        let (first, first_fd) = client(3);
+        let (second, _second_fd) = client(8);
+        state.clients.extend([Arc::new(first), Arc::new(second)]);
+        for device in [3, 8] {
+            state.keys.insert(device, [0; 96]);
+            std::fs::write(dir.join(format!("linuxapk-event{device}")), []).unwrap();
+        }
+        state.remove(8, &dir);
+        assert!(!dir.join("linuxapk-event8").exists());
+        assert!(!state.keys.contains_key(&8));
+        assert_eq!(state.clients.len(), 1);
+        assert!(dir.join("linuxapk-event3").exists());
+        assert!(state.keys.contains_key(&3));
+        let packet = event(0, 2, 0, 1);
+        let remaining = state.clients[0].clone();
+        let delivery = std::thread::spawn(move || remaining.deliver(&packet).unwrap());
+        assert_eq!(receive(&first_fd), packet);
+        delivery.join().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn gamepad_timestamp_bytes_never_register_a_device() {
         let mut registration = gamepad::FIRST.to_le_bytes().to_vec();

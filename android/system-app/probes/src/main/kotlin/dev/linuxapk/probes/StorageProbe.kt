@@ -45,7 +45,7 @@ class StorageProbe : BroadcastReceiver() {
       check(!file.exists())
       Log.i(
         "LinuxApkStorageProbe",
-        "state=$state app-dir=ok MediaStore=ok round=${intent.getStringExtra("round")}",
+        "state=$state app-dir=ok MediaStore=ok",
       )
       pending.finish()
     }

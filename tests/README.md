@@ -1,15 +1,16 @@
 # Tests
 
-Keep tests of observable Linux.apk behaviour. Prefer a unit test for edge cases;
-e2e checks the desktop/Android wiring once per feature. Preserve regressions for
-bugs we have fixed.
+Unit and low-level tests carry branches, edge cases and error handling; e2e
+keeps one common-path scenario per user-visible feature. Move variants down
+before removing them from e2e, preserving every bug regression at the cheapest
+level.
 
 - `mise run test`: Rust, Kotlin protocol/input, HAL host tests, supervisor,
   image scripts and harness units. No Android session or APK corpus needed.
 - `mise run test:e2e -- [group...]`: one fresh named session on an isolated
-  desktop. No arguments runs all nine groups: `boot` (including host safety
-  selftest), `storage`, `input`, `audio`, `desktop`, `sharing`, `a11y`,
-  `production` and `lifecycle`. Build and prepare first:
+  desktop. No arguments runs five groups: `boot` (host safety, HOME and
+  storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
+  Build and prepare first:
 
   ```sh
   mise run build
@@ -30,8 +31,8 @@ observations; audio runs concurrently. CI uses headless Mutter/llvmpipe with
 and group limits scale with that deadline. Logs, captures and phase timings land
 in `out/test/e2e/<instance>/`; desktop logs are in
 `out/test/nested/<instance>/`. CI uploads these in `checks-logs`. Android log
-captures are bounded. `production` uses a capped bridge sidecar on the same
-private desktop to check real policy without opening host apps or dialogs.
+captures are bounded. `desktop` uses a capped bridge sidecar on the same private
+desktop to check real policy without opening host apps or dialogs.
 
 - `mise run test:bionic`: manual Android-side HAL diagnostics.
 - `mise run test:compat -- --only <package>`: manual app troubleshooting; see

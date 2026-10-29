@@ -22,7 +22,7 @@ import android.view.KeyEvent
  * and CREATE_DOCUMENT; plus prefix for a folder.
  */
 class PickerActivity : Activity() {
-  private var done = false
+  private val state = PickerState()
   private var listener: HostFiles.PickListener? = null
   private val main = Handler(Looper.getMainLooper())
   private var waiting: (() -> Unit)? = null
@@ -67,14 +67,14 @@ class PickerActivity : Activity() {
     val ready: () -> Unit = {
       main.post {
         // The immediate connected check can race the HELLO callback. Only the first wins.
-        if (waiting != null && !done && !isFinishing) {
+        if (!isFinishing && state.connected()) {
           stopWaiting()
           // PICK waits for an acknowledgement; keep that wait off the UI thread too.
           Thread(
               {
                 val ok = HostFiles.pick(mode, write, displayId, "", name, mimes, pickListener)
                 main.post {
-                  if (done) HostFiles.abandon(pickListener) else if (!ok) fallback()
+                  if (state.done) HostFiles.abandon(pickListener) else if (!ok) fallback()
                 }
               },
               "linuxapk-picker",
@@ -96,8 +96,7 @@ class PickerActivity : Activity() {
   }
 
   private fun fallback() {
-    if (done || isFinishing) return
-    done = true
+    if (isFinishing || !state.finish()) return
     Log.w(HostFiles.TAG, "no desktop file chooser; handing ${intent.action} to DocumentsUI")
     try {
       startActivity(
@@ -114,8 +113,7 @@ class PickerActivity : Activity() {
   }
 
   private fun deliver(mode: Int, write: Boolean, status: Int, items: List<HostFiles.Picked>) {
-    if (done || isFinishing) return
-    done = true
+    if (isFinishing || !state.finish()) return
     if (status != 0 || items.isEmpty()) {
       Log.i(HostFiles.TAG, "pick ended: $status")
       setResult(RESULT_CANCELED)
@@ -158,8 +156,7 @@ class PickerActivity : Activity() {
   @Deprecated("Activity.onBackPressed") override fun onBackPressed() = cancel()
 
   private fun cancel() {
-    if (done) return
-    done = true
+    if (!state.finish()) return
     stopWaiting()
     listener?.let(HostFiles::abandon)
     setResult(RESULT_CANCELED)
@@ -167,7 +164,7 @@ class PickerActivity : Activity() {
   }
 
   override fun onDestroy() {
-    done = true
+    state.finish()
     stopWaiting()
     listener?.let(HostFiles::abandon)
     super.onDestroy()
