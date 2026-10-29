@@ -52,7 +52,17 @@ stop_session() {
 
 if [[ ${1:-} == --group ]]; then
   case $2 in
-    boot) "$S" selftest ;;
+    boot)
+      "$S" selftest
+      s timeout 10 logcat -b all -d -t 100 >"$T/logcat.txt"
+      [[ -s $T/logcat.txt ]]
+      s timeout 10 logcat -b all -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
+      if file_has "$T/trace.txt" 'Error opening trace file'; then
+        echo 'FAIL expected missing-tracefs error was not silenced' >&2
+        exit 1
+      fi
+      echo 'ok   bounded all-buffer log dump; no missing-tracefs noise'
+      ;;
     input)
       launch InputProbeActivity
       # shellcheck disable=SC2329 # invoked through until_ok
