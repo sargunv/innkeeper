@@ -21,7 +21,10 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
 
 - **Never sudo.** Nothing the project needs, to build or to run, may require
   root, a system package, an SELinux module, an AppArmor profile or a kernel
-  module. Build dependencies go in the build container or mise.
+  module. Build dependencies go in the build container or mise. Disposable
+  GitHub-hosted CI runners are the exception: `tools/ci/setup.sh` may provision
+  their packages, kernel devices and namespace settings with sudo, and refuses
+  to run outside GitHub Actions. This does not apply to contributors' machines.
 - **Memory caps** (a global OOM once crashed the user's desktop). `/tmp` is a
   RAM-backed tmpfs: never write large files there; use `out/`. Sessions run
   capped (`MemoryHigh=6G`, `MemoryMax=8G`), container builds always pass

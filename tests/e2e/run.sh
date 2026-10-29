@@ -8,6 +8,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-e2e}
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
+  mise run test:compat -- fetch --only io.anuke.mindustry,com.darkempire78.opencalculator,org.wikipedia
   export LINUXAPK_TEST_LAUNCHER_PORTAL=${LINUXAPK_TEST_LAUNCHER_PORTAL:-gtk}
   exec "$repo/tests/nested.sh" "$0" "$@"
 fi

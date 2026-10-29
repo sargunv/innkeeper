@@ -105,6 +105,10 @@ install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig ima
 install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
 """
 
+[tasks."package:flatpak"]
+description = "Build the stage and install the Flatpak into FLATPAK_USER_DIR"
+run = "packaging/flatpak/build.sh"
+
 [tasks.stage]
 description = "Merge the module install trees into out/stage (and write its manifest)"
 run = "tools/build/stage.sh"

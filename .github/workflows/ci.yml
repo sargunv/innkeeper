@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+env:
+  CARGO_BUILD_JOBS: 4
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
+  FLATPAK_USER_DIR: ${{ github.workspace }}/out/flatpak/user
+  LINUXAPK_INSTANCE: ci
+  # The 16 GB runner runs one capped (8 GiB) Android session at a time.
+  LINUXAPK_MIN_AVAILABLE_GIB: 10
+
+jobs:
+  checks:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60 # Cold Mesa/LLVM builds; warm runs reuse the input cache.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: mise run check
+      - run: mise run build
+      - run: mise run test
+      - name: End-to-end tests on an isolated software desktop
+        run: mise run test:e2e
+      - name: Test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checks-logs
+          path: |
+            out/test
+            out/dev/flatpak/**/*.log
+            !out/test/compat/corpus/**
+            !**/android-data*/**
+          retention-days: 7
+
+  nightly:
+    if:
+      github.event_name == 'schedule' || github.event_name ==
+      'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - name: Build the stage and Flatpak
+        run: mise run package:flatpak
+      - name: Stage manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-manifest
+          path: out/stage/share/linuxapk/manifest.tsv
+      - name: Full headless compatibility corpus
+        id: headless
+        run: tools/ci/compat.sh headless
+      - name: Full windowed compatibility corpus
+        if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
+        run: tools/ci/compat.sh windowed
+      - name: Compatibility reports and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility
+          path: |
+            out/ci/reports
+            out/test/nested
+            out/dev/flatpak/**/*.log
+            !**/android-data*/**
+          retention-days: 14
