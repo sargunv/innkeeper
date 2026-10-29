@@ -222,6 +222,32 @@ static int flatpak(void) {
   }
   return flatpak_state;
 }
+#include <fcntl.h>
+#include <stdarg.h>
+
+#include "fuse.h"
+
+static int do_open(const char* path, int flags, mode_t mode) {
+  int fd = syscall(SYS_openat, AT_FDCWD, path, flags, mode);
+  if (fd == -1 && errno == ENOENT && !strcmp(path, "/dev/fuse"))
+    return fuse_open();
+  return fd;
+}
+EXPORT int open(const char* path, int flags, ...) {
+  mode_t mode = 0;
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, int);
+    va_end(ap);
+  }
+  return do_open(path, flags, mode);
+}
+EXPORT int __open_2(const char* path, int flags) {
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) abort();
+  return do_open(path, flags, 0);
+}
+
 static long refused_ok(long rc) {
   return rc != 0 && errno == EPERM && flatpak() ? 0 : rc;
 }
@@ -229,9 +255,18 @@ EXPORT int mount(
   const char* src, const char* dst, const char* type, unsigned long flags,
   const void* data
 ) {
+  if (
+    fuse_peer != -1 && type && !strcmp(type, "fuse") &&
+    strcmp(dst, kEmulatedMount)
+  ) {
+    fuse_unmount(kEmulatedMount);
+    errno = ENODEV;
+    return -1;
+  }
   return refused_ok(syscall(SYS_mount, src, dst, type, flags, data));
 }
 EXPORT int umount2(const char* target, int flags) {
+  fuse_unmount(target);
   return refused_ok(syscall(SYS_umount2, target, flags));
 }
 EXPORT int umount(const char* target) { return umount2(target, 0); }
@@ -532,6 +567,15 @@ static void vstat_fixup(
 EXPORT int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
   int saved = errno;
   long r = syscall(SYS_newfstatat, dirfd, path, st, flags);
+  // vold prepares its mount points with lstat, and MediaProvider lstats the
+  // volume root. These stand for mounts: show the directory, not the link.
+  if (
+    r == 0 && S_ISLNK(st->st_mode) && (flags & AT_SYMLINK_NOFOLLOW) &&
+    (!strcmp(path, "/storage/emulated") || !strcmp(path, kEmulatedMount) ||
+     !strcmp(path, "/mnt/pass_through/0/emulated")) &&
+    flatpak()
+  )
+    r = syscall(SYS_newfstatat, dirfd, path, st, flags & ~AT_SYMLINK_NOFOLLOW);
   if (r == 0 && vstat_on()) {
     vstat_fixup(dirfd, path, flags, st);
     errno = saved;

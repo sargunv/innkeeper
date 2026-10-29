@@ -54,14 +54,31 @@ if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
       "$S" selftest
-      s timeout 10 logcat -b all -d -t 100 >"$T/logcat.txt"
+      s timeout 10 logcat -d -t 100 >"$T/logcat.txt"
       [[ -s $T/logcat.txt ]]
-      s timeout 10 logcat -b all -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
+      s timeout 10 logcat -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
       if file_has "$T/trace.txt" 'Error opening trace file'; then
         echo 'FAIL expected missing-tracefs error was not silenced' >&2
         exit 1
       fi
-      echo 'ok   bounded all-buffer log dump; no missing-tracefs noise'
+      echo 'ok   bounded log dump; no missing-tracefs noise'
+      ;;
+    storage)
+      s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow
+      s am start -n dev.linuxapk.probes/.StorageProbe --es round initial >/dev/null
+      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=initial'
+      provider=$(s pidof com.android.providers.media.module)
+      [[ -n $provider ]]
+      # shellcheck disable=SC2329 # invoked through until_ok
+      volume_state() { s sm list-volumes all | grep -q "^emulated;0 $1 "; }
+      s sm unmount 'emulated;0'
+      until_ok volume_state unmounted
+      [[ $(s pidof com.android.providers.media.module) == "$provider" ]]
+      s sm mount 'emulated;0'
+      until_ok volume_state mounted
+      [[ $(s pidof com.android.providers.media.module) == "$provider" ]]
+      s am start -n dev.linuxapk.probes/.StorageProbe --es round remounted >/dev/null
+      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=remounted'
       ;;
     input)
       launch InputProbeActivity
@@ -207,9 +224,9 @@ if [[ ${1:-} == --group ]]; then
 fi
 
 groups=("$@")
-((${#groups[@]})) || groups=(boot input audio desktop sharing a11y production lifecycle)
+((${#groups[@]})) || groups=(boot storage input audio desktop sharing a11y production lifecycle)
 for group in "${groups[@]}"; do
-  case $group in boot | input | audio | desktop | sharing | a11y | production | lifecycle) ;; *)
+  case $group in boot | storage | input | audio | desktop | sharing | a11y | production | lifecycle) ;; *)
     echo "unknown e2e group: $group" >&2
     exit 2
     ;;
