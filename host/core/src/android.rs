@@ -151,7 +151,12 @@ pub enum Launch {
     /// carries BROWSABLE and only reaches activities that accept web links.
     View { package: String, uri: String },
     /// A read-only fd grant from the bridge documents service.
-    File { package: String, grant: u64 },
+    File {
+        package: String,
+        grant: u64,
+        /// Explicit target for the system app's private Open With chooser.
+        component: Option<String>,
+    },
 }
 
 /// How a launch's window comes up.
@@ -186,7 +191,11 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
                 .map_or(component.as_str(), |c| c.0);
             v.extend(["--es", "package", pkg, "--es", "component", component].map(String::from));
         }
-        Launch::File { package, grant } => {
+        Launch::File {
+            package,
+            grant,
+            component,
+        } => {
             v.extend(
                 [
                     "--es",
@@ -198,6 +207,9 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
                 ]
                 .map(String::from),
             );
+            if let Some(component) = component {
+                v.extend(["--es", "component", component].map(String::from));
+            }
         }
         Launch::View { package, uri } => {
             v.extend(["--es", "package", package, "--es", "uri", uri].map(String::from));
@@ -426,6 +438,28 @@ mod tests {
     fn background_replies() {
         assert_eq!(background_reply("background -"), Vec::<String>::new());
         assert_eq!(background_reply("background a.b,c.d"), ["a.b", "c.d"]);
+    }
+
+    #[test]
+    fn file_chooser_is_an_explicit_target_with_the_original_grant() {
+        let args = wm_launch_args(
+            &Launch::File {
+                package: "dev.linuxapk.system".into(),
+                grant: 0xabc,
+                component: Some("dev.linuxapk.system/.documents.OpenWithActivity".into()),
+            },
+            &LaunchOptions::default(),
+        );
+        assert!(
+            args.windows(3)
+                .any(|w| w == ["--es", "file-grant", "0000000000000abc"])
+        );
+        assert!(args.windows(3).any(|w| w
+            == [
+                "--es",
+                "component",
+                "dev.linuxapk.system/.documents.OpenWithActivity"
+            ]));
     }
 
     #[test]

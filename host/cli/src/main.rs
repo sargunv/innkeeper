@@ -99,7 +99,12 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        run("dev.linuxapk.system", &args, token)?;
+        run(
+            "dev.linuxapk.system",
+            &args,
+            token,
+            Some("dev.linuxapk.system/.documents.OpenWithActivity"),
+        )?;
     }
     Ok(())
 }
@@ -122,7 +127,12 @@ fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
 
 /// Launches an app. From a desktop launch on a stopped session, a splash
 /// window shows at once and hands its focus on to the app's window.
-fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
+fn run(
+    pkg: &str,
+    args: &[String],
+    token: Option<String>,
+    file_component: Option<&str>,
+) -> Result<()> {
     let pkg = validate::package(pkg)?;
     let session = Session::find()?;
     let splash = if session.running() {
@@ -190,6 +200,7 @@ fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
                         &linuxapk_core::android::Launch::File {
                             package: pkg.into(),
                             grant,
+                            component: file_component.map(str::to_string),
                         },
                         &opts,
                     )?
@@ -268,7 +279,7 @@ fn main() -> ExitCode {
         Cmd::Run {
             package,
             files_or_uri,
-        } => run(&package, &files_or_uri, token),
+        } => run(&package, &files_or_uri, token, None),
         Cmd::List => list(),
         Cmd::Background { package, setting } => {
             if package.is_some() != setting.is_some() {

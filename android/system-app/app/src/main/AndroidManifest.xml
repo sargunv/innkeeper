@@ -150,16 +150,9 @@
     <activity
       android:name=".documents.OpenWithActivity"
       android:excludeFromRecents="true"
-      android:exported="true"
+      android:exported="false"
       android:label="@string/open_with_title"
-      android:permission="dev.linuxapk.permission.CONTROL_WINDOWS"
-      android:theme="@android:style/Theme.Material.Light.Dialog.Alert">
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <data android:scheme="content" android:mimeType="*/*" />
-      </intent-filter>
-    </activity>
+      android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
 
     <!-- The picked host files as documents; reachable only through granted URIs. -->
     <provider
