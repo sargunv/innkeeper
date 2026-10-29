@@ -28,7 +28,7 @@ session in a sandbox of its own.
 | `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never)            |
 | `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session             |
 | `LINUXAPK_TEST_TIMERS`                             | tests: short idle polling and alarm wake lead, named sessions only |
-| `LINUXAPK_OPEN_URLS`                               | tests: let a test session open links                               |
+| `LINUXAPK_TEST`                                    | tests: isolate desktop integration even without an instance name   |
 | `LINUXAPK_DATA`, `LINUXAPK_IMAGES`, `LINUXAPK_PIN` | tests: Android's `/data`, the image cache, the pin                 |
 | `LINUXAPK_BRIDGE_VERBOSE`, `LINUXAPK_BROKER_DEBUG` | debugging: bridge stream stats; broker tracing                     |
 

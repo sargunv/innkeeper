@@ -6,6 +6,8 @@ import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.DocumentsContract
 import android.util.Log
 import android.view.KeyEvent
@@ -22,6 +24,12 @@ import android.view.KeyEvent
 class PickerActivity : Activity() {
   private var done = false
   private var listener: HostFiles.PickListener? = null
+  private val main = Handler(Looper.getMainLooper())
+  private var waiting: (() -> Unit)? = null
+  private val timeout = Runnable {
+    stopWaiting()
+    fallback()
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -49,41 +57,60 @@ class PickerActivity : Activity() {
     val name =
       if (mode == HostFiles.MODE_SAVE) intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty() else ""
     val displayId = display?.displayId ?: 0
-    HostFiles.start()
-    // Just after the process started, the connection may still be coming up.
-    repeat(20) { if (!HostFiles.connected) Thread.sleep(50) }
-    val ok =
-      HostFiles.connected &&
-        HostFiles.pick(
-          mode,
-          write,
-          displayId,
-          "",
-          name,
-          mimes,
-          object : HostFiles.PickListener {
-              override fun onDone(status: Int, items: List<HostFiles.Picked>) {
-                runOnUiThread { deliver(mode, write, status, items) }
-              }
-            }
-            .also { listener = it },
-        )
-    if (!ok) {
-      Log.w(HostFiles.TAG, "no desktop file chooser; handing $action to DocumentsUI")
-      try {
-        startActivity(
-          Intent(intent)
-            .setComponent(null)
-            .setPackage(DOCUMENTS_UI)
-            .addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT),
-        )
-      } catch (e: Exception) {
-        Log.w(HostFiles.TAG, "DocumentsUI: $e")
-        setResult(RESULT_CANCELED)
+    val pickListener =
+      object : HostFiles.PickListener {
+        override fun onDone(status: Int, items: List<HostFiles.Picked>) {
+          main.post { deliver(mode, write, status, items) }
+        }
       }
-      done = true
-      finish()
+    listener = pickListener
+    val ready: () -> Unit = {
+      main.post {
+        // The immediate connected check can race the HELLO callback. Only the first wins.
+        if (waiting != null && !done && !isFinishing) {
+          stopWaiting()
+          // PICK waits for an acknowledgement; keep that wait off the UI thread too.
+          Thread(
+              {
+                val ok = HostFiles.pick(mode, write, displayId, "", name, mimes, pickListener)
+                main.post {
+                  if (done) HostFiles.abandon(pickListener) else if (!ok) fallback()
+                }
+              },
+              "linuxapk-picker",
+            )
+            .start()
+        }
+      }
+      Unit
     }
+    waiting = ready
+    main.postDelayed(timeout, CONNECT_TIMEOUT_MS)
+    HostFiles.whenConnected(ready)
+  }
+
+  private fun stopWaiting() {
+    waiting?.let(HostFiles::stopWaiting)
+    waiting = null
+    main.removeCallbacks(timeout)
+  }
+
+  private fun fallback() {
+    if (done || isFinishing) return
+    done = true
+    Log.w(HostFiles.TAG, "no desktop file chooser; handing ${intent.action} to DocumentsUI")
+    try {
+      startActivity(
+        Intent(intent)
+          .setComponent(null)
+          .setPackage(DOCUMENTS_UI)
+          .addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT),
+      )
+    } catch (e: Exception) {
+      Log.w(HostFiles.TAG, "DocumentsUI: $e")
+      setResult(RESULT_CANCELED)
+    }
+    finish()
   }
 
   private fun deliver(mode: Int, write: Boolean, status: Int, items: List<HostFiles.Picked>) {
@@ -133,17 +160,21 @@ class PickerActivity : Activity() {
   private fun cancel() {
     if (done) return
     done = true
+    stopWaiting()
     listener?.let(HostFiles::abandon)
     setResult(RESULT_CANCELED)
     finish()
   }
 
   override fun onDestroy() {
+    done = true
+    stopWaiting()
     listener?.let(HostFiles::abandon)
     super.onDestroy()
   }
 
   companion object {
+    private const val CONNECT_TIMEOUT_MS = 1_000L
     private const val DOCUMENTS_UI = "com.android.documentsui"
   }
 }

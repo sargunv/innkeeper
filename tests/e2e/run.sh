@@ -82,22 +82,47 @@ if [[ ${1:-} == --group ]]; then
       s am start -n dev.linuxapk.probes/.DesktopProbe --es action link >/dev/null
       until_ok file_has "$bridge_log" 'openuri: .*https://example.com/linuxapk-e2e'
       s am start -n dev.linuxapk.probes/.NotificationProbe >/dev/null
-      until_ok file_has "$desktop_log" 'notification: Ada Lovelace'
-      s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-clipboard >/dev/null
-      # shellcheck disable=SC2329 # invoked through until_ok
-      clipboard() { [[ $(timeout 2 wl-paste --no-newline 2>/dev/null) == linuxapk-e2e-clipboard ]]; }
-      until_ok clipboard
+      until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
+      printf %s linuxapk-e2e-host-before | wl-copy
+      s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-android >/dev/null
+      until_ok log_has LinuxApkClipProbe 'set: linuxapk-e2e-android'
+      [[ $(timeout 2 wl-paste --no-newline) == linuxapk-e2e-host-before ]]
+      printf %s linuxapk-e2e-host-after | wl-copy
+      s am start -n dev.linuxapk.probes/.ClipProbe >/dev/null
+      until_ok log_has LinuxApkClipProbe 'clip: .*text=linuxapk-e2e-android'
+      # A process cold start exercises PickerActivity's connection callback.
+      s kill -9 "$(s pidof dev.linuxapk.system)"
       launch DesktopProbe
-      until_ok file_has "$desktop_log" 'picker: Open File'
-      until_ok log_has LinuxApkDesktopProbe 'picked: linuxapk-e2e-file'
+      until_ok file_has "$bridge_log" 'documents: .*pick cancelled \(test session\)'
+      until_ok log_has LinuxApkDocs 'pick ended: -125'
+      until_ok log_has LinuxApkDesktopProbe 'picked: null'
+      if file_has "$desktop_log" 'picker:|notification:'; then
+        echo 'FAIL unexpected desktop picker or notification' >&2
+        exit 1
+      fi
+      echo 'ok   clipboard isolated both ways; cold PICK cancelled without a portal'
+      # Hide only this instance's socket to exercise the asynchronous connection timeout.
+      socket=$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/bridge/bridge.sock
+      mv "$socket" "$socket.hidden"
+      trap 'mv "$socket.hidden" "$socket" 2>/dev/null || true' EXIT
+      s kill -9 "$(s pidof dev.linuxapk.system)"
+      s am start -n dev.linuxapk.system/.documents.PickerActivity \
+        -a android.intent.action.OPEN_DOCUMENT -t text/plain >/dev/null
+      until_ok log_has LinuxApkDocs 'no desktop file chooser; handing .* to DocumentsUI'
+      # shellcheck disable=SC2329 # invoked through until_ok
+      documents_ui() { s dumpsys activity activities | grep 'topResumedActivity=.*com.android.documentsui' >/dev/null; }
+      until_ok documents_ui
+      mv "$socket.hidden" "$socket"
+      trap - EXIT
+      s am force-stop com.android.documentsui
+      echo 'ok   unavailable bridge falls back to DocumentsUI after the connection timeout'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
     a11y)
       dbus-send --session --dest=org.a11y.Bus --type=method_call --print-reply /org/a11y/bus \
         org.freedesktop.DBus.Properties.Set string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
       launch A11yProbeActivity
-      label=$(wm LIST | sed -n 's/.*label=//p' | head -1 | sed 's/"$//')
-      /usr/bin/python3 -I "$here/a11y.py" "$label"
+      until_ok file_has "$bridge_log" 'a11y: test session: never active'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
     lifecycle)

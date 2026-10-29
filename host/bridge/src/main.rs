@@ -1,6 +1,5 @@
 //! `linuxapk-bridge --run-dir DIR --state-dir DIR [--allow-uid UID]...
-//!                  [--system-app-dir DIR] [--mirror-apps] [--no-open-urls]
-//!                  [--no-desktop-presence] [--sink NAME] [-v]`
+//!                  [--system-app-dir DIR] [--mirror-apps] [--test-session] [--sink NAME] [-v]`
 //!
 //! Listens on `<run-dir>/bridge/bridge.sock` for clients from the Android
 //! session (the launcher binds `<run-dir>/bridge` into it), keeps MPRIS
@@ -16,8 +15,8 @@
 //! installed inside Android (`$XDG_DATA_HOME`). The documents service's
 //! grants (host files the user picked) persist in
 //! `<state-dir>/documents.grants`.
-//! `--no-open-urls` and `--no-desktop-presence` turn OpenURI, and
-//! notifications, MPRIS and AT-SPI, into log-only sinks (test sessions).
+//! `--test-session` (also `LINUXAPK_TEST=1`) isolates clipboard, portals,
+//! OpenURI, notifications, MPRIS, AT-SPI and location from the desktop.
 //! `-v` logs per-stream statistics.
 
 use std::path::PathBuf;
@@ -41,7 +40,7 @@ fn main() -> Result<()> {
     let mut sink = None;
     let mut system_app_dir: Option<PathBuf> = None;
     let mut mirror_apps = false;
-    let mut policy = linuxapk_bridge::system::Policy::default();
+    let mut test_session = std::env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -57,8 +56,7 @@ fn main() -> Result<()> {
             ),
             "--sink" => sink = Some(args.next().context("--sink needs a name")?),
             "--mirror-apps" => mirror_apps = true,
-            "--no-open-urls" => policy.open_urls = false,
-            "--no-desktop-presence" => policy.presence = false,
+            "--test-session" => test_session = true,
             "--system-app-dir" => {
                 system_app_dir = Some(args.next().context("--system-app-dir needs a path")?.into())
             }
@@ -66,6 +64,8 @@ fn main() -> Result<()> {
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
     }
+    let policy = linuxapk_bridge::system::Policy::for_session(test_session);
+    let mirror_apps = mirror_apps && !test_session;
     let run_dir = run_dir.context("--run-dir is required")?;
     let state_dir = state_dir.context("--state-dir is required")?;
     let socket = run_dir.join("bridge/bridge.sock");
@@ -138,7 +138,7 @@ fn main() -> Result<()> {
     });
     // The host's battery, power saver, network and location. Location asks
     // the user, so a test session on the real desktop gets none.
-    let host_state = linuxapk_bridge::hoststate::HostState::new(policy.presence);
+    let host_state = linuxapk_bridge::hoststate::HostState::new(policy.portals);
     services.register(service::HOSTSTATE, "hoststate", move |peer, events| {
         Ok(Box::new(linuxapk_bridge::hoststate::HostStateService::new(
             host_state.clone(),
@@ -153,6 +153,7 @@ fn main() -> Result<()> {
             store.clone(),
             peer,
             events,
+            policy,
         )))
     });
     // Apps installed inside Android get desktop entries; only with

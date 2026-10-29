@@ -19,8 +19,8 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
   the instance's XDG runtime and state dirs (socket, MPRIS artwork, document
   grants, log), `--allow-uid` and `--system-app-dir` set who may connect, and
-  `--mirror-apps`, `--no-open-urls` and `--no-desktop-presence` are what make a
-  test session ([docs/security.md](../../docs/security.md#test-sessions)).
+  `--test-session` (also `LINUXAPK_TEST=1`) makes a test session
+  ([docs/security.md](../../docs/security.md#test-sessions)).
 - **Environment:** `LINUXAPK_AUDIO_SINK` (one PipeWire sink),
   `LINUXAPK_BRIDGE_VERBOSE=1` (per-stream stats), and the caller's
   `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`,

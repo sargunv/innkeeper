@@ -9,8 +9,8 @@
 //! - `location`: one shared Location portal session
 //!
 //! Battery, power saver and network are read-only state the desktop shows
-//! any app. Location asks the user (the portal's dialog), so test sessions
-//! that talk to the real session bus get none (`allow_location`).
+//! any app. Test sessions disable all session portals (`allow_portals`),
+//! including Location, which can ask the user for consent.
 
 pub mod location;
 pub mod network;
@@ -78,7 +78,7 @@ impl<T: Clone + PartialEq + std::fmt::Debug> Topic<T> {
 
 /// Bridge-wide state, created once in `main.rs`.
 pub struct HostState {
-    allow_location: bool,
+    allow_portals: bool,
     system: OnceLock<Option<zbus::blocking::Connection>>,
     session: OnceLock<Option<zbus::blocking::Connection>>,
     pub battery: Topic<Battery>,
@@ -93,11 +93,11 @@ fn encode_saver(on: &bool) -> Vec<u8> {
 }
 
 impl HostState {
-    /// `allow_location`: whether the Location portal may be asked (not in a
-    /// test session on the real desktop).
-    pub fn new(allow_location: bool) -> Arc<HostState> {
+    /// `allow_portals`: whether desktop portals may be reached (never in a
+    /// test session, including read-only power and network monitoring).
+    pub fn new(allow_portals: bool) -> Arc<HostState> {
         Arc::new(HostState {
-            allow_location,
+            allow_portals,
             system: OnceLock::new(),
             session: OnceLock::new(),
             battery: Topic::new("battery", ev::BATTERY),
@@ -119,6 +119,9 @@ impl HostState {
     }
 
     fn session(&self) -> Option<zbus::blocking::Connection> {
+        if !self.allow_portals {
+            return None;
+        }
         self.session
             .get_or_init(|| {
                 zbus::blocking::Connection::session()
@@ -201,7 +204,7 @@ impl HostStateService {
             self.subs.push(("network", k));
         }
         have |= feature::BATTERY | feature::POWER_SAVER | feature::NETWORK;
-        if self.shared.allow_location {
+        if self.shared.allow_portals {
             have |= feature::LOCATION;
         }
         crate::info!(
@@ -226,7 +229,7 @@ impl Service for HostStateService {
         match req {
             Request::Start { features } => self.start(features),
             Request::LocationStart { precise } => {
-                if !self.shared.allow_location {
+                if !self.shared.allow_portals {
                     return Reply::err(-ENOSYS);
                 }
                 crate::info!(
@@ -313,4 +316,16 @@ fn signals_under(
         .member(member.to_owned())?
         .build();
     zbus::blocking::MessageIterator::for_match_rule(rule, conn, Some(64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_never_connects_to_portals() {
+        let state = HostState::new(false);
+        assert!(state.session().is_none());
+        assert!(state.session.get().is_none());
+    }
 }
