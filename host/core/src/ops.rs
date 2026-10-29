@@ -96,17 +96,19 @@ impl Package {
         )
     }
 
-    /// Whether this host can run it, judging by its native code alone (the
+    /// Whether this image can run it, judging by its native code alone (the
     /// session's ABI list is checked again at install).
     pub fn runs_here(&self) -> bool {
-        let host: &[&str] = if cfg!(target_arch = "x86_64") {
-            &["x86_64", "x86"]
-        } else if cfg!(target_arch = "aarch64") {
-            &["arm64-v8a", "armeabi-v7a"]
-        } else {
-            &[]
-        };
-        self.abis.is_empty() || self.abis.iter().any(|a| host.contains(&a.as_str()))
+        // Use the ABI declaration applied to the pinned image. It excludes
+        // NativeBridge ABIs until a translator is installed (image/vendor.prop).
+        let abis = include_str!("../../../image/vendor.prop")
+            .lines()
+            .find_map(|l| l.strip_prefix("ro.product.cpu.abilist="))
+            .unwrap_or_default();
+        self.abis.is_empty()
+            || abis
+                .split(',')
+                .any(|a| self.abis.iter().any(|b| b == a.trim()))
     }
 }
 
@@ -499,6 +501,50 @@ fn notice_once(dir: &Path, running: bool) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_uses_image_abis() {
+        let dir = crate::test_dir("package-abis");
+        let file = dir.join("fixture.apk");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&file).unwrap());
+        zip.start_file(
+            "AndroidManifest.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        zip.finish().unwrap();
+
+        // Metadata fixtures: no third-party APK or native libraries needed.
+        for (native_code, runnable) in [
+            (vec!["x86"], false),
+            (vec!["x86_64"], true),
+            (vec![], true),
+            (vec!["arm64-v8a"], false),
+            (vec!["x86", "x86_64"], true),
+        ] {
+            let info = ApkInfo {
+                native_code: native_code.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            };
+            let p = Package {
+                file: file.clone(),
+                package: "com.example.fixture".into(),
+                label: "Fixture".into(),
+                version: String::new(),
+                version_code: String::new(),
+                permissions: vec![],
+                abis: info.native_code.clone(),
+                size: 0,
+                apk_count: 1,
+                icon: None,
+                input: bundle::open(&file, &dir).unwrap(),
+                info: vec![info],
+                base: 0,
+            };
+            assert_eq!(p.runs_here(), runnable, "native code: {native_code:?}");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn versions() {
