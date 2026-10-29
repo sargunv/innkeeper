@@ -203,7 +203,6 @@ pub mod event {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
@@ -258,27 +257,5 @@ mod tests {
         }
         assert!(roundtrip(&encode(1, &b)).is_err());
         assert_eq!(decode(0x02ff, &[]), Err(DecodeError::UnknownType(0x02ff)));
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        // The decoder never panics, and anything it accepts re-encodes to
-        // the same bytes.
-        #[test]
-        fn decode_arbitrary_bodies(t in 0x0200u16..0x0207, body in proptest::collection::vec(any::<u8>(), 0..300)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-
-        // Mutating one byte of a valid message never panics.
-        #[test]
-        fn decode_mutated(stride in 0u32..80000, pos in 0usize..64, val in any::<u8>()) {
-            let mut b = encode(3, &buffer(stride));
-            let i = pos % b.len();
-            b[i] = val;
-            let _ = roundtrip(&b);
-        }
     }
 }

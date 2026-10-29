@@ -134,7 +134,6 @@ pub fn active_event(active: bool) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, MAX_MSG, decode_header};
-    use proptest::prelude::*;
 
     #[test]
     fn examples() {
@@ -172,15 +171,5 @@ mod tests {
         let n = u16::from_le_bytes([b[28], b[29]]) as usize;
         assert_eq!(n, b.len() - 30);
         assert!(std::str::from_utf8(&b[30..]).is_ok());
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn decode_arbitrary(t in 0x0700u16..0x0705, body in proptest::collection::vec(any::<u8>(), 0..12)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
     }
 }

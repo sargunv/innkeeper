@@ -174,12 +174,10 @@ logic is `TextInputSession.kt` in `:protocol`.
   random streams; `KeyboardTest` covers layouts, text, compose and the
   shortcuts. `cargo test -p linuxapk-bridge` resolves keys under keymaps
   compiled from RMLVO names (`fr`, `de`, `us` with `compose:ralt`).
-- `tests/e2e/system-app/run.sh` (in `mise run test:e2e`): opens the probes APK's
-  `InputProbeActivity` in its own window, injects `probe-stream.txt` through the
-  app's translator and injector, and checks the events (hover, click, scroll,
-  Shift+A, Escape, a layout key, Alt+Left, Ctrl+W, two fingers, touchpad scroll,
-  fling stop, pinch, pen and eraser) and that the dispatcher reported no
-  inconsistent event.
+- `mise run test:e2e -- input` opens the probes APK's `InputProbeActivity` in
+  its own mapped desktop window, injects a short pointer/keyboard stream through
+  our translator and injector, and checks click, scroll and Shift+A at the
+  activity. Detailed translation cases stay in unit tests.
 - The IME's text commits and the repeat settings need the bridge's seat: they
   are checked in a nested KWin with `org_kde_kwin_fake_input`
   ([development.md](development.md#a-nested-isolated-desktop)) and the probes'

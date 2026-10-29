@@ -30,8 +30,7 @@ answers on the shared listener itself.
 ## Binder
 
 `src/binder/driver.rs` follows `drivers/android/binder.c` and makes no syscalls,
-so it is unit-tested and fuzzed on the host; `src/notify.rs` binds it to real
-processes:
+so it is unit-tested on the host; `src/notify.rs` binds it to real processes:
 
 - binder `openat` gets a 4 MiB memfd injected (`SECCOMP_IOCTL_NOTIF_ADDFD`),
   which the process maps as its receive area; the broker writes through its own
@@ -109,10 +108,8 @@ pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
 ## Tests
 
-- `cargo test -p linuxapk-broker` (driver, lifecycle properties with and without
-  the freezer, creds model) and the bounded fuzzer run in `mise run test`; a
-  long fuzz:
-  `cargo run --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 500000 <seed>`.
+- `cargo test -p linuxapk-broker` (binder transactions, failure delivery,
+  freezing and credential behaviour) runs in `mise run test`.
 - `tests/bpfemu.sh` and `tests/seccomp-filter.sh` (in `mise run test`) check the
   emulator's bounds and exactly which syscalls notify in each mode;
   `tests/shim-netlink.sh` the uevent port choice.
@@ -126,7 +123,7 @@ pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
   image's release, so they are built from AOSP (the header of `run.sh` says
   how). By default `tests/binder/flatpak.sh` runs them in a booted session
   instead, and exits 77 after them: there is no binderfs for the kernel oracle.
-- `mise run test:boot` boots and runs `selftest`.
+- `mise run test:e2e -- boot` boots and runs `selftest`.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).

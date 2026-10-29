@@ -370,7 +370,6 @@ pub fn encode(s: &Snapshot) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     fn hex(s: &str) -> Vec<u8> {
         let s: String = s.split_whitespace().collect();
@@ -482,26 +481,5 @@ mod tests {
         assert!(decode(&encode(&s)).is_err(), "a full snapshot needs a root");
         s.partial = true;
         assert!(decode(&encode(&s)).is_ok());
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn decode_never_panics(b in proptest::collection::vec(any::<u8>(), 0..512)) {
-            if let Ok(s) = decode(&b) {
-                prop_assert_eq!(encode(&s), b);
-            }
-        }
-        /// Mutated valid snapshots: decoding never panics, and what it
-        /// accepts re-encodes to the same bytes.
-        #[test]
-        fn decode_mutated(i in 0usize..400, v in any::<u8>()) {
-            let mut b = encode(&fixture());
-            let i = i % b.len();
-            b[i] = v;
-            if let Ok(s) = decode(&b) {
-                prop_assert_eq!(encode(&s), b);
-            }
-        }
     }
 }

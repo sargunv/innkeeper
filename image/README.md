@@ -40,7 +40,7 @@ About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
 3. Diff every image file we fork against the new image's copy (the list is in
    [android/overlay/README.md](../android/overlay/README.md)), and port upstream
    changes. Rename the blanked APEX APKs to the new build id.
-4. Prove it: `mise run test:boot`, `mise run test:e2e` and
+4. Prove it: `mise run test:e2e -- boot`, `mise run test:e2e` and
    `mise run test:compat` with no regressions, then regenerate
    `docs/compatibility.md`.
 

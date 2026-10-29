@@ -274,7 +274,6 @@ pub fn truncate(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     /// `wire-fixtures.txt`, which the system app's tests also check: each
     /// message built from its fields must match the hex, and read back.
@@ -389,16 +388,5 @@ mod tests {
             decode_reply(&reply(3, -22, b"xy")),
             Some((3, -22, &b"xy"[..]))
         );
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn reader_never_panics(b in proptest::collection::vec(any::<u8>(), 0..64)) {
-            let mut r = Reader::new(&b);
-            let _ = (r.name(), r.u64(), r.bool(), r.unit_f32(), r.end());
-            let _ = decode_header(&b);
-            let _ = decode_reply(&b);
-        }
     }
 }

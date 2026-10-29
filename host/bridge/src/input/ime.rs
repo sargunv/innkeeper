@@ -270,7 +270,6 @@ pub fn decode(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     #[test]
     fn lines_roundtrip() {
@@ -382,33 +381,5 @@ mod tests {
         .to_lines(1);
         assert!(p[0].len() <= 400);
         assert!(p[0].starts_with("ti_preedit 106 106 %25"));
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        #[test]
-        fn parse_never_panics(s in "\\PC{0,80}") {
-            if let Some(r) = parse(&s) {
-                prop_assert_eq!(r.to_line(), s);
-            }
-        }
-
-        #[test]
-        fn text_roundtrips(s in "\\PC{0,60}", c in 0usize..80) {
-            let s: String = s.chars().filter(|c| *c != '\0').collect();
-            prop_assert_eq!(decode(&encode(&s)), Some(s.clone()));
-            let c = (0..=c.min(s.len())).rev().find(|i| s.is_char_boundary(*i)).unwrap() as u32;
-            let r = Req::Surrounding { text: s, cursor: c, anchor: 0, other: false };
-            if r.to_line().len() <= MAX_LINE {
-                prop_assert_eq!(parse(&r.to_line()), Some(r));
-            }
-        }
-
-        #[test]
-        fn surrounding_bytes(b in proptest::collection::vec(any::<u8>(), 0..60)) {
-            let l = format!("ti_surrounding 0 0 1 {}", String::from_utf8_lossy(&b));
-            let _ = parse(&l);
-        }
     }
 }

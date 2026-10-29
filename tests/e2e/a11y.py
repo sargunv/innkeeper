@@ -15,7 +15,7 @@ import pyatspi
 from gi.repository import GLib
 
 LABEL = sys.argv[1]
-TIMEOUT = 60
+TIMEOUT = 10
 failed = False
 
 
@@ -131,6 +131,8 @@ if entry is not None:
     if e.detail1 == 1:
       try:
         events.append((e.source.name, e.source.getRole()))
+        if e.source.name == "Name":
+          pyatspi.Registry.stop()
       except Exception:  # noqa: BLE001
         events.append((None, None))
 
@@ -138,7 +140,7 @@ if entry is not None:
     on_focus, "object:state-changed:focused"
   )
   entry.queryComponent().grabFocus()
-  GLib.timeout_add(8000, pyatspi.Registry.stop)
+  GLib.timeout_add(5000, pyatspi.Registry.stop)
   pyatspi.Registry.start()
   print(f"     focus events: {events}", flush=True)
   report(

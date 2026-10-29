@@ -10,7 +10,7 @@ sudo apt-get install -y --no-install-recommends \
   clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev \
   podman uidmap passt flatpak cpio dbus-user-session kwin-wayland \
   xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-kde \
-  at-spi2-core python3-pyatspi \
+  at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
 # Ubuntu restricts mounts in unprivileged user namespaces by default.
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

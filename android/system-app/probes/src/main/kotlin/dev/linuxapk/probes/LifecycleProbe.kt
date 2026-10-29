@@ -17,33 +17,14 @@ import android.media.AudioTrack
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
-import java.net.HttpURLConnection
-import java.net.URI
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-/** Real alarm-clock and foreground audio APIs for tests/lifecycle.sh; never shipped. */
+/** Real alarm-clock and foreground audio APIs for the e2e audio/lifecycle groups; never shipped. */
 class LifecycleProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     when (intent.getStringExtra("action")) {
-      "network" ->
-        thread(name = "lifecycle-network") {
-          try {
-            val connection =
-              URI("https://example.com/").toURL().openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            try {
-              val bytes = connection.inputStream.use { it.read(ByteArray(512)) }
-              Log.i(TAG, "network status=${connection.responseCode} bytes=$bytes")
-            } finally {
-              connection.disconnect()
-            }
-          } catch (e: Exception) {
-            Log.e(TAG, "network failed", e)
-          }
-        }
       "media" -> startForegroundService(Intent(this, Media::class.java))
       "stop" -> stopService(Intent(this, Media::class.java))
       "alarm" -> {

@@ -14,8 +14,8 @@ runs), then [docs/architecture.md](docs/architecture.md).
 - `mise run build`: every `build:<module>`, then `stage` into `out/stage`.
   `mise run clean` removes build output.
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare`.
-- `mise run test` (unit), `test:bionic`, `test:binder`, `test:boot`, `test:e2e`,
-  `test:compat`; see [tests/README.md](tests/README.md).
+- `mise run test` (unit), `test:e2e` (grouped runtime checks), `test:bionic`,
+  `test:binder`, `test:compat`; see [tests/README.md](tests/README.md).
 
 ## Rules
 
@@ -36,16 +36,20 @@ runs), then [docs/architecture.md](docs/architecture.md).
 - **Host safety.** Inside the session Android's root is the host user. Every
   namespace running Android code masks and locks host sysfs, has its own network
   namespace and cgroup, and never binds host `/run/user`, `$HOME` or `/dev`
-  wholesale. `linuxapk-session selftest` must pass (`mise run test:boot`).
+  wholesale. `linuxapk-session selftest` must pass
+  (`mise run test:e2e -- boot`).
 - **Test sessions are named.** Use `LINUXAPK_INSTANCE=<name>` with a fresh data
   dir for anything you run, and stop it when done. Don't start, restart or reset
   the user's main session (no instance name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
-- **Test what you touched, in under a minute.** Iterate on unit tests plus the
-  e2e checks relevant to your change. The compat corpus is a manual harness for
-  investigating one app (`mise run test:compat -- --only <package>`) and a
-  nightly CI job. Never run the full corpus, and never trigger, run or wait for
-  the nightly job: its failures become issues.
+- **Test what you touched, in under a minute.** Keep only tests of observable
+  behaviour we own. Iterate on `mise run test` plus relevant
+  `mise run test:e2e -- <group>` checks; the whole e2e run must take under 60 s,
+  with waits for observations instead of fixed delays. The compat corpus is a
+  manual harness for investigating one app
+  (`mise run test:compat -- --only <package>`) and a nightly CI job. Never run
+  the full corpus, and never trigger, run or wait for the nightly job: its
+  failures become issues.
 - **Nested test desktops are fully isolated** (a nested plasmashell once started
   kded, KDE Connect and Akonadi against the user's real config, and nested
   portals opened dialogs on the real desktop): a private `dbus-run-session`, a

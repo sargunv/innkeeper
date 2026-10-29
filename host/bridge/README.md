@@ -27,8 +27,8 @@ starts it inside the session's systemd unit (so it shares the memory cap and
   `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's `plasma-localerc`), which
   the launcher passes on.
 - **Conventions:** a client can never block the bridge (events never wait, long
-  work runs on service threads), every decoder is bounded and proptested, and
-  shared memory the bridge hands out is sealed and never read back.
+  work runs on service threads), decoders have focused protocol boundary tests,
+  and shared memory the bridge hands out is sealed and never read back.
 
 Protocol: [docs/bridge-protocol.md](../../docs/bridge-protocol.md); each
 service's messages are its `proto.rs` module doc. Tests:

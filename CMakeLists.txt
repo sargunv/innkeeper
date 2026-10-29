@@ -17,7 +17,6 @@ if(ANDROID)
   add_subdirectory(android/vendor/audio)
   # Test-only binaries; never installed.
   add_subdirectory(tests/bionic)
-  add_subdirectory(tests/e2e/audio)
 else()
   enable_testing()
 endif()

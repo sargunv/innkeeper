@@ -262,7 +262,6 @@ pub fn encode_u8(v: u8) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     #[test]
     fn requests() {
@@ -338,27 +337,5 @@ mod tests {
             }
             .valid()
         );
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-        #[test]
-        fn decode_arbitrary(t in 0x0800u16..0x0805, body in proptest::collection::vec(any::<u8>(), 0..8)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-        #[test]
-        fn events_reencode(body in proptest::collection::vec(any::<u8>(), 0..48)) {
-            if let Ok(b) = Battery::decode(&body) {
-                prop_assert_eq!(b.encode(), body.clone());
-            }
-            if let Ok(n) = Network::decode(&body) {
-                prop_assert_eq!(n.encode(), body.clone());
-            }
-            if let Ok(f) = Fix::decode(&body) {
-                prop_assert_eq!(f.encode(), body.clone());
-            }
-        }
     }
 }

@@ -131,7 +131,7 @@ mise install                    # toolchains and the pre-commit hook
 mise run build                  # everything, staged into out/stage
 mise run install-dev            # install the committed Flatpak, including APK handling
 flatpak run dev.linuxapk.Manager install app.apk
-mise run test                   # unit tests; test:boot, test:e2e, test:compat need a session
+mise run test                   # unit tests; test:e2e needs a session; compat is manual/nightly
 ```
 
 Contributor and agent rules: [AGENTS.md](AGENTS.md).

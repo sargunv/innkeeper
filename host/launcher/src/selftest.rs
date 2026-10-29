@@ -1,5 +1,5 @@
 //! `selftest`: host-safety probes against a live session; each must report
-//! `ok` (docs/session.md, "Host safety"). `mise run test:boot` runs it.
+//! `ok` (docs/session.md, "Host safety"). `mise run test:e2e -- boot` runs it.
 
 use std::fs;
 use std::os::unix::fs::FileTypeExt;

@@ -22,17 +22,18 @@ session in a sandbox of its own.
 | `exec.rs`, `selftest.rs`           | `exec` (control socket, then the exec relay) and the probes                                         |
 | `lifecycle.rs`                     | stopping when idle, and the wakeup for the next alarm                                               |
 
-| Knob                                               | For                                                     |
-| -------------------------------------------------- | ------------------------------------------------------- |
-| `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio        |
-| `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never) |
-| `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session  |
-| `LINUXAPK_OPEN_URLS`                               | tests: let a test session open links                    |
-| `LINUXAPK_DATA`, `LINUXAPK_IMAGES`, `LINUXAPK_PIN` | tests: Android's `/data`, the image cache, the pin      |
-| `LINUXAPK_BRIDGE_VERBOSE`, `LINUXAPK_BROKER_DEBUG` | debugging: bridge stream stats; broker tracing          |
+| Knob                                               | For                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------ |
+| `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio                   |
+| `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never)            |
+| `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session             |
+| `LINUXAPK_TEST_TIMERS`                             | tests: short idle polling and alarm wake lead, named sessions only |
+| `LINUXAPK_OPEN_URLS`                               | tests: let a test session open links                               |
+| `LINUXAPK_DATA`, `LINUXAPK_IMAGES`, `LINUXAPK_PIN` | tests: Android's `/data`, the image cache, the pin                 |
+| `LINUXAPK_BRIDGE_VERBOSE`, `LINUXAPK_BROKER_DEBUG` | debugging: bridge stream stats; broker tracing                     |
 
 Tests: `cargo test -p linuxapk-session` (in `mise run test`: the pin, property
-merging and apex-info parsing), and `mise run test:boot`, which boots a fresh
-headless instance and runs `selftest`. Sessions under development run through
+merging and apex-info parsing), and `mise run test:e2e -- boot`, which runs
+`selftest` in a fresh named sandbox. Sessions under development run through
 `tools/dev/session.sh`, the staged launcher in a private Flatpak
 ([packaging/flatpak](../../packaging/flatpak/README.md)).

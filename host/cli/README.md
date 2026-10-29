@@ -26,6 +26,5 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 - With `LINUXAPK_INSTANCE` set, entries bake it into their `Exec`, so a test's
   entries keep using its session.
 
-Tests: `cargo test -p linuxapk` and the CLI suite of `mise run test:e2e`
-(`tests/e2e/cli/run.sh`, which installs, launches through `gtk-launch` and
-`gio open`, and uninstalls against a real session).
+Tests: `cargo test -p linuxapk` and the shared core tests in `mise run test`
+cover command results, metadata, validation and desktop entries.

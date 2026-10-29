@@ -4,7 +4,7 @@
 //!   * [`binder`]: the driver's state machine (`drivers/android/binder.c`) and
 //!     its UAPI. It makes no syscalls: process memory, receive buffers, fds
 //!     and answering the caller go through the [`binder::driver::Userspace`]
-//!     trait, so it is unit tested and fuzzed on the host against [`fake`].
+//!     trait, so it is unit tested on the host against [`fake`].
 //!   * [`notify`]: the broker's serve loop. It receives the session's seccomp
 //!     user notifications and serves binder ioctls to real Android processes.
 //!   * `creds`: single-uid mode's credential model and the syscalls it

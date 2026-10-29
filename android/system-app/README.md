@@ -69,12 +69,7 @@ Known limits:
 - `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL HAL would
   remove that.
 
-Tests: `:protocol` unit tests (`mise run test`); `tests/e2e/system-app`
-(`mise run test:e2e`) checks the app's permissions, its bridge connections,
-windows through `dev.linuxapk.LAUNCH` and input injection with the probes;
-`tests/hoststate` checks host state against mocked desktop services.
-
-`LifecycleProbe` in `:probes` uses a real foreground media service and an alarm
-clock, persisting and rescheduling it after `BOOT_COMPLETED`.
-`tests/lifecycle.sh` captures its tone after the activity closes, waits for idle
-shutdown and checks delivery after the session wakes. The probe is never staged.
+Tests: `:protocol` unit tests (`mise run test`) and the grouped e2e runner
+(`mise run test:e2e -- input desktop a11y audio lifecycle`). These exercise app
+windows, delivered input, desktop handoffs, accessible actions, audio at
+PipeWire, and idle stop/alarm restart. The probes APK is never staged.

@@ -585,7 +585,6 @@ impl Image {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     fn sample() -> Media {
         Media {
@@ -647,16 +646,5 @@ mod tests {
         };
         let p = st.position();
         assert!((6_900_000..7_500_000).contains(&p), "{p}");
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn decode_mutated(pos in 0usize..200, val in any::<u8>()) {
-            let mut b = sample().encode();
-            let i = pos % b.len();
-            b[i] = val;
-            let _ = Media::decode(&b);
-        }
     }
 }

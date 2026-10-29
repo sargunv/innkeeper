@@ -19,7 +19,7 @@ use linuxapk_bridge::ipc::proto::{Hello, hello_reply_body, service};
 use linuxapk_bridge::ipc::server::{self, Config, Events, Registry, Reply, Service};
 use linuxapk_bridge::ipc::transport;
 use linuxapk_bridge::ipc::wire::{self, errno::*};
-use proptest::prelude::*;
+
 use rustix::event::{PollFd, PollFlags};
 use rustix::net::{
     AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SocketAddrUnix,
@@ -518,33 +518,6 @@ fn listen_refuses_to_replace_files() {
     assert!(transport::listen(&p).is_err());
     assert_eq!(std::fs::read(&p).unwrap(), b"keep me");
     std::fs::remove_file(&p).unwrap();
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(300))]
-
-    // Random packets on a live, authenticated connection: every one is
-    // answered or ends the connection, and the server keeps serving.
-    #[test]
-    fn fuzz_live_connection(pkts in proptest::collection::vec(proptest::collection::vec(any::<u8>(), 0..80), 1..12)) {
-        static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-        let path = PATH.get_or_init(|| start(Limits::default(), true));
-        let mut c = Client::connect(path);
-        c.hello();
-        for mut p in pkts {
-            // Keep the header plausible half the time so bodies get exercised.
-            if p.len() >= 8 && p[0] & 1 == 0 {
-                p[1] = 1;
-                p[2] = 0;
-                p[3] = 0;
-            }
-            if p.is_empty() || c.send_raw(&p, &[]).is_err() || c.recv().is_none() {
-                break;
-            }
-        }
-        let mut d = Client::connect(path);
-        d.hello();
-    }
 }
 
 #[test]

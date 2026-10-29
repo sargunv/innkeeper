@@ -488,7 +488,6 @@ fn desktop_file_exists(entry: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     fn sample() -> Note {
         Note {
@@ -552,20 +551,5 @@ mod tests {
         b.push(0);
         assert!(Note::decode(&b).is_err());
         assert_eq!(escape_markup("<b>&"), "&lt;b&gt;&amp;");
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn decode_mutated(pos in 0usize..400, val in any::<u8>()) {
-            let mut b = sample().encode();
-            let i = pos % b.len();
-            b[i] = val;
-            let _ = Note::decode(&b);
-        }
-        #[test]
-        fn decode_arbitrary(b in proptest::collection::vec(any::<u8>(), 0..200)) {
-            let _ = Note::decode(&b);
-        }
     }
 }

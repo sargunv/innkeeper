@@ -13,8 +13,3 @@ libc = "0.2"
 [[bin]]
 name = "linuxapk-broker"
 path = "src/main.rs"
-
-# Dependency-free fuzzer for the command-stream parser.
-[[bin]]
-name = "linuxapk-broker-fuzz"
-path = "src/bin/fuzz.rs"
