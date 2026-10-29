@@ -7,29 +7,25 @@ windowed. Each mode keeps its report and session logs in the `compatibility`
 artifact, including on failure. Both compare against the committed baselines;
 the wrapper restores the harness's tracked output files after each run.
 
-The nightly renders both modes' saved JSON to the
+The nightly renders both modes' unmerged `fresh-results.json` to the
 [Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility),
 including app versions, frameworks, native code, results, notes and the image
 build. Missing mode results are marked explicitly. Run metadata, timings, memory
 and budget measurements stay in the logs and artifacts so repeated runs with
 unchanged compatibility produce the same page. The rendered page is also saved
 in the artifact. Wiki errors are warnings and never replace the corpus exit
-status; unchanged pages are not committed. The report uses `GITHUB_TOKEN` with
-`contents: write` only in the nightly job. No extra credential is configured
-automatically. If GitHub rejects wiki access, the repository owner must supply a
-repository Actions secret named `LINUXAPK_WIKI_TOKEN` containing a **classic PAT
-with `public_repo` scope** from an account with write access to this public
-repository, then switch the publishing step's `GH_TOKEN` to that secret. A newly
-enabled wiki needs an initial page created by the owner before its Git remote
-exists.
+status; unchanged pages are not committed. Publishing uses the repository
+Actions secret `LINUXAPK_WIKI_TOKEN` described in
+[tests/README.md](../../tests/README.md). Without it, publishing is skipped with
+a notice. The job's `GITHUB_TOKEN` keeps only `contents: read`. A newly enabled
+wiki needs an initial page created by the owner before its Git remote exists.
 
-Test and render without running any apps (the checked-in baseline is a saved
-results file):
+Test and render without running any apps (the fixture includes a harness error):
 
 ```sh
 python3 -B -m unittest discover -s tools/ci/tests
 mkdir -p out/wiki-fixture/headless
-cp tests/compat/results.json out/wiki-fixture/headless/results.json
+cp tools/ci/tests/fixtures/results.json out/wiki-fixture/headless/fresh-results.json
 python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
   --output out/wiki-fixture/Compatibility.md
 ```

@@ -6,7 +6,9 @@ loop gate: crate `linuxapk-compat`, run with
 `src/main.rs`). It installs each app of [corpus.toml](corpus.toml) (pinned
 F-Droid APKs, fetched to `out/test/compat/corpus` and never committed) into a
 session, and records JSON and Markdown under `out/test/compat/<instance>/`.
-Nightly CI publishes the
+`fresh-results.json` contains the current observations, including harness
+errors; `results.json` keeps baseline entries for apps not run or hit by a
+harness error. Nightly CI publishes the
 [compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility).
 
 Per app (`src/app.rs`): `pm install`, launch through the window manager, watch 8

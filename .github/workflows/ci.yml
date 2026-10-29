@@ -68,8 +68,6 @@ jobs:
       'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 120
-    permissions:
-      contents: write # Try the job token for this repository's wiki only.
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
@@ -109,11 +107,15 @@ jobs:
         if: ${{ !cancelled() && steps.wiki.outcome == 'success' }}
         continue-on-error: true # Publishing must never mask the corpus result.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.LINUXAPK_WIKI_TOKEN }}
         run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::notice::Wiki publishing skipped: LINUXAPK_WIKI_TOKEN is not set. Compatibility results remain in the artifact.'
+            exit 0
+          fi
           if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
             clone https://github.com/sargunv/linux.apk.wiki.git out/ci/wiki; then
-            echo '::warning::Wiki clone failed. The wiki may need its first page, or GITHUB_TOKEN may lack wiki access. See tools/ci/README.md.'
+            echo '::warning::Wiki clone failed; check LINUXAPK_WIKI_TOKEN and wiki initialization. See tests/README.md.'
             exit 1
           fi
           cp out/ci/reports/Compatibility.md out/ci/wiki/Compatibility.md

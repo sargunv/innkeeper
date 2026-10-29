@@ -241,9 +241,13 @@ fn real_main() -> Result<ExitCode> {
         build: s.getprop("ro.build.fingerprint"),
         headless: s.headless(),
         session_mem_mb: s.status().memory.map(|b| b >> 20),
-        measured: measured.or(baseline.measured),
-        apps: vec![],
+        measured,
+        apps: results.clone(),
     };
+    // Publish actual observations before the baseline merge masks harness errors.
+    new.save(&out.join("fresh-results.json"))?;
+    new.measured = measured.or(baseline.measured);
+    new.apps.clear();
     // Merge: keep baseline entries for apps not run, or that hit a harness error.
     for a in &corpus.app {
         let fresh = results.iter().find(|r| r.package == a.package);

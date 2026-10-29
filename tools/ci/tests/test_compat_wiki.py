@@ -64,7 +64,7 @@ class WikiTest(unittest.TestCase):
       work = Path(work)
       (work / "headless").mkdir()
       results = json.loads(FIXTURE.read_text())
-      saved = work / "headless/results.json"
+      saved = work / "headless/fresh-results.json"
       saved.write_text(json.dumps(results))
       output = work / "Compatibility.md"
       command = self.command(work, output)
@@ -97,6 +97,31 @@ class WikiTest(unittest.TestCase):
       self.assertIn(
         "| ⚠️ Partly works | new compatibility failure |", output.read_text()
       )
+
+  def test_fresh_harness_error_overrides_stale_merged_success(self):
+    with self.workspace() as work:
+      work = Path(work)
+      (work / "headless").mkdir()
+      merged = json.loads(FIXTURE.read_text())
+      merged["apps"] = [merged["apps"][0]]
+      self.assertEqual(merged["apps"][0]["result"], "works")
+      (work / "headless/results.json").write_text(json.dumps(merged))
+      fresh = json.loads(json.dumps(merged))
+      fresh["apps"][0].update(
+        result="error", reason="session restarted or died during the run"
+      )
+      (work / "headless/fresh-results.json").write_text(json.dumps(fresh))
+      output = work / "Compatibility.md"
+      subprocess.run(
+        self.command(work, output), check=True, capture_output=True
+      )
+      md = output.read_text()
+      self.assertIn("1 apps: ✅ 0 · ⚠️ 0 · ❌ 0 · ➖ 1.", md)
+      self.assertIn(
+        "| OpenCalc | 3.2.0 | Android Views | none | ➖ Not tested | session restarted or died during the run |",
+        md,
+      )
+      self.assertNotIn("✅ Works", md)
 
   def test_no_results_leaves_existing_page_untouched(self):
     with self.workspace() as work:

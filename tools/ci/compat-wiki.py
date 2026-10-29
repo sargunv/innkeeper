@@ -83,7 +83,7 @@ def main():
   corpus = tomllib.loads((root / "tests/compat/corpus.toml").read_text())
   reports = {}
   for mode in ("headless", "windowed"):
-    path = args.reports / mode / "results.json"
+    path = args.reports / mode / "fresh-results.json"
     reports[mode] = json.loads(path.read_text()) if path.exists() else None
   if not any(reports.values()):
     parser.error("no saved compatibility results; leaving the wiki unchanged")
