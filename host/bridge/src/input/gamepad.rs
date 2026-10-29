@@ -62,7 +62,11 @@ struct Mapping {
 }
 impl Mapping {
     fn new(axes: &[(u16, i32, i32)], vendor: u16) -> Self {
-        let right_xy = axes.iter().any(|a| a.0 == 3) && axes.iter().any(|a| a.0 == 4);
+        // EVIOCGABS succeeds with zeroed info even for unsupported axes.
+        let right_xy = [3, 4].iter().all(|&code| {
+            axes.iter()
+                .any(|&(host, min, max)| host == code && min < max)
+        });
         let axes = axes
             .iter()
             .filter_map(|&(host, min, max)| {
@@ -500,11 +504,16 @@ mod tests {
                 (0, -1, 1),
                 (1, -1, 1),
                 (2, -32768, 32767),
+                (3, 0, 0), // unsupported RX/RY still return zeroed EVIOCGABS
+                (4, 0, 0),
                 (5, -32768, 32767),
             ],
             0x045e,
         );
         assert_eq!(generic.translate(3, 2, 32767), Some((3, 2, 32767)));
+        assert_eq!(generic.translate(3, 5, -32768), Some((3, 5, -32768)));
+        assert_eq!(generic.translate(3, 3, 0), None);
+        assert_eq!(generic.translate(3, 4, 0), None);
         assert_eq!(generic.translate(1, 312, 1), Some((3, 10, 32767)));
         let mut sony = Mapping::new(
             &[

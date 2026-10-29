@@ -41,8 +41,31 @@ struct Client {
     endpoint: OwnedFd,
     pid: u32,
     fd: i32,
+    effects: Mutex<Vec<i16>>,
 }
 impl Client {
+    fn feedback_ioctl(
+        &self,
+        feedback: &gamepad::Feedback,
+        cmd: u32,
+        bytes: &mut [u8],
+        scalar: u64,
+    ) -> Result<i64, i32> {
+        let result = feedback.ioctl(cmd, bytes, scalar)?;
+        let mut effects = self.effects.lock().unwrap();
+        match cmd & 0xff {
+            0x80 => {
+                let id = i16::from_le_bytes(bytes[2..4].try_into().unwrap());
+                if !effects.contains(&id) {
+                    effects.push(id);
+                }
+            }
+            0x81 => effects.retain(|&id| i64::from(id) != scalar as i64),
+            _ => {}
+        }
+        Ok(result)
+    }
+
     fn live(&self) -> bool {
         let link = std::fs::read_link(format!("/proc/{}/fd/{}", self.pid, self.fd));
         let ours = std::fs::read_link(format!("/proc/self/fd/{}", self.endpoint.as_raw_fd()));
@@ -366,6 +389,36 @@ fn drain_writes(client: &Client, state: &mut Devices) {
     }
 }
 
+fn reap_closed_clients(state: &mut Devices) {
+    for client in std::mem::take(&mut state.clients) {
+        if client.live() {
+            state.clients.push(client);
+            continue;
+        }
+        // Preserve queued play/stop ordering before emulating evdev's per-open
+        // effect cleanup. The controller's host fd outlives virtual clients.
+        drain_writes(&client, state);
+        if let Some(feedback) = state
+            .pads
+            .get(&client.device)
+            .and_then(|p| p.feedback.as_ref())
+        {
+            for id in client.effects.lock().unwrap().drain(..) {
+                if let Err(e) = feedback.ioctl(0x40044581, &mut [], id as u64) {
+                    eprintln!("evdev: rumble cleanup: {e}");
+                }
+            }
+        }
+    }
+}
+
+fn prepare_directories(dev: &std::path::Path) -> std::io::Result<()> {
+    // EventHub checks existence before its redirected scan. Flatpak only
+    // supplies /dev/input when the host has one; leave an existing bind intact.
+    std::fs::create_dir_all(dev.join("input"))?;
+    std::fs::create_dir_all(dev.join("linuxapk-input"))
+}
+
 // Registration has a fixed eight-digit port identity. Event packets are
 // 4 + N*EVENT_SIZE bytes, so timestamp bytes can never look like control data.
 fn is_registration(packet: &[u8]) -> bool {
@@ -378,7 +431,7 @@ impl Input {
             return None;
         }
         let dir = std::path::Path::new(DIRECTORY);
-        std::fs::create_dir_all(dir).ok()?;
+        prepare_directories(std::path::Path::new("/dev")).ok()?;
         let path = "/dev/socket/linuxapk/evdev.sock";
         let _ = std::fs::remove_file(path);
         let socket = UnixDatagram::bind(path).ok()?;
@@ -399,7 +452,7 @@ impl Input {
                     libc::poll(polls.as_mut_ptr(), polls.len() as _, 10);
                 }
                 let mut state = writes.lock().unwrap();
-                state.clients.retain(|c| c.live());
+                reap_closed_clients(&mut state);
                 for (client, poll) in clients.iter().zip(polls) {
                     if poll.revents & libc::POLLIN == 0 {
                         continue;
@@ -637,7 +690,8 @@ impl Input {
                                 {
                                     return Err(libc::EINVAL);
                                 }
-                                let val = feedback.ioctl(cmd, &mut data, req.data.args[2])?;
+                                let val =
+                                    c.feedback_ioctl(feedback, cmd, &mut data, req.data.args[2])?;
                                 Ok((data, val))
                             })
                         }
@@ -703,6 +757,7 @@ impl Input {
                 endpoint,
                 pid: req.pid,
                 fd,
+                effects: Mutex::new(Vec::new()),
             }));
         }
         true
@@ -733,6 +788,7 @@ mod tests {
             endpoint: reader.try_clone().unwrap(),
             pid: std::process::id(),
             fd: reader.as_raw_fd(),
+            effects: Mutex::new(Vec::new()),
         };
         (client, reader)
     }
@@ -786,6 +842,85 @@ mod tests {
     fn get(nr: u32, size: u32) -> u32 {
         0x80004500 | nr | size << 16
     }
+    #[test]
+    fn discovery_exists_without_host_input_and_preserves_host_nodes() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/input-directories-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(!root.join("input").exists());
+        prepare_directories(&root).unwrap();
+        assert!(root.join("input").is_dir()); // EventHub's existence check
+        assert!(root.join("linuxapk-input").is_dir()); // redirected discovery
+        std::fs::write(root.join("input/event0"), b"host node").unwrap();
+        prepare_directories(&root).unwrap();
+        assert_eq!(
+            std::fs::read(root.join("input/event0")).unwrap(),
+            b"host node"
+        );
+        assert_eq!(
+            std::fs::read_dir(root.join("linuxapk-input"))
+                .unwrap()
+                .count(),
+            0
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn closing_a_virtual_client_erases_its_uploaded_effects() {
+        let (feedback, source) = UnixDatagram::pair().unwrap();
+        for socket in [&feedback, &source] {
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .unwrap();
+        }
+        let worker = std::thread::spawn(move || {
+            let mut request = [0; 128];
+            let n = source.recv(&mut request).unwrap();
+            assert_eq!(n, 12 + gamepad::EFFECT_SIZE);
+            assert_eq!(&request[..4], &0x40304580u32.to_le_bytes());
+            assert_eq!(&request[14..16], &(-1i16).to_le_bytes());
+            let mut response = vec![0; 4];
+            response.extend_from_slice(&request[12..n]);
+            response[6..8].copy_from_slice(&7i16.to_le_bytes());
+            source.send(&response).unwrap();
+            assert_eq!(source.recv(&mut request).unwrap(), 12);
+            assert_eq!(&request[..4], &0x40044581u32.to_le_bytes());
+            assert_eq!(&request[4..12], &7u64.to_le_bytes());
+            source.send(&0i32.to_le_bytes()).unwrap();
+        });
+        let feedback = gamepad::Feedback {
+            fd: feedback.into(),
+            synthetic: true,
+        };
+        let (client, reader) = client(gamepad::FIRST);
+        let mut effect = [0; gamepad::EFFECT_SIZE];
+        effect[..2].copy_from_slice(&0x50u16.to_le_bytes());
+        effect[2..4].copy_from_slice(&(-1i16).to_le_bytes());
+        assert_eq!(
+            client.feedback_ioctl(&feedback, 0x40304580, &mut effect, 0),
+            Ok(0)
+        );
+        let mut state = Devices::default();
+        state.pads.insert(
+            gamepad::FIRST,
+            Pad {
+                identity: "controller".into(),
+                feedback: Some(feedback),
+                axes: [0; 8],
+            },
+        );
+        state.clients.push(Arc::new(client));
+        reap_closed_clients(&mut state);
+        assert_eq!(state.clients.len(), 1); // still open: keep the effect
+        drop(reader);
+        reap_closed_clients(&mut state);
+        assert!(state.clients.is_empty());
+        worker.join().unwrap();
+    }
+
     #[test]
     fn eventhub_identifies_keyboard_and_mouse() {
         assert_eq!(
