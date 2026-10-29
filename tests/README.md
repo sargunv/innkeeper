@@ -27,9 +27,10 @@ only on that private desktop.
 
 - **`bionic/run.sh`** runs binaries in the actual Flatpak runtime. `-v` supplies
   an addon vendor layer, `-t` streams test files to `/data/nativetest64`, and
-  `LINUXAPK_PROPS` entries become real properties. Frame dumps go to
-  `out/test/bionic/<instance>/frames`. The host comparison retains the bootless
-  image-rooted namespace and props shim.
+  mutable `LINUXAPK_PROPS` entries become real properties. Read-only overrides
+  preload the test shim from a path allowed by the vendor or platform linker
+  namespace. Frame dumps go to `out/test/bionic/<instance>/frames`. The host
+  comparison retains the bootless image-rooted namespace and props shim.
 - `tests/lifecycle.sh` uses the unshipped probes APK to check foreground audio
   with no activity, idle shutdown, and an alarm rescheduled on boot. It uses an
   isolated nested desktop and a private audio sink.

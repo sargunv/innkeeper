@@ -45,6 +45,13 @@ trap 'exit 130' INT TERM
 cleanup
 mkdir -p "$addon/vendor"
 for ((i = ${#vendor[@]} - 1; i >= 0; i--)); do cp -a "${vendor[i]}/." "$addon/vendor/"; done
+for e in "${envs[@]}"; do
+  if [[ $e == LINUXAPK_PROPS=* ]]; then
+    install -D -m 644 "$repo/out/build/android/tests/bionic/libprops_shim.so" \
+      "$addon/vendor/lib64/liblinuxapk_test_props.so"
+    break
+  fi
+done
 "$session" start --headless
 for _ in $(seq 150); do
   [[ $("$session" exec getprop sys.boot_completed 2>/dev/null) == 1 ]] && break
@@ -74,11 +81,17 @@ for e in "${envs[@]}"; do
       if [[ $p != ro.* ]]; then "$session" exec setprop "${p%%=*}" "${p#*=}"; fi
     done
     # Read-only test properties must be per-process; init has already seeded
-    # the real property area. The same shim serves them in host mode.
-    shim=$repo/out/build/android/tests/bionic/libprops_shim.so
-    "$session" exec mkdir -p /data/nativetest64
-    "$session" exec sh -c 'cat > /data/nativetest64/libprops_shim.so' <"$shim"
-    args+=("$e" LD_PRELOAD=/data/nativetest64/libprops_shim.so)
+    # the real property area. Preload from a path permitted by this test's
+    # vendor or platform linker namespace. Host mode uses the same shim.
+    args+=("$e")
+    if [[ $1 == /vendor/* || $1 == /odm/* ]]; then
+      args+=(LD_PRELOAD=/vendor/lib64/liblinuxapk_test_props.so)
+    else
+      shim=$repo/out/build/android/tests/bionic/libprops_shim.so
+      "$session" exec mkdir -p /data/nativetest64
+      "$session" exec sh -c 'cat > /data/nativetest64/libprops_shim.so' <"$shim"
+      args+=(LD_PRELOAD=/data/nativetest64/libprops_shim.so)
+    fi
   else
     args+=("$e")
   fi
