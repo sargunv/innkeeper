@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -173,19 +174,30 @@ static void serve_one(int c) {
     _exit(errno == ENOENT ? 127 : 126);
   }
   for (int i = 0; i < 3; i++) close(fds[i]);
-  // Wait for the command; kill its process group if the client hangs up.
-  int status = 0;
-  for (;;) {
-    pid_t w = waitpid(pid, &status, WNOHANG);
-    if (w == pid) break;
-    struct pollfd p = {.fd = c, .events = POLLIN | POLLRDHUP};
-    if (poll(&p, 1, 200) > 0 && (p.revents & (POLLHUP | POLLRDHUP | POLLERR))) {
-      kill(-pid, SIGKILL);
-      kill(pid, SIGKILL);
-      waitpid(pid, &status, 0);
-      _exit(0);
-    }
+  // Wait for exit or disconnect together. Polling waitpid every 200 ms made
+  // short commands (including boot readiness probes) wait out the whole tick.
+  int pidfd = syscall(SYS_pidfd_open, pid, 0);
+  struct pollfd watched[] = {
+    {.fd = pidfd, .events = POLLIN},
+    {.fd = c, .events = POLLRDHUP},
+  };
+  int ready;
+  do {
+    ready = pidfd < 0 ? -1 : poll(watched, 2, -1);
+  } while (ready < 0 && errno == EINTR);
+  int disconnected = ready < 0 || (watched[1].revents &
+                                   (POLLHUP | POLLRDHUP | POLLERR | POLLNVAL));
+  if (disconnected) {
+    kill(-pid, SIGKILL);
+    kill(pid, SIGKILL);
   }
+  if (pidfd >= 0) close(pidfd);
+  int status = 0;
+  pid_t reaped;
+  do {
+    reaped = waitpid(pid, &status, 0);
+  } while (reaped < 0 && errno == EINTR);
+  if (disconnected || reaped < 0) _exit(0);
   int32_t rc = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
   send_all(c, &rc, sizeof(rc));
   _exit(0);

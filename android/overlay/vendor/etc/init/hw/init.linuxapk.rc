@@ -24,9 +24,9 @@ on late-fs
     trigger nonencrypted
 
 # The default 256 KiB log buffers wrap within seconds of boot, so enlarge them
-# as soon as logd is up.
+# as soon as logd is up, without holding up the remaining init actions.
 on property:logd.ready=true
-    exec - root root -- /system/bin/logcat -G 16M
+    exec_background - root root -- /system/bin/logcat -G 16M
 
 on property:sys.boot_completed=1
     # SystemUI's "Viewing full screen" cling takes focus from every immersive

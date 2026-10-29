@@ -311,7 +311,12 @@ type Idle = Arc<Mutex<Option<Option<u64>>>>;
 /// its log meanwhile. It ends with this process: on a signal, `stop`, or
 /// init's exit. When it stops for idleness with an alarm ahead, this process
 /// stays as the waiter that starts it again ([`wait_to_wake`]).
-pub fn run(cfg: &Config, follow: bool, image_lease: crate::prune::Lease) -> Result<()> {
+pub fn run(
+    cfg: &Config,
+    follow: bool,
+    image_lease: crate::prune::Lease,
+    trace: &session::BootTrace,
+) -> Result<()> {
     let sigs = sys::block_signals(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]);
     let p = cfg.paths.clone();
     thread::spawn(move || {
@@ -320,7 +325,7 @@ pub fn run(cfg: &Config, follow: bool, image_lease: crate::prune::Lease) -> Resu
         std::process::exit(128 + sig);
     });
     let idle = Idle::default();
-    let r = run_session(cfg, follow, &idle);
+    let r = run_session(cfg, follow, &idle, trace);
     teardown(&cfg.paths);
     // The alarm waiter has no Android processes left. Its next start must
     // be able to prepare changed derived layers and acquire a fresh lease.
@@ -410,13 +415,17 @@ pub fn request_background(p: &Paths) {
     }
 }
 
-fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
+fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTrace) -> Result<()> {
     let p = &cfg.paths;
     compose(cfg).context("compose the root")?;
+    trace.mark(p, "root composed");
     apply_run_layer(cfg).context("add the start-time layer")?;
+    trace.mark(p, "start-time layer applied");
     sandbox_root(cfg).context("set up the sandbox's /")?;
+    trace.mark(p, "sandbox root ready");
     session::start_kmsg_reader(p)?;
     session::start_bridge(cfg)?;
+    trace.mark(p, "bridge ready");
     let log = append(&p.session_log())?;
     // realpath (via /proc/self/fd) must retain the public volume path:
     // MediaProvider treats canonical /data/media paths as internal storage.
@@ -441,6 +450,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
         .spawn()
         .context("start pivot-exec")?;
     let outer = pivot.id() as i32;
+    trace.mark(p, "pivot spawned");
     let mut init = None;
     for _ in 0..300 {
         init = sys::children(outer, &["init"]).first().copied();
@@ -453,6 +463,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
         bail!("init did not start (see {})", p.session_log().display());
     };
     session::write_pids(p, outer, init)?;
+    trace.mark(p, "init found");
     let paths = p.clone();
     control::serve(
         &p.control(),

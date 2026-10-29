@@ -453,6 +453,12 @@ def main():
     ["shell"],
   ):
     return control(args)
+  if program == "session" and args[:1] == ["image"]:
+    # This only reads the pin and paths; the launcher allows it outside
+    # Flatpak. Core checks it before every start, so avoid a second sandbox.
+    return run(
+      [str(STAGE / "libexec/linuxapk/linuxapk-session"), *args]
+    ).returncode
   bootstrap()
   if args[:1] == ["_watch"]:
     with (SCRATCH / "watch.lock").open("w") as lock:
