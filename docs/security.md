@@ -72,10 +72,12 @@ The Flatpak sandbox is the boundary, as for any Flatpak app
 ([session.md](session.md#flatpak-mode)). Android has no network namespace of its
 own there: it uses the host's network, as a native app with `--share=network`
 does, and netd's routing and firewall rules are accepted and ignored, so per-app
-network restrictions don't apply. Only single-uid mode exists, and there are no
-cgroups: a session has no memory cap of its own. `selftest` checks the sandbox's
-grants and what it shows Android. Development and test sessions are capped
-externally by the host driver; the app receives no systemd permission.
+network restrictions don't apply. There is no TUN device, so `VpnService` apps
+can't start a VPN; that is accepted, not planned (#56). Only single-uid mode
+exists, and there are no cgroups: a session has no memory cap of its own.
+`selftest` checks the sandbox's grants and what it shows Android. Development
+and test sessions are capped externally by the host driver; the app receives no
+systemd permission.
 
 The Flatpak's grants are `--device=dri`, `--share=network`, `--share=ipc`,
 `--socket=wayland`, `--socket=pulseaudio` and talking to `org.a11y.Bus` (the
