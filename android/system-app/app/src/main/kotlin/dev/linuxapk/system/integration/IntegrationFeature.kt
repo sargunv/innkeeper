@@ -73,7 +73,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
       override fun onReceive(c: Context, i: android.content.Intent) {
         val pkg = i.data?.schemeSpecificPart ?: return
         if (!i.getBooleanExtra(android.content.Intent.EXTRA_REPLACING, false)) {
-          BrowserRole.onPackageAdded(context, pkg)
+          if (pkg != context.packageName) BrowserRole.claim(context)
         }
       }
     }
