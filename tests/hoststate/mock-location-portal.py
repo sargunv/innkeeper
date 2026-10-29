@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""A stand-in for the XDG Location portal on a private session bus.
+"""Stand-ins for the host-state portals on a private session bus.
 
     mock-location-portal.py [--deny]
 
@@ -8,6 +8,8 @@ Owns org.freedesktop.portal.Desktop and serves org.freedesktop.portal.Location
 1 with --deny (the user said no). Fixes are sent with the mock method
 dev.linuxapk.Mock.Fix(latitude, longitude, accuracy) on
 /org/freedesktop/portal/desktop, as LocationUpdated on every started session.
+Also serves NetworkMonitor v3 and PowerProfileMonitor v1; the mock methods
+SetMetered and SetPowerSaver update their state and emit their change signals.
 Only ever run it on a private bus (tests/hoststate/run.sh).
 """
 
@@ -21,6 +23,8 @@ from gi.repository import GLib
 
 PATH = "/org/freedesktop/portal/desktop"
 LOCATION = "org.freedesktop.portal.Location"
+NETWORK = "org.freedesktop.portal.NetworkMonitor"
+POWER = "org.freedesktop.portal.PowerProfileMonitor"
 REQUEST = "org.freedesktop.portal.Request"
 SESSION = "org.freedesktop.portal.Session"
 DENY = "--deny" in sys.argv
@@ -50,13 +54,16 @@ class Portal(dbus.service.Object):
     self.bus = bus
     self.started = set()
     self.keep = []
+    self.metered = False
+    self.saver = False
 
   @dbus.service.method(
     dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v"
   )
   def Get(self, iface, prop):
-    if iface == LOCATION and prop == "version":
-      return dbus.UInt32(1)
+    props = self.GetAll(iface)
+    if prop in props:
+      return props[prop]
     raise dbus.exceptions.DBusException(
       "no such property", name="org.freedesktop.DBus.Error.UnknownProperty"
     )
@@ -65,7 +72,44 @@ class Portal(dbus.service.Object):
     dbus.PROPERTIES_IFACE, in_signature="s", out_signature="a{sv}"
   )
   def GetAll(self, iface):
-    return {"version": dbus.UInt32(1)} if iface == LOCATION else {}
+    if iface == LOCATION:
+      return {"version": dbus.UInt32(1)}
+    if iface == NETWORK:
+      return {"version": dbus.UInt32(3)}
+    if iface == POWER:
+      return {
+        "version": dbus.UInt32(1),
+        "power-saver-enabled": dbus.Boolean(self.saver),
+      }
+    return {}
+
+  @dbus.service.method(NETWORK, in_signature="", out_signature="a{sv}")
+  def GetStatus(self):
+    return {
+      "available": dbus.Boolean(True),
+      "metered": dbus.Boolean(self.metered),
+      "connectivity": dbus.UInt32(4),
+    }
+
+  @dbus.service.signal(NETWORK, signature="")
+  def changed(self):
+    pass
+
+  @dbus.service.signal(dbus.PROPERTIES_IFACE, signature="sa{sv}as")
+  def PropertiesChanged(self, iface, changed, invalidated):
+    pass
+
+  @dbus.service.method("dev.linuxapk.Mock", in_signature="b", out_signature="")
+  def SetMetered(self, metered):
+    self.metered = bool(metered)
+    self.changed()
+
+  @dbus.service.method("dev.linuxapk.Mock", in_signature="b", out_signature="")
+  def SetPowerSaver(self, saver):
+    self.saver = bool(saver)
+    self.PropertiesChanged(
+      POWER, {"power-saver-enabled": dbus.Boolean(self.saver)}, []
+    )
 
   @dbus.service.method(
     LOCATION, in_signature="a{sv}", out_signature="o", sender_keyword="sender"

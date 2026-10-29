@@ -7,8 +7,8 @@
 //! dismissals come back as `NOTIFY_EVENT`s. When the connection ends, its
 //! notifications are closed.
 //!
-//! The portal `org.freedesktop.portal.Notification` is the later route for
-//! Flatpak; it can't replace a notification in place or show progress.
+//! The baseline Notification portal cannot update a notification in place
+//! or show progress, so the bridge uses the freedesktop notification service.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

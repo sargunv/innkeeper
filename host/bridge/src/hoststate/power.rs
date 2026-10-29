@@ -5,12 +5,10 @@
 //! `OnBattery`, re-read on each `PropertiesChanged`. Without UPower, or
 //! without a battery, the host is on AC and full ([`Battery::AC_ONLY`]).
 //!
-//! Power saver: the PowerProfileMonitor portal's `power-saver-enabled`, else
-//! power-profiles-daemon's `ActiveProfile` (`power-saver`) under either of
-//! its bus names.
+//! Power saver: the PowerProfileMonitor portal's `power-saver-enabled`.
 
 use super::proto::Battery;
-use super::{Topic, get_all, is_missing, signals, signals_under};
+use super::{Topic, get_all, signals, signals_under};
 use zbus::blocking::Connection;
 use zbus::zvariant::OwnedValue;
 
@@ -25,15 +23,6 @@ const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const PROFILE_MONITOR: &str = "org.freedesktop.portal.PowerProfileMonitor";
-
-/// power-profiles-daemon's names: the current one, then the old one.
-const PPD: [(&str, &str); 2] = [
-    (
-        "org.freedesktop.UPower.PowerProfiles",
-        "/org/freedesktop/UPower/PowerProfiles",
-    ),
-    ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles"),
-];
 
 pub fn watch_battery(system: Option<Connection>, topic: &Topic<Battery>) {
     let Some(conn) = system else {
@@ -108,68 +97,34 @@ pub fn battery_from(
     }
 }
 
-pub fn watch_saver(
-    session: Option<Connection>,
-    system: Option<Connection>,
-    topic: &Topic<bool>,
-    encode: fn(&bool) -> Vec<u8>,
-) {
-    if let Some(conn) = session {
-        let changes = signals(&conn, PORTAL_PATH, PROPERTIES, "PropertiesChanged");
-        match portal_saver(&conn) {
-            Ok(on) => {
-                topic.set(on, encode);
-                let Ok(changes) = changes else { return };
-                for msg in changes {
-                    let Ok(msg) = msg else { continue };
-                    let body = msg.body();
-                    let Ok((iface, _, _)) =
-                        body.deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
-                    else {
-                        continue;
-                    };
-                    if iface == PROFILE_MONITOR
-                        && let Ok(on) = portal_saver(&conn)
-                    {
-                        topic.set(on, encode);
-                    }
-                }
-                return crate::warn!("hoststate: power saver: portal signal stream ended");
-            }
-            Err(e) if is_missing(&e) => {}
-            Err(e) => crate::warn!("hoststate: PowerProfileMonitor: {e}"),
+pub fn watch_saver(session: Option<Connection>, topic: &Topic<bool>, encode: fn(&bool) -> Vec<u8>) {
+    let Some(conn) = session else { return };
+    let changes = signals(&conn, PORTAL_PATH, PROPERTIES, "PropertiesChanged");
+    match portal_saver(&conn) {
+        Ok(on) => topic.set(on, encode),
+        Err(e) => return crate::warn!("hoststate: PowerProfileMonitor: {e}"),
+    }
+    let Ok(changes) = changes else { return };
+    for msg in changes {
+        let Ok(msg) = msg else { continue };
+        let body = msg.body();
+        let Ok((iface, _, _)) =
+            body.deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
+        else {
+            continue;
+        };
+        if iface == PROFILE_MONITOR
+            && let Ok(on) = portal_saver(&conn)
+        {
+            topic.set(on, encode);
         }
     }
-    let Some(conn) = system else { return };
-    for (name, path) in PPD {
-        let changes = signals(&conn, path, PROPERTIES, "PropertiesChanged");
-        match ppd_saver(&conn, name, path) {
-            Ok(on) => {
-                crate::info!("hoststate: power saver from {name}");
-                topic.set(on, encode);
-                let Ok(changes) = changes else { return };
-                for _ in changes {
-                    if let Ok(on) = ppd_saver(&conn, name, path) {
-                        topic.set(on, encode);
-                    }
-                }
-                return crate::warn!("hoststate: power saver: {name} signal stream ended");
-            }
-            Err(e) if is_missing(&e) => continue,
-            Err(e) => return crate::warn!("hoststate: {name}: {e}"),
-        }
-    }
-    crate::info!("hoststate: no power profiles: power saver unknown");
+    crate::warn!("hoststate: power saver: portal signal stream ended");
 }
 
 fn portal_saver(conn: &Connection) -> zbus::Result<bool> {
     let p = zbus::blocking::Proxy::new(conn, PORTAL, PORTAL_PATH, PROFILE_MONITOR)?;
     p.get_property::<bool>("power-saver-enabled")
-}
-
-fn ppd_saver(conn: &Connection, name: &str, path: &str) -> zbus::Result<bool> {
-    let p = zbus::blocking::Proxy::new(conn, name.to_owned(), path.to_owned(), name.to_owned())?;
-    Ok(p.get_property::<String>("ActiveProfile")? == "power-saver")
 }
 
 #[cfg(test)]

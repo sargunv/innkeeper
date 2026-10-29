@@ -1,10 +1,5 @@
-//! Location: the XDG Location portal, falling back to GeoClue directly.
-//! Ported from Nucleus's `location/src/main/native/src/linux.rs`.
-//!
-//! The portal is preferred: it owns the desktop's consent dialog and reaches
-//! GeoClue under its own identity. GeoClue is used directly only when the
-//! portal is missing and the bridge isn't sandboxed, and never after the
-//! portal said no, which would route around the user's decision.
+//! Location through the XDG Location portal, which owns the desktop's
+//! consent dialog and reaches GeoClue under its own identity.
 //!
 //! xdg-desktop-portal drives one GeoClue client for all its Location
 //! sessions: a second session gets no initial fix, each session's thresholds
@@ -26,7 +21,6 @@ use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::message::Message;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-use super::is_missing;
 use super::proto::{Fix, ev, status};
 use crate::ipc::server::Events;
 
@@ -41,16 +35,6 @@ const ACCURACY_EXACT: u32 = 5;
 /// the desktop (GNOME Privacy > Location, or a lockdown).
 const SERVICES_DISABLED: &str = "Location services disabled";
 
-const GEOCLUE: &str = "org.freedesktop.GeoClue2";
-const GEOCLUE_MANAGER_PATH: &str = "/org/freedesktop/GeoClue2/Manager";
-const GEOCLUE_MANAGER: &str = "org.freedesktop.GeoClue2.Manager";
-const GEOCLUE_CLIENT: &str = "org.freedesktop.GeoClue2.Client";
-const GEOCLUE_LOCATION: &str = "org.freedesktop.GeoClue2.Location";
-const GEOCLUE_ACCURACY_CITY: u32 = 4;
-const GEOCLUE_ACCURACY_EXACT: u32 = 8;
-/// What GeoClue's agent shows and matches against its allow-list.
-const DESKTOP_ID: &str = "dev.linuxapk.Manager";
-
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 fn token(kind: &str) -> String {
@@ -64,8 +48,6 @@ fn token(kind: &str) -> String {
 /// Every client that wants fixes, served by one desktop session.
 pub struct Hub {
     inner: Mutex<Inner>,
-    /// The bridge's buses, only to probe for GeoClue.
-    system: Option<Connection>,
 }
 
 struct Inner {
@@ -87,27 +69,15 @@ struct Run {
     opened: Arc<Mutex<Option<Opened>>>,
 }
 
-enum Opened {
-    Portal(Connection, OwnedObjectPath),
-    GeoClue(Connection, OwnedObjectPath),
-}
+struct Opened(Connection, OwnedObjectPath);
 
 impl Opened {
     fn close(self) {
-        match self {
-            Opened::Portal(c, session) => {
-                if let Ok(p) = Proxy::new(&c, PORTAL, session.as_str(), PORTAL_SESSION) {
-                    let _ = p.call::<_, _, ()>("Close", &());
-                }
-                let _ = c.close();
-            }
-            Opened::GeoClue(c, client) => {
-                if let Ok(p) = Proxy::new(&c, GEOCLUE, client.as_str(), GEOCLUE_CLIENT) {
-                    let _ = p.call::<_, _, ()>("Stop", &());
-                }
-                let _ = c.close();
-            }
+        let Self(c, session) = self;
+        if let Ok(p) = Proxy::new(&c, PORTAL, session.as_str(), PORTAL_SESSION) {
+            let _ = p.call::<_, _, ()>("Close", &());
         }
+        let _ = c.close();
     }
 }
 
@@ -124,7 +94,7 @@ fn send(e: &Events, ty: u16, body: &[u8]) {
 }
 
 impl Hub {
-    pub fn new(_session: Option<Connection>, system: Option<Connection>) -> Arc<Hub> {
+    pub fn new() -> Arc<Hub> {
         Arc::new(Hub {
             inner: Mutex::new(Inner {
                 members: Vec::new(),
@@ -133,7 +103,6 @@ impl Hub {
                 last: None,
                 denied: false,
             }),
-            system,
         })
     }
 
@@ -177,7 +146,7 @@ impl Hub {
                 }
             }
         }
-        // Closed after the swap, so its Stop reaches GeoClue before the new
+        // Closed after the swap, so its Close reaches the portal before the new
         // session's Start does anything.
         if let Some(r) = replaced {
             r.close();
@@ -268,34 +237,13 @@ impl Hub {
                 if !self.adopt(
                     generation,
                     &opened,
-                    Opened::Portal(p.conn.clone(), p.session.clone()),
+                    Opened(p.conn.clone(), p.session.clone()),
                 ) {
                     return;
                 }
                 p.run(&self, generation)
             }
-            Err(PortalError::Missing(why)) if !sandboxed() && self.geoclue_present() => {
-                crate::info!("hoststate: location: no portal ({why}); GeoClue directly");
-                match GeoClue::open(precise) {
-                    Ok(g) => {
-                        if !self.adopt(
-                            generation,
-                            &opened,
-                            Opened::GeoClue(g.conn.clone(), g.client.clone()),
-                        ) {
-                            return;
-                        }
-                        g.run(&self, generation)
-                    }
-                    Err((st, why)) => self.fail(generation, st, &why),
-                }
-            }
-            Err(PortalError::Missing(why)) => self.fail(
-                generation,
-                status::UNAVAILABLE,
-                &format!("no backend ({why})"),
-            ),
-            Err(PortalError::Failed(st, why)) => self.fail(generation, st, &why),
+            Err((st, why)) => self.fail(generation, st, &why),
         }
     }
 
@@ -311,32 +259,6 @@ impl Hub {
         *slot.lock().unwrap() = Some(o);
         true
     }
-
-    fn geoclue_present(&self) -> bool {
-        let Some(c) = &self.system else { return false };
-        let Ok(p) = zbus::blocking::fdo::DBusProxy::new(c) else {
-            return false;
-        };
-        let name = zbus::names::BusName::try_from(GEOCLUE).expect("valid name");
-        p.name_has_owner(name.clone()).unwrap_or(false)
-            || p.list_activatable_names()
-                .is_ok_and(|n| n.iter().any(|n| n.as_str() == GEOCLUE))
-    }
-}
-
-/// A sandboxed bridge must stay on the portal: a system-bus call to GeoClue
-/// would bypass its permission decision.
-fn sandboxed() -> bool {
-    std::path::Path::new("/.flatpak-info").exists()
-        || std::env::var_os("FLATPAK_ID").is_some()
-        || std::env::var_os("SNAP").is_some()
-}
-
-enum PortalError {
-    /// No portal, or one without the Location interface: GeoClue may be
-    /// tried instead.
-    Missing(String),
-    Failed(u8, String),
 }
 
 struct Portal {
@@ -349,22 +271,11 @@ struct Portal {
 
 impl Portal {
     /// Connects (a connection of its own, so closing it ends this thread),
-    /// checks the interface and creates a session; nothing the user sees.
-    fn open(precise: bool) -> Result<Portal, PortalError> {
-        let failed = |e: zbus::Error| PortalError::Failed(classify(&e), e.to_string());
-        let conn = Connection::session().map_err(|e| PortalError::Missing(e.to_string()))?;
+    /// creates a session; nothing the user sees.
+    fn open(precise: bool) -> Result<Portal, (u8, String)> {
+        let failed = |e: zbus::Error| (classify(&e), e.to_string());
+        let conn = Connection::session().map_err(failed)?;
         let proxy = Proxy::new(&conn, PORTAL, PORTAL_PATH, PORTAL_LOCATION).map_err(failed)?;
-        match proxy.get_property::<u32>("version") {
-            Ok(v) if v >= 1 => {}
-            Ok(v) => return Err(PortalError::Missing(format!("Location portal version {v}"))),
-            Err(e) => {
-                return Err(if is_missing(&e) {
-                    PortalError::Missing(e.to_string())
-                } else {
-                    failed(e)
-                });
-            }
-        }
         // Subscribed before any call, so neither the Response nor an early
         // fix can be missed.
         let rule = zbus::MatchRule::builder()
@@ -394,7 +305,7 @@ impl Portal {
             .unwrap_or_default();
         let request =
             OwnedObjectPath::try_from(format!("{PORTAL_PATH}/request/{sender}/{request_token}"))
-                .map_err(|e| PortalError::Failed(status::UNAVAILABLE, e.to_string()))?;
+                .map_err(|e| (status::UNAVAILABLE, e.to_string()))?;
         Ok(Portal {
             conn,
             messages,
@@ -475,7 +386,7 @@ impl Portal {
                     .deserialize::<(OwnedObjectPath, HashMap<String, OwnedValue>)>()
                 {
                     Ok((s, v)) if s == self.session => {
-                        parse_fix(&v, -1.0).map_or(Event::Other, Event::Fix)
+                        parse_fix(&v).map_or(Event::Other, Event::Fix)
                     }
                     _ => Event::Other,
                 }
@@ -497,86 +408,9 @@ enum Event {
     Other,
 }
 
-struct GeoClue {
-    conn: Connection,
-    client: OwnedObjectPath,
-    messages: MessageIterator,
-}
-
-impl GeoClue {
-    fn open(precise: bool) -> Result<GeoClue, (u8, String)> {
-        let err = |e: zbus::Error| (classify(&e), e.to_string());
-        let conn = Connection::system().map_err(|e| (status::UNAVAILABLE, e.to_string()))?;
-        let m = Proxy::new(&conn, GEOCLUE, GEOCLUE_MANAGER_PATH, GEOCLUE_MANAGER).map_err(err)?;
-        let client: OwnedObjectPath = m.call("GetClient", &()).map_err(err)?;
-        let c = Proxy::new(&conn, GEOCLUE, client.to_string(), GEOCLUE_CLIENT).map_err(err)?;
-        let set = |k: &str, v: Value<'_>| c.set_property(k, v).map_err(|e| err(e.into()));
-        set("DesktopId", Value::from(DESKTOP_ID))?;
-        set(
-            "RequestedAccuracyLevel",
-            Value::from(if precise {
-                GEOCLUE_ACCURACY_EXACT
-            } else {
-                GEOCLUE_ACCURACY_CITY
-            }),
-        )?;
-        let rule = zbus::MatchRule::builder()
-            .msg_type(zbus::message::Type::Signal)
-            .sender(GEOCLUE)
-            .and_then(|b| b.path(client.as_str()))
-            .and_then(|b| b.interface(GEOCLUE_CLIENT))
-            .and_then(|b| b.member("LocationUpdated"))
-            .map(|b| b.build())
-            .map_err(err)?;
-        let messages = MessageIterator::for_match_rule(rule, &conn, Some(64)).map_err(err)?;
-        drop(c);
-        Ok(GeoClue {
-            conn,
-            client,
-            messages,
-        })
-    }
-
-    /// GeoClue asks its agent (and through it the user) before answering
-    /// `Start`, so a successful `Start` is the consent.
-    fn run(self, hub: &Hub, generation: u64) {
-        let start = Proxy::new(&self.conn, GEOCLUE, self.client.as_str(), GEOCLUE_CLIENT)
-            .and_then(|p| p.call::<_, _, ()>("Start", &()));
-        if let Err(e) = start {
-            return hub.fail(generation, classify(&e), &e.to_string());
-        }
-        hub.started(generation);
-        for msg in self.messages.clone() {
-            if !hub.runs(generation) {
-                return;
-            }
-            let Ok(msg) = msg else { continue };
-            let Ok((_, new)) = msg
-                .body()
-                .deserialize::<(OwnedObjectPath, OwnedObjectPath)>()
-            else {
-                continue;
-            };
-            let Ok(v) = super::get_all(&self.conn, GEOCLUE, new.as_str(), GEOCLUE_LOCATION) else {
-                continue;
-            };
-            // GeoClue marks an unknown altitude with -DBL_MAX.
-            if let Some(f) = parse_fix(&v, f64::MIN) {
-                hub.fix(generation, f);
-            }
-        }
-        hub.fail(
-            generation,
-            status::UNAVAILABLE,
-            "the GeoClue connection closed",
-        );
-    }
-}
-
-/// A portal or GeoClue location dictionary. Both use the same keys: unknown
-/// speed and heading are -1, an unknown altitude is `unknown_altitude` (or
-/// -DBL_MAX), `Timestamp` is `(seconds, µs)`.
-pub fn parse_fix(v: &HashMap<String, OwnedValue>, unknown_altitude: f64) -> Option<Fix> {
+/// A Location portal dictionary: unknown speed and heading are -1,
+/// unknown altitude is -1 or -DBL_MAX, and `Timestamp` is `(seconds, µs)`.
+pub fn parse_fix(v: &HashMap<String, OwnedValue>) -> Option<Fix> {
     let num = |k: &str| {
         v.get(k)
             .and_then(|x| f64::try_from(x).ok())
@@ -601,7 +435,7 @@ pub fn parse_fix(v: &HashMap<String, OwnedValue>, unknown_altitude: f64) -> Opti
         latitude: num("Latitude")?,
         longitude: num("Longitude")?,
         altitude: num("Altitude")
-            .filter(|a| *a != unknown_altitude && *a > -1.0e300)
+            .filter(|a| *a != -1.0 && *a > -1.0e300)
             .unwrap_or(f64::NAN),
         accuracy: opt("Accuracy", 1e7),
         speed: opt("Speed", 1e4),
@@ -621,9 +455,7 @@ fn classify(e: &zbus::Error) -> u8 {
             "org.freedesktop.portal.Error.NotAllowed" if disabled => return status::DISABLED,
             "org.freedesktop.portal.Error.NotAllowed"
             | "org.freedesktop.portal.Error.Cancelled"
-            | "org.freedesktop.DBus.Error.AccessDenied"
-            | "org.freedesktop.GeoClue2.Error.AccessDenied"
-            | "org.freedesktop.GeoClue2.Error.NotAuthorized" => return status::DENIED,
+            | "org.freedesktop.DBus.Error.AccessDenied" => return status::DENIED,
             _ => {}
         }
     }
@@ -648,7 +480,7 @@ mod tests {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.try_to_owned().unwrap()))
         .collect();
-        let f = parse_fix(&v, -1.0).unwrap();
+        let f = parse_fix(&v).unwrap();
         assert_eq!((f.latitude, f.longitude), (52.52, 13.405));
         assert!(f.altitude.is_nan());
         assert_eq!((f.accuracy, f.speed, f.bearing), (25.0, -1.0, 90.0));
@@ -658,8 +490,8 @@ mod tests {
             "Latitude".into(),
             Value::from(120.0f64).try_to_owned().unwrap(),
         );
-        assert!(parse_fix(&bad, -1.0).is_none());
+        assert!(parse_fix(&bad).is_none());
         bad.remove("Latitude");
-        assert!(parse_fix(&bad, -1.0).is_none());
+        assert!(parse_fix(&bad).is_none());
     }
 }

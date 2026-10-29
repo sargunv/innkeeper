@@ -31,7 +31,8 @@ pub struct SettingsHub {
 /// The settings sent, plus the two desktop switches reduced motion follows:
 /// the portal's `reduced-motion` (GNOME's accessibility "Reduce Animation",
 /// KDE's animation speed) and GNOME's `enable-animations`, which the portal
-/// doesn't map.
+/// doesn't map. xdg-desktop-portal 1.20 (the Debian 13 baseline) has no
+/// standardized reduced-motion key.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Desktop {
     s: Settings,

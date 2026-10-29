@@ -4,10 +4,9 @@
 //! client asks for it, and sent to every connection that subscribed:
 //!
 //! - `power`: UPower's `DisplayDevice` (the Health HAL's battery) and the
-//!   power saver (the PowerProfileMonitor portal, else power-profiles-daemon)
-//! - `network`: the NetworkMonitor portal, else NetworkManager
-//! - `location`: one shared Location portal session (GeoClue only when
-//!   there is no portal and the bridge isn't sandboxed)
+//!   power saver (the PowerProfileMonitor portal)
+//! - `network`: the NetworkMonitor portal
+//! - `location`: one shared Location portal session
 //!
 //! Battery, power saver and network are read-only state the desktop shows
 //! any app. Location asks the user (the portal's dialog), so test sessions
@@ -27,7 +26,7 @@ use crate::ipc::wire::errno::*;
 use proto::{Battery, Network, Request, ev, feature};
 
 /// One kind of state: its last value and who wants it. Identical updates
-/// (the portal and NetworkManager both repeat themselves) are dropped.
+/// (portals can repeat themselves) are dropped.
 pub struct Topic<T> {
     what: &'static str,
     event: u16,
@@ -130,8 +129,7 @@ impl HostState {
     }
 
     fn location(&self) -> &Arc<location::Hub> {
-        self.location
-            .get_or_init(|| location::Hub::new(self.session(), self.system()))
+        self.location.get_or_init(location::Hub::new)
     }
 }
 
@@ -186,7 +184,7 @@ impl HostStateService {
             let st = s.clone();
             let k = s.saver.subscribe(self.events.clone(), encode_saver, || {
                 spawn("hoststate-saver", move || {
-                    power::watch_saver(st.session(), st.system(), &st.saver, encode_saver)
+                    power::watch_saver(st.session(), &st.saver, encode_saver)
                 })
             });
             self.subs.push(("saver", k));
@@ -197,7 +195,7 @@ impl HostStateService {
                 .network
                 .subscribe(self.events.clone(), Network::encode, || {
                     spawn("hoststate-network", move || {
-                        network::watch(st.session(), st.system(), &st.network)
+                        network::watch(st.session(), &st.network)
                     })
                 });
             self.subs.push(("network", k));
@@ -299,37 +297,6 @@ fn signals(
         .member(member.to_owned())?
         .build();
     zbus::blocking::MessageIterator::for_match_rule(rule, conn, Some(64))
-}
-
-/// Whether a D-Bus error means the service or interface simply isn't there
-/// (rather than refusing or failing).
-fn is_missing(e: &zbus::Error) -> bool {
-    let name = match e {
-        zbus::Error::MethodError(name, _, _) => name.as_str().to_owned(),
-        zbus::Error::FDO(f) => match f.as_ref() {
-            zbus::fdo::Error::ServiceUnknown(_) => "org.freedesktop.DBus.Error.ServiceUnknown",
-            zbus::fdo::Error::NameHasNoOwner(_) => "org.freedesktop.DBus.Error.NameHasNoOwner",
-            zbus::fdo::Error::UnknownInterface(_) => "org.freedesktop.DBus.Error.UnknownInterface",
-            zbus::fdo::Error::UnknownMethod(_) => "org.freedesktop.DBus.Error.UnknownMethod",
-            zbus::fdo::Error::UnknownObject(_) => "org.freedesktop.DBus.Error.UnknownObject",
-            zbus::fdo::Error::UnknownProperty(_) => "org.freedesktop.DBus.Error.UnknownProperty",
-            zbus::fdo::Error::InvalidArgs(_) => "org.freedesktop.DBus.Error.InvalidArgs",
-            _ => return false,
-        }
-        .to_owned(),
-        _ => return false,
-    };
-    matches!(
-        name.as_str(),
-        "org.freedesktop.DBus.Error.ServiceUnknown"
-            | "org.freedesktop.DBus.Error.NameHasNoOwner"
-            | "org.freedesktop.DBus.Error.UnknownInterface"
-            | "org.freedesktop.DBus.Error.UnknownMethod"
-            | "org.freedesktop.DBus.Error.UnknownObject"
-            | "org.freedesktop.DBus.Error.UnknownProperty"
-            | "org.freedesktop.DBus.Error.InvalidArgs"
-            | "org.freedesktop.DBus.Error.Spawn.ServiceNotFound"
-    )
 }
 
 /// Like [`signals`], for every object under `path`.

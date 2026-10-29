@@ -162,9 +162,9 @@ impl Config {
         if let Some(b) = bus {
             e.insert("DBUS_SESSION_BUS_ADDRESS".into(), b);
         }
-        // The host state service reads UPower, power-profiles-daemon and
-        // NetworkManager on the caller's system bus, and the settings
-        // service the desktop's locale (plasma-localerc on KDE).
+        // The host state service reads UPower on the caller's system bus,
+        // and the settings service reads the desktop's locale (plasma-localerc
+        // on KDE).
         for v in [
             "XDG_DATA_HOME",
             "XDG_CONFIG_HOME",
