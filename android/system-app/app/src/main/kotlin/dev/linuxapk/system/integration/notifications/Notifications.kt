@@ -192,15 +192,15 @@ class Notifications(
         .orEmpty()
     val ongoing =
       n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0
-    val channel =
+    val ranking =
       try {
         listener?.let { l ->
-          val ranking = NotificationListenerService.Ranking()
-          if (l.currentRanking.getRanking(sbn.key, ranking)) ranking.importance else null
+          NotificationListenerService.Ranking().takeIf { l.currentRanking.getRanking(sbn.key, it) }
         }
       } catch (_: Exception) {
         null
-      } ?: NotificationManager.IMPORTANCE_DEFAULT
+      }
+    val channel = ranking?.importance ?: NotificationManager.IMPORTANCE_DEFAULT
     val silent =
       (update && n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0) ||
         channel < NotificationManager.IMPORTANCE_DEFAULT
@@ -208,6 +208,11 @@ class Notifications(
     if (ongoing) flags = flags or 1
     if (silent) flags = flags or 2
     if (n.contentIntent != null) flags = flags or 4
+    // Launcher3's notification-dot rule: effective ranking/channel badge
+    // permission, excluding ongoing notifications and group summaries.
+    if (!ongoing && ranking?.canShowBadge() == true && ranking.channel?.canShowBadge() == true) {
+      flags = flags or 8
+    }
     val urgency =
       when {
         channel <= NotificationManager.IMPORTANCE_LOW -> 0
@@ -216,11 +221,19 @@ class Notifications(
           2
         else -> 1
       }
-    val max = x.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+    val style =
+      if (x.getString(Notification.EXTRA_TEMPLATE) == Notification.ProgressStyle::class.java.name) {
+        Notification.Builder.recoverBuilder(context, n).style as? Notification.ProgressStyle
+      } else null
+    val max = style?.progressMax ?: x.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
     val progress =
       when {
-        x.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE) -> -2
-        max > 0 -> (x.getInt(Notification.EXTRA_PROGRESS) * 100L / max).toInt().coerceIn(0, 100)
+        style?.isProgressIndeterminate ?: x.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE) ->
+          -2
+        max > 0 ->
+          ((style?.progress ?: x.getInt(Notification.EXTRA_PROGRESS)) * 100L / max)
+            .toInt()
+            .coerceIn(0, 100)
         else -> -1
       }
     val actions = (n.actions ?: emptyArray()).take(3)

@@ -28,7 +28,9 @@ class NotificationProbe : Activity() {
     super.onCreate(savedInstanceState)
     val now =
       java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
-    post(this, "Ada Lovelace", "Are we still on for the demo at 3? ($now)")
+    val mode = intent.getStringExtra("mode").orEmpty()
+    if (mode == "cancel") getSystemService(NotificationManager::class.java).cancel(ID)
+    else post(this, "Ada Lovelace $mode", "Are we still on for the demo at 3? ($now)", mode)
     finish()
   }
 
@@ -57,10 +59,12 @@ class NotificationProbe : Activity() {
     private const val ACTION_READ = "dev.linuxapk.probes.READ"
     private const val ACTION_REPLY = "dev.linuxapk.probes.REPLY"
 
-    fun post(context: Context, title: String, text: String) {
+    fun post(context: Context, title: String, text: String, mode: String = "") {
       val nm = context.getSystemService(NotificationManager::class.java)
+      val channel = if (mode == "no-badge") "$CHANNEL-no-badge" else CHANNEL
       nm.createNotificationChannel(
-        NotificationChannel(CHANNEL, "Notification probe", NotificationManager.IMPORTANCE_DEFAULT),
+        NotificationChannel(channel, "Notification probe", NotificationManager.IMPORTANCE_DEFAULT)
+          .apply { setShowBadge(mode != "no-badge") },
       )
       fun broadcast(action: String, mutable: Boolean) =
         PendingIntent.getBroadcast(
@@ -84,7 +88,7 @@ class NotificationProbe : Activity() {
       val read =
         Notification.Action.Builder(null, "Mark as read", broadcast(ACTION_READ, false)).build()
       val n =
-        Notification.Builder(context, CHANNEL)
+        Notification.Builder(context, channel)
           .setSmallIcon(android.R.drawable.stat_notify_chat)
           .setContentTitle(title)
           .setContentText(text)
@@ -92,6 +96,21 @@ class NotificationProbe : Activity() {
           .setAutoCancel(true)
           .addAction(read)
           .addAction(reply)
+          .apply {
+            when (mode) {
+              "progress" -> setProgress(100, 42, false)
+              "indeterminate" -> setProgress(100, 0, true)
+              "ongoing" -> setOngoing(true)
+              "style",
+              "style-indeterminate" ->
+                setStyle(
+                  Notification.ProgressStyle()
+                    .setProgressSegments(listOf(Notification.ProgressStyle.Segment(200)))
+                    .setProgress(84)
+                    .setProgressIndeterminate(mode == "style-indeterminate"),
+                )
+            }
+          }
           .build()
       nm.notify(ID, n)
     }

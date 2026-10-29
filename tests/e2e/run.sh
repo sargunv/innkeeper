@@ -93,6 +93,16 @@ if [[ ${1:-} == --group ]]; then
       s pm disable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
       s am start -n dev.linuxapk.probes/.NotificationProbe >/dev/null
       until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
+      for mode in progress style indeterminate style-indeterminate ongoing no-badge; do
+        expected=42 badge=true
+        case $mode in
+          *indeterminate) expected=-2 ;;
+          ongoing | no-badge) expected=-1 badge=false ;;
+        esac
+        s am start -n dev.linuxapk.probes/.NotificationProbe --es mode "$mode" >/dev/null
+        until_ok file_has "$bridge_log" "not shown .*Ada Lovelace $mode.*progress=$expected badge=$badge"
+      done
+      s am start -n dev.linuxapk.probes/.NotificationProbe --es mode cancel >/dev/null
       printf %s linuxapk-e2e-host-before | wl-copy
       s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-android >/dev/null
       until_ok log_has LinuxApkClipProbe 'set: linuxapk-e2e-android'
