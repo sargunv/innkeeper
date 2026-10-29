@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 /** Public API requests for the windowing e2e group and nested-desktop proof. */
@@ -19,18 +20,23 @@ class WindowModeProbe : Activity() {
     super.onCreate(savedInstanceState)
     status = TextView(this).apply { textSize = 24f }
     setContentView(
-      LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(24, 24, 24, 24)
-        addView(status)
-        for (action in listOf("portrait", "landscape", "immersive", "restore", "fullscreen-api")) {
-          addView(
-            Button(this@WindowModeProbe).apply {
-              text = action
-              setOnClickListener { applyAction(action) }
-            },
-          )
-        }
+      ScrollView(this).apply {
+        addView(
+          LinearLayout(this@WindowModeProbe).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 24)
+            addView(status)
+            for (action in
+              listOf("portrait", "landscape", "immersive", "restore", "fullscreen-api")) {
+              addView(
+                Button(this@WindowModeProbe).apply {
+                  text = action
+                  setOnClickListener { applyAction(action) }
+                },
+              )
+            }
+          },
+        )
       },
     )
     applyAction(intent.getStringExtra("action") ?: "portrait")

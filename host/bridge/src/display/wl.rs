@@ -738,6 +738,9 @@ impl WindowHandler for State {
         );
         let w = self.windows.get_mut(&id).unwrap();
         if w.fullscreen && !c.is_fullscreen() {
+            if w.app_fullscreen {
+                w.manual_fullscreen_choice = true;
+            }
             w.app_fullscreen = false;
             (w.width, w.height) = w.windowed_size;
         } else if !w.fullscreen && c.is_fullscreen() {
