@@ -10,12 +10,13 @@ Two gate tiers, both testing observable behaviour we own:
   `input` (an app window and delivered input), `audio` (440 Hz at PipeWire),
   `desktop` (links and notifications logged, clipboard isolated both ways,
   cold-start file picker cancelled without a portal, and DocumentsUI after a
-  connection timeout, CLI file VIEW and the Android Open With chooser), `a11y`
-  (AT-SPI stays inactive), `production` (Android mailto VIEW and notifications
-  reach logging desktop fakes, and PICK returns a readable file), and
-  `lifecycle` (idle stop and alarm restart). The whole command, including setup
-  and cleanup, has a 55 s deadline (plus at most 4 s for cleanup) on a warm
-  image and prints its total wall time. Setup boots once and installs the
+  connection timeout, CLI file VIEW and the Android Open With chooser),
+  `sharing` (host SEND/SEND_MULTIPLE byte hashes, MIME matching and read-only
+  grants), `a11y` (AT-SPI stays inactive), `production` (Android mailto VIEW and
+  notifications reach logging desktop fakes, and PICK returns a readable file),
+  and `lifecycle` (idle stop and alarm restart). The whole command, including
+  setup and cleanup, has a 55 s deadline (plus at most 4 s for cleanup) on a
+  warm image and prints its total wall time. Setup boots once and installs the
   probes; audio runs concurrently with the activity checks. Groups wait for
   observations, rather than fixed delays. Lifecycle uses named-session-only
   short timers.

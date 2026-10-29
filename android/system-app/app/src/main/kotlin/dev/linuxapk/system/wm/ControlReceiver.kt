@@ -3,6 +3,7 @@ package dev.linuxapk.system.wm
 
 import android.app.Activity
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -69,11 +70,15 @@ class ControlReceiver : BroadcastReceiver() {
           i.getStringExtra("component")?.let {
             ComponentName.unflattenFromString(it) ?: return "error: bad component $it"
           }
-        val file =
+        val files =
           i.getStringExtra("file-grant")?.let {
-            if (it.length != 16 || it.toULongOrNull(16) == null) return "error: bad file grant"
-            DocumentsContract.buildDocumentUri(HostDocumentsProvider.AUTHORITY, it)
+            it.split(',').map { grant ->
+              if (grant.length != 16 || grant.toULongOrNull(16) == null)
+                return "error: bad file grant"
+              DocumentsContract.buildDocumentUri(HostDocumentsProvider.AUTHORITY, grant)
+            }
           }
+        val file = files?.firstOrNull()
         if (file != null) {
           // MIME lookup and the app's first open need the documents HELLO after a cold start.
           // This runs on the control worker, never the UI thread.
@@ -85,7 +90,9 @@ class ControlReceiver : BroadcastReceiver() {
           } finally {
             HostFiles.stopWaiting(connected)
           }
-          context.grantUriPermission(pkg, file, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          files.forEach {
+            context.grantUriPermission(pkg, it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          }
         }
         val reply =
           wm.launch(
@@ -97,6 +104,20 @@ class ControlReceiver : BroadcastReceiver() {
               i.getIntExtra("height", 0),
               i.getStringExtra("token").orEmpty(),
               file != null,
+              launchIntent =
+                if (files != null && files.size > 1) {
+                  Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(file, context.contentResolver.getType(files.first()))
+                    .apply {
+                      setComponent(component)
+                      setPackage(pkg)
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      clipData =
+                        ClipData.newUri(context.contentResolver, "Files", files.first()).apply {
+                          files.drop(1).forEach { addItem(ClipData.Item(it)) }
+                        }
+                    }
+                } else null,
             ),
           )
         val display = LAUNCHED.find(reply)?.groupValues?.get(1)?.toInt()

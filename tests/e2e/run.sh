@@ -176,6 +176,7 @@ if [[ ${1:-} == --group ]]; then
       wm CLOSE --es package dev.linuxapk.system >/dev/null
       echo 'ok   Open With matches VIEW filters, opens the selected app and shows no-match UI'
       ;;
+    sharing) "$here/share.sh" ;;
     a11y)
       dbus-send --session --dest=org.a11y.Bus --type=method_call --print-reply /org/a11y/bus \
         org.freedesktop.DBus.Properties.Set string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
@@ -206,9 +207,9 @@ if [[ ${1:-} == --group ]]; then
 fi
 
 groups=("$@")
-((${#groups[@]})) || groups=(boot input audio desktop a11y production lifecycle)
+((${#groups[@]})) || groups=(boot input audio desktop sharing a11y production lifecycle)
 for group in "${groups[@]}"; do
-  case $group in boot | input | audio | desktop | a11y | production | lifecycle) ;; *)
+  case $group in boot | input | audio | desktop | sharing | a11y | production | lifecycle) ;; *)
     echo "unknown e2e group: $group" >&2
     exit 2
     ;;

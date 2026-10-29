@@ -153,7 +153,7 @@ pub enum Launch {
     /// A read-only fd grant from the bridge documents service.
     File {
         package: String,
-        grant: u64,
+        grants: Vec<u64>,
         /// Explicit target for the system app's private Open With chooser.
         component: Option<String>,
     },
@@ -193,7 +193,7 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
         }
         Launch::File {
             package,
-            grant,
+            grants,
             component,
         } => {
             v.extend(
@@ -203,7 +203,11 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
                     package,
                     "--es",
                     "file-grant",
-                    &format!("{grant:016x}"),
+                    &grants
+                        .iter()
+                        .map(|g| format!("{g:016x}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
                 ]
                 .map(String::from),
             );
@@ -445,14 +449,14 @@ mod tests {
         let args = wm_launch_args(
             &Launch::File {
                 package: "dev.linuxapk.system".into(),
-                grant: 0xabc,
+                grants: vec![0xabc, 0xdef],
                 component: Some("dev.linuxapk.system/.documents.OpenWithActivity".into()),
             },
             &LaunchOptions::default(),
         );
         assert!(
             args.windows(3)
-                .any(|w| w == ["--es", "file-grant", "0000000000000abc"])
+                .any(|w| w == ["--es", "file-grant", "0000000000000abc,0000000000000def"])
         );
         assert!(args.windows(3).any(|w| w
             == [

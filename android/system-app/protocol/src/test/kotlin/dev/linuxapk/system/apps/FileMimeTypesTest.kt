@@ -6,6 +6,13 @@ import kotlin.test.assertEquals
 
 class FileMimeTypesTest {
   @Test
+  fun shareBatchUsesTheNarrowestCommonType() {
+    assertEquals("image/png", sharedMimeType(listOf("image/png", "image/png")))
+    assertEquals("image/*", sharedMimeType(listOf("image/png", "image/jpeg")))
+    assertEquals("*/*", sharedMimeType(listOf("image/png", "text/plain")))
+  }
+
+  @Test
   fun concreteTypesExcludeWildcardsSchemesAndInvalidValues() {
     assertEquals(
       listOf("application/vnd.example+json", "text/markdown"),

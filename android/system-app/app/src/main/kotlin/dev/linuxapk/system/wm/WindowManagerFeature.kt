@@ -158,6 +158,8 @@ class WindowManagerFeature(
     /** The desktop's `xdg_activation_v1` token for this launch (empty: none). */
     val token: String = "",
     val file: Boolean = false,
+    /** An explicit file handoff prepared by the system app (VIEW or SEND). */
+    val launchIntent: Intent? = null,
   )
 
   /** Opens [r]'s app in a new window, or focuses its window. Returns a one-line result. */
@@ -207,6 +209,7 @@ class WindowManagerFeature(
       }
     val intent =
       when {
+        r.launchIntent != null -> Intent(r.launchIntent)
         r.uri != null ->
           Intent(Intent.ACTION_VIEW, r.uri).apply {
             if (r.file) {
@@ -230,7 +233,7 @@ class WindowManagerFeature(
       ?.let { w ->
         // A link or another activity opens in the app's window; its launcher activity just
         // brings the task back.
-        if (r.uri != null || r.component != null) start(intent, w.id)
+        if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
         focus(w, activate = true, token = r.token)
         return "focused display=${w.id} package=${r.pkg}"
       }
@@ -241,7 +244,7 @@ class WindowManagerFeature(
     val w = createWindow(r.pkg, label, sizing, r.token) ?: return "error: no virtual display"
     // An existing task (say, started on display 0) moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
-    if (existing != null && r.uri == null) {
+    if (existing != null && r.uri == null && r.launchIntent == null) {
       move(existing, w)
     } else {
       start(intent, w.id)

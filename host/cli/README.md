@@ -26,10 +26,14 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 - The static Linux.apk desktop entry accepts common document, text and media
   types. Flatpak exports its `%F` as `--file-forwarding … @@ %F @@`, granting
   those files through the document portal. `open` uses the same read-only grants
-  as `run`, then shows **Open with Android app…** with installed apps whose
-  exported VIEW filters match the file's MIME type. If none match, the chooser
-  says so. APKs and bundles open in the installer instead. No file-type defaults
-  are changed; per-app host Open With entries remain deferred.
+  as `run`, then shows **Open or share with Android app…**. **Open** lists VIEW
+  handlers; **Share** lists SEND targets for one file and SEND_MULTIPLE targets
+  for a batch. The same activity must accept every file's MIME type. Share
+  delivers EXTRA_STREAM and ClipData with FLAG_GRANT_READ_URI_PERMISSION; grants
+  last until session shutdown. Targets are queried each time the chooser opens,
+  so installs and removals appear immediately. If none match, it says so. APKs
+  and bundles open in the installer instead. No file-type defaults are changed;
+  per-app host Open With entries remain deferred.
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).
@@ -41,3 +45,7 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 
 Tests: `cargo test -p linuxapk` and the shared core tests in `mise run test`
 cover command results, metadata, validation and desktop entries.
+
+Host text sharing has no standard desktop hook on the supported desktops (Debian
+13 baseline, xdg-desktop-portal 1.20). This is an upstream limit: the host entry
+accepts files; it does not register a text-sharing service.

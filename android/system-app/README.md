@@ -89,8 +89,12 @@ Known limits:
   session shutdown, up to 256 MiB per session; saved copies are removed
   immediately. Shutdown cleans the cache; a later bridge reaps crash leftovers.
 - Copy is offered only for text: Android content URIs cannot be pasted into a
-  desktop file manager. Host → Android sharing is tracked in
-  [#66](https://github.com/sargunv/linux.apk/issues/66).
+  desktop file manager. For host → Android files, the static desktop entry
+  offers Open and Share sections in its chooser, reusing read-only document
+  grants. Share uses EXTRA_STREAM and ClipData, with SEND_MULTIPLE for batches.
+  There is no standard host text-sharing hook in the supported desktop baseline
+  (xdg-desktop-portal 1.20); text sharing from the host remains an upstream
+  limit.
 - Arbitrary untyped custom URI schemes need an explicit manifest filter; the
   Android 17 resolver has no catch-all scheme filter.
 
