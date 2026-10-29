@@ -25,6 +25,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Told where the seat's keyboard focus is: a window, or none of ours.
 pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PointerPosition {
+    pub position: (i32, i32),
+    pub generation: u64,
+}
+
 #[derive(Default)]
 pub struct Hub {
     state: Mutex<State>,
@@ -32,6 +38,8 @@ pub struct Hub {
     focus_watch: Mutex<Option<FocusWatch>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
     repeat: Mutex<Option<String>>,
+    pub evdev: Mutex<Option<super::evdev::Evdev>>,
+    pub pointer_positions: Mutex<HashMap<u32, PointerPosition>>,
 }
 
 #[derive(Default)]

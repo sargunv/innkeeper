@@ -18,6 +18,8 @@
 
   <!-- signature: granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
+  <uses-permission android:name="android.permission.ASSOCIATE_INPUT_DEVICE_TO_DISPLAY" />
+  <uses-permission android:name="android.permission.SET_POINTER_SPEED" />
 
   <!-- Window manager (docs/display.md). Trusted, always-unlocked virtual displays with their
        own focus and display group; secure, so FLAG_SECURE windows aren't blacked out. -->

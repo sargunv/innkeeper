@@ -24,10 +24,18 @@ struct ClientTargetState {
   UniqueFd acquireFence;
 };
 
+struct CursorState {
+  BufferPtr buffer;
+  UniqueFd acquireFence;
+  int32_t x = 0, y = 0;
+  float alpha = 1;
+};
+
 struct FrameInput {
   int64_t displayId;
   ClientTargetState* clientTarget;
   BufferPtr outputBuffer;  // virtual displays: the sink's buffer
+  CursorState* cursor = nullptr;
 };
 
 class Presenter {

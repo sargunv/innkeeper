@@ -24,6 +24,18 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$N"/{home,config,data,cache,state}
+# KWin grants fake seat input only to an executable whose desktop file names
+# the protocol. This entry lives solely on this disposable desktop.
+mkdir -p "$N/data/applications"
+cat >"$N/data/applications/dev.linuxapk.TestSeat.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Linux.apk test seat
+Exec=$(readlink -f /usr/bin/python3)
+NoDisplay=true
+X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input
+DESKTOP
+
 if [[ -n ${LINUXAPK_TEST_LAUNCHER_PORTAL:-} ]]; then
   mkdir -p "$N/config/xdg-desktop-portal"
   printf '[preferred]\norg.freedesktop.impl.portal.DynamicLauncher=%s\n' \

@@ -48,6 +48,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
       latencySensitive = true,
     )
   private val listeners = CopyOnWriteArrayList<Listener>()
+  private lateinit var virtual: VirtualInput
+  private lateinit var keys: KeyboardDelivery
   private lateinit var injector: Injector
   private lateinit var translator: InputTranslator // reader thread
   private var refused = 0
@@ -64,6 +66,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   override fun start() {
     injector = Injector()
+    virtual = VirtualInput(context, connection)
+    keys = KeyboardDelivery(::injectFallback)
     translator = newTranslator()
     connection.start()
   }
@@ -95,6 +99,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     title: String,
     token: String = "",
   ): Boolean {
+    virtual.addDisplay(window)
     val r =
       connection.call(WINDOW_REQUEST, timeoutMs = 2000) {
         u32(window).u32(width).u32(height).u32(dpi).u32(minWidthDp).u32(minHeightDp)
@@ -122,7 +127,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   fun minimizeWindow(window: Int) = connection.send(WINDOW_MINIMIZE) { u32(window) }
 
-  fun destroyWindow(window: Int) = connection.send(WINDOW_DESTROY) { u32(window) }
+  fun destroyWindow(window: Int): Boolean {
+    virtual.removeDisplay(window)
+    return connection.send(WINDOW_DESTROY) { u32(window) }
+  }
 
   /** One `ti_*` line for the host input method. Returns false if it wasn't sent. */
   fun textInput(text: String) = connection.send(TEXT_INPUT) { line(text, MAX_TEXT_INPUT_LINE) }
@@ -135,11 +143,16 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     synchronized(keyTexts) { keyTexts.remove(keyTextId(e)) }
   }
 
-  override fun onConnected() = listeners.forEach { it.onConnected() }
+  override fun onConnected() {
+    virtual.reset()
+    listeners.forEach { it.onConnected() }
+  }
 
   // Whatever is held (keys, buttons, touches) is released.
   override fun onDisconnected() {
-    translator.reset().forEach(::inject)
+    val released = translator.reset()
+    virtual.modifiers(translator.metaState, SystemClock.uptimeMillis())
+    released.forEach(::inject)
     translator = newTranslator()
     repeat = null
   }
@@ -157,7 +170,9 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
             return
           }
           if (e is HostEvent.RepeatInfo) applyRepeat(e)
-          translator.handle(e).forEach(::inject)
+          val translated = translator.handle(e)
+          virtual.modifiers(translator.metaState, SystemClock.uptimeMillis())
+          translated.forEach(::inject)
           e
         }
         WINDOW_MAPPED -> HostEvent.WindowMapped(body.int)
@@ -218,6 +233,15 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   }
 
   private fun inject(e: OutEvent) {
+    if (e is OutKey) {
+      keys.key(e)
+      return
+    }
+    if (e is OutMotion && virtual.motion(e)) return
+    injectFallback(e)
+  }
+
+  private fun injectFallback(e: OutEvent) {
     if (e is OutKey && e.action == KeyEvent.ACTION_DOWN) {
       val text = e.text
       if (text != null)

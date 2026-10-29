@@ -18,10 +18,11 @@ that touches gralloc buffers.
   session's root may open `/dev/udmabuf`, so the allocator opens it before
   dropping to `system:graphics`.
 - **Composer:** one headless display 0 (1280x800, 60 Hz timer vsync) plus up to
-  32 HWC-backed virtual displays; every layer is CLIENT. `Presenter.cpp` picks
-  the backend from `vendor.linuxapk.hwc.backend`: `bridge` (the session default)
-  sends virtual displays to the bridge's display service, `headless` shows
-  nothing. `vendor.linuxapk.hwc.dump.dir` writes PNG frame dumps.
+  32 HWC-backed virtual displays; content layers are CLIENT and CURSOR layers
+  are exported separately to Wayland. `Presenter.cpp` picks the backend from
+  `vendor.linuxapk.hwc.backend`: `bridge` (the session default) sends virtual
+  displays to the bridge's display service, `headless` shows nothing.
+  `vendor.linuxapk.hwc.dump.dir` writes PNG frame dumps.
 - **LL-NDK only.** `third_party/aosp` holds the frozen AIDL snapshots and binder
   NDK and IMapper headers (`tools/sync-aosp.sh`); `tools/gen-aidl.sh` generates
   the NDK backend with the build-tools' `aidl`, and `tools/gen-stub.py` turns

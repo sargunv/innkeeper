@@ -27,7 +27,7 @@ flowchart LR
   launcher -->|"Flatpak sandbox, composed root"| pivot
   launcher --> bridge
   pivot -->|"fork, exec init"| init
-  init -. "seccomp user notifications: binder, bpf, credentials" .-> broker
+  init -. "seccomp user notifications: binder, bpf, credentials, evdev" .-> broker
   hal -->|"bridge.sock: display, audio, hoststate"| bridge
   sysapp <-->|"bridge.sock: input, system, documents, apps, hoststate"| bridge
   bridge <--> host
@@ -38,16 +38,18 @@ flowchart LR
   the only process that talks to the desktop.
 - **Supervisor.** One seccomp filter on Android's init traps what the sandbox
   can't do (binder, eBPF, single-uid credentials). The Rust broker defines the
-  filter and serves every notification, including binder, credentials and BPF.
-  The static pivot-exec bootstrap establishes the root and namespaces and reaps
-  children. See [supervisor/README.md](../supervisor/README.md).
+  filter and serves every notification, including binder, credentials, BPF and
+  session-local evdev. The static pivot-exec bootstrap establishes the root and
+  namespaces and reaps children. See
+  [supervisor/README.md](../supervisor/README.md).
 - **Android.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).
 
 The channels between zones are the seccomp notification fd and one socket,
-`bridge.sock` ([bridge-protocol.md](bridge-protocol.md)). Nothing in Android
-reaches the desktop any other way, apart from `/dev/dri`, `/dev/udmabuf` and the
-host network ([session.md](session.md)).
+`bridge.sock` ([bridge-protocol.md](bridge-protocol.md)). The bridge also writes
+input records to the broker's private `evdev.sock`. Nothing in Android reaches
+the desktop any other way, apart from `/dev/dri`, `/dev/udmabuf` and the host
+network ([session.md](session.md)).
 
 ## Decisions
 

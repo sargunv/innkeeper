@@ -60,3 +60,10 @@ data class OutKey(
   /** A key down's repeat count: nonzero only for repeats the compositor sends itself. */
   val repeatCount: Int = 0,
 ) : OutEvent
+
+/** One ordered injection path for ordinary keys; modifier transitions belong to evdev. */
+class KeyboardDelivery(private val inject: (OutKey) -> Unit) {
+  fun key(event: OutKey) {
+    if (!EvdevModifiers.owns(event.keyCode)) inject(event)
+  }
+}

@@ -13,6 +13,13 @@
 //! | `0x0204` | BUFFER_REMOVE  | `u32 buffer`                                                                                                                                                                         |                                                                                             |
 //! | `0x0205` | FRAME          | `u32 display`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's again at RELEASE; one the window can't show yet is released at once |
 //!
+//! CURSOR (0x0206): u32 display, u32 width, u32 height (each <=512),
+//! i32 x, i32 y (layer origin in display pixels). Nonzero dimensions carry
+//! one sealed memfd with width*height*4 premultiplied BGRA bytes (wl_shm
+//! ARGB8888); 0x0, without an fd, hides the cursor. The layer is excluded
+//! from FRAME. The input service supplies the last pointer position to
+//! derive the hotspot; HWC3 has no style-name or hotspot metadata.
+//!
 //! | Event    | Message | Body                                         |
 //! | -------- | ------- | -------------------------------------------- |
 //! | `0x4201` | RELEASE | `u32 buffer` (mirrors `wl_buffer.release`)   |
@@ -25,6 +32,7 @@ pub mod ty {
     pub const BUFFER_ADD: u16 = 0x0203;
     pub const BUFFER_REMOVE: u16 = 0x0204;
     pub const FRAME: u16 = 0x0205;
+    pub const CURSOR: u16 = 0x0206;
 
     /// Events (bridge to composer, tag 0).
     pub const RELEASE: u16 = 0x4201;
@@ -74,6 +82,13 @@ impl BufferSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
+    Cursor {
+        display: u32,
+        width: u32,
+        height: u32,
+        x: i32,
+        y: i32,
+    },
     DisplayAdd {
         display: u32,
         width: u32,
@@ -103,6 +118,13 @@ fn dim(r: &mut Reader<'_>, what: &'static str) -> Result<u32, DecodeError> {
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
     let mut r = Reader::new(body);
     let req = match ty {
+        ty::CURSOR => Request::Cursor {
+            display: r.u32()?,
+            width: r.u32_in(0..=512, "cursor width")?,
+            height: r.u32_in(0..=512, "cursor height")?,
+            x: r.i32()?,
+            y: r.i32()?,
+        },
         ty::DISPLAY_ADD => Request::DisplayAdd {
             display: r.u32()?,
             width: dim(&mut r, "width")?,
@@ -146,6 +168,16 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let mut w;
     match req {
+        Request::Cursor {
+            display,
+            width,
+            height,
+            x,
+            y,
+        } => {
+            w = Writer::message(ty::CURSOR, tag);
+            w.u32(*display).u32(*width).u32(*height).i32(*x).i32(*y);
+        }
         Request::DisplayAdd {
             display,
             width,

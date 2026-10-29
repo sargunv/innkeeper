@@ -21,6 +21,7 @@ mod creds;
 pub mod fake;
 pub mod filter;
 mod flat;
+pub mod input;
 pub mod notify;
 
 use std::io::Write;

@@ -57,6 +57,7 @@ use wayland_protocols::xdg::toplevel_icon::v1::client::{
 };
 
 pub(crate) mod appearance;
+pub(crate) mod cursor;
 mod data_device;
 mod foreign;
 mod policy;
@@ -88,6 +89,10 @@ pub enum Cmd {
     /// A request from the Linux.apk IME.
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
+    Cursor {
+        window: u32,
+        image: cursor::Image,
+    },
     Quit,
 }
 
@@ -162,6 +167,8 @@ pub(crate) struct State {
     params: HashMap<ObjectId, u32>,
     pub(crate) seat: Seat,
     pub(crate) clipboard: Option<data_device::Clipboard>,
+    cursors: HashMap<u32, cursor::Cursor>,
+    cursor_surface: Option<(wl_surface::WlSurface, Option<WpViewport>)>,
     quit: bool,
 }
 
@@ -542,6 +549,8 @@ impl State {
     }
 
     fn destroy(&mut self, id: u32) {
+        self.cursors.remove(&id);
+        self.hub.pointer_positions.lock().unwrap().remove(&id);
         let Some(w) = self.windows.remove(&id) else {
             return;
         };
@@ -611,6 +620,7 @@ impl State {
     }
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
+        self.cursor_frame(id);
         let ready = self
             .buffers
             .get(&buffer)
@@ -769,6 +779,7 @@ impl State {
             } => self.frame(window, buffer, damage),
             Cmd::TextInput(r) => self.text_input(r),
             Cmd::WindowPolicy(p) => self.window_policy(p),
+            Cmd::Cursor { window, image } => self.cursor(window, image),
             Cmd::Quit => self.quit = true,
         }
     }
@@ -1114,6 +1125,8 @@ pub fn run(
         params: HashMap::new(),
         seat: Seat::new(bind_opt(&globals, &qh, 1), &globals, &qh),
         clipboard: data_device::Clipboard::new(&globals, &qh, &shared, &ev)?,
+        cursors: HashMap::new(),
+        cursor_surface: None,
         quit: false,
     };
     crate::info!(

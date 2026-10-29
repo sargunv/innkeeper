@@ -103,6 +103,95 @@ if [[ ${1:-} == --group ]]; then
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped
+      s dumpsys input >"$T/devices.txt"
+      file_has "$T/devices.txt" 'Linux.apk Keyboard'
+      file_has "$T/devices.txt" 'Linux.apk Mouse'
+      # Keep one fake KWin device across enter/leave and drag. Submit the
+      # ordered stream without observation barriers between evdev devices.
+      mkfifo "$T/seat"
+      /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
+      seat_pid=$!
+      exec {seat_fd}>"$T/seat"
+      printf '%s\n' key:30,1 key:30,0 \
+        abs:900,300 abs:100,300 abs:900,300 button:272,1 \
+        key:42,1 abs:1000,320 key:42,0 abs:1100,340 button:272,0 >&"$seat_fd"
+      # One bounded capture checks the delivered sequence, avoiding a separate
+      # exec/logcat round trip for every intermediate observation.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      native_input_ready() {
+        s logcat -d -s LinuxApkProbe:I >"$T/modifier-drag.txt"
+        file_has "$T/modifier-drag.txt" 'key .*KEYCODE_A.*deviceId=-1' &&
+          file_has "$T/modifier-drag.txt" 'touch .*ACTION_UP.*metaState=0.*deviceName=Linux.apk Mouse'
+      }
+      until_ok native_input_ready
+      for pattern in 'configuration keyboard=2' \
+        'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse' \
+        'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse' \
+        'touch .*ACTION_DOWN.*deviceName=Linux.apk Mouse' \
+        'key .*ACTION_DOWN.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard' \
+        'touch .*ACTION_MOVE.*META_SHIFT_ON.*deviceName=Linux.apk Mouse' \
+        'key .*ACTION_UP.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard'; do
+        file_has "$T/modifier-drag.txt" "$pattern"
+      done
+      [[ $(grep -Ec 'key .*KEYCODE_SHIFT_LEFT' "$T/modifier-drag.txt") == 2 ]]
+      if file_has "$T/modifier-drag.txt" '(touch|generic) .*deviceId=-1'; then
+        echo 'FAIL physical mouse switched to injection' >&2
+        exit 1
+      fi
+      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; ordered seat key injection (Android device ID -1)'
+      # Put a second probe on a separately owned window/display. A second task
+      # on Settings' display keeps the production one-window-per-package policy.
+      second=$(wm LAUNCH --es package com.android.settings --es component com.android.settings/.Settings)
+      second_display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$second")
+      [[ -n $second_display && $second_display != "$display" ]]
+      s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
+      until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
+      cat >"$T/two-windows.js" <<'JS'
+let x = 0;
+for (const w of workspace.windowList()) {
+  if (String(w.resourceClass).includes("dev.linuxapk.")) {
+    w.minimized = false;
+    w.frameGeometry = {x: x, y: 100, width: 800, height: 800};
+    x += 1000;
+  }
+}
+JS
+      script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.loadScript "$T/two-windows.js" linuxapk-input-two | grep -oE '[0-9]+')
+      gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
+        --method org.kde.kwin.Script.run >/dev/null
+      gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
+      # Rapid alternating enter/move/click/leave reports must retain their own
+      # display's device even with both endpoints readable.
+      for _ in {1..2}; do
+        printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:1200,300\nbutton:272,1\nbutton:272,0\n' >&"$seat_fd"
+      done
+      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
+      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
+      s logcat -d -s LinuxApkProbe:I >"$T/two-windows.txt"
+      /usr/bin/python3 - "$T/two-windows.txt" <<'PYTEST'
+import re, sys
+for device, window in re.findall(r'deviceName=Linux.apk Mouse (\d+) windowDisplay=(\d+)', open(sys.argv[1]).read()):
+  assert device == window, (device, window)
+PYTEST
+      s dumpsys input >"$T/two-devices.txt"
+      file_has "$T/two-devices.txt" "Linux.apk Mouse $display"
+      file_has "$T/two-devices.txt" "Linux.apk Mouse $second_display"
+      wm CLOSE --ei display "$second_display" >/dev/null
+      # Removal must leave the first display's mouse alive.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      mouse_removed() {
+        s dumpsys input >"$T/remaining-device.txt"
+        ! file_has "$T/remaining-device.txt" "Linux.apk Mouse $second_display"
+      }
+      until_ok mouse_removed
+      file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
+      echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
+      exec {seat_fd}>&-
+      wait "$seat_pid"
+      rm "$T/seat"
+      echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"
