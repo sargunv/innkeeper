@@ -34,12 +34,11 @@ own; `cargo test -p linuxapk-core` tests it.
   missing or runs another command, unless the user declined it.
 - **File metadata**: the system app queries PackageManager's exported, enabled,
   default VIEW filters that accept `content://` files and reports concrete MIME
-  types through `IconDump`. File MIME types are not registered in desktop
-  entries yet: the baseline DynamicLauncher portal does not forward host files
-  on ordinary Exec launches
-  ([#71](https://github.com/sargunv/linux.apk/issues/71)). Desktop shortcut
-  export is also blocked by the portal's single-group limit
-  ([#68](https://github.com/sargunv/linux.apk/issues/68)).
+  types through `IconDump`. Linux.apk's static Flatpak desktop entry registers
+  common document, text and media types and forwards files through the document
+  portal to an **Open with Android app…** chooser (see
+  [the CLI](../cli/README.md)). Per-app host Open With entries remain deferred
+  ([#71](https://github.com/sargunv/linux.apk/issues/71)).
 - **Paths** (`paths.rs`): the prefix relative to the running executable and the
   XDG dirs; the session's own paths and the `LINUXAPK_INSTANCE` parser come from
   the launcher's library ([host/launcher](../launcher/README.md)).
@@ -51,3 +50,9 @@ own; `cargo test -p linuxapk-core` tests it.
   single-threaded process.
 - **Untrusted input** (`validate.rs`): package names, labels, schemes, locales
   and URIs are validated before they reach a path, an entry or a command.
+
+## Known limits
+
+- The baseline DynamicLauncher portal rejects `[Desktop Action]` groups and has
+  no silent update API; #68 is closed as an upstream limit, and the sandbox
+  stays unchanged ([#68](https://github.com/sargunv/linux.apk/issues/68)).

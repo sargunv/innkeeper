@@ -138,6 +138,23 @@ if [[ ${1:-} == --group ]]; then
       file_has "$T/file-metadata.txt" '^mime text/markdown$'
       file_has "$T/file-metadata.txt" '^mime text/plain$'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      printf '# linuxapk-open-with\n' >"$T/file.md"
+      "$repo/tools/dev/linuxapk.sh" open "$T/file.md"
+      until_ok log_has LinuxApkOpenWith 'chooser type=text/markdown apps=dev.linuxapk.probes'
+      until_ok window_ready OpenWithActivity
+      chooser=$(wm LIST | sed -n 's/.*display=\([0-9]*\) package=dev.linuxapk.system .*/\1/p')
+      s input -d "$chooser" keyevent KEYCODE_DPAD_DOWN KEYCODE_ENTER
+      until_ok log_has LinuxApkOpenWith 'selected dev.linuxapk.probes:'
+      until_ok log_has LinuxApkFileProbe 'uri=content://dev.linuxapk.system.documents/document/.*type=text/markdown read=true content=# linuxapk-open-with'
+      until_ok window_ready FileProbe
+      s logcat -d -s LinuxApkOpenWith:I LinuxApkFileProbe:I >"$T/open-with.txt"
+      wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      printf 'no handler\n' >"$T/file.linuxapk-unknown"
+      "$repo/tools/dev/linuxapk.sh" open "$T/file.linuxapk-unknown"
+      until_ok log_has LinuxApkOpenWith 'chooser type=application/octet-stream apps=$'
+      until_ok window_ready OpenWithActivity
+      wm CLOSE --es package dev.linuxapk.system >/dev/null
+      echo 'ok   Open With matches VIEW filters, opens the selected app and shows no-match UI'
       ;;
     a11y)
       dbus-send --session --dest=org.a11y.Bus --type=method_call --print-reply /org/a11y/bus \

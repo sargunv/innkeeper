@@ -146,6 +146,14 @@
       </intent-filter>
     </activity>
 
+    <!-- The CLI's file chooser, opened through the same fd-grant VIEW path as an app. -->
+    <activity
+      android:name=".documents.OpenWithActivity"
+      android:excludeFromRecents="true"
+      android:exported="false"
+      android:label="@string/open_with_title"
+      android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
+
     <!-- The picked host files as documents; reachable only through granted URIs. -->
     <provider
       android:name=".documents.HostDocumentsProvider"

@@ -1,7 +1,8 @@
 # flatpak
 
 The Linux.apk Flatpak, `dev.linuxapk.Manager`: the manager is its app (its
-desktop entry opens APKs) and `linuxapk` its command, so
+desktop entry opens APKs in the installer and documents in an Android app
+chooser) and `linuxapk` its command, so
 `flatpak run dev.linuxapk.Manager install App.apk` is the CLI. It ships no
 Android image; the session fetches that at first use, on first use.
 

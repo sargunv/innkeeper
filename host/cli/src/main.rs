@@ -31,6 +31,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Open files with an Android app, or show the manager with no files.
+    Open { files: Vec<PathBuf> },
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
     Install { file: PathBuf },
     /// Launch an app, optionally opening files or a URI in it.
@@ -74,6 +76,39 @@ fn install(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The static desktop entry handles both APK installation and file VIEW.
+fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
+    let (packages, documents): (Vec<_>, Vec<_>) = files.iter().partition(|p| {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            ["apk", "apks", "xapk", "apkm"]
+                .iter()
+                .any(|x| e.eq_ignore_ascii_case(x))
+        })
+    });
+    if files.is_empty() || !packages.is_empty() {
+        let mut manager =
+            std::process::Command::new(std::env::current_exe()?.with_file_name("linuxapk-manager"));
+        manager.args(packages);
+        if let Some(t) = &token {
+            manager.env("XDG_ACTIVATION_TOKEN", t);
+        }
+        manager.spawn()?;
+    }
+    if !documents.is_empty() {
+        let args = documents
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        run(
+            "dev.linuxapk.system",
+            &args,
+            token,
+            Some("dev.linuxapk.system/.documents.OpenWithActivity"),
+        )?;
+    }
+    Ok(())
+}
+
 fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
     let u = ops::uninstall(pkg, keep_data, &stderr)?;
     if u.from_android {
@@ -92,7 +127,12 @@ fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
 
 /// Launches an app. From a desktop launch on a stopped session, a splash
 /// window shows at once and hands its focus on to the app's window.
-fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
+fn run(
+    pkg: &str,
+    args: &[String],
+    token: Option<String>,
+    file_component: Option<&str>,
+) -> Result<()> {
     let pkg = validate::package(pkg)?;
     let session = Session::find()?;
     let splash = if session.running() {
@@ -160,6 +200,7 @@ fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
                         &linuxapk_core::android::Launch::File {
                             package: pkg.into(),
                             grant,
+                            component: file_component.map(str::to_string),
                         },
                         &opts,
                     )?
@@ -232,12 +273,13 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     let res = match cli.cmd {
+        Cmd::Open { files } => open(&files, token),
         Cmd::Install { file } => install(&file),
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
         Cmd::Run {
             package,
             files_or_uri,
-        } => run(&package, &files_or_uri, token),
+        } => run(&package, &files_or_uri, token, None),
         Cmd::List => list(),
         Cmd::Background { package, setting } => {
             if package.is_some() != setting.is_some() {
