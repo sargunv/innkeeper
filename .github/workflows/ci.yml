@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "23 8 * * *"
@@ -112,6 +113,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stage
+          overwrite: true
           path: |
             out/stage.tar.gz
             out/probes.tar.gz
@@ -144,8 +146,11 @@ jobs:
       - name: Runtime input tree
         id: runtime
         run: |
-          image=$(git ls-tree -r HEAD -- image | sha256sum)
-          flatpak=$(git ls-tree -r HEAD -- packaging/flatpak tools/dev | sha256sum)
+          image=$(git ls-tree -r HEAD -- image/pin.toml image/*.sh image/bootconfig \
+            image/tools tools/container/Containerfile tools/container/run.sh \
+            host/launcher/src/image.rs | sha256sum)
+          flatpak=$(git ls-tree -r HEAD -- packaging/flatpak/dev-init.sh \
+            packaging/flatpak/dev.linuxapk.Manager.yml tools/dev/run.py | sha256sum)
           echo "image=${image%% *}" >>"$GITHUB_OUTPUT"
           echo "flatpak=${flatpak%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
@@ -192,6 +197,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: checks-logs
+          overwrite: true
           path: |
             out/test/e2e/ci/
             out/test/nested/**/*.log

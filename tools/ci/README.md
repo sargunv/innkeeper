@@ -1,10 +1,12 @@
 # GitHub Actions
 
-`CI` classifies changes, then runs lint and a single release build. Unit tests
-and e2e run in parallel on separate runners, using that build's `stage` artifact
-(release tarball, test probes and `manifest.tsv`). Tarballs preserve executable
-modes and symlinks. The `checks` gate requires every applicable job to succeed;
-a failed or cancelled dependency cannot turn into a green skipped gate.
+`CI` runs on pull requests and pushes to main, avoiding duplicate feature-branch
+push and PR jobs and their large, separately scoped cache copies. It classifies
+changes, then runs lint and a single release build. Unit tests and e2e run in
+parallel on separate runners, using that build's `stage` artifact (release
+tarball, test probes and `manifest.tsv`). Tarballs preserve executable modes and
+symlinks. The `checks` gate requires every applicable job to succeed; a failed
+or cancelled dependency cannot turn into a green skipped gate.
 
 Changes only to README files, `AGENTS.md`, Markdown under `docs/`, or `LICENSE`
 run formatting and script/workflow lint without Clippy, build or runtime tests.
@@ -43,10 +45,10 @@ python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
 Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
 workflow to test CI changes: dispatch runs the nightly corpus.
 
-To measure incremental compilation, compare push or PR runs with the same build
-inputs, removing only the branch's exact stage cache between them. Keep the
-dependency and toolchain caches. A documentation-only follow-up push checks the
-fast path; its PR run still validates the full diff against the base branch.
+To measure incremental compilation, rerun a PR run at its pinned commit after
+removing only its exact stage cache. Keep dependency and toolchain caches. New
+PR events can include a newer merge of main and changed dependency pins, so they
+may legitimately be cold. A rerun replaces stage and diagnostic artifacts.
 
 Ubuntu 26.04 supplies the project's GTK baseline, Mutter and Flatpak. Only
 `setup.sh`, guarded by `GITHUB_ACTIONS=true`, uses sudo. It enables unprivileged
@@ -99,12 +101,14 @@ failure cannot discard them. Mise caches pinned tools. E2e installs runtime
 packages only and restores no compiler, Gradle or Android SDK cache. Other jobs
 install only their host build dependencies; docs install no system packages.
 
-The prepared Android image uses the image source tree hash. Cache archives omit
-xattrs, so preparation always regenerates the small single-user CLAT layer that
-carries Android ownership xattrs; partitions and flattened APEXes stay cached.
-The private Flatpak cache uses the development driver and Flatpak manifest tree
-hash; its registered development deployment always runs the current artifact
-through `--app-path=out/stage`, with permissions read from the current manifest.
-Neither Android session data nor a running instance is cached. No Android image
-or third-party APK is uploaded as a workflow artifact. Cold Mesa/LLVM builds
-still have a 120-minute build timeout.
+The prepared Android image hashes its pin, preparation scripts, image tools,
+container and launcher preparation code; documentation and tests do not
+invalidate it. Cache archives omit xattrs, so preparation always regenerates the
+small single-user CLAT layer that carries Android ownership xattrs; partitions
+and flattened APEXes stay cached. The private Flatpak cache hashes the
+development driver, bootstrap script and Flatpak manifest; its registered
+development deployment always runs the current artifact through
+`--app-path=out/stage`, with permissions read from the current manifest. Neither
+Android session data nor a running instance is cached. No Android image or
+third-party APK is uploaded as a workflow artifact. Cold Mesa/LLVM builds still
+have a 120-minute build timeout.
