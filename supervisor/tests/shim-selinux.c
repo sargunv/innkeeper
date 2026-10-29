@@ -17,9 +17,13 @@ int main(int argc, char** argv) {
   FILE* file = fopen(path, "w");
   assert(file);
   assert(fclose(file) == 0);
-  int (*getters[])(const char*, char**) = {getfilecon, getfilecon_raw};
-  const char* names[] = {"getfilecon", "getfilecon_raw"};
-  for (unsigned i = 0; i < 2; i++) {
+  int (*getters[])(const char*, char**) = {
+    getfilecon, getfilecon_raw, lgetfilecon, lgetfilecon_raw
+  };
+  const char* names[] = {
+    "getfilecon", "getfilecon_raw", "lgetfilecon", "lgetfilecon_raw"
+  };
+  for (unsigned i = 0; i < 4; i++) {
     int (*native)(const char*, char**) = dlsym(lib, names[i]);
     assert(native);
     char* context = NULL;
@@ -43,6 +47,21 @@ int main(int argc, char** argv) {
       "ok   %s: unlabeled fallback; real label and ENOENT preserved\n", names[i]
     );
   }
+  // The lget variants must inspect the link, not inherit its target's label.
+  const char label[] = "u:object_r:test_target:s0";
+  assert(
+    setxattr(path, "user.linuxapk.test.selinux", label, sizeof(label), 0) == 0
+  );
+  char link[4096];
+  assert(snprintf(link, sizeof(link), "%s/link", argv[1]) > 0);
+  assert(symlink("file", link) == 0);
+  for (unsigned i = 0; i < 4; i++) {
+    char* context = NULL;
+    assert(getters[i](link, &context) > 0);
+    assert(strcmp(i < 2 ? label : "u:object_r:linuxapk_exec:s0", context) == 0);
+    free(context);
+  }
+  assert(unlink(link) == 0);
   assert(unlink(path) == 0);
   dlclose(lib);
 }
