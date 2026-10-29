@@ -43,8 +43,11 @@ mouse-scaling and cursor-position test APIs to maintain this routing.
 Injection preserves behavior Android's physical keymap cannot represent:
 host-layout remapped keys, IME text corrections, sticky/locked or inherited
 modifiers, compositor repeats, synthetic Back, touchpad gestures, touch and pen.
-A key keeps the route chosen at DOWN through UP. Ordinary mouse buttons, wheel
-and motion use the virtual mouse; classified fake-finger gestures stay injected.
+A key keeps the route chosen at DOWN through UP. Keys arriving before a new
+display association is ready stay injected, rather than waiting in a queue.
+Ordinary mouse buttons, wheel and motion use the virtual mouse when its keyboard
+state matches the host modifiers; inherited-modifier clicks stay injected
+through release; classified fake-finger gestures stay injected.
 
 ## Translation
 

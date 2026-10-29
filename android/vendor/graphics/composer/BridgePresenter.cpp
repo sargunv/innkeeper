@@ -103,6 +103,7 @@ class BridgeDisplay {
   bool mWarnedFormat = false;
   std::vector<uint8_t> mCursor;
   int mCursorX = 0, mCursorY = 0;
+  uint32_t mCursorWidth = 0, mCursorHeight = 0;
   bool mCursorKnown = false;
 };
 
@@ -373,7 +374,10 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
       }
     }
   }
-  if (mCursorKnown && pixels == mCursor && x == mCursorX && y == mCursorY)
+  if (
+    mCursorKnown && pixels == mCursor && x == mCursorX && y == mCursorY &&
+    w == mCursorWidth && h == mCursorHeight
+  )
     return;
   int fd = -1;
   if (!pixels.empty()) {
@@ -398,6 +402,8 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
     mCursor = std::move(pixels);
     mCursorX = x;
     mCursorY = y;
+    mCursorWidth = w;
+    mCursorHeight = h;
     mCursorKnown = true;
   }
 }

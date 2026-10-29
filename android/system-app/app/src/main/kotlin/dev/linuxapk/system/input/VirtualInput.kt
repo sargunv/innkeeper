@@ -2,6 +2,7 @@
 package dev.linuxapk.system.input
 
 import android.content.Context
+import android.graphics.Point
 import android.graphics.PointF
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
@@ -15,7 +16,11 @@ import android.view.MotionEvent
 import dev.linuxapk.system.bridge.BridgeConnection
 
 /** The real evdev path, after the host-layout/shortcut translator made its decisions. */
-class VirtualInput(private val context: Context, private val connection: BridgeConnection) {
+class VirtualInput(
+  private val context: Context,
+  private val connection: BridgeConnection,
+  private val inject: (OutEvent) -> Unit,
+) {
   private val im = context.getSystemService(InputManager::class.java)
   private val dm = context.getSystemService(DisplayManager::class.java)
   private val thread = HandlerThread("LinuxApkEvdev").apply { start() }
@@ -37,8 +42,7 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
   private val sentKeys = HashSet<Int>()
   private var sentButtons = 0
   private val queue = ArrayDeque<OutMotion>()
-  private val keyQueue = ArrayDeque<OutKey>()
-  private var target: PointF? = null
+  private val pointer = EvdevPointer()
 
   init {
     im.registerInputDeviceListener(
@@ -51,6 +55,19 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
       },
       handler,
     )
+  }
+
+  @Synchronized
+  fun focus(display: Int) {
+    if (keysDisplay == display) return
+    dm.getDisplay(display)?.let {
+      association.invoke(
+        im,
+        "linuxapk/keyboard",
+        Display::class.java.getMethod("getUniqueId").invoke(it) as String,
+      )
+      keysDisplay = display
+    }
   }
 
   // Preserve the route chosen at DOWN through UP. Layout remapping, IME text
@@ -70,10 +87,19 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
             )
       } else held.contains(e.scanCode)
     if (!real) return false
-    if (down) held.add(e.scanCode) else held.remove(e.scanCode)
-    handler.post {
-      keyQueue.add(e)
-      drain()
+    if (down) {
+      focus(e.displayId)
+      val keyboard =
+        im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).firstOrNull {
+          it.name == "Linux.apk Keyboard"
+        }
+      // Never buffer a key behind association: the next translated key may need
+      // injection and must not overtake this one.
+      if (keyboard == null || (displayId.invoke(keyboard) as Int) != e.displayId) return false
+      held.add(e.scanCode)
+    } else held.remove(e.scanCode)
+    if (send(0, e.eventTime, listOf(Triple(1, e.scanCode, if (down) 1 else 0)))) {
+      if (down) sentKeys.add(e.scanCode) else sentKeys.remove(e.scanCode)
     }
     return true
   }
@@ -86,10 +112,15 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
     )
       return false
     handler.post {
+      val meta = synchronized(this) { nativeMeta() }
+      if (!pointer.native(e.action and MotionEvent.ACTION_MASK, e.buttonState, e.metaState, meta)) {
+        inject(e)
+        return@post
+      }
       if (mouseDisplay != e.displayId) {
         mouseDisplay = e.displayId
         queue.clear()
-        target = null
+        pointer.reset()
         dm.getDisplay(e.displayId)?.let {
           scaling.invoke(im, false, e.displayId)
           association.invoke(
@@ -106,35 +137,6 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
   }
 
   private fun drain() {
-    val keyboard =
-      im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).firstOrNull {
-        it.name == "Linux.apk Keyboard"
-      }
-    while (keyQueue.isNotEmpty() && keyboard != null) {
-      val e = keyQueue.first()
-      if (keysDisplay != e.displayId) {
-        dm.getDisplay(e.displayId)?.let {
-          association.invoke(
-            im,
-            "linuxapk/keyboard",
-            Display::class.java.getMethod("getUniqueId").invoke(it) as String,
-          )
-          keysDisplay = e.displayId
-        }
-      }
-      if ((displayId.invoke(keyboard) as Int) != e.displayId) break
-      keyQueue.removeFirst()
-      if (
-        send(
-          0,
-          e.eventTime,
-          listOf(Triple(1, e.scanCode, if (e.action == KeyEvent.ACTION_DOWN) 1 else 0)),
-        )
-      ) {
-        if (e.action == KeyEvent.ACTION_DOWN) sentKeys.add(e.scanCode)
-        else sentKeys.remove(e.scanCode)
-      }
-    }
     val mouse =
       im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).firstOrNull {
         it.name == "Linux.apk Mouse"
@@ -150,15 +152,17 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
           action == MotionEvent.ACTION_HOVER_MOVE ||
           action == MotionEvent.ACTION_MOVE
       ) {
-        val current = target ?: (position.invoke(im, e.displayId) as? PointF)
+        val current = position.invoke(im, e.displayId) as? PointF
         if (current == null) {
           queue.addFirst(e)
           return
         }
-        events += Triple(2, 0, Math.round(p.x - current.x))
-        events += Triple(2, 1, Math.round(p.y - current.y))
-        target =
-          PointF(current.x + Math.round(p.x - current.x), current.y + Math.round(p.y - current.y))
+        val size = Point()
+        dm.getDisplay(e.displayId)?.getRealSize(size)
+        val step = pointer.move(p.x, p.y, current.x, current.y, size.x, size.y)
+        events += Triple(2, 0, step.dx)
+        events += Triple(2, 1, step.dy)
+        connection.send(0x0608) { u32(e.displayId).i32(Math.round(step.x)).i32(Math.round(step.y)) }
       }
       for ((mask, code) in listOf(1 to 272, 2 to 273, 4 to 274)) {
         if ((buttons xor e.buttonState) and mask != 0)
@@ -170,9 +174,6 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
         if (p.hscroll != 0f) events += Triple(2, 12, Math.round(p.hscroll * 120))
       }
       if (events.isNotEmpty()) {
-        target?.let {
-          connection.send(0x0608) { u32(e.displayId).i32(Math.round(it.x)).i32(Math.round(it.y)) }
-        }
         if (send(1, e.eventTime, events)) sentButtons = e.buttonState
       }
     }
@@ -182,22 +183,24 @@ class VirtualInput(private val context: Context, private val connection: BridgeC
   @Synchronized
   fun reset() {
     held.clear()
+    val now = SystemClock.uptimeMillis()
+    for (batch in sentKeys.toList().chunked(32)) {
+      if (send(0, now, batch.map { Triple(1, it, 0) })) sentKeys.removeAll(batch.toSet())
+    }
     handler.post {
-      keyQueue.clear()
       queue.clear()
-      val now = SystemClock.uptimeMillis()
-      for (batch in sentKeys.toList().chunked(32)) {
-        if (send(0, now, batch.map { Triple(1, it, 0) })) sentKeys.removeAll(batch.toSet())
-      }
       val releases =
         listOf(1 to 272, 2 to 273, 4 to 274)
           .filter { (mask, _) -> sentButtons and mask != 0 }
           .map { (_, code) -> Triple(1, code, 0) }
       if (releases.isNotEmpty() && send(1, now, releases)) sentButtons = 0
       buttons = 0
-      target = null
+      pointer.reset()
     }
   }
+
+  private fun nativeMeta(): Int =
+    KeyEvent.normalizeMetaState(held.fold(0) { m, code -> m or modifier(code) })
 
   private fun modifier(scanCode: Int): Int =
     when (scanCode) {

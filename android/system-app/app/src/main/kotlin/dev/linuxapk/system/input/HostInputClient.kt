@@ -65,7 +65,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   override fun start() {
     injector = Injector()
-    virtual = VirtualInput(context, connection)
+    virtual = VirtualInput(context, connection, ::injectFallback)
     translator = newTranslator()
     connection.start()
   }
@@ -163,6 +163,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
           }
           if (e is HostEvent.RepeatInfo) applyRepeat(e)
           translator.handle(e).forEach(::inject)
+          if (e is HostEvent.KeyboardEnter) virtual.focus(e.display)
           e
         }
         WINDOW_MAPPED -> HostEvent.WindowMapped(body.int)
@@ -225,6 +226,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   private fun inject(e: OutEvent) {
     if (e is OutKey && virtual.key(e)) return
     if (e is OutMotion && virtual.motion(e)) return
+    injectFallback(e)
+  }
+
+  private fun injectFallback(e: OutEvent) {
     if (e is OutKey && e.action == KeyEvent.ACTION_DOWN) {
       val text = e.text
       if (text != null)
