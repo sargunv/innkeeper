@@ -92,6 +92,7 @@ fn main() -> Result<()> {
     *hub.evdev.lock().unwrap() = Some(linuxapk_bridge::input::evdev::Evdev::new(
         run_dir.join("bridge/evdev.sock"),
     )?);
+    linuxapk_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"), test_session);
     // Not in the socket directory, which is shared with Android.
     let shared = Shared::with_input(&run_dir, policy, hub.clone());
     let display_shared = shared.clone();

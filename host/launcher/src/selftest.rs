@@ -157,7 +157,7 @@ fn flatpak_info(r: &mut Report) {
         "the sandbox may talk to org.freedesktop.Flatpak",
     );
     // What it shows: the home dir holds only the app's own dir, and /dev no
-    // block devices or input devices.
+    // block devices. Input access is an accepted desktop-parity grant.
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -181,13 +181,9 @@ fn flatpak_info(r: &mut Report) {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     r.check(
-        block.is_empty()
-            && fs::read_dir("/dev/input")
-                .into_iter()
-                .flatten()
-                .all(|e| e.is_ok_and(|e| e.file_type().is_ok_and(|t| t.is_file()))),
-        "no host block or input devices",
-        &format!("host devices visible: {} /dev/input", block.join(" ")),
+        block.is_empty(),
+        "no host block devices",
+        &format!("host block devices visible: {}", block.join(" ")),
     );
 }
 

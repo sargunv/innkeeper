@@ -34,6 +34,47 @@ impl Evdev {
         self.packet(&b)
     }
 
+    pub fn gamepad(
+        &self,
+        device: u32,
+        identity: &str,
+        feedback: Option<&std::os::fd::OwnedFd>,
+        synthetic: bool,
+    ) -> std::io::Result<()> {
+        use std::os::fd::AsRawFd;
+        let mut b = device.to_le_bytes().to_vec();
+        b.extend_from_slice(&[if synthetic { 3 } else { 2 }, 0]);
+        b.extend_from_slice(identity.as_bytes());
+        // Connect once for sendmsg's ancillary fd; normal records still use
+        // send_to on the same destination.
+        self.socket.connect(&self.path)?;
+        let mut iov = libc::iovec {
+            iov_base: b.as_mut_ptr().cast(),
+            iov_len: b.len(),
+        };
+        let mut control = [0usize; 4];
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        if let Some(fd) = feedback {
+            msg.msg_control = control.as_mut_ptr().cast();
+            msg.msg_controllen = unsafe { libc::CMSG_SPACE(size_of::<i32>() as _) } as usize;
+            unsafe {
+                let c = libc::CMSG_FIRSTHDR(&msg);
+                (*c).cmsg_level = libc::SOL_SOCKET;
+                (*c).cmsg_type = libc::SCM_RIGHTS;
+                (*c).cmsg_len = libc::CMSG_LEN(size_of::<i32>() as _) as usize;
+                std::ptr::write_unaligned(libc::CMSG_DATA(c).cast::<i32>(), fd.as_raw_fd());
+            }
+        }
+        let n = unsafe { libc::sendmsg(self.socket.as_raw_fd(), &msg, 0) };
+        if n < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
     fn packet(&self, b: &[u8]) -> std::io::Result<()> {
         // The kernel's bounded receive queue supplies backpressure. Retry
         // interruptions, and wait for room rather than dropping transitions.
