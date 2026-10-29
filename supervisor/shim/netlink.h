@@ -5,8 +5,10 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-// Separate Flatpak pid namespaces share the host network. Uevent receivers
-// must let the kernel choose a port instead of colliding on their local pid.
+// Flatpak mode: concurrent sessions are separate pid namespaces on the host's
+// network, so a uevent socket bound to its pid (vold's) collides with another
+// session's. Let the kernel choose the port; other netlink protocols keep
+// theirs. A header of its own for supervisor/tests/shim-netlink.c.
 static int linuxapk_netlink_bind(
   int fd, const struct sockaddr* addr, socklen_t len, int flatpak
 ) {

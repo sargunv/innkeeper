@@ -103,9 +103,11 @@ In Flatpak mode the sandbox's own seccomp filter refuses some calls before ours
 sees them, so the shim covers them where it is loaded: `mount`, `umount`,
 `unshare`, `setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)`
 (which the connectivity stack only opens and closes) gets an eventfd; netd's
-refused rtnetlink requests read as done (`LINUXAPK_NETLINK_ACCEPT`); and lmkd's
-PSI trigger windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1
-there, so pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
+refused rtnetlink requests read as done (`LINUXAPK_NETLINK_ACCEPT`); vold's
+uevent socket binds to a kernel-chosen port (concurrent sessions share the
+host's network, so their pid-numbered ports collide); and lmkd's PSI trigger
+windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1 there, so
+pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
 ## Tests
 
@@ -114,7 +116,8 @@ there, so pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
   long fuzz:
   `cargo run --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 500000 <seed>`.
 - `tests/bpfemu.sh` and `tests/seccomp-filter.sh` (in `mise run test`) check the
-  emulator's bounds and exactly which syscalls notify in each mode.
+  emulator's bounds and exactly which syscalls notify in each mode;
+  `tests/shim-netlink.sh` the uevent port choice.
 - `mise run test:binder` (`tests/binder/run.sh`) runs AOSP's binder gtests
   against the broker, then against kernel binder as the oracle (exit 77 when the
   host forbids binderfs), in a root with the test unit's own cgroup for the
@@ -122,15 +125,11 @@ there, so pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
   `$XDG_DATA_HOME/linuxapk/test-bin/binder`, checked against
   `tests/binder/test-bin.sha256`; Android's CI doesn't publish them for the
   image's release, so they are built from AOSP (the header of `run.sh` says
-  how).
-- `mise run test:boot` boots both uid modes and runs `selftest`.
+  how). In Flatpak mode (the default) `tests/binder/flatpak.sh` runs them in a
+  booted session instead, and exits 77 after them: there is no binderfs for the
+  kernel oracle.
+- `mise run test:boot` boots and runs `selftest` (in host mode, in both uid
+  modes).
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).
-
-In Flatpak, vold uevent sockets request a kernel-assigned netlink port:
-sandboxes share the host network and separate pid namespaces otherwise give
-concurrent vold processes the same port. This applies only to
-`NETLINK_KOBJECT_UEVENT`, preserving request/reply protocols. Binder tests
-default to the Flatpak bionic runner; a kernel binder oracle requires binderfs
-and is unavailable there (exit 77 after broker tests pass).
