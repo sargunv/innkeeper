@@ -61,7 +61,9 @@ data class OutKey(
   val repeatCount: Int = 0,
 ) : OutEvent
 
-/** One ordered injection path for physical, remapped, composed and repeated keys. */
+/** One ordered injection path for ordinary keys; modifier transitions belong to evdev. */
 class KeyboardDelivery(private val inject: (OutKey) -> Unit) {
-  fun key(event: OutKey) = inject(event)
+  fun key(event: OutKey) {
+    if (!EvdevModifiers.owns(event.keyCode)) inject(event)
+  }
 }

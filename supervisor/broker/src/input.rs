@@ -53,6 +53,22 @@ impl Client {
                 )
             };
             if n >= 0 {
+                // EventHub reads one packet per ready device, in epoll order.
+                // Wait for this batch to be read before making another device
+                // readable, preserving modifier/mouse order through InputReader.
+                while self.live() {
+                    let mut queued = 0i32;
+                    if unsafe { libc::ioctl(self.peer.as_raw_fd(), libc::TIOCOUTQ, &mut queued) }
+                        < 0
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if queued == 0 {
+                        break;
+                    }
+                    // Writable does not mean consumed on a Unix socket.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
                 return Ok(());
             } // SOCK_SEQPACKET preserves the whole record batch.
             let e = std::io::Error::last_os_error();
@@ -173,7 +189,7 @@ fn answer(device: u8, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i6
                 1 => bitmap(
                     size,
                     if device == KEYBOARD {
-                        (1..=248).collect::<Vec<_>>()
+                        (1..=248).chain([464]).collect::<Vec<_>>()
                     } else {
                         (272..=279).collect()
                     },
@@ -394,6 +410,77 @@ impl Input {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn client(device: u8) -> (Client, OwnedFd) {
+        let mut fds = [-1; 2];
+        assert_eq!(
+            unsafe {
+                libc::socketpair(
+                    libc::AF_UNIX,
+                    libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK,
+                    0,
+                    fds.as_mut_ptr(),
+                )
+            },
+            0
+        );
+        let reader = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        let client = Client {
+            device,
+            peer: unsafe { OwnedFd::from_raw_fd(fds[1]) },
+            endpoint: reader.try_clone().unwrap(),
+            pid: std::process::id(),
+            fd: reader.as_raw_fd(),
+        };
+        (client, reader)
+    }
+
+    fn receive(fd: &OwnedFd) -> Vec<u8> {
+        let mut poll = libc::pollfd {
+            fd: fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert_eq!(unsafe { libc::poll(&mut poll, 1, 1000) }, 1);
+        let mut packet = vec![0; EVENT_SIZE];
+        assert_eq!(
+            unsafe { libc::recv(fd.as_raw_fd(), packet.as_mut_ptr().cast(), packet.len(), 0) },
+            EVENT_SIZE as isize
+        );
+        packet
+    }
+
+    #[test]
+    fn modifier_release_is_consumed_before_mouse_report() {
+        let (keyboard, keys) = client(KEYBOARD);
+        let (mouse, motion) = client(MOUSE);
+        let (done, completed) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            keyboard.deliver(&event(1, 1, 42, 1)).unwrap();
+            keyboard.deliver(&event(2, 1, 42, 0)).unwrap();
+            mouse.deliver(&event(3, 2, 0, 10)).unwrap();
+            done.send(()).unwrap();
+        });
+        assert!(
+            completed
+                .recv_timeout(std::time::Duration::from_millis(20))
+                .is_err()
+        );
+        assert_eq!(receive(&keys), event(1, 1, 42, 1));
+        // The queued release must be read before mouse delivery can begin.
+        let mut poll = libc::pollfd {
+            fd: motion.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert_eq!(unsafe { libc::poll(&mut poll, 1, 20) }, 0);
+        assert_eq!(receive(&keys), event(2, 1, 42, 0));
+        assert_eq!(receive(&motion), event(3, 2, 0, 10));
+        completed
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        worker.join().unwrap();
+    }
     fn get(nr: u32, size: u32) -> u32 {
         0x80004500 | nr | size << 16
     }

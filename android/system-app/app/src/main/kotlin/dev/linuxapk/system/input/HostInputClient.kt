@@ -66,7 +66,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   override fun start() {
     injector = Injector()
-    virtual = VirtualInput(context, connection, ::injectFallback)
+    virtual = VirtualInput(context, connection)
     keys = KeyboardDelivery(::injectFallback)
     translator = newTranslator()
     connection.start()
@@ -146,7 +146,9 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   // Whatever is held (keys, buttons, touches) is released.
   override fun onDisconnected() {
-    translator.reset().forEach(::inject)
+    val released = translator.reset()
+    virtual.modifiers(translator.metaState, SystemClock.uptimeMillis())
+    released.forEach(::inject)
     translator = newTranslator()
     repeat = null
   }
@@ -164,7 +166,9 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
             return
           }
           if (e is HostEvent.RepeatInfo) applyRepeat(e)
-          translator.handle(e).forEach(::inject)
+          val translated = translator.handle(e)
+          virtual.modifiers(translator.metaState, SystemClock.uptimeMillis())
+          translated.forEach(::inject)
           e
         }
         WINDOW_MAPPED -> HostEvent.WindowMapped(body.int)

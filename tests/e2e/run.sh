@@ -121,16 +121,33 @@ if [[ ${1:-} == --group ]]; then
       until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse'
       printf 'abs:100,300\n' >&"$seat_fd"
       until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse'
-      # Releasing a modifier without motion switches the final exit back to
-      # native routing; it must also end device -1's earlier injected hover.
-      printf 'key:42,1\nabs:900,300\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceId=-1'
-      printf 'key:42,0\nabs:100,300\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_EXIT.*deviceId=-1'
+      # Shift changes during an existing drag must update the same native
+      # mouse stream. Modifier key events reach the probe once, from evdev.
+      printf 'abs:900,300\nbutton:272,1\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'touch .*ACTION_DOWN.*deviceName=Linux.apk Mouse'
+      printf 'key:42,1\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'key .*ACTION_DOWN.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard' || {
+        s logcat -d -s LinuxApkProbe:I LinuxApkInput:I InputReader:I >"$T/modifier-failure.txt"
+        s dumpsys input >"$T/modifier-input.txt"
+        exit 1
+      }
+      printf 'abs:1000,320\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'touch .*ACTION_MOVE.*META_SHIFT_ON.*deviceName=Linux.apk Mouse'
+      # No observation barrier between the release and mouse records: delivery
+      # must preserve their order across the keyboard and mouse descriptors.
+      printf 'key:42,0\nabs:1100,340\nbutton:272,0\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'key .*ACTION_UP.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard'
+      until_ok log_has LinuxApkProbe 'touch .*ACTION_UP.*metaState=0.*deviceName=Linux.apk Mouse'
+      s logcat -d -s LinuxApkProbe:I >"$T/modifier-drag.txt"
+      [[ $(grep -Ec 'key .*KEYCODE_SHIFT_LEFT' "$T/modifier-drag.txt") == 2 ]]
+      if file_has "$T/modifier-drag.txt" '(touch|generic) .*deviceId=-1'; then
+        echo 'FAIL physical mouse switched to injection' >&2
+        exit 1
+      fi
       exec {seat_fd}>&-
       wait "$seat_pid"
       rm "$T/seat"
-      echo 'ok   native and injected mouse hover exit when the host pointer leaves the window'
+      echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"

@@ -72,6 +72,10 @@ class InputTranslator(
   var keyDisplay = 0
     private set
 
+  /** Effective host modifiers, independent of whether a key produced an output event. */
+  val metaState: Int
+    get() = keyboard.metaState
+
   private var touchDisplay = 0
 
   // --- pointer state -------------------------------------------------------
