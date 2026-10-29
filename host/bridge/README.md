@@ -14,7 +14,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 | documents | the FileChooser portal, parented through `zxdg_exporter_v2`                                                                      | `src/documents/` |
 | apps      | desktop entries through `linuxapk-core`                                                                                          | `src/apps/`      |
 | a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                              | `src/a11y/`      |
-| hoststate | UPower, power-profiles-daemon, NetworkMonitor or NetworkManager, the Location portal                                             | `src/hoststate/` |
+| hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                             | `src/hoststate/` |
 
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
   the instance's XDG runtime and state dirs (socket, MPRIS artwork, document

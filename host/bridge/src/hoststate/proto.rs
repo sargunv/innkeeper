@@ -155,7 +155,7 @@ impl Battery {
     }
 }
 
-/// The host's network, from the NetworkMonitor portal or NetworkManager.
+/// The host's network, from the NetworkMonitor portal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Network {
     pub available: u8,

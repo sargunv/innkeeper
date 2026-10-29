@@ -15,17 +15,17 @@ KWin), whose dialogs `e2e/cli/confirm.py` accepts over AT-SPI. In Flatpak mode
 the CLI suite opens a custom scheme through `linuxapk run` rather than
 `gio open`: DynamicLauncher doesn't update the MIME cache.
 
-| Tier       | Task                      | What                                                                                                                                                      |
-| ---------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| unit       | `mise run test`           | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests |
-| bionic     | `mise run test:bionic`    | Android test binaries against our HALs and drivers, in a booted session with its framework stopped (`bionic/run.sh`)                                      |
-| binder     | `mise run test:binder`    | AOSP's binder gtests on the broker, then on kernel binder where binderfs exists, so not in Flatpak (77) (`supervisor/tests/binder`)                       |
-| boot       | `mise run test:boot`      | a fresh headless boot plus `selftest`, in host mode in subuid and single-uid mode (`boot.sh`)                                                             |
-| e2e        | `mise run test:e2e`       | audio, system-app and CLI suites on an isolated nested KWin (`e2e/run.sh`)                                                                                |
-| a11y       | `mise run test:a11y`      | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                           |
-| compat     | `mise run test:compat`    | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
-| lifecycle  | `mise run test:lifecycle` | foreground audio, idle shutdown and alarm wakeup on a private nested desktop (`lifecycle.sh`)                                                             |
-| host state | `mise run test:hoststate` | battery, power saver, metering, live locale and location against python-dbusmock and a mock Location portal on private buses (`--deny`: a portal refusal) |
+| Tier       | Task                      | What                                                                                                                                                                |
+| ---------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unit       | `mise run test`           | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests           |
+| bionic     | `mise run test:bionic`    | Android test binaries against our HALs and drivers, in a booted session with its framework stopped (`bionic/run.sh`)                                                |
+| binder     | `mise run test:binder`    | AOSP's binder gtests on the broker, then on kernel binder where binderfs exists, so not in Flatpak (77) (`supervisor/tests/binder`)                                 |
+| boot       | `mise run test:boot`      | a fresh headless boot plus `selftest`, in host mode in subuid and single-uid mode (`boot.sh`)                                                                       |
+| e2e        | `mise run test:e2e`       | audio, system-app and CLI suites on an isolated nested KWin (`e2e/run.sh`)                                                                                          |
+| a11y       | `mise run test:a11y`      | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                                     |
+| compat     | `mise run test:compat`    | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                              |
+| lifecycle  | `mise run test:lifecycle` | foreground audio, idle shutdown and alarm wakeup on a private nested desktop (`lifecycle.sh`)                                                                       |
+| host state | `mise run test:hoststate` | battery, power saver, metering, live locale and location against python-dbusmock (UPower) and mock host-state portals on private buses (`--deny`: a portal refusal) |
 
 - **`bionic/run.sh`** is the one runner for on-device binaries. In Flatpak mode
   (`bionic/flatpak.sh`) it boots a session with `-v` dirs as an addon's vendor

@@ -6,8 +6,7 @@ import android.os.PowerManager
 import android.util.Log
 
 /**
- * The desktop's power saver (power-profiles-daemon's `power-saver` profile, or the
- * PowerProfileMonitor portal) as Android's battery saver, which apps read from
+ * The desktop's PowerProfileMonitor portal as Android's battery saver, which apps read from
  * `PowerManager.isPowerSaveMode` and its broadcast (AntennaPod pauses downloads). The desktop's
  * value wins whenever it is sent: at each connect and on each change.
  */

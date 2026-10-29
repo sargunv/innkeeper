@@ -85,12 +85,12 @@ The Flatpak's grants are `--device=dri`, `--share=network`, `--share=ipc`,
 baseline AT-SPI proxy hides the `org.a11y.Status` properties the bridge
 follows), the system bus's `org.freedesktop.UPower` (the desktop baseline has no
 battery portal), and `org.freedesktop.Notifications` (the Notification portal
-can't replace a notification in place, show progress or take an inline reply).
-MPRIS players own names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`,
-which Flatpak grants every app for its own id. Links and files go through the
-same portals as outside, and clipboard sync needs a compositor that offers data
-control to sandboxed clients (KWin does). App-menu entries go through the
-DynamicLauncher portal, so the user confirms each one.
+can't update notifications in place or show progress). MPRIS players own names
+under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which Flatpak grants every
+app for its own id. Links and files go through the same portals as outside, and
+clipboard sync needs a compositor that offers data control to sandboxed clients
+(KWin does). App-menu entries go through the DynamicLauncher portal, so the user
+confirms each one.
 
 ## Desktop exposure
 
@@ -113,17 +113,15 @@ DynamicLauncher portal, so the user confirms each one.
 - **Desktop entries:** names, schemes and URIs from APKs are validated and
   escaped; `http(s)`, `file`, `content` and `intent` schemes are never
   registered.
-- **Host state:** the battery (UPower), the power saver (power-profiles-daemon
-  or the PowerProfileMonitor portal) and the network's metering (the
-  NetworkMonitor portal or NetworkManager) are read-only state any desktop app
-  can read; every Android app sees them.
+- **Host state:** the battery (UPower), the power saver (the PowerProfileMonitor
+  portal) and the network's metering (the NetworkMonitor portal) are read-only
+  state any desktop app can read; every Android app sees them.
 - **Location** has two consents. Android's runtime permission comes first: the
   bridge asks the Location portal only once an app Android allowed asks for a
   location, through one portal session for all of Android. If the user says no
   there, or location is off on the desktop, Android's location providers stay
-  off until the bridge restarts, and apps keep their Android permission. GeoClue
-  is used directly only when there is no portal and the bridge isn't sandboxed,
-  and never after a refusal.
+  off until the bridge restarts, and apps keep their Android permission. If the
+  portal is unavailable, Android gets no location.
 
 ## Test sessions
 

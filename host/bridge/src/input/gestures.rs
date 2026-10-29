@@ -23,7 +23,6 @@ pub(crate) struct Gestures {
     manager: Option<ZwpPointerGesturesV1>,
     swipe: Option<ZwpPointerGestureSwipeV1>,
     pinch: Option<ZwpPointerGesturePinchV1>,
-    /// Version 3 and later.
     hold: Option<ZwpPointerGestureHoldV1>,
     /// The window each gesture in progress began on; only those are
     /// forwarded.
@@ -44,7 +43,7 @@ pub(crate) struct G;
 impl Gestures {
     pub(crate) fn bind(globals: &GlobalList, qh: &QueueHandle<State>) -> Gestures {
         Gestures {
-            manager: globals.bind(qh, 1..=3, G).ok(),
+            manager: globals.bind(qh, 3..=3, G).ok(),
             ..Default::default()
         }
     }
@@ -57,9 +56,7 @@ impl Gestures {
         let Some(m) = &self.manager else { return };
         self.swipe = Some(m.get_swipe_gesture(pointer, qh, G));
         self.pinch = Some(m.get_pinch_gesture(pointer, qh, G));
-        if m.version() >= 3 {
-            self.hold = Some(m.get_hold_gesture(pointer, qh, G));
-        }
+        self.hold = Some(m.get_hold_gesture(pointer, qh, G));
     }
 
     pub(crate) fn detach(&mut self) {

@@ -84,14 +84,10 @@ mock() {
   XDG_RUNTIME_DIR="$T/rt" "$@" &
   pids+=($!)
 }
-for t in upower power_profiles_daemon networkmanager; do
-  mock "$py" -m dbusmock --template "$t" >"$T/mock-$t.log" 2>&1
-done
+mock "$py" -m dbusmock --template upower >"$T/mock-upower.log" 2>&1
 mock /usr/bin/python3 "$here/mock-location-portal.py" $deny >"$T/portal.log" 2>&1
 sleep 2
 call() { gdbus call -a "$1" -d "$2" -o "$3" -m "$4" "${@:5}" >/dev/null; }
-call "$sys" org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
-  org.freedesktop.DBus.Mock.AddProperty org.freedesktop.NetworkManager Metered '<uint32 2>'
 set_prop() { call "$sys" "$1" "$2" org.freedesktop.DBus.Properties.Set "$3" "$4" "$5"; }
 
 # The desktop's locale (KDE): plasma-localerc, edited below while running.
@@ -150,14 +146,17 @@ wait_for "42% discharging: level 42" "s dumpsys battery" "level: 42"
 wait_for "42% discharging: on battery" "s dumpsys battery" "AC powered: false" "AC powered"
 wait_for "42% discharging: status discharging" "s dumpsys battery" "status: 3" "status"
 
-# Power saver: power-profiles-daemon's profile.
-set_prop net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile '<"power-saver">'
+# Power saver: the PowerProfileMonitor portal.
+call "$DBUS_SESSION_BUS_ADDRESS" org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+  dev.linuxapk.Mock.SetPowerSaver true
 wait_for "power-saver profile: battery saver on" "s settings get global low_power" "^1$"
-set_prop net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile '<"balanced">'
+call "$DBUS_SESSION_BUS_ADDRESS" org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+  dev.linuxapk.Mock.SetPowerSaver false
 wait_for "balanced profile: battery saver off" "s settings get global low_power" "^0$"
 
 # Metered: reaches the system app (host mode can't apply it to Ethernet).
-set_prop org.freedesktop.NetworkManager /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered '<uint32 1>'
+call "$DBUS_SESSION_BUS_ADDRESS" org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+  dev.linuxapk.Mock.SetMetered true
 if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
   wait_for "host network becomes metered" "s logcat -d -s LinuxApkHostNetwork:I" "host network metered"
 else

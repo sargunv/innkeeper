@@ -5,8 +5,8 @@ import android.util.Log
 import dev.linuxapk.system.net.HostNetworkFeature
 
 /**
- * The host connection's metering (NetworkMonitor portal or NetworkManager) on Android's default
- * network, so apps that honour "unmetered only" (F-Droid, AntennaPod) see the host's state.
+ * The host connection's metering (NetworkMonitor portal) on Android's default network, so apps that
+ * honour "unmetered only" (F-Droid, AntennaPod) see the host's state.
  *
  * Only a network agent we own can change its capabilities: Flatpak mode's host network
  * ([HostNetworkFeature]). In host mode the network is EthernetService's, whose capabilities can

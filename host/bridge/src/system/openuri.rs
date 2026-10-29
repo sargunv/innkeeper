@@ -1,5 +1,5 @@
 //! Opening web links from Android in the host browser, through the OpenURI
-//! portal (or `xdg-open` without one). Only absolute `http`/`https` URLs in
+//! portal. Only absolute `http`/`https` URLs in
 //! plain ASCII get through, at most [`MAX_URI`] bytes and [`RATE`] per
 //! window per connection; every one is logged.
 
@@ -77,44 +77,31 @@ pub fn open(dbus: Option<&zbus::blocking::Connection>, url: &str, who: &str) -> 
         return Err(-EINVAL);
     }
     crate::info!("openuri: {who}: {}", crate::ipc::wire::truncate(url, 512));
-    if let Some(conn) = dbus {
-        let opts: HashMap<&str, Value<'_>> = HashMap::new();
-        let r: zbus::Result<zbus::zvariant::OwnedObjectPath> = conn
-            .call_method(
-                Some("org.freedesktop.portal.Desktop"),
-                "/org/freedesktop/portal/desktop",
-                Some("org.freedesktop.portal.OpenURI"),
-                "OpenURI",
-                &("", url, opts),
-            )
-            .and_then(|m| m.body().deserialize());
-        match r {
-            Ok(_) => return Ok(()),
-            Err(e) => crate::warn!("openuri: portal: {e}; trying xdg-open"),
-        }
-    }
-    // No shell: the URL is one argv entry, and it starts with "http", so it
-    // can't be taken for an option.
-    match std::process::Command::new("xdg-open")
-        .arg(url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .spawn()
-    {
-        Ok(mut child) => {
-            std::thread::spawn(move || child.wait());
-            Ok(())
-        }
-        Err(e) => {
-            crate::warn!("openuri: xdg-open: {e}");
-            Err(-EIO)
-        }
-    }
+    let conn = dbus.ok_or(-ENOSYS)?;
+    let opts: HashMap<&str, Value<'_>> = HashMap::new();
+    let r: zbus::Result<zbus::zvariant::OwnedObjectPath> = conn
+        .call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.OpenURI"),
+            "OpenURI",
+            &("", url, opts),
+        )
+        .and_then(|m| m.body().deserialize());
+    r.map(|_| ()).map_err(|e| {
+        crate::warn!("openuri: portal: {e}");
+        -EIO
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_bus() {
+        assert_eq!(open(None, "https://example.com", "test"), Err(-ENOSYS));
+    }
 
     #[test]
     fn urls() {
