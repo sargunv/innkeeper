@@ -45,11 +45,13 @@ runs), then [docs/architecture.md](docs/architecture.md).
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
 - **Test what you touched, in under a minute.** Keep only tests of observable
   behaviour we own. Iterate on `mise run test` plus relevant
-  `mise run test:e2e -- <group>` checks; the whole e2e run must take under 60 s,
-  with waits for observations instead of fixed delays. The compat corpus is a
-  manual harness for investigating one app
-  (`mise run test:compat -- --only <package>`) and a nightly CI job. Never run
-  the full corpus, and never trigger, run or wait for the nightly job.
+  `mise run test:e2e -- <group>` checks; the whole local e2e run must take under
+  60 s, with waits for observations instead of fixed delays. GitHub Actions uses
+  its own deadline for the slower software-rendered desktop, documented in
+  [tests/README.md](tests/README.md). The compat corpus is a manual harness for
+  investigating one app (`mise run test:compat -- --only <package>`) and a
+  nightly CI job. Never run the full corpus, and never trigger, run or wait for
+  the nightly job.
 - **Nested test desktops are fully isolated** (a nested plasmashell once started
   kded, KDE Connect and Akonadi against the user's real config, and nested
   portals opened dialogs on the real desktop): a private `dbus-run-session`, a
