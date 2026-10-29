@@ -94,9 +94,11 @@ jobs:
         with:
           name: checks-logs
           path: |
-            out/test
+            out/test/e2e
+            out/test/nested/**/*.log
+            out/test/nested/**/*.txt
             out/dev/flatpak/**/*.log
-            !out/test/compat/corpus/**
+            !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 7
 
@@ -163,7 +165,9 @@ jobs:
           name: compatibility
           path: |
             out/ci/reports
-            out/test/nested
+            out/test/nested/**/*.log
+            out/test/nested/**/*.txt
             out/dev/flatpak/**/*.log
+            !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 14
