@@ -30,14 +30,14 @@ are not isolated from each other, as native desktop apps aren't
 
 ## Status
 
-**Pre-alpha.** Android 17 boots rootless in about 3 s warm, and 29 of 31 test
-apps fully work in Flatpak ([docs/compatibility.md](docs/compatibility.md));
-Rethink runs without its VPN because the sandbox has no TUN device. These
-include Compose, Flutter, React Native, Capacitor and Godot apps,
-StreetComplete's MapLibre map and video playback, each in its own window with
-sound. Desktop integration (M3) and the no-privilege mode (M4: userspace binder,
-single-uid, the CI image) are done. Linux.apk builds as a Flatpak that runs
-Android inside its own sandbox
+**Pre-alpha.** Android 17 boots rootless in about 3 s warm; see the
+[nightly compatibility results](https://github.com/sargunv/linux.apk/wiki/Compatibility)
+for app status, start times and memory use. Rethink runs without its VPN because
+the sandbox has no TUN device. Working apps include Compose, Flutter, React
+Native, Capacitor and Godot apps, StreetComplete's MapLibre map and video
+playback, each in its own window with sound. Desktop integration (M3) and the
+no-privilege mode (M4: userspace binder, single-uid, the CI image) are done.
+Linux.apk builds as a Flatpak that runs Android inside its own sandbox
 ([packaging/flatpak](packaging/flatpak/README.md)). Next: the rest of packaging
 (M5) and ARM translation (M6); see the
 [milestones](https://github.com/sargunv/linux.apk/milestones).

@@ -129,6 +129,7 @@ cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
 ctest --preset host-tests
 for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
+python3 -B -m unittest discover -s tools/ci/tests
 """
 
 [tasks."test:bionic"]

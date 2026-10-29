@@ -5,8 +5,9 @@ loop gate: crate `linuxapk-compat`, run with
 `mise run test:compat -- --only <package>` (usage in the header of
 `src/main.rs`). It installs each app of [corpus.toml](corpus.toml) (pinned
 F-Droid APKs, fetched to `out/test/compat/corpus` and never committed) into a
-session, and records the results in `results.json` and
-[docs/compatibility.md](../../docs/compatibility.md).
+session, and records JSON and Markdown under `out/test/compat/<instance>/`.
+Nightly CI publishes the
+[compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility).
 
 Per app (`src/app.rs`): `pm install`, launch through the window manager, watch 8
 s (15 s for games) for crashes, ANRs and death, check window focus, take a
@@ -32,8 +33,8 @@ available for a run.
   ([budgets.toml](budgets.toml): cold session start, warm app start, idle
   session memory), fails the run and leaves the baseline alone. These failures
   become issues, never PR blockers. Only `--accept` updates the committed
-  baseline and report. `-- report` rewrites `docs/compatibility.md` from
-  `results.json`.
+  baseline. `-- report` renders `results.json` to
+  `out/test/compat/COMPATIBILITY.md` without running apps.
 - **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
   is running, or else one it starts (headless unless `--window`) and stops at
   the end. Only a session it starts gets its start time and idle memory

@@ -7,6 +7,32 @@ windowed. Each mode keeps its report and session logs in the `compatibility`
 artifact, including on failure. Both compare against the committed baselines;
 the wrapper restores the harness's tracked output files after each run.
 
+The nightly renders both modes' saved JSON to the
+[Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility),
+including the run date, source commit and run link. Missing mode results are
+marked explicitly. The rendered page is also saved in the artifact. Wiki errors
+are warnings and never replace the corpus exit status; unchanged pages are not
+committed. The report uses `GITHUB_TOKEN` with `contents: write` only in the
+nightly job. No extra credential is configured automatically. If GitHub rejects
+wiki access, the repository owner must supply a repository Actions secret named
+`LINUXAPK_WIKI_TOKEN` containing a **classic PAT with `public_repo` scope** from
+an account with write access to this public repository, then switch the
+publishing step's `GH_TOKEN` to that secret. A newly enabled wiki needs an
+initial page created by the owner before its Git remote exists.
+
+Test and render without running any apps (the checked-in baseline is a saved
+results file):
+
+```sh
+python3 -B -m unittest discover -s tools/ci/tests
+mkdir -p out/wiki-fixture/headless
+cp tests/compat/results.json out/wiki-fixture/headless/results.json
+python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
+  --commit "$(git rev-parse HEAD)" \
+  --run-url https://github.com/sargunv/linux.apk/actions/runs/123 \
+  --output out/wiki-fixture/Compatibility.md
+```
+
 ```sh
 gh workflow run ci.yml --ref <branch>
 gh run watch <run-id> --exit-status

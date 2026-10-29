@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-28",
+  "build": "generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys",
+  "headless": true,
+  "session_mem_mb": 954,
+  "session_start_ms": 2162,
+  "app_start_ms": 171,
+  "idle_memory_mib": 542,
+  "apps": [
+    {
+      "package": "com.darkempire78.opencalculator",
+      "name": "OpenCalc",
+      "group": "noarch",
+      "version_name": "3.2.0",
+      "version_code": 53,
+      "result": "works",
+      "reason": "launches, renders, survives tap/scroll/back",
+      "launch_ms": 111,
+      "pss_mb": 35
+    },
+    {
+      "package": "org.moire.opensudoku",
+      "name": "Open Sudoku",
+      "group": "noarch",
+      "version_name": "4.11.3",
+      "version_code": 20261008,
+      "result": "broken",
+      "reason": "install: INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113"
+    },
+    {
+      "package": "org.fdroid.fdroid",
+      "name": "F-Droid",
+      "group": "noarch",
+      "version_name": "2.0.2",
+      "version_code": 2000052,
+      "result": "error",
+      "reason": "harness | stopped\n<no frame>"
+    },
+    {
+      "package": "com.celzero.bravedns",
+      "name": "Rethink: DNS + Firewall + VPN",
+      "group": "window",
+      "version_name": "v0.5.8",
+      "version_code": 709,
+      "result": "partly",
+      "reason": "first frame ok; VPN unavailable in Flatpak: no TUN device (host-mode VPN check passes)",
+      "launch_ms": 116,
+      "pss_mb": 82
+    }
+  ]
+}
