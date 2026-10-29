@@ -29,7 +29,8 @@ export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"
 sudo systemctl start "user@$(id -u).service"
 systemctl --user start pipewire pipewire-pulse wireplumber
-systemctl --user set-environment LIBGL_ALWAYS_SOFTWARE=1 KWIN_COMPOSE=Q
+# QPainter does not advertise linux-dmabuf, which Android's frames require.
+systemctl --user set-environment LIBGL_ALWAYS_SOFTWARE=1 KWIN_COMPOSE=O2
 echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >>"$GITHUB_ENV"
 echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus" >>"$GITHUB_ENV"
 # Container builds mount the runner's home. Put the NDK inside that mount.

@@ -225,6 +225,9 @@ PYTEST
       file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
       echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
       echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
+      # The two-window sequence changed size and focus; inject into a fresh mapped probe.
+      launch InputProbeActivity
+      until_ok mapped
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"
@@ -305,7 +308,7 @@ sys.exit(1)
       s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
       until_ok log_has LinuxApkHandoffProbe 'Android handler: content://dev.linuxapk.probes.handoff/shared.odt'
       s pm disable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
-      s am start -n dev.linuxapk.probes/.NotificationProbe >/dev/null
+      s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY >/dev/null
       until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
       for mode in progress style indeterminate style-indeterminate ongoing no-badge; do
         expected=42 badge=true
@@ -313,10 +316,10 @@ sys.exit(1)
           *indeterminate) expected=-2 ;;
           ongoing | no-badge) expected=-1 badge=false ;;
         esac
-        s am start -n dev.linuxapk.probes/.NotificationProbe --es mode "$mode" >/dev/null
+        s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY --es mode "$mode" >/dev/null
         until_ok file_has "$bridge_log" "not shown .*Ada Lovelace $mode.*progress=$expected badge=$badge"
       done
-      s am start -n dev.linuxapk.probes/.NotificationProbe --es mode cancel >/dev/null
+      s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY --es mode cancel >/dev/null
       printf %s linuxapk-e2e-host-before | wl-copy
       s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-android >/dev/null
       until_ok log_has LinuxApkClipProbe 'set: linuxapk-e2e-android'
@@ -496,6 +499,17 @@ run_group() {
   if ((result != 0)); then
     # Preserve the failed activity sequence before lifecycle restarts logd.
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
+    timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
+    if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
+      local cg stat
+      cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup")
+      for stat in memory.events memory.peak memory.max; do
+        if [[ -r $cg/$stat ]]; then
+          printf '%s\n' "$stat"
+          cat "$cg/$stat"
+        fi
+      done >"$T/$1-memory.txt"
+    fi
   fi
   return "$result"
 }

@@ -38,6 +38,22 @@ Build and prepare the image first (`mise run build`,
 The runner stops and resets its own instance on exit, including on failure. It
 never uses the main session or the user's desktop configuration.
 
+The CI desktop uses KWin's OpenGL compositor with Mesa software rendering
+(`KWIN_COMPOSE=O2 LIBGL_ALWAYS_SOFTWARE=1`). QPainter (`KWIN_COMPOSE=Q`) does
+not advertise linux-dmabuf, so Android's windows cannot map there. The nested
+runner forwards these renderer overrides only to its private desktop. To
+reproduce CI locally with a prepared image and CI stage:
+
+```sh
+GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \
+  KWIN_COMPOSE=O2 LIBGL_ALWAYS_SOFTWARE=1 LINUXAPK_INSTANCE=ci-repro \
+  mise run test:e2e
+```
+
+Failed groups save bounded Android logs and session cgroup memory counters
+before subsequent groups can clear logcat or restart the session. The nested
+desktop saves its last 200 journal lines in `compositor.log` on exit.
+
 Set `LINUXAPK_SHARE_SCREENSHOT=1` when capturing chooser proof; normal sharing
 checks reuse the receiver window and exercise both chooser selections without
 starting the screenshot tool.

@@ -54,10 +54,12 @@ driver. `test:e2e` starts its own isolated desktop; both compatibility modes use
 `tests/nested.sh`. That runner provides virtual KWin, a private bus, runtime
 directory and HOME/XDG directories, and stops the desktop when done. The
 runner's user manager supplies software-rendering settings to KWin. Android
-sessions are named and memory capped by the development driver. The nightly also
-builds and installs the distributable Flatpak. CI sets
-`LINUXAPK_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
-remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
+frames require its OpenGL compositor, even with software rendering: QPainter
+does not expose the linux-dmabuf protocol used by the bridge. Android sessions
+are named and memory capped by the development driver. The nightly also builds
+and installs the distributable Flatpak. CI sets `LINUXAPK_MIN_AVAILABLE_GIB=10`
+for the 16 GB runner; the driver's default remains 25 GiB for local desktops,
+and its 8 GiB hard cap remains.
 
 An exact stage cache skips building when none of its source, build script or
 toolchain inputs changed; the probes APK is restored with the stage. Tests still

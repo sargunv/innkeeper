@@ -39,6 +39,12 @@ class NotificationProbe : Activity() {
     override fun onReceive(context: Context, intent: Intent) {
       val reply = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)
       when {
+        intent.action == ACTION_POST -> {
+          val mode = intent.getStringExtra("mode").orEmpty()
+          val nm = context.getSystemService(NotificationManager::class.java)
+          if (mode == "cancel") nm.cancel(ID)
+          else post(context, "Ada Lovelace $mode", "Notification probe", mode)
+        }
         reply != null -> {
           Log.i(TAG, "reply: $reply")
           post(context, "Ada Lovelace", "You replied: $reply")
@@ -56,6 +62,7 @@ class NotificationProbe : Activity() {
     private const val CHANNEL = "linuxapk-probe"
     private const val ID = 4242
     private const val KEY_REPLY = "reply"
+    private const val ACTION_POST = "dev.linuxapk.probes.NOTIFY"
     private const val ACTION_READ = "dev.linuxapk.probes.READ"
     private const val ACTION_REPLY = "dev.linuxapk.probes.REPLY"
 

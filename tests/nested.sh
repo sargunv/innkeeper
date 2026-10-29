@@ -9,6 +9,7 @@ host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
 unit=linuxapk-nested-$LINUXAPK_INSTANCE
 cleanup() {
+  journalctl --user -u "$unit" --no-pager -n 200 >"$N/compositor.log" 2>&1 || true
   # A deadline can interrupt the runner before its trap reaches session stop.
   # Flatpak's scope is outside this desktop's service; reap that test scope too.
   if [[ ${LINUXAPK_E2E:-} == 1 && -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
@@ -69,6 +70,11 @@ export LANG=C.UTF-8 LANGUAGE=C
 export HOME=$N/home XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data
 export XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state XDG_CURRENT_DESKTOP=KDE
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
+# Explicit renderer overrides belong to this desktop, not the user's manager.
+renderer_env=()
+for key in LIBGL_ALWAYS_SOFTWARE KWIN_COMPOSE; do
+  if [[ -v $key ]]; then renderer_env+=("$key=${!key}"); fi
+done
 # systemd itself is reached through the host bus; everything it starts inherits
 # the private runtime and the nested Wayland socket before dbus-run-session.
 DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemd-run --user --quiet --collect \
@@ -77,6 +83,7 @@ DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemd-run --user --quie
   XDG_DATA_HOME="$XDG_DATA_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" \
   XDG_DATA_DIRS="$XDG_DATA_DIRS" XDG_CURRENT_DESKTOP=KDE FLATPAK_USER_DIR="$FLATPAK_USER_DIR" \
   PULSE_SERVER="$PULSE_SERVER" WAYLAND_DISPLAY=lapk-nested \
+  "${renderer_env[@]}" \
   dbus-run-session -- "$N/compositor.sh"
 for _ in $(seq 100); do
   [[ -s $N/bus && -S $rt/lapk-nested ]] && break
