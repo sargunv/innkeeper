@@ -366,6 +366,12 @@ fn drain_writes(client: &Client, state: &mut Devices) {
     }
 }
 
+// Registration has a fixed eight-digit port identity. Event packets are
+// 4 + N*EVENT_SIZE bytes, so timestamp bytes can never look like control data.
+fn is_registration(packet: &[u8]) -> bool {
+    packet.len() == 14 && matches!(packet[4], 2 | 3)
+}
+
 impl Input {
     pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Option<Self> {
         if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
@@ -414,7 +420,7 @@ impl Input {
                 }
                 let device = u32::from_le_bytes(buf[..4].try_into().unwrap());
                 let mut s = state.lock().unwrap();
-                if n >= 6 && device >= gamepad::FIRST && matches!(buf[4], 2 | 3) {
+                if device >= gamepad::FIRST && is_registration(&buf[..n]) {
                     let Ok(identity) = std::str::from_utf8(&buf[6..n]) else {
                         continue;
                     };
@@ -817,6 +823,20 @@ mod tests {
             answer(8, get(0x22, 8), &[], &[])
         );
     }
+    #[test]
+    fn gamepad_timestamp_bytes_never_register_a_device() {
+        let mut registration = gamepad::FIRST.to_le_bytes().to_vec();
+        registration.extend_from_slice(b"\x02\x001234abcd");
+        assert!(is_registration(&registration));
+        for seconds in [258, 259] {
+            let mut packet = gamepad::FIRST.to_le_bytes().to_vec();
+            packet.extend_from_slice(&event(seconds * 1_000_000, 1, 304, 1));
+            packet.extend_from_slice(&event(seconds * 1_000_000, 0, 0, 0));
+            assert!(matches!(packet[4], 2 | 3));
+            assert!(!is_registration(&packet));
+        }
+    }
+
     #[test]
     fn gamepads_have_separate_ports_and_android_capabilities() {
         let pad = Pad {

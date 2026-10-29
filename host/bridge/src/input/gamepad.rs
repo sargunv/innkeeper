@@ -58,9 +58,10 @@ impl Axis {
 struct Mapping {
     axes: Vec<Axis>,
     dpad: [bool; 4],
+    playstation: bool,
 }
 impl Mapping {
-    fn new(axes: &[(u16, i32, i32)]) -> Self {
+    fn new(axes: &[(u16, i32, i32)], vendor: u16) -> Self {
         let right_xy = axes.iter().any(|a| a.0 == 3) && axes.iter().any(|a| a.0 == 4);
         let axes = axes
             .iter()
@@ -85,11 +86,31 @@ impl Mapping {
         Self {
             axes,
             dpad: [false; 4],
+            playstation: vendor == 0x054c,
         }
     }
     fn translate(&mut self, ty: u16, code: u16, value: i32) -> Option<(u16, u16, i32)> {
+        // hid-playstation uses position names for north/west. Generic.kl uses
+        // Xbox's BTN_X/BTN_Y aliases for those same numeric codes instead.
+        let code = if ty == 1 && self.playstation {
+            match code {
+                307 => 308,
+                308 => 307,
+                _ => code,
+            }
+        } else {
+            code
+        };
         match ty {
             1 if BUTTONS.contains(&code) => Some((1, code, value)),
+            1 if matches!(code, 312 | 313)
+                && self
+                    .axes
+                    .iter()
+                    .any(|a| a.target == if code == 312 { 10 } else { 9 }) =>
+            {
+                None
+            }
             1 if matches!(code, 312 | 313) => Some((
                 3,
                 if code == 312 { 10 } else { 9 },
@@ -172,16 +193,19 @@ impl Controller {
         let (fd, feedback, identity, mapping) = if synthetic {
             let fd = connect(path)?;
             let feedback = connect(&path.with_extension("ff"))?;
-            let mapping = Mapping::new(&[
-                (0, -32768, 32767),
-                (1, -32768, 32767),
-                (2, 0, 255),
-                (3, -32768, 32767),
-                (4, -32768, 32767),
-                (5, 0, 255),
-                (16, -1, 1),
-                (17, -1, 1),
-            ]);
+            let mapping = Mapping::new(
+                &[
+                    (0, -32768, 32767),
+                    (1, -32768, 32767),
+                    (2, 0, 255),
+                    (3, -32768, 32767),
+                    (4, -32768, 32767),
+                    (5, 0, 255),
+                    (16, -1, 1),
+                    (17, -1, 1),
+                ],
+                0x045e,
+            );
             (
                 fd,
                 Some(feedback),
@@ -241,7 +265,12 @@ impl Controller {
                     let mut bits = [0; 16];
                     (get(&f, 0x35, &mut bits).is_ok() && bit(&bits, 0x50)).then(|| f.into())
                 });
-            (file.into(), feedback, identity, Mapping::new(&axes))
+            (
+                file.into(),
+                feedback,
+                identity,
+                Mapping::new(&axes, u16::from_le_bytes(id[2..4].try_into().unwrap())),
+            )
         };
         unsafe {
             libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
@@ -445,14 +474,17 @@ mod tests {
     use super::*;
     #[test]
     fn xbox_axes_buttons_and_dpad_follow_android_generic_layout() {
-        let mut m = Mapping::new(&[
-            (0, 0, 65535),
-            (1, 0, 65535),
-            (2, 0, 255),
-            (3, -32768, 32767),
-            (4, -32768, 32767),
-            (5, 0, 255),
-        ]);
+        let mut m = Mapping::new(
+            &[
+                (0, 0, 65535),
+                (1, 0, 65535),
+                (2, 0, 255),
+                (3, -32768, 32767),
+                (4, -32768, 32767),
+                (5, 0, 255),
+            ],
+            0x045e,
+        );
         assert_eq!(m.translate(3, 3, 32767), Some((3, 2, 32767)));
         assert_eq!(m.translate(3, 4, -32768), Some((3, 5, -32768)));
         assert_eq!(m.translate(3, 2, 255), Some((3, 10, 32767))); // LTRIGGER
@@ -463,14 +495,34 @@ mod tests {
         assert_eq!(m.translate(1, 547, 1), Some((3, 16, 0)));
         assert_eq!(m.translate(1, 546, 0), Some((3, 16, 1)));
         assert_eq!(m.translate(1, 30, 1), None);
-        let mut generic = Mapping::new(&[
-            (0, -1, 1),
-            (1, -1, 1),
-            (2, -32768, 32767),
-            (5, -32768, 32767),
-        ]);
+        let mut generic = Mapping::new(
+            &[
+                (0, -1, 1),
+                (1, -1, 1),
+                (2, -32768, 32767),
+                (5, -32768, 32767),
+            ],
+            0x045e,
+        );
         assert_eq!(generic.translate(3, 2, 32767), Some((3, 2, 32767)));
         assert_eq!(generic.translate(1, 312, 1), Some((3, 10, 32767)));
+        let mut sony = Mapping::new(
+            &[
+                (0, -32768, 32767),
+                (1, -32768, 32767),
+                (2, 0, 255),
+                (3, -32768, 32767),
+                (4, -32768, 32767),
+                (5, 0, 255),
+            ],
+            0x054c,
+        );
+        assert_eq!(sony.translate(1, 307, 1), Some((1, 308, 1))); // Triangle -> Y
+        assert_eq!(sony.translate(1, 308, 1), Some((1, 307, 1))); // Square -> X
+        assert_eq!(sony.translate(3, 2, 128), Some((3, 10, 16447)));
+        assert_eq!(sony.translate(1, 312, 1), None); // digital transition cannot replace pressure
+        assert_eq!(sony.translate(3, 5, 64), Some((3, 9, 8223)));
+        assert_eq!(sony.translate(1, 313, 1), None);
         assert_ne!(stable_id("one"), stable_id("two"));
         assert_eq!(stable_id("one"), stable_id("one"));
     }

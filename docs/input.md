@@ -91,8 +91,11 @@ makes those nodes visible; it includes keyboards and mice as well as gamepads
 newly accessible controllers; an unplug closes that controller's virtual device.
 The reader uses the kernel's standard Linux gamepad button layout, maps common
 `RX/RY` right-stick and `Z/RZ` trigger arrangements to Android's `Generic.kl`,
-and normalizes sticks, triggers and D-pads. `SYN_DROPPED` resynchronizes held
-buttons and axes from the source. Gamepads use evdev exclusively.
+and normalizes sticks, triggers and D-pads. Sony's north/west face buttons map
+to Android Y/X; Xbox aliases keep their existing mapping. Digital trigger
+buttons synthesize pressure only when the source has no corresponding analog
+axis. `SYN_DROPPED` resynchronizes held buttons and axes from the source.
+Gamepads use evdev exclusively.
 
 Each controller has an independent virtual port and Android device ID, outside
 the keyboard/mouse number range. Its input identity plus serial number, or
