@@ -10,12 +10,13 @@ Two gate tiers, both testing observable behaviour we own:
   `input` (an app window and delivered input), `audio` (440 Hz at PipeWire),
   `desktop` (links and notifications logged, clipboard isolated both ways,
   cold-start file picker cancelled without a portal, and DocumentsUI after a
-  connection timeout), `a11y` (AT-SPI stays inactive), and `lifecycle` (idle
-  stop and alarm restart). The whole command, including setup and cleanup, has a
-  52 s deadline (plus at most 5 s for cleanup) on a warm image and prints its
-  total wall time. Setup boots once and installs the probes; audio runs
-  concurrently with the activity checks. Groups wait for observations, rather
-  than fixed delays. Lifecycle uses named-session-only short timers.
+  connection timeout, and CLI file VIEW), `a11y` (AT-SPI stays inactive), and
+  `lifecycle` (idle stop and alarm restart). The whole command, including setup
+  and cleanup, has a 52 s deadline (plus at most 5 s for cleanup) on a warm
+  image and prints its total wall time. Setup boots once and installs the
+  probes; audio runs concurrently with the activity checks. Groups wait for
+  observations, rather than fixed delays. Lifecycle uses named-session-only
+  short timers.
 
 Build and prepare the image first (`mise run build`,
 `mise run session -- prepare`). Results and captures stay in `out/test/e2e/`.

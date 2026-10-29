@@ -32,6 +32,14 @@ own; `cargo test -p linuxapk-core` tests it.
   which survives updates. Windows, notifications and MPRIS players use that id.
   Entry repair (`linuxapk list`, manager start) offers an entry again when it is
   missing or runs another command, unless the user declined it.
+- **File metadata**: the system app queries PackageManager's exported, enabled,
+  default VIEW filters that accept `content://` files and reports concrete MIME
+  types through `IconDump`. File MIME types are not registered in desktop
+  entries yet: the baseline DynamicLauncher portal does not forward host files
+  on ordinary Exec launches
+  ([#71](https://github.com/sargunv/linux.apk/issues/71)). Desktop shortcut
+  export is also blocked by the portal's single-group limit
+  ([#68](https://github.com/sargunv/linux.apk/issues/68)).
 - **Paths** (`paths.rs`): the prefix relative to the running executable and the
   XDG dirs; the session's own paths and the `LINUXAPK_INSTANCE` parser come from
   the launcher's library ([host/launcher](../launcher/README.md)).

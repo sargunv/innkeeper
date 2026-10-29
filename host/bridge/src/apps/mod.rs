@@ -32,6 +32,8 @@ use crate::ipc::server::{Peer, Reply, Service};
 use crate::ipc::wire::errno::*;
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
+pub mod file;
+
 pub mod ty {
     pub const HAVE: u16 = 0x0501;
     pub const ADDED: u16 = 0x0502;

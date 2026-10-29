@@ -3,14 +3,13 @@
 
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use rustix::net::{
     AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags,
     SendAncillaryBuffer, SendAncillaryMessage, SendFlags, SocketAddrUnix, SocketFlags, SocketType,
-    UCred,
 };
 
 use crate::ipc::wire::MAX_MSG;
@@ -47,9 +46,33 @@ pub fn listen(path: &Path) -> Result<OwnedFd> {
 
 /// Accepts one connection and returns it with the peer's credentials (host
 /// ids, as seen from the bridge's namespaces).
-pub fn accept(listener: &OwnedFd) -> rustix::io::Result<(OwnedFd, UCred)> {
+pub fn accept(listener: &OwnedFd) -> rustix::io::Result<(OwnedFd, libc::ucred)> {
     let sock = rustix::net::accept_with(listener, SocketFlags::CLOEXEC)?;
-    let cred = rustix::net::sockopt::socket_peercred(&sock)?;
+    // A sibling Flatpak sandbox is outside our PID namespace: Linux reports
+    // pid=0. rustix::UCred cannot represent that (its Pid is nonzero).
+    let mut cred = MaybeUninit::<libc::ucred>::uninit();
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: cred and len point to writable storage of the stated size.
+    let ret = unsafe {
+        libc::getsockopt(
+            sock.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            cred.as_mut_ptr().cast(),
+            &mut len,
+        )
+    };
+    if ret != 0 {
+        return Err(
+            rustix::io::Errno::from_io_error(&std::io::Error::last_os_error())
+                .expect("getsockopt errno"),
+        );
+    }
+    if len as usize != std::mem::size_of::<libc::ucred>() {
+        return Err(rustix::io::Errno::INVAL);
+    }
+    // SAFETY: getsockopt succeeded and filled the complete ucred.
+    let cred = unsafe { cred.assume_init() };
     Ok((sock, cred))
 }
 

@@ -54,6 +54,7 @@ object IconDump {
     val label = launcher?.loadLabel(pm) ?: app.loadLabel(pm)
     out.append("label ${label.toString().replace(Regex("[\\r\\n\\t]"), " ").trim()}\n")
     out.append("category ${app.category}\n")
+    for (mime in FileAssociations.mimeTypes(pm, pkg)) out.append("mime $mime\n")
     splashColor(pm, app, launcher)?.let { out.append("splash %08x\n".format(it)) }
     val size = WindowSizing.of(launcher)
     out.append("window ${size.widthDp} ${size.heightDp}\n")

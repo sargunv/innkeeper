@@ -50,7 +50,7 @@ impl Reply {
 /// Who is on the other end of a connection.
 #[derive(Debug, Clone)]
 pub struct Peer {
-    /// Host uid and pid (from SO_PEERCRED).
+    /// Host uid and pid (from SO_PEERCRED); pid 0 is outside this PID namespace.
     pub uid: u32,
     pub pid: i32,
     /// Client name from HELLO.
@@ -194,7 +194,7 @@ pub fn serve(listener: OwnedFd, cfg: Arc<Config>) -> Result<()> {
             Err(rustix::io::Errno::INTR | rustix::io::Errno::CONNABORTED) => continue,
             Err(e) => return Err(e).context("accept"),
         };
-        let (uid, pid) = (cred.uid.as_raw(), cred.pid.as_raw_nonzero().get());
+        let (uid, pid) = (cred.uid, cred.pid);
         if !cfg.may_connect(uid) {
             crate::warn!("refused connection from uid {uid} (pid {pid})");
             continue;

@@ -30,10 +30,10 @@ struct Cli {
 enum Cmd {
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
     Install { file: PathBuf },
-    /// Launch an app, optionally opening a URI in it.
+    /// Launch an app, optionally opening files or a URI in it.
     Run {
         package: String,
-        uri: Option<String>,
+        files_or_uri: Vec<String>,
     },
     /// Uninstall an app and remove its desktop entry and icons.
     Uninstall {
@@ -89,7 +89,7 @@ fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
 
 /// Launches an app. From a desktop launch on a stopped session, a splash
 /// window shows at once and hands its focus on to the app's window.
-fn run(pkg: &str, uri: Option<&str>, token: Option<String>) -> Result<()> {
+fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
     let pkg = validate::package(pkg)?;
     let session = Session::find()?;
     let splash = if session.running() {
@@ -124,7 +124,47 @@ fn run(pkg: &str, uri: Option<&str>, token: Option<String>) -> Result<()> {
             token,
             wait: splash.is_some(),
         };
-        ops::run(pkg, uri, &opts, &stderr)
+        if args.iter().all(|s| s.is_empty()) {
+            return ops::run(pkg, None, &opts, &stderr);
+        }
+        let paths = linuxapk_core::paths::Prefix::locate()?.session_paths()?;
+        let mut reply = String::new();
+        for arg in args.iter().filter(|s| !s.is_empty()) {
+            let path = if arg.starts_with("file:") {
+                Some(
+                    linuxapk_bridge::documents::portal::file_path(arg)
+                        .ok_or_else(|| anyhow::anyhow!("invalid file URI"))?,
+                )
+            } else if !arg.contains(":") || Path::new(arg).exists() {
+                Some(PathBuf::from(arg))
+            } else {
+                None
+            };
+            reply = match path {
+                Some(path) => {
+                    let file = std::fs::File::open(&path)?;
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
+                    let grant = linuxapk_bridge::apps::file::grant(
+                        &paths.run.join("bridge/bridge.sock"),
+                        &file,
+                        name,
+                    )?;
+                    linuxapk_core::android::launch(
+                        &session,
+                        &linuxapk_core::android::Launch::File {
+                            package: pkg.into(),
+                            grant,
+                        },
+                        &opts,
+                    )?
+                }
+                None => ops::run(pkg, Some(arg), &opts, &stderr)?,
+            };
+        }
+        Ok(reply)
     })();
     if let Some(s) = splash {
         s.close();
@@ -172,7 +212,10 @@ fn main() -> ExitCode {
     let res = match cli.cmd {
         Cmd::Install { file } => install(&file),
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
-        Cmd::Run { package, uri } => run(&package, uri.as_deref(), token),
+        Cmd::Run {
+            package,
+            files_or_uri,
+        } => run(&package, &files_or_uri, token),
         Cmd::List => list(),
         Cmd::Background { package, setting } => {
             if package.is_some() != setting.is_some() {

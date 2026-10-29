@@ -39,6 +39,11 @@ impl Prefix {
         self.0.join(LAUNCHER)
     }
 
+    /// Runtime paths shared by the CLI and its session.
+    pub fn session_paths(&self) -> Result<linuxapk_session::Paths> {
+        linuxapk_session::Paths::new(&self.0)
+    }
+
     /// A program in `bin/`.
     pub fn bin(&self, name: &str) -> PathBuf {
         self.0.join("bin").join(name)
