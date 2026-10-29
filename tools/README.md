@@ -20,6 +20,6 @@ Build and dev tooling; never shipped.
 - **`dev/footprint.sh`**: PSS and RSS of every process in a running session, and
   its cgroup's memory, to see what an idle session holds.
 - **`dev/window-shot.sh`**: a screenshot of just a Linux.apk window on KDE, for
-  bug reports and the README media issue.
+  PRs, bug reports and the README media issue.
 
 How these fit together: [docs/development.md](../docs/development.md).
