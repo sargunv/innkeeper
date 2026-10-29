@@ -5,27 +5,32 @@ installed on Android's init and inherited by every Android process, turns what
 an unprivileged namespace can't do into user notifications.
 `mise run build:supervisor` builds all three artifacts.
 
-| Dir          | Artifact (stage path)                                             | Runs                                                      | Start reading                           |
-| ------------ | ----------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------- |
-| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | sandbox subreaper; its bpf thread stays there             | `pivot-exec.c`, `bpfemu.c`              |
-| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | forked by pivot-exec in the sandbox, host-user privileges | `src/notify.rs`, `src/binder/driver.rs` |
-| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it  | `linuxapk_shim.c`                       |
+| Dir          | Artifact (stage path)                                             | Runs                                                      | Start reading                 |
+| ------------ | ----------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------- |
+| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | static pivot/namespace bootstrap and subreaper            | `pivot-exec.c`                |
+| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | forked by pivot-exec in the sandbox, host-user privileges | `src/notify.rs`, `src/bpf.rs` |
+| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it  | `linuxapk_shim.c`             |
 
 ## What is trapped, and who serves it
 
-| Syscalls                                                                                                                                      | Served by         | Why                                                                    |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                            | broker (binder)   | binder in userspace: no binderfs, no SELinux module                    |
-| `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling       | bpfemu (C thread) | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
-| `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)    | virtual Android uids without a subordinate id range                    |
-| `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                            | broker (`flat`)   | no mounts or user namespace in the sandbox (docs/session.md)           |
-| `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | bpfemu            | no capabilities in the sandbox; the host's network                     |
+| Syscalls                                                                                                                                      | Served by       | Why                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------- |
+| `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                            | broker (binder) | binder in userspace: no binderfs, no SELinux module                    |
+| `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling       | broker (`bpf`)  | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
+| `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)  | virtual Android uids without a subordinate id range                    |
+| `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                            | broker (`flat`) | no mounts or user namespace in the sandbox (docs/session.md)           |
+| `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | broker (`bpf`)  | no capabilities in the sandbox; the host's network                     |
 
-The kernel allows one listener per filter chain, so the broker receives every
-notification. It forwards the non-binder, non-credential ones to bpfemu over a
-`SOCK_SEQPACKET` socket, one `seccomp_notif` per message, with `MSG_DONTWAIT` (a
-busy bpfemu fails that call with `EAGAIN` rather than stall binder); bpfemu
-answers on the shared listener itself.
+The broker constructs and installs the filter (`src/filter.rs`) in its `--init`
+entry point, hands the listener to pivot-exec, then execs Android. The outer
+broker receives and serves every notification directly: binder, credentials,
+Flatpak filesystem calls and BPF emulation share one Rust boundary. Each BPF
+object retains one memfd inode; opening a pin reopens that inode with an
+independent file description, so netd's OFD map locks conflict correctly.
+
+pivot-exec stays static C because it runs before pivot_root, before Android's
+bootstrap linker exists. It only establishes the root and namespaces, execs the
+dynamic Rust broker and reaps children; it defines no syscall policy.
 
 ## Binder
 

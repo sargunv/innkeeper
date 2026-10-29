@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The session's seccomp filter (pivot-exec/bpfemu.c) traps exactly the syscalls
+# The session's seccomp filter (broker/src/filter.rs) traps exactly the syscalls
 # each mode needs: bpf and friends, openat and binder ioctls always; the
 # credential syscalls, SO_PEERCRED, lstat-shaped newfstatat and W_OK access
 # checks in single-uid mode (supervisor/README.md); readlink, getcwd, fstat,
@@ -10,7 +10,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=$here/../../out/test/supervisor/seccomp-filter
 mkdir -p "$out"
-cc -O1 -Wall -Werror -o "$out/t" "$here/seccomp-filter.c" "$here/../pivot-exec/bpfemu.c" -lpthread
+cargo build -q -p linuxapk-broker --example supervisor-probes
+cc -O1 -Wall -Werror -o "$out/t" "$here/seccomp-filter.c" "$here/../../out/cargo/debug/examples/libsupervisor_probes.a" -lpthread -ldl -lm
 fail=0
 # Name, harness flag, then the probes expected to be notified.
 check() {

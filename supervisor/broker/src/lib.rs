@@ -16,8 +16,10 @@
 //! `supervisor/README.md`.
 
 pub mod binder;
+mod bpf;
 mod creds;
 pub mod fake;
+pub mod filter;
 mod flat;
 pub mod notify;
 

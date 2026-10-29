@@ -15,7 +15,7 @@ flowchart LR
     host["Wayland, PipeWire, portals, D-Bus"]
   end
   subgraph sup["Supervisor (Flatpak sandbox, host-user privileges)"]
-    pivot["pivot-exec + bpfemu thread"]
+    pivot["pivot-exec"]
     broker["linuxapk-broker"]
   end
   subgraph droid["Android (Flatpak sandbox)"]
@@ -28,7 +28,6 @@ flowchart LR
   launcher --> bridge
   pivot -->|"fork, exec init"| init
   init -. "seccomp user notifications: binder, bpf, credentials" .-> broker
-  broker -->|"non-binder notifications"| pivot
   hal -->|"bridge.sock: display, audio, hoststate"| bridge
   sysapp <-->|"bridge.sock: input, system, documents, apps, hoststate"| bridge
   bridge <--> host
@@ -38,9 +37,10 @@ flowchart LR
   `linuxapk-core`; the launcher assembles and starts the session; the bridge is
   the only process that talks to the desktop.
 - **Supervisor.** One seccomp filter on Android's init traps what the sandbox
-  can't do (binder, eBPF, single-uid credentials). The broker receives every
-  notification, serves binder and credentials, and forwards the rest to a C
-  thread in pivot-exec. See [supervisor/README.md](../supervisor/README.md).
+  can't do (binder, eBPF, single-uid credentials). The Rust broker defines the
+  filter and serves every notification, including binder, credentials and BPF.
+  The static pivot-exec bootstrap establishes the root and namespaces and reaps
+  children. See [supervisor/README.md](../supervisor/README.md).
 - **Android.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).
 

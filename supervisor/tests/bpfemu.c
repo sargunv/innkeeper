@@ -1,9 +1,5 @@
-// The bpf() emulator (pivot-exec/bpfemu.c) against hostile callers. Built and
-// run by bpfemu.sh inside a private user and mount namespace whose
-// /sys/fs/bpf is a tmpfs, like the session's. A child installs the session's
-// filter and makes bpf() calls. In the parent a stand-in for the broker lets
-// openat and binder ioctls continue and forwards the rest to bpfemu's serve
-// thread, as pivot-exec wires it; the parent must survive each call.
+// Existing bpf syscall probes against the Rust broker (broker/src/bpf.rs).
+// The child inherits the real filter; the parent runs the real broker.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -26,7 +22,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "../pivot-exec/bpfemu.h"
+extern int linuxapk_filter_install(int harness);
+extern void linuxapk_broker_start(int listener, int pins);
 
 static int fails;
 #define CHECK(cond, ...)           \
@@ -105,6 +102,27 @@ static void tests(const char* outside_dir) {
   CHECK(pin(m, "/sys/fs/bpf/m") == 0, "pin under /sys/fs/bpf");
   long g = get("/sys/fs/bpf/m");
   CHECK(g >= 0 && lookup(g, &k, &got) == 0 && got == 42, "get pin and lookup");
+
+  // netd's mapLockTest needs one inode but independent open descriptions.
+  long g2 = get("/sys/fs/bpf/m");
+  struct stat ms, gs;
+  CHECK(
+    g2 >= 0 && fstat(m, &ms) == 0 && fstat(g2, &gs) == 0 &&
+      ms.st_dev == gs.st_dev && ms.st_ino == gs.st_ino,
+    "map opens share one inode"
+  );
+  struct flock lock = {.l_type = F_RDLCK, .l_whence = SEEK_SET};
+  CHECK(fcntl(g, F_OFD_SETLK, &lock) == 0, "map read OFD lock");
+  lock.l_type = F_WRLCK;
+  CHECK(
+    fcntl(g2, F_OFD_SETLK, &lock) == -1 && errno == EAGAIN,
+    "independent map open conflicts with OFD lock"
+  );
+  close(g);
+  CHECK(
+    fcntl(g2, F_OFD_SETLK, &lock) == 0, "closing map open releases OFD lock"
+  );
+  close(g2);
 
   // S3: element operations on ring buffers (no tables).
   long ur = map_create(BPF_MAP_TYPE_USER_RINGBUF, 0, 0, 4096);
@@ -204,36 +222,6 @@ static void tests(const char* outside_dir) {
   CHECK(i < 5000, "objects capped after %d programs", i);
 }
 
-// The broker's part (supervisor/broker/src/notify.rs): receive every
-// notification on the listener, let the ones it would serve (openat, binder
-// ioctls) continue, and forward the rest to bpfemu.
-struct broker {
-  int listener, forward;
-};
-
-static void* serve_as_broker(void* arg) {
-  struct broker* b = arg;
-  struct seccomp_notif_sizes sz;
-  if (syscall(__NR_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &sz)) return NULL;
-  struct seccomp_notif* req = calloc(1, sz.seccomp_notif);
-  struct seccomp_notif_resp* resp = calloc(1, sz.seccomp_notif_resp);
-  for (;;) {
-    memset(req, 0, sz.seccomp_notif);
-    if (ioctl(b->listener, SECCOMP_IOCTL_NOTIF_RECV, req)) {
-      if (errno == EINTR || errno == ENOENT) continue;
-      return NULL;
-    }
-    if (req->data.nr != __NR_openat && req->data.nr != __NR_ioctl) {
-      send(b->forward, req, sz.seccomp_notif, 0);
-      continue;
-    }
-    memset(resp, 0, sz.seccomp_notif_resp);
-    resp->id = req->id;
-    resp->flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
-    ioctl(b->listener, SECCOMP_IOCTL_NOTIF_SEND, resp);
-  }
-}
-
 int main(int argc, char** argv) {
   if (argc < 2) return fprintf(stderr, "usage: %s OUTSIDE_DIR\n", argv[0]), 2;
   // Room for more objects than the cap (each holds a memfd).
@@ -242,7 +230,8 @@ int main(int argc, char** argv) {
   rl.rlim_cur = rl.rlim_max;
   setrlimit(RLIMIT_NOFILE, &rl);
   // As pivot-exec does before Android runs.
-  bpfemu_set_pin_dir(open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC));
+  int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
+  setenv("LINUXAPK_BIONIC_HARNESS", "1", 1);
   int sp[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sp))
     return perror("socketpair"), 1;
@@ -250,7 +239,7 @@ int main(int argc, char** argv) {
   if (c == 0) {
     alarm(20);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-    int lfd = bpfemu_install_filter(1);
+    int lfd = linuxapk_filter_install(1);
     if (lfd < 0) return perror("filter"), 1;
     char ctl[CMSG_SPACE(sizeof(int))] = {0};
     char b = 0;
@@ -282,15 +271,9 @@ int main(int argc, char** argv) {
   };
   if (recvmsg(sp[0], &mh, 0) != 1 || !CMSG_FIRSTHDR(&mh))
     return fprintf(stderr, "no listener\n"), 1;
-  static struct broker brk;
-  memcpy(&brk.listener, CMSG_DATA(CMSG_FIRSTHDR(&mh)), sizeof(int));
-  int fwd[2];
-  if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fwd))
-    return perror("socketpair"), 1;
-  brk.forward = fwd[1];
-  pthread_t t;
-  pthread_create(&t, NULL, serve_as_broker, &brk);
-  if (bpfemu_start(brk.listener, fwd[0])) return perror("bpfemu_start"), 1;
+  int listener;
+  memcpy(&listener, CMSG_DATA(CMSG_FIRSTHDR(&mh)), sizeof(int));
+  linuxapk_broker_start(listener, pins);
   // A hung or crashed supervisor fails the test (SIGALRM, SIGSEGV).
   alarm(30);
   int st;

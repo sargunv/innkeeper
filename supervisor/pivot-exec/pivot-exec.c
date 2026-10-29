@@ -6,7 +6,7 @@
 //
 // In those developer harnesses, pivot to NEWROOT, clone nested namespaces
 // with locked mounts, and install the seccomp filter before executing PROG.
-// The parent serves notifications through the broker and bpf emulator.
+// The parent serves notifications through the Rust broker.
 //
 // Built static with the NDK so it keeps working after the host root is gone.
 //
@@ -32,29 +32,18 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "bpfemu.h"
-
 extern char** environ;
 
-// Path to the Rust binder broker (supervisor/broker/src/main.rs), from
-// LINUXAPK_BROKER. The kernel allows only one notification listener per
-// process, so bpfemu installs one seccomp filter for bpf, openat and binder
-// ioctls, and the broker receives every notification, serves the binder ones
-// and forwards the rest to the bpf thread. The broker is a normal dynamic
-// bionic binary, so pivot-exec stays a pure-C static binary (it is exec'd
-// before pivot_root, where no linker exists).
+// The static bootstrap runs before Android's linker exists. After pivot it
+// execs the dynamic Rust broker, which owns the entire syscall boundary.
 static const char* broker;
 // Flatpak mode (see the header).
 static int flat;
 
 static void die(const char* what);
 
-// Fork+exec the broker, which receives notifications on `listener` and
-// forwards non-binder ones to `sock`. Runs in the parent's (outer) namespaces
-// like the bpf thread, so it sees Android pids and can process_vm_* them.
-// Dynamic bionic; the parent is in the pivoted Android root, so
-// /system/bin/linker64 and libc.so resolve.
-static void spawn_broker(int sock, int listener, pid_t init) {
+// The broker stays in the outer namespaces to see every Android pid.
+static void spawn_broker(int pins, int listener, pid_t init) {
   pid_t p = fork();
   if (p < 0) die("fork broker");
   if (p != 0) return;
@@ -65,12 +54,12 @@ static void spawn_broker(int sock, int listener, pid_t init) {
     setenv("LINUXAPK_INIT_PID", pid, 1);
   }
   // Inherited fds must survive exec; clear CLOEXEC.
-  fcntl(sock, F_SETFD, 0);
+  if (pins >= 0) fcntl(pins, F_SETFD, 0);
   fcntl(listener, F_SETFD, 0);
-  char sockbuf[16], fdbuf[16];
-  snprintf(sockbuf, sizeof(sockbuf), "%d", sock);
+  char pinbuf[16], fdbuf[16];
+  snprintf(pinbuf, sizeof(pinbuf), "%d", pins);
   snprintf(fdbuf, sizeof(fdbuf), "%d", listener);
-  char* argv[] = {(char*)broker, sockbuf, fdbuf, NULL};
+  char* argv[] = {(char*)broker, fdbuf, pinbuf, NULL};
   execve(broker, argv, environ);
   die("exec broker");
 }
@@ -150,29 +139,28 @@ static int child_main(void* arg) {
     setenv("LINUXAPK_SHIM_INIT", "1", 1);
   }
 
-  // Route Android's bpf(), openat and binder ioctls to the supervisor via one
-  // seccomp notification listener, then hand it the fd.
-  int listener = bpfemu_install_filter(!flat);
-  if (listener < 0) die("install seccomp filter");
-  char cbuf[CMSG_SPACE(sizeof(int))];
-  memset(cbuf, 0, sizeof(cbuf));
-  struct iovec iov = {.iov_base = "L", .iov_len = 1};
-  struct msghdr msg = {
-    .msg_iov = &iov,
-    .msg_iovlen = 1,
-    .msg_control = cbuf,
-    .msg_controllen = sizeof(cbuf)
-  };
-  struct cmsghdr* cm = CMSG_FIRSTHDR(&msg);
-  cm->cmsg_level = SOL_SOCKET;
-  cm->cmsg_type = SCM_RIGHTS;
-  cm->cmsg_len = CMSG_LEN(sizeof(int));
-  memcpy(CMSG_DATA(cm), &listener, sizeof(int));
-  if (sendmsg(sync_sock[0], &msg, 0) != 1) die("send seccomp listener");
-  close(listener);
-  close(sync_sock[0]);
-
-  execve(child_argv[0], child_argv, environ);
+  // Rust installs the filter, hands its listener to our parent, then execs
+  // Android. No syscall policy or emulator runs in this static bootstrap.
+  fcntl(sync_sock[0], F_SETFD, 0);
+  char syncbuf[16];
+  snprintf(syncbuf, sizeof(syncbuf), "%d", sync_sock[0]);
+  int n = 0;
+  while (child_argv[n]) n++;
+  char** args = calloc(n + 4, sizeof(char*));
+  if (!args) die("calloc broker argv");
+  args[0] = (char*)broker;
+  args[1] = "--init";
+  args[2] = syncbuf;
+  memcpy(args + 3, child_argv, (n + 1) * sizeof(char*));
+  // Init's shim consumes LD_PRELOAD (and its init marker) in its constructor.
+  // Do not load it into this intermediate Rust process: restore the preload
+  // only in the environment Rust hands to the final Android exec.
+  const char* preload = getenv("LD_PRELOAD");
+  if (preload) {
+    if (setenv("LINUXAPK_INIT_PRELOAD", preload, 1) != 0) die("save preload");
+    unsetenv("LD_PRELOAD");
+  }
+  execve(broker, args, environ);
   die("execve");
   return 1;
 }
@@ -219,7 +207,6 @@ int main(int argc, char** argv) {
   int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
   if (pins < 0)
     fprintf(stderr, "pivot-exec: /sys/fs/bpf: %s\n", strerror(errno));
-  bpfemu_set_pin_dir(pins);
 
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sync_sock) != 0)
     die("socketpair");
@@ -253,14 +240,9 @@ int main(int argc, char** argv) {
   memcpy(&listener, CMSG_DATA(cm), sizeof(int));
   close(sync_sock[1]);
 
-  // The broker receives all notifications and forwards the bpf ones to the
-  // serve thread over a SOCK_SEQPACKET pair.
-  int sp[2];
-  if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sp) != 0)
-    die("broker socketpair");
-  spawn_broker(sp[1], listener, pid);
-  close(sp[1]);
-  if (bpfemu_start(listener, sp[0]) != 0) die("bpfemu thread");
+  spawn_broker(pins, listener, pid);
+  close(listener);
+  if (pins >= 0) close(pins);
 
   // We are pid 1 of the outer pid namespace (Flatpak mode: init's
   // subreaper): reap until the child is gone.

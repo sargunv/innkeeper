@@ -273,7 +273,7 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     fs::create_dir_all(dev.join("socket"))?;
     link(&run.join("bridge"), &dev.join("socket/linuxapk"))?;
     link(&run.join("kmsg"), &dev.join("kmsg"))?;
-    // The bpf() emulator's pins (supervisor/pivot-exec/bpfemu.c).
+    // The bpf() emulator's pins (supervisor/broker/src/bpf.rs).
     fs::create_dir_all("/sys/fs/bpf")?;
     fs::set_permissions("/sys/fs/bpf", fs::Permissions::from_mode(0o1777))?;
     // No cgroup tree in the sandbox: /sys/fs/cgroup is a plain directory, so

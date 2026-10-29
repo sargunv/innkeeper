@@ -68,8 +68,8 @@ flowchart LR
     aosp["system, vendor, product, APEXes"]
   end
   subgraph sup["supervisor/ : syscall boundary (Flatpak sandbox)"]
-    pivot["pivot-exec + bpfemu (supervisor/pivot-exec)"]
-    broker["linuxapk-broker: binder + credentials (supervisor/broker)"]
+    pivot["pivot-exec (supervisor/pivot-exec)"]
+    broker["linuxapk-broker: syscall emulation (supervisor/broker)"]
   end
   subgraph and["android/ : inside the Android session"]
     shim["liblinuxapk_shim.so (supervisor/shim)"]
@@ -88,7 +88,7 @@ flowchart LR
   aosp -.->|"lowest layer"| and
   pivot -->|"fork, exec init"| and
   pivot -->|"seccomp notify fd"| broker
-  broker <-->|"trapped binder and credential syscalls"| and
+  broker <-->|"trapped syscalls"| and
   hwc -->|"display service: dma-buf frames"| bridge
   snd -->|"audio service: memfd ring"| bridge
   health -->|"hoststate service: battery"| bridge

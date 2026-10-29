@@ -1,4 +1,4 @@
-// Which syscalls does the session's seccomp filter (pivot-exec/bpfemu.c) turn
+// Which syscalls does the session's seccomp filter (broker/src/filter.rs) turn
 // into user notifications? Built and run by seccomp-filter.sh on the host.
 // A child installs the filter (bootless harness, virtual credentials and
 // Flatpak variants) and serves its listener; a grandchild makes each probe
@@ -19,7 +19,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "../pivot-exec/bpfemu.h"
+extern int linuxapk_filter_install(int harness);
 
 struct probe {
   const char* name;
@@ -62,7 +62,7 @@ static struct probe probes[] = {
 // Prints one line per probe: "<name> <0|1>" (1 = notified).
 static int run(int harness) {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-  int lfd = bpfemu_install_filter(harness);
+  int lfd = linuxapk_filter_install(harness);
   if (lfd < 0) return perror("filter"), 1;
   static struct stat st;
   for (int i = 0; i < NPROBES; i++)
