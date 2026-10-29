@@ -91,6 +91,21 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
+    /// A fresh activation token using the source window and newest seat serial.
+    pub fn activation_token(&self, window: u32) -> Option<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let s = self.state.lock().unwrap();
+            let conn = s
+                .shown
+                .get(&window)
+                .map(|(conn, _)| *conn)
+                .or_else(|| s.displays.keys().next().copied())?;
+            s.displays[&conn].send(Cmd::ExportToken(window, tx)).ok()?;
+        }
+        rx.recv_timeout(Duration::from_secs(1)).ok()
+    }
+
     /// Drops a queued request, or closes a shown window.
     pub fn destroy(&self, window: u32) {
         let mut s = self.state.lock().unwrap();

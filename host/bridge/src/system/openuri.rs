@@ -1,5 +1,5 @@
-//! Opening web links from Android in the host browser, through the OpenURI
-//! portal. Only absolute `http`/`https` URLs in
+//! Opening links from Android through the OpenURI
+//! portal. Absolute external URIs in
 //! plain ASCII get through, at most [`MAX_URI`] bytes and [`RATE`] per
 //! window per connection; every one is logged.
 
@@ -15,7 +15,7 @@ pub const MAX_URI: usize = 8192;
 pub const RATE: usize = 5;
 pub const RATE_WINDOW: Duration = Duration::from_secs(10);
 
-/// Checks that `u` is an absolute http(s) URL with a host, in printable
+/// Checks that `u` is an external URI (http(s) must have a host), in printable
 /// ASCII without spaces, quotes or backslashes (Android sends it
 /// percent-encoded; IRIs are converted on that side).
 pub fn validate(u: &str) -> Result<(), &'static str> {
@@ -29,6 +29,23 @@ pub fn validate(u: &str) -> Result<(), &'static str> {
         return Err("character not allowed in a URL");
     }
     let lower = u.to_ascii_lowercase();
+    let (scheme, value) = lower.split_once(':').ok_or("no scheme")?;
+    if scheme.is_empty()
+        || !scheme.as_bytes()[0].is_ascii_alphabetic()
+        || !scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b))
+        || matches!(
+            scheme,
+            "file" | "content" | "intent" | "javascript" | "data"
+        )
+        || (value.is_empty() && scheme != "mailto")
+    {
+        return Err("not an external URI");
+    }
+    if !matches!(scheme, "http" | "https") {
+        return Ok(());
+    }
     let rest = lower
         .strip_prefix("https://")
         .or_else(|| lower.strip_prefix("http://"))
@@ -69,6 +86,15 @@ impl RateLimit {
 
 /// Opens a validated URL. Errors are reply statuses.
 pub fn open(dbus: Option<&zbus::blocking::Connection>, url: &str, who: &str) -> Result<(), i32> {
+    open_with_activation(dbus, url, who, "")
+}
+
+pub fn open_with_activation(
+    dbus: Option<&zbus::blocking::Connection>,
+    url: &str,
+    who: &str,
+    activation: &str,
+) -> Result<(), i32> {
     if let Err(why) = validate(url) {
         crate::warn!(
             "openuri: {who}: refused ({why}): {:?}",
@@ -78,7 +104,10 @@ pub fn open(dbus: Option<&zbus::blocking::Connection>, url: &str, who: &str) -> 
     }
     crate::info!("openuri: {who}: {}", crate::ipc::wire::truncate(url, 512));
     let conn = dbus.ok_or(-ENOSYS)?;
-    let opts: HashMap<&str, Value<'_>> = HashMap::new();
+    let mut opts: HashMap<&str, Value<'_>> = HashMap::new();
+    if !activation.is_empty() {
+        opts.insert("activation_token", Value::from(activation));
+    }
     let r: zbus::Result<zbus::zvariant::OwnedObjectPath> = conn
         .call_method(
             Some("org.freedesktop.portal.Desktop"),
@@ -106,6 +135,10 @@ mod tests {
     #[test]
     fn urls() {
         for ok in [
+            "mailto:",
+            "mailto:a@b",
+            "MAILTO:a@b?subject=Hello%20world",
+            "tel:+123456",
             "https://example.com",
             "http://example.com:8080/a/b?c=d&e=%20#frag",
             "https://user@host/",
@@ -117,6 +150,7 @@ mod tests {
         for bad in [
             "",
             "file:///etc/passwd",
+            "content://provider/file",
             "javascript:alert(1)",
             "https://",
             "https:///path",

@@ -64,6 +64,8 @@ pub enum Cmd {
     Destroy(u32),
     /// Activate a window, with this activation token if there is one.
     Activate(u32, Option<String>),
+    /// Return a token for a portal launch rather than activating our window.
+    ExportToken(u32, std::sync::mpsc::Sender<String>),
     /// A buffer of the window's display.
     BufferAdd(BufferSpec, u32, OwnedFd),
     BufferRemove(u32),
@@ -216,7 +218,7 @@ impl Dispatch2<WpFractionalScaleV1, State> for ScaleOf {
 }
 
 /// An activation token request for a window.
-struct TokenFor(u32);
+struct TokenFor(u32, Option<std::sync::mpsc::Sender<String>>);
 impl Dispatch2<XdgActivationTokenV1, State> for TokenFor {
     fn event(
         &self,
@@ -227,7 +229,9 @@ impl Dispatch2<XdgActivationTokenV1, State> for TokenFor {
         _: &QueueHandle<State>,
     ) {
         if let xdg_activation_token_v1::Event::Done { token } = e {
-            if let (Some(a), Some(w)) = (&st.activation, st.windows.get(&self.0)) {
+            if let Some(reply) = &self.1 {
+                let _ = reply.send(token);
+            } else if let (Some(a), Some(w)) = (&st.activation, st.windows.get(&self.0)) {
                 a.activate(token, w.window.wl_surface());
             }
             t.destroy();
@@ -564,7 +568,13 @@ impl State {
             a.activate(t, w.window.wl_surface());
             return;
         }
-        let t = a.get_activation_token(&self.qh, TokenFor(id));
+        self.token(id, None);
+    }
+
+    fn token(&self, id: u32, reply: Option<std::sync::mpsc::Sender<String>>) {
+        let Some(a) = &self.activation else { return };
+        let internal = reply.is_none();
+        let t = a.get_activation_token(&self.qh, TokenFor(id, reply));
         if let Some(seat) = &self.seat.wl_seat
             && self.seat.last_serial != 0
         {
@@ -573,7 +583,9 @@ impl State {
         if let Some(f) = self.seat.keyboard_focus.and_then(|f| self.windows.get(&f)) {
             t.set_surface(f.window.wl_surface());
         }
-        t.set_app_id(w.app_id.clone());
+        if internal && let Some(w) = self.windows.get(&id) {
+            t.set_app_id(w.app_id.clone());
+        }
         t.commit();
     }
 
@@ -585,6 +597,7 @@ impl State {
             }
             Cmd::Destroy(id) => self.destroy(id),
             Cmd::Activate(id, token) => self.activate(id, token),
+            Cmd::ExportToken(id, reply) => self.token(id, Some(reply)),
             Cmd::BufferAdd(b, window, fd) => self.add_buffer(b, window, fd),
             Cmd::BufferRemove(id) => self.remove_buffer(id),
             Cmd::Frame {

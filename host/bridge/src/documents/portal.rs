@@ -23,6 +23,15 @@ pub fn pick(
     parent: &str,
     p: &Pick,
 ) -> Result<Vec<PathBuf>, i32> {
+    pick_with_activation(conn, parent, p, "")
+}
+
+pub fn pick_with_activation(
+    conn: &zbus::blocking::Connection,
+    parent: &str,
+    p: &Pick,
+    activation: &str,
+) -> Result<Vec<PathBuf>, i32> {
     let token = format!("linuxapk{}", TOKEN.fetch_add(1, Ordering::Relaxed));
     let sender = conn
         .unique_name()
@@ -44,6 +53,9 @@ pub fn pick(
     let mut opts: HashMap<&str, Value<'_>> = HashMap::new();
     opts.insert("handle_token", Value::from(token.as_str()));
     opts.insert("modal", Value::from(true));
+    if !activation.is_empty() {
+        opts.insert("activation_token", Value::from(activation));
+    }
     if p.mode == PickMode::OpenMultiple {
         opts.insert("multiple", Value::from(true));
     }

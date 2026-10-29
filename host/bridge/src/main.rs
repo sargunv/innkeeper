@@ -99,11 +99,12 @@ fn main() -> Result<()> {
             events,
         )?))
     });
+    let handoff_input = hub.clone();
     services.register(service::INPUT, "input", move |peer, events| {
         Ok(Box::new(InputService::new(hub.clone(), peer, events)))
     });
     // Not in the socket directory, which is shared with Android.
-    let shared = Shared::with_policy(&run_dir, policy);
+    let shared = Shared::with_input(&run_dir, policy, handoff_input);
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))

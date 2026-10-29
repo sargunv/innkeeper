@@ -8,7 +8,8 @@
 //!   text scale), the time zone and the locale
 //! - `notify`: `org.freedesktop.Notifications`
 //! - `clipboard`: the Wayland clipboard through `ext-data-control-v1`
-//! - `openuri`: the OpenURI portal (http and https only)
+//! - `openuri`: external URI validation and the OpenURI portal
+//! - `handoff`: files, desktop share targets, FileChooser SaveFile and Email
 //! - `mpris`: MediaSessions as MPRIS players
 //! - lifecycle: what keeps the session up, written to `<run-dir>/lifecycle`
 //!   for the launcher's idle shutdown (docs/session.md, "Lifecycle"), and
@@ -19,6 +20,7 @@
 //! owner of the app's data directory at connect time.
 
 pub mod clipboard;
+pub mod handoff;
 pub mod mpris;
 pub mod notify;
 pub mod openuri;
@@ -71,6 +73,7 @@ impl Default for Policy {
 /// time a client asks for it.
 pub struct Shared {
     art_dir: PathBuf,
+    handoffs: Arc<handoff::Handoffs>,
     /// `<run-dir>/lifecycle`, and the client whose report it holds.
     lifecycle: PathBuf,
     lifecycle_owner: std::sync::Mutex<Option<u64>>,
@@ -88,11 +91,20 @@ impl Shared {
     /// Android shares): MPRIS artwork goes in `art/`, the lifecycle report in
     /// `lifecycle`.
     pub fn with_policy(run_dir: &std::path::Path, policy: Policy) -> Arc<Shared> {
+        Self::with_input(run_dir, policy, crate::input::Hub::new())
+    }
+
+    pub fn with_input(
+        run_dir: &std::path::Path,
+        policy: Policy,
+        input: Arc<crate::input::Hub>,
+    ) -> Arc<Shared> {
         if policy != Policy::default() {
             crate::info!("system: test session: {policy:?} (log-only sinks)");
         }
         Arc::new(Shared {
             art_dir: run_dir.join("art"),
+            handoffs: handoff::Handoffs::new(input),
             lifecycle: run_dir.join("lifecycle"),
             lifecycle_owner: Default::default(),
             policy,
@@ -109,6 +121,7 @@ impl Shared {
     /// stay up after their sender exits, so close them. (MPRIS players and the
     /// clipboard source go away with the process.)
     pub fn shutdown(&self) {
+        self.handoffs.clear();
         if let Some(Some(n)) = self.notify.get() {
             n.close_everything();
         }
@@ -348,7 +361,8 @@ impl SystemService {
             );
             return Reply::ok();
         }
-        match openuri::open(self.shared.dbus(), &url, &self.label) {
+        let token = self.shared.handoffs.activation_token(0);
+        match openuri::open_with_activation(self.shared.dbus(), &url, &self.label, &token) {
             Ok(()) => Reply::ok(),
             Err(e) => Reply::err(e),
         }
@@ -449,13 +463,66 @@ impl Service for SystemService {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),
         };
-        // Exactly one fd for blob requests, none otherwise.
-        if fds.len() != req.takes_fd() as usize {
+        // Metadata blobs take one fd; HANDOFF can add up to three content fds.
+        if fds.len() != req.fd_count() {
             return Reply::err(-EPROTO);
+        }
+        if let Request::Handoff {
+            window,
+            action,
+            files,
+            ask,
+            len,
+        } = req
+        {
+            let metadata = fds.remove(0);
+            let bytes = match blob::read(&metadata, len, 64 << 10) {
+                Ok(b) => b,
+                Err(e) => return Reply::err(e),
+            };
+            let payload = match handoff::Payload::decode(&bytes, files) {
+                Ok(p) => p,
+                Err(e) => return Reply::err(e.status()),
+            };
+            if action == 1 && openuri::validate(&payload.text).is_err() {
+                return Reply::err(-EINVAL);
+            }
+            if !self.uri_rate.allow(Instant::now()) {
+                return Reply::err(-EAGAIN);
+            }
+            if !self.shared.policy.open_urls {
+                crate::info!(
+                    "handoff: {}: not opened (test session): action {action}, {} files, {}",
+                    self.label,
+                    files,
+                    crate::ipc::wire::truncate(&payload.text, 200)
+                );
+                return Reply::ok();
+            }
+            let Some(conn) = self.shared.dbus().cloned() else {
+                return Reply::err(-ENOSYS);
+            };
+            let handoffs = self.shared.handoffs.clone();
+            let Some(slot) = handoffs.slot() else {
+                return Reply::err(-EBUSY);
+            };
+            return match std::thread::Builder::new()
+                .name("desktop-handoff".into())
+                .spawn(move || {
+                    let result = handoffs.run(&conn, window, action, ask, payload, fds);
+                    if let Err(e) = result {
+                        crate::warn!("handoff: action {action} ended: {e}");
+                    }
+                    drop(slot);
+                }) {
+                Ok(_) => Reply::ok(),
+                Err(_) => Reply::err(-EAGAIN),
+            };
         }
         let fd = fds.pop();
         let fd = || fd.as_ref().expect("checked above");
         match req {
+            Request::Handoff { .. } => unreachable!("handled above"),
             Request::Start { features } => self.start(features),
             Request::Notify { id, len } => self.notify(id, len, fd()),
             Request::NotifyClose { id } => {

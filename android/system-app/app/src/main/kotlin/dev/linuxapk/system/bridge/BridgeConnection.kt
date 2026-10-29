@@ -127,6 +127,17 @@ class BridgeConnection(
     body: Wire.Writer.() -> Unit,
     onReply: (Reply) -> Unit,
   ): Boolean {
+    return writeFiles(type, if (fd == null) emptyArray() else arrayOf(fd), body, onReply)
+  }
+
+  /** Sends up to four fds; ownership stays with the caller. */
+  fun writeFiles(
+    type: Int,
+    fds: Array<FileDescriptor>,
+    body: Wire.Writer.() -> Unit,
+    onReply: (Reply) -> Unit,
+  ): Boolean {
+    require(fds.size <= 4)
     val s = socket ?: return false
     if (!connected) return false
     val tag = tags.getAndIncrement() and 0x7fffffff
@@ -134,7 +145,7 @@ class BridgeConnection(
     if (msg.size > Wire.MAX_MSG) return false
     pending[tag] = onReply
     return try {
-      write(s, msg, fd)
+      write(s, msg, fds)
       true
     } catch (e: IOException) {
       pending.remove(tag)
@@ -143,10 +154,10 @@ class BridgeConnection(
     }
   }
 
-  private fun write(s: LocalSocket, msg: ByteArray, fd: FileDescriptor?) {
+  private fun write(s: LocalSocket, msg: ByteArray, fds: Array<FileDescriptor>) {
     synchronized(writeLock) {
       // LocalSocket keeps outbound fds until replaced, so set them for every write.
-      s.setFileDescriptorsForSend(if (fd != null) arrayOf(fd) else null)
+      s.setFileDescriptorsForSend(fds.takeIf { it.isNotEmpty() })
       try {
         s.outputStream.write(msg)
       } finally {
@@ -196,7 +207,7 @@ class BridgeConnection(
 
   private fun session(s: LocalSocket) {
     val buf = ByteArray(Wire.MAX_MSG + 1)
-    write(s, Wire.hello(HELLO_TAG, service, name), null)
+    write(s, Wire.hello(HELLO_TAG, service, name), emptyArray())
     val input = s.inputStream
     while (running) {
       val n = input.read(buf)
