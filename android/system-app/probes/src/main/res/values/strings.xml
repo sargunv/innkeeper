@@ -5,5 +5,6 @@
   <string name="input_probe_name">Linux.apk input probe</string>
   <string name="text_probe_name">Linux.apk text probe</string>
   <string name="window_probe_name">Linux.apk window probe</string>
+  <string name="display_compat_probe_name">Linux.apk display compat probe</string>
   <string name="a11y_probe_name">Linux.apk accessibility probe</string>
 </resources>

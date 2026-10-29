@@ -129,6 +129,22 @@ sys.exit(1)
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
       echo 'ok   requested-orientation host window shape (portrait -> landscape)'
+      # An activity that handles no configuration changes, closed and opened again. Android 17's
+      # display-compat recovery relaunches onto a display that is still going away if we release
+      # the VirtualDisplay before its tasks are gone; that throw is on the display thread and
+      # restarts the framework.
+      system_server=$(s pidof system_server)
+      launch DisplayCompatProbe
+      wm CLOSE --ei display "$display" | grep -q "closed display=$display"
+      launch DisplayCompatProbe
+      wm CLOSE --ei display "$display" | grep -q "closed display=$display"
+      [[ $(s pidof system_server) == "$system_server" ]]
+      s logcat -d -b crash -t 50 >"$T/display-compat-crash.txt"
+      if file_has "$T/display-compat-crash.txt" 'FATAL EXCEPTION IN SYSTEM PROCESS'; then
+        echo 'FAIL framework restarted while closing DisplayCompatProbe' >&2
+        exit 1
+      fi
+      echo 'ok   closing a config-blind window left system_server running'
       ;;
     audio)
       s cmd media_session volume --stream 3 --set 15 >/dev/null

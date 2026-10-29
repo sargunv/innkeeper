@@ -83,6 +83,12 @@
       android:exported="true"
       android:screenOrientation="portrait" />
 
+    <!-- Handles no configuration changes, so a window close can trip display-compat recovery. -->
+    <activity
+      android:name=".DisplayCompatProbe"
+      android:exported="true"
+      android:label="@string/display_compat_probe_name" />
+
     <!-- Insets and elevation-shadow check for app windows (docs/display.md). -->
     <activity
       android:name=".WindowProbeActivity"

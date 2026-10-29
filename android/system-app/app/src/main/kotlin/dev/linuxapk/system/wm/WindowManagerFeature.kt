@@ -69,6 +69,8 @@ class WindowManagerFeature(
   }
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
+  // Closed windows whose VirtualDisplay is held until its tasks are gone.
+  private val releasing = ArrayList<AppWindow>()
   // The scale new windows start at: the last one a window reported (kept across restarts, so the
   // first window after boot opens at the desktop's scale).
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
@@ -116,6 +118,9 @@ class WindowManagerFeature(
     var requestedVisibleTypes = WindowInsets.Type.systemBars()
     var insetComponent: ComponentName? = null
     var game = false
+    /** Task ids we asked to finish and are still waiting to leave before [releaseDisplay]. */
+    var pendingRemoval: Set<Int> = emptySet()
+    var releaseFallback: Runnable? = null
   }
 
   /** One row of [list]. */
@@ -151,7 +156,10 @@ class WindowManagerFeature(
 
   override fun stop() {
     atm.unregisterTaskStackListener(taskListener)
-    onWm { windows.values.toList().forEach { close(it, finishTasks = false) } }
+    onWm {
+      windows.values.toList().forEach { close(it, finishTasks = false) }
+      releasing.toList().forEach(::releaseDisplay)
+    }
     thread.quitSafely()
     frames.quitSafely()
   }
@@ -392,7 +400,42 @@ class WindowManagerFeature(
       }
     }
     input.destroyWindow(w.id)
-    // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
+    releasing += w
+    // Android 17 posts AppCompatDisplayCompatPolicy's recovery start on the display thread, with
+    // launchDisplayId set to the display the task is leaving. Releasing this VirtualDisplay first
+    // makes that start throw (the display is gone) and restart the framework. Wait until the tasks
+    // are actually gone; the timeout covers a task that never reports removal.
+    w.pendingRemoval = tasksOn(w.id).map { it.taskId }.toSet()
+    if (w.pendingRemoval.isEmpty()) {
+      releaseDisplay(w)
+      return
+    }
+    val fallback = Runnable {
+      if (w.releaseFallback != null) {
+        Log.w(TAG, "display ${w.id}: releasing with tasks ${w.pendingRemoval} still attached")
+        releaseDisplay(w)
+      }
+    }
+    w.releaseFallback = fallback
+    handler.postDelayed(fallback, RELEASE_TIMEOUT_MS)
+  }
+
+  /** Drops [taskId] from a display waiting to be released, and releases it once none remain. */
+  private fun noteTaskRemoved(taskId: Int) {
+    val w = releasing.firstOrNull { taskId in it.pendingRemoval } ?: return
+    w.pendingRemoval -= taskId
+    if (w.pendingRemoval.isEmpty()) releaseDisplay(w)
+  }
+
+  private fun tasksOn(displayId: Int) = allTasks().filter { Tasks.displayId(it) == displayId }
+
+  // The display id must still exist until this returns: a queued display-compat
+  // relaunch targets it.
+  private fun releaseDisplay(w: AppWindow) {
+    w.releaseFallback?.let(handler::removeCallbacks)
+    w.releaseFallback = null
+    if (!releasing.remove(w)) return
+    Log.i(TAG, "releasing display ${w.id} (${w.pkg})")
     wms.setDisplayWindowInsetsController(w.id, null)
     w.display.release()
     w.reader.close()
@@ -529,7 +572,10 @@ class WindowManagerFeature(
 
       override fun onTaskCreated(taskId: Int, componentName: ComponentName?) = queueRefresh()
 
-      override fun onTaskRemoved(taskId: Int) = queueRefresh()
+      override fun onTaskRemoved(taskId: Int) {
+        handler.post { noteTaskRemoved(taskId) }
+        queueRefresh()
+      }
 
       override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo?) = queueRefresh()
 
@@ -630,6 +676,9 @@ class WindowManagerFeature(
     private const val MAX_TASKS = 200
     private const val SIZE_DEBOUNCE_MS = 120L
     private const val LAUNCH_TIMEOUT_MS = 20_000L
+    // Long enough for removeTask to deliver onTaskRemoved; short enough that a stuck task
+    // does not keep its Wayland-less display forever.
+    private const val RELEASE_TIMEOUT_MS = 500L
 
     // WindowManager.DISPLAY_IME_POLICY_LOCAL: the input method binds to editors in the window. The
     // default one, the Linux.apk Keyboard (ime/), draws nothing; an Android IME the user picks
