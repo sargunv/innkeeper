@@ -11,8 +11,12 @@ host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
 unit=linuxapk-nested-$LINUXAPK_INSTANCE
 phase=bootstrap
+private_bus=""
 cleanup() {
-  local result=$?
+  local result=$? portal
+  # Cleanup failures must not replace the nested command's exit status.
+  trap - ERR
+  set +e
   journalctl --user -u "$unit" --no-pager -n 80 >"$N/service.log" 2>&1 || true
   if ((result != 0)); then
     echo "nested: $phase failed (compositor=$LINUXAPK_TEST_COMPOSITOR, status=$result)" >&2
@@ -31,9 +35,29 @@ cleanup() {
     DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
       systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
+  # Resolve only the owner on our private bus, before stopping that bus.
+  # Looking up an absent owner does not activate a new portal during teardown.
+  if [[ -n $private_bus ]]; then
+    portal=$(timeout 1 gdbus call --address "$private_bus" --dest org.freedesktop.DBus \
+      --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.GetConnectionUnixProcessID \
+      org.freedesktop.portal.Documents 2>/dev/null)
+    if [[ $portal =~ ^\(uint32\ ([0-9]+),\)$ ]]; then
+      kill "${BASH_REMATCH[1]}" 2>/dev/null || true
+    fi
+  fi
   DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
     systemctl --user stop "$unit" 2>/dev/null || true
-  rm -rf "$rt"
+  if mountpoint -q "$rt/doc"; then
+    timeout 1 fusermount3 -u "$rt/doc" 2>/dev/null ||
+      timeout 1 fusermount3 -uz "$rt/doc" 2>/dev/null
+  fi
+  # Never descend into a portal mount which could not be detached.
+  if mountpoint -q "$rt/doc"; then
+    echo "nested: cleanup leaked private runtime $rt (document portal still mounted)" >&2
+  elif ! rm -rf "$rt"; then
+    echo "nested: cleanup leaked private runtime $rt (removal failed)" >&2
+  fi
+  return "$result"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -121,6 +145,7 @@ done
   exit 1
 }
 DBUS_SESSION_BUS_ADDRESS=$(cat "$N/bus")
+private_bus=$DBUS_SESSION_BUS_ADDRESS
 export XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=lapk-nested DBUS_SESSION_BUS_ADDRESS
 export LINUXAPK_NESTED=1
 if [[ $LINUXAPK_TEST_COMPOSITOR == mutter ]]; then
