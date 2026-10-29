@@ -75,8 +75,9 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
 
 ## Workflow
 
-- Push straight to `main`: rebase, never merge, never force-push. Logical
-  commits with clear messages; `mise run check` passes before every push.
+- Every change goes through a PR (the full-send workflow): a branch, proof,
+  review, a PR, CI and review bots green, then merge. Logical commits with clear
+  messages; `mise run check` passes before every push. Never force-push `main`.
 - The repo is public: never commit secrets, image contents or third-party APKs.
   Generated files go in `out/`. Post nothing outside this repo.
 - Never commit media. Upload screenshots to the README media issue with
