@@ -3,41 +3,43 @@
 Cross-module tests; they run on the host and are never shipped. Module-local
 tests live next to their code. Every tier needs `mise run build` (the unit tier
 for the staged launcher), and the session tiers a prepared image. Their logs go
-under `out/test/<suite>/`. Session suites use `tools/dev/session.sh`: real
-Flatpak by default, private installation and HOME/XDG directories under `out/`,
-and host-side 6/8 GiB scope limits. Set `LINUXAPK_MODE=host` to compare the same
-stage through the host launcher. Set `LINUXAPK_INSTANCE` to a unique name;
-suites stop and reset the data they create. Run windowed compat through
-`tests/nested.sh mise run test:compat -- --window`; it cleans up its private
-KWin, bus, runtime and XDG dirs. CLI tests automatically use that desktop. GTK
-DynamicLauncher can be selected for tests with
-`LINUXAPK_TEST_LAUNCHER_PORTAL=gtk`. Its dialogs are confirmed through AT-SPI
-only on that private desktop.
+under `out/test/<suite>/`. The session suites run the stage in a private Flatpak
+through `tools/dev/session.sh`
+([packaging/flatpak](../packaging/flatpak/README.md#development)), or outside it
+with `LINUXAPK_MODE=host`; each runs a named instance (`LINUXAPK_INSTANCE`) on a
+fresh `/data` and resets it at the end. The windowed ones (e2e, `--window`
+compat, `lifecycle.sh`) run themselves on `nested.sh`'s disposable KWin, with a
+private bus, runtime dir and XDG dirs. There e2e uses the GTK DynamicLauncher
+backend (`LINUXAPK_TEST_LAUNCHER_PORTAL`; KDE's dialog fails to load on a nested
+KWin), whose dialogs `e2e/cli/confirm.py` accepts over AT-SPI. In Flatpak mode
+the CLI suite opens a custom scheme through `linuxapk run` rather than
+`gio open`: DynamicLauncher doesn't update the MIME cache.
 
 | Tier       | Task                     | What                                                                                                                                                      |
 | ---------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | unit       | `mise run test`          | Rust workspace, the broker fuzzer (bounded), the system app's `:protocol`, the HAL and bridge-client host tests, and the supervisor and image shell tests |
-| bionic     | `mise run test:bionic`   | Android binaries in a fresh Flatpak session; host comparison uses the minimal bootless runner                                                             |
-| binder     | `mise run test:binder`   | AOSP binder tests on the broker; kernel binder oracle is unavailable in Flatpak (exit 77)                                                                 |
-| boot       | `mise run test:boot`     | a fresh headless boot plus `selftest`; host mode also checks both uid modes                                                                               |
+| bionic     | `mise run test:bionic`   | Android test binaries against our HALs and drivers, in a booted session with its framework stopped (`bionic/run.sh`)                                      |
+| binder     | `mise run test:binder`   | AOSP's binder gtests on the broker, then on kernel binder where binderfs exists, so not in Flatpak (77) (`supervisor/tests/binder`)                       |
+| boot       | `mise run test:boot`     | a fresh headless boot plus `selftest`, in host mode in subuid and single-uid mode (`boot.sh`)                                                             |
 | e2e        | `mise run test:e2e`      | audio, system-app and CLI suites on an isolated nested KWin (`e2e/run.sh`)                                                                                |
 | a11y       | `mise run test:a11y`     | Android apps on AT-SPI in a nested, isolated KWin with its own AT-SPI bus, checked with pyatspi (`a11y/run.sh`)                                           |
 | compat     | `mise run test:compat`   | the 31-app F-Droid corpus ([compat](compat/README.md))                                                                                                    |
 | host state | `tests/hoststate/run.sh` | battery, power saver, metering, live locale and location against python-dbusmock and a mock Location portal on private buses (`--deny`: a portal refusal) |
 
-- **`bionic/run.sh`** runs binaries in the actual Flatpak runtime. `-v` supplies
-  an addon vendor layer, `-t` streams test files to `/data/nativetest64`, and
-  mutable `LINUXAPK_PROPS` entries become real properties. Read-only overrides
-  preload the test shim from a path allowed by the vendor or platform linker
-  namespace. Frame dumps go to `out/test/bionic/<instance>/frames`. The host
-  comparison retains the bootless image-rooted namespace and props shim.
-- `tests/lifecycle.sh` uses the unshipped probes APK to check foreground audio
-  with no activity, idle shutdown, and an alarm rescheduled on boot. It uses an
-  isolated nested desktop and a private audio sink.
+- **`bionic/run.sh`** is the one runner for on-device binaries. In Flatpak mode
+  (`bionic/flatpak.sh`) it boots a session with `-v` dirs as an addon's vendor
+  layer, stops Android's framework so the program has the composer to itself,
+  copies `-t`'s dir to `/data/nativetest64` and runs the program with
+  `session exec`; `LINUXAPK_PROPS` become real properties, except `ro.*` ones,
+  which `props-shim.c` serves. In host mode it boots nothing: it builds an
+  image-rooted namespace (the image's `/system` and flattened `/apex`, the
+  stage's `/vendor`, a generated `/linkerconfig`) and runs the program under
+  pivot-exec and the broker, with servicemanager and our graphics HALs up, and
+  `props-shim.c` standing in for the property service. Either way it is capped.
 - The e2e suites install `out/test/probes/LinuxApkProbes.apk` from the system
   app's build; the audio suite routes to a private null sink.
-
-`LINUXAPK_TEST_UPDATE=1 mise run test:e2e` also refreshes the private Flatpak
-deployment and checks an existing menu entry after that update.
-`tools/dev/benchmark.sh` compares fresh/cold boot, idle memory, Binder
-throughput and gfxinfo for OpenCalc, Wikipedia and Tomato in isolated KWin.
+  `LINUXAPK_TEST_UPDATE=1` adds a Flatpak update under an existing menu entry
+  and a cold launch's splash time (200 ms at most) to the CLI suite.
+- `lifecycle.sh` checks with the probes that foreground audio outlives its
+  activity and the idle grace, then that the session stops idle and an alarm set
+  before it wakes the session and fires.

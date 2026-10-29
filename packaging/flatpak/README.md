@@ -47,21 +47,21 @@ also granted (`flatpak run --filesystem=<runtime dir>/doc`). Flatpak moves
 
 ## Development
 
-`mise run session -- ...` uses `tools/dev/session.sh`. `dev-init.sh` registers a
-snapshot of `out/stage` once in the private `out/flatpak/user` installation. The
-runner uses `flatpak run --app-path=<absolute out/stage>`, so ordinary rebuilds
-do not export or package anything. Run `dev-init.sh` explicitly to refresh the
-registered deployment when testing an update and its menu entries. Both
-registration and sandbox HOME/XDG state stay under `out/`.
+`mise run session -- ...` and the session test suites run the stage in this
+sandbox through `tools/dev/session.sh` (`tools/dev/linuxapk.sh` for the CLI),
+without building the Flatpak:
 
-The dev sandbox also grants the exact stage path read-only and starts its
-executables there. Portal-spawned sessions, including alarm wakeups, retain that
-prefix and grant. Registered dev menu commands forward to the current stage, so
-they also see ordinary rebuilds. XDG overrides are applied after Flatpak
-initializes its environment. Stop the named session before rebuilding the stage.
-
-The host driver sets `MemoryHigh=6G` and `MemoryMax=8G` on the app scope before
-releasing the initial start gate, and monitors alarm replacement scopes. The cap
-is a development/test facility outside the sandbox, with no systemd bus grant.
-`status` and `exec` use the launcher's existing control socket protocol from the
-host, avoiding a second Flatpak for each Android command.
+- The first use runs `dev-init.sh`, which installs a snapshot of `out/stage`
+  into the private `out/flatpak/user`. Each run then mounts the current stage as
+  `/app` (`flatpak run --app-path`) and grants it read-only, so sessions the
+  portal spawns, alarm wakeups included, start the stage's files too, and the
+  snapshot's `linuxapk` and `linuxapk-manager` forward to the stage for menu
+  entries. Rerun `dev-init.sh` to test a Flatpak update.
+- HOME and the XDG dirs are scratch dirs under `out/dev/<mode>/<instance>`; the
+  image cache is the user's.
+- The driver holds the sandbox at a gate until it has set `MemoryHigh=6G` and
+  `MemoryMax=8G` on its scope from the host, and a host-side watcher caps the
+  sandboxes alarm wakeups start. The app gets no systemd access for it.
+- `status`, `stop` and `exec` talk to the session's control socket from the
+  host, with no Flatpak per command.
+- Stop a session before rebuilding the stage it runs.

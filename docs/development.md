@@ -51,19 +51,17 @@ flowchart LR
 ## Run
 
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare` runs
-  the current stage inside a real Flatpak through `tools/dev/session.sh`. The
-  first command registers a stage snapshot in `out/flatpak/user`; later builds
-  use `flatpak run --app-path=out/stage`, with no export or bundle. The default
-  named instance is `dev`. Scratch HOME and XDG dirs are under
-  `out/dev/flatpak/<instance>`; `tools/dev/session.sh paths` prints them. Only
-  the prepared image cache is shared with the host setup. The host driver caps
-  the app's scope at 6/8 GiB and waits when less than 25 GiB of host memory is
-  available. Use `LINUXAPK_MODE=host` for comparison.
+  the staged launcher ([host/launcher](../host/launcher/README.md)) in a private
+  Flatpak, capped from the host, with scratch HOME and XDG dirs under
+  `out/dev/flatpak/<instance>` (default instance `dev`); it waits while less
+  than 25 GiB is available
+  ([packaging/flatpak](../packaging/flatpak/README.md#development)).
+  `LINUXAPK_MODE=host` runs the stage outside Flatpak instead.
 - `tools/dev/linuxapk.sh install app.apk`, `run`, `uninstall`, `list`
-  ([host/cli](../host/cli/README.md)). CLI integration runs on an isolated
-  desktop: `LINUXAPK_INSTANCE=cli tests/nested.sh tools/dev/linuxapk.sh list`.
-  `tests/nested.sh` starts and cleans up an isolated KWin, D-Bus, AT-SPI bus,
-  runtime directory and HOME/XDG directories.
+  ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of
+  its own: `LINUXAPK_INSTANCE=cli tests/nested.sh tools/dev/linuxapk.sh list`
+  runs it on a nested KWin with a private bus, AT-SPI bus, runtime dir and
+  HOME/XDG dirs, and removes them after.
 - `packaging/flatpak/build.sh` builds the Flatpak from the committed tree and
   installs it into `FLATPAK_USER_DIR`; use a private one under `out/`
   ([packaging/flatpak](../packaging/flatpak/README.md)).

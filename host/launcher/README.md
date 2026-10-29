@@ -42,10 +42,6 @@ session in a sandbox of its own) and `_userns` (a command as Android's root, for
 Tests: `cargo test -p linuxapk-session` (in `mise run test`: subordinate id
 ranges, the uid mode a `/data` keeps, the pin, property merging, mountinfo and
 apex-info parsing) and `mise run test:boot`, which boots a fresh headless
-instance in each uid mode and runs `selftest`.
-
-The development driver is `tools/dev/session.sh`: it mounts the current stage as
-Flatpak `/app` and caps its scope from the host. Flatpak composition uses
-reflink copies because separate filesystem grants cannot hardlink across mount
-points. Host-mode systemd commands explicitly reach the host user manager while
-the bridge retains an isolated test desktop.
+instance and runs `selftest` (in host mode, once in each uid mode). Sessions
+under development run through `tools/dev/session.sh`, the staged launcher in a
+private Flatpak ([packaging/flatpak](../../packaging/flatpak/README.md)).

@@ -174,14 +174,9 @@ reacts to memory pressure through lmkd (PSI), and beyond that the host's OOM
 handling applies, as for any Flatpak app. Talking to systemd to get a cap would
 let the app start any unit, which is a sandbox escape.
 
-Development and test sessions use `tools/dev/session.sh`, which applies
-`MemoryHigh=6G` and `MemoryMax=8G` to the Flatpak scope from the host. Its
-initial sandbox waits at a gate until the cap is installed; a host monitor also
-caps replacement sandboxes created for alarm wakeups. This adds no sandbox
-permission. The driver defaults to Flatpak, mounts the current `out/stage` as
-`/app`, uses a private installation under `out/flatpak/user`, and keeps HOME and
-XDG data under `out/`. `LINUXAPK_MODE=host` runs the same stage through the host
-launcher for comparisons.
+Development and test sessions get the usual 6/8 GiB cap from outside: the dev
+driver sets it on their Flatpak scope from the host
+([packaging/flatpak](../packaging/flatpak/README.md#development)).
 
 ## Lifecycle
 
@@ -277,94 +272,53 @@ session must keep it passing.
 
 ## Numbers
 
-Harness measurements on 2026-10-28, Strix Halo with RADV, kernel 7.1.9, CI image
-16644040, Flatpak 1.18.4 and org.gnome.Platform 51. Windowed runs use an
-isolated KWin 6.7.5 desktop; the host has xdg-desktop-portal 1.22.1. These are
-individual runs on a shared development machine, without dropping the host's
-page cache. Host mode uses subuids; Flatpak uses single-uid mode.
+Measured on the dev host (Strix Halo, RADV, kernel 7.1.9), CI image 16644040,
+Flatpak 1.18.4 with org.gnome.Platform 51, on 2026-10-28; windowed runs on a
+nested KWin 6.7.5. Host mode is in subuid mode, Flatpak mode in single-uid mode.
+Single runs on a shared machine, page cache not dropped.
 
-The full 31-app compat runs measure from the dev driver's start to
-`sys.boot_completed` on an existing `/data`, the corpus median app launch, and
-idle cgroup memory after 90 s (`memory.current - file + shmem`). Memory
-admission waits are outside startup timing. The budgets and margins are
-unchanged: cold start 2500 ms + 25%, warm launch 200 ms + 25%, idle memory 575
-MiB + 10%.
+- Idle session, 90 s after a warm boot: 84 processes, 750 to 900 MiB total PSS,
+  and 520 to 575 MiB of cgroup memory without page cache (400 MiB anonymous, 105
+  MiB kernel, mostly page tables). Page cache is charged to whichever session
+  read the image first, so `memory.current` varies more. The binder freezer
+  freezes the 8 cached processes but frees nothing: without swap their pages
+  stay resident. `tools/dev/footprint.sh` lists it per process.
+- In Flatpak mode `start` returns after 0.3 s; the first boot also composes the
+  root.
 
-| Runtime / desktop    | Cold start (ms; limit 3125) | Warm app median (ms; limit 250) | Idle (MiB; limit 633) | Full corpus                      |
-| -------------------- | --------------------------: | ------------------------------: | --------------------: | -------------------------------- |
-| Host, headless       |                 3649 (over) |                             181 |                   544 | 30 work, 1 ABI failure           |
-| Flatpak, headless    |                 3532 (over) |                             200 |                   527 | 29 work, 1 partly, 1 ABI failure |
-| Host, nested KWin    |                        2186 |                             209 |                   563 | 29 work, 1 partly, 1 ABI failure |
-| Flatpak, nested KWin |                        2868 |                             234 |                   519 | 29 work, 1 partly, 1 ABI failure |
+The same stage in both modes, `tools/dev/benchmark.sh` on a nested KWin: boot to
+`sys.boot_completed` on a fresh `/data`, then a restart on it; idle memory 90 s
+after that; `binderThroughputTest -w 2 -i 20000 -p` through the broker.
 
-Open Sudoku's corpus APK is arm64-only and fails to install in both modes.
-Rethink renders in Flatpak, but its VPN cannot connect without a TUN device; the
-Flatpak run therefore fails the unchanged 30-working-app baseline. The host
-windowed run's partly working app was Mastodon: its live OAuth check did not
-emit a desktop URL. The host headless run passed that check. Both full headless
-runs exceeded the cold-start limit; neither timing is discarded. Raw results are
-in `out/test/compat/m6-{host,flatpak}-{headless,window}/`.
+| Measurement                          |   Host | Flatpak |
+| ------------------------------------ | -----: | ------: |
+| Boot, fresh `/data` (ms)             |   4180 |    3264 |
+| Boot, restart (ms)                   |   2318 |    2811 |
+| Idle memory without page cache (MiB) |    560 |     525 |
+| Binder round trip, mean / p99 (µs)   | 46/370 |   29/44 |
 
-A focused host-windowed Mastodon retest also passed, at 2766 ms cold start and
-562 MiB idle. It does not replace the original full-run failure.
+Frame times from `dumpsys gfxinfo <package>` (Android's rendering, not the
+compositor's presentation), over startup and ten tap-and-scroll rounds; 5 ms is
+the histogram's lowest bucket:
 
-A later targeted Flatpak headless run (OpenCalc only) passed startup and memory
-limits: 2915 ms cold start, 527 MiB idle, 121 ms app launch. A subset run does
-not measure the corpus launch median or replace the full-run result.
+| App       | Host: frames, janky, p95/p99 (ms) | Flatpak: frames, janky, p95/p99 (ms) |
+| --------- | --------------------------------- | ------------------------------------ |
+| OpenCalc  | 551, 0.36%, 8/15                  | 550, 0.18%, 5/5                      |
+| Wikipedia | 641, 0.78%, 5/22                  | 642, 0.62%, 5/24                     |
+| Tomato    | 172, 0.58%, 5/200                 | 173, 0.58%, 5/200                    |
 
-The paired windowed probe (`tools/dev/benchmark.sh`) used the identical staged
-manifest, SHA-256
-`b49047a4b6c67f9a3512d05a7973b6dd0848d11fadfea0fc9d4c14db8e34130a`. The image,
-composed root and host file cache were prepared already; the first boot has
-fresh Android `/data`, and the restart reuses it. Idle memory is taken 90 s
-after that restart. Binder uses the pinned Android 17
-`binderThroughputTest -w 2 -i 20000 -p`. These are single trials on the shared
-host, including scheduling delays, rather than an isolated CPU comparison.
+The compat corpus's budgets ([compatibility.md](compatibility.md#budgets)), full
+31-app runs: cold session start (limit 3125 ms), warm app start median (limit
+250 ms) and idle memory (limit 633 MiB):
 
-| Measurement                                     |    Host | Flatpak |
-| ----------------------------------------------- | ------: | ------: |
-| Fresh `/data` boot to `sys.boot_completed` (ms) |    4180 |    3264 |
-| Cold restart to `sys.boot_completed` (ms)       |    2318 |    2811 |
-| Idle memory without page cache (MiB)            |     560 |     525 |
-| Binder iterations/s                             | 33538.7 |   53274 |
-| Binder mean round trip (µs)                     |   46.49 |   29.39 |
-| Binder p99 round trip (µs)                      |  370.04 |   43.91 |
+| Mode, desktop        | Cold start (ms) | Warm app start (ms) | Idle (MiB) | Apps                                    |
+| -------------------- | --------------: | ------------------: | ---------: | --------------------------------------- |
+| Host, headless       |     3649 (over) |                 181 |        544 | 30 work, 1 doesn't                      |
+| Flatpak, headless    |     3532 (over) |                 200 |        527 | 29 work, 1 partly (Rethink), 1 doesn't  |
+| Host, nested KWin    |            2186 |                 209 |        563 | 29 work, 1 partly (Mastodon), 1 doesn't |
+| Flatpak, nested KWin |            2868 |                 234 |        519 | 29 work, 1 partly (Rethink), 1 doesn't  |
 
-Android UI rendering timings from `dumpsys gfxinfo <package> framestats` include
-startup and the same ten tap/scroll cycles per app. The table uses each
-process's aggregate histogram, not individual window sections. It measures UI
-rendering, not compositor presentation or input-to-display latency; 5 ms is the
-histogram's lowest bucket. Tomato's 200 ms p99 remains in both samples.
-
-| App       | Runtime | Frames | Janky frames | p95 (ms) | p99 (ms) |
-| --------- | ------- | -----: | -----------: | -------: | -------: |
-| OpenCalc  | Host    |    551 |    2 (0.36%) |        8 |       15 |
-| OpenCalc  | Flatpak |    550 |    1 (0.18%) |        5 |        5 |
-| Wikipedia | Host    |    641 |    5 (0.78%) |        5 |       22 |
-| Wikipedia | Flatpak |    642 |    4 (0.62%) |        5 |       24 |
-| Tomato    | Host    |    172 |    1 (0.58%) |        5 |      200 |
-| Tomato    | Flatpak |    173 |    1 (0.58%) |        5 |      200 |
-
-Raw boot, memory, Binder and frame outputs, together with each run's manifest,
-are in `out/test/benchmark/m6-{host,flatpak}-bench/`.
-
-The M5 probes on the isolated desktop verified Flatpak installation, a native
-Mindustry window with audio, Android HTTPS returning 200, and launching OpenCalc
-through its existing menu entry after refreshing the private deployment.
-DynamicLauncher dialogs used the GTK backend: the installed KDE 6.7.5 backend's
-dialog failed with missing QML properties. Desktop custom-scheme association
-remains unverified in Flatpak because DynamicLauncher does not rebuild the MIME
-cache; explicit CLI URI launch passed.
-
-The lifecycle probe kept 439.99 Hz foreground audio playing after its activity
-closed, stopped with a 10 s idle grace period, and restarted the current stage
-under an 8 GiB host scope cap a minute before its alarm. The boot-rescheduled
-alarm fired 3 ms after its requested time. Cold-launch splash buffer submission
-was 149.9 ms in Flatpak and 27.8 ms in host mode (limit 200 ms); these are the
-first Wayland buffer attach/commit, not physical display presentation times.
-
-The full Flatpak bionic task passed gralloc (110 checks), composer (55 checks),
-Vulkan on lavapipe and RADV, and the audio ABI check. The configured Binder task
-passed 110 gtests, with 10 upstream skips (nine freezer cases and the Binder
-observer integration test). It exits 77 after those tests because the kernel
-binder oracle needs a binderfs mount, which Flatpak forbids.
+Open Sudoku's APK is arm64-only and doesn't install in either mode; Rethink's
+VPN can't connect without a TUN device; Mastodon's OAuth step passed on a
+retest. A cold `linuxapk run` shows its splash's first buffer after 28 ms in
+host mode and 150 ms in Flatpak mode.
