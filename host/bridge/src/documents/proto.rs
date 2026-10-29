@@ -36,6 +36,8 @@ pub mod ty {
     pub const DELETE: u16 = 0x0406;
     pub const RENAME: u16 = 0x0407;
     pub const FORGET: u16 = 0x0408;
+    /// Import a desktop file (one fd); reply: u64 read-only grant id.
+    pub const IMPORT: u16 = 0x0409;
 
     /// Events.
     pub const PICKED: u16 = 0x4401;
@@ -98,6 +100,9 @@ pub struct Pick {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
+    Import {
+        name: String,
+    },
     Pick(Pick),
     Open {
         grant: u64,
@@ -261,6 +266,9 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
             name: name(&mut r)?,
         },
         ty::FORGET => Request::Forget { grant: r.u64()? },
+        ty::IMPORT => Request::Import {
+            name: name(&mut r)?,
+        },
         t => return Err(DecodeError::UnknownType(t)),
     };
     r.end()?;
@@ -275,6 +283,10 @@ fn put_text(w: &mut Writer, s: &str) {
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let mut w;
     match req {
+        Request::Import { name } => {
+            w = Writer::message(ty::IMPORT, tag);
+            put_text(&mut w, name);
+        }
         Request::Pick(p) => {
             w = Writer::message(ty::PICK, tag);
             w.u32(p.request)
@@ -384,6 +396,23 @@ mod tests {
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
         decode(h.ty, &b[HDR..])
+    }
+
+    #[test]
+    fn imports_roundtrip_and_reject_bad_names() {
+        let req = Request::Import {
+            name: "note.md".into(),
+        };
+        let b = encode(1, &req);
+        assert_eq!(decode(ty::IMPORT, &b[crate::ipc::wire::HDR..]), Ok(req));
+        assert!(decode(ty::IMPORT, &[0, 0]).is_err());
+        let b = encode(
+            1,
+            &Request::Import {
+                name: "../note.md".into(),
+            },
+        );
+        assert!(decode(ty::IMPORT, &b[crate::ipc::wire::HDR..]).is_err());
     }
 
     #[test]

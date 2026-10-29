@@ -157,6 +157,7 @@ class WindowManagerFeature(
     val heightDp: Int = 0,
     /** The desktop's `xdg_activation_v1` token for this launch (empty: none). */
     val token: String = "",
+    val file: Boolean = false,
   )
 
   /** Opens [r]'s app in a new window, or focuses its window. Returns a one-line result. */
@@ -208,6 +209,10 @@ class WindowManagerFeature(
       when {
         r.uri != null ->
           Intent(Intent.ACTION_VIEW, r.uri).apply {
+            if (r.file) {
+              setDataAndType(r.uri, context.contentResolver.getType(r.uri))
+              addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             if (r.component != null) component = r.component else setPackage(r.pkg)
           }
         r.component != null ->
@@ -217,7 +222,7 @@ class WindowManagerFeature(
     // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher does: an existing task comes to the front.
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
     // A desktop link is an untrusted-origin VIEW: only activities that accept web links.
-    if (r.uri != null) intent.addCategory(Intent.CATEGORY_BROWSABLE)
+    if (r.uri != null && !r.file) intent.addCategory(Intent.CATEGORY_BROWSABLE)
 
     refreshTasks()
     windows.values

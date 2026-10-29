@@ -1,12 +1,13 @@
 # linuxapk
 
 The scriptable user surface: `bin/linuxapk`, built by `mise run build:host`, run
-from a shell or from the `Exec` of the desktop entries it writes. All logic is
-in [linuxapk-core](../core/README.md).
+from a shell or from the `Exec` of the desktop entries it writes. Shared
+operations are in [linuxapk-core](../core/README.md); file grants use the bridge
+IPC client.
 
 ```sh
 linuxapk install App.apk             # also .apks, .xapk, .apkm
-linuxapk run org.wikipedia [URI]     # a window of its own, or focus the one it has
+linuxapk run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 linuxapk uninstall org.wikipedia [--keep-data]
 linuxapk list                        # user apps; repairs stale desktop entries first
 linuxapk background [PKG on|off]     # may PKG run with no window open (lists them)
@@ -15,8 +16,15 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 - Every command starts the session if needed; the first start downloads the
   Android image (about 1.2 GB) with progress on stderr.
 - `run` with a URI sends `VIEW` + `BROWSABLE` restricted to the package, so only
-  activities that accept browser links get it; `file:`, `content:` and `intent:`
-  URIs are refused.
+  activities that accept browser links get it; `content:` and `intent:` URIs are
+  refused. Paths and `file:` URIs instead import a read-only file fd into the
+  session's documents service. Android gets an opaque `content://` URI, MIME
+  type and `FLAG_GRANT_READ_URI_PERMISSION`, restricted to that package. These
+  grants last until the session stops; they expose no host directories. Files
+  must already be accessible to the CLI's Flatpak sandbox. File MIME
+  registrations in host Open With await a forwarding design
+  ([#71](https://github.com/sargunv/linux.apk/issues/71)); no file-type defaults
+  are changed.
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).

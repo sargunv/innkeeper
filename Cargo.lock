@@ -1188,8 +1188,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "linuxapk-bridge",
  "linuxapk-core",
  "png",
+ "rustix",
  "smithay-client-toolkit",
 ]
 
@@ -1202,6 +1204,7 @@ dependencies = [
  "accesskit_unix",
  "anyhow",
  "calloop",
+ "libc",
  "linuxapk-core",
  "png",
  "pulseaudio",

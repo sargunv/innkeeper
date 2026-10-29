@@ -117,6 +117,17 @@ if [[ ${1:-} == --group ]]; then
       s am force-stop com.android.documentsui
       echo 'ok   unavailable bridge falls back to DocumentsUI after the connection timeout'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      printf '# linuxapk-file-grant\n' >"$T/file.md"
+      "$repo/tools/dev/linuxapk.sh" run dev.linuxapk.probes "$T/file.md"
+      until_ok log_has LinuxApkFileProbe 'uri=content://dev.linuxapk.system.documents/document/.*type=text/markdown read=true content=# linuxapk-file-grant'
+      until_ok window_ready FileProbe
+      s logcat -d -s LinuxApkFileProbe:I >"$T/file-view.txt"
+      s dumpsys activity top >"$T/file-activity.txt"
+      s env CLASSPATH=/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk \
+        app_process / dev.linuxapk.system.apps.IconDump dev.linuxapk.probes >"$T/file-metadata.txt"
+      file_has "$T/file-metadata.txt" '^mime text/markdown$'
+      file_has "$T/file-metadata.txt" '^mime text/plain$'
+      wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
     a11y)
       dbus-send --session --dest=org.a11y.Bus --type=method_call --print-reply /org/a11y/bus \

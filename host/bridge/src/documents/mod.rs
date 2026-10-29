@@ -5,8 +5,8 @@
 //! The bridge is the only one that knows host paths. Android gets opaque
 //! grant ids and file descriptors:
 //!
-//! - A grant is made only from a portal result, so only what the user picked
-//!   is reachable. Grants persist (the provider's URIs outlive the session)
+//! - Portal grants expose only what the user picked. CLI imports hold just the
+//!   supplied file fd, read-only, until session exit or FORGET. Portal grants persist (the provider's URIs outlive the session)
 //!   in the instance's state directory, and FORGET drops one.
 //! - A file grant opens only that file. A folder grant opens paths beneath it
 //!   through `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` from the
@@ -19,7 +19,7 @@ pub mod portal;
 pub mod proto;
 
 use std::ffi::OsStr;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -53,6 +53,8 @@ pub struct Grant {
 pub struct Store {
     file: Option<PathBuf>,
     grants: Mutex<Vec<(u64, Grant)>>,
+    /// Desktop Open With files: held by fd, read-only, until forgotten or session exit.
+    files: Mutex<Vec<(u64, OwnedFd, String)>>,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     picks: AtomicUsize,
 }
@@ -72,6 +74,7 @@ impl Store {
         Arc::new(Store {
             file,
             grants: Mutex::new(grants),
+            files: Mutex::new(Vec::new()),
             dbus: OnceLock::new(),
             picks: AtomicUsize::new(0),
         })
@@ -125,9 +128,63 @@ impl Store {
     }
 
     pub fn forget(&self, id: u64) {
+        self.files.lock().unwrap().retain(|(i, _, _)| *i != id);
         let mut g = self.grants.lock().unwrap();
         g.retain(|(i, _)| *i != id);
         self.save(&g);
+    }
+
+    /// Import only the supplied regular file; no host path reaches Android.
+    pub fn import_file(&self, fd: OwnedFd, name: String) -> Result<u64, i32> {
+        let st = rustix::fs::fstat(&fd).map_err(errno)?;
+        if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
+            return Err(-EINVAL);
+        }
+        let id = random_id();
+        let mut files = self.files.lock().unwrap();
+        if files.len() >= MAX_GRANTS {
+            files.remove(0);
+        }
+        files.push((id, fd, name));
+        Ok(id)
+    }
+
+    fn file_request(&self, req: &Request) -> Option<Reply> {
+        let (id, path, mode) = match req {
+            Request::Open { grant, mode, path } => (*grant, path, Some(*mode)),
+            Request::Stat { grant, path } => (*grant, path, None),
+            _ => return None,
+        };
+        let files = self.files.lock().unwrap();
+        let (_, fd, name) = files.iter().find(|(i, _, _)| *i == id)?;
+        if !path.is_empty() {
+            return Some(Reply::err(-ENOENT));
+        }
+        if mode.is_some_and(OpenMode::writes) {
+            return Some(Reply::err(-EACCES));
+        }
+        let grant = Grant {
+            path: format!("/proc/self/fd/{}", fd.as_raw_fd()).into(),
+            dir: false,
+            write: false,
+        };
+        Some(match mode {
+            Some(mode) => match Fs(&grant).open("", mode) {
+                Ok(fd) => {
+                    let mut r = Reply::ok();
+                    r.fds.push(fd);
+                    r
+                }
+                Err(e) => Reply::err(e),
+            },
+            None => match Fs(&grant).stat("") {
+                Ok(mut meta) => {
+                    meta.name = name.clone();
+                    meta_reply(&meta)
+                }
+                Err(e) => Reply::err(e),
+            },
+        })
     }
 
     fn save(&self, g: &[(u64, Grant)]) {
@@ -554,16 +611,33 @@ fn meta_reply(m: &Meta) -> Reply {
 }
 
 impl Service for DocumentsService {
-    fn handle(&mut self, t: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply {
+    fn handle(&mut self, t: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
         let req = match proto::decode(t, body) {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),
         };
-        if !fds.is_empty() {
+        if fds.len() != usize::from(matches!(req, Request::Import { .. })) {
             return Reply::err(-EPROTO);
+        }
+        if let Request::Import { name } = req {
+            return match self
+                .store
+                .import_file(fds.pop().expect("checked above"), name)
+            {
+                Ok(id) => {
+                    let mut w = Writer::default();
+                    w.u64(id);
+                    Reply::with_body(w.into_vec())
+                }
+                Err(e) => Reply::err(e),
+            };
+        }
+        if let Some(r) = self.store.file_request(&req) {
+            return r;
         }
         let grant_of = |id: u64| self.store.get(id).ok_or(-ENOENT);
         let r = match req {
+            Request::Import { .. } => unreachable!("handled above"),
             Request::Pick(p) => return self.pick(p),
             Request::Forget { grant } => {
                 self.store.forget(grant);
@@ -665,6 +739,78 @@ mod tests {
         assert!(store.dbus.get().is_none());
         assert_eq!(store.picks.load(Ordering::SeqCst), 0);
         assert!(store.grants.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn imported_files_keep_contents_and_name_without_path_or_write_access() {
+        let dir = crate::test_dir("import-file");
+        let path = dir.join("note.md");
+        std::fs::write(&path, "# imported file").unwrap();
+        let store = Store::new(None);
+        let fd = std::fs::File::open(&path).unwrap().into();
+        let id = store.import_file(fd, "note.md".into()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        for _ in 0..2 {
+            let mut reply = store
+                .file_request(&Request::Open {
+                    grant: id,
+                    mode: OpenMode::Read,
+                    path: String::new(),
+                })
+                .unwrap();
+            assert_eq!(reply.status, 0);
+            let mut text = String::new();
+            std::fs::File::from(reply.fds.pop().unwrap())
+                .read_to_string(&mut text)
+                .unwrap();
+            assert_eq!(text, "# imported file");
+        }
+        let reply = store
+            .file_request(&Request::Stat {
+                grant: id,
+                path: String::new(),
+            })
+            .unwrap();
+        assert!(reply.body.ends_with(b"note.md"));
+        assert_eq!(
+            store
+                .file_request(&Request::Open {
+                    grant: id,
+                    mode: OpenMode::ReadWrite,
+                    path: String::new()
+                })
+                .unwrap()
+                .status,
+            -EACCES
+        );
+        assert_eq!(
+            store
+                .file_request(&Request::Open {
+                    grant: id,
+                    mode: OpenMode::Read,
+                    path: "other.md".into()
+                })
+                .unwrap()
+                .status,
+            -ENOENT
+        );
+        assert!(
+            store
+                .import_file(
+                    std::fs::File::open(&dir).unwrap().into(),
+                    "directory".into()
+                )
+                .is_err()
+        );
+        store.forget(id);
+        assert!(
+            store
+                .file_request(&Request::Stat {
+                    grant: id,
+                    path: String::new()
+                })
+                .is_none()
+        );
     }
 
     /// Outstanding picks are counted for the whole bridge (every connection

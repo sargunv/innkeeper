@@ -150,6 +150,8 @@ pub enum Launch {
     /// A URI from the desktop (`%U`): an untrusted-origin VIEW intent, so it
     /// carries BROWSABLE and only reaches activities that accept web links.
     View { package: String, uri: String },
+    /// A read-only fd grant from the bridge documents service.
+    File { package: String, grant: u64 },
 }
 
 /// How a launch's window comes up.
@@ -183,6 +185,19 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
                 .split_once('/')
                 .map_or(component.as_str(), |c| c.0);
             v.extend(["--es", "package", pkg, "--es", "component", component].map(String::from));
+        }
+        Launch::File { package, grant } => {
+            v.extend(
+                [
+                    "--es",
+                    "package",
+                    package,
+                    "--es",
+                    "file-grant",
+                    &format!("{grant:016x}"),
+                ]
+                .map(String::from),
+            );
         }
         Launch::View { package, uri } => {
             v.extend(["--es", "package", package, "--es", "uri", uri].map(String::from));
@@ -278,6 +293,7 @@ pub struct AppInfo {
     pub window: Option<(u32, u32)>,
     /// (size, PNG bytes)
     pub icons: Vec<(u32, Vec<u8>)>,
+    pub mime_types: Vec<String>,
 }
 
 pub fn parse_helper_output(out: &str) -> AppInfo {
@@ -286,6 +302,8 @@ pub fn parse_helper_output(out: &str) -> AppInfo {
     for l in out.lines() {
         if let Some(v) = l.strip_prefix("label ") {
             info.label = v.to_string();
+        } else if let Some(v) = l.strip_prefix("mime ") {
+            info.mime_types.push(v.to_string());
         } else if let Some(v) = l.strip_prefix("category ") {
             info.category = v.trim().parse().ok();
         } else if let Some(v) = l.strip_prefix("splash ") {

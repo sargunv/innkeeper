@@ -7,9 +7,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import dev.linuxapk.system.LinuxApkSystemApp
+import dev.linuxapk.system.documents.HostDocumentsProvider
+import dev.linuxapk.system.documents.HostFiles
 import dev.linuxapk.system.integration.IntegrationFeature
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -44,7 +49,7 @@ class ControlReceiver : BroadcastReceiver() {
     thread(name = "linuxapk-control") {
       val reply =
         try {
-          if (wm == null) "error: window manager not running" else handle(wm, intent)
+          if (wm == null) "error: window manager not running" else handle(context, wm, intent)
         } catch (e: Exception) {
           Log.e(WindowManagerFeature.TAG, "control ${intent.action} failed", e)
           "error: ${e.cause ?: e}"
@@ -56,7 +61,7 @@ class ControlReceiver : BroadcastReceiver() {
     }
   }
 
-  private fun handle(wm: WindowManagerFeature, i: Intent): String =
+  private fun handle(context: Context, wm: WindowManagerFeature, i: Intent): String =
     when (i.action) {
       ACTION_LAUNCH -> {
         val pkg = i.getStringExtra("package") ?: return "error: --es package PKG is required"
@@ -64,15 +69,34 @@ class ControlReceiver : BroadcastReceiver() {
           i.getStringExtra("component")?.let {
             ComponentName.unflattenFromString(it) ?: return "error: bad component $it"
           }
+        val file =
+          i.getStringExtra("file-grant")?.let {
+            if (it.length != 16 || it.toULongOrNull(16) == null) return "error: bad file grant"
+            DocumentsContract.buildDocumentUri(HostDocumentsProvider.AUTHORITY, it)
+          }
+        if (file != null) {
+          // MIME lookup and the app's first open need the documents HELLO after a cold start.
+          // This runs on the control worker, never the UI thread.
+          val ready = CountDownLatch(1)
+          val connected = { ready.countDown() }
+          HostFiles.whenConnected(connected)
+          try {
+            if (!ready.await(10, TimeUnit.SECONDS)) return "error: file bridge unavailable"
+          } finally {
+            HostFiles.stopWaiting(connected)
+          }
+          context.grantUriPermission(pkg, file, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         val reply =
           wm.launch(
             WindowManagerFeature.LaunchRequest(
               pkg,
               component,
-              i.getStringExtra("uri")?.let(Uri::parse),
+              file ?: i.getStringExtra("uri")?.let(Uri::parse),
               i.getIntExtra("width", 0),
               i.getIntExtra("height", 0),
               i.getStringExtra("token").orEmpty(),
+              file != null,
             ),
           )
         val display = LAUNCHED.find(reply)?.groupValues?.get(1)?.toInt()

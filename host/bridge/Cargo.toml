@@ -7,6 +7,7 @@ description = "Linux.apk desktop bridge: host-side services (audio, windows, des
 
 [dependencies]
 anyhow = "1"
+libc = "0.2"
 pulseaudio = "0.3.2"
 rustix = { version = "1.1", features = [
   "event",
