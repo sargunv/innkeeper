@@ -1,8 +1,8 @@
 # Compatibility
 
-Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested by the compat harness (`mise run test:compat`): install, launch, a non-blank first frame, then a tap, a scroll and Back without a crash or ANR, plus an optional per-app script. Failures are triaged in [tests/compat](../tests/compat/README.md). Generated: run `mise run test:compat` (or `mise run test:compat -- report` to rewrite this file from `tests/compat/results.json`). Start is the time to the first frame on a fresh install; memory is the app's total PSS after the interactions.
+Apps from the F-Droid corpus (`tests/compat/corpus.toml`), smoke-tested by the compat harness (`mise run test:compat`): install, launch, a non-blank first frame, then a tap, a scroll and Back without a crash or ANR, plus an optional per-app script. Failures are triaged in [tests/compat](../tests/compat/README.md). Generated: run `mise run test:compat -- --accept` (or `mise run test:compat -- report` to rewrite this file from `tests/compat/results.json`). Start is the time to the first frame on a fresh install; memory is the app's total PSS after the interactions.
 
-Last run: 2026-10-28, image `generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys`, headless session. 31 apps: 30 work, 0 partly, 1 don't, 0 not tested.
+Last run: 2026-10-28, image `generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:17/CP2A.260605.016/16644040:userdebug/test-keys`, headless session. 31 apps: 29 work, 1 partly, 1 don't, 0 not tested.
 
 | App | Version | Framework | Native code | Result | Start | Memory | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -33,7 +33,7 @@ Last run: 2026-10-28, image `generic/aosp_cf_x86_64_only_phone/vsoc_x86_64_only:
 | NewPipe | 0.29.1 | Android Views | x86_64 | Works | 163 ms | 141 MB |  |
 | Fennec F-Droid | 158.0.2 | GeckoView + Compose | x86_64 | Works | 175 ms | 296 MB |  |
 | FlorisBoard | 0.5.2 | Jetpack Compose (IME) | x86_64 | Works | 151 ms | 39 MB |  |
-| Rethink: DNS + Firewall + VPN | v0.5.8 | Android Views + Go | x86_64 | Works | 156 ms | 94 MB |  |
+| Rethink: DNS + Firewall + VPN | v0.5.8 | Android Views + Go | x86_64 | Partly works | 116 ms | 82 MB | first frame ok; VPN unavailable in Flatpak: no TUN device (host-mode VPN check passes) |
 | Jellyfin for Android TV | 0.19.10 | Leanback / Compose for TV | x86_64 | Works | 167 ms | 77 MB |  |
 | Mastodon | 2.13.4 | Android Views | none | Works | 132 ms | 45 MB |  |
 | Floating Mute | 4.0.1 | Android Views (overlay) | none | Works | 163 ms | 32 MB |  |

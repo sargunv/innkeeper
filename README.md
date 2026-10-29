@@ -31,12 +31,14 @@ isolated from each other, as native desktop apps aren't
 
 ## Status
 
-**Pre-alpha.** Android 17 boots rootless in about 3 s warm, and 30 of 31 test
-apps work ([docs/compatibility.md](docs/compatibility.md)): Compose, Flutter,
-React Native, Capacitor and Godot apps, StreetComplete's MapLibre map and video
-playback, each in its own window with sound. Desktop integration (M3) and the
-no-privilege mode (M4: userspace binder, automatic single-uid, the CI image) are
-done. Linux.apk builds as a Flatpak that runs Android inside its own sandbox
+**Pre-alpha.** Android 17 boots rootless in about 3 s warm, and 29 of 31 test
+apps fully work in Flatpak ([docs/compatibility.md](docs/compatibility.md));
+Rethink runs without its VPN because the sandbox has no TUN device. These
+include Compose, Flutter, React Native, Capacitor and Godot apps,
+StreetComplete's MapLibre map and video playback, each in its own window with
+sound. Desktop integration (M3) and the no-privilege mode (M4: userspace binder,
+automatic single-uid, the CI image) are done. Linux.apk builds as a Flatpak that
+runs Android inside its own sandbox
 ([packaging/flatpak](packaging/flatpak/README.md)) and as an AppImage
 ([packaging/appimage](packaging/appimage/README.md)). Next: the rest of
 packaging (M5) and ARM translation (M6); see the

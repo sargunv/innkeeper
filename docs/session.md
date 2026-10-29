@@ -322,3 +322,9 @@ Open Sudoku's APK is arm64-only and doesn't install in either mode; Rethink's
 VPN can't connect without a TUN device; Mastodon's OAuth step passed on a
 retest. A cold `linuxapk run` shows its splash's first buffer after 28 ms in
 host mode and 150 ms in Flatpak mode.
+
+Cold start varies between runs: a later headless comparison measured 2214 ms in
+host mode and 4440 ms in Flatpak mode; a focused Flatpak Mastodon run measured
+2929 ms with 529 MiB idle memory and passed its OAuth handoff. Intermittent
+Flatpak cold starts above the unchanged 3125 ms limit are tracked in
+[#55](https://github.com/sargunv/linux.apk/issues/55).

@@ -1106,10 +1106,10 @@
       "group": "window",
       "version_name": "v0.5.8",
       "version_code": 709,
-      "result": "works",
-      "reason": "launches, renders, survives tap/scroll/back",
-      "launch_ms": 156,
-      "pss_mb": 94,
+      "result": "partly",
+      "reason": "first frame ok; VPN unavailable in Flatpak: no TUN device (host-mode VPN check passes)",
+      "launch_ms": 116,
+      "pss_mb": 82,
       "checks": [
         {
           "name": "install",
@@ -1118,7 +1118,7 @@
         {
           "name": "launch",
           "ok": true,
-          "detail": "156 ms, window display 28 (1280x800)"
+          "detail": "116 ms, window display 28 (1280x800)"
         },
         {
           "name": "alive after launch",
@@ -1127,7 +1127,7 @@
         {
           "name": "app window focused",
           "ok": true,
-          "detail": "Window{67ceec4 u0 com.celzero.bravedns/com.celzero.bravedns.ui.activity.WelcomeActivity}"
+          "detail": "Window{52838ab u0 com.celzero.bravedns/com.celzero.bravedns.ui.activity.WelcomeActivity}"
         },
         {
           "name": "first frame",
@@ -1136,7 +1136,8 @@
         },
         {
           "name": "script",
-          "ok": true
+          "ok": false,
+          "detail": "sh:dumpsys connectivity | grep -q 'VPN CONNECTED extra: VPN:com.celzero.bravedns': failed: "
         },
         {
           "name": "alive after tap/scroll/back",
