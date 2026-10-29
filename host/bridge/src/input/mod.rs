@@ -73,6 +73,7 @@ impl Service for InputService {
                 status(self.hub.request(r))
             }
             Request::WindowActivate { window, token } => status(self.hub.activate(window, token)),
+            Request::WindowMinimize { window } => status(self.hub.minimize(window)),
             Request::WindowDestroy { window } => {
                 self.hub.destroy(window);
                 Reply::ok()

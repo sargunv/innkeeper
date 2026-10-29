@@ -80,9 +80,9 @@ The mapping follows what InputReader produces for real devices
   toggles fullscreen in the bridge. `persist.linuxapk.input.window_shortcuts=0`
   turns Ctrl+W, Ctrl+Q and Alt+Left off.
 - **Escape stays Escape.** Android 17 already closes dialogs and popups on it;
-  mapping it to BACK would break apps that use Escape. The mouse back button and
-  the Back key send BACK; the manager’s per-app **Escape as Back** switch opts
-  in immediately.
+  mapping it to BACK would break apps that use Escape. The title-bar ‹ button,
+  mouse back button and the Back key send BACK; the manager’s per-app **Escape
+  as Back** switch opts in immediately.
 - **Timestamps** map the compositor's millisecond clock onto `uptimeMillis`,
   keeping the spacing VelocityTracker needs, clamped to the last 100 ms.
 - **Why injection.** uinput isn't available rootless and would create a

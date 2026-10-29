@@ -91,6 +91,14 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
+    pub fn minimize(&self, window: u32) -> Result<(), i32> {
+        let s = self.state.lock().unwrap();
+        let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
+        s.displays[conn]
+            .send(Cmd::Minimize(window))
+            .map_err(|_| -EIO)
+    }
+
     /// A fresh activation token using the source window and newest seat serial.
     pub fn activation_token(&self, window: u32) -> Option<String> {
         let (tx, rx) = std::sync::mpsc::channel();

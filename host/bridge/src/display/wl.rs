@@ -2,10 +2,9 @@
 //! composer connection, one `xdg_toplevel` per window and dma-buf frames.
 //! The connection's seat is the input service's (`input::seat`).
 //!
-//! Decorations: server-side when the compositor offers xdg-decoration (KDE),
-//! else an Adwaita-style client-side frame from `sctk-adwaita` (GNOME,
-//! weston). Everything runs on one thread with a calloop event loop; the
-//! service sends it [`Cmd`]s over a channel.
+//! Decorations: an Adwaita-style client-side frame on every desktop. Everything
+//! runs on one thread with a calloop event loop; the service sends it [`Cmd`]s
+//! over a channel.
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -31,14 +30,12 @@ use sctk::reexports::protocols::wp::linux_dmabuf::zv1::client::{
 use sctk::registry::{ProvidesRegistryState, RegistryState};
 use sctk::seat::{Capability, SeatHandler, SeatState};
 use sctk::shell::WaylandSurface;
-use sctk::shell::xdg::window::{
-    DecorationMode, Window, WindowConfigure, WindowDecorations, WindowHandler,
-};
+use sctk::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
 use sctk::shell::xdg::{XdgShell, XdgSurface};
 use sctk::shm::{Shm, ShmHandler};
 use sctk::subcompositor::SubcompositorState;
 use sctk::{delegate_dispatch2, delegate_registry, dispatch2::Dispatch2, registry_handlers};
-use sctk_adwaita::AdwaitaFrame;
+use sctk_adwaita::{Action, AdwaitaFrame};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
@@ -77,6 +74,7 @@ pub enum Cmd {
     },
     /// Activate a window, with this activation token if there is one.
     Activate(u32, Option<String>),
+    Minimize(u32),
     /// Return a token for a portal launch rather than activating our window.
     ExportToken(u32, std::sync::mpsc::Sender<String>),
     /// A buffer of the window's display.
@@ -380,7 +378,7 @@ impl State {
         }
     }
 
-    // The pointer over a window's client-side frame drives the frame.
+    // Pointer and touch contacts share the client-side frame interaction handlers.
 
     /// Returns the cursor the frame wants.
     pub(crate) fn frame_pointer_moved(
@@ -418,9 +416,11 @@ impl State {
             .windows
             .get_mut(&id)
             .and_then(|w| w.frame.as_mut())
-            .and_then(|f| f.on_click(time, click, pressed));
-        if let Some(a) = action {
-            self.frame_action(id, a, serial);
+            .and_then(|f| f.on_frame_click(time, click, pressed));
+        match action {
+            Some(Action::Back) => self.hub.input(&format!("back {id}")),
+            Some(Action::Window(a)) => self.frame_action(id, a, serial),
+            None => {}
         }
     }
 
@@ -492,7 +492,7 @@ impl State {
         let surface = self.compositor.create_surface(&qh);
         let window = self
             .xdg
-            .create_window(surface, WindowDecorations::RequestServer, &qh);
+            .create_window(surface, WindowDecorations::ClientOnly, &qh);
         window.set_title(s.title.clone());
         window.set_app_id(s.app_id.clone());
         window.set_min_size(Some((s.min_width.max(MIN_W), s.min_height.max(MIN_H))));
@@ -753,6 +753,11 @@ impl State {
                 icon,
             } => self.window_appearance(window, color, icon),
             Cmd::Destroy(id) => self.destroy(id),
+            Cmd::Minimize(id) => {
+                if let Some(w) = self.windows.get(&id) {
+                    w.window.set_minimized();
+                }
+            }
             Cmd::Activate(id, token) => self.activate(id, token),
             Cmd::ExportToken(id, reply) => self.token(id, Some(reply)),
             Cmd::BufferAdd(b, window, fd) => self.add_buffer(b, window, fd),
@@ -804,7 +809,7 @@ impl WindowHandler for State {
         } else if !w.fullscreen && c.is_fullscreen() {
             w.windowed_size = (w.width, w.height);
         }
-        let (width, height) = if c.decoration_mode == DecorationMode::Client && !c.is_fullscreen() {
+        let (width, height) = if !c.is_fullscreen() {
             if w.frame.is_none() {
                 match AdwaitaFrame::new(
                     &w.window,

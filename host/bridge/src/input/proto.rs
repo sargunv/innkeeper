@@ -36,6 +36,9 @@
 //! window manager sends the current policy when mapped and when it changes.
 //! The bridge reshapes floating toplevels and translates fullscreen to xdg-shell.
 //!
+//! `WINDOW_MINIMIZE` (0x0607): u32 display; minimize the toplevel when Android
+//! moves its root task to the back. `-ENOENT` if not shown.
+//!
 //! `WINDOW_APPEARANCE` (0x0606): u32 display, u32 primary colour (Android ARGB,
 //! 0: default caption), u32 blob length, one sealed memfd containing a blob
 //! RGBA image (u16 width/height, packed pixels; 0x0 clears the icon). Each side
@@ -75,6 +78,7 @@
 //!   `tablet_pressure <0..65535>`, `tablet_distance <0..65535>`,
 //!   `tablet_tilt <x> <y>` (degrees), `tablet_button <button> <0|1>`, each
 //!   group ended by `tablet_frame <t>`.
+//! - `back <display>`: a title-bar Back click, a BACK key tap on that display.
 //! - `keyboard_enter <display>`, `keyboard_leave <display>`,
 //!   `key <t> <keycode> <0|1|2> [<sym> [text <text> | compose]]` (2: a
 //!   repeat, from a wl_keyboard v10 compositor that repeats keys itself;
@@ -105,6 +109,7 @@ pub mod ty {
     pub const TEXT_INPUT: u16 = 0x0604;
     pub const WINDOW_POLICY: u16 = 0x0605;
     pub const WINDOW_APPEARANCE: u16 = 0x0606;
+    pub const WINDOW_MINIMIZE: u16 = 0x0607;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -163,6 +168,7 @@ pub enum Request {
     WindowRequest(WindowRequest),
     WindowActivate { window: u32, token: String },
     WindowDestroy { window: u32 },
+    WindowMinimize { window: u32 },
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
     WindowAppearance { window: u32, color: u32, len: u32 },
@@ -186,6 +192,7 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             window: r.u32()?,
             token: r.name()?,
         },
+        ty::WINDOW_MINIMIZE => Request::WindowMinimize { window: r.u32()? },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
         ty::WINDOW_APPEARANCE => Request::WindowAppearance {
             window: r.u32()?,
@@ -231,6 +238,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::WindowActivate { window, token } => {
             w = Writer::message(ty::WINDOW_ACTIVATE, tag);
             w.u32(*window).name(token);
+        }
+        Request::WindowMinimize { window } => {
+            w = Writer::message(ty::WINDOW_MINIMIZE, tag);
+            w.u32(*window);
         }
         Request::WindowDestroy { window } => {
             w = Writer::message(ty::WINDOW_DESTROY, tag);
@@ -314,6 +325,7 @@ mod tests {
                 token: String::new(),
             },
             Request::WindowDestroy { window: 3 },
+            Request::WindowMinimize { window: 3 },
             Request::WindowAppearance {
                 window: 3,
                 color: 0xff1976d2,

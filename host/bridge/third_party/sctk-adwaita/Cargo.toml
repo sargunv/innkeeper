@@ -1,0 +1,30 @@
+[package]
+name = "sctk-adwaita"
+version = "0.12.0"
+edition = "2021"
+authors = ["Poly <marynczak.bartlomiej@gmail.com>"]
+keywords = ["sctk"]
+license = "MIT"
+repository = "https://github.com/PolyMeilex/sctk-adwaita"
+documentation = "https://docs.rs/sctk-adwaita"
+description = "Adwaita-like SCTK Frame"
+
+exclude = [
+    "tests/*",
+]
+
+[dependencies]
+log = "0.4"
+memmap2 = { version = "0.9.0", optional = true }
+tiny-skia = { version = "0.12", default-features = false, features = [
+  "std",
+  "simd",
+] }
+smithay-client-toolkit = { version = "0.21.1", default-features = false }
+
+# The bridge uses the same ab_glyph backend as upstream's default.
+ab_glyph = "0.2.17"
+
+[features]
+default = ["ab_glyph"]
+ab_glyph = ["memmap2"]

@@ -1,7 +1,7 @@
 //! The host seat, turned into input lines ([`super::proto`]). The display
 //! service owns the Wayland connection; its seat's pointer, keyboard and
 //! touch events land here, and [`super::gestures`] and [`super::tablet`]
-//! add touchpad gestures and tablets. Pointer events over a window's
+//! add touchpad gestures and tablets. Pointer and touch events over a window's
 //! client-side frame go back to the display service, which drives the frame.
 //!
 //! The cursor is always defined: the default arrow over a window's content
@@ -51,6 +51,8 @@ pub(crate) struct Seat {
     pointer_surface: Option<ObjectId>,
     pub(crate) keyboard_focus: Option<u32>,
     touch_focus: HashMap<i32, u32>,
+    /// The frame has one click point; keep its first contact separate from Android.
+    frame_touch: Option<FrameTouch>,
     /// zwp_text_input_v3 for the IME.
     pub(crate) text: TextInput,
     pub(crate) gestures: Gestures,
@@ -82,6 +84,7 @@ impl Seat {
             pointer_surface: None,
             keyboard_focus: None,
             touch_focus: HashMap::new(),
+            frame_touch: None,
             text: TextInput::new(text_input),
             gestures: Gestures::bind(globals, qh),
             tablets: Tablets::bind(globals, qh),
@@ -178,6 +181,9 @@ impl Seat {
             self.keyboard_focus = None;
         }
         self.touch_focus.retain(|_, w| *w != id);
+        if self.frame_touch.as_ref().is_some_and(|t| t.window == id) {
+            self.frame_touch = None;
+        }
         self.text.forget(id);
     }
 }
@@ -505,6 +511,15 @@ fn key_line(xkb: Option<&mut Xkb>, time: u32, key: u32, state: KeyLine) -> Strin
     l
 }
 
+/// wl_touch motion coordinates stay relative to the down surface, and interactive
+/// move/resize must use that down's serial, rather than the pointer's last serial.
+struct FrameTouch {
+    id: i32,
+    window: u32,
+    surface: ObjectId,
+    serial: u32,
+}
+
 impl Dispatch2<wl_touch::WlTouch, State> for Tch {
     fn event(
         &self,
@@ -525,19 +540,60 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                 y,
             } => {
                 st.seat.last_serial = serial;
-                if let Some((w, false)) = st.window_of(&surface) {
-                    st.seat.touch_focus.insert(id, w);
-                    let (x, y) = st.to_display(w, x, y);
-                    st.hub
-                        .input(&format!("touch_down {time} {id} {x:.2} {y:.2} {w}"));
+                match st.window_of(&surface) {
+                    Some((w, true)) if st.seat.frame_touch.is_none() => {
+                        st.frame_pointer_left(w);
+                        st.frame_pointer_moved(
+                            w,
+                            &surface.id(),
+                            Duration::from_millis(time as u64),
+                            x,
+                            y,
+                        );
+                        st.seat.frame_touch = Some(FrameTouch {
+                            id,
+                            window: w,
+                            surface: surface.id(),
+                            serial,
+                        });
+                        st.frame_click(w, Duration::from_millis(time as u64), 0x110, true, serial);
+                    }
+                    Some((w, false)) => {
+                        st.seat.touch_focus.insert(id, w);
+                        let (x, y) = st.to_display(w, x, y);
+                        st.hub
+                            .input(&format!("touch_down {time} {id} {x:.2} {y:.2} {w}"));
+                    }
+                    _ => {}
                 }
             }
             E::Up { time, id, .. } => {
+                if st.seat.frame_touch.as_ref().is_some_and(|t| t.id == id) {
+                    let t = st.seat.frame_touch.take().unwrap();
+                    st.frame_click(
+                        t.window,
+                        Duration::from_millis(time as u64),
+                        0x110,
+                        false,
+                        t.serial,
+                    );
+                    st.frame_pointer_left(t.window);
+                }
                 if st.seat.touch_focus.remove(&id).is_some() {
                     st.hub.input(&format!("touch_up {time} {id}"));
                 }
             }
             E::Motion { time, id, x, y } => {
+                if let Some(t) = st.seat.frame_touch.as_ref().filter(|t| t.id == id) {
+                    let (window, surface) = (t.window, t.surface.clone());
+                    st.frame_pointer_moved(
+                        window,
+                        &surface,
+                        Duration::from_millis(time as u64),
+                        x,
+                        y,
+                    );
+                }
                 if let Some(&w) = st.seat.touch_focus.get(&id) {
                     let (x, y) = st.to_display(w, x, y);
                     st.hub
@@ -546,6 +602,9 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
             }
             E::Frame => st.hub.input("touch_frame"),
             E::Cancel => {
+                if let Some(t) = st.seat.frame_touch.take() {
+                    st.frame_pointer_left(t.window);
+                }
                 st.seat.touch_focus.clear();
                 st.hub.input("touch_cancel");
             }

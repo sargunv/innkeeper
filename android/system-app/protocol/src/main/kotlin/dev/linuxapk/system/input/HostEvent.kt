@@ -132,6 +132,9 @@ sealed interface HostEvent {
 
   data object TouchCancel : HostEvent
 
+  /** A title-bar Back click, independent of the keyboard and pointer focus. */
+  data class Back(val display: Int) : HostEvent
+
   /** The user asked to close the window of [display]. */
   data class Close(val display: Int = 0) : HostEvent
 
@@ -237,6 +240,7 @@ sealed interface HostEvent {
         "touch_up" -> need(args, 2) { TouchUp(time(1), int(2)) }
         "touch_frame" -> TouchFrame
         "touch_cancel" -> TouchCancel
+        "back" -> need(args, 1) { Back(int(1)) }
         "close" -> Close(display(1, 0))
         "ti_delete" -> need(args, 2) { TextDelete(int(1), int(2)) }
         "ti_commit" -> TextCommit(PercentText.decode(f.getOrElse(1) { "" }) ?: return null)
