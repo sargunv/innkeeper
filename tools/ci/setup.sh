@@ -14,7 +14,9 @@ sudo apt-get install -y --no-install-recommends \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
 # Ubuntu restricts mounts in unprivileged user namespaces by default.
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-sudo modprobe udmabuf
+if [[ ! -e /dev/udmabuf ]]; then
+  sudo modprobe udmabuf
+fi
 sudo chmod 666 /dev/udmabuf
 test -r /dev/udmabuf && test -w /dev/udmabuf
 XDG_RUNTIME_DIR=/run/user/$(id -u)

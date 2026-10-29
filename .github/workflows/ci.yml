@@ -34,10 +34,6 @@ jobs:
       - run: mise run check
       - run: mise run build
       - run: mise run test
-      - name: Fetch the e2e test apps
-        run:
-          mise run test:compat -- fetch --only
-          io.anuke.mindustry,com.darkempire78.opencalculator,org.wikipedia
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
       - name: Test diagnostics
