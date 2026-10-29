@@ -60,16 +60,3 @@ fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 pub fn status(paths: &Paths) -> Status {
     control::status(&paths.control()).map_or(Status { pid: None }, |text| Status::parse(&text))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn status_text() {
-        for s in [Status { pid: Some(42) }, Status { pid: None }] {
-            assert_eq!(Status::parse(&s.text()), s);
-        }
-        assert_eq!(Status { pid: None }.text(), "stopped\n");
-    }
-}

@@ -54,3 +54,11 @@ available for a run.
 - **Flatpak**: there is no TUN device, so Rethink's VPN check fails and it
   partly works. A `--window` run gets a nested desktop of its own
   (`tests/nested.sh`).
+
+Wiki publishing requires the Actions secret `LINUXAPK_WIKI_TOKEN`: a classic
+personal access token with `public_repo` scope from an account with write access
+to this public repository. `GITHUB_TOKEN` cannot push the separate wiki Git
+repository. Without the secret, CI skips publishing and retains the artifact;
+publishing errors do not change the compatibility result. Test the renderer
+without a session or APKs with
+`python3 -B -m unittest discover -s tools/ci/tests`.

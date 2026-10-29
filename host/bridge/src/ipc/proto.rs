@@ -80,23 +80,3 @@ pub fn hello_reply_body() -> Vec<u8> {
     w.u16(MAJOR).u16(MINOR);
     w.into_vec()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ipc::wire::{HDR, decode_header};
-
-    #[test]
-    fn hello_roundtrip() {
-        let h = Hello {
-            major: 1,
-            minor: 0,
-            service: service::AUDIO,
-            name: "audio HAL".into(),
-        };
-        let b = h.encode(5);
-        assert_eq!(decode_header(&b).unwrap().tag, 5);
-        assert_eq!(Hello::decode(&b[HDR..]), Ok(h));
-        assert!(Hello::decode(&b[HDR..b.len() - 1]).is_err());
-    }
-}

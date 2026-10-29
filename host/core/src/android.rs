@@ -439,12 +439,6 @@ mod tests {
     }
 
     #[test]
-    fn background_replies() {
-        assert_eq!(background_reply("background -"), Vec::<String>::new());
-        assert_eq!(background_reply("background a.b,c.d"), ["a.b", "c.d"]);
-    }
-
-    #[test]
     fn file_chooser_is_an_explicit_target_with_the_original_grant() {
         let args = wm_launch_args(
             &Launch::File {

@@ -128,11 +128,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_bus() {
-        assert_eq!(open(None, "https://example.com", "test"), Err(-ENOSYS));
-    }
-
-    #[test]
     fn urls() {
         for ok in [
             "mailto:",

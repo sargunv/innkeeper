@@ -73,7 +73,7 @@ for packaging:
   compiled into Launcher3 and SystemUI), not on any installed file.
 - The kernel and dtb (GPL-2.0) are in `boot.img`, which we never extract.
 
-Tests: `tests/image-select.sh` and `tests/fork-drift.sh` (in `mise run test`)
-check image selection and drift detection without a session. The latter also
-checks all nine upstream bases when the pinned image is prepared. Launcher unit
-tests exercise pruning selection, active leases, read-only trees and symlinks.
+Tests: launcher units cover pin selection and pruning, including active leases,
+read-only trees and symlinks. `tests/fork-drift.sh` (in `mise run test`) checks
+unchanged, changed and missing overlay bases with a self-contained fixture.
+Image preparation checks all nine real upstream bases against the pinned image.

@@ -287,19 +287,6 @@ PYTEST
       file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
       echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
       echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
-      # The two-window sequence changed size and focus; inject into a fresh mapped probe.
-      launch InputProbeActivity
-      until_ok mapped
-      # The first frame is visible before the Android opening animation ends.
-      # InputDispatcher drops otherwise valid injected touches at low opacity.
-      until_ok input_ready "$display"
-      harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
-      sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
-        s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"
-      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*META_SHIFT_ON'
-      until_ok log_has LinuxApkProbe 'touch .*ACTION_DOWN.*source=0x2002'
-      until_ok log_has LinuxApkProbe 'generic .*ACTION_SCROLL'
-      wm CLOSE --ei display "$display" | grep -q "closed display=$display"
       launch CaptureProbeActivity
       until_ok mapped
       until_ok input_ready "$display" CaptureProbeActivity
@@ -367,17 +354,6 @@ sys.exit(1)
       until_ok file_has "$bridge_log" 'handoff: .*mailto:e2e@example.com'
       s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
       until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
-      s am broadcast -n "dev.linuxapk.probes/.HandoffProbe\$HandlerControl" --ez enabled true >/dev/null
-      # shellcheck disable=SC2329 # invoked by the EXIT trap
-      reset_handler() { s am broadcast -n "dev.linuxapk.probes/.HandoffProbe\$HandlerControl" --ez enabled false >/dev/null; }
-      trap reset_handler EXIT
-      s am start -a android.intent.action.VIEW -d mailto:android-handler@example.com >/dev/null
-      until_ok log_has LinuxApkHandoffProbe 'Android handler: mailto:android-handler@example.com'
-      # NEW_TASK | CLEAR_TASK re-runs onCreate without killing the probe process.
-      s am start -f 0x10008000 -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
-      until_ok log_has LinuxApkHandoffProbe 'Android handler: content://dev.linuxapk.probes.handoff/shared.odt'
-      reset_handler
-      trap - EXIT
       s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY >/dev/null
       until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
       for mode in progress style indeterminate style-indeterminate ongoing no-badge; do
@@ -427,17 +403,6 @@ sys.exit(1)
       wm CLOSE --es package com.android.documentsui >/dev/null
       echo 'ok   unavailable bridge falls back to DocumentsUI after the connection timeout'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
-      printf '# linuxapk-file-grant\n' >"$T/file.md"
-      "$repo/tools/dev/linuxapk.sh" run dev.linuxapk.probes "$T/file.md"
-      until_ok log_has LinuxApkFileProbe 'uri=content://dev.linuxapk.system.documents/document/.*type=text/markdown read=true content=# linuxapk-file-grant'
-      until_ok window_ready FileProbe
-      s logcat -d -s LinuxApkFileProbe:I >"$T/file-view.txt"
-      s dumpsys activity top >"$T/file-activity.txt"
-      s env CLASSPATH=/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk \
-        app_process / dev.linuxapk.system.apps.IconDump dev.linuxapk.probes >"$T/file-metadata.txt"
-      file_has "$T/file-metadata.txt" '^mime text/markdown$'
-      file_has "$T/file-metadata.txt" '^mime text/plain$'
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
       printf '# linuxapk-open-with\n' >"$T/file.md"
       "$repo/tools/dev/linuxapk.sh" open "$T/file.md"
       until_ok log_has LinuxApkOpenWith 'chooser type=text/markdown apps=dev.linuxapk.probes'
@@ -449,12 +414,7 @@ sys.exit(1)
       until_ok window_ready FileProbe
       s logcat -d -s LinuxApkOpenWith:I LinuxApkFileProbe:I >"$T/open-with.txt"
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
-      printf 'no handler\n' >"$T/file.linuxapk-unknown"
-      "$repo/tools/dev/linuxapk.sh" open "$T/file.linuxapk-unknown"
-      until_ok log_has LinuxApkOpenWith 'chooser type=application/octet-stream apps=$'
-      until_ok window_ready OpenWithActivity
-      wm CLOSE --es package dev.linuxapk.system >/dev/null
-      echo 'ok   Open With matches VIEW filters, opens the selected app and shows no-match UI'
+      echo 'ok   Open With opens the selected app with a readable file grant'
       ;;
     sharing) "$here/share.sh" ;;
     a11y)

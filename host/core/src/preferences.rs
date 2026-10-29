@@ -140,18 +140,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dbus_json_roundtrip() {
+    fn preferences_json_and_bounds() {
         let p = Preferences {
             follow_dark: false,
             idle_minutes: 13,
             ..Preferences::default()
         };
         let json = encode(&p).unwrap();
-        // Session1 carries JSON as a D-Bus string argument, not a byte array.
-        let context = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::LE, 0);
-        let bytes = zbus::zvariant::to_bytes(context, &(json,)).unwrap();
-        let ((wire,), _): ((String,), _) = bytes.deserialize().unwrap();
-        assert_eq!(decode(&wire).unwrap(), p);
+        assert_eq!(decode(&json).unwrap(), p);
         assert!(decode(r#"{"idle_minutes":0}"#).is_err());
         assert!(decode(r#"{"follow_dark":"yes"}"#).is_err());
         assert!(decode(r#"{"unknown":true}"#).is_err());

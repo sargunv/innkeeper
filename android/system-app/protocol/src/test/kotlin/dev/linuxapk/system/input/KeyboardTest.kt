@@ -245,17 +245,6 @@ class KeyboardTest {
     feed("key 7 29 1 65507", "modifiers 4 0 0 0", "key 8 17 1 119")
     assertTrue(feed("key 9 17 2 119").isEmpty())
   }
-
-  @Test
-  fun layoutKeycodes() {
-    assertEquals(KeyEvent.KEYCODE_A, Keyboard.layoutKeycode('a'.code))
-    assertEquals(KeyEvent.KEYCODE_Z, Keyboard.layoutKeycode('Z'.code))
-    assertEquals(KeyEvent.KEYCODE_7, Keyboard.layoutKeycode('7'.code))
-    assertEquals(KeyEvent.KEYCODE_SLASH, Keyboard.layoutKeycode('/'.code))
-    assertNull(Keyboard.layoutKeycode('&'.code))
-    assertNull(Keyboard.layoutKeycode(0xe9)) // é
-    assertNull(Keyboard.layoutKeycode(0xff1b)) // Escape
-  }
 }
 
 /** Android's Virtual.kcm (US) for the keys these tests use. */

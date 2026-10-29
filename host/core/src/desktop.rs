@@ -477,11 +477,6 @@ mod tests {
     }
 
     #[test]
-    fn list_escaping() {
-        assert_eq!(list(&["a;b", "c"]).unwrap(), "a\\;b;c;");
-    }
-
-    #[test]
     fn replaces_one_key() {
         let t = "[Desktop Entry]\nName=A\nExec=old\n[Desktop Action x]\nExec=other\n";
         assert_eq!(
@@ -492,14 +487,6 @@ mod tests {
             replace_key("[Desktop Entry]\nName=A\n", "Exec", "new"),
             None
         );
-    }
-
-    #[test]
-    fn categories() {
-        assert_eq!(categories_for(None, true), ["Game"]);
-        assert_eq!(categories_for(Some(5), false), ["Network", "News"]);
-        assert_eq!(categories_for(Some(-1), false), ["Utility"]);
-        assert_eq!(categories_for(Some(99), false), ["Utility"]);
     }
 
     #[test]

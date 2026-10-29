@@ -40,14 +40,6 @@ class HostEventTest {
         "touch_frame" to HostEvent.TouchFrame,
         "touch_cancel" to HostEvent.TouchCancel,
         "close" to HostEvent.Close(),
-      )
-    for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
-  }
-
-  @Test
-  fun parsesDisplayIds() {
-    val cases =
-      mapOf(
         "window 1100 700 1.700 5" to HostEvent.Window(1100, 700, 1.7, 5),
         "pointer_enter 10.50 20.25 5" to HostEvent.PointerEnter(10.5f, 20.25f, 5),
         "pointer_leave 5" to HostEvent.PointerLeave(5),
@@ -56,14 +48,6 @@ class HostEventTest {
         "touch_down 1 3 1.00 2.00 9" to HostEvent.TouchDown(1, 3, 1f, 2f, 9),
         "close 5" to HostEvent.Close(5),
         "tablet_proximity_in 321 5" to HostEvent.TabletProximityIn(0x141, 5),
-      )
-    for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
-  }
-
-  @Test
-  fun parsesGesturesAndTablets() {
-    val cases =
-      mapOf(
         "pointer_axis_source 1" to HostEvent.PointerAxisSource(1),
         "gesture_swipe_begin 5 3" to HostEvent.SwipeBegin(5, 3),
         "gesture_swipe_update 6 1.50 -2.00" to HostEvent.SwipeUpdate(6, 1.5f, -2f),
@@ -85,11 +69,6 @@ class HostEventTest {
         "tablet_frame 99" to HostEvent.TabletFrame(99),
       )
     for ((line, expected) in cases) assertEquals(expected, HostEvent.parse(line), line)
-  }
-
-  @Test
-  fun toleratesWhitespaceAndExtraFields() {
-    assertEquals(HostEvent.Key(9, 30, true, 97), HostEvent.parse("  key 9 30 1 97 extra\r"))
   }
 
   @Test

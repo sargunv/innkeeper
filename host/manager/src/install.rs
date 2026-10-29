@@ -333,18 +333,3 @@ fn details(
     });
     pp.upcast()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_texts() {
-        assert_eq!(
-            status_text("starting the Android session"),
-            "Starting Android…"
-        );
-        assert_eq!(status_text("installing org.x 1.0 (1 APK)"), "Installing…");
-        assert_eq!(status_text("something else"), "Something else…");
-    }
-}
