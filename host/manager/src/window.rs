@@ -2,6 +2,7 @@
 //! navigation to the install page, and the first run's image download.
 
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
@@ -14,9 +15,6 @@ use linuxapk_core::xdg::{DesktopApp, Dirs};
 
 use crate::errors::{self, Op};
 use crate::{install, worker};
-
-/// How often the session row refreshes while the window is open.
-const POLL_SECS: u32 = 3;
 
 #[derive(Clone)]
 pub struct Window(Rc<Inner>);
@@ -44,7 +42,10 @@ pub struct Inner {
     sessions: [SessionRow; 2],
     /// The session is being started or stopped from here.
     session_busy: Cell<bool>,
-    polling: Cell<bool>,
+    busy_apps: RefCell<HashMap<String, String>>,
+    open_apps: RefCell<HashSet<String>>,
+    session_proxy: RefCell<Option<gio::DBusProxy>>,
+    state_read: Cell<u64>,
     last_status: Cell<Option<Status>>,
     /// Watches the desktop entries, so installs from the CLI show up.
     monitor: RefCell<Option<gio::FileMonitor>>,
@@ -300,7 +301,10 @@ impl Window {
             installed: RefCell::default(),
             sessions,
             session_busy: Cell::new(false),
-            polling: Cell::new(false),
+            busy_apps: RefCell::default(),
+            open_apps: RefCell::default(),
+            session_proxy: RefCell::default(),
+            state_read: Cell::new(0),
             last_status: Cell::new(None),
             monitor: RefCell::default(),
             refresh_pending: Cell::new(false),
@@ -363,15 +367,7 @@ impl Window {
             w2.refresh();
         });
         w.prepare_if_needed();
-        w.poll_session();
-        let weak = Rc::downgrade(&w.0);
-        glib::timeout_add_seconds_local(POLL_SECS, move || match weak.upgrade() {
-            Some(inner) => {
-                Window(inner).poll_session();
-                glib::ControlFlow::Continue
-            }
-            None => glib::ControlFlow::Break,
-        });
+        w.watch_session();
         w
     }
 
@@ -538,9 +534,25 @@ impl Window {
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
+        let spinner = adw::Spinner::builder().visible(false).build();
+        let indicator = gtk::Label::builder()
+            .label("Open")
+            .css_classes(["success", "caption"])
+            .tooltip_text("This app has an open window")
+            .visible(self.open_apps.borrow().contains(&a.package))
+            .build();
+        row.add_suffix(&indicator);
+        row.add_suffix(&spinner);
+        if let Some(status) = self.busy_apps.borrow().get(&a.package) {
+            row.set_subtitle(status);
+            spinner.set_visible(true);
+            launch.set_sensitive(false);
+            remove.set_sensitive(false);
+            row.set_activatable(false);
+        }
         row.add_suffix(&launch);
         row.add_suffix(&remove);
-        row.set_activatable(true);
+        row.set_activatable(!self.busy_apps.borrow().contains_key(&a.package));
         row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
         let (w, app) = (self.clone(), a.clone());
         row.connect_activated(move |_| w.nav.push(&crate::app::page(&w, &app)));
@@ -553,7 +565,9 @@ impl Window {
 
     /// Opens an app in its own window (starting the session if needed).
     pub fn launch(&self, pkg: &str, name: &str) {
-        let toast = self.say(&format!("Opening {name}…"));
+        if !self.begin_app(pkg, "Opening…") {
+            return;
+        }
         // An activation token from our window (which has focus), so the
         // app's window may take it.
         let token = gio::prelude::AppLaunchContextExt::startup_notify_id(
@@ -566,16 +580,30 @@ impl Window {
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {
             let p = pkg.clone();
-            let r = worker::run(move |rep| ops::run(&p, None, &opts, rep), |_| {}).await;
-            toast.dismiss();
+            let (progress, progress_pkg) = (w.clone(), pkg.clone());
+            let r = worker::run(
+                move |rep| ops::run(&p, None, &opts, rep),
+                move |e| {
+                    if let Event::Status(text) = e {
+                        progress.app_progress(&progress_pkg, &install::status_text(&text));
+                    }
+                },
+            )
+            .await;
+            w.busy_apps.borrow_mut().remove(&pkg);
+            let apps = w.installed.borrow().clone();
+            w.show_apps(apps);
             if let Err(e) = r {
                 w.show_error(Op::Open, Some(&name), &e);
             }
-            w.poll_session();
+            w.read_session();
         });
     }
 
     pub fn confirm_uninstall(&self, a: &DesktopApp) {
+        if self.busy_apps.borrow().contains_key(&a.package) {
+            return;
+        }
         let d = adw::AlertDialog::new(
             Some(&format!("Uninstall {}?", a.name)),
             Some("It will be removed from Android and from the app menu."),
@@ -600,10 +628,21 @@ impl Window {
                 return;
             }
             let keep_data = keep.is_active();
-            let toast = w.say(&format!("Uninstalling {}…", a.name));
+            if !w.begin_app(&a.package, "Uninstalling…") {
+                return;
+            }
             let pkg = a.package.clone();
-            let r = worker::run(move |rep| ops::uninstall(&pkg, keep_data, rep), |_| {}).await;
-            toast.dismiss();
+            let (progress, progress_pkg) = (w.clone(), pkg.clone());
+            let r = worker::run(
+                move |rep| ops::uninstall(&pkg, keep_data, rep),
+                move |e| {
+                    if let Event::Status(text) = e {
+                        progress.app_progress(&progress_pkg, &install::status_text(&text));
+                    }
+                },
+            )
+            .await;
+            w.busy_apps.borrow_mut().remove(&a.package);
             match r {
                 Ok(_) => {
                     w.nav.pop_to_tag("main");
@@ -664,33 +703,110 @@ impl Window {
         });
     }
 
-    /// Reads the session's status off the UI thread and shows it, and the
-    /// single-uid notice the first time the session runs in that mode.
-    pub fn poll_session(&self) {
-        if self.polling.replace(true) {
-            return;
+    fn begin_app(&self, pkg: &str, text: &str) -> bool {
+        if self.busy_apps.borrow().contains_key(pkg) {
+            return false;
         }
+        self.app_progress(pkg, text);
+        true
+    }
+
+    fn app_progress(&self, pkg: &str, text: &str) {
+        self.busy_apps.borrow_mut().insert(pkg.into(), text.into());
+        let apps = self.installed.borrow().clone();
+        self.show_apps(apps);
+    }
+
+    /// Watch the bridge's real lifetime and its readiness/window signals. The
+    /// proxy never activates a session merely to display its state.
+    fn watch_session(&self) {
+        let weak = self.downgrade();
+        glib::spawn_future_local(async move {
+            let name = linuxapk_core::app_settings::bus_name(
+                &linuxapk_core::paths::instance().unwrap_or_default(),
+            );
+            let proxy = gio::DBusProxy::for_bus_future(
+                gio::BusType::Session,
+                gio::DBusProxyFlags::DO_NOT_AUTO_START
+                    | gio::DBusProxyFlags::DO_NOT_LOAD_PROPERTIES,
+                None,
+                &name,
+                linuxapk_core::app_settings::PATH,
+                linuxapk_core::app_settings::INTERFACE,
+            )
+            .await;
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            match proxy {
+                Ok(proxy) => {
+                    let weak = w.downgrade();
+                    proxy.connect_notify_local(Some("g-name-owner"), move |_, _| {
+                        if let Some(w) = weak.upgrade() {
+                            w.read_session();
+                        }
+                    });
+                    let weak = w.downgrade();
+                    proxy.connect_local("g-signal", false, move |args| {
+                        if args[2].get::<String>().ok().as_deref() == Some("Changed")
+                            && let Some(w) = weak.upgrade()
+                        {
+                            w.read_session();
+                        }
+                        None
+                    });
+                    *w.session_proxy.borrow_mut() = Some(proxy);
+                    w.read_session();
+                }
+                Err(e) => {
+                    eprintln!("session bus: {e}");
+                    w.show_session(None, None);
+                }
+            }
+        });
+    }
+
+    pub fn read_session(&self) {
+        let Some(proxy) = self.session_proxy.borrow().clone() else {
+            return;
+        };
+        let generation = self.state_read.get() + 1;
+        self.state_read.set(generation);
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let (st, notice) = worker::run_quiet(|| {
-                let st = Session::find().ok().map(|s| s.status());
-                (st, ops::single_uid_notice(st.is_some_and(|s| s.running)))
-            })
-            .await;
+            let running = proxy.name_owner().is_some();
+            let state = if running {
+                proxy
+                    .call_future("State", None, gio::DBusCallFlags::NO_AUTO_START, 5000)
+                    .await
+                    .ok()
+                    .and_then(|v| v.get::<(bool, Vec<String>)>())
+            } else {
+                None
+            };
+            if w.state_read.get() != generation {
+                return;
+            }
+            let (booted, packages) = state.unwrap_or_default();
+            *w.open_apps.borrow_mut() = packages.into_iter().collect();
+            let st = Status {
+                running,
+                booted,
+                memory: None,
+            };
+            let was_booted = w.last_status.replace(Some(st)).is_some_and(|s| s.booted);
+            if !w.session_busy.get() {
+                w.show_session(Some(st), None);
+            }
+            let apps = w.installed.borrow().clone();
+            w.show_apps(apps);
+            if booted && !was_booted {
+                w.refresh();
+            }
+            let notice = worker::run_quiet(move || ops::single_uid_notice(booted)).await;
             if let Some(n) = notice {
                 w.banner.set_title(n);
                 w.banner.set_revealed(true);
-            }
-            w.polling.set(false);
-            if w.session_busy.get() {
-                return;
-            }
-            let was_booted = w.last_status.get().is_some_and(|s| s.booted);
-            w.last_status.set(st);
-            w.show_session(st, None);
-            // Apps installed without a desktop entry show up once it boots.
-            if !was_booted && st.is_some_and(|s| s.booted) {
-                w.refresh();
             }
         });
     }
@@ -729,7 +845,7 @@ impl Window {
             if let Err(e) = r {
                 w.show_error(Op::Session, None, &e);
             }
-            w.poll_session();
+            w.read_session();
         });
     }
 }

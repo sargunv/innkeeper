@@ -306,7 +306,7 @@ fn details(
             )
             .await;
             page.set_can_pop(true);
-            w.poll_session();
+            w.read_session();
             match r {
                 Ok(i) => {
                     w.refresh();

@@ -19,7 +19,9 @@ own; `cargo test -p linuxapk-core` tests it.
   malformed is an error, never a panic.
 - **Icons** come from Android: the system app's `IconDump` runs under
   `app_process` and renders the launcher icon at 48 to 512 px, so adaptive and
-  vector icons get the system mask. The APK's own PNGs are the fallback.
+  vector icons get the system mask. The APK's own PNGs are the fallback. Before
+  installation, `apk/icon.rs` renders static adaptive/vector layers on the host
+  with resvg; see the [manager limits](../manager/README.md).
 - **Desktop entries** (`desktop.rs`, `xdg.rs`): `dev.linuxapk.<pkg>.desktop`
   with `StartupWMClass` matching the window's `app_id`, custom URL schemes as
   `x-scheme-handler/*` (never `http(s)`, `file`, `content` or `intent`), and
@@ -48,6 +50,9 @@ own; `cargo test -p linuxapk-core` tests it.
   the launcher's library, in-process; start, stop and `exec` run
   `linuxapk-session`, whose `exec` must join the session's namespaces from a
   single-threaded process.
+- **Errors** (`errors.rs`): `ErrorKind` context on anyhow errors lets front ends
+  select user-facing copy without parsing diagnostics. PackageManager install
+  codes are parsed once in core, including unknown future codes.
 - **Untrusted input** (`validate.rs`): package names, labels, schemes, locales
   and URIs are validated before they reach a path, an entry or a command.
 

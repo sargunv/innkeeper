@@ -53,3 +53,17 @@ Preferences live in `$XDG_CONFIG_HOME/linuxapk[-<instance>]/preferences.toml`.
 The page reads them without starting Android. A running session accepts updates
 through `Session1`; otherwise they are saved for the next start. Desktop
 following, mirroring and the idle timeout change live.
+
+The install page renders adaptive icons on the host without starting Android:
+static PNG/WebP layers, solid colours and vector paths (including groups,
+transforms, strokes and alpha), resolved from the APK's binary resources. It
+uses a circular mask and crops the layers' adaptive overscan. Theme tints,
+colour state lists, gradients, clip paths, trimmed paths, animated drawables,
+inset/layer-list drawables and resources supplied only by another split are not
+previewed; those fall back to a legacy bitmap, then the generic icon. Android
+renders the final installed icon.
+
+The list shows a spinner and progress on the affected row while opening or
+uninstalling, and an **Open** label for apps with windows. Session state follows
+D-Bus name ownership and the bridge's `State` / `Changed` API, including windows
+opened or closed outside the manager; there is no status polling timer.

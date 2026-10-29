@@ -154,6 +154,22 @@ object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
 and CLI calls use this interface for per-app management; they do not run
 commands inside Android. Starting a stopped session still uses the launcher.
 
+`State() → (b booted, as open_packages)` reads a snapshot without starting
+Android. Name ownership means the bridge is running; `booted` means the system
+app has observed `sys.boot_completed=1`, matching `Session::booted()`. The apps
+channel connecting alone does not mean Android has completed booting.
+`open_packages` lists packages whose windows are mapped by the display bridge.
+`Changed()` invalidates this snapshot on boot completion, apps channel
+connect/disconnect or window map/unmap. Consumers watch name ownership as well,
+clearing state when the bridge exits, subscribe before reading, and read again
+on each signal. No periodic status command is needed.
+
+The system app sends apps request `0x0505` (BOOT_COMPLETED, empty body, no fds)
+after receiving Android's boot-completed broadcast and checking the property. It
+also checks and replays this on every connection for a late process start or
+reconnect. A replacement or disconnected apps channel clears `booted` until the
+current connection reports completion; an obsolete connection cannot set it.
+
 `App(s package, s action, s permission, b enabled) → s response` is synchronous.
 Actions are `info`, `clear-cache`, `clear-data`, `force-stop`, `permission`,
 `escape-back` and `background`. Only `permission` accepts a permission name;

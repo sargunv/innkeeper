@@ -4,6 +4,7 @@
 //! Everything read is untrusted: front ends validate it before use.
 
 mod chunk;
+pub mod icon;
 mod locale;
 mod table;
 mod xml;

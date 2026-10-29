@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import dev.linuxapk.system.Feature
+import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.bridge.Blob
 import dev.linuxapk.system.bridge.BridgeConnection
 import java.io.ByteArrayOutputStream
@@ -74,6 +75,13 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
       }
     }
 
+  private val bootReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(c: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) reportBootCompleted()
+      }
+    }
+
   override fun start() {
     thread.start()
     handler = Handler(thread.looper)
@@ -86,17 +94,27 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
         addDataScheme("package")
       }
     context.registerReceiver(receiver, f, null, handler, Context.RECEIVER_EXPORTED)
+    context.registerReceiver(
+      bootReceiver,
+      IntentFilter(Intent.ACTION_BOOT_COMPLETED),
+      null,
+      handler,
+      Context.RECEIVER_EXPORTED,
+    )
     channel.start()
   }
 
   override fun stop() {
     channel.stop()
     context.unregisterReceiver(receiver)
+    context.unregisterReceiver(bootReceiver)
     thread.quitSafely()
   }
 
   private fun onConnected() {
     handler.post {
+      // Replay after a late process start or reconnect; channel presence alone precedes boot.
+      reportBootCompleted()
       val launchable =
         pm
           .queryIntentActivities(
@@ -107,6 +125,10 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
           .toSet()
       for (p in launchable) sync(p)
     }
+  }
+
+  private fun reportBootCompleted() {
+    if (SystemProps.get("sys.boot_completed") == "1") channel.send(BOOT_COMPLETED)
   }
 
   private fun app(pkg: String): ApplicationInfo? {
@@ -194,6 +216,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
     private const val REMOVED = 0x0503
     private const val COMMAND = 0x4501
     private const val RESULT = 0x0504
+    private const val BOOT_COMPLETED = 0x0505
     private const val MISSING = 0
   }
 }

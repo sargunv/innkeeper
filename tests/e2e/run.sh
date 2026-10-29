@@ -86,6 +86,16 @@ if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
       "$S" selftest
+      # Session1 reports the same completed boot as the launcher's property check.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      session_booted() {
+        gdbus call --session --dest "dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}" \
+          --object-path /dev/linuxapk/Session --method dev.linuxapk.Session1.State >"$T/session-state.txt" &&
+          file_has "$T/session-state.txt" '^\(true,'
+      }
+      until_ok session_booted
+      booted
+      echo 'ok   Session1 booted follows Android boot completion'
       s getprop ro.product.board >"$T/board.txt"
       [[ $(cat "$T/board.txt") == cutf ]]
       # Cuttlefish's netd aborts during startup if mapLockTest fails. Its

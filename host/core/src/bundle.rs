@@ -11,6 +11,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::ErrorKind;
 use anyhow::{Context, Result, bail};
 
 /// Per-APK and total extraction caps.
@@ -83,14 +84,16 @@ pub fn select_entries(names: &[String]) -> (Vec<String>, Vec<String>) {
 /// directory under `work_root`.
 pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
     if !is_zip(path)? {
-        bail!(
+        return Err(anyhow::anyhow!(
             "{} is not an APK or APK bundle (not a zip archive)",
             path.display()
-        );
+        )
+        .context(ErrorKind::NotAnApk));
     }
     let f = File::open(path)?;
-    let mut zip =
-        zip::ZipArchive::new(f).with_context(|| format!("read zip {}", path.display()))?;
+    let mut zip = zip::ZipArchive::new(f)
+        .with_context(|| format!("read zip {}", path.display()))
+        .context(ErrorKind::NotAnApk)?;
     let names: Vec<String> = zip
         .file_names()
         .filter_map(|r| r.ok())
@@ -108,13 +111,17 @@ pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
     }
     let (entries, skipped) = select_entries(&names);
     if entries.is_empty() {
-        bail!(
+        return Err(anyhow::anyhow!(
             "{} contains no APKs (encrypted .apkm files aren't supported)",
             path.display()
-        );
+        )
+        .context(ErrorKind::UnsupportedBundle));
     }
     if entries.len() > 200 {
-        bail!("{} has too many APKs ({})", path.display(), entries.len());
+        return Err(
+            anyhow::anyhow!("{} has too many APKs ({})", path.display(), entries.len())
+                .context(ErrorKind::UnsupportedBundle),
+        );
     }
     fs::create_dir_all(work_root)?;
     // Unique per process and per open: the GUI can hold several at once.
@@ -135,7 +142,8 @@ pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
     for (i, name) in entries.iter().enumerate() {
         let mut e = zip.by_name(name)?;
         if e.encrypted() {
-            bail!("{name} in {} is encrypted", path.display());
+            return Err(anyhow::anyhow!("{name} in {} is encrypted", path.display())
+                .context(ErrorKind::UnsupportedBundle));
         }
         let dst = work.join(format!("{i}.apk"));
         let mut out = File::create(&dst)?;

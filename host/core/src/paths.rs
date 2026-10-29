@@ -33,6 +33,7 @@ impl Prefix {
                     exe.display()
                 )
             })
+            .context(crate::ErrorKind::SessionStartFailed)
     }
 
     pub fn launcher(&self) -> PathBuf {

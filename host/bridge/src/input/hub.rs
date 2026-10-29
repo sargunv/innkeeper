@@ -36,6 +36,8 @@ pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
     focus_watch: Mutex<Option<FocusWatch>>,
+    window_watch: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    packages: Mutex<HashMap<u32, String>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
     repeat: Mutex<Option<String>>,
     pub evdev: Mutex<Option<super::evdev::Evdev>>,
@@ -55,6 +57,23 @@ struct State {
 impl Hub {
     pub fn new() -> Arc<Hub> {
         Arc::default()
+    }
+
+    pub fn watch_windows(&self, watch: impl Fn() + Send + Sync + 'static) {
+        *self.window_watch.lock().unwrap() = Some(Box::new(watch));
+    }
+
+    pub fn open_packages(&self) -> Vec<String> {
+        let mut packages: Vec<_> = self.packages.lock().unwrap().values().cloned().collect();
+        packages.sort();
+        packages.dedup();
+        packages
+    }
+
+    fn windows_changed(&self) {
+        if let Some(watch) = &*self.window_watch.lock().unwrap() {
+            watch();
+        }
     }
 
     // ---- the input service's side
@@ -221,6 +240,14 @@ impl Hub {
             .unwrap()
             .shown
             .insert(r.window, (conn, display));
+        let prefix = format!(
+            "{}.",
+            linuxapk_core::desktop::flatpak_app_id().unwrap_or_else(|| "dev.linuxapk".into())
+        );
+        if let Some(pkg) = r.app_id.strip_prefix(&prefix) {
+            self.packages.lock().unwrap().insert(r.window, pkg.into());
+        }
+        self.windows_changed();
         crate::info!("input: window {} shows display {display}", r.window);
     }
 
@@ -244,6 +271,8 @@ impl Hub {
     }
 
     fn unmapped(&self, window: u32) {
+        self.packages.lock().unwrap().remove(&window);
+        self.windows_changed();
         let body = event::window_unmapped(window);
         self.clients
             .broadcast(ty::WINDOW_UNMAPPED, &body, &[], None);

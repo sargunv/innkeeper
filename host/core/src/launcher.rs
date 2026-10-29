@@ -210,6 +210,7 @@ impl Session {
     /// progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
         self.run_prepare()
+            .context(crate::ErrorKind::ImageNotPrepared)
     }
 
     fn run_prepare(&self) -> Result<()> {
@@ -232,7 +233,8 @@ impl Session {
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
         if !self.image_ready() {
             status(PREPARING);
-            self.run_prepare()?;
+            self.run_prepare()
+                .context(crate::ErrorKind::ImageNotPrepared)?;
         }
         status("starting the Android session");
         let mut c = Command::new(&self.launcher);
@@ -240,8 +242,16 @@ impl Session {
         if headless {
             c.arg("--headless");
         }
-        if !c.status()?.success() {
-            bail!("session start failed ({} start)", self.launcher.display());
+        if !c
+            .status()
+            .context(crate::ErrorKind::SessionStartFailed)?
+            .success()
+        {
+            return Err(anyhow::anyhow!(
+                "session start failed ({} start)",
+                self.launcher.display()
+            )
+            .context(crate::ErrorKind::SessionStartFailed));
         }
         Ok(())
     }
@@ -253,10 +263,16 @@ impl Session {
         let mut said = false;
         while !self.booted() {
             if !self.running() {
-                bail!("the session stopped while booting (see `linuxapk-session log`)");
+                return Err(anyhow::anyhow!(
+                    "the session stopped while booting (see `linuxapk-session log`)"
+                )
+                .context(crate::ErrorKind::SessionStartFailed));
             }
             if t.elapsed() > limit {
-                bail!("the session did not finish booting in {limit:?}");
+                return Err(
+                    anyhow::anyhow!("the session did not finish booting in {limit:?}")
+                        .context(crate::ErrorKind::SessionStartFailed),
+                );
             }
             if !said && t.elapsed() > Duration::from_secs(3) {
                 status("waiting for Android to boot");

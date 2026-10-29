@@ -14,19 +14,26 @@ use crate::ipc::{
 
 pub const COMMAND: u16 = 0x4501;
 pub const RESULT: u16 = 0x0504;
+pub const BOOT_COMPLETED: u16 = 0x0505;
 type Answer = Result<String, String>;
 
 #[derive(Default)]
 struct State {
     next: u64,
     connection: Option<(u64, Events)>,
+    booted: bool,
     pending: HashMap<u64, mpsc::SyncSender<Answer>>,
+    bus: Option<zbus::blocking::Connection>,
 }
 
 #[derive(Clone, Default)]
 pub struct Relay(Arc<Mutex<State>>);
 
 impl Relay {
+    fn booted(&self) -> bool {
+        self.0.lock().unwrap().booted
+    }
+
     pub fn attach(&self, events: Events) -> u64 {
         let mut state = self.0.lock().unwrap();
         if let Some((_, old)) = state.connection.take() {
@@ -36,6 +43,9 @@ impl Relay {
         state.next += 1;
         let id = state.next;
         state.connection = Some((id, events));
+        state.booted = false;
+        drop(state);
+        self.changed();
         id
     }
 
@@ -43,7 +53,38 @@ impl Relay {
         let mut state = self.0.lock().unwrap();
         if state.connection.as_ref().is_some_and(|(k, _)| *k == id) {
             state.connection = None;
+            state.booted = false;
             state.pending.clear();
+        }
+        drop(state);
+        self.changed();
+    }
+
+    pub fn boot_completed(&self, connection: u64) {
+        let mut state = self.0.lock().unwrap();
+        if state.booted
+            || !state
+                .connection
+                .as_ref()
+                .is_some_and(|(id, _)| *id == connection)
+        {
+            return;
+        }
+        state.booted = true;
+        drop(state);
+        self.changed();
+    }
+
+    fn changed(&self) {
+        let bus = self.0.lock().unwrap().bus.clone();
+        if let Some(bus) = bus {
+            let _ = bus.emit_signal(
+                None::<&str>,
+                app_settings::PATH,
+                app_settings::INTERFACE,
+                "Changed",
+                &(),
+            );
         }
     }
 
@@ -111,23 +152,30 @@ impl Relay {
         &self,
         shared: Arc<crate::system::Shared>,
         apps: Arc<super::Config>,
+        input: Arc<crate::input::Hub>,
     ) -> anyhow::Result<zbus::blocking::Connection> {
-        Ok(zbus::blocking::connection::Builder::session()?
+        let relay = self.clone();
+        input.watch_windows(move || relay.changed());
+        let bus = zbus::blocking::connection::Builder::session()?
             .name(app_settings::bus_name(&linuxapk_core::paths::instance()?))?
             .serve_at(
                 app_settings::PATH,
                 SessionApi {
                     relay: self.clone(),
+                    input,
                     shared,
                     apps,
                     preferences: Mutex::new(()),
                 },
             )?
-            .build()?)
+            .build()?;
+        self.0.lock().unwrap().bus = Some(bus.clone());
+        Ok(bus)
     }
 }
 
 struct SessionApi {
+    input: Arc<crate::input::Hub>,
     relay: Relay,
     shared: Arc<crate::system::Shared>,
     apps: Arc<super::Config>,
@@ -136,6 +184,14 @@ struct SessionApi {
 
 #[zbus::interface(name = "dev.linuxapk.Session1")]
 impl SessionApi {
+    /// Booted only after the system app observes sys.boot_completed=1.
+    fn state(&self) -> (bool, Vec<String>) {
+        (self.relay.booted(), self.input.open_packages())
+    }
+
+    #[zbus(signal)]
+    async fn changed(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
+
     fn get_preferences(&self) -> zbus::fdo::Result<String> {
         let _guard = self.preferences.lock().unwrap();
         linuxapk_core::preferences::Preferences::load()
@@ -180,5 +236,42 @@ impl SessionApi {
             .validate()
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
         self.relay.call(command).map_err(zbus::fdo::Error::Failed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn connection_does_not_mean_boot_completed() {
+        let relay = Relay::default();
+        assert!(!relay.booted());
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let first = relay.attach(Events::new(Arc::new(socket.into())));
+        assert!(!relay.booted());
+        relay.boot_completed(first);
+        assert!(relay.booted());
+
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let second = relay.attach(Events::new(Arc::new(socket.into())));
+        assert!(!relay.booted());
+        relay.boot_completed(first);
+        assert!(
+            !relay.booted(),
+            "an obsolete connection cannot complete boot"
+        );
+        relay.boot_completed(second);
+        assert!(relay.booted(), "a reconnect replays completed boot");
+        relay.detach(first);
+        assert!(relay.booted());
+        relay.detach(second);
+        assert!(!relay.booted());
+        relay.boot_completed(second);
+        assert!(
+            !relay.booted(),
+            "a disconnected channel cannot complete boot"
+        );
     }
 }

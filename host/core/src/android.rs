@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 
 use crate::launcher::Session;
-use crate::validate;
+use crate::{ErrorKind, validate};
 
 /// The system app, whose `IconDump` renders app icons (and reports labels).
 const SYSTEM_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
@@ -24,6 +24,10 @@ pub fn parse_session_id(out: &str) -> Option<u32> {
 /// Installs one app from its APKs (base first) in one PackageInstaller
 /// session, streaming each file through stdin (no copies in the session).
 pub fn install(s: &Session, apks: &[&Path]) -> Result<()> {
+    install_apks(s, apks).map_err(crate::errors::classify_install_error)
+}
+
+fn install_apks(s: &Session, apks: &[&Path]) -> Result<()> {
     let total: u64 = apks
         .iter()
         .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
@@ -72,10 +76,7 @@ pub fn install(s: &Session, apks: &[&Path]) -> Result<()> {
         let o = s.exec(600, &["cmd", "package", "install-commit", &sid_s])?;
         let t = o.text();
         if !t.lines().any(|l| l.trim() == "Success") {
-            bail!(
-                "{}",
-                validate::truncate(format!("{} {}", t.trim(), o.stderr.trim()).trim(), 600)
-            );
+            bail!("{} {}", t.trim(), o.stderr.trim());
         }
         Ok(())
     })();
@@ -138,7 +139,10 @@ pub fn launcher_component(s: &Session, pkg: &str) -> Result<String> {
     let comp = out.lines().last().unwrap_or("").trim();
     match comp.split_once('/') {
         Some((p, _)) if p == pkg && !comp.contains(char::is_whitespace) => Ok(comp.to_string()),
-        _ => bail!("{pkg} has no launcher activity (is it installed?)"),
+        _ => Err(
+            anyhow::anyhow!("{pkg} has no launcher activity (is it installed?)")
+                .context(ErrorKind::NoLauncherActivity),
+        ),
     }
 }
 
@@ -253,14 +257,15 @@ pub fn launch(s: &Session, l: &Launch, o: &LaunchOptions) -> Result<String> {
     match wm_reply(&o.text()) {
         Some(Ok(r)) => Ok(r),
         Some(Err(e)) => bail!("launch failed: {e}"),
-        None => bail!(
+        None => Err(anyhow::anyhow!(
             "launch failed: Linux.apk System's window manager did not answer (Android {})",
             if s.booted() {
                 "has booted"
             } else {
                 "is still booting"
             }
-        ),
+        )
+        .context(ErrorKind::Timeout)),
     }
 }
 
@@ -284,7 +289,7 @@ pub fn background(s: &Session, set: Option<(&str, bool)>) -> Result<Vec<String>>
     match wm_reply(&s.exec(30, &argv)?.text()) {
         Some(Ok(r)) => Ok(background_reply(&r)),
         Some(Err(e)) => bail!("{e}"),
-        None => bail!("Linux.apk System did not answer"),
+        None => Err(anyhow::anyhow!("Linux.apk System did not answer").context(ErrorKind::Timeout)),
     }
 }
 
