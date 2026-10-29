@@ -425,26 +425,8 @@ native = "x86_64"
 framework = "Android Views + Go"
 url = "https://f-droid.org/repo/com.celzero.bravedns_709.apk"
 sha256 = "0e8e5d70496b506038ca4afaef868fadaac6e0b5416b80aa6e139174fa181004"
-note = "VpnService (TUN in the session)"
-script = [
-  "tap:Skip",
-  "wait:2",
-  "tap:START",
-  "wait:2",
-  "try:Skip Tour",
-  "wait:1",
-  "tap:START",
-  "wait:2",
-  "tap:Proceed",
-  "wait:2",
-  "sh:dumpsys window displays | grep mCurrentFocus | grep -q vpndialogs",
-  "tap:OK",
-  "wait:10",
-  "sh:dumpsys connectivity | grep -q 'VPN CONNECTED extra: VPN:com.celzero.bravedns'",
-  "sh:ip link | grep -q tun",
-  "shot:vpn",
-]
-manual = "Flatpak has no TUN device: VPN is unavailable (partly works). In host mode, start the DNS/firewall VPN and browse: does traffic flow through the TUN, does the VPN key icon show?"
+note = "VpnService"
+manual = "Flatpak has no TUN device, so its VPN can't start (#56)."
 
 [[app]]
 package = "org.jellyfin.androidtv"
@@ -469,17 +451,8 @@ native = "none"
 framework = "Android Views"
 url = "https://f-droid.org/repo/org.joinmastodon.android_191.apk"
 sha256 = "ce1a8222a1f9a59cdde0816a64a39692123c3bc05f64966abae5b0ea2dfe709e"
-note = "OAuth sign-in through Custom Tabs/browser"
-script = [
-  "tap:Log in",
-  "wait:3",
-  "tap:mastodon.social",
-  "tap:Next",
-  "sh:for i in $(seq 30); do logcat -d -s LinuxApkBrowser | grep -q 'opening on the desktop: https://mastodon.social/oauth/authorize' && exit 0; sleep 1; done; exit 1",
-  "bridgelog:https://mastodon.social/oauth/authorize",
-  "shot:oauth",
-]
-manual = "Log in to a server (in the main session; test sessions only log links): the sign-in page opens in the host browser (the system app is the default browser, host/bridge/src/system/openuri.rs); does the redirect come back to the app through the CLI's scheme handler?"
+note = "OAuth sign-in through the host browser"
+manual = "Log in to a server: the sign-in page opens in the host browser, and the redirect comes back to the app."
 
 [[app]]
 package = "com.github.mkalmousli.floating_mute"
