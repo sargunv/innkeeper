@@ -44,6 +44,11 @@ def serve(directory):
   clients = {}
   next_effect = [0, 0]
 
+  def disconnect(key):
+    client = clients.pop(key)
+    selector.unregister(client)
+    client.close()
+
   def create(index):
     for suffix in ("", ".ff"):
       path = directory / f"event{index}{suffix}"
@@ -58,11 +63,9 @@ def serve(directory):
       )
 
   def remove(index):
-    for key, sock in list(clients.items()):
+    for key in list(clients):
       if key[0] == index:
-        selector.unregister(sock)
-        sock.close()
-        del clients[key]
+        disconnect(key)
     for key, sock in list(listeners.items()):
       if key[0] == index:
         selector.unregister(sock)
@@ -84,8 +87,7 @@ def serve(directory):
         client.setblocking(False)
         key = (index, suffix)
         if key in clients:
-          selector.unregister(clients[key])
-          clients[key].close()
+          disconnect(key)
         clients[key] = client
         selector.register(
           client, selectors.EVENT_READ, ("client", index, suffix)
@@ -98,18 +100,21 @@ def serve(directory):
           try:
             client.send(event(3, 0, 12345) + event(1, 304, 1) + event(0, 0, 0))
             client.send(event(1, 304, 0) + event(0, 0, 0))
-          except BrokenPipeError:
+          except ConnectionError:
             # The bridge retries registration until the broker is listening.
-            selector.unregister(client)
-            client.close()
-            clients.pop(key, None)
+            disconnect(key)
       else:
         client = selected.fileobj
-        data = client.recv(4096)
+        key = (index, suffix)
+        if clients.get(key) is not client:
+          continue  # A ready accept may have replaced this selected connection.
+        try:
+          data = client.recv(4096)
+        except ConnectionResetError:
+          # Closing with unread initial reports resets a seqpacket connection.
+          data = b""
         if not data:
-          selector.unregister(client)
-          client.close()
-          clients.pop((index, suffix), None)
+          disconnect(key)
           continue
         cmd = struct.unpack_from("I", data)[0]
         result = 0
@@ -125,7 +130,10 @@ def serve(directory):
         with (directory / f"rumble{index}.jsonl").open("a") as log:
           log.write(json.dumps({"cmd": cmd, "bytes": data.hex()}) + "\n")
         if cmd:
-          client.send(struct.pack("i", result) + payload)
+          try:
+            client.send(struct.pack("i", result) + payload)
+          except ConnectionError:
+            disconnect(key)
 
 
 if __name__ == "__main__":
