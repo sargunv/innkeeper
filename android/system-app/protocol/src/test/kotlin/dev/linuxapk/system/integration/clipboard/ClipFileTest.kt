@@ -8,6 +8,18 @@ import kotlin.test.assertFails
 
 class ClipFileTest {
   @Test
+  fun fileMimePreservesProviderAndDescriptionTypes() {
+    val declared = listOf("application/pdf", "text/plain")
+    assertEquals("image/jpeg", ClipFile.resolveMime("image/jpeg", declared, 1))
+    assertEquals("application/pdf", ClipFile.resolveMime(null, declared, 1))
+    assertEquals("application/pdf", ClipFile.resolveMime(null, listOf("application/pdf"), 2))
+    assertEquals("image/jpeg", ClipFile.resolveMime("image/jpeg", declared, 2))
+    assertEquals("application/octet-stream", ClipFile.resolveMime(null, declared, 2))
+    assertEquals("application/octet-stream", ClipFile.resolveMime(null, emptyList(), 1))
+    assertEquals("application/octet-stream", ClipFile.resolveMime(null, emptyList(), 2))
+  }
+
+  @Test
   fun fileClipRoundtripAndBounds() {
     val f =
       ClipFiles(

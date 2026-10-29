@@ -17,6 +17,12 @@ data class ClipFile(val name: String, val mime: String, val bytes: ByteArray) {
   companion object {
     const val MAX_BYTES = (16 shl 20) - 1024
 
+    /** ClipDescription covers every item, so multiple declared types are ambiguous for a list. */
+    fun resolveMime(providerMime: String?, descriptionMimes: List<String>, itemCount: Int): String =
+      providerMime
+        ?: descriptionMimes.firstOrNull()?.takeIf { itemCount == 1 || descriptionMimes.size == 1 }
+        ?: "application/octet-stream"
+
     fun validate(name: String, mime: String, size: Int) {
       require(
         name.isNotEmpty() &&

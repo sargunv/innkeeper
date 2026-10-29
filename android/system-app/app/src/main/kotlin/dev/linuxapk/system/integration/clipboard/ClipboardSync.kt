@@ -92,6 +92,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         require(uris.size <= ClipFiles.MAX_FILES && uris.all { it?.scheme == "content" }) {
           "copy up to ${ClipFiles.MAX_FILES} content files"
         }
+        val descriptionMimes = (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }
         val files = mutableListOf<ClipFile>()
         var remaining = ClipFiles.MAX_TOTAL - 4
         for (fileUri in uris.filterNotNull()) {
@@ -105,7 +106,12 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
                 null,
               )
               ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "clipboard-file"
-          val fileMime = context.contentResolver.getType(fileUri) ?: "application/octet-stream"
+          val fileMime =
+            ClipFile.resolveMime(
+              context.contentResolver.getType(fileUri),
+              descriptionMimes,
+              clip.itemCount,
+            )
           require(fileMime != "vnd.android.document/directory") {
             "clipboard directories unsupported"
           }
