@@ -156,12 +156,14 @@ static void tests(const char* outside_dir) {
   CHECK(get("/sys/fs/bpf/fifo") == -EINVAL, "get of a FIFO: EINVAL, no hang");
   char esc[512];
   snprintf(esc, sizeof(esc), "%s/escaped", outside_dir);
-  symlink(outside_dir, "/sys/fs/bpf/link");
+  CHECK(
+    symlink(outside_dir, "/sys/fs/bpf/link") == 0, "symlink into the pin dir"
+  );
   CHECK(
     pin(m, "/sys/fs/bpf/link/escaped") == -ELOOP && access(esc, F_OK) != 0,
     "pin through a symlink: ELOOP, nothing created outside"
   );
-  symlink(esc, "/sys/fs/bpf/flink");
+  CHECK(symlink(esc, "/sys/fs/bpf/flink") == 0, "symlink to a file outside");
   CHECK(get("/sys/fs/bpf/flink") == -ELOOP, "get of a symlink: ELOOP");
   CHECK(get("/sys/fs/bpf/../../../etc/passwd") == -EXDEV, "get with ..: EXDEV");
   char outside[512];
