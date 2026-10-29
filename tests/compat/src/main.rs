@@ -98,6 +98,7 @@ fn run_at_nice_zero() -> Result<()> {
             || name.starts_with("XDG_")
             || [
                 "WAYLAND_DISPLAY",
+                "PULSE_SERVER",
                 "DBUS_SESSION_BUS_ADDRESS",
                 "HOME",
                 "PATH",
