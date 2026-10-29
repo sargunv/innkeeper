@@ -30,7 +30,8 @@ for d in "$@"; do
 done
 true'
 
-android_ns=$(readlink "/proc/$pid/ns/pid")
+# The dev driver reports a scope PID, which may be outside Android's PID namespace.
+android_ns=$("$session" exec readlink /proc/self/ns/pid)
 outer=()
 while read -r p; do
   [[ $(readlink "/proc/$p/ns/pid" 2>/dev/null) == "$android_ns" ]] || outer+=("/proc/$p")

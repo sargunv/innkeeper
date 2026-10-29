@@ -9,4 +9,5 @@ session_start_ms = { budget = 2500, margin = 0.25 }
 # Warm app start: the corpus median, ms.
 app_start_ms = { budget = 200, margin = 0.25 }
 # Idle session memory without page cache, MiB.
-idle_memory_mib = { budget = 575, margin = 0.10 }
+# Minimal HOME: 527 -> 484 MiB after 90 s idle; keep 13 MiB of the 43 MiB saving.
+idle_memory_mib = { budget = 545, margin = 0.10 }

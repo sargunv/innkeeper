@@ -54,13 +54,14 @@ Apps the boot broadcasts start, which then stay resident, for features a desktop
 session doesn't have (#28). Each is blanked like the files above;
 `tools/dev/footprint.sh` shows what a session holds.
 
-| File                                                                                                          | Why                                                       |
-| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `system/priv-app/CellBroadcastLegacyApp`, `apex/com.android.cellbroadcast/priv-app/*`                         | emergency alerts arrive over a modem                      |
-| `product/app/messaging`, `product/priv-app/ImsServiceEntitlement`                                             | SMS and carrier IMS need a modem                          |
-| `product/app/Camera2`                                                                                         | no camera                                                 |
-| `product/app/QuickSearchBox`                                                                                  | the home screen's search widget; nobody sees the launcher |
-| `system/app/Traceur`, `system/priv-app/DeviceDiagnostics`, `system/priv-app/DynamicSystemInstallationService` | on-device tracing, trade-in diagnostics, GSI installs     |
+| File                                                                                                          | Why                                                                                   |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `system/priv-app/CellBroadcastLegacyApp`, `apex/com.android.cellbroadcast/priv-app/*`                         | emergency alerts arrive over a modem                                                  |
+| `product/app/messaging`, `product/priv-app/ImsServiceEntitlement`                                             | SMS and carrier IMS need a modem                                                      |
+| `product/app/Camera2`                                                                                         | no camera                                                                             |
+| `system_ext/priv-app/Launcher3QuickStep`                                                                      | HOME is the system app’s empty activity; the desktop owns launches and task switching |
+| `product/app/QuickSearchBox`                                                                                  | the home screen's search widget; nobody sees the launcher                             |
+| `system/app/Traceur`, `system/priv-app/DeviceDiagnostics`, `system/priv-app/DynamicSystemInstallationService` | on-device tracing, trade-in diagnostics, GSI installs                                 |
 
 APK paths inside APEXes carry the build id (`CellBroadcastApp@CP2A.260605.016`),
 so check them when the pin moves; the compat run's idle-memory budget fails if

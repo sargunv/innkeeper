@@ -9,6 +9,7 @@ restarts it if it dies.
 
 | Feature (`app/.../system/`)             | Bridge service | What it does                                                                           |
 | --------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
+| `wm/HomeActivity.kt`                    | none           | empty HOME on the windowless default display, replacing Launcher3/QuickStep            |
 | `wm/`                                   | input          | one trusted virtual display and host window per app ([display](../../docs/display.md)) |
 | `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))          |
 | `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up    |
