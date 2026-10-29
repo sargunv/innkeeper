@@ -11,9 +11,9 @@
 //     rejects Android contexts with EINVAL, and init treats that as fatal.
 //   * Sockets and files get setsockcreatecon()/setfscreatecon() contexts.
 //
-// This shim makes those calls succeed as no-ops. The getters (getcon,
-// getfilecon, getpeercon...) are left alone: they return host labels, which
-// only end up in log lines and in checks that libselinux already skips.
+// This shim makes those calls succeed as no-ops. File contexts fall back to
+// a synthetic label on hosts without SELinux. Process and peer contexts keep
+// their host labels, used only in logs and checks libselinux already skips.
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +24,8 @@
 typedef unsigned short security_class_t;
 
 static const char kServiceContext[] = "u:r:linuxapk:s0";
+
+#include "selinux-file.h"
 
 EXPORT int security_compute_create(
   const char* scon, const char* tcon, security_class_t tclass, char** newcon
