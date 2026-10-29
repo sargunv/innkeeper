@@ -1,4 +1,5 @@
-// init reads the service executable's label even with SELinux disabled.
+// init reads executable labels and vold_prepare_subdirs reads directory labels
+// even with SELinux disabled.
 // Ubuntu's files have no security.selinux xattr. Supply a label for our
 // no-op security_compute_create, preserving real labels and file errors.
 #include <dlfcn.h>
@@ -23,4 +24,6 @@
 
 FILE_CONTEXT_GETTER(getfilecon)
 FILE_CONTEXT_GETTER(getfilecon_raw)
+FILE_CONTEXT_GETTER(lgetfilecon)
+FILE_CONTEXT_GETTER(lgetfilecon_raw)
 #undef FILE_CONTEXT_GETTER
