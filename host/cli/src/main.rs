@@ -184,7 +184,7 @@ fn main() -> ExitCode {
     };
     if let Some(n) = Session::find()
         .ok()
-        .and_then(|s| ops::single_uid_notice(s.uid_mode()))
+        .and_then(|s| ops::single_uid_notice(s.running()))
     {
         eprintln!("linuxapk: note: {n} See {}", ops::SINGLE_UID_DOCS);
     }

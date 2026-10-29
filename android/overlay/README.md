@@ -45,7 +45,7 @@ must be diffed against the image's copies whenever the pin moves
 | `vendor/etc/vintf/manifest/{face,fingerprint}-default.xml`                                                                        | biometrics HALs declared but never started                                 |
 | `vendor/etc/vintf/manifest/mapper.minigbm.xml`                                                                                    | the minigbm mapper; ours replaces it                                       |
 | `vendor/priv-app/CuttlefishService`, `system_ext/priv-app/CFSatelliteService`                                                     | cuttlefish-only apps                                                       |
-| `vendor/overlay/cuttlefish_overlay_connectivity.apk`                                                                              | an RRO that made pasta's `eth1` a restricted network, so apps were offline |
+| `vendor/overlay/cuttlefish_overlay_connectivity.apk`                                                                              | the image's connectivity RRO; the host network agent supplies capabilities |
 | `vendor/etc/init/motioncontext-service-default.rc`, `vendor/etc/vintf/manifest/motioncontext-service-default.xml`                 | a sample sensor-hub HAL; the session has no sensors                        |
 
 ## Removed for idle memory

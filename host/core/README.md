@@ -36,7 +36,7 @@ own; `cargo test -p linuxapk-core` tests it.
   XDG dirs; the session's own paths and the `LINUXAPK_INSTANCE` parser come from
   the launcher's library ([host/launcher](../launcher/README.md)).
 - **Session** (`launcher.rs`): starts the session on demand and waits for boot.
-  Whether it runs, its uid mode (for the one-time single-uid notice,
+  Whether it runs (for the one-time single-uid notice,
   `ops::single_uid_notice`), its memory and whether the image is ready come from
   the launcher's library, in-process; start, stop and `exec` run
   `linuxapk-session`, whose `exec` must join the session's namespaces from a

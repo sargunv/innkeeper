@@ -1,5 +1,5 @@
 //! Driving the Android session through `linuxapk-session` (the prefix's, or
-//! any launcher for test harnesses). Its state (running, uid mode, memory,
+//! any launcher for test harnesses). Its state (running, memory,
 //! the image) comes from the launcher's library, or, for a launcher outside a
 //! prefix (the dev driver, tools/dev/session.sh), from its `status`, `cgroup`
 //! and `image`; starting, stopping and commands go through the launcher
@@ -15,7 +15,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_session::{Paths, Sandbox, requirements};
+use linuxapk_session::Paths;
 
 use crate::paths::Prefix;
 use crate::proc;
@@ -32,14 +32,6 @@ fn clean_stderr(s: &str) -> String {
         .join("\n")
 }
 
-/// How Android's uids map to host ids: each Android uid one of the user's
-/// subordinate ids (apps isolated from each other as on Android), or every
-/// Android uid the user (no isolation between apps).
-pub use linuxapk_session::UidMode;
-
-/// How the error for missing host requirements begins; the list follows it.
-pub use linuxapk_session::requirements::HEADLINE as MISSING_REQUIREMENTS;
-
 /// What [`Session::status`] reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Status {
@@ -47,7 +39,6 @@ pub struct Status {
     pub booted: bool,
     /// The session unit's memory use (cgroup `memory.current`), in bytes.
     pub memory: Option<u64>,
-    pub uid_mode: Option<UidMode>,
 }
 
 impl Session {
@@ -84,12 +75,6 @@ impl Session {
         self.state()?.pid.map(|p| p as u32)
     }
 
-    /// The running session's uid mode.
-    pub fn uid_mode(&self) -> Option<UidMode> {
-        let s = self.state()?;
-        s.pid.map(|_| s.uid_mode)
-    }
-
     /// The output of a launcher command that only reads state, if it
     /// succeeds.
     fn query(&self, command: &str) -> Option<String> {
@@ -99,11 +84,10 @@ impl Session {
             .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
     }
 
-    /// The session's cgroup dir (host mode, or the dev driver's Flatpak
-    /// scope), for memory accounting.
+    /// The dev driver's Flatpak scope, for memory accounting.
     pub fn cgroup(&self) -> Option<PathBuf> {
         match self.paths() {
-            Some(paths) => linuxapk_session::cgroup(&paths),
+            Some(_) => None,
             None => Some(self.query("cgroup")?.trim().into()),
         }
     }
@@ -177,7 +161,7 @@ impl Session {
         Ok(())
     }
 
-    /// Running state, boot state, memory use and uid mode, for status
+    /// Running state, boot state and memory use, for status
     /// displays.
     pub fn status(&self) -> Status {
         let Some(s) = self.state() else {
@@ -196,7 +180,6 @@ impl Session {
                     .parse()
                     .ok()
             }),
-            uid_mode: Some(s.uid_mode),
         }
     }
 
@@ -226,7 +209,6 @@ impl Session {
     /// Fetches and unpacks the image (about 1.2 GB to download). Its
     /// progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
-        self.check_host()?;
         self.run_prepare()
     }
 
@@ -248,7 +230,6 @@ impl Session {
     /// Starts the session (headless: with no windows, for tests), preparing
     /// the image first if this is the first start. Progress goes to `status`.
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
-        self.check_host()?;
         if !self.image_ready() {
             status(PREPARING);
             self.run_prepare()?;
@@ -261,16 +242,6 @@ impl Session {
         }
         if !c.status()?.success() {
             bail!("session start failed ({} start)", self.launcher.display());
-        }
-        Ok(())
-    }
-
-    /// In host mode, fails naming everything the host lacks for a session.
-    /// The launcher checks too; this makes the list the error itself, for the
-    /// manager to show, rather than a line on stderr.
-    fn check_host(&self) -> Result<()> {
-        if self.paths().is_some_and(|p| p.sandbox == Sandbox::Host) {
-            requirements::check(false)?;
         }
         Ok(())
     }

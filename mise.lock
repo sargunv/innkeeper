@@ -66,29 +66,6 @@ checksum = "sha256:5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbe
 url = "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip"
 url_api = "https://api.github.com/repos/ninja-build/ninja/releases/assets/318865358"
 
-[[tools."github:AppImage/appimagetool"]]
-version = "1.9.1"
-backend = "github:AppImage/appimagetool"
-specifiers = ["1.9.1"]
-
-[tools."github:AppImage/appimagetool"."platforms.linux-x64"]
-checksum = "sha256:ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
-url = "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
-url_api = "https://api.github.com/repos/AppImage/appimagetool/releases/assets/324406736"
-
-[[tools."github:AppImage/type2-runtime"]]
-version = "20251108"
-backend = "github:AppImage/type2-runtime"
-specifiers = ["20251108"]
-
-[tools."github:AppImage/type2-runtime".options]
-asset_pattern = "runtime-x86_64"
-
-[tools."github:AppImage/type2-runtime"."platforms.linux-x64"]
-checksum = "sha256:2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
-url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64"
-url_api = "https://api.github.com/repos/AppImage/type2-runtime/releases/assets/326011592"
-
 [[tools."github:jdx/hk"]]
 version = "2.8.1"
 backend = "github:jdx/hk"

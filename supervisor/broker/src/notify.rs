@@ -597,7 +597,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
         at: AtomicU64::new(u64::MAX),
     });
     // Single-uid mode (supervisor/README.md): virtual ids for every process.
-    let vid = (std::env::var("LINUXAPK_SINGLE_UID").as_deref() == Ok("1"))
+    let vid = (std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
     let flat = crate::flat::Flat::from_env(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {

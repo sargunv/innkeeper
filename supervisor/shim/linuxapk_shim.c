@@ -103,14 +103,12 @@ static int is_selinux_xattr(const char* name) {
 // to wipe /data. Every Android process is the same kernel uid there, so the
 // ACL has nothing to grant: skip it.
 //
-// The mode comes from LINUXAPK_SINGLE_UID=1, which init passes on to every
-// service. (Not the ro.boot property: libc's own startup fstat()s the
-// property areas through this shim before properties can be read.)
+// The bootless developer harness uses real credentials and mounts.
 static int single_uid_state = -1;
 static int single_uid(void) {
   if (single_uid_state < 0) {
-    const char* e = getenv("LINUXAPK_SINGLE_UID");
-    single_uid_state = e && !strcmp(e, "1");
+    const char* e = getenv("LINUXAPK_BIONIC_HARNESS");
+    single_uid_state = !(e && !strcmp(e, "1"));
   }
   return single_uid_state;
 }
@@ -209,8 +207,7 @@ __attribute__((constructor)) static void linuxapk_shim_init(void) {
   }
 }
 
-// Flatpak mode (LINUXAPK_FLATPAK=1, which init passes on like
-// LINUXAPK_SINGLE_UID): the sandbox's seccomp filter fails mount, umount,
+// Flatpak: the sandbox's seccomp filter fails mount, umount,
 // unshare and setns with EPERM, ahead of any filter of ours. Android's root is
 // already assembled (symlinks, see host/launcher/src/flatpak.rs) and has no
 // namespaces to make, so a refused call is treated as done: init's mounts,
@@ -220,8 +217,8 @@ __attribute__((constructor)) static void linuxapk_shim_init(void) {
 static int flatpak_state = -1;
 static int flatpak(void) {
   if (flatpak_state < 0) {
-    const char* e = getenv("LINUXAPK_FLATPAK");
-    flatpak_state = e && !strcmp(e, "1");
+    const char* e = getenv("LINUXAPK_BIONIC_HARNESS");
+    flatpak_state = !(e && !strcmp(e, "1"));
   }
   return flatpak_state;
 }
@@ -249,7 +246,7 @@ EXPORT int setns(int fd, int nstype) {
 // kernel answers its rtnetlink requests (rules, routes, addresses) with
 // EPERM, and netd won't start without its routing rules: report them done.
 // Its routing then means nothing, as its marks (SO_MARK, bpfemu) and
-// iptables rules (linuxapk-iptables) don't; sockets use the host's routes,
+// firewall rules don't; sockets use the host's routes,
 // as every desktop app does.
 #include <linux/netlink.h>
 #include <sys/socket.h>

@@ -1,7 +1,6 @@
 //! Preparing the pinned image: fetched and extracted, its APEXes flattened,
 //! its files read-only, and the derived layers current (image/README.md).
 
-use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -10,8 +9,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
-use crate::paths::{Image, Paths, Sandbox};
-use crate::uid::{self, Uids};
+use crate::paths::{Image, Paths};
 
 fn run(c: &mut Command) -> Result<()> {
     let st = c
@@ -26,8 +24,7 @@ fn run(c: &mut Command) -> Result<()> {
 /// Makes every file under `dir` read-only (a-w), `last` after all others, so
 /// a tree whose `last` is read-only is done. Flatpak mode's composed roots
 /// hardlink these files, so this keeps a session from writing the cache
-/// through them (and ART refuses dex files its process could write). Host
-/// mode's overlays are read-only mounts instead.
+/// through them (and ART refuses dex files its process could write).
 fn make_read_only(dir: &Path, last: &Path) -> Result<()> {
     if fs::metadata(last).is_ok_and(|m| m.permissions().mode() & 0o222 == 0) {
         return Ok(());
@@ -71,22 +68,15 @@ fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
 }
 
 /// Fetches, extracts and flattens the image if needed, and brings the common
-/// derived layer and this uid mode's up to date.
-pub fn prepare(paths: &Paths, image: &Image, uids: &Uids, exe: &Path) -> Result<()> {
+/// and single-uid derived layers up to date.
+pub fn prepare(paths: &Paths, image: &Image) -> Result<()> {
     let tools = paths.libexec.join("image");
-    let read_only = |dir: &Path, last: &Path| {
-        if paths.sandbox == Sandbox::Flatpak {
-            make_read_only(dir, last)
-        } else {
-            Ok(())
-        }
-    };
     if !image.img.join("system/system").is_dir() {
         run(Command::new(tools.join("fetch.sh"))
             .arg(&paths.pin)
             .arg(&paths.images))?;
     }
-    read_only(&image.img, &image.img.join("system/system/build.prop"))?;
+    make_read_only(&image.img, &image.img.join("system/system/build.prop"))?;
     let info = image.apexdir.join("apex-info-list.xml");
     if !info.is_file() {
         let sfx = crate::paths::per_instance("", &paths.instance);
@@ -99,16 +89,16 @@ pub fn prepare(paths: &Paths, image: &Image, uids: &Uids, exe: &Path) -> Result<
             .arg(&image.img)
             .arg(paths.share.join("image/bootconfig"))
             .arg(&tmp))?;
-        read_only(&tmp, &tmp.join("apex-info-list.xml"))?;
+        make_read_only(&tmp, &tmp.join("apex-info-list.xml"))?;
         // Another instance may have won the race: fine.
         if fs::rename(&tmp, &image.apexdir).is_err() {
             let _ = fs::remove_dir_all(&tmp);
         }
     }
-    read_only(&image.apexdir, &info)?;
+    make_read_only(&image.apexdir, &info)?;
     let want = derive_source(paths, image)?;
     fs::create_dir_all(&image.derived)?;
-    for layer in ["common", uids.mode.name()] {
+    for layer in ["common", "single"] {
         let source = image.derived.join(format!("{layer}.source"));
         if fs::read_to_string(&source).is_ok_and(|s| s.trim_end_matches('\n') == want) {
             continue;
@@ -116,18 +106,11 @@ pub fn prepare(paths: &Paths, image: &Image, uids: &Uids, exe: &Path) -> Result<
         let _ = fs::remove_file(&source);
         let derive = tools.join("derive.sh");
         let out = image.derived.join(layer);
-        let argv: [&OsStr; 5] = [
-            derive.as_os_str(),
-            OsStr::new(layer),
-            image.img.as_os_str(),
-            image.apexdir.as_os_str(),
-            out.as_os_str(),
-        ];
-        if layer == "subuid" {
-            uid::as_android(exe, uids, paths.sandbox, &argv)?;
-        } else {
-            run(Command::new(argv[0]).args(&argv[1..]))?;
-        }
+        run(Command::new(derive)
+            .arg(layer)
+            .arg(&image.img)
+            .arg(&image.apexdir)
+            .arg(out))?;
         fs::write(&source, format!("{want}\n"))?;
     }
     Ok(())

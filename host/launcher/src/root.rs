@@ -1,4 +1,4 @@
-//! What both modes' Android roots share: the partitions, the image's
+//! Android's root: the partitions, the image's
 //! top-level entries, the binder nodes and `/linuxapk`.
 
 use std::fs;
@@ -112,7 +112,7 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
 ///    `androidboot.*` values; init insists on raising ASLR entropy (fatal if
 ///    it can't), so it gets a writable mmap_rnd_bits (the host's setting
 ///    applies regardless). Flatpak mode adds the BPF sysctls netbpfload sets
-///    (`linuxapk-bpfload` binds the same in host mode).
+///    read by the broker.
 ///  - `config.gz`: a kernel config for code that wants /proc/config.gz
 ///    (supervisor/shim).
 pub fn linuxapk_dir(cfg: &Config, l: &Path) -> Result<()> {
@@ -125,26 +125,20 @@ pub fn linuxapk_dir(cfg: &Config, l: &Path) -> Result<()> {
         fs::copy(cfg.paths.run.join(f), proc.join(f))?;
     }
     fs::write(proc.join("sys/vm/mmap_rnd_bits"), "32\n")?;
-    let config = if cfg.flatpak() {
-        fs::create_dir_all(proc.join("sys/kernel"))?;
-        fs::create_dir_all(proc.join("sys/net/core"))?;
-        fs::write(proc.join("sys/kernel/unprivileged_bpf_disabled"), "2\n")?;
-        fs::write(proc.join("sys/net/core/bpf_jit_enable"), "1\n")?;
-        fs::write(proc.join("sys/net/core/bpf_jit_kallsyms"), "0\n")?;
-        // The sandbox can't read /boot. The one option system_server reads,
-        // as every x86_64 distro kernel sets it.
-        Some(b"CONFIG_VMAP_STACK=y\n".to_vec())
-    } else {
-        fs::read(format!("/boot/config-{}", crate::sys::kernel_release())).ok()
-    };
-    if let Some(c) = config {
-        let mut gz = GzEncoder::new(
-            fs::File::create(l.join("config.gz"))?,
-            Compression::default(),
-        );
-        gz.write_all(&c)?;
-        gz.finish()?;
-    }
+
+    fs::create_dir_all(proc.join("sys/kernel"))?;
+    fs::create_dir_all(proc.join("sys/net/core"))?;
+    fs::write(proc.join("sys/kernel/unprivileged_bpf_disabled"), "2\n")?;
+    fs::write(proc.join("sys/net/core/bpf_jit_enable"), "1\n")?;
+    fs::write(proc.join("sys/net/core/bpf_jit_kallsyms"), "0\n")?;
+    // The sandbox can't read /boot. The one option system_server reads,
+    // as every x86_64 distro kernel sets it.
+    let mut gz = GzEncoder::new(
+        fs::File::create(l.join("config.gz"))?,
+        Compression::default(),
+    );
+    gz.write_all(b"CONFIG_VMAP_STACK=y\n")?;
+    gz.finish()?;
     Ok(())
 }
 

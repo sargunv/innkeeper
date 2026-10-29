@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 /// The session launcher, relative to the prefix.
 const LAUNCHER: &str = "libexec/linuxapk/linuxapk-session";
 
-/// An installed Linux.apk: `/app` in the Flatpak, `usr/` in the AppImage,
+/// An installed Linux.apk: `/app` in the Flatpak,
 /// `out/stage` in a checkout.
 pub struct Prefix(PathBuf);
 
@@ -44,18 +44,9 @@ impl Prefix {
         self.0.join("bin").join(name)
     }
 
-    /// The command that runs this installation's `linuxapk` from anywhere,
-    /// as desktop entries do: `bin/linuxapk`, or from the AppImage, the
-    /// AppImage itself with `linuxapk` (its mount is gone once it exits).
-    /// Its `AppRun` sets `LINUXAPK_APPIMAGE` (packaging/appimage).
+    /// The command that runs this installation's CLI.
     pub fn cli(&self) -> Vec<String> {
-        match env::var_os("LINUXAPK_APPIMAGE")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute() && p.is_file())
-        {
-            Some(a) => vec![a.to_string_lossy().into_owned(), "linuxapk".into()],
-            None => vec![self.bin("linuxapk").to_string_lossy().into_owned()],
-        }
+        vec![self.bin("linuxapk").to_string_lossy().into_owned()]
     }
 }
 
@@ -68,7 +59,7 @@ pub use linuxapk_session::paths::instance;
 pub use linuxapk_session::paths::xdg_home;
 
 /// `name`, suffixed with `-<instance>` for a named instance: the session's
-/// systemd unit and its XDG directories are named this way.
+/// XDG directories are named this way.
 fn per_instance(name: &str) -> Result<String> {
     Ok(linuxapk_session::paths::per_instance(name, &instance()?))
 }
@@ -114,11 +105,6 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
     }
 }
 
-/// The systemd user unit the launcher runs the session in.
-pub fn unit_name() -> Result<String> {
-    per_instance("linuxapk-session")
-}
-
 /// The session's state directory (logs, the documents service's grants):
 /// `$XDG_STATE_HOME/linuxapk[-<instance>]`.
 pub fn state_dir() -> Result<PathBuf> {
@@ -148,11 +134,6 @@ mod tests {
         assert!(!i.foreign_env);
         let main = command(&argv("/x/linuxapk"), "");
         assert_eq!(invocation(&main).instance, "");
-        // The AppImage: the program is the AppImage, `linuxapk` an argument.
-        let appimage = command(&argv("/a/Linux.apk.AppImage linuxapk"), "");
-        let i = invocation(&appimage);
-        assert_eq!((i.instance, i.program), ("", Some("/a/Linux.apk.AppImage")));
-
         let old = argv("env LINUXAPK_SESSION=/s LINUXAPK_INSTANCE=cli linuxapk run a.b");
         let old = invocation(&old);
         assert_eq!((old.instance, old.program), ("cli", Some("linuxapk")));

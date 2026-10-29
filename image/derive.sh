@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
 # Derive one of the layers the session stacks right above the image
-# (host/launcher/src/nsroot.rs), into <out-dir>:
+# (host/launcher/src/flatpak.rs), into <out-dir>:
 #   common       <partition>/: copies of image files with read/exec bits
 #                added. The extracted image lost its fs_config ownership:
 #                every file belongs to the invoking user (root in the
 #                session), so a file meant for e.g. "0550 logd logd" is
 #                unusable by its real owner.
-#   subuid       apex/: APEX files whose fs_config owner and mode code verifies
-#                at runtime, chowned to that owner. Run it in a user namespace
-#                with the session's id maps (linuxapk-session does), so e.g.
-#                1029 here is AID_CLAT.
 #   single       apex/: the same files for single mode (supervisor/README.md),
 #                owned by us, with the Android owner in the
 #                user.linuxapk.owner xattr that the shim reports.
 #
-# usage: derive.sh common|subuid|single <img-dir> <apex-dir> <out-dir>
+# usage: derive.sh common|single <img-dir> <apex-dir> <out-dir>
 set -euo pipefail
-usage="usage: derive.sh common|subuid|single <img-dir> <apex-dir> <out-dir>"
+usage="usage: derive.sh common|single <img-dir> <apex-dir> <out-dir>"
 layer=${1:?$usage} img=${2:?$usage} apex=${3:?$usage} out=${4:?$usage}
 
 relax() {
@@ -55,18 +51,6 @@ case $layer in
     relax system_ext "$img/system_ext"
     relax product "$img/product"
     relax odm "$img/odm"
-    ;;
-  subuid)
-    rm -rf "$out"
-    mkdir -p "$out"
-    copy_apex_files
-    # In reverse, so files are done before their (possibly 0750) parents.
-    for ((i = ${#apex_fs_config[@]} - 1; i >= 0; i--)); do
-      read -r rel mode uid gid <<<"${apex_fs_config[i]}"
-      [[ -e $out/apex/$rel ]] || continue
-      chown "$uid:$gid" "$out/apex/$rel"
-      chmod "$mode" "$out/apex/$rel"
-    done
     ;;
   single)
     rm -rf "$out"

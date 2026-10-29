@@ -1,6 +1,5 @@
 //! session.conf: everything a session needs, decided once by `start` and read
-//! by the processes that run it (the unit's `_run`, the namespaces' pid 1,
-//! selftest).
+//! by the session and selftest.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -10,9 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::paths::{Image, Paths, Sandbox};
+use crate::paths::{Image, Paths};
 use crate::sys;
-use crate::uid::{UidMode, Uids};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -36,17 +34,10 @@ pub struct Config {
     pub bridge_env: BTreeMap<String, String>,
     pub paths: Paths,
     pub image: Image,
-    pub uids: Uids,
 }
 
 impl Config {
-    pub fn new(
-        paths: Paths,
-        image: Image,
-        uids: Uids,
-        headless: bool,
-        wayland: Option<PathBuf>,
-    ) -> Self {
+    pub fn new(paths: Paths, image: Image, headless: bool, wayland: Option<PathBuf>) -> Self {
         let mut c = Config {
             headless,
             wayland,
@@ -59,7 +50,6 @@ impl Config {
             bridge_env: BTreeMap::new(),
             paths,
             image,
-            uids,
         };
         c.bridge_setup();
         c
@@ -73,19 +63,6 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let p = self.paths.conf();
         fs::write(&p, toml::to_string(self)?).with_context(|| format!("write {}", p.display()))
-    }
-
-    pub fn flatpak(&self) -> bool {
-        self.paths.sandbox == Sandbox::Flatpak
-    }
-
-    pub fn single(&self) -> bool {
-        self.uids.mode == UidMode::Single
-    }
-
-    /// The image-derived layer for this uid mode (image/derive.sh).
-    pub fn uid_layer(&self) -> PathBuf {
-        self.image.derived.join(self.uids.mode.name())
     }
 
     /// The start-time layer (see [`crate::layer`]).
@@ -109,16 +86,8 @@ impl Config {
             a.push(k.into());
             a.push(v.to_string_lossy().into_owned());
         }
-        let mut allow = vec![sys::uid() as u64];
-        // AID_SYSTEM 1000 and AID_AUDIOSERVER 1041 map to base + id - 1. (In
-        // single mode every Android process is the host user.)
-        if let Some(b) = self.uids.subuid_base {
-            allow.extend([b + 999, b + 1040]);
-        }
-        for u in allow {
-            a.push("--allow-uid".into());
-            a.push(u.to_string());
-        }
+        a.push("--allow-uid".into());
+        a.push(sys::uid().to_string());
         if let Some(sink) = env::var("LINUXAPK_AUDIO_SINK")
             .ok()
             .filter(|v| !v.is_empty())
@@ -174,11 +143,6 @@ impl Config {
             if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
                 e.insert(v.into(), d);
             }
-        }
-        // From the AppImage, those entries run apps through it, as the CLI's
-        // and the manager's do.
-        if let Some(a) = env::var("LINUXAPK_APPIMAGE").ok().filter(|v| !v.is_empty()) {
-            e.insert("LINUXAPK_APPIMAGE".into(), a);
         }
     }
 }

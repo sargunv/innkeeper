@@ -2,28 +2,22 @@
 //! and what host/core reads of a session without running it: its paths, its
 //! status and its cgroup. docs/session.md describes the session.
 
-mod appimage;
 pub mod cli;
 mod conf;
 mod control;
 mod exec;
 mod flatpak;
-mod host;
 mod image;
 mod init;
 mod layer;
 pub mod lifecycle;
-mod nsroot;
 pub mod paths;
-pub mod requirements;
 mod root;
 mod selftest;
 mod session;
 mod sys;
-mod uid;
 
-pub use paths::{Paths, Sandbox};
-pub use uid::UidMode;
+pub use paths::Paths;
 
 /// A session's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,8 +25,6 @@ pub struct Status {
     /// Android init's pid (in the session's sandbox in Flatpak mode), while
     /// it runs.
     pub pid: Option<i32>,
-    /// The running session's uid mode, or the one the next start would use.
-    pub uid_mode: UidMode,
 }
 
 impl Status {
@@ -42,7 +34,7 @@ impl Status {
             Some(p) => format!("running: host pid {p}"),
             None => "stopped".into(),
         };
-        format!("{head}\nuid-mode={}\n", self.uid_mode.name())
+        format!("{head}\n")
     }
 
     /// The state in [`Status::text`]'s output.
@@ -51,10 +43,6 @@ impl Status {
             pid: field(text, "running")
                 .and_then(|v| v.strip_prefix("host pid "))
                 .and_then(|v| v.parse().ok()),
-            uid_mode: match field(text, "uid-mode") {
-                Some("subuid") => UidMode::Subuid,
-                _ => UidMode::Single,
-            },
         }
     }
 }
@@ -68,31 +56,7 @@ fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 }
 
 pub fn status(paths: &Paths) -> Status {
-    let detect = || uid::detect(&paths.data, paths.sandbox);
-    if paths.sandbox == Sandbox::Flatpak {
-        let Some(text) = control::status(&paths.control()) else {
-            return Status {
-                pid: None,
-                uid_mode: detect(),
-            };
-        };
-        return Status::parse(&text);
-    }
-    match session::ns_pid(paths) {
-        Some(pid) => Status {
-            pid: Some(pid),
-            uid_mode: conf::Config::load(&paths.conf()).map_or_else(|_| detect(), |c| c.uids.mode),
-        },
-        None => Status {
-            pid: None,
-            uid_mode: detect(),
-        },
-    }
-}
-
-/// The session's cgroup dir (host mode).
-pub fn cgroup(paths: &Paths) -> Option<std::path::PathBuf> {
-    host::cgroup(paths)
+    control::status(&paths.control()).map_or(Status { pid: None }, |text| Status::parse(&text))
 }
 
 #[cfg(test)]
@@ -101,18 +65,9 @@ mod tests {
 
     #[test]
     fn status_text() {
-        let s = Status {
-            pid: Some(42),
-            uid_mode: UidMode::Single,
-        };
-        assert_eq!(s.text(), "running: host pid 42\nuid-mode=single\n");
-        assert_eq!(field(&s.text(), "running"), Some("host pid 42"));
-        assert_eq!(field(&s.text(), "uid-mode"), Some("single"));
-        let s = Status {
-            pid: None,
-            uid_mode: UidMode::Subuid,
-        };
-        assert_eq!(s.text(), "stopped\nuid-mode=subuid\n");
-        assert_eq!(Status::parse(&s.text()), s);
+        for s in [Status { pid: Some(42) }, Status { pid: None }] {
+            assert_eq!(Status::parse(&s.text()), s);
+        }
+        assert_eq!(Status { pid: None }.text(), "stopped\n");
     }
 }

@@ -14,7 +14,7 @@ first `start`) runs the pipeline.
 flowchart LR
   fetch["fetch.sh<br/>download, size + sha256 check"] --> extract["extract.sh<br/>super.img → partitions"]
   extract --> flatten["flatten-apex.sh<br/>APEXes → dirs, per bootconfig"]
-  flatten --> derive["derive.sh<br/>common, subuid | single layers"]
+  flatten --> derive["derive.sh<br/>common and single layers"]
 ```
 
 Cache, shared by every instance, in `$XDG_DATA_HOME/linuxapk/images/<name>/`:

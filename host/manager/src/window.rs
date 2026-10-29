@@ -649,7 +649,7 @@ impl Window {
         glib::spawn_future_local(async move {
             let (st, notice) = worker::run_quiet(|| {
                 let st = Session::find().ok().map(|s| s.status());
-                (st, ops::single_uid_notice(st.and_then(|s| s.uid_mode)))
+                (st, ops::single_uid_notice(st.is_some_and(|s| s.running)))
             })
             .await;
             if let Some(n) = notice {

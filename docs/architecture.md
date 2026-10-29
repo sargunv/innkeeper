@@ -14,19 +14,19 @@ flowchart LR
     bridge["linuxapk-bridge"]
     host["Wayland, PipeWire, portals, D-Bus"]
   end
-  subgraph sup["Supervisor (outer namespaces, host-user privileges)"]
+  subgraph sup["Supervisor (Flatpak sandbox, host-user privileges)"]
     pivot["pivot-exec + bpfemu thread"]
     broker["linuxapk-broker"]
   end
-  subgraph droid["Android (nested, locked namespaces)"]
+  subgraph droid["Android (Flatpak sandbox)"]
     init["init, servicemanager, system_server, zygote, apps"]
     hal["vendor HALs: composer, gralloc, Vulkan, audio, health"]
     sysapp["Linux.apk System app"]
   end
   cli -->|"start, exec"| launcher
-  launcher -->|"unit, namespaces, overlay stack"| pivot
+  launcher -->|"Flatpak sandbox, composed root"| pivot
   launcher --> bridge
-  pivot -->|"pivot_root, exec init"| init
+  pivot -->|"fork, exec init"| init
   init -. "seccomp user notifications: binder, bpf, credentials" .-> broker
   broker -->|"non-binder notifications"| pivot
   hal -->|"bridge.sock: display, audio, hoststate"| bridge
@@ -37,18 +37,17 @@ flowchart LR
 - **Desktop.** The CLI and manager install and launch apps through
   `linuxapk-core`; the launcher assembles and starts the session; the bridge is
   the only process that talks to the desktop.
-- **Supervisor.** One seccomp filter on Android's init traps what an
-  unprivileged namespace can't do (binder, eBPF, single-uid credentials). The
-  broker receives every notification, serves binder and credentials, and
-  forwards the rest to a C thread in pivot-exec. See
-  [supervisor/README.md](../supervisor/README.md).
+- **Supervisor.** One seccomp filter on Android's init traps what the sandbox
+  can't do (binder, eBPF, single-uid credentials). The broker receives every
+  notification, serves binder and credentials, and forwards the rest to a C
+  thread in pivot-exec. See [supervisor/README.md](../supervisor/README.md).
 - **Android.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).
 
 The channels between zones are the seccomp notification fd and one socket,
 `bridge.sock` ([bridge-protocol.md](bridge-protocol.md)). Nothing in Android
 reaches the desktop any other way, apart from `/dev/dri`, `/dev/udmabuf` and the
-network through pasta ([session.md](session.md)).
+host network ([session.md](session.md)).
 
 ## Decisions
 
@@ -85,16 +84,14 @@ network through pasta ([session.md](session.md)).
 
 ## Packaging scope
 
-- Linux.apk itself ships as a Flatpak, and as an AppImage
-  ([packaging/appimage](../packaging/appimage/README.md)), which runs the
-  session in host mode and so needs from the host what a checkout does. Per-app
-  Flatpaks are an optional extra, never a design constraint.
+- Linux.apk ships as a Flatpak. Per-app Flatpaks are an optional extra, never a
+  design constraint.
 - Installing anything never needs `sudo`: no RPM/deb/AUR packages, SELinux
   modules, AppArmor profiles or kernel modules.
 - `out/stage` is the installable prefix and already has the Flatpak shape: it
-  becomes `/app` in a Flatpak and `usr/` in an AppImage. Every lookup is
-  relative to the running executable, and runtime state lives in the XDG dirs,
-  so dev, test and packaged runs share one code path.
+  becomes `/app` in the Flatpak. Every lookup is relative to the running
+  executable, and runtime state lives in the XDG dirs, so dev, test and packaged
+  runs share one code path.
   [tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
   module stages and where it runs.
 - Inside Flatpak there are no nested user namespaces, mounts or capabilities, so

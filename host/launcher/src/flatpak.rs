@@ -102,7 +102,7 @@ fn compose_key(cfg: &Config) -> Result<String> {
     h.update(COMPOSE_VERSION);
     h.update(cfg.image.img.as_os_str().as_encoded_bytes());
     h.update(cfg.image.apexdir.as_os_str().as_encoded_bytes());
-    for l in ["common", cfg.uids.mode.name()] {
+    for l in ["common", "single"] {
         h.update(fs::read(cfg.image.derived.join(format!("{l}.source"))).unwrap_or_default());
     }
     h.update(fs::read(cfg.paths.share.join("manifest.tsv"))?);
@@ -149,8 +149,7 @@ fn compose(cfg: &Config) -> Result<()> {
     let link = |src: &Path, dst: &Path| cp(&[tree, &[src.as_os_str(), dst.as_os_str()]].concat());
     let p = &cfg.paths;
     let addons = p.addon_layers();
-    // Each partition's stack, bottom first (the reverse of host mode's
-    // overlays); the start-time layer goes on at each start.
+    // Each partition's stack, bottom first; the start-time layer goes on at each start.
     for part in PARTITIONS {
         let src = root::image_partition(&cfg.image.img, part);
         if !src.is_dir() {
@@ -161,7 +160,7 @@ fn compose(cfg: &Config) -> Result<()> {
         if LAYERED.contains(part) {
             let mut layers = vec![
                 cfg.image.derived.join("common").join(part),
-                cfg.uid_layer().join(part),
+                cfg.image.derived.join("single").join(part),
                 p.android().join(part),
             ];
             layers.extend(addons.iter().map(|a| a.join(part)));
@@ -172,11 +171,11 @@ fn compose(cfg: &Config) -> Result<()> {
     }
     let apex = r.join("apex");
     link(&cfg.image.apexdir, &apex)?;
-    over(&cfg.uid_layer().join("apex"), &apex)?;
+    over(&cfg.image.derived.join("single").join("apex"), &apex)?;
     files_read_only(r)?;
     // The uid mode's layer sets exact modes that code verifies (clatd's
     // 06755), so it goes on again.
-    over(&cfg.uid_layer().join("apex"), &apex)?;
+    over(&cfg.image.derived.join("single").join("apex"), &apex)?;
     fs::write(&key_file, key)?;
     Ok(())
 }
@@ -333,10 +332,7 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     control::serve(
         &sock,
         control::Served {
-            status: format!(
-                "stopped\nuid-mode={}\nwakeup={at_ms}\n",
-                cfg.uids.mode.name()
-            ),
+            status: format!("stopped\nwakeup={at_ms}\n"),
             exec_lock: None,
             stop: Box::new(move || {
                 let _ = fs::remove_file(&gone);
@@ -407,14 +403,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
     session::start_bridge(cfg)?;
     let log = append(&p.session_log())?;
     let root_map = format!("{}=/\n{}=/data", p.root.display(), p.data.display());
-    let mut cmd = init::command(
-        cfg,
-        Path::new("/"),
-        &[
-            ("LINUXAPK_FLATPAK", "1".into()),
-            ("LINUXAPK_ROOT_MAP", root_map),
-        ],
-    );
+    let mut cmd = init::command(cfg, Path::new("/"), &[("LINUXAPK_ROOT_MAP", root_map)]);
     // pivot-exec, init's subreaper, dies with this thread.
     unsafe {
         cmd.pre_exec(|| {
@@ -445,10 +434,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
     control::serve(
         &p.control(),
         control::Served {
-            status: format!(
-                "running: host pid {init}\nuid-mode={}\n",
-                cfg.uids.mode.name()
-            ),
+            status: format!("running: host pid {init}\n"),
             exec_lock: Some(p.exec_lock()),
             stop: Box::new(move || teardown(&paths)),
         },
@@ -460,9 +446,8 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
         teardown(&paths);
     });
     println!(
-        "session started ({}, uid mode {}, in Flatpak): Android init = pid {init}; log: {}",
+        "session started ({}, in Flatpak): Android init = pid {init}; log: {}",
         cfg.image.name,
-        cfg.uids.mode.name(),
         p.kmsg_log().display()
     );
     if follow {

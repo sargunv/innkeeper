@@ -5,14 +5,11 @@
 // descendants). Returns the notification listener fd, or -1. The filter traps
 // bpf and its companions (see bpfemu.c), openat and binder ioctls (ioctl cmd
 // type byte == 'b'); the kernel allows only one notification listener per
-// process, so bpf and binder share this one filter. If single_uid is nonzero,
-// it also traps the credential syscalls (set*id/get*id,
-// setgroups/getgroups, the chown family, getsockopt(SO_PEERCRED)), which the
-// broker emulates with virtual ids (supervisor/broker/src/creds/table.rs,
-// supervisor/README.md). If flat is nonzero (Flatpak mode: no namespaces), it
-// also traps readlink/readlinkat and getcwd (the broker shows Android paths
-// for the composed root) and setsockopt(SO_MARK).
-int bpfemu_install_filter(int single_uid, int flat);
+// process, so bpf and binder share this one filter. The runtime also traps
+// credential syscalls, readlink/getcwd, file metadata and capabilities for
+// Android's virtual ids and composed root. Only the bootless developer
+// harness (harness != 0) uses real credentials and namespace paths.
+int bpfemu_install_filter(int harness);
 
 // The directory pins live in (the session's /sys/fs/bpf tmpfs), opened
 // before any Android code runs. Without it, pins fail with ENOENT.

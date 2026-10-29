@@ -3,7 +3,7 @@
 The Linux.apk Flatpak, `dev.linuxapk.Manager`: the manager is its app (its
 desktop entry opens APKs) and `linuxapk` its command, so
 `flatpak run dev.linuxapk.Manager install App.apk` is the CLI. It ships no
-Android image; the session fetches that at first use, as outside Flatpak.
+Android image; the session fetches that at first use, on first use.
 
 ```sh
 FLATPAK_USER_DIR=$PWD/out/flatpak/user packaging/flatpak/build.sh
@@ -57,7 +57,7 @@ without building the Flatpak:
   portal spawns, alarm wakeups included, start the stage's files too, and the
   snapshot's `linuxapk` and `linuxapk-manager` forward to the stage for menu
   entries. Rerun `dev-init.sh` to test a Flatpak update.
-- HOME and the XDG dirs are scratch dirs under `out/dev/<mode>/<instance>`; the
+- HOME and the XDG dirs are scratch dirs under `out/dev/flatpak/<instance>`; the
   image cache is the user's.
 - The driver holds the sandbox at a gate until it has set `MemoryHigh=6G` and
   `MemoryMax=8G` on its scope from the host, and a host-side watcher caps the

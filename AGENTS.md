@@ -1,9 +1,9 @@
 # Linux.apk
 
-Android apps on desktop Linux: a real AOSP 17 userspace in a rootless namespace
-session, with our own vendor HALs, a seccomp supervisor and a desktop bridge.
-Start with [README.md](README.md) (the module table says what each dir is and
-where it runs), then [docs/architecture.md](docs/architecture.md).
+Android apps on desktop Linux: a real AOSP 17 userspace in a Flatpak session,
+with our own vendor HALs, a seccomp supervisor and a desktop bridge. Start with
+[README.md](README.md) (the module table says what each dir is and where it
+runs), then [docs/architecture.md](docs/architecture.md).
 
 ## Commands
 
@@ -26,11 +26,11 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
   their packages, kernel devices and namespace settings with sudo, and refuses
   to run outside GitHub Actions. This does not apply to contributors' machines.
 - **Memory caps** (a global OOM once crashed the user's desktop). `/tmp` is a
-  RAM-backed tmpfs: never write large files there; use `out/`. Sessions run
-  capped (`MemoryHigh=6G`, `MemoryMax=8G`), container builds always pass
-  `--memory` and `--pids-limit` (`tools/container/run.sh`), and long jobs run
-  under `systemd-run --user` with a `MemoryMax`. Check `free -g` before starting
-  another session.
+  RAM-backed tmpfs: never write large files there; use `out/`. Development and
+  test sessions run capped from the host (`MemoryHigh=6G`, `MemoryMax=8G`),
+  container builds always pass `--memory` and `--pids-limit`
+  (`tools/container/run.sh`), and long jobs run under `systemd-run --user` with
+  a `MemoryMax`. Check `free -g` before starting another session.
 - **Never `logcat -b all`** or an unbounded `logcat` into a file; bound it with
   `-d`, `-t <n>` or `-s <tags>`.
 - **Host safety.** Inside the session Android's root is the host user. Every

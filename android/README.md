@@ -13,7 +13,7 @@ image.
 | [vendor/vulkan](vendor/vulkan/README.md)               | `/vendor/lib64/hw/vulkan.{radv,lvp}.so`, `/vendor/etc/permissions`                  | libvulkan in apps, SurfaceFlinger and ANGLE                      |
 | [vendor/audio](vendor/audio/README.md)                 | `/apex/com.android.hardware.audio/lib64/libtinyalsav2.so`, `/vendor/etc`            | the AIDL audio HAL                                               |
 | [vendor/bridge-client](vendor/bridge-client/README.md) | nothing (static library)                                                            | linked into the composer, the Health HAL and `libtinyalsav2`     |
-| [system](system/README.md)                             | `/system/bin/{linuxapk-exec,xtables-nft-multi,linuxapk-iptables}`, rc               | init (exec relay); netd (iptables)                               |
+| [system](system/README.md)                             | `/system/bin/linuxapk-exec`, rc                                                     | init (exec relay)                                                |
 | [system-app](system-app/README.md)                     | `/system_ext/priv-app/LinuxApkSystem`, `/system_ext/etc/permissions`                | system_server, as a persistent privileged app                    |
 | [overlay](overlay/README.md)                           | rc, XML and blank files in every partition                                          | init, system_server, PackageManager                              |
 | [microg](microg/README.md)                             | the addons layer, `$XDG_DATA_HOME/linuxapk/addons/microg`                           | PackageManager (optional, `mise run microg`)                     |

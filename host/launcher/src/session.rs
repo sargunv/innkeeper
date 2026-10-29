@@ -1,4 +1,4 @@
-//! What runs beside Android in both modes: the kmsg log reader and the
+//! What runs beside Android: the kmsg log reader and the
 //! desktop bridge, plus the session's pid files.
 
 use std::fs::{self, File, OpenOptions};
@@ -29,20 +29,6 @@ pub fn log(paths: &Paths, msg: &str) {
     if let Ok(mut f) = append(&paths.session_log()) {
         let _ = writeln!(f, "linuxapk-session: {msg}");
     }
-}
-
-fn read_pid(p: &Path) -> Option<i32> {
-    fs::read_to_string(p).ok()?.trim().parse().ok()
-}
-
-/// Android init's pid (in this process's pid namespace), if it is alive.
-pub fn ns_pid(paths: &Paths) -> Option<i32> {
-    read_pid(&paths.pid_file()).filter(|&p| sys::alive(p))
-}
-
-/// The process init is a child of, if it is alive.
-pub fn outer_pid(paths: &Paths) -> Option<i32> {
-    read_pid(&paths.outer_pid_file()).filter(|&p| sys::alive(p))
 }
 
 pub fn write_pids(paths: &Paths, outer: i32, init: i32) -> Result<()> {

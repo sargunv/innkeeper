@@ -1,6 +1,6 @@
 //! Single-uid mode's syscall side (supervisor/README.md): answers the credential
-//! syscalls that the session's seccomp filter traps when
-//! `LINUXAPK_SINGLE_UID=1`, using the model in [`crate::creds::table`].
+//! syscalls that the session's seccomp filter traps,
+//! using the model in [`crate::creds::table`].
 //!
 //!  * `get*id`/`getgroups`: the caller's virtual credentials.
 //!  * `set*id`/`setgroups`: the kernel's rules, applied to the virtual
@@ -702,11 +702,12 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
 }
 
 /// The thread's real effective CAP_SETUID/CAP_SETGID. In Flatpak mode
-/// (`LINUXAPK_FLATPAK=1`) no process has capabilities, so virtual root has
+/// no process has capabilities, so virtual root has
 /// both.
 fn caps(tid: i32, c: &Creds) -> table::Caps {
     static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *FLAT.get_or_init(|| std::env::var("LINUXAPK_FLATPAK").as_deref() == Ok("1")) && c.euid == 0
+    if *FLAT.get_or_init(|| std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
+        && c.euid == 0
     {
         return table::Caps {
             setgid: true,

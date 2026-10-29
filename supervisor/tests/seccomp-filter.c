@@ -1,8 +1,9 @@
 // Which syscalls does the session's seccomp filter (pivot-exec/bpfemu.c) turn
 // into user notifications? Built and run by seccomp-filter.sh on the host.
-// A child installs the filter (subuid, single-uid and Flatpak variants) and
-// serves its listener; a grandchild makes each probe syscall, and the child
-// records which ones arrived as notifications and lets them continue.
+// A child installs the filter (bootless harness, virtual credentials and
+// Flatpak variants) and serves its listener; a grandchild makes each probe
+// syscall, and the child records which ones arrived as notifications and lets
+// them continue.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -59,9 +60,9 @@ static struct probe probes[] = {
 #define NPROBES (int)(sizeof(probes) / sizeof(probes[0]))
 
 // Prints one line per probe: "<name> <0|1>" (1 = notified).
-static int run(int single_uid, int flat) {
+static int run(int harness) {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-  int lfd = bpfemu_install_filter(single_uid, flat);
+  int lfd = bpfemu_install_filter(harness);
   if (lfd < 0) return perror("filter"), 1;
   static struct stat st;
   for (int i = 0; i < NPROBES; i++)
@@ -124,6 +125,6 @@ static int run(int single_uid, int flat) {
 }
 
 int main(int argc, char** argv) {
-  if (argc != 3) return 2;
-  return run(atoi(argv[1]), atoi(argv[2]));
+  if (argc != 2) return 2;
+  return run(atoi(argv[1]));
 }

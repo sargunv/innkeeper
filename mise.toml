@@ -11,8 +11,6 @@ lockfile = true
 "aqua:mvdan/sh" = "3.14.1"
 "aqua:ninja-build/ninja" = "1.13.2"
 "core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-linux-android" }
-"github:AppImage/appimagetool" = { version = "1.9.1", bin = "appimagetool" }
-"github:AppImage/type2-runtime" = { version = "20251108", asset_pattern = "runtime-x86_64", bin = "appimage-runtime-x86_64" }
 "github:jdx/hk" = "2.8.1"
 "core:java" = "zulu-25.36.205.0"
 
@@ -76,12 +74,14 @@ depends = ["ndk"]
 run = "tools/build/install-component.sh audio"
 
 [tasks."build:system"]
-description = "The exec relay and iptables (nf_tables, build container)"
+description = "The exec relay and no-op firewall front ends"
 depends = ["ndk"]
 run = """
 set -euo pipefail
 tools/build/install-component.sh system
-android/system/iptables/build.sh
+d=out/build/system/install/share/linuxapk/android/system/bin
+install -m 755 android/system/iptables/linuxapk-iptables "$d/"
+cp -P android/system/iptables/{iptables,iptables-restore,ip6tables,ip6tables-restore} "$d/"
 """
 
 [tasks."build:system-app"]
@@ -133,7 +133,7 @@ for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
 """
 
 [tasks."test:bionic"]
-description = "Android binaries in the Flatpak session (host mode: bootless HAL harness)"
+description = "Android binaries in the Flatpak session (LINUXAPK_BIONIC_HARNESS=1: bootless HAL harness)"
 run = """
 set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor
@@ -149,12 +149,8 @@ description = "AOSP's binder tests against the broker, then kernel binder (77: u
 run = "supervisor/tests/binder/run.sh"
 
 [tasks."test:boot"]
-description = "Fresh Flatpak boot and selftest; host comparison also checks both uid modes"
-run = """
-set -euo pipefail
-tests/boot.sh
-if [[ ${LINUXAPK_MODE:-flatpak} == host ]]; then tests/boot.sh --no-subids; fi
-"""
+description = "Fresh Flatpak boot and selftest"
+run = "tests/boot.sh"
 
 [tasks."test:e2e"]
 description = "Audio, system-app and CLI suites in a private Flatpak on isolated KWin"
@@ -186,21 +182,8 @@ description = "The staged session launcher (mise run session -- start|stop|statu
 run = "tools/dev/session.sh"
 
 [tasks.install-dev]
-description = "Add the staged manager to your app menu and APK handlers"
-run = '''
-set -euo pipefail
-s=$PWD/out/stage
-[[ -f $s/share/linuxapk/manifest.tsv ]] || { echo 'run `mise run build` first' >&2; exit 1; }
-data=${XDG_DATA_HOME:-$HOME/.local/share}
-install -D -m 644 -t "$data/icons/hicolor/scalable/apps" "$s/share/icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg"
-mkdir -p "$data/applications"
-sed "s|^Exec=linuxapk-manager|Exec=$s/bin/linuxapk-manager|" "$s/share/applications/dev.linuxapk.Manager.desktop" \
-  >"$data/applications/dev.linuxapk.Manager.desktop"
-install -D -m 644 -t "$data/mime/packages" "$s/share/mime/packages/dev.linuxapk.Manager.xml"
-update-mime-database "$data/mime" || true
-update-desktop-database -q "$data/applications" || true
-echo "installed $data/applications/dev.linuxapk.Manager.desktop"
-'''
+description = "Build and install the Flatpak into the user installation"
+run = 'FLATPAK_USER_DIR="${FLATPAK_USER_DIR:-$HOME/.local/share/flatpak}" packaging/flatpak/build.sh'
 
 [tasks.microg]
 description = "Install microG as an addon layer (-- --beta | --remove)"

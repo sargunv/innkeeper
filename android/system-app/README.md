@@ -66,9 +66,6 @@ battery goes to the Health HAL,
 
 Known limits:
 
-- In host mode the network is EthernetService's, and only automotive builds may
-  change an Ethernet network's capabilities (`updateConfiguration`), so a
-  metered host connection still reads as unmetered there.
 - `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL HAL would
   remove that.
 

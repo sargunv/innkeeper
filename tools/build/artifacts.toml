@@ -21,12 +21,12 @@ artifacts = [
 
 [module.launcher]
 task = "build:host"
-runs = "on the desktop (glibc), then as pid 1 of the session's outer namespaces; in Flatpak, in the app's sandbox"
+runs = "in the Flatpak sandbox (glibc)"
 artifacts = ["libexec/linuxapk/linuxapk-session"]
 
 [module.supervisor]
 task = "build:supervisor"
-runs = "pivot-exec in the outer namespaces; the broker beside Android with host-user privileges; the shim in every Android process"
+runs = "pivot-exec and the broker beside Android in the Flatpak sandbox; the shim in Android processes"
 artifacts = [
   "libexec/linuxapk/pivot-exec",
   "share/linuxapk/android/system/bin/linuxapk-broker",
@@ -73,9 +73,12 @@ task = "build:system"
 runs = "in Android, as /system binaries"
 artifacts = [
   "share/linuxapk/android/system/bin/linuxapk-exec",
-  "share/linuxapk/android/system/etc/init/linuxapk-exec.rc",
-  "share/linuxapk/android/system/bin/xtables-nft-multi",
   "share/linuxapk/android/system/bin/linuxapk-iptables",
+  "share/linuxapk/android/system/bin/iptables",
+  "share/linuxapk/android/system/bin/iptables-restore",
+  "share/linuxapk/android/system/bin/ip6tables",
+  "share/linuxapk/android/system/bin/ip6tables-restore",
+  "share/linuxapk/android/system/etc/init/linuxapk-exec.rc",
 ]
 
 [module.system-app]
