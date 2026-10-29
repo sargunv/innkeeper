@@ -107,9 +107,30 @@ if [[ ${1:-} == --group ]]; then
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
       file_has "$T/devices.txt" 'Linux.apk Mouse'
       until_ok log_has LinuxApkProbe 'configuration keyboard=2'
-      /usr/bin/python3 "$here/seat.py" key:30,1 key:30,0
-      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceName=Linux.apk Keyboard'
-      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; seat key from real keyboard device'
+      # One fake-input connection is one KWin device. Keep it alive across
+      # assertions so moving out really leaves the pointer that entered.
+      mkfifo "$T/seat"
+      /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
+      seat_pid=$!
+      exec {seat_fd}>"$T/seat"
+      printf 'key:30,1\nkey:30,0\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceId=-1'
+      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; ordered seat key injection (Android device ID -1)'
+      # Observe native hover, then leave the window and check its device reset exit.
+      printf 'abs:900,300\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse'
+      printf 'abs:100,300\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse'
+      # Releasing a modifier without motion switches the final exit back to
+      # native routing; it must also end device -1's earlier injected hover.
+      printf 'key:42,1\nabs:900,300\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceId=-1'
+      printf 'key:42,0\nabs:100,300\n' >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_EXIT.*deviceId=-1'
+      exec {seat_fd}>&-
+      wait "$seat_pid"
+      rm "$T/seat"
+      echo 'ok   native and injected mouse hover exit when the host pointer leaves the window'
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"

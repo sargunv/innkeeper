@@ -4,8 +4,8 @@
 //! add touchpad gestures and tablets. Pointer and touch events over a window's
 //! client-side frame go back to the display service, which drives the frame.
 //!
-//! The cursor is always defined: the default arrow over a window's content
-//! and the frame's own shapes over its edges (`wp_cursor_shape_v1`, where
+//! Content uses Android's cursor bitmap; the frame keeps its own arrow and
+//! resize shapes (`wp_cursor_shape_v1`, where
 //! the compositor has it). Android draws no pointer of its own.
 
 use std::collections::HashMap;

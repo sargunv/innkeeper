@@ -60,3 +60,8 @@ data class OutKey(
   /** A key down's repeat count: nonzero only for repeats the compositor sends itself. */
   val repeatCount: Int = 0,
 ) : OutEvent
+
+/** One ordered injection path for physical, remapped, composed and repeated keys. */
+class KeyboardDelivery(private val inject: (OutKey) -> Unit) {
+  fun key(event: OutKey) = inject(event)
+}

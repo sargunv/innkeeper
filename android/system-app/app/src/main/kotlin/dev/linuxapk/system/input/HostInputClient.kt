@@ -49,6 +49,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     )
   private val listeners = CopyOnWriteArrayList<Listener>()
   private lateinit var virtual: VirtualInput
+  private lateinit var keys: KeyboardDelivery
   private lateinit var injector: Injector
   private lateinit var translator: InputTranslator // reader thread
   private var refused = 0
@@ -66,6 +67,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   override fun start() {
     injector = Injector()
     virtual = VirtualInput(context, connection, ::injectFallback)
+    keys = KeyboardDelivery(::injectFallback)
     translator = newTranslator()
     connection.start()
   }
@@ -163,7 +165,6 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
           }
           if (e is HostEvent.RepeatInfo) applyRepeat(e)
           translator.handle(e).forEach(::inject)
-          if (e is HostEvent.KeyboardEnter) virtual.focus(e.display)
           e
         }
         WINDOW_MAPPED -> HostEvent.WindowMapped(body.int)
@@ -224,7 +225,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   }
 
   private fun inject(e: OutEvent) {
-    if (e is OutKey && virtual.key(e)) return
+    if (e is OutKey) {
+      keys.key(e)
+      return
+    }
     if (e is OutMotion && virtual.motion(e)) return
     injectFallback(e)
   }

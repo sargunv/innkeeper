@@ -11,7 +11,6 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import android.view.Display
 import android.view.InputDevice
-import android.view.KeyEvent
 import android.view.MotionEvent
 import dev.linuxapk.system.bridge.BridgeConnection
 
@@ -36,11 +35,9 @@ class VirtualInput(
   private val position = im.javaClass.getMethod("getCursorPosition", Int::class.javaPrimitiveType)
   private val displayId = InputDevice::class.java.getMethod("getAssociatedDisplayId")
   private var mouseDisplay = -1
-  private var keysDisplay = -1
   private var buttons = 0
-  private val held = HashSet<Int>()
-  private val sentKeys = HashSet<Int>()
   private var sentButtons = 0
+  private var nativeHover = false
   private val queue = ArrayDeque<OutMotion>()
   private val pointer = EvdevPointer()
 
@@ -57,53 +54,6 @@ class VirtualInput(
     )
   }
 
-  @Synchronized
-  fun focus(display: Int) {
-    if (keysDisplay == display) return
-    dm.getDisplay(display)?.let {
-      association.invoke(
-        im,
-        "linuxapk/keyboard",
-        Display::class.java.getMethod("getUniqueId").invoke(it) as String,
-      )
-      keysDisplay = display
-    }
-  }
-
-  // Preserve the route chosen at DOWN through UP. Layout remapping, IME text
-  // corrections, synthetic Back and compositor repeats keep the injection path.
-  @Synchronized
-  fun key(e: OutKey): Boolean {
-    if (e.repeatCount > 0) return false
-    val down = e.action == KeyEvent.ACTION_DOWN
-    val real =
-      if (down && e.repeatCount == 0) {
-        e.text == null &&
-          e.keyCode == EvdevKeymap.keycode(e.scanCode) &&
-          e.scanCode !in listOf(58, 69, 70) &&
-          e.metaState ==
-            KeyEvent.normalizeMetaState(
-              (held + e.scanCode).fold(0) { m, code -> m or modifier(code) },
-            )
-      } else held.contains(e.scanCode)
-    if (!real) return false
-    if (down) {
-      focus(e.displayId)
-      val keyboard =
-        im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).firstOrNull {
-          it.name == "Linux.apk Keyboard"
-        }
-      // Never buffer a key behind association: the next translated key may need
-      // injection and must not overtake this one.
-      if (keyboard == null || (displayId.invoke(keyboard) as Int) != e.displayId) return false
-      held.add(e.scanCode)
-    } else held.remove(e.scanCode)
-    if (send(0, e.eventTime, listOf(Triple(1, e.scanCode, if (down) 1 else 0)))) {
-      if (down) sentKeys.add(e.scanCode) else sentKeys.remove(e.scanCode)
-    }
-    return true
-  }
-
   fun motion(e: OutMotion): Boolean {
     if (
       e.source != InputDevice.SOURCE_MOUSE ||
@@ -112,11 +62,16 @@ class VirtualInput(
     )
       return false
     handler.post {
-      val meta = synchronized(this) { nativeMeta() }
-      if (!pointer.native(e.action and MotionEvent.ACTION_MASK, e.buttonState, e.metaState, meta)) {
+      // Keys are injected with their host modifiers. InputReader's evdev
+      // keyboard state stays unmodified, so modifier-sensitive mouse actions
+      // use injection too. Android assigns all injected events device ID -1.
+      if (!pointer.native(e.action and MotionEvent.ACTION_MASK, e.buttonState, e.metaState, 0)) {
+        endNativeHover(e.eventTime)
         inject(e)
+        pointer.injected(e)
         return@post
       }
+      pointer.exitInjected(e.eventTime)?.let(inject)
       if (mouseDisplay != e.displayId) {
         mouseDisplay = e.displayId
         queue.clear()
@@ -145,6 +100,10 @@ class VirtualInput(
     while (queue.isNotEmpty()) {
       val e = queue.removeFirst()
       val action = e.action and MotionEvent.ACTION_MASK
+      if (action == MotionEvent.ACTION_HOVER_EXIT) {
+        endNativeHover(e.eventTime)
+        continue
+      }
       val p = e.pointers[0]
       val events = ArrayList<Triple<Int, Int, Int>>()
       if (
@@ -162,7 +121,7 @@ class VirtualInput(
         val step = pointer.move(p.x, p.y, current.x, current.y, size.x, size.y)
         events += Triple(2, 0, step.dx)
         events += Triple(2, 1, step.dy)
-        connection.send(0x0608) { u32(e.displayId).i32(Math.round(step.x)).i32(Math.round(step.y)) }
+        connection.send(0x0609) { u32(e.displayId).i32(Math.round(step.x)).i32(Math.round(step.y)) }
       }
       for ((mask, code) in listOf(1 to 272, 2 to 273, 4 to 274)) {
         if ((buttons xor e.buttonState) and mask != 0)
@@ -174,19 +133,26 @@ class VirtualInput(
         if (p.hscroll != 0f) events += Triple(2, 12, Math.round(p.hscroll * 120))
       }
       if (events.isNotEmpty()) {
-        if (send(1, e.eventTime, events)) sentButtons = e.buttonState
+        if (send(1, e.eventTime, events)) {
+          sentButtons = e.buttonState
+          nativeHover = true
+        }
       }
     }
   }
 
-  // A bridge reconnect must release keys whose UP could not be delivered.
-  @Synchronized
+  private fun endNativeHover(time: Long) {
+    // A relative mouse has no out-of-range coordinate. End this discontinuous
+    // stream with evdev's resync marker; InputReader resets the device, and
+    // InputDispatcher emits HOVER_EXIT under its real ID. An injected exit
+    // cannot do this: Android rewrites injected device IDs to -1.
+    if (nativeHover && send(1, time, listOf(Triple(0, 3, 0)))) nativeHover = false
+    pointer.reset()
+  }
+
+  // Release buttons whose UP could not be delivered across a disconnect.
   fun reset() {
-    held.clear()
     val now = SystemClock.uptimeMillis()
-    for (batch in sentKeys.toList().chunked(32)) {
-      if (send(0, now, batch.map { Triple(1, it, 0) })) sentKeys.removeAll(batch.toSet())
-    }
     handler.post {
       queue.clear()
       val releases =
@@ -195,28 +161,13 @@ class VirtualInput(
           .map { (_, code) -> Triple(1, code, 0) }
       if (releases.isNotEmpty() && send(1, now, releases)) sentButtons = 0
       buttons = 0
-      pointer.reset()
+      endNativeHover(now)
+      pointer.exitInjected(now)?.let(inject)
     }
   }
 
-  private fun nativeMeta(): Int =
-    KeyEvent.normalizeMetaState(held.fold(0) { m, code -> m or modifier(code) })
-
-  private fun modifier(scanCode: Int): Int =
-    when (scanCode) {
-      42 -> KeyEvent.META_SHIFT_LEFT_ON
-      54 -> KeyEvent.META_SHIFT_RIGHT_ON
-      29 -> KeyEvent.META_CTRL_LEFT_ON
-      97 -> KeyEvent.META_CTRL_RIGHT_ON
-      56 -> KeyEvent.META_ALT_LEFT_ON
-      100 -> KeyEvent.META_ALT_RIGHT_ON
-      125 -> KeyEvent.META_META_LEFT_ON
-      126 -> KeyEvent.META_META_RIGHT_ON
-      else -> 0
-    }
-
   private fun send(device: Int, time: Long, events: List<Triple<Int, Int, Int>>): Boolean =
-    connection.send(0x0607) {
+    connection.send(0x0608) {
       u32(device).u64(time * 1000).u32(events.size)
       for ((type, code, value) in events) u16(type).u16(code).i32(value)
     }

@@ -34,10 +34,53 @@ struct Client {
     endpoint: OwnedFd,
     pid: u32,
     fd: i32,
-    dropped: bool,
+}
+impl Client {
+    fn live(&self) -> bool {
+        let link = std::fs::read_link(format!("/proc/{}/fd/{}", self.pid, self.fd));
+        let ours = std::fs::read_link(format!("/proc/self/fd/{}", self.endpoint.as_raw_fd()));
+        link.is_ok() && link.ok() == ours.ok()
+    }
+
+    fn deliver(&self, packet: &[u8]) -> std::io::Result<()> {
+        while self.live() {
+            let n = unsafe {
+                libc::send(
+                    self.peer.as_raw_fd(),
+                    packet.as_ptr().cast(),
+                    packet.len(),
+                    libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+                )
+            };
+            if n >= 0 {
+                return Ok(());
+            } // SOCK_SEQPACKET preserves the whole record batch.
+            let e = std::io::Error::last_os_error();
+            match e.kind() {
+                std::io::ErrorKind::Interrupted => continue,
+                std::io::ErrorKind::WouldBlock => {
+                    let mut poll = libc::pollfd {
+                        fd: self.peer.as_raw_fd(),
+                        events: libc::POLLOUT,
+                        revents: 0,
+                    };
+                    // Recheck the installed fd when a reader closes without
+                    // draining: we retain its endpoint for ioctl identity.
+                    let n = unsafe { libc::poll(&mut poll, 1, 100) };
+                    if n < 0
+                        && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                _ => return Err(e),
+            }
+        }
+        Ok(()) // The Android reader closed this device.
+    }
 }
 struct Devices {
-    clients: Vec<Client>,
+    clients: Vec<Arc<Client>>,
     keys: [[u8; 96]; 2],
     leds: [u8; 8],
 }
@@ -198,10 +241,7 @@ impl Input {
                 }
                 let mut leds = s.leds;
                 s.clients.retain_mut(|c| {
-                    let link = std::fs::read_link(format!("/proc/{}/fd/{}", c.pid, c.fd));
-                    let ours =
-                        std::fs::read_link(format!("/proc/self/fd/{}", c.endpoint.as_raw_fd()));
-                    if link.is_err() || link.ok() != ours.ok() {
+                    if !c.live() {
                         return false;
                     }
                     // Drain EV_LED writes. No host LEDs are changed.
@@ -231,28 +271,23 @@ impl Input {
                             }
                         }
                     }
-                    if c.device != device {
-                        return true;
-                    }
-                    let mut packet = Vec::new();
-                    if c.dropped {
-                        packet.extend_from_slice(&event(0, 0, 3, 0)); // SYN_DROPPED: resync EVIOCGKEY
-                        packet.extend_from_slice(&event(0, 0, 0, 0));
-                    }
-                    packet.extend_from_slice(&buf[1..n]);
-                    let sent = unsafe {
-                        libc::send(
-                            c.peer.as_raw_fd(),
-                            packet.as_ptr().cast(),
-                            packet.len(),
-                            libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
-                        )
-                    };
-                    c.dropped = sent < 0;
-                    sent >= 0
-                        || std::io::Error::last_os_error().raw_os_error() == Some(libc::EAGAIN)
+                    true
                 });
                 s.leds = leds;
+                let clients: Vec<_> = s
+                    .clients
+                    .iter()
+                    .filter(|c| c.device == device)
+                    .cloned()
+                    .collect();
+                drop(s);
+                // Do not hold device state while waiting: EventHub may need an
+                // ioctl answer before it can drain its socket.
+                for client in clients {
+                    if let Err(e) = client.deliver(&buf[1..n]) {
+                        eprintln!("evdev: delivery failed: {e}");
+                    }
+                }
             }
         });
         // Create after the input socket is ready; EventHub observes these via
@@ -344,14 +379,13 @@ impl Input {
             )
         };
         if fd >= 0 {
-            self.devices.lock().unwrap().clients.push(Client {
+            self.devices.lock().unwrap().clients.push(Arc::new(Client {
                 device,
                 peer,
                 endpoint,
                 pid: req.pid,
                 fd,
-                dropped: false,
-            });
+            }));
         }
         true
     }

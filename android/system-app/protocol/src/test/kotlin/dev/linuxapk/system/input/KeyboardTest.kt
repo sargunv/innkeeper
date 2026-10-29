@@ -47,6 +47,39 @@ class KeyboardTest {
   }
 
   @Test
+  fun mixedLayoutAndComposedKeysUseOneOrderedInjectionPath() {
+    feed("keyboard_enter 7")
+    val delivered = ArrayList<OutKey>()
+    val delivery = KeyboardDelivery(delivered::add)
+    // AZERTY S is physically compatible, A is remapped, and é needs IME text.
+    val translated =
+      feed(
+        "key 1 31 1 115 text s",
+        "key 2 31 0",
+        "key 3 16 1 97 text a",
+        "key 4 16 0",
+        "key 5 3 1 233 text é",
+        "key 6 3 0",
+        "key 7 18 1 101 compose",
+        "key 8 18 0",
+      )
+    for (event in translated) {
+      delivery.key(event)
+      // Every event is delivered before the next one, including remaps/compose.
+      assertEquals(translated.take(delivered.size), delivered)
+    }
+    assertEquals(
+      listOf(KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_2, KeyEvent.KEYCODE_E),
+      delivered.filter { it.action == KeyEvent.ACTION_DOWN }.map { it.keyCode },
+    )
+    assertEquals(
+      listOf(null, null, "é", ""),
+      delivered.filter { it.action == KeyEvent.ACTION_DOWN }.map { it.text },
+    )
+    assertTrue(delivered.all { it.displayId == 7 })
+  }
+
+  @Test
   fun mediaKeysReachAndroidButVolumeStaysOnTheHost() {
     feed("keyboard_enter 7")
     for ((scan, code) in

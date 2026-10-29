@@ -91,7 +91,12 @@ send(
 )
 send(fi, 0, string("linuxapk test") + string("pointer test"))
 roundtrip()
-for a in sys.argv[1:]:
+actions = (
+  (line.strip() for line in sys.stdin)
+  if sys.argv[1:] == ["--stdin"]
+  else sys.argv[1:]
+)
+for a in actions:
   k, _, v = a.partition(":")
   x, y = (float(t) for t in v.split(","))
   if k == "abs":

@@ -374,6 +374,9 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
       }
     }
   }
+  // Reconnect invalidation and cache publication must be one transaction:
+  // an old connection's send cannot mark the new connection's cursor known.
+  std::lock_guard lock(b->mutex);
   if (
     mCursorKnown && pixels == mCursor && x == mCursorX && y == mCursorY &&
     w == mCursorWidth && h == mCursorHeight

@@ -173,9 +173,16 @@ pub struct WindowPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     WindowRequest(WindowRequest),
-    WindowActivate { window: u32, token: String },
-    WindowDestroy { window: u32 },
-    WindowMinimize { window: u32 },
+    WindowActivate {
+        window: u32,
+        token: String,
+    },
+    WindowDestroy {
+        window: u32,
+    },
+    WindowMinimize {
+        window: u32,
+    },
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
     WindowAppearance {

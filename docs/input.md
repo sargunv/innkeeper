@@ -6,8 +6,9 @@ Linux.apk System app may open. The bridge turns `wl_pointer`, `wl_keyboard`,
 (`zwp_tablet_v2`) into protocol v2 lines
 ([input/proto.rs](../host/bridge/src/input/proto.rs) lists every line); the
 system app translates them into `MotionEvent`s and `KeyEvent`s. Ordinary mouse
-input and keys matching Android's physical keymap return to the bridge, which
-writes evdev records to the broker. Other events use InputDispatcher injection.
+input returns to the bridge, which writes evdev records to the broker. Every key
+uses the same ordered InputDispatcher injection path; layout, compose and IME
+corrections remain intact.
 
 ```mermaid
 flowchart LR
@@ -34,20 +35,27 @@ writes Linux `input_event` records through `evdev.sock`; no host input nodes or
 uinput devices are exposed. Apps enumerate real device IDs, and
 `Configuration.keyboard` is `KEYBOARD_QWERTY`.
 
-`VirtualInput.kt` associates each device's port with the focused virtual
-display's unique ID. Mouse deltas follow the host's absolute window coordinates;
-Android mouse scaling is disabled because the desktop already accelerated and
-scaled them. The system app uses Android 17's input-device display association,
-mouse-scaling and cursor-position test APIs to maintain this routing.
+`VirtualInput.kt` associates the mouse's port with its virtual display's unique
+ID. Mouse deltas follow the host's absolute window coordinates; Android mouse
+scaling is disabled because the desktop already accelerated and scaled them. The
+system app uses Android 17's input-device display association, mouse-scaling and
+cursor-position test APIs to maintain this routing.
 
-Injection preserves behavior Android's physical keymap cannot represent:
-host-layout remapped keys, IME text corrections, sticky/locked or inherited
-modifiers, compositor repeats, synthetic Back, touchpad gestures, touch and pen.
-A key keeps the route chosen at DOWN through UP. Keys arriving before a new
-display association is ready stay injected, rather than waiting in a queue.
-Ordinary mouse buttons, wheel and motion use the virtual mouse when its keyboard
-state matches the host modifiers; inherited-modifier clicks stay injected
-through release; classified fake-finger gestures stay injected.
+The keyboard is present for device enumeration and hardware-keyboard
+configuration. All keys, including physically compatible keys, use one ordered
+injection path. Splitting keys between evdev and injection would let remapped or
+composed keys overtake earlier physical keys. Injection also carries the host's
+modifiers, text corrections, repeats and synthetic Back.
+
+Ordinary unmodified mouse buttons, wheel and motion use evdev. Modified mouse
+sequences use injection through release. Relative evdev motion cannot express
+leaving a desktop window, so the system app ends the native stream with
+`SYN_DROPPED` followed by `SYN_REPORT`. InputReader resets the device and
+InputDispatcher emits HOVER_EXIT under the mouse device ID. The same reset ends
+native hover before switching to modifier-sensitive injection. Touchpad
+gestures, touch and pen keep their existing injection stream. Both evdev socket
+hops apply bounded kernel backpressure and retry; a queued release is never
+discarded for EAGAIN.
 
 ## Translation
 
@@ -60,12 +68,12 @@ The mapping follows what InputReader produces for real devices
   `touch_down` decides where the following events go (`setDisplayId`). Moving to
   another window first ends the hover or drag on the old one; a touch sequence
   stays on its first finger's window.
-- **One injection stream.** InputDispatcher gives every injected event device id
-  −1 and checks the stream with InputVerifier, so the mouse, touchscreen and pen
-  must never overlap: touch or a pen during a mouse drag or touchpad gesture is
-  dropped, and so is mouse input during a touch sequence or while the pen is in
-  proximity. Leaving a window with a button held releases it (Wayland sends no
-  release after `leave`).
+- **Touch/pen injection stream.** Touchpad gestures, touchscreen and pen use
+  device id −1 and share InputVerifier state, so they must never overlap: touch
+  or a pen during a mouse drag or touchpad gesture is dropped, and so is mouse
+  input during a touch sequence or while the pen is in proximity. Leaving a
+  window with a button held releases it (Wayland sends no release after
+  `leave`).
 - **Wheel.** A detent (`value120` 120) is one unit of `AXIS_VSCROLL` or
   `AXIS_HSCROLL`; hi-res wheels give fractions, as CursorInputMapper's hi-res
   scroll does. Continuous sources (trackpoints) convert surface pixels to
@@ -169,9 +177,8 @@ logic is `TextInputSession.kt` in `:protocol`.
   input view, so no soft keyboard covers the window. The window manager's
   per-display IME policy is `LOCAL`: `HIDE` would bind no IME at all, and text
   input would stop.
-- **Keys** arrive through the virtual keyboard or injection. The IME passes them
-  through except those whose text it commits
-  ([Keyboard layout](#keyboard-layout)).
+- **Keys** arrive through injection. The IME passes them through except those
+  whose text it commits ([Keyboard layout](#keyboard-layout)).
 - **With a host input method** (CJK, dead keys, compose): for each editor the
   IME sends `ti_enable`, the content type (password, email, number, …), the
   surrounding text (up to 120 UTF-16 units each side) and the cursor rectangle,
@@ -200,10 +207,13 @@ logic is `TextInputSession.kt` in `:protocol`.
   bypass DND. GNOME 48's portal does not export `show-banners`, so the bridge
   cannot suppress that exception without additional settings access (#79). The
   Android interruption filter is unchanged.
-- The virtual keyboard uses Android's Generic keymap; injected keys use
-  `Virtual.kcm`. Apps that read `KeyEvent.getUnicodeChar()` outside a text field
-  (games, terminals' key handlers) see US characters for non-US keys. A KCM
-  matching the host layout remains separate work (#3).
+- Android 17 assigns every ordinarily injected key device ID −1, even if the
+  caller sets a real device ID. The virtual keyboard still enumerates and makes
+  `Configuration.keyboard` QWERTY. All keys use injection to preserve ordering,
+  host layouts and compose.
+- Injected keys use `Virtual.kcm`. Apps that read `KeyEvent.getUnicodeChar()`
+  outside a text field (games, terminals' key handlers) see US characters for
+  non-US keys. A KCM matching the host layout remains separate work (#3).
 - Window shortcuts are on or off for every app except browsers' Ctrl+W, until
   per-app settings exist (#24).
 - Pointer capture is not forwarded to Wayland pointer constraints (#4).
@@ -223,8 +233,8 @@ logic is `TextInputSession.kt` in `:protocol`.
   its own mapped desktop window, injects a short pointer/keyboard stream through
   our translator and injector, and checks click, scroll and Shift+A at the
   activity. It also checks virtual device enumeration, QWERTY configuration and
-  a seat key's virtual keyboard device ID. Detailed translation cases stay in
-  unit tests.
+  a seat key's injected device ID −1, and native mouse hover exit on window
+  leave. Detailed translation cases stay in unit tests.
 - The IME's text commits and the repeat settings need the bridge's seat: they
   are checked in a nested KWin with `org_kde_kwin_fake_input`
   ([development.md](development.md#a-nested-isolated-desktop)) and the probes'
