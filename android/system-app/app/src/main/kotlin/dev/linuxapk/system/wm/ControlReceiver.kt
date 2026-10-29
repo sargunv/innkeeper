@@ -11,7 +11,10 @@ import android.provider.DocumentsContract
 import android.util.Log
 import dev.linuxapk.system.LinuxApkSystemApp
 import dev.linuxapk.system.documents.HostDocumentsProvider
+import dev.linuxapk.system.documents.HostFiles
 import dev.linuxapk.system.integration.IntegrationFeature
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -71,8 +74,19 @@ class ControlReceiver : BroadcastReceiver() {
             if (it.length != 16 || it.toULongOrNull(16) == null) return "error: bad file grant"
             DocumentsContract.buildDocumentUri(HostDocumentsProvider.AUTHORITY, it)
           }
-        if (file != null)
+        if (file != null) {
+          // MIME lookup and the app's first open need the documents HELLO after a cold start.
+          // This runs on the control worker, never the UI thread.
+          val ready = CountDownLatch(1)
+          val connected = { ready.countDown() }
+          HostFiles.whenConnected(connected)
+          try {
+            if (!ready.await(10, TimeUnit.SECONDS)) return "error: file bridge unavailable"
+          } finally {
+            HostFiles.stopWaiting(connected)
+          }
           context.grantUriPermission(pkg, file, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         val reply =
           wm.launch(
             WindowManagerFeature.LaunchRequest(
