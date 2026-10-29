@@ -75,7 +75,7 @@ gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
 if [ "$LINUXAPK_TEST_COMPOSITOR" = mutter ]; then
   echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
-  exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 1920x1080 \\
+  exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 3200x1080 \\
     --wayland-display lapk-nested --automation-script "$repo/tests/e2e/mutter.js"
 fi
 exec kwin_wayland --virtual --no-lockscreen --socket lapk-nested \\

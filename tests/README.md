@@ -20,18 +20,18 @@ Two gate tiers, both testing observable behaviour we own:
   restart). Locally the whole command has a 55 s deadline (plus at most 4 s for
   cleanup) on a warm image. GitHub Actions sets `LINUXAPK_E2E_DEADLINE=180` for
   its four-vCPU software-rendered desktop; that override is ignored outside
-  GitHub Actions. Setup observation waits scale from 20 s at the local 55 s
-  deadline to 66 s at CI's 180 s deadline, bounded by the total deadline. Group
-  observation waits remain 20 s. Setup holds the session's busy lock from the
-  host during boot polling, then hands it over to the Android keeper once boot
-  completes. The host lock closes before groups start, so lifecycle still tests
-  idle shutdown when the keeper exits. The runner prints its total wall time and
-  each setup phase and group's elapsed time/status, including interrupted
-  phases, and saves those timings in `out/test/e2e/<instance>/timings.log`. CI
-  uploads that directory in `checks-logs` even on failure. Setup boots once and
-  installs the probes; audio runs concurrently with the activity checks. Groups
-  wait for observations, rather than fixed delays. Lifecycle uses
-  named-session-only short timers.
+  GitHub Actions. Setup and group observation waits scale from 20 s at the local
+  55 s deadline to 66 s at CI's 180 s deadline, bounded by the total deadline.
+  The per-group cap scales from 50 s by the same ratio. Setup holds the
+  session's busy lock from the host during boot polling, then hands it over to
+  the Android keeper once boot completes. The host lock closes before groups
+  start, so lifecycle still tests idle shutdown when the keeper exits. The
+  runner prints its total wall time and each setup phase and group's elapsed
+  time/status, including interrupted phases, and saves those timings in
+  `out/test/e2e/<instance>/timings.log`. CI uploads that directory in
+  `checks-logs` even on failure. Setup boots once and installs the probes; audio
+  runs concurrently with the activity checks. Groups wait for observations,
+  rather than fixed delays. Lifecycle uses named-session-only short timers.
 
 Build and prepare the image first (`mise run build`,
 `mise run session -- prepare`). Results and captures stay in `out/test/e2e/`.
@@ -46,11 +46,12 @@ frames. It follows
 and
 [GNOME Shell's automation harness](https://github.com/GNOME/gnome-shell/blob/main/tests/meson.build).
 The disposable shell loads `e2e/mutter.js` to position windows and drive native
-virtual input on its private bus. Its animations and overview hot corner are
-disabled so they cannot intercept the test stream. Local runs default to KWin;
-its QPainter renderer lacks linux-dmabuf, while its OpenGL backend needs a DRM
-device. To reproduce with GNOME Shell installed, a prepared image and the CI
-stage:
+virtual input on its private bus. Its 3200-pixel-wide desktop fits both input
+windows without resizing Android displays, whose transition snapshots can
+consume touches. Its animations and overview hot corner are disabled so they
+cannot intercept the test stream. Local runs default to KWin; its QPainter
+renderer lacks linux-dmabuf, while its OpenGL backend needs a DRM device. To
+reproduce with GNOME Shell installed, a prepared image and the CI stage:
 
 ```sh
 GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \
@@ -60,6 +61,8 @@ GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \
 
 Failed groups save bounded Android and bridge logs and session cgroup memory
 counters before subsequent groups can clear logcat or restart the session. The
+runner also saves process-death events in a tagged, timed, 2 MiB-bounded
+`session-events.txt`, retaining earlier events across an Android restart. The
 nested desktop writes its stdout/stderr to `compositor.log` and saves the last
 80 service journal lines in `service.log`. Setup failures print the failed
 command, startup phase and bounded log tails directly in the job output.

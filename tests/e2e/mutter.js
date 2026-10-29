@@ -39,7 +39,7 @@ export async function run() {
   control = Gio.DBusExportedObject.wrapJSObject(
     `<node><interface name="dev.linuxapk.TestDesktop">
       <method name="Input"><arg type="s" direction="in"/></method>
-      <method name="Position"><arg type="b" direction="in"/></method>
+      <method name="Position"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
     </interface></node>`,
     {
       Input(action) {
@@ -79,7 +79,9 @@ export async function run() {
       },
       async PositionAsync([two], invocation) {
         let x = two ? 0 : 300;
+        let positioned = 0;
         for (const actor of global.get_window_actors()) {
+          if (!actor.mapped) continue;
           const window = actor.meta_window;
           if (
             !String(window.get_wm_class()).includes(
@@ -88,15 +90,18 @@ export async function run() {
           )
             continue;
           window.unminimize();
-          if (two) window.move_resize_frame(false, x, 100, 800, 800);
-          else {
-            window.move_frame(false, x, 100);
-            window.activate(global.get_current_time());
-          }
-          x += 1000;
+          window.move_frame(false, x, 100);
+          if (!two) window.activate(global.get_current_time());
+          x += 1600;
+          positioned++;
         }
         await new Promise((resolve) => global.run_at_leisure(resolve));
-        invocation.return_value(null);
+        console.log(
+          `test desktop: positioned ${positioned} windows (two=${two})`,
+        );
+        invocation.return_value(
+          new GLib.Variant("(b)", [positioned >= (two ? 2 : 1)]),
+        );
       },
     },
   );

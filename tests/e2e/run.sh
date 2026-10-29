@@ -23,6 +23,7 @@ deadline=55
 if [[ ${GITHUB_ACTIONS:-} == true ]]; then
   deadline=${LINUXAPK_E2E_DEADLINE:-55}
 fi
+observation_wait=$(((20 * deadline + 54) / 55))
 timed() (
   local name=$1 start
   shift
@@ -54,10 +55,7 @@ until_ok() {
     sleep 0.1
   done
 }
-until_setup() {
-  local observation_wait=$(((20 * deadline + 54) / 55))
-  until_ok "$@"
-}
+until_setup() { until_ok "$@"; }
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
 file_has() { grep -E "$2" "$1" >/dev/null; }
@@ -140,8 +138,14 @@ if [[ ${1:-} == --group ]]; then
       # Position the window for absolute input without resizing Android's
       # display: resize snapshots temporarily block otherwise valid touches.
       if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
-        gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
-          --method dev.linuxapk.TestDesktop.Position false >/dev/null
+        # HWC's first frame can precede Mutter creating its window actor.
+        # Retry the compositor operation until it actually found the window.
+        # shellcheck disable=SC2329 # invoked through until_ok
+        positioned() {
+          gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
+            --method dev.linuxapk.TestDesktop.Position "$1" | grep -q true
+        }
+        until_ok positioned false
       else
         cat >"$T/input-window.js" <<'JS'
 for (const w of workspace.windowList()) {
@@ -167,7 +171,9 @@ JS
       input_ready() {
         s dumpsys input >"$T/devices.txt"
         sed -n '/^  FocusedWindows:/,/^  FocusRequests:/p' "$T/devices.txt" |
-          grep -E "displayId=$1, name=.*${2:-InputProbeActivity}" >/dev/null
+          grep -E "displayId=$1, name=.*${2:-InputProbeActivity}" >/dev/null &&
+          grep -E "name=.*${2:-InputProbeActivity}, id=.*displayId=$1, .*alpha=1," "$T/devices.txt" |
+          grep -Ev 'NOT_VISIBLE|NOT_FOCUSABLE' >/dev/null
       }
       until_ok input_ready "$display"
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
@@ -222,19 +228,20 @@ JS
       s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
       until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
       until_ok input_ready "$second_display"
+      second_x=1200
       if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+        second_x=1800
         s logcat -b main -c
-        gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
-          --method dev.linuxapk.TestDesktop.Position true >/dev/null
-        # Mutter configures sizes asynchronously. Observe delivery to both
-        # resized Android windows before the uninterrupted crossing stream.
+        until_ok positioned true
+        # Place both at their original size: resize snapshots can consume valid
+        # touches after hover is already delivered on a software renderer.
         # shellcheck disable=SC2329 # invoked through until_ok
-        two_windows_ready() {
-          printf 'abs:200,300\nabs:1200,300\n' >&"$seat_fd"
-          log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display" &&
-            log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
+        window_pointer_ready() {
+          printf 'abs:%s,300\n' "$1" >&"$seat_fd"
+          log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $2 windowDisplay=$2"
         }
-        until_ok two_windows_ready
+        until_ok window_pointer_ready 200 "$display"
+        until_ok window_pointer_ready "$second_x" "$second_display"
       else
         cat >"$T/two-windows.js" <<'JS'
 let x = 0;
@@ -256,7 +263,7 @@ JS
       # Rapid alternating enter/move/click/leave reports must retain their own
       # display's device even with both endpoints readable.
       for _ in {1..2}; do
-        printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:1200,300\nbutton:272,1\nbutton:272,0\n' >&"$seat_fd"
+        printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:%s,300\nbutton:272,1\nbutton:272,0\n' "$second_x" >&"$seat_fd"
       done
       until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
       until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
@@ -283,6 +290,9 @@ PYTEST
       # The two-window sequence changed size and focus; inject into a fresh mapped probe.
       launch InputProbeActivity
       until_ok mapped
+      # The first frame is visible before the Android opening animation ends.
+      # InputDispatcher drops otherwise valid injected touches at low opacity.
+      until_ok input_ready "$display"
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"
@@ -501,6 +511,7 @@ mkdir -p "$T"
 : >"$T/timings.log"
 export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
 keeper=""
+events=""
 setup_lock=""
 gamepads=""
 mod=""
@@ -526,6 +537,7 @@ cleanup() {
   fi
   "$S" stop >/dev/null 2>&1 || true
   "$S" reset >/dev/null 2>&1 || true
+  if [[ -n $events ]]; then wait "$events" 2>/dev/null || true; fi
   if [[ -n $keeper ]]; then wait "$keeper" 2>/dev/null || true; fi
   if [[ -n $gamepads ]]; then
     kill "$gamepads" 2>/dev/null || true
@@ -562,10 +574,26 @@ exec {setup_lock}>&-
 setup_lock=""
 size=$(stat -c %s "$apk")
 timed setup-probes s cmd package install -r -g -S "$size" <"$apk"
+# Keep the original process-death events if Android restarts and its noisy boot
+# replaces the log ring before a failed group's snapshot. Tags, time and bytes
+# are bounded; session stop closes this exec before cleanup waits for it.
+(
+  # shellcheck disable=SC2016 # expanded by the Android shell
+  timeout "$deadline" "$S" exec sh -c '
+    logcat -b main,system,crash -T 1 -v threadtime \
+      -s Zygote:I AndroidRuntime:E ActivityManager:I ActivityTaskManager:I vold:I Process:I &
+    logger=$!
+    while ! test -f /data/local/tmp/e2e-events-stop; do sleep 0.1; done
+    kill "$logger"
+    wait "$logger" 2>/dev/null || true
+  ' |
+    head -c 2097152 >"$T/session-events.txt"
+) &
+events=$!
 failed=()
 run_group() {
   local result=0
-  timed "$1" timeout --kill-after=2 50 "$0" --group "$1" || result=$?
+  timed "$1" timeout --kill-after=2 "$(((50 * deadline + 54) / 55))" "$0" --group "$1" || result=$?
   if ((result != 0)); then
     # Preserve the failed activity sequence before lifecycle restarts logd.
     tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
@@ -603,7 +631,13 @@ for group in "${groups[@]}"; do
   if [[ $group == production ]]; then run_group production || failed+=(production); fi
 done
 for group in "${groups[@]}"; do
-  if [[ $group == lifecycle ]]; then run_group lifecycle || failed+=(lifecycle); fi
+  if [[ $group == lifecycle ]]; then
+    # Logging is an exec too: release its busy lock before testing idle stop.
+    s touch /data/local/tmp/e2e-events-stop
+    wait "$events" || true
+    events=""
+    run_group lifecycle || failed+=(lifecycle)
+  fi
 done
 ((${#failed[@]} == 0)) || {
   echo "e2e: FAIL (${failed[*]})"
