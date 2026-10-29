@@ -135,7 +135,7 @@ if [[ ${1:-} == --group ]]; then
       input_ready() {
         s dumpsys input >"$T/devices.txt"
         sed -n '/^  FocusedWindows:/,/^  FocusRequests:/p' "$T/devices.txt" |
-          grep -E "displayId=$1, name=.*InputProbeActivity" >/dev/null
+          grep -E "displayId=$1, name=.*${2:-InputProbeActivity}" >/dev/null
       }
       until_ok input_ready "$display"
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
@@ -232,6 +232,8 @@ PYTEST
       until_ok log_has LinuxApkProbe 'generic .*ACTION_SCROLL'
       wm CLOSE --ei display "$display" | grep -q "closed display=$display"
       launch CaptureProbeActivity
+      until_ok mapped
+      until_ok input_ready "$display" CaptureProbeActivity
       printf '%s\n' abs:900,400 key:46,1 key:46,0 >&"$seat_fd"
       # One capture assertion: native relative motion reaches the requesting view.
       # shellcheck disable=SC2329 # invoked through until_ok
