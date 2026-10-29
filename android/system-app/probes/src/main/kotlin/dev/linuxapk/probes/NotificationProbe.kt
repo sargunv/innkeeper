@@ -28,9 +28,7 @@ class NotificationProbe : Activity() {
     super.onCreate(savedInstanceState)
     val now =
       java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
-    val mode = intent.getStringExtra("mode").orEmpty()
-    if (mode == "cancel") getSystemService(NotificationManager::class.java).cancel(ID)
-    else post(this, "Ada Lovelace $mode", "Are we still on for the demo at 3? ($now)", mode)
+    post(this, "Ada Lovelace", "Are we still on for the demo at 3? ($now)")
     finish()
   }
 
@@ -39,12 +37,6 @@ class NotificationProbe : Activity() {
     override fun onReceive(context: Context, intent: Intent) {
       val reply = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)
       when {
-        intent.action == ACTION_POST -> {
-          val mode = intent.getStringExtra("mode").orEmpty()
-          val nm = context.getSystemService(NotificationManager::class.java)
-          if (mode == "cancel") nm.cancel(ID)
-          else post(context, "Ada Lovelace $mode", "Notification probe", mode)
-        }
         reply != null -> {
           Log.i(TAG, "reply: $reply")
           post(context, "Ada Lovelace", "You replied: $reply")
@@ -62,16 +54,13 @@ class NotificationProbe : Activity() {
     private const val CHANNEL = "linuxapk-probe"
     private const val ID = 4242
     private const val KEY_REPLY = "reply"
-    private const val ACTION_POST = "dev.linuxapk.probes.NOTIFY"
     private const val ACTION_READ = "dev.linuxapk.probes.READ"
     private const val ACTION_REPLY = "dev.linuxapk.probes.REPLY"
 
-    fun post(context: Context, title: String, text: String, mode: String = "") {
+    fun post(context: Context, title: String, text: String) {
       val nm = context.getSystemService(NotificationManager::class.java)
-      val channel = if (mode == "no-badge") "$CHANNEL-no-badge" else CHANNEL
       nm.createNotificationChannel(
-        NotificationChannel(channel, "Notification probe", NotificationManager.IMPORTANCE_DEFAULT)
-          .apply { setShowBadge(mode != "no-badge") },
+        NotificationChannel(CHANNEL, "Notification probe", NotificationManager.IMPORTANCE_DEFAULT),
       )
       fun broadcast(action: String, mutable: Boolean) =
         PendingIntent.getBroadcast(
@@ -95,7 +84,7 @@ class NotificationProbe : Activity() {
       val read =
         Notification.Action.Builder(null, "Mark as read", broadcast(ACTION_READ, false)).build()
       val n =
-        Notification.Builder(context, channel)
+        Notification.Builder(context, CHANNEL)
           .setSmallIcon(android.R.drawable.stat_notify_chat)
           .setContentTitle(title)
           .setContentText(text)
@@ -103,21 +92,6 @@ class NotificationProbe : Activity() {
           .setAutoCancel(true)
           .addAction(read)
           .addAction(reply)
-          .apply {
-            when (mode) {
-              "progress" -> setProgress(100, 42, false)
-              "indeterminate" -> setProgress(100, 0, true)
-              "ongoing" -> setOngoing(true)
-              "style",
-              "style-indeterminate" ->
-                setStyle(
-                  Notification.ProgressStyle()
-                    .setProgressSegments(listOf(Notification.ProgressStyle.Segment(200)))
-                    .setProgress(84)
-                    .setProgressIndeterminate(mode == "style-indeterminate"),
-                )
-            }
-          }
           .build()
       nm.notify(ID, n)
     }

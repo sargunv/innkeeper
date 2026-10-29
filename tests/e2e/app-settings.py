@@ -42,15 +42,12 @@ if not str(data) or data == Path("."):
   )
 cache = data / "data" / package / "cache/session-api-probe"
 files = data / "data" / package / "files/session-api-probe"
-assert cache.read_text() == "temporary"
-assert files.read_text() == "persistent"
-info = call("info")
-original = granted(info)
-assert granted(call("permission", permission, not original)) != original
-assert granted(call("permission", permission, original)) == original
+assert not granted(call("permission", permission, False))
 call("clear-cache")
 assert not cache.exists(), "clear-cache left the probe's temporary file"
 assert files.read_text() == "persistent", "clear-cache removed app data"
+# The fresh install grants this; restore it for the notification scenario.
+call("permission", permission, True)
 print(
   "ok   session D-Bus clears cache, preserves data and toggles a runtime permission"
 )

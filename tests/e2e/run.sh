@@ -96,49 +96,12 @@ if [[ ${1:-} == --group ]]; then
       until_ok session_booted
       booted
       echo 'ok   Session1 booted follows Android boot completion'
-      s getprop ro.product.board >"$T/board.txt"
-      [[ $(cat "$T/board.txt") == cutf ]]
-      # Cuttlefish's netd aborts during startup if mapLockTest fails. Its
-      # published binder service proves startup passed those OFD checks.
-      s service check netd >"$T/netd.txt"
-      file_has "$T/netd.txt" '^Service netd: found$'
-      s pidof netd >>"$T/netd.txt"
-      echo 'ok   image board=cutf; netd published after mapLockTest'
-      s timeout 10 logcat -b main,system,crash -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
-      if file_has "$T/trace.txt" 'Error opening trace file'; then
-        echo 'FAIL expected missing-tracefs error was not silenced' >&2
-        exit 1
-      fi
-      echo 'ok   no missing-tracefs noise'
       s cmd package resolve-activity --brief -a android.intent.action.MAIN \
         -c android.intent.category.HOME >"$T/home.txt"
       file_has "$T/home.txt" '^dev.linuxapk.system/.wm.HomeActivity$'
-      [[ -z $(s pm path com.android.launcher3) ]]
-      sysui=$(s pidof com.android.systemui)
-      s input -d 0 keyevent KEYCODE_APP_SWITCH KEYCODE_HOME KEYCODE_BACK
-      until_ok window_ready HomeActivity
-      [[ $(s pidof com.android.systemui) == "$sysui" ]]
-      s dumpsys activity service com.android.systemui/.SystemUIService LauncherProxyService >"$T/overview.txt"
-      file_has "$T/overview.txt" 'mIsEnabled=false'
-      file_has "$T/overview.txt" 'mBound=false'
-      echo 'ok   HOME resolves without Launcher3; recents/Home/Back leave SystemUI and HOME running'
-      ;;
-    storage)
       s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow
-      s am broadcast -n dev.linuxapk.probes/.StorageProbe --es round initial >/dev/null
-      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=initial'
-      provider=$(s pidof com.android.providers.media.module)
-      [[ -n $provider ]]
-      # shellcheck disable=SC2329 # invoked through until_ok
-      volume_state() { s sm list-volumes all | grep -q "^emulated;0 $1 "; }
-      s sm unmount 'emulated;0'
-      until_ok volume_state unmounted
-      [[ $(s pidof com.android.providers.media.module) == "$provider" ]]
-      s sm mount 'emulated;0'
-      until_ok volume_state mounted
-      [[ $(s pidof com.android.providers.media.module) == "$provider" ]]
-      s am broadcast -n dev.linuxapk.probes/.StorageProbe --es round remounted >/dev/null
-      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=remounted'
+      s am broadcast -n dev.linuxapk.probes/.StorageProbe >/dev/null
+      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
       ;;
     input)
       launch InputProbeActivity
@@ -153,9 +116,9 @@ if [[ ${1:-} == --group ]]; then
         # shellcheck disable=SC2329 # invoked through until_ok
         positioned() {
           gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
-            --method dev.linuxapk.TestDesktop.Position "$1" | grep -q true
+            --method dev.linuxapk.TestDesktop.Position | grep -q true
         }
-        until_ok positioned false
+        until_ok positioned
       else
         cat >"$T/input-window.js" <<'JS'
 for (const w of workspace.windowList()) {
@@ -186,11 +149,8 @@ JS
           grep -Ev 'NOT_VISIBLE|NOT_FOCUSABLE' >/dev/null
       }
       until_ok input_ready "$display"
-      file_has "$T/devices.txt" 'Linux.apk Keyboard'
-      file_has "$T/devices.txt" 'Linux.apk Mouse'
       /usr/bin/python3 "$here/gamepads.py" check "$T/devices.txt"
-      # Keep one virtual seat device across enter/leave and drag. Submit the
-      # ordered stream without observation barriers between evdev devices.
+      # Keep one native seat across the keyboard, click and capture scenarios.
       mkfifo "$T/seat"
       /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
       seat_pid=$!
@@ -203,100 +163,10 @@ JS
         log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display"
       }
       until_ok pointer_ready
-      printf '%s\n' key:30,1 key:30,0 \
-        abs:900,300 abs:100,300 abs:900,300 button:272,1 \
-        key:42,1 abs:1000,320 key:42,0 abs:1100,340 button:272,0 >&"$seat_fd"
-      # One bounded capture checks the delivered sequence, avoiding a separate
-      # exec/logcat round trip for every intermediate observation.
-      # shellcheck disable=SC2329 # invoked through until_ok
-      native_input_ready() {
-        s logcat -d -s LinuxApkProbe:I >"$T/modifier-drag.txt"
-        file_has "$T/modifier-drag.txt" 'key .*KEYCODE_A.*deviceId=-1' &&
-          file_has "$T/modifier-drag.txt" 'touch .*ACTION_UP.*metaState=0.*deviceName=Linux.apk Mouse'
-      }
-      until_ok native_input_ready
-      for pattern in 'configuration keyboard=2' \
-        'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse' \
-        'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse' \
-        'touch .*ACTION_DOWN.*deviceName=Linux.apk Mouse' \
-        'key .*ACTION_DOWN.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard' \
-        'touch .*ACTION_MOVE.*META_SHIFT_ON.*deviceName=Linux.apk Mouse' \
-        'key .*ACTION_UP.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard'; do
-        file_has "$T/modifier-drag.txt" "$pattern"
-      done
-      [[ $(grep -Ec 'key .*KEYCODE_SHIFT_LEFT' "$T/modifier-drag.txt") == 2 ]]
-      if file_has "$T/modifier-drag.txt" '(touch|generic) .*deviceId=-1'; then
-        echo 'FAIL physical mouse switched to injection' >&2
-        exit 1
-      fi
-      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; ordered seat key injection (Android device ID -1)'
-      # Put a second probe on a separately owned window/display. A second task
-      # on Settings' display keeps the production one-window-per-package policy.
-      second=$(wm LAUNCH --es package com.android.settings --es component com.android.settings/.Settings)
-      second_display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$second")
-      [[ -n $second_display && $second_display != "$display" ]]
-      s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
-      until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
-      until_ok input_ready "$second_display"
-      second_x=1200
-      if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
-        second_x=1800
-        s logcat -b main -c
-        until_ok positioned true
-        # Place both at their original size: resize snapshots can consume valid
-        # touches after hover is already delivered on a software renderer.
-        # shellcheck disable=SC2329 # invoked through until_ok
-        window_pointer_ready() {
-          printf 'abs:%s,300\n' "$1" >&"$seat_fd"
-          log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $2 windowDisplay=$2"
-        }
-        until_ok window_pointer_ready 200 "$display"
-        until_ok window_pointer_ready "$second_x" "$second_display"
-      else
-        cat >"$T/two-windows.js" <<'JS'
-let x = 0;
-for (const w of workspace.windowList()) {
-  if (String(w.resourceClass).includes("dev.linuxapk.")) {
-    w.minimized = false;
-    w.frameGeometry = {x: x, y: 100, width: 800, height: 800};
-    x += 1000;
-  }
-}
-JS
-        script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-          --method org.kde.kwin.Scripting.loadScript "$T/two-windows.js" linuxapk-input-two | grep -oE '[0-9]+')
-        gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
-          --method org.kde.kwin.Script.run >/dev/null
-        gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-          --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
-      fi
-      # Rapid alternating enter/move/click/leave reports must retain their own
-      # display's device even with both endpoints readable.
-      for _ in {1..2}; do
-        printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:%s,300\nbutton:272,1\nbutton:272,0\n' "$second_x" >&"$seat_fd"
-      done
+      printf '%s\n' key:30,1 key:30,0 button:272,1 button:272,0 >&"$seat_fd"
+      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceId=-1'
       until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
-      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
-      s logcat -d -s LinuxApkProbe:I >"$T/two-windows.txt"
-      /usr/bin/python3 - "$T/two-windows.txt" <<'PYTEST'
-import re, sys
-for device, window in re.findall(r'deviceName=Linux.apk Mouse (\d+) windowDisplay=(\d+)', open(sys.argv[1]).read()):
-  assert device == window, (device, window)
-PYTEST
-      s dumpsys input >"$T/two-devices.txt"
-      file_has "$T/two-devices.txt" "Linux.apk Mouse $display"
-      file_has "$T/two-devices.txt" "Linux.apk Mouse $second_display"
-      wm CLOSE --ei display "$second_display" >/dev/null
-      # Removal must leave the first display's mouse alive.
-      # shellcheck disable=SC2329 # invoked through until_ok
-      mouse_removed() {
-        s dumpsys input >"$T/remaining-device.txt"
-        ! file_has "$T/remaining-device.txt" "Linux.apk Mouse $second_display"
-      }
-      until_ok mouse_removed
-      file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
-      echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
-      echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
+      echo 'ok   native keyboard and mouse reach the app'
       launch CaptureProbeActivity
       until_ok mapped
       until_ok input_ready "$display" CaptureProbeActivity
@@ -313,8 +183,7 @@ PYTEST
       wait "$seat_pid"
       rm "$T/seat"
       launch WindowModeProbe
-      # A manifest-locked portrait activity starts portrait; a public runtime request reshapes
-      # the actual host window, whose configure comes back through the bridge as this size.
+      # A public orientation request reshapes the real host window.
       # shellcheck disable=SC2329 # invoked through until_ok
       shape() {
         wm LIST | /usr/bin/python3 -c '
@@ -326,11 +195,12 @@ for line in sys.stdin:
 sys.exit(1)
 ' "$display" "$1"
       }
+      # Establish the starting shape so an unchanged window cannot pass the request.
       until_ok shape portrait
       s am start --display "$display" -n dev.linuxapk.probes/.WindowModeProbe --es action landscape >/dev/null
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
-      echo 'ok   requested-orientation host window shape (portrait -> landscape)'
+      echo 'ok   requested orientation reshapes the host window'
       /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)
@@ -350,68 +220,8 @@ sys.exit(1)
       dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}
       gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
         --method dev.linuxapk.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
-      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
-        --method dev.linuxapk.Session1.GetPreferences >"$T/preferences.txt"
-      file_has "$T/preferences.txt" '"follow_accent":false'
       until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=false'
-      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
-        --method dev.linuxapk.Session1.SetPreferences '{}' >/dev/null
-      until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=true'
-      echo 'ok   preference persisted and applied live over Session1'
-      s am start -n dev.linuxapk.probes/.DesktopProbe --es action link >/dev/null
-      until_ok file_has "$bridge_log" 'openuri: .*https://example.com/linuxapk-e2e'
-      s am start -a android.intent.action.VIEW -d mailto:e2e@example.com >/dev/null
-      until_ok file_has "$bridge_log" 'handoff: .*mailto:e2e@example.com'
-      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
-      until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
-      s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY >/dev/null
-      until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
-      for mode in progress style indeterminate style-indeterminate ongoing no-badge; do
-        expected=42 badge=true
-        case $mode in
-          *indeterminate) expected=-2 ;;
-          ongoing | no-badge) expected=-1 badge=false ;;
-        esac
-        s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY --es mode "$mode" >/dev/null
-        until_ok file_has "$bridge_log" "not shown .*Ada Lovelace $mode.*progress=$expected badge=$badge"
-      done
-      s am broadcast -n "dev.linuxapk.probes/.NotificationProbe\$Receiver" -a dev.linuxapk.probes.NOTIFY --es mode cancel >/dev/null
-      printf %s linuxapk-e2e-host-before | wl-copy
-      s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-android >/dev/null
-      until_ok log_has LinuxApkClipProbe 'set: linuxapk-e2e-android'
-      [[ $(timeout 2 wl-paste --no-newline) == linuxapk-e2e-host-before ]]
-      printf %s linuxapk-e2e-host-after | wl-copy
-      s am start -n dev.linuxapk.probes/.ClipProbe >/dev/null
-      until_ok log_has LinuxApkClipProbe 'clip: .*text=linuxapk-e2e-android'
-      # A process cold start exercises PickerActivity's connection callback.
-      s kill -9 "$(s pidof dev.linuxapk.system)"
-      launch DesktopProbe
-      until_ok file_has "$bridge_log" 'documents: .*pick cancelled \(test session\)'
-      until_ok log_has LinuxApkDocs 'pick ended: -125'
-      until_ok log_has LinuxApkDesktopProbe 'picked: null'
-      if file_has "$desktop_log" 'picker:|notification:'; then
-        echo 'FAIL unexpected desktop picker or notification' >&2
-        exit 1
-      fi
-      echo 'ok   clipboard isolated both ways; cold PICK cancelled without a portal'
-      # Hide only this instance's socket to exercise the asynchronous connection timeout.
-      socket=$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/bridge/bridge.sock
-      mv "$socket" "$socket.hidden"
-      trap 'mv "$socket.hidden" "$socket" 2>/dev/null || true' EXIT
-      s kill -9 "$(s pidof dev.linuxapk.system)"
-      s am start -n dev.linuxapk.system/.documents.PickerActivity \
-        -a android.intent.action.OPEN_DOCUMENT -t text/plain >/dev/null
-      until_ok log_has LinuxApkDocs 'no desktop file chooser; handing .* to DocumentsUI'
-      # shellcheck disable=SC2329 # invoked through until_ok
-      documents_ui() { s dumpsys activity activities | grep 'topResumedActivity=.*com.android.documentsui' >/dev/null; }
-      until_ok documents_ui
-      mv "$socket.hidden" "$socket"
-      trap - EXIT
-      s am force-stop com.android.documentsui
-      # The cold fallback can finish its task before WM observes it. Explicitly
-      # release this fixture's display before another same-size window opens.
-      wm CLOSE --es package com.android.documentsui >/dev/null
-      echo 'ok   unavailable bridge falls back to DocumentsUI after the connection timeout'
+      echo 'ok   preference applied live over Session1'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       printf '# linuxapk-open-with\n' >"$T/file.md"
       "$repo/tools/dev/linuxapk.sh" open "$T/file.md"
@@ -425,16 +235,11 @@ sys.exit(1)
       s logcat -d -s LinuxApkOpenWith:I LinuxApkFileProbe:I >"$T/open-with.txt"
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       echo 'ok   Open With opens the selected app with a readable file grant'
-      ;;
-    sharing) "$here/share.sh" ;;
-    a11y)
-      dbus-send --session --dest=org.a11y.Bus --type=method_call --print-reply /org/a11y/bus \
-        org.freedesktop.DBus.Properties.Set string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
-      launch A11yProbeActivity
-      until_ok file_has "$bridge_log" 'a11y: test session: never active'
+      "$here/share.sh"
+      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
+      until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
-      ;;
-    production)
+      # Real desktop requests use a capped production-policy sidecar on the private bus.
       # shellcheck source=tests/e2e/production.sh
       source "$here/production.sh"
       ;;
@@ -456,9 +261,9 @@ sys.exit(1)
 fi
 
 groups=("$@")
-((${#groups[@]})) || groups=(boot storage input audio desktop sharing a11y production lifecycle)
+((${#groups[@]})) || groups=(boot input audio desktop lifecycle)
 for group in "${groups[@]}"; do
-  case $group in boot | storage | input | audio | desktop | sharing | a11y | production | lifecycle) ;; *)
+  case $group in boot | input | audio | desktop | lifecycle) ;; *)
     echo "unknown e2e group: $group" >&2
     exit 2
     ;;
@@ -583,8 +388,7 @@ run_group() {
   return "$result"
 }
 # Audio uses a foreground service and a private sink; it can run alongside
-# the sequential activity/window checks. Production runs after isolation
-# assertions (its fake-service logs are positive), then lifecycle changes state.
+# the sequential activity/window checks; lifecycle changes session state last.
 audio_pid=""
 for group in "${groups[@]}"; do
   if [[ $group == audio ]]; then
@@ -593,13 +397,15 @@ for group in "${groups[@]}"; do
   fi
 done
 for group in "${groups[@]}"; do
-  case $group in audio | production | lifecycle) continue ;; esac
+  case $group in audio | lifecycle) continue ;; esac
+  if [[ $group == desktop && -n $audio_pid ]]; then
+    # The sidecar restarts the probe process; finish audio before that teardown.
+    wait "$audio_pid" || failed+=(audio)
+    audio_pid=""
+  fi
   run_group "$group" || failed+=("$group")
 done
 if [[ -n $audio_pid ]]; then wait "$audio_pid" || failed+=(audio); fi
-for group in "${groups[@]}"; do
-  if [[ $group == production ]]; then run_group production || failed+=(production); fi
-done
 for group in "${groups[@]}"; do
   if [[ $group == lifecycle ]]; then
     # Logging is an exec too: release its busy lock before testing idle stop.

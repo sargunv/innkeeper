@@ -118,12 +118,6 @@
       android:exported="true"
       android:label="@string/window_probe_name" />
 
-    <!-- Widgets for the accessibility test (tests/e2e/a11y). -->
-    <activity
-      android:name=".A11yProbeActivity"
-      android:exported="true"
-      android:label="@string/a11y_probe_name" />
-
     <!-- A notification with an action and an inline reply. -->
     <activity
       android:name=".NotificationProbe"

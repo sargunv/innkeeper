@@ -191,5 +191,17 @@ mod tests {
             merge_props(image, ours),
             "# image\nro.a=1\nro.c\n\n# --- ours ---\nro.b=3\n\nro.d=4\n"
         );
+        // The shipped override silences absent tracefs without exposing host tracing.
+        let merged = merge_props(
+            "log.tag.cutils-trace=E\n",
+            include_str!("../../../image/vendor.prop"),
+        );
+        assert_eq!(
+            merged
+                .lines()
+                .filter(|l| l.starts_with("log.tag.cutils-trace="))
+                .collect::<Vec<_>>(),
+            ["log.tag.cutils-trace=S"]
+        );
     }
 }

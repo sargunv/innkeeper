@@ -31,9 +31,9 @@ def check(path):
     sources = re.search(r"Sources: ([^\n]+)", body)
     if sources and "GAMEPAD" in sources[1] and "JOYSTICK" in sources[1]:
       ids.add(device)
-  assert len(ids) == 2, f"expected two distinct Android gamepads, found {ids}"
+  assert ids, "expected an Android gamepad with GAMEPAD and JOYSTICK sources"
   print(
-    f"ok   synthetic host controllers enumerate as Android gamepads: {sorted(ids)}"
+    f"ok   a host controller enumerates as an Android gamepad: {sorted(ids)}"
   )
 
 

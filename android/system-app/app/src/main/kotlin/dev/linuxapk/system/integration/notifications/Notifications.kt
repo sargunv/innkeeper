@@ -210,7 +210,13 @@ class Notifications(
     if (n.contentIntent != null) flags = flags or 4
     // Launcher3's notification-dot rule: effective ranking/channel badge
     // permission, excluding ongoing notifications and group summaries.
-    if (!ongoing && ranking?.canShowBadge() == true && ranking.channel?.canShowBadge() == true) {
+    if (
+      notificationBadge(
+        ongoing,
+        ranking?.canShowBadge() == true,
+        ranking?.channel?.canShowBadge() == true,
+      )
+    ) {
       flags = flags or 8
     }
     val urgency =
@@ -225,17 +231,17 @@ class Notifications(
       if (x.getString(Notification.EXTRA_TEMPLATE) == Notification.ProgressStyle::class.java.name) {
         Notification.Builder.recoverBuilder(context, n).style as? Notification.ProgressStyle
       } else null
-    val max = style?.progressMax ?: x.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
     val progress =
-      when {
-        style?.isProgressIndeterminate ?: x.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE) ->
-          -2
-        max > 0 ->
-          ((style?.progress ?: x.getInt(Notification.EXTRA_PROGRESS)) * 100L / max)
-            .toInt()
-            .coerceIn(0, 100)
-        else -> -1
-      }
+      notificationProgress(
+        NotificationProgress(
+          x.getInt(Notification.EXTRA_PROGRESS),
+          x.getInt(Notification.EXTRA_PROGRESS_MAX, 0),
+          x.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE),
+        ),
+        style?.let {
+          NotificationProgress(it.progress, it.progressMax, it.isProgressIndeterminate)
+        },
+      )
     val actions = (n.actions ?: emptyArray()).take(3)
     val w = Wire.Writer(4096)
     w.u32(1)
