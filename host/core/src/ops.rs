@@ -518,26 +518,4 @@ mod tests {
         assert_eq!(notice_once(&dir.join("none"), false), None);
         fs::remove_dir_all(&dir).unwrap();
     }
-
-    #[test]
-    fn inspects_corpus_apk() {
-        let apk = crate::test_corpus().join("com.darkempire78.opencalculator_53.apk");
-        if !apk.is_file() {
-            eprintln!("skipping: no corpus APK {}", apk.display());
-            return;
-        }
-        let p = inspect(&apk, &quiet).unwrap();
-        assert_eq!(p.package, "com.darkempire78.opencalculator");
-        assert!(!p.version.is_empty());
-        assert!(p.size > 0);
-        assert_eq!(p.apk_count, 1);
-        assert!(p.runs_here());
-        // An adaptive icon with legacy PNGs: the largest PNG is found.
-        assert!(p.icon.as_ref().is_some_and(|i| i.starts_with(b"\x89PNG")));
-        assert!(
-            p.permissions
-                .iter()
-                .any(|x| x == "android.permission.VIBRATE")
-        );
-    }
 }

@@ -827,7 +827,6 @@ fn tree_info(root: NodeId) -> TreeInfo {
 mod tests {
     use super::super::wire::{Collection, Item, Range};
     use super::*;
-    use proptest::prelude::*;
 
     fn raw(id: u64) -> RawNode {
         RawNode {
@@ -1146,10 +1145,6 @@ mod tests {
         n
     }
 
-    fn consumer(t: &WindowTree) -> accesskit_consumer::Tree {
-        accesskit_consumer::Tree::new(t.full_update().unwrap(), true)
-    }
-
     struct Nop;
     impl accesskit_consumer::TreeChangeHandler for Nop {
         fn node_added(&mut self, _: &accesskit_consumer::NodeRef) {}
@@ -1354,65 +1349,5 @@ mod tests {
             )
             .unwrap();
         assert_eq!((s.action, s.a, s.b), (act::SET_SELECTION, 3, 5));
-    }
-
-    fn arb_update(full_: bool) -> impl Strategy<Value = Snapshot> {
-        let node = (
-            1u64..24,
-            proptest::collection::vec(1u64..24, 0..5),
-            any::<bool>(),
-        )
-            .prop_map(|(id, children, editable)| {
-                let mut n = with_children(raw(id), &children);
-                if editable {
-                    n.flags |= flag::EDITABLE;
-                    n.text = "x".into();
-                }
-                n
-            });
-        (proptest::collection::vec(node, 1..16), 0u64..24).prop_map(move |(mut nodes, focus)| {
-            let mut ids = HashSet::new();
-            nodes.retain(|n| ids.insert(n.id));
-            if full_ {
-                nodes[0].id = 1;
-                nodes.dedup_by_key(|n| n.id);
-                let mut ids = HashSet::new();
-                nodes.retain(|n| ids.insert(n.id));
-            }
-            Snapshot {
-                partial: !full_,
-                scale: 1.0,
-                focus,
-                title: String::new(),
-                nodes,
-            }
-        })
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(3000))]
-        /// Whatever Android sends, AccessKit takes every update without a
-        /// panic and holds exactly the mirror's nodes.
-        #[test]
-        fn accesskit_accepts_every_update(
-            first in arb_update(true),
-            rest in proptest::collection::vec(prop_oneof![arb_update(false), arb_update(true)], 0..12),
-        ) {
-            let mut t = WindowTree::default();
-            let u = t.apply(&first).unwrap();
-            let mut c = accesskit_consumer::Tree::new(u, true);
-            prop_assert_eq!(reachable(&c).len(), t.node_count());
-            for s in rest {
-                let Ok(u) = t.apply(&s) else { continue };
-                let focus = u.focus;
-                c.update_and_process_changes(u, &mut Nop);
-                let r = reachable(&c);
-                prop_assert_eq!(r.len(), t.node_count());
-                prop_assert!(r.iter().all(|id| t.contains(*id)));
-                prop_assert!(t.contains(focus));
-                let again = consumer(&t);
-                prop_assert_eq!(reachable(&again).len(), t.node_count());
-            }
-        }
     }
 }

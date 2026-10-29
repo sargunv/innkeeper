@@ -3,7 +3,7 @@
 //! The driver makes no syscalls itself: process memory, receive buffers, fds
 //! and answering the caller go through the [`Userspace`] trait, so the whole
 //! driver is exercised by `cargo test` against an in-memory fake (see
-//! `tests.rs`, `lifecycle_tests.rs` and `src/bin/fuzz.rs`). The seccomp binding
+//! `tests.rs`). The seccomp binding
 //! that wires it to real Android processes lives in `src/notify.rs`.
 //!
 //! The reference is the kernel's `drivers/android/binder.c`; function names in
@@ -3335,11 +3335,6 @@ impl BinderDriver {
     // ---- introspection for tests ----------------------------------------------
 
     #[cfg(test)]
-    pub(crate) fn requested_threads(&self, proc: ProcId) -> u32 {
-        self.procs[&proc].requested_threads
-    }
-
-    #[cfg(test)]
     pub(crate) fn ref_counts(&self, proc: ProcId, desc: u32) -> Option<(i32, i32)> {
         self.procs
             .get(&proc)?
@@ -3348,8 +3343,7 @@ impl BinderDriver {
             .map(|r| (r.strong, r.weak))
     }
 
-    /// Internal consistency checks between ioctls (used by tests and the
-    /// fuzzer).
+    /// Internal consistency checks between ioctls, used by tests.
     pub fn check_invariants(&self) {
         assert!(self.woken.is_empty(), "woken threads left unserved");
         let mut strong_refs: HashMap<NodeId, i32> = HashMap::new();

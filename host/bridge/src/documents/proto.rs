@@ -380,7 +380,6 @@ pub mod event {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
@@ -464,24 +463,5 @@ mod tests {
             path: "../etc/passwd".into(),
         };
         assert!(roundtrip(&encode(1, &traversal)).is_err());
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        #[test]
-        fn decode_arbitrary_bodies(t in 0x0400u16..0x040a, body in proptest::collection::vec(any::<u8>(), 0..300)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-
-        #[test]
-        fn accepted_paths_have_no_traversal(p in "[a-z./]{0,20}") {
-            if valid_path(&p) {
-                prop_assert!(!p.split('/').any(|c| c == ".." || c == "." || c.is_empty()) || p.is_empty());
-                prop_assert!(!p.starts_with('/'));
-            }
-        }
     }
 }

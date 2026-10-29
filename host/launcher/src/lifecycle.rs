@@ -27,14 +27,26 @@ use crate::session;
 /// says otherwise.
 pub const DEFAULT_GRACE_SECS: u64 = 120;
 /// How often activity is checked.
-const POLL: Duration = Duration::from_secs(5);
+fn poll() -> Duration {
+    Duration::from_millis(if test_timers() { 200 } else { 5000 })
+}
 /// A wakeup sooner than this keeps the session up: stopping would gain
 /// little, and the alarm's app might not have rescheduled it in time.
-const IMMINENT: Duration = Duration::from_secs(180);
+fn imminent() -> Duration {
+    Duration::from_secs(if test_timers() { 3 } else { 180 })
+}
 /// How long before a wakeup the session starts again: boot, then the
 /// alarm's app reschedules it from `BOOT_COMPLETED` (Android forgets alarms
 /// when it stops).
-pub const WAKE_LEAD: Duration = Duration::from_secs(60);
+pub fn wake_lead() -> Duration {
+    Duration::from_secs(if test_timers() { 6 } else { 60 })
+}
+
+// Short real idle/alarm round trips, only in explicitly named test sessions.
+fn test_timers() -> bool {
+    std::env::var("LINUXAPK_TEST_TIMERS").is_ok_and(|v| v == "1")
+        && std::env::var("LINUXAPK_INSTANCE").is_ok_and(|v| !v.is_empty())
+}
 
 /// The grace period for a new session, in seconds; 0: it never stops by
 /// itself. Headless sessions (tests) never do unless `LINUXAPK_IDLE_GRACE`
@@ -111,8 +123,8 @@ impl Activity {
         // A wakeup that has just passed is likely ringing now; one long past
         // is stale.
         let soon = |t: u64| {
-            t.saturating_sub(now_ms) < IMMINENT.as_millis() as u64
-                && now_ms.saturating_sub(t) < IMMINENT.as_millis() as u64
+            t.saturating_sub(now_ms) < imminent().as_millis() as u64
+                && now_ms.saturating_sub(t) < imminent().as_millis() as u64
         };
         match self.wakeup_ms {
             Some(t) if soon(t) => Some(format!("the alarm at {}", calendar(t / 1000))),
@@ -179,7 +191,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
         let mut last = String::new();
         let mut asked_background = false;
         loop {
-            thread::sleep(POLL);
+            thread::sleep(poll());
             let why = busy(&paths);
             // In Flatpak, running with no window is the Background portal's
             // to allow.

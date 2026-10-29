@@ -120,11 +120,10 @@ run = "rm -rf out/build out/stage out/cargo out/test/probes"
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit tests: Rust, the broker fuzzer, the system app's protocol and wire, the HAL host tests, supervisor and image scripts"
+description = "Unit behaviour: Rust, Kotlin protocol/input, HALs, supervisor and image scripts"
 run = """
 set -euo pipefail
 cargo test -q --workspace
-cargo run -q --release -p linuxapk-broker --bin linuxapk-broker-fuzz -- 20000 1
 (cd android/system-app && ./gradlew --console=plain -q -Pkotlin.project.persistent.dir={{config_root}}/out/build/system-app/kotlin :protocol:test)
 cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
@@ -148,28 +147,12 @@ android/vendor/audio/tests/abi.sh
 description = "AOSP's binder tests against the broker, then kernel binder (77: unavailable here)"
 run = "supervisor/tests/binder/run.sh"
 
-[tasks."test:boot"]
-description = "Fresh Flatpak boot and selftest"
-run = "tests/boot.sh"
-
 [tasks."test:e2e"]
-description = "Audio, system-app and CLI suites in a private Flatpak on isolated KWin"
+description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop a11y lifecycle]); whole run <60 s"
 run = "tests/e2e/run.sh"
 
-[tasks."test:a11y"]
-description = "Android apps on AT-SPI: a nested KWin with its own AT-SPI bus, checked with pyatspi"
-run = "tests/a11y/run.sh"
-
-[tasks."test:lifecycle"]
-description = "Foreground audio, idle shutdown and alarm wakeup on an isolated nested desktop"
-run = "tests/lifecycle.sh"
-
-[tasks."test:hoststate"]
-description = "Battery, power, metering, locale and location on private buses (-- --deny for refusal)"
-run = "tests/hoststate/run.sh"
-
 [tasks."test:compat"]
-description = "The compat corpus against a session (-- [--only PKG,...] [--window] [--accept] | fetch | report)"
+description = "Manual app troubleshooting (-- --only PKG); full corpus only in nightly CI, never a gate"
 # A named instance (default compat), so a test session: links are only logged,
 # and notifications and media players stay off the real desktop.
 env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') }}" }

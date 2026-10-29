@@ -11,7 +11,7 @@ import android.window.OnBackInvokedDispatcher
 
 /**
  * Diagnostic window that logs every input event it receives (logcat tag `LinuxApkProbe`) and shows
- * the last one. Used by tests/e2e/system-app/run.sh.
+ * the last one. Used by the e2e input group.
  */
 class InputProbeActivity : Activity() {
   private lateinit var text: TextView

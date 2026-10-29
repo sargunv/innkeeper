@@ -75,6 +75,7 @@
       android:name=".LocationProbe"
       android:excludeFromRecents="true"
       android:exported="true" />
+    <activity android:name=".DesktopProbe" android:exported="true" />
     <activity android:name=".LifecycleProbe" android:exported="true" />
     <service android:name=".LifecycleProbe$Media" android:foregroundServiceType="mediaPlayback" android:exported="false" />
     <receiver android:name=".LifecycleProbe$Alarm" android:exported="false">

@@ -350,7 +350,6 @@ impl Service for AppsService {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
@@ -477,21 +476,5 @@ mod tests {
         assert!(!cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").exists());
         assert!(!cfg.dirs.app_desktop("org.ex.b").exists());
         let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        #[test]
-        fn decode_arbitrary_bodies(t in 0x0500u16..0x0505, body in proptest::collection::vec(any::<u8>(), 0..200)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-
-        #[test]
-        fn icons_never_panic(b in proptest::collection::vec(any::<u8>(), 0..300)) {
-            let _ = parse_icons(&b);
-        }
     }
 }

@@ -9,6 +9,14 @@ host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
 unit=linuxapk-nested-$LINUXAPK_INSTANCE
 cleanup() {
+  # A deadline can interrupt the runner before its trap reaches session stop.
+  # Flatpak's scope is outside this desktop's service; reap that test scope too.
+  if [[ ${LINUXAPK_E2E:-} == 1 && -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
+    local cg
+    cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup")
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
+      systemctl --user stop "${cg##*/}" 2>/dev/null || true
+  fi
   DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
     systemctl --user stop "$unit" 2>/dev/null || true
   rm -rf "$rt"
@@ -29,10 +37,13 @@ HOLD
 chmod +x "$N/hold.sh"
 cat >"$N/compositor.sh" <<HOLD
 #!/bin/sh
+if [ "${LINUXAPK_E2E:-}" = 1 ]; then
+  /usr/bin/python3 "$repo/tests/e2e/desktop.py" "$N/data/picked.txt" >"$N/desktop.log" 2>&1 &
+  gdbus wait --session --timeout 10 org.freedesktop.portal.Desktop
+fi
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
-sleep 1
+gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
-sleep 1
 exec kwin_wayland --virtual --no-lockscreen --socket lapk-nested \\
   --width 1920 --height 1080 --exit-with-session "$N/hold.sh"
 HOLD

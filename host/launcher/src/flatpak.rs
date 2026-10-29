@@ -326,7 +326,7 @@ pub fn run(cfg: &Config, follow: bool) -> Result<()> {
 fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     let p = &cfg.paths;
     request_background(p);
-    let at = at_ms.saturating_sub(lifecycle::WAKE_LEAD.as_millis() as u64);
+    let at = at_ms.saturating_sub(lifecycle::wake_lead().as_millis() as u64);
     let sock = p.control();
     let gone = sock.clone();
     control::serve(

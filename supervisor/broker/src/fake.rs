@@ -1,4 +1,4 @@
-//! A deterministic in-memory [`Userspace`] for the tests and the fuzzer.
+//! A deterministic in-memory [`Userspace`] for the tests.
 //!
 //! Each process's address space is a sparse page map and its receive region a
 //! bump allocator, so transactions are translated end to end without the

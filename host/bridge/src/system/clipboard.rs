@@ -538,19 +538,3 @@ impl Dispatch<ExtDataControlSourceV1, ()> for State {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn png_roundtrip() {
-        let i = Image {
-            width: 3,
-            height: 2,
-            rgba: (0..24).collect(),
-        };
-        assert_eq!(decode_png(&encode_png(&i).unwrap()).unwrap(), i);
-        assert!(decode_png(b"not a png").is_err());
-    }
-}

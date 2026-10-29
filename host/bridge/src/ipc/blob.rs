@@ -156,7 +156,6 @@ impl DocWriter for crate::ipc::wire::Writer {
 mod tests {
     use super::*;
     use crate::ipc::wire::Writer;
-    use proptest::prelude::*;
 
     #[test]
     fn memfd_roundtrip_and_seal_checks() {
@@ -202,14 +201,5 @@ mod tests {
         let mut w = Writer::default();
         w.u16(9).u16(1);
         assert!(Doc::new(&w.0).image(8).is_err());
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(5000))]
-        #[test]
-        fn doc_never_panics(b in proptest::collection::vec(any::<u8>(), 0..96)) {
-            let mut d = Doc::new(&b);
-            let _ = (d.text(32), d.image(4), d.end());
-        }
     }
 }

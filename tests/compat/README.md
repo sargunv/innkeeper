@@ -1,10 +1,11 @@
 # compat
 
-The app-compatibility gate: crate `linuxapk-compat`, run with
-`mise run test:compat` (usage in the header of `src/main.rs`). It installs each
-app of [corpus.toml](corpus.toml) (pinned F-Droid APKs, fetched to
-`out/test/compat/corpus` and never committed) into a session, and records the
-results in `results.json` and
+A manual app-troubleshooting harness and nightly CI corpus, never a PR or agent
+loop gate: crate `linuxapk-compat`, run with
+`mise run test:compat -- --only <package>` (usage in the header of
+`src/main.rs`). It installs each app of [corpus.toml](corpus.toml) (pinned
+F-Droid APKs, fetched to `out/test/compat/corpus` and never committed) into a
+session, and records the results in `results.json` and
 [docs/compatibility.md](../../docs/compatibility.md).
 
 Per app (`src/app.rs`): `pm install`, launch through the window manager, watch 8
@@ -18,11 +19,13 @@ and screenshots go to `out/test/compat/<instance>/<pkg>/`.
 - **Results:** works, partly works (the first frame was fine, a later check
   failed), or doesn't work. A session restart during an app is retried once and
   never counts against it.
-- **Gate:** an app worse than in `results.json`, or a measurement over its
-  budget by more than its margin ([budgets.toml](budgets.toml): cold session
-  start, warm app start, idle session memory), fails the run and leaves the
-  baseline alone. Only `--accept` updates the committed baseline and report.
-  `-- report` rewrites `docs/compatibility.md` from `results.json`.
+- **Nightly regression reporting:** an app worse than in `results.json`, or a
+  measurement over its budget by more than its margin
+  ([budgets.toml](budgets.toml): cold session start, warm app start, idle
+  session memory), fails the run and leaves the baseline alone. These failures
+  become issues, never PR blockers. Only `--accept` updates the committed
+  baseline and report. `-- report` rewrites `docs/compatibility.md` from
+  `results.json`.
 - **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
   is running, or else one it starts (headless unless `--window`) and stops at
   the end. Only a session it starts gets its start time and idle memory

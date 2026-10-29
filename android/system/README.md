@@ -9,5 +9,5 @@ staged under `share/linuxapk/android/system/`.
   (`am`, `pm`, `cmd`). init runs `linuxapk-exec --serve`; the client hands it
   argv, environment, cwd and stdio fds over a root-only socket on the session's
   `/dev`, and it runs the command, as adbd does for `adb shell`. The relay is
-  exercised by every boot (`mise run test:boot`) and the e2e suites, which drive
-  Android through `linuxapk-session exec`.
+  exercised by every boot (`mise run test:e2e -- boot`) and the e2e suites,
+  which drive Android through `linuxapk-session exec`.

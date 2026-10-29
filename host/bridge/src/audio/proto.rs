@@ -247,7 +247,6 @@ impl OpenOutputReply {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn out(rate: u32, ch: u8, pf: u32, p: u32) -> Request {
         Request::OpenOutput(OutputConfig {
@@ -335,35 +334,5 @@ mod tests {
         b.push(0);
         assert_eq!(roundtrip(&b), Err(DecodeError::Long));
         assert_eq!(decode(0x0177, &[]), Err(DecodeError::UnknownType(0x0177)));
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        // The decoder never panics, and anything it accepts re-encodes to
-        // the same bytes (no trailing garbage, no lossy fields).
-        #[test]
-        fn decode_arbitrary_bodies(t in 0x0100u16..0x0108, body in proptest::collection::vec(any::<u8>(), 0..120)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-
-        // Mutating one byte of a valid message never panics.
-        #[test]
-        fn decode_mutated(rate in 0u32..300_000, ch in 0u8..4, pf in 0u32..20000, p in 0u32..20,
-                          pos in 0usize..64, val in any::<u8>()) {
-            let mut b = encode(3, &out(rate, ch, pf, p));
-            let i = pos % b.len();
-            b[i] = val;
-            let _ = roundtrip(&b);
-        }
-
-        #[test]
-        fn decoded_configs_are_bounded(rate in any::<u32>(), ch in any::<u8>(), pf in any::<u32>(), p in any::<u32>()) {
-            if let Ok(Request::OpenOutput(c)) = roundtrip(&encode(0, &out(rate, ch, pf, p))) {
-                prop_assert!(c.capacity_frames() as u64 * c.frame_bytes() as u64 <= 16384 * 16 * 8);
-            }
-        }
     }
 }

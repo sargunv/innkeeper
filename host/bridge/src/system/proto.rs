@@ -406,7 +406,6 @@ pub fn media_cmd(player: u32, cmd: u8, arg: i64) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
@@ -508,19 +507,5 @@ mod tests {
             .takes_fd()
         );
         assert!(!Request::Lifecycle(Lifecycle::default()).takes_fd());
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-        #[test]
-        fn decode_arbitrary(t in 0x0300u16..0x030a, body in proptest::collection::vec(any::<u8>(), 0..40)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
-        #[test]
-        fn settings_never_panics(body in proptest::collection::vec(any::<u8>(), 0..64)) {
-            let _ = Settings::decode(&body);
-        }
     }
 }

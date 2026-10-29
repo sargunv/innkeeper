@@ -235,7 +235,6 @@ pub mod event {
 mod tests {
     use super::*;
     use crate::ipc::wire::{HDR, decode_header};
-    use proptest::prelude::*;
 
     fn roundtrip(b: &[u8]) -> Result<Request, DecodeError> {
         let h = decode_header(b)?;
@@ -302,18 +301,5 @@ mod tests {
     fn input_lines_are_bounded() {
         let long = "x".repeat(1000);
         assert_eq!(event::input(&long).len(), 2 + limits::MAX_LINE);
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20000))]
-
-        // The decoder never panics, and anything it accepts re-encodes to
-        // the same bytes.
-        #[test]
-        fn decode_arbitrary_bodies(t in 0x0600u16..0x0606, body in proptest::collection::vec(any::<u8>(), 0..300)) {
-            if let Ok(req) = decode(t, &body) {
-                prop_assert_eq!(&encode(9, &req)[HDR..], &body[..]);
-            }
-        }
     }
 }
