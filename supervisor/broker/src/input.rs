@@ -1,6 +1,7 @@
 //! Session-local evdev devices. EventHub polls a socket endpoint installed by
 //! ADDFD; its peer receives the bridge's input_event records. Nothing reaches
 //! the host input subsystem. The ordinary tmpfs nodes exist for inotify only.
+use std::collections::HashMap;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixDatagram;
 use std::sync::{Arc, Mutex};
@@ -11,8 +12,8 @@ use crate::notify::{
 };
 
 pub const EVENT_SIZE: usize = 24;
-pub const KEYBOARD: u8 = 0;
-pub const MOUSE: u8 = 1;
+pub const KEYBOARD: u32 = 0;
+pub const MOUSE: u32 = 1;
 
 /// x86_64 Linux input_event, with a CLOCK_MONOTONIC timeval. Kept explicit:
 /// Rust struct padding is not part of the bridge protocol.
@@ -27,7 +28,7 @@ pub fn event(micros: i64, ty: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
 }
 
 struct Client {
-    device: u8,
+    device: u32,
     peer: OwnedFd,
     /// Keep the installed endpoint alive for its inode identity. A peer with
     /// no Android references is detected by comparing its installed /proc fd.
@@ -97,7 +98,7 @@ impl Client {
 }
 struct Devices {
     clients: Vec<Arc<Client>>,
-    keys: [[u8; 96]; 2],
+    keys: HashMap<u32, [u8; 96]>,
     leds: [u8; 8],
 }
 
@@ -120,14 +121,14 @@ fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
 /// EVIOCG* answers, including the caller's requested bitmap/string length.
 /// Return value is bytes copied for variable-length queries, zero for fixed
 /// structs, as evdev does. Unknown ioctls stay ENOTTY.
-fn answer(device: u8, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i64), i32> {
+fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i64), i32> {
     let nr = cmd & 0xff;
     let size = ((cmd >> 16) & 0x3fff) as usize;
     let read = cmd >> 30 & 2 != 0;
     let mut variable = false;
     let mut b = match (read, nr) {
         (true, 0x01) => 0x010001i32.to_le_bytes().to_vec(), // EV_VERSION
-        (true, 0x02) => [6u16, 0x1209, 0x4c00 + device as u16, 1]
+        (true, 0x02) => [6u16, 0x1209, 0x4c00 + u16::from(device != KEYBOARD), 1]
             .into_iter()
             .flat_map(u16::to_le_bytes)
             .collect(),
@@ -137,23 +138,23 @@ fn answer(device: u8, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i6
             let s = match nr {
                 0x06 => {
                     if device == KEYBOARD {
-                        "Linux.apk Keyboard"
+                        "Linux.apk Keyboard".to_owned()
                     } else {
-                        "Linux.apk Mouse"
+                        format!("Linux.apk Mouse {}", device - 1)
                     }
                 }
                 0x07 => {
                     if device == KEYBOARD {
-                        "linuxapk/keyboard"
+                        "linuxapk/keyboard".to_owned()
                     } else {
-                        "linuxapk/mouse"
+                        format!("linuxapk/mouse/{}", device - 1)
                     }
                 }
                 _ => {
                     if device == KEYBOARD {
-                        "linuxapk-keyboard"
+                        "linuxapk-keyboard".to_owned()
                     } else {
-                        "linuxapk-mouse"
+                        format!("linuxapk-mouse-{}", device - 1)
                     }
                 }
             };
@@ -194,7 +195,7 @@ fn answer(device: u8, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i6
                         (272..=279).collect()
                     },
                 ),
-                2 if device == MOUSE => bitmap(size, [0, 1, 6, 8, 11, 12]),
+                2 if device != KEYBOARD => bitmap(size, [0, 1, 6, 8, 11, 12]),
                 17 if device == KEYBOARD => bitmap(size, [0, 1, 2]),
                 _ => vec![0; size],
             }
@@ -215,7 +216,7 @@ impl Default for Devices {
     fn default() -> Self {
         Self {
             clients: Vec::new(),
-            keys: [[0; 96]; 2],
+            keys: HashMap::from([(KEYBOARD, [0; 96])]),
             leds: [0; 8],
         }
     }
@@ -234,20 +235,37 @@ impl Input {
         let devices = Arc::new(Mutex::new(Devices::default()));
         let state = Arc::clone(&devices);
         std::thread::spawn(move || {
-            let mut buf = [0; 1 + 64 * EVENT_SIZE];
+            let mut buf = [0; 4 + 64 * EVENT_SIZE];
             loop {
                 let Ok(n) = socket.recv(&mut buf) else { return };
-                if n < 1 || buf[0] > MOUSE || (n - 1) % EVENT_SIZE != 0 {
+                if n < 4 {
                     continue;
                 }
-                let device = buf[0];
+                let device = u32::from_le_bytes(buf[..4].try_into().unwrap());
                 let mut s = state.lock().unwrap();
-                for ev in buf[1..n].as_chunks::<EVENT_SIZE>().0 {
+                if n == 5 && device != KEYBOARD {
+                    let path = dir.join(format!("event{device}"));
+                    if buf[4] != 0 {
+                        if let std::collections::hash_map::Entry::Vacant(e) = s.keys.entry(device) {
+                            e.insert([0; 96]);
+                            let _ = std::fs::write(path, []);
+                        }
+                    } else {
+                        s.keys.remove(&device);
+                        s.clients.retain(|c| c.device != device);
+                        let _ = std::fs::remove_file(path);
+                    }
+                    continue;
+                }
+                if (n - 4) % EVENT_SIZE != 0 || !s.keys.contains_key(&device) {
+                    continue;
+                }
+                for ev in buf[4..n].as_chunks::<EVENT_SIZE>().0 {
                     let ty = u16::from_le_bytes(ev[16..18].try_into().unwrap());
                     let code = u16::from_le_bytes(ev[18..20].try_into().unwrap()) as usize;
                     let value = i32::from_le_bytes(ev[20..24].try_into().unwrap());
                     if ty == 1 && code < 768 {
-                        let b = &mut s.keys[device as usize][code / 8];
+                        let b = &mut s.keys.get_mut(&device).unwrap()[code / 8];
                         if value == 0 {
                             *b &= !(1 << (code % 8));
                         } else {
@@ -300,7 +318,7 @@ impl Input {
                 // Do not hold device state while waiting: EventHub may need an
                 // ioctl answer before it can drain its socket.
                 for client in clients {
-                    if let Err(e) = client.deliver(&buf[1..n]) {
+                    if let Err(e) = client.deliver(&buf[4..n]) {
                         eprintln!("evdev: delivery failed: {e}");
                     }
                 }
@@ -308,7 +326,7 @@ impl Input {
         });
         // Create after the input socket is ready; EventHub observes these via
         // its initial scan or inotify. /dev is the sandbox's private tmpfs.
-        for n in 0..2 {
+        for n in 0..1 {
             std::fs::write(dir.join(format!("event{n}")), []).ok()?;
         }
         Some(Self {
@@ -320,11 +338,17 @@ impl Input {
 
     pub(crate) fn serve(&self, req: &SeccompNotif) -> bool {
         let device = if req.data.nr as i64 == libc::SYS_openat {
-            match read_path(req.pid as i32, req.data.args[1]).as_deref() {
-                Some(b"/dev/input/event0") => KEYBOARD,
-                Some(b"/dev/input/event1") => MOUSE,
-                _ => return false,
+            let path = read_path(req.pid as i32, req.data.args[1]);
+            let device = path
+                .as_deref()
+                .and_then(|p| p.strip_prefix(b"/dev/input/event"))
+                .and_then(|p| std::str::from_utf8(p).ok())
+                .and_then(|p| p.parse::<u32>().ok());
+            let Some(device) = device else { return false };
+            if !self.devices.lock().unwrap().keys.contains_key(&device) {
+                return false;
             }
+            device
         } else if req.data.nr as i64 == libc::SYS_ioctl
             && req.data.args[1] as u32 & 0xff00 == 0x4500
         {
@@ -351,7 +375,7 @@ impl Input {
             let result = answer(
                 c.device,
                 req.data.args[1] as u32,
-                &state.keys[c.device as usize],
+                &state.keys[&c.device],
                 &state.leds,
             );
             match result {
@@ -387,6 +411,13 @@ impl Input {
             newfd: 0,
             newfd_flags: req.data.args[2] as u32 & libc::O_CLOEXEC as u32,
         };
+        // Serialize installation with dynamic removal, so a newly installed
+        // endpoint always has live ioctl state until removal closes it.
+        let mut state = self.devices.lock().unwrap();
+        if !state.keys.contains_key(&device) {
+            send_resp(self.listener, self.resp_sz, req.id, 0, -libc::ENOENT, false);
+            return true;
+        }
         let fd = unsafe {
             libc::ioctl(
                 self.listener,
@@ -395,7 +426,7 @@ impl Input {
             )
         };
         if fd >= 0 {
-            self.devices.lock().unwrap().clients.push(Arc::new(Client {
+            state.clients.push(Arc::new(Client {
                 device,
                 peer,
                 endpoint,
@@ -411,7 +442,7 @@ impl Input {
 mod tests {
     use super::*;
 
-    fn client(device: u8) -> (Client, OwnedFd) {
+    fn client(device: u32) -> (Client, OwnedFd) {
         let mut fds = [-1; 2];
         assert_eq!(
             unsafe {
@@ -501,6 +532,25 @@ mod tests {
         assert_eq!(rel[0] & 3, 3); // REL_X/Y: cursor device
         assert_ne!(rel[11 / 8] & (1 << (11 % 8)), 0); // high-resolution wheel
         assert!(answer(MOUSE, get(0x40, 24), &[], &[]).is_err());
+    }
+    #[test]
+    fn display_mice_have_distinct_permanent_ports() {
+        assert_eq!(
+            answer(3, get(7, 80), &[], &[]).unwrap().0,
+            b"linuxapk/mouse/2\0"
+        );
+        assert_eq!(
+            answer(8, get(7, 80), &[], &[]).unwrap().0,
+            b"linuxapk/mouse/7\0"
+        );
+        assert_ne!(
+            answer(3, get(8, 80), &[], &[]).unwrap().0,
+            answer(8, get(8, 80), &[], &[]).unwrap().0
+        );
+        assert_eq!(
+            answer(3, get(0x22, 8), &[], &[]),
+            answer(8, get(0x22, 8), &[], &[])
+        );
     }
     #[test]
     fn records_have_the_kernel_abi_and_sync_boundary() {

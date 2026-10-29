@@ -26,23 +26,27 @@ flowchart LR
 
 ## Virtual devices
 
-The broker creates `event0` (Linux.apk Keyboard) and `event1` (Linux.apk Mouse)
-in the session's private tmpfs `/dev/input`. EventHub discovers these regular
-placeholder files by scan/inotify. Trapped `openat` returns a broker-owned
-socket endpoint; `EVIOCG*` answers identify an alphabetic keyboard and relative
-mouse, expose capabilities and held-key state, and accept LED writes. The bridge
-writes Linux `input_event` records through `evdev.sock`; no host input nodes or
-uinput devices are exposed. Apps enumerate real device IDs, and
-`Configuration.keyboard` is `KEYBOARD_QWERTY`.
+The broker creates `event0` (Linux.apk Keyboard) and `event<display + 1>`
+(Linux.apk Mouse <display>) for each window in the session's private tmpfs
+`/dev/input`. EventHub discovers these regular placeholder files by
+scan/inotify. Trapped `openat` returns a broker-owned socket endpoint; `EVIOCG*`
+answers identify an alphabetic keyboard and relative mouse, expose capabilities
+and held-key state, and accept LED writes. The bridge writes Linux `input_event`
+records through `evdev.sock`; no host input nodes or uinput devices are exposed.
+Apps enumerate real device IDs, and `Configuration.keyboard` is
+`KEYBOARD_QWERTY`.
 
-`VirtualInput.kt` associates the mouse's port with the pointer's virtual display
-using its unique ID. The keyboard stays unassociated, so it supplies hardware
-keyboard configuration to every display and native modifier notifications follow
-Android's focused display. Mouse deltas follow the host's absolute window
-coordinates; Android mouse scaling is disabled because the desktop already
-accelerated and scaled them. The system app uses Android 17's input-device
-display association, mouse-scaling and cursor-position test APIs to maintain
-this routing.
+`VirtualInput.kt` creates each window's mouse with a distinct port and
+permanently associates it with that virtual display using its unique ID. The
+mouse is removed with the window. Moving between windows never reassigns a
+device, so in-flight records retain their destination. Each mouse has its own
+position and button state. The keyboard stays unassociated, so it supplies
+hardware keyboard configuration to every display and native modifier
+notifications follow Android's focused display. Mouse deltas follow the host's
+absolute window coordinates; Android mouse scaling is disabled because the
+desktop already accelerated and scaled them. The system app uses Android 17's
+input-device display association, mouse-scaling and cursor-position test APIs to
+maintain this routing.
 
 The keyboard provides device enumeration, hardware-keyboard configuration and
 InputReader's modifier state. Shift, Ctrl, Alt, Meta, Fn, Caps Lock and Num Lock

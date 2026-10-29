@@ -144,6 +144,75 @@ if [[ ${1:-} == --group ]]; then
         echo 'FAIL physical mouse switched to injection' >&2
         exit 1
       fi
+      # Put a second probe on a separately owned window/display. A second task
+      # on Settings' display keeps the production one-window-per-package policy.
+      second=$(wm LAUNCH --es package com.android.settings --es component com.android.settings/.Settings)
+      second_display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$second")
+      [[ -n $second_display && $second_display != "$display" ]]
+      s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
+      until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
+      cat >"$T/two-windows.js" <<'JS'
+let x = 0;
+for (const w of workspace.windowList()) {
+  if (String(w.resourceClass).includes("dev.linuxapk.")) {
+    w.minimized = false;
+    w.frameGeometry = {x: x, y: 100, width: 800, height: 800};
+    x += 1000;
+  }
+}
+JS
+      script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.loadScript "$T/two-windows.js" linuxapk-input-two | grep -oE '[0-9]+')
+      gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
+        --method org.kde.kwin.Script.run >/dev/null
+      gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
+      # Rapid alternating enter/move/click/leave reports must retain their own
+      # display's device even with both endpoints readable.
+      for _ in {1..4}; do
+        printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:1200,300\nbutton:272,1\nbutton:272,0\n' >&"$seat_fd"
+      done
+      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
+      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
+      s logcat -d -s LinuxApkProbe:I >"$T/two-windows.txt"
+      /usr/bin/python3 - "$T/two-windows.txt" <<'PYTEST'
+import re, sys
+for device, window in re.findall(r'deviceName=Linux.apk Mouse (\d+) windowDisplay=(\d+)', open(sys.argv[1]).read()):
+  assert device == window, (device, window)
+PYTEST
+      s dumpsys input >"$T/two-devices.txt"
+      file_has "$T/two-devices.txt" "Linux.apk Mouse $display"
+      file_has "$T/two-devices.txt" "Linux.apk Mouse $second_display"
+      # Freeze only this named session's bridge so close cannot be delivered,
+      # then restart it after the removal request times out. The broker survives.
+      bridge_pid=$(
+        /usr/bin/python3 - <<'PIDS'
+import os
+from pathlib import Path
+found=[]
+for p in Path('/proc').glob('[0-9]*'):
+  try:
+    if not (p/'exe').readlink().name == 'linuxapk-bridge': continue
+    env=(p/'environ').read_bytes().split(b'\0')
+    if ('LINUXAPK_INSTANCE='+os.environ['LINUXAPK_INSTANCE']).encode() in env: found.append(p.name)
+  except (OSError, ValueError): pass
+assert len(found)==1, found
+print(found[0])
+PIDS
+      )
+      kill -STOP "$bridge_pid"
+      wm CLOSE --ei display "$second_display" >/dev/null
+      until_ok log_has LinuxApkBridge 'service 6 request 0x60a:.*TimeoutException'
+      kill -KILL "$bridge_pid"
+      # Removal must leave the first display's mouse alive.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      mouse_removed() {
+        s dumpsys input >"$T/remaining-device.txt"
+        ! file_has "$T/remaining-device.txt" "Linux.apk Mouse $second_display"
+      }
+      until_ok mouse_removed
+      file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
+      echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
       exec {seat_fd}>&-
       wait "$seat_pid"
       rm "$T/seat"

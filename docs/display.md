@@ -78,11 +78,13 @@ or transparent cursor layer hides the Wayland pointer while it is over content
 (`PointerIcon.TYPE_NULL`); client-side frame edges keep their resize cursors.
 
 HWC3 carries no pointer style or hotspot metadata. The bridge displays the
-Android bitmap on a `wl_shm` cursor surface and derives its hotspot by
-subtracting the layer's display position from the last pointer position sent to
-that Android display. Both image and hotspot follow the window's scale. This
-covers standard and custom icons without matching style names or using a private
-Android pointer-icon listener.
+Android bitmap on a `wl_shm` cursor surface. Hotspots are cached by the hash of
+bitmap pixels and dimensions. A hotspot is measured as pointer position minus
+layer origin only after both stay unchanged across consecutive frames; motion
+uses the cached value. A new bitmap uses the previous hotspot (initially the
+top-left) until a stationary sample is available. Both image and hotspot follow
+the window's scale. This covers standard and custom icons without matching style
+names or using a private Android pointer-icon listener.
 
 ## Window semantics
 

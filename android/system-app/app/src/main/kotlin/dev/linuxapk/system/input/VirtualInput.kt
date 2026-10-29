@@ -33,12 +33,20 @@ class VirtualInput(
     )
   private val position = im.javaClass.getMethod("getCursorPosition", Int::class.javaPrimitiveType)
   private val displayId = InputDevice::class.java.getMethod("getAssociatedDisplayId")
-  private var mouseDisplay = -1
   private var queuedMeta = 0
   private val keyboard = EvdevModifiers()
-  private var buttons = 0
-  private var sentButtons = 0
-  private var nativeHover = false
+
+  private class Mouse(val display: Int) {
+    val device = display + 1
+    val port = "linuxapk/mouse/$display"
+    val pointer = EvdevPointer()
+    var buttons = 0
+    var sentButtons = 0
+    var nativeHover = false
+  }
+
+  private val mice = HashMap<Int, Mouse>()
+  private val removals = HashSet<Int>()
 
   private sealed interface Pending {
     data class Modifiers(val meta: Int, val time: Long) : Pending
@@ -47,7 +55,6 @@ class VirtualInput(
   }
 
   private val queue = ArrayDeque<Pending>()
-  private val pointer = EvdevPointer()
 
   init {
     dm.registerDisplayListener(
@@ -57,12 +64,7 @@ class VirtualInput(
         override fun onDisplayChanged(id: Int) = drain()
 
         override fun onDisplayRemoved(id: Int) {
-          queue.removeAll { it is Pending.Mouse && it.event.displayId == id }
-          if (mouseDisplay == id) {
-            mouseDisplay = -1
-            pointer.reset()
-          }
-          drain()
+          removeMouse(id)
         }
       },
       handler,
@@ -98,24 +100,59 @@ class VirtualInput(
     return true
   }
 
-  private fun ready(target: Int): Boolean {
-    if (mouseDisplay != target) {
-      val display = dm.getDisplay(target) ?: return false
-      mouseDisplay = target
-      pointer.reset()
-      scaling.invoke(im, false, target)
-      association.invoke(
-        im,
-        "linuxapk/mouse",
-        Display::class.java.getMethod("getUniqueId").invoke(display) as String,
-      )
+  /** A window owns one mouse for its entire lifetime; its port is never reassociated. */
+  fun addDisplay(id: Int) {
+    handler.post {
+      val display = dm.getDisplay(id) ?: return@post
+      val mouse =
+        mice.getOrPut(id) {
+          Mouse(id).also {
+            scaling.invoke(im, false, id)
+            association.invoke(
+              im,
+              it.port,
+              Display::class.java.getMethod("getUniqueId").invoke(display) as String,
+            )
+          }
+        }
+      connection.send(0x060a) { u32(mouse.device).u32(1) }
+      drain()
     }
-    val mouse =
-      im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).firstOrNull {
-        it.name == "Linux.apk Mouse"
-      }
-    return mouse != null && (displayId.invoke(mouse) as Int) == target
   }
+
+  fun removeDisplay(id: Int) {
+    handler.post { removeMouse(id) }
+  }
+
+  private fun removeMouse(id: Int) {
+    queue.removeAll { it is Pending.Mouse && it.event.displayId == id }
+    mice.remove(id)?.let { mouse ->
+      removals += mouse.device
+      im.javaClass
+        .getMethod("removeUniqueIdAssociationByPort", String::class.java)
+        .invoke(im, mouse.port)
+    }
+    flushRemovals()
+    drain()
+  }
+
+  // The broker survives a bridge restart. Keep a closed window's device until
+  // the bridge has acknowledged its removal, and retry before replaying live mice.
+  private fun flushRemovals() {
+    val it = removals.iterator()
+    while (it.hasNext()) {
+      val device = it.next()
+      val reply = connection.call(0x060a, timeoutMs = 500) { u32(device).u32(0) }
+      reply?.closeFds()
+      if (reply?.ok == true) it.remove()
+    }
+  }
+
+  private fun ready(mouse: Mouse): Boolean =
+    im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).any {
+      it.name == "Linux.apk Mouse ${mouse.display}" &&
+        (displayId.invoke(it) as Int) == mouse.display
+    }
 
   private fun drain() {
     while (queue.isNotEmpty()) {
@@ -132,11 +169,16 @@ class VirtualInput(
         queue.removeFirst()
         continue
       }
-      if (!ready(e.displayId)) return
+      val mouse = mice[e.displayId]
+      if (mouse == null) {
+        queue.removeFirst()
+        continue
+      }
+      if (!ready(mouse)) return
       queue.removeFirst()
       val action = e.action and MotionEvent.ACTION_MASK
       if (action == MotionEvent.ACTION_HOVER_EXIT) {
-        endNativeHover(e.eventTime)
+        endNativeHover(mouse, e.eventTime)
         continue
       }
       val p = e.pointers[0]
@@ -153,36 +195,37 @@ class VirtualInput(
         }
         val size = Point()
         dm.getDisplay(e.displayId)?.getRealSize(size)
-        val step = pointer.move(p.x, p.y, current.x, current.y, size.x, size.y)
+        val step = mouse.pointer.move(p.x, p.y, current.x, current.y, size.x, size.y)
         events += Triple(2, 0, step.dx)
         events += Triple(2, 1, step.dy)
         connection.send(0x0609) { u32(e.displayId).i32(Math.round(step.x)).i32(Math.round(step.y)) }
       }
       for ((mask, code) in listOf(1 to 272, 2 to 273, 4 to 274)) {
-        if ((buttons xor e.buttonState) and mask != 0)
+        if ((mouse.buttons xor e.buttonState) and mask != 0)
           events += Triple(1, code, if (e.buttonState and mask != 0) 1 else 0)
       }
-      buttons = e.buttonState
+      mouse.buttons = e.buttonState
       if (action == MotionEvent.ACTION_SCROLL) {
         if (p.vscroll != 0f) events += Triple(2, 11, Math.round(p.vscroll * 120))
         if (p.hscroll != 0f) events += Triple(2, 12, Math.round(p.hscroll * 120))
       }
       if (events.isNotEmpty()) {
-        if (send(1, e.eventTime, events)) {
-          sentButtons = e.buttonState
-          nativeHover = true
+        if (send(mouse.device, e.eventTime, events)) {
+          mouse.sentButtons = e.buttonState
+          mouse.nativeHover = true
         }
       }
     }
   }
 
-  private fun endNativeHover(time: Long) {
+  private fun endNativeHover(mouse: Mouse, time: Long) {
     // A relative mouse has no out-of-range coordinate. End this discontinuous
     // stream with evdev's resync marker; InputReader resets the device, and
     // InputDispatcher emits HOVER_EXIT under its real ID. An injected exit
     // cannot do this: Android rewrites injected device IDs to -1.
-    if (nativeHover && send(1, time, listOf(Triple(0, 3, 0)))) nativeHover = false
-    pointer.reset()
+    if (mouse.nativeHover && send(mouse.device, time, listOf(Triple(0, 3, 0))))
+      mouse.nativeHover = false
+    mouse.pointer.reset()
   }
 
   // Release buttons whose UP could not be delivered across a disconnect.
@@ -190,13 +233,17 @@ class VirtualInput(
     val now = SystemClock.uptimeMillis()
     handler.post {
       queue.clear()
-      val releases =
-        listOf(1 to 272, 2 to 273, 4 to 274)
-          .filter { (mask, _) -> sentButtons and mask != 0 }
-          .map { (_, code) -> Triple(1, code, 0) }
-      if (releases.isNotEmpty() && send(1, now, releases)) sentButtons = 0
-      buttons = 0
-      endNativeHover(now)
+      flushRemovals()
+      for (mouse in mice.values) {
+        val releases =
+          listOf(1 to 272, 2 to 273, 4 to 274)
+            .filter { (mask, _) -> mouse.sentButtons and mask != 0 }
+            .map { (_, code) -> Triple(1, code, 0) }
+        if (releases.isNotEmpty() && send(mouse.device, now, releases)) mouse.sentButtons = 0
+        mouse.buttons = 0
+        endNativeHover(mouse, now)
+        connection.send(0x060a) { u32(mouse.device).u32(1) }
+      }
       keyboard.sync(0) { send(0, now, it) }
       queuedMeta = 0
     }

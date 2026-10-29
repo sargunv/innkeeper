@@ -44,9 +44,10 @@
 //! RGBA image (u16 width/height, packed pixels; 0x0 clears the icon). Each side
 //! is at most 256 pixels; at most 262148 bytes. Sent on mapping and debounced
 //! TaskDescription changes. Unsupported icon protocols receive no fallback.
-//! `EVDEV` (0x0608): u32 device (0 keyboard, 1 mouse), u64 monotonic
+//! `EVDEV` (0x0608): u32 device (0 keyboard, display + 1 mouse), u64 monotonic
 //! microseconds, u32 count (1..32), then count records of u16 type, u16 code,
 //! i32 value. The bridge adds SYN_REPORT and writes to the broker's evdev.sock.
+//! `EVDEV_DEVICE` (0x060a): u32 device (display + 1), u32 enabled; create/remove a mouse.
 //! `POINTER_POSITION` (0x0609): u32 display, i32 x, i32 y in display pixels,
 //! sent before mouse records so the cursor layer origin can yield its hotspot.
 //!
@@ -117,6 +118,7 @@ pub mod ty {
     pub const WINDOW_MINIMIZE: u16 = 0x0607;
     pub const EVDEV: u16 = 0x0608;
     pub const POINTER_POSITION: u16 = 0x0609;
+    pub const EVDEV_DEVICE: u16 = 0x060a;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -195,8 +197,12 @@ pub enum Request {
         x: i32,
         y: i32,
     },
+    EvdevDevice {
+        device: u32,
+        enabled: bool,
+    },
     Evdev {
-        device: u8,
+        device: u32,
         micros: i64,
         events: Vec<(u16, u16, i32)>,
     },
@@ -238,8 +244,12 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             x: r.i32()?,
             y: r.i32()?,
         },
+        ty::EVDEV_DEVICE => Request::EvdevDevice {
+            device: r.u32_in(1..=u32::MAX, "mouse device")?,
+            enabled: r.u32_in(0..=1, "enabled")? != 0,
+        },
         ty::EVDEV => {
-            let device = r.u32_in(0..=1, "evdev device")? as u8;
+            let device = r.u32()?;
             let micros = r.u64()? as i64;
             let count = r.u32_in(1..=32, "evdev count")?;
             let mut events = Vec::new();
@@ -309,15 +319,17 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             w = Writer::message(ty::POINTER_POSITION, tag);
             w.u32(*display).i32(*x).i32(*y);
         }
+        Request::EvdevDevice { device, enabled } => {
+            w = Writer::message(ty::EVDEV_DEVICE, tag);
+            w.u32(*device).u32(u32::from(*enabled));
+        }
         Request::Evdev {
             device,
             micros,
             events,
         } => {
             w = Writer::message(ty::EVDEV, tag);
-            w.u32(*device as u32)
-                .u64(*micros as u64)
-                .u32(events.len() as u32);
+            w.u32(*device).u64(*micros as u64).u32(events.len() as u32);
             for &(ty, code, value) in events {
                 w.u16(ty).u16(code).i32(value);
             }

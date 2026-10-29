@@ -19,7 +19,7 @@ pub mod xkb;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 
-pub use hub::Hub;
+pub use hub::{Hub, PointerPosition};
 
 use crate::ipc::server::{Events, Peer, Reply, Service};
 use crate::ipc::wire::errno::*;
@@ -93,12 +93,22 @@ impl Service for InputService {
             }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
             Request::PointerPosition { display, x, y } => {
-                self.hub
-                    .pointer_positions
-                    .lock()
-                    .unwrap()
-                    .insert(display, (x, y));
+                let mut positions = self.hub.pointer_positions.lock().unwrap();
+                let p = positions.entry(display).or_default();
+                if p.position != (x, y) {
+                    p.position = (x, y);
+                    p.generation += 1;
+                }
                 Reply::ok()
+            }
+            Request::EvdevDevice { device, enabled } => {
+                let evdev = self.hub.evdev.lock().unwrap();
+                status(
+                    evdev
+                        .as_ref()
+                        .ok_or(-EIO)
+                        .and_then(|e| e.device(device, enabled).map_err(|_| -EIO)),
+                )
             }
             Request::Evdev {
                 device,

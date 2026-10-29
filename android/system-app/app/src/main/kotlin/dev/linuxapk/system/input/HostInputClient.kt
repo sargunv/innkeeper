@@ -99,6 +99,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     title: String,
     token: String = "",
   ): Boolean {
+    virtual.addDisplay(window)
     val r =
       connection.call(WINDOW_REQUEST, timeoutMs = 2000) {
         u32(window).u32(width).u32(height).u32(dpi).u32(minWidthDp).u32(minHeightDp)
@@ -126,7 +127,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   fun minimizeWindow(window: Int) = connection.send(WINDOW_MINIMIZE) { u32(window) }
 
-  fun destroyWindow(window: Int) = connection.send(WINDOW_DESTROY) { u32(window) }
+  fun destroyWindow(window: Int): Boolean {
+    virtual.removeDisplay(window)
+    return connection.send(WINDOW_DESTROY) { u32(window) }
+  }
 
   /** One `ti_*` line for the host input method. Returns false if it wasn't sent. */
   fun textInput(text: String) = connection.send(TEXT_INPUT) { line(text, MAX_TEXT_INPUT_LINE) }

@@ -1,11 +1,14 @@
 //! Android's hardware cursor plane is a Wayland cursor surface. HWC3 has no
-//! style/hotspot metadata: subtract the plane origin from the last pointer
-//! position sent to that display. Ordinary frames never include these pixels.
+//! style/hotspot metadata. Learn each bitmap's fixed hotspot only on stationary
+//! frames; never subtract independently moving state while restoring a cursor.
 use super::{State, Unit};
+use crate::input::PointerPosition;
 use rustix::fs::{MemfdFlags, SealFlags};
 use sctk::dispatch2::Dispatch2;
 use sctk::reexports::client::protocol::{wl_buffer, wl_shm, wl_shm_pool};
 use sctk::reexports::client::{Connection, Proxy, QueueHandle};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 
@@ -25,31 +28,92 @@ fn hotspot(position: (i32, i32), origin: (i32, i32), width: u32, height: u32) ->
     )
 }
 
+pub(super) struct Cursor {
+    image: Image,
+    bitmap: u64,
+    hotspots: HashMap<u64, (i32, i32)>,
+    hotspot: (i32, i32),
+    previous: Option<(PointerPosition, (i32, i32), u64)>,
+}
+impl Cursor {
+    fn new(image: Image) -> Self {
+        let mut cursor = Self {
+            image: image.clone(),
+            bitmap: 0,
+            hotspots: HashMap::new(),
+            hotspot: (0, 0),
+            previous: None,
+        };
+        cursor.update(image);
+        cursor
+    }
+    fn update(&mut self, image: Image) {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (image.width, image.height, &image.pixels).hash(&mut hash);
+        self.bitmap = hash.finish();
+        self.hotspot = self
+            .hotspots
+            .get(&self.bitmap)
+            .copied()
+            .unwrap_or(self.hotspot);
+        self.image = image;
+    }
+    fn frame(&mut self, pointer: Option<PointerPosition>) -> bool {
+        let mut changed = false;
+        if let Some(p) = pointer
+            && self.previous == Some((p, (self.image.x, self.image.y), self.bitmap))
+            && !self.image.pixels.is_empty()
+            && !self.hotspots.contains_key(&self.bitmap)
+        {
+            self.hotspot = hotspot(
+                p.position,
+                (self.image.x, self.image.y),
+                self.image.width,
+                self.image.height,
+            );
+            self.hotspots.insert(self.bitmap, self.hotspot);
+            changed = true;
+        }
+        self.previous = pointer.map(|p| (p, (self.image.x, self.image.y), self.bitmap));
+        changed
+    }
+}
+
 impl State {
     pub(super) fn cursor(&mut self, window: u32, image: Image) {
-        self.cursors.insert(window, image);
+        match self.cursors.entry(window) {
+            std::collections::hash_map::Entry::Occupied(mut e) => e.get_mut().update(image),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(Cursor::new(image));
+            }
+        }
         self.restore_cursor(window);
     }
-    pub(crate) fn restore_cursor(&mut self, window: u32) {
-        if self.seat.pointer_window() != Some(window) {
-            return;
-        }
-        let Some(image) = self.cursors.get(&window) else {
-            return;
-        };
-        if image.pixels.is_empty() {
-            self.seat.set_android_cursor(window, None, 0, 0);
-            return;
-        }
-        let pos = self
+    pub(super) fn cursor_frame(&mut self, window: u32) {
+        let p = self
             .hub
             .pointer_positions
             .lock()
             .unwrap()
             .get(&window)
-            .copied()
-            .unwrap_or((image.x, image.y));
-        let (hx, hy) = hotspot(pos, (image.x, image.y), image.width, image.height);
+            .copied();
+        if self.cursors.get_mut(&window).is_some_and(|c| c.frame(p)) {
+            self.restore_cursor(window);
+        }
+    }
+    pub(crate) fn restore_cursor(&mut self, window: u32) {
+        if self.seat.pointer_window() != Some(window) {
+            return;
+        }
+        let Some(cursor) = self.cursors.get(&window) else {
+            return;
+        };
+        let image = &cursor.image;
+        if image.pixels.is_empty() {
+            self.seat.set_android_cursor(window, None, 0, 0);
+            return;
+        }
+        let (hx, hy) = cursor.hotspot;
         let scale = self.scale120(window) as f64 / 120.;
         let logical_w = (image.width as f64 / scale).round().max(1.) as i32;
         let logical_h = (image.height as f64 / scale).round().max(1.) as i32;
@@ -135,8 +199,48 @@ impl Dispatch2<wl_buffer::WlBuffer, State> for CursorBuffer {
 mod tests {
     use super::*;
     #[test]
-    fn plane_origin_gives_the_bitmap_hotspot() {
-        assert_eq!(hotspot((100, 80), (94, 68), 32, 32), (6, 12));
-        assert_eq!(hotspot((100, 80), (101, 0), 32, 32), (0, 31));
+    fn cached_hotspot_survives_rapid_motion_and_bitmap_changes() {
+        let image = Image {
+            width: 32,
+            height: 32,
+            x: 94,
+            y: 68,
+            pixels: vec![255; 32 * 32 * 4],
+        };
+        let mut cursor = Cursor::new(image.clone());
+        let still = Some(PointerPosition {
+            position: (100, 80),
+            generation: 1,
+        });
+        assert!(!cursor.frame(still));
+        assert_eq!(cursor.hotspot, (0, 0));
+        assert!(cursor.frame(still));
+        assert_eq!(cursor.hotspot, (6, 12));
+        for n in 2..100 {
+            cursor.update(Image {
+                x: n * 10,
+                y: n * 10,
+                ..image.clone()
+            });
+            cursor.frame(Some(PointerPosition {
+                position: (n * 20, n * 20),
+                generation: n as u64,
+            }));
+            assert_eq!(cursor.hotspot, (6, 12));
+        }
+        // A new bitmap inherits the previous hotspot until a stationary frame.
+        let custom = Image {
+            x: 90,
+            y: 70,
+            pixels: vec![128; 32 * 32 * 4],
+            ..image.clone()
+        };
+        cursor.update(custom);
+        assert_eq!(cursor.hotspot, (6, 12));
+        assert!(!cursor.frame(still));
+        assert!(cursor.frame(still));
+        assert_eq!(cursor.hotspot, (10, 10));
+        cursor.update(image);
+        assert_eq!(cursor.hotspot, (6, 12));
     }
 }

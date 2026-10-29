@@ -167,7 +167,7 @@ pub(crate) struct State {
     params: HashMap<ObjectId, u32>,
     pub(crate) seat: Seat,
     pub(crate) clipboard: Option<data_device::Clipboard>,
-    cursors: HashMap<u32, cursor::Image>,
+    cursors: HashMap<u32, cursor::Cursor>,
     cursor_surface: Option<(wl_surface::WlSurface, Option<WpViewport>)>,
     quit: bool,
 }
@@ -620,6 +620,7 @@ impl State {
     }
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
+        self.cursor_frame(id);
         let ready = self
             .buffers
             .get(&buffer)
