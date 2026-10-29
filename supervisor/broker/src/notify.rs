@@ -1,11 +1,10 @@
 //! Seccomp user-notification binding: serves the [`BinderDriver`] to real
 //! Android processes in a Linux.apk session.
 //!
-//! The session's `pivot-exec` installs one seccomp filter on Android init
+//! The broker bootstrap installs one seccomp filter on Android init
 //! (inherited by every process) that turns `bpf()`, `openat()` and binder
 //! `ioctl()`s into user notifications, all received by [`serve`] in this
-//! helper process outside the Android namespaces. It forwards the bpf ones to
-//! the C supervisor (`bpfemu.c`) over a SOCK_SEQPACKET socket.
+//! helper process outside the Android namespaces, serving the entire boundary.
 //!
 //!  * `openat` of a binder device path -> inject a memfd (`ADDFD`+`SEND`); the
 //!    process mmaps it as its receive region, and the broker writes
@@ -576,12 +575,9 @@ impl Userspace for SeccompUserspace {
 
 // ---- the serve loop ----------------------------------------------------
 
-/// Receive every notification on `listener` (the session's single seccomp
-/// listener), serve `openat` and binder `ioctl`s, and forward the rest (bpf
-/// and friends, rare) to the C supervisor thread over `sock` as one
-/// `seccomp_notif` per SOCK_SEQPACKET message. Called by the broker helper
-/// (`src/main.rs`).
-pub fn serve(sock: RawFd, listener: RawFd) {
+/// Receive and serve every notification on the session's single listener.
+/// `pins` is the bpffs directory opened before Android can mount over it.
+pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
     crate::init_log();
     let mut sizes = SeccompNotifSizes::default();
     let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
@@ -591,6 +587,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
     }
     let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
     let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
+    let mut emulation = crate::bpf::Emulation::new(listener, resp_sz, pins);
     let (tx, rx) = mpsc::channel();
     let timer = Arc::new(Timer {
         start: std::time::Instant::now(),
@@ -648,13 +645,7 @@ pub fn serve(sock: RawFd, listener: RawFd) {
             continue;
         }
         if !is_binder_syscall(nr, &req.data.args) {
-            // Never wait for the C supervisor: if it is stuck (or behind),
-            // binder must keep working, so the forwarded call fails instead.
-            let flags = libc::MSG_DONTWAIT;
-            if unsafe { libc::send(sock, notif.as_ptr() as *const _, notif_sz, flags) } < 0 {
-                eprintln!("broker: forward: {}", std::io::Error::last_os_error());
-                send_resp(listener, resp_sz, req.id, 0, -libc::EAGAIN, false);
-            }
+            emulation.serve(&req);
             continue;
         }
         // Single-uid mode: /proc/<pid>/status with the virtual ids.

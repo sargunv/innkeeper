@@ -13,3 +13,9 @@ libc = "0.2"
 [[bin]]
 name = "linuxapk-broker"
 path = "src/main.rs"
+
+# C syscall probes exercise the real Rust boundary through this test-only ABI.
+[[example]]
+name = "supervisor-probes"
+path = "../tests/broker.rs"
+crate-type = ["staticlib"]

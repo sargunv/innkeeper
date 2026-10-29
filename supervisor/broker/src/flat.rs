@@ -330,6 +330,13 @@ impl Flat {
             d.extend_from_slice(&p);
             d
         };
+        // Android paths through /proc/self must name the caller, never our
+        // own fds (which include the retained bpffs directory).
+        let full = if full.starts_with(b"/proc/") {
+            proc_path(tid, &full)?.0
+        } else {
+            full
+        };
         std::ffi::CString::new(full).ok()
     }
 
@@ -522,6 +529,36 @@ mod tests {
     fn flat(map: &str) -> Flat {
         unsafe { std::env::set_var("LINUXAPK_ROOT_MAP", map) };
         Flat::from_env(-1, 0).unwrap()
+    }
+
+    #[test]
+    fn chmod_path_names_the_callers_proc_fds() {
+        let f = Flat {
+            listener: -1,
+            resp_sz: 0,
+            map: Vec::new(),
+            uid: 0,
+            gid: 0,
+        };
+        let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
+        // The syscall caller's fd namespace must survive path resolution,
+        // even when the supervisor keeps a directory at the same fd number.
+        let path = c"/proc/self/fd/3";
+        let resolved = f
+            .target_path(tid, libc::AT_FDCWD, path.as_ptr() as u64)
+            .unwrap();
+        assert_eq!(
+            resolved.to_bytes(),
+            format!("/proc/{}/fd/3", std::process::id()).as_bytes()
+        );
+        let path = c"/proc/thread-self/fd/3";
+        let resolved = f
+            .target_path(tid, libc::AT_FDCWD, path.as_ptr() as u64)
+            .unwrap();
+        assert_eq!(
+            resolved.to_bytes(),
+            format!("/proc/{}/task/{tid}/fd/3", std::process::id()).as_bytes()
+        );
     }
 
     #[test]

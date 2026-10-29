@@ -54,6 +54,14 @@ if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
       "$S" selftest
+      s getprop ro.product.board >"$T/board.txt"
+      [[ $(cat "$T/board.txt") == cutf ]]
+      # Cuttlefish's netd aborts during startup if mapLockTest fails. Its
+      # published binder service proves startup passed those OFD checks.
+      s service check netd >"$T/netd.txt"
+      file_has "$T/netd.txt" '^Service netd: found$'
+      s pidof netd >>"$T/netd.txt"
+      echo 'ok   image board=cutf; netd published after mapLockTest'
       s timeout 10 logcat -b main,system,crash -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
       if file_has "$T/trace.txt" 'Error opening trace file'; then
         echo 'FAIL expected missing-tracefs error was not silenced' >&2

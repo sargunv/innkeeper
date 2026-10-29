@@ -18,7 +18,7 @@ that.
 ```mermaid
 flowchart LR
   apps["Android apps"] -->|"Android permissions, binder"| sys["system_server, HALs"]
-  apps -. "trapped syscalls" .-> broker["broker + bpfemu<br/>(host user's power)"]
+  apps -. "trapped syscalls" .-> broker["broker<br/>(host user's power)"]
   sys -->|"bridge.sock, per-service uid policy"| bridge["linuxapk-bridge<br/>(the user)"]
   bridge -->|"portals, D-Bus, Wayland"| desk["desktop"]
   root["Android root = host user"] -->|"Flatpak sandbox"| host["host files the user owns"]
@@ -28,12 +28,12 @@ flowchart LR
   file access, limited by the Flatpak sandbox:
   [session.md](session.md#host-safety) lists its grants and probes, and
   `selftest` proves them.
-- **The supervisor** (pivot-exec's bpf thread and the broker) runs in the
-  sandbox with the host user's privileges and reads and writes Android
-  processes' memory. It serves only callers inside the session's seccomp filter.
-  It keeps bounds checks and pins each process's memory at binder open so writes
-  never land in the wrong process, but a process that misbehaves on purpose can
-  stop binder for the whole session; that is accepted.
+- **The supervisor** (the Rust broker) runs in the sandbox with the host user's
+  privileges and reads and writes Android processes' memory. It serves only
+  callers inside the session's seccomp filter. It keeps bounds checks and pins
+  each process's memory at binder open so writes never land in the wrong
+  process, but a process that misbehaves on purpose can stop binder for the
+  whole session; that is accepted.
 - **The bridge** runs as the user and talks to the desktop. Its socket is the
   only channel out of Android ([bridge-protocol.md](bridge-protocol.md)).
 

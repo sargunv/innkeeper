@@ -1,0 +1,13 @@
+//! Test-only C ABI for the existing Linux syscall probes. No policy lives here.
+use std::os::fd::{FromRawFd, OwnedFd};
+
+#[unsafe(no_mangle)]
+extern "C" fn linuxapk_filter_install(harness: i32) -> i32 {
+    linuxapk_broker::filter::install(harness != 0).unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn linuxapk_broker_start(listener: i32, pins: i32) {
+    let pins = (pins >= 0).then(|| unsafe { OwnedFd::from_raw_fd(pins) });
+    std::thread::spawn(move || linuxapk_broker::notify::serve(listener, pins));
+}

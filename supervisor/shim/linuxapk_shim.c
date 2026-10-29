@@ -392,7 +392,7 @@ EXPORT ssize_t __write_chk(int fd, const void* buf, size_t n, size_t buf_size) {
 // socket(AF_KEY) in Flatpak mode: the sandbox refuses the family before our
 // seccomp filter sees the call. The connectivity stack opens and closes one
 // only to wait for an RCU grace period after swapping eBPF maps, which
-// emulated maps don't need (supervisor/pivot-exec/bpfemu.c).
+// emulated maps don't need (supervisor/broker/src/bpf.rs).
 #include <sys/eventfd.h>
 EXPORT int socket(int domain, int type, int protocol) {
   long r = syscall(SYS_socket, domain, type, protocol);
