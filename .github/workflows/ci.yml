@@ -47,8 +47,9 @@ jobs:
         shell: bash
         run: |
           # Include paths, symlinks and executable modes as well as contents.
-          digest=$(git ls-tree -r HEAD -- host supervisor android image tools/build \
-            tools/container packaging/flatpak tests/bionic Cargo.toml Cargo.lock \
+          digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
+            supervisor/broker android image tools/build tools/container \
+            packaging/flatpak Cargo.toml Cargo.lock \
             .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock | sha256sum)
           echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4

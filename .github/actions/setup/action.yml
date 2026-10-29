@@ -41,7 +41,12 @@ runs:
         key:
           compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock',
           '**/*.gradle.kts', '**/gradle-wrapper.properties',
-          'tools/build/toolchain.env') }}-${{ github.job }}-${{ github.sha }}
+          'tools/build/toolchain.env') }}-${{ github.job }}-${{
+          hashFiles('host/**/*.rs', 'host/**/Cargo.toml',
+          'supervisor/broker/**/*.rs', 'supervisor/broker/Cargo.toml',
+          'Cargo.toml', '.cargo/**', 'CMakeLists.txt', 'CMakePresets.json',
+          'android/vendor/graphics/**', 'android/vendor/health/**',
+          'android/vendor/bridge-client/**') }}
         restore-keys: |
           compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock', '**/*.gradle.kts', '**/gradle-wrapper.properties', 'tools/build/toolchain.env') }}-${{ github.job }}-
     - uses: actions/cache@v4
