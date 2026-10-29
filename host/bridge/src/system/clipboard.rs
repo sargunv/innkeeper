@@ -60,7 +60,7 @@ const MAX_IMAGE_SIDE: u32 = 2048;
 pub enum Content {
     Text(String),
     Image(Image),
-    File(files::ClipFile),
+    Files(files::ClipFiles),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,7 +74,7 @@ impl Clip {
     fn event(&self) -> Result<(Vec<u8>, OwnedFd)> {
         let (kind, bytes) = match &self.content {
             Content::Text(t) => (ClipKind::Text, t.as_bytes().to_vec()),
-            Content::File(f) => (ClipKind::File, f.encode()),
+            Content::Files(f) => (ClipKind::File, f.encode()),
             Content::Image(i) => {
                 let mut w = crate::ipc::wire::Writer::default();
                 w.image(Some(i));
@@ -93,7 +93,7 @@ enum Cmd {
 /// What our data source serves: bytes per MIME type.
 pub(crate) struct Offered {
     pub(crate) types: HashMap<String, Arc<Vec<u8>>>,
-    _file: Option<files::CachedFile>,
+    _file: Option<files::CachedFiles>,
 }
 
 pub struct ClipboardHub {
@@ -170,8 +170,8 @@ impl ClipboardHub {
         let mut types: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
         let mut file = None;
         match &clip.content {
-            Content::File(f) => {
-                let cached = files::CachedFile::create(&self.cache, f)?;
+            Content::Files(f) => {
+                let cached = files::CachedFiles::create(&self.cache, f)?;
                 if let Some(key) = cached.portal_key() {
                     types.insert(files::PORTAL_TYPE.into(), Arc::new(key));
                 }
@@ -250,7 +250,7 @@ impl ClipboardHub {
             "clipboard: host selection ({}{})",
             match &clip.content {
                 Content::Text(t) => format!("{} bytes of text", t.len()),
-                Content::File(f) => format!("{} bytes in {}", f.bytes.len(), f.name),
+                Content::Files(f) => format!("{} files", f.0.len()),
                 Content::Image(i) => format!("{}x{} image", i.width, i.height),
             },
             if clip.sensitive { ", sensitive" } else { "" }
@@ -491,8 +491,8 @@ pub(crate) fn receive_offer(
                 };
                 let bytes = read_capped(r, max as usize)?;
                 match mime.as_str() {
-                    "text/uri-list" => Ok(Content::File(files::read_uri_list(&bytes)?)),
-                    files::PORTAL_TYPE => Ok(Content::File(files::retrieve(&bytes)?)),
+                    "text/uri-list" => Ok(Content::Files(files::read_uri_list(&bytes)?)),
+                    files::PORTAL_TYPE => Ok(Content::Files(files::retrieve(&bytes)?)),
                     "image/png" => Ok(Content::Image(decode_png(&bytes)?)),
                     _ => Ok(Content::Text(String::from_utf8(bytes)?)),
                 }

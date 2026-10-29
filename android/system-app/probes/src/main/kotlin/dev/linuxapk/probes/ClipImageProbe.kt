@@ -18,11 +18,12 @@ class ClipImageProbe : ContentProvider() {
   override fun onCreate() = true
 
   override fun getType(uri: Uri) =
-    if (uri.lastPathSegment == "probe.txt") "text/plain" else "image/png"
+    if (uri.lastPathSegment?.endsWith(".txt") == true) "text/plain" else "image/png"
 
   override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
     ParcelFileDescriptor.open(
-      if (uri.lastPathSegment == "probe.txt") File(context!!.cacheDir, "probe.txt")
+      if (uri.lastPathSegment?.endsWith(".txt") == true)
+        File(context!!.cacheDir, uri.lastPathSegment!!)
       else file(context!!),
       ParcelFileDescriptor.MODE_READ_ONLY,
     )
@@ -52,9 +53,9 @@ class ClipImageProbe : ContentProvider() {
   companion object {
     private fun file(c: Context) = File(c.cacheDir, "probe.png")
 
-    fun storeFile(c: Context): Uri {
-      File(c.cacheDir, "probe.txt").writeText("linuxapk-file-from-android\n")
-      return Uri.parse("content://dev.linuxapk.probes.clip/probe.txt")
+    fun storeFile(c: Context, name: String = "probe.txt"): Uri {
+      File(c.cacheDir, name).writeText("linuxapk-file-from-android $name\n")
+      return Uri.parse("content://dev.linuxapk.probes.clip/$name")
     }
 
     /** Writes the test image; returns its URI. */

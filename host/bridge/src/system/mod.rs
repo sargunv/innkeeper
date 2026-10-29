@@ -312,8 +312,8 @@ impl SystemService {
             Err(e) => return Reply::err(e),
         };
         let content = match kind {
-            ClipKind::File => match clipboard::files::ClipFile::decode(&b) {
-                Ok(f) => Content::File(f),
+            ClipKind::File => match clipboard::files::ClipFiles::decode(&b) {
+                Ok(f) => Content::Files(f),
                 Err(_) => return Reply::err(-EINVAL),
             },
             ClipKind::Text => match String::from_utf8(b) {
