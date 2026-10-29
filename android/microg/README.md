@@ -14,8 +14,23 @@ them), default runtime grants and a battery-optimization exemption.
 - **Doesn't:** anything built on the Play Services client libraries (FCM for
   Firebase apps, Google sign-in, Maps API, licensing), because they check that
   GmsCore carries Google's certificate, and AOSP 17 has no signature-spoofing
-  hook. The smallest fix is a framework patch, which the unmodified CI image
-  can't carry; that decision is tracked on GitHub.
-- **Push without Google:** UnifiedPush works today with no microG, for example
-  ntfy as the distributor. A distributor needs a battery-optimization exemption
-  to start its service from the background.
+  hook. Linux.apk does not support signature spoofing: framework patches and
+  runtime hooks cross our unmodified-image boundary. These clients remain
+  unsupported under microG
+  ([decision #23](https://github.com/sargunv/linux.apk/issues/23)).
+- **Push without Google:** use a UnifiedPush distributor with apps that support
+  UnifiedPush; it does not make FCM clients work. No distributor is shipped. If
+  you install one, such as ntfy, exempt it from Android's battery optimisation
+  so it can start its service from the background.
+
+For ntfy (`io.heckel.ntfy`), grant the exemption in a running session:
+
+```sh
+flatpak run --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager \
+  exec dumpsys deviceidle whitelist +io.heckel.ntfy
+```
+
+Use `exec dumpsys deviceidle whitelist` to check the list; ntfy should appear as
+`user,io.heckel.ntfy,...`. For another distributor, substitute its package name.
+The exemption persists across session restarts; remove it with
+`exec dumpsys deviceidle whitelist -io.heckel.ntfy`.
