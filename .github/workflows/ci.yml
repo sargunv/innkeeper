@@ -102,14 +102,8 @@ jobs:
         id: wiki
         if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
         continue-on-error: true
-        env:
-          COMMIT: ${{ github.sha }}
-          RUN_URL:
-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
-            github.run_id }}
         run: |
           python3 tools/ci/compat-wiki.py --reports out/ci/reports \
-            --commit "$COMMIT" --run-url "$RUN_URL" \
             --output out/ci/reports/Compatibility.md
       - name: Publish compatibility to the wiki
         if: ${{ !cancelled() && steps.wiki.outcome == 'success' }}

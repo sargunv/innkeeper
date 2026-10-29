@@ -49,8 +49,7 @@ runs), then [docs/architecture.md](docs/architecture.md).
   with waits for observations instead of fixed delays. The compat corpus is a
   manual harness for investigating one app
   (`mise run test:compat -- --only <package>`) and a nightly CI job. Never run
-  the full corpus, and never trigger, run or wait for the nightly job: its
-  failures become issues.
+  the full corpus, and never trigger, run or wait for the nightly job.
 - **Nested test desktops are fully isolated** (a nested plasmashell once started
   kded, KDE Connect and Akonadi against the user's real config, and nested
   portals opened dialogs on the real desktop): a private `dbus-run-session`, a

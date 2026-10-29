@@ -44,7 +44,7 @@ dialogs.
 `mise run test:compat -- --only <package>` is a manual troubleshooting harness;
 [compat/README.md](compat/README.md) describes its artifacts. The full corpus
 runs only in nightly CI; it never gates an agent loop or a PR. Never trigger,
-run, or wait for that job. Nightly regressions become issues. The
+run, or wait for that job. The
 [compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility)
 publishes its results. The wiki renderer can be tested without a session or
 APKs: `python3 -B -m unittest discover -s tools/ci/tests`.

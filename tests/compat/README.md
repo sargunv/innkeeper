@@ -32,9 +32,9 @@ available for a run.
   measurement over its budget by more than its margin
   ([budgets.toml](budgets.toml): cold session start, warm app start, idle
   session memory), fails the run and leaves the baseline alone. These failures
-  become issues, never PR blockers. Only `--accept` updates the committed
-  baseline. `-- report` renders `results.json` to
-  `out/test/compat/COMPATIBILITY.md` without running apps.
+  never block PRs. Only `--accept` updates the committed baseline. `-- report`
+  renders `results.json` to `out/test/compat/COMPATIBILITY.md` without running
+  apps.
 - **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
   is running, or else one it starts (headless unless `--window`) and stops at
   the end. Only a session it starts gets its start time and idle memory
@@ -46,9 +46,9 @@ available for a run.
   and assets (`libflutter.so`, `libhermes.so`, `assets/capacitor.config.json`,
   `libgodot_android.so`, Compose classes, `libgdx.so`, `libmaplibre.so`); there
   is no FOSS Unity or Xamarin app to test.
-- **Triage:** a failing app gets a GitHub issue with the failure signature from
-  its `out/test/compat/<instance>/<pkg>/` logs; `manual` notes in the corpus
-  list checks the harness doesn't automate yet.
+- **Triage:** inspect a failing app's failure signature in its
+  `out/test/compat/<instance>/<pkg>/` logs; `manual` notes in the corpus list
+  checks the harness doesn't automate yet.
 - **Flatpak**: there is no TUN device, so Rethink's VPN check fails and it
   partly works. A `--window` run gets a nested desktop of its own
   (`tests/nested.sh`).
