@@ -34,17 +34,12 @@ ENV.setdefault(
 ENV.setdefault("LINUXAPK_DATA", str(BASE / MODE / INSTANCE / "android-data"))
 SCRATCH = BASE / MODE / INSTANCE
 SCRATCH.mkdir(parents=True, exist_ok=True)
-# These defaults never put entries, Flatpak state or notices in the real XDG dirs.
-for key, leaf in [
-  ("XDG_DATA_HOME", "data"),
-  ("XDG_STATE_HOME", "state"),
-  ("XDG_CONFIG_HOME", "config"),
-  ("XDG_CACHE_HOME", "cache"),
-]:
-  if key not in ENV or not str(Path(ENV[key])).startswith(
-    str(TOP / "out") + "/"
-  ):
-    ENV[key] = str(SCRATCH / leaf)
+XDG = ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+# Entries, Flatpak state and notices never go to the real XDG dirs: only ones
+# under out/ (a nested test desktop's) are kept.
+for key in XDG:
+  if not ENV.get(key, "").startswith(str(TOP / "out") + "/"):
+    ENV[key] = str(SCRATCH / key.split("_")[1].lower())
   Path(ENV[key]).mkdir(parents=True, exist_ok=True)
 INSTALL = TOP / "out/flatpak/user"
 ENV["FLATPAK_USER_DIR"] = str(INSTALL)
@@ -85,6 +80,7 @@ def command(program, args, gate=None, instance_fd=None):
     "--no-documents-portal",
     f"--app-path={STAGE}",
   ]
+  # The manifest's current permissions, which dev-init.sh's snapshot may lack.
   manifest = (TOP / "packaging/flatpak/dev.linuxapk.Manager.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   argv += re.findall(r"^  - (--\S+)$", finish, re.MULTILINE)
@@ -95,15 +91,7 @@ def command(program, args, gate=None, instance_fd=None):
     str(Path(ENV["LINUXAPK_DATA"]).parent),
     ENV["LINUXAPK_IMAGES"],
   }
-  paths.update(
-    ENV[k]
-    for k in (
-      "XDG_DATA_HOME",
-      "XDG_CONFIG_HOME",
-      "XDG_CACHE_HOME",
-      "XDG_STATE_HOME",
-    )
-  )
+  paths.update(ENV[k] for k in XDG)
   if program == "linuxapk":
     for arg in args:
       p = Path(arg)
@@ -115,22 +103,24 @@ def command(program, args, gate=None, instance_fd=None):
     ):
       argv.append(f"--filesystem={p}")
   inner_env = []
+  # Flatpak sets XDG_*_HOME over any --env; env(1) sets them after it.
   for k, v in ENV.items():
-    if k.startswith("LINUXAPK_") or k in (
-      "XDG_DATA_HOME",
-      "XDG_CONFIG_HOME",
-      "XDG_CACHE_HOME",
-      "XDG_STATE_HOME",
-      "PULSE_SERVER",
-      "LANG",
-      "LANGUAGE",
-      "LC_ALL",
-      "LC_MESSAGES",
-      "LC_TIME",
-      "LC_MEASUREMENT",
-      "XDG_CURRENT_DESKTOP",
-      "DBUS_SYSTEM_BUS_ADDRESS",
-      "WAYLAND_DEBUG",
+    if (
+      k.startswith("LINUXAPK_")
+      or k in XDG
+      or k
+      in (
+        "PULSE_SERVER",
+        "LANG",
+        "LANGUAGE",
+        "LC_ALL",
+        "LC_MESSAGES",
+        "LC_TIME",
+        "LC_MEASUREMENT",
+        "XDG_CURRENT_DESKTOP",
+        "DBUS_SYSTEM_BUS_ADDRESS",
+        "WAYLAND_DEBUG",
+      )
     ):
       inner_env.append(f"{k}={v}")
   target = (
@@ -155,10 +145,6 @@ def command(program, args, gate=None, instance_fd=None):
   else:
     argv += ["--command=env", APP, *inner_env, target, *args]
   return argv
-
-
-def session(args, **kwargs):
-  return run(command("session", args), **kwargs)
 
 
 def connect():
@@ -234,9 +220,7 @@ def available():
       file=sys.stderr,
       flush=True,
     )
-    # Short intervals keep termination responsive while retaining a five-minute retry.
-    for _ in range(300):
-      time.sleep(1)
+    time.sleep(300)
 
 
 def scope(instance, record=True):
@@ -451,8 +435,7 @@ def main():
     print(
       json.dumps(
         {
-          "data": ENV["LINUXAPK_DATA"],
-          "state": ENV["XDG_STATE_HOME"],
+          "state": str(Path(ENV["XDG_STATE_HOME"]) / f"linuxapk-{INSTANCE}"),
           "data_home": ENV["XDG_DATA_HOME"],
         }
       )

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Boot a fresh headless test instance (LINUXAPK_INSTANCE, default boot; its
 # /data under out/test/boot), wait for Android to finish booting, run the
-# host-safety selftest, and stop it again. The uid mode is the host's: subuid when it has
-# a subordinate id range.
+# host-safety selftest, and stop it again. The uid mode is single in Flatpak
+# mode; in host mode it is the host's: subuid when it has a subordinate id range.
 #   tests/boot.sh [--no-subids]
 # --no-subids hides the host's ranges (empty /etc/subuid and /etc/subgid
 # stand-ins), so the session runs in single mode.
@@ -37,13 +37,12 @@ trap '"$session" stop >/dev/null; "$session" reset >/dev/null' EXIT
 "$session" wait
 t=$SECONDS
 "$session" start --headless
-deadline=$((SECONDS + 300))
 until [[ $("$session" exec getprop sys.boot_completed 2>/dev/null) == 1 ]]; do
   "$session" status >/dev/null || {
     echo "FAIL the session stopped while booting (\`LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE mise run session -- log\`)" >&2
     exit 1
   }
-  ((SECONDS < deadline)) || {
+  ((SECONDS - t < 300)) || {
     echo "FAIL not booted after 300 s" >&2
     exit 1
   }

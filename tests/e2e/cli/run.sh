@@ -28,9 +28,8 @@ la=$repo/tools/dev/linuxapk.sh
   exit 1
 }
 
-# The session keeps the launcher's usual image and /data; only the desktop
-# side moves to the scratch tree.
-export LINUXAPK_DATA=${LINUXAPK_DATA:-$repo/out/dev/${LINUXAPK_MODE:-flatpak}/$LINUXAPK_INSTANCE/android-data}
+# The dev driver gives the session a fresh /data, and nested.sh the desktop
+# side a scratch XDG tree.
 "$session" stop >/dev/null
 "$session" reset >/dev/null
 confirm_pid=""

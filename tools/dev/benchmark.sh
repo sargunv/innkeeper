@@ -18,32 +18,26 @@ trap cleanup EXIT
 cleanup
 boot() {
   "$S" wait
-  /usr/bin/python3 - "$S" <<'PY'
-import subprocess, sys, time
-start = time.monotonic()
-subprocess.run([sys.argv[1], 'start'], check=True)
-while subprocess.run([sys.argv[1], 'exec', 'getprop', 'sys.boot_completed'],
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.strip() != b'1':
-    if time.monotonic() - start > 300:
-        raise SystemExit('boot timed out')
-    time.sleep(.1)
-print(f'boot_ms={(time.monotonic() - start) * 1000:.0f}')
-PY
+  local t=${EPOCHREALTIME/./}
+  "$S" start
+  until [[ $("$S" exec getprop sys.boot_completed 2>/dev/null) == 1 ]]; do
+    ((${EPOCHREALTIME/./} - t < 300000000)) || {
+      echo 'boot timed out'
+      exit 1
+    }
+    sleep 0.1
+  done
+  echo "boot_ms=$(((${EPOCHREALTIME/./} - t) / 1000))"
 }
 boot | tee "$T/fresh.txt"
 "$S" stop
 boot | tee "$T/cold.txt"
 sleep 90
+# Without page cache, as compat measures it.
 cg=$("$S" cgroup)
-/usr/bin/python3 - "$cg" <<'PY' | tee "$T/memory.txt"
-from pathlib import Path
-import sys
-cg = Path(sys.argv[1])
-stat = dict(line.split() for line in (cg / 'memory.stat').read_text().splitlines())
-print('idle_memory_mib=' + str((int((cg / 'memory.current').read_text()) - int(stat['file']) + int(stat['shmem'])) // 1048576))
-PY
+awk -v cur="$(cat "$cg/memory.current")" '$1 == "file" { f = $2 } $1 == "shmem" { s = $2 }
+  END { print "idle_memory_mib=" int((cur - f + s) / 1048576) }' "$cg/memory.stat" | tee "$T/memory.txt"
 binary=$LINUXAPK_BINDER_TESTS/binderThroughputTest
-# Explicitly use the pinned corpus of platform test binaries.
 (cd "$(dirname "$binary")" && sha256sum --quiet -c "$repo/supervisor/tests/binder/test-bin.sha256")
 "$S" exec sh -c 'cat > /data/local/tmp/binderThroughputTest; chmod 755 /data/local/tmp/binderThroughputTest' <"$binary"
 "$S" exec /data/local/tmp/binderThroughputTest -w 2 -i 20000 -p | tee "$T/binder.txt"
@@ -59,7 +53,7 @@ for pkg in com.darkempire78.opencalculator org.wikipedia org.nsh07.pomodoro; do
     exit 1
   }
   sleep 3
-  # Fresh install: include startup frames and the same tap/scroll sequence.
+  # A fresh install: startup frames, then the same taps and scrolls each run.
   "$S" exec sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do input -d $display tap 400 300; input -d $display swipe 600 650 600 150 500; input -d $display swipe 600 150 600 650 500; done"
   "$S" exec dumpsys gfxinfo "$pkg" framestats >"$T/gfxinfo-$pkg.txt"
   frames=$(sed -n '/^Total frames rendered:/ {s/^Total frames rendered: //; p; q;}' "$T/gfxinfo-$pkg.txt")

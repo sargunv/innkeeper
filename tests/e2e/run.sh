@@ -12,7 +12,6 @@ if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   exec "$repo/tests/nested.sh" "$0" "$@"
 fi
 session=$repo/tools/dev/session.sh
-export LINUXAPK_DATA=${LINUXAPK_DATA:-$repo/out/dev/${LINUXAPK_MODE:-flatpak}/$LINUXAPK_INSTANCE/android-data}
 "$session" stop >/dev/null
 "$session" reset >/dev/null
 trap '"$session" stop >/dev/null; "$session" reset >/dev/null' EXIT
