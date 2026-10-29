@@ -101,7 +101,7 @@ rm -rf out/build/overlay/install out/build/image/install
 mkdir -p out/build/overlay/install/share/linuxapk/android
 cp -a android/overlay/. out/build/overlay/install/share/linuxapk/android/
 i=out/build/image/install
-install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig image/vendor.prop
+install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig image/vendor.prop image/fork-bases.sha256
 install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
 """
 

@@ -249,7 +249,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         Some(wayland_socket()?)
     };
     let image = paths.image()?;
-    image::prepare(paths, &image)?;
+    let _image_lease = image::prepare(paths, &image)?;
     if !follow && !serve {
         return flatpak::spawn(paths, &exe, headless);
     }

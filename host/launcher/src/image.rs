@@ -69,7 +69,9 @@ fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
 
 /// Fetches, extracts and flattens the image if needed, and brings the common
 /// and single-uid derived layers up to date.
-pub fn prepare(paths: &Paths, image: &Image) -> Result<()> {
+pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
+    let _prepare = crate::prune::prepare_lock(&paths.images)?;
+    let lease = crate::prune::lease(paths, image)?;
     let tools = paths.libexec.join("image");
     if !image.img.join("system/system").is_dir() {
         run(Command::new(tools.join("fetch.sh"))
@@ -96,12 +98,23 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<()> {
         }
     }
     make_read_only(&image.apexdir, &info)?;
+    run(Command::new(tools.join("check-forks.sh"))
+        .arg(&image.img)
+        .arg(&image.apexdir)
+        .arg(paths.share.join("image/fork-bases.sha256"))
+        .arg(paths.android()))?;
     let want = derive_source(paths, image)?;
     fs::create_dir_all(&image.derived)?;
     for layer in ["common", "single"] {
         let source = image.derived.join(format!("{layer}.source"));
         if fs::read_to_string(&source).is_ok_and(|s| s.trim_end_matches('\n') == want) {
             continue;
+        }
+        if lease.was_in_use {
+            bail!(
+                "derived image layers are in use; stop sessions using {} before preparing changed layers",
+                image.name
+            );
         }
         let _ = fs::remove_file(&source);
         let derive = tools.join("derive.sh");
@@ -113,5 +126,6 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<()> {
             .arg(out))?;
         fs::write(&source, format!("{want}\n"))?;
     }
-    Ok(())
+    crate::prune::prune(paths, image)?;
+    Ok(lease)
 }
