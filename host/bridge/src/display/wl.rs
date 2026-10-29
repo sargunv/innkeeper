@@ -355,8 +355,6 @@ impl State {
         self.apply_window_policy(
             p.window,
             PolicyEvent::App(AppRequest {
-                immersive: p.immersive,
-                fullscreen: p.fullscreen,
                 shape: p.orientation,
             }),
         );
@@ -426,6 +424,7 @@ impl State {
             .and_then(|w| w.frame.as_mut())
             .and_then(|f| f.on_frame_click(time, click, pressed));
         match action {
+            Some(Action::ToggleFullscreen) => self.toggle_fullscreen(id),
             Some(Action::Back) => self.hub.input(&format!("back {id}")),
             Some(Action::Window(a)) => self.frame_action(id, a, serial),
             None => {}
@@ -834,7 +833,6 @@ impl WindowHandler for State {
             self.subcompositor.clone(),
         );
         let w = self.windows.get_mut(&id).unwrap();
-        let was_fullscreen = w.fullscreen;
         if w.fullscreen && !c.is_fullscreen() {
             (w.width, w.height) = w.windowed_size;
         } else if !w.fullscreen && c.is_fullscreen() {
@@ -910,7 +908,7 @@ impl WindowHandler for State {
         }
         w.window.commit();
         self.send_configure(id);
-        self.apply_window_policy(id, PolicyEvent::Configure { was_fullscreen });
+        self.apply_window_policy(id, PolicyEvent::Configure);
     }
 }
 

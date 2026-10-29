@@ -63,11 +63,12 @@ sequenceDiagram
   client frame, matching the GTK/libadwaita manager on every desktop, including
   KWin. The bridge does not negotiate server decorations. Its vendored
   `sctk-adwaita` 0.12 adds a ‹ Back button at the start of the header; it sends
-  BACK to that window's display. The frame disappears in fullscreen, retains
-  resize edges and maximize/tiling, and right-click asks the compositor for its
-  window menu (`show_window_menu`). If the compositor goes away the bridge ends
-  the composer's connection; the composer reconnects every second and adds its
-  displays again.
+  BACK to that window's display, plus a fullscreen button beside the window
+  controls. Both support pointer and touch. The frame disappears in fullscreen,
+  retains resize edges and maximize/tiling, and right-click asks the compositor
+  for its window menu (`show_window_menu`). If the compositor goes away the
+  bridge ends the composer's connection; the composer reconnects every second
+  and adds its displays again.
 
 ## Cursor
 
@@ -140,17 +141,17 @@ necessary.
 
 ### Fullscreen and immersive
 
-F11 toggles the focused window's desktop fullscreen mode. The compositor's
-window menu also offers fullscreen where supported. Normal immersive apps keep
-their window: hiding Android's bars offers fullscreen without forcing it, as in
-WMShell's `DesktopImmersiveController`. Games (`ApplicationInfo`'s game category
-or legacy game flag) automatically enter desktop fullscreen when they request
-both status and navigation bars hidden together with landscape or sensor
-orientation. Showing the bars again restores the previous window. A manual F11
-or native-menu exit takes precedence until the next visible-to-hidden immersive
-entry. User-entered fullscreen remains in effect until the user exits it. A pure
-per-window policy function computes fullscreen and shape requests for every app,
-shortcut and compositor event; only its result is applied to Wayland.
+The title bar's fullscreen button and F11 toggle the focused window's desktop
+fullscreen mode. The frame is hidden in fullscreen: **press F11 to leave**. The
+compositor's window menu also offers fullscreen where supported (for example,
+Alt+F3 on KWin). Escape releases pointer capture; it does not exit fullscreen.
+
+Fullscreen is a user control. App immersive mode (hidden Android system bars)
+never changes the host window, including for games. Each app already fills its
+own Android virtual display, with no system decorations. Requested orientation
+still reshapes floating windows, and Ctrl+R swaps their shape. The per-window
+policy function defers shape requests while fullscreen, maximized or tiled; a
+later compositor configure wins.
 
 The system app registers `IDisplayWindowInsetsController` on its own displays.
 Android 17 reports the focused component and **requested** visible inset types
@@ -166,8 +167,8 @@ another activity's request. Signatures and behavior were checked against
 
 `Activity.requestFullscreenMode` is a separate, currently unsupported request:
 Android rejects it before dispatch because each app task already fills its
-Android virtual display. Supporting it requires a task-mode/transition policy
-([#77](https://github.com/sargunv/linux.apk/issues/77)).
+Android virtual display. It does not control desktop fullscreen; that remains a
+user choice ([#77](https://github.com/sargunv/linux.apk/issues/77)).
 
 ### Launch feedback
 

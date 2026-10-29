@@ -30,11 +30,11 @@
 //! attention.
 //!
 //! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
-//! 1 portrait, 2 landscape), u32 automatic fullscreen (0 or 1), u32 immersive
-//! request (both bars hidden, 0 or 1). The separate immersive cycle preserves a
-//! manual fullscreen exit across orientation eligibility changes. The Android
-//! window manager sends the current policy when mapped and when it changes.
-//! The bridge reshapes floating toplevels and translates fullscreen to xdg-shell.
+//! 1 portrait, 2 landscape), u32 legacy automatic fullscreen (0 or 1), u32
+//! immersive request (both bars hidden, 0 or 1). The bridge ignores the last two
+//! fields: desktop fullscreen is a user control. The Android window manager
+//! sends the current policy when mapped and when it changes; only orientation
+//! reshapes floating toplevels.
 //!
 //! `WINDOW_MINIMIZE` (0x0607): u32 display; minimize the toplevel when Android
 //! moves its root task to the back. `-ENOENT` if not shown.

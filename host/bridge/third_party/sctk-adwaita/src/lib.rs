@@ -2,8 +2,8 @@
 //! Upstream commit: 1bddc2264a71ae3897903ec8a7d7b13b834ff1b1.
 //! Copyright Bartłomiej Maryńczak and contributors; MIT license in ../LICENSE.
 //!
-//! Linux.apk changes for upstream sync: buttons.rs prepends and draws Back;
-//! pointer.rs tracks a completed Back click; on_frame_click returns Back alongside
+//! Linux.apk changes for upstream sync: buttons.rs adds and draws Back and Fullscreen;
+//! pointer.rs tracks completed custom button clicks; on_frame_click returns them alongside
 //! SCTK window actions. The bridge still uses upstream resize/menu/fullscreen code.
 //! ab_glyph_renderer.rs uses the system font without the bundled binary fallback;
 //! only the default ab_glyph renderer is kept. No fonts or snapshot fixtures are
@@ -75,6 +75,7 @@ type SkiaResult = Option<()>;
 #[derive(Debug)]
 pub enum Action {
     Back,
+    ToggleFullscreen,
     Window(FrameAction),
 }
 
@@ -180,8 +181,9 @@ where
     /// Handle the app button before delegating normal window actions to SCTK.
     pub fn on_frame_click(&mut self, timestamp: Duration, click: FrameClick, pressed: bool) -> Option<Action> {
         if self.is_hidden() { return None; }
-        if matches!(click, FrameClick::Normal)
-            && self.mouse.back_click(pressed) { return Some(Action::Back); }
+        if matches!(click, FrameClick::Normal) {
+            if let Some(action) = self.mouse.button_click(pressed) { return Some(action); }
+        }
         self.on_click(timestamp, click, pressed).map(Action::Window)
     }
 
