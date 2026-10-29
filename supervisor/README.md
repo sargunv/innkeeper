@@ -118,6 +118,9 @@ the mounted-volume notification, scans the volume and serves MediaStore; apps
 can index later file writes with MediaScanner or create them through MediaStore.
 Unmount closes the socket and ends the session. This supports the primary
 emulated volume, not AppFuse proxy descriptors or removable volumes.
+Canonicalization keeps the public path, while cross-process `/proc` reads keep
+the lower path so vold does not kill MediaProvider's recovery database on
+unmount.
 
 ## Tests
 

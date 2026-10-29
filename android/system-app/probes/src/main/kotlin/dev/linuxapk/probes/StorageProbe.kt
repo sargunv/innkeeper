@@ -40,7 +40,10 @@ class StorageProbe : Activity() {
       } ?: error("MediaStore read failed")
       check(contentResolver.delete(uri, null, null) == 1)
       check(!file.exists())
-      Log.i("LinuxApkStorageProbe", "state=$state app-dir=ok MediaStore=ok")
+      Log.i(
+        "LinuxApkStorageProbe",
+        "state=$state app-dir=ok MediaStore=ok round=${intent.getStringExtra("round")}",
+      )
       finish()
     }
   }

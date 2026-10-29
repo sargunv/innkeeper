@@ -177,8 +177,14 @@ impl Flat {
     }
 
     /// `p` with a mapped host dir replaced by its Android path.
-    fn to_android(&self, p: &[u8]) -> Vec<u8> {
+    fn to_android(&self, p: &[u8], public_storage: bool) -> Vec<u8> {
         for (host, android) in &self.map {
+            // A realpath/getcwd caller needs the public volume name. A scan
+            // of another process's fds (vold's unmount cleanup) needs the
+            // lower path, or it kills MediaProvider's open recovery database.
+            if !public_storage && android == b"/storage/emulated" {
+                continue;
+            }
             let Some(rest) = p.strip_prefix(host.as_slice()) else {
                 continue;
             };
@@ -219,8 +225,13 @@ impl Flat {
             }
             _ => {}
         }
-        let (link, buf, size) = if nr == libc::SYS_getcwd {
-            (format!("/proc/{tid}/cwd").into_bytes(), a[0], a[1] as usize)
+        let (link, buf, size, public_storage) = if nr == libc::SYS_getcwd {
+            (
+                format!("/proc/{tid}/cwd").into_bytes(),
+                a[0],
+                a[1] as usize,
+                true,
+            )
         } else {
             let (path, buf, size) = if nr == libc::SYS_readlink {
                 (a[0], a[1], a[2] as usize)
@@ -229,7 +240,7 @@ impl Flat {
                 (a[1], a[2], a[3] as usize)
             };
             match read_path(tid, path).and_then(|p| proc_path(tid, &p)) {
-                Some(p) => (p, buf, size),
+                Some((p, own)) => (p, buf, size, own),
                 None => return self.cont(req.id),
             }
         };
@@ -238,7 +249,7 @@ impl Flat {
             // E.g. a non-dumpable process's fds: it can read its own.
             Err(_) => return self.cont(req.id),
         };
-        let mut out = self.to_android(target.as_os_str().as_bytes());
+        let mut out = self.to_android(target.as_os_str().as_bytes(), public_storage);
         let n = if nr == libc::SYS_getcwd {
             out.push(0);
             if out.len() > size {
@@ -479,8 +490,8 @@ impl Flat {
 }
 
 /// `/proc/self/...` and `/proc/thread-self/...` as the broker must name them
-/// for task `tid`; None for paths outside /proc.
-fn proc_path(tid: i32, p: &[u8]) -> Option<Vec<u8>> {
+/// for task `tid`, plus whether the request names the caller; None outside /proc.
+fn proc_path(tid: i32, p: &[u8]) -> Option<(Vec<u8>, bool)> {
     let rest = p.strip_prefix(b"/proc/")?;
     let tgid = || status_field(tid, "Tgid:");
     let mut out = b"/proc/".to_vec();
@@ -489,16 +500,19 @@ fn proc_path(tid: i32, p: &[u8]) -> Option<Vec<u8>> {
             .filter(|r| r.is_empty() || r[0] == b'/')
             .map(|r| r.to_vec())
     };
-    if let Some(r) = word(b"self") {
+    let own = if let Some(r) = word(b"self") {
         out.extend_from_slice(tgid()?.as_bytes());
         out.extend_from_slice(&r);
+        true
     } else if let Some(r) = word(b"thread-self") {
         out.extend_from_slice(format!("{}/task/{tid}", tgid()?).as_bytes());
         out.extend_from_slice(&r);
+        true
     } else {
         out.extend_from_slice(rest);
-    }
-    Some(out)
+        false
+    };
+    Some((out, own))
 }
 
 #[cfg(test)]
@@ -512,15 +526,26 @@ mod tests {
 
     #[test]
     fn maps_host_dirs_to_android_paths() {
-        let f = flat("/var/r=/\n/var/d/data-x=/data");
+        let f = flat("/var/r=/\n/var/d/data-x=/data\n/var/d/data-x/media=/storage/emulated");
         assert_eq!(
-            f.to_android(b"/var/r/system/lib64/libc.so"),
+            f.to_android(b"/var/r/system/lib64/libc.so", true),
             b"/system/lib64/libc.so"
         );
-        assert_eq!(f.to_android(b"/var/r"), b"/");
-        assert_eq!(f.to_android(b"/var/d/data-x/app/x.apk"), b"/data/app/x.apk");
-        assert_eq!(f.to_android(b"/var/d/data-x"), b"/data");
-        assert_eq!(f.to_android(b"/var/rr/x"), b"/var/rr/x");
-        assert_eq!(f.to_android(b"socket:[1]"), b"socket:[1]");
+        assert_eq!(f.to_android(b"/var/r", true), b"/");
+        assert_eq!(
+            f.to_android(b"/var/d/data-x/app/x.apk", true),
+            b"/data/app/x.apk"
+        );
+        assert_eq!(f.to_android(b"/var/d/data-x", true), b"/data");
+        assert_eq!(f.to_android(b"/var/rr/x", true), b"/var/rr/x");
+        assert_eq!(f.to_android(b"socket:[1]", true), b"socket:[1]");
+        assert_eq!(
+            f.to_android(b"/var/d/data-x/media/0/a.png", true),
+            b"/storage/emulated/0/a.png"
+        );
+        assert_eq!(
+            f.to_android(b"/var/d/data-x/media/0/a.png", false),
+            b"/data/media/0/a.png"
+        );
     }
 }
