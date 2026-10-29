@@ -111,8 +111,10 @@ WMShell's `DesktopImmersiveController`. Games (`ApplicationInfo`'s game category
 or legacy game flag) automatically enter desktop fullscreen when they request
 both status and navigation bars hidden together with landscape or sensor
 orientation. Showing the bars again restores the previous window. A manual F11
-or native-menu choice takes precedence until the app starts a new immersive
-request. The policy and its restoration state belong to each window/display.
+or native-menu exit takes precedence until the next visible-to-hidden immersive
+entry. User-entered fullscreen remains in effect until the user exits it. A pure
+per-window policy function computes fullscreen and shape requests for every app,
+shortcut and compositor event; only its result is applied to Wayland.
 
 The system app registers `IDisplayWindowInsetsController` on its own displays.
 Android 17 reports the focused component and **requested** visible inset types

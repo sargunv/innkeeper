@@ -58,6 +58,9 @@ use crate::ipc::server::Events;
 
 mod data_device;
 mod foreign;
+mod policy;
+
+use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_window_state};
 
 /// Work for the Wayland thread.
 pub enum Cmd {
@@ -94,49 +97,6 @@ struct Buf {
     busy: bool,
 }
 
-/// Per-window request/choice state, independent of the Wayland objects.
-#[derive(Default)]
-struct FullscreenPolicy {
-    immersive: bool,
-    requested: bool,
-    manual_choice: bool,
-    /// True only if Android, rather than the user, entered fullscreen.
-    app_fullscreen: bool,
-    restore_pending: bool,
-}
-
-impl FullscreenPolicy {
-    fn request(&mut self, immersive: bool, requested: bool, fullscreen: bool) -> Option<bool> {
-        if immersive && !self.immersive {
-            self.manual_choice = false;
-        }
-        self.immersive = immersive;
-        let mut change = None;
-        if requested != self.requested && !self.manual_choice {
-            if requested && !fullscreen {
-                self.app_fullscreen = true;
-                self.restore_pending = false;
-                change = Some(true);
-            } else if !requested && self.app_fullscreen {
-                self.app_fullscreen = false;
-                self.restore_pending = true;
-                change = Some(false);
-            }
-        }
-        self.requested = requested;
-        change
-    }
-
-    fn exited(&mut self) {
-        // Only our automatic restore may exit without recording the user's choice.
-        if !self.restore_pending {
-            self.manual_choice = true;
-        }
-        self.restore_pending = false;
-        self.app_fullscreen = false;
-    }
-}
-
 struct Win {
     id: u32,
     window: Window,
@@ -155,10 +115,7 @@ struct Win {
     configured: bool,
     fullscreen: bool,
     constrained: bool,
-    fullscreen_policy: FullscreenPolicy,
-    /// The last requested Android orientation; manual Rotate does not change it.
-    orientation: u32,
-    orientation_pending: bool,
+    policy: Policy,
     /// Last windowed content size, restored if the compositor leaves size unspecified.
     windowed_size: (u32, u32),
     /// Buffer shown now (its size maps input), and the last one asked for.
@@ -329,27 +286,18 @@ impl State {
     }
 
     pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
-        if let Some(w) = self.windows.get_mut(&id) {
-            w.fullscreen_policy.manual_choice = true;
-            w.fullscreen_policy.app_fullscreen = false;
-            w.fullscreen_policy.restore_pending = false;
-            if w.fullscreen {
-                w.window.unset_fullscreen();
-            } else {
-                w.window.set_fullscreen(None);
-            }
-        }
+        self.apply_window_policy(id, PolicyEvent::ToggleFullscreen);
     }
 
-    /// A client chooses its floating size in xdg-shell; a later configure may override it.
-    /// Android letterboxes fixed-orientation activities inside the resulting display buffer.
     pub(crate) fn rotate(&mut self, id: u32) {
+        self.apply_window_policy(id, PolicyEvent::Rotate);
+    }
+
+    /// A client chooses its floating size; the policy allows this only while floating.
+    fn swap_shape(&mut self, id: u32) {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
-        if w.fullscreen || w.constrained {
-            return;
-        }
         std::mem::swap(&mut w.width, &mut w.height);
         w.windowed_size = (w.width, w.height);
         if let Some(f) = w.frame.as_mut().filter(|f| !f.is_hidden()) {
@@ -376,40 +324,37 @@ impl State {
     }
 
     fn window_policy(&mut self, p: WindowPolicy) {
-        let Some(w) = self.windows.get_mut(&p.window) else {
+        self.apply_window_policy(
+            p.window,
+            PolicyEvent::App(AppRequest {
+                immersive: p.immersive,
+                fullscreen: p.fullscreen,
+                shape: p.orientation,
+            }),
+        );
+    }
+
+    fn apply_window_policy(&mut self, id: u32, event: PolicyEvent) {
+        let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
-        if let Some(fullscreen) =
-            w.fullscreen_policy
-                .request(p.immersive, p.fullscreen, w.fullscreen)
-        {
-            if fullscreen {
+        let compositor = WindowState {
+            fullscreen: w.fullscreen,
+            shape: if w.width <= w.height { 1 } else { 2 },
+            constrained: w.constrained,
+        };
+        let (policy, desired, fullscreen_changed) =
+            desired_window_state(w.policy, event, compositor);
+        w.policy = policy;
+        if fullscreen_changed && desired.fullscreen != w.fullscreen {
+            if desired.fullscreen {
                 w.window.set_fullscreen(None);
             } else {
                 w.window.unset_fullscreen();
             }
         }
-        if w.orientation != p.orientation {
-            w.orientation = p.orientation;
-            w.orientation_pending = true;
-        }
-        self.apply_orientation(p.window);
-    }
-
-    fn apply_orientation(&mut self, id: u32) {
-        let Some(w) = self.windows.get_mut(&id) else {
-            return;
-        };
-        if !w.orientation_pending
-            || w.fullscreen
-            || w.constrained
-            || w.fullscreen_policy.app_fullscreen
-        {
-            return;
-        }
-        w.orientation_pending = false;
-        if matches!((w.orientation, w.width > w.height), (1, true) | (2, false)) {
-            self.rotate(id);
+        if desired.shape != 0 && desired.shape != compositor.shape {
+            self.swap_shape(id);
         }
     }
 
@@ -562,9 +507,7 @@ impl State {
                 configured: false,
                 fullscreen: false,
                 constrained: false,
-                fullscreen_policy: FullscreenPolicy::default(),
-                orientation: 0,
-                orientation_pending: false,
+                policy: Policy::default(),
                 windowed_size: (width, height),
                 shown: None,
                 shown_size: (0, 0),
@@ -774,8 +717,8 @@ impl WindowHandler for State {
             self.subcompositor.clone(),
         );
         let w = self.windows.get_mut(&id).unwrap();
+        let was_fullscreen = w.fullscreen;
         if w.fullscreen && !c.is_fullscreen() {
-            w.fullscreen_policy.exited();
             (w.width, w.height) = w.windowed_size;
         } else if !w.fullscreen && c.is_fullscreen() {
             w.windowed_size = (w.width, w.height);
@@ -850,7 +793,7 @@ impl WindowHandler for State {
         }
         w.window.commit();
         self.send_configure(id);
-        self.apply_orientation(id);
+        self.apply_window_policy(id, PolicyEvent::Configure { was_fullscreen });
     }
 }
 
@@ -1109,27 +1052,4 @@ pub fn run(
         st.destroy(id);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FullscreenPolicy;
-
-    #[test]
-    fn native_fullscreen_exit_survives_landscape_request() {
-        let mut policy = FullscreenPolicy::default();
-        // Immersive portrait, then the user enters fullscreen through the native menu.
-        assert_eq!(policy.request(true, false, false), None);
-        assert_eq!(policy.request(true, false, true), None);
-        // The native menu exits. Landscape in the same hidden-bars cycle must stay windowed.
-        policy.exited();
-        assert_eq!(policy.request(true, true, false), None);
-        // A fresh immersive cycle allows automatic entry again.
-        assert_eq!(policy.request(false, false, false), None);
-        assert_eq!(policy.request(true, true, false), Some(true));
-        // Our automatic restore must not latch a manual choice.
-        assert_eq!(policy.request(false, false, true), Some(false));
-        policy.exited();
-        assert!(!policy.manual_choice);
-    }
 }
