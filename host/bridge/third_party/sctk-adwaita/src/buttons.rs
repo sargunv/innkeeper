@@ -295,12 +295,13 @@ impl Button {
                 );
             }
             ButtonKind::Fullscreen => {
-                // The four outward corners of view-fullscreen-symbolic.
+                // Inward corners indicate Leave fullscreen; outward corners indicate Enter.
+                let (corner, arm) = if state.contains(WindowState::FULLSCREEN) { (2., 5.) } else { (5., 2.) };
                 let mut path = PathBuilder::new();
                 for (dx, dy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
-                    path.move_to(x + dx * 2. * scale, y + dy * 5. * scale);
-                    path.line_to(x + dx * 5. * scale, y + dy * 5. * scale);
-                    path.line_to(x + dx * 5. * scale, y + dy * 2. * scale);
+                    path.move_to(x + dx * arm * scale, y + dy * corner * scale);
+                    path.line_to(x + dx * corner * scale, y + dy * corner * scale);
+                    path.line_to(x + dx * corner * scale, y + dy * arm * scale);
                 }
                 pixmap.stroke_path(
                     &path.finish()?,

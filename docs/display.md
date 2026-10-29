@@ -64,11 +64,12 @@ sequenceDiagram
   KWin. The bridge does not negotiate server decorations. Its vendored
   `sctk-adwaita` 0.12 adds a ‹ Back button at the start of the header; it sends
   BACK to that window's display, plus a fullscreen button beside the window
-  controls. Both support pointer and touch. The frame disappears in fullscreen,
-  retains resize edges and maximize/tiling, and right-click asks the compositor
-  for its window menu (`show_window_menu`). If the compositor goes away the
-  bridge ends the composer's connection; the composer reconnects every second
-  and adds its displays again.
+  controls. Both support pointer and touch. The frame hides in fullscreen until
+  its top edge is touched or hovered, and retains resize edges and
+  maximize/tiling, and right-click asks the compositor for its window menu
+  (`show_window_menu`). If the compositor goes away the bridge ends the
+  composer's connection; the composer reconnects every second and adds its
+  displays again.
 
 ## Cursor
 
@@ -142,7 +143,12 @@ necessary.
 ### Fullscreen and immersive
 
 The title bar's fullscreen button and F11 toggle the focused window's desktop
-fullscreen mode. The frame is hidden in fullscreen: **press F11 to leave**. The
+fullscreen mode. In fullscreen, move the pointer to the top edge or touch its
+first four logical pixels to reveal the header over the app. Its inward-corner
+fullscreen button leaves fullscreen; F11 also exits. The header hides when the
+pointer leaves it. After a touch reveals it, it stays available for a second tap
+on the button and hides when a touch moves or starts outside it. The app's
+Android display keeps its fullscreen size while the header is revealed. The
 compositor's window menu also offers fullscreen where supported (for example,
 Alt+F3 on KWin). Escape releases pointer capture; it does not exit fullscreen.
 

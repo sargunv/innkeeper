@@ -123,6 +123,7 @@ pub struct AdwaitaFrame<State> {
     /// Draw decorations but without the titlebar
     hide_titlebar: bool,
     hide_border: bool,
+    fullscreen_revealed: bool,
 
     width: NonZeroU32,
     height: NonZeroU32,
@@ -173,6 +174,7 @@ where
             shadow: Shadow::default(),
             hide_titlebar: frame_config.hide_titlebar,
             hide_border: frame_config.hide_border,
+            fullscreen_revealed: false,
             width: NonZeroU32::MIN,
             height: NonZeroU32::MIN,
         })
@@ -184,7 +186,16 @@ where
         if matches!(click, FrameClick::Normal) {
             if let Some(action) = self.mouse.button_click(pressed) { return Some(action); }
         }
+        if self.state.contains(WindowState::FULLSCREEN) && self.mouse.location == Location::Head {
+            return None;
+        }
         self.on_click(timestamp, click, pressed).map(Action::Window)
+    }
+
+    /// Reset a touch press without dismissing revealed controls: after release they
+    /// remain available for a second tap. Content touches/cancel use click_point_left.
+    pub fn reset_touch_point(&mut self) {
+        self.mouse.left();
     }
 
     /// Update the current frame config.
@@ -266,8 +277,10 @@ where
             width: self.width.get(),
             height: self.height.get(),
             hide_titlebar: self.hide_titlebar,
-            hide_border: self.hide_border,
-            hide_edges: self.state.contains(WindowState::MAXIMIZED),
+            hide_border: self.hide_border || self.state.contains(WindowState::FULLSCREEN),
+            hide_edges: self.state.intersects(WindowState::MAXIMIZED | WindowState::FULLSCREEN),
+            fullscreen: self.state.contains(WindowState::FULLSCREEN),
+            revealed: self.fullscreen_revealed,
         }
     }
 
@@ -279,13 +292,7 @@ where
         self.dirty = false;
         let should_sync = mem::take(&mut self.should_sync);
 
-        // Don't draw decorations if the frame is fullscreened.
-        if self.state.contains(WindowState::FULLSCREEN) {
-            decorations.hide();
-            return Some(true);
-        } else {
-            decorations.show();
-        }
+        decorations.show();
 
         if layout_config.hide_titlebar {
             decorations.hide_titlebar();
@@ -302,6 +309,12 @@ where
         decorations.relayout(layout_config);
 
         if let Some(title_text) = self.title_text.as_mut() {
+            let title = self.title.as_deref().unwrap_or_default();
+            title_text.update_title(if layout_config.fullscreen {
+                format!("{title} — Leave fullscreen")
+            } else {
+                title.to_owned()
+            });
             title_text.update_scale(self.scale_factor);
             title_text.update_color(colors.font_color);
         }
@@ -331,21 +344,24 @@ where
             // do invisible borders to enlarge the input zone.
             pixmap.fill(Color::TRANSPARENT);
 
-            draw_part(
-                idx,
-                rect,
-                &mut pixmap,
-                self.title_text.as_ref().map(|t| t.pixmap()).unwrap_or(None),
-                scale,
-                self.resizable,
-                &self.state,
-                colors,
-                &self.buttons,
-                self.mouse.location,
-                self.hide_border,
-                self.hide_titlebar,
-                &mut self.shadow,
-            );
+            // In fullscreen the transparent header keeps only its top-edge input strip.
+            if !layout_config.fullscreen || layout_config.revealed {
+                draw_part(
+                    idx,
+                    rect,
+                    &mut pixmap,
+                    self.title_text.as_ref().map(|t| t.pixmap()).unwrap_or(None),
+                    scale,
+                    self.resizable,
+                    &self.state,
+                    colors,
+                    &self.buttons,
+                    self.mouse.location,
+                    layout_config.hide_border,
+                    self.hide_titlebar,
+                    &mut self.shadow,
+                );
+            }
 
             // Debug fill all subsurfaces with solid colors
             if false {
@@ -396,6 +412,8 @@ where
 
                 part.surface
                     .set_input_region(Some(input_region.wl_region()));
+            } else {
+                part.surface.set_input_region(None);
             }
 
             part.surface.commit();
@@ -412,6 +430,10 @@ where
     fn update_state(&mut self, state: WindowState) {
         let difference = self.state.symmetric_difference(state);
         self.state = state;
+        if difference.contains(WindowState::FULLSCREEN) {
+            self.fullscreen_revealed = false;
+            self.mouse.left();
+        }
         self.dirty |= difference.intersects(
             WindowState::ACTIVATED
                 | WindowState::FULLSCREEN
@@ -561,8 +583,18 @@ where
             return None;
         }
 
+        if self.state.contains(WindowState::FULLSCREEN) {
+            if !parts::fullscreen_header_contains(self.width.get(), x, y, self.fullscreen_revealed) {
+                self.click_point_left();
+                return Some(CursorIcon::Default);
+            }
+            if !self.fullscreen_revealed {
+                self.fullscreen_revealed = true;
+                self.dirty = true;
+            }
+        }
         let old_location = self.mouse.location;
-
+        let decorations = self.decorations.as_ref()?;
         let location = self.precise_location(location, decorations, x, y);
         let new_cursor = self.mouse.moved(location, x, y, self.resizable);
 
@@ -571,11 +603,19 @@ where
             || matches!(self.mouse.location, Location::Button(_)))
             && old_location != self.mouse.location;
 
+        if self.dirty {
+            let _ = self.redraw_inner();
+        }
         Some(new_cursor)
     }
 
     fn click_point_left(&mut self) {
-        self.mouse.left()
+        self.mouse.left();
+        if self.fullscreen_revealed {
+            self.fullscreen_revealed = false;
+            self.dirty = true;
+            let _ = self.redraw_inner();
+        }
     }
 
     fn is_dirty(&self) -> bool {
@@ -838,7 +878,7 @@ fn draw_headerbar_bg(
     let w = pixmap.width() as f32;
     let h = pixmap.height() as f32;
 
-    let radius = if state.intersects(WindowState::MAXIMIZED | WindowState::TILED) {
+    let radius = if state.intersects(WindowState::MAXIMIZED | WindowState::TILED | WindowState::FULLSCREEN) {
         0.
     } else {
         CORNER_RADIUS as f32 * scale
@@ -927,7 +967,7 @@ fn rounded_headerbar_shape(x: f32, y: f32, width: f32, height: f32, radius: f32)
 
 // returns horizontal margin, logical points
 fn get_margin_h_lp(state: &WindowState, hider_border: bool) -> f32 {
-    if state.intersects(WindowState::MAXIMIZED | WindowState::TILED) {
+    if state.intersects(WindowState::MAXIMIZED | WindowState::TILED | WindowState::FULLSCREEN) {
         0.0
     } else {
         theme::border_size(hider_border) as f32

@@ -104,15 +104,6 @@ impl DecorationParts {
         &mut self.parts[PartId::HEADER]
     }
 
-    pub fn hide(&mut self) {
-        for part in self.parts.iter_mut() {
-            part.hide = true;
-            part.subsurface.set_sync();
-            part.surface.attach(None, 0, 0);
-            part.surface.commit();
-        }
-    }
-
     pub fn show(&mut self) {
         for part in self.parts.iter_mut() {
             part.hide = false;
@@ -178,6 +169,8 @@ pub struct LayoutConfig {
     pub hide_titlebar: bool,
     pub hide_border: bool,
     pub hide_edges: bool,
+    pub fullscreen: bool,
+    pub revealed: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -198,6 +191,8 @@ impl PartLayout {
             hide_titlebar,
             hide_border,
             hide_edges,
+            fullscreen,
+            revealed,
         } = config;
 
         let mut parts = [Self::default(); 5];
@@ -282,7 +277,77 @@ impl PartLayout {
             parts[PartId::HEADER].surface_rect.x -= border_size as i32;
         }
 
+        if fullscreen {
+            parts[PartId::HEADER].surface_rect = Rect {
+                x: 0,
+                y: 0,
+                width,
+                height: theme::HEADER_SIZE,
+            };
+            parts[PartId::HEADER].input_rect = Some(Rect {
+                x: 0,
+                y: 0,
+                width,
+                height: fullscreen_header_height(revealed),
+            });
+        }
+
         parts
+    }
+}
+
+/// A small transparent strip receives pointer/touch input while the header is hidden.
+const FULLSCREEN_REVEAL_HEIGHT: u32 = 4;
+
+fn fullscreen_header_height(revealed: bool) -> u32 {
+    if revealed {
+        theme::HEADER_SIZE
+    } else {
+        FULLSCREEN_REVEAL_HEIGHT
+    }
+}
+
+pub(crate) fn fullscreen_header_contains(width: u32, x: f64, y: f64, revealed: bool) -> bool {
+    x >= 0. && x < f64::from(width) && y >= 0. && y < f64::from(fullscreen_header_height(revealed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fullscreen_reveal_zone_matches_the_header_input_region() {
+        for revealed in [false, true] {
+            let height = if revealed { theme::HEADER_SIZE } else { 4 };
+            let layout = PartLayout::calc(LayoutConfig {
+                width: 800,
+                height: 600,
+                fullscreen: true,
+                revealed,
+                ..Default::default()
+            });
+            let header = &layout[PartId::HEADER];
+            assert_eq!((header.surface_rect.x, header.surface_rect.y), (0, 0));
+            let Some(input) = header.input_rect else {
+                unreachable!()
+            };
+            assert_eq!(
+                (input.x, input.y, input.width, input.height),
+                (0, 0, 800, height)
+            );
+            for (x, y, inside) in [
+                (0., 0., true),
+                (799.9, f64::from(height) - 0.1, true),
+                (-0.1, 0., false),
+                (800., 0., false),
+                (0., -0.1, false),
+                (0., f64::from(height), false),
+            ] {
+                assert_eq!(fullscreen_header_contains(800, x, y, revealed), inside);
+            }
+        }
+        assert!(!fullscreen_header_contains(800, 400., 17., false));
+        assert!(fullscreen_header_contains(800, 400., 17., true));
     }
 }
 

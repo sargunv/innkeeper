@@ -577,7 +577,7 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                 st.seat.last_serial = serial;
                 match st.window_of(&surface) {
                     Some((w, true)) if st.seat.frame_touch.is_none() => {
-                        st.frame_pointer_left(w);
+                        st.frame_touch_point(w);
                         st.frame_pointer_moved(
                             w,
                             &surface.id(),
@@ -594,6 +594,7 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                         st.frame_click(w, Duration::from_millis(time as u64), 0x110, true, serial);
                     }
                     Some((w, false)) => {
+                        st.frame_pointer_left(w);
                         st.seat.touch_focus.insert(id, w);
                         let (x, y) = st.to_display(w, x, y);
                         st.hub
@@ -612,7 +613,7 @@ impl Dispatch2<wl_touch::WlTouch, State> for Tch {
                         false,
                         t.serial,
                     );
-                    st.frame_pointer_left(t.window);
+                    st.frame_touch_point(t.window);
                 }
                 if st.seat.touch_focus.remove(&id).is_some() {
                     st.hub.input(&format!("touch_up {time} {id}"));
