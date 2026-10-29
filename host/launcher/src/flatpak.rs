@@ -287,6 +287,12 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
 fn teardown(p: &Paths) {
     session::ENDING.store(true, std::sync::atomic::Ordering::SeqCst);
     sys::kill_descendants();
+    // The bridge is killed with Android, so its signal handler cannot reap
+    // files kept alive for desktop readers. End their lifetime here.
+    let cache = crate::paths::xdg_home("XDG_CACHE_HOME", ".cache")
+        .join(crate::paths::per_instance("linuxapk", &p.instance))
+        .join("handoff");
+    let _ = fs::remove_dir_all(cache);
     if sys::ppid() == 1 {
         unsafe { libc::kill(-1, libc::SIGKILL) };
     }

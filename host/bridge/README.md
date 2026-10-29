@@ -5,16 +5,16 @@ The desktop bridge: the only process that connects Android to the desktop.
 starts it inside the session's systemd unit (so it shares the memory cap and
 `stop` ends it) and restarts it if it exits; clients reconnect.
 
-| Service   | Desktop side                                                                                                                     | Code             |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| audio     | PipeWire through its Pulse server (pure-Rust `pulseaudio` crate, no C deps)                                                      | `src/audio/`     |
-| display   | Wayland: one `xdg_toplevel` per window, linux-dmabuf, viewporter, decorations                                                    | `src/display/`   |
-| input     | the seat, its xkb keymap, gestures, tablets, cursor shape, `zwp_text_input_v3`                                                   | `src/input/`     |
-| system    | portal Settings, `org.freedesktop.Notifications`, `ext_data_control_v1`, OpenURI, MPRIS; the session's activity for the launcher | `src/system/`    |
-| documents | the FileChooser portal, parented through `zxdg_exporter_v2`                                                                      | `src/documents/` |
-| apps      | desktop entries through `linuxapk-core`                                                                                          | `src/apps/`      |
-| a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                              | `src/a11y/`      |
-| hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                             | `src/hoststate/` |
+| Service   | Desktop side                                                                                                                                                  | Code             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| audio     | PipeWire through its Pulse server (pure-Rust `pulseaudio` crate, no C deps)                                                                                   | `src/audio/`     |
+| display   | Wayland: one `xdg_toplevel` per window, linux-dmabuf, viewporter, decorations                                                                                 | `src/display/`   |
+| input     | the seat, its xkb keymap, gestures, tablets, cursor shape, `zwp_text_input_v3`                                                                                | `src/input/`     |
+| system    | portal Settings, `org.freedesktop.Notifications`, `ext_data_control_v1`, OpenURI, Email, FileChooser SaveFile, MPRIS; the session's activity for the launcher | `src/system/`    |
+| documents | the FileChooser portal, parented through `zxdg_exporter_v2`                                                                                                   | `src/documents/` |
+| apps      | desktop entries through `linuxapk-core`                                                                                                                       | `src/apps/`      |
+| a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                                                           | `src/a11y/`      |
+| hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                          | `src/hoststate/` |
 
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
   the instance's XDG runtime and state dirs (socket, MPRIS artwork, document

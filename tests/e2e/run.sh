@@ -81,6 +81,16 @@ if [[ ${1:-} == --group ]]; then
     desktop)
       s am start -n dev.linuxapk.probes/.DesktopProbe --es action link >/dev/null
       until_ok file_has "$bridge_log" 'openuri: .*https://example.com/linuxapk-e2e'
+      s am start -a android.intent.action.VIEW -d mailto:e2e@example.com >/dev/null
+      until_ok file_has "$bridge_log" 'handoff: .*mailto:e2e@example.com'
+      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
+      until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
+      s pm enable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
+      s am start -a android.intent.action.VIEW -d mailto:android-handler@example.com >/dev/null
+      until_ok log_has LinuxApkHandoffProbe 'Android handler: mailto:android-handler@example.com'
+      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
+      until_ok log_has LinuxApkHandoffProbe 'Android handler: content://dev.linuxapk.probes.handoff/shared.odt'
+      s pm disable "dev.linuxapk.probes/.HandoffProbe\$Claimed" >/dev/null
       s am start -n dev.linuxapk.probes/.NotificationProbe >/dev/null
       until_ok file_has "$bridge_log" 'notify: .*not shown \(test session\)'
       printf %s linuxapk-e2e-host-before | wl-copy

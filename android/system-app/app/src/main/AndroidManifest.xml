@@ -199,6 +199,44 @@
       </intent-filter>
     </activity>
 
+    <!-- Android 17 matches schemes literally, so enumerate external schemes. MIME */*
+         catches unclaimed content/file VIEWs. Priority -1000 leaves real Android handlers first. -->
+    <activity
+      android:name=".integration.handoff.HandoffActivity"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:label="Desktop"
+      android:theme="@android:style/Theme.Material.Light.Dialog.Alert">
+      <intent-filter android:priority="-1000">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="mailto" />
+        <data android:scheme="tel" />
+        <data android:scheme="sms" />
+        <data android:scheme="smsto" />
+        <data android:scheme="geo" />
+        <data android:scheme="market" />
+        <data android:scheme="magnet" />
+        <data android:scheme="webcal" />
+        <data android:scheme="webcals" />
+        <data android:scheme="ftp" />
+        <data android:scheme="ftps" />
+      </intent-filter>
+      <intent-filter android:priority="-1000">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:mimeType="*/*" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <action android:name="android.intent.action.SEND_MULTIPLE" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="*/*" />
+      </intent-filter>
+    </activity>
+
     <!-- Custom Tabs provider stub, so Custom Tabs and AppAuth see a browser. -->
     <service
       android:name=".integration.browser.CustomTabsService"

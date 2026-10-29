@@ -64,10 +64,35 @@ battery goes to the Health HAL,
 - **Metered:** applied only in Flatpak mode, to `net/HostNetworkFeature.kt`'s
   network agent.
 
+Known limits: `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL
+HAL would remove that.
+
+## Desktop handoff
+
+The browser and `integration/handoff/` forward external VIEWs through OpenURI. A
+priority -1000 wildcard MIME filter handles files with no Android handler;
+explicit scheme filters cover mailto, tel, sms, smsto, geo, market, magnet,
+webcal(s) and ftp(s). Android handlers at normal priority take precedence.
+Android 17 matches URI schemes literally: a wildcard scheme filter cannot catch
+arbitrary untyped custom schemes.
+
+The sharesheet's **Desktop** target offers **Open with a desktop app** (OpenFile
+with `ask=true`), **Save to file…** (SaveFile), **Copy** (text, through
+clipboard sync), and **Send by email** (Email, including attachments). Text
+opens/saves as a `.txt` file. The bridge requests an xdg-activation token from
+the source window's seat and parents portal dialogs with xdg-foreign.
+
 Known limits:
 
-- `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL HAL would
-  remove that.
+- Shares are capped at three attachments, 64 MiB each, and 32 KiB of text.
+  Opened files and email attachments are retained in the instance cache until
+  session shutdown, up to 256 MiB per session; saved copies are removed
+  immediately. Shutdown cleans the cache; a later bridge reaps crash leftovers.
+- Copy is offered only for text: Android content URIs cannot be pasted into a
+  desktop file manager. Host → Android sharing is tracked in
+  [#66](https://github.com/sargunv/linux.apk/issues/66).
+- Arbitrary untyped custom URI schemes need an explicit manifest filter; the
+  Android 17 resolver has no catch-all scheme filter.
 
 Tests: `:protocol` unit tests (`mise run test`) and the grouped e2e runner
 (`mise run test:e2e -- input desktop a11y audio lifecycle`). These exercise app

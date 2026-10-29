@@ -10,10 +10,18 @@
 //! | `0x0302` | NOTIFY       | `u32 id` (≠ 0), `u32 len` ≤ 1 MiB (fd: notification blob)                       | `-EBUSY` over 64 per connection, `-EIO` if the server refused; posting an id again replaces it |
 //! | `0x0303` | NOTIFY_CLOSE | `u32 id`                                                                        |                                                                                                |
 //! | `0x0304` | CLIP_SET     | `u8 kind` (1 text, 2 image), `u8 sensitive`, `u16 0`, `u32 len` ≤ 1/16 MiB (fd) | `-ENOSYS` without data control                                                                 |
-//! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not http(s), `-EAGAIN` over 5 per 10 s                                            |
+//! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not an external URI, `-EAGAIN` over 5 per 10 s                                            |
 //! | `0x0306` | MEDIA        | `u32 player` (≠ 0), `u32 len` ≤ 2 MiB (fd: media blob)                          | `-EBUSY` over 8 players per connection                                                         |
 //! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
 //! | `0x0308` | LIFECYCLE    | `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len` ≤ 16 KiB (fd if len > 0: background apps) | the session's activity, for idle shutdown ([`Lifecycle`])                              |
+//! | `0x0309` | HANDOFF | `u32 window`, `u8 action` (1 URI, 2 open, 3 save, 4 email), `u8 files` (0..3), `u8 ask`, `u8 0`, `u32 len` ≤ 64 KiB; metadata fd then content fds | accepted for asynchronous portal operation; `-EBUSY` over 4 pending, `-EAGAIN` over 5 per 10 s |
+//!
+//! HANDOFF metadata: `u32 version` (1), text (≤32 KiB), subject (≤4 KiB),
+//! then one display name (≤255 B) per content fd, each a `u32` length and UTF-8.
+//! URI has no content fds. Open/save without files writes text as a `.txt` file;
+//! email without files uses text as the body. Each content file is ≤64 MiB.
+//! Opened files/attachments stay in the instance cache until session shutdown,
+//! capped at 256 MiB retained. Save copies are removed after writing.
 //!
 //! | Event    | Message      | Body (fd)                                                                                                                                                                                                |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -39,6 +47,7 @@ pub mod ty {
     pub const MEDIA: u16 = 0x0306;
     pub const MEDIA_CLOSE: u16 = 0x0307;
     pub const LIFECYCLE: u16 = 0x0308;
+    pub const HANDOFF: u16 = 0x0309;
 }
 
 pub mod ev {
@@ -155,10 +164,25 @@ pub enum Request {
     /// `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len`; fd (if len >
     /// 0): background apps.
     Lifecycle(Lifecycle),
+    /// Metadata memfd followed by `files` content fds; see `handoff`.
+    Handoff {
+        window: u32,
+        action: u8,
+        files: u8,
+        ask: bool,
+        len: u32,
+    },
 }
 
 impl Request {
     /// Whether this request comes with exactly one fd.
+    pub fn fd_count(&self) -> usize {
+        if let Request::Handoff { files, .. } = self {
+            return 1 + *files as usize;
+        }
+        self.takes_fd() as usize
+    }
+
     pub fn takes_fd(&self) -> bool {
         matches!(
             self,
@@ -166,6 +190,7 @@ impl Request {
                 | Request::ClipSet { .. }
                 | Request::OpenUri { .. }
                 | Request::Media { .. }
+                | Request::Handoff { .. }
         ) || matches!(self, Request::Lifecycle(l) if l.len > 0)
     }
 }
@@ -189,6 +214,26 @@ fn limited(v: u32, max: u32, what: &'static str) -> Result<u32, DecodeError> {
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
     let mut r = Reader::new(body);
     let req = match ty {
+        ty::HANDOFF => {
+            let window = r.u32()?;
+            let action = r.u8()?;
+            let files = r.u8()?;
+            let ask = r.bool()?;
+            if r.u8()? != 0
+                || !(1..=4).contains(&action)
+                || files > 3
+                || (action == 1 && files != 0)
+            {
+                return Err(DecodeError::Invalid("handoff"));
+            }
+            Request::Handoff {
+                window,
+                action,
+                files,
+                ask,
+                len: limited(nonzero(r.u32()?, "len")?, 64 << 10, "len")?,
+            }
+        }
         ty::START => Request::Start { features: r.u32()? },
         ty::NOTIFY => Request::Notify {
             id: nonzero(r.u32()?, "id")?,
@@ -233,6 +278,22 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
 
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match *req {
+        Request::Handoff {
+            window,
+            action,
+            files,
+            ask,
+            len,
+        } => {
+            let mut w = Writer::message(ty::HANDOFF, tag);
+            w.u32(window)
+                .u8(action)
+                .u8(files)
+                .u8(ask as u8)
+                .u8(0)
+                .u32(len);
+            w
+        }
         Request::Lifecycle(l) => {
             let mut w = Writer::message(ty::LIFECYCLE, tag);
             w.u32(l.windows).u32(l.services).u64(l.wakeup_ms).u32(l.len);
@@ -426,6 +487,13 @@ mod tests {
                 len: 5,
             },
             Request::OpenUri { len: 20 },
+            Request::Handoff {
+                window: 12,
+                action: 4,
+                files: 3,
+                ask: false,
+                len: 100,
+            },
             Request::Media {
                 player: 1,
                 len: 100,

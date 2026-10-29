@@ -78,6 +78,34 @@ sequenceDiagram
 
 Who may open which service: [security.md](security.md#the-bridge-socket).
 
+## Android → desktop handoff
+
+System request `0x0309` (HANDOFF) adds portal operations without changing the
+existing `0x0305` OPEN_URI layout. Body: `u32 window`, `u8 action` (1 URI, 2
+open file, 3 save file, 4 compose email), `u8 files` (0–3), `u8 ask` (boolean),
+`u8 0`, `u32 metadata_len` (1–65536). Fds: a sealed metadata memfd, followed by
+exactly `files` readable regular-file fds. Metadata is `u32 version` (1), text
+(≤32 KiB), subject (≤4 KiB), and one filename (≤255 bytes) per content fd;
+strings are `u32 length` plus UTF-8. Filenames cannot contain `/` or be
+`.`/`..`. URI operations require zero files and validate external schemes,
+rejecting `file:`, `content:`, `intent:`, `javascript:` and `data:`. `mailto:`
+is allowed.
+
+The reply acknowledges scheduling, not completion of a desktop dialog. The
+bridge logs portal cancellation/failure. Four operations may wait for portals;
+the existing five-per-ten-second rate limit also applies. Content is capped at
+64 MiB per file and copied to real files under the instance's cache directory.
+OpenURI OpenFile uses `ask` for the desktop chooser; SaveFile writes only to the
+portal-selected destination; Email uses `attachment_fds`. Opened files and
+attachments stay until session shutdown (256 MiB retained cap); save copies are
+removed after completion. Crash leftovers are reaped at the next handoff.
+
+The bridge obtains a fresh xdg-activation token from the source Wayland
+connection and supplies it to the portal; xdg-foreign supplies the parent.
+Text-only open/save creates a `.txt` file; text-only email creates a draft body.
+Text Copy uses the existing clipboard protocol. The reverse direction is tracked
+separately in [#66](https://github.com/sargunv/linux.apk/issues/66).
+
 ## Versioning
 
 Minor versions only add message types or trailing reply fields, and clients
