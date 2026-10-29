@@ -129,7 +129,7 @@ for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
 """
 
 [tasks."test:bionic"]
-description = "Android test binaries against the HALs and drivers, without booting (needs the image)"
+description = "Android binaries in the Flatpak session (host mode: bootless HAL harness)"
 run = """
 set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor
@@ -145,11 +145,15 @@ description = "AOSP's binder tests against the broker, then kernel binder (77: u
 run = "supervisor/tests/binder/run.sh"
 
 [tasks."test:boot"]
-description = "Boot a fresh headless test instance and run selftest: subuid mode, then single (subordinate ids hidden)"
-run = ["tests/boot.sh", "tests/boot.sh --no-subids"]
+description = "Fresh Flatpak boot and selftest; host comparison also checks both uid modes"
+run = """
+set -euo pipefail
+tests/boot.sh
+if [[ ${LINUXAPK_MODE:-flatpak} == host ]]; then tests/boot.sh --no-subids; fi
+"""
 
 [tasks."test:e2e"]
-description = "End-to-end suites against a headless test instance: audio, system-app, cli"
+description = "Audio, system-app and CLI suites in a private Flatpak on isolated KWin"
 run = "tests/e2e/run.sh"
 
 [tasks."test:a11y"]
@@ -161,13 +165,13 @@ description = "The compat corpus against a session (-- [--only PKG,...] [--windo
 # A named instance (default compat), so a test session: links are only logged,
 # and notifications and media players stay off the real desktop.
 env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') }}" }
-run = "cargo run -q --release -p linuxapk-compat --"
+run = "tests/compat/run.sh"
 
 # ---- run ---------------------------------------------------------------------
 
 [tasks.session]
 description = "The staged session launcher (mise run session -- start|stop|status|...)"
-run = "out/stage/libexec/linuxapk/linuxapk-session"
+run = "tools/dev/session.sh"
 
 [tasks.install-dev]
 description = "Add the staged manager to your app menu and APK handlers"

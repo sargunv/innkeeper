@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Run on-device test binaries in the same Flatpak session as the boot suites.
+set -euo pipefail
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+session=$repo/tools/dev/session.sh
+export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-bionic}
+root=$repo/out/test/bionic/$LINUXAPK_INSTANCE
+export LINUXAPK_DATA=${LINUXAPK_DATA:-$root/data}
+mkdir -p "$root"
+envs=() vendor=() testdir=""
+while (($#)); do
+  case $1 in
+    -e)
+      envs+=("$2")
+      shift 2
+      ;;
+    -v)
+      vendor+=("$(realpath "$2")")
+      shift 2
+      ;;
+    -t)
+      testdir=$(realpath "$2")
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *) break ;;
+  esac
+done
+(($#)) || {
+  echo 'missing test program' >&2
+  exit 2
+}
+data_home=$("$session" paths | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["data_home"])')
+addon=$data_home/linuxapk/addons/bionic
+cleanup() {
+  "$session" stop >/dev/null 2>&1 || true
+  "$session" reset >/dev/null 2>&1 || true
+  rm -rf "$addon"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+cleanup
+mkdir -p "$addon/vendor"
+for ((i = ${#vendor[@]} - 1; i >= 0; i--)); do cp -a "${vendor[i]}/." "$addon/vendor/"; done
+"$session" start --headless
+for _ in $(seq 150); do
+  [[ $("$session" exec getprop sys.boot_completed 2>/dev/null) == 1 ]] && break
+  sleep 2
+done
+[[ $("$session" exec getprop sys.boot_completed) == 1 ]] || {
+  echo 'session failed to boot' >&2
+  exit 1
+}
+# HAL clients need exclusive access to the composer, as in the bootless host
+# runner. Keep init/logd/properties and the HALs, but stop framework clients.
+"$session" exec stop
+for _ in $(seq 100); do
+  if ! "$session" exec pidof surfaceflinger >/dev/null; then break; fi
+  sleep 0.1
+done
+if [[ -n $testdir ]]; then
+  "$session" exec mkdir -p /data/nativetest64
+  tar -C "$testdir" -cf - . | "$session" exec tar -xf - -C /data/nativetest64
+fi
+# The live property service replaces props-shim in the no-init host harness.
+args=()
+for e in "${envs[@]}"; do
+  if [[ $e == LINUXAPK_PROPS=* ]]; then
+    IFS=';' read -ra props <<<"${e#*=}"
+    for p in "${props[@]}"; do
+      if [[ $p != ro.* ]]; then "$session" exec setprop "${p%%=*}" "${p#*=}"; fi
+    done
+    # Read-only test properties must be per-process; init has already seeded
+    # the real property area. The same shim serves them in host mode.
+    shim=$repo/out/build/android/tests/bionic/libprops_shim.so
+    "$session" exec mkdir -p /data/nativetest64
+    "$session" exec sh -c 'cat > /data/nativetest64/libprops_shim.so' <"$shim"
+    args+=("$e" LD_PRELOAD=/data/nativetest64/libprops_shim.so)
+  else
+    args+=("$e")
+  fi
+done
+"$session" exec mkdir -p /data/vendor/linuxapk/frames
+rc=0
+timeout "${TIMEOUT:-300}" "$session" exec env "${args[@]}" "$@" || rc=$?
+mkdir -p "$root/frames"
+"$session" exec tar -cf - -C /data/vendor/linuxapk/frames . | tar -xf - -C "$root/frames"
+exit "$rc"

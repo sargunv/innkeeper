@@ -44,3 +44,24 @@ with a private runtime dir an opened APK is missing unless that `doc` dir is
 also granted (`flatpak run --filesystem=<runtime dir>/doc`). Flatpak moves
 `flatpak run` into its own systemd scope; to cap a test session's memory, set
 `MemoryMax` on that `app-flatpak-dev.linuxapk.Manager-*.scope`.
+
+## Development
+
+`mise run session -- ...` uses `tools/dev/session.sh`. `dev-init.sh` registers a
+snapshot of `out/stage` once in the private `out/flatpak/user` installation. The
+runner uses `flatpak run --app-path=<absolute out/stage>`, so ordinary rebuilds
+do not export or package anything. Run `dev-init.sh` explicitly to refresh the
+registered deployment when testing an update and its menu entries. Both
+registration and sandbox HOME/XDG state stay under `out/`.
+
+The dev sandbox also grants the exact stage path read-only and starts its
+executables there. Portal-spawned sessions, including alarm wakeups, retain that
+prefix and grant. Registered dev menu commands forward to the current stage, so
+they also see ordinary rebuilds. XDG overrides are applied after Flatpak
+initializes its environment. Stop the named session before rebuilding the stage.
+
+The host driver sets `MemoryHigh=6G` and `MemoryMax=8G` on the app scope before
+releasing the initial start gate, and monitors alarm replacement scopes. The cap
+is a development/test facility outside the sandbox, with no systemd bus grant.
+`status` and `exec` use the launcher's existing control socket protocol from the
+host, avoiding a second Flatpak for each Android command.

@@ -77,17 +77,20 @@ own there: it uses the host's network, as a native app with `--share=network`
 does, and netd's routing and firewall rules are accepted and ignored, so per-app
 network restrictions don't apply. Only single-uid mode exists, and there are no
 cgroups: a session has no memory cap of its own. `selftest` checks the sandbox's
-grants and what it shows Android.
+grants and what it shows Android. Development and test sessions are capped
+externally by the host driver; the app receives no systemd permission.
 
 The Flatpak's grants are `--device=dri`, `--share=network`, `--share=ipc`,
-`--socket=wayland`, `--socket=pulseaudio` and talking to
-`org.freedesktop.Notifications` (the Notification portal can't replace a
-notification in place, show progress or take an inline reply). MPRIS players own
-names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which Flatpak grants
-every app for its own id. Links and files go through the same portals as
-outside, and clipboard sync needs a compositor that offers data control to
-sandboxed clients (KWin does). App-menu entries go through the DynamicLauncher
-portal, so the user confirms each one.
+`--socket=wayland`, `--socket=pulseaudio` and talking to `org.a11y.Bus` (the
+baseline AT-SPI proxy hides the `org.a11y.Status` properties the bridge
+follows), the system bus's `org.freedesktop.UPower` (the desktop baseline has no
+battery portal), and `org.freedesktop.Notifications` (the Notification portal
+can't replace a notification in place, show progress or take an inline reply).
+MPRIS players own names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`,
+which Flatpak grants every app for its own id. Links and files go through the
+same portals as outside, and clipboard sync needs a compositor that offers data
+control to sandboxed clients (KWin does). App-menu entries go through the
+DynamicLauncher portal, so the user confirms each one.
 
 ## Desktop exposure
 

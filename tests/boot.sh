@@ -8,24 +8,19 @@
 # stand-ins), so the session runs in single mode.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+session=$repo/tools/dev/session.sh
 [[ -x $session ]] || {
   echo "no $session (run \`mise run build\`)" >&2
   exit 1
 }
 mode=subuid
+[[ ${LINUXAPK_MODE:-flatpak} == flatpak ]] && mode=single
 if [[ ${1:-} == --no-subids ]]; then
   mode=single
   export LINUXAPK_SUBUID_FILE=/dev/null LINUXAPK_SUBGID_FILE=/dev/null
 fi
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-boot}
 export LINUXAPK_DATA=$repo/out/test/boot/data-$mode
-
-avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo)
-((avail >= 12)) || {
-  echo "only ${avail} GB available; not starting a session" >&2
-  exit 1
-}
 
 fail=0
 check() { # name expected actual
@@ -38,15 +33,17 @@ uid_mode() { "$session" status | sed -n 's/^uid-mode=//p'; }
 
 "$session" stop >/dev/null
 "$session" reset >/dev/null
-trap '"$session" stop >/dev/null' EXIT
-"$session" start --headless
+trap '"$session" stop >/dev/null; "$session" reset >/dev/null' EXIT
+"$session" wait
 t=$SECONDS
+"$session" start --headless
+deadline=$((SECONDS + 300))
 until [[ $("$session" exec getprop sys.boot_completed 2>/dev/null) == 1 ]]; do
   "$session" status >/dev/null || {
     echo "FAIL the session stopped while booting (\`LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE mise run session -- log\`)" >&2
     exit 1
   }
-  ((SECONDS - t < 300)) || {
+  ((SECONDS < deadline)) || {
     echo "FAIL not booted after 300 s" >&2
     exit 1
   }

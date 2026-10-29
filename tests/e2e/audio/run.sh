@@ -24,7 +24,7 @@ game=io.anuke.mindustry
 [[ ${1:-} == --game ]] && game=$2
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-audio-e2e}
 export LINUXAPK_AUDIO_SINK=linuxapk_test
-S=$repo/out/stage/libexec/linuxapk/linuxapk-session
+S=$repo/tools/dev/session.sh
 T=$repo/out/test/audio
 [[ -x $S && -f $tone ]] || {
   echo "no staged session or $tone (run \`mise run build\`)" >&2
@@ -48,7 +48,7 @@ record() { # seconds file
 }
 
 if ! "$S" status >/dev/null 2>&1; then
-  "$S" start --headless
+  if [[ ${LINUXAPK_NESTED:-} == 1 ]]; then "$S" start; else "$S" start --headless; fi
 fi
 for _ in $(seq 120); do
   [[ $(timeout 10 "$S" exec getprop sys.boot_completed 2>/dev/null) == 1 ]] && break

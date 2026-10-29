@@ -66,7 +66,23 @@ impl Session {
     }
 
     fn state(&self) -> Option<linuxapk_session::Status> {
-        Some(linuxapk_session::status(&self.paths()?))
+        if let Some(paths) = self.paths() {
+            return Some(linuxapk_session::status(&paths));
+        }
+        // An external dev/test driver runs outside the installed prefix and
+        // may reach a session in another sandbox. Query that driver instead.
+        let o = Command::new(&self.launcher).arg("status").output().ok()?;
+        let text = String::from_utf8_lossy(&o.stdout);
+        Some(linuxapk_session::Status {
+            pid: text
+                .lines()
+                .find_map(|l| l.strip_prefix("running: host pid ")?.parse().ok()),
+            uid_mode: if text.lines().any(|l| l == "uid-mode=subuid") {
+                UidMode::Subuid
+            } else {
+                UidMode::Single
+            },
+        })
     }
 
     pub fn running(&self) -> bool {
@@ -87,7 +103,13 @@ impl Session {
 
     /// The session's cgroup dir (host mode), for memory accounting.
     pub fn cgroup(&self) -> Option<PathBuf> {
-        linuxapk_session::cgroup(&self.paths()?)
+        if let Some(paths) = self.paths() {
+            return linuxapk_session::cgroup(&paths);
+        }
+        let o = Command::new(&self.launcher).arg("cgroup").output().ok()?;
+        o.status
+            .success()
+            .then(|| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
     }
 
     /// Runs argv inside the session as root; returns (success, stdout, stderr).
@@ -162,17 +184,22 @@ impl Session {
     /// Running state, boot state, memory use and uid mode, for status
     /// displays.
     pub fn status(&self) -> Status {
-        let Some(paths) = self.paths() else {
+        let Some(s) = self.state() else {
             return Status::default();
         };
-        let s = linuxapk_session::status(&paths);
         if s.pid.is_none() {
             return Status::default();
         }
         Status {
             running: true,
             booted: self.booted(),
-            memory: linuxapk_session::memory(&paths),
+            memory: self.cgroup().and_then(|cg| {
+                std::fs::read_to_string(cg.join("memory.current"))
+                    .ok()?
+                    .trim()
+                    .parse()
+                    .ok()
+            }),
             uid_mode: Some(s.uid_mode),
         }
     }
@@ -184,9 +211,24 @@ impl Session {
     /// Whether the image is fetched, extracted and flattened (so starting
     /// doesn't download it first).
     pub fn image_ready(&self) -> bool {
-        self.paths().and_then(|p| p.image().ok()).is_some_and(|i| {
-            i.img.join("system/system").is_dir() && i.apexdir.join("apex-info-list.xml").is_file()
-        })
+        if let Some(paths) = self.paths() {
+            return paths.image().is_ok_and(|i| {
+                i.img.join("system/system").is_dir()
+                    && i.apexdir.join("apex-info-list.xml").is_file()
+            });
+        }
+        let Ok(o) = Command::new(&self.launcher).arg("image").output() else {
+            return false;
+        };
+        let text = String::from_utf8_lossy(&o.stdout);
+        let path = |key: &str| {
+            text.lines()
+                .find_map(|l| l.strip_prefix(key))
+                .map(PathBuf::from)
+        };
+        o.status.success()
+            && path("img=").is_some_and(|p| p.join("system/system").is_dir())
+            && path("apex=").is_some_and(|p| p.join("apex-info-list.xml").is_file())
     }
 
     /// Fetches and unpacks the image (about 1.2 GB to download). Its

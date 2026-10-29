@@ -7,7 +7,7 @@
 # the broker) from the host.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+session=$repo/tools/dev/session.sh
 top=0
 [[ ${1:-} == -n ]] && top=$2
 
@@ -16,8 +16,7 @@ pid=$("$session" status | sed -n 's/^running: host pid //p')
   echo "no running session${LINUXAPK_INSTANCE:+ ($LINUXAPK_INSTANCE)}" >&2
   exit 1
 }
-unit=linuxapk-session${LINUXAPK_INSTANCE:+-$LINUXAPK_INSTANCE}
-cg=/sys/fs/cgroup$(systemctl --user show -P ControlGroup "$unit")
+cg=$("$session" cgroup)
 
 # "pss_kb rss_kb pid name" for each readable /proc/<pid> in $@ (default: all).
 # shellcheck disable=SC2016 # also runs inside the session

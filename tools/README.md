@@ -18,3 +18,8 @@ Build and dev tooling; never shipped.
   bug reports and the README media issue.
 
 How these fit together: [docs/development.md](../docs/development.md).
+
+- **`dev/session.sh`, `dev/linuxapk.sh`, `dev/run.py`**: the staged Flatpak dev
+  driver, private installation and scratch HOME/XDG dirs, host-side memory caps
+  and the launcher control protocol. `LINUXAPK_MODE=host` selects the comparison
+  runtime.

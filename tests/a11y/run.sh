@@ -12,8 +12,9 @@ export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-a11y}
 T=$repo/out/test/a11y/$LINUXAPK_INSTANCE
 export LINUXAPK_DATA=${LINUXAPK_DATA:-$T/android-data}
 N=$T/desktop # the nested desktop's runtime and XDG dirs
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+session=$repo/tools/dev/session.sh
 probes=$repo/out/test/probes/LinuxApkProbes.apk
+host_runtime=$XDG_RUNTIME_DIR
 unit=linuxapk-a11y-kwin-$LINUXAPK_INSTANCE
 sock=lapk-a11y-$LINUXAPK_INSTANCE
 [[ -x $session && -f $probes ]] || {
@@ -23,7 +24,8 @@ sock=lapk-a11y-$LINUXAPK_INSTANCE
 
 cleanup() {
   "$session" stop >/dev/null 2>&1 || true
-  systemctl --user stop "$unit" 2>/dev/null || true
+  "$session" reset >/dev/null 2>&1 || true
+  XDG_RUNTIME_DIR="$host_runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemctl --user stop "$unit" 2>/dev/null || true
   [[ -z ${rt:-} ]] || rm -rf "$rt"
 }
 trap cleanup EXIT
@@ -67,7 +69,7 @@ a11y_enabled() {
 }
 a11y_enabled true
 
-export WAYLAND_DISPLAY=$rt/$sock DBUS_SESSION_BUS_ADDRESS=$bus
+export WAYLAND_DISPLAY=$rt/$sock DBUS_SESSION_BUS_ADDRESS=$bus XDG_RUNTIME_DIR=$rt
 unset DISPLAY AT_SPI_BUS_ADDRESS
 "$session" reset >/dev/null
 "$session" start >/dev/null

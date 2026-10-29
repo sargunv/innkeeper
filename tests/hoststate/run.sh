@@ -14,7 +14,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+session=$repo/tools/dev/session.sh
 probes=$repo/out/test/probes/LinuxApkProbes.apk
 py=${LINUXAPK_DBUSMOCK_PYTHON:-/usr/bin/python3}
 deny="" keep=""
@@ -36,11 +36,6 @@ done
   echo "python-dbusmock is missing for $py (set LINUXAPK_DBUSMOCK_PYTHON)" >&2
   exit 2
 }
-avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo)
-((avail >= 12)) || {
-  echo "only ${avail} GB available; not starting a session" >&2
-  exit 2
-}
 
 T=$repo/out/test/hoststate
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-hoststate}
@@ -55,7 +50,9 @@ pids=()
 # shellcheck disable=SC2329 # run by the EXIT trap
 cleanup() {
   "$session" stop >/dev/null 2>&1 || true
+  "$session" reset >/dev/null 2>&1 || true
   ((${#pids[@]})) && kill "${pids[@]}" 2>/dev/null
+  [[ -z ${rt:-} ]] || rm -rf "$rt"
   return 0
 }
 trap cleanup EXIT
@@ -125,6 +122,8 @@ wait_for() {
   grep -E "${4:-.}" <<<"$out" | head -5 | sed 's/^/     /'
 }
 
+rt=$(mktemp -d -p "$XDG_RUNTIME_DIR" lapk-XXXXXX)
+export XDG_RUNTIME_DIR=$rt
 "$session" start --headless >/dev/null
 t=$SECONDS
 until [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; do
@@ -159,7 +158,11 @@ wait_for "balanced profile: battery saver off" "s settings get global low_power"
 
 # Metered: reaches the system app (host mode can't apply it to Ethernet).
 set_prop org.freedesktop.NetworkManager /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered '<uint32 1>'
-wait_for "metered host connection reaches Android" "s logcat -d -s LinuxApkHostState:I" "host network metered=2"
+if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
+  wait_for "host network becomes metered" "s logcat -d -s LinuxApkHostNetwork:I" "host network metered"
+else
+  wait_for "metered host connection reaches Android" "s logcat -d -s LinuxApkHostState:I" "host network metered=2"
+fi
 
 # Locale: plasma-localerc, live. US English starts weeks on Sunday, so
 # LC_TIME=en_GB adds the Monday week start as a regional preference.

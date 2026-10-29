@@ -12,7 +12,10 @@ s (15 s for games) for crashes, ANRs and death, check window focus, take a
 screenshot that must not be blank (one colour over 99.5%), run the optional
 script (syntax at the top of `corpus.toml`), then tap, scroll and Back, and scan
 the log for known failure signatures (MediaCodec, WebView, GL/EGL/Vulkan errors,
-Play services). Logs and screenshots go to `out/test/compat/<pkg>/`.
+Play services). Logs, screenshots and results go to
+`out/test/compat/<instance>/<pkg>/` and
+`out/test/compat/<instance>/results.json`. Separate named instances can run
+concurrently without overwriting evidence.
 
 - **Results:** works, partly works (the first frame was fine, a later check
   failed), or doesn't work. A session restart during an app is retried once and
@@ -20,8 +23,8 @@ Play services). Logs and screenshots go to `out/test/compat/<pkg>/`.
 - **Gate:** an app worse than in `results.json`, or a measurement over its
   budget by more than its margin ([budgets.toml](budgets.toml): cold session
   start, warm app start, idle session memory), fails the run and leaves the
-  baseline alone; `--accept` records it anyway. `-- report` rewrites
-  `docs/compatibility.md` from `results.json`.
+  baseline alone. Only `--accept` updates the committed baseline and report.
+  `-- report` rewrites `docs/compatibility.md` from `results.json`.
 - **Session:** the named instance `LINUXAPK_INSTANCE` (default `compat`) if it
   is running, or else one it starts (headless unless `--window`) and stops at
   the end. Only a session it starts gets its start time and idle memory
@@ -34,5 +37,13 @@ Play services). Logs and screenshots go to `out/test/compat/<pkg>/`.
   `libgodot_android.so`, Compose classes, `libgdx.so`, `libmaplibre.so`); there
   is no FOSS Unity or Xamarin app to test.
 - **Triage:** a failing app gets a GitHub issue with the failure signature from
-  its `out/test/compat/<pkg>/` logs; `manual` notes in the corpus list checks
-  the harness doesn't automate yet.
+  its `out/test/compat/<instance>/<pkg>/` logs; `manual` notes in the corpus
+  list checks the harness doesn't automate yet.
+
+The default driver uses the current stage in a real Flatpak sandbox. For a
+windowed run use
+`LINUXAPK_INSTANCE=compat-window tests/nested.sh mise run test:compat -- --window`.
+`LINUXAPK_MODE=host` selects the host comparison. The Flatpak has no TUN device,
+so Rethink's VPN check currently reports partly working; its UI still renders.
+The arm64-only Open Sudoku APK cannot install without binary translation.
+Budgets remain unchanged for both modes.

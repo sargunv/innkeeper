@@ -43,3 +43,9 @@ Tests: `cargo test -p linuxapk-session` (in `mise run test`: subordinate id
 ranges, the uid mode a `/data` keeps, the pin, property merging, mountinfo and
 apex-info parsing) and `mise run test:boot`, which boots a fresh headless
 instance in each uid mode and runs `selftest`.
+
+The development driver is `tools/dev/session.sh`: it mounts the current stage as
+Flatpak `/app` and caps its scope from the host. Flatpak composition uses
+reflink copies because separate filesystem grants cannot hardlink across mount
+points. Host-mode systemd commands explicitly reach the host user manager while
+the bridge retains an isolated test desktop.

@@ -36,6 +36,9 @@
 # Logs: out/test/binder/<broker|kernel>-<test>.log
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
+  exec "$here/flatpak.sh" "$@"
+fi
 # shellcheck source=../../../tests/bionic/lib.sh
 . "$here/../../../tests/bionic/lib.sh"
 logs=$repo/out/test/binder

@@ -6,9 +6,8 @@
 //!
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
 //! one if needed, and stopping it at the end), runs every app, writes
-//! out/test/compat/, and then, unless an app that worked before got worse,
-//! tests/compat/results.json and docs/compatibility.md. `--accept` records
-//! the results even with regressions.
+//! out/test/compat/<instance>/. `--accept` also records the results in
+//! tests/compat/results.json and docs/compatibility.md.
 
 mod app;
 mod budget;
@@ -127,7 +126,7 @@ fn real_main() -> Result<ExitCode> {
     // A dev tool: it runs against the checkout it was built in, and its staged
     // session.
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let launcher = repo.join("out/stage/libexec/linuxapk/linuxapk-session");
+    let launcher = repo.join("tools/dev/session.sh");
     let corpus = corpus::load(&repo.join("tests/compat/corpus.toml"))?;
     let baseline_path = repo.join("tests/compat/results.json");
     let baseline = Results::load(&baseline_path).unwrap_or_default();
@@ -151,8 +150,12 @@ fn real_main() -> Result<ExitCode> {
     if apps.is_empty() {
         bail!("no apps selected");
     }
-    let out = repo.join("out/test/compat");
-    let apk_dir = out.join("corpus");
+    let out = repo
+        .join("out/test/compat")
+        .join(linuxapk_core::paths::instance()?);
+    let apk_dir = env::var_os("LINUXAPK_CORPUS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join("out/test/compat/corpus"));
     let mut apks = vec![];
     for a in &apps {
         apks.push(corpus::fetch(a, &apk_dir)?);
@@ -274,12 +277,15 @@ fn real_main() -> Result<ExitCode> {
         eprintln!("compat: REGRESSION {r}");
     }
     println!("{}", report::summary(&results));
-    if regressions.is_empty() || o.accept {
+    if o.accept {
         new.save(&baseline_path)?;
         report::write_markdown(&repo.join("docs/compatibility.md"), &new, &corpus, &budgets)?;
         eprintln!("compat: wrote tests/compat/results.json and docs/compatibility.md");
     } else {
-        eprintln!("compat: baseline kept; results in out/test/compat/ (--accept to record)");
+        eprintln!(
+            "compat: baseline kept; results in {} (--accept to record)",
+            out.display()
+        );
     }
     Ok(if regressions.is_empty() {
         ExitCode::SUCCESS

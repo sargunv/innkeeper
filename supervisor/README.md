@@ -127,3 +127,10 @@ there, so pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).
+
+In Flatpak, vold uevent sockets request a kernel-assigned netlink port:
+sandboxes share the host network and separate pid namespaces otherwise give
+concurrent vold processes the same port. This applies only to
+`NETLINK_KOBJECT_UEVENT`, preserving request/reply protocols. Binder tests
+default to the Flatpak bionic runner; a kernel binder oracle requires binderfs
+and is unavailable there (exit 77 after broker tests pass).

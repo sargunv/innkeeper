@@ -13,7 +13,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
+session=$repo/tools/dev/session.sh
 s() { "$session" exec "$@"; }
 probes=$repo/out/test/probes/LinuxApkProbes.apk
 fail=0

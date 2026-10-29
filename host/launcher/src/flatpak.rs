@@ -479,6 +479,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
 pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Result<()> {
     let p = cfg_paths;
     let mut c = Command::new("flatpak-spawn");
+    c.arg("/usr/bin/env");
     for (k, v) in env::vars_os() {
         let name = k.to_string_lossy();
         if name.starts_with("LINUXAPK_")
@@ -490,7 +491,9 @@ pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Res
             ]
             .contains(&name.as_ref())
         {
-            let mut a = OsString::from("--env=");
+            // Flatpak initializes XDG_*_HOME itself. Set them in the child
+            // command, after that initialization, as the dev driver does.
+            let mut a = OsString::new();
             a.push(&k);
             a.push("=");
             a.push(&v);

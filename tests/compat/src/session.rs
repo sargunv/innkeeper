@@ -7,6 +7,7 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,7 @@ const IDLE_SETTLE: Duration = Duration::from_secs(90);
 pub struct Session {
     core: launcher::Session,
     started: Cell<bool>,
+    driver: PathBuf,
     /// LinuxApkProbes.apk (out/test/probes), for its input harness.
     pub probes: PathBuf,
 }
@@ -46,7 +48,8 @@ pub struct Output {
 impl Session {
     pub fn new(launcher: PathBuf, probes: PathBuf) -> Self {
         Self {
-            core: launcher::Session::at(launcher),
+            core: launcher::Session::at(launcher.clone()),
+            driver: launcher,
             started: Cell::new(false),
             probes,
         }
@@ -87,7 +90,21 @@ impl Session {
 
     /// The host bridge's log, in the session's state directory.
     fn bridge_log_path(&self) -> PathBuf {
-        paths::state_dir().unwrap_or_default().join("bridge.log")
+        let state = Command::new(&self.driver)
+            .arg("paths")
+            .output()
+            .ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| v["state"].as_str().map(PathBuf::from));
+        state
+            .map(|s| {
+                s.join(format!(
+                    "linuxapk-{}",
+                    paths::instance().unwrap_or_default()
+                ))
+            })
+            .unwrap_or_else(|| paths::state_dir().unwrap_or_default())
+            .join("bridge.log")
     }
 
     /// The bridge log's current size, so a step can look only at what comes
@@ -142,6 +159,11 @@ impl Session {
     /// Starts the session and waits until Android has booted, polling more
     /// often than [`launcher::Session::wait_booted`] does.
     fn boot_timed(&self, window: bool) -> Result<Duration> {
+        // Admission waits for host memory are not Android startup time.
+        let ready = Command::new(&self.driver).arg("wait").status()?;
+        if !ready.success() {
+            bail!("the session driver could not admit a boot");
+        }
         let t = Instant::now();
         self.start(!window, &|m: &str| eprintln!("compat: {m}"))?;
         while !self.booted() {
@@ -271,6 +293,7 @@ impl Drop for Session {
             if let Err(e) = self.stop() {
                 eprintln!("compat: {e:#}");
             }
+            let _ = Command::new(&self.driver).arg("reset").status();
         }
     }
 }
