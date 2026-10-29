@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use zbus::zvariant::{StructureBuilder, Value};
 
+use super::launcher_entry::LauncherEntry;
 use super::proto::{ev, notify_event};
 use crate::ipc::blob::{self, Doc, Image};
 use crate::ipc::server::Events;
@@ -35,7 +36,9 @@ pub mod flags {
     pub const SILENT: u8 = 2;
     /// Has a content intent: clicking it opens the app.
     pub const CLICKABLE: u8 = 4;
-    pub const ALL: u8 = ONGOING | SILENT | CLICKABLE;
+    /// Eligible for a Launcher3 notification dot (channel allows badges, not ongoing).
+    pub const BADGE: u8 = 8;
+    pub const ALL: u8 = ONGOING | SILENT | CLICKABLE | BADGE;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +170,7 @@ struct Maps {
     routes: HashMap<u32, Route>,
     /// (client, Android-side id) -> desktop id.
     ids: HashMap<(u64, u32), u32>,
+    launcher: LauncherEntry,
 }
 
 pub struct NotifyHub {
@@ -211,14 +215,22 @@ impl NotifyHub {
 
     /// Shows or updates `note` for (client, id). Returns the desktop id.
     pub fn post(&self, client: u64, events: &Events, id: u32, note: &Note) -> anyhow::Result<u32> {
-        let replaces = self
-            .maps
-            .lock()
-            .unwrap()
-            .ids
-            .get(&(client, id))
-            .copied()
-            .unwrap_or(0);
+        // Launcher state follows Android's active notifications even when DND
+        // suppresses the popup or the notification server cannot display it.
+        let mut m = self.maps.lock().unwrap();
+        m.launcher.post(&self.conn, client, id, note);
+        let replaces = m.ids.get(&(client, id)).copied().unwrap_or(0);
+        if super::settings::notifications_inhibited(&self.conn) {
+            crate::info!("notify: {} ({id}): suppressed by host DND", note.package);
+            // An update during DND also withdraws any earlier popup.
+            if replaces != 0 {
+                m.ids.remove(&(client, id));
+                m.routes.remove(&replaces);
+                drop(m);
+                self.close_host(replaces);
+            }
+            return Ok(0);
+        }
         let mut actions: Vec<String> = Vec::new();
         let mut keys = Vec::new();
         if note.flags & flags::CLICKABLE != 0 {
@@ -289,7 +301,6 @@ impl NotifyHub {
             )?
             .body()
             .deserialize()?;
-        let mut m = self.maps.lock().unwrap();
         if replaces != 0 && replaces != host {
             m.routes.remove(&replaces);
         }
@@ -310,12 +321,17 @@ impl NotifyHub {
     pub fn close(&self, client: u64, id: u32) {
         let host = {
             let mut m = self.maps.lock().unwrap();
+            m.launcher.close(&self.conn, client, id);
             let Some(host) = m.ids.remove(&(client, id)) else {
                 return;
             };
             m.routes.remove(&host);
             host
         };
+        self.close_host(host);
+    }
+
+    fn close_host(&self, host: u32) {
         let r = self
             .conn
             .call_method(Some(DEST), PATH, Some(DEST), "CloseNotification", &(host,));
@@ -326,22 +342,18 @@ impl NotifyHub {
 
     pub fn count(&self, client: u64) -> usize {
         let m = self.maps.lock().unwrap();
-        m.ids.keys().filter(|(c, _)| *c == client).count()
+        m.launcher.count(client)
     }
 
     pub fn contains(&self, client: u64, id: u32) -> bool {
-        self.maps.lock().unwrap().ids.contains_key(&(client, id))
+        self.maps.lock().unwrap().launcher.contains(client, id)
     }
 
     /// Closes everything `client` posted (its connection ended).
     pub fn close_all(&self, client: u64) {
         let ids: Vec<u32> = {
             let m = self.maps.lock().unwrap();
-            m.ids
-                .keys()
-                .filter(|(c, _)| *c == client)
-                .map(|k| k.1)
-                .collect()
+            m.launcher.ids(client)
         };
         for id in ids {
             self.close(client, id);
@@ -352,6 +364,7 @@ impl NotifyHub {
     pub fn close_everything(&self) {
         let hosts: Vec<u32> = {
             let mut m = self.maps.lock().unwrap();
+            m.launcher.clear(&self.conn);
             m.ids.clear();
             m.routes.drain().map(|(h, _)| h).collect()
         };
@@ -424,6 +437,9 @@ impl NotifyHub {
                     return;
                 };
                 m.ids.remove(&(r.client, r.id));
+                // The popup disappeared, but Android may retain the notification
+                // (notably a non-clearable ongoing task). Only NOTIFY_CLOSE,
+                // disconnect or shutdown removes its launcher contribution.
                 // 2: dismissed by the user; 3: closed by us.
                 if reason == 2 {
                     crate::info!("notify: {host} ({}): dismissed", r.id);

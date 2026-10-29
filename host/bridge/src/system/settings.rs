@@ -136,6 +136,24 @@ impl SettingsHub {
     }
 }
 
+/// Read Plasma's DND immediately before each popup, without a stale property
+/// cache. GNOME's portal does not expose show-banners on our baseline; GNOME
+/// Shell applies its own DND policy to Notify calls (including its critical
+/// urgency exception). No additional sandbox permission is needed.
+pub fn notifications_inhibited(conn: &zbus::blocking::Connection) -> bool {
+    conn.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &("org.freedesktop.Notifications", "Inhibited"),
+    )
+    .ok()
+    .and_then(|m| m.body().deserialize::<OwnedValue>().ok())
+    .and_then(|v| bool::try_from(&v).ok())
+    .unwrap_or(false)
+}
+
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
     if let Err(e) = std::thread::Builder::new().name(name.into()).spawn(f) {
         crate::warn!("spawn {name}: {e}");

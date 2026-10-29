@@ -31,6 +31,11 @@ class NotificationForwarder : NotificationListenerService() {
     f.lifecycle.poke()
   }
 
+  override fun onNotificationRankingUpdate(rankingMap: RankingMap) {
+    val f = feature ?: return
+    f.handler.post { f.notifications.refresh() }
+  }
+
   override fun onNotificationRemoved(sbn: StatusBarNotification) {
     val f = feature ?: return
     f.handler.post { f.notifications.removed(sbn.key) }

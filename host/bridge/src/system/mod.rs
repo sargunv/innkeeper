@@ -21,6 +21,7 @@
 
 pub mod clipboard;
 pub mod handoff;
+mod launcher_entry;
 pub mod mpris;
 pub mod notify;
 pub mod openuri;
@@ -275,10 +276,12 @@ impl SystemService {
         };
         if !self.shared.policy.presence {
             crate::info!(
-                "notify: {}: not shown (test session): {} {:?}",
+                "notify: {}: not shown (test session): {} {:?} progress={} badge={}",
                 self.label,
                 note.package,
-                crate::ipc::wire::truncate(&note.title, 80)
+                crate::ipc::wire::truncate(&note.title, 80),
+                note.progress,
+                note.flags & notify::flags::BADGE != 0
             );
             return Reply::ok();
         }

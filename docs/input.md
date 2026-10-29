@@ -151,6 +151,22 @@ logic is `TextInputSession.kt` in `:protocol`.
 
 ## Known limits
 
+- Notification progress and badge counts use Unity LauncherEntry: Plasma and
+  Ubuntu Dock / Dash to Dock display them; stock GNOME Shell does not. No
+  alternative is provided. Progress comes from `EXTRA_PROGRESS` or Android 16
+  `ProgressStyle`. Unity has no indeterminate state, so busy work shows at 50%;
+  multiple active tasks use their equally weighted mean. Badge counts count
+  notifications eligible for Launcher3 dots (channel/ranking permits badges, no
+  ongoing notifications or group summaries), not unread messages. Cancelling a
+  notification or disconnecting clears its contribution.
+- On Plasma, host Do Not Disturb suppresses desktop notification calls at the
+  bridge, reading `org.freedesktop.Notifications.Inhibited` before each post.
+  Progress and counts still update; suppressed popups are not replayed when DND
+  ends. On GNOME, Shell applies its own DND policy to our host notifications:
+  ordinary banners are suppressed, but critical call/alarm notifications can
+  bypass DND. GNOME 48's portal does not export `show-banners`, so the bridge
+  cannot suppress that exception without additional settings access (#79). The
+  Android interruption filter is unchanged.
 - Android sees no physical keyboard (`Configuration.keyboard`), and key events
   still carry `Virtual.kcm`'s characters: apps that read
   `KeyEvent.getUnicodeChar()` outside a text field (games, terminals' key
