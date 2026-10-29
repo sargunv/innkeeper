@@ -81,7 +81,7 @@ set -euo pipefail
 tools/build/install-component.sh system
 d=out/build/system/install/share/linuxapk/android/system/bin
 install -m 755 android/system/iptables/linuxapk-iptables "$d/"
-cp -P android/system/iptables/{iptables,iptables-restore,ip6tables,ip6tables-restore} "$d/"
+for f in iptables iptables-restore ip6tables ip6tables-restore; do cp -P "android/system/iptables/$f" "$d/"; done
 """
 
 [tasks."build:system-app"]
@@ -97,7 +97,7 @@ run = "image/tools/build.sh"
 description = "The overlay (android/overlay) and the image's config and scripts"
 run = """
 set -euo pipefail
-rm -rf out/build/{overlay,image}/install
+rm -rf out/build/overlay/install out/build/image/install
 mkdir -p out/build/overlay/install/share/linuxapk/android
 cp -a android/overlay/. out/build/overlay/install/share/linuxapk/android/
 i=out/build/image/install
