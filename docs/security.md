@@ -80,17 +80,28 @@ its own. `selftest` checks the sandbox's grants and what it shows Android.
 Development and test sessions are capped externally by the host driver; the app
 receives no systemd permission.
 
-The Flatpak's grants are `--device=dri`, `--share=network`, `--share=ipc`,
-`--socket=wayland`, `--socket=pulseaudio` and talking to `org.a11y.Bus` (the
-baseline AT-SPI proxy hides the `org.a11y.Status` properties the bridge
-follows), the system bus's `org.freedesktop.UPower` (the desktop baseline has no
-battery portal), and `org.freedesktop.Notifications` (the Notification portal
-can't update notifications in place or show progress). MPRIS players own names
-under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which Flatpak grants every
-app for its own id. Links and files go through the same portals as outside, and
-clipboard sync uses data control where available (KWin), or the display
-connection while a Linux.apk window has focus (GNOME). App-menu entries go
-through the DynamicLauncher portal, so the user confirms each one.
+With `--device=input`, every Android app can read the host's input devices,
+including keyboards and mice, just as a native Flatpak with that grant could.
+This exposure is accepted under desktop parity for controller support. EventHub
+scans the broker's private discovery directory to avoid duplicate keyboard,
+mouse and controller routes; that routing is not an access boundary.
+
+The Flatpak's grants are `--device=dri`, `--device=input`, `--share=network`,
+`--share=ipc`, `--socket=wayland`, `--socket=pulseaudio` and talking to
+`org.a11y.Bus` (the baseline AT-SPI proxy hides the `org.a11y.Status` properties
+the bridge follows), the system bus's `org.freedesktop.UPower` (the desktop
+baseline has no battery portal), and `org.freedesktop.Notifications` (the
+Notification portal can't update notifications in place or show progress). MPRIS
+players own names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which
+Flatpak grants every app for its own id. `--device=input` lets the bridge open
+controllers the user can already access through uaccess ACLs, including rumble
+writes; it also lets every Android app read host input devices, keyboards and
+mice included. This is accepted under desktop parity, as for game Flatpaks with
+the same grant. The grant requires Flatpak 1.15.6 or newer; Debian 13 ships
+1.16. Links and files go through the same portals as outside, and clipboard sync
+uses data control where available (KWin), or the display connection while a
+Linux.apk window has focus (GNOME). App-menu entries go through the
+DynamicLauncher portal, so the user confirms each one.
 
 ## Desktop exposure
 

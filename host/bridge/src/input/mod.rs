@@ -7,6 +7,7 @@
 //! connection through the [`Hub`].
 
 pub mod evdev;
+pub mod gamepad;
 pub(crate) mod gestures;
 mod hub;
 pub mod ime;

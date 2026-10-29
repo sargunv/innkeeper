@@ -132,6 +132,7 @@ if [[ ${1:-} == --group ]]; then
       s dumpsys input >"$T/devices.txt"
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
       file_has "$T/devices.txt" 'Linux.apk Mouse'
+      /usr/bin/python3 "$here/gamepads.py" check "$T/devices.txt"
       # Keep one fake KWin device across enter/leave and drag. Submit the
       # ordered stream without observation barriers between evdev devices.
       mkfifo "$T/seat"
@@ -414,6 +415,10 @@ mkdir -p "$T"
 export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
 keeper=""
 setup_lock=""
+export LINUXAPK_GAMEPAD_TEST_DIR=$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/gp
+/usr/bin/python3 "$here/gamepads.py" serve "$LINUXAPK_GAMEPAD_TEST_DIR" &
+gamepads=$!
+until_ok test -f "$LINUXAPK_GAMEPAD_TEST_DIR/ready"
 mod=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
 cleanup() {
   local result=$?
@@ -431,6 +436,8 @@ cleanup() {
   "$S" stop >/dev/null 2>&1 || true
   "$S" reset >/dev/null 2>&1 || true
   if [[ -n $keeper ]]; then wait "$keeper" 2>/dev/null || true; fi
+  kill "$gamepads" 2>/dev/null || true
+  wait "$gamepads" 2>/dev/null || true
   pactl unload-module "$mod"
 }
 trap cleanup EXIT

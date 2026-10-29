@@ -159,8 +159,8 @@ every per-instance path.
 ## Host safety
 
 The Flatpak sandbox is the boundary. `selftest` verifies its filesystem and
-device grants, no host home or block/input devices, no access to the host
-Flatpak service, unmapped supplementary groups, unwritable sysfs, no visible
-FUSE connections, refused mounts and sysrq, no capabilities, no new privileges,
-and both seccomp filters. `mise run test:e2e -- boot` runs it against a fresh
-named session. See [security.md](security.md).
+device grants, no host home or block devices, no access to the host Flatpak
+service, unmapped supplementary groups, unwritable sysfs, no visible FUSE
+connections, refused mounts and sysrq, no capabilities, no new privileges, and
+both seccomp filters. `mise run test:e2e -- boot` runs it against a fresh named
+session. See [security.md](security.md).

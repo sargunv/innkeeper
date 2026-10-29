@@ -26,15 +26,20 @@ flowchart LR
 
 ## Virtual devices
 
-The broker creates `event0` (Linux.apk Keyboard) and `event<display + 1>`
-(Linux.apk Mouse <display>) for each window in the session's private tmpfs
-`/dev/input`. EventHub discovers these regular placeholder files by
-scan/inotify. Trapped `openat` returns a broker-owned socket endpoint; `EVIOCG*`
-answers identify an alphabetic keyboard and relative mouse, expose capabilities
-and held-key state, and accept LED writes. The bridge writes Linux `input_event`
-records through `evdev.sock`; no host input nodes or uinput devices are exposed.
-Apps enumerate real device IDs, and `Configuration.keyboard` is
-`KEYBOARD_QWERTY`.
+The broker creates `linuxapk-event0` (Linux.apk Keyboard),
+`linuxapk-event<display + 1>` (Linux.apk Mouse <display>) and one
+`linuxapk-event<controller id>` per host gamepad. Discovery files live in the
+sandbox's writable tmpfs `/dev/linuxapk-input`. The broker redirects Android's
+`openat("/dev/input")` and `inotify_add_watch("/dev/input")` to that directory,
+so EventHub discovers only our devices. Its resulting
+`/dev/input/linuxapk-event*` opens are served by the broker. Host `eventN` nodes
+keep their names and remain directly readable under the accepted input grant;
+the virtual names never collide with them. Trapped `openat` returns a
+broker-owned socket endpoint; `EVIOCG*` answers identify an alphabetic keyboard
+and relative mouse, expose capabilities and held-key state, and accept LED
+writes. The bridge writes Linux `input_event` records through `evdev.sock`
+without uinput. Apps enumerate separate Android device IDs, and
+`Configuration.keyboard` is `KEYBOARD_QWERTY`.
 
 `VirtualInput.kt` creates each window's mouse with a distinct port and
 permanently associates it with that virtual display using its unique ID. The
@@ -76,6 +81,27 @@ resets the device and InputDispatcher emits HOVER_EXIT under the mouse device
 ID. Touchpad gestures, touch and pen keep their existing injection stream. Both
 evdev socket hops apply bounded kernel backpressure and retry; a queued release
 is never discarded for EAGAIN.
+
+## Controllers and rumble
+
+The bridge reads host `/dev/input/event*` nodes allowed by the user's existing
+ACLs, without grabbing them or using uinput. Flatpak's `--device=input` grant
+makes those nodes visible; it includes keyboards and mice as well as gamepads
+([security.md](security.md#flatpak-mode)). Every 250 ms it discovers added or
+newly accessible controllers; an unplug closes that controller's virtual device.
+The reader uses the kernel's standard Linux gamepad button layout, maps common
+`RX/RY` right-stick and `Z/RZ` trigger arrangements to Android's `Generic.kl`,
+and normalizes sticks, triggers and D-pads. `SYN_DROPPED` resynchronizes held
+buttons and axes from the source. Gamepads use evdev exclusively.
+
+Each controller has an independent virtual port and Android device ID, outside
+the keyboard/mouse number range. Its input identity plus serial number, or
+physical port when no serial exists, keeps the mapping stable across reconnects
+where possible. Rumble is advertised only when the source allows a separate
+read-write open and supports `FF_RUMBLE`. The bridge passes that open fd to the
+broker, which forwards `EVIOCSFF`, `EVIOCRMFF`, `EVIOCGEFFECTS` and `EV_FF`
+playback/stop records, including while the controller is otherwise idle. No host
+controller fd is installed in an Android process.
 
 ## Translation
 

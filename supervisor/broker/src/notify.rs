@@ -638,6 +638,10 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         {
             continue;
         }
+        if nr == libc::SYS_inotify_add_watch {
+            send_continue(listener, resp_sz, req.id);
+            continue;
+        }
         if let Some(v) = &vid
             && crate::creds::is_cred_syscall(nr, &req.data.args)
         {
