@@ -906,6 +906,7 @@ impl<'a> Run<'a> {
                     Some(w) => display_section(&o.text, w.display).unwrap_or_default(),
                     None => o.text,
                 };
+                self.save("ui.xml", &xml);
                 return Ok(parse_nodes(&xml));
             }
             last = format!("{} (after {took:.0} s)", o.text.trim());

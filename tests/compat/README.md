@@ -12,7 +12,8 @@ s (15 s for games) for crashes, ANRs and death, check window focus, take a
 screenshot that must not be blank (one colour over 99.5%), run the optional
 script (syntax at the top of `corpus.toml`), then tap, scroll and Back, and scan
 the log for known failure signatures (MediaCodec, WebView, GL/EGL/Vulkan errors,
-Play services). Logs and screenshots go to `out/test/compat/<instance>/<pkg>/`.
+Play services). The last UI dump is saved as `ui.xml` for script failures. Logs
+and screenshots go to `out/test/compat/<instance>/<pkg>/`.
 
 - **Results:** works, partly works (the first frame was fine, a later check
   failed), or doesn't work. A session restart during an app is retried once and

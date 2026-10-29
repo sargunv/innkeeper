@@ -95,8 +95,8 @@ pub fn write_markdown(
      non-blank first frame, then a tap, a scroll and Back without a crash or \
      ANR, plus an optional per-app script. Failures are triaged in \
      [tests/compat](../tests/compat/README.md). Generated: run \
-     `mise run test:compat` (or `mise run test:compat -- report` to rewrite this \
-     file from `tests/compat/results.json`). Start is the time to the first \
+     `mise run test:compat -- --accept` (or `mise run test:compat -- report` to \
+     rewrite this file from `tests/compat/results.json`). Start is the time to the first \
      frame on a fresh install; memory is the app's total PSS after the \
      interactions.\n\n",
     );

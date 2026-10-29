@@ -444,7 +444,7 @@ script = [
   "sh:ip link | grep -q tun",
   "shot:vpn",
 ]
-manual = "Start the DNS/firewall VPN and browse: does traffic flow through the TUN, does the VPN key icon show?"
+manual = "Flatpak has no TUN device: VPN is unavailable (partly works). In host mode, start the DNS/firewall VPN and browse: does traffic flow through the TUN, does the VPN key icon show?"
 
 [[app]]
 package = "org.jellyfin.androidtv"
@@ -475,8 +475,7 @@ script = [
   "wait:3",
   "tap:mastodon.social",
   "tap:Next",
-  "wait:10",
-  "sh:logcat -d -s LinuxApkBrowser | grep -q 'opening on the desktop: https://mastodon.social/oauth/authorize'",
+  "sh:for i in $(seq 30); do logcat -d -s LinuxApkBrowser | grep -q 'opening on the desktop: https://mastodon.social/oauth/authorize' && exit 0; sleep 1; done; exit 1",
   "bridgelog:https://mastodon.social/oauth/authorize",
   "shot:oauth",
 ]
