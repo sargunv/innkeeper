@@ -46,7 +46,7 @@ class VirtualInput(
   }
 
   private val mice = HashMap<Int, Mouse>()
-  private val removals = HashSet<Int>()
+  private val removals = EvdevRemovals()
 
   private sealed interface Pending {
     data class Modifiers(val meta: Int, val time: Long) : Pending
@@ -127,7 +127,7 @@ class VirtualInput(
   private fun removeMouse(id: Int) {
     queue.removeAll { it is Pending.Mouse && it.event.displayId == id }
     mice.remove(id)?.let { mouse ->
-      removals += mouse.device
+      removals.add(mouse.device)
       im.javaClass
         .getMethod("removeUniqueIdAssociationByPort", String::class.java)
         .invoke(im, mouse.port)
@@ -139,12 +139,10 @@ class VirtualInput(
   // The broker survives a bridge restart. Keep a closed window's device until
   // the bridge has acknowledged its removal, and retry before replaying live mice.
   private fun flushRemovals() {
-    val it = removals.iterator()
-    while (it.hasNext()) {
-      val device = it.next()
+    removals.flush { device ->
       val reply = connection.call(0x060a, timeoutMs = 500) { u32(device).u32(0) }
       reply?.closeFds()
-      if (reply?.ok == true) it.remove()
+      reply?.ok == true
     }
   }
 

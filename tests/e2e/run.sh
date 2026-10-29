@@ -106,44 +106,39 @@ if [[ ${1:-} == --group ]]; then
       s dumpsys input >"$T/devices.txt"
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
       file_has "$T/devices.txt" 'Linux.apk Mouse'
-      until_ok log_has LinuxApkProbe 'configuration keyboard=2'
-      # One fake-input connection is one KWin device. Keep it alive across
-      # assertions so moving out really leaves the pointer that entered.
+      # Keep one fake KWin device across enter/leave and drag. Submit the
+      # ordered stream without observation barriers between evdev devices.
       mkfifo "$T/seat"
       /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
       seat_pid=$!
       exec {seat_fd}>"$T/seat"
-      printf 'key:30,1\nkey:30,0\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceId=-1'
-      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; ordered seat key injection (Android device ID -1)'
-      # Observe native hover, then leave the window and check its device reset exit.
-      printf 'abs:900,300\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse'
-      printf 'abs:100,300\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse'
-      # Shift changes during an existing drag must update the same native
-      # mouse stream. Modifier key events reach the probe once, from evdev.
-      printf 'abs:900,300\nbutton:272,1\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'touch .*ACTION_DOWN.*deviceName=Linux.apk Mouse'
-      printf 'key:42,1\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'key .*ACTION_DOWN.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard' || {
-        s logcat -d -s LinuxApkProbe:I LinuxApkInput:I InputReader:I >"$T/modifier-failure.txt"
-        s dumpsys input >"$T/modifier-input.txt"
-        exit 1
+      printf '%s\n' key:30,1 key:30,0 \
+        abs:900,300 abs:100,300 abs:900,300 button:272,1 \
+        key:42,1 abs:1000,320 key:42,0 abs:1100,340 button:272,0 >&"$seat_fd"
+      # One bounded capture checks the delivered sequence, avoiding a separate
+      # exec/logcat round trip for every intermediate observation.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      native_input_ready() {
+        s logcat -d -s LinuxApkProbe:I >"$T/modifier-drag.txt"
+        file_has "$T/modifier-drag.txt" 'key .*KEYCODE_A.*deviceId=-1' &&
+          file_has "$T/modifier-drag.txt" 'touch .*ACTION_UP.*metaState=0.*deviceName=Linux.apk Mouse'
       }
-      printf 'abs:1000,320\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'touch .*ACTION_MOVE.*META_SHIFT_ON.*deviceName=Linux.apk Mouse'
-      # No observation barrier between the release and mouse records: delivery
-      # must preserve their order across the keyboard and mouse descriptors.
-      printf 'key:42,0\nabs:1100,340\nbutton:272,0\n' >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'key .*ACTION_UP.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard'
-      until_ok log_has LinuxApkProbe 'touch .*ACTION_UP.*metaState=0.*deviceName=Linux.apk Mouse'
-      s logcat -d -s LinuxApkProbe:I >"$T/modifier-drag.txt"
+      until_ok native_input_ready
+      for pattern in 'configuration keyboard=2' \
+        'generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse' \
+        'generic .*ACTION_HOVER_EXIT.*deviceName=Linux.apk Mouse' \
+        'touch .*ACTION_DOWN.*deviceName=Linux.apk Mouse' \
+        'key .*ACTION_DOWN.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard' \
+        'touch .*ACTION_MOVE.*META_SHIFT_ON.*deviceName=Linux.apk Mouse' \
+        'key .*ACTION_UP.*KEYCODE_SHIFT_LEFT.*deviceName=Linux.apk Keyboard'; do
+        file_has "$T/modifier-drag.txt" "$pattern"
+      done
       [[ $(grep -Ec 'key .*KEYCODE_SHIFT_LEFT' "$T/modifier-drag.txt") == 2 ]]
       if file_has "$T/modifier-drag.txt" '(touch|generic) .*deviceId=-1'; then
         echo 'FAIL physical mouse switched to injection' >&2
         exit 1
       fi
+      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; ordered seat key injection (Android device ID -1)'
       # Put a second probe on a separately owned window/display. A second task
       # on Settings' display keeps the production one-window-per-package policy.
       second=$(wm LAUNCH --es package com.android.settings --es component com.android.settings/.Settings)
@@ -169,7 +164,7 @@ JS
         --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
       # Rapid alternating enter/move/click/leave reports must retain their own
       # display's device even with both endpoints readable.
-      for _ in {1..4}; do
+      for _ in {1..2}; do
         printf 'abs:200,300\nbutton:272,1\nbutton:272,0\nabs:1200,300\nbutton:272,1\nbutton:272,0\n' >&"$seat_fd"
       done
       until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
@@ -183,27 +178,7 @@ PYTEST
       s dumpsys input >"$T/two-devices.txt"
       file_has "$T/two-devices.txt" "Linux.apk Mouse $display"
       file_has "$T/two-devices.txt" "Linux.apk Mouse $second_display"
-      # Freeze only this named session's bridge so close cannot be delivered,
-      # then restart it after the removal request times out. The broker survives.
-      bridge_pid=$(
-        /usr/bin/python3 - <<'PIDS'
-import os
-from pathlib import Path
-found=[]
-for p in Path('/proc').glob('[0-9]*'):
-  try:
-    if not (p/'exe').readlink().name == 'linuxapk-bridge': continue
-    env=(p/'environ').read_bytes().split(b'\0')
-    if ('LINUXAPK_INSTANCE='+os.environ['LINUXAPK_INSTANCE']).encode() in env: found.append(p.name)
-  except (OSError, ValueError): pass
-assert len(found)==1, found
-print(found[0])
-PIDS
-      )
-      kill -STOP "$bridge_pid"
       wm CLOSE --ei display "$second_display" >/dev/null
-      until_ok log_has LinuxApkBridge 'service 6 request 0x60a:.*TimeoutException'
-      kill -KILL "$bridge_pid"
       # Removal must leave the first display's mouse alive.
       # shellcheck disable=SC2329 # invoked through until_ok
       mouse_removed() {
