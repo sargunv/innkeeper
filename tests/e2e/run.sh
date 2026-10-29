@@ -129,7 +129,15 @@ if [[ ${1:-} == --group ]]; then
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped
-      s dumpsys input >"$T/devices.txt"
+      # Activity resume precedes InputDispatcher's focused-window publication.
+      # Wait for the actual input target before submitting the burst.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      input_ready() {
+        s dumpsys input >"$T/devices.txt"
+        sed -n '/^  FocusedWindows:/,/^  FocusRequests:/p' "$T/devices.txt" |
+          grep -E "displayId=$1, name=.*${2:-InputProbeActivity}" >/dev/null
+      }
+      until_ok input_ready "$display"
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
       file_has "$T/devices.txt" 'Linux.apk Mouse'
       # Keep one fake KWin device across enter/leave and drag. Submit the
@@ -172,6 +180,7 @@ if [[ ${1:-} == --group ]]; then
       [[ -n $second_display && $second_display != "$display" ]]
       s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
       until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
+      until_ok input_ready "$second_display"
       cat >"$T/two-windows.js" <<'JS'
 let x = 0;
 for (const w of workspace.windowList()) {
@@ -214,9 +223,6 @@ PYTEST
       until_ok mouse_removed
       file_has "$T/remaining-device.txt" "Linux.apk Mouse $display"
       echo 'ok   two windows retain distinct mouse devices across rapid crossings; removed with their display'
-      exec {seat_fd}>&-
-      wait "$seat_pid"
-      rm "$T/seat"
       echo 'ok   native mouse hover exit and modifier changes during drag; no duplicate modifier keys'
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
@@ -225,6 +231,21 @@ PYTEST
       until_ok log_has LinuxApkProbe 'touch .*ACTION_DOWN.*source=0x2002'
       until_ok log_has LinuxApkProbe 'generic .*ACTION_SCROLL'
       wm CLOSE --ei display "$display" | grep -q "closed display=$display"
+      launch CaptureProbeActivity
+      until_ok mapped
+      until_ok input_ready "$display" CaptureProbeActivity
+      printf '%s\n' abs:900,400 key:46,1 key:46,0 >&"$seat_fd"
+      # One capture assertion: native relative motion reaches the requesting view.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      captured_motion() {
+        printf '%s\n' rel:20,-10 >&"$seat_fd"
+        log_has LinuxApkCaptureProbe 'relative source=131076 x=20.0 y=-10.0 device=Linux.apk Mouse'
+      }
+      until_ok captured_motion
+      printf '%s\n' key:19,1 key:19,0 >&"$seat_fd"
+      exec {seat_fd}>&-
+      wait "$seat_pid"
+      rm "$T/seat"
       launch WindowModeProbe
       # A manifest-locked portrait activity starts portrait; a public runtime request reshapes
       # the actual host window, whose configure comes back through the bridge as this size.

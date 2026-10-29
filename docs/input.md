@@ -210,6 +210,32 @@ logic is `TextInputSession.kt` in `:protocol`.
 - **Limits:** `setComposingText` can only put the cursor at either end of the
   preedit; `TYPE_NULL` editors (terminals) get raw keys only.
 
+## Pointer capture
+
+`View.requestPointerCapture` locks the focused content surface with
+`zwp_pointer_constraints_v1.lock_pointer` and consumes unaccelerated motion from
+`zwp_relative_pointer_v1`. The system app accumulates fractional deltas into
+`REL_X`/`REL_Y` reports on that window's existing evdev mouse; Android delivers
+`SOURCE_MOUSE_RELATIVE` to the capturing view. Captured motion bypasses absolute
+cursor positioning, clipping and desktop acceleration.
+
+The signal is the public `InputManager.InputDeviceListener` callback and
+`InputDevice.sources`: Android 17's
+`CursorInputMapper::configureOnPointerCapture` switches mice between
+`SOURCE_MOUSE` and `SOURCE_MOUSE_RELATIVE` and bumps their generation. Capture
+is global in InputReader; the bridge routes it to the window with both keyboard
+and content-pointer focus. This was checked against `android-17.0.0_r1` and the
+pinned Android 17 image. No private capture listener, polling, cursor-visibility
+heuristic or image patch is needed. An app hiding its cursor alone never locks
+the host pointer.
+
+Android release, host focus loss and window destruction destroy the lock. Escape
+also destroys it before the key reaches Android, even if the app ignores the
+key. Locks are one-shot: the compositor's unlock gesture cannot reactivate one.
+After either escape route, capture cannot lock again until Android releases and
+requests it again. The app can still believe it has capture until it releases it
+or loses Android focus; it cannot trap the host pointer again in that interval.
+
 ## Known limits
 
 - Notification progress and badge counts use Unity LauncherEntry: Plasma and

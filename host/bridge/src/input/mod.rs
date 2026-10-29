@@ -6,6 +6,7 @@
 //! seat events to [`seat`] and [`text_input`], whose lines go to every input
 //! connection through the [`Hub`].
 
+pub(crate) mod capture;
 pub mod evdev;
 pub(crate) mod gestures;
 mod hub;
@@ -92,6 +93,10 @@ impl Service for InputService {
                 status(self.hub.window_appearance(window, color, icon))
             }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
+            Request::PointerCapture { enabled } => {
+                self.hub.pointer_capture(enabled);
+                Reply::ok()
+            }
             Request::PointerPosition { display, x, y } => {
                 let mut positions = self.hub.pointer_positions.lock().unwrap();
                 let p = positions.entry(display).or_default();

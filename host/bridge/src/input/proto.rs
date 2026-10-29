@@ -47,6 +47,9 @@
 //! `EVDEV` (0x0608): u32 device (0 keyboard, display + 1 mouse), u64 monotonic
 //! microseconds, u32 count (1..32), then count records of u16 type, u16 code,
 //! i32 value. The bridge adds SYN_REPORT and writes to the broker's evdev.sock.
+//! `POINTER_CAPTURE` (0x060b): u32 enabled, Android InputReader capture state.
+//! The bridge locks only its focused content surface.
+//!
 //! `EVDEV_DEVICE` (0x060a): u32 device (display + 1), u32 enabled; create/remove a mouse.
 //! `POINTER_POSITION` (0x0609): u32 display, i32 x, i32 y in display pixels,
 //! sent before mouse records so the cursor layer origin can yield its hotspot.
@@ -63,6 +66,8 @@
 //! - `window <logical_w> <logical_h> <scale> <display>`: the window's size
 //!   or scale changed.
 //! - `close <display>`: the user asked to close the window.
+//! - `pointer_relative <display> <dx> <dy>`: unaccelerated device units while
+//!   the host lock is active, sent through that window's evdev mouse.
 //! - `pointer_enter <x> <y> <display>`, `pointer_leave <display>`,
 //!   `pointer_motion <t> <x> <y>`, `pointer_button <t> <button> <0|1>`,
 //!   `pointer_axis <t> <axis> <value>` (axis 0 vertical, 1 horizontal; value
@@ -119,6 +124,7 @@ pub mod ty {
     pub const EVDEV: u16 = 0x0608;
     pub const POINTER_POSITION: u16 = 0x0609;
     pub const EVDEV_DEVICE: u16 = 0x060a;
+    pub const POINTER_CAPTURE: u16 = 0x060b;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -192,6 +198,9 @@ pub enum Request {
         color: u32,
         len: u32,
     },
+    PointerCapture {
+        enabled: bool,
+    },
     PointerPosition {
         display: u32,
         x: i32,
@@ -239,6 +248,9 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
             immersive: r.u32_in(0..=1, "immersive")? != 0,
         }),
+        ty::POINTER_CAPTURE => Request::PointerCapture {
+            enabled: r.u32_in(0..=1, "capture enabled")? != 0,
+        },
         ty::POINTER_POSITION => Request::PointerPosition {
             display: r.u32()?,
             x: r.i32()?,
@@ -314,6 +326,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(p.orientation)
                 .u32(u32::from(p.fullscreen))
                 .u32(u32::from(p.immersive));
+        }
+        Request::PointerCapture { enabled } => {
+            w = Writer::message(ty::POINTER_CAPTURE, tag);
+            w.u32(u32::from(*enabled));
         }
         Request::PointerPosition { display, x, y } => {
             w = Writer::message(ty::POINTER_POSITION, tag);

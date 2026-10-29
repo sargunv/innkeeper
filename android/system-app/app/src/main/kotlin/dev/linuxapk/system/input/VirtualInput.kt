@@ -33,6 +33,7 @@ class VirtualInput(
     )
   private val position = im.javaClass.getMethod("getCursorPosition", Int::class.javaPrimitiveType)
   private val displayId = InputDevice::class.java.getMethod("getAssociatedDisplayId")
+  private var capture: Boolean? = null
   private var queuedMeta = 0
   private val keyboard = EvdevModifiers()
 
@@ -40,6 +41,7 @@ class VirtualInput(
     val device = display + 1
     val port = "linuxapk/mouse/$display"
     val pointer = EvdevPointer()
+    val relative = EvdevRelative()
     var buttons = 0
     var sentButtons = 0
     var nativeHover = false
@@ -52,6 +54,8 @@ class VirtualInput(
     data class Modifiers(val meta: Int, val time: Long) : Pending
 
     data class Mouse(val event: OutMotion) : Pending
+
+    data class Relative(val event: HostEvent.PointerRelative) : Pending
   }
 
   private val queue = ArrayDeque<Pending>()
@@ -71,14 +75,47 @@ class VirtualInput(
     )
     im.registerInputDeviceListener(
       object : InputManager.InputDeviceListener {
-        override fun onInputDeviceAdded(id: Int) = drain()
+        override fun onInputDeviceAdded(id: Int) {
+          captureChanged()
+          drain()
+        }
 
-        override fun onInputDeviceChanged(id: Int) = drain()
+        override fun onInputDeviceChanged(id: Int) {
+          captureChanged()
+          drain()
+        }
 
-        override fun onInputDeviceRemoved(id: Int) = Unit
+        override fun onInputDeviceRemoved(id: Int) = captureChanged()
       },
       handler,
     )
+  }
+
+  // Android 17 CursorInputMapper::configureOnPointerCapture changes mSource and
+  // bumps the device generation. InputDeviceListener and sources are public SDK
+  // APIs; unlike a hidden cursor, SOURCE_MOUSE_RELATIVE unambiguously means capture.
+  // Capture is global in InputReader, so the bridge selects its focused window.
+  private fun captureChanged() {
+    val enabled =
+      im.inputDeviceIds.toList().mapNotNull(im::getInputDevice).any {
+        it.name.startsWith("Linux.apk Mouse ") &&
+          it.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+      }
+    if (capture == enabled) return
+    capture = enabled
+    android.util.Log.i(HostInputClient.TAG, "pointer capture=$enabled")
+    for (mouse in mice.values) {
+      mouse.pointer.reset()
+      mouse.relative.reset()
+    }
+    connection.send(0x060b) { u32(if (enabled) 1 else 0) }
+  }
+
+  fun relative(e: HostEvent.PointerRelative) {
+    handler.post {
+      queue.add(Pending.Relative(e))
+      drain()
+    }
   }
 
   fun modifiers(meta: Int, time: Long) {
@@ -125,7 +162,10 @@ class VirtualInput(
   }
 
   private fun removeMouse(id: Int) {
-    queue.removeAll { it is Pending.Mouse && it.event.displayId == id }
+    queue.removeAll {
+      (it is Pending.Mouse && it.event.displayId == id) ||
+        (it is Pending.Relative && it.event.display == id)
+    }
     mice.remove(id)?.let { mouse ->
       removals.add(mouse.device)
       im.javaClass
@@ -160,6 +200,16 @@ class VirtualInput(
         queue.removeFirst()
         continue
       }
+      if (pending is Pending.Relative) {
+        val e = pending.event
+        val mouse = mice[e.display]
+        queue.removeFirst()
+        if (mouse != null && capture == true) {
+          val events = mouse.relative.move(e.dx, e.dy)
+          if (events.isNotEmpty()) send(mouse.device, SystemClock.uptimeMillis(), events)
+        }
+        continue
+      }
       val e = (pending as Pending.Mouse).event
       // A removal callback can precede a late report from the host. Never let
       // an obsolete display block surviving displays or modifier releases.
@@ -182,9 +232,10 @@ class VirtualInput(
       val p = e.pointers[0]
       val events = ArrayList<Triple<Int, Int, Int>>()
       if (
-        action == MotionEvent.ACTION_HOVER_ENTER ||
-          action == MotionEvent.ACTION_HOVER_MOVE ||
-          action == MotionEvent.ACTION_MOVE
+        capture != true &&
+          (action == MotionEvent.ACTION_HOVER_ENTER ||
+            action == MotionEvent.ACTION_HOVER_MOVE ||
+            action == MotionEvent.ACTION_MOVE)
       ) {
         val current = position.invoke(im, e.displayId) as? PointF
         if (current == null) {
@@ -231,6 +282,8 @@ class VirtualInput(
     val now = SystemClock.uptimeMillis()
     handler.post {
       queue.clear()
+      capture = null
+      captureChanged()
       flushRemovals()
       for (mouse in mice.values) {
         val releases =

@@ -86,6 +86,10 @@ top-left) until a stationary sample is available. Both image and hotspot follow
 the window's scale. This covers standard and custom icons without matching style
 names or using a private Android pointer-icon listener.
 
+Pointer capture uses the mouse's Android source change independently of cursor
+visibility; see [input.md](input.md#pointer-capture). A hidden cursor alone does
+not constrain the host pointer.
+
 ## Window semantics
 
 - **Resize and scale.** `configure` and the fractional (or integer) scale come
