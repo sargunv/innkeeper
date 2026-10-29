@@ -38,6 +38,10 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
   dir for anything you run, and stop it when done. Don't start, restart or reset
   the user's main session (no instance name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
+- **Test what you touched, in under a minute.** Iterate on unit tests plus the
+  one or few apps or e2e checks relevant to your change (for example
+  `mise run test:compat -- <package>`). Never run the full compat corpus. It is
+  a scheduled nightly/weekly run, not a gate for agents or commits.
 - **Nested test desktops are fully isolated** (a nested plasmashell once started
   kded, KDE Connect and Akonadi against the user's real config, and nested
   portals opened dialogs on the real desktop): a private `dbus-run-session`, a
