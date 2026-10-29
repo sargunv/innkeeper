@@ -183,6 +183,10 @@ if [[ ${1:-} == --group ]]; then
       until_ok file_has "$bridge_log" 'a11y: test session: never active'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
+    production)
+      # shellcheck source=tests/e2e/production.sh
+      source "$here/production.sh"
+      ;;
     lifecycle)
       s cmd appops set dev.linuxapk.probes SCHEDULE_EXACT_ALARM allow
       s logcat -c
@@ -202,9 +206,9 @@ if [[ ${1:-} == --group ]]; then
 fi
 
 groups=("$@")
-((${#groups[@]})) || groups=(boot input audio desktop a11y lifecycle)
+((${#groups[@]})) || groups=(boot input audio desktop a11y production lifecycle)
 for group in "${groups[@]}"; do
-  case $group in boot | input | audio | desktop | a11y | lifecycle) ;; *)
+  case $group in boot | input | audio | desktop | a11y | production | lifecycle) ;; *)
     echo "unknown e2e group: $group" >&2
     exit 2
     ;;
@@ -213,7 +217,7 @@ done
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   start=$(date +%s%N)
   result=0
-  timeout --kill-after=5 52 "$repo/tests/nested.sh" "$0" "${groups[@]}" &
+  timeout --kill-after=4 55 "$repo/tests/nested.sh" "$0" "${groups[@]}" &
   runner=$!
   trap 'kill -TERM "$runner" 2>/dev/null || true; wait "$runner" 2>/dev/null || true' INT TERM
   wait "$runner" || result=$?
@@ -258,7 +262,8 @@ run_group() {
   return "$result"
 }
 # Audio uses a foreground service and a private sink; it can run alongside
-# the sequential activity/window checks. Lifecycle changes session state last.
+# the sequential activity/window checks. Production runs after isolation
+# assertions (its fake-service logs are positive), then lifecycle changes state.
 audio_pid=""
 for group in "${groups[@]}"; do
   if [[ $group == audio ]]; then
@@ -267,10 +272,13 @@ for group in "${groups[@]}"; do
   fi
 done
 for group in "${groups[@]}"; do
-  case $group in audio | lifecycle) continue ;; esac
+  case $group in audio | production | lifecycle) continue ;; esac
   run_group "$group" || failed+=("$group")
 done
 if [[ -n $audio_pid ]]; then wait "$audio_pid" || failed+=(audio); fi
+for group in "${groups[@]}"; do
+  if [[ $group == production ]]; then run_group production || failed+=(production); fi
+done
 for group in "${groups[@]}"; do
   if [[ $group == lifecycle ]]; then run_group lifecycle || failed+=(lifecycle); fi
 done

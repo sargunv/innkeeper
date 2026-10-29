@@ -24,6 +24,30 @@ class Request(dbus.service.Object):
 
 
 class Portal(dbus.service.Object):
+  def respond(self, options, sender, results):
+    path = (
+      f"{PATH}/request/{sender[1:].replace('.', '_')}/{options['handle_token']}"
+    )
+    request = Request(bus, path)
+
+    def answer():
+      request.Response(0, results)
+      request.remove_from_connection()
+      return False
+
+    GLib.idle_add(answer)
+    return dbus.ObjectPath(path)
+
+  @dbus.service.method(
+    "org.freedesktop.portal.OpenURI",
+    in_signature="ssa{sv}",
+    out_signature="o",
+    sender_keyword="sender",
+  )
+  def OpenURI(self, parent, uri, options, sender):
+    print(f"openuri: {uri}", flush=True)
+    return self.respond(options, sender, {})
+
   @dbus.service.method(
     "org.freedesktop.portal.FileChooser",
     in_signature="ssa{sv}",
@@ -31,21 +55,10 @@ class Portal(dbus.service.Object):
     sender_keyword="sender",
   )
   def OpenFile(self, parent, title, options, sender):
-    path = (
-      f"{PATH}/request/{sender[1:].replace('.', '_')}/{options['handle_token']}"
-    )
-    request = Request(bus, path)
     print(f"picker: {title}", flush=True)
-
-    def answer():
-      request.Response(
-        0, {"uris": dbus.Array([selected.as_uri()], signature="s")}
-      )
-      request.remove_from_connection()
-      return False
-
-    GLib.idle_add(answer)
-    return dbus.ObjectPath(path)
+    return self.respond(
+      options, sender, {"uris": dbus.Array([selected.as_uri()], signature="s")}
+    )
 
 
 class Notifications(dbus.service.Object):

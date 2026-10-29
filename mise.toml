@@ -148,7 +148,7 @@ description = "AOSP's binder tests against the broker, then kernel binder (77: u
 run = "supervisor/tests/binder/run.sh"
 
 [tasks."test:e2e"]
-description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop a11y lifecycle]); whole run <60 s"
+description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop a11y production lifecycle]); whole run <60 s"
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
