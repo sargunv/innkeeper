@@ -9,8 +9,7 @@ from the host; none of it needs root.
 | For               | What                                                                                                                                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | building          | Android SDK at `$ANDROID_HOME` (default `~/Android/Sdk`) with NDK `30.0.16248370`, build-tools `37.0.0` and `platforms;android-37.0`; podman; clang; GTK 4 (4.18+) and libadwaita (1.7+) development files |
-| running a session | a Wayland desktop, `systemd --user`, pasta (passt), curl, Python 3.11+, read-write `/dev/udmabuf` (a logind ACL) and pipewire-pulse; `start` names what's missing                                          |
-| subuid mode       | `newuidmap`/`newgidmap` and a range of at least 49999 ids in `/etc/subuid` and `/etc/subgid`; without them the session runs in single-uid mode                                                             |
+| running a session | Flatpak, a Wayland desktop, GPU access (`/dev/udmabuf`) and audio; development sessions also use `systemd --user` and Python 3.11+                                                                         |
 
 ## Build
 
@@ -27,7 +26,7 @@ flowchart LR
   ndk["ndk<br/>CMake superbuild"] --> sup["build:supervisor<br/>+ cargo (bionic broker)"] --> stage
   ndk --> gfx["build:graphics"] --> stage
   ndk --> aud["build:audio"] --> stage
-  ndk --> sys["build:system<br/>+ iptables (container)"] --> stage
+  ndk --> sys["build:system"] --> stage
   vk["build:vulkan<br/>Mesa (container)"] --> stage
   it["build:image-tools<br/>(container)"] --> stage
   app["build:system-app<br/>Gradle"] --> stage
@@ -42,10 +41,9 @@ flowchart LR
 - **One NDK superbuild**, the root `CMakeLists.txt` (presets `android` and
   `host-tests`), builds every Android-side C/C++ artifact; each module installs
   its CMake component.
-- **One build container**, [tools/container](../tools/README.md), for Mesa,
-  iptables and the static image tools. Every run is capped (`--memory`,
-  `--pids-limit`); those builds are skipped while their inputs hash to the same
-  stamp.
+- **One build container**, [tools/container](../tools/README.md), for Mesa and
+  the static image tools. Every run is capped (`--memory`, `--pids-limit`);
+  those builds are skipped while their inputs hash to the same stamp.
 - `mise run clean` removes build output and keeps test results.
 
 ## Run
@@ -56,7 +54,6 @@ flowchart LR
   `out/dev/flatpak/<instance>` (default instance `dev`); it waits while less
   than 25 GiB is available
   ([packaging/flatpak](../packaging/flatpak/README.md#development)).
-  `LINUXAPK_MODE=host` runs the stage outside Flatpak instead.
 - `tools/dev/linuxapk.sh install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of
   its own: `LINUXAPK_INSTANCE=cli tests/nested.sh tools/dev/linuxapk.sh list`
@@ -65,10 +62,11 @@ flowchart LR
 - `packaging/flatpak/build.sh` builds the Flatpak from the committed tree and
   installs it into `FLATPAK_USER_DIR`; use a private one under `out/`
   ([packaging/flatpak](../packaging/flatpak/README.md)).
-- `mise run install-dev` adds the staged manager to the app menu and makes it an
-  APK handler. Do this only for a checkout you mean to use as your Linux.apk.
+- `mise run install-dev` builds and installs the committed Flatpak in the user
+  installation, adding the manager to the app menu as an APK handler. Do this
+  only for a checkout you mean to use as your Linux.apk.
 - Use `LINUXAPK_INSTANCE=<name>` for anything experimental: it is a separate
-  session with its own `/data`, logs and unit, and stays off the real desktop
+  session with its own `/data`, logs and sandbox, and stays off the real desktop
   ([security.md](security.md#test-sessions)).
 
 ## Test

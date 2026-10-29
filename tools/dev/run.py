@@ -23,7 +23,6 @@ ENV["PATH"] = os.pathsep.join(
   for p in ENV.get("PATH", "/usr/bin:/bin").split(os.pathsep)
   if not p.endswith("/mise/shims")
 )
-MODE = ENV.get("LINUXAPK_MODE", "flatpak")
 INSTANCE = ENV.get("LINUXAPK_INSTANCE", "dev")
 if not re.fullmatch(r"[a-z0-9-]+", INSTANCE):
   sys.exit("dev runner requires a named LINUXAPK_INSTANCE")
@@ -31,8 +30,10 @@ ENV["LINUXAPK_INSTANCE"] = INSTANCE
 ENV.setdefault(
   "LINUXAPK_IMAGES", str(Path.home() / ".local/share/linuxapk/images")
 )
-ENV.setdefault("LINUXAPK_DATA", str(BASE / MODE / INSTANCE / "android-data"))
-SCRATCH = BASE / MODE / INSTANCE
+ENV.setdefault(
+  "LINUXAPK_DATA", str(BASE / "flatpak" / INSTANCE / "android-data")
+)
+SCRATCH = BASE / "flatpak" / INSTANCE
 SCRATCH.mkdir(parents=True, exist_ok=True)
 XDG = ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
 # Entries, Flatpak state and notices never go to the real XDG dirs: only ones
@@ -176,7 +177,7 @@ def control(args):
     if args[0] == "stop":
       return 0
     if args[0] == "status":
-      print("stopped\nuid-mode=single")
+      print("stopped")
       return 1
     sys.exit("the session is not running")
   with sock:
@@ -445,39 +446,6 @@ def main():
   if program == "session" and args[:1] == ["wait"]:
     available()
     return 0
-  if MODE == "host":
-    if args[:1] == ["start"] or program == "linuxapk":
-      target = STAGE / "libexec/linuxapk/linuxapk-session"
-      active = run(
-        [str(target), "status"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-      )
-      if active.returncode != 0:
-        available()
-    if args[:1] == ["cgroup"]:
-      o = subprocess.check_output(
-        [
-          "systemctl",
-          "--user",
-          "show",
-          "-P",
-          "ControlGroup",
-          f"linuxapk-session-{INSTANCE}",
-        ],
-        env=SYSTEMD_ENV,
-        text=True,
-      )
-      print("/sys/fs/cgroup" + o.strip())
-      return 0
-    target = STAGE / (
-      "bin/linuxapk"
-      if program == "linuxapk"
-      else "libexec/linuxapk/linuxapk-session"
-    )
-    os.execve(target, [str(target), *args], ENV)
-  if MODE != "flatpak":
-    sys.exit("LINUXAPK_MODE must be flatpak or host")
   if program == "session" and args[:1] in (
     ["status"],
     ["stop"],

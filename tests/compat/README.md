@@ -37,6 +37,6 @@ and screenshots go to `out/test/compat/<instance>/<pkg>/`.
 - **Triage:** a failing app gets a GitHub issue with the failure signature from
   its `out/test/compat/<instance>/<pkg>/` logs; `manual` notes in the corpus
   list checks the harness doesn't automate yet.
-- **Flatpak mode** (the default; `LINUXAPK_MODE=host` for the other): there is
-  no TUN device, so Rethink's VPN check fails and it partly works. A `--window`
-  run gets a nested desktop of its own (`tests/nested.sh`).
+- **Flatpak**: there is no TUN device, so Rethink's VPN check fails and it
+  partly works. A `--window` run gets a nested desktop of its own
+  (`tests/nested.sh`).

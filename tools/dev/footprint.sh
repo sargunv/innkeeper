@@ -2,7 +2,7 @@
 # Memory of a running session (LINUXAPK_INSTANCE): PSS and RSS of every
 # process in it, largest PSS first, then the session cgroup's totals.
 #   tools/dev/footprint.sh [-n N]    (only the N largest processes)
-# Android's processes are read from inside the session, since in subuid mode
+# Android's processes are read from inside the session, since
 # the host user can't read them; the outer ones (bridge, pasta, pivot-exec,
 # the broker) from the host.
 set -euo pipefail

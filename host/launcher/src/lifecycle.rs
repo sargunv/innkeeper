@@ -9,24 +9,19 @@
 //!   as busy.
 //! - **Commands** keep it up while they run: `exec` holds a shared lock on
 //!   `<run>/exec.lock`.
-//! - **Wakeups:** host mode leaves a transient systemd user timer that runs
-//!   `start` shortly before the alarm. In Flatpak mode the session's process
-//!   stays as a waiter in its sandbox, serving `status` and `stop` on the
+//! - **Wakeups:** the session's process stays as a waiter in its sandbox, serving `status` and `stop` on the
 //!   control socket, and starts the session again at that time.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, bail};
-
 use crate::conf::Config;
 use crate::paths::Paths;
-use crate::{host, session};
+use crate::session;
 
 /// The grace period of a session with windows, unless `LINUXAPK_IDLE_GRACE`
 /// says otherwise.
@@ -179,7 +174,6 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
     }
     let grace = Duration::from_secs(cfg.idle_grace);
     let paths = cfg.paths.clone();
-    let flatpak = cfg.flatpak();
     thread::spawn(move || {
         let mut idle_since: Option<Instant> = None;
         let mut last = String::new();
@@ -189,8 +183,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
             let why = busy(&paths);
             // In Flatpak, running with no window is the Background portal's
             // to allow.
-            if flatpak
-                && !asked_background
+            if !asked_background
                 && Activity::read(&paths)
                     .is_some_and(|a| a.windows == 0 && (a.services > 0 || !a.background.is_empty()))
             {
@@ -270,51 +263,6 @@ pub fn calendar(secs: u64) -> String {
         rem % 3600 / 60,
         rem % 60
     )
-}
-
-fn systemctl(args: &[&str]) -> Command {
-    let mut c = host::user_manager("systemctl");
-    c.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    c
-}
-
-/// Host mode: a transient systemd user timer that starts the session
-/// [`WAKE_LEAD`] before `at_ms`.
-pub fn schedule_host(cfg: &Config, exe: &Path, at_ms: u64) -> Result<()> {
-    let p = &cfg.paths;
-    let at = (at_ms / 1000).saturating_sub(WAKE_LEAD.as_secs());
-    cancel_host(p);
-    let mut c = host::user_manager("systemd-run");
-    c.args(["--quiet", "--collect"])
-        .arg(format!("--unit={}", p.wake_unit()))
-        .arg(format!("--on-calendar={}", calendar(at)))
-        .args([
-            "--timer-property=AccuracySec=1s",
-            "--timer-property=RemainAfterElapse=no",
-        ]);
-    for (k, v) in &cfg.start_env {
-        c.arg(format!("--setenv={k}={v}"));
-    }
-    c.arg("--").arg(exe).arg("start");
-    if cfg.headless {
-        c.arg("--headless");
-    }
-    let st = c.stdin(Stdio::null()).status().context("run systemd-run")?;
-    if !st.success() {
-        bail!("systemd-run for the wakeup timer failed ({st})");
-    }
-    session::log(p, &format!("wakeup timer: start at {}", calendar(at)));
-    Ok(())
-}
-
-/// Host mode: removes a pending wakeup timer.
-pub fn cancel_host(p: &Paths) {
-    let t = format!("{}.timer", p.wake_unit());
-    let _ = systemctl(&["stop", &t]).status();
-    let _ = systemctl(&["reset-failed", &t]).status();
 }
 
 #[cfg(test)]

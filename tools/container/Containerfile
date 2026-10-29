@@ -1,5 +1,5 @@
 # The build container: tools for cross-compiling Mesa, libdrm, LLVM and
-# iptables for Android, and for the static image tools (image/tools/build.sh).
+# Android, and for the static image tools (image/tools/build.sh).
 # The NDK comes from the host (tools/container/run.sh mounts $HOME), pinned in
 # tools/build/toolchain.env.
 FROM registry.fedoraproject.org/fedora:44

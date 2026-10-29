@@ -4,9 +4,9 @@
 # Lower a budget when a change makes the session cheaper; raise one only with
 # the reason in the commit message.
 
-# Cold session start, ms (2.1 s subuid, 2.6 s single-uid on the dev host).
+# Cold session start, ms.
 session_start_ms = { budget = 2500, margin = 0.25 }
 # Warm app start: the corpus median, ms.
 app_start_ms = { budget = 200, margin = 0.25 }
-# Idle session memory without page cache, MiB (556 subuid, 574 single-uid).
+# Idle session memory without page cache, MiB.
 idle_memory_mib = { budget = 575, margin = 0.10 }

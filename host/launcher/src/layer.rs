@@ -83,13 +83,11 @@ fn our_props(cfg: &Config) -> Result<String> {
     // Composer backend: windows through the bridge, or none.
     let backend = if cfg.headless { "headless" } else { "bridge" };
     s += &format!("vendor.linuxapk.hwc.backend={backend}\n");
-    if cfg.flatpak() {
-        // No mounts, so zygote can't hide other apps' data dirs.
-        s += "persist.zygote.app_data_isolation=false\n";
-        // The host's network is Android's (the system app's
-        // HostNetworkFeature, which follows the sandbox's resolv.conf).
-        s += "ro.vendor.linuxapk.host_net=1\n";
-    }
+
+    // No mounts, so zygote can't hide other apps' data dirs.
+    s += "persist.zygote.app_data_isolation=false\n";
+    // The host's network is Android's (the system app's
+    // HostNetworkFeature, which follows the sandbox's resolv.conf).
     s += "# --- linuxapk-session: image/vendor.prop ---\n";
     s += &fs::read_to_string(share.join("image/vendor.prop"))?;
     Ok(s)

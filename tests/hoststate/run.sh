@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Host state in Android (#19, #16) against stand-ins for the desktop's
 # services, so nothing reads the user's real battery, network or location:
-# a private system bus with python-dbusmock's upower, power_profiles_daemon
-# and networkmanager templates, and a private session bus with
-# mock-location-portal.py. Neither bus can activate services. Boots a fresh
+# a private system bus with python-dbusmock's upower template, and a private
+# session bus with mock-location-portal.py's host-state portals. Neither bus
+# can activate services. Boots a fresh
 # headless test instance (LINUXAPK_INSTANCE, default hoststate; /data at
 # LINUXAPK_DATA, default out/test/hoststate/data) with them and checks what
 # Android shows:
@@ -41,7 +41,7 @@ T=$repo/out/test/hoststate
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-hoststate}
 export LINUXAPK_DATA=${LINUXAPK_DATA:-$T/data}
 "$session" stop >/dev/null 2>&1 || true
-"$session" reset >/dev/null # /data holds subordinate ids: only reset deletes it
+"$session" reset >/dev/null
 find "$T" -mindepth 1 -maxdepth 1 ! -name data -exec rm -rf {} + 2>/dev/null || true
 mkdir -p "$T/rt" "$T/config"
 chmod 700 "$T/rt"
@@ -154,14 +154,10 @@ call "$DBUS_SESSION_BUS_ADDRESS" org.freedesktop.portal.Desktop /org/freedesktop
   dev.linuxapk.Mock.SetPowerSaver false
 wait_for "balanced profile: battery saver off" "s settings get global low_power" "^0$"
 
-# Metered: reaches the system app (host mode can't apply it to Ethernet).
+# Metered: updates the host network agent.
 call "$DBUS_SESSION_BUS_ADDRESS" org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
   dev.linuxapk.Mock.SetMetered true
-if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
-  wait_for "host network becomes metered" "s logcat -d -s LinuxApkHostNetwork:I" "host network metered"
-else
-  wait_for "metered host connection reaches Android" "s logcat -d -s LinuxApkHostState:I" "host network metered=2"
-fi
+wait_for "host network becomes metered" "s logcat -d -s LinuxApkHostNetwork:I" "host network metered"
 
 # Locale: plasma-localerc, live. US English starts weeks on Sunday, so
 # LC_TIME=en_GB adds the Monday week start as a regional preference.

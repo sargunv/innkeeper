@@ -13,7 +13,7 @@ use crate::android::{self, Launch};
 use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
-use crate::launcher::{Session, UidMode};
+use crate::launcher::Session;
 use crate::paths::{self, Prefix};
 use crate::validate;
 use crate::xdg::{self, DesktopApp, Dirs};
@@ -473,35 +473,27 @@ pub fn refresh_entries() -> usize {
     linuxapk().map_or(0, |l| xdg::refresh_entries(&Dirs::from_env(), &l))
 }
 
-/// Shown once, the first time a session runs in single-uid mode.
+/// Shown once after the first session starts.
 pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
-    this computer gives you no subordinate uid range (/etc/subuid), so they all run as your user.";
-/// [`SINGLE_UID_NOTICE`] inside the Flatpak, where single-uid mode is the
-/// only one.
-pub const SINGLE_UID_NOTICE_FLATPAK: &str = "Android apps are not isolated from each other: \
     inside Flatpak they all run as your user, as desktop apps do.";
 pub const SINGLE_UID_DOCS: &str =
     "https://github.com/sargunv/linux.apk/blob/main/docs/security.md#single-uid-mode";
 
-/// [`SINGLE_UID_NOTICE`] if the session runs in single-uid `mode` and the
+/// [`SINGLE_UID_NOTICE`] if the session is running and the
 /// notice hasn't been shown yet. It counts as shown from now on (a stamp in
 /// [`paths::notices_dir`]).
-pub fn single_uid_notice(mode: Option<UidMode>) -> Option<&'static str> {
-    notice_once(&paths::notices_dir(), mode)
+pub fn single_uid_notice(running: bool) -> Option<&'static str> {
+    notice_once(&paths::notices_dir(), running)
 }
 
-fn notice_once(dir: &Path, mode: Option<UidMode>) -> Option<&'static str> {
-    if mode != Some(UidMode::Single) {
+fn notice_once(dir: &Path, running: bool) -> Option<&'static str> {
+    if !running {
         return None;
     }
     fs::create_dir_all(dir).ok()?;
     // Whoever creates the stamp shows the notice.
     fs::File::create_new(dir.join("single-uid")).ok()?;
-    Some(if crate::desktop::flatpak_app_id().is_some() {
-        SINGLE_UID_NOTICE_FLATPAK
-    } else {
-        SINGLE_UID_NOTICE
-    })
+    Some(SINGLE_UID_NOTICE)
 }
 
 #[cfg(test)]
@@ -519,14 +511,11 @@ mod tests {
     fn single_uid_notice_shows_once() {
         let dir = crate::test_dir("single-uid-notice");
         let notices = dir.join("notices");
-        assert_eq!(
-            notice_once(&notices, Some(UidMode::Single)),
-            Some(SINGLE_UID_NOTICE)
-        );
-        assert_eq!(notice_once(&notices, Some(UidMode::Single)), None);
+        assert_eq!(notice_once(&notices, true), Some(SINGLE_UID_NOTICE));
+        assert_eq!(notice_once(&notices, true), None);
         assert!(notices.join("single-uid").is_file());
-        assert_eq!(notice_once(&dir.join("other"), Some(UidMode::Subuid)), None);
-        assert_eq!(notice_once(&dir.join("none"), None), None);
+        assert_eq!(notice_once(&dir.join("other"), false), None);
+        assert_eq!(notice_once(&dir.join("none"), false), None);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -1,4 +1,4 @@
-//! Flatpak mode (`LINUXAPK_FLATPAK=1`): the session runs in the sandbox's own
+//! Flatpak runtime: the session runs in the sandbox's own
 //! namespaces, with no mounts. Android's root is the sandbox's `/`, where
 //! `/system`, `/apex`, `/data`... are symlinks into a composed tree on disk
 //! (`host/launcher/src/flatpak.rs`). The broker covers what the mounts did:
@@ -113,7 +113,9 @@ pub(crate) fn init_as_pid1(pid: i32) -> i32 {
 /// In Flatpak mode, the Android path a symlink (O_PATH fd) that stands in
 /// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
-    std::env::var_os("LINUXAPK_FLATPAK").filter(|v| v == "1")?;
+    if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
+        return None;
+    }
     let mut buf = [0u8; 256];
     let n = unsafe {
         libc::readlinkat(
@@ -132,7 +134,7 @@ pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
 pub(crate) fn root_ids(st: &mut libc::stat) {
     static IDS: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
     let ids = IDS.get_or_init(|| {
-        (std::env::var("LINUXAPK_FLATPAK").as_deref() == Ok("1"))
+        (std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
             .then(|| unsafe { (libc::getuid(), libc::getgid()) })
     });
     if let Some((u, g)) = *ids {
@@ -146,10 +148,10 @@ pub(crate) fn root_ids(st: &mut libc::stat) {
 }
 
 impl Flat {
-    /// From `LINUXAPK_FLATPAK=1` and `LINUXAPK_ROOT_MAP` (lines of
-    /// `<host dir>=<Android path>`), or None outside Flatpak mode.
+    /// From `LINUXAPK_ROOT_MAP` (lines of
+    /// `<host dir>=<Android path>`), or None in the bootless developer harness.
     pub(crate) fn from_env(listener: RawFd, resp_sz: usize) -> Option<Flat> {
-        if std::env::var("LINUXAPK_FLATPAK").as_deref() != Ok("1") {
+        if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
             return None;
         }
         let spec = std::env::var("LINUXAPK_ROOT_MAP").unwrap_or_default();
@@ -504,7 +506,6 @@ mod tests {
     use super::*;
 
     fn flat(map: &str) -> Flat {
-        unsafe { std::env::set_var("LINUXAPK_FLATPAK", "1") };
         unsafe { std::env::set_var("LINUXAPK_ROOT_MAP", map) };
         Flat::from_env(-1, 0).unwrap()
     }

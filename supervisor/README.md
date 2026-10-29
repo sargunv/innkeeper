@@ -5,21 +5,21 @@ installed on Android's init and inherited by every Android process, turns what
 an unprivileged namespace can't do into user notifications.
 `mise run build:supervisor` builds all three artifacts.
 
-| Dir          | Artifact (stage path)                                             | Runs                                                               | Start reading                           |
-| ------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------- |
-| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | pid 1 of the outer namespaces; its bpf thread stays there          | `pivot-exec.c`, `bpfemu.c`              |
-| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | forked by pivot-exec in the outer namespaces, host-user privileges | `src/notify.rs`, `src/binder/driver.rs` |
-| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it           | `linuxapk_shim.c`                       |
+| Dir          | Artifact (stage path)                                             | Runs                                                      | Start reading                           |
+| ------------ | ----------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------- |
+| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | sandbox subreaper; its bpf thread stays there             | `pivot-exec.c`, `bpfemu.c`              |
+| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | forked by pivot-exec in the sandbox, host-user privileges | `src/notify.rs`, `src/binder/driver.rs` |
+| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it  | `linuxapk_shim.c`                       |
 
 ## What is trapped, and who serves it
 
-| Syscalls                                                                                                                                                       | Served by         | Why                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                                             | broker (binder)   | binder in userspace: no binderfs, no SELinux module                    |
-| `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling                        | bpfemu (C thread) | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
-| single-uid only: `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)    | virtual Android uids without a subordinate id range                    |
-| Flatpak mode only: `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                          | broker (`flat`)   | no mounts or user namespace in the sandbox (docs/session.md)           |
-| Flatpak mode only: `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                          | bpfemu            | no capabilities in the sandbox; the host's network                     |
+| Syscalls                                                                                                                                      | Served by         | Why                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                            | broker (binder)   | binder in userspace: no binderfs, no SELinux module                    |
+| `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling       | bpfemu (C thread) | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
+| `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)    | virtual Android uids without a subordinate id range                    |
+| `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                            | broker (`flat`)   | no mounts or user namespace in the sandbox (docs/session.md)           |
+| `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | bpfemu            | no capabilities in the sandbox; the host's network                     |
 
 The kernel allows one listener per filter chain, so the broker receives every
 notification. It forwards the non-binder, non-credential ones to bpfemu over a
@@ -42,16 +42,15 @@ processes:
   work, and stays interruptible, so ptrace and job control work;
 - polling threads get an eventfd in place of their binder fd;
 - `sender_pid` is the pid in Android's namespace and `sender_euid` the opener's
-  (virtual, in single-uid mode);
+  virtual;
 - the freezer works as in the kernel, so ActivityManager freezes cached apps
   (`dumpsys activity` shows `use_freezer=true`): `BINDER_FREEZE` takes the pid
   in Android's namespace (the kernel's is the host's), and one that waits for
   its target to drain is answered when it drains or at its timeout
-  (`notify.rs`'s monitor thread runs the timer). The cgroup half of the freezer
-  is the session's delegated cgroup (`cgroup.freeze`), whose waits end the
-  broker's unanswered reads like a signal does. `/dev/binderfs/features` (made
-  by the launcher) tells libbinder the broker has freeze notifications, extended
-  errors and oneway spam detection.
+  (`notify.rs`'s monitor thread runs the timer). There is no cgroup freezer in
+  the sandbox. `/dev/binderfs/features` (made by the launcher) tells libbinder
+  the broker has freeze notifications, extended errors and oneway spam
+  detection.
 
 Not supported: priority inheritance, binder netlink reports and `TF_UPDATE_TXN`
 (Android 17 doesn't send it). Two deviations from the kernel:
@@ -74,8 +73,7 @@ second; a round trip costs 15 µs against 3.8 µs for kernel binder.
 side. A process's identity is an id in its soft `RLIMIT_RTTIME`, which `fork`
 inherits and `execve` keeps, so there is no fork tracking; the session has no
 real-time tasks for the limit to affect. `set*id` follow the kernel's rules
-applied to the virtual ids, and `capset` runs natively, so dropped capabilities
-stay dropped.
+applied to the virtual ids, and capabilities are virtual.
 
 **The owner contract.** A `chown` runs as a no-op `fchownat(-1, -1)` (for the
 kernel's errors and side effects) and records the owner as
@@ -97,7 +95,7 @@ Hidden SELinux breaks call sites in init and a few services that assume a policy
 (`security_compute_create`, `set*con`, `selinux_status_*`); the shim turns them
 into no-ops. It also makes priority and rlimit changes best-effort, treats
 vold's refused quota-project ioctl as success, skips POSIX ACL xattrs in
-single-uid mode, and serves `/proc/config.gz` from the host's config.
+single-uid mode, and serves the staged `/proc/config.gz`.
 
 In Flatpak mode the sandbox's own seccomp filter refuses some calls before ours
 sees them, so the shim covers them where it is loaded: `mount`, `umount`,
@@ -120,16 +118,15 @@ pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
   `tests/shim-netlink.sh` the uevent port choice.
 - `mise run test:binder` (`tests/binder/run.sh`) runs AOSP's binder gtests
   against the broker, then against kernel binder as the oracle (exit 77 when the
-  host forbids binderfs), in a root with the test unit's own cgroup for the
+  host forbids binderfs; select this developer oracle with
+  `LINUXAPK_BINDER_ORACLE=1`), in a root with the test unit's own cgroup for the
   freezer cases. The binaries come from
   `$XDG_DATA_HOME/linuxapk/test-bin/binder`, checked against
   `tests/binder/test-bin.sha256`; Android's CI doesn't publish them for the
   image's release, so they are built from AOSP (the header of `run.sh` says
-  how). In Flatpak mode (the default) `tests/binder/flatpak.sh` runs them in a
-  booted session instead, and exits 77 after them: there is no binderfs for the
-  kernel oracle.
-- `mise run test:boot` boots and runs `selftest` (in host mode, in both uid
-  modes).
+  how). By default `tests/binder/flatpak.sh` runs them in a booted session
+  instead, and exits 77 after them: there is no binderfs for the kernel oracle.
+- `mise run test:boot` boots and runs `selftest`.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).

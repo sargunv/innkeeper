@@ -39,12 +39,11 @@ cleanup() {
   "$session" reset >/dev/null
 }
 trap cleanup EXIT
-if [[ ${LINUXAPK_MODE:-flatpak} == flatpak && ${LINUXAPK_TEST_LAUNCHER_PORTAL:-} == gtk ]]; then
+if [[ ${LINUXAPK_TEST_LAUNCHER_PORTAL:-} == gtk ]]; then
   /usr/bin/python3 "$here/confirm.py" &
   confirm_pid=$!
 fi
-flatpak_prefix=""
-[[ ${LINUXAPK_MODE:-flatpak} == flatpak ]] && flatpak_prefix=Manager.
+flatpak_prefix=Manager.
 apps=$XDG_DATA_HOME/applications
 icons=$XDG_DATA_HOME/icons/hicolor
 
@@ -118,14 +117,13 @@ X-LinuxApk-Package=org.example.stale
 EOF
 "$la" list | grep -q $'^org.wikipedia\tWikipedia$' || fail "list"
 ok "list"
-repair_cli=$(realpath "$repo/out/stage/bin/linuxapk")
-[[ ${LINUXAPK_MODE:-flatpak} == flatpak ]] && repair_cli=linuxapk
+repair_cli=linuxapk
 want="Exec=env LINUXAPK_INSTANCE=$LINUXAPK_INSTANCE ${repair_cli} run org.example.stale %U"
 [[ $(grep '^Exec=' "$stale") == "$want" ]] || fail "stale entry not repaired: $(grep '^Exec=' "$stale")"
 rm "$stale"
 ok "list repairs a stale entry"
 
-if [[ ${LINUXAPK_TEST_UPDATE:-} == 1 && ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
+if [[ ${LINUXAPK_TEST_UPDATE:-} == 1 ]]; then
   before_commit=$(flatpak info --user --show-commit dev.linuxapk.Manager)
   before_entry=$(sha256sum "$apps/dev.linuxapk.org.wikipedia.desktop")
   "$repo/packaging/flatpak/dev-init.sh"
@@ -140,12 +138,8 @@ fi
 env -u LINUXAPK_INSTANCE gtk-launch dev.linuxapk.${flatpak_prefix}com.darkempire78.opencalculator
 wait_top com.darkempire78.opencalculator
 ok "gtk-launch: OpenCalc resumed ($(top))"
-if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
-  echo 'SKIP desktop URI association: DynamicLauncher does not rebuild the MIME cache'
-  "$la" run org.wikipedia 'wikipedia://en.wikipedia.org/wiki/Linux'
-else
-  env -u LINUXAPK_INSTANCE gio open 'wikipedia://en.wikipedia.org/wiki/Linux'
-fi
+echo 'SKIP desktop URI association: DynamicLauncher does not rebuild the MIME cache'
+"$la" run org.wikipedia 'wikipedia://en.wikipedia.org/wiki/Linux'
 wait_top org.wikipedia PageActivity
 ok "Wikipedia URI resumed ($(top))"
 

@@ -16,7 +16,7 @@ fn main() {
         .expect("missing <listener-fd>");
     // Flatpak mode makes directories for Android processes (src/flat.rs),
     // applying their umask itself.
-    if std::env::var("LINUXAPK_FLATPAK").as_deref() == Ok("1") {
+    if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1") {
         unsafe { libc::umask(0) };
     }
     linuxapk_broker::notify::serve(sock, listener);

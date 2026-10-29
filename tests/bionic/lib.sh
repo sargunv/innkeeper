@@ -134,7 +134,7 @@ bionic_broker_nodes() {
 bionic_env() {
   local v
   for v in $(compgen -e); do unset "$v"; done
-  export PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
+  export LINUXAPK_BIONIC_HARNESS=1 PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
     ANDROID_ART_ROOT=/apex/com.android.art ANDROID_I18N_ROOT=/apex/com.android.i18n \
     ANDROID_TZDATA_ROOT=/apex/com.android.tzdata TMPDIR=/data/local/tmp
 }

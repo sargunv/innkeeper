@@ -5,14 +5,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::process::CommandExt;
-use std::path::Path;
-use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::paths::{Paths, Sandbox};
-use crate::{control, session, sys};
+use crate::control;
+use crate::paths::Paths;
 
 pub const RELAY: &str = "/system/bin/linuxapk-exec";
 
@@ -44,50 +41,5 @@ pub fn android_env() -> Vec<(String, String)> {
 
 /// Runs argv in the session; returns its exit code.
 pub fn run(paths: &Paths, argv: &[&OsStr]) -> Result<i32> {
-    if paths.sandbox == Sandbox::Flatpak {
-        return control::exec(&paths.control(), argv);
-    }
-    let pid = session::ns_pid(paths).context("not running")?;
-    // Keeps the session up while the command runs (crate::lifecycle).
-    let _running = crate::lifecycle::hold_exec_lock(&paths.exec_lock());
-    // Join the session's cgroup, so nothing started here outlives `stop`.
-    if let Some(cg) = crate::host::cgroup(paths) {
-        let _ = fs::write(cg.join("cgroup.procs"), format!("{}\n", sys::pid()));
-    }
-    // Android's root and namespaces (init's), user first: it grants the
-    // rights to join the others.
-    let proc = Path::new("/proc").join(pid.to_string());
-    let open = |n: &str| {
-        sys::open_path(&proc.join("ns").join(n)).with_context(|| format!("open {n} namespace"))
-    };
-    let user = open("user")?;
-    let others = [
-        (open("cgroup")?, libc::CLONE_NEWCGROUP),
-        (open("ipc")?, libc::CLONE_NEWIPC),
-        (open("uts")?, libc::CLONE_NEWUTS),
-        (open("net")?, libc::CLONE_NEWNET),
-        (open("pid")?, libc::CLONE_NEWPID),
-        (open("mnt")?, libc::CLONE_NEWNS),
-    ];
-    let root = sys::open_path(&proc.join("root")).context("open the session's root")?;
-    sys::setns(&user, libc::CLONE_NEWUSER).context("join the user namespace")?;
-    for (fd, t) in &others {
-        sys::setns(fd, *t).with_context(|| format!("join namespace {t:#x}"))?;
-    }
-    sys::fchdir(&root)?;
-    sys::chroot_here().context("chroot")?;
-    std::env::set_current_dir("/")?;
-    // A new pid namespace applies to children only.
-    let child = sys::fork()?;
-    if child == 0 {
-        sys::die_with_parent(libc::SIGKILL);
-        let e = Command::new(RELAY)
-            .args(argv)
-            .env_clear()
-            .envs(android_env())
-            .exec();
-        eprintln!("linuxapk-session: exec {RELAY}: {e}");
-        unsafe { libc::_exit(127) };
-    }
-    Ok(sys::wait(child)?)
+    control::exec(&paths.control(), argv)
 }

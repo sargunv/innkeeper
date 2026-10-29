@@ -6,9 +6,8 @@ An Android app may do what a native desktop app running as the user can do.
 Linux.apk adds no protection that costs complexity, hacks or performance beyond
 that.
 
-- **Kept:** isolation that comes free from the namespaces the session needs
-  anyway, and simple bounds and correctness checks (sizes, overflow, never
-  writing into the wrong process).
+- **Kept:** isolation that comes from the Flatpak sandbox, and simple bounds and
+  correctness checks (sizes, overflow, never writing into the wrong process).
 - **Out of scope:** making host helpers robust against deliberately malicious
   Android processes, such as session-wide denial of service or kernel-exact
   fault semantics for malformed requests that only hurt the caller.
@@ -22,15 +21,15 @@ flowchart LR
   apps -. "trapped syscalls" .-> broker["broker + bpfemu<br/>(host user's power)"]
   sys -->|"bridge.sock, per-service uid policy"| bridge["linuxapk-bridge<br/>(the user)"]
   bridge -->|"portals, D-Bus, Wayland"| desk["desktop"]
-  root["Android root = host user"] -->|"locked masks, own netns, own cgroup"| host["host files the user owns"]
+  root["Android root = host user"] -->|"Flatpak sandbox"| host["host files the user owns"]
 ```
 
 - **Android root is the host user.** Inside the user namespace it has the user's
-  file access, limited by what the session mounts:
-  [session.md](session.md#host-safety) lists the masks, namespaces and binds,
-  and `selftest` proves them.
-- **The supervisor** (pivot-exec's bpf thread and the broker) runs in the outer
-  namespaces with the host user's privileges and reads and writes Android
+  file access, limited by the Flatpak sandbox:
+  [session.md](session.md#host-safety) lists its grants and probes, and
+  `selftest` proves them.
+- **The supervisor** (pivot-exec's bpf thread and the broker) runs in the
+  sandbox with the host user's privileges and reads and writes Android
   processes' memory. It serves only callers inside the session's seccomp filter.
   It keeps bounds checks and pins each process's memory at binder open so writes
   never land in the wrong process, but a process that misbehaves on purpose can
@@ -40,11 +39,10 @@ flowchart LR
 
 ## The bridge socket
 
-- The socket directory is bound into Android as `/dev/socket/linuxapk`,
+- The socket directory is linked into Android as `/dev/socket/linuxapk`,
   `root:audio 0750`; the system app gets the `audio` group through its
   `HOST_BRIDGE` permission.
-- `SO_PEERCRED` is checked against an allow-list: Android root (the user),
-  `system` and `audioserver` (their subordinate uids in subuid mode).
+- `SO_PEERCRED` is checked against the host user.
 - The system app's uid (the owner of its data directory) is admitted to the
   system, documents, apps and hoststate services; `system` (the Health HAL)
   reaches hoststate through the allow-list. The **input and a11y services are
@@ -62,9 +60,8 @@ but that is policy enforced by Android's own processes, not by the kernel.
 
 - This matches one desktop user running several native apps, which is the threat
   model. The CLI and manager show a one-time notice.
-- The host user's supplementary groups can't be dropped without a subgid range;
-  `selftest` checks that they are unmapped inside and that no bound host path
-  belongs to one of them.
+- Host supplementary groups are unmapped in the sandbox; `selftest` checks that
+  no host group is mapped.
 - **Accepted:** the bridge sees every Android process as the user, so its uid
   checks admit any app to every service, including input. That matches desktop
   parity: a native app running as the user can reach the same desktop services.

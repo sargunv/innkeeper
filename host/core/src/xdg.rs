@@ -340,7 +340,7 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 
 /// Repairs our app entries. The `Exec` of one that can no longer run is
 /// pointed at `linuxapk` (this installation's command line, keeping its
-/// instance): its program is gone (Linux.apk, or its AppImage, moved or was
+/// instance): its program is gone (Linux.apk moved or was
 /// reinstalled elsewhere), it sets variables an older Linux.apk used
 /// (`LINUXAPK_SESSION`), or, inside the Flatpak, it runs anything but
 /// `linuxapk`. Inside the Flatpak, a record whose app-menu entry is missing or
@@ -469,10 +469,9 @@ mod tests {
             cache: root.join("cache"),
             portal: None,
         };
-        // This installation is an AppImage (Prefix::cli).
-        let appimage = root.join("Linux.apk.AppImage");
-        fs::write(&appimage, "").unwrap();
-        let cli = vec![appimage.to_string_lossy().into_owned(), "linuxapk".into()];
+        let binary = root.join("linuxapk");
+        fs::write(&binary, "").unwrap();
+        let cli = vec![binary.to_string_lossy().into_owned()];
         let entry = |pkg: &str, exec: &str| {
             let p = d.app_desktop(pkg);
             let text =
@@ -491,18 +490,13 @@ mod tests {
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
         let moved = entry("org.ex.moved", "/gone/linuxapk run org.ex.moved %U");
-        let moved_appimage = entry(
-            "org.ex.ai",
-            "env LINUXAPK_INSTANCE=t /gone/Linux.apk.AppImage linuxapk run org.ex.ai %U",
-        );
         let fine = entry("org.ex.fine", &want("org.ex.fine", "").unwrap());
         let on_path = entry("org.ex.path", "linuxapk run org.ex.path %U");
 
-        assert_eq!(refresh_entries(&d, &cli), 3);
+        assert_eq!(refresh_entries(&d, &cli), 2);
         assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
         assert_eq!(exec_instance(&exec_of(&old).unwrap()), "cli");
         assert_eq!(exec_of(&moved), want("org.ex.moved", ""));
-        assert_eq!(exec_of(&moved_appimage), want("org.ex.ai", "t"));
         assert_eq!(exec_of(&fine), want("org.ex.fine", ""));
         assert_eq!(
             exec_of(&on_path).as_deref(),

@@ -14,27 +14,6 @@ use crate::sys;
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.linuxapk.Manager";
 
-/// Where the session runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Sandbox {
-    /// Rootless namespaces in a systemd user unit.
-    Host,
-    /// Inside Linux.apk's own Flatpak sandbox, which allows no namespaces or
-    /// mounts (docs/session.md, "Flatpak mode").
-    Flatpak,
-}
-
-impl Sandbox {
-    pub fn detect() -> Self {
-        if Path::new("/.flatpak-info").exists() {
-            Sandbox::Flatpak
-        } else {
-            Sandbox::Host
-        }
-    }
-}
-
 /// `LINUXAPK_INSTANCE` if it is a valid instance name, else an error. Empty
 /// for the main session.
 pub fn instance() -> Result<String> {
@@ -49,7 +28,7 @@ pub fn instance() -> Result<String> {
 }
 
 /// `name`, suffixed with `-<instance>` for a named instance: the session's
-/// systemd unit and its directories are named this way.
+/// directories are named this way.
 pub fn per_instance(name: &str, instance: &str) -> String {
     if instance.is_empty() {
         name.into()
@@ -81,7 +60,6 @@ fn env_path(var: &str) -> Option<PathBuf> {
 pub struct Paths {
     /// Empty for the main session.
     pub instance: String,
-    pub sandbox: Sandbox,
     /// `<prefix>/libexec/linuxapk`: pivot-exec, the bridge, the image scripts.
     pub libexec: PathBuf,
     /// `<prefix>/share/linuxapk`: the Android tree, the image config.
@@ -102,8 +80,6 @@ pub struct Paths {
     pub pin: PathBuf,
     /// Flatpak mode's composed root: `root[-<instance>]`.
     pub root: PathBuf,
-    /// The systemd user unit (host mode).
-    pub unit: String,
 }
 
 impl Paths {
@@ -117,19 +93,14 @@ impl Paths {
             );
         }
         let instance = instance()?;
-        let sandbox = Sandbox::detect();
         let sfx = |n: &str| per_instance(n, &instance);
         let runtime = env_path("XDG_RUNTIME_DIR")
             .unwrap_or_else(|| format!("/run/user/{}", sys::uid()).into());
-        let run = match sandbox {
-            Sandbox::Host => runtime.join(sfx("linuxapk")),
-            // The sandbox's own runtime dir is private to each instance; the
-            // app's dir in it is shared by all of them.
-            Sandbox::Flatpak => runtime
-                .join("app")
-                .join(env::var("FLATPAK_ID").unwrap_or_else(|_| APP_ID.into()))
-                .join(sfx("linuxapk")),
-        };
+        // The app's runtime dir is shared by every sandbox instance.
+        let run = runtime
+            .join("app")
+            .join(env::var("FLATPAK_ID").unwrap_or_else(|_| APP_ID.into()))
+            .join(sfx("linuxapk"));
         let data_home = xdg_home("XDG_DATA_HOME", ".local/share").join("linuxapk");
         Ok(Paths {
             libexec: prefix.join("libexec/linuxapk"),
@@ -139,11 +110,9 @@ impl Paths {
             images: env_path("LINUXAPK_IMAGES").unwrap_or_else(|| data_home.join("images")),
             pin: env_path("LINUXAPK_PIN").unwrap_or_else(|| share.join("image/pin.toml")),
             root: data_home.join(sfx("root")),
-            unit: sfx("linuxapk-session"),
             data_home,
             share,
             instance,
-            sandbox,
         })
     }
 
@@ -169,8 +138,7 @@ impl Paths {
         self.run.join("pid")
     }
 
-    /// The process init is a child of: pid 1 of the outer namespaces (host
-    /// mode), or pivot-exec (Flatpak mode).
+    /// The process init is a child of: pivot-exec.
     pub fn outer_pid_file(&self) -> PathBuf {
         self.run.join("outer.pid")
     }
@@ -190,12 +158,6 @@ impl Paths {
     /// Held shared by every running `exec`, which keeps the session up.
     pub fn exec_lock(&self) -> PathBuf {
         self.run.join("exec.lock")
-    }
-
-    /// The transient systemd timer (and its service) that starts the session
-    /// again for an alarm (host mode).
-    pub fn wake_unit(&self) -> String {
-        format!("{}-wake", self.unit)
     }
 
     pub fn kmsg_log(&self) -> PathBuf {

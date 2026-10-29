@@ -20,7 +20,8 @@ pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.linuxapk
 /// Linux.apk's Flatpak app id when it runs inside its Flatpak (where app-menu
 /// entries go through the DynamicLauncher portal), else None.
 pub fn flatpak_app_id() -> Option<String> {
-    (linuxapk_session::Sandbox::detect() == linuxapk_session::Sandbox::Flatpak)
+    std::path::Path::new("/.flatpak-info")
+        .exists()
         .then(|| std::env::var("FLATPAK_ID").unwrap_or_else(|_| MANAGER_ID.into()))
 }
 

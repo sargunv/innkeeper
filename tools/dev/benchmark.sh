@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 export LINUXAPK_BINDER_TESTS=${LINUXAPK_BINDER_TESTS:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/test-bin/binder}
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-benchmark-${LINUXAPK_MODE:-flatpak}}
+export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-benchmark}
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@"; fi
 S=$repo/tools/dev/session.sh
 T=$repo/out/test/benchmark/$LINUXAPK_INSTANCE

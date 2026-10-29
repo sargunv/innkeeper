@@ -12,16 +12,13 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import dev.linuxapk.system.Feature
-import dev.linuxapk.system.SystemProps
 import java.io.File
 import java.net.InetAddress
 
 /**
- * Flatpak mode (docs/session.md): Android shares the host's network namespace, as any desktop app
- * does, so there is no interface for EthernetService to bring up. Offer the host's network itself
- * as Android's default network: an agent with no interface, whose DNS servers are the host's.
- * Sockets then use the host's routes. The launcher sets `ro.vendor.linuxapk.host_net` in Flatpak
- * mode only; otherwise this does nothing.
+ * Android shares the host's network namespace, as any desktop app does. Offer the host's network as
+ * Android's default network: an agent with no interface, whose DNS servers are the host's. Sockets
+ * use the host's routes.
  *
  * The resolvers come from the sandbox's `/etc/resolv.conf`, which Flatpak keeps current (a link
  * into `/run/host/monitor`), and are sent again whenever it changes, such as when the host joins a
@@ -42,7 +39,6 @@ class HostNetworkFeature(private val context: Context) : Feature {
     get() = agent != null
 
   override fun start() {
-    if (!SystemProps.getBoolean(FLAG_PROP, false)) return
     val t = HandlerThread("HostNetwork").also { it.start() }
     thread = t
     instance = this
@@ -172,7 +168,6 @@ class HostNetworkFeature(private val context: Context) : Feature {
     @Volatile var instance: HostNetworkFeature? = null
 
     private const val TAG = "LinuxApkHostNetwork"
-    private const val FLAG_PROP = "ro.vendor.linuxapk.host_net"
     private const val RESOLV_CONF = "/etc/resolv.conf"
     private const val LINK_KBPS = 1_000_000
     /** NetworkCapabilities.NET_CAPABILITY_NOT_VCN_MANAGED (a system API constant). */

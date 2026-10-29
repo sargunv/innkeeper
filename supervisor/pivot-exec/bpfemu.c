@@ -913,7 +913,8 @@ static long handle(struct seccomp_notif* req) {
 #define __NR_ioctl 16
 #endif
 
-int bpfemu_install_filter(int single_uid, int flat) {
+int bpfemu_install_filter(int harness) {
+  int flat = !harness;
   // The syscall clauses (bpf, statfs, getxattr, getsockopt, prlimit, timerfd,
   // sched). All jumps are relative, and they target NOTIF/ALLOW, which sit
   // immediately after this block, so the whole block can be shifted down by a
@@ -990,7 +991,7 @@ int bpfemu_install_filter(int single_uid, int flat) {
   int vid_start = n;  // where non-binder syscalls continue
   int vid_jumps[32], nvid_jumps = 0, peercred_i = -1, lstat_i = -1,
                      access_i = -1;
-  if (single_uid) {
+  if (!harness) {
     for (size_t i = 0; i < sizeof(kVidNrs) / sizeof(kVidNrs[0]); i++) {
       vid_jumps[nvid_jumps++] = n;
       f[n++] = (struct sock_filter)BPF_JUMP(

@@ -69,15 +69,10 @@ done
   echo "FAIL idle shutdown: $status"
   exit 1
 }
-if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
-  grep -qx "wakeup=$wakeup" <<<"$status" || {
-    echo "FAIL alarm waiter: $status"
-    exit 1
-  }
-else
-  env XDG_RUNTIME_DIR="/run/user/$UID" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID/bus" \
-    systemctl --user is-active --quiet "linuxapk-session-$LINUXAPK_INSTANCE-wake.timer"
-fi
+grep -qx "wakeup=$wakeup" <<<"$status" || {
+  echo "FAIL alarm waiter: $status"
+  exit 1
+}
 printf 'ok   idle stopped with pending alarm: %s\n' "$status"
 wake_checked=
 for _ in $(seq 240); do

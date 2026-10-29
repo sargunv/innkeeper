@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
   if (c == 0) {
     alarm(20);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-    int lfd = bpfemu_install_filter(0, 0);
+    int lfd = bpfemu_install_filter(1);
     if (lfd < 0) return perror("filter"), 1;
     char ctl[CMSG_SPACE(sizeof(int))] = {0};
     char b = 0;

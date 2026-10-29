@@ -1,29 +1,16 @@
 // pivot-exec NEWROOT PROG [ARGS...]
 //
-// Final step of the session launcher (runs as pid 1 of the session's outer
-// user/mount/pid namespaces, after host/launcher/src/nsroot.rs assembled
-// NEWROOT):
+// The session runs inside Flatpak (see below). The namespace path
+// is retained only for the bootless bionic test harness and kernel binder
+// oracle, which assemble NEWROOT in tests/bionic/lib.sh.
 //
-//  1. Make NEWROOT the root and detach the old (host) root.
-//  2. Clone a child into nested user, mount, pid, cgroup, network, IPC and
-//     UTS namespaces. The parent writes the child's uid/gid maps (identity
-//     over the outer namespace's ranges), the bubblewrap technique: because
-//     the child's mount namespace is owned by a less privileged user
-//     namespace, every mount it inherits is MNT_LOCKED, so Android's root
-//     cannot unmount the masks over host sysfs/proc, and read-only/nosuid/
-//     nodev/noexec flags on inherited mounts can't be cleared.
-//  3. The child installs the seccomp filter (bpfemu.c). The parent forks the
-//     binder broker (LINUXAPK_BROKER), which receives every notification,
-//     serves binder and forwards the rest, such as bpf(2), to an emulator
-//     thread (real eBPF needs privileges).
-//  4. The child (pid 1 of the nested pid namespace) mounts a fresh /proc,
-//     binds the fake files staged under /linuxapk/proc over it, and execs
-//     PROG. The parent stays as the outer pid 1 and exits with the child's
-//     status, so the whole session ends when Android init does.
+// In those developer harnesses, pivot to NEWROOT, clone nested namespaces
+// with locked mounts, and install the seccomp filter before executing PROG.
+// The parent serves notifications through the broker and bpf emulator.
 //
 // Built static with the NDK so it keeps working after the host root is gone.
 //
-// Flatpak mode (LINUXAPK_FLATPAK=1, NEWROOT "/"): the sandbox forbids mounts
+// Flatpak runtime (NEWROOT "/"): the sandbox forbids mounts
 // and namespaces, and the launcher already built Android's root out of
 // symlinks in the sandbox's own "/". Steps 1 and 2 are skipped: init is a
 // plain child, and this process becomes its subreaper instead of pid 1. The
@@ -59,9 +46,6 @@ extern char** environ;
 static const char* broker;
 // Flatpak mode (see the header).
 static int flat;
-// Single-uid mode (LINUXAPK_SINGLE_UID=1): the session maps only uid/gid 0,
-// and the broker emulates Android's uids (supervisor/README.md).
-static int single_uid;
 
 static void die(const char* what);
 
@@ -168,7 +152,7 @@ static int child_main(void* arg) {
 
   // Route Android's bpf(), openat and binder ioctls to the supervisor via one
   // seccomp notification listener, then hand it the fd.
-  int listener = bpfemu_install_filter(single_uid, flat);
+  int listener = bpfemu_install_filter(!flat);
   if (listener < 0) die("install seccomp filter");
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
@@ -204,16 +188,12 @@ int main(int argc, char** argv) {
     fprintf(stderr, "pivot-exec: LINUXAPK_BROKER (the broker) is not set\n");
     return 2;
   }
-  const char* su = getenv("LINUXAPK_SINGLE_UID");
-  single_uid = su != NULL && strcmp(su, "1") == 0;
-  const char* fp = getenv("LINUXAPK_FLATPAK");
-  flat = fp != NULL && strcmp(fp, "1") == 0;
+  const char* harness = getenv("LINUXAPK_BIONIC_HARNESS");
+  flat = !(harness && strcmp(harness, "1") == 0);
 
   if (flat) {
-    if (strcmp(argv[1], "/") != 0 || !single_uid) {
-      fprintf(
-        stderr, "pivot-exec: Flatpak mode needs NEWROOT / and single-uid\n"
-      );
+    if (strcmp(argv[1], "/") != 0) {
+      fprintf(stderr, "pivot-exec: Flatpak runtime needs NEWROOT /\n");
       return 2;
     }
     if (chdir("/") != 0) die("chdir /");

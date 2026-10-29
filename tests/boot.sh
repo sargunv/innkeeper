@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 # Boot a fresh headless test instance (LINUXAPK_INSTANCE, default boot; its
 # /data under out/test/boot), wait for Android to finish booting, run the
-# host-safety selftest, and stop it again. The uid mode is single in Flatpak
-# mode; in host mode it is the host's: subuid when it has a subordinate id range.
-#   tests/boot.sh [--no-subids]
-# --no-subids hides the host's ranges (empty /etc/subuid and /etc/subgid
-# stand-ins), so the session runs in single mode.
+# sandbox selftest, and stop it again.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 session=$repo/tools/dev/session.sh
@@ -13,23 +9,8 @@ session=$repo/tools/dev/session.sh
   echo "no $session (run \`mise run build\`)" >&2
   exit 1
 }
-mode=subuid
-[[ ${LINUXAPK_MODE:-flatpak} == flatpak ]] && mode=single
-if [[ ${1:-} == --no-subids ]]; then
-  mode=single
-  export LINUXAPK_SUBUID_FILE=/dev/null LINUXAPK_SUBGID_FILE=/dev/null
-fi
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-boot}
-export LINUXAPK_DATA=$repo/out/test/boot/data-$mode
-
-fail=0
-check() { # name expected actual
-  if [[ $2 == "$3" ]]; then echo "ok   $1"; else
-    echo "FAIL $1: expected '$2', got '$3'"
-    fail=1
-  fi
-}
-uid_mode() { "$session" status | sed -n 's/^uid-mode=//p'; }
+export LINUXAPK_DATA=$repo/out/test/boot/data
 
 "$session" stop >/dev/null
 "$session" reset >/dev/null
@@ -48,11 +29,5 @@ until [[ $("$session" exec getprop sys.boot_completed 2>/dev/null) == 1 ]]; do
   }
   sleep 2
 done
-echo "ok   booted ($mode) in $((SECONDS - t)) s"
-check "uid mode" "$mode" "$(uid_mode)"
-"$session" selftest || fail=1
-"$session" stop >/dev/null
-# The /data it made keeps its mode, whatever ranges the host shows now.
-check "uid mode sticks to /data without ranges" "$mode" \
-  "$(LINUXAPK_SUBUID_FILE=/dev/null LINUXAPK_SUBGID_FILE=/dev/null uid_mode)"
-exit $fail
+echo "ok   booted in $((SECONDS - t)) s"
+"$session" selftest

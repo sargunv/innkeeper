@@ -2,15 +2,14 @@
 //! `ok` (docs/session.md, "Host safety"). `mise run test:boot` runs it.
 
 use std::fs;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 
 use crate::conf::Config;
-use crate::paths::Sandbox;
-use crate::{session, sys};
+use crate::sys;
 
 struct Report(String);
 
@@ -23,33 +22,6 @@ impl Report {
         }
     }
 }
-
-/// Probes run inside Android, each a shell condition that must fail.
-const HOST_PROBES: &[(&str, &str)] = &[
-    (
-        "umount of the fusectl mask refused",
-        "umount /sys/fs/fuse/connections",
-    ),
-    (
-        "lazy umount of a /sys mask refused",
-        "umount -l /sys/firmware/efi/efivars",
-    ),
-    ("remount /sys rw refused", "mount -o remount,bind,rw /sys"),
-    ("sysfs not writable", "echo 1 > /sys/kernel/mm/ksm/run"),
-    (
-        "no FUSE connections visible",
-        "[ -n \"$(ls -A /sys/fs/fuse/connections)\" ]",
-    ),
-    (
-        "fresh sysfs mount refused",
-        "mkdir -p /tmp/.st && mount -t sysfs s /tmp/.st",
-    ),
-    ("sysrq refused", "echo h > /proc/sysrq-trigger"),
-    (
-        "umount of the staged APEX tree refused",
-        "umount /linuxapk/apex",
-    ),
-];
 
 /// Flatpak mode's: the sandbox is the boundary, so these check what it gives
 /// an Android process (the probe's own shell, under both seccomp filters).
@@ -99,28 +71,6 @@ fn android_probes(exe: &Path, probes: &[(&str, &str)]) -> Result<String> {
         .collect())
 }
 
-/// Every file at or under `paths` (not crossing filesystems) owned by group
-/// `gid`: the first one.
-fn owned_by_group(paths: &[PathBuf], gid: u32) -> Option<PathBuf> {
-    fn walk(p: &Path, dev: u64, gid: u32) -> Option<PathBuf> {
-        let m = p.symlink_metadata().ok()?;
-        if m.gid() == gid {
-            return Some(p.to_path_buf());
-        }
-        if m.is_dir() && m.dev() == dev {
-            for e in fs::read_dir(p).ok()?.flatten() {
-                if let Some(f) = walk(&e.path(), dev, gid) {
-                    return Some(f);
-                }
-            }
-        }
-        None
-    }
-    paths
-        .iter()
-        .find_map(|p| walk(p, p.symlink_metadata().ok()?.dev(), gid))
-}
-
 fn status_field(pid: i32, key: &str) -> String {
     fs::read_to_string(format!("/proc/{pid}/status"))
         .unwrap_or_default()
@@ -129,27 +79,17 @@ fn status_field(pid: i32, key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Single mode (docs/security.md): without a subgid range the kernel denies
-/// setgroups, so the host user's supplementary groups can't be dropped.
-/// They must stay unusable instead: setgroups denied (no way to change
-/// them), unmapped inside, and no host path bound into the session owned by
-/// one of them.
-///
-/// In Flatpak mode the sandbox's user namespace maps no host group either:
-/// they all show as the overflow gid, as does every host file whose group
-/// isn't the user's, so bound paths can't be told apart. The sandbox is the
-/// boundary there, as for any Flatpak app.
-fn single_mode_groups(r: &mut Report, cfg: &Config, pid: i32) {
+/// No host supplementary group is mapped into the sandbox.
+fn single_mode_groups(r: &mut Report, pid: i32) {
     let me = sys::gid();
     let overflow: u32 = fs::read_to_string("/proc/sys/kernel/overflowgid")
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(65534);
-    let flatpak = cfg.flatpak();
     let extra: Vec<u32> = status_field(pid, "Groups:")
         .split_whitespace()
         .filter_map(|g| g.parse().ok())
-        .filter(|&g| g != me && !(flatpak && g == overflow))
+        .filter(|&g| g != me && g != overflow)
         .collect();
     let setgroups = fs::read_to_string(format!("/proc/{pid}/setgroups")).unwrap_or_default();
     r.check(
@@ -157,56 +97,10 @@ fn single_mode_groups(r: &mut Report, cfg: &Config, pid: i32) {
         "single mode: setgroups denied in the session",
         "single mode: setgroups allowed in the session",
     );
-    if extra.is_empty() {
-        let what = if flatpak {
-            "no host supplementary groups mapped in the sandbox"
-        } else {
-            "no host supplementary groups"
-        };
-        r.check(true, what, "");
-        return;
-    }
-    let gid_map = fs::read_to_string(format!("/proc/{pid}/gid_map")).unwrap_or_default();
-    let mapped = gid_map.lines().any(|l| {
-        let f: Vec<u64> = l
-            .split_whitespace()
-            .filter_map(|w| w.parse().ok())
-            .collect();
-        f.len() == 3
-            && extra
-                .iter()
-                .any(|&g| (f[0]..f[0] + f[2]).contains(&(g as u64)))
-    });
-    let list = extra
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(" ");
     r.check(
-        !mapped,
-        &format!("single mode: host supplementary groups ({list}) unmapped"),
-        "single mode: a host supplementary group is mapped",
-    );
-    // The host paths bound or linked into the session: /data, the device
-    // nodes, the kmsg FIFO and the bridge's socket dir.
-    let p = &cfg.paths;
-    let mut paths = vec![p.data.clone(), p.run.join("kmsg"), p.run.join("bridge")];
-    for n in [
-        "null", "zero", "full", "random", "urandom", "fuse", "udmabuf", "net/tun", "dri",
-    ] {
-        let d = Path::new("/dev").join(n);
-        if d.exists() {
-            paths.push(d);
-        }
-    }
-    let bad = extra.iter().find_map(|&g| owned_by_group(&paths, g));
-    r.check(
-        bad.is_none(),
-        "single mode: no bound host path belongs to them",
-        &format!(
-            "single mode: bound host path owned by a host group: {}",
-            bad.unwrap_or_default().display()
-        ),
+        extra.is_empty(),
+        "no host supplementary groups mapped in the sandbox",
+        "a host supplementary group is mapped",
     );
 }
 
@@ -298,42 +192,9 @@ fn flatpak_info(r: &mut Report) {
 pub fn run(cfg: &Config, exe: &Path) -> Result<bool> {
     let p = &cfg.paths;
     let mut r = Report(String::new());
-    if p.sandbox == Sandbox::Flatpak {
-        flatpak_info(&mut r);
-        single_mode_groups(&mut r, cfg, sys::pid());
-        r.0 += &android_probes(exe, FLATPAK_PROBES)?;
-    } else {
-        let pid = session::ns_pid(p).context("not running")?;
-        let ns = |n: &str, of: &str| fs::read_link(format!("/proc/{of}/ns/{n}")).ok();
-        let (pid_s, me) = (pid.to_string(), "self");
-        r.check(
-            ns("net", &pid_s) != ns("net", me),
-            "own network namespace",
-            "shares the host network namespace",
-        );
-        r.check(
-            ns("ipc", &pid_s) != ns("ipc", me),
-            "own IPC namespace",
-            "shares the host IPC namespace",
-        );
-        let cg = fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap_or_default();
-        r.check(
-            cg.contains(&format!("/{}.service", p.unit)),
-            &format!("runs in {}.service's cgroup", p.unit),
-            &format!("cgroup: {}", cg.trim()),
-        );
-        if cfg.single() {
-            single_mode_groups(&mut r, cfg, pid);
-        } else {
-            let g = status_field(pid, "Groups:");
-            r.check(
-                g.is_empty(),
-                "no host supplementary groups",
-                &format!("Groups: {g}"),
-            );
-        }
-        r.0 += &android_probes(exe, HOST_PROBES)?;
-    }
+    flatpak_info(&mut r);
+    single_mode_groups(&mut r, sys::pid());
+    r.0 += &android_probes(exe, FLATPAK_PROBES)?;
     print!("{}", r.0);
     let _ = fs::write(p.run.join("selftest.txt"), &r.0);
     Ok(!r.0.lines().any(|l| l.starts_with("FAIL")) && r.0.lines().any(|l| l.starts_with("ok")))

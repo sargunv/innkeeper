@@ -24,9 +24,8 @@ linuxapk uninstall org.wikipedia
 linuxapk list
 ```
 
-The first use downloads the Android image (about 1.2 GB). On a host without a
-subordinate uid range (such as inside Flatpak) apps share one uid and are not
-isolated from each other, as native desktop apps aren't
+The first use downloads the Android image (about 1.2 GB). Apps share one uid and
+are not isolated from each other, as native desktop apps aren't
 ([docs/security.md](docs/security.md#single-uid-mode)).
 
 ## Status
@@ -37,11 +36,10 @@ Rethink runs without its VPN because the sandbox has no TUN device. These
 include Compose, Flutter, React Native, Capacitor and Godot apps,
 StreetComplete's MapLibre map and video playback, each in its own window with
 sound. Desktop integration (M3) and the no-privilege mode (M4: userspace binder,
-automatic single-uid, the CI image) are done. Linux.apk builds as a Flatpak that
-runs Android inside its own sandbox
-([packaging/flatpak](packaging/flatpak/README.md)) and as an AppImage
-([packaging/appimage](packaging/appimage/README.md)). Next: the rest of
-packaging (M5) and ARM translation (M6); see the
+single-uid, the CI image) are done. Linux.apk builds as a Flatpak that runs
+Android inside its own sandbox
+([packaging/flatpak](packaging/flatpak/README.md)). Next: the rest of packaging
+(M5) and ARM translation (M6); see the
 [milestones](https://github.com/sargunv/linux.apk/milestones).
 
 Real apps running in Linux.apk on KDE Plasma (Wayland):
@@ -69,7 +67,7 @@ flowchart LR
   subgraph img["image/ : pinned AOSP CI image (fetched at first use)"]
     aosp["system, vendor, product, APEXes"]
   end
-  subgraph sup["supervisor/ : syscall boundary (outer namespaces)"]
+  subgraph sup["supervisor/ : syscall boundary (Flatpak sandbox)"]
     pivot["pivot-exec + bpfemu (supervisor/pivot-exec)"]
     broker["linuxapk-broker: binder + credentials (supervisor/broker)"]
   end
@@ -80,15 +78,15 @@ flowchart LR
     vk["RADV / lavapipe (android/vendor/vulkan)"]
     snd["libtinyalsav2 (android/vendor/audio)"]
     health["Health HAL (android/vendor/health)"]
-    sysbin["linuxapk-exec, iptables (android/system)"]
+    sysbin["linuxapk-exec (android/system)"]
   end
   cli --> core
   mgr --> core
   core -->|"start, exec"| launcher
-  launcher -->|"systemd unit, namespaces, overlay stack"| pivot
+  launcher -->|"Flatpak sandbox, composed root"| pivot
   launcher --> bridge
   aosp -.->|"lowest layer"| and
-  pivot -->|"pivot_root, exec init"| and
+  pivot -->|"fork, exec init"| and
   pivot -->|"seccomp notify fd"| broker
   broker <-->|"trapped binder and credential syscalls"| and
   hwc -->|"display service: dma-buf frames"| bridge
@@ -103,22 +101,21 @@ flowchart LR
 | [host/core](host/core/README.md)                                       | `linuxapk-core` (library)                              | inside the CLI, manager and bridge         | `src/ops.rs`                   |
 | [host/cli](host/cli/README.md)                                         | `bin/linuxapk`                                         | desktop, as you                            | `src/main.rs`                  |
 | [host/manager](host/manager/README.md)                                 | `bin/linuxapk-manager`                                 | desktop, as you                            | `src/window.rs`                |
-| [host/bridge](host/bridge/README.md)                                   | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's unit             | `src/main.rs`, `src/ipc/`      |
-| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`                    | desktop, then outer namespaces             | `src/cli.rs`                   |
-| [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | outer namespaces; the shim inside Android  | `broker/src/notify.rs`         |
+| [host/bridge](host/bridge/README.md)                                   | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's sandbox          | `src/main.rs`, `src/ipc/`      |
+| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`                    | Flatpak sandbox                            | `src/cli.rs`                   |
+| [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | sandbox; the shim inside Android           | `broker/src/notify.rs`         |
 | [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared        | `fetch.sh`, `pin.toml`         |
 | [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                          | `composer/Display.cpp`         |
 | [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.lvp.so`                      | Android, in every Vulkan user              | `build.sh`, `patches/mesa/`    |
 | [android/vendor/audio](android/vendor/audio/README.md)                 | `libtinyalsav2.so`                                     | Android, in the audio HAL                  | `tinyalsa/pcm.c`               |
 | [android/vendor/health](android/vendor/health/README.md)               | `android.hardware.health-service.linuxapk`             | Android `/vendor`                          | `src/battery.c`                |
 | [android/vendor/bridge-client](android/vendor/bridge-client/README.md) | static library                                         | linked into the composer, audio and health | `bridge_client.c`              |
-| [android/system](android/system/README.md)                             | `linuxapk-exec`, nf_tables iptables                    | Android `/system`                          | `exec/linuxapk-exec.c`         |
+| [android/system](android/system/README.md)                             | `linuxapk-exec`                                        | Android `/system`                          | `exec/linuxapk-exec.c`         |
 | [android/system-app](android/system-app/README.md)                     | `LinuxApkSystem.apk`                                   | Android, as a privileged app               | `app/.../LinuxApkSystemApp.kt` |
 | [android/overlay](android/overlay/README.md)                           | config files over the image's partitions               | Android                                    | its README                     |
 | [android/microg](android/microg/README.md)                             | optional microG addon                                  | Android                                    | `install.sh`                   |
 | [tests](tests/README.md)                                               | test harnesses and suites                              | desktop, never shipped                     | its README                     |
 | [packaging/flatpak](packaging/flatpak/README.md)                       | the Flatpak, `dev.linuxapk.Manager`                    | build time                                 | `build.sh`                     |
-| [packaging/appimage](packaging/appimage/README.md)                     | AppImage of the staged prefix                          | build time                                 | `build.sh`, `AppRun`           |
 | [tools](tools/README.md)                                               | build container, staging, dev scripts                  | build time                                 | `build/artifacts.toml`         |
 | [docs](docs/)                                                          | cross-cutting design                                   |                                            | `architecture.md`              |
 
@@ -126,15 +123,14 @@ flowchart LR
 
 Build prerequisites: [mise](https://mise.jdx.dev), the Android SDK with NDK r30
 and build-tools 37, podman, clang, and the GTK 4 and libadwaita development
-files. A session needs a Wayland desktop, `systemd --user`, pasta (plus
-`newuidmap` for subuid mode), read-write `/dev/udmabuf` and pipewire-pulse.
-Details: [docs/development.md](docs/development.md).
+files. A session runs in Flatpak on a Wayland desktop, with GPU and audio
+access. Details: [docs/development.md](docs/development.md).
 
 ```sh
 mise install                    # toolchains and the pre-commit hook
 mise run build                  # everything, staged into out/stage
-mise run install-dev            # the manager in your app menu, as the APK handler
-out/stage/bin/linuxapk install app.apk
+mise run install-dev            # install the committed Flatpak, including APK handling
+flatpak run dev.linuxapk.Manager install app.apk
 mise run test                   # unit tests; test:boot, test:e2e, test:compat need a session
 ```
 

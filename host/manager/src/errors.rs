@@ -1,8 +1,6 @@
 //! Turns `linuxapk-core` errors into messages for people: a heading, a
 //! sentence or two, and the original text as details.
 
-use linuxapk_core::launcher::MISSING_REQUIREMENTS;
-
 /// What the user was doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -102,19 +100,10 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
             "This bundle doesn’t contain exactly one app.",
         );
     }
-    if let Some(i) = d.find(MISSING_REQUIREMENTS) {
-        let list = d[i + MISSING_REQUIREMENTS.len()..].trim_start_matches(':');
-        let body: Vec<String> = list
-            .trim()
-            .lines()
-            .map(|l| l.strip_prefix("- ").map_or(l.into(), |i| format!("• {i}")))
-            .collect();
-        return pair("This Computer Can’t Run Android Yet", &body.join("\n"));
-    }
     if has("linuxapk-session not found") {
         return pair(
             "Linux.apk Isn’t Set Up",
-            "This copy of Linux.apk is incomplete: the Android session launcher isn’t installed next to it. In a checkout, run `mise run build` and start out/stage/bin/linuxapk-manager.",
+            "This copy of Linux.apk is incomplete: the Android session launcher isn’t installed next to it. In a checkout, run `mise run build` and use the Flatpak development driver.",
         );
     }
     if has("session start failed") || has("stopped while booting") || has("did not finish booting")
@@ -219,20 +208,6 @@ mod tests {
             )
             .heading,
             "Calculator Can’t Be Opened"
-        );
-    }
-
-    #[test]
-    fn missing_requirements() {
-        let e = anyhow::anyhow!(
-            "{MISSING_REQUIREMENTS}:\n- pasta isn't installed (package passt): x\nFixing this needs root."
-        )
-        .context("session start failed (/x/linuxapk-session start)");
-        let m = humane(Op::Open, Some("Calculator"), &e);
-        assert_eq!(m.heading, "This Computer Can’t Run Android Yet");
-        assert_eq!(
-            m.body,
-            "• pasta isn't installed (package passt): x\nFixing this needs root."
         );
     }
 
