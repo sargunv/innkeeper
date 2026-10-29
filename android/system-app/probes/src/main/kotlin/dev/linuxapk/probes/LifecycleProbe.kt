@@ -14,6 +14,8 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
@@ -51,11 +53,49 @@ class LifecycleProbe : Activity() {
 
   class Media : Service() {
     @Volatile private var playing = false
+    private lateinit var session: MediaSession
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
       super.onCreate()
+      session = MediaSession(this, "LinuxApkMediaProbe")
+      fun state(playing: Boolean) {
+        session.setPlaybackState(
+          PlaybackState.Builder()
+            .setActions(
+              PlaybackState.ACTION_PLAY or
+                PlaybackState.ACTION_PAUSE or
+                PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_SKIP_TO_NEXT,
+            )
+            .setState(
+              if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+              0,
+              1f,
+            )
+            .build(),
+        )
+      }
+      session.setCallback(
+        object : MediaSession.Callback() {
+          override fun onPlay() {
+            Log.i(TAG, "media play")
+            state(true)
+          }
+
+          override fun onPause() {
+            Log.i(TAG, "media pause")
+            state(false)
+          }
+
+          override fun onSkipToNext() {
+            Log.i(TAG, "media next")
+          }
+        },
+      )
+      state(true)
+      session.isActive = true
       getSystemService(NotificationManager::class.java)
         .createNotificationChannel(
           NotificationChannel("media", "Lifecycle test", NotificationManager.IMPORTANCE_LOW),
@@ -98,6 +138,7 @@ class LifecycleProbe : Activity() {
 
     override fun onDestroy() {
       playing = false
+      session.release()
       super.onDestroy()
     }
   }

@@ -32,6 +32,22 @@ class KeyboardTest {
   private fun down(line: String) = feed(line).single().also { assertEquals(it.action, 0) }
 
   @Test
+  fun mediaKeysReachAndroidButVolumeStaysOnTheHost() {
+    feed("keyboard_enter 7")
+    for ((scan, code) in
+      listOf(164 to KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 163 to KeyEvent.KEYCODE_MEDIA_NEXT)) {
+      val events = feed("key 1 $scan 1", "key 2 $scan 0")
+      assertEquals(listOf(code, code), events.map { it.keyCode })
+      assertEquals(listOf(0, 1), events.map { it.action })
+      assertTrue(events.all { it.displayId == 7 })
+    }
+    for (scan in 113..115) {
+      assertTrue(feed("key 3 $scan 1", "key 4 $scan 2", "key 5 $scan 0").isEmpty())
+    }
+    assertTrue(feed("keyboard_leave 7").isEmpty())
+  }
+
+  @Test
   fun lettersTakeTheirKeycodeFromTheLayout() {
     // AZERTY: the Q position types 'a', the W position 'z'.
     val a = down("key 1 16 1 97 text a")
