@@ -6,6 +6,7 @@
 //! seat events to [`seat`] and [`text_input`], whose lines go to every input
 //! connection through the [`Hub`].
 
+pub mod evdev;
 pub(crate) mod gestures;
 mod hub;
 pub mod ime;
@@ -91,6 +92,29 @@ impl Service for InputService {
                 status(self.hub.window_appearance(window, color, icon))
             }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
+            Request::PointerPosition { display, x, y } => {
+                self.hub
+                    .pointer_positions
+                    .lock()
+                    .unwrap()
+                    .insert(display, (x, y));
+                Reply::ok()
+            }
+            Request::Evdev {
+                device,
+                micros,
+                events,
+            } => {
+                let evdev = self.hub.evdev.lock().unwrap();
+                match evdev
+                    .as_ref()
+                    .ok_or(-EIO)
+                    .and_then(|e| e.send(device, micros, &events).map_err(|_| -EIO))
+                {
+                    Ok(()) => Reply::ok(),
+                    Err(e) => Reply::err(e),
+                }
+            }
             Request::TextInput(r) => {
                 self.hub.text_input(r);
                 Reply::ok()

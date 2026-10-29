@@ -55,7 +55,7 @@ Error Display::setClientTarget(const c3::Buffer& buffer) {
 
 Error Display::setOutputBuffer(const c3::Buffer& buffer) {
   // The release fence only matters to a composer that writes the output
-  // buffer. Every layer is CLIENT, so SurfaceFlinger renders into this very
+  // buffer. Content layers are CLIENT, so SurfaceFlinger renders into this
   // buffer (it is also the client target) and we only read it.
   BufferPtr b;
   Error e = mOutputSlots.update(buffer, &b);
@@ -91,6 +91,7 @@ Error Display::validate(std::optional<c3::ChangedCompositionTypes>* changes) {
   for (auto& [id, l] : mLayers) {
     if (
       l.requested != c3::Composition::CLIENT &&
+      l.requested != c3::Composition::CURSOR &&
       l.requested != c3::Composition::INVALID
     )
       mPendingChanges.push_back(id);
@@ -130,8 +131,16 @@ Error Display::present() {
   if (mState == State::NeedAccept)
     acceptChanges();  // SF may present right after validate
   mState = State::NeedValidate;
+  CursorState* cursor = nullptr;
+  for (auto& [id, l] : mLayers) {
+    if (
+      l.requested == c3::Composition::CURSOR && l.cursor.alpha > 0 &&
+      l.cursor.buffer
+    )
+      cursor = &l.cursor;
+  }
   if (mPower == c3::PowerMode::ON)
-    mPresenter->present({mId, &mClientTarget, mOutputBuffer});
+    mPresenter->present({mId, &mClientTarget, mOutputBuffer, cursor});
   return Error::None;
 }
 

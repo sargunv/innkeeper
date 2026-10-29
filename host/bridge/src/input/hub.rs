@@ -32,6 +32,8 @@ pub struct Hub {
     focus_watch: Mutex<Option<FocusWatch>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
     repeat: Mutex<Option<String>>,
+    pub evdev: Mutex<Option<super::evdev::Evdev>>,
+    pub pointer_positions: Mutex<HashMap<u32, (i32, i32)>>,
 }
 
 #[derive(Default)]

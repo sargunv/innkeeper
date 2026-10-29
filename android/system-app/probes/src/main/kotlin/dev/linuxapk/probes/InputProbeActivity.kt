@@ -28,6 +28,7 @@ class InputProbeActivity : Activity() {
         text = "input probe"
       }
     setContentView(text)
+    Log.i(TAG, "configuration keyboard=${resources.configuration.keyboard}")
     // Back (predictive back takes KEYCODE_BACK before dispatchKeyEvent) is logged, not acted on,
     // so the window stays for the rest of a test.
     onBackInvokedDispatcher.registerOnBackInvokedCallback(
@@ -39,7 +40,10 @@ class InputProbeActivity : Activity() {
   }
 
   private fun show(what: String, event: Any) {
-    val line = "$what $event" + if (event is MotionEvent) gesture(event) else ""
+    val device =
+      if (event is android.view.InputEvent) android.view.InputDevice.getDevice(event.deviceId)?.name
+      else null
+    val line = "$what $event deviceName=$device" + if (event is MotionEvent) gesture(event) else ""
     Log.i(TAG, line)
     text.text = line
   }

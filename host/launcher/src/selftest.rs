@@ -181,7 +181,11 @@ fn flatpak_info(r: &mut Report) {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     r.check(
-        block.is_empty() && !Path::new("/dev/input").exists(),
+        block.is_empty()
+            && fs::read_dir("/dev/input")
+                .into_iter()
+                .flatten()
+                .all(|e| e.is_ok_and(|e| e.file_type().is_ok_and(|t| t.is_file()))),
         "no host block or input devices",
         &format!("host devices visible: {} /dev/input", block.join(" ")),
     );

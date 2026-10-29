@@ -233,8 +233,19 @@ void ComposerClient::executeLayerCommand(
     d.invalidate();
   }
   if (c.sidebandStream) results.error(Error::Unsupported);
-  // Buffers, geometry, color and the rest only matter to DEVICE composition,
-  // which we never do (Display.h, Layer).
+  if (c.buffer) {
+    results.error(l->slots.update(*c.buffer, &l->cursor.buffer));
+    l->cursor.acquireFence.reset(dupFd(c.buffer->fence.get()));
+  }
+  if (c.displayFrame) {
+    l->cursor.x = c.displayFrame->left;
+    l->cursor.y = c.displayFrame->top;
+  }
+  if (c.cursorPosition) {
+    l->cursor.x = c.cursorPosition->x;
+    l->cursor.y = c.cursorPosition->y;
+  }
+  if (c.planeAlpha) l->cursor.alpha = c.planeAlpha->alpha;
 }
 
 // ---- display queries ----

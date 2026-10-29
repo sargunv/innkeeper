@@ -75,6 +75,8 @@
       android:exported="true"
       android:label="@string/input_probe_name" />
 
+    <activity android:name=".CursorProbeActivity" android:exported="true" android:label="Cursor probe" />
+
     <!-- A focused text field that logs its text and keys (tag LinuxApkProbe). -->
     <activity
       android:name=".TextProbeActivity"

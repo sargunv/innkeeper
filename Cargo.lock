@@ -1330,6 +1330,7 @@ dependencies = [
  "anyhow",
  "calloop",
  "libc",
+ "linuxapk-broker",
  "linuxapk-core",
  "mime_guess",
  "png",

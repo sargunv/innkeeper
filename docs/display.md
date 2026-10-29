@@ -26,7 +26,7 @@ sequenceDiagram
   BR->>WL: xdg_activation_v1 with the launch's token
   BR-->>WM: WINDOW_MAPPED
   loop every frame
-    SF->>HWC: validate (all layers CLIENT), present with the output buffer
+    SF->>HWC: validate (content CLIENT, cursor CURSOR), present with the output buffer
     HWC->>HWC: copy into one of 3 udmabufs for the display
     HWC->>BR: FRAME (buffer id, damage)
     BR->>WL: attach the linux-dmabuf buffer, viewporter to the logical size
@@ -43,8 +43,9 @@ sequenceDiagram
   a consumer.
 - **HWC-backed virtual displays.** The composer's rc sets
   `debug.sf.enable_hwc_vds=1` and reports 32 virtual displays, so SurfaceFlinger
-  hands the composer every frame. Every layer stays CLIENT: RenderEngine renders
-  into the sink buffer, which is both client target and output buffer.
+  hands the composer every frame. Content layers stay CLIENT: RenderEngine
+  renders into the sink buffer, which is both client target and output buffer.
+  CURSOR layers stay separate and are exported to the host cursor surface.
 - **Matching a display to its window.** HWC3's `createVirtualDisplay` carries
   only a size, so the window manager orders things: request the window first,
   then attach the surface, so SurfaceFlinger's next commit creates the HWC
@@ -67,6 +68,21 @@ sequenceDiagram
   window menu (`show_window_menu`). If the compositor goes away the bridge ends
   the composer's connection; the composer reconnects every second and adds its
   displays again.
+
+## Cursor
+
+The composer accepts `Composition::CURSOR` and copies its RGBA/BGRA buffer to a
+sealed memfd for the bridge's CURSOR message. SurfaceFlinger excludes that layer
+from the client target, so the window never contains a second cursor. A missing
+or transparent cursor layer hides the Wayland pointer while it is over content
+(`PointerIcon.TYPE_NULL`); client-side frame edges keep their resize cursors.
+
+HWC3 carries no pointer style or hotspot metadata. The bridge displays the
+Android bitmap on a `wl_shm` cursor surface and derives its hotspot by
+subtracting the layer's display position from the last pointer position sent to
+that Android display. Both image and hotspot follow the window's scale. This
+covers standard and custom icons without matching style names or using a private
+Android pointer-icon listener.
 
 ## Window semantics
 

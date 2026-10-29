@@ -156,6 +156,27 @@ impl Seat {
         }
     }
 
+    pub(crate) fn pointer_window(&self) -> Option<u32> {
+        self.pointer_focus
+            .filter(|(_, frame)| !frame)
+            .map(|(window, _)| window)
+    }
+
+    pub(crate) fn set_android_cursor(
+        &mut self,
+        window: u32,
+        surface: Option<&sctk::reexports::client::protocol::wl_surface::WlSurface>,
+        x: i32,
+        y: i32,
+    ) {
+        if self.pointer_focus == Some((window, false))
+            && let Some(pointer) = &self.pointer
+        {
+            pointer.set_cursor(self.enter_serial, surface, x, y);
+            self.shape = None;
+        }
+    }
+
     fn over_content(&self) -> bool {
         matches!(self.pointer_focus, Some((_, false)))
     }
@@ -271,6 +292,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                         st.seat.set_cursor(Shape::Default);
                         let (x, y) = st.to_display(id, surface_x, surface_y);
                         st.hub.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
+                        st.restore_cursor(id);
                     }
                     Some((id, true)) => {
                         let icon = st.frame_pointer_moved(

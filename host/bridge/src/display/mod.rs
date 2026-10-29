@@ -150,13 +150,48 @@ impl Service for DisplayService {
         };
         // Only BUFFER_ADD (the dma-buf) and FRAME (an acquire fence) carry fds.
         let max_fds = match req {
-            Request::BufferAdd(_) | Request::Frame { .. } => 1,
+            Request::BufferAdd(_) | Request::Frame { .. } | Request::Cursor { .. } => 1,
             _ => 0,
         };
         if fds.len() > max_fds {
             return Reply::err(-EPROTO);
         }
         match req {
+            Request::Cursor {
+                display,
+                width,
+                height,
+                x,
+                y,
+            } => {
+                let Some(&window) = self.displays.get(&display) else {
+                    return Reply::err(-ENOENT);
+                };
+                let pixels = if width == 0 && height == 0 && fds.is_empty() {
+                    Vec::new()
+                } else {
+                    let Some(fd) = fds.pop() else {
+                        return Reply::err(-EINVAL);
+                    };
+                    if width == 0 || height == 0 {
+                        return Reply::err(-EINVAL);
+                    }
+                    match crate::ipc::blob::read(&fd, width * height * 4, 512 * 512 * 4) {
+                        Ok(p) => p,
+                        Err(e) => return Reply::err(e),
+                    }
+                };
+                self.send(Cmd::Cursor {
+                    window,
+                    image: wl::cursor::Image {
+                        width,
+                        height,
+                        x,
+                        y,
+                        pixels,
+                    },
+                })
+            }
             Request::DisplayAdd {
                 display,
                 width,

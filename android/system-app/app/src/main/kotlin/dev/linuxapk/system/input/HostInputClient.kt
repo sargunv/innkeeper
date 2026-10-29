@@ -48,6 +48,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
       latencySensitive = true,
     )
   private val listeners = CopyOnWriteArrayList<Listener>()
+  private lateinit var virtual: VirtualInput
   private lateinit var injector: Injector
   private lateinit var translator: InputTranslator // reader thread
   private var refused = 0
@@ -64,6 +65,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   override fun start() {
     injector = Injector()
+    virtual = VirtualInput(context, connection)
     translator = newTranslator()
     connection.start()
   }
@@ -135,7 +137,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     synchronized(keyTexts) { keyTexts.remove(keyTextId(e)) }
   }
 
-  override fun onConnected() = listeners.forEach { it.onConnected() }
+  override fun onConnected() {
+    virtual.reset()
+    listeners.forEach { it.onConnected() }
+  }
 
   // Whatever is held (keys, buttons, touches) is released.
   override fun onDisconnected() {
@@ -218,6 +223,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   }
 
   private fun inject(e: OutEvent) {
+    if (e is OutKey && virtual.key(e)) return
+    if (e is OutMotion && virtual.motion(e)) return
     if (e is OutKey && e.action == KeyEvent.ACTION_DOWN) {
       val text = e.text
       if (text != null)

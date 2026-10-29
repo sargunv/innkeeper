@@ -74,6 +74,7 @@ class BridgeDisplay {
   uint32_t width() const { return mWidth; }
   uint32_t height() const { return mHeight; }
   void present(const FrameInput& frame);
+  void cursor(const CursorState* cursor);
   // The rest: bridge lock held.
   void onRelease(uint32_t buffer);
   // DISPLAY_ADD's answer: shown in `window`, or not shown (-1).
@@ -84,6 +85,7 @@ class BridgeDisplay {
   void reset() {
     mWindow = -1;
     mPoolStale = true;
+    mCursorKnown = false;
   }
 
  private:
@@ -99,6 +101,9 @@ class BridgeDisplay {
   uint64_t mFrames = 0, mDropped = 0;
   int64_t mLastLogNs = 0;
   bool mWarnedFormat = false;
+  std::vector<uint8_t> mCursor;
+  int mCursorX = 0, mCursorY = 0;
+  bool mCursorKnown = false;
 };
 
 class Bridge {
@@ -327,6 +332,76 @@ bool BridgeDisplay::makePool(
   return true;
 }
 
+// CURSOR is accepted by validate rather than converted to CLIENT: these
+// pixels are exclusively the Wayland cursor, never part of the window frame.
+void BridgeDisplay::cursor(const CursorState* cursor) {
+  std::vector<uint8_t> pixels;
+  uint32_t w = 0, h = 0;
+  int x = 0, y = 0;
+  if (cursor && cursor->buffer) {
+    const auto* bh = cursor->buffer->info();
+    if (
+      !bh || bh->width > 512 || bh->height > 512 ||
+      (bh->resolvedFormat != fmt::RGBA_8888 &&
+       bh->resolvedFormat != fmt::BGRA_8888)
+    )
+      return;
+    if (!waitFence(cursor->acquireFence.get(), 1000)) return;
+    const auto* map = cursor->buffer->map();
+    if (!map) return;
+    w = bh->width;
+    h = bh->height;
+    x = cursor->x;
+    y = cursor->y;
+    pixels.resize(size_t(w) * h * 4);
+    for (uint32_t row = 0; row < h; row++) {
+      auto* dst = pixels.data() + size_t(row) * w * 4;
+      const auto* src =
+        map + bh->planes[0].offset.get() + size_t(row) * bh->planes[0].stride;
+      for (uint32_t col = 0; col < w; col++) {
+        // wl_shm ARGB8888 is B,G,R,A in memory, premultiplied like Android.
+        dst[col * 4] =
+          src[col * 4 + (bh->resolvedFormat == fmt::RGBA_8888 ? 2 : 0)];
+        dst[col * 4 + 1] = src[col * 4 + 1];
+        dst[col * 4 + 2] =
+          src[col * 4 + (bh->resolvedFormat == fmt::RGBA_8888 ? 0 : 2)];
+        dst[col * 4 + 3] = src[col * 4 + 3];
+        for (int channel = 0; channel < 4; ++channel)
+          dst[col * 4 + channel] = uint8_t(
+            dst[col * 4 + channel] * std::clamp(cursor->alpha, 0.f, 1.f)
+          );
+      }
+    }
+  }
+  if (mCursorKnown && pixels == mCursor && x == mCursorX && y == mCursorY)
+    return;
+  int fd = -1;
+  if (!pixels.empty()) {
+    fd = memfd_create("linuxapk-cursor", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0) return;
+    if (
+      write(fd, pixels.data(), pixels.size()) != ssize_t(pixels.size()) ||
+      fcntl(
+        fd, F_ADD_SEALS,
+        F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL
+      ) != 0
+    ) {
+      close(fd);
+      return;
+    }
+  }
+  bool sent = b->send(
+    message(0x0206, b->tag(), {mId, w, h, uint32_t(x), uint32_t(y)}), fd
+  );
+  if (fd >= 0) close(fd);
+  if (sent) {
+    mCursor = std::move(pixels);
+    mCursorX = x;
+    mCursorY = y;
+    mCursorKnown = true;
+  }
+}
+
 void BridgeDisplay::present(const FrameInput& frame) {
   {
     std::lock_guard lock(b->mutex);
@@ -337,6 +412,7 @@ void BridgeDisplay::present(const FrameInput& frame) {
       mLast = -1;
     }
   }
+  cursor(frame.cursor);
   ClientTargetState* ct = frame.clientTarget;
   BufferPtr buffer = ct && ct->buffer ? ct->buffer : frame.outputBuffer;
   if (!buffer) return;

@@ -44,6 +44,11 @@
 //! RGBA image (u16 width/height, packed pixels; 0x0 clears the icon). Each side
 //! is at most 256 pixels; at most 262148 bytes. Sent on mapping and debounced
 //! TaskDescription changes. Unsupported icon protocols receive no fallback.
+//! `EVDEV` (0x0608): u32 device (0 keyboard, 1 mouse), u64 monotonic
+//! microseconds, u32 count (1..32), then count records of u16 type, u16 code,
+//! i32 value. The bridge adds SYN_REPORT and writes to the broker's evdev.sock.
+//! `POINTER_POSITION` (0x0609): u32 display, i32 x, i32 y in display pixels,
+//! sent before mouse records so the cursor layer origin can yield its hotspot.
 //!
 //! **Input lines** are protocol v2: ASCII, space-separated fields, in the
 //! order the seat produced them.
@@ -110,6 +115,8 @@ pub mod ty {
     pub const WINDOW_POLICY: u16 = 0x0605;
     pub const WINDOW_APPEARANCE: u16 = 0x0606;
     pub const WINDOW_MINIMIZE: u16 = 0x0607;
+    pub const EVDEV: u16 = 0x0608;
+    pub const POINTER_POSITION: u16 = 0x0609;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -171,7 +178,21 @@ pub enum Request {
     WindowMinimize { window: u32 },
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
-    WindowAppearance { window: u32, color: u32, len: u32 },
+    WindowAppearance {
+        window: u32,
+        color: u32,
+        len: u32,
+    },
+    PointerPosition {
+        display: u32,
+        x: i32,
+        y: i32,
+    },
+    Evdev {
+        device: u8,
+        micros: i64,
+        events: Vec<(u16, u16, i32)>,
+    },
 }
 
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
@@ -205,6 +226,25 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
             immersive: r.u32_in(0..=1, "immersive")? != 0,
         }),
+        ty::POINTER_POSITION => Request::PointerPosition {
+            display: r.u32()?,
+            x: r.i32()?,
+            y: r.i32()?,
+        },
+        ty::EVDEV => {
+            let device = r.u32_in(0..=1, "evdev device")? as u8;
+            let micros = r.u64()? as i64;
+            let count = r.u32_in(1..=32, "evdev count")?;
+            let mut events = Vec::new();
+            for _ in 0..count {
+                events.push((r.u16()?, r.u16()?, r.i32()?));
+            }
+            Request::Evdev {
+                device,
+                micros,
+                events,
+            }
+        }
         ty::TEXT_INPUT => {
             let n = r.u16()? as usize;
             if n > ime::MAX_LINE {
@@ -257,6 +297,23 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(p.orientation)
                 .u32(u32::from(p.fullscreen))
                 .u32(u32::from(p.immersive));
+        }
+        Request::PointerPosition { display, x, y } => {
+            w = Writer::message(ty::POINTER_POSITION, tag);
+            w.u32(*display).i32(*x).i32(*y);
+        }
+        Request::Evdev {
+            device,
+            micros,
+            events,
+        } => {
+            w = Writer::message(ty::EVDEV, tag);
+            w.u32(*device as u32)
+                .u64(*micros as u64)
+                .u32(events.len() as u32);
+            for &(ty, code, value) in events {
+                w.u16(ty).u16(code).i32(value);
+            }
         }
         Request::TextInput(r) => {
             w = Writer::message(ty::TEXT_INPUT, tag);

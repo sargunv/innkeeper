@@ -597,6 +597,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
     let vid = (std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
     let flat = crate::flat::Flat::from_env(listener, resp_sz);
+    let input = crate::input::Input::new(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {
         broker: BinderDriver::new(),
         us: SeccompUserspace {
@@ -632,6 +633,11 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         }
         let req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
         let nr = req.data.nr as i64;
+        if let Some(input) = &input
+            && input.serve(&req)
+        {
+            continue;
+        }
         if let Some(v) = &vid
             && crate::creds::is_cred_syscall(nr, &req.data.args)
         {

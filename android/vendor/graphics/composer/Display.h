@@ -28,10 +28,12 @@ struct DisplayConfig {
   int32_t dpi = 160;
 };
 
-// SurfaceFlinger composites every layer itself (CLIENT), so a layer is only
-// the composition it asked for: its buffer and geometry never reach us.
+// SurfaceFlinger composites ordinary layers. CURSOR stays separate and is
+// exported to the host cursor plane, so it never enters the window pixels.
 struct Layer {
   c3::Composition requested = c3::Composition::INVALID;
+  BufferSlots slots;
+  CursorState cursor;
 };
 
 class Display {

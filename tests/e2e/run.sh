@@ -103,6 +103,13 @@ if [[ ${1:-} == --group ]]; then
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped
+      s dumpsys input >"$T/devices.txt"
+      file_has "$T/devices.txt" 'Linux.apk Keyboard'
+      file_has "$T/devices.txt" 'Linux.apk Mouse'
+      until_ok log_has LinuxApkProbe 'configuration keyboard=2'
+      /usr/bin/python3 "$here/seat.py" key:30,1 key:30,0
+      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceName=Linux.apk Keyboard'
+      echo 'ok   virtual keyboard and mouse enumerated; QWERTY configuration; seat key from real keyboard device'
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"

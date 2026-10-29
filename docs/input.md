@@ -5,8 +5,9 @@ Linux.apk System app may open. The bridge turns `wl_pointer`, `wl_keyboard`,
 `wl_touch`, touchpad gestures (`zwp_pointer_gestures_v1`) and tablets
 (`zwp_tablet_v2`) into protocol v2 lines
 ([input/proto.rs](../host/bridge/src/input/proto.rs) lists every line); the
-system app translates them into `MotionEvent`s and `KeyEvent`s and injects them
-into InputDispatcher. The composer never sees input.
+system app translates them into `MotionEvent`s and `KeyEvent`s. Ordinary mouse
+input and keys matching Android's physical keymap return to the bridge, which
+writes evdev records to the broker. Other events use InputDispatcher injection.
 
 ```mermaid
 flowchart LR
@@ -14,12 +15,38 @@ flowchart LR
   im["host input method<br/>IBus, Fcitx"] <-->|"zwp_text_input_v3"| bti["bridge input/text_input.rs"]
   bseat -->|"INPUT lines"| hic["HostInputClient"]
   bti -->|"ti_* lines"| hic
-  hic --> tr["InputTranslator (:protocol)"] --> inj["Injector (:inject)"] --> disp["InputDispatcher"]
+  hic --> tr["InputTranslator (:protocol)"]
+  tr --> vi["VirtualInput"] -->|"EVDEV records via bridge"| broker["broker evdev"]
+  broker --> reader["InputReader"] --> disp["InputDispatcher"]
+  tr --> inj["Injector (:inject)"] --> disp
   hic --> ime["HostImeService"]
   ime -->|"TEXT_INPUT"| bti
 ```
 
-## Injection
+## Virtual devices
+
+The broker creates `event0` (Linux.apk Keyboard) and `event1` (Linux.apk Mouse)
+in the session's private tmpfs `/dev/input`. EventHub discovers these regular
+placeholder files by scan/inotify. Trapped `openat` returns a broker-owned
+socket endpoint; `EVIOCG*` answers identify an alphabetic keyboard and relative
+mouse, expose capabilities and held-key state, and accept LED writes. The bridge
+writes Linux `input_event` records through `evdev.sock`; no host input nodes or
+uinput devices are exposed. Apps enumerate real device IDs, and
+`Configuration.keyboard` is `KEYBOARD_QWERTY`.
+
+`VirtualInput.kt` associates each device's port with the focused virtual
+display's unique ID. Mouse deltas follow the host's absolute window coordinates;
+Android mouse scaling is disabled because the desktop already accelerated and
+scaled them. The system app uses Android 17's input-device display association,
+mouse-scaling and cursor-position test APIs to maintain this routing.
+
+Injection preserves behavior Android's physical keymap cannot represent:
+host-layout remapped keys, IME text corrections, sticky/locked or inherited
+modifiers, compositor repeats, synthetic Back, touchpad gestures, touch and pen.
+A key keeps the route chosen at DOWN through UP. Ordinary mouse buttons, wheel
+and motion use the virtual mouse; classified fake-finger gestures stay injected.
+
+## Translation
 
 The mapping follows what InputReader produces for real devices
 (`CursorInputMapper`, the multi-touch mapper, `TouchInputMapper`'s stylus,
@@ -60,9 +87,10 @@ The mapping follows what InputReader produces for real devices
   `AXIS_TILT` and `AXIS_ORIENTATION` from the two tilt angles, and the stylus
   buttons as `BUTTON_STYLUS_PRIMARY` and `SECONDARY`, in TouchInputMapper's
   order.
-- **Cursor.** The bridge sets the default arrow on every pointer enter and
-  tablet proximity, and the frame's resize shapes over a client-side frame
-  (`wp_cursor_shape_v1`).
+- **Cursor.** Android's CURSOR layer becomes a custom Wayland cursor surface,
+  including I-beams, custom bitmaps and hidden pointers. The bridge uses
+  `wp_cursor_shape_v1` for the initial arrow, tablet proximity and client-side
+  frame resize shapes. See [display.md](display.md#cursor).
 - **Keys** follow the host layout (see [Keyboard layout](#keyboard-layout)). The
   scan code is always the evdev code. Meta state comes from the modifier keys
   and the xkb masks.
@@ -85,9 +113,9 @@ The mapping follows what InputReader produces for real devices
   as Back** switch opts in immediately.
 - **Timestamps** map the compositor's millisecond clock onto `uptimeMillis`,
   keeping the spacing VelocityTracker needs, clamped to the last 100 ms.
-- **Why injection.** uinput isn't available rootless and would create a
-  host-global device the compositor picks up; VirtualDeviceManager's input
-  devices sit on uinput too.
+- **Why broker evdev.** uinput would create a host-global device the compositor
+  picks up; VirtualDeviceManager's input devices sit on uinput too. Broker
+  endpoints remain private to Android.
 
 ## Keyboard layout
 
@@ -138,8 +166,9 @@ logic is `TextInputSession.kt` in `:protocol`.
   input view, so no soft keyboard covers the window. The window manager's
   per-display IME policy is `LOCAL`: `HIDE` would bind no IME at all, and text
   input would stop.
-- **Keys** still arrive as injected key events, which the IME passes through,
-  except those whose text it commits ([Keyboard layout](#keyboard-layout)).
+- **Keys** arrive through the virtual keyboard or injection. The IME passes them
+  through except those whose text it commits
+  ([Keyboard layout](#keyboard-layout)).
 - **With a host input method** (CJK, dead keys, compose): for each editor the
   IME sends `ti_enable`, the content type (password, email, number, …), the
   surrounding text (up to 120 UTF-16 units each side) and the cursor rectangle,
@@ -168,17 +197,13 @@ logic is `TextInputSession.kt` in `:protocol`.
   bypass DND. GNOME 48's portal does not export `show-banners`, so the bridge
   cannot suppress that exception without additional settings access (#79). The
   Android interruption filter is unchanged.
-- Android sees no physical keyboard (`Configuration.keyboard`), and key events
-  still carry `Virtual.kcm`'s characters: apps that read
-  `KeyEvent.getUnicodeChar()` outside a text field (games, terminals' key
-  handlers) see US characters for non-US keys. A KCM matching the host layout
-  needs a real input device (#5).
+- The virtual keyboard uses Android's Generic keymap; injected keys use
+  `Virtual.kcm`. Apps that read `KeyEvent.getUnicodeChar()` outside a text field
+  (games, terminals' key handlers) see US characters for non-US keys. A KCM
+  matching the host layout remains separate work (#3).
 - Window shortcuts are on or off for every app except browsers' Ctrl+W, until
   per-app settings exist (#24).
-- Android draws no pointer for injected events, and pointer-icon changes aren't
-  forwarded; the host cursor is the only cursor, and it stays the arrow (text
-  fields show no I-beam, games can't hide it). Without `wp_cursor_shape_v1` the
-  cursor over a window is whatever it was.
+- Pointer capture is not forwarded to Wayland pointer constraints (#4).
 - Views that accept only `SOURCE_TOUCHSCREEN` ignore the touchpad's fake
   fingers, as on stock Android with a touchpad.
 - Compositors keep most three- and four-finger swipes for themselves, and tablet
@@ -194,7 +219,9 @@ logic is `TextInputSession.kt` in `:protocol`.
 - `mise run test:e2e -- input` opens the probes APK's `InputProbeActivity` in
   its own mapped desktop window, injects a short pointer/keyboard stream through
   our translator and injector, and checks click, scroll and Shift+A at the
-  activity. Detailed translation cases stay in unit tests.
+  activity. It also checks virtual device enumeration, QWERTY configuration and
+  a seat key's virtual keyboard device ID. Detailed translation cases stay in
+  unit tests.
 - The IME's text commits and the repeat settings need the bridge's seat: they
   are checked in a nested KWin with `org_kde_kwin_fake_input`
   ([development.md](development.md#a-nested-isolated-desktop)) and the probes'
