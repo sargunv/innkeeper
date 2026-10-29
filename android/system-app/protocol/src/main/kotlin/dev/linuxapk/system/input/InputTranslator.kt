@@ -240,7 +240,12 @@ class InputTranslator(
         if (e.display != keyDisplay) keys(out) { keyboard.releaseAll(clock.untimed(), it) }
         keyDisplay = e.display
       }
-      is HostEvent.KeyboardLeave -> keys(out) { keyboard.releaseAll(clock.untimed(), it) }
+      is HostEvent.KeyboardLeave -> {
+        // Display connections run on separate Wayland threads. An old
+        // display's leave can arrive after the new focus's enter and keys.
+        if (e.display == -1 || e.display == keyDisplay)
+          keys(out) { keyboard.releaseAll(clock.untimed(), it) }
+      }
       // A compositor's repeats may carry the press's time; they happen now.
       is HostEvent.Key ->
         keys(out) { keyboard.key(e, if (e.repeat) clock.untimed() else clock.map(e.time), it) }

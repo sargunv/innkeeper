@@ -57,6 +57,32 @@ class EvdevModifiersTest {
   }
 
   @Test
+  fun lateLeaveFromPreviousDisplayDoesNotReleaseNewWindowsModifier() {
+    val translator = InputTranslator(now = { 1000 })
+    val keyboard = EvdevModifiers()
+    val records = ArrayList<Triple<Int, Int, Int>>()
+    // Each HWC display has its own Wayland connection/thread. The old
+    // connection can deliver its leave after the new connection's enter/key.
+    for (line in
+      listOf(
+        "keyboard_enter 2",
+        "keyboard_enter 4",
+        "key 1 42 1",
+        "keyboard_leave 2",
+        "modifiers 1 0 0 0",
+        "key 2 42 0",
+        "modifiers 0 0 0 0",
+      )) {
+      translator.handle(requireNotNull(HostEvent.parse(line)))
+      keyboard.sync(translator.metaState) {
+        records.addAll(it)
+        true
+      }
+    }
+    assertEquals(listOf(Triple(1, 42, 1), Triple(1, 42, 0)), records)
+  }
+
+  @Test
   fun inheritedModifiersAndLocksSynchronizeOnlyOnChange() {
     val keyboard = EvdevModifiers()
     val records = ArrayList<Triple<Int, Int, Int>>()

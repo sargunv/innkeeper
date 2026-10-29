@@ -115,7 +115,7 @@ if [[ ${1:-} == --group ]]; then
       ;;
     storage)
       s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow
-      s am start -n dev.linuxapk.probes/.StorageProbe --es round initial >/dev/null
+      s am broadcast -n dev.linuxapk.probes/.StorageProbe --es round initial >/dev/null
       until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=initial'
       provider=$(s pidof com.android.providers.media.module)
       [[ -n $provider ]]
@@ -127,7 +127,7 @@ if [[ ${1:-} == --group ]]; then
       s sm mount 'emulated;0'
       until_ok volume_state mounted
       [[ $(s pidof com.android.providers.media.module) == "$provider" ]]
-      s am start -n dev.linuxapk.probes/.StorageProbe --es round remounted >/dev/null
+      s am broadcast -n dev.linuxapk.probes/.StorageProbe --es round remounted >/dev/null
       until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok round=remounted'
       ;;
     input)
