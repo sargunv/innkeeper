@@ -224,8 +224,12 @@
 
     <!-- Android 17 matches schemes literally, so enumerate external schemes. MIME */*
          catches unclaimed content/file VIEWs. Priority -1000 leaves real Android handlers first. -->
+    <!-- Handoffs may move with the caller's task onto its virtual display. Handle the
+         configuration change in place: Android 17's display-compat self-kill recovery can
+         otherwise relaunch onto a display our window manager has already released (#98). -->
     <activity
       android:name=".integration.handoff.HandoffActivity"
+      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
       android:excludeFromRecents="true"
       android:exported="true"
       android:label="Desktop"
