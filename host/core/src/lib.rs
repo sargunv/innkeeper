@@ -12,6 +12,7 @@ pub mod dynlauncher;
 pub mod launcher;
 pub mod ops;
 pub mod paths;
+pub mod preferences;
 pub mod proc;
 pub mod validate;
 pub mod xdg;

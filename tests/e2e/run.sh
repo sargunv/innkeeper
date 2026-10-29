@@ -144,6 +144,18 @@ sys.exit(1)
       s am stopservice -n "dev.linuxapk.probes/.LifecycleProbe\$Media" >/dev/null || true
       ;;
     desktop)
+      # One live preference round trip, through the same Session1 API as GTK.
+      dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}
+      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
+        --method dev.linuxapk.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
+      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
+        --method dev.linuxapk.Session1.GetPreferences >"$T/preferences.txt"
+      file_has "$T/preferences.txt" '"follow_accent":false'
+      until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=false'
+      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
+        --method dev.linuxapk.Session1.SetPreferences '{}' >/dev/null
+      until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=true'
+      echo 'ok   preference persisted and applied live over Session1'
       s am start -n dev.linuxapk.probes/.DesktopProbe --es action link >/dev/null
       until_ok file_has "$bridge_log" 'openuri: .*https://example.com/linuxapk-e2e'
       s am start -a android.intent.action.VIEW -d mailto:e2e@example.com >/dev/null

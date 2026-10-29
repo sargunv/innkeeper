@@ -230,6 +230,7 @@ impl Window {
 
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
+        section.append(Some("_Preferences"), Some("win.preferences"));
         section.append(Some("_About Linux.apk"), Some("app.about"));
         menu.append_section(None, &section);
         let header = adw::HeaderBar::new();
@@ -347,6 +348,14 @@ impl Window {
         });
         w.win.add_controller(drop);
 
+        let preferences = gio::SimpleAction::new("preferences", None);
+        let weak = w.downgrade();
+        preferences.connect_activate(move |_, _| {
+            if let Some(w) = weak.upgrade() {
+                w.nav.push(&crate::preferences::page(&w));
+            }
+        });
+        w.win.add_action(&preferences);
         w.watch_entries();
         let w2 = w.clone();
         glib::spawn_future_local(async move {

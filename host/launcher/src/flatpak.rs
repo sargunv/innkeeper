@@ -386,6 +386,9 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
 /// (media, alarms, background work), so the desktop doesn't stop it. Best
 /// effort, without waiting for the answer: `gdbus` is in the Flatpak runtime.
 pub fn request_background(p: &Paths) {
+    if crate::preferences::Preferences::load().is_ok_and(|p| p.keep_running) {
+        return;
+    }
     let opts = "{'reason': <'Android apps keep playing media, run foreground services and ring \
                 alarms with no window open'>, 'autostart': <false>}";
     let r = Command::new("gdbus")

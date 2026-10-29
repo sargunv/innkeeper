@@ -12,6 +12,7 @@ mod init;
 mod layer;
 pub mod lifecycle;
 pub mod paths;
+pub mod preferences;
 mod prune;
 mod root;
 mod selftest;

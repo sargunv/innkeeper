@@ -106,6 +106,7 @@ fn main() -> Result<()> {
     services.register(service::INPUT, "input", move |peer, events| {
         Ok(Box::new(InputService::new(hub.clone(), peer, events)))
     });
+    let for_preferences = shared.clone();
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))
@@ -161,14 +162,14 @@ fn main() -> Result<()> {
     // Apps installed inside Android get desktop entries; only with
     // --mirror-apps (the main session).
     let session_api = linuxapk_bridge::apps::session::Relay::default();
-    let _session_bus = match session_api.serve() {
+    let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
+    let _session_bus = match session_api.serve(for_preferences, apps.clone()) {
         Ok(bus) => Some(bus),
         Err(e) => {
             linuxapk_bridge::warn!("session D-Bus: {e:#}");
             None
         }
     };
-    let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
     linuxapk_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
     services.register(service::APPS, "apps", move |peer, events| {
         Ok(Box::new(

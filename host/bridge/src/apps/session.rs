@@ -101,18 +101,67 @@ impl Relay {
         Ok(())
     }
 
-    pub fn serve(&self) -> anyhow::Result<zbus::blocking::Connection> {
+    fn rescan(&self) {
+        if let Some((_, events)) = &self.0.lock().unwrap().connection {
+            let _ = events.try_send(0x4502, &[], &[]);
+        }
+    }
+
+    pub fn serve(
+        &self,
+        shared: Arc<crate::system::Shared>,
+        apps: Arc<super::Config>,
+    ) -> anyhow::Result<zbus::blocking::Connection> {
         Ok(zbus::blocking::connection::Builder::session()?
             .name(app_settings::bus_name(&linuxapk_core::paths::instance()?))?
-            .serve_at(app_settings::PATH, SessionApi(self.clone()))?
+            .serve_at(
+                app_settings::PATH,
+                SessionApi {
+                    relay: self.clone(),
+                    shared,
+                    apps,
+                    preferences: Mutex::new(()),
+                },
+            )?
             .build()?)
     }
 }
 
-struct SessionApi(Relay);
+struct SessionApi {
+    relay: Relay,
+    shared: Arc<crate::system::Shared>,
+    apps: Arc<super::Config>,
+    preferences: Mutex<()>,
+}
 
 #[zbus::interface(name = "dev.linuxapk.Session1")]
 impl SessionApi {
+    fn get_preferences(&self) -> zbus::fdo::Result<String> {
+        let _guard = self.preferences.lock().unwrap();
+        linuxapk_core::preferences::Preferences::load()
+            .and_then(|p| linuxapk_core::preferences::encode(&p))
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    fn set_preferences(&self, json: &str) -> zbus::fdo::Result<()> {
+        let _guard = self.preferences.lock().unwrap();
+        let prefs = linuxapk_core::preferences::decode(json)
+            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        let old = linuxapk_core::preferences::Preferences::load()
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        prefs
+            .save()
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        self.apps
+            .mirror_apps
+            .store(prefs.mirror_apps, std::sync::atomic::Ordering::Relaxed);
+        self.shared.refresh_preferences();
+        if !old.mirror_apps && prefs.mirror_apps {
+            self.relay.rescan();
+        }
+        Ok(())
+    }
+
     /// Version 1: JSON AppInfo response; error text on failed Android operations.
     fn app(
         &self,
@@ -130,6 +179,6 @@ impl SessionApi {
         command
             .validate()
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
-        self.0.call(command).map_err(zbus::fdo::Error::Failed)
+        self.relay.call(command).map_err(zbus::fdo::Error::Failed)
     }
 }

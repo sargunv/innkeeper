@@ -7,6 +7,7 @@ mod app;
 mod errors;
 mod install;
 mod permissions;
+mod preferences;
 mod window;
 mod worker;
 
@@ -60,6 +61,7 @@ fn main() -> glib::ExitCode {
             &css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+        app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.open", &["<Control>o"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);

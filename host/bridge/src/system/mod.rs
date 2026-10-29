@@ -143,6 +143,10 @@ impl Shared {
             .as_ref()
     }
 
+    pub fn refresh_preferences(&self) {
+        self.settings().refresh_preferences();
+    }
+
     fn settings(&self) -> &Arc<SettingsHub> {
         self.settings
             .get_or_init(|| SettingsHub::start(self.dbus().cloned()))
