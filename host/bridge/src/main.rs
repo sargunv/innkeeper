@@ -89,6 +89,9 @@ fn main() -> Result<()> {
     // The composer's displays in host windows (needs $WAYLAND_DISPLAY), and
     // the system app's side of them: window requests, the seat, the IME.
     let hub = Hub::new();
+    // Not in the socket directory, which is shared with Android.
+    let shared = Shared::with_input(&run_dir, policy, hub.clone());
+    let display_shared = shared.clone();
     let display_hub = hub.clone();
     let a11y_hub = hub.clone();
     services.register(service::DISPLAY, "display", move |peer, events| {
@@ -97,14 +100,12 @@ fn main() -> Result<()> {
             display_hub.clone(),
             peer,
             events,
+            display_shared.clone(),
         )?))
     });
-    let handoff_input = hub.clone();
     services.register(service::INPUT, "input", move |peer, events| {
         Ok(Box::new(InputService::new(hub.clone(), peer, events)))
     });
-    // Not in the socket directory, which is shared with Android.
-    let shared = Shared::with_input(&run_dir, policy, handoff_input);
     let for_signals = shared.clone();
     services.register(service::SYSTEM, "system", move |peer, events| {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))

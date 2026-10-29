@@ -85,9 +85,9 @@ battery portal), and `org.freedesktop.Notifications` (the Notification portal
 can't update notifications in place or show progress). MPRIS players own names
 under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which Flatpak grants every
 app for its own id. Links and files go through the same portals as outside, and
-clipboard sync needs a compositor that offers data control to sandboxed clients
-(KWin does). App-menu entries go through the DynamicLauncher portal, so the user
-confirms each one.
+clipboard sync uses data control where available (KWin), or the display
+connection while a Linux.apk window has focus (GNOME). App-menu entries go
+through the DynamicLauncher portal, so the user confirms each one.
 
 ## Desktop exposure
 
@@ -96,9 +96,12 @@ confirms each one.
 - **Files:** Android reaches only what the user picked in the FileChooser
   portal, through opaque grants and `openat2(RESOLVE_BENEATH)`; the bridge is
   the only side that sees host paths.
-- **Clipboard:** synced both ways through `ext_data_control_v1`, so Android sees
-  host selections while a session runs; sensitive clips carry the
-  password-manager hint.
+- **Clipboard:** text, images and bounded single files sync through
+  `ext_data_control_v1`, or `wl_data_device` while a Linux.apk window has focus.
+  File-manager copies use FileTransfer portal grants; plain file URIs can read
+  only paths the Flatpak already has. Android file clips use private cache
+  copies and read-only content URIs. Sensitive clips carry the password-manager
+  hint. Test sessions disable both backends.
 - **Notifications and MPRIS:** labels and images from apps; images are raw RGBA,
   so nothing Android sends reaches a host image decoder.
 - **Accessibility:** while the desktop's assistive technologies are on

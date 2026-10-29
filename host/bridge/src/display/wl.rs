@@ -56,6 +56,7 @@ use crate::input::proto::WindowRequest;
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
 
+mod data_device;
 mod foreign;
 
 /// Work for the Wayland thread.
@@ -141,6 +142,7 @@ pub(crate) struct State {
     /// zwp_linux_buffer_params_v1 being created -> buffer id.
     params: HashMap<ObjectId, u32>,
     pub(crate) seat: Seat,
+    pub(crate) clipboard: Option<data_device::Clipboard>,
     quit: bool,
 }
 
@@ -800,6 +802,9 @@ impl SeatHandler for State {
         seat: wl_seat::WlSeat,
         cap: Capability,
     ) {
+        if let Some(c) = &mut self.clipboard {
+            c.seat(&seat, qh);
+        }
         self.seat.add_capability(seat, cap, qh);
     }
     fn remove_capability(
@@ -904,12 +909,19 @@ pub(super) fn foreign_handles(window: u32) -> Option<String> {
 }
 
 /// Runs the Wayland side until [`Cmd::Quit`] or the compositor goes away.
-pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events, hub: Arc<Hub>) -> Result<()> {
+pub fn run(
+    conn: Connection,
+    commands: Channel<Cmd>,
+    events: Events,
+    hub: Arc<Hub>,
+    shared: Arc<crate::system::Shared>,
+) -> Result<()> {
     let (globals, queue) = registry_queue_init::<State>(&conn).context("registry")?;
     let qh = queue.handle();
     let compositor = CompositorState::bind(&globals, &qh).context("wl_compositor")?;
     let subcompositor = SubcompositorState::bind(compositor.wl_compositor().clone(), &globals, &qh)
         .context("wl_subcompositor")?;
+    let mut ev: EventLoop<State> = EventLoop::try_new().context("event loop")?;
     let mut st = State {
         registry: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &qh),
@@ -930,6 +942,7 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events, hub: Arc<Hu
         buffers: HashMap::new(),
         params: HashMap::new(),
         seat: Seat::new(bind_opt(&globals, &qh, 1), &globals, &qh),
+        clipboard: data_device::Clipboard::new(&globals, &qh, &shared, &ev)?,
         quit: false,
     };
     crate::info!(
@@ -940,7 +953,6 @@ pub fn run(conn: Connection, commands: Channel<Cmd>, events: Events, hub: Arc<Hu
         st.activation.is_some(),
         st.seat.text.available()
     );
-    let mut ev: EventLoop<State> = EventLoop::try_new().context("event loop")?;
     WaylandSource::new(conn, queue)
         .insert(ev.handle())
         .map_err(|e| anyhow::anyhow!("wayland source: {e}"))?;

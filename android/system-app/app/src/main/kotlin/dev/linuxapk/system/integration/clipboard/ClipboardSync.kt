@@ -35,6 +35,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
 
   /** What we last sent the host (the listener can fire more than once per change). */
   private var toHost: String? = null
+  private val importedFileEcho = ImportedFileEcho()
 
   private val listener = ClipboardManager.OnPrimaryClipChangedListener {
     feature.handler.post { onAndroidClip() }
@@ -62,6 +63,8 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     val sensitive = desc.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
     val item = clip.getItemAt(0)
     val uri = item.uri
+    val fileEcho =
+      importedFileEcho.consume(uri?.toString(), desc.extras?.getLong(EXTRA_FILE_GENERATION) ?: 0)
     val mime =
       if (uri != null)
         (context.contentResolver.getType(uri)
@@ -70,10 +73,48 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     if (uri != null && mime?.startsWith("image/") == true) {
       val img = loadImage(uri) ?: return
       val key = imageKey(img)
+      if (fileEcho) {
+        toHost = key
+        return
+      }
       if (fromHost == key || toHost == key) return
       toHost = key
       val blob = Wire.Writer(img.bytes.size + 8).image(img).bytes()
       send(Wire.CLIP_IMAGE, sensitive, blob)
+      return
+    }
+    if (uri?.scheme == "content") {
+      try {
+        val name =
+          context.contentResolver
+            .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use {
+              if (it.moveToFirst()) it.getString(0) else null
+            } ?: "clipboard-file"
+        val bytes =
+          context.contentResolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(65536)
+            while (true) {
+              val n = input.read(buffer)
+              if (n < 0) break
+              require(out.size() + n <= ClipFile.MAX_BYTES) { "clipboard file too large" }
+              out.write(buffer, 0, n)
+            }
+            out.toByteArray()
+          } ?: return
+        val file = ClipFile(name, mime ?: "application/octet-stream", bytes)
+        val key = "file $uri ${bytes.contentHashCode()}"
+        if (fileEcho || toHost == key) {
+          toHost = key
+          return
+        }
+        val blob = file.encode()
+        toHost = key
+        send(Wire.CLIP_FILE, sensitive, blob)
+      } catch (e: Exception) {
+        Log.w(TAG, "reading clip file $uri: $e")
+      }
       return
     }
     val text = item.coerceToText(context)?.toString() ?: return
@@ -127,6 +168,17 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
           fromHost = text
           ClipData.newPlainText("Desktop", text)
         }
+        Wire.CLIP_FILE -> {
+          try {
+            val file = ClipFile.decode(data)
+            val uri = ClipFileProvider.store(context, file)
+            fromHost = "file $uri"
+            ClipData.newUri(context.contentResolver, file.name, uri)
+          } catch (e: Exception) {
+            Log.w(TAG, "host clip file: $e")
+            return
+          }
+        }
         Wire.CLIP_IMAGE -> {
           val img = decodeImage(data) ?: return
           fromHost = imageKey(img)
@@ -136,6 +188,14 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         else -> return
       }
     if (sensitive) clip.description.extras = extras
+    val fileUri = clip.getItemAt(0).uri?.toString().takeIf { kind == Wire.CLIP_FILE }
+    val generation = importedFileEcho.install(fileUri)
+    if (fileUri != null) {
+      clip.description.extras =
+        (clip.description.extras ?: PersistableBundle()).apply {
+          putLong(EXTRA_FILE_GENERATION, generation)
+        }
+    }
     try {
       cm.setPrimaryClip(clip)
       Log.i(TAG, "clip from the host (kind $kind, ${data.size} bytes)")
@@ -156,7 +216,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     if (r.remaining() < 4) return null
     val w = r.short.toInt() and 0xffff
     val h = r.short.toInt() and 0xffff
-    if (w == 0 || h == 0 || r.remaining() != w * h * 4) return null
+    if (w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE || r.remaining() != w * h * 4) return null
     val px = ByteArray(w * h * 4)
     r.get(px)
     return Wire.Rgba(w, h, px)
@@ -178,5 +238,6 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
   companion object {
     const val TAG = "LinuxApkClipboard"
     private const val MAX_SIDE = 2048
+    private const val EXTRA_FILE_GENERATION = "dev.linuxapk.system.clipboard.FILE_GENERATION"
   }
 }

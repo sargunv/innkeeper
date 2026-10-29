@@ -61,6 +61,7 @@ object Wire {
 
   const val CLIP_TEXT = 1
   const val CLIP_IMAGE = 2
+  const val CLIP_FILE = 3
 
   /** A little-endian message (or blob) builder. */
   class Writer(capacity: Int = 64) {

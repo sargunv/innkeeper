@@ -271,6 +271,11 @@
 
     <!-- Images copied on the desktop, pasted into Android apps. -->
     <provider
+      android:name=".integration.clipboard.ClipFileProvider"
+      android:authorities="dev.linuxapk.system.clipboard.files"
+      android:exported="false"
+      android:grantUriPermissions="true" />
+    <provider
       android:name=".integration.clipboard.ClipImageProvider"
       android:authorities="dev.linuxapk.system.clipboard"
       android:exported="false"

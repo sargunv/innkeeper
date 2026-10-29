@@ -17,10 +17,15 @@ import java.io.File
 class ClipImageProbe : ContentProvider() {
   override fun onCreate() = true
 
-  override fun getType(uri: Uri) = "image/png"
+  override fun getType(uri: Uri) =
+    if (uri.lastPathSegment == "probe.txt") "text/plain" else "image/png"
 
   override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
-    ParcelFileDescriptor.open(file(context!!), ParcelFileDescriptor.MODE_READ_ONLY)
+    ParcelFileDescriptor.open(
+      if (uri.lastPathSegment == "probe.txt") File(context!!.cacheDir, "probe.txt")
+      else file(context!!),
+      ParcelFileDescriptor.MODE_READ_ONLY,
+    )
 
   override fun query(
     uri: Uri,
@@ -28,7 +33,10 @@ class ClipImageProbe : ContentProvider() {
     selection: String?,
     selectionArgs: Array<out String>?,
     sortOrder: String?,
-  ) = null
+  ) =
+    android.database.MatrixCursor(arrayOf(android.provider.OpenableColumns.DISPLAY_NAME)).apply {
+      addRow(arrayOf(uri.lastPathSegment))
+    }
 
   override fun insert(uri: Uri, values: ContentValues?): Uri? = null
 
@@ -43,6 +51,11 @@ class ClipImageProbe : ContentProvider() {
 
   companion object {
     private fun file(c: Context) = File(c.cacheDir, "probe.png")
+
+    fun storeFile(c: Context): Uri {
+      File(c.cacheDir, "probe.txt").writeText("linuxapk-file-from-android\n")
+      return Uri.parse("content://dev.linuxapk.probes.clip/probe.txt")
+    }
 
     /** Writes the test image; returns its URI. */
     fun store(c: Context): Uri {

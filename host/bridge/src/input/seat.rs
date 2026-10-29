@@ -362,7 +362,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
         _: &wl_keyboard::WlKeyboard,
         e: wl_keyboard::Event,
         _: &Connection,
-        _: &QueueHandle<State>,
+        qh: &QueueHandle<State>,
     ) {
         use wl_keyboard::Event as E;
         match e {
@@ -391,11 +391,17 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 }
                 let id = st.window_of(&surface).map(|(id, _)| id);
                 st.seat.keyboard_focus = id;
+                if let Some(c) = &mut st.clipboard {
+                    c.focus(id.map(|_| serial), qh);
+                }
                 if let Some(id) = id {
                     st.hub.input(&format!("keyboard_enter {id}"));
                 }
             }
             E::Leave { .. } => {
+                if let Some(c) = &mut st.clipboard {
+                    c.focus(None, qh);
+                }
                 if let Some(x) = &mut st.seat.xkb {
                     x.reset_compose();
                 }
