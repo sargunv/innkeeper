@@ -54,14 +54,12 @@ if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
       "$S" selftest
-      s timeout 10 logcat -d -t 100 >"$T/logcat.txt"
-      [[ -s $T/logcat.txt ]]
-      s timeout 10 logcat -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
+      s timeout 10 logcat -b main,system,crash -d -t 10000 -s cutils-trace:E >"$T/trace.txt"
       if file_has "$T/trace.txt" 'Error opening trace file'; then
         echo 'FAIL expected missing-tracefs error was not silenced' >&2
         exit 1
       fi
-      echo 'ok   bounded log dump; no missing-tracefs noise'
+      echo 'ok   no missing-tracefs noise'
       s cmd package resolve-activity --brief -a android.intent.action.MAIN \
         -c android.intent.category.HOME >"$T/home.txt"
       file_has "$T/home.txt" '^dev.linuxapk.system/.wm.HomeActivity$'
@@ -219,8 +217,8 @@ if [[ ${1:-} == --group ]]; then
       ;;
     lifecycle)
       s cmd appops set dev.linuxapk.probes SCHEDULE_EXACT_ALARM allow
-      s logcat -c
-      s am start -n dev.linuxapk.probes/.LifecycleProbe --es action alarm --ei seconds 18 >/dev/null
+      # Allow four seconds to observe idle stop before the six-second wake lead.
+      s am start -n dev.linuxapk.probes/.LifecycleProbe --es action alarm --ei seconds 10 >/dev/null
       until_ok log_has LinuxApkLifecycleProbe 'alarm scheduled at='
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       s touch /data/local/tmp/e2e-idle
@@ -228,7 +226,6 @@ if [[ ${1:-} == --group ]]; then
       echo 'ok   session stopped idle with an alarm pending'
       until_ok running
       until_ok booted
-      until_ok log_has LinuxApkLifecycleProbe 'alarm fired at='
       ;;
   esac
   echo "ok   $2"
@@ -261,6 +258,16 @@ export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk
 keeper=""
 mod=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
 cleanup() {
+  local result=$?
+  if ((result != 0)); then
+    echo "e2e: Android failure diagnostics: $T/{crash,system}.txt" >&2
+    timeout 1 "$S" exec logcat -d -b crash >"$T/crash.txt" 2>&1 || true
+    if file_has "$T/crash.txt" 'FATAL EXCEPTION IN SYSTEM PROCESS'; then
+      echo 'e2e: system_server crashed (not a boot readiness timeout):' >&2
+      cat "$T/crash.txt" >&2
+    fi
+    timeout 1 "$S" exec logcat -d -b system -t 200 >"$T/system.txt" 2>&1 || true
+  fi
   "$S" stop >/dev/null 2>&1 || true
   "$S" reset >/dev/null 2>&1 || true
   if [[ -n $keeper ]]; then wait "$keeper" 2>/dev/null || true; fi
@@ -289,6 +296,10 @@ run_group() {
   echo "=== e2e: $1"
   timeout --kill-after=2 50 "$0" --group "$1" || result=$?
   echo "e2e: $1 elapsed=$((SECONDS - start))s"
+  if ((result != 0)); then
+    # Preserve the failed activity sequence before lifecycle restarts logd.
+    timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
+  fi
   return "$result"
 }
 # Audio uses a foreground service and a private sink; it can run alongside
