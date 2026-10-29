@@ -44,7 +44,10 @@ runs), then [docs/architecture.md](docs/architecture.md).
   the user's main session (no instance name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
 - **Test what you touched, in under a minute.** Keep only tests of observable
-  behaviour we own. Iterate on `mise run test` plus relevant
+  behaviour we own. Unit and low-level tests cover branches, edge cases and
+  error handling; e2e keeps one common-path scenario per user-visible feature,
+  never variants of the same path. A bug fix comes with a test that fails
+  without it; no reproduction, no fix. Iterate on `mise run test` plus relevant
   `mise run test:e2e -- <group>` checks; the whole local e2e run must take under
   60 s, with waits for observations instead of fixed delays. GitHub Actions uses
   its own deadline for the slower software-rendered desktop, documented in
