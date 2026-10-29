@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Every Android-side C/C++ artifact, built with the NDK pin (preset "android"),
-# and the host unit tests of the graphics and health HALs and the bridge
-# client (preset "host-tests"). Each module installs as COMPONENT <module>,
+# and the host unit tests of the exec relay, graphics and health HALs and
+# the bridge client (preset "host-tests"). Each module installs as COMPONENT
+# <module>,
 # at paths relative to the stage prefix (see tools/build/artifacts.toml);
 # `mise run build:<module>` installs it.
 cmake_minimum_required(VERSION 3.22)
@@ -13,13 +14,13 @@ set(LINUXAPK_ANDROID share/linuxapk/android)
 if(ANDROID)
   add_subdirectory(supervisor/pivot-exec)
   add_subdirectory(supervisor/shim)
-  add_subdirectory(android/system/exec)
   add_subdirectory(android/vendor/audio)
   # Test-only binaries; never installed.
   add_subdirectory(tests/bionic)
 else()
   enable_testing()
 endif()
+add_subdirectory(android/system/exec)
 add_subdirectory(android/vendor/bridge-client)
 add_subdirectory(android/vendor/graphics)
 add_subdirectory(android/vendor/health)

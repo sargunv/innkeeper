@@ -37,3 +37,8 @@ merging and apex-info parsing), and `mise run test:e2e -- boot`, which runs
 `selftest` in a fresh named sandbox. Sessions under development run through
 `tools/dev/session.sh`, the staged launcher in a private Flatpak
 ([packaging/flatpak](../../packaging/flatpak/README.md)).
+
+`session.log` records launcher setup milestones with elapsed milliseconds and
+host `CLOCK_BOOTTIME` timestamps. Compare them with init's `ro.boottime.*`
+properties and the event log's `boot_progress_*` timestamps to separate setup
+from Android boot without reading host `dmesg`.

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
@@ -28,6 +28,32 @@ pub fn append(path: &Path) -> Result<File> {
 pub fn log(paths: &Paths, msg: &str) {
     if let Ok(mut f) = append(&paths.session_log()) {
         let _ = writeln!(f, "linuxapk-session: {msg}");
+    }
+}
+
+/// Launcher milestones, on Android's CLOCK_BOOTTIME timebase too, so init's
+/// ro.boottime.* properties and boot_progress events can be compared directly.
+pub struct BootTrace(Instant);
+
+impl BootTrace {
+    pub fn new() -> Self {
+        Self(Instant::now())
+    }
+
+    pub fn mark(&self, paths: &Paths, stage: &str) {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) };
+        log(
+            paths,
+            &format!(
+                "boot +{} ms, boottime {} ms: {stage}",
+                self.0.elapsed().as_millis(),
+                ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000
+            ),
+        );
     }
 }
 

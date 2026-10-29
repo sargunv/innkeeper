@@ -224,6 +224,7 @@ fn wayland_socket() -> Result<PathBuf> {
 /// `start`, and `_serve` (`serve`): Flatpak mode's session in a sandbox of
 /// its own, which `start` spawns.
 fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
+    let trace = session::BootTrace::new();
     let (mut follow, mut headless) = (false, false);
     for o in opts {
         match *o {
@@ -254,10 +255,12 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         return flatpak::spawn(paths, &exe, headless);
     }
     session::fresh_dirs(paths)?;
+    trace.mark(paths, "image prepared, runtime ready");
     let cfg = Config::new(paths.clone(), image, headless, wayland);
     layer::write(&cfg)?;
+    trace.mark(paths, "start-time layer written");
     cfg.save()?;
-    flatpak::run(&cfg, follow, image_lease)
+    flatpak::run(&cfg, follow, image_lease, &trace)
 }
 
 /// Deletes Android's /data, as Android's root: its files belong to Android's
