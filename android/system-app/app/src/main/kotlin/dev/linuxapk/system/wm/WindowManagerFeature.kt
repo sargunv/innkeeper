@@ -579,6 +579,17 @@ class WindowManagerFeature(
 
       override fun onTaskRemoved(taskId: Int) = queueRefresh()
 
+      override fun onTaskMovedToBack(taskInfo: ActivityManager.RunningTaskInfo?) {
+        if (taskInfo == null) return
+        handler.post {
+          windows[Tasks.displayId(taskInfo)]?.let { w ->
+            // Back on a launcher root backgrounds the task rather than finishing it.
+            // Keep the display alive so launching it again restores the same task.
+            if (w.tasks.firstOrNull() == taskInfo.taskId) input.minimizeWindow(w.id)
+          }
+        }
+      }
+
       override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo?) = queueRefresh()
 
       override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) = queueRefresh()

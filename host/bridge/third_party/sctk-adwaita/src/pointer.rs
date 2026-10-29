@@ -1,0 +1,193 @@
+use std::time::Duration;
+
+use smithay_client_toolkit::reexports::csd_frame::{
+    CursorIcon, FrameAction, ResizeEdge, WindowManagerCapabilities, WindowState,
+};
+
+use crate::{
+    buttons::ButtonKind,
+    theme::{self, HEADER_SIZE},
+};
+
+/// Time to register the next click as a double click.
+///
+/// The value is the same as the default in gtk4.
+const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(400);
+
+/// The state of the mouse input inside the decorations frame.
+#[derive(Debug, Default)]
+pub(crate) struct MouseState {
+    pub location: Location,
+    back_pressed: bool,
+
+    /// The surface local location inside the surface.
+    position: (f64, f64),
+
+    /// The instant of the last click.
+    last_normal_click: Option<Duration>,
+}
+
+impl MouseState {
+    /// Activate only after a press and release on Back. Leaving cancels the press.
+    pub fn back_click(&mut self, pressed: bool) -> bool {
+        let on_back = self.location == Location::Button(ButtonKind::Back);
+        if pressed {
+            self.back_pressed = on_back;
+            false
+        } else {
+            std::mem::take(&mut self.back_pressed) && on_back
+        }
+    }
+
+    /// The normal click on decorations frame was made.
+    pub fn click(
+        &mut self,
+        timestamp: Duration,
+        pressed: bool,
+        resizable: bool,
+        state: &WindowState,
+        wm_capabilities: &WindowManagerCapabilities,
+    ) -> Option<FrameAction> {
+        let maximized = state.contains(WindowState::MAXIMIZED);
+        let action = match self.location {
+            Location::Top if resizable => FrameAction::Resize(ResizeEdge::Top),
+            Location::TopLeft if resizable => FrameAction::Resize(ResizeEdge::TopLeft),
+            Location::Left if resizable => FrameAction::Resize(ResizeEdge::Left),
+            Location::BottomLeft if resizable => FrameAction::Resize(ResizeEdge::BottomLeft),
+            Location::Bottom if resizable => FrameAction::Resize(ResizeEdge::Bottom),
+            Location::BottomRight if resizable => FrameAction::Resize(ResizeEdge::BottomRight),
+            Location::Right if resizable => FrameAction::Resize(ResizeEdge::Right),
+            Location::TopRight if resizable => FrameAction::Resize(ResizeEdge::TopRight),
+            Location::Button(ButtonKind::Close) if !pressed => FrameAction::Close,
+            Location::Button(ButtonKind::Maximize) if !pressed && !maximized => {
+                FrameAction::Maximize
+            }
+            Location::Button(ButtonKind::Maximize) if !pressed && maximized => {
+                FrameAction::UnMaximize
+            }
+            Location::Button(ButtonKind::Minimize) if !pressed => FrameAction::Minimize,
+            Location::Head
+                if pressed && wm_capabilities.contains(WindowManagerCapabilities::MAXIMIZE) =>
+            {
+                match self.last_normal_click.replace(timestamp) {
+                    Some(last) if timestamp.saturating_sub(last) < DOUBLE_CLICK_DURATION => {
+                        if maximized {
+                            FrameAction::UnMaximize
+                        } else {
+                            FrameAction::Maximize
+                        }
+                    }
+                    _ => FrameAction::Move,
+                }
+            }
+            Location::Head if pressed => FrameAction::Move,
+            _ => return None,
+        };
+
+        Some(action)
+    }
+
+    /// Alternative click on decorations frame was made.
+    pub fn alternate_click(
+        &mut self,
+        pressed: bool,
+        wm_capabilities: &WindowManagerCapabilities,
+        hide_border: bool,
+    ) -> Option<FrameAction> {
+        // Invalidate the normal click.
+        self.last_normal_click = None;
+
+        let edge_size = theme::edge_size(hide_border);
+
+        match self.location {
+            Location::Head | Location::Button(_)
+                if pressed && wm_capabilities.contains(WindowManagerCapabilities::WINDOW_MENU) =>
+            {
+                Some(FrameAction::ShowMenu(
+                    // XXX this could be one 1pt off when the frame is not maximized, but it's not
+                    // like it really matters in the end.
+                    self.position.0 as i32 - edge_size as i32,
+                    // We must offset it by header size for precise position.
+                    self.position.1 as i32 - HEADER_SIZE as i32,
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// The mouse moved inside the decorations frame.
+    pub fn moved(&mut self, location: Location, x: f64, y: f64, resizable: bool) -> CursorIcon {
+        self.location = location;
+        self.position = (x, y);
+        match self.location {
+            _ if !resizable => CursorIcon::Default,
+            Location::Top => CursorIcon::NResize,
+            Location::TopRight => CursorIcon::NeResize,
+            Location::Right => CursorIcon::EResize,
+            Location::BottomRight => CursorIcon::SeResize,
+            Location::Bottom => CursorIcon::SResize,
+            Location::BottomLeft => CursorIcon::SwResize,
+            Location::Left => CursorIcon::WResize,
+            Location::TopLeft => CursorIcon::NwResize,
+            _ => CursorIcon::Default,
+        }
+    }
+
+    /// The mouse left the decorations frame.
+    pub fn left(&mut self) {
+        // Reset only the location.
+        self.location = Location::None;
+        self.back_pressed = false;
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum Location {
+    #[default]
+    None,
+    Head,
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+    TopLeft,
+    Button(ButtonKind),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn back_requires_a_click_and_does_not_move_or_resize() {
+        let mut mouse = MouseState::default();
+        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
+        assert!(!mouse.back_click(false));
+        assert!(!mouse.back_click(true));
+        assert!(mouse
+            .click(
+                Duration::ZERO,
+                true,
+                true,
+                &WindowState::empty(),
+                &WindowManagerCapabilities::all()
+            )
+            .is_none());
+        assert!(mouse.back_click(false));
+        assert!(!mouse.back_click(false));
+        mouse.back_click(true);
+        mouse.left();
+        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
+        assert!(!mouse.back_click(false));
+        mouse.moved(Location::Head, 50., 17., true);
+        mouse.back_click(true);
+        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
+        assert!(!mouse.back_click(false));
+        assert!(matches!(
+            mouse.alternate_click(true, &WindowManagerCapabilities::all(), false),
+            Some(FrameAction::ShowMenu(_, _))
+        ));
+    }
+}

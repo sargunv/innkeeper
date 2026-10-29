@@ -255,6 +255,11 @@ class InputTranslator(
       }
       HostEvent.TouchFrame -> touchFrame(out)
       HostEvent.TouchCancel -> touchCancel(out)
+      is HostEvent.Back -> {
+        val t = clock.untimed()
+        out += sideKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_DOWN, t, 0, e.display)
+        out += sideKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP, t, 0, e.display)
+      }
       is HostEvent.Close,
       is HostEvent.RepeatInfo,
       is HostEvent.WindowMapped,
@@ -472,8 +477,13 @@ class InputTranslator(
     )
   }
 
-  private fun sideKey(keyCode: Int, action: Int, t: Long, meta: Int) =
-    OutKey(action, keyCode, 0, meta, KeyEvent.FLAG_FROM_SYSTEM, t, t, pointerDisplay)
+  private fun sideKey(
+    keyCode: Int,
+    action: Int,
+    t: Long,
+    meta: Int,
+    display: Int = pointerDisplay,
+  ) = OutKey(action, keyCode, 0, meta, KeyEvent.FLAG_FROM_SYSTEM, t, t, display)
 
   // --- touchpad gestures ---------------------------------------------------
   // GestureConverter's state machine (handleScroll/endScroll, handleFling, handlePinch/endPinch,

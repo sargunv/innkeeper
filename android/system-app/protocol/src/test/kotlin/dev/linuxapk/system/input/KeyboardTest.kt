@@ -32,6 +32,21 @@ class KeyboardTest {
   private fun down(line: String) = feed(line).single().also { assertEquals(it.action, 0) }
 
   @Test
+  fun titleBarBackTargetsItsWindowWithoutChangingInputFocusOrModifiers() {
+    feed("keyboard_enter 7", "key 1 42 1", "pointer_enter 10 10 8")
+    val events = feed("back 9")
+    assertEquals(listOf(0, 1), events.map { it.action })
+    assertTrue(
+      events.all { it.keyCode == KeyEvent.KEYCODE_BACK && it.displayId == 9 && it.metaState == 0 },
+    )
+    assertEquals(7, tr.keyDisplay)
+    assertEquals(8, tr.pointerDisplay)
+    val a = down("key 2 30 1")
+    assertEquals(7, a.displayId)
+    assertTrue(a.metaState and KeyEvent.META_SHIFT_ON != 0)
+  }
+
+  @Test
   fun mediaKeysReachAndroidButVolumeStaysOnTheHost() {
     feed("keyboard_enter 7")
     for ((scan, code) in

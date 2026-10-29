@@ -25,7 +25,7 @@ linuxapk-core = { path = "../core" }
 sctk = { package = "smithay-client-toolkit", version = "0.21", default-features = false, features = [
   "calloop",
 ] }
-sctk-adwaita = "0.12"
+sctk-adwaita = { path = "third_party/sctk-adwaita" }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = [
   "client",
