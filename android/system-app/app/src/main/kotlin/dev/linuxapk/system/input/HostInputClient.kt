@@ -170,6 +170,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
             return
           }
           if (e is HostEvent.RepeatInfo) applyRepeat(e)
+          if (e is HostEvent.PointerRelative) virtual.relative(e)
           val translated = translator.handle(e)
           virtual.modifiers(translator.metaState, SystemClock.uptimeMillis())
           translated.forEach(::inject)

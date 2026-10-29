@@ -159,6 +159,12 @@ impl Hub {
         }
     }
 
+    pub fn pointer_capture(&self, enabled: bool) {
+        for d in self.state.lock().unwrap().displays.values() {
+            let _ = d.send(Cmd::PointerCapture(enabled));
+        }
+    }
+
     /// Goes to every display connection; the one whose seat has text-input
     /// focus applies it.
     pub fn text_input(&self, req: ime::Req) {

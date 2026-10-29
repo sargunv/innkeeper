@@ -20,6 +20,8 @@ sealed interface HostEvent {
 
   data class PointerLeave(val display: Int = -1) : HostEvent
 
+  data class PointerRelative(val display: Int, val dx: Float, val dy: Float) : HostEvent
+
   data class PointerMotion(val time: Long, val x: Float, val y: Float) : HostEvent
 
   data class PointerButton(val time: Long, val button: Int, val pressed: Boolean) : HostEvent
@@ -193,6 +195,7 @@ sealed interface HostEvent {
         "window" -> need(args, 3) { Window(int(1), int(2), f[3].toDouble(), display(4, 0)) }
         "pointer_enter" -> need(args, 2) { PointerEnter(float(1), float(2), display(3, 0)) }
         "pointer_leave" -> PointerLeave(display(1, -1))
+        "pointer_relative" -> need(args, 3) { PointerRelative(int(1), float(2), float(3)) }
         "pointer_motion" -> need(args, 3) { PointerMotion(time(1), float(2), float(3)) }
         "pointer_button" -> need(args, 3) { PointerButton(time(1), int(2), bool(3)) }
         "pointer_axis" -> need(args, 3) { PointerAxis(time(1), int(2), f[3].toDouble()) }

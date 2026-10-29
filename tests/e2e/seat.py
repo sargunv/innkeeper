@@ -101,6 +101,8 @@ for a in actions:
   x, y = (float(t) for t in v.split(","))
   if k == "abs":
     send(fi, 9, fixed(x) + fixed(y))
+  elif k == "rel":
+    send(fi, 1, fixed(x) + fixed(y))
   elif k in ("key", "button"):
     send(fi, 10 if k == "key" else 2, struct.pack("<II", int(x), int(y)))
   elif k == "axis":

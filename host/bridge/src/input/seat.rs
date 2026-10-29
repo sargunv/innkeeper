@@ -25,6 +25,7 @@ use wayland_protocols::wp::cursor_shape::v1::client::{
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
 
 use super::Hub;
+use super::capture::Capture;
 use super::gestures::Gestures;
 use super::tablet::Tablets;
 use super::text_input::TextInput;
@@ -36,7 +37,8 @@ const KEY_F11: u32 = 87;
 
 pub(crate) struct Seat {
     pub(crate) wl_seat: Option<wl_seat::WlSeat>,
-    pointer: Option<wl_pointer::WlPointer>,
+    pub(crate) pointer: Option<wl_pointer::WlPointer>,
+    pub(crate) capture: Capture,
     pub(crate) cursor_shape: Option<WpCursorShapeManagerV1>,
     /// The pointer's cursor-shape device, the serial of its last enter and
     /// the shape set since.
@@ -74,6 +76,7 @@ impl Seat {
         let seat = Seat {
             wl_seat: None,
             pointer: None,
+            capture: Capture::bind(globals, qh),
             cursor_shape: globals.bind(qh, 1..=1, Cursor).ok(),
             cursor: None,
             enter_serial: 0,
@@ -119,6 +122,7 @@ impl Seat {
                     .as_ref()
                     .map(|m| m.get_pointer(&p, qh, Cursor));
                 self.gestures.attach(&p, qh);
+                self.capture.attach(&p, qh);
                 self.pointer = Some(p);
             }
             Capability::Keyboard if self.keyboard.is_none() => {
@@ -136,6 +140,7 @@ impl Seat {
                 if let Some(c) = self.cursor.take() {
                     c.destroy();
                 }
+                self.capture.detach();
                 self.gestures.detach();
                 if let Some(p) = self.pointer.take() {
                     p.release();
@@ -193,6 +198,7 @@ impl Seat {
 
     /// The window `id` is gone; gestures and a tablet tool over it end.
     pub(crate) fn forget(&mut self, id: u32, hub: &Hub) {
+        self.capture.forget(id);
         self.gestures.forget(id, hub);
         self.tablets.forget(id, hub);
         if self.pointer_focus.is_some_and(|(p, _)| p == id) {
@@ -293,6 +299,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                         let (x, y) = st.to_display(id, surface_x, surface_y);
                         st.hub.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
                         st.restore_cursor(id);
+                        st.update_capture();
                     }
                     Some((id, true)) => {
                         let icon = st.frame_pointer_moved(
@@ -308,6 +315,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 }
             }
             E::Leave { .. } => {
+                st.seat.capture.cancel();
                 st.seat.pointer_surface = None;
                 match st.seat.pointer_focus.take() {
                     Some((id, false)) => st.hub.input(&format!("pointer_leave {id}")),
@@ -320,7 +328,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 surface_x,
                 surface_y,
             } => match st.seat.pointer_focus {
-                Some((id, false)) => {
+                Some((id, false)) if !st.seat.capture.state.active => {
                     let (x, y) = st.to_display(id, surface_x, surface_y);
                     st.hub
                         .input(&format!("pointer_motion {time} {x:.2} {y:.2}"));
@@ -333,7 +341,7 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                         st.seat.set_cursor(frame_shape(icon));
                     }
                 }
-                None => {}
+                _ => {}
             },
             E::Button {
                 serial,
@@ -421,6 +429,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 }
                 let id = st.window_of(&surface).map(|(id, _)| id);
                 st.seat.keyboard_focus = id;
+                st.update_capture();
                 if let Some(c) = &mut st.clipboard {
                     c.focus(id.map(|_| serial), qh);
                 }
@@ -429,6 +438,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 }
             }
             E::Leave { .. } => {
+                st.seat.capture.cancel();
                 if let Some(c) = &mut st.clipboard {
                     c.focus(None, qh);
                 }
@@ -458,6 +468,9 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                     WEnum::Value(K::Repeated) => KeyLine::Repeat,
                     _ => KeyLine::Release,
                 };
+                if key == 1 && state == KeyLine::Press {
+                    st.seat.capture.cancel();
+                }
                 // F11 toggles fullscreen, as in desktop apps; Android never
                 // sees it.
                 if key == KEY_F11 {

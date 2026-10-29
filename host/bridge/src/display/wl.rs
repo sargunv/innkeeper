@@ -88,6 +88,7 @@ pub enum Cmd {
     },
     /// A request from the Linux.apk IME.
     TextInput(ime::Req),
+    PointerCapture(bool),
     WindowPolicy(WindowPolicy),
     Cursor {
         window: u32,
@@ -548,7 +549,22 @@ impl State {
         0
     }
 
+    pub(crate) fn update_capture(&mut self) {
+        let pointer = self.seat.pointer_window();
+        let surface = pointer
+            .and_then(|id| self.windows.get(&id))
+            .map(|w| w.window.wl_surface());
+        self.seat.capture.sync(
+            self.seat.keyboard_focus,
+            pointer,
+            surface,
+            self.seat.pointer.as_ref(),
+            &self.qh,
+        );
+    }
+
     fn destroy(&mut self, id: u32) {
+        self.seat.capture.forget(id);
         self.cursors.remove(&id);
         self.hub.pointer_positions.lock().unwrap().remove(&id);
         let Some(w) = self.windows.remove(&id) else {
@@ -778,6 +794,10 @@ impl State {
                 damage,
             } => self.frame(window, buffer, damage),
             Cmd::TextInput(r) => self.text_input(r),
+            Cmd::PointerCapture(enabled) => {
+                self.seat.capture.state.request(enabled);
+                self.update_capture();
+            }
             Cmd::WindowPolicy(p) => self.window_policy(p),
             Cmd::Cursor { window, image } => self.cursor(window, image),
             Cmd::Quit => self.quit = true,
