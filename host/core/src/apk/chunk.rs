@@ -171,6 +171,10 @@ pub enum Value {
     /// Decimal or hex integer, including enums and flags.
     Int(u32),
     Bool(bool),
+    /// IEEE float bits, kept exact for equality.
+    Float(u32),
+    /// Android ARGB colour.
+    Color(u32),
     /// Anything else (floats, dimensions, colours, theme attributes).
     Other,
 }
@@ -183,6 +187,8 @@ impl Value {
             0x03 => Value::Str(pool.get(data)?),
             0x10 | 0x11 => Value::Int(data),
             0x12 => Value::Bool(data != 0),
+            0x04 => Value::Float(data),
+            0x1c..=0x1f => Value::Color(data),
             _ => Value::Other,
         })
     }

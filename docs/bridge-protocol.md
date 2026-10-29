@@ -154,6 +154,14 @@ object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
 and CLI calls use this interface for per-app management; they do not run
 commands inside Android. Starting a stopped session still uses the launcher.
 
+`State() → (b ready, as open_packages)` reads a snapshot without starting
+Android. Name ownership means the bridge is running; `ready` means the system
+app's apps channel is connected. `open_packages` lists packages whose windows
+are mapped by the display bridge. `Changed()` invalidates this snapshot when the
+apps channel connects/disconnects or a window maps/unmaps. Consumers watch name
+ownership as well, clearing state when the bridge exits, subscribe before
+reading, and read again on each signal. No periodic status command is needed.
+
 `App(s package, s action, s permission, b enabled) → s response` is synchronous.
 Actions are `info`, `clear-cache`, `clear-data`, `force-stop`, `permission`,
 `escape-back` and `background`. Only `permission` accepts a permission name;

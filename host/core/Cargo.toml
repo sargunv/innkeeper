@@ -19,3 +19,7 @@ zbus = { version = "5", default-features = false, features = [
 zip = { version = "9.1.2", default-features = false, features = [
   "deflate-flate2-zlib-rs",
 ] }
+# Adaptive/vector icons are rendered locally; no Android session or SDK.
+resvg = { version = "0.49", default-features = false, features = [
+  "raster-images",
+] }

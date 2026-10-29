@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 pub use crate::android::LaunchOptions;
 use crate::android::{self, Launch};
@@ -15,8 +15,8 @@ use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
 use crate::launcher::Session;
 use crate::paths::{self, Prefix};
-use crate::validate;
 use crate::xdg::{self, DesktopApp, Dirs};
+use crate::{ErrorKind, validate};
 
 /// Progress from a long operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,8 +79,7 @@ pub struct Package {
     pub size: u64,
     /// Number of APKs (1 for a plain APK).
     pub apk_count: usize,
-    /// The APK's largest launcher icon bitmap (PNG or WebP), if it has one.
-    /// Adaptive (XML) icons are only rendered by Android after install.
+    /// A host-rendered adaptive icon or the largest legacy bitmap.
     pub icon: Option<Vec<u8>>,
     input: Input,
     /// Metadata of each member of `input`, in order.
@@ -129,6 +128,7 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     for m in &input.apks {
         info.push(
             apk::read(&m.path)
+                .context(ErrorKind::NotAnApk)
                 .with_context(|| format!("read {}", validate::truncate(&m.origin, 120)))?,
         );
     }
@@ -136,19 +136,21 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
         .filter(|i| info[*i].split.is_empty())
         .collect();
     if bases.len() != 1 {
-        bail!(
+        return Err(anyhow::anyhow!(
             "expected one base APK in {}, found {}",
             file.display(),
             bases.len()
-        );
+        )
+        .context(ErrorKind::UnsupportedBundle));
     }
     let base = &info[bases[0]];
     let pkg = validate::package(&base.package)?.to_string();
     if let Some(b) = info.iter().find(|b| b.package != pkg) {
-        bail!(
+        return Err(anyhow::anyhow!(
             "bundle mixes packages ({pkg} and {})",
             validate::truncate(&b.package, 80)
-        );
+        )
+        .context(ErrorKind::UnsupportedBundle));
     }
     let label = validate::label(&base.label).unwrap_or_else(|| pkg.clone());
     let mut abis: BTreeSet<String> = base.native_code.iter().cloned().collect();
@@ -157,8 +159,7 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     for b in &info {
         permissions.extend(b.permissions.iter().cloned());
     }
-    // An adaptive (XML) icon falls back to its legacy bitmaps.
-    let icon = largest_bitmap_icon(&input.apks[bases[0]].path, &base.icons);
+    let icon = apk::icon::render(&input.apks[bases[0]].path, &base.icons);
     Ok(Package {
         file: file.to_path_buf(),
         label,
@@ -226,20 +227,22 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
             .iter()
             .any(|b| bundle::split_abi(&b.split).is_some_and(|a| abis.contains(&a)))
     {
-        bail!(
+        return Err(anyhow::anyhow!(
             "{pkg} has no native code for this session's ABIs ({})",
             abis.join(", ")
-        );
+        )
+        .context(ErrorKind::WrongAbi));
     }
     if !base.native_code.is_empty()
         && abi_splits == 0
         && !base.native_code.iter().any(|c| abis.contains(c))
     {
-        bail!(
+        return Err(anyhow::anyhow!(
             "{pkg} only has native code for {} (this session runs {})",
             base.native_code.join(", "),
             abis.join(", ")
-        );
+        )
+        .context(ErrorKind::WrongAbi));
     }
     report(Event::Status(format!(
         "installing {pkg} {} ({} APK{})",
@@ -339,17 +342,6 @@ fn apk_png_icons(apk: &Path, icons: &[(u32, String)]) -> Vec<(u32, Vec<u8>)> {
         }
     }
     out
-}
-
-/// The highest-density bitmap (PNG or WebP) launcher icon in the APK.
-fn largest_bitmap_icon(apk: &Path, icons: &[(u32, String)]) -> Option<Vec<u8>> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(apk).ok()?).ok()?;
-    let mut v: Vec<&(u32, String)> = icons
-        .iter()
-        .filter(|(_, p)| p.ends_with(".png") || p.ends_with(".webp"))
-        .collect();
-    v.sort_by_key(|(d, _)| std::cmp::Reverse(*d));
-    v.into_iter().find_map(|(_, p)| zip_entry(&mut zip, p))
 }
 
 /// What [`uninstall`] did.

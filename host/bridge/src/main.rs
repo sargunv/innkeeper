@@ -97,6 +97,7 @@ fn main() -> Result<()> {
     let shared = Shared::with_input(&run_dir, policy, hub.clone());
     let display_shared = shared.clone();
     let display_hub = hub.clone();
+    let session_hub = hub.clone();
     let a11y_hub = hub.clone();
     services.register(service::DISPLAY, "display", move |peer, events| {
         Ok(Box::new(DisplayService::new(
@@ -167,7 +168,7 @@ fn main() -> Result<()> {
     // --mirror-apps (the main session).
     let session_api = linuxapk_bridge::apps::session::Relay::default();
     let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
-    let _session_bus = match session_api.serve(for_preferences, apps.clone()) {
+    let _session_bus = match session_api.serve(for_preferences, apps.clone(), session_hub) {
         Ok(bus) => Some(bus),
         Err(e) => {
             linuxapk_bridge::warn!("session D-Bus: {e:#}");

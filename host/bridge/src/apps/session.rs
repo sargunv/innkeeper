@@ -21,6 +21,7 @@ struct State {
     next: u64,
     connection: Option<(u64, Events)>,
     pending: HashMap<u64, mpsc::SyncSender<Answer>>,
+    bus: Option<zbus::blocking::Connection>,
 }
 
 #[derive(Clone, Default)]
@@ -36,6 +37,8 @@ impl Relay {
         state.next += 1;
         let id = state.next;
         state.connection = Some((id, events));
+        drop(state);
+        self.changed();
         id
     }
 
@@ -44,6 +47,21 @@ impl Relay {
         if state.connection.as_ref().is_some_and(|(k, _)| *k == id) {
             state.connection = None;
             state.pending.clear();
+        }
+        drop(state);
+        self.changed();
+    }
+
+    fn changed(&self) {
+        let bus = self.0.lock().unwrap().bus.clone();
+        if let Some(bus) = bus {
+            let _ = bus.emit_signal(
+                None::<&str>,
+                app_settings::PATH,
+                app_settings::INTERFACE,
+                "Changed",
+                &(),
+            );
         }
     }
 
@@ -111,23 +129,30 @@ impl Relay {
         &self,
         shared: Arc<crate::system::Shared>,
         apps: Arc<super::Config>,
+        input: Arc<crate::input::Hub>,
     ) -> anyhow::Result<zbus::blocking::Connection> {
-        Ok(zbus::blocking::connection::Builder::session()?
+        let relay = self.clone();
+        input.watch_windows(move || relay.changed());
+        let bus = zbus::blocking::connection::Builder::session()?
             .name(app_settings::bus_name(&linuxapk_core::paths::instance()?))?
             .serve_at(
                 app_settings::PATH,
                 SessionApi {
                     relay: self.clone(),
+                    input,
                     shared,
                     apps,
                     preferences: Mutex::new(()),
                 },
             )?
-            .build()?)
+            .build()?;
+        self.0.lock().unwrap().bus = Some(bus.clone());
+        Ok(bus)
     }
 }
 
 struct SessionApi {
+    input: Arc<crate::input::Hub>,
     relay: Relay,
     shared: Arc<crate::system::Shared>,
     apps: Arc<super::Config>,
@@ -136,6 +161,17 @@ struct SessionApi {
 
 #[zbus::interface(name = "dev.linuxapk.Session1")]
 impl SessionApi {
+    /// Bridge presence means starting; the system app's apps channel means ready.
+    fn state(&self) -> (bool, Vec<String>) {
+        (
+            self.relay.0.lock().unwrap().connection.is_some(),
+            self.input.open_packages(),
+        )
+    }
+
+    #[zbus(signal)]
+    async fn changed(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
+
     fn get_preferences(&self) -> zbus::fdo::Result<String> {
         let _guard = self.preferences.lock().unwrap();
         linuxapk_core::preferences::Preferences::load()

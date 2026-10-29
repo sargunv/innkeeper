@@ -5,7 +5,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 pub struct Output {
     pub status: ExitStatus,
@@ -51,7 +51,10 @@ pub fn run(cmd: &mut Command, stdin: Stdio, limit: Duration) -> Result<Output> {
         if t.elapsed() > limit {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("{:?} timed out after {limit:?}", cmd.get_program());
+            return Err(
+                anyhow::anyhow!("{:?} timed out after {limit:?}", cmd.get_program())
+                    .context(crate::ErrorKind::Timeout),
+            );
         }
         thread::sleep(Duration::from_millis(20));
     };
