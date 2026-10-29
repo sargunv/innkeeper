@@ -3,7 +3,13 @@
 # The NDK comes from the host (tools/container/run.sh mounts $HOME), pinned in
 # tools/build/toolchain.env.
 FROM registry.fedoraproject.org/fedora:44
-RUN dnf -y install \
+# Avoid slow or unreachable mirrors selected by the metalinks on hosted runners.
+RUN dnf -y \
+      --setopt='fedora.metalink=' \
+      --setopt='fedora.baseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/$releasever/Everything/$basearch/os/' \
+      --setopt='updates.metalink=' \
+      --setopt='updates.baseurl=https://dl.fedoraproject.org/pub/fedora/linux/updates/$releasever/Everything/$basearch/' \
+      install \
       meson ninja-build cmake make pkgconf-pkg-config git patch patchelf file \
       python3 python3-mako python3-pyyaml python3-packaging \
       glslang bison flex gcc gcc-c++ diffutils curl tar xz bzip2 \
