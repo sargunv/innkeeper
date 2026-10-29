@@ -75,7 +75,8 @@ remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
 
 An exact stage cache skips building when none of its source, build script,
 workflow or toolchain inputs changed; it restores the probes APK with the stage.
-Its Git tree digest includes paths, modes, symlinks and contents. Tests still
+Its Git tree digest includes paths, modes, symlinks and contents. An exact hit
+also skips the build runner's package, SDK and compiler-cache setup. Tests still
 run for code changes even when the stage is restored.
 
 Build, unit and lint jobs cache Cargo's target directory and registry by

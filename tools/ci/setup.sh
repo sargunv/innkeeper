@@ -18,17 +18,20 @@ if [[ $mode == build || $mode == unit || $mode == e2e || $mode == nightly ]]; th
   # The build container, supervisor unit tests and Flatpak need unprivileged mount namespaces.
   sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 fi
+if [[ $mode == unit || $mode == e2e || $mode == nightly ]]; then
+  # Gralloc's host unit tests also exercise real dma-buf allocations.
+  if [[ ! -e /dev/udmabuf ]]; then
+    sudo modprobe udmabuf
+  fi
+  sudo chmod 666 /dev/udmabuf
+  test -r /dev/udmabuf && test -w /dev/udmabuf
+fi
 [[ $mode == e2e || $mode == nightly ]] || exit 0
 sudo apt-get install -y --no-install-recommends \
-  podman uidmap passt flatpak cpio dbus-user-session gnome-shell mutter \
+  podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
-if [[ ! -e /dev/udmabuf ]]; then
-  sudo modprobe udmabuf
-fi
-sudo chmod 666 /dev/udmabuf
-test -r /dev/udmabuf && test -w /dev/udmabuf
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"

@@ -69,9 +69,6 @@ jobs:
     timeout-minutes: 120 # Cold Mesa/LLVM builds; warm runs reuse the saved build.
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup
-        with:
-          mode: build
       - name: Stage input tree
         id: inputs
         shell: bash
@@ -92,6 +89,10 @@ jobs:
           key:
             stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
             steps.inputs.outputs.stage }}
+      - uses: ./.github/actions/setup
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          mode: build
       - uses: ./.github/actions/build-cached
         if: steps.stage.outputs.cache-hit != 'true'
       - run: mise run build
