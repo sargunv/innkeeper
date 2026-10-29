@@ -2,15 +2,18 @@
 //! entries and icons, run, list and uninstall them. A thin front end over
 //! `linuxapk-core` (shared with `linuxapk-manager`). See host/cli/README.md.
 
+use std::fs::{File, OpenOptions};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
 use linuxapk_core::launcher::Session;
 use linuxapk_core::ops::{self, Event, LaunchOptions};
 use linuxapk_core::{desktop, validate, xdg};
+use rustix::fs::{FileType, OFlags};
 
 mod splash;
 use splash::Splash;
@@ -142,7 +145,7 @@ fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
             };
             reply = match path {
                 Some(path) => {
-                    let file = std::fs::File::open(&path)?;
+                    let file = open_input(&path)?;
                     let name = path
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -170,6 +173,25 @@ fn run(pkg: &str, args: &[String], token: Option<String>) -> Result<()> {
         s.close();
     }
     r.map(drop)
+}
+
+/// Reject special files without waiting for a FIFO writer before the fd is checked.
+fn open_input(path: &Path) -> Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(OFlags::NONBLOCK.bits() as i32)
+        .open(path)?;
+    let stat = rustix::fs::fstat(&file)?;
+    ensure!(
+        FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile,
+        "not a regular file: {}",
+        path.display()
+    );
+    let flags = rustix::fs::fcntl_getfl(&file)?;
+    if flags.contains(OFlags::NONBLOCK) {
+        rustix::fs::fcntl_setfl(&file, flags - OFlags::NONBLOCK)?;
+    }
+    Ok(file)
 }
 
 /// The splash colour of an app whose entry doesn't say (Android's light
@@ -237,5 +259,32 @@ fn main() -> ExitCode {
             eprintln!("linuxapk: {e:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fifo_without_a_writer_is_rejected_without_blocking() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../out/test/cli")
+            .join(format!("fifo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("input.md");
+        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, rustix::fs::Mode::RUSR).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(open_input(&fifo)).unwrap());
+        let result = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("FIFO open blocked");
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not a regular file")
+        );
     }
 }
