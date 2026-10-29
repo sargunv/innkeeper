@@ -10,12 +10,13 @@ Two gate tiers, both testing observable behaviour we own:
   `input` (an app window and delivered input), `audio` (440 Hz at PipeWire),
   `desktop` (links and notifications logged, clipboard isolated both ways,
   cold-start file picker cancelled without a portal, and DocumentsUI after a
-  connection timeout, CLI file VIEW and the Android Open With chooser), `a11y`
-  (AT-SPI stays inactive), `production` (Android mailto VIEW and notifications
-  reach logging desktop fakes, and PICK returns a readable file), and
-  `lifecycle` (idle stop and alarm restart). The whole command, including setup
-  and cleanup, has a 55 s deadline (plus at most 4 s for cleanup) on a warm
-  image and prints its total wall time. Setup boots once and installs the
+  connection timeout, CLI file VIEW and the Android Open With chooser),
+  `sharing` (host SEND/SEND_MULTIPLE byte hashes, MIME matching and read-only
+  grants), `a11y` (AT-SPI stays inactive), `production` (Android mailto VIEW and
+  notifications reach logging desktop fakes, and PICK returns a readable file),
+  and `lifecycle` (idle stop and alarm restart). The whole command, including
+  setup and cleanup, has a 55 s deadline (plus at most 4 s for cleanup) on a
+  warm image and prints its total wall time. Setup boots once and installs the
   probes; audio runs concurrently with the activity checks. Groups wait for
   observations, rather than fixed delays. Lifecycle uses named-session-only
   short timers.
@@ -24,6 +25,10 @@ Build and prepare the image first (`mise run build`,
 `mise run session -- prepare`). Results and captures stay in `out/test/e2e/`.
 The runner stops and resets its own instance on exit, including on failure. It
 never uses the main session or the user's desktop configuration.
+
+Set `LINUXAPK_SHARE_SCREENSHOT=1` when capturing chooser proof; normal sharing
+checks reuse the receiver window and exercise both chooser selections without
+starting the screenshot tool.
 
 The `production` group runs after isolation checks and temporarily puts a
 separately capped bridge on the named session's socket, leaving existing

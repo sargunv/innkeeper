@@ -172,6 +172,7 @@ fn run(
         }
         let paths = linuxapk_core::paths::Prefix::locate()?.session_paths()?;
         let mut reply = String::new();
+        let mut chooser_grants = Vec::new();
         for arg in args.iter().filter(|s| !s.is_empty()) {
             let path = if arg.starts_with("file:") {
                 Some(
@@ -195,11 +196,15 @@ fn run(
                         &file,
                         name,
                     )?;
+                    if file_component.is_some() {
+                        chooser_grants.push(grant);
+                        continue;
+                    }
                     linuxapk_core::android::launch(
                         &session,
                         &linuxapk_core::android::Launch::File {
                             package: pkg.into(),
-                            grant,
+                            grants: vec![grant],
                             component: file_component.map(str::to_string),
                         },
                         &opts,
@@ -207,6 +212,17 @@ fn run(
                 }
                 None => ops::run(pkg, Some(arg), &opts, &stderr)?,
             };
+        }
+        if !chooser_grants.is_empty() {
+            reply = linuxapk_core::android::launch(
+                &session,
+                &linuxapk_core::android::Launch::File {
+                    package: pkg.into(),
+                    grants: chooser_grants,
+                    component: file_component.map(str::to_string),
+                },
+                &opts,
+            )?;
         }
         Ok(reply)
     })();
