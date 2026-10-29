@@ -35,6 +35,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
 
   /** What we last sent the host (the listener can fire more than once per change). */
   private var toHost: String? = null
+  private val importedFileEcho = ImportedFileEcho()
 
   private val listener = ClipboardManager.OnPrimaryClipChangedListener {
     feature.handler.post { onAndroidClip() }
@@ -62,15 +63,20 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     val sensitive = desc.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
     val item = clip.getItemAt(0)
     val uri = item.uri
+    val fileEcho =
+      importedFileEcho.consume(uri?.toString(), desc.extras?.getLong(EXTRA_FILE_GENERATION) ?: 0)
     val mime =
       if (uri != null)
         (context.contentResolver.getType(uri)
           ?: desc.takeIf { it.mimeTypeCount > 0 }?.getMimeType(0))
       else null
-    if (uri?.authority == ClipFileProvider.AUTHORITY) return
     if (uri != null && mime?.startsWith("image/") == true) {
       val img = loadImage(uri) ?: return
       val key = imageKey(img)
+      if (fileEcho) {
+        toHost = key
+        return
+      }
       if (fromHost == key || toHost == key) return
       toHost = key
       val blob = Wire.Writer(img.bytes.size + 8).image(img).bytes()
@@ -99,7 +105,10 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
           } ?: return
         val file = ClipFile(name, mime ?: "application/octet-stream", bytes)
         val key = "file $uri ${bytes.contentHashCode()}"
-        if (toHost == key) return
+        if (fileEcho || toHost == key) {
+          toHost = key
+          return
+        }
         val blob = file.encode()
         toHost = key
         send(Wire.CLIP_FILE, sensitive, blob)
@@ -179,6 +188,14 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         else -> return
       }
     if (sensitive) clip.description.extras = extras
+    val fileUri = clip.getItemAt(0).uri?.toString().takeIf { kind == Wire.CLIP_FILE }
+    val generation = importedFileEcho.install(fileUri)
+    if (fileUri != null) {
+      clip.description.extras =
+        (clip.description.extras ?: PersistableBundle()).apply {
+          putLong(EXTRA_FILE_GENERATION, generation)
+        }
+    }
     try {
       cm.setPrimaryClip(clip)
       Log.i(TAG, "clip from the host (kind $kind, ${data.size} bytes)")
@@ -221,5 +238,6 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
   companion object {
     const val TAG = "LinuxApkClipboard"
     private const val MAX_SIDE = 2048
+    private const val EXTRA_FILE_GENERATION = "dev.linuxapk.system.clipboard.FILE_GENERATION"
   }
 }
