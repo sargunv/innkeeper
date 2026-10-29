@@ -85,7 +85,14 @@ jobs:
           retention-days: 7
       - run: mise run test
       - name: Prepare the image and private Flatpak for the timed run
-        run: mise run session -- prepare
+        run: |
+          # Flatpak can only share an existing host directory. Otherwise the
+          # first prepare writes into its temporary sandbox and start fetches
+          # the image again in a different sandbox.
+          mkdir -p "$LINUXAPK_IMAGES"
+          mise run session -- prepare
+          img=$(out/stage/libexec/linuxapk/linuxapk-session image | sed -n 's/^img=//p')
+          test -f "$img/system/system/build.prop"
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
         env:
@@ -96,10 +103,10 @@ jobs:
         with:
           name: checks-logs
           path: |
-            out/test/e2e
+            out/test/e2e/ci/
             out/test/nested/**/*.log
             out/test/nested/**/*.txt
-            out/dev/flatpak/**/*.log
+            out/dev/flatpak/ci/*.log
             !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 7
