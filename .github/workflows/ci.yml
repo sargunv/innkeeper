@@ -88,6 +88,8 @@ jobs:
         run: mise run session -- prepare
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
+        env:
+          LINUXAPK_E2E_DEADLINE: 180
       - name: Test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
