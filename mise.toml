@@ -144,10 +144,6 @@ android/vendor/vulkan/tests/run.sh
 android/vendor/audio/tests/abi.sh
 """
 
-[tasks."test:binder"]
-description = "AOSP's binder tests against the broker, then kernel binder (77: unavailable here)"
-run = "supervisor/tests/binder/run.sh"
-
 [tasks."test:e2e"]
 description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop a11y production lifecycle]); whole run <60 s"
 run = "tests/e2e/run.sh"

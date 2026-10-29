@@ -2,7 +2,6 @@
 # Same-stage runtime comparison, with real app frame stats on isolated KWin.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-export LINUXAPK_BINDER_TESTS=${LINUXAPK_BINDER_TESTS:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/test-bin/binder}
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-benchmark}
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@"; fi
 S=$repo/tools/dev/session.sh
@@ -37,10 +36,6 @@ sleep 90
 cg=$("$S" cgroup)
 awk -v cur="$(cat "$cg/memory.current")" '$1 == "file" { f = $2 } $1 == "shmem" { s = $2 }
   END { print "idle_memory_mib=" int((cur - f + s) / 1048576) }' "$cg/memory.stat" | tee "$T/memory.txt"
-binary=$LINUXAPK_BINDER_TESTS/binderThroughputTest
-(cd "$(dirname "$binary")" && sha256sum --quiet -c "$repo/supervisor/tests/binder/test-bin.sha256")
-"$S" exec sh -c 'cat > /data/local/tmp/binderThroughputTest; chmod 755 /data/local/tmp/binderThroughputTest' <"$binary"
-"$S" exec /data/local/tmp/binderThroughputTest -w 2 -i 20000 -p | tee "$T/binder.txt"
 for pkg in com.darkempire78.opencalculator org.wikipedia org.nsh07.pomodoro; do
   apk=$(find "$repo/out/test/compat/corpus/" -name "${pkg}_*.apk" -print -quit)
   size=$(stat -c %s "$apk")

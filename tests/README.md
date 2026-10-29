@@ -56,4 +56,4 @@ repository. `GITHUB_TOKEN` cannot push to the separate wiki Git repository. If
 the secret is absent, CI skips publishing with a notice; results remain in the
 artifact. Wiki publishing errors never change the compatibility result.
 
-`test:bionic` and `test:binder` are manual low-level HAL/broker diagnostics.
+`test:bionic` provides manual low-level HAL diagnostics.

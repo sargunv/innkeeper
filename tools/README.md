@@ -15,8 +15,8 @@ Build and dev tooling; never shipped.
 - **`dev/session.sh`, `dev/linuxapk.sh`** (both `dev/run.py`): the staged
   launcher and CLI in a private Flatpak, capped from the host
   ([packaging/flatpak](../packaging/flatpak/README.md#development));
-  **`dev/benchmark.sh`**: boot, idle memory, Binder throughput and frame timing,
-  for comparing the two.
+  **`dev/benchmark.sh`**: boot, idle memory, frame timing, for comparing the
+  two.
 - **`dev/footprint.sh`**: PSS and RSS of every process in a running session, and
   its cgroup's memory, to see what an idle session holds.
 - **`dev/window-shot.sh`**: a screenshot of just a Linux.apk window on KDE, for

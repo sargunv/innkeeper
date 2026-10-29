@@ -15,7 +15,7 @@ runs), then [docs/architecture.md](docs/architecture.md).
   `mise run clean` removes build output.
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare`.
 - `mise run test` (unit), `test:e2e` (grouped runtime checks), `test:bionic`,
-  `test:binder`, `test:compat`; see [tests/README.md](tests/README.md).
+  `test:compat`; see [tests/README.md](tests/README.md).
 
 ## Rules
 
