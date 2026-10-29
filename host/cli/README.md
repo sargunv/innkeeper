@@ -7,6 +7,7 @@ IPC client.
 
 ```sh
 linuxapk install App.apk             # also .apks, .xapk, .apkm
+linuxapk open [FILE...]              # choose an Android app; no files opens the manager
 linuxapk run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 linuxapk uninstall org.wikipedia [--keep-data]
 linuxapk list                        # user apps; repairs stale desktop entries first
@@ -21,10 +22,14 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
   session's documents service. Android gets an opaque `content://` URI, MIME
   type and `FLAG_GRANT_READ_URI_PERMISSION`, restricted to that package. These
   grants last until the session stops; they expose no host directories. Files
-  must already be accessible to the CLI's Flatpak sandbox. File MIME
-  registrations in host Open With await a forwarding design
-  ([#71](https://github.com/sargunv/linux.apk/issues/71)); no file-type defaults
-  are changed.
+  must already be accessible to the CLI's Flatpak sandbox.
+- The static Linux.apk desktop entry accepts common document, text and media
+  types. Flatpak exports its `%F` as `--file-forwarding … @@ %F @@`, granting
+  those files through the document portal. `open` uses the same read-only grants
+  as `run`, then shows **Open with Android app…** with installed apps whose
+  exported VIEW filters match the file's MIME type. If none match, the chooser
+  says so. APKs and bundles open in the installer instead. No file-type defaults
+  are changed; per-app host Open With entries remain deferred.
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).

@@ -2,6 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <resources>
   <string name="app_name">Linux.apk System</string>
+  <string name="open_with_title">Open with Android app…</string>
+  <string name="open_with_empty">No installed Android app can open this file (%1$s).</string>
+  <string name="open_with_failed">Could not open this file: %1$s</string>
   <string name="ime_name">Linux.apk Keyboard</string>
   <string name="browser_name">Desktop browser</string>
   <string name="a11y_name">Desktop assistive technologies</string>

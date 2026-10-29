@@ -31,6 +31,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Open files with an Android app, or show the manager with no files.
+    Open { files: Vec<PathBuf> },
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
     Install { file: PathBuf },
     /// Launch an app, optionally opening files or a URI in it.
@@ -70,6 +72,34 @@ fn install(file: &Path) -> Result<()> {
     println!("  app menu: {}", i.menu);
     if !i.schemes.is_empty() {
         println!("  URI schemes: {}", i.schemes.join(", "));
+    }
+    Ok(())
+}
+
+/// The static desktop entry handles both APK installation and file VIEW.
+fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
+    let (packages, documents): (Vec<_>, Vec<_>) = files.iter().partition(|p| {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            ["apk", "apks", "xapk", "apkm"]
+                .iter()
+                .any(|x| e.eq_ignore_ascii_case(x))
+        })
+    });
+    if files.is_empty() || !packages.is_empty() {
+        let mut manager =
+            std::process::Command::new(std::env::current_exe()?.with_file_name("linuxapk-manager"));
+        manager.args(packages);
+        if let Some(t) = &token {
+            manager.env("XDG_ACTIVATION_TOKEN", t);
+        }
+        manager.spawn()?;
+    }
+    if !documents.is_empty() {
+        let args = documents
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        run("dev.linuxapk.system", &args, token)?;
     }
     Ok(())
 }
@@ -232,6 +262,7 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     let res = match cli.cmd {
+        Cmd::Open { files } => open(&files, token),
         Cmd::Install { file } => install(&file),
         Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
         Cmd::Run {
