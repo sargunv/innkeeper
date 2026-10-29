@@ -16,7 +16,15 @@ concurrency:
 
 env:
   CARGO_BUILD_JOBS: 4
+  # Debug symbols and per-checkout incremental state only inflate CI caches.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_INCREMENTAL: 0
   CMAKE_BUILD_PARALLEL_LEVEL: 4
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 500M
   LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
   FLATPAK_USER_DIR: ${{ github.workspace }}/out/flatpak/user
   LINUXAPK_INSTANCE: ci
@@ -24,24 +32,46 @@ env:
   LINUXAPK_MIN_AVAILABLE_GIB: 10
 
 jobs:
-  lint:
+  changes:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: tools/ci/changed-paths.sh "$BASE" "$GITHUB_SHA"
+
+  lint:
+    needs: changes
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
         with:
-          runtime: "false"
+          mode: ${{ needs.changes.outputs.code == 'true' && 'lint' || 'docs' }}
       - run: mise run check
+        if: needs.changes.outputs.code == 'true'
+      - name: Documentation checks
+        if: needs.changes.outputs.code != 'true'
+        run: mise exec -- hk check --all --skip-step cargo-clippy
 
-  checks:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+  build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 120 # Cold Mesa/LLVM builds; warm runs reuse the saved build.
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
+        with:
+          mode: build
       - name: Stage input tree
         id: inputs
         shell: bash
@@ -50,7 +80,8 @@ jobs:
           digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
             supervisor/broker android image tools/build tools/container \
             packaging/flatpak Cargo.toml Cargo.lock \
-            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock | sha256sum)
+            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \
+            .github/workflows/ci.yml .github/actions tools/ci/setup.sh | sha256sum)
           echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
         id: stage
@@ -59,7 +90,7 @@ jobs:
             out/stage
             out/test/probes
           key:
-            stage-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
             steps.inputs.outputs.stage }}
       - uses: ./.github/actions/build-cached
         if: steps.stage.outputs.cache-hit != 'true'
@@ -72,27 +103,85 @@ jobs:
             out/stage
             out/test/probes
           key: ${{ steps.stage.outputs.cache-primary-key }}
-      - name: Archive the release stage
-        run: tar -C out/stage -czf out/stage.tar.gz .
+      - name: Archive the release stage and test probes
+        run: |
+          tar -C out/stage -czf out/stage.tar.gz .
+          tar -C out/test/probes -czf out/probes.tar.gz .
       - name: Release stage and manifest
         uses: actions/upload-artifact@v4
         with:
           name: stage
           path: |
             out/stage.tar.gz
+            out/probes.tar.gz
             out/stage/share/linuxapk/manifest.tsv
           if-no-files-found: error
           retention-days: 7
+
+  unit:
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          mode: unit
+      - uses: ./.github/actions/restore-stage
       - run: mise run test
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          mode: e2e
+      - uses: ./.github/actions/restore-stage
+      - name: Runtime input tree
+        id: runtime
+        run: |
+          image=$(git ls-tree -r HEAD -- image | sha256sum)
+          flatpak=$(git ls-tree -r HEAD -- packaging/flatpak tools/dev | sha256sum)
+          echo "image=${image%% *}" >>"$GITHUB_OUTPUT"
+          echo "flatpak=${flatpak%% *}" >>"$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: image
+        with:
+          path: out/ci/images
+          key:
+            image-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.runtime.outputs.image }}
+      - uses: actions/cache/restore@v4
+        id: flatpak
+        with:
+          path: out/flatpak/user
+          key:
+            flatpak-v1-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.runtime.outputs.flatpak }}
       - name: Prepare the image and private Flatpak for the timed run
         run: |
-          # Flatpak can only share an existing host directory. Otherwise the
-          # first prepare writes into its temporary sandbox and start fetches
-          # the image again in a different sandbox.
+          # Flatpak must see a host directory before sharing it.
           mkdir -p "$LINUXAPK_IMAGES"
+          # actions/cache drops xattrs. Recreate the tiny CLAT ownership layer;
+          # extracted partitions and flattened APEXes remain cached.
+          find "$LINUXAPK_IMAGES" -path '*/derived/single.source' -delete
           mise run session -- prepare
           img=$(out/stage/libexec/linuxapk/linuxapk-session image | sed -n 's/^img=//p')
           test -f "$img/system/system/build.prop"
+      # Save before e2e, whose failures must not discard expensive preparation.
+      - uses: actions/cache/save@v4
+        if: steps.image.outputs.cache-hit != 'true'
+        with:
+          path: out/ci/images
+          key: ${{ steps.image.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v4
+        if: steps.flatpak.outputs.cache-hit != 'true'
+        with:
+          path: out/flatpak/user
+          key: ${{ steps.flatpak.outputs.cache-primary-key }}
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
         env:
@@ -110,6 +199,27 @@ jobs:
             !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 7
+
+  # Preserve a single required gate: skipped jobs must not hide a failed dependency.
+  checks:
+    needs: [changes, lint, build, unit, e2e]
+    if:
+      always() && (github.event_name == 'push' || github.event_name ==
+      'pull_request')
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Require all applicable checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          jobs = json.loads(os.environ['RESULTS'])
+          required = ['changes', 'lint']
+          if jobs['changes']['outputs'].get('code') == 'true':
+              required += ['build', 'unit', 'e2e']
+          assert all(jobs[j]['result'] == 'success' for j in required), jobs
+          PYCODE
 
   nightly:
     if:
