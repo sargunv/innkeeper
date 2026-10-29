@@ -249,7 +249,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
         Some(wayland_socket()?)
     };
     let image = paths.image()?;
-    image::prepare(paths, &image)?;
+    let image_lease = image::prepare(paths, &image)?;
     if !follow && !serve {
         return flatpak::spawn(paths, &exe, headless);
     }
@@ -257,7 +257,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     let cfg = Config::new(paths.clone(), image, headless, wayland);
     layer::write(&cfg)?;
     cfg.save()?;
-    flatpak::run(&cfg, follow)
+    flatpak::run(&cfg, follow, image_lease)
 }
 
 /// Deletes Android's /data, as Android's root: its files belong to Android's

@@ -24,6 +24,15 @@ rewritten under a running session), `derived/` (the layers
 [docs/session.md](../docs/session.md#overlay-stack) stacks above the image).
 About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
 
+After successful preparation, stale build directories (including their derived
+layers) and unselected `apex-<hash>` trees are pruned, with paths and allocated
+bytes released logged to stderr. The current pin and running sessions keep
+leases on their build and APEX tree; a cache-wide prepare lock serializes
+preparation and collection across instances, even with private runtime dirs.
+Lock files under `images/.locks/` stay in place. Symlinks, unknown directories
+and incomplete APEX extractions are left alone. Changed derived layers cannot be
+regenerated while another session uses that build; stop those sessions first.
+
 - **apexd and flatten-apex.sh must agree.** [bootconfig](bootconfig) selects
   multi-install vendor APEXes the way cuttlefish's launcher does
   (`androidboot.vendor.apex.<name>=<file>|none`); the session passes the same
@@ -37,9 +46,16 @@ About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
    sha256 in `pin.toml` with the new `name`, `build_id` and `fingerprint`.
 2. `mise run session -- prepare`, then list `img/vendor/apex` and add a
    selection to `bootconfig` for every new multi-install or VM-only APEX.
-3. Diff every image file we fork against the new image's copy (the list is in
-   [android/overlay/README.md](../android/overlay/README.md)), and port upstream
-   changes. Rename the blanked APEX APKs to the new build id.
+3. `prepare` checks the upstream SHA-256 bases in
+   [fork-bases.sha256](fork-bases.sha256) for all nine overlay forks and fails
+   with each changed path and an image-to-overlay diff. Port upstream changes
+   into the forks listed in
+   [android/overlay/README.md](../android/overlay/README.md), then update the
+   hashes from the **image copies**, never the edited overlays. System paths
+   resolve under `img/system/system/`; APEX paths under the selected
+   `apex-<hash>/`. Stage the updated hashes with `mise run build:data` and
+   `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to the
+   new build id.
 4. Prove it: `mise run test:e2e -- boot`, `mise run test:e2e` and
    `mise run test:compat` with no regressions, then regenerate
    `docs/compatibility.md`.
@@ -57,5 +73,7 @@ for packaging:
   compiled into Launcher3 and SystemUI), not on any installed file.
 - The kernel and dtb (GPL-2.0) are in `boot.img`, which we never extract.
 
-Tests: `tests/image-select.sh` (in `mise run test`) checks the pin parsing and
-image selection without a session.
+Tests: `tests/image-select.sh` and `tests/fork-drift.sh` (in `mise run test`)
+check image selection and drift detection without a session. The latter also
+checks all nine upstream bases when the pinned image is prepared. Launcher unit
+tests exercise pruning selection, active leases, read-only trees and symlinks.

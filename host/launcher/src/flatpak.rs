@@ -311,7 +311,7 @@ type Idle = Arc<Mutex<Option<Option<u64>>>>;
 /// its log meanwhile. It ends with this process: on a signal, `stop`, or
 /// init's exit. When it stops for idleness with an alarm ahead, this process
 /// stays as the waiter that starts it again ([`wait_to_wake`]).
-pub fn run(cfg: &Config, follow: bool) -> Result<()> {
+pub fn run(cfg: &Config, follow: bool, image_lease: crate::prune::Lease) -> Result<()> {
     let sigs = sys::block_signals(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]);
     let p = cfg.paths.clone();
     thread::spawn(move || {
@@ -322,6 +322,9 @@ pub fn run(cfg: &Config, follow: bool) -> Result<()> {
     let idle = Idle::default();
     let r = run_session(cfg, follow, &idle);
     teardown(&cfg.paths);
+    // The alarm waiter has no Android processes left. Its next start must
+    // be able to prepare changed derived layers and acquire a fresh lease.
+    drop(image_lease);
     let wakeup = *idle.lock().unwrap();
     match wakeup {
         Some(Some(at)) if r.is_ok() => wait_to_wake(cfg, at),

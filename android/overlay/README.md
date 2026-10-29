@@ -8,8 +8,11 @@ empty manifest blanks the image's file of the same path.
 
 ## Forked files
 
-Copies of image files with our edits (each edit is marked `linuxapk:`). They
-must be diffed against the image's copies whenever the pin moves
+Copies of image files with our edits (each edit is marked `linuxapk:`). They are
+guarded by the upstream base hashes in
+[image/fork-bases.sha256](../../image/fork-bases.sha256): `prepare` fails and
+prints image-to-overlay diffs if the image's copies change. Port those changes
+before refreshing hashes when the pin moves
 ([image/README.md](../../image/README.md#bumping-the-pin)).
 
 | File                                                | Why                                                                                                                                            |
