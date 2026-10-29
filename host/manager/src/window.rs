@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -20,6 +20,14 @@ const POLL_SECS: u32 = 3;
 
 #[derive(Clone)]
 pub struct Window(Rc<Inner>);
+
+pub struct WeakWindow(Weak<Inner>);
+
+impl WeakWindow {
+    pub fn upgrade(&self) -> Option<Window> {
+        self.0.upgrade().map(Window)
+    }
+}
 
 pub struct Inner {
     pub win: adw::ApplicationWindow,
@@ -356,6 +364,10 @@ impl Window {
             None => glib::ControlFlow::Break,
         });
         w
+    }
+
+    pub fn downgrade(&self) -> WeakWindow {
+        WeakWindow(Rc::downgrade(&self.0))
     }
 
     pub fn present(&self) {

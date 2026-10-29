@@ -7,10 +7,15 @@ use gtk::glib;
 use linuxapk_core::app_settings::{self, AppInfo, Command};
 use linuxapk_core::xdg::DesktopApp;
 
-use crate::{errors::Op, permissions, window::Window, worker};
+use crate::{
+    errors::Op,
+    permissions,
+    window::{WeakWindow, Window},
+    worker,
+};
 
 struct Page {
-    window: Window,
+    window: WeakWindow,
     app: DesktopApp,
     content: gtk::Box,
     busy: Cell<bool>,
@@ -26,12 +31,14 @@ pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
         .child(&toolbar)
         .build();
     let state = Rc::new(Page {
-        window: window.clone(),
+        window: window.downgrade(),
         app: app.clone(),
         content,
         busy: Cell::new(false),
     });
-    state.load(Command::new(&app.package, "info"));
+    // The navigation page owns the state. Its rows use weak references, so
+    // leaving the page releases its controls and doesn't retain the main window.
+    page.connect_showing(move |_| state.load(Command::new(&state.app.package, "info")));
     page
 }
 
@@ -59,15 +66,19 @@ impl Page {
             match result {
                 Ok(info) => state.show(info),
                 Err(e) => {
-                    state
-                        .window
-                        .show_error(Op::AppSettings, Some(&state.app.name), &e);
+                    if let Some(window) = state.window.upgrade() {
+                        window.show_error(Op::AppSettings, Some(&state.app.name), &e);
+                    }
                     // Re-read after an uncertain or rejected mutation. Preserve the previous
                     // controls until the user retries, but don't leave a toggle claiming success.
                     state.clear();
                     let retry = gtk::Button::with_label("Try Again");
-                    let s = state.clone();
-                    retry.connect_clicked(move |_| s.load(Command::new(&s.app.package, "info")));
+                    let s = Rc::downgrade(&state);
+                    retry.connect_clicked(move |_| {
+                        if let Some(s) = s.upgrade() {
+                            s.load(Command::new(&s.app.package, "info"));
+                        }
+                    });
                     state.content.append(
                         &adw::StatusPage::builder()
                             .title("App Settings Unavailable")
@@ -102,8 +113,14 @@ impl Page {
             .label("Open")
             .valign(gtk::Align::Center)
             .build();
-        let s = self.clone();
-        open.connect_clicked(move |_| s.window.launch(&s.app.package, &s.app.name));
+        let s = Rc::downgrade(self);
+        open.connect_clicked(move |_| {
+            if let Some(s) = s.upgrade()
+                && let Some(window) = s.window.upgrade()
+            {
+                window.launch(&s.app.package, &s.app.name);
+            }
+        });
         identity.add_suffix(&open);
         app.add(&identity);
         prefs.add(&app);
@@ -189,8 +206,14 @@ impl Page {
             .activatable(true)
             .build();
         row.add_css_class("error");
-        let s = self.clone();
-        row.connect_activated(move |_| s.window.confirm_uninstall(&s.app));
+        let s = Rc::downgrade(self);
+        row.connect_activated(move |_| {
+            if let Some(s) = s.upgrade()
+                && let Some(window) = s.window.upgrade()
+            {
+                window.confirm_uninstall(&s.app);
+            }
+        });
         actions.add(&row);
         prefs.add(&actions);
         self.content.append(&prefs);
@@ -214,8 +237,15 @@ impl Page {
             .active(active)
             .sensitive(editable)
             .build();
-        let (s, action, permission) = (self.clone(), action.to_string(), permission.to_string());
+        let (s, action, permission) = (
+            Rc::downgrade(self),
+            action.to_string(),
+            permission.to_string(),
+        );
         row.connect_active_notify(move |row| {
+            let Some(s) = s.upgrade() else {
+                return;
+            };
             let mut command = Command::new(&s.app.package, &action);
             command.permission = permission.clone();
             command.enabled = row.is_active();
@@ -240,9 +270,10 @@ impl Page {
         if confirm {
             row.add_css_class("error");
         }
-        let (s, action) = (self.clone(), action.to_string());
+        let (s, action) = (Rc::downgrade(self), action.to_string());
         row.connect_activated(move |_| {
-            let (s, action) = (s.clone(), action.clone());
+            let Some(s) = s.upgrade() else { return; };
+            let action = action.clone();
             glib::spawn_future_local(async move {
                 if confirm {
                     let d = adw::AlertDialog::new(Some(&format!("Clear {}’s Data?", s.app.name)), Some("All settings, accounts and files stored by this app will be permanently deleted."));
@@ -250,7 +281,8 @@ impl Page {
                     d.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
                     d.set_default_response(Some("cancel"));
                     d.set_close_response("cancel");
-                    if d.choose_future(Some(&s.window.win)).await != "clear" { return; }
+                    let Some(window) = s.window.upgrade() else { return; };
+                    if d.choose_future(Some(&window.win)).await != "clear" { return; }
                 }
                 s.load(Command::new(&s.app.package, &action));
             });
