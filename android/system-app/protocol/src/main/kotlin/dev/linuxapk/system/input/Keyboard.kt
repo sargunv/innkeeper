@@ -77,6 +77,8 @@ class Keyboard(
 
   fun key(e: HostEvent.Key, time: Long, out: MutableList<OutEvent>) {
     val evdev = e.code
+    // Volume belongs to the desktop, even when its compositor passes these keys to us.
+    if (evdev in 113..115) return // KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP
     if (!e.pressed) {
       val h = held.remove(evdev) ?: return
       if (h.keyCode == SWALLOWED) return
