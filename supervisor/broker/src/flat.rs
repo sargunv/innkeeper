@@ -333,7 +333,7 @@ impl Flat {
         // Android paths through /proc/self must name the caller, never our
         // own fds (which include the retained bpffs directory).
         let full = if full.starts_with(b"/proc/") {
-            proc_path(tid, &full)?
+            proc_path(tid, &full)?.0
         } else {
             full
         };
