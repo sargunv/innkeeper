@@ -19,10 +19,10 @@ import dev.linuxapk.system.input.TranslatorConfig
  * ```
  *
  * `--dry-run` prints each MotionEvent/KeyEvent instead of injecting it; otherwise the caller needs
- * INJECT_EVENTS (root or shell in the session). Escape stays Escape: the system app's
- * `persist.linuxapk.input.escape_back` doesn't apply here. Window shortcuts are on, and a close
- * request is printed (there is no window manager here); text keys reach the app as keys only, since
- * committing their text is the system app's IME.
+ * INJECT_EVENTS (root or shell in the session). Escape stays Escape: the system app's per-app
+ * Escape setting doesn't apply here. Window shortcuts are on, and a close request is printed (there
+ * is no window manager here); text keys reach the app as keys only, since committing their text is
+ * the system app's IME.
  */
 object InputStdinHarness {
   private const val TAG = "LinuxApkInputHarness"

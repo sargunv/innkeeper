@@ -47,6 +47,16 @@ enum Cmd {
         #[arg(long)]
         keep_data: bool,
     },
+    /// Read or change an app through the session D-Bus service. Prints current settings as JSON.
+    App {
+        package: String,
+        #[arg(default_value = "info", value_parser = ["info", "clear-cache", "clear-data", "force-stop", "permission", "escape-back", "background"])]
+        action: String,
+        #[arg(long)]
+        permission: Option<String>,
+        #[arg(long, value_parser = ["on", "off"])]
+        setting: Option<String>,
+    },
     /// List installed (user) apps.
     List,
     /// Let an app run in the background with no window open (keeping the
@@ -297,6 +307,24 @@ fn main() -> ExitCode {
             files_or_uri,
         } => run(&package, &files_or_uri, token, None),
         Cmd::List => list(),
+        Cmd::App {
+            package,
+            action,
+            permission,
+            setting,
+        } => (|| -> Result<()> {
+            ensure!(
+                setting.is_some()
+                    == matches!(action.as_str(), "permission" | "escape-back" | "background"),
+                "use --setting on|off for a switch"
+            );
+            let mut command = linuxapk_core::app_settings::Command::new(&package, &action);
+            command.permission = permission.unwrap_or_default();
+            command.enabled = setting.as_deref() == Some("on");
+            let info = linuxapk_core::app_settings::request(command, &stderr)?;
+            println!("{}", serde_json::to_string_pretty(&info)?);
+            Ok(())
+        })(),
         Cmd::Background { package, setting } => {
             if package.is_some() != setting.is_some() {
                 Err(anyhow::anyhow!("give a package and on or off, or neither"))

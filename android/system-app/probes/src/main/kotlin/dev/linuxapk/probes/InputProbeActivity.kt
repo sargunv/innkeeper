@@ -18,6 +18,9 @@ class InputProbeActivity : Activity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // A cache entry and persistent sentinel for the session API's clear-cache proof.
+    java.io.File(cacheDir, "session-api-probe").writeText("temporary")
+    java.io.File(filesDir, "session-api-probe").writeText("persistent")
     text =
       TextView(this).apply {
         textSize = 20f

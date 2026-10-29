@@ -33,6 +33,7 @@ use crate::ipc::wire::errno::*;
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
 pub mod file;
+pub mod session;
 
 pub mod ty {
     pub const HAVE: u16 = 0x0501;
@@ -227,6 +228,7 @@ impl Config {
 pub struct AppsService {
     cfg: Arc<Config>,
     label: String,
+    session: Option<(session::Relay, crate::ipc::server::Events, u64)>,
 }
 
 impl AppsService {
@@ -234,7 +236,17 @@ impl AppsService {
         AppsService {
             cfg,
             label: peer.label.clone(),
+            session: None,
         }
+    }
+
+    pub fn with_session(
+        mut self,
+        relay: session::Relay,
+        events: crate::ipc::server::Events,
+    ) -> Self {
+        self.session = Some((relay, events, 0));
+        self
     }
 
     fn added(
@@ -309,8 +321,32 @@ impl AppsService {
     }
 }
 
+impl Drop for AppsService {
+    fn drop(&mut self) {
+        if let Some((relay, _, id)) = &self.session {
+            relay.detach(*id);
+        }
+    }
+}
+
 impl Service for AppsService {
+    fn connected(&mut self) {
+        if let Some((relay, events, id)) = &mut self.session {
+            *id = relay.attach(events.clone());
+        }
+    }
+
     fn handle(&mut self, t: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
+        if t == session::RESULT {
+            return match &self.session {
+                Some((relay, _, id)) => match relay.complete(*id, body, fds) {
+                    Ok(()) => Reply::ok(),
+                    Err(e) => Reply::err(e),
+                },
+                None => Reply::err(-EPERM),
+            };
+        }
+
         let req = match decode(t, body) {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),

@@ -14,6 +14,9 @@ import dev.linuxapk.system.Feature
 import dev.linuxapk.system.bridge.Blob
 import dev.linuxapk.system.bridge.BridgeConnection
 import java.io.ByteArrayOutputStream
+import java.io.FileDescriptor
+import java.nio.ByteBuffer
+import org.json.JSONObject
 
 /**
  * Apps installed inside Android (an app store, PackageInstaller, `pm install`) get a desktop entry
@@ -25,18 +28,30 @@ import java.io.ByteArrayOutputStream
  * (HAVE), so installs made while the bridge was away are caught up; the bridge skips entries that
  * `linuxapk install` or another session instance wrote.
  */
-class AppMirrorFeature(private val context: Context) : Feature {
+class AppMirrorFeature(private val context: Context, private val settings: AppSettings) : Feature {
   override val name = "apps"
 
   private val thread = HandlerThread("linuxapk-apps")
   private lateinit var handler: Handler
   private val pm = context.packageManager
-  private val channel =
+  private val channel: BridgeConnection =
     BridgeConnection(
       BridgeConnection.SERVICE_APPS,
       "Linux.apk System apps",
       object : BridgeConnection.Listener {
         override fun onConnected() = this@AppMirrorFeature.onConnected()
+
+        override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) {
+          if (type != COMMAND) return
+          val id = body.long
+          val len = body.int
+          require(!body.hasRemaining() && fds.size == 1)
+          val command = JSONObject(String(Blob.read(fds[0], len, 65536), Charsets.UTF_8))
+          handler.post {
+            val response = settings.execute(command).toString().toByteArray(Charsets.UTF_8)
+            channel.send(RESULT, blob = response) { u64(id).u32(response.size) }
+          }
+        }
       },
     )
 
@@ -172,6 +187,8 @@ class AppMirrorFeature(private val context: Context) : Feature {
     private const val HAVE = 0x0501
     private const val ADDED = 0x0502
     private const val REMOVED = 0x0503
+    private const val COMMAND = 0x4501
+    private const val RESULT = 0x0504
     private const val MISSING = 0
   }
 }

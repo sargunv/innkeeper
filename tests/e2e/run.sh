@@ -100,6 +100,7 @@ if [[ ${1:-} == --group ]]; then
       ;;
     input)
       launch InputProbeActivity
+      /usr/bin/python3 "$here/app-settings.py"
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped

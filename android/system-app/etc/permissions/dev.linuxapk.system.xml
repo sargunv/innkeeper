@@ -9,6 +9,13 @@
   <privapp-permissions package="dev.linuxapk.system">
     <permission name="android.permission.REAL_GET_TASKS" />
     <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <permission name="android.permission.PACKAGE_USAGE_STATS" />
+    <permission name="android.permission.CLEAR_APP_CACHE" />
+    <permission name="android.permission.CLEAR_APP_USER_DATA" />
+    <permission name="android.permission.FORCE_STOP_PACKAGES" />
+    <permission name="android.permission.GRANT_RUNTIME_PERMISSIONS" />
+    <permission name="android.permission.REVOKE_RUNTIME_PERMISSIONS" />
+    <permission name="android.permission.GET_RUNTIME_PERMISSIONS" />
     <!-- Desktop integration. -->
     <permission name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
     <permission name="android.permission.CHANGE_CONFIGURATION" />

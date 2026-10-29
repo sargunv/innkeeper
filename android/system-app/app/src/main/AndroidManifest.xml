@@ -7,6 +7,15 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+  <!-- Per-app management through the session bridge. -->
+  <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+  <uses-permission android:name="android.permission.CLEAR_APP_CACHE" />
+  <uses-permission android:name="android.permission.CLEAR_APP_USER_DATA" />
+  <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" />
+  <uses-permission android:name="android.permission.GRANT_RUNTIME_PERMISSIONS" />
+  <uses-permission android:name="android.permission.REVOKE_RUNTIME_PERMISSIONS" />
+  <uses-permission android:name="android.permission.GET_RUNTIME_PERMISSIONS" />
+
   <!-- signature: granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
 

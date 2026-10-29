@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import dev.linuxapk.system.Feature
+import dev.linuxapk.system.LinuxApkSystemApp
 import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.bridge.BridgeConnection
 import java.io.FileDescriptor
@@ -25,7 +26,6 @@ import java.util.concurrent.CopyOnWriteArrayList
  * goes to the [Listener]s there. The host's key repeat becomes Android's repeat settings.
  *
  * Read at start:
- * - `persist.linuxapk.input.escape_back`: send BACK for Escape (default false).
  * - `persist.linuxapk.input.window_shortcuts`: Ctrl+W and Ctrl+Q close the window, Alt+Left goes
  *   back (default true). Web browsers keep Ctrl+W, which closes a tab.
  */
@@ -247,7 +247,6 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     val kcm = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
     return InputTranslator(
       TranslatorConfig(
-        escapeAsBack = SystemProps.getBoolean("persist.linuxapk.input.escape_back", false),
         scrollPixelsPerUnit = Injector.scrollPixelsPerUnit(),
         keyChars = KeyChars(kcm::get),
         windowShortcuts = SystemProps.getBoolean("persist.linuxapk.input.window_shortcuts", true),
@@ -255,6 +254,11 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
       SystemClock::uptimeMillis,
       keepsCtrlW = ::isBrowserDisplay,
       onClose = { dispatch(HostEvent.Close(it)) },
+      escapeBack = { display ->
+        val name = context.getSystemService(DisplayManager::class.java).getDisplay(display)?.name
+        val pkg = name?.takeIf { it.startsWith(DISPLAY_PREFIX) }?.removePrefix(DISPLAY_PREFIX)
+        (context.applicationContext as LinuxApkSystemApp).appSettings.input.escapeBack(pkg)
+      },
     )
   }
 }

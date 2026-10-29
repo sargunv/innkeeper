@@ -48,6 +48,7 @@ class InputTranslator(
   now: () -> Long = { System.nanoTime() / 1_000_000 },
   /** Whether the app on this display keeps Ctrl+W (a web browser closes a tab with it). */
   private val keepsCtrlW: (display: Int) -> Boolean = { false },
+  private val escapeBack: (display: Int) -> Boolean = { config.escapeAsBack },
   /** A window shortcut asked to close the window of this display. */
   private val onClose: (display: Int) -> Unit = {},
 ) {
@@ -59,6 +60,7 @@ class InputTranslator(
       config.windowShortcuts,
       keepCtrlW = { keepsCtrlW(keyDisplay) },
       onClose = { onClose(keyDisplay) },
+      escapeBack = { escapeBack(keyDisplay) },
     )
 
   private val windows = HashMap<Int, HostEvent.Window>() // by display

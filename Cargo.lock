@@ -1316,6 +1316,7 @@ dependencies = [
  "linuxapk-core",
  "png",
  "rustix",
+ "serde_json",
  "smithay-client-toolkit",
 ]
 
@@ -1371,6 +1372,8 @@ dependencies = [
  "anyhow",
  "base64",
  "linuxapk-session",
+ "serde",
+ "serde_json",
  "zbus",
  "zip",
 ]

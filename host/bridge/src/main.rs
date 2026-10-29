@@ -160,13 +160,21 @@ fn main() -> Result<()> {
     });
     // Apps installed inside Android get desktop entries; only with
     // --mirror-apps (the main session).
+    let session_api = linuxapk_bridge::apps::session::Relay::default();
+    let _session_bus = match session_api.serve() {
+        Ok(bus) => Some(bus),
+        Err(e) => {
+            linuxapk_bridge::warn!("session D-Bus: {e:#}");
+            None
+        }
+    };
     let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
     linuxapk_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
-    services.register(service::APPS, "apps", move |peer, _events| {
-        Ok(Box::new(linuxapk_bridge::apps::AppsService::new(
-            apps.clone(),
-            peer,
-        )))
+    services.register(service::APPS, "apps", move |peer, events| {
+        Ok(Box::new(
+            linuxapk_bridge::apps::AppsService::new(apps.clone(), peer)
+                .with_session(session_api.clone(), events),
+        ))
     });
     let mut service_uids: Vec<(u32, UidCheck)> = Vec::new();
     if let Some(dir) = system_app_dir {
@@ -190,7 +198,7 @@ fn main() -> Result<()> {
     let cfg = Config {
         allow_uids: allow,
         service_uids,
-        private_services: vec![service::INPUT, service::A11Y],
+        private_services: vec![service::INPUT, service::A11Y, service::APPS],
         max_clients: 32,
         services,
     };
