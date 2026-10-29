@@ -411,18 +411,34 @@ pub struct DocumentsService {
     store: Arc<Store>,
     events: Events,
     label: String,
+    policy: crate::system::Policy,
 }
 
 impl DocumentsService {
-    pub fn new(store: Arc<Store>, peer: &Peer, events: Events) -> DocumentsService {
+    pub fn new(
+        store: Arc<Store>,
+        peer: &Peer,
+        events: Events,
+        policy: crate::system::Policy,
+    ) -> DocumentsService {
         DocumentsService {
             store,
             events,
             label: peer.label.clone(),
+            policy,
         }
     }
 
     fn pick(&mut self, p: Pick) -> Reply {
+        if !self.policy.portals {
+            crate::info!("documents: {}: pick cancelled (test session)", self.label);
+            let _ = self.events.try_send(
+                proto::ty::PICK_DONE,
+                &proto::event::done(p.request, -ECANCELED, 0),
+                &[],
+            );
+            return Reply::ok();
+        }
         if self.store.dbus().is_none() {
             return Reply::err(-ENOSYS);
         }
@@ -603,6 +619,53 @@ impl Service for DocumentsService {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn test_pick_cancels_without_a_portal() {
+        use crate::ipc::{transport, wire};
+        use rustix::net::{AddressFamily, SocketFlags, SocketType};
+        let (server, client) = rustix::net::socketpair(
+            AddressFamily::UNIX,
+            SocketType::SEQPACKET,
+            SocketFlags::CLOEXEC | SocketFlags::NONBLOCK,
+            None,
+        )
+        .unwrap();
+        let store = Store::new(None);
+        let mut service = DocumentsService::new(
+            store.clone(),
+            &Peer::test(),
+            Events::new(Arc::new(server)),
+            crate::system::Policy::for_session(true),
+        );
+        for mode in [
+            PickMode::Open,
+            PickMode::OpenMultiple,
+            PickMode::Save,
+            PickMode::Folder,
+        ] {
+            let reply = service.pick(Pick {
+                request: 42,
+                mode,
+                write: true,
+                window: 0,
+                title: String::new(),
+                name: String::new(),
+                mimes: vec![],
+            });
+            assert_eq!(reply.status, 0);
+            let mut buf = [0; wire::MAX_MSG + 1];
+            let packet = transport::recv(&client, &mut buf).unwrap().unwrap();
+            let expected = proto::event::done(42, -ECANCELED, 0);
+            let mut message = Writer::message(proto::ty::PICK_DONE, 0);
+            message.0.extend_from_slice(&expected);
+            assert_eq!(&buf[..packet.len], message.0);
+            assert!(packet.fds.is_empty());
+        }
+        assert!(store.dbus.get().is_none());
+        assert_eq!(store.picks.load(Ordering::SeqCst), 0);
+        assert!(store.grants.lock().unwrap().is_empty());
+    }
 
     /// Outstanding picks are counted for the whole bridge (every connection
     /// shares the Store), and stay charged until the pick finishes, not

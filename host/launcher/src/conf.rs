@@ -101,21 +101,11 @@ impl Config {
         let bus = env::var("DBUS_SESSION_BUS_ADDRESS")
             .ok()
             .filter(|v| !v.is_empty());
-        if p.instance.is_empty() {
-            // Apps installed inside the main session get desktop entries.
-            a.push("--mirror-apps".into());
+        if !p.instance.is_empty() || env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1") {
+            // Persist isolation in session.conf, including across wakeups.
+            a.push("--test-session".into());
         } else {
-            // Test sessions never reach the user's real desktop: links are
-            // only logged (unless LINUXAPK_OPEN_URLS=1), and so are
-            // notifications and media players unless the session talks to a
-            // private bus (a nested test desktop).
-            if !env::var("LINUXAPK_OPEN_URLS").is_ok_and(|v| v == "1") {
-                a.push("--no-open-urls".into());
-            }
-            let real_bus = format!("unix:path=/run/user/{}/bus", sys::uid());
-            if bus.as_ref().is_none_or(|b| *b == real_bus) {
-                a.push("--no-desktop-presence".into());
-            }
+            a.push("--mirror-apps".into());
         }
         // The display service and the clipboard use the host compositor; the
         // system service the caller's session bus; desktop entries for apps

@@ -10,6 +10,7 @@ import java.io.FileDescriptor
 import java.io.FileNotFoundException
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -66,11 +67,16 @@ object HostFiles {
 
   private val requests = AtomicInteger(1)
   private val pending = ConcurrentHashMap<Int, Pending>()
+  private val connectedListeners = CopyOnWriteArraySet<() -> Unit>()
   private val channel by lazy {
     BridgeConnection(
         BridgeConnection.SERVICE_DOCUMENTS,
         "Linux.apk System documents",
         object : BridgeConnection.Listener {
+          override fun onConnected() {
+            connectedListeners.forEach { it() }
+          }
+
           override fun onDisconnected() = failAll()
 
           override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) =
@@ -82,6 +88,17 @@ object HostFiles {
 
   fun start() {
     channel
+  }
+
+  /** Register before starting the connection so a cold HELLO cannot be missed. */
+  fun whenConnected(listener: () -> Unit) {
+    connectedListeners.add(listener)
+    start()
+    if (connected) listener()
+  }
+
+  fun stopWaiting(listener: () -> Unit) {
+    connectedListeners.remove(listener)
   }
 
   val connected

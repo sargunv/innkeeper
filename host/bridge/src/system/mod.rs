@@ -40,23 +40,30 @@ use openuri::RateLimit;
 use proto::{ClipKind, Lifecycle, Request, feature};
 use settings::SettingsHub;
 
-/// What a session may do on the real desktop. Test sessions (named instances)
-/// get log-only sinks, so nothing opens in the user's
-/// browser and nothing appears in their notifications or media controls.
+/// What a session may do on the desktop. All desktop effects share one
+/// switch, including reads of the clipboard and user-facing portals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Policy {
-    /// OpenURI really opens links (else: logged only).
     pub open_urls: bool,
-    /// Notifications and MPRIS players are published (else: logged only).
     pub presence: bool,
+    pub clipboard: bool,
+    pub portals: bool,
+}
+
+impl Policy {
+    pub fn for_session(test_session: bool) -> Self {
+        Self {
+            open_urls: !test_session,
+            presence: !test_session,
+            clipboard: !test_session,
+            portals: !test_session,
+        }
+    }
 }
 
 impl Default for Policy {
     fn default() -> Self {
-        Policy {
-            open_urls: true,
-            presence: true,
-        }
+        Self::for_session(false)
     }
 }
 
@@ -108,6 +115,9 @@ impl Shared {
     }
 
     fn dbus(&self) -> Option<&zbus::blocking::Connection> {
+        if !self.policy.portals {
+            return None;
+        }
         self.dbus
             .get_or_init(|| match zbus::blocking::Connection::session() {
                 Ok(c) => Some(c),
@@ -125,6 +135,9 @@ impl Shared {
     }
 
     fn notify(&self) -> Option<&Arc<NotifyHub>> {
+        if !self.policy.presence {
+            return None;
+        }
         self.notify
             .get_or_init(|| {
                 let conn = self.dbus()?.clone();
@@ -136,6 +149,9 @@ impl Shared {
     }
 
     fn clipboard(&self) -> Option<&Arc<ClipboardHub>> {
+        if !self.policy.clipboard {
+            return None;
+        }
         self.clipboard
             .get_or_init(|| {
                 ClipboardHub::start()
@@ -509,4 +525,36 @@ pub fn valid_package(p: &str) -> bool {
         && !p.starts_with('.')
         && p.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_policy_matrix() {
+        for test_session in [false, true] {
+            let p = Policy::for_session(test_session);
+            assert_eq!(
+                [p.open_urls, p.presence, p.clipboard, p.portals],
+                [!test_session; 4]
+            );
+        }
+        assert_eq!(Policy::default(), Policy::for_session(false));
+    }
+
+    #[test]
+    fn test_session_does_not_start_desktop_hubs() {
+        let dir = crate::test_dir("system-test-policy");
+        let shared = Shared::with_policy(&dir, Policy::for_session(true));
+        // Gating the hub itself prevents both clipboard publication and subscriptions,
+        // and even a NOTIFY_CLOSE must not connect to the real notification server.
+        assert!(shared.clipboard().is_none());
+        assert!(shared.notify().is_none());
+        assert!(shared.dbus().is_none());
+        assert!(shared.clipboard.get().is_none());
+        assert!(shared.notify.get().is_none());
+        assert!(shared.dbus.get().is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -60,10 +60,9 @@ Environment:
 Tests only:
   LINUXAPK_INSTANCE        run an independent, named session (default: the
                            main one). Named sessions are test sessions: they
-                           only log links, and also notifications and media
-                           players unless they talk to a private bus (a
-                           nested test desktop).
-  LINUXAPK_OPEN_URLS=1     a test session opens links in the host browser
+                           isolate clipboard, portals, links, notifications,
+                           media players, AT-SPI and location from the desktop.
+  LINUXAPK_TEST=1         apply the same isolation to an unnamed session
   LINUXAPK_DATA            Android's /data (default
                            $XDG_DATA_HOME/linuxapk/data[-<instance>])
   LINUXAPK_IMAGES, LINUXAPK_PIN  the image cache and the pin

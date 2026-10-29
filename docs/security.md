@@ -122,11 +122,14 @@ confirms each one.
 
 ## Test sessions
 
-A named `LINUXAPK_INSTANCE` makes a test session that leaves the user's desktop
-alone: links are logged, not opened (unless `LINUXAPK_OPEN_URLS=1`),
-notifications, MPRIS players and AT-SPI trees stay off the desktop and location
-is off unless the session talks to a private bus (a nested test desktop), and
-apps installed inside Android get no desktop entries. Battery, power saver and
-metering come from the caller's system bus (`DBUS_SYSTEM_BUS_ADDRESS`), which
-tests point at mocks. Clipboard sync and the FileChooser portal still reach the
-real desktop; that is tracked on GitHub.
+A named `LINUXAPK_INSTANCE` or `LINUXAPK_TEST=1` selects the bridge's
+`--test-session` mode, persisted in `session.conf`. It leaves the user's desktop
+alone, including when tests use a private bus: links, notifications and MPRIS
+players are logged only, AT-SPI and location are off, and apps installed inside
+Android get no desktop entries. Clipboard sync is disabled in both directions;
+the bridge never connects to the compositor's clipboard. A documents PICK
+immediately completes with `-ECANCELED` and no items, without opening the
+FileChooser portal. The system service does not connect to the desktop's
+Settings, PowerProfileMonitor or NetworkMonitor portals either. Battery readings
+come from the caller's system bus (`DBUS_SYSTEM_BUS_ADDRESS`), which tests point
+at mocks.
