@@ -419,7 +419,8 @@ cleanup() {
       echo 'e2e: system_server crashed (not a boot readiness timeout):' >&2
       cat "$T/crash.txt" >&2
     fi
-    timeout 1 "$S" exec logcat -d -b system -t 200 >"$T/system.txt" 2>&1 || true
+    # Keep boot's original error as well as a later recovery/watchdog failure.
+    timeout 1 "$S" exec logcat -d -b main,system -t 10000 >"$T/system.txt" 2>&1 || true
   fi
   "$S" stop >/dev/null 2>&1 || true
   "$S" reset >/dev/null 2>&1 || true
