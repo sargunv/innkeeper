@@ -161,6 +161,31 @@ pub enum Location {
 mod tests {
     use super::*;
     #[test]
+    fn normal_taps_activate_controls_and_title_press_starts_move() {
+        let mut mouse = MouseState::default();
+        let state = WindowState::empty();
+        let caps = WindowManagerCapabilities::all();
+        for button in [ButtonKind::Close, ButtonKind::Minimize, ButtonKind::Maximize] {
+            mouse.moved(Location::Button(button), 20., 17., true);
+            assert!(mouse.click(Duration::ZERO, true, true, &state, &caps).is_none());
+            assert!(matches!(
+                (button, mouse.click(Duration::ZERO, false, true, &state, &caps)),
+                (ButtonKind::Close, Some(FrameAction::Close)) | (ButtonKind::Minimize, Some(FrameAction::Minimize)) | (ButtonKind::Maximize, Some(FrameAction::Maximize))
+            ));
+            mouse.left();
+        }
+        mouse.moved(Location::Button(ButtonKind::Maximize), 20., 17., true);
+        assert!(matches!(
+            mouse.click(Duration::ZERO, false, true, &WindowState::MAXIMIZED, &caps),
+            Some(FrameAction::UnMaximize),
+        ));
+        mouse.moved(Location::Head, 200., 17., true);
+        assert!(matches!(mouse.click(Duration::ZERO, true, true, &state, &caps), Some(FrameAction::Move)));
+        mouse.left();
+        assert!(mouse.click(Duration::ZERO, false, true, &state, &caps).is_none());
+    }
+
+    #[test]
     fn back_requires_a_click_and_does_not_move_or_resize() {
         let mut mouse = MouseState::default();
         mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);

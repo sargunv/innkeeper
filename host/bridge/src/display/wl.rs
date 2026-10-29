@@ -378,7 +378,7 @@ impl State {
         }
     }
 
-    // The pointer over a window's client-side frame drives the frame.
+    // Pointer and touch contacts share the client-side frame interaction handlers.
 
     /// Returns the cursor the frame wants.
     pub(crate) fn frame_pointer_moved(
