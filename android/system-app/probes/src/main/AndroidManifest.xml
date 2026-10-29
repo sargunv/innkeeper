@@ -34,6 +34,16 @@
     </activity>
     <activity android:name=".BackProbe$Details" android:exported="false" />
 
+    <activity android:name=".CustomTabProbe" android:exported="true"
+      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection">
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="https" android:host="linuxapk-probe.example.org" />
+      </intent-filter>
+    </activity>
+
     <activity android:name=".TaskAppearanceProbe" android:exported="true" android:launchMode="singleTop" />
 
     <activity android:name=".ShareProbe" android:exported="true" android:label="Share probe">

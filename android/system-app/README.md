@@ -72,8 +72,13 @@ HAL would remove that.
 
 ## Desktop handoff
 
-The browser and `integration/handoff/` forward external VIEWs through OpenURI. A
-priority -1000 wildcard MIME filter handles files with no Android handler;
+The browser and `integration/handoff/` forward external VIEWs through OpenURI.
+Custom Tabs VIEWs from apps with a verified App Link host use an installed
+Android browser, allowing https sign-in redirects to return through Android App
+Links. Ordinary links still use the desktop browser, including from those same
+apps. The browser role stays with Linux.apk System.
+
+A priority -1000 wildcard MIME filter handles files with no Android handler;
 explicit scheme filters cover mailto, tel, sms, smsto, geo, market, magnet,
 webcal(s) and ftp(s). Android handlers at normal priority take precedence.
 Android 17 matches URI schemes literally: a wildcard scheme filter cannot catch
@@ -87,6 +92,9 @@ the source window's seat and parents portal dialogs with xdg-foreign.
 
 Known limits:
 
+- Without an Android browser installed, Custom Tabs still open on the desktop.
+  An https App Link sign-in redirect then stays in the desktop browser and
+  cannot return to the Android app; Linux.apk does not own desktop https links.
 - Shares are capped at three attachments, 64 MiB each, and 32 KiB of text.
   Opened files and email attachments are retained in the instance cache until
   session shutdown, up to 256 MiB per session; saved copies are removed

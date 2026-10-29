@@ -4,22 +4,19 @@ package dev.linuxapk.system.integration.browser
 import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.util.Log
 
 /**
- * Makes [BrowserActivity] Android's default browser when no real browser has the role, so web links
- * open in the host browser. Apps with verified links still get their links (Android checks those
- * before the browser role). A browser the user installs later gets the role from us.
+ * Keeps [BrowserActivity] as Android's default browser so ordinary links open on the desktop.
+ * Verified App Links still win before the browser role. Custom Tabs may explicitly target an
+ * installed Android browser without giving it ordinary links.
  *
  * The image's WebView test shell would otherwise be the browser; its browser activity is turned off
  * (apps that pick a browser themselves, like Wikipedia, would choose it).
  */
 object BrowserRole {
   /** Browsers that come with the image and aren't meant for users. */
-  private val TEST_SHELLS = setOf("org.chromium.webview_shell")
   private val TEST_SHELL_ACTIVITIES =
     listOf(
       ComponentName(
@@ -56,10 +53,6 @@ object BrowserRole {
           .getMethod("getBrowserRoleHolder", Int::class.javaPrimitiveType)
           .invoke(rm, 0) as String?
       if (holder == context.packageName) return
-      if (holder != null && holder !in TEST_SHELLS) {
-        Log.i(UrlOpener.TAG, "default browser is $holder; leaving it")
-        return
-      }
       val ok =
         RoleManager::class
           .java
@@ -70,36 +63,6 @@ object BrowserRole {
           )
           .invoke(rm, context.packageName, 0) as Boolean
       Log.i(UrlOpener.TAG, "default browser: ${holder ?: "none"} -> ${context.packageName} ($ok)")
-    } catch (e: Exception) {
-      Log.w(UrlOpener.TAG, "browser role: $e")
-    }
-  }
-
-  /** A browser was installed: it takes the role over from us. */
-  fun onPackageAdded(context: Context, pkg: String) {
-    if (pkg == context.packageName) return
-    val probe =
-      Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/"))
-        .addCategory(Intent.CATEGORY_BROWSABLE)
-        .setPackage(pkg)
-    if (context.packageManager.queryIntentActivities(probe, 0).isEmpty()) return
-    try {
-      val rm = context.getSystemService(RoleManager::class.java)
-      val holder =
-        RoleManager::class
-          .java
-          .getMethod("getBrowserRoleHolder", Int::class.javaPrimitiveType)
-          .invoke(rm, 0) as String?
-      if (holder != context.packageName) return
-      RoleManager::class
-        .java
-        .getMethod(
-          "setBrowserRoleHolder",
-          String::class.java,
-          Int::class.javaPrimitiveType,
-        )
-        .invoke(rm, pkg, 0)
-      Log.i(UrlOpener.TAG, "default browser -> $pkg (newly installed)")
     } catch (e: Exception) {
       Log.w(UrlOpener.TAG, "browser role: $e")
     }

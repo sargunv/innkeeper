@@ -10,7 +10,7 @@ import android.os.Parcel
 /**
  * A Custom Tabs provider, so apps (AppAuth sign-ins, "open in browser" helpers) find a browser that
  * supports Custom Tabs. It accepts sessions and warmup and does nothing else; the tab itself is a
- * `VIEW` intent to [BrowserActivity], which opens the host browser. Implements
+ * `VIEW` intent to [BrowserActivity], which chooses the desktop or an Android browser. Implements
  * `android.support.customtabs.ICustomTabsService` by hand (no AndroidX).
  */
 class CustomTabsService : Service() {
