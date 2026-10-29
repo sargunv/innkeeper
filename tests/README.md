@@ -60,7 +60,9 @@ GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \
 
 Failed groups save bounded Android and bridge logs and session cgroup memory
 counters before subsequent groups can clear logcat or restart the session. The
-nested desktop saves its last 200 journal lines in `compositor.log` on exit.
+nested desktop writes its stdout/stderr to `compositor.log` and saves the last
+80 service journal lines in `service.log`. Setup failures print the failed
+command, startup phase and bounded log tails directly in the job output.
 
 Set `LINUXAPK_SHARE_SCREENSHOT=1` when capturing chooser proof; normal sharing
 checks reuse the receiver window and exercise both chooser selections without

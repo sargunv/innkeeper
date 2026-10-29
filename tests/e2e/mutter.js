@@ -10,6 +10,9 @@ let pointer;
 let keyboard;
 
 export function init() {
+  console.log(
+    `test desktop: automation init; Shell starting=${Main.layoutManager._startingUp}`,
+  );
   St.Settings.get().inhibit_animations();
   // A fresh virtual pointer starts in GNOME's overview hot corner.
   new Gio.Settings({ schema_id: "org.gnome.desktop.interface" }).set_boolean(
@@ -21,6 +24,14 @@ export function init() {
   keyboard = seat.create_virtual_device(
     Clutter.InputDeviceType.KEYBOARD_DEVICE,
   );
+  // Shell connects startup-complete after awaiting the automation module's
+  // import. If startup won that race, its performance runner never calls us.
+  if (!Main.layoutManager._startingUp) {
+    console.log(
+      "test desktop: Shell already started; starting automation directly",
+    );
+    run().catch(console.error);
+  }
 }
 
 export async function run() {
@@ -97,5 +108,6 @@ export async function run() {
     null,
     null,
   );
+  console.log("test desktop: native input and window control ready");
   await new Promise(() => {});
 }

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # One runner, one private desktop/session, independently selectable bounded groups.
-set -euo pipefail
+set -Eeuo pipefail
+# Expected empty command substitutions need not fail their parent expression.
+# shellcheck disable=SC2329 # invoked by the ERR trap
+report_error() {
+  if ((BASH_SUBSHELL == 0)); then
+    echo "e2e: command failed (status=$1) at line $2: $3" >&2
+  fi
+}
+trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-e2e}
@@ -500,6 +508,13 @@ cleanup() {
   local result=$?
   if [[ -n $setup_lock ]]; then exec {setup_lock}>&-; fi
   if ((result != 0)); then
+    for log in "$desktop_log" "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/runner.log" \
+      "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/supervisor.log"; do
+      if [[ -f $log ]]; then
+        echo "e2e: last 60 lines of $log:" >&2
+        tail -n 60 "$log" >&2
+      fi
+    done
     echo "e2e: Android failure diagnostics: $T/{crash,system}.txt" >&2
     timeout 1 "$S" exec logcat -d -b crash >"$T/crash.txt" 2>&1 || true
     if file_has "$T/crash.txt" 'FATAL EXCEPTION IN SYSTEM PROCESS'; then
