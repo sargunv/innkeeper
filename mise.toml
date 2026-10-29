@@ -160,6 +160,14 @@ run = "tests/e2e/run.sh"
 description = "Android apps on AT-SPI: a nested KWin with its own AT-SPI bus, checked with pyatspi"
 run = "tests/a11y/run.sh"
 
+[tasks."test:lifecycle"]
+description = "Foreground audio, idle shutdown and alarm wakeup on an isolated nested desktop"
+run = "tests/lifecycle.sh"
+
+[tasks."test:hoststate"]
+description = "Battery, power, metering, locale and location on private buses (-- --deny for refusal)"
+run = "tests/hoststate/run.sh"
+
 [tasks."test:compat"]
 description = "The compat corpus against a session (-- [--only PKG,...] [--window] [--accept] | fetch | report)"
 # A named instance (default compat), so a test session: links are only logged,

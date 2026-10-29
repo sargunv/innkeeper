@@ -56,17 +56,30 @@ echo 'ok   Android app HTTPS request returned 200'
 
 "$S" exec am start -n dev.linuxapk.probes/.LifecycleProbe --es action alarm --ei seconds 240
 "$S" exec am start -n dev.linuxapk.probes/.LifecycleProbe --es action stop
+wakeup=$("$S" exec logcat -d -s LinuxApkLifecycleProbe:I | sed -n 's/.*alarm scheduled at=\([0-9]*\).*/\1/p' | tail -1)
+[[ -n $wakeup ]] || {
+  echo "FAIL alarm was not scheduled"
+  exit 1
+}
 # status does not keep the exec lock alive.
 for _ in $(seq 60); do
   if status=$("$S" status); then sleep 1; else break; fi
 done
-[[ $status == stopped*wakeup=* ]] || {
+[[ $status == stopped* ]] || {
   echo "FAIL idle shutdown: $status"
   exit 1
 }
-printf 'ok   idle stopped, alarm waiter: %s\n' "$status"
+if [[ ${LINUXAPK_MODE:-flatpak} == flatpak ]]; then
+  grep -qx "wakeup=$wakeup" <<<"$status" || {
+    echo "FAIL alarm waiter: $status"
+    exit 1
+  }
+else
+  env XDG_RUNTIME_DIR="/run/user/$UID" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID/bus" \
+    systemctl --user is-active --quiet "linuxapk-session-$LINUXAPK_INSTANCE-wake.timer"
+fi
+printf 'ok   idle stopped with pending alarm: %s\n' "$status"
 wake_checked=
-wakeup=$(sed -n 's/^wakeup=//p' <<<"$status")
 for _ in $(seq 240); do
   # An autonomous wake is a boot too. Cancel rather than violate the host's
   # memory floor if another workload grew while the waiter was idle.
@@ -90,7 +103,8 @@ cg=$("$S" cgroup)
   echo 'FAIL replacement sandbox memory cap'
   exit 1
 }
-"$S" exec cat "$repo/out/stage/share/linuxapk/manifest.tsv" | cmp - "$repo/out/stage/share/linuxapk/manifest.tsv"
+"$S" exec cat /system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk |
+  cmp - "$repo/out/stage/share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk"
 printf 'ok   alarm restarts current stage in capped scope\n'
 for _ in $(seq 100); do
   log=$("$S" exec logcat -d -s LinuxApkLifecycleProbe:I)
