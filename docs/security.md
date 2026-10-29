@@ -96,7 +96,7 @@ through the DynamicLauncher portal, so the user confirms each one.
 - **Files:** Android reaches only what the user picked in the FileChooser
   portal, through opaque grants and `openat2(RESOLVE_BENEATH)`; the bridge is
   the only side that sees host paths.
-- **Clipboard:** text, images and bounded single files sync through
+- **Clipboard:** text, images and bounded file selections sync through
   `ext_data_control_v1`, or `wl_data_device` while a Linux.apk window has focus.
   File-manager copies use FileTransfer portal grants; plain file URIs can read
   only paths the Flatpak already has. Android file clips use private cache

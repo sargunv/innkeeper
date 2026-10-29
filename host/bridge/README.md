@@ -44,15 +44,16 @@ and keyboard-enter serial: sync works only while a Linux.apk window has focus,
 as with Waydroid. A host copy arrives when a Linux.apk window regains focus; an
 Android copy made without focus is offered on the next keyboard enter.
 
-File copies support one regular file under 16 MiB (the payload reserves 1024
-bytes for metadata), preserving its name, MIME type and bytes. Android
-`content://` clips become temporary copies in the instance's cache, offered as
-`text/uri-list` and `x-special/gnome-copied-files`, plus a FileTransfer portal
-key when available. The cache copy is removed when replaced and at the next
-bridge start. Host copies use the portal grant when offered; a plain URI list
-works for files already accessible to the Flatpak. Incoming files become a
-private system-app `content://` URI, with read access granted by Android's
-ClipboardService to the pasting app. Only the latest incoming file is retained.
-Multi-file and directory copies are tracked in
-[#74](https://github.com/sargunv/linux.apk/issues/74). Test sessions never read
-or publish the desktop clipboard, on either backend.
+File copies support up to 16 regular files per selection, preserving each name,
+MIME type and bytes. Each file is capped at 16 MiB minus 1024 bytes; the
+complete selection, including metadata, must fit in 16 MiB. Oversized selections
+and selections containing directories are rejected in full; directories are not
+traversed or archived. Android `content://` clips become temporary copies in the
+instance's cache, offered as `text/uri-list` and `x-special/gnome-copied-files`,
+plus a FileTransfer portal key when available. The cache copy is removed when
+replaced and at the next bridge start. Host copies use the portal grant when
+offered; a plain URI list works for files already accessible to the Flatpak.
+Incoming files become private system-app `content://` URIs, with read access
+granted by Android's ClipboardService to the pasting app. Only the latest
+incoming file selection is retained. Test sessions never read or publish the
+desktop clipboard, on either backend.

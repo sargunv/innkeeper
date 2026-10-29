@@ -21,7 +21,11 @@ class ClipProbe : Activity() {
     val text = intent.getStringExtra("text")
     if (intent.getBooleanExtra("file", false)) {
       val uri = ClipImageProbe.storeFile(this)
-      cm.setPrimaryClip(ClipData.newUri(contentResolver, "probe file", uri))
+      val clip = ClipData.newUri(contentResolver, "probe file", uri)
+      if (intent.getBooleanExtra("multiple", false)) {
+        clip.addItem(contentResolver, ClipData.Item(ClipImageProbe.storeFile(this, "second.txt")))
+      }
+      cm.setPrimaryClip(clip)
       Log.i(TAG, "set file: $uri")
     } else if (intent.getBooleanExtra("image", false)) {
       val uri = ClipImageProbe.store(this)
@@ -33,16 +37,21 @@ class ClipProbe : Activity() {
     } else {
       val clip = cm.primaryClip
       val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
-      item?.uri?.let { uri ->
+      Log.i(TAG, "items: ${clip?.itemCount}")
+      for (i in 0 until (clip?.itemCount ?: 0)) clip!!.getItemAt(i).uri?.let { uri ->
         try {
           val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: byteArrayOf()
           val hash =
             java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {
               "%02x".format(it)
             }
+          val name =
+            contentResolver
+              .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+              ?.use { if (it.moveToFirst()) it.getString(0) else null }
           Log.i(
             TAG,
-            "file: uri=$uri mime=${contentResolver.getType(uri)} bytes=${bytes.size} sha256=$hash",
+            "file: name=$name uri=$uri mime=${contentResolver.getType(uri)} bytes=${bytes.size} sha256=$hash",
           )
         } catch (e: Exception) {
           Log.e(TAG, "reading file: $e")

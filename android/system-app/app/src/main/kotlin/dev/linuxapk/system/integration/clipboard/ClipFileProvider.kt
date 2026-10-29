@@ -75,20 +75,22 @@ class ClipFileProvider : ContentProvider() {
     const val AUTHORITY = "dev.linuxapk.system.clipboard.files"
 
     @Synchronized
-    fun store(context: Context, clip: ClipFile): Uri {
+    fun store(context: Context, clip: ClipFiles): List<Uri> {
       val root = File(context.cacheDir, "clip-files").apply { mkdirs() }
       root.listFiles()?.forEach { it.deleteRecursively() }
-      val id = UUID.randomUUID().toString()
-      val d = File(root, id).apply { mkdir() }
-      d.resolve("data").writeBytes(clip.bytes)
-      d.resolve("name").writeText(clip.name)
-      d.resolve("mime").writeText(clip.mime)
-      return Uri.Builder()
-        .scheme("content")
-        .authority(AUTHORITY)
-        .appendPath(id)
-        .appendPath(clip.name)
-        .build()
+      return clip.files.map { file ->
+        val id = UUID.randomUUID().toString()
+        val d = File(root, id).apply { mkdir() }
+        d.resolve("data").writeBytes(file.bytes)
+        d.resolve("name").writeText(file.name)
+        d.resolve("mime").writeText(file.mime)
+        Uri.Builder()
+          .scheme("content")
+          .authority(AUTHORITY)
+          .appendPath(id)
+          .appendPath(file.name)
+          .build()
+      }
     }
   }
 }

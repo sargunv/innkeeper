@@ -59,6 +59,11 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         null
       } ?: return
     if (clip.itemCount == 0) return
+    val uris = (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+    if (ClipFiles.isMultiFileSelection(uris.map { it?.scheme })) {
+      onAndroidFiles(clip, uris.filterNotNull())
+      return
+    }
     val desc = clip.description
     val sensitive = desc.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
     val item = clip.getItemAt(0)
@@ -109,7 +114,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
           toHost = key
           return
         }
-        val blob = file.encode()
+        val blob = ClipFiles(listOf(file)).encode()
         toHost = key
         send(Wire.CLIP_FILE, sensitive, blob)
       } catch (e: Exception) {
@@ -121,6 +126,80 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     if (text.isEmpty() || text == fromHost || text == toHost) return
     toHost = text
     send(Wire.CLIP_TEXT, sensitive, Wire.truncateUtf8(text, 1 shl 20))
+  }
+
+  private fun onAndroidFiles(clip: ClipData, uris: List<android.net.Uri>) {
+    val desc = clip.description
+    val sensitive = desc.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
+    val fileEcho =
+      importedFileEcho.consume(
+        uris.map { it.toString() },
+        desc.extras?.getLong(EXTRA_FILE_GENERATION) ?: 0,
+      )
+    try {
+      require(uris.size <= ClipFiles.MAX_FILES) {
+        "copy up to ${ClipFiles.MAX_FILES} content files"
+      }
+      val descriptionMimes = (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }
+      val files = mutableListOf<ClipFile>()
+      var remaining = ClipFiles.MAX_TOTAL - 4
+      for (fileUri in uris) {
+        val name =
+          context.contentResolver
+            .query(
+              fileUri,
+              arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+              null,
+              null,
+              null,
+            )
+            ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "clipboard-file"
+        val fileMime =
+          ClipFile.resolveMime(
+            context.contentResolver.getType(fileUri),
+            descriptionMimes,
+            clip.itemCount,
+          )
+        require(fileMime != "vnd.android.document/directory") {
+          "clipboard directories unsupported"
+        }
+        ClipFile.validate(name, fileMime, 0)
+        val max =
+          minOf(
+            ClipFile.MAX_BYTES,
+            remaining - 12 - name.toByteArray().size - fileMime.toByteArray().size,
+          )
+        require(max >= 0) { "clipboard selection too large" }
+        val bytes =
+          context.contentResolver.openInputStream(fileUri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(65536)
+            while (true) {
+              val n = input.read(buffer)
+              if (n < 0) break
+              require(out.size() + n <= max) { "clipboard selection too large" }
+              out.write(buffer, 0, n)
+            }
+            out.toByteArray()
+          } ?: return
+        remaining -= 12 + name.toByteArray().size + fileMime.toByteArray().size + bytes.size
+        files.add(ClipFile(name, fileMime, bytes))
+      }
+      val key =
+        "files " +
+          files.mapIndexed { i, f ->
+            "${uris[i]} ${f.name} ${f.mime} ${f.bytes.contentHashCode()}"
+          }
+      if (fileEcho || toHost == key) {
+        toHost = key
+        return
+      }
+      val blob = ClipFiles(files).encode()
+      toHost = key
+      send(Wire.CLIP_FILE, sensitive, blob)
+    } catch (e: Exception) {
+      Log.w(TAG, "reading clip files: $e")
+    }
   }
 
   private fun send(kind: Int, sensitive: Boolean, blob: ByteArray) {
@@ -170,10 +249,15 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         }
         Wire.CLIP_FILE -> {
           try {
-            val file = ClipFile.decode(data)
-            val uri = ClipFileProvider.store(context, file)
-            fromHost = "file $uri"
-            ClipData.newUri(context.contentResolver, file.name, uri)
+            val files = ClipFiles.decode(data)
+            val uris = ClipFileProvider.store(context, files)
+            fromHost = "files $uris"
+            ClipData(
+                "Desktop files",
+                files.files.map { it.mime }.distinct().toTypedArray(),
+                ClipData.Item(uris[0]),
+              )
+              .apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
           } catch (e: Exception) {
             Log.w(TAG, "host clip file: $e")
             return
@@ -188,9 +272,11 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         else -> return
       }
     if (sensitive) clip.description.extras = extras
-    val fileUri = clip.getItemAt(0).uri?.toString().takeIf { kind == Wire.CLIP_FILE }
-    val generation = importedFileEcho.install(fileUri)
-    if (fileUri != null) {
+    val fileUris =
+      if (kind == Wire.CLIP_FILE) (0 until clip.itemCount).map { clip.getItemAt(it).uri.toString() }
+      else emptyList()
+    val generation = importedFileEcho.install(fileUris)
+    if (fileUris.isNotEmpty()) {
       clip.description.extras =
         (clip.description.extras ?: PersistableBundle()).apply {
           putLong(EXTRA_FILE_GENERATION, generation)
