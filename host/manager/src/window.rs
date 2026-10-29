@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -20,6 +20,14 @@ const POLL_SECS: u32 = 3;
 
 #[derive(Clone)]
 pub struct Window(Rc<Inner>);
+
+pub struct WeakWindow(Weak<Inner>);
+
+impl WeakWindow {
+    pub fn upgrade(&self) -> Option<Window> {
+        self.0.upgrade().map(Window)
+    }
+}
 
 pub struct Inner {
     pub win: adw::ApplicationWindow,
@@ -358,6 +366,10 @@ impl Window {
         w
     }
 
+    pub fn downgrade(&self) -> WeakWindow {
+        WeakWindow(Rc::downgrade(&self.0))
+    }
+
     pub fn present(&self) {
         self.win.present();
     }
@@ -519,7 +531,10 @@ impl Window {
             .build();
         row.add_suffix(&launch);
         row.add_suffix(&remove);
-        row.set_activatable_widget(Some(&launch));
+        row.set_activatable(true);
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        let (w, app) = (self.clone(), a.clone());
+        row.connect_activated(move |_| w.nav.push(&crate::app::page(&w, &app)));
         let (w, pkg, name) = (self.clone(), a.package.clone(), a.name.clone());
         launch.connect_clicked(move |_| w.launch(&pkg, &name));
         let (w, a2) = (self.clone(), a.clone());
@@ -551,7 +566,7 @@ impl Window {
         });
     }
 
-    fn confirm_uninstall(&self, a: &DesktopApp) {
+    pub fn confirm_uninstall(&self, a: &DesktopApp) {
         let d = adw::AlertDialog::new(
             Some(&format!("Uninstall {}?", a.name)),
             Some("It will be removed from Android and from the app menu."),
@@ -582,6 +597,7 @@ impl Window {
             toast.dismiss();
             match r {
                 Ok(_) => {
+                    w.nav.pop_to_tag("main");
                     _ = w.say(&format!(
                         "{} uninstalled{}",
                         a.name,

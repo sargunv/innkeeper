@@ -144,3 +144,53 @@ ignore reply bytes they don't know. A new major version means a new HELLO.
    list if the service has new clients.
 6. Shared memory you hand out is created and sealed by the bridge; never read
    back state you own from it, and clamp what the client writes there.
+
+## Desktop session API (version 1)
+
+The bridge owns `dev.linuxapk.Manager.Session` on the desktop session bus,
+inside the Flatpak app-id namespace. A named instance owns
+`dev.linuxapk.Manager.Session.i_<instance>` (hyphens become underscores). The
+object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
+and CLI calls use this interface for per-app management; they do not run
+commands inside Android. Starting a stopped session still uses the launcher.
+
+`App(s package, s action, s permission, b enabled) → s response` is synchronous.
+Actions are `info`, `clear-cache`, `clear-data`, `force-stop`, `permission`,
+`escape-back` and `background`. Only `permission` accepts a permission name;
+only the last three accept `enabled=true`. Unknown actions, malformed package or
+permission names and unused fields fail with `InvalidArgs`. Disconnection, full
+queues and a 20-second response timeout fail with `Failed`; after a timeout,
+refresh before retrying because Android may have completed the operation.
+
+The response is UTF-8 JSON (at most 64 KiB): `{"error":"", "info":{…}}` on
+success, or `{"error":"message", "info":null}` on Android failure. `info`
+contains `app_bytes`, `data_bytes` (including cache), `cache_bytes`,
+`escape_back`, `background`, and `permissions`: objects with `name`, `granted`
+and `editable`. Byte counts come from Android StorageStatsManager. Only
+requested dangerous permissions are included; system/policy-fixed permissions
+and legacy app permissions are read-only. Android enforces grant dependencies
+and restrictions; failures return to the caller. Only installed user apps can be
+changed. Cache/data clearing waits for Android's package-data callback; clear
+data deletes the target's accounts, files and settings.
+
+The system app's existing **apps** connection receives event `0x4501`:
+`u64 request_id, u32 length`, plus one sealed JSON memfd. The command is
+`{"package":"…","action":"…","permission":"…","enabled":false}`. It answers with
+request `0x0504`, the same envelope and one sealed response memfd. No trailing
+envelope bytes or extra fds are accepted. Both JSON payloads are capped at 64
+KiB. Up to eight requests may wait; the system app serializes operations on its
+apps worker. A reconnect cancels pending requests and stale responses are
+ignored. The apps service, like input and accessibility, only admits the system
+app's uid.
+
+Escape-as-Back is stored per package in the system app's device-protected
+preferences, default off. Input resolves the `linuxapk:<package>` display on
+each new key press. Changes apply to existing windows immediately, while a held
+key retains its original code through release. The global
+`persist.linuxapk.input.escape_back` property is no longer read. Background uses
+the existing lifecycle allow-list and prompts a fresh activity report.
+
+CLI examples: `linuxapk app org.example.app`,
+`linuxapk app org.example.app clear-cache`,
+`linuxapk app org.example.app escape-back --setting on`, and
+`linuxapk app org.example.app permission --permission android.permission.CAMERA --setting off`.

@@ -40,6 +40,7 @@ class Keyboard(
   private val chars: KeyChars = KeyChars { _, _ -> 0 },
   private val windowShortcuts: Boolean = false,
   private val keepCtrlW: () -> Boolean = { false },
+  private val escapeBack: () -> Boolean = { escapeAsBack },
   private val onClose: () -> Unit = {},
 ) {
   /** [clearMeta]: meta bits the key's events leave out (Alt, for Alt+Left as BACK). */
@@ -182,7 +183,7 @@ class Keyboard(
     val physical = EvdevKeymap.keycode(evdev)
     // Only character keys follow the layout; Escape or F1 stay put whatever a layout puts there.
     val code = if (physical in CHARACTER_KEYS) layoutKeycode(sym) ?: physical else physical
-    return if (escapeAsBack && code == KeyEvent.KEYCODE_ESCAPE) KeyEvent.KEYCODE_BACK else code
+    return if (escapeBack() && code == KeyEvent.KEYCODE_ESCAPE) KeyEvent.KEYCODE_BACK else code
   }
 
   // Called after [held] changed. Recomputes from the keys still held, so releasing one Shift

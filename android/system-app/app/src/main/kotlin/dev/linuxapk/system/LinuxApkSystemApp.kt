@@ -5,6 +5,7 @@ import android.app.Application
 import android.util.Log
 import dev.linuxapk.system.a11y.A11yFeature
 import dev.linuxapk.system.apps.AppMirrorFeature
+import dev.linuxapk.system.apps.AppSettings
 import dev.linuxapk.system.ime.ImeFeature
 import dev.linuxapk.system.input.HostInputClient
 import dev.linuxapk.system.integration.HostStateFeature
@@ -24,6 +25,8 @@ class LinuxApkSystemApp : Application() {
   private val features = mutableListOf<Feature>()
 
   /** The bridge's input service: window requests, host input, the host's input methods. */
+  val appSettings by lazy { AppSettings(this) }
+
   val input = HostInputClient(this)
 
   /** Android apps on the desktop's AT-SPI bus; its accessibility service finds it here. */
@@ -44,7 +47,7 @@ class LinuxApkSystemApp : Application() {
         wm,
         ImeFeature(this),
         IntegrationFeature(this, wm),
-        AppMirrorFeature(this),
+        AppMirrorFeature(this, appSettings),
         HostNetworkFeature(this),
         HostStateFeature(this),
         a11y,

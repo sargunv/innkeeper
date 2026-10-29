@@ -129,6 +129,7 @@ sys.exit(1)
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
       echo 'ok   requested-orientation host window shape (portrait -> landscape)'
+      /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)
       s cmd media_session volume --stream 3 --set 15 >/dev/null

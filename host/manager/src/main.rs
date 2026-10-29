@@ -3,6 +3,7 @@
 //! session. A GTK 4 / libadwaita front end over `linuxapk-core`; see
 //! host/manager/README.md.
 
+mod app;
 mod errors;
 mod install;
 mod permissions;

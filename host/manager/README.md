@@ -24,3 +24,11 @@ Start reading at `src/window.rs` (list, session, drag and drop) and
 `cargo test -p linuxapk-manager` (error texts, permission names, progress
 texts). For screenshots, use the nested desktop in
 [docs/development.md](../../docs/development.md).
+
+Selecting an installed app opens its per-app page (`src/app.rs`): storage use,
+clear cache/data, runtime permission switches, Escape as Back, Run in
+Background, force stop and uninstall. These controls use the bridge's versioned
+session D-Bus API
+([protocol](../../docs/bridge-protocol.md#desktop-session-api-version-1)). Clear
+data and uninstall ask for confirmation. Operations disable the controls until
+Android answers, and then refresh all values; errors offer a fresh read.

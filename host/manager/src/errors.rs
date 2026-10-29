@@ -9,6 +9,7 @@ pub enum Op {
     Open,
     Uninstall,
     Session,
+    AppSettings,
     /// Downloading and unpacking the Android image.
     Prepare,
 }
@@ -137,6 +138,7 @@ fn classify(op: Op, name: Option<&str>, d: &str) -> (String, String) {
         Op::Install => format!("Couldn’t Install {}", cap(app)),
         Op::Open => format!("Couldn’t Open {}", cap(app)),
         Op::Uninstall => format!("Couldn’t Uninstall {}", cap(app)),
+        Op::AppSettings => format!("Couldn’t Change {}’s Settings", cap(app)),
         Op::Session => "Couldn’t Control the Android Session".into(),
         Op::Prepare => "Couldn’t Download Android".into(),
     };

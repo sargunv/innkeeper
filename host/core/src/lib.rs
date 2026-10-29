@@ -5,6 +5,7 @@
 
 pub mod android;
 pub mod apk;
+pub mod app_settings;
 pub mod bundle;
 pub mod desktop;
 pub mod dynlauncher;
