@@ -156,6 +156,53 @@ stateDiagram-v2
 `LINUXAPK_INSTANCE` names an independent session for tests; its suffix goes on
 every per-instance path.
 
+## Image upgrades and data recovery
+
+`prepare` only prepares the read-only image cache. On `start`, the launcher
+checks `/data/.linuxapk-data-version` before changing anything in `/data`. The
+record identifies frameworks by Android SDK level, then numeric AOSP CI build
+ID, read from the system image's `build.prop`; renaming a pin does not change
+its version. Equal versions and upgrades reuse the existing data. Non-numeric
+framework versions are unsupported and fail before data is opened.
+
+The launcher durably records `started` before Android can open the data. Init
+records `booted` only after `sys.boot_completed=1`, retaining the previous
+successful version through an interrupted first boot. Start the same image or a
+newer one to retry; Android performs its usual startup recovery. Because even a
+failed boot may have migrated data, a framework older than either recorded
+version is refused. The error names the data directory, both versions and
+recovery choices. Data from before this policy has no recorded history and is
+adopted on its next start; back it up first if its history is uncertain.
+
+An image rollback does **not** roll back `/data`. Before upgrading, stop the
+instance and back up its **entire** data directory, including the hidden version
+record, app databases, package-manager state, keys and shared storage. Keep the
+backup outside the image cache, whose old images may be pruned. For a normal
+Flatpak installation, from a host terminal:
+
+```sh
+flatpak run --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager stop
+# Default Flatpak XDG_DATA_HOME; adjust for a named instance or custom path.
+data_dir="$HOME/.var/app/dev.linuxapk.Manager/data/linuxapk/data"
+backup_dir="$HOME/linuxapk-data-backup-$(date +%Y%m%d-%H%M%S)"
+cp -a --reflink=auto "$data_dir" "$backup_dir"
+```
+
+Keep the matching older Linux.apk/image version available if you need to
+restore. To recover, stop the instance, move its current data directory aside,
+and copy the complete pre-upgrade backup back to the original path with
+`cp -a --reflink=auto`. Then start the matching framework. Alternatively, use
+the recorded framework or a newer one with the current data. Moving the data
+directory aside without restoring a backup starts fresh, without the old apps or
+files. Do not delete or edit just the version record to bypass a refusal: it
+cannot undo Android's migrations. A launcher release predating this policy
+cannot enforce this check, so restore the matching backup before using it.
+
+For a named instance, supply the same `LINUXAPK_INSTANCE` on stop/start and use
+`data-<instance>`; `LINUXAPK_DATA` overrides that location. Development sessions
+use `out/dev/flatpak/<instance>/android-data` by default. Never copy or restore
+data while that instance is running.
+
 ## Host safety
 
 The Flatpak sandbox is the boundary. `selftest` verifies its filesystem and

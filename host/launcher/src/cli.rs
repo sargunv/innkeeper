@@ -251,6 +251,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     };
     let image = paths.image()?;
     let image_lease = image::prepare(paths, &image)?;
+    image::check_data(&paths.data, &image)?;
     if !follow && !serve {
         return flatpak::spawn(paths, &exe, headless);
     }

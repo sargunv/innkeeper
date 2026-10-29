@@ -2,14 +2,131 @@
 //! its files read-only, and the derived layers current (image/README.md).
 
 use std::fs;
+use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::paths::{Image, Paths};
+
+const DATA_VERSION: &str = ".linuxapk-data-version";
+
+/// Order Google's CI frameworks by SDK, then numeric build ID, never by the
+/// cache directory's name. Read the actual system image, not the pin's label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Framework {
+    image: String,
+    sdk: u32,
+    build: u64,
+}
+
+impl Framework {
+    fn read(image: &Image) -> Result<Self> {
+        let props = fs::read_to_string(image.img.join("system/system/build.prop"))?;
+        let prop = |key| crate::field(&props, key).with_context(|| format!("missing {key}"));
+        Ok(Self {
+            image: image.name.clone(),
+            sdk: prop("ro.build.version.sdk")?
+                .parse()
+                .context("non-numeric Android SDK")?,
+            build: prop("ro.build.version.incremental")?
+                .parse()
+                .context("non-numeric AOSP CI build ID")?,
+        })
+    }
+
+    fn version(&self) -> (u32, u64) {
+        (self.sdk, self.build)
+    }
+}
+
+/// An attempted boot may already have migrated /data before it fails. Keep
+/// that floor as well as the last success; retrying it or upgrading is safe.
+#[derive(Debug, Serialize, Deserialize)]
+struct DataVersion {
+    started: Framework,
+    booted: Option<Framework>,
+}
+
+impl DataVersion {
+    fn load(data: &Path) -> Result<Option<Self>> {
+        let path = data.join(DATA_VERSION);
+        match fs::read_to_string(&path) {
+            Ok(text) => toml::from_str(&text).map(Some).with_context(|| format!(
+                "cannot read data version {}; restore a complete /data backup (docs/session.md)",
+                path.display()
+            )),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+        }
+    }
+
+    fn check(&self, data: &Path, current: &Framework) -> Result<()> {
+        for previous in std::iter::once(&self.started).chain(&self.booted) {
+            if current.version() < previous.version() {
+                bail!(
+                    "refusing Android data downgrade: {} was opened by {} (SDK {}, CI build {}), \
+                     newer than selected {} (SDK {}, CI build {}). \
+                     A failed boot may already have migrated /data. \
+                     Start {} or a newer framework, restore a complete pre-upgrade /data backup, \
+                     or move this data directory aside to start fresh. \
+                     Changing the image alone cannot undo a data migration. See docs/session.md",
+                    data.display(),
+                    previous.image,
+                    previous.sdk,
+                    previous.build,
+                    current.image,
+                    current.sdk,
+                    current.build,
+                    previous.image
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Read-only gate, also in the calling sandbox so background start reports
+/// the actionable error directly. Preparing an image alone never adopts data.
+pub fn check_data(data: &Path, image: &Image) -> Result<()> {
+    let current = Framework::read(image)?;
+    if let Some(state) = DataVersion::load(data)? {
+        state.check(data, &current)?;
+    }
+    Ok(())
+}
+
+/// Called before any setup of /data or Android process. Persist the attempt
+/// before exposing data, and give init an atomic replacement to commit at
+/// sys.boot_completed=1. An interrupted boot keeps the old `booted` value.
+pub fn begin_boot(data: &Path, image: &Image, linuxapk: &Path) -> Result<()> {
+    let current = Framework::read(image)?;
+    let previous = DataVersion::load(data)?;
+    if let Some(state) = &previous {
+        state.check(data, &current)?;
+    }
+    let mut state = DataVersion {
+        started: current.clone(),
+        booted: previous.and_then(|s| s.booted),
+    };
+    fs::create_dir_all(data)?;
+    let tmp = data.join(format!("{DATA_VERSION}.next"));
+    let mut f = fs::File::create(&tmp)?;
+    f.write_all(toml::to_string(&state)?.as_bytes())?;
+    f.sync_all()?;
+    fs::rename(tmp, data.join(DATA_VERSION))?;
+    fs::File::open(data)?.sync_all()?;
+    state.booted = Some(current);
+    fs::write(
+        linuxapk.join("data-version-booted"),
+        toml::to_string(&state)?,
+    )?;
+    Ok(())
+}
 
 fn run(c: &mut Command) -> Result<()> {
     let st = c
@@ -128,4 +245,115 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
     }
     crate::prune::prune(paths, image)?;
     Ok(lease)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn framework(sdk: u32, build: u64) -> Framework {
+        Framework {
+            image: format!("ci-{build}"),
+            sdk,
+            build,
+        }
+    }
+
+    #[test]
+    fn framework_order_is_numeric_and_sdk_first() {
+        assert!(framework(37, 9).version() < framework(37, 10).version());
+        assert!(framework(36, 100).version() < framework(37, 1).version());
+        let mut renamed = framework(37, 10);
+        renamed.image = "other-cache-name".into();
+        assert_eq!(renamed.version(), framework(37, 10).version());
+    }
+
+    #[test]
+    fn start_allows_adoption_upgrade_and_retry_but_not_downgrade() {
+        let data = Path::new("test-data");
+        let old = framework(37, 9);
+        let new = framework(37, 10);
+        let mut state = DataVersion {
+            started: old.clone(),
+            booted: Some(old.clone()),
+        };
+        assert!(state.check(data, &old).is_ok());
+        assert!(state.check(data, &new).is_ok());
+        // The new framework may migrate data before boot completes.
+        state.started = new.clone();
+        assert!(state.check(data, &new).is_ok());
+        assert!(state.check(data, &old).is_err());
+        assert!(state.check(data, &framework(38, 1)).is_ok());
+        state.booted = Some(new);
+        assert!(state.check(data, &old).is_err());
+    }
+
+    #[test]
+    fn boot_record_survives_interruption_and_refusal_is_read_only() -> Result<()> {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/data-version-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let data = base.join("data");
+        let linuxapk = base.join("linuxapk");
+        let mut image = Image {
+            name: "ci-9".into(),
+            dir: base.clone(),
+            img: base.join("img"),
+            apexdir: base.join("apex"),
+            derived: base.join("derived"),
+        };
+        fs::create_dir_all(image.img.join("system/system"))?;
+        fs::create_dir_all(&linuxapk)?;
+        let props = image.img.join("system/system/build.prop");
+        fs::write(
+            &props,
+            "ro.build.version.sdk=37\nro.build.version.incremental=9\n",
+        )?;
+        check_data(&data, &image)?;
+        assert!(!data.exists());
+        begin_boot(&data, &image, &linuxapk)?;
+        assert!(DataVersion::load(&data)?.unwrap().booted.is_none());
+        fs::copy(
+            linuxapk.join("data-version-booted"),
+            data.join(DATA_VERSION),
+        )?;
+        fs::write(data.join("app-data"), b"preserve me")?;
+        image.name = "ci-10".into();
+        fs::write(
+            &props,
+            "ro.build.version.sdk=37\nro.build.version.incremental=10\n",
+        )?;
+        begin_boot(&data, &image, &linuxapk)?;
+        assert_eq!(
+            DataVersion::load(&data)?.unwrap().booted,
+            Some(framework(37, 9))
+        );
+        begin_boot(&data, &image, &linuxapk)?; // Retry an interrupted upgrade.
+        fs::copy(
+            linuxapk.join("data-version-booted"),
+            data.join(DATA_VERSION),
+        )?;
+        assert_eq!(
+            DataVersion::load(&data)?.unwrap().booted,
+            Some(framework(37, 10))
+        );
+        let before = fs::read(data.join(DATA_VERSION))?;
+        fs::write(
+            &props,
+            "ro.build.version.sdk=37\nro.build.version.incremental=9\n",
+        )?;
+        let error = begin_boot(&data, &image, &linuxapk)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("refusing Android data downgrade"));
+        assert!(error.contains("pre-upgrade /data backup"));
+        assert_eq!(fs::read(data.join(DATA_VERSION))?, before);
+        assert_eq!(fs::read(data.join("app-data"))?, b"preserve me");
+        fs::write(data.join(DATA_VERSION), "broken record")?;
+        assert!(check_data(&data, &image).is_err());
+        fs::remove_dir_all(base)?;
+        Ok(())
+    }
 }

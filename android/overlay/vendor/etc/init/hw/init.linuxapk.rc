@@ -29,6 +29,8 @@ on property:logd.ready=true
     exec_background - root root -- /system/bin/logcat -G 16M
 
 on property:sys.boot_completed=1
+    # Commit the launcher's candidate only after the framework finishes booting.
+    exec_background - root root -- /system/bin/sh -c "cp /linuxapk/data-version-booted /data/.linuxapk-data-version.tmp && mv /data/.linuxapk-data-version.tmp /data/.linuxapk-data-version"
     # SystemUI's "Viewing full screen" cling takes focus from every immersive
     # app (games) until dismissed. On a desktop it has no purpose, so mark it
     # as already confirmed.
