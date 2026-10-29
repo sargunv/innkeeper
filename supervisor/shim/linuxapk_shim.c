@@ -376,8 +376,52 @@ static long psi_write(int fd, const void* buf, size_t n) {
   int m = snprintf(out, sizeof(out), "%s %u %u", kind, stall, window);
   return syscall(SYS_write, fd, out, m + 1) < 0 ? -1 : (long)n;
 }
+
+#include "oom.h"
+
+// Only lmkd opts in. Keep its Android scores for its own kill policy, but
+// write kernel scores that it can lower again when an app becomes foreground.
+static long oom_write(int fd, const void* buf, size_t n) {
+  static int floor = -2;
+  if (floor == -2) {
+    floor = -1;
+    const char* e = getenv("LINUXAPK_OOM_ADJ");
+    if (e && !strcmp(e, "1") && flatpak()) {
+      int f =
+        syscall(SYS_openat, AT_FDCWD, "/proc/self/oom_score_adj", O_RDONLY);
+      if (f >= 0) {
+        char value[16];
+        long l = syscall(SYS_read, f, value, sizeof(value) - 1);
+        syscall(SYS_close, f);
+        if (l > 0) {
+          value[l] = 0;
+          floor = atoi(value);
+          if (floor < 0) floor = 0;
+        }
+      }
+    }
+  }
+  if (floor < 0 || n == 0 || n > 16) return -2;
+  char link[64], path[64], text[17];
+  int pid, used = 0;
+  snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+  long l = syscall(SYS_readlinkat, AT_FDCWD, link, path, sizeof(path) - 1);
+  if (l <= 0) return -2;
+  path[l] = 0;
+  sscanf(path, "/proc/%d/oom_score_adj%n", &pid, &used);
+  if (used == 0 || path[used] || pid <= 0) return -2;
+  memcpy(text, buf, n);
+  text[n] = 0;
+  char* end;
+  long adj = strtol(text, &end, 10);
+  if (end == text || (*end && strcmp(end, "\n")) || adj < -1000 || adj > 1000)
+    return -2;
+  int m = snprintf(text, sizeof(text), "%d", linuxapk_oom_adj(adj, floor));
+  return syscall(SYS_write, fd, text, m) < 0 ? -1 : (long)n;
+}
 static long do_write(int fd, const void* buf, size_t n) {
-  long r = psi_write(fd, buf, n);
+  long r = oom_write(fd, buf, n);
+  if (r == -2) r = psi_write(fd, buf, n);
   return r != -2 ? r : syscall(SYS_write, fd, buf, n);
 }
 EXPORT ssize_t write(int fd, const void* buf, size_t n) {

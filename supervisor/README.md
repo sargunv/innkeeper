@@ -111,6 +111,13 @@ host's network, so their pid-numbered ports collide); and lmkd's PSI trigger
 windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1 there, so
 pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
+lmkd also opts into `LINUXAPK_OOM_ADJ`: its writes to
+`/proc/<pid>/oom_score_adj` map Android's -1000…1000 range into the inherited
+session score…1000 (with a minimum floor of 0). The kernel lets an unprivileged
+process lower a score back to that floor, so a cached app returning to the
+foreground regains its relative protection. lmkd keeps the original Android
+scores for its own kill policy.
+
 Android 17 mounts every visible emulated volume through FUSE; the old
 `persist.sys.fuse` switch no longer selects a non-FUSE path. Flatpak has no
 `/dev/fuse` and cannot mount filesystems. For vold only
