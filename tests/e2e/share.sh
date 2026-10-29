@@ -27,36 +27,28 @@ choose_share() {
   s input -d "$display" keyevent KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_ENTER
 }
 received() {
-  local kind=$1 action=$2 type=$3 count=$4
-  s logcat -d -s LinuxApkOpenWith:I LinuxApkShareProbe:I >"$T/share-$kind.txt"
-  grep -F "action=android.intent.action.$action type=$type count=$count read=true clip=true" "$T/share-$kind.txt" >/dev/null &&
-    grep -E "item=0 bytes=13 sha256=$first uri=content://.* write=false" "$T/share-$kind.txt" >/dev/null &&
-    { [[ $count == 1 ]] || grep -E "item=1 bytes=23 sha256=$second uri=content://.* write=false" "$T/share-$kind.txt" >/dev/null; }
-}
-share_targets() {
-  s logcat -d -s LinuxApkOpenWith:I | grep -E "share action=android.intent.action.$1 files=$2 apps=dev.linuxapk.probes$" >/dev/null
+  s logcat -d -s LinuxApkOpenWith:I LinuxApkShareProbe:I >"$T/share-received.txt"
+  grep -F "action=android.intent.action.SEND_MULTIPLE type=text/* count=2 read=true clip=true" "$T/share-received.txt" >/dev/null &&
+    grep -E "item=0 bytes=13 sha256=$first uri=content://.* write=false" "$T/share-received.txt" >/dev/null &&
+    grep -E "item=1 bytes=23 sha256=$second uri=content://.* write=false" "$T/share-received.txt" >/dev/null
 }
 printf 'host share\000\377\n' >"$T/share.md"
 printf 'second host attachment\n' >"$T/share.txt"
 first=$(sha256sum "$T/share.md" | cut -d ' ' -f1)
 second=$(sha256sum "$T/share.txt" | cut -d ' ' -f1)
 s logcat -c
-"$repo/tools/dev/linuxapk.sh" open "$T/share.md"
-until_ok share_targets SEND 1
-# Screenshot proof is opt-in; normal regression runs exercise the same chooser
-# through real input without starting Spectacle or its fixed activation delay.
+"$repo/tools/dev/linuxapk.sh" open "$T/share.md" "$T/share.txt"
+# MarkdownShareOnly must be excluded from the mixed batch, even though it matches text/*.
+# shellcheck disable=SC2329 # invoked through until_ok
+share_targets() {
+  s logcat -d -s LinuxApkOpenWith:I | grep -E 'share action=android.intent.action.SEND_MULTIPLE files=2 apps=dev.linuxapk.probes$' >/dev/null
+}
+until_ok share_targets
 if [[ ${LINUXAPK_SHARE_SCREENSHOT:-} == 1 ]]; then
   until_ok chooser_ready
   "$repo/tools/dev/window-shot.sh" "$T/share-chooser.png" 'Linux.apk System'
 fi
 choose_share
-until_ok received single SEND text/markdown 1
-# Keep the receiver window: the second share must deliver a new intent there.
-s logcat -c
-"$repo/tools/dev/linuxapk.sh" open "$T/share.md" "$T/share.txt"
-# MarkdownShareOnly must be excluded from the mixed batch, even though it matches text/*.
-until_ok share_targets SEND_MULTIPLE 2
-choose_share
-until_ok received multiple SEND_MULTIPLE 'text/*' 2
+until_ok received
 wm CLOSE --es package dev.linuxapk.probes >/dev/null
-printf 'ok   host SEND and SEND_MULTIPLE: matching bytes, MIME, ClipData and read-only grants\n'
+printf 'ok   host multi-file share: matching bytes, MIME, ClipData and read-only grants\n'

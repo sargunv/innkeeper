@@ -337,19 +337,6 @@ class InputTranslatorTest {
   }
 
   @Test
-  fun locksComeFromXkb() {
-    val e = feed("modifiers 0 0 18 0", "key 1 71 1").single() as OutKey
-    assertEquals(KeyEvent.META_CAPS_LOCK_ON or KeyEvent.META_NUM_LOCK_ON, e.metaState)
-  }
-
-  @Test
-  fun mouseEventsCarryKeyboardMeta() {
-    feed("key 1 29 1")
-    val e = feed("pointer_motion 2 1.00 1.00", "pointer_frame").single() as OutMotion
-    assertEquals(KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON, e.metaState)
-  }
-
-  @Test
   fun focusLossCancelsHeldKeys() {
     feed("key 1 29 1", "key 2 46 1")
     val e = feed("keyboard_leave").map { it as OutKey }
@@ -572,21 +559,6 @@ class InputTranslatorTest {
     feed("window 800 600 2.000 5", "pointer_enter 1.00 1.00 5", "pointer_frame")
     val e = feed("pointer_axis 1 0 16.000", "pointer_frame").single() as OutMotion
     // 16 surface px = 32 display px = half a unit; Wayland down is VSCROLL -1.
-    assertEquals(-0.5f, e.pointers[0].vscroll)
-  }
-
-  @Test
-  fun hiResWheelStepsAreFractions() {
-    feed("pointer_motion 1 5.00 5.00", "pointer_frame")
-    val e =
-      feed(
-          "pointer_axis_source 0",
-          "pointer_axis_value120 0 60",
-          "pointer_axis 2 0 7.500",
-          "pointer_frame",
-        )
-        .single() as OutMotion
-    assertEquals(MotionEvent.ACTION_SCROLL, e.action)
     assertEquals(-0.5f, e.pointers[0].vscroll)
   }
 

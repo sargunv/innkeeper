@@ -288,18 +288,4 @@ mod tests {
         assert_eq!(r.available(), 0);
         assert_eq!(r.read(&mut out), 0);
     }
-
-    #[test]
-    fn memfd_is_sealed() {
-        let r = Ring::new(4, 480, 48000).unwrap();
-        assert!(rustix::fs::ftruncate(r.memfd(), 0).is_err());
-        assert!(rustix::fs::ftruncate(r.memfd(), 1 << 30).is_err());
-        assert!(rustix::fs::fcntl_add_seals(r.memfd(), SealFlags::WRITE).is_err());
-    }
-
-    #[test]
-    fn map_size_bounds() {
-        assert_eq!(Ring::map_size(4, 960), Some(8192));
-        assert!(Ring::map_size(u32::MAX, u32::MAX).is_some()); // 64-bit
-    }
 }

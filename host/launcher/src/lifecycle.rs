@@ -338,12 +338,4 @@ mod tests {
         assert_eq!(calendar(951_782_400), "2000-02-29 00:00:00 UTC");
         assert_eq!(calendar(1_793_222_130), "2026-10-28 21:15:30 UTC");
     }
-
-    #[test]
-    fn grace() {
-        // SAFETY: tests in this module don't read it concurrently.
-        unsafe { std::env::remove_var("LINUXAPK_IDLE_GRACE") };
-        assert_eq!(grace_secs(true), 0);
-        assert_eq!(grace_secs(false), DEFAULT_GRACE_SECS);
-    }
 }

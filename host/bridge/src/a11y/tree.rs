@@ -1011,18 +1011,10 @@ mod tests {
     }
 
     #[test]
-    fn checked_text_view_role() {
-        let mut n = raw(1);
-        n.class_name = "android.widget.CheckedTextView".into();
-        assert_eq!(one(&n).role(), Role::Label);
-        n.children = vec![2];
-        assert_eq!(one(&n).role(), Role::Label);
-    }
-
-    #[test]
     fn class_roles() {
         for (class, clickable, want) in [
             ("android.widget.Button", false, Role::Button),
+            ("android.widget.CheckedTextView", false, Role::Label),
             ("android.widget.CheckBox", false, Role::CheckBox),
             ("android.widget.ImageView", false, Role::Image),
             ("android.widget.ImageView", true, Role::Button),

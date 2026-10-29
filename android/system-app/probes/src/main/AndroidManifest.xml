@@ -150,20 +150,6 @@
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
       android:exported="true" />
     <provider android:name=".HandoffProbe$FileProvider" android:authorities="dev.linuxapk.probes.handoff" android:exported="false" android:grantUriPermissions="true" />
-    <receiver android:name=".HandoffProbe$HandlerControl" android:exported="false" />
-    <activity android:name=".HandoffProbe$Claimed" android:exported="true" android:enabled="false" android:theme="@android:style/Theme.NoDisplay">
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <category android:name="android.intent.category.BROWSABLE" />
-        <data android:scheme="mailto" />
-      </intent-filter>
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <data android:mimeType="application/vnd.oasis.opendocument.text" />
-      </intent-filter>
-    </activity>
     <activity android:name=".LifecycleProbe" android:exported="true" />
     <service android:name=".LifecycleProbe$Media" android:foregroundServiceType="mediaPlayback" android:exported="false" />
     <receiver android:name=".LifecycleProbe$Alarm" android:exported="false">

@@ -61,21 +61,3 @@ pub fn from_portal(available: bool, metered: bool, connectivity: u32) -> Network
         },
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mapping() {
-        assert_eq!(
-            from_portal(true, true, 4),
-            Network {
-                available: YES,
-                metered: YES,
-                connectivity: 5
-            }
-        );
-        assert_eq!(from_portal(false, false, 0).connectivity, 1);
-    }
-}

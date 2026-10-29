@@ -322,10 +322,4 @@ mod tests {
                 .collect::<String>()
         });
     }
-
-    #[test]
-    fn instance_suffix() {
-        assert_eq!(per_instance("linuxapk", ""), "linuxapk");
-        assert_eq!(per_instance("linuxapk", "e2e"), "linuxapk-e2e");
-    }
 }

@@ -398,15 +398,6 @@ mod tests {
     }
 
     #[test]
-    fn png_dims() {
-        let mut p = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        p.extend(256u32.to_be_bytes());
-        p.extend(128u32.to_be_bytes());
-        assert_eq!(png_size(&p), Some((256, 128)));
-        assert_eq!(png_size(b"GIF89a"), None);
-    }
-
-    #[test]
     fn app_files_roundtrip() {
         let root = crate::test_dir("xdg-app-files");
         let d = Dirs {

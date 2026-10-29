@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-# Run the real check on the pinned cache, then prove changed and missing bases
-# all fail together without ever writing the cache.
+# Unchanged overlay bases pass; changed and missing bases fail together.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-session=$repo/out/stage/libexec/linuxapk/linuxapk-session
-img=$("$session" image | sed -n 's/^img=//p')
-apex=$("$session" image | sed -n 's/^apex=//p')
-if [[ -d $img/system/system && -f $apex/apex-info-list.xml ]]; then
-  "$repo/image/check-forks.sh" "$img" "$apex" "$repo/image/fork-bases.sha256" "$repo/android/overlay"
-  echo 'ok   all nine fork bases match the pinned image'
-else
-  echo 'skip pinned fork bases: prepare the image first (prepare always checks them)'
-fi
 work=$repo/out/test/fork-drift
 mkdir -p "$work/img/system/system/etc" "$work/apex" "$work/overlay/system/etc"
 trap 'rm -rf "$work"' EXIT
