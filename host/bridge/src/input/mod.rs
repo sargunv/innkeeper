@@ -77,6 +77,7 @@ impl Service for InputService {
                 self.hub.destroy(window);
                 Reply::ok()
             }
+            Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
             Request::TextInput(r) => {
                 self.hub.text_input(r);
                 Reply::ok()

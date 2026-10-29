@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<resources>
+  <!-- Enable the remote-controller path; the system app registers only on its own displays. -->
+  <bool name="config_remoteInsetsControllerControlsSystemBars">true</bool>
+</resources>

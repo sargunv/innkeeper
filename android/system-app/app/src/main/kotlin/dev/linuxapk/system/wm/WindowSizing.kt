@@ -46,13 +46,13 @@ data class WindowSizing(
       return WindowSizing(maxOf(w, minW), maxOf(h, minH), minW, minH)
     }
 
-    private fun isPortrait(o: Int) =
+    fun isPortrait(o: Int) =
       o == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT ||
         o == ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT ||
         o == ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT ||
         o == ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
 
-    private fun isLandscape(o: Int) =
+    fun isLandscape(o: Int) =
       o == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
         o == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE ||
         o == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE ||

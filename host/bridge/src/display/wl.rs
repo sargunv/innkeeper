@@ -52,12 +52,15 @@ use wayland_protocols::xdg::activation::v1::client::{
 };
 
 use super::proto::{BufferSpec, event, ty};
-use crate::input::proto::WindowRequest;
+use crate::input::proto::{WindowPolicy, WindowRequest};
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
 
 mod data_device;
 mod foreign;
+mod policy;
+
+use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_window_state};
 
 /// Work for the Wayland thread.
 pub enum Cmd {
@@ -77,6 +80,7 @@ pub enum Cmd {
     },
     /// A request from the Linux.apk IME.
     TextInput(ime::Req),
+    WindowPolicy(WindowPolicy),
     Quit,
 }
 
@@ -110,6 +114,10 @@ struct Win {
     scale120: u32,
     configured: bool,
     fullscreen: bool,
+    constrained: bool,
+    policy: Policy,
+    /// Last windowed content size, restored if the compositor leaves size unspecified.
+    windowed_size: (u32, u32),
     /// Buffer shown now (its size maps input), and the last one asked for.
     shown: Option<u32>,
     shown_size: (u32, u32),
@@ -277,13 +285,76 @@ impl State {
         self.windows.get(&id).map_or(120, |w| w.scale120.max(1))
     }
 
-    pub(crate) fn toggle_fullscreen(&self, id: u32) {
-        if let Some(w) = self.windows.get(&id) {
-            if w.fullscreen {
-                w.window.unset_fullscreen();
-            } else {
+    pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
+        self.apply_window_policy(id, PolicyEvent::ToggleFullscreen);
+    }
+
+    pub(crate) fn rotate(&mut self, id: u32) {
+        self.apply_window_policy(id, PolicyEvent::Rotate);
+    }
+
+    /// A client chooses its floating size; the policy allows this only while floating.
+    fn swap_shape(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        std::mem::swap(&mut w.width, &mut w.height);
+        w.windowed_size = (w.width, w.height);
+        if let Some(f) = w.frame.as_mut().filter(|f| !f.is_hidden()) {
+            f.resize(
+                NonZeroU32::new(w.width).unwrap(),
+                NonZeroU32::new(w.height).unwrap(),
+            );
+            let (x, y) = f.location();
+            let (width, height) = f.add_borders(w.width, w.height);
+            w.window
+                .xdg_surface()
+                .set_window_geometry(x, y, width as i32, height as i32);
+            f.draw();
+        } else {
+            w.window
+                .xdg_surface()
+                .set_window_geometry(0, 0, w.width as i32, w.height as i32);
+        }
+        if let Some(v) = &w.viewport {
+            v.set_destination(w.width as i32, w.height as i32);
+        }
+        w.window.commit();
+        self.send_configure(id);
+    }
+
+    fn window_policy(&mut self, p: WindowPolicy) {
+        self.apply_window_policy(
+            p.window,
+            PolicyEvent::App(AppRequest {
+                immersive: p.immersive,
+                fullscreen: p.fullscreen,
+                shape: p.orientation,
+            }),
+        );
+    }
+
+    fn apply_window_policy(&mut self, id: u32, event: PolicyEvent) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        let compositor = WindowState {
+            fullscreen: w.fullscreen,
+            shape: if w.width <= w.height { 1 } else { 2 },
+            constrained: w.constrained,
+        };
+        let (policy, desired, fullscreen_request) =
+            desired_window_state(w.policy, event, compositor);
+        w.policy = policy;
+        if let Some(fullscreen) = fullscreen_request {
+            if fullscreen {
                 w.window.set_fullscreen(None);
+            } else {
+                w.window.unset_fullscreen();
             }
+        }
+        if desired.shape != 0 && desired.shape != compositor.shape {
+            self.swap_shape(id);
         }
     }
 
@@ -435,6 +506,9 @@ impl State {
                 scale120: 120,
                 configured: false,
                 fullscreen: false,
+                constrained: false,
+                policy: Policy::default(),
+                windowed_size: (width, height),
                 shown: None,
                 shown_size: (0, 0),
                 token: (!s.token.is_empty()).then_some(s.token),
@@ -608,6 +682,7 @@ impl State {
                 damage,
             } => self.frame(window, buffer, damage),
             Cmd::TextInput(r) => self.text_input(r),
+            Cmd::WindowPolicy(p) => self.window_policy(p),
             Cmd::Quit => self.quit = true,
         }
     }
@@ -642,7 +717,13 @@ impl WindowHandler for State {
             self.subcompositor.clone(),
         );
         let w = self.windows.get_mut(&id).unwrap();
-        let (width, height) = if c.decoration_mode == DecorationMode::Client {
+        let was_fullscreen = w.fullscreen;
+        if w.fullscreen && !c.is_fullscreen() {
+            (w.width, w.height) = w.windowed_size;
+        } else if !w.fullscreen && c.is_fullscreen() {
+            w.windowed_size = (w.width, w.height);
+        }
+        let (width, height) = if c.decoration_mode == DecorationMode::Client && !c.is_fullscreen() {
             if w.frame.is_none() {
                 match AdwaitaFrame::new(
                     &w.window,
@@ -701,6 +782,7 @@ impl WindowHandler for State {
         w.height = height;
         w.configured = true;
         w.fullscreen = c.is_fullscreen();
+        w.constrained = c.is_maximized() || c.is_tiled();
         if let Some(v) = &w.viewport {
             v.set_destination(width as i32, height as i32);
         }
@@ -711,6 +793,7 @@ impl WindowHandler for State {
         }
         w.window.commit();
         self.send_configure(id);
+        self.apply_window_policy(id, PolicyEvent::Configure { was_fullscreen });
     }
 }
 

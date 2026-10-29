@@ -8,6 +8,8 @@ import android.app.TaskStackListener
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
 import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
 import android.hardware.display.DisplayManager
@@ -19,6 +21,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
+import android.view.WindowInsets
 import android.view.WindowManagerGlobal
 import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
@@ -107,6 +110,12 @@ class WindowManagerFeature(
     var hadTask = false
     var mapped = false
     var resize: Runnable? = null
+    var requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    var topActivity: ComponentName? = null
+    val orientations = HashMap<Pair<Int, ComponentName>, Int>()
+    var requestedVisibleTypes = WindowInsets.Type.systemBars()
+    var insetComponent: ComponentName? = null
+    var game = false
   }
 
   /** One row of [list]. */
@@ -317,10 +326,29 @@ class WindowManagerFeature(
       return null
     }
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
+    val ai = context.packageManager.getApplicationInfo(pkg, 0)
+    @Suppress("DEPRECATION")
+    w.game =
+      ai.category == ApplicationInfo.CATEGORY_GAME || ai.flags and ApplicationInfo.FLAG_IS_GAME != 0
     windows[w.id] = w
     changed()
     try {
       wms.setDisplayImePolicy(w.id, DISPLAY_IME_POLICY_LOCAL)
+      // The host window chooses display geometry. WMS letterboxes an activity that cannot fit
+      // that orientation instead of rotating our output buffer behind the compositor's back.
+      wms.setIgnoreOrientationRequest(w.id, true)
+      wms.setDisplayWindowInsetsController(
+        w.id,
+        RequestedInsets { component, types ->
+          handler.post {
+            if (windows[w.id] === w) {
+              w.requestedVisibleTypes = types
+              w.insetComponent = component
+              sendPolicy(w)
+            }
+          }
+        },
+      )
     } catch (e: Exception) {
       Log.w(TAG, "setDisplayImePolicy(${w.id}): $e")
     }
@@ -365,6 +393,7 @@ class WindowManagerFeature(
     }
     input.destroyWindow(w.id)
     // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
+    wms.setDisplayWindowInsetsController(w.id, null)
     w.display.release()
     w.reader.close()
   }
@@ -411,6 +440,7 @@ class WindowManagerFeature(
         windows[e.display]?.let {
           it.mapped = true
           it.shown.countDown()
+          sendPolicy(it)
         }
       is HostEvent.WindowUnmapped -> {
         // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
@@ -443,6 +473,32 @@ class WindowManagerFeature(
     w.display.resize(width, height, dpi)
   }
 
+  private fun sendPolicy(w: AppWindow) {
+    if (!w.mapped) return
+    val orientation =
+      when {
+        WindowSizing.isPortrait(w.requestedOrientation) -> 1
+        WindowSizing.isLandscape(w.requestedOrientation) -> 2
+        else -> 0
+      }
+    val sensorOrientation =
+      w.requestedOrientation in
+        intArrayOf(
+          ActivityInfo.SCREEN_ORIENTATION_SENSOR,
+          ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR,
+          ActivityInfo.SCREEN_ORIENTATION_USER,
+          ActivityInfo.SCREEN_ORIENTATION_FULL_USER,
+        )
+    val bars = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+    val immersive = w.requestedVisibleTypes and bars == 0
+    val fullscreen =
+      w.game &&
+        w.insetComponent?.packageName == w.pkg &&
+        immersive &&
+        (orientation == 2 || sensorOrientation)
+    input.windowPolicy(w.id, orientation, fullscreen, immersive)
+  }
+
   private fun focus(w: AppWindow, activate: Boolean, token: String = "") {
     try {
       atm.focusTopTask(w.id)
@@ -456,6 +512,21 @@ class WindowManagerFeature(
 
   private val taskListener =
     object : TaskStackListener() {
+      override fun onActivityRequestedOrientationChanged(taskId: Int, requestedOrientation: Int) {
+        handler.post {
+          val t = allTasks().firstOrNull { it.taskId == taskId } ?: return@post
+          val w = windows[Tasks.displayId(t)] ?: return@post
+          if (allTasks().firstOrNull { Tasks.displayId(it) == w.id }?.taskId != taskId) return@post
+          w.topActivity = t.topActivity
+          t.topActivity?.let { w.orientations[taskId to it] = requestedOrientation }
+          w.requestedOrientation = requestedOrientation
+          Log.i(TAG, "display ${w.id}: requested orientation=$requestedOrientation task=$taskId")
+          sendPolicy(w)
+        }
+      }
+
+      override fun onTaskStackChanged() = queueRefresh()
+
       override fun onTaskCreated(taskId: Int, componentName: ComponentName?) = queueRefresh()
 
       override fun onTaskRemoved(taskId: Int) = queueRefresh()
@@ -503,6 +574,17 @@ class WindowManagerFeature(
           it.topActivity?.className != AppWarningActivity::class.java.name
         }
       w.tasks = ts.map { it.taskId }
+      w.orientations.keys.retainAll { it.first in w.tasks }
+      val top = ts.firstOrNull()
+      if (top?.topActivity != w.topActivity) {
+        w.topActivity = top?.topActivity
+        w.requestedOrientation =
+          top?.let { t ->
+            t.topActivity?.let { w.orientations[t.taskId to it] }
+              ?: Tasks.topActivityInfo(t)?.screenOrientation
+          } ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        sendPolicy(w)
+      }
       when {
         ts.isNotEmpty() && !w.hadTask -> {
           w.hadTask = true

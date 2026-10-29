@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use calloop::channel::Sender;
 
 use super::ime;
-use super::proto::{WindowRequest, event, ty};
+use super::proto::{WindowPolicy, WindowRequest, event, ty};
 use crate::display::wl::Cmd;
 use crate::ipc::Subscribers;
 use crate::ipc::server::Events;
@@ -104,6 +104,15 @@ impl Hub {
             s.displays[&conn].send(Cmd::ExportToken(window, tx)).ok()?;
         }
         rx.recv_timeout(Duration::from_secs(1)).ok()
+    }
+
+    /// Applies Android's policy to this display's toplevel only.
+    pub fn window_policy(&self, policy: WindowPolicy) -> Result<(), i32> {
+        let s = self.state.lock().unwrap();
+        let (conn, _) = s.shown.get(&policy.window).ok_or(-ENOENT)?;
+        s.displays[conn]
+            .send(Cmd::WindowPolicy(policy))
+            .map_err(|_| -EIO)
     }
 
     /// Drops a queued request, or closes a shown window.

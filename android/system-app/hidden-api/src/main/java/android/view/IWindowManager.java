@@ -5,5 +5,10 @@ package android.view;
 import android.os.RemoteException;
 
 public interface IWindowManager extends android.os.IInterface {
+  void setDisplayWindowInsetsController(int displayId, IDisplayWindowInsetsController controller)
+      throws RemoteException;
+
+  void setIgnoreOrientationRequest(int displayId, boolean ignore) throws RemoteException;
+
   void setDisplayImePolicy(int displayId, int imePolicy) throws RemoteException;
 }

@@ -10,6 +10,13 @@ object Tasks {
     android.app.TaskInfo::class.java.getField("topActivityType")
   }
 
+  private val topActivityInfoField by lazy {
+    android.app.TaskInfo::class.java.getField("topActivityInfo")
+  }
+
+  fun topActivityInfo(t: ActivityManager.RunningTaskInfo): android.content.pm.ActivityInfo? =
+    topActivityInfoField.get(t) as? android.content.pm.ActivityInfo
+
   // WindowConfiguration.ACTIVITY_TYPE_*
   private const val ACTIVITY_TYPE_UNDEFINED = 0
   private const val ACTIVITY_TYPE_STANDARD = 1

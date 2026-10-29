@@ -93,7 +93,45 @@ window's scale:
 3. else 1280x800.
 
 `<layout android:minWidth/minHeight>` become the toplevel's minimum size.
-`resizeableActivity=false` gets no special case: Android letterboxes it.
+Runtime `onActivityRequestedOrientationChanged` requests, and changes of the top
+activity, swap a floating window's width and height when its shape disagrees
+with a fixed portrait/landscape request. Ctrl+R swaps the focused floating
+window's shape. Like WMShell's `DesktopActivityOrientationChangeHandler`, this
+is a request to reshape the window; a later compositor configure wins. The
+virtual display ignores physical rotation requests, so Android keeps the
+activity's aspect ratio by letterboxing inside the display buffer when
+necessary.
+
+### Fullscreen and immersive
+
+F11 toggles the focused window's desktop fullscreen mode. The compositor's
+window menu also offers fullscreen where supported. Normal immersive apps keep
+their window: hiding Android's bars offers fullscreen without forcing it, as in
+WMShell's `DesktopImmersiveController`. Games (`ApplicationInfo`'s game category
+or legacy game flag) automatically enter desktop fullscreen when they request
+both status and navigation bars hidden together with landscape or sensor
+orientation. Showing the bars again restores the previous window. A manual F11
+or native-menu exit takes precedence until the next visible-to-hidden immersive
+entry. User-entered fullscreen remains in effect until the user exits it. A pure
+per-window policy function computes fullscreen and shape requests for every app,
+shortcut and compositor event; only its result is applied to Wayland.
+
+The system app registers `IDisplayWindowInsetsController` on its own displays.
+Android 17 reports the focused component and **requested** visible inset types
+through `topFocusedWindowChanged`, even without system-bar surfaces. A small
+platform-signed RRO enables `config_remoteInsetsControllerControlsSystemBars`,
+which gates that callback. This hidden interface is needed because no public or
+system SDK API observes another app's requested bar visibility; using
+`TaskOrganizer` instead would take task and surface ownership from WMShell.
+`TaskStackListener` and `TaskInfo.topActivityInfo` supply orientation changes
+and activity metadata for the same reason: SDK display listeners don't report
+another activity's request. Signatures and behavior were checked against
+`android-17.0.0_r1` and the pinned Android 17 image; the image is not patched.
+
+`Activity.requestFullscreenMode` is a separate, currently unsupported request:
+Android rejects it before dispatch because each app task already fills its
+Android virtual display. Supporting it requires a task-mode/transition policy
+([#77](https://github.com/sargunv/linux.apk/issues/77)).
 
 ### Launch feedback
 
