@@ -179,12 +179,10 @@ fn busy(paths: &Paths) -> Option<String> {
 
 /// Watches the session's activity on a thread of its own. After
 /// `cfg.idle_grace` seconds of idleness it calls `end` with the next wakeup
-/// (ms since the epoch), once. Does nothing if the grace period is 0.
+/// (ms since the epoch), once. Preferences are re-read so timeout changes apply live.
 pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
-    if cfg.idle_grace == 0 {
-        return;
-    }
-    let grace = Duration::from_secs(cfg.idle_grace);
+    let fixed_grace = (cfg.headless || std::env::var_os("LINUXAPK_IDLE_GRACE").is_some())
+        .then_some(cfg.idle_grace);
     let paths = cfg.paths.clone();
     thread::spawn(move || {
         let mut idle_since: Option<Instant> = None;
@@ -192,6 +190,12 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
         let mut asked_background = false;
         loop {
             thread::sleep(poll());
+            let seconds = fixed_grace.unwrap_or_else(|| {
+                crate::preferences::Preferences::load()
+                    .map(|p| p.idle_seconds())
+                    .unwrap_or(120)
+            });
+            let grace = Duration::from_secs(seconds);
             let why = busy(&paths);
             // In Flatpak, running with no window is the Background portal's
             // to allow.
@@ -207,7 +211,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
                 session::log(&paths, &format!("activity: {state}"));
                 last = state;
             }
-            if why.is_some() {
+            if why.is_some() || seconds == 0 {
                 idle_since = None;
                 continue;
             }

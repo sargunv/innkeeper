@@ -361,6 +361,8 @@ pub struct Settings {
     pub color_scheme: u8,
     /// `accent-color` as sRGB bytes.
     pub accent: Option<[u8; 3]>,
+    /// Opt out: has_accent=2 leaves Android’s accent untouched.
+    pub accent_disabled: bool,
     /// `contrast`: 0 normal, 1 high.
     pub contrast: u8,
     /// `reduced-motion`: 0 no preference, 1 reduced.
@@ -385,7 +387,11 @@ impl Settings {
         let mut w = Writer::default();
         let [r, g, b] = self.accent.unwrap_or_default();
         w.u8(self.color_scheme)
-            .u8(self.accent.is_some() as u8)
+            .u8(if self.accent_disabled {
+                2
+            } else {
+                self.accent.is_some() as u8
+            })
             .u8(r)
             .u8(g)
             .u8(b)
@@ -403,11 +409,15 @@ impl Settings {
     pub fn decode(body: &[u8]) -> Result<Settings, DecodeError> {
         let mut r = Reader::new(body);
         let color_scheme = r.u8()?;
-        let has_accent = r.bool()?;
+        let has_accent = r.u8()?;
+        if has_accent > 2 {
+            return Err(DecodeError::Invalid("accent policy"));
+        }
         let rgb = [r.u8()?, r.u8()?, r.u8()?];
         let s = Settings {
             color_scheme,
-            accent: has_accent.then_some(rgb),
+            accent: (has_accent == 1).then_some(rgb),
+            accent_disabled: has_accent == 2,
             contrast: r.u8()?,
             reduced_motion: r.u8()?,
             clock: r.u8()?,
@@ -550,6 +560,7 @@ mod tests {
         let s = Settings {
             color_scheme: 1,
             accent: Some([0x3d, 0xae, 0xe9]),
+            accent_disabled: false,
             contrast: 0,
             reduced_motion: 1,
             clock: 2,

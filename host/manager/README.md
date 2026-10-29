@@ -32,3 +32,24 @@ session D-Bus API
 ([protocol](../../docs/bridge-protocol.md#desktop-session-api-version-1)). Clear
 data and uninstall ask for confirmation. Operations disable the controls until
 Android answers, and then refresh all values; errors offer a fresh read.
+
+The main menu's Preferences page (`src/preferences.rs`, Ctrl+,) controls desktop
+appearance, language/region and clock following (each on by default), idle
+shutdown, app-menu mirroring and the optional installed microG addon. It also
+keeps the single-uid notice visible and opens Android Settings in its own
+window. Turning off desktop following keeps Android's current value; subsequent
+changes in Android Settings are left alone. Turning off mirroring keeps existing
+launchers; turning it back on catches up apps installed while it was off.
+
+When idle, Android stops after 2 minutes by default (adjustable from 1 to 120).
+Keep Running instead disables idle shutdown and requests login startup through
+the Background portal; a denied request leaves the setting unchanged. Login
+startup is only available for the main instance. microG uses the separately
+installed addon described in [its README](../../android/microg/README.md); the
+switch is unavailable without the addon and takes effect at the next Android
+start. Play Services client libraries remain unsupported.
+
+Preferences live in `$XDG_CONFIG_HOME/linuxapk[-<instance>]/preferences.toml`.
+The page reads them without starting Android. A running session accepts updates
+through `Session1`; otherwise they are saved for the next start. Desktop
+following, mirroring and the idle timeout change live.

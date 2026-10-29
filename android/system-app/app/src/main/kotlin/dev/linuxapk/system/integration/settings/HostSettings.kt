@@ -20,6 +20,7 @@ import org.json.JSONObject
 data class DesktopSettings(
   val colorScheme: Int,
   val accent: Int?,
+  val followAccent: Boolean,
   val contrast: Int,
   val reducedMotion: Int,
   val clock: Int,
@@ -32,14 +33,15 @@ data class DesktopSettings(
   companion object {
     fun decode(r: ByteBuffer): DesktopSettings {
       val scheme = r.get().toInt() and 0xff
-      val hasAccent = r.get().toInt() != 0
+      val hasAccent = r.get().toInt() and 0xff
       val rgb =
         ((r.get().toInt() and 0xff) shl 16) or
           ((r.get().toInt() and 0xff) shl 8) or
           (r.get().toInt() and 0xff)
       return DesktopSettings(
         colorScheme = scheme,
-        accent = if (hasAccent) rgb else null,
+        accent = if (hasAccent == 1) rgb else null,
+        followAccent = hasAccent != 2,
         contrast = r.get().toInt() and 0xff,
         reducedMotion = r.get().toInt() and 0xff,
         clock = r.get().toInt() and 0xff,
@@ -71,7 +73,10 @@ class HostSettings(private val context: Context) {
     Log.i(TAG, "desktop settings: $s")
     fun changed(f: (DesktopSettings) -> Any?) = prev == null || f(prev) != f(s)
     step("dark mode") { if (changed { it.colorScheme }) darkMode(s.colorScheme) }
-    step("accent") { if (changed { it.accent }) accent(s.accent, prev == null) }
+    step("accent") {
+      if (s.followAccent && (changed { it.accent } || changed { it.followAccent }))
+        accent(s.accent, prev == null)
+    }
     step("contrast") { if (changed { it.contrast }) contrast(s.contrast, prev == null) }
     step("motion") { if (changed { it.reducedMotion }) motion(s.reducedMotion, prev == null) }
     step("time zone") { if (changed { it.timezone }) timezone(s.timezone) }

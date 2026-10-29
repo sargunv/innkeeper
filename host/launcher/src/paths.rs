@@ -189,6 +189,12 @@ impl Paths {
                 d.flatten()
                     .map(|e| e.path())
                     .filter(|p| p.is_dir())
+                    .filter(|p| {
+                        p.file_name().is_none_or(|n| n != "microg")
+                            || crate::preferences::Preferences::load()
+                                .map(|s| s.microg)
+                                .unwrap_or(true)
+                    })
                     .collect()
             })
             .unwrap_or_default();

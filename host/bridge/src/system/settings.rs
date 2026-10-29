@@ -71,7 +71,12 @@ impl SettingsHub {
     }
 
     pub fn current(&self) -> Settings {
-        self.state.lock().unwrap().s.clone()
+        filtered(self.state.lock().unwrap().s.clone())
+    }
+
+    pub fn refresh_preferences(&self) {
+        self.subs
+            .broadcast(ev::SETTINGS, &self.current().encode(), &[], None);
     }
 
     /// Subscribes `e` and sends it the current settings.
@@ -97,7 +102,7 @@ impl SettingsHub {
                 return;
             }
             crate::info!("settings: {:?}", st.s);
-            st.s.encode()
+            filtered(st.s.clone()).encode()
         };
         self.subs.broadcast(ev::SETTINGS, &body, &[], None);
     }
@@ -134,6 +139,32 @@ impl SettingsHub {
         }
         crate::warn!("settings: portal signal stream ended");
     }
+}
+
+fn filtered(settings: Settings) -> Settings {
+    filter(
+        settings,
+        &linuxapk_core::preferences::Preferences::load().unwrap_or_default(),
+    )
+}
+
+fn filter(mut settings: Settings, p: &linuxapk_core::preferences::Preferences) -> Settings {
+    if !p.follow_dark {
+        settings.color_scheme = 0;
+    }
+    if !p.follow_accent {
+        settings.accent = None;
+        settings.accent_disabled = true;
+    }
+    if !p.follow_clock {
+        settings.clock = 0;
+    }
+    if !p.follow_locale {
+        settings.locales.clear();
+        settings.time_locale.clear();
+        settings.measure_locale.clear();
+    }
+    settings
 }
 
 /// Read Plasma's DND immediately before each popup, without a stale property
@@ -383,6 +414,43 @@ fn bcp47_list(tags: impl Iterator<Item = String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opt_outs_leave_other_desktop_settings_intact() {
+        let settings = Settings {
+            color_scheme: 1,
+            accent: Some([10, 20, 30]),
+            clock: 2,
+            locales: "de-DE".into(),
+            time_locale: "en-GB".into(),
+            measure_locale: "en-US".into(),
+            timezone: "Europe/Berlin".into(),
+            contrast: 1,
+            ..Settings::default()
+        };
+        let p = linuxapk_core::preferences::Preferences::default();
+        assert_eq!(filter(settings.clone(), &p), settings);
+        let off = linuxapk_core::preferences::Preferences {
+            follow_dark: false,
+            follow_accent: false,
+            follow_clock: false,
+            follow_locale: false,
+            ..p
+        };
+        let filtered = filter(settings, &off);
+        assert_eq!(filtered.color_scheme, 0);
+        assert_eq!(filtered.accent, None);
+        assert!(filtered.accent_disabled);
+        assert_eq!(filtered.clock, 0);
+        assert!(
+            filtered.locales.is_empty()
+                && filtered.time_locale.is_empty()
+                && filtered.measure_locale.is_empty()
+        );
+        assert_eq!(filtered.timezone, "Europe/Berlin");
+        assert_eq!(filtered.contrast, 1);
+        assert_eq!(Settings::decode(&filtered.encode()).unwrap(), filtered);
+    }
 
     #[test]
     fn posix_locales() {
