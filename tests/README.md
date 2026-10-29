@@ -20,9 +20,13 @@ Two gate tiers, both testing observable behaviour we own:
   restart). Locally the whole command has a 55 s deadline (plus at most 4 s for
   cleanup) on a warm image. GitHub Actions sets `LINUXAPK_E2E_DEADLINE=180` for
   its four-vCPU software-rendered desktop; that override is ignored outside
-  GitHub Actions. The runner prints its total wall time and each setup phase and
-  group's elapsed time/status, including interrupted phases, and saves those
-  timings in `out/test/e2e/<instance>/timings.log`. CI uploads that directory in
+  GitHub Actions. Setup observation waits scale from 20 s at the local 55 s
+  deadline to 66 s at CI's 180 s deadline, bounded by the total deadline. Group
+  observation waits remain 20 s. The keeper holds the session's busy lock before
+  boot polling so the lifecycle test's short idle grace cannot stop setup. The
+  runner prints its total wall time and each setup phase and group's elapsed
+  time/status, including interrupted phases, and saves those timings in
+  `out/test/e2e/<instance>/timings.log`. CI uploads that directory in
   `checks-logs` even on failure. Setup boots once and installs the probes; audio
   runs concurrently with the activity checks. Groups wait for observations,
   rather than fixed delays. Lifecycle uses named-session-only short timers.

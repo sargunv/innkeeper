@@ -37,7 +37,7 @@ wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxap
 # Poll observations, returning as soon as they arrive; the outer group deadline
 # also bounds a command that stops answering.
 until_ok() {
-  local end=$((SECONDS + 20))
+  local end=$((SECONDS + ${observation_wait:-20}))
   until "$@"; do
     ((SECONDS < end)) || {
       echo "FAIL waiting for $*" >&2
@@ -45,6 +45,10 @@ until_ok() {
     }
     sleep 0.1
   done
+}
+until_setup() {
+  local observation_wait=$(((20 * deadline + 54) / 55))
+  until_ok "$@"
 }
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
@@ -68,7 +72,7 @@ stop_session() {
   # The dev supervisor publishes its exit after the sandbox closes. Wait for
   # it before a restart, so its old completion cannot fail the new start.
   if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
-    until_ok test -f "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/ended"
+    until_setup test -f "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/ended"
   fi
 }
 
@@ -433,15 +437,16 @@ timed setup-stop stop_session
 timed setup-reset "$S" reset
 mkdir -p "$(dirname "$bridge_log")"
 : >"$bridge_log"
-timed setup-desktop until_ok file_has "$desktop_log" ready
+timed setup-desktop until_setup file_has "$desktop_log" ready
 timed setup-start "$S" start
-# Hold exec's existing busy lock while the other groups run. Lifecycle releases
-# it after scheduling its alarm, so no extra boot is needed to change timers.
-timed setup-boot until_ok booted
+# Hold exec's busy lock before boot polling: the system app can report idle
+# before boot completes, and the test's one-second grace must not stop setup.
+# Lifecycle releases it after scheduling its alarm.
 : >"$T/keeper.log"
 s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' >"$T/keeper.log" &
 keeper=$!
-timed setup-keeper until_ok file_has "$T/keeper.log" '^ready$'
+timed setup-keeper until_setup file_has "$T/keeper.log" '^ready$'
+timed setup-boot until_setup booted
 size=$(stat -c %s "$apk")
 timed setup-probes s cmd package install -r -g -S "$size" <"$apk"
 failed=()
