@@ -36,6 +36,12 @@
 //! window manager sends the current policy when mapped and when it changes.
 //! The bridge reshapes floating toplevels and translates fullscreen to xdg-shell.
 //!
+//! `WINDOW_APPEARANCE` (0x0606): u32 display, u32 primary colour (Android ARGB,
+//! 0: default caption), u32 blob length, one sealed memfd containing a blob
+//! RGBA image (u16 width/height, packed pixels; 0x0 clears the icon). Each side
+//! is at most 256 pixels; at most 262148 bytes. Sent on mapping and debounced
+//! TaskDescription changes. Unsupported icon protocols receive no fallback.
+//!
 //! **Input lines** are protocol v2: ASCII, space-separated fields, in the
 //! order the seat produced them.
 //!
@@ -98,6 +104,7 @@ pub mod ty {
     pub const WINDOW_DESTROY: u16 = 0x0603;
     pub const TEXT_INPUT: u16 = 0x0604;
     pub const WINDOW_POLICY: u16 = 0x0605;
+    pub const WINDOW_APPEARANCE: u16 = 0x0606;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -111,6 +118,8 @@ pub mod limits {
     pub const MAX_DIM: u32 = 16384;
     /// Densities, in dpi (160 is scale 1).
     pub const MAX_DPI: u32 = 160 * 8;
+    pub const MAX_ICON_SIDE: u16 = 256;
+    pub const MAX_ICON_BLOB: usize = 4 + MAX_ICON_SIDE as usize * MAX_ICON_SIDE as usize * 4;
     /// Longest line in an INPUT event.
     pub const MAX_LINE: usize = 400;
 }
@@ -156,6 +165,7 @@ pub enum Request {
     WindowDestroy { window: u32 },
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
+    WindowAppearance { window: u32, color: u32, len: u32 },
 }
 
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
@@ -177,6 +187,11 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             token: r.name()?,
         },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
+        ty::WINDOW_APPEARANCE => Request::WindowAppearance {
+            window: r.u32()?,
+            color: r.u32()?,
+            len: r.u32_in(4..=limits::MAX_ICON_BLOB as u32, "icon length")?,
+        },
         ty::WINDOW_POLICY => Request::WindowPolicy(WindowPolicy {
             window: r.u32()?,
             orientation: r.u32_in(0..=2, "orientation")?,
@@ -220,6 +235,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::WindowDestroy { window } => {
             w = Writer::message(ty::WINDOW_DESTROY, tag);
             w.u32(*window);
+        }
+        Request::WindowAppearance { window, color, len } => {
+            w = Writer::message(ty::WINDOW_APPEARANCE, tag);
+            w.u32(*window).u32(*color).u32(*len);
         }
         Request::WindowPolicy(p) => {
             w = Writer::message(ty::WINDOW_POLICY, tag);
@@ -295,6 +314,11 @@ mod tests {
                 token: String::new(),
             },
             Request::WindowDestroy { window: 3 },
+            Request::WindowAppearance {
+                window: 3,
+                color: 0xff1976d2,
+                len: 8,
+            },
             Request::TextInput(ime::Req::Surrounding {
                 text: "日本語 text".into(),
                 cursor: 3,

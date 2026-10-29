@@ -106,6 +106,23 @@ impl Hub {
         rx.recv_timeout(Duration::from_secs(1)).ok()
     }
 
+    pub fn window_appearance(
+        &self,
+        window: u32,
+        color: u32,
+        icon: Option<crate::ipc::blob::Image>,
+    ) -> Result<(), i32> {
+        let s = self.state.lock().unwrap();
+        let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
+        s.displays[conn]
+            .send(Cmd::WindowAppearance {
+                window,
+                color,
+                icon,
+            })
+            .map_err(|_| -EIO)
+    }
+
     /// Applies Android's policy to this display's toplevel only.
     pub fn window_policy(&self, policy: WindowPolicy) -> Result<(), i32> {
         let s = self.state.lock().unwrap();

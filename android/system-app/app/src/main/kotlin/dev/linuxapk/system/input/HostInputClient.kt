@@ -116,6 +116,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
       u32(window).u32(orientation).u32(if (fullscreen) 1 else 0).u32(if (immersive) 1 else 0)
     }
 
+  /** TaskDescription primary colour and a bounded RGBA icon in a sealed blob. */
+  fun windowAppearance(window: Int, color: Int, icon: ByteArray) =
+    connection.send(WINDOW_APPEARANCE, blob = icon) { u32(window).u32(color).u32(icon.size) }
+
   fun destroyWindow(window: Int) = connection.send(WINDOW_DESTROY) { u32(window) }
 
   /** One `ti_*` line for the host input method. Returns false if it wasn't sent. */
@@ -231,6 +235,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val WINDOW_DESTROY = 0x0603
     private const val TEXT_INPUT = 0x0604
     private const val WINDOW_POLICY = 0x0605
+    private const val WINDOW_APPEARANCE = 0x0606
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603
