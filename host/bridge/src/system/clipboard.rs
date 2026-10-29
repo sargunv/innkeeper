@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::{AsFd, OwnedFd};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -102,6 +103,7 @@ pub struct ClipboardHub {
     cache: std::path::PathBuf,
     subs: Subscribers,
     current: Mutex<Option<Clip>>,
+    epoch: AtomicU64,
 }
 
 impl ClipboardHub {
@@ -124,6 +126,7 @@ impl ClipboardHub {
             cache: files::cache_dir()?,
             subs: Subscribers::default(),
             current: Mutex::new(None),
+            epoch: AtomicU64::new(0),
         });
         let Some(manager) = manager else {
             crate::info!("clipboard: wl_data_device (while a window has focus)");
@@ -173,9 +176,10 @@ impl ClipboardHub {
                     types.insert(files::PORTAL_TYPE.into(), Arc::new(key));
                 }
                 types.insert("text/uri-list".into(), Arc::new(cached.uri_list()));
-                let mut gnome = b"copy\n".to_vec();
-                gnome.extend_from_slice(&cached.uri_list());
-                types.insert("x-special/gnome-copied-files".into(), Arc::new(gnome));
+                types.insert(
+                    "x-special/gnome-copied-files".into(),
+                    Arc::new(cached.gnome_copied_files()),
+                );
                 file = Some(cached);
             }
             Content::Text(t) => {
@@ -192,7 +196,9 @@ impl ClipboardHub {
         if clip.sensitive {
             types.insert(PASSWORD_HINT.into(), Arc::new(b"secret".to_vec()));
         }
-        *self.current.lock().unwrap() = Some(clip);
+        let mut current = self.current.lock().unwrap();
+        self.epoch.fetch_add(1, Ordering::Relaxed);
+        *current = Some(clip);
         let offered = Arc::new(Offered { types, _file: file });
         // Serialize attach and publication so a newly attached display cannot
         // miss the latest selection between subscribing and taking its snapshot.
@@ -225,8 +231,16 @@ impl ClipboardHub {
         true
     }
 
-    fn host_changed(&self, clip: Clip) {
-        if self.current.lock().unwrap().as_ref() == Some(&clip) {
+    /// Supersedes in-flight transfers on a new selection or publication. The
+    /// current lock serializes this with accepting a completed read and set().
+    pub(crate) fn invalidate_reads(&self) -> u64 {
+        let _current = self.current.lock().unwrap();
+        self.epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    }
+
+    fn host_changed(&self, epoch: u64, clip: Clip) {
+        let mut current = self.current.lock().unwrap();
+        if self.epoch.load(Ordering::Relaxed) != epoch || current.as_ref() == Some(&clip) {
             return;
         }
         // A host replacement must not replay the last Android offer when the
@@ -245,7 +259,7 @@ impl ClipboardHub {
             Ok((body, fd)) => self.subs.broadcast(ev::CLIP, &body, &[fd.as_fd()], None),
             Err(e) => crate::warn!("clipboard: memfd: {e}"),
         }
-        *self.current.lock().unwrap() = Some(clip);
+        *current = Some(clip);
     }
 }
 
@@ -407,13 +421,15 @@ impl Dispatch<ExtDataControlDeviceV1, ()> for State {
                 state.offers.insert(id.id(), Vec::new());
             }
             Event::Selection { id } => {
-                let Some(offer) = id else { return };
+                let Some(offer) = id else {
+                    if let Some(hub) = state.hub.upgrade() {
+                        hub.invalidate_reads();
+                    }
+                    return;
+                };
                 let types = state.offers.get(&offer.id()).cloned().unwrap_or_default();
                 // Offers are only good until the next selection; drop the rest.
                 state.offers.retain(|k, _| *k == offer.id());
-                if types.iter().any(|t| t == MARKER) {
-                    return; // our own selection
-                }
                 if let Some(hub) = state.hub.upgrade() {
                     receive(&offer, &types, conn, hub);
                 }
@@ -449,6 +465,7 @@ pub(crate) fn receive_offer(
     hub: Arc<ClipboardHub>,
     receive: impl FnOnce(&str, std::os::fd::BorrowedFd<'_>),
 ) {
+    let epoch = hub.invalidate_reads();
     if types.iter().any(|t| t == MARKER) {
         return;
     }
@@ -481,7 +498,7 @@ pub(crate) fn receive_offer(
                 }
             })();
             match result {
-                Ok(content) => hub.host_changed(Clip { content, sensitive }),
+                Ok(content) => hub.host_changed(epoch, Clip { content, sensitive }),
                 Err(e) => crate::warn!("clipboard: reading the host selection: {e:#}"),
             }
         });
@@ -605,5 +622,43 @@ impl Dispatch<ExtDataControlSourceV1, ()> for State {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(s: &str) -> Clip {
+        Clip {
+            content: Content::Text(s.into()),
+            sensitive: false,
+        }
+    }
+
+    #[test]
+    fn superseded_host_reads_cannot_replace_a_newer_clip() {
+        let hub = ClipboardHub {
+            cmd: None,
+            fallback: Mutex::new(Vec::new()),
+            offered: Mutex::new(None),
+            cache: std::path::PathBuf::new(),
+            subs: Subscribers::default(),
+            current: Mutex::new(None),
+            epoch: AtomicU64::new(0),
+        };
+        let old_host_read = hub.invalidate_reads();
+        hub.set(text("newer Android copy")).unwrap();
+        hub.host_changed(old_host_read, text("old host snapshot"));
+        assert_eq!(
+            *hub.current.lock().unwrap(),
+            Some(text("newer Android copy"))
+        );
+        let first = hub.invalidate_reads();
+        let second = hub.invalidate_reads();
+        hub.host_changed(second, text("newer host copy"));
+        hub.host_changed(first, text("slower old host copy"));
+        assert_eq!(*hub.current.lock().unwrap(), Some(text("newer host copy")));
+        assert!(hub.offered.lock().unwrap().is_none());
     }
 }

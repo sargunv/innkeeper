@@ -28,6 +28,8 @@ pub(crate) struct Clipboard {
     source: Option<(wl_data_source::WlDataSource, Arc<Offered>)>,
     pending: Option<Arc<Offered>>,
     serial: Option<u32>,
+    enter_snapshot: bool,
+    skip_snapshot: bool,
 }
 
 impl Clipboard {
@@ -67,6 +69,8 @@ impl Clipboard {
             source: None,
             pending: None,
             serial: None,
+            enter_snapshot: false,
+            skip_snapshot: false,
         }))
     }
 
@@ -78,6 +82,8 @@ impl Clipboard {
 
     pub(crate) fn focus(&mut self, serial: Option<u32>, qh: &QueueHandle<State>) {
         self.serial = serial;
+        self.enter_snapshot = serial.is_some();
+        self.skip_snapshot = false;
         self.publish(qh);
     }
 
@@ -88,6 +94,10 @@ impl Clipboard {
         let Some(offered) = self.pending.take() else {
             return;
         };
+        // The compositor sends its previous selection just after keyboard
+        // enter. A queued Android copy is newer than that focus snapshot.
+        self.skip_snapshot |= self.enter_snapshot;
+        self.hub.invalidate_reads();
         let source = self.manager.create_data_source(qh, Data);
         for mime in offered.types.keys() {
             source.offer(mime.clone());
@@ -107,6 +117,10 @@ impl Clipboard {
             self.types.remove(&id);
             old.destroy();
         }
+        self.enter_snapshot = false;
+        if std::mem::take(&mut self.skip_snapshot) {
+            return;
+        }
         if let Some(offer) = offer {
             let types = self.types.get(&offer.id()).cloned().unwrap_or_default();
             // Selection events are delivered on keyboard enter. Consume them
@@ -114,6 +128,8 @@ impl Clipboard {
             receive_offer(&types, conn, self.hub.clone(), |mime, fd| {
                 offer.receive(mime.into(), fd)
             });
+        } else {
+            self.hub.invalidate_reads();
         }
     }
 }

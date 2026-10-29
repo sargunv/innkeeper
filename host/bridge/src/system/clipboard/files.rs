@@ -125,6 +125,12 @@ impl CachedFile {
         format!("{}\r\n", url::Url::from_file_path(&self.path).unwrap()).into_bytes()
     }
 
+    pub fn gnome_copied_files(&self) -> Vec<u8> {
+        // Nautilus' format is LF-separated with no empty final item. It is
+        // distinct from text/uri-list, whose lines end in CRLF.
+        format!("copy\n{}", url::Url::from_file_path(&self.path).unwrap()).into_bytes()
+    }
+
     pub fn portal_key(&self) -> Option<Vec<u8>> {
         self.portal.as_ref().map(|(_, key)| key.as_bytes().to_vec())
     }
@@ -265,6 +271,12 @@ mod tests {
             portal: None,
         };
         let list = cached.uri_list();
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        assert_eq!(list, format!("{uri}\r\n").as_bytes());
+        assert_eq!(
+            cached.gnome_copied_files(),
+            format!("copy\n{uri}").as_bytes()
+        );
         assert!(std::str::from_utf8(&list).unwrap().contains("a%20b.txt"));
         let clip = read_uri_list(&list).unwrap();
         assert_eq!(clip.name, "a b.txt");
