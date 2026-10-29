@@ -130,6 +130,7 @@ impl Config {
             "XDG_CURRENT_DESKTOP",
             "DBUS_SYSTEM_BUS_ADDRESS",
             "LINUXAPK_GAMEPAD_TEST_DIR",
+            "LINUXAPK_BENCH",
         ] {
             if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
                 e.insert(v.into(), d);

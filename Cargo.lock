@@ -1321,6 +1321,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "linuxapk-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
 name = "linuxapk-bridge"
 version = "0.1.0"
 dependencies = [

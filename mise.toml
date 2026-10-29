@@ -156,6 +156,10 @@ description = "Manual app troubleshooting (-- --only PKG); full corpus only in n
 env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
 
+[tasks.bench]
+description = "Manual measurement harness (-- input frame audio gpu memory binder); never a test gate"
+run = "tests/bench/run.sh"
+
 # ---- run ---------------------------------------------------------------------
 
 [tasks.session]
