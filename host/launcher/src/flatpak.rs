@@ -2,8 +2,8 @@
 //! Linux.apk's own sandbox, which allows no namespaces, mounts or systemd
 //! units, but whose `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!
-//! - The root is composed on disk: per partition, reflink copies of the
-//!   image cache plus the layers above it, files read-only. It is
+//! - The root is composed on disk: per partition, hardlinks to the (read-only)
+//!   image cache plus copies of the layers above it, files read-only. It is
 //!   composed once per image, stage and addons, and only the start-time layer
 //!   goes on at each start.
 //! - `/` gets symlinks to it, the binder nodes and socket dirs; the broker
@@ -47,7 +47,7 @@ fn cp(args: &[&std::ffi::OsStr]) -> Result<()> {
 }
 
 /// A layer's files over the composed tree. `--remove-destination` unlinks a
-/// file before replacing it, so read-only layers can be overlaid.
+/// hardlinked file before replacing it, so the image cache is never written.
 fn over(layer: &Path, dst: &Path) -> Result<()> {
     if !layer.is_dir() {
         return Ok(());
@@ -136,6 +136,17 @@ fn compose(cfg: &Config) -> Result<()> {
     }
     remove_tree(r)?;
     fs::create_dir_all(r)?;
+    // Hardlinks to the image cache, or reflink copies where they can't cross
+    // mounts (the dev driver grants the image cache and the root separately).
+    let probe = r.join(".link");
+    let tree: &[&std::ffi::OsStr] =
+        if fs::hard_link(cfg.image.apexdir.join("apex-info-list.xml"), &probe).is_ok() {
+            &["-al".as_ref()]
+        } else {
+            &["-a".as_ref(), "--reflink=auto".as_ref()]
+        };
+    let _ = fs::remove_file(&probe);
+    let link = |src: &Path, dst: &Path| cp(&[tree, &[src.as_os_str(), dst.as_os_str()]].concat());
     let p = &cfg.paths;
     let addons = p.addon_layers();
     // Each partition's stack, bottom first (the reverse of host mode's
@@ -146,12 +157,7 @@ fn compose(cfg: &Config) -> Result<()> {
             continue;
         }
         let dst = r.join(part);
-        cp(&[
-            "-a".as_ref(),
-            "--reflink=auto".as_ref(),
-            src.as_os_str(),
-            dst.as_os_str(),
-        ])?;
+        link(&src, &dst)?;
         if LAYERED.contains(part) {
             let mut layers = vec![
                 cfg.image.derived.join("common").join(part),
@@ -165,12 +171,7 @@ fn compose(cfg: &Config) -> Result<()> {
         }
     }
     let apex = r.join("apex");
-    cp(&[
-        "-a".as_ref(),
-        "--reflink=auto".as_ref(),
-        cfg.image.apexdir.as_os_str(),
-        apex.as_os_str(),
-    ])?;
+    link(&cfg.image.apexdir, &apex)?;
     over(&cfg.uid_layer().join("apex"), &apex)?;
     files_read_only(r)?;
     // The uid mode's layer sets exact modes that code verifies (clatd's
@@ -491,8 +492,8 @@ pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Res
             ]
             .contains(&name.as_ref())
         {
-            // Flatpak initializes XDG_*_HOME itself. Set them in the child
-            // command, after that initialization, as the dev driver does.
+            // Flatpak sets XDG_*_HOME in the new sandbox over any --env;
+            // env(1) sets them after it.
             let mut a = OsString::new();
             a.push(&k);
             a.push("=");
