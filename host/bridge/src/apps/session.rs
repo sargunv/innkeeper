@@ -14,12 +14,14 @@ use crate::ipc::{
 
 pub const COMMAND: u16 = 0x4501;
 pub const RESULT: u16 = 0x0504;
+pub const BOOT_COMPLETED: u16 = 0x0505;
 type Answer = Result<String, String>;
 
 #[derive(Default)]
 struct State {
     next: u64,
     connection: Option<(u64, Events)>,
+    booted: bool,
     pending: HashMap<u64, mpsc::SyncSender<Answer>>,
     bus: Option<zbus::blocking::Connection>,
 }
@@ -28,6 +30,10 @@ struct State {
 pub struct Relay(Arc<Mutex<State>>);
 
 impl Relay {
+    fn booted(&self) -> bool {
+        self.0.lock().unwrap().booted
+    }
+
     pub fn attach(&self, events: Events) -> u64 {
         let mut state = self.0.lock().unwrap();
         if let Some((_, old)) = state.connection.take() {
@@ -37,6 +43,7 @@ impl Relay {
         state.next += 1;
         let id = state.next;
         state.connection = Some((id, events));
+        state.booted = false;
         drop(state);
         self.changed();
         id
@@ -46,8 +53,24 @@ impl Relay {
         let mut state = self.0.lock().unwrap();
         if state.connection.as_ref().is_some_and(|(k, _)| *k == id) {
             state.connection = None;
+            state.booted = false;
             state.pending.clear();
         }
+        drop(state);
+        self.changed();
+    }
+
+    pub fn boot_completed(&self, connection: u64) {
+        let mut state = self.0.lock().unwrap();
+        if state.booted
+            || !state
+                .connection
+                .as_ref()
+                .is_some_and(|(id, _)| *id == connection)
+        {
+            return;
+        }
+        state.booted = true;
         drop(state);
         self.changed();
     }
@@ -161,12 +184,9 @@ struct SessionApi {
 
 #[zbus::interface(name = "dev.linuxapk.Session1")]
 impl SessionApi {
-    /// Bridge presence means starting; the system app's apps channel means ready.
+    /// Booted only after the system app observes sys.boot_completed=1.
     fn state(&self) -> (bool, Vec<String>) {
-        (
-            self.relay.0.lock().unwrap().connection.is_some(),
-            self.input.open_packages(),
-        )
+        (self.relay.booted(), self.input.open_packages())
     }
 
     #[zbus(signal)]
@@ -216,5 +236,42 @@ impl SessionApi {
             .validate()
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
         self.relay.call(command).map_err(zbus::fdo::Error::Failed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn connection_does_not_mean_boot_completed() {
+        let relay = Relay::default();
+        assert!(!relay.booted());
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let first = relay.attach(Events::new(Arc::new(socket.into())));
+        assert!(!relay.booted());
+        relay.boot_completed(first);
+        assert!(relay.booted());
+
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let second = relay.attach(Events::new(Arc::new(socket.into())));
+        assert!(!relay.booted());
+        relay.boot_completed(first);
+        assert!(
+            !relay.booted(),
+            "an obsolete connection cannot complete boot"
+        );
+        relay.boot_completed(second);
+        assert!(relay.booted(), "a reconnect replays completed boot");
+        relay.detach(first);
+        assert!(relay.booted());
+        relay.detach(second);
+        assert!(!relay.booted());
+        relay.boot_completed(second);
+        assert!(
+            !relay.booted(),
+            "a disconnected channel cannot complete boot"
+        );
     }
 }

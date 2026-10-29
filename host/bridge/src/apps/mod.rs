@@ -344,6 +344,18 @@ impl Service for AppsService {
     }
 
     fn handle(&mut self, t: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
+        if t == session::BOOT_COMPLETED {
+            if !body.is_empty() || !fds.is_empty() {
+                return Reply::err(-EPROTO);
+            }
+            return match &self.session {
+                Some((relay, _, id)) => {
+                    relay.boot_completed(*id);
+                    Reply::ok()
+                }
+                None => Reply::err(-EPERM),
+            };
+        }
         if t == session::RESULT {
             return match &self.session {
                 Some((relay, _, id)) => match relay.complete(*id, body, fds) {
