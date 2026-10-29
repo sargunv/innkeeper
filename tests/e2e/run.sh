@@ -8,6 +8,7 @@ export LINUXAPK_E2E=1
 S=$repo/tools/dev/session.sh
 T=$repo/out/test/e2e/$LINUXAPK_INSTANCE
 desktop_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/desktop.log
+bridge_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/state/linuxapk-$LINUXAPK_INSTANCE/bridge.log
 apk=$repo/out/test/probes/LinuxApkProbes.apk
 s() { "$S" exec "$@"; }
 wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }
@@ -54,7 +55,9 @@ if [[ ${1:-} == --group ]]; then
     boot) "$S" selftest ;;
     input)
       launch InputProbeActivity
-      wm LIST | grep -q "display=$display package=dev.linuxapk.probes"
+      # shellcheck disable=SC2329 # invoked through until_ok
+      mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
+      until_ok mapped
       harness=$(s pm path dev.linuxapk.probes | sed -n 's/^package://p' | tr -d '\r')
       sed "s/DISPLAY/$display/" "$here/system-app/probe-stream.txt" |
         s sh -c "CLASSPATH=$harness app_process / dev.linuxapk.probes.InputStdinHarness" >"$T/input.txt"
@@ -77,8 +80,7 @@ if [[ ${1:-} == --group ]]; then
       ;;
     desktop)
       s am start -n dev.linuxapk.probes/.DesktopProbe --es action link >/dev/null
-      state=$("$S" paths | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
-      until_ok file_has "$state/bridge.log" 'openuri: .*https://example.com/linuxapk-e2e'
+      until_ok file_has "$bridge_log" 'openuri: .*https://example.com/linuxapk-e2e'
       s am start -n dev.linuxapk.probes/.NotificationProbe >/dev/null
       until_ok file_has "$desktop_log" 'notification: Ada Lovelace'
       s am start -n dev.linuxapk.probes/.ClipProbe --es text linuxapk-e2e-clipboard >/dev/null
@@ -128,7 +130,11 @@ done
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   start=$(date +%s%N)
   result=0
-  timeout --kill-after=5 52 "$repo/tests/nested.sh" "$0" "${groups[@]}" || result=$?
+  timeout --kill-after=5 52 "$repo/tests/nested.sh" "$0" "${groups[@]}" &
+  runner=$!
+  trap 'kill -TERM "$runner" 2>/dev/null || true; wait "$runner" 2>/dev/null || true' INT TERM
+  wait "$runner" || result=$?
+  trap - INT TERM
   end=$(date +%s%N)
   /usr/bin/python3 -c 'import sys; print(f"e2e: TOTAL wall={(int(sys.argv[2])-int(sys.argv[1]))/1e9:.2f}s")' "$start" "$end"
   exit "$result"
@@ -147,13 +153,16 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 stop_session
 "$S" reset >/dev/null
+mkdir -p "$(dirname "$bridge_log")"
+: >"$bridge_log"
 until_ok file_has "$desktop_log" ready
 "$S" start >/dev/null
 # Hold exec's existing busy lock while the other groups run. Lifecycle releases
 # it after scheduling its alarm, so no extra boot is needed to change timers.
-s sh -c 'while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' &
-keeper=$!
 until_ok booted
+s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' >"$T/keeper.log" &
+keeper=$!
+until_ok file_has "$T/keeper.log" '^ready$'
 size=$(stat -c %s "$apk")
 s cmd package install -r -g -S "$size" <"$apk" >/dev/null
 failed=()
