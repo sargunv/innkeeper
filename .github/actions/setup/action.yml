@@ -1,0 +1,57 @@
+name: Linux.apk runner
+description:
+  Toolchains, build caches and runtime prerequisites for hosted Linux runners
+runs:
+  using: composite
+  steps:
+    - name: Runner packages and kernel setup
+      shell: bash
+      run: tools/ci/setup.sh
+    - uses: jdx/mise-action@v5
+      with:
+        cache: true
+    - uses: actions/cache@v4
+      with:
+        path: ~/Android/Sdk
+        key: sdk-${{ runner.os }}-${{ hashFiles('tools/build/toolchain.env') }}
+    - name: Android SDK
+      shell: bash
+      run: |
+        source tools/build/toolchain.env
+        sdkmanager --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;android-$ANDROID_COMPILE_SDK.0"
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          out/cargo
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key:
+          compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock',
+          '**/*.gradle.kts', '**/gradle-wrapper.properties') }}-${{ github.sha
+          }}
+        restore-keys: |
+          compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}-
+    - uses: actions/cache@v4
+      with:
+        path: |
+          out/build/vulkan/install
+          out/build/vulkan/.stamp
+          out/build/vulkan/deps/llvm
+          out/build/image-tools/install
+          out/build/image-tools/.stamp
+        key:
+          android-${{ runner.os }}-${{ hashFiles('android/vendor/vulkan/**',
+          'android/vendor/graphics/common/**', 'image/tools/**',
+          'tools/container/Containerfile', 'tools/build/toolchain.env') }}
+    - uses: actions/cache@v4
+      with:
+        path: out/ci/images
+        key:
+          image-${{ hashFiles('image/pin.toml', 'image/*.sh',
+          'image/bootconfig') }}
+    - uses: actions/cache@v4
+      with:
+        path: out/test/compat/corpus
+        key: corpus-${{ hashFiles('tests/compat/corpus.toml') }}
