@@ -41,31 +41,8 @@ struct Client {
     endpoint: OwnedFd,
     pid: u32,
     fd: i32,
-    effects: Mutex<Vec<i16>>,
 }
 impl Client {
-    fn feedback_ioctl(
-        &self,
-        feedback: &gamepad::Feedback,
-        cmd: u32,
-        bytes: &mut [u8],
-        scalar: u64,
-    ) -> Result<i64, i32> {
-        let result = feedback.ioctl(cmd, bytes, scalar)?;
-        let mut effects = self.effects.lock().unwrap();
-        match cmd & 0xff {
-            0x80 => {
-                let id = i16::from_le_bytes(bytes[2..4].try_into().unwrap());
-                if !effects.contains(&id) {
-                    effects.push(id);
-                }
-            }
-            0x81 => effects.retain(|&id| i64::from(id) != scalar as i64),
-            _ => {}
-        }
-        Ok(result)
-    }
-
     fn live(&self) -> bool {
         let link = std::fs::read_link(format!("/proc/{}/fd/{}", self.pid, self.fd));
         let ours = std::fs::read_link(format!("/proc/self/fd/{}", self.endpoint.as_raw_fd()));
@@ -400,15 +377,26 @@ fn reap_closed_clients(state: &mut Devices) {
         drain_writes(&client, state);
         if let Some(feedback) = state
             .pads
-            .get(&client.device)
-            .and_then(|p| p.feedback.as_ref())
+            .get_mut(&client.device)
+            .and_then(|p| p.feedback.as_mut())
         {
-            for id in client.effects.lock().unwrap().drain(..) {
-                if let Err(e) = feedback.ioctl(0x40044581, &mut [], id as u64) {
-                    eprintln!("evdev: rumble cleanup: {e}");
-                }
-            }
+            feedback.close_client(client.endpoint.as_raw_fd());
         }
+    }
+}
+
+fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Path) {
+    let replaced = state.pads.insert(device, pad).is_some();
+    let new = state.keys.insert(device, [0; 96]).is_none();
+    let path = dir.join(format!("linuxapk-event{device}"));
+    if replaced {
+        // EventHub caches an effect ID for its open. Reopen after replacing the
+        // host fd, whose RAII owner has erased and forgotten the old effects.
+        state.clients.retain(|c| c.device != device);
+        let _ = std::fs::remove_file(&path);
+    }
+    if new || replaced {
+        let _ = std::fs::write(path, []);
     }
 }
 
@@ -454,7 +442,9 @@ impl Input {
                 let mut state = writes.lock().unwrap();
                 reap_closed_clients(&mut state);
                 for (client, poll) in clients.iter().zip(polls) {
-                    if poll.revents & libc::POLLIN == 0 {
+                    if poll.revents & libc::POLLIN == 0
+                        || !state.clients.iter().any(|c| Arc::ptr_eq(c, client))
+                    {
                         continue;
                     }
                     drain_writes(client, &mut state);
@@ -477,21 +467,17 @@ impl Input {
                     let Ok(identity) = std::str::from_utf8(&buf[6..n]) else {
                         continue;
                     };
-                    let feedback = feedback.map(|fd| gamepad::Feedback {
-                        fd,
-                        synthetic: buf[4] == 3,
-                    });
-                    s.pads.insert(
+                    let feedback = feedback.map(|fd| gamepad::Feedback::new(fd, buf[4] == 3));
+                    register_pad(
+                        &mut s,
                         device,
                         Pad {
                             identity: identity.into(),
                             feedback,
                             axes: [0; 8],
                         },
+                        dir,
                     );
-                    if s.keys.insert(device, [0; 96]).is_none() {
-                        let _ = std::fs::write(dir.join(format!("linuxapk-event{device}")), []);
-                    }
                     continue;
                 }
                 if n == 5 && device != KEYBOARD {
@@ -670,8 +656,11 @@ impl Input {
             }
             drain_writes(&c, &mut state);
             let cmd = req.data.args[1] as u32;
-            let result = if let Some(pad) = state.pads.get(&c.device) {
-                if let Some(feedback) = &pad.feedback {
+            let Devices {
+                pads, keys, leds, ..
+            } = &mut *state;
+            let result = if let Some(pad) = pads.get_mut(&c.device) {
+                if let Some(feedback) = &mut pad.feedback {
                     match cmd & 0xff {
                         0x80 | 0x81 | 0x84 => {
                             let len = match cmd & 0xff {
@@ -690,18 +679,22 @@ impl Input {
                                 {
                                     return Err(libc::EINVAL);
                                 }
-                                let val =
-                                    c.feedback_ioctl(feedback, cmd, &mut data, req.data.args[2])?;
+                                let val = feedback.ioctl(
+                                    c.endpoint.as_raw_fd(),
+                                    cmd,
+                                    &mut data,
+                                    req.data.args[2],
+                                )?;
                                 Ok((data, val))
                             })
                         }
-                        _ => pad_answer(c.device, pad, cmd, &state.keys[&c.device]),
+                        _ => pad_answer(c.device, pad, cmd, &keys[&c.device]),
                     }
                 } else {
-                    pad_answer(c.device, pad, cmd, &state.keys[&c.device])
+                    pad_answer(c.device, pad, cmd, &keys[&c.device])
                 }
             } else {
-                answer(c.device, cmd, &state.keys[&c.device], &state.leds)
+                answer(c.device, cmd, &keys[&c.device], leds)
             };
             match result {
                 Ok((bytes, val)) if mem_write(mem.raw(), req.data.args[2], &bytes) => {
@@ -757,7 +750,6 @@ impl Input {
                 endpoint,
                 pid: req.pid,
                 fd,
-                effects: Mutex::new(Vec::new()),
             }));
         }
         true
@@ -788,7 +780,6 @@ mod tests {
             endpoint: reader.try_clone().unwrap(),
             pid: std::process::id(),
             fd: reader.as_raw_fd(),
-            effects: Mutex::new(Vec::new()),
         };
         (client, reader)
     }
@@ -868,8 +859,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn closing_a_virtual_client_erases_its_uploaded_effects() {
+    fn feedback_source() -> (gamepad::Feedback, std::thread::JoinHandle<()>) {
         let (feedback, source) = UnixDatagram::pair().unwrap();
         for socket in [&feedback, &source] {
             socket
@@ -891,18 +881,24 @@ mod tests {
             assert_eq!(&request[4..12], &7u64.to_le_bytes());
             source.send(&0i32.to_le_bytes()).unwrap();
         });
-        let feedback = gamepad::Feedback {
-            fd: feedback.into(),
-            synthetic: true,
-        };
-        let (client, reader) = client(gamepad::FIRST);
+        (gamepad::Feedback::new(feedback.into(), true), worker)
+    }
+
+    fn upload(feedback: &mut gamepad::Feedback, client: &Client) {
         let mut effect = [0; gamepad::EFFECT_SIZE];
         effect[..2].copy_from_slice(&0x50u16.to_le_bytes());
         effect[2..4].copy_from_slice(&(-1i16).to_le_bytes());
         assert_eq!(
-            client.feedback_ioctl(&feedback, 0x40304580, &mut effect, 0),
+            feedback.ioctl(client.endpoint.as_raw_fd(), 0x40304580, &mut effect, 0),
             Ok(0)
         );
+    }
+
+    #[test]
+    fn closing_a_virtual_client_erases_its_uploaded_effects() {
+        let (mut feedback, worker) = feedback_source();
+        let (client, reader) = client(gamepad::FIRST);
+        upload(&mut feedback, &client);
         let mut state = Devices::default();
         state.pads.insert(
             gamepad::FIRST,
@@ -919,6 +915,77 @@ mod tests {
         reap_closed_clients(&mut state);
         assert!(state.clients.is_empty());
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn replacing_feedback_erases_old_effects_and_rediscovers_with_no_stale_effect() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/input-replacement-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pad = |feedback| Pad {
+            identity: "controller".into(),
+            feedback: Some(feedback),
+            axes: [0; 8],
+        };
+        let (mut old_feedback, old_source) = feedback_source();
+        let (old_client, old_reader) = client(gamepad::FIRST);
+        upload(&mut old_feedback, &old_client);
+        let mut state = Devices::default();
+        register_pad(&mut state, gamepad::FIRST, pad(old_feedback), &dir);
+        state.clients.push(Arc::new(old_client));
+
+        let watch = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        assert!(watch >= 0);
+        let watch = unsafe { OwnedFd::from_raw_fd(watch) };
+        let path = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes()).unwrap();
+        assert!(
+            unsafe {
+                libc::inotify_add_watch(
+                    watch.as_raw_fd(),
+                    path.as_ptr(),
+                    libc::IN_DELETE | libc::IN_CREATE,
+                )
+            } >= 0
+        );
+        let (new_feedback, new_source) = feedback_source();
+        register_pad(&mut state, gamepad::FIRST, pad(new_feedback), &dir);
+        old_source.join().unwrap(); // RAII erased through the old fd, before it closed
+        assert!(state.clients.is_empty()); // EventHub's cached effect ID must be discarded
+        let mut events = [0u8; 256];
+        let n = unsafe { libc::read(watch.as_raw_fd(), events.as_mut_ptr().cast(), events.len()) };
+        assert!(n > 0);
+        let mut masks = Vec::new();
+        let mut offset = 0;
+        while offset < n as usize {
+            let ev = unsafe {
+                std::ptr::read_unaligned(events.as_ptr().add(offset).cast::<libc::inotify_event>())
+            };
+            masks.push(ev.mask);
+            offset += size_of::<libc::inotify_event>() + ev.len as usize;
+        }
+        assert_eq!(masks, [libc::IN_DELETE, libc::IN_CREATE]);
+
+        let (new_client, new_reader) = client(gamepad::FIRST);
+        upload(
+            state
+                .pads
+                .get_mut(&gamepad::FIRST)
+                .unwrap()
+                .feedback
+                .as_mut()
+                .unwrap(),
+            &new_client,
+        );
+        state.clients.push(Arc::new(new_client));
+        drop(old_reader);
+        reap_closed_clients(&mut state);
+        assert_eq!(state.clients.len(), 1); // old close cannot erase the new fd's effect 7
+        drop(new_reader);
+        reap_closed_clients(&mut state);
+        new_source.join().unwrap(); // only this client's close erases the new effect 7
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

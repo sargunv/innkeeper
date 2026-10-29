@@ -1,6 +1,7 @@
 //! Canonical evdev layout consumed by Android's Generic.kl. The bridge maps
 //! host axes to this layout; FF_RUMBLE retains the Linux ff_effect ABI.
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::collections::HashMap;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
 pub const FIRST: u32 = 0x10000;
 pub const AXES: [u16; 8] = [0, 1, 2, 5, 9, 10, 16, 17];
@@ -25,12 +26,59 @@ pub fn absinfo(code: u16, value: i32) -> Option<Vec<u8>> {
 }
 
 pub struct Feedback {
-    pub fd: OwnedFd,
+    fd: OwnedFd,
     // Only a bridge in --test-session accepts synthetic host sources.
-    pub synthetic: bool,
+    synthetic: bool,
+    // Effects belong to this host open and the virtual endpoint that uploaded
+    // them. They cannot outlive or move to a replacement host fd.
+    effects: HashMap<RawFd, Vec<i16>>,
 }
 impl Feedback {
-    pub fn ioctl(&self, cmd: u32, bytes: &mut [u8], scalar: u64) -> Result<i64, i32> {
+    pub fn new(fd: OwnedFd, synthetic: bool) -> Self {
+        Self {
+            fd,
+            synthetic,
+            effects: HashMap::new(),
+        }
+    }
+
+    pub fn ioctl(
+        &mut self,
+        client: RawFd,
+        cmd: u32,
+        bytes: &mut [u8],
+        scalar: u64,
+    ) -> Result<i64, i32> {
+        let result = self.host_ioctl(cmd, bytes, scalar)?;
+        match cmd & 0xff {
+            0x80 => {
+                let id = i16::from_le_bytes(bytes[2..4].try_into().unwrap());
+                let effects = self.effects.entry(client).or_default();
+                if !effects.contains(&id) {
+                    effects.push(id);
+                }
+            }
+            0x81 => {
+                if let Some(effects) = self.effects.get_mut(&client) {
+                    effects.retain(|&id| i64::from(id) != scalar as i64);
+                }
+            }
+            _ => {}
+        }
+        Ok(result)
+    }
+
+    pub fn close_client(&mut self, client: RawFd) {
+        if let Some(effects) = self.effects.remove(&client) {
+            for id in effects {
+                if let Err(e) = self.host_ioctl(0x40044581, &mut [], id as u64) {
+                    eprintln!("evdev: rumble cleanup: {e}");
+                }
+            }
+        }
+    }
+
+    fn host_ioctl(&self, cmd: u32, bytes: &mut [u8], scalar: u64) -> Result<i64, i32> {
         let n = if self.synthetic {
             let mut request = cmd.to_le_bytes().to_vec();
             request.extend_from_slice(&scalar.to_le_bytes());
@@ -104,6 +152,14 @@ impl Feedback {
     }
 }
 
+impl Drop for Feedback {
+    fn drop(&mut self) {
+        while let Some(&client) = self.effects.keys().next() {
+            self.close_client(client);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,10 +171,7 @@ mod tests {
             unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET, 0, fds.as_mut_ptr()) },
             0
         );
-        let feedback = Feedback {
-            fd: unsafe { OwnedFd::from_raw_fd(fds[0]) },
-            synthetic: true,
-        };
+        let feedback = Feedback::new(unsafe { OwnedFd::from_raw_fd(fds[0]) }, true);
         let source = unsafe { OwnedFd::from_raw_fd(fds[1]) };
         let worker = std::thread::spawn(move || {
             let mut bytes = [0; 128];
@@ -174,10 +227,13 @@ mod tests {
         effect[..2].copy_from_slice(&0x50u16.to_le_bytes());
         effect[2..4].copy_from_slice(&(-1i16).to_le_bytes());
         effect[16..20].copy_from_slice(&[0x34, 0x12, 0xcd, 0xab]);
-        assert_eq!(feedback.ioctl(0x40304580, &mut effect, 0), Ok(0));
+        assert_eq!(feedback.host_ioctl(0x40304580, &mut effect, 0), Ok(0));
         assert_eq!(&effect[2..4], &7i16.to_le_bytes());
         feedback.write(&crate::input::event(1, 21, 7, 1)).unwrap();
-        assert_eq!(feedback.ioctl(0x40044581, &mut [], 7), Err(libc::EINVAL));
+        assert_eq!(
+            feedback.host_ioctl(0x40044581, &mut [], 7),
+            Err(libc::EINVAL)
+        );
         worker.join().unwrap();
     }
 }
