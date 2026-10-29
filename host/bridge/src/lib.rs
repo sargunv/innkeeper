@@ -39,3 +39,5 @@ fn test_dir(name: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&d).unwrap();
     d
 }
+
+pub mod bench;

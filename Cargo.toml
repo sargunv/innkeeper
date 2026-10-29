@@ -7,6 +7,7 @@ members = [
   "host/manager",
   "supervisor/broker",
   "tests/compat",
+  "tests/bench",
 ]
 # A plain `cargo build` builds only what runs on the desktop: the broker is a
 # bionic binary (`mise run build:supervisor`) and compat is a test harness.

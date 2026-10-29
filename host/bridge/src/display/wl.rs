@@ -61,6 +61,7 @@ pub(crate) mod cursor;
 mod data_device;
 mod foreign;
 mod policy;
+mod presentation;
 
 use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_window_state};
 
@@ -108,6 +109,8 @@ struct Buf {
     wl: Option<wl_buffer::WlBuffer>,
     /// Attached and not yet released by the compositor.
     busy: bool,
+    bench_fd: Option<OwnedFd>,
+    bench_offset: u64,
 }
 
 struct Win {
@@ -150,6 +153,7 @@ pub(crate) struct State {
     xdg: XdgShell,
     dmabuf: DmabufState,
     viewporter: Option<WpViewporter>,
+    presentation: Option<presentation::Presentation>,
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
     icon_manager: Option<XdgToplevelIconManagerV1>,
@@ -620,6 +624,14 @@ impl State {
                 height: b.height,
                 wl: None,
                 busy: false,
+                bench_fd: if crate::bench::enabled() {
+                    fd.try_clone().ok()
+                } else {
+                    None
+                },
+                bench_offset: b.offset as u64
+                    + (b.height / 2) as u64 * b.stride as u64
+                    + (b.width / 2) as u64 * 4,
             },
         );
         // `fd` closes here; the compositor has its own copy once the request
@@ -671,6 +683,51 @@ impl State {
             && !f.is_hidden()
         {
             f.draw();
+        }
+        if crate::bench::enabled() {
+            let stamp = crate::bench::now();
+            let mut pixel = [0u8; 4];
+            let color = b.bench_fd.as_ref().and_then(|fd| {
+                use std::os::fd::AsRawFd;
+                // dma-buf descriptors support mmap, not read/pread.
+                let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+                let base = b.bench_offset / page * page;
+                let within = (b.bench_offset - base) as usize;
+                let len = within + 4;
+                let ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        len,
+                        libc::PROT_READ,
+                        libc::MAP_SHARED,
+                        fd.as_raw_fd(),
+                        base as libc::off_t,
+                    )
+                };
+                if ptr == libc::MAP_FAILED {
+                    return None;
+                }
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        ptr.cast::<u8>().add(within),
+                        pixel.as_mut_ptr(),
+                        4,
+                    );
+                    libc::munmap(ptr, len);
+                }
+                Some(u32::from_le_bytes(pixel) & 0xffffff)
+            });
+            if let Some(p) = &self.presentation {
+                p.feedback(
+                    &surface,
+                    &self.qh,
+                    presentation::Frame { stamp, window: id },
+                );
+            }
+            crate::bench::trace(format_args!(
+                "commit ns={stamp} window={id} color={}",
+                color.map_or(-1, i64::from)
+            ));
         }
         surface.commit();
         if first {
@@ -1132,6 +1189,11 @@ pub fn run(
         xdg: XdgShell::bind(&globals, &qh).context("xdg_wm_base")?,
         dmabuf: DmabufState::new(&globals, &qh),
         viewporter: bind_opt(&globals, &qh, 1),
+        presentation: if crate::bench::enabled() {
+            bind_opt(&globals, &qh, 1)
+        } else {
+            None
+        },
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
         icon_manager: bind_opt(&globals, &qh, 1),
@@ -1149,6 +1211,10 @@ pub fn run(
         cursor_surface: None,
         quit: false,
     };
+    crate::bench::trace(format_args!(
+        "capabilities presentation={}",
+        u8::from(st.presentation.is_some())
+    ));
     crate::info!(
         "display: connected to the compositor (dmabuf v{:?}, viewporter {}, fractional-scale {}, activation {}, text-input {})",
         st.dmabuf.version(),
