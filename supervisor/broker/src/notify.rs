@@ -596,7 +596,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
     // Single-uid mode (supervisor/README.md): virtual ids for every process.
     let vid = (std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
         .then(|| crate::creds::Vid::new(listener, resp_sz));
-    let flat = crate::flat::Flat::from_env(listener, resp_sz);
+    let flat = crate::flat::Workers::new(listener, resp_sz);
     let input = crate::input::Input::new(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {
         broker: BinderDriver::new(),
@@ -651,7 +651,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         if let Some(f) = &flat
             && crate::flat::is_flat_syscall(nr)
         {
-            f.serve(&req);
+            f.submit(req);
             continue;
         }
         if !is_binder_syscall(nr, &req.data.args) {
@@ -665,16 +665,14 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         {
             continue;
         }
-        if nr == libc::SYS_openat
-            && let Some(f) = &flat
-            && f.openat(&req)
-        {
-            continue;
-        }
         // Every openat in the session lands here: let the ones that can't be a
         // binder device through without taking the lock.
         if nr == libc::SYS_openat && !maybe_dev_path(req.pid as i32, req.data.args[1]) {
-            send_continue(listener, resp_sz, req.id);
+            if let Some(f) = &flat {
+                f.submit(req);
+            } else {
+                send_continue(listener, resp_sz, req.id);
+            }
             continue;
         }
         sup.lock().unwrap().dispatch(req);

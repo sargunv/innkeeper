@@ -43,6 +43,46 @@ pub(crate) struct Flat {
     gid: u32,
 }
 
+/// Filesystem lookups can wait on a mount. Keep them off the binder receive
+/// thread, including fstat's traversal of /proc/<tid>/fd/<fd>.
+pub(crate) struct Workers(std::sync::mpsc::Sender<SeccompNotif>);
+
+impl Workers {
+    pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Option<Self> {
+        use std::sync::{Arc, Mutex, mpsc};
+        let flat = Arc::new(Flat::from_env(listener, resp_sz)?);
+        let (tx, rx) = mpsc::channel::<SeccompNotif>();
+        let rx = Arc::new(Mutex::new(rx));
+        for _ in 0..4 {
+            let flat = Arc::clone(&flat);
+            let rx = Arc::clone(&rx);
+            std::thread::spawn(move || {
+                loop {
+                    let Ok(req) = rx.lock().unwrap().recv() else {
+                        return;
+                    };
+                    // Queued notifications can have ended before we start.
+                    if !notif_id_valid(listener, req.id) {
+                        continue;
+                    }
+                    if req.data.nr as i64 == libc::SYS_openat {
+                        if !flat.openat(&req) {
+                            flat.cont(req.id);
+                        }
+                    } else {
+                        flat.serve(&req);
+                    }
+                }
+            });
+        }
+        Some(Self(tx))
+    }
+
+    pub(crate) fn submit(&self, req: SeccompNotif) {
+        self.0.send(req).expect("Flatpak workers stopped");
+    }
+}
+
 const SYS_FCHMODAT2: i64 = 452;
 
 /// The syscalls [`Flat::serve`] answers.

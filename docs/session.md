@@ -28,6 +28,7 @@ sequenceDiagram
   S->>S: start linuxapk-bridge, listen on control.sock
   S->>P: NEWROOT /
   P->>I: fork init under the seccomp filter (no namespaces)
+  Note over P: exec broker in the same process (init's parent)
   C->>S: status over control.sock: up
 ```
 

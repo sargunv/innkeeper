@@ -138,7 +138,7 @@ impl Paths {
         self.run.join("pid")
     }
 
-    /// The process init is a child of: pivot-exec.
+    /// The process init is a child of: pivot-exec, which execs the broker.
     pub fn outer_pid_file(&self) -> PathBuf {
         self.run.join("outer.pid")
     }

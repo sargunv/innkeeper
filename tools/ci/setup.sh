@@ -16,9 +16,6 @@ sudo apt-get install -y --no-install-recommends \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
 # Ubuntu restricts mounts in unprivileged user namespaces by default.
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-# The sibling broker needs process-memory access; Ubuntu's Yama default
-# blocks it. The rootless ancestor-based supervisor fix is tracked in #52.
-sudo sysctl -w kernel.yama.ptrace_scope=0
 if [[ ! -e /dev/udmabuf ]]; then
   sudo modprobe udmabuf
 fi
