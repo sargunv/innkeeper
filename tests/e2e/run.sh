@@ -129,11 +129,15 @@ if [[ ${1:-} == --group ]]; then
       # shellcheck disable=SC2329 # invoked through until_ok
       mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
       until_ok mapped
-      # Keep the absolute seat coordinates inside/outside a known rectangle.
+      # Position the window for absolute input without resizing Android's
+      # display: resize snapshots temporarily block otherwise valid touches.
       cat >"$T/input-window.js" <<'JS'
 for (const w of workspace.windowList()) {
   if (String(w.resourceClass).includes("dev.linuxapk.probes")) {
-    w.frameGeometry = {x: 300, y: 100, width: 1280, height: 800};
+    const geometry = w.frameGeometry;
+    geometry.x = 300;
+    geometry.y = 100;
+    w.frameGeometry = geometry;
     workspace.activeWindow = w;
   }
 }
@@ -166,7 +170,7 @@ JS
       # Establish real pointer delivery before the uninterrupted test stream.
       # shellcheck disable=SC2329 # invoked through until_ok
       pointer_ready() {
-        printf 'abs:100,300\nabs:900,300\n' >&"$seat_fd"
+        printf 'abs:800,300\nabs:900,300\n' >&"$seat_fd"
         log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display"
       }
       until_ok pointer_ready
