@@ -57,6 +57,7 @@ until_ok() {
 }
 until_setup() { until_ok "$@"; }
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
+user_unlocked() { [[ $(s am get-started-user-state 0 2>/dev/null) == RUNNING_UNLOCKED ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
 file_has() { grep -E "$2" "$1" >/dev/null; }
 window_ready() { s dumpsys activity activities | grep "topResumedActivity=.*$1" >/dev/null; }
@@ -353,6 +354,9 @@ timed setup-start "$S" start
 exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/exec.lock"
 flock --shared "$setup_lock"
 timed setup-boot until_setup booted
+# BOOT_COMPLETED can precede CE app-data preparation on the software runner.
+# Installing during unlock can leave a successful install without its data dirs.
+timed setup-user-unlock until_setup user_unlocked
 : >"$T/keeper.log"
 # Do not let the keeper inherit the host lock: lifecycle must stop the session
 # after it releases its own exec lock by observing e2e-idle.
