@@ -127,12 +127,18 @@ installed emulator, use the same AOSP/API level, x86_64 architecture,
 resolution, refresh rate and GPU mode; record its version, command, CPU/memory
 allocation and acceleration. Install our probes APK with `adb install -r -g`,
 launch `dev.linuxapk.probes/.BenchProbe` with
-`--es mode input|scroll|game|audio|binder`, and collect bounded
-`adb logcat -d -t 2000 -s LinuxApkBench:I`. Use the same sampling intervals and
-host cgroup/procfs accounting for its whole process tree. There is no Linux.apk
-bridge trace in an emulator: measure input-to-photon with the same external
-camera/photodiode, and use its presentation/Perfetto tools for frame timing. Run
-the same glmark2 build and scene list manually.
+`--es mode input|scroll|game|audio|binder`, and, for `audio` or `binder`, wait
+until the activity is visible and start its workers explicitly:
+
+```sh
+adb shell am broadcast -a dev.linuxapk.BENCH_BEGIN -p dev.linuxapk.probes
+```
+
+Then collect bounded `adb logcat -d -t 2000 -s LinuxApkBench:I`. Use the same
+sampling intervals and host cgroup/procfs accounting for its whole process tree.
+There is no Linux.apk bridge trace in an emulator: measure input-to-photon with
+the same external camera/photodiode, and use its presentation/Perfetto tools for
+frame timing. Run the same glmark2 build and scene list manually.
 
 For a native GTK baseline, make an equivalent drawing-area app with SPACE
 changing a solid colour, the same text/sprite workload, window size and refresh
@@ -143,6 +149,8 @@ latency. Compare native PipeWire audio with the endpoints described above.
 Waydroid is a manual baseline only if the user has already installed and chosen
 to run it. Never install root services, binderfs or kernel modules for these
 benchmarks. Match the image/workload/display configuration, install the same
-probes and collect their tagged logs; account for the whole container process
+probes, launch the selected mode, and send the same `dev.linuxapk.BENCH_BEGIN`
+broadcast for audio/binder after its window is visible, using Waydroid's Android
+shell. Collect their tagged logs and account for the whole container process
 tree. Document any baseline that cannot expose the same timestamps rather than
 substituting shell timing for a missing metric.
