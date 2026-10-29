@@ -17,6 +17,7 @@ use xkbcommon_dl::{
     XkbCommon, XkbCommonCompose, xkb_compose_compile_flags, xkb_compose_feed_result,
     xkb_compose_state, xkb_compose_state_flags, xkb_compose_status, xkb_compose_table, xkb_context,
     xkb_context_flags, xkb_keymap, xkb_keymap_compile_flags, xkb_keymap_format, xkb_state,
+    xkb_state_component,
 };
 
 /// evdev codes are xkb keycodes minus 8.
@@ -175,6 +176,17 @@ impl Xkb {
                 )
             };
         }
+    }
+
+    /// The compositor's effective Ctrl modifier, independent of keymap bit positions.
+    pub fn control_active(&self) -> bool {
+        self.keymap.as_ref().is_some_and(|k| unsafe {
+            (self.xkb.xkb_state_mod_name_is_active)(
+                k.state.as_ptr(),
+                c"Control".as_ptr(),
+                xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
+            ) > 0
+        })
     }
 
     /// Focus changed: a half-typed compose sequence is dropped.
@@ -462,6 +474,18 @@ mod tests {
 
     fn typed(s: &str) -> Typed {
         Typed::Text(s.into())
+    }
+
+    #[test]
+    fn control_uses_the_keymaps_effective_modifier() {
+        let Some(mut rig) = Rig::new("us", "") else {
+            return;
+        };
+        assert!(!rig.ours.control_active());
+        rig.key(KEY_LEFTCTRL, true);
+        assert!(rig.ours.control_active());
+        rig.key(KEY_LEFTCTRL, false);
+        assert!(!rig.ours.control_active());
     }
 
     #[test]

@@ -22,6 +22,8 @@ public abstract class TaskStackListener extends ITaskStackListener.Stub {
 
   public void onTaskDisplayChanged(int taskId, int newDisplayId) throws RemoteException {}
 
+  public void onActivityRequestedOrientationChanged(int taskId, int requestedOrientation) {}
+
   public void onTaskFocusChanged(int taskId, boolean focused) {}
 
   public void onTaskMovedToBack(ActivityManager.RunningTaskInfo taskInfo) {}

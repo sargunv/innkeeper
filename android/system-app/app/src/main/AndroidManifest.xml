@@ -21,6 +21,8 @@
   <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
   <uses-permission android:name="android.permission.REMOVE_TASKS" />
   <uses-permission android:name="android.permission.REORDER_TASKS" />
+  <uses-permission android:name="android.permission.MANAGE_APP_TOKENS" />
+  <uses-permission android:name="android.permission.SET_ORIENTATION" />
   <!-- Labels and launch intents of the apps it opens. -->
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
   <!-- signature|privileged: listed in dev.linuxapk.system.xml. -->

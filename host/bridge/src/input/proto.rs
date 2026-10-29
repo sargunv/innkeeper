@@ -29,6 +29,11 @@
 //! screen, so the compositor focuses it without flagging it as demanding
 //! attention.
 //!
+//! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
+//! 1 portrait, 2 landscape), u32 automatic fullscreen (0 or 1). The Android
+//! window manager sends the current policy when mapped and when it changes.
+//! The bridge reshapes floating toplevels and translates fullscreen to xdg-shell.
+//!
 //! **Input lines** are protocol v2: ASCII, space-separated fields, in the
 //! order the seat produced them.
 //!
@@ -90,6 +95,7 @@ pub mod ty {
     pub const WINDOW_ACTIVATE: u16 = 0x0602;
     pub const WINDOW_DESTROY: u16 = 0x0603;
     pub const TEXT_INPUT: u16 = 0x0604;
+    pub const WINDOW_POLICY: u16 = 0x0605;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -132,12 +138,21 @@ impl WindowRequest {
     }
 }
 
+/// Per-display Android requests. Orientation: 0 unspecified, 1 portrait, 2 landscape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowPolicy {
+    pub window: u32,
+    pub orientation: u32,
+    pub fullscreen: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     WindowRequest(WindowRequest),
     WindowActivate { window: u32, token: String },
     WindowDestroy { window: u32 },
     TextInput(ime::Req),
+    WindowPolicy(WindowPolicy),
 }
 
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
@@ -159,6 +174,11 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             token: r.name()?,
         },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
+        ty::WINDOW_POLICY => Request::WindowPolicy(WindowPolicy {
+            window: r.u32()?,
+            orientation: r.u32_in(0..=2, "orientation")?,
+            fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
+        }),
         ty::TEXT_INPUT => {
             let n = r.u16()? as usize;
             if n > ime::MAX_LINE {
@@ -196,6 +216,12 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::WindowDestroy { window } => {
             w = Writer::message(ty::WINDOW_DESTROY, tag);
             w.u32(*window);
+        }
+        Request::WindowPolicy(p) => {
+            w = Writer::message(ty::WINDOW_POLICY, tag);
+            w.u32(p.window)
+                .u32(p.orientation)
+                .u32(u32::from(p.fullscreen));
         }
         Request::TextInput(r) => {
             w = Writer::message(ty::TEXT_INPUT, tag);
@@ -271,6 +297,11 @@ mod tests {
                 other: true,
             }),
             Request::TextInput(ime::Req::Apply),
+            Request::WindowPolicy(WindowPolicy {
+                window: 3,
+                orientation: 1,
+                fullscreen: true,
+            }),
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
         }
@@ -282,6 +313,17 @@ mod tests {
         let mut big = request(160);
         big.width = limits::MAX_DIM + 1;
         assert!(roundtrip(&encode(1, &Request::WindowRequest(big))).is_err());
+        assert!(
+            roundtrip(&encode(
+                1,
+                &Request::WindowPolicy(WindowPolicy {
+                    window: 3,
+                    orientation: 3,
+                    fullscreen: false,
+                })
+            ))
+            .is_err()
+        );
         assert_eq!(decode(0x06ff, &[]), Err(DecodeError::UnknownType(0x06ff)));
     }
 

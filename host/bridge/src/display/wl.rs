@@ -52,7 +52,7 @@ use wayland_protocols::xdg::activation::v1::client::{
 };
 
 use super::proto::{BufferSpec, event, ty};
-use crate::input::proto::WindowRequest;
+use crate::input::proto::{WindowPolicy, WindowRequest};
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
 
@@ -77,6 +77,7 @@ pub enum Cmd {
     },
     /// A request from the Linux.apk IME.
     TextInput(ime::Req),
+    WindowPolicy(WindowPolicy),
     Quit,
 }
 
@@ -110,6 +111,14 @@ struct Win {
     scale120: u32,
     configured: bool,
     fullscreen: bool,
+    /// The last requested Android orientation; manual Rotate does not change it.
+    orientation: u32,
+    /// True only if Android, rather than the user, entered fullscreen.
+    app_fullscreen: bool,
+    app_requested_fullscreen: bool,
+    orientation_pending: bool,
+    /// Last windowed content size, restored if the compositor leaves size unspecified.
+    windowed_size: (u32, u32),
     /// Buffer shown now (its size maps input), and the last one asked for.
     shown: Option<u32>,
     shown_size: (u32, u32),
@@ -277,13 +286,82 @@ impl State {
         self.windows.get(&id).map_or(120, |w| w.scale120.max(1))
     }
 
-    pub(crate) fn toggle_fullscreen(&self, id: u32) {
-        if let Some(w) = self.windows.get(&id) {
+    pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
+        if let Some(w) = self.windows.get_mut(&id) {
+            w.app_fullscreen = false;
             if w.fullscreen {
                 w.window.unset_fullscreen();
             } else {
                 w.window.set_fullscreen(None);
             }
+        }
+    }
+
+    /// A client chooses its floating size in xdg-shell; a later configure may override it.
+    /// Android letterboxes fixed-orientation activities inside the resulting display buffer.
+    pub(crate) fn rotate(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if w.fullscreen {
+            return;
+        }
+        std::mem::swap(&mut w.width, &mut w.height);
+        w.windowed_size = (w.width, w.height);
+        if let Some(f) = w.frame.as_mut().filter(|f| !f.is_hidden()) {
+            f.resize(
+                NonZeroU32::new(w.width).unwrap(),
+                NonZeroU32::new(w.height).unwrap(),
+            );
+            let (x, y) = f.location();
+            let (width, height) = f.add_borders(w.width, w.height);
+            w.window
+                .xdg_surface()
+                .set_window_geometry(x, y, width as i32, height as i32);
+            f.draw();
+        } else {
+            w.window
+                .xdg_surface()
+                .set_window_geometry(0, 0, w.width as i32, w.height as i32);
+        }
+        if let Some(v) = &w.viewport {
+            v.set_destination(w.width as i32, w.height as i32);
+        }
+        w.window.commit();
+        self.send_configure(id);
+    }
+
+    fn window_policy(&mut self, p: WindowPolicy) {
+        let Some(w) = self.windows.get_mut(&p.window) else {
+            return;
+        };
+        if p.fullscreen != w.app_requested_fullscreen {
+            w.app_requested_fullscreen = p.fullscreen;
+            if p.fullscreen && !w.fullscreen {
+                w.app_fullscreen = true;
+                w.window.set_fullscreen(None);
+            } else if !p.fullscreen && w.app_fullscreen {
+                w.app_fullscreen = false;
+                w.window.unset_fullscreen();
+            }
+        }
+        if w.orientation != p.orientation {
+            w.orientation = p.orientation;
+            w.orientation_pending = true;
+        }
+        self.apply_orientation(p.window);
+    }
+
+    fn apply_orientation(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if !w.orientation_pending || w.fullscreen || w.app_fullscreen {
+            return;
+        }
+        w.orientation_pending = false;
+        if matches!((w.orientation, w.width > w.height), (1, true) | (2, false)) {
+            self.rotate(id);
         }
     }
 
@@ -435,6 +513,11 @@ impl State {
                 scale120: 120,
                 configured: false,
                 fullscreen: false,
+                orientation: 0,
+                app_fullscreen: false,
+                app_requested_fullscreen: false,
+                orientation_pending: false,
+                windowed_size: (width, height),
                 shown: None,
                 shown_size: (0, 0),
                 token: (!s.token.is_empty()).then_some(s.token),
@@ -608,6 +691,7 @@ impl State {
                 damage,
             } => self.frame(window, buffer, damage),
             Cmd::TextInput(r) => self.text_input(r),
+            Cmd::WindowPolicy(p) => self.window_policy(p),
             Cmd::Quit => self.quit = true,
         }
     }
@@ -642,7 +726,13 @@ impl WindowHandler for State {
             self.subcompositor.clone(),
         );
         let w = self.windows.get_mut(&id).unwrap();
-        let (width, height) = if c.decoration_mode == DecorationMode::Client {
+        if w.fullscreen && !c.is_fullscreen() {
+            w.app_fullscreen = false;
+            (w.width, w.height) = w.windowed_size;
+        } else if !w.fullscreen && c.is_fullscreen() {
+            w.windowed_size = (w.width, w.height);
+        }
+        let (width, height) = if c.decoration_mode == DecorationMode::Client && !c.is_fullscreen() {
             if w.frame.is_none() {
                 match AdwaitaFrame::new(
                     &w.window,
@@ -711,6 +801,7 @@ impl WindowHandler for State {
         }
         w.window.commit();
         self.send_configure(id);
+        self.apply_orientation(id);
     }
 }
 

@@ -49,5 +49,9 @@ tasks.register<Sync>("install") {
     into("$systemExt/priv-app/LinuxApkSystem")
     rename { "LinuxApkSystem.apk" }
   }
+  from(project(":wm-overlay").tasks.named("signRelease")) {
+    into("$systemExt/overlay")
+    rename { "LinuxApkWindowPolicy.apk" }
+  }
   from(rootDir.resolve("etc/permissions")) { into("$systemExt/etc/permissions") }
 }

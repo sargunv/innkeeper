@@ -110,6 +110,25 @@ if [[ ${1:-} == --group ]]; then
       until_ok log_has LinuxApkProbe 'touch .*ACTION_DOWN.*source=0x2002'
       until_ok log_has LinuxApkProbe 'generic .*ACTION_SCROLL'
       wm CLOSE --ei display "$display" | grep -q "closed display=$display"
+      launch WindowModeProbe
+      # A manifest-locked portrait activity starts portrait; a public runtime request reshapes
+      # the actual host window, whose configure comes back through the bridge as this size.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      shape() {
+        wm LIST | /usr/bin/python3 -c '
+import re, sys
+for line in sys.stdin:
+    m = re.search(r"display=" + sys.argv[1] + r" .*size=(\d+)x(\d+)", line)
+    if m and ((int(m[1]) < int(m[2])) == (sys.argv[2] == "portrait")):
+        sys.exit(0)
+sys.exit(1)
+' "$display" "$1"
+      }
+      until_ok shape portrait
+      s am start --display "$display" -n dev.linuxapk.probes/.WindowModeProbe --es action landscape >/dev/null
+      until_ok shape landscape
+      wm CLOSE --ei display "$display" >/dev/null
+      echo 'ok   requested-orientation host window shape (portrait -> landscape)'
       ;;
     audio)
       s cmd media_session volume --stream 3 --set 15 >/dev/null

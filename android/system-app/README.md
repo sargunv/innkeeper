@@ -31,6 +31,8 @@ Gradle modules:
   framework at runtime.
 - `:app`: the APK. `bridge/BridgeConnection.kt` is the one Kotlin client of the
   bridge.
+- `:wm-overlay`: resource-only, platform-signed RRO enabling per-display remote
+  insets requests.
 - `:probes`: `LinuxApkProbes.apk`, diagnostic activities and the input harness
   for the e2e and compat tests. Installed to `out/test/probes`, never staged.
 

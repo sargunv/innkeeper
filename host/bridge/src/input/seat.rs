@@ -60,6 +60,7 @@ pub(crate) struct Seat {
     /// The compositor's keymap; None until it sends one, or without
     /// libxkbcommon (then keys go out as evdev codes only).
     xkb: Option<Xkb>,
+    rotate_key: Option<u32>,
 }
 
 impl Seat {
@@ -86,6 +87,7 @@ impl Seat {
             tablets: Tablets::bind(globals, qh),
             last_serial: 0,
             xkb: None,
+            rotate_key: None,
         };
         crate::info!(
             "input: cursor-shape {}, pointer-gestures v{}, tablets {}",
@@ -402,6 +404,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 if let Some(c) = &mut st.clipboard {
                     c.focus(None, qh);
                 }
+                st.seat.rotate_key = None;
                 if let Some(x) = &mut st.seat.xkb {
                     x.reset_compose();
                 }
@@ -433,6 +436,22 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                     if state == KeyLine::Press {
                         st.toggle_fullscreen(id);
                     }
+                    return;
+                }
+                if st.seat.rotate_key == Some(key) {
+                    if state == KeyLine::Release {
+                        st.seat.rotate_key = None;
+                    }
+                    return;
+                }
+                if state == KeyLine::Press
+                    && st.seat.xkb.as_ref().is_some_and(|x| {
+                        x.control_active()
+                            && x.repeat(key).is_some_and(|p| matches!(p.sym, 0x72 | 0x52))
+                    })
+                {
+                    st.seat.rotate_key = Some(key);
+                    st.rotate(id);
                     return;
                 }
                 st.hub
