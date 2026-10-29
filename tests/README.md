@@ -26,6 +26,10 @@ Build and prepare the image first (`mise run build`,
 The runner stops and resets its own instance on exit, including on failure. It
 never uses the main session or the user's desktop configuration.
 
+Set `LINUXAPK_SHARE_SCREENSHOT=1` when capturing chooser proof; normal sharing
+checks reuse the receiver window and exercise both chooser selections without
+starting the screenshot tool.
+
 The `production` group runs after isolation checks and temporarily puts a
 separately capped bridge on the named session's socket, leaving existing
 display/audio connections on the test bridge. The sidecar uses normal production
