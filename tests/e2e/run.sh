@@ -62,6 +62,18 @@ if [[ ${1:-} == --group ]]; then
         exit 1
       fi
       echo 'ok   bounded log dump; no missing-tracefs noise'
+      s cmd package resolve-activity --brief -a android.intent.action.MAIN \
+        -c android.intent.category.HOME >"$T/home.txt"
+      file_has "$T/home.txt" '^dev.linuxapk.system/.wm.HomeActivity$'
+      [[ -z $(s pm path com.android.launcher3) ]]
+      sysui=$(s pidof com.android.systemui)
+      s input -d 0 keyevent KEYCODE_APP_SWITCH KEYCODE_HOME KEYCODE_BACK
+      until_ok window_ready HomeActivity
+      [[ $(s pidof com.android.systemui) == "$sysui" ]]
+      s dumpsys activity service com.android.systemui/.SystemUIService LauncherProxyService >"$T/overview.txt"
+      file_has "$T/overview.txt" 'mIsEnabled=false'
+      file_has "$T/overview.txt" 'mBound=false'
+      echo 'ok   HOME resolves without Launcher3; recents/Home/Back leave SystemUI and HOME running'
       ;;
     storage)
       s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow

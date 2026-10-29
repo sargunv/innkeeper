@@ -75,6 +75,21 @@
     android:label="@string/app_name"
     android:persistent="true">
 
+    <!-- Display 0 has no desktop window. HOME stays in our existing persistent process;
+         apps use their own virtual displays, and the desktop owns task switching. -->
+    <activity
+      android:name=".wm.HomeActivity"
+      android:excludeFromRecents="true"
+      android:exported="true"
+      android:launchMode="singleTask"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.HOME" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity>
+
     <!-- The deprecated-target-SDK warning, in the app's window (see AppWarningActivity). -->
     <activity
       android:name=".wm.AppWarningActivity"
