@@ -43,6 +43,11 @@ python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
 Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
 workflow to test CI changes: dispatch runs the nightly corpus.
 
+To measure incremental compilation, compare push or PR runs with the same build
+inputs, removing only the branch's exact stage cache between them. Keep the
+dependency and toolchain caches. A documentation-only follow-up push checks the
+fast path; its PR run still validates the full diff against the base branch.
+
 Ubuntu 26.04 supplies the project's GTK baseline, Mutter and Flatpak. Only
 `setup.sh`, guarded by `GITHUB_ACTIONS=true`, uses sudo. It enables unprivileged
 user namespaces, starts the systemd user manager and runner PipeWire server, and
