@@ -413,9 +413,11 @@ mkdir -p "$T"
 : >"$T/timings.log"
 export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
 keeper=""
+setup_lock=""
 mod=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
 cleanup() {
   local result=$?
+  if [[ -n $setup_lock ]]; then exec {setup_lock}>&-; fi
   if ((result != 0)); then
     echo "e2e: Android failure diagnostics: $T/{crash,system}.txt" >&2
     timeout 1 "$S" exec logcat -d -b crash >"$T/crash.txt" 2>&1 || true
@@ -439,14 +441,20 @@ mkdir -p "$(dirname "$bridge_log")"
 : >"$bridge_log"
 timed setup-desktop until_setup file_has "$desktop_log" ready
 timed setup-start "$S" start
-# Hold exec's busy lock before boot polling: the system app can report idle
-# before boot completes, and the test's one-second grace must not stop setup.
-# Lifecycle releases it after scheduling its alarm.
+# The exec service is not ready immediately after start. Hold its existing
+# busy lock from the host until a booted Android can run the keeper instead.
+exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/exec.lock"
+flock --shared "$setup_lock"
+timed setup-boot until_setup booted
 : >"$T/keeper.log"
-s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' >"$T/keeper.log" &
+# Do not let the keeper inherit the host lock: lifecycle must stop the session
+# after it releases its own exec lock by observing e2e-idle.
+s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' \
+  {setup_lock}>&- >"$T/keeper.log" 2>&1 &
 keeper=$!
 timed setup-keeper until_setup file_has "$T/keeper.log" '^ready$'
-timed setup-boot until_setup booted
+exec {setup_lock}>&-
+setup_lock=""
 size=$(stat -c %s "$apk")
 timed setup-probes s cmd package install -r -g -S "$size" <"$apk"
 failed=()
