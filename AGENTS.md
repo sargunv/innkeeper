@@ -33,11 +33,12 @@ runs), then [docs/architecture.md](docs/architecture.md).
   a `MemoryMax`. Check `free -g` before starting another session.
 - **Never `logcat -b all`** or an unbounded `logcat` into a file; bound it with
   `-d`, `-t <n>` or `-s <tags>`.
-- **Host safety.** Inside the session Android's root is the host user. Every
-  namespace running Android code masks and locks host sysfs, has its own network
-  namespace and cgroup, and never binds host `/run/user`, `$HOME` or `/dev`
-  wholesale. `linuxapk-session selftest` must pass
-  (`mise run test:e2e -- boot`).
+- **Host safety.** Inside the session Android's root is the host user. The
+  Flatpak sandbox is the boundary: every namespace running Android code masks
+  and locks host sysfs and never binds host `/run/user`, `$HOME` or `/dev`
+  wholesale. Android shares the host's network, as any `--share=network` app
+  does ([docs/security.md](docs/security.md#flatpak-mode)).
+  `linuxapk-session selftest` must pass (`mise run test:e2e -- boot`).
 - **Test sessions are named.** Use `LINUXAPK_INSTANCE=<name>` with a fresh data
   dir for anything you run, and stop it when done. Don't start, restart or reset
   the user's main session (no instance name), and don't install host integration
