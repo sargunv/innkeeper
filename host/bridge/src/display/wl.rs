@@ -359,8 +359,6 @@ impl State {
         self.apply_window_policy(
             p.window,
             PolicyEvent::App(AppRequest {
-                immersive: p.immersive,
-                fullscreen: p.fullscreen,
                 shape: p.orientation,
             }),
         );
@@ -405,6 +403,12 @@ impl State {
         f.click_point_moved(time, surface, x, y)
     }
 
+    pub(crate) fn frame_touch_point(&mut self, id: u32) {
+        if let Some(f) = self.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
+            f.reset_touch_point();
+        }
+    }
+
     pub(crate) fn frame_pointer_left(&mut self, id: u32) {
         if let Some(f) = self.windows.get_mut(&id).and_then(|w| w.frame.as_mut()) {
             f.click_point_left();
@@ -430,6 +434,7 @@ impl State {
             .and_then(|w| w.frame.as_mut())
             .and_then(|f| f.on_frame_click(time, click, pressed));
         match action {
+            Some(Action::ToggleFullscreen) => self.toggle_fullscreen(id),
             Some(Action::Back) => self.hub.input(&format!("back {id}")),
             Some(Action::Window(a)) => self.frame_action(id, a, serial),
             None => {}
@@ -891,30 +896,29 @@ impl WindowHandler for State {
             self.subcompositor.clone(),
         );
         let w = self.windows.get_mut(&id).unwrap();
-        let was_fullscreen = w.fullscreen;
         if w.fullscreen && !c.is_fullscreen() {
             (w.width, w.height) = w.windowed_size;
         } else if !w.fullscreen && c.is_fullscreen() {
             w.windowed_size = (w.width, w.height);
         }
-        let (width, height) = if !c.is_fullscreen() {
-            if w.frame.is_none() {
-                match AdwaitaFrame::new(
-                    &w.window,
-                    shm,
-                    compositor,
-                    subcompositor,
-                    qh.clone(),
-                    appearance::caption_config(&self.caption_theme, w.color),
-                ) {
-                    Ok(mut f) => {
-                        f.set_title(w.title.clone());
-                        f.set_scaling_factor(w.scale120 as f64 / 120.0);
-                        w.frame = Some(f);
-                    }
-                    Err(e) => crate::warn!("display: no client-side frame: {e}"),
+        if w.frame.is_none() {
+            match AdwaitaFrame::new(
+                &w.window,
+                shm,
+                compositor,
+                subcompositor,
+                qh.clone(),
+                appearance::caption_config(&self.caption_theme, w.color),
+            ) {
+                Ok(mut f) => {
+                    f.set_title(w.title.clone());
+                    f.set_scaling_factor(w.scale120 as f64 / 120.0);
+                    w.frame = Some(f);
                 }
+                Err(e) => crate::warn!("display: no client-side frame: {e}"),
             }
+        }
+        let (width, height) = if !c.is_fullscreen() {
             let (cw, ch) = (
                 NonZeroU32::new(w.width).unwrap_or(NonZeroU32::MIN),
                 NonZeroU32::new(w.height).unwrap_or(NonZeroU32::MIN),
@@ -942,11 +946,17 @@ impl WindowHandler for State {
                 )
             }
         } else {
-            if let Some(f) = w.frame.as_mut() {
-                f.set_hidden(true);
-            }
             let nw = c.new_size.0.map_or(w.width, |v| v.get());
             let nh = c.new_size.1.map_or(w.height, |v| v.get());
+            if let Some(f) = w.frame.as_mut() {
+                f.set_hidden(false);
+                f.update_state(c.state);
+                f.update_wm_capabilities(c.capabilities);
+                f.resize(
+                    NonZeroU32::new(nw).unwrap_or(NonZeroU32::MIN),
+                    NonZeroU32::new(nh).unwrap_or(NonZeroU32::MIN),
+                );
+            }
             w.window
                 .xdg_surface()
                 .set_window_geometry(0, 0, nw as i32, nh as i32);
@@ -967,7 +977,7 @@ impl WindowHandler for State {
         }
         w.window.commit();
         self.send_configure(id);
-        self.apply_window_policy(id, PolicyEvent::Configure { was_fullscreen });
+        self.apply_window_policy(id, PolicyEvent::Configure);
     }
 }
 

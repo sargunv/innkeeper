@@ -18,7 +18,7 @@ const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(400);
 #[derive(Debug, Default)]
 pub(crate) struct MouseState {
     pub location: Location,
-    back_pressed: bool,
+    button_pressed: Option<ButtonKind>,
 
     /// The surface local location inside the surface.
     position: (f64, f64),
@@ -28,14 +28,20 @@ pub(crate) struct MouseState {
 }
 
 impl MouseState {
-    /// Activate only after a press and release on Back. Leaving cancels the press.
-    pub fn back_click(&mut self, pressed: bool) -> bool {
-        let on_back = self.location == Location::Button(ButtonKind::Back);
+    /// Activate custom controls only after a press and release on the same button.
+    pub fn button_click(&mut self, pressed: bool) -> Option<crate::Action> {
+        let button = match self.location {
+            Location::Button(kind @ (ButtonKind::Back | ButtonKind::Fullscreen)) => Some(kind),
+            _ => None,
+        };
         if pressed {
-            self.back_pressed = on_back;
-            false
-        } else {
-            std::mem::take(&mut self.back_pressed) && on_back
+            self.button_pressed = button;
+            return None;
+        }
+        match (self.button_pressed.take(), button) {
+            (Some(ButtonKind::Back), Some(ButtonKind::Back)) => Some(crate::Action::Back),
+            (Some(ButtonKind::Fullscreen), Some(ButtonKind::Fullscreen)) => Some(crate::Action::ToggleFullscreen),
+            _ => None,
         }
     }
 
@@ -137,7 +143,7 @@ impl MouseState {
     pub fn left(&mut self) {
         // Reset only the location.
         self.location = Location::None;
-        self.back_pressed = false;
+        self.button_pressed = None;
     }
 }
 
@@ -186,11 +192,12 @@ mod tests {
     }
 
     #[test]
-    fn back_requires_a_click_and_does_not_move_or_resize() {
+    fn custom_controls_require_a_click_and_do_not_move_or_resize() {
+        for kind in [ButtonKind::Back, ButtonKind::Fullscreen] {
         let mut mouse = MouseState::default();
-        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
-        assert!(!mouse.back_click(false));
-        assert!(!mouse.back_click(true));
+        mouse.moved(Location::Button(kind), 19., 17., true);
+        assert!(mouse.button_click(false).is_none());
+        assert!(mouse.button_click(true).is_none());
         assert!(mouse
             .click(
                 Duration::ZERO,
@@ -200,19 +207,20 @@ mod tests {
                 &WindowManagerCapabilities::all()
             )
             .is_none());
-        assert!(mouse.back_click(false));
-        assert!(!mouse.back_click(false));
-        mouse.back_click(true);
+        assert!(matches!((kind, mouse.button_click(false)), (ButtonKind::Back, Some(crate::Action::Back)) | (ButtonKind::Fullscreen, Some(crate::Action::ToggleFullscreen))));
+        assert!(mouse.button_click(false).is_none());
+        mouse.button_click(true);
         mouse.left();
-        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
-        assert!(!mouse.back_click(false));
+        mouse.moved(Location::Button(kind), 19., 17., true);
+        assert!(mouse.button_click(false).is_none());
         mouse.moved(Location::Head, 50., 17., true);
-        mouse.back_click(true);
-        mouse.moved(Location::Button(ButtonKind::Back), 19., 17., true);
-        assert!(!mouse.back_click(false));
+        mouse.button_click(true);
+        mouse.moved(Location::Button(kind), 19., 17., true);
+        assert!(mouse.button_click(false).is_none());
         assert!(matches!(
             mouse.alternate_click(true, &WindowManagerCapabilities::all(), false),
             Some(FrameAction::ShowMenu(_, _))
         ));
+        }
     }
 }

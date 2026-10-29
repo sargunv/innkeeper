@@ -9,7 +9,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.content.pm.ApplicationInfo
 import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
 import android.hardware.display.DisplayManager
@@ -120,7 +119,6 @@ class WindowManagerFeature(
     val orientations = HashMap<Pair<Int, ComponentName>, Int>()
     var requestedVisibleTypes = WindowInsets.Type.systemBars()
     var insetComponent: ComponentName? = null
-    var game = false
   }
 
   /** One row of [list]. */
@@ -331,10 +329,6 @@ class WindowManagerFeature(
       return null
     }
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
-    val ai = context.packageManager.getApplicationInfo(pkg, 0)
-    @Suppress("DEPRECATION")
-    w.game =
-      ai.category == ApplicationInfo.CATEGORY_GAME || ai.flags and ApplicationInfo.FLAG_IS_GAME != 0
     windows[w.id] = w
     changed()
     try {
@@ -520,22 +514,9 @@ class WindowManagerFeature(
         WindowSizing.isLandscape(w.requestedOrientation) -> 2
         else -> 0
       }
-    val sensorOrientation =
-      w.requestedOrientation in
-        intArrayOf(
-          ActivityInfo.SCREEN_ORIENTATION_SENSOR,
-          ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR,
-          ActivityInfo.SCREEN_ORIENTATION_USER,
-          ActivityInfo.SCREEN_ORIENTATION_FULL_USER,
-        )
     val bars = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
     val immersive = w.requestedVisibleTypes and bars == 0
-    val fullscreen =
-      w.game &&
-        w.insetComponent?.packageName == w.pkg &&
-        immersive &&
-        (orientation == 2 || sensorOrientation)
-    input.windowPolicy(w.id, orientation, fullscreen, immersive)
+    input.windowPolicy(w.id, orientation, false, immersive)
   }
 
   private fun focus(w: AppWindow, activate: Boolean, token: String = "") {

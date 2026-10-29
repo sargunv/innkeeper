@@ -91,7 +91,7 @@ impl Buttons {
 
     pub fn update_buttons(&mut self, supports_maximize: bool, supports_minimize: bool) {
         let is_supported = |button: &Button| match button.kind {
-            ButtonKind::Back | ButtonKind::Close => true,
+            ButtonKind::Back | ButtonKind::Fullscreen | ButtonKind::Close => true,
             ButtonKind::Maximize => supports_maximize,
             ButtonKind::Minimize => supports_minimize,
         };
@@ -144,7 +144,7 @@ impl Buttons {
         let (left_side, right_side) = sides?;
 
         let buttons_left = Buttons::parse_button_layout_side(&left_side, Side::Left);
-        let buttons_right = Buttons::parse_button_layout_side(&right_side, Side::Right);
+        let mut buttons_right = Buttons::parse_button_layout_side(&right_side, Side::Right);
 
         if buttons_left.is_empty() && buttons_right.is_empty() {
             trace!("No valid buttons found in configuration");
@@ -153,6 +153,7 @@ impl Buttons {
 
         let mut buttons_left = buttons_left;
         buttons_left.insert(0, Button::new(ButtonKind::Back));
+        buttons_right.push(Button::new(ButtonKind::Fullscreen));
         Some((buttons_left, buttons_right))
     }
 
@@ -193,6 +194,7 @@ impl Buttons {
                 Button::new(ButtonKind::Close),
                 Button::new(ButtonKind::Maximize),
                 Button::new(ButtonKind::Minimize),
+                Button::new(ButtonKind::Fullscreen),
             ],
         )
     }
@@ -288,6 +290,23 @@ impl Button {
                         width: 1.5 * scale,
                         ..Default::default()
                     },
+                    Transform::identity(),
+                    None,
+                );
+            }
+            ButtonKind::Fullscreen => {
+                // Inward corners indicate Leave fullscreen; outward corners indicate Enter.
+                let (corner, arm) = if state.contains(WindowState::FULLSCREEN) { (2., 5.) } else { (5., 2.) };
+                let mut path = PathBuilder::new();
+                for (dx, dy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
+                    path.move_to(x + dx * arm * scale, y + dy * corner * scale);
+                    path.line_to(x + dx * corner * scale, y + dy * corner * scale);
+                    path.line_to(x + dx * corner * scale, y + dy * arm * scale);
+                }
+                pixmap.stroke_path(
+                    &path.finish()?,
+                    &button_icon_paint,
+                    &Stroke { width: scale, ..Default::default() },
                     Transform::identity(),
                     None,
                 );
@@ -388,6 +407,7 @@ impl Button {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ButtonKind {
     Back,
+    Fullscreen,
     Close,
     Maximize,
     Minimize,
@@ -426,4 +446,22 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn fullscreen_hit_target_follows_window_controls() {
+        for layout in [None, Some(("close,minimize,maximize".into(), "".into())), Some(("".into(), "close".into()))] {
+            let mut buttons = Buttons::new(layout);
+            for caps in [WindowManagerCapabilities::empty(), WindowManagerCapabilities::all()] {
+                buttons.update_wm_capabilities(caps);
+                buttons.arrange(500, 2.);
+                let Some(button) = buttons.buttons_right.last() else { unreachable!() };
+                assert_eq!(button.kind, ButtonKind::Fullscreen);
+                let (x, y) = (button.center_x() as f64, button.center_y() as f64);
+                assert_eq!(buttons.find_button(x, y), Location::Button(ButtonKind::Fullscreen));
+                for (x, y) in [(button.x() as f64, y), (button.end_x() as f64, y), (x, 5.), (x, 29.)] {
+                    assert_ne!(buttons.find_button(x, y), Location::Button(ButtonKind::Fullscreen));
+                }
+            }
+        }
+    }
+
 }
