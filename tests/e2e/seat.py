@@ -1,7 +1,26 @@
 #!/usr/bin/python3
-"""Input on the disposable KWin seat: abs:x,y, button:code,state, key:code,state."""
+"""Input on the disposable compositor seat: abs:x,y, button:code,state, key:code,state."""
 
 import os, socket, struct, sys
+
+if os.environ.get("LINUXAPK_TEST_COMPOSITOR") == "mutter":
+  from gi.repository import Gio, GLib
+
+  bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+  actions = sys.stdin if sys.argv[1:] == ["--stdin"] else sys.argv[1:]
+  for action in actions:
+    bus.call_sync(
+      "dev.linuxapk.TestDesktop",
+      "/dev/linuxapk/TestDesktop",
+      "dev.linuxapk.TestDesktop",
+      "Input",
+      GLib.Variant("(s)", (action.strip(),)),
+      None,
+      Gio.DBusCallFlags.NONE,
+      5000,
+      None,
+    )
+  sys.exit()
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 sock.connect(

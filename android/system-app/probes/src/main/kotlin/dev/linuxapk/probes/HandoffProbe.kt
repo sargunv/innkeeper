@@ -2,9 +2,13 @@
 package dev.linuxapk.probes
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Bundle
@@ -91,6 +95,20 @@ class HandoffProbe : Activity() {
       selection: String?,
       selectionArgs: Array<out String>?,
     ) = 0
+  }
+
+  /** Toggle the fixture without killing its activities on virtual displays. */
+  class HandlerControl : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      val state =
+        if (intent.getBooleanExtra("enabled", false)) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+      context.packageManager.setComponentEnabledSetting(
+        ComponentName(context, Claimed::class.java),
+        state,
+        PackageManager.DONT_KILL_APP,
+      )
+    }
   }
 
   /** Enabled only while proving a real Android handler beats the fallback. */

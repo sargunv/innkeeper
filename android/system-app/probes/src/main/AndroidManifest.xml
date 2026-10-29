@@ -150,6 +150,7 @@
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
       android:exported="true" />
     <provider android:name=".HandoffProbe$FileProvider" android:authorities="dev.linuxapk.probes.handoff" android:exported="false" android:grantUriPermissions="true" />
+    <receiver android:name=".HandoffProbe$HandlerControl" android:exported="false" />
     <activity android:name=".HandoffProbe$Claimed" android:exported="true" android:enabled="false" android:theme="@android:style/Theme.NoDisplay">
       <intent-filter>
         <action android:name="android.intent.action.VIEW" />
