@@ -25,6 +25,7 @@ import android.view.WindowInsets
 import android.view.WindowManagerGlobal
 import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
+import dev.linuxapk.system.bridge.Wire
 import dev.linuxapk.system.input.HostEvent
 import dev.linuxapk.system.input.HostInputClient
 import java.util.concurrent.CopyOnWriteArrayList
@@ -110,6 +111,10 @@ class WindowManagerFeature(
     var hadTask = false
     var mapped = false
     var resize: Runnable? = null
+    var appearance: Runnable? = null
+    var topTask: Int? = null
+    var lastColor: Int? = null
+    var lastIcon: ByteArray? = null
     var requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     var topActivity: ComponentName? = null
     val orientations = HashMap<Pair<Int, ComponentName>, Int>()
@@ -381,6 +386,7 @@ class WindowManagerFeature(
     if (windows.remove(w.id) == null) return
     Log.i(TAG, "closing display ${w.id} (${w.pkg}), finishTasks=$finishTasks")
     changed()
+    w.appearance?.let(handler::removeCallbacks)
     w.resize?.let(handler::removeCallbacks)
     if (finishTasks) {
       for (t in w.tasks) {
@@ -441,6 +447,9 @@ class WindowManagerFeature(
           it.mapped = true
           it.shown.countDown()
           sendPolicy(it)
+          it.lastColor = null
+          it.lastIcon = null
+          queueAppearance(it)
         }
       is HostEvent.WindowUnmapped -> {
         // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
@@ -471,6 +480,36 @@ class WindowManagerFeature(
     w.height = height
     w.dpi = dpi
     w.display.resize(width, height, dpi)
+  }
+
+  // Coalesce TaskDescription churn before loading/copying a bitmap or creating a memfd.
+  private fun queueAppearance(w: AppWindow) {
+    w.appearance?.let(handler::removeCallbacks)
+    val r = Runnable {
+      w.appearance = null
+      if (windows[w.id] !== w || !w.mapped) return@Runnable
+      val top =
+        allTasks().firstOrNull {
+          Tasks.displayId(it) == w.id &&
+            it.topActivity?.className != AppWarningActivity::class.java.name
+        } ?: return@Runnable
+      val description = top.taskDescription
+      try {
+        val color = description?.primaryColor ?: 0
+        val icon =
+          Wire.Writer().image(description?.let { Tasks.descriptionIcon(context, it) }).bytes()
+        if (w.lastColor != color || w.lastIcon?.contentEquals(icon) != true) {
+          if (input.windowAppearance(w.id, color, icon)) {
+            w.lastColor = color
+            w.lastIcon = icon
+          }
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "task appearance for display ${w.id}: $e")
+      }
+    }
+    w.appearance = r
+    handler.postDelayed(r, 120)
   }
 
   private fun sendPolicy(w: AppWindow) {
@@ -525,6 +564,15 @@ class WindowManagerFeature(
         }
       }
 
+      override fun onTaskDescriptionChanged(taskInfo: ActivityManager.RunningTaskInfo?) {
+        if (taskInfo == null) return
+        handler.post {
+          windows[Tasks.displayId(taskInfo)]?.let { w ->
+            if (w.topTask == taskInfo.taskId) queueAppearance(w)
+          }
+        }
+      }
+
       override fun onTaskStackChanged() = queueRefresh()
 
       override fun onTaskCreated(taskId: Int, componentName: ComponentName?) = queueRefresh()
@@ -576,6 +624,10 @@ class WindowManagerFeature(
       w.tasks = ts.map { it.taskId }
       w.orientations.keys.retainAll { it.first in w.tasks }
       val top = ts.firstOrNull()
+      if (top?.taskId != w.topTask) {
+        w.topTask = top?.taskId
+        queueAppearance(w)
+      }
       if (top?.topActivity != w.topActivity) {
         w.topActivity = top?.topActivity
         w.requestedOrientation =

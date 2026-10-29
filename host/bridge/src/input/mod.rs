@@ -51,8 +51,8 @@ fn status(r: Result<(), i32>) -> Reply {
 }
 
 impl Service for InputService {
-    fn handle(&mut self, ty: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply {
-        if !fds.is_empty() {
+    fn handle(&mut self, ty: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
+        if fds.len() != usize::from(ty == proto::ty::WINDOW_APPEARANCE) {
             return Reply::err(-EPROTO);
         }
         let req = match proto::decode(ty, body) {
@@ -76,6 +76,18 @@ impl Service for InputService {
             Request::WindowDestroy { window } => {
                 self.hub.destroy(window);
                 Reply::ok()
+            }
+            Request::WindowAppearance { window, color, len } => {
+                let fd = fds.pop().unwrap();
+                let bytes = match crate::ipc::blob::read(&fd, len, proto::limits::MAX_ICON_BLOB) {
+                    Ok(b) => b,
+                    Err(e) => return Reply::err(e),
+                };
+                let icon = match crate::display::wl::appearance::decode_icon(&bytes) {
+                    Ok(i) => i,
+                    Err(e) => return Reply::err(e.status()),
+                };
+                status(self.hub.window_appearance(window, color, icon))
             }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
             Request::TextInput(r) => {

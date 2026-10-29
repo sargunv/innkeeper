@@ -79,6 +79,14 @@ sequenceDiagram
   Launching an app that has a window activates it through `xdg_activation_v1`,
   with the launch's token ([Launch feedback](#launch-feedback)); without one,
   compositors may only flag it without a fresh input serial.
+- **Task appearance.** The top task's `TaskDescription` supplies the window icon
+  and primary colour, refreshed on mapping and description changes. Changes are
+  coalesced for 120 ms before copying an icon, scaled to fit 256×256 pixels;
+  identical updates are skipped. The bridge uses `xdg_toplevel_icon_v1` when
+  offered (KWin), with no icon fallback on other compositors. Client-side
+  captions (GNOME) use the primary RGB with a contrasting title and button
+  foreground; a zero primary colour restores the desktop theme. Clearing a task
+  icon restores the compositor's default icon.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
   recents, dream and assistant tasks stay.

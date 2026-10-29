@@ -38,7 +38,7 @@ use sctk::shell::xdg::{XdgShell, XdgSurface};
 use sctk::shm::{Shm, ShmHandler};
 use sctk::subcompositor::SubcompositorState;
 use sctk::{delegate_dispatch2, delegate_registry, dispatch2::Dispatch2, registry_handlers};
-use sctk_adwaita::{AdwaitaFrame, FrameConfig};
+use sctk_adwaita::AdwaitaFrame;
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
@@ -55,7 +55,11 @@ use super::proto::{BufferSpec, event, ty};
 use crate::input::proto::{WindowPolicy, WindowRequest};
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
+use wayland_protocols::xdg::toplevel_icon::v1::client::{
+    xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1, xdg_toplevel_icon_v1::XdgToplevelIconV1,
+};
 
+pub(crate) mod appearance;
 mod data_device;
 mod foreign;
 mod policy;
@@ -66,6 +70,11 @@ use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_wind
 pub enum Cmd {
     Create(WindowRequest, std::sync::mpsc::Sender<i32>),
     Destroy(u32),
+    WindowAppearance {
+        window: u32,
+        color: u32,
+        icon: Option<crate::ipc::blob::Image>,
+    },
     /// Activate a window, with this activation token if there is one.
     Activate(u32, Option<String>),
     /// Return a token for a portal launch rather than activating our window.
@@ -106,6 +115,8 @@ struct Win {
     exported:
         Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exported_v2::ZxdgExportedV2>,
     frame: Option<AdwaitaFrame<State>>,
+    color: u32,
+    icon: Option<crate::ipc::blob::Image>,
     title: String,
     app_id: String,
     /// Logical content size and scale×120.
@@ -137,6 +148,8 @@ pub(crate) struct State {
     viewporter: Option<WpViewporter>,
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
+    icon_manager: Option<XdgToplevelIconManagerV1>,
+    caption_theme: sctk_adwaita::theme::ColorTheme,
     exporter:
         Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2>,
     qh: QueueHandle<State>,
@@ -203,6 +216,15 @@ impl Dispatch2<XdgActivationV1, State> for Unit {
     ) {
     }
 }
+
+macro_rules! ignore_events {
+    ($($proxy:ty),*) => { $(
+        impl Dispatch2<$proxy, State> for Unit {
+            fn event(&self, _: &mut State, _: &$proxy, _: <$proxy as Proxy>::Event, _: &Connection, _: &QueueHandle<State>) {}
+        }
+    )* };
+}
+ignore_events!(XdgToplevelIconManagerV1, XdgToplevelIconV1);
 
 /// A window's fractional-scale object.
 struct ScaleOf(u32);
@@ -499,6 +521,8 @@ impl State {
                 fractional,
                 exported,
                 frame: None,
+                color: 0,
+                icon: None,
                 title: s.title,
                 app_id: s.app_id,
                 width,
@@ -665,12 +689,69 @@ impl State {
         t.commit();
     }
 
+    fn window_appearance(&mut self, id: u32, color: u32, icon: Option<crate::ipc::blob::Image>) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if w.color != color {
+            w.color = color;
+            if let Some(frame) = w.frame.as_mut() {
+                frame.set_config(appearance::caption_config(&self.caption_theme, color));
+                if !frame.is_hidden() {
+                    frame.draw();
+                }
+            }
+        }
+        if w.icon != icon {
+            if let Some(manager) = &self.icon_manager {
+                if let Some(image) = &icon {
+                    let (side, pixels) = appearance::icon_pixels(image);
+                    // Compositors may map shm pools read/write: IPC's sealed
+                    // memfds cannot back Wayland buffers. This pool is never reused.
+                    let mut pool = match sctk::shm::slot::SlotPool::new(pixels.len(), &self.shm) {
+                        Ok(pool) => pool,
+                        Err(e) => {
+                            crate::warn!("display: task icon pool: {e}");
+                            return;
+                        }
+                    };
+                    let (buffer, canvas) = match pool.create_buffer(
+                        side,
+                        side,
+                        side * 4,
+                        wayland_client::protocol::wl_shm::Format::Argb8888,
+                    ) {
+                        Ok(buffer) => buffer,
+                        Err(e) => {
+                            crate::warn!("display: task icon buffer: {e}");
+                            return;
+                        }
+                    };
+                    canvas.copy_from_slice(&pixels);
+                    let object = manager.create_icon(&self.qh, Unit);
+                    object.add_buffer(buffer.wl_buffer(), 1);
+                    manager.set_icon(w.window.xdg_toplevel(), Some(&object));
+                    object.destroy();
+                } else {
+                    manager.set_icon(w.window.xdg_toplevel(), None);
+                }
+            }
+            w.icon = icon;
+        }
+        w.window.commit();
+    }
+
     fn command(&mut self, c: Cmd) {
         match c {
             Cmd::Create(s, reply) => {
                 let r = self.create(s);
                 let _ = reply.send(r);
             }
+            Cmd::WindowAppearance {
+                window,
+                color,
+                icon,
+            } => self.window_appearance(window, color, icon),
             Cmd::Destroy(id) => self.destroy(id),
             Cmd::Activate(id, token) => self.activate(id, token),
             Cmd::ExportToken(id, reply) => self.token(id, Some(reply)),
@@ -731,7 +812,7 @@ impl WindowHandler for State {
                     compositor,
                     subcompositor,
                     qh.clone(),
-                    FrameConfig::auto(),
+                    appearance::caption_config(&self.caption_theme, w.color),
                 ) {
                     Ok(mut f) => {
                         f.set_title(w.title.clone());
@@ -1017,6 +1098,8 @@ pub fn run(
         viewporter: bind_opt(&globals, &qh, 1),
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
+        icon_manager: bind_opt(&globals, &qh, 1),
+        caption_theme: sctk_adwaita::theme::ColorTheme::auto(),
         exporter: bind_opt(&globals, &qh, 1),
         qh: qh.clone(),
         events,
