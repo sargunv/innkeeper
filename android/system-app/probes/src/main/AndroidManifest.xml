@@ -142,7 +142,7 @@
       android:name=".DesktopProbe"
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
       android:exported="true" />
-    <activity android:name=".StorageProbe" android:exported="true" />
+    <receiver android:name=".StorageProbe" android:exported="true" />
     <!-- Reparenting the task must not recreate the file provider's caller and send
          a second VIEW while the first handoff is still reading its grant. -->
     <activity
