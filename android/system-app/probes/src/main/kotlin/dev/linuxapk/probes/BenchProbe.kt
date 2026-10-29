@@ -3,9 +3,11 @@ package dev.linuxapk.probes
 
 import android.app.Activity
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.graphics.Canvas
 import android.graphics.Color
@@ -31,16 +33,23 @@ import kotlin.math.sin
 class BenchProbe : Activity() {
   private var connection: ServiceConnection? = null
   private var started = false
+  private val control =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context, intent: Intent) {
+        begin()
+      }
+    }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     val mode = intent.getStringExtra("mode") ?: "input"
     setContentView(ProbeView(this, mode))
+    registerReceiver(control, IntentFilter("dev.linuxapk.BENCH_BEGIN"), Context.RECEIVER_EXPORTED)
   }
 
   private fun begin() {
-    // The system app moves display-0 launches into a desktop virtual display.
-    // Start measurements only on the destination, avoiding duplicate workers.
+    // The runner starts workers after the desktop window has mapped, so moving
+    // the activity off display 0 cannot create duplicate measurement workers.
     if (started) return
     started = true
     when (intent.getStringExtra("mode")) {
@@ -50,6 +59,7 @@ class BenchProbe : Activity() {
   }
 
   override fun onDestroy() {
+    unregisterReceiver(control)
     connection?.let { unbindService(it) }
     super.onDestroy()
   }
@@ -93,10 +103,9 @@ class BenchProbe : Activity() {
           canvas.drawCircle(x, y, 12f, paint)
         }
       }
-      if (!ready && display?.displayId != 0) {
+      if (!ready) {
         Log.i("LinuxApkBench", "BENCH ready mode=$mode")
         ready = true
-        (context as BenchProbe).begin()
       }
       frame++
       if (mode == "scroll" || mode == "game") postInvalidateOnAnimation()

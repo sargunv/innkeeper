@@ -233,6 +233,8 @@ fn gpu(out: &Path) -> Result<Value> {
                 "build:duration=2",
                 "--benchmark",
                 "texture:duration=2",
+                "--size",
+                "1280x800",
             ],
         )?;
         fs::write(out.join("glmark2-host.txt"), &text)?;
@@ -246,15 +248,18 @@ fn gpu(out: &Path) -> Result<Value> {
             "-W",
             "-n",
             "org.linaro.glmark2/.Glmark2Activity",
+            "--es",
+            "args",
+            "--benchmark build:duration=2 --benchmark texture:duration=2 --size 1280x800",
         ])?;
         wait(
             || {
-                android(&["logcat", "-d", "-t", "2000", "-s", "glmark2:I"])
+                android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])
                     .is_ok_and(|s| score(&s).is_some())
             },
             180,
         )?;
-        let text = android(&["logcat", "-d", "-t", "2000", "-s", "glmark2:I"])?;
+        let text = android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])?;
         fs::write(out.join("glmark2-android.txt"), &text)?;
         result["android"] = json!({"status":"collected","score":score(&text).context("glmark2 completed without a score; inspect raw log")?});
     }
@@ -375,6 +380,15 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         }
         "binder" => {
             launch("binder")?;
+            wait(|| solid_frame(&bridge()).is_some(), 10)?;
+            android(&[
+                "am",
+                "broadcast",
+                "-a",
+                "dev.linuxapk.BENCH_BEGIN",
+                "-p",
+                "dev.linuxapk.probes",
+            ])?;
             wait(|| log().contains("BENCH binder workers=8 "), 30)
                 .context("waiting for eight-worker binder result")?;
             let text = log();
@@ -399,6 +413,15 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 "15",
             ])?;
             launch("audio")?;
+            wait(|| solid_frame(&bridge()).is_some(), 10)?;
+            android(&[
+                "am",
+                "broadcast",
+                "-a",
+                "dev.linuxapk.BENCH_BEGIN",
+                "-p",
+                "dev.linuxapk.probes",
+            ])?;
             wait(|| log().contains("BENCH audio "), 15)?;
             let text = log();
             fs::write(out.join("audio.txt"), &text)?;

@@ -95,13 +95,16 @@ measurements are recorded.
   record its commit and build native Wayland/GLES and Android x86_64 variants
   using upstream instructions in a bounded build container or mise toolchain.
   Keep the APK and all build products under `out/`, never in Git. The Android
-  package/activity must be `org.linaro.glmark2/.Glmark2Activity`, with score
-  messages tagged `glmark2`. The host command runs `build:duration=2` and
-  `texture:duration=2`. Configure the Android build's benchmark list identically
-  before comparing scores; a default full-suite Android run is not comparable to
-  the host subset. Record renderer, resolution, GLES version and benchmark list
-  from the raw logs. GPU run deadlines are bounded; upstream variants with a
-  different activity/tag need manual execution and score collection.
+  package/activity must be `org.linaro.glmark2/.Glmark2Activity`. Upstream's old
+  Android wrapper targets SDK 23: provide a build updated to the current SDK,
+  with an exported benchmark activity, rather than weakening installation
+  policy. Both variants run `build:duration=2` and `texture:duration=2` at
+  1280x800; Android receives upstream's `args` intent extra, and the runner
+  reads its native `files/last_run.log`. Use the host GLES binary
+  (`glmark2-es2-wayland`) to match Android's API. Record renderer, resolution,
+  GLES version and benchmark list from the raw logs. GPU deadlines are bounded;
+  variants with another activity/log path need manual execution and score
+  collection.
 - **CPU/memory:** one interval with no probe app and one with the static colour
   probe. Reports session cgroup CPU usage as percent of one core, cgroup charged
   memory, and per-process PSS from `smaps_rollup` (null if procfs denies it).
