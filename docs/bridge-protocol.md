@@ -106,6 +106,18 @@ Text-only open/save creates a `.txt` file; text-only email creates a draft body.
 Text Copy uses the existing clipboard protocol. The reverse direction is tracked
 separately in [#66](https://github.com/sargunv/linux.apk/issues/66).
 
+## Clipboard blobs
+
+System `CLIP_SET` (`0x0304`) and `CLIP` (`0x4303`) share the envelope
+`u8 kind, u8 sensitive, u16 reserved=0, u32 blob length`, with one sealed memfd.
+Kinds are 1 (raw UTF-8 text, 1 MiB), 2 (u16 width/height plus RGBA8, 16 MiB),
+and 3 (one file, 16 MiB total). The file blob contains `u32 name length` plus
+UTF-8 name (1–255 bytes, no path separators), `u32 MIME length` plus MIME (1–255
+bytes), then `u32 byte count` and raw bytes (at most 16 MiB minus 1024). No
+trailing bytes are accepted. The system app exposes incoming bytes through a
+read-only `content://dev.linuxapk.system.clipboard.files/…` URI and lets
+ClipboardService grant the pasting app access. No new request types are used.
+
 ## Versioning
 
 Minor versions only add message types or trailing reply fields, and clients

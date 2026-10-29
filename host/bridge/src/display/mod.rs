@@ -65,6 +65,7 @@ impl DisplayService {
         hub: Arc<Hub>,
         peer: &Peer,
         events: Events,
+        shared: Arc<crate::system::Shared>,
     ) -> Result<DisplayService> {
         let conn = wayland_client::Connection::connect_to_env()
             .context("connecting to the host Wayland compositor")?;
@@ -74,7 +75,7 @@ impl DisplayService {
         let thread = std::thread::Builder::new()
             .name("display".into())
             .spawn(move || {
-                if let Err(e) = wl::run(conn, rx, events, seat_hub) {
+                if let Err(e) = wl::run(conn, rx, events, seat_hub, shared) {
                     crate::warn!("display: {e:#}");
                 }
                 // Without its compositor connection the service is useless:

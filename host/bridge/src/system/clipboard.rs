@@ -1,7 +1,5 @@
-//! The host clipboard, both ways, through `ext-data-control-v1` on its own
-//! Wayland connection. Data control works without keyboard focus, so this
-//! doesn't need the display service's seat (KWin, wlroots compositors and
-//! others offer it; GNOME doesn't, so there the clipboard doesn't sync).
+//! Clipboard transfers shared by ext-data-control and the display service's
+//! focus-scoped wl_data_device (GNOME). Test sessions never create this hub.
 //!
 //! - Host to Android: each new host selection with text (or, without text,
 //!   a PNG image) is read (capped), and sent to every subscribed system-app
@@ -39,9 +37,11 @@ use crate::ipc::Subscribers;
 use crate::ipc::blob::{self, DocWriter, Image};
 use crate::ipc::server::Events;
 
+pub mod files;
+
 /// Marks our own selection, so it isn't echoed back to Android.
-const MARKER: &str = "application/x-linuxapk-bridge";
-const PASSWORD_HINT: &str = "x-kde-passwordManagerHint";
+pub(crate) const MARKER: &str = "application/x-linuxapk-bridge";
+pub(crate) const PASSWORD_HINT: &str = "x-kde-passwordManagerHint";
 const TEXT_TYPES: [&str; 5] = [
     "text/plain;charset=utf-8",
     "UTF8_STRING",
@@ -59,6 +59,7 @@ const MAX_IMAGE_SIDE: u32 = 2048;
 pub enum Content {
     Text(String),
     Image(Image),
+    File(files::ClipFile),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,7 @@ impl Clip {
     fn event(&self) -> Result<(Vec<u8>, OwnedFd)> {
         let (kind, bytes) = match &self.content {
             Content::Text(t) => (ClipKind::Text, t.as_bytes().to_vec()),
+            Content::File(f) => (ClipKind::File, f.encode()),
             Content::Image(i) => {
                 let mut w = crate::ipc::wire::Writer::default();
                 w.image(Some(i));
@@ -88,39 +90,46 @@ enum Cmd {
 }
 
 /// What our data source serves: bytes per MIME type.
-struct Offered {
-    types: HashMap<String, Arc<Vec<u8>>>,
+pub(crate) struct Offered {
+    pub(crate) types: HashMap<String, Arc<Vec<u8>>>,
+    _file: Option<files::CachedFile>,
 }
 
 pub struct ClipboardHub {
-    cmd: Mutex<mpsc::Sender<Cmd>>,
-    wake: OwnedFd,
+    cmd: Option<(Mutex<mpsc::Sender<Cmd>>, OwnedFd)>,
+    fallback: Mutex<Vec<calloop::channel::Sender<Arc<Offered>>>>,
+    offered: Mutex<Option<Arc<Offered>>>,
+    cache: std::path::PathBuf,
     subs: Subscribers,
     current: Mutex<Option<Clip>>,
 }
 
 impl ClipboardHub {
-    /// Connects to `$WAYLAND_DISPLAY`; fails if the compositor has no
-    /// ext-data-control.
+    /// Uses data control when available, otherwise the display connection.
     pub fn start() -> Result<Arc<ClipboardHub>> {
         let conn = Connection::connect_to_env().context("connecting to the host compositor")?;
         let (globals, queue) = registry_queue_init::<State>(&conn)?;
         let qh = queue.handle();
-        let manager: ExtDataControlManagerV1 = globals
-            .bind(&qh, 1..=1, ())
-            .context("the compositor has no ext_data_control_manager_v1")?;
+        let manager: Option<ExtDataControlManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
         let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).context("no wl_seat")?;
-        let device = manager.get_data_device(&seat, &qh, ());
+
         let (wake_r, wake_w) = rustix::pipe::pipe_with(
             rustix::pipe::PipeFlags::CLOEXEC | rustix::pipe::PipeFlags::NONBLOCK,
         )?;
         let (tx, rx) = mpsc::channel();
         let hub = Arc::new(ClipboardHub {
-            cmd: Mutex::new(tx),
-            wake: wake_w,
+            cmd: manager.as_ref().map(|_| (Mutex::new(tx), wake_w)),
+            fallback: Mutex::new(Vec::new()),
+            offered: Mutex::new(None),
+            cache: files::cache_dir()?,
             subs: Subscribers::default(),
             current: Mutex::new(None),
         });
+        let Some(manager) = manager else {
+            crate::info!("clipboard: wl_data_device (while a window has focus)");
+            return Ok(hub);
+        };
+        let device = manager.get_data_device(&seat, &qh, ());
         let mut state = State {
             hub: Arc::downgrade(&hub),
             manager,
@@ -156,7 +165,19 @@ impl ClipboardHub {
     /// Makes `clip` the host selection.
     pub fn set(&self, clip: Clip) -> Result<()> {
         let mut types: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
+        let mut file = None;
         match &clip.content {
+            Content::File(f) => {
+                let cached = files::CachedFile::create(&self.cache, f)?;
+                if let Some(key) = cached.portal_key() {
+                    types.insert(files::PORTAL_TYPE.into(), Arc::new(key));
+                }
+                types.insert("text/uri-list".into(), Arc::new(cached.uri_list()));
+                let mut gnome = b"copy\n".to_vec();
+                gnome.extend_from_slice(&cached.uri_list());
+                types.insert("x-special/gnome-copied-files".into(), Arc::new(gnome));
+                file = Some(cached);
+            }
             Content::Text(t) => {
                 let b = Arc::new(t.as_bytes().to_vec());
                 for ty in TEXT_TYPES {
@@ -172,23 +193,50 @@ impl ClipboardHub {
             types.insert(PASSWORD_HINT.into(), Arc::new(b"secret".to_vec()));
         }
         *self.current.lock().unwrap() = Some(clip);
-        self.cmd
-            .lock()
-            .unwrap()
-            .send(Cmd::Set(Arc::new(Offered { types })))
-            .context("clipboard thread gone")?;
-        let _ = rustix::io::write(&self.wake, &[1]);
+        let offered = Arc::new(Offered { types, _file: file });
+        // Serialize attach and publication so a newly attached display cannot
+        // miss the latest selection between subscribing and taking its snapshot.
+        let mut latest = self.offered.lock().unwrap();
+        *latest = Some(offered.clone());
+        if let Some((cmd, wake)) = &self.cmd {
+            cmd.lock()
+                .unwrap()
+                .send(Cmd::Set(offered.clone()))
+                .context("clipboard thread gone")?;
+            let _ = rustix::io::write(wake, &[1]);
+        } else {
+            self.fallback
+                .lock()
+                .unwrap()
+                .retain(|tx| tx.send(offered.clone()).is_ok());
+        }
         Ok(())
+    }
+
+    pub(crate) fn attach(&self, tx: calloop::channel::Sender<Arc<Offered>>) -> bool {
+        if self.cmd.is_some() {
+            return false;
+        }
+        let latest = self.offered.lock().unwrap();
+        if let Some(offered) = latest.as_ref() {
+            let _ = tx.send(offered.clone());
+        }
+        self.fallback.lock().unwrap().push(tx);
+        true
     }
 
     fn host_changed(&self, clip: Clip) {
         if self.current.lock().unwrap().as_ref() == Some(&clip) {
             return;
         }
+        // A host replacement must not replay the last Android offer when the
+        // display connection is recreated. Its source retains any in-flight copy.
+        *self.offered.lock().unwrap() = None;
         crate::info!(
             "clipboard: host selection ({}{})",
             match &clip.content {
                 Content::Text(t) => format!("{} bytes of text", t.len()),
+                Content::File(f) => format!("{} bytes in {}", f.bytes.len(), f.name),
                 Content::Image(i) => format!("{}x{} image", i.width, i.height),
             },
             if clip.sensitive { ", sensitive" } else { "" }
@@ -391,42 +439,72 @@ fn receive(
     conn: &Connection,
     hub: Arc<ClipboardHub>,
 ) {
+    receive_offer(types, conn, hub, |mime, fd| offer.receive(mime.into(), fd));
+}
+
+/// Both Wayland protocols use the same MIME negotiation and bounded reader.
+pub(crate) fn receive_offer(
+    types: &[String],
+    conn: &Connection,
+    hub: Arc<ClipboardHub>,
+    receive: impl FnOnce(&str, std::os::fd::BorrowedFd<'_>),
+) {
+    if types.iter().any(|t| t == MARKER) {
+        return;
+    }
     let sensitive = types.iter().any(|t| t == PASSWORD_HINT);
-    let (mime, is_text) = match TEXT_TYPES.iter().find(|t| types.iter().any(|o| o == *t)) {
-        Some(t) => (*t, true),
-        None if types.iter().any(|t| t == "image/png") => ("image/png", false),
-        None => return,
+    let Some(mime) = preferred_type(types) else {
+        return;
     };
     let Ok((r, w)) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC) else {
         return;
     };
-    offer.receive(mime.into(), w.as_fd());
+    receive(mime, w.as_fd());
     drop(w);
     let _ = conn.flush();
-    let max = if is_text {
-        limits::CLIP_TEXT
-    } else {
-        limits::CLIP_IMAGE
-    } as usize;
+    let mime = mime.to_owned();
     let _ = std::thread::Builder::new()
         .name("clipboard-read".into())
         .spawn(move || {
-            let bytes = match read_capped(r, max) {
-                Ok(b) => b,
-                Err(e) => return crate::warn!("clipboard: reading the host selection: {e}"),
-            };
-            let content = if is_text {
-                match String::from_utf8(bytes) {
-                    Ok(t) => Content::Text(t),
-                    Err(_) => return crate::warn!("clipboard: host text is not UTF-8"),
+            let result = (|| -> Result<Content> {
+                let max = if mime == "image/png" {
+                    limits::CLIP_IMAGE
+                } else {
+                    limits::CLIP_TEXT
+                };
+                let bytes = read_capped(r, max as usize)?;
+                match mime.as_str() {
+                    "text/uri-list" => Ok(Content::File(files::read_uri_list(&bytes)?)),
+                    files::PORTAL_TYPE => Ok(Content::File(files::retrieve(&bytes)?)),
+                    "image/png" => Ok(Content::Image(decode_png(&bytes)?)),
+                    _ => Ok(Content::Text(String::from_utf8(bytes)?)),
                 }
-            } else {
-                match decode_png(&bytes) {
-                    Ok(i) => Content::Image(i),
-                    Err(e) => return crate::warn!("clipboard: host image: {e:#}"),
-                }
-            };
-            hub.host_changed(Clip { content, sensitive });
+            })();
+            match result {
+                Ok(content) => hub.host_changed(Clip { content, sensitive }),
+                Err(e) => crate::warn!("clipboard: reading the host selection: {e:#}"),
+            }
+        });
+}
+
+pub(crate) fn preferred_type(types: &[String]) -> Option<&str> {
+    [files::PORTAL_TYPE, "text/uri-list"]
+        .into_iter()
+        .chain(TEXT_TYPES)
+        .chain(["image/png"])
+        .find(|t| types.iter().any(|o| o == t))
+}
+
+pub(crate) fn serve(offered: &Offered, mime: String, fd: OwnedFd) {
+    let Some(data) = offered.types.get(&mime).cloned() else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("clipboard-write".into())
+        .spawn(move || {
+            if let Err(e) = write_all_timeout(fd, &data) {
+                crate::warn!("clipboard: serving {mime}: {e}");
+            }
         });
 }
 
@@ -517,16 +595,7 @@ impl Dispatch<ExtDataControlSourceV1, ()> for State {
                 if cur != src {
                     return;
                 }
-                let Some(data) = offered.types.get(&mime_type).cloned() else {
-                    return;
-                };
-                let _ = std::thread::Builder::new()
-                    .name("clipboard-write".into())
-                    .spawn(move || {
-                        if let Err(e) = write_all_timeout(fd, &data) {
-                            crate::warn!("clipboard: serving {mime_type}: {e}");
-                        }
-                    });
+                serve(offered, mime_type, fd);
             }
             ext_data_control_source_v1::Event::Cancelled => {
                 if state.source.as_ref().is_some_and(|(s, _)| s == src) {

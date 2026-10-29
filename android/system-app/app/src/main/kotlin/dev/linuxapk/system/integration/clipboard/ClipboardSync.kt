@@ -67,6 +67,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
         (context.contentResolver.getType(uri)
           ?: desc.takeIf { it.mimeTypeCount > 0 }?.getMimeType(0))
       else null
+    if (uri?.authority == ClipFileProvider.AUTHORITY) return
     if (uri != null && mime?.startsWith("image/") == true) {
       val img = loadImage(uri) ?: return
       val key = imageKey(img)
@@ -74,6 +75,37 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
       toHost = key
       val blob = Wire.Writer(img.bytes.size + 8).image(img).bytes()
       send(Wire.CLIP_IMAGE, sensitive, blob)
+      return
+    }
+    if (uri?.scheme == "content") {
+      try {
+        val name =
+          context.contentResolver
+            .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use {
+              if (it.moveToFirst()) it.getString(0) else null
+            } ?: "clipboard-file"
+        val bytes =
+          context.contentResolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(65536)
+            while (true) {
+              val n = input.read(buffer)
+              if (n < 0) break
+              require(out.size() + n <= ClipFile.MAX_BYTES) { "clipboard file too large" }
+              out.write(buffer, 0, n)
+            }
+            out.toByteArray()
+          } ?: return
+        val file = ClipFile(name, mime ?: "application/octet-stream", bytes)
+        val key = "file $uri ${bytes.contentHashCode()}"
+        if (toHost == key) return
+        val blob = file.encode()
+        toHost = key
+        send(Wire.CLIP_FILE, sensitive, blob)
+      } catch (e: Exception) {
+        Log.w(TAG, "reading clip file $uri: $e")
+      }
       return
     }
     val text = item.coerceToText(context)?.toString() ?: return
@@ -127,6 +159,17 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
           fromHost = text
           ClipData.newPlainText("Desktop", text)
         }
+        Wire.CLIP_FILE -> {
+          try {
+            val file = ClipFile.decode(data)
+            val uri = ClipFileProvider.store(context, file)
+            fromHost = "file $uri"
+            ClipData.newUri(context.contentResolver, file.name, uri)
+          } catch (e: Exception) {
+            Log.w(TAG, "host clip file: $e")
+            return
+          }
+        }
         Wire.CLIP_IMAGE -> {
           val img = decodeImage(data) ?: return
           fromHost = imageKey(img)
@@ -156,7 +199,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     if (r.remaining() < 4) return null
     val w = r.short.toInt() and 0xffff
     val h = r.short.toInt() and 0xffff
-    if (w == 0 || h == 0 || r.remaining() != w * h * 4) return null
+    if (w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE || r.remaining() != w * h * 4) return null
     val px = ByteArray(w * h * 4)
     r.get(px)
     return Wire.Rgba(w, h, px)

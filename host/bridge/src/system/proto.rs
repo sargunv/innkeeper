@@ -9,7 +9,7 @@
 //! | `0x0301` | START        | `u32 features` (1 settings, 2 clipboard, 4 notifications, 8 media, 16 links)    | `u32` features served; the current settings and host clipboard follow as events                |
 //! | `0x0302` | NOTIFY       | `u32 id` (≠ 0), `u32 len` ≤ 1 MiB (fd: notification blob)                       | `-EBUSY` over 64 per connection, `-EIO` if the server refused; posting an id again replaces it |
 //! | `0x0303` | NOTIFY_CLOSE | `u32 id`                                                                        |                                                                                                |
-//! | `0x0304` | CLIP_SET     | `u8 kind` (1 text, 2 image), `u8 sensitive`, `u16 0`, `u32 len` ≤ 1/16 MiB (fd) | `-ENOSYS` without data control                                                                 |
+//! | `0x0304` | CLIP_SET     | `u8 kind` (1 text, 2 image, 3 file), `u8 sensitive`, `u16 0`, `u32 len` ≤ 1/16 MiB (fd) | `-ENOSYS` when clipboard disabled                                                                 |
 //! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not an external URI, `-EAGAIN` over 5 per 10 s                                            |
 //! | `0x0306` | MEDIA        | `u32 player` (≠ 0), `u32 len` ≤ 2 MiB (fd: media blob)                          | `-EBUSY` over 8 players per connection                                                         |
 //! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
@@ -34,7 +34,10 @@
 //! [`super::mpris::Media`] document theirs, and the system app's encoders
 //! (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is `u32 len` +
 //! UTF-8; images are `u16 width, u16 height` + raw RGBA8 rows, so nothing
-//! Android sends reaches a host image decoder.
+//! Android sends reaches a host image decoder. Clip kind 3 is a single file:
+//! blob text name (1..255 bytes, no slash), blob text MIME (1..255 bytes),
+//! u32 size and raw file bytes (at most 16 MiB minus 1024); total at most
+//! 16 MiB. Clipboard text is raw UTF-8, without a length prefix.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -72,6 +75,7 @@ pub mod limits {
     pub const NOTIFY_BLOB: u32 = 1 << 20;
     pub const CLIP_TEXT: u32 = 1 << 20;
     pub const CLIP_IMAGE: u32 = 16 << 20;
+    pub const CLIP_FILE: u32 = 16 << 20;
     pub const URI: u32 = 8192;
     pub const MEDIA_BLOB: u32 = 2 << 20;
     /// LIFECYCLE's blob, and the background-allowed apps in it.
@@ -86,6 +90,8 @@ pub enum ClipKind {
     Text = 1,
     /// An RGBA image (`blob::Doc::image`).
     Image = 2,
+    /// File: blob text name, blob text MIME, u32 byte count, raw bytes.
+    File = 3,
 }
 
 impl ClipKind {
@@ -93,6 +99,7 @@ impl ClipKind {
         match v {
             1 => Ok(ClipKind::Text),
             2 => Ok(ClipKind::Image),
+            3 => Ok(ClipKind::File),
             _ => Err(DecodeError::Invalid("clip kind")),
         }
     }
@@ -100,6 +107,7 @@ impl ClipKind {
         match self {
             ClipKind::Text => limits::CLIP_TEXT,
             ClipKind::Image => limits::CLIP_IMAGE,
+            ClipKind::File => limits::CLIP_FILE,
         }
     }
 }
@@ -486,6 +494,11 @@ mod tests {
                 sensitive: true,
                 len: 5,
             },
+            Request::ClipSet {
+                kind: ClipKind::File,
+                sensitive: false,
+                len: limits::CLIP_FILE,
+            },
             Request::OpenUri { len: 20 },
             Request::Handoff {
                 window: 12,
@@ -515,7 +528,7 @@ mod tests {
             (ty::NOTIFY, &[1, 0, 0, 0, 0, 0, 0x20, 0]),    // over the cap
             (ty::OPEN_URI, &[0, 0, 0, 0]),
             (ty::OPEN_URI, &[0x01, 0x20, 0, 0]), // 8193
-            (ty::CLIP_SET, &[3, 0, 0, 0, 1, 0, 0, 0]),
+            (ty::CLIP_SET, &[4, 0, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 2, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 0, 1, 0, 1, 0, 0, 0]),
             (ty::START, &[0, 0, 0, 0, 0]),

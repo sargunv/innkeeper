@@ -19,7 +19,11 @@ class ClipProbe : Activity() {
     super.onCreate(savedInstanceState)
     val cm = getSystemService(ClipboardManager::class.java)
     val text = intent.getStringExtra("text")
-    if (intent.getBooleanExtra("image", false)) {
+    if (intent.getBooleanExtra("file", false)) {
+      val uri = ClipImageProbe.storeFile(this)
+      cm.setPrimaryClip(ClipData.newUri(contentResolver, "probe file", uri))
+      Log.i(TAG, "set file: $uri")
+    } else if (intent.getBooleanExtra("image", false)) {
       val uri = ClipImageProbe.store(this)
       cm.setPrimaryClip(ClipData.newUri(contentResolver, "probe image", uri))
       Log.i(TAG, "set image: $uri")
@@ -29,6 +33,21 @@ class ClipProbe : Activity() {
     } else {
       val clip = cm.primaryClip
       val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+      item?.uri?.let { uri ->
+        try {
+          val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: byteArrayOf()
+          val hash =
+            java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {
+              "%02x".format(it)
+            }
+          Log.i(
+            TAG,
+            "file: uri=$uri mime=${contentResolver.getType(uri)} bytes=${bytes.size} sha256=$hash",
+          )
+        } catch (e: Exception) {
+          Log.e(TAG, "reading file: $e")
+        }
+      }
       Log.i(TAG, "clip: label=${clip?.description?.label} text=${item?.text} uri=${item?.uri}")
     }
     finish()

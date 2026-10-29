@@ -162,7 +162,7 @@ impl Shared {
             .as_ref()
     }
 
-    fn clipboard(&self) -> Option<&Arc<ClipboardHub>> {
+    pub(crate) fn clipboard(&self) -> Option<&Arc<ClipboardHub>> {
         if !self.policy.clipboard {
             return None;
         }
@@ -312,6 +312,10 @@ impl SystemService {
             Err(e) => return Reply::err(e),
         };
         let content = match kind {
+            ClipKind::File => match clipboard::files::ClipFile::decode(&b) {
+                Ok(f) => Content::File(f),
+                Err(_) => return Reply::err(-EINVAL),
+            },
             ClipKind::Text => match String::from_utf8(b) {
                 Ok(t) if !t.contains('\0') => Content::Text(t),
                 _ => return Reply::err(-EINVAL),
