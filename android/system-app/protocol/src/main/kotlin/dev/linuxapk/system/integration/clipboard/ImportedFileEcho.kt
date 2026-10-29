@@ -11,6 +11,8 @@ class ImportedFileEcho {
     return ++generation
   }
 
+  fun consume(uri: String?, generation: Long): Boolean = consume(listOf(uri), generation)
+
   fun consume(uris: List<String?>, generation: Long): Boolean {
     val expected = this.uris
     this.uris = emptyList()

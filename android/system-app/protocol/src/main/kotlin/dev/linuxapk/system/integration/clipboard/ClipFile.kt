@@ -80,6 +80,9 @@ data class ClipFiles(val files: List<ClipFile>) {
     const val MAX_FILES = 16
     const val MAX_TOTAL = 16 shl 20
 
+    fun isMultiFileSelection(uriSchemes: List<String?>): Boolean =
+      uriSchemes.size > 1 && uriSchemes.all { it == "content" }
+
     fun encodedSize(files: List<ClipFile>): Int =
       4 +
         files.sumOf { 12 + it.name.toByteArray().size + it.mime.toByteArray().size + it.bytes.size }

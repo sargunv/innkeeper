@@ -24,6 +24,9 @@ class ImportedFileEchoTest {
     assertFalse(
       echo.consume(uri.take(1), partial),
     ) // Matching the first item cannot hide a changed selection.
+    val single = echo.install(uri.take(1))
+    assertTrue(echo.consume(uri[0], single))
+    assertFalse(echo.consume(uri[0], single))
     val newer = echo.install(uri)
     assertFalse(echo.consume(uri, generation)) // An old generation cannot match a new install.
     assertFalse(echo.consume(uri, newer)) // Every observation consumes the pending marker.

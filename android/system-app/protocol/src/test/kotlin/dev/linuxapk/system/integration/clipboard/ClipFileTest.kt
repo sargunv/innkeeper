@@ -5,8 +5,27 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ClipFileTest {
+  @Test
+  fun onlyMultipleContentUrisUseTheMultiFilePath() {
+    val rawHttpsUri = java.net.URI("https://example.com/copied-link")
+    assertFalse(ClipFiles.isMultiFileSelection(listOf(rawHttpsUri.scheme)))
+    assertFalse(
+      ClipFiles.isMultiFileSelection(listOf("content")),
+    ) // Keep single-file/image behavior.
+    assertFalse(ClipFiles.isMultiFileSelection(listOf("content", rawHttpsUri.scheme)))
+    assertFalse(ClipFiles.isMultiFileSelection(listOf(rawHttpsUri.scheme, "content")))
+    assertFalse(ClipFiles.isMultiFileSelection(listOf(null, "content"))) // Text/intent first.
+    assertFalse(ClipFiles.isMultiFileSelection(listOf("content", null)))
+    assertFalse(ClipFiles.isMultiFileSelection(listOf("file")))
+    assertFalse(ClipFiles.isMultiFileSelection(listOf(null)))
+    assertFalse(ClipFiles.isMultiFileSelection(emptyList()))
+    assertTrue(ClipFiles.isMultiFileSelection(listOf("content", "content")))
+  }
+
   @Test
   fun fileMimePreservesProviderAndDescriptionTypes() {
     val declared = listOf("application/pdf", "text/plain")
