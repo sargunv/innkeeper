@@ -57,8 +57,8 @@ regenerated while another session uses that build; stop those sessions first.
    `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to the
    new build id.
 4. Prove it: `mise run test:e2e -- boot`, `mise run test:e2e` and
-   `mise run test:compat` with no regressions, then regenerate
-   `docs/compatibility.md`.
+   `mise run test:compat` with no regressions, then regenerate the
+   [Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility).
 
 ## Licensing
 

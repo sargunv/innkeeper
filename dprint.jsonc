@@ -44,7 +44,6 @@
     ],
   },
   "excludes": [
-    "docs/compatibility.md",
     "**/third_party/**",
     "android/vendor/vulkan/patches/**",
     "android/overlay/**/*.rc",

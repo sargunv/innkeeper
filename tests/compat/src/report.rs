@@ -1,4 +1,4 @@
-//! tests/compat/results.json, the regression gate and docs/compatibility.md.
+//! tests/compat/results.json, the regression gate and local Markdown reports.
 
 use std::fs;
 use std::path::Path;
@@ -94,9 +94,10 @@ pub fn write_markdown(
      by the compat harness (`mise run test:compat`): install, launch, a \
      non-blank first frame, then a tap, a scroll and Back without a crash or \
      ANR, plus an optional per-app script. Failures are triaged in \
-     [tests/compat](../tests/compat/README.md). Generated: run \
-     `mise run test:compat -- --accept` (or `mise run test:compat -- report` to \
-     rewrite this file from `tests/compat/results.json`). Start is the time to the first \
+     [tests/compat](https://github.com/sargunv/linux.apk/tree/main/tests/compat). \
+     Nightly results are published on the \
+     [wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility). \
+     Start is the time to the first \
      frame on a fresh install; memory is the app's total PSS after the \
      interactions.\n\n",
     );
@@ -155,6 +156,9 @@ pub fn write_markdown(
             l.limit,
             u = l.unit
         );
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
     fs::write(path, md)?;
     Ok(())

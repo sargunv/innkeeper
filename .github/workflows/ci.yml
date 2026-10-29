@@ -96,6 +96,39 @@ jobs:
       - name: Full windowed compatibility corpus
         if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
         run: tools/ci/compat.sh windowed
+      - name: Render compatibility wiki page
+        id: wiki
+        if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
+        continue-on-error: true
+        run: |
+          python3 tools/ci/compat-wiki.py --reports out/ci/reports \
+            --output out/ci/reports/Compatibility.md
+      - name: Publish compatibility to the wiki
+        if: ${{ !cancelled() && steps.wiki.outcome == 'success' }}
+        continue-on-error: true # Publishing must never mask the corpus result.
+        env:
+          GH_TOKEN: ${{ secrets.LINUXAPK_WIKI_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::notice::Wiki publishing skipped: LINUXAPK_WIKI_TOKEN is not set. Compatibility results remain in the artifact.'
+            exit 0
+          fi
+          if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+            clone https://github.com/sargunv/linux.apk.wiki.git out/ci/wiki; then
+            echo '::warning::Wiki clone failed; check LINUXAPK_WIKI_TOKEN and wiki initialization. See tests/README.md.'
+            exit 1
+          fi
+          cp out/ci/reports/Compatibility.md out/ci/wiki/Compatibility.md
+          cd out/ci/wiki
+          git add Compatibility.md
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Update nightly compatibility results'
+          if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD; then
+            echo '::warning::Wiki push failed; compatibility results remain in the artifact. See tools/ci/README.md for the required credential.'
+            exit 1
+          fi
       - name: Compatibility reports and diagnostics
         if: always()
         uses: actions/upload-artifact@v4

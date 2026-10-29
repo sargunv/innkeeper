@@ -13,7 +13,7 @@ export LINUXAPK_INSTANCE=ci-$mode
 export MISE_DATA_DIR=${MISE_DATA_DIR:-$HOME/.local/share/mise}
 export MISE_STATE_DIR=${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}
 restore_baseline() {
-  git restore --source=HEAD -- tests/compat/results.json docs/compatibility.md
+  git restore --source=HEAD -- tests/compat/results.json
 }
 trap restore_baseline EXIT
 restore_baseline

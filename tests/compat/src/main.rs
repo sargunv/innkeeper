@@ -7,7 +7,7 @@
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
 //! one if needed, and stopping it at the end), runs every app, writes
 //! out/test/compat/<instance>/. `--accept` also records the results in
-//! tests/compat/results.json and docs/compatibility.md.
+//! tests/compat/results.json. `report` renders the baseline under out/.
 
 mod app;
 mod budget;
@@ -135,7 +135,7 @@ fn real_main() -> Result<ExitCode> {
 
     if o.cmd == "report" {
         report::write_markdown(
-            &repo.join("docs/compatibility.md"),
+            &repo.join("out/test/compat/COMPATIBILITY.md"),
             &baseline,
             &corpus,
             &budgets,
@@ -241,9 +241,13 @@ fn real_main() -> Result<ExitCode> {
         build: s.getprop("ro.build.fingerprint"),
         headless: s.headless(),
         session_mem_mb: s.status().memory.map(|b| b >> 20),
-        measured: measured.or(baseline.measured),
-        apps: vec![],
+        measured,
+        apps: results.clone(),
     };
+    // Publish actual observations before the baseline merge masks harness errors.
+    new.save(&out.join("fresh-results.json"))?;
+    new.measured = measured.or(baseline.measured);
+    new.apps.clear();
     // Merge: keep baseline entries for apps not run, or that hit a harness error.
     for a in &corpus.app {
         let fresh = results.iter().find(|r| r.package == a.package);
@@ -280,8 +284,7 @@ fn real_main() -> Result<ExitCode> {
     println!("{}", report::summary(&results));
     if o.accept {
         new.save(&baseline_path)?;
-        report::write_markdown(&repo.join("docs/compatibility.md"), &new, &corpus, &budgets)?;
-        eprintln!("compat: wrote tests/compat/results.json and docs/compatibility.md");
+        eprintln!("compat: wrote tests/compat/results.json");
     } else {
         eprintln!(
             "compat: baseline kept; results in {} (--accept to record)",

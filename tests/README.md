@@ -44,6 +44,16 @@ dialogs.
 `mise run test:compat -- --only <package>` is a manual troubleshooting harness;
 [compat/README.md](compat/README.md) describes its artifacts. The full corpus
 runs only in nightly CI; it never gates an agent loop or a PR. Never trigger,
-run, or wait for that job. Nightly regressions become issues.
+run, or wait for that job. The
+[compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility)
+publishes its results. The wiki renderer can be tested without a session or
+APKs: `python3 -B -m unittest discover -s tools/ci/tests`.
+
+Wiki publishing requires the repository Actions secret `LINUXAPK_WIKI_TOKEN`: a
+classic personal access token from an account with write access to
+`sargunv/linux.apk`, with the minimum `public_repo` scope for this public
+repository. `GITHUB_TOKEN` cannot push to the separate wiki Git repository. If
+the secret is absent, CI skips publishing with a notice; results remain in the
+artifact. Wiki publishing errors never change the compatibility result.
 
 `test:bionic` and `test:binder` are manual low-level HAL/broker diagnostics.
