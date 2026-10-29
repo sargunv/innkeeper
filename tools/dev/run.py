@@ -207,16 +207,17 @@ def control(args):
 
 
 def available():
+  minimum = int(ENV.get("LINUXAPK_MIN_AVAILABLE_GIB", "25"))
   subprocess.run(["free", "-g"], check=True)
   while True:
     fields = Path("/proc/meminfo").read_text().splitlines()
     kib = int(
       next(l for l in fields if l.startswith("MemAvailable:")).split()[1]
     )
-    if kib >= 25 * 1024 * 1024:
+    if kib >= minimum * 1024 * 1024:
       return
     print(
-      "dev runner: less than 25 GiB available; waiting five minutes",
+      f"dev runner: less than {minimum} GiB available; waiting five minutes",
       file=sys.stderr,
       flush=True,
     )
