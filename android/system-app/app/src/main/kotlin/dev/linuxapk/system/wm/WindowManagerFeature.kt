@@ -31,6 +31,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
 /**
@@ -41,8 +42,8 @@ import kotlin.math.roundToInt
  *    SurfaceFlinger then creates the HWC virtual display, which gets the requested window.
  * 2. The app starts there (`ActivityOptions.setLaunchDisplayId`).
  * 3. Window events: a resize (`window`) resizes the display to the window's logical size times its
- *    scale, at 160 dpi times the scale; `close` removes the tasks and releases the display;
- *    `keyboard_enter` focuses the display's top task.
+ *    scale, at 160 dpi times the scale; `close` removes the tasks and releases the display once
+ *    they are gone (see [close]); `keyboard_enter` focuses the display's top task.
  * 4. A task stack listener closes the window when the display's last task is gone, and moves any
  *    app task that shows up on display 0 into a window of its own.
  *
@@ -394,8 +395,73 @@ class WindowManagerFeature(
     input.destroyWindow(w.id)
     // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
     wms.setDisplayWindowInsetsController(w.id, null)
-    w.display.release()
-    w.reader.close()
+    // Detach the output surface now: SurfaceFlinger stops rendering frames into
+    // this display's ImageReader buffers for the whole hold, so the deferred
+    // release below never races an in-flight frame against the reader close
+    // (the software renderer keeps presenting during teardown otherwise). The
+    // display stays registered for a recovery relaunch to land on; it just has
+    // nothing left to draw until it is released.
+    try {
+      w.display.surface = null
+    } catch (e: Exception) {
+      Log.w(TAG, "detach surface for ${w.id}: $e")
+    }
+    releaseDisplayWhenTasksGone(w, w.tasks.toSet())
+  }
+
+  // Android 17 relaunches an activity that finished while it was being relaunched for a display
+  // move onto the display the task moved to, at the end of that transition
+  // (AppCompatDisplayCompatPolicy's self-kill recovery). Releasing the display while a task's
+  // removal or such a relaunch is still in flight makes that launch target a display id that no
+  // longer exists; it fails on the framework's display thread and system_server goes down with
+  // it, closing every app window (#50). [close] therefore only tears the window down and
+  // schedules the release: [releaseDisplayWhenTasksGone] polls on its own thread (the gettasks
+  // binder walk against the activity task manager must not delay the window manager's thread)
+  // until no task is on the display or still being removed here, then posts the release back to
+  // the window manager after a short settle — so a recovery relaunch queued at the removal's
+  // end still finds a registered display. A task that never leaves, and new tasks on the
+  // display (a relaunch that came back here), still close at RELEASE_TIMEOUT_MS: releasing then
+  // finishes the display's contents, whose tasks are reparented to the default display and
+  // adopted into a new window.
+  private fun releaseDisplayWhenTasksGone(
+    w: AppWindow,
+    removed: Set<Int>,
+  ) {
+    val startedAt = SystemClock.uptimeMillis()
+    thread(name = "linuxapk-wm-release-${w.id}") {
+      var emptyAt = startedAt
+      while (true) {
+        val now = SystemClock.uptimeMillis()
+        if (now - startedAt >= RELEASE_TIMEOUT_MS) {
+          break
+        }
+        val busy =
+          when (val tasks = allTasksOrError()) {
+            null -> true // a failed getTasks is not "all tasks gone": the display stays held.
+            else -> tasks.any { Tasks.displayId(it) == w.id || it.taskId in removed }
+          }
+        if (busy) {
+          emptyAt = now
+        }
+        if (!busy && now - emptyAt >= RELEASE_SETTLE_MS) {
+          break
+        }
+        Thread.sleep(RELEASE_POLL_MS)
+      }
+      // The release runs on the window manager's thread, after any pending
+      // close/start work; the state machine above did the waiting.
+      handler.post {
+        val left =
+          try {
+            allTasks().filter { Tasks.displayId(it) == w.id }.map { it.taskId }
+          } catch (e: Exception) {
+            emptyList()
+          }
+        Log.i(TAG, "display ${w.id}: released${if (left.isEmpty()) "" else " with tasks $left"}")
+        w.display.release()
+        w.reader.close()
+      }
+    }
   }
 
   // ---- window events -------------------------------------------------------------
@@ -594,13 +660,16 @@ class WindowManagerFeature(
   private fun tasksOf(pkg: String) =
     allTasks().filter { (it.baseActivity ?: it.topActivity)?.packageName == pkg }
 
-  private fun allTasks(): List<ActivityManager.RunningTaskInfo> =
+  /** [allTasks], reporting a failed query as null so callers can't confuse it with "no tasks". */
+  private fun allTasksOrError(): List<ActivityManager.RunningTaskInfo>? =
     try {
       atm.getTasks(MAX_TASKS, false, false, INVALID_DISPLAY)
     } catch (e: Exception) {
       Log.w(TAG, "getTasks: $e")
-      emptyList()
+      null
     }
+
+  private fun allTasks(): List<ActivityManager.RunningTaskInfo> = allTasksOrError().orEmpty()
 
   // Syncs windows with the tasks on their displays: closes windows whose app is gone, shows
   // app warnings once a window has its task, and adopts app tasks from display 0.
@@ -674,6 +743,9 @@ class WindowManagerFeature(
     private const val MAX_TASKS = 200
     private const val SIZE_DEBOUNCE_MS = 120L
     private const val LAUNCH_TIMEOUT_MS = 20_000L
+    private const val RELEASE_POLL_MS = 50L
+    private const val RELEASE_SETTLE_MS = 500L
+    private const val RELEASE_TIMEOUT_MS = 3_000L
 
     // WindowManager.DISPLAY_IME_POLICY_LOCAL: the input method binds to editors in the window. The
     // default one, the Linux.apk Keyboard (ime/), draws nothing; an Android IME the user picks

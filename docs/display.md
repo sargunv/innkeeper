@@ -101,10 +101,15 @@ not constrain the host pointer.
   scales; `wp_viewporter` stretches the old frame until a new one arrives. The
   last scale seen is kept, so later windows open at it.
 - **Close.** `xdg_toplevel.close` removes every task on the display and releases
-  it. When the display's last task finishes, a `TaskStackListener` closes the
-  window; Back on a launcher root instead moves the task to the back and
-  minimizes its host window, keeping the task and display alive for the next
-  launch; a window whose app never starts a task closes after 20 s.
+  it once they are gone, after a short settle: releasing while a task's removal
+  is still in flight lets Android 17's display-compat recovery
+  (AppCompatDisplayCompatPolicy) relaunch a finished activity onto the display
+  id being destroyed; that launch fails inside system_server, which restarts and
+  closes every window. When the display's last task finishes, a
+  `TaskStackListener` closes the window; Back on a launcher root instead moves
+  the task to the back and minimizes its host window, keeping the task and
+  display alive for the next launch; a window whose app never starts a task
+  closes after 20 s.
 - **Focus.** `keyboard_enter` makes the window's top task Android's focused one.
   Launching an app that has a window activates it through `xdg_activation_v1`,
   with the launch's token ([Launch feedback](#launch-feedback)); without one,
