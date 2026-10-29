@@ -7,19 +7,21 @@ Two gate tiers, both testing observable behaviour we own:
 - `mise run test:e2e -- [group...]`: one runner on a disposable KWin, private
   D-Bus/runtime/XDG dirs, a fresh named Flatpak session, and our probes APK.
   With no arguments it runs all groups: `boot` (including host safety selftest),
-  `input` (an app window and delivered input), `audio` (440 Hz at PipeWire),
-  `desktop` (links and notifications logged, clipboard isolated both ways,
-  cold-start file picker cancelled without a portal, and DocumentsUI after a
-  connection timeout, CLI file VIEW and the Android Open With chooser),
-  `sharing` (host SEND/SEND_MULTIPLE byte hashes, MIME matching and read-only
-  grants), `a11y` (AT-SPI stays inactive), `production` (Android mailto VIEW and
-  notifications reach logging desktop fakes, and PICK returns a readable file),
-  and `lifecycle` (idle stop and alarm restart). The whole command, including
-  setup and cleanup, has a 55 s deadline (plus at most 4 s for cleanup) on a
-  warm image and prints its total wall time. Setup boots once and installs the
-  probes; audio runs concurrently with the activity checks. Groups wait for
-  observations, rather than fixed delays. Lifecycle uses named-session-only
-  short timers.
+  `storage` (mounted primary volume, external app directories, and a shared
+  image scanned, queried and read through MediaStore before and after a remount
+  that preserves MediaProvider), `input` (an app window and delivered input),
+  `audio` (440 Hz at PipeWire), `desktop` (links and notifications logged,
+  clipboard isolated both ways, cold-start file picker cancelled without a
+  portal, and DocumentsUI after a connection timeout, CLI file VIEW and the
+  Android Open With chooser), `sharing` (host SEND/SEND_MULTIPLE byte hashes,
+  MIME matching and read-only grants), `a11y` (AT-SPI stays inactive),
+  `production` (Android mailto VIEW and notifications reach logging desktop
+  fakes, and PICK returns a readable file), and `lifecycle` (idle stop and alarm
+  restart). The whole command, including setup and cleanup, has a 55 s deadline
+  (plus at most 4 s for cleanup) on a warm image and prints its total wall time.
+  Setup boots once and installs the probes; audio runs concurrently with the
+  activity checks. Groups wait for observations, rather than fixed delays.
+  Lifecycle uses named-session-only short timers.
 
 Build and prepare the image first (`mise run build`,
 `mise run session -- prepare`). Results and captures stay in `out/test/e2e/`.

@@ -10,4 +10,5 @@ service vold /system/bin/vold \
     # linuxapk: labels the directories it creates (setfscreatecon), which
     # fails against the host SELinux without the shim.
     setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LINUXAPK_EMULATED_STORAGE 1
     reboot_on_failure reboot,vold-failed

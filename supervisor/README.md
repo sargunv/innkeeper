@@ -106,6 +106,22 @@ host's network, so their pid-numbered ports collide); and lmkd's PSI trigger
 windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1 there, so
 pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
 
+Android 17 mounts every visible emulated volume through FUSE; the old
+`persist.sys.fuse` switch no longer selects a non-FUSE path. Flatpak has no
+`/dev/fuse` and cannot mount filesystems. For vold only
+(`LINUXAPK_EMULATED_STORAGE=1`), `shim/fuse.h` provides a socket with the stable
+FUSE INIT request so MediaProvider starts its storage session. The launcher
+links `/storage/emulated`, `/mnt/user/0/emulated` and
+`/mnt/pass_through/0/emulated` to `/data/media`. All file access uses that same
+filesystem, with no FUSE cache or filesystem requests. MediaProvider receives
+the mounted-volume notification, scans the volume and serves MediaStore; apps
+can index later file writes with MediaScanner or create them through MediaStore.
+Unmount closes the socket and ends the session. This supports the primary
+emulated volume, not AppFuse proxy descriptors or removable volumes.
+Canonicalization keeps the public path, while cross-process `/proc` reads keep
+the lower path so vold does not kill MediaProvider's recovery database on
+unmount.
+
 ## Tests
 
 - `cargo test -p linuxapk-broker` (binder transactions, failure delivery,

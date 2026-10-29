@@ -239,6 +239,10 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     // /mnt/user/0 over /storage): apps reach /data/media directly, so it is
     // on disk rather than in the sandbox's tmpfs.
     link(Path::new("/data/media"), Path::new("/storage/emulated"))?;
+    for base in ["/mnt/user/0", "/mnt/pass_through/0"] {
+        fs::create_dir_all(base)?;
+        link(Path::new("/data/media"), &Path::new(base).join("emulated"))?;
+    }
     fs::create_dir_all("/storage/self")?;
     link(
         Path::new("/storage/emulated/0"),
@@ -408,7 +412,14 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle) -> Result<()> {
     session::start_kmsg_reader(p)?;
     session::start_bridge(cfg)?;
     let log = append(&p.session_log())?;
-    let root_map = format!("{}=/\n{}=/data", p.root.display(), p.data.display());
+    // realpath (via /proc/self/fd) must retain the public volume path:
+    // MediaProvider treats canonical /data/media paths as internal storage.
+    let root_map = format!(
+        "{}=/\n{}=/data\n{}=/storage/emulated",
+        p.root.display(),
+        p.data.display(),
+        p.data.join("media").display()
+    );
     let mut cmd = init::command(cfg, Path::new("/"), &[("LINUXAPK_ROOT_MAP", root_map)]);
     // pivot-exec, init's subreaper, dies with this thread.
     unsafe {
