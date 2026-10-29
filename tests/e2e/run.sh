@@ -131,7 +131,11 @@ if [[ ${1:-} == --group ]]; then
       until_ok mapped
       # Position the window for absolute input without resizing Android's
       # display: resize snapshots temporarily block otherwise valid touches.
-      cat >"$T/input-window.js" <<'JS'
+      if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+        gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
+          --method dev.linuxapk.TestDesktop.Position false >/dev/null
+      else
+        cat >"$T/input-window.js" <<'JS'
 for (const w of workspace.windowList()) {
   if (String(w.resourceClass).includes("dev.linuxapk.probes")) {
     const geometry = w.frameGeometry;
@@ -142,12 +146,13 @@ for (const w of workspace.windowList()) {
   }
 }
 JS
-      script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-        --method org.kde.kwin.Scripting.loadScript "$T/input-window.js" linuxapk-input-window | grep -oE '[0-9]+')
-      gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
-        --method org.kde.kwin.Script.run >/dev/null
-      gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-        --method org.kde.kwin.Scripting.unloadScript linuxapk-input-window >/dev/null
+        script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+          --method org.kde.kwin.Scripting.loadScript "$T/input-window.js" linuxapk-input-window | grep -oE '[0-9]+')
+        gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
+          --method org.kde.kwin.Script.run >/dev/null
+        gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+          --method org.kde.kwin.Scripting.unloadScript linuxapk-input-window >/dev/null
+      fi
       # Activity resume precedes InputDispatcher's focused-window publication.
       # Wait for the actual input target before submitting the burst.
       # shellcheck disable=SC2329 # invoked through until_ok
@@ -160,13 +165,13 @@ JS
       file_has "$T/devices.txt" 'Linux.apk Keyboard'
       file_has "$T/devices.txt" 'Linux.apk Mouse'
       /usr/bin/python3 "$here/gamepads.py" check "$T/devices.txt"
-      # Keep one fake KWin device across enter/leave and drag. Submit the
+      # Keep one virtual seat device across enter/leave and drag. Submit the
       # ordered stream without observation barriers between evdev devices.
       mkfifo "$T/seat"
       /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
       seat_pid=$!
       exec {seat_fd}>"$T/seat"
-      # A submitted first frame precedes KWin mapping/focusing the surface.
+      # A submitted first frame precedes the compositor mapping/focusing the surface.
       # Establish real pointer delivery before the uninterrupted test stream.
       # shellcheck disable=SC2329 # invoked through until_ok
       pointer_ready() {
@@ -209,7 +214,21 @@ JS
       s am start --display "$second_display" -f 0x18000000 -n dev.linuxapk.probes/.InputProbeActivity >/dev/null
       until_ok log_has LinuxApkProbe "configuration keyboard=2 windowDisplay=$second_display"
       until_ok input_ready "$second_display"
-      cat >"$T/two-windows.js" <<'JS'
+      if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+        s logcat -b main -c
+        gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
+          --method dev.linuxapk.TestDesktop.Position true >/dev/null
+        # Mutter configures sizes asynchronously. Observe delivery to both
+        # resized Android windows before the uninterrupted crossing stream.
+        # shellcheck disable=SC2329 # invoked through until_ok
+        two_windows_ready() {
+          printf 'abs:200,300\nabs:1200,300\n' >&"$seat_fd"
+          log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display" &&
+            log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $second_display windowDisplay=$second_display"
+        }
+        until_ok two_windows_ready
+      else
+        cat >"$T/two-windows.js" <<'JS'
 let x = 0;
 for (const w of workspace.windowList()) {
   if (String(w.resourceClass).includes("dev.linuxapk.")) {
@@ -219,12 +238,13 @@ for (const w of workspace.windowList()) {
   }
 }
 JS
-      script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-        --method org.kde.kwin.Scripting.loadScript "$T/two-windows.js" linuxapk-input-two | grep -oE '[0-9]+')
-      gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
-        --method org.kde.kwin.Script.run >/dev/null
-      gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-        --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
+        script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+          --method org.kde.kwin.Scripting.loadScript "$T/two-windows.js" linuxapk-input-two | grep -oE '[0-9]+')
+        gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
+          --method org.kde.kwin.Script.run >/dev/null
+        gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+          --method org.kde.kwin.Scripting.unloadScript linuxapk-input-two >/dev/null
+      fi
       # Rapid alternating enter/move/click/leave reports must retain their own
       # display's device even with both endpoints readable.
       for _ in {1..2}; do
@@ -384,6 +404,9 @@ sys.exit(1)
       mv "$socket.hidden" "$socket"
       trap - EXIT
       s am force-stop com.android.documentsui
+      # The cold fallback can finish its task before WM observes it. Explicitly
+      # release this fixture's display before another same-size window opens.
+      wm CLOSE --es package com.android.documentsui >/dev/null
       echo 'ok   unavailable bridge falls back to DocumentsUI after the connection timeout'
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       printf '# linuxapk-file-grant\n' >"$T/file.md"
@@ -530,6 +553,7 @@ run_group() {
   timed "$1" timeout --kill-after=2 50 "$0" --group "$1" || result=$?
   if ((result != 0)); then
     # Preserve the failed activity sequence before lifecycle restarts logd.
+    tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
     timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
     if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then

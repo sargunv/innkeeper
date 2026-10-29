@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Run a command on a disposable KWin desktop with a private bus and XDG dirs.
+# Run a command on a disposable Wayland desktop with a private bus and XDG dirs.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 export LINUXAPK_IMAGES=${LINUXAPK_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/images}
 export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-nested}
+export LINUXAPK_TEST_COMPOSITOR=${LINUXAPK_TEST_COMPOSITOR:-kwin}
 N=$repo/out/test/nested/$LINUXAPK_INSTANCE
 host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
@@ -57,6 +58,11 @@ fi
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
 gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
+if [ "$LINUXAPK_TEST_COMPOSITOR" = mutter ]; then
+  echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
+  exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 1920x1080 \\
+    --wayland-display lapk-nested --automation-script "$repo/tests/e2e/mutter.js"
+fi
 exec kwin_wayland --virtual --no-lockscreen --socket lapk-nested \\
   --width 1920 --height 1080 --exit-with-session "$N/hold.sh"
 HOLD
@@ -68,7 +74,9 @@ export FLATPAK_USER_DIR=$repo/out/flatpak/user
 export XDG_DATA_DIRS=$FLATPAK_USER_DIR/exports/share:/usr/local/share:/usr/share
 export LANG=C.UTF-8 LANGUAGE=C
 export HOME=$N/home XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data
-export XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state XDG_CURRENT_DESKTOP=KDE
+export XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
+export XDG_CURRENT_DESKTOP=KDE
+if [[ $LINUXAPK_TEST_COMPOSITOR == mutter ]]; then export XDG_CURRENT_DESKTOP=GNOME; fi
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 # Explicit renderer overrides belong to this desktop, not the user's manager.
 renderer_env=()
@@ -79,9 +87,10 @@ done
 # the private runtime and the nested Wayland socket before dbus-run-session.
 DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemd-run --user --quiet --collect \
   --unit "$unit" -p MemoryMax=3G -- env -u DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
-  LANG="$LANG" LANGUAGE="$LANGUAGE" HOME="$HOME" XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
+  PATH="$PATH" LANG="$LANG" LANGUAGE="$LANGUAGE" HOME="$HOME" XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
   XDG_DATA_HOME="$XDG_DATA_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" \
-  XDG_DATA_DIRS="$XDG_DATA_DIRS" XDG_CURRENT_DESKTOP=KDE FLATPAK_USER_DIR="$FLATPAK_USER_DIR" \
+  XDG_DATA_DIRS="$XDG_DATA_DIRS" XDG_CURRENT_DESKTOP="$XDG_CURRENT_DESKTOP" FLATPAK_USER_DIR="$FLATPAK_USER_DIR" \
+  LINUXAPK_TEST_COMPOSITOR="$LINUXAPK_TEST_COMPOSITOR" \
   PULSE_SERVER="$PULSE_SERVER" WAYLAND_DISPLAY=lapk-nested \
   "${renderer_env[@]}" \
   dbus-run-session -- "$N/compositor.sh"
@@ -90,16 +99,16 @@ for _ in $(seq 100); do
   sleep 0.1
 done
 [[ -s $N/bus && -S $rt/lapk-nested ]] || {
-  echo 'nested KWin did not start' >&2
+  echo 'nested desktop did not start' >&2
   exit 1
 }
 DBUS_SESSION_BUS_ADDRESS=$(cat "$N/bus")
 export XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=lapk-nested DBUS_SESSION_BUS_ADDRESS
 export LINUXAPK_NESTED=1
-gdbus call --session --dest org.kde.KWin --object-path /KWin \
-  --method org.kde.KWin.supportInformation >"$N/kwin-support.txt"
-if [[ ${GITHUB_ACTIONS:-} == true ]] && ! grep -q 'Compositing Type: OpenGL' "$N/kwin-support.txt"; then
-  echo "nested KWin needs OpenGL and a DRM device; see $N/kwin-support.txt" >&2
-  exit 1
+if [[ $LINUXAPK_TEST_COMPOSITOR == mutter ]]; then
+  gdbus wait --session --timeout 10 dev.linuxapk.TestDesktop
+else
+  gdbus call --session --dest org.kde.KWin --object-path /KWin \
+    --method org.kde.KWin.supportInformation >"$N/kwin-support.txt"
 fi
 "$@"

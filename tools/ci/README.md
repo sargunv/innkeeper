@@ -38,7 +38,7 @@ gh workflow run ci.yml --ref <branch>
 gh run watch <run-id> --exit-status
 ```
 
-Ubuntu 26.04 supplies the project's GTK baseline, KWin and Flatpak. Only
+Ubuntu 26.04 supplies the project's GTK baseline, Mutter and Flatpak. Only
 `setup.sh`, guarded by `GITHUB_ACTIONS=true`, uses sudo. It enables unprivileged
 user namespaces, starts the systemd user manager and runner PipeWire server, and
 grants runner-local read/write access to udmabuf (built into the runner's Azure
@@ -49,24 +49,24 @@ run under that default without host configuration. A missing udmabuf module
 fails setup: software Vulkan still needs real dma-buf allocations, so a fake
 device or skipping the runtime tests would not test Android graphics.
 
-The hosted GPU-less VM also needs the in-kernel `vgem` DRM device for KWin's
-virtual OpenGL backend. Setup installs the matching kernel's extra modules if
-vgem is absent, loads it, and grants the runner access to its card node. This
-provides buffer allocation for the software compositor; Android still uses
-lavapipe and udmabuf. This provisioning is confined to disposable hosted
-runners. Contributors use their existing DRM device without host setup.
+The GPU-less hosted VM runs headless GNOME Shell/Mutter with surfaceless
+llvmpipe. Unlike KWin's OpenGL virtual backend, this needs no DRM node and
+advertises linux-dmabuf v3; Android still allocates real buffers with udmabuf.
+The invocation follows
+[GTK's headless CI runner](https://github.com/GNOME/gtk/blob/main/.gitlab-ci/run-tests.sh)
+and
+[GNOME Shell's automation tests](https://github.com/GNOME/gnome-shell/blob/main/tests/meson.build).
 
 The test tasks run the stage through the repository's Flatpak development
 driver. `test:e2e` starts its own isolated desktop; both compatibility modes use
-`tests/nested.sh`. That runner provides virtual KWin, a private bus, runtime
-directory and HOME/XDG directories, and stops the desktop when done. The
-runner's user manager supplies software-rendering settings to KWin. Android
-frames require its OpenGL compositor, even with software rendering: QPainter
-does not expose the linux-dmabuf protocol used by the bridge. Android sessions
-are named and memory capped by the development driver. The nightly also builds
-and installs the distributable Flatpak. CI sets `LINUXAPK_MIN_AVAILABLE_GIB=10`
-for the 16 GB runner; the driver's default remains 25 GiB for local desktops,
-and its 8 GiB hard cap remains.
+`tests/nested.sh`. That runner provides a private bus, runtime directory and
+HOME/XDG directories, and stops the desktop when done. CI selects Mutter with
+`LINUXAPK_TEST_COMPOSITOR=mutter`; local runs default to virtual KWin. The
+runner forwards explicit software-rendering settings only to its desktop.
+Android sessions are named and memory capped by the development driver. The
+nightly also builds and installs the distributable Flatpak. CI sets
+`LINUXAPK_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
+remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
 
 An exact stage cache skips building when none of its source, build script or
 toolchain inputs changed; the probes APK is restored with the stage. Tests still

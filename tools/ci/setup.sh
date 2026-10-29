@@ -10,7 +10,7 @@ sudo apt-get install -y --no-install-recommends \
   clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev
 [[ ${LINUXAPK_CI_RUNTIME:-true} == true ]] || exit 0
 sudo apt-get install -y --no-install-recommends \
-  podman uidmap passt flatpak cpio dbus-user-session kwin-wayland \
+  podman uidmap passt flatpak cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-kde \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
@@ -24,31 +24,18 @@ if [[ ! -e /dev/udmabuf ]]; then
 fi
 sudo chmod 666 /dev/udmabuf
 test -r /dev/udmabuf && test -w /dev/udmabuf
-# KWin's virtual OpenGL backend still needs a DRM allocation device. The
-# hosted VM has no GPU; vgem supplies buffers for Mesa's software renderer.
-if ! modinfo vgem >/dev/null 2>&1; then
-  sudo apt-get install -y --no-install-recommends "linux-modules-extra-$(uname -r)"
-fi
-sudo modprobe vgem
-vgem_node=""
-for card in /sys/class/drm/card[0-9]*; do
-  target=$(readlink -f "$card/device")
-  if [[ ${target##*/} == vgem ]]; then
-    vgem_node=/dev/dri/${card##*/}
-    sudo chmod 666 "$vgem_node"
-    break
-  fi
-done
-test -r "$vgem_node" && test -w "$vgem_node"
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"
 sudo systemctl start "user@$(id -u).service"
 systemctl --user start pipewire pipewire-pulse wireplumber
-# QPainter does not advertise linux-dmabuf, which Android's frames require.
-systemctl --user set-environment LIBGL_ALWAYS_SOFTWARE=1 KWIN_COMPOSE=O2
-echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >>"$GITHUB_ENV"
-echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus" >>"$GITHUB_ENV"
+# Mutter uses surfaceless llvmpipe and advertises linux-dmabuf without a DRM node.
+systemctl --user set-environment LIBGL_ALWAYS_SOFTWARE=1
+{
+  echo "LINUXAPK_TEST_COMPOSITOR=mutter"
+  echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus"
+} >>"$GITHUB_ENV"
 # Container builds mount the runner's home. Put the NDK inside that mount.
 mkdir -p "$HOME/Android/Sdk"
 cp -a "$ANDROID_HOME/licenses" "$HOME/Android/Sdk/"

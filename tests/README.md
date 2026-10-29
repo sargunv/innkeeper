@@ -4,7 +4,7 @@ Two gate tiers, both testing observable behaviour we own:
 
 - `mise run test`: unit tests, without an Android session or compat APKs. Rust,
   Kotlin input/protocol, HAL host tests, supervisor and image scripts.
-- `mise run test:e2e -- [group...]`: one runner on a disposable KWin, private
+- `mise run test:e2e -- [group...]`: one runner on a disposable desktop, private
   D-Bus/runtime/XDG dirs, a fresh named Flatpak session, and our probes APK.
   With no arguments it runs all groups: `boot` (including host safety selftest),
   `storage` (mounted primary volume, external app directories, and a shared
@@ -38,24 +38,29 @@ Build and prepare the image first (`mise run build`,
 The runner stops and resets its own instance on exit, including on failure. It
 never uses the main session or the user's desktop configuration.
 
-The CI desktop uses KWin's OpenGL compositor with Mesa software rendering
-(`KWIN_COMPOSE=O2 LIBGL_ALWAYS_SOFTWARE=1`). QPainter (`KWIN_COMPOSE=Q`) does
-not advertise linux-dmabuf, so Android's windows cannot map there. KWin's
-virtual OpenGL backend also needs a DRM device: CI provisions vgem, while local
-development uses the host's existing device. The nested runner forwards renderer
-overrides only to its private desktop and saves KWin's support information in
-`kwin-support.txt`. CI fails before starting Android if KWin fell back from
-OpenGL. To reproduce locally with a prepared image and CI stage:
+The CI desktop uses headless GNOME Shell/Mutter with surfaceless llvmpipe
+(`LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1`). This path needs no
+DRM device and offers linux-dmabuf v3, including import of the bridge's udmabuf
+frames. It follows
+[GTK's headless Mutter CI](https://github.com/GNOME/gtk/blob/main/.gitlab-ci/run-tests.sh)
+and
+[GNOME Shell's automation harness](https://github.com/GNOME/gnome-shell/blob/main/tests/meson.build).
+The disposable shell loads `e2e/mutter.js` to position windows and drive native
+virtual input on its private bus. Its animations and overview hot corner are
+disabled so they cannot intercept the test stream. Local runs default to KWin;
+its QPainter renderer lacks linux-dmabuf, while its OpenGL backend needs a DRM
+device. To reproduce with GNOME Shell installed, a prepared image and the CI
+stage:
 
 ```sh
 GITHUB_ACTIONS=true LINUXAPK_E2E_DEADLINE=180 \
-  KWIN_COMPOSE=O2 LIBGL_ALWAYS_SOFTWARE=1 LINUXAPK_INSTANCE=ci-repro \
-  mise run test:e2e
+  LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1 \
+  LINUXAPK_INSTANCE=ci-repro mise run test:e2e
 ```
 
-Failed groups save bounded Android logs and session cgroup memory counters
-before subsequent groups can clear logcat or restart the session. The nested
-desktop saves its last 200 journal lines in `compositor.log` on exit.
+Failed groups save bounded Android and bridge logs and session cgroup memory
+counters before subsequent groups can clear logcat or restart the session. The
+nested desktop saves its last 200 journal lines in `compositor.log` on exit.
 
 Set `LINUXAPK_SHARE_SCREENSHOT=1` when capturing chooser proof; normal sharing
 checks reuse the receiver window and exercise both chooser selections without
