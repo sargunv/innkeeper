@@ -33,9 +33,8 @@ and a 180 s deadline (`LINUXAPK_E2E_DEADLINE`, honored only with
 `GITHUB_ACTIONS=true`). Observation and group limits scale with that deadline.
 Logs, captures and phase timings land in `out/test/e2e/<instance>/`; desktop
 logs are in `out/test/nested/<instance>/`. CI uploads these in `checks-logs`.
-Android log captures are bounded. `desktop` uses a capped bridge sidecar on
-the same private desktop to check real policy without opening host apps or
-dialogs.
+Android log captures are bounded. `desktop` uses a capped bridge sidecar on the
+same private desktop to check real policy without opening host apps or dialogs.
 
 - `mise run test:bionic`: manual Android-side HAL diagnostics.
 - `mise run test:compat -- --only <package>`: manual app troubleshooting; see
