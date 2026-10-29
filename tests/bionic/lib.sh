@@ -1,6 +1,5 @@
 # shellcheck shell=bash
-# Shared by the bionic test harnesses (tests/bionic/run.sh,
-# supervisor/tests/binder/run.sh): run Android binaries from the session's
+# Helpers for tests/bionic/run.sh: run Android binaries from the session's
 # image in a throwaway root, without booting Android.
 #
 # Sourcing it sets:

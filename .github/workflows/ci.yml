@@ -24,6 +24,17 @@ env:
   LINUXAPK_MIN_AVAILABLE_GIB: 10
 
 jobs:
+  lint:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          runtime: "false"
+      - run: mise run check
+
   checks:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
@@ -31,34 +42,72 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
-        id: setup
-      - run: mise run check
-      - run: mise run build
-      - name: Save the Mesa/LLVM and image-tools build
-        if: steps.setup.outputs.android-hit != 'true'
-        uses: actions/cache/save@v4
+      - name: Stage input tree
+        id: inputs
+        shell: bash
+        run: |
+          # Include paths, symlinks and executable modes as well as contents.
+          digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
+            supervisor/broker android image tools/build tools/container \
+            packaging/flatpak Cargo.toml Cargo.lock \
+            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock | sha256sum)
+          echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: stage
         with:
           path: |
-            out/build/vulkan/install
-            out/build/vulkan/.stamp
-            out/build/vulkan/deps/llvm
-            out/build/image-tools/install
-            out/build/image-tools/.stamp
-          key: ${{ steps.setup.outputs.android-key }}
+            out/stage
+            out/test/probes
+          key:
+            stage-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.inputs.outputs.stage }}
+      - uses: ./.github/actions/build-cached
+        if: steps.stage.outputs.cache-hit != 'true'
+      - run: mise run build
+        if: steps.stage.outputs.cache-hit != 'true'
+      - uses: actions/cache/save@v4
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          path: |
+            out/stage
+            out/test/probes
+          key: ${{ steps.stage.outputs.cache-primary-key }}
+      - name: Archive the release stage
+        run: tar -C out/stage -czf out/stage.tar.gz .
+      - name: Release stage and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage
+          path: |
+            out/stage.tar.gz
+            out/stage/share/linuxapk/manifest.tsv
+          if-no-files-found: error
+          retention-days: 7
       - run: mise run test
       - name: Prepare the image and private Flatpak for the timed run
-        run: mise run session -- prepare
+        run: |
+          # Flatpak can only share an existing host directory. Otherwise the
+          # first prepare writes into its temporary sandbox and start fetches
+          # the image again in a different sandbox.
+          mkdir -p "$LINUXAPK_IMAGES"
+          mise run session -- prepare
+          img=$(out/stage/libexec/linuxapk/linuxapk-session image | sed -n 's/^img=//p')
+          test -f "$img/system/system/build.prop"
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
+        env:
+          LINUXAPK_E2E_DEADLINE: 180
       - name: Test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: checks-logs
           path: |
-            out/test
-            out/dev/flatpak/**/*.log
-            !out/test/compat/corpus/**
+            out/test/e2e/ci/
+            out/test/nested/**/*.log
+            out/test/nested/**/*.txt
+            out/dev/flatpak/ci/*.log
+            !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 7
 
@@ -71,20 +120,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
-        id: setup
+      - uses: ./.github/actions/build-cached
       - name: Build the stage and Flatpak
         run: mise run package:flatpak
-      - name: Save the Mesa/LLVM and image-tools build
-        if: steps.setup.outputs.android-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            out/build/vulkan/install
-            out/build/vulkan/.stamp
-            out/build/vulkan/deps/llvm
-            out/build/image-tools/install
-            out/build/image-tools/.stamp
-          key: ${{ steps.setup.outputs.android-key }}
       - name: Stage manifest
         uses: actions/upload-artifact@v4
         with:
@@ -136,7 +174,9 @@ jobs:
           name: compatibility
           path: |
             out/ci/reports
-            out/test/nested
+            out/test/nested/**/*.log
+            out/test/nested/**/*.txt
             out/dev/flatpak/**/*.log
+            !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 14

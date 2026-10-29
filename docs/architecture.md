@@ -70,8 +70,7 @@ network ([session.md](session.md)).
   `/vendor/lib64`, and builds out of tree with the NDK.
 - **Binder in userspace.** The broker serves binder from the seccomp supervisor,
   so a session needs no binderfs and no SELinux module, and it works where
-  nested user namespaces are blocked. Kernel binder remains only as the test
-  oracle.
+  nested user namespaces are blocked.
 - **The bridge owns the desktop.** The composer is a pure HWC: it hands frames
   to the bridge, which is the Wayland client (decorations, fractional scale,
   activation). Bionic code never links desktop libraries.

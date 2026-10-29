@@ -1,8 +1,8 @@
 // pivot-exec NEWROOT PROG [ARGS...]
 //
 // The session runs inside Flatpak (see below). The namespace path
-// is retained only for the bootless bionic test harness and kernel binder
-// oracle, which assemble NEWROOT in tests/bionic/lib.sh.
+// is retained only for the bootless bionic test harness, which assembles
+// NEWROOT in tests/bionic/lib.sh.
 //
 // In those developer harnesses, pivot to NEWROOT, clone nested namespaces
 // with locked mounts, and install the seccomp filter before executing PROG.

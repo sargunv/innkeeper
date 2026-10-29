@@ -17,11 +17,21 @@ Two gate tiers, both testing observable behaviour we own:
   MIME matching and read-only grants), `a11y` (AT-SPI stays inactive),
   `production` (Android mailto VIEW and notifications reach logging desktop
   fakes, and PICK returns a readable file), and `lifecycle` (idle stop and alarm
-  restart). The whole command, including setup and cleanup, has a 55 s deadline
-  (plus at most 4 s for cleanup) on a warm image and prints its total wall time.
-  Setup boots once and installs the probes; audio runs concurrently with the
-  activity checks. Groups wait for observations, rather than fixed delays.
-  Lifecycle uses named-session-only short timers.
+  restart). Locally the whole command has a 55 s deadline (plus at most 4 s for
+  cleanup) on a warm image. GitHub Actions sets `LINUXAPK_E2E_DEADLINE=180` for
+  its four-vCPU software-rendered desktop; that override is ignored outside
+  GitHub Actions. Setup observation waits scale from 20 s at the local 55 s
+  deadline to 66 s at CI's 180 s deadline, bounded by the total deadline. Group
+  observation waits remain 20 s. Setup holds the session's busy lock from the
+  host during boot polling, then hands it over to the Android keeper once boot
+  completes. The host lock closes before groups start, so lifecycle still tests
+  idle shutdown when the keeper exits. The runner prints its total wall time and
+  each setup phase and group's elapsed time/status, including interrupted
+  phases, and saves those timings in `out/test/e2e/<instance>/timings.log`. CI
+  uploads that directory in `checks-logs` even on failure. Setup boots once and
+  installs the probes; audio runs concurrently with the activity checks. Groups
+  wait for observations, rather than fixed delays. Lifecycle uses
+  named-session-only short timers.
 
 Build and prepare the image first (`mise run build`,
 `mise run session -- prepare`). Results and captures stay in `out/test/e2e/`.
@@ -56,4 +66,4 @@ repository. `GITHUB_TOKEN` cannot push to the separate wiki Git repository. If
 the secret is absent, CI skips publishing with a notice; results remain in the
 artifact. Wiki publishing errors never change the compatibility result.
 
-`test:bionic` and `test:binder` are manual low-level HAL/broker diagnostics.
+`test:bionic` provides manual low-level HAL diagnostics.

@@ -1,31 +1,35 @@
 name: Linux.apk runner
 description:
   Toolchains, build caches and runtime prerequisites for hosted Linux runners
-outputs:
-  android-key:
-    description: Cache key of the Mesa/LLVM and image-tools build
-    value: ${{ steps.android.outputs.cache-primary-key }}
-  android-hit:
-    description: Whether that build was restored
-    value: ${{ steps.android.outputs.cache-hit }}
+inputs:
+  runtime:
+    description: Install Android and runtime prerequisites (false for lint)
+    default: "true"
 runs:
   using: composite
   steps:
     - name: Runner packages and kernel setup
       shell: bash
       run: tools/ci/setup.sh
+      env:
+        LINUXAPK_CI_RUNTIME: ${{ inputs.runtime }}
     - uses: jdx/mise-action@v5
       with:
         cache: true
     - uses: actions/cache@v4
+      if: inputs.runtime == 'true'
+      id: sdk
       with:
         path: ~/Android/Sdk
         key: sdk-${{ runner.os }}-${{ hashFiles('tools/build/toolchain.env') }}
     - name: Android SDK
+      if: inputs.runtime == 'true'
       shell: bash
       run: |
         source tools/build/toolchain.env
-        "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;android-$ANDROID_COMPILE_SDK.0"
+        if [[ '${{ steps.sdk.outputs.cache-hit }}' != true ]]; then
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;android-$ANDROID_COMPILE_SDK.0"
+        fi
         echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV"
     - uses: actions/cache@v4
       with:
@@ -33,36 +37,39 @@ runs:
           ~/.cargo/registry
           ~/.cargo/git
           out/cargo
-          ~/.gradle/caches
-          ~/.gradle/wrapper
+          out/build/host-tests
         key:
           compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock',
-          '**/*.gradle.kts', '**/gradle-wrapper.properties') }}-${{ github.sha
-          }}
+          '**/*.gradle.kts', '**/gradle-wrapper.properties',
+          'tools/build/toolchain.env') }}-${{ github.job }}-${{
+          hashFiles('host/**/*.rs', 'host/**/Cargo.toml',
+          'supervisor/broker/**/*.rs', 'supervisor/broker/Cargo.toml',
+          'Cargo.toml', '.cargo/**', 'CMakeLists.txt', 'CMakePresets.json',
+          'android/vendor/graphics/**', 'android/vendor/health/**',
+          'android/vendor/bridge-client/**') }}
         restore-keys: |
-          compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}-
-    # Restore only: the workflow saves right after `mise run build`, so a cold
-    # Mesa/LLVM build is kept even if a later step fails.
-    - uses: actions/cache/restore@v4
-      id: android
+          compile-${{ runner.os }}-${{ hashFiles('mise.lock', 'Cargo.lock', '**/*.gradle.kts', '**/gradle-wrapper.properties', 'tools/build/toolchain.env') }}-${{ github.job }}-
+    - uses: actions/cache@v4
+      if: inputs.runtime == 'true'
       with:
         path: |
-          out/build/vulkan/install
-          out/build/vulkan/.stamp
-          out/build/vulkan/deps/llvm
-          out/build/image-tools/install
-          out/build/image-tools/.stamp
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          out/build/system-app
         key:
-          android-${{ runner.os }}-${{ hashFiles('android/vendor/vulkan/**',
-          'android/vendor/graphics/common/**', 'image/tools/**',
-          'tools/container/Containerfile', 'tools/build/toolchain.env') }}
+          gradle-${{ runner.os }}-${{ hashFiles('android/system-app/**',
+          'tools/build/toolchain.env', 'mise.lock') }}-${{ github.job }}
+        restore-keys: |
+          gradle-${{ runner.os }}-
     - uses: actions/cache@v4
+      if: inputs.runtime == 'true'
       with:
         path: out/ci/images
         key:
           image-${{ hashFiles('image/pin.toml', 'image/*.sh',
           'image/bootconfig') }}
     - uses: actions/cache@v4
+      if: inputs.runtime == 'true'
       with:
         path: out/test/compat/corpus
         key: corpus-${{ hashFiles('tests/compat/corpus.toml') }}

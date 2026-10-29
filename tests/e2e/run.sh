@@ -10,12 +10,34 @@ T=$repo/out/test/e2e/$LINUXAPK_INSTANCE
 desktop_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/desktop.log
 bridge_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/state/linuxapk-$LINUXAPK_INSTANCE/bridge.log
 apk=$repo/out/test/probes/LinuxApkProbes.apk
+# GitHub's software-rendered desktop is slower than local development.
+deadline=55
+if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+  deadline=${LINUXAPK_E2E_DEADLINE:-55}
+fi
+timed() (
+  local name=$1 start
+  shift
+  start=$(date +%s%N)
+  # shellcheck disable=SC2329 # invoked by the EXIT trap
+  finish() {
+    local result=$? elapsed
+    elapsed=$(($(date +%s%N) - start))
+    printf 'e2e: %s elapsed=%d.%03ds status=%d\n' "$name" \
+      "$((elapsed / 1000000000))" "$(((elapsed / 1000000) % 1000))" "$result" |
+      tee -a "$T/timings.log"
+  }
+  trap finish EXIT
+  trap 'exit 130' INT TERM
+  printf '=== e2e: %s\n' "$name" | tee -a "$T/timings.log"
+  "$@"
+)
 s() { "$S" exec "$@"; }
 wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }
 # Poll observations, returning as soon as they arrive; the outer group deadline
 # also bounds a command that stops answering.
 until_ok() {
-  local end=$((SECONDS + 20))
+  local end=$((SECONDS + ${observation_wait:-20}))
   until "$@"; do
     ((SECONDS < end)) || {
       echo "FAIL waiting for $*" >&2
@@ -23,6 +45,10 @@ until_ok() {
     }
     sleep 0.1
   done
+}
+until_setup() {
+  local observation_wait=$(((20 * deadline + 54) / 55))
+  until_ok "$@"
 }
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
@@ -46,7 +72,7 @@ stop_session() {
   # The dev supervisor publishes its exit after the sandbox closes. Wait for
   # it before a restart, so its old completion cannot fail the new start.
   if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
-    until_ok test -f "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/ended"
+    until_setup test -f "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/ended"
   fi
 }
 
@@ -373,7 +399,8 @@ done
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   start=$(date +%s%N)
   result=0
-  timeout --kill-after=4 55 "$repo/tests/nested.sh" "$0" "${groups[@]}" &
+  echo "e2e: deadline=${deadline}s (plus at most 4s cleanup)"
+  timeout --kill-after=4 "$deadline" "$repo/tests/nested.sh" "$0" "${groups[@]}" &
   runner=$!
   trap 'kill -TERM "$runner" 2>/dev/null || true; wait "$runner" 2>/dev/null || true' INT TERM
   wait "$runner" || result=$?
@@ -383,11 +410,14 @@ if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   exit "$result"
 fi
 mkdir -p "$T"
+: >"$T/timings.log"
 export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
 keeper=""
+setup_lock=""
 mod=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
 cleanup() {
   local result=$?
+  if [[ -n $setup_lock ]]; then exec {setup_lock}>&-; fi
   if ((result != 0)); then
     echo "e2e: Android failure diagnostics: $T/{crash,system}.txt" >&2
     timeout 1 "$S" exec logcat -d -b crash >"$T/crash.txt" 2>&1 || true
@@ -395,7 +425,8 @@ cleanup() {
       echo 'e2e: system_server crashed (not a boot readiness timeout):' >&2
       cat "$T/crash.txt" >&2
     fi
-    timeout 1 "$S" exec logcat -d -b system -t 200 >"$T/system.txt" 2>&1 || true
+    # Keep boot's original error as well as a later recovery/watchdog failure.
+    timeout 1 "$S" exec logcat -d -b main,system -t 10000 >"$T/system.txt" 2>&1 || true
   fi
   "$S" stop >/dev/null 2>&1 || true
   "$S" reset >/dev/null 2>&1 || true
@@ -404,27 +435,32 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
-stop_session
-"$S" reset >/dev/null
+timed setup-stop stop_session
+timed setup-reset "$S" reset
 mkdir -p "$(dirname "$bridge_log")"
 : >"$bridge_log"
-until_ok file_has "$desktop_log" ready
-"$S" start >/dev/null
-# Hold exec's existing busy lock while the other groups run. Lifecycle releases
-# it after scheduling its alarm, so no extra boot is needed to change timers.
-until_ok booted
+timed setup-desktop until_setup file_has "$desktop_log" ready
+timed setup-start "$S" start
+# The exec service is not ready immediately after start. Hold its existing
+# busy lock from the host until a booted Android can run the keeper instead.
+exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/exec.lock"
+flock --shared "$setup_lock"
+timed setup-boot until_setup booted
 : >"$T/keeper.log"
-s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' >"$T/keeper.log" &
+# Do not let the keeper inherit the host lock: lifecycle must stop the session
+# after it releases its own exec lock by observing e2e-idle.
+s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' \
+  {setup_lock}>&- >"$T/keeper.log" 2>&1 &
 keeper=$!
-until_ok file_has "$T/keeper.log" '^ready$'
+timed setup-keeper until_setup file_has "$T/keeper.log" '^ready$'
+exec {setup_lock}>&-
+setup_lock=""
 size=$(stat -c %s "$apk")
-s cmd package install -r -g -S "$size" <"$apk" >/dev/null
+timed setup-probes s cmd package install -r -g -S "$size" <"$apk"
 failed=()
 run_group() {
-  local start=$SECONDS result=0
-  echo "=== e2e: $1"
-  timeout --kill-after=2 50 "$0" --group "$1" || result=$?
-  echo "e2e: $1 elapsed=$((SECONDS - start))s"
+  local result=0
+  timed "$1" timeout --kill-after=2 50 "$0" --group "$1" || result=$?
   if ((result != 0)); then
     # Preserve the failed activity sequence before lifecycle restarts logd.
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
