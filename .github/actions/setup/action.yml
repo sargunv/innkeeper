@@ -18,7 +18,7 @@ runs:
       shell: bash
       run: |
         source tools/build/toolchain.env
-        sdkmanager --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;android-$ANDROID_COMPILE_SDK.0"
+        "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;android-$ANDROID_COMPILE_SDK.0"
     - uses: actions/cache@v4
       with:
         path: |
