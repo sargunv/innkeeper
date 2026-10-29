@@ -1,0 +1,51 @@
+name: Cached native dependencies
+description: Build and immediately cache each expensive module on its inputs
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/restore@v4
+      id: image-tools
+      with:
+        path: |
+          out/build/image-tools/install
+          out/build/image-tools/.stamp
+        key:
+          image-tools-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('image/tools/**', 'tools/container/**') }}
+    - name: Build image tools
+      shell: bash
+      run: mise run build:image-tools
+    - uses: actions/cache/save@v4
+      if: steps.image-tools.outputs.cache-hit != 'true'
+      with:
+        path: |
+          out/build/image-tools/install
+          out/build/image-tools/.stamp
+        key: ${{ steps.image-tools.outputs.cache-primary-key }}
+    - uses: actions/cache/restore@v4
+      id: vulkan
+      with:
+        path: |
+          out/build/vulkan/install
+          out/build/vulkan/.stamp
+          out/build/vulkan/deps/llvm
+          out/build/vulkan/test
+          out/build/vulkan/test-vendor
+        key:
+          vulkan-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('android/vendor/vulkan/**',
+          'android/vendor/graphics/common/**', 'tools/container/**',
+          'tools/build/toolchain.env') }}
+    - name: Build Mesa and LLVM
+      shell: bash
+      run: mise run build:vulkan
+    - uses: actions/cache/save@v4
+      if: steps.vulkan.outputs.cache-hit != 'true'
+      with:
+        path: |
+          out/build/vulkan/install
+          out/build/vulkan/.stamp
+          out/build/vulkan/deps/llvm
+          out/build/vulkan/test
+          out/build/vulkan/test-vendor
+        key: ${{ steps.vulkan.outputs.cache-primary-key }}

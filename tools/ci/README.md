@@ -1,11 +1,14 @@
 # GitHub Actions
 
-`CI` runs `mise run check`, `build`, `test` and `test:e2e` on every push and
-pull request. The scheduled run (08:23 UTC daily) and `workflow_dispatch` run
-`package:flatpak`, then the full `test:compat` corpus twice: headless and
-windowed. Each mode keeps its report and session logs in the `compatibility`
-artifact, including on failure. Both compare against the committed baselines;
-the wrapper restores the harness's tracked output files after each run.
+`CI` runs `mise run check` in parallel with `build`, `test` and `test:e2e` on
+every push and pull request. The checks build uploads a `stage` artifact
+containing the release stage tarball and its `manifest.tsv` (path, owning module
+and SHA-256). The tarball preserves executable modes and symlinks. The scheduled
+run (08:23 UTC daily) and `workflow_dispatch` run `package:flatpak`, then the
+full `test:compat` corpus twice: headless and windowed. Each mode keeps its
+report and session logs in the `compatibility` artifact, including on failure.
+Both compare against the committed baselines; the wrapper restores the harness's
+tracked output files after each run.
 
 The nightly renders both modes' unmerged `fresh-results.json` to the
 [Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility),
@@ -53,9 +56,15 @@ builds and installs the distributable Flatpak. CI sets
 `LINUXAPK_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
 remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
 
+An exact stage cache skips building when none of its source, build script or
+toolchain inputs changed; the probes APK is restored with the stage. Tests still
+run on every push and PR. Gradle outputs and dependency caches restore on their
+source/toolchain hash, with incremental reuse after source changes.
+
 Mise caches its pinned tools. Separate caches cover the SDK pin, Cargo and
-Gradle inputs, the Mesa/LLVM and image-tool install trees on their source
+Gradle inputs, the Mesa/LLVM and image-tool install trees on separate input
 hashes, the Android image on its pin/extraction inputs, and the APK corpus on
-its checksums. The first build is substantially slower than a warm run; the
-60-minute check timeout allows a cold LLVM build. No Android image or
-third-party APK is uploaded as a workflow artifact.
+its checksums. Each expensive module is saved immediately after it builds,
+before the rest of the build or tests can fail. The first build is substantially
+slower than a warm run; the 120-minute check timeout allows a cold LLVM build.
+No Android image or third-party APK is uploaded as a workflow artifact.

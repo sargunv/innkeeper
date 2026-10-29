@@ -7,7 +7,9 @@ set -euo pipefail
 }
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends \
-  clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev \
+  clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev
+[[ ${LINUXAPK_CI_RUNTIME:-true} == true ]] || exit 0
+sudo apt-get install -y --no-install-recommends \
   podman uidmap passt flatpak cpio dbus-user-session kwin-wayland \
   xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-kde \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
