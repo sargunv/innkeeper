@@ -68,6 +68,7 @@ class Display {
   Error acceptChanges();
   Error present();
   int presentFence() const { return mPresentFence.get(); }
+  const auto& releaseFences() const { return mReleaseFences; }
   // Any layer/display state change invalidates a previous validate.
   void invalidate() { mState = State::NeedValidate; }
 
@@ -88,6 +89,7 @@ class Display {
   BufferPtr mOutputBuffer;
   UniqueFd mOutputAcquireFence;
   UniqueFd mPresentFence;
+  std::map<int64_t, UniqueFd> mReleaseFences;
   GpuCopy mGpuCopy;
   State mState = State::NeedValidate;
   std::vector<int64_t> mPendingChanges;  // layers that become CLIENT

@@ -38,7 +38,10 @@ ndk::ScopedAStatus Composer::createClient(
 }
 
 ndk::ScopedAStatus Composer::getCapabilities(std::vector<Capability>* out) {
-  // We return no present fences (or unreliable ones from future backends).
+  // Completion sync_files describe GPU work, not host presentation. The
+  // headless primary cannot supply a scanout fence; wp_presentation supplies
+  // timestamps but no sync_file. Do not call GPU-completion timestamps reliable
+  // presentation timestamps.
   *out = {Capability::PRESENT_FENCE_IS_NOT_RELIABLE};
   return ndk::ScopedAStatus::ok();
 }

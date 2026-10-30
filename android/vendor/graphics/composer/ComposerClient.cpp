@@ -220,6 +220,12 @@ void ComposerClient::executeDisplayCommand(
     }
     ReleaseFences rf;
     rf.display = d->id();
+    for (const auto& [layer, fence] : d->releaseFences()) {
+      ReleaseFences::Layer lf;
+      lf.layer = layer;
+      lf.fence = ndk::ScopedFileDescriptor(dupFd(fence.get()));
+      rf.layers.push_back(std::move(lf));
+    }
     results.add(std::move(rf));
   }
 }

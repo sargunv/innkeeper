@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "linuxapk-hwc"
-#include <linux/dma-buf.h>
-#include <sys/ioctl.h>
-
 #include "Display.h"
 
 #include "GpuCopy.h"
@@ -181,14 +178,38 @@ Error Display::present() {
        mVirtual ? sinkReady : mClientTargetUpdated}
     );
   mPresentFence.reset();
-  if (sinkReady) {
-    dma_buf_export_sync_file fence{.flags = DMA_BUF_SYNC_READ, .fd = -1};
-    if (
-      ioctl(
-        mOutputBuffer->info()->fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &fence
-      ) == 0
-    )
-      mPresentFence.reset(fence.fd);
+  mReleaseFences.clear();
+  // A virtual present completes when the sink is written, not when the host
+  // later releases its ImageReader lease. Display 0 is headless: its only
+  // work is the renderer's client target (and the optional synchronous dump).
+  if (mPower == c3::PowerMode::ON) {
+    if (sinkReady) {
+      mPresentFence = completionFence(
+        mOutputBuffer->info()->fd,
+        target == &mClientTarget ? mClientTarget.acquireFence.get() : -1
+      );
+    } else if (
+      !mVirtual && mClientTargetUpdated && mClientTarget.buffer &&
+      mClientTarget.buffer->info()
+    ) {
+      mPresentFence = completionFence(
+        mClientTarget.buffer->info()->fd, mClientTarget.acquireFence.get()
+      );
+    }
+    // Only CURSOR layers are read by HWC. Their CPU copy has completed by
+    // now, so producer completion is also a safe release dependency. CLIENT
+    // layers belong to RenderEngine and must not get invented HWC fences.
+    for (auto& [id, l] : mLayers) {
+      if (
+        l.requested != c3::Composition::CURSOR || !l.cursor.buffer ||
+        l.cursor.alpha <= 0 || !l.cursor.buffer->info()
+      )
+        continue;
+      auto fence = completionFence(
+        l.cursor.buffer->info()->fd, l.cursor.acquireFence.get()
+      );
+      if (fence.ok()) mReleaseFences.emplace(id, std::move(fence));
+    }
   }
   mClientTargetUpdated = false;
   if (bench) {

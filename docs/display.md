@@ -358,12 +358,24 @@ linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
 
 ## Fences
 
-The composer waits on acquire fences before submitting buffers. It exports real
-sync_files with `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` for completed virtual sink work
-when supported. Mixed composition completes its GPU blit before releasing the
-scratch client target. `PRESENT_FENCE_IS_NOT_RELIABLE` remains: these fences
-describe GPU completion, while ImageReader leases protect the pixels until host
-release. They do not describe host presentation.
+The composer returns real sync_files for completed client-target work on the
+headless primary and for virtual output-buffer work. An explicit producer
+sync_file (RADV's acquire fence) is duplicated when available; otherwise
+`DMA_BUF_IOCTL_EXPORT_SYNC_FILE` exports the buffer's write dependencies.
+Pollable descriptors such as eventfds are never passed off as sync_files. Fences
+are owned per present, duplicated into Binder results, and retired on the next
+present or display teardown. Reusing composition without a new client target
+does not replay an old fence.
+
+CURSOR layers get real release dependencies after HWC's CPU copy; CLIENT layers
+are read by RenderEngine and have no HWC release fence. Mixed composition
+completes its GPU blit before releasing the scratch client target. ImageReader
+leases continue protecting virtual-output pixels until host RELEASE.
+
+`PRESENT_FENCE_IS_NOT_RELIABLE` remains: display 0 is headless and these fences
+describe GPU completion, not host presentation. `wp_presentation` supplies the
+host timestamps used by the vsync clock, but does not provide sync_file fences.
+A GPU fence timestamp must not be reported as a reliable host-present timestamp.
 
 ## Control interface
 

@@ -30,6 +30,11 @@ class UniqueFd {
   int mFd = -1;
 };
 
+// GPU producer completion: duplicate a real acquire sync_file when available,
+// otherwise export the dma-buf's write fences. Never substitute a pollable
+// non-sync fd. This is not a host scanout/presentation fence.
+UniqueFd completionFence(int dmaBuf, int acquireFence = -1);
+
 // Waits for a sync_file (or any pollable fd) to signal. -1 is "already
 // signalled". Returns false on timeout/error.
 bool waitFence(int fd, int timeoutMs);

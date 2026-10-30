@@ -10,13 +10,19 @@
 #include <stdio.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
+#include <linux/dma-buf.h>
+#include <linux/sync_file.h>
+#include <poll.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -124,6 +130,22 @@ static const auto* find(const std::vector<CommandResultPayload>& r) {
   return (const std::decay_t<decltype(r[0].get<T>())>*)nullptr;
 }
 
+static int producerFence(const NativeHandle& h) {
+  dma_buf_export_sync_file fence{.flags = DMA_BUF_SYNC_READ, .fd = -1};
+  CHECK(ioctl(h.fds[0].get(), DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &fence) == 0);
+  return fence.fd;
+}
+
+static void checkFence(int fd) {
+  CHECK(fd >= 0);
+  if (fd < 0) return;
+  sync_file_info info{};
+  CHECK(ioctl(fd, SYNC_IOC_FILE_INFO, &info) == 0);
+  pollfd p{fd, POLLIN, 0};
+  CHECK(poll(&p, 1, 1000) == 1 && (p.revents & POLLIN));
+  CHECK(fcntl(fd, F_GETFD) & FD_CLOEXEC);
+}
+
 int main() {
   setvbuf(stdout, nullptr, _IONBF, 0);
   ABinderProcess_startThreadPool();
@@ -142,6 +164,11 @@ int main() {
   composer->getCapabilities(&caps);
   printf("IComposer V%d, %zu capabilities\n", ver, caps.size());
   CHECK(ver == 5);
+  CHECK(
+    std::find(
+      caps.begin(), caps.end(), Capability::PRESENT_FENCE_IS_NOT_RELIABLE
+    ) != caps.end()
+  );  // GPU completion is not a host scanout timestamp.
 
   std::shared_ptr<IComposerClient> client;
   CHECK(composer->createClient(&client).isOk() && client);
@@ -285,6 +312,9 @@ int main() {
     ClientTarget ct;
     ct.buffer.slot = slot;
     if (withHandle) ct.buffer.handle = dupHandle(ar.buffers[slot]);
+    if (size_t(slot) < ar.buffers.size())
+      ct.buffer.fence =
+        ndk::ScopedFileDescriptor(producerFence(ar.buffers[slot]));
     ct.dataspace = Dataspace::SRGB;
     c.clientTarget = std::move(ct);
     c.presentDisplay = true;
@@ -300,9 +330,17 @@ int main() {
   CHECK(countErrors(res) == 0);
   auto* rf = find<CommandResultPayload::releaseFences>(res);
   CHECK(rf && rf->display == D);
-  CHECK(
-    find<CommandResultPayload::presentFence>(res) == nullptr
-  );  // headless: none
+  CHECK(rf && rf->layers.empty());  // CLIENT layers are read by RenderEngine.
+  const auto* pf = find<CommandResultPayload::presentFence>(res);
+  CHECK(pf && pf->display == D);
+  if (pf) {
+    checkFence(pf->fence.get());
+    int received = pf->fence.get();
+    ndk::ScopedFileDescriptor duplicate(fcntl(received, F_DUPFD_CLOEXEC, 0));
+    res.clear();
+    CHECK(fcntl(received, F_GETFD) == -1);
+    checkFence(duplicate.get());  // Closing one owner does not retire another.
+  }
 
   // Present without validate -> NOT_VALIDATED.
   res = present(1, true, false);
@@ -337,6 +375,87 @@ int main() {
   }
   res = present(2, false, true);
   CHECK(countErrors(res) == 1);
+
+  // No fresh client target must not replay a prior present fence.
+  {
+    DisplayCommand c;
+    c.display = D;
+    c.validateDisplay = true;
+    c.presentDisplay = true;
+    std::vector<DisplayCommand> v;
+    v.push_back(std::move(c));
+    client->executeCommands(v, &res);
+    CHECK(countErrors(res) == 0);
+    CHECK(find<CommandResultPayload::presentFence>(res) == nullptr);
+  }
+
+  // CURSOR is the one layer type HWC reads. Return a real release sync_file
+  // for that layer, while CLIENT layers continue to have no HWC release fd.
+  {
+    auto cursorDesc = d;
+    cursorDesc.width = cursorDesc.height = 64;
+    AllocationResult cursor;
+    CHECK(alloc->allocate2(cursorDesc, 1, &cursor).isOk());
+    if (cursor.buffers.size() == 1) {
+      DisplayCommand c;
+      c.display = D;
+      LayerCommand layer;
+      layer.layer = l2;
+      layer.composition = ParcelableComposition{Composition::CURSOR};
+      Buffer buffer;
+      buffer.slot = 0;
+      buffer.handle = dupHandle(cursor.buffers[0]);
+      buffer.fence =
+        ndk::ScopedFileDescriptor(producerFence(cursor.buffers[0]));
+      layer.buffer = std::move(buffer);
+      c.layers.push_back(std::move(layer));
+      c.validateDisplay = true;
+      c.presentDisplay = true;
+      std::vector<DisplayCommand> v;
+      v.push_back(std::move(c));
+      client->executeCommands(v, &res);
+      CHECK(countErrors(res) == 0);
+      auto* released = find<CommandResultPayload::releaseFences>(res);
+      CHECK(released && released->layers.size() == 1);
+      if (released && released->layers.size() == 1) {
+        CHECK(released->layers[0].layer == l2);
+        checkFence(released->layers[0].fence.get());
+      }
+    }
+  }
+
+  // Virtual output completion is a real sync_file too, including the
+  // dma-buf-export path when no explicit producer fence is supplied.
+  {
+    VirtualDisplay vd;
+    CHECK(client
+            ->createVirtualDisplay(
+              cfg.width, cfg.height, PixelFormat::RGBA_8888, 2, &vd
+            )
+            .isOk());
+    DisplayCommand c;
+    c.display = vd.display;
+    ClientTarget ct;
+    ct.buffer.slot = 0;
+    ct.buffer.handle = dupHandle(ar.buffers[0]);
+    c.clientTarget = std::move(ct);
+    Buffer output;
+    output.slot = 0;
+    output.handle = dupHandle(ar.buffers[0]);
+    c.virtualDisplayOutputBuffer = std::move(output);
+    c.validateDisplay = true;
+    c.presentDisplay = true;
+    std::vector<DisplayCommand> v;
+    v.push_back(std::move(c));
+    client->executeCommands(v, &res);
+    CHECK(countErrors(res) == 0);
+    auto* presented = find<CommandResultPayload::presentFence>(res);
+    CHECK(presented && presented->display == vd.display);
+    if (presented) checkFence(presented->fence.get());
+    CHECK(client->destroyVirtualDisplay(vd.display).isOk());
+    if (presented)
+      checkFence(presented->fence.get());  // Binder fd outlives display.
+  }
 
   // Dump check (set vendor.linuxapk.hwc.dump.dir for the composer).
   if (const char* dir = getenv("EXPECT_DUMP")) {
