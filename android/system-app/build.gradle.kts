@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import java.io.IOException
 import java.net.URI
 import java.security.MessageDigest
 import java.util.Base64
@@ -50,6 +51,19 @@ val fetchPlatformKey =
     doLast {
       fun sha256(b: ByteArray) =
         MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+      fun fetch(url: String): ByteArray {
+        var attempt = 1
+        while (true) {
+          try {
+            return Base64.getMimeDecoder().decode(URI(url).toURL().readText())
+          } catch (e: IOException) {
+            if (attempt == 3) throw e
+            logger.warn("Platform key fetch failed (attempt $attempt/3), retrying: ${e.message}")
+            Thread.sleep(attempt * 1000L)
+            attempt++
+          }
+        }
+      }
       dir.mkdirs()
       for ((ext, sum) in sums) {
         val f = dir.resolve("platform.$ext")
@@ -57,7 +71,7 @@ val fetchPlatformKey =
         val url =
           "https://android.googlesource.com/platform/build/+/refs/tags/android-17.0.0_r1/" +
             "target/product/security/platform.$ext?format=TEXT"
-        val b = Base64.getMimeDecoder().decode(URI(url).toURL().readText())
+        val b = fetch(url)
         check(sha256(b) == sum) { "platform.$ext from googlesource: checksum mismatch" }
         f.writeBytes(b)
       }
