@@ -115,13 +115,16 @@ not constrain the host pointer.
   with the launch's token ([Launch feedback](#launch-feedback)); without one,
   compositors may only flag it without a fresh input serial.
 - **Task appearance.** The top task's `TaskDescription` supplies the window icon
-  and primary colour, refreshed on mapping and description changes. Changes are
+  and primary colour, refreshed on mapping and description changes. An absent
+  task icon falls back to the app launcher icon, drawn with the same mask as its
+  desktop entry. The initial icon is set when the toplevel is created, before
+  its first map; only an app without either icon has no icon. Changes are
   coalesced for 120 ms before copying an icon, scaled to fit 256×256 pixels;
   identical updates are skipped. The bridge uses `xdg_toplevel_icon_v1` when
   offered (KWin), with no icon fallback on other compositors. Client-side
   captions on every desktop use the primary RGB with a contrasting title and
   button foreground; a zero primary colour restores the desktop theme. Clearing
-  a task icon restores the compositor's default icon.
+  a task icon restores the launcher icon.
 - **Task ownership.** A window is owned by an Android task id, independent of
   the package of its top activity. A start without `NEW_TASK` stays in that task
   and window. A new task on an occupied app display gets a VirtualDisplay of its
@@ -133,9 +136,11 @@ not constrain the host pointer.
   desktop entry's **New Window** action request `NEW_TASK | MULTIPLE_TASK` on a
   fresh display. Entries advertise it only for launcher activities whose launch
   and document modes permit multiple tasks; singleton or document-never
-  launchers keep the ordinary launch action. DynamicLauncher 1.20 rejects action
-  groups, so Flatpak portal entries retain the ordinary launcher; the CLI option
-  remains available inside Flatpak. Native desktop entries include the action.
+  launchers keep the ordinary launch action. DynamicLauncher 1.20 accepts only
+  one desktop-entry group, so its upstream restriction prevents installing a New
+  Window action group. Flatpak portal entries retain the ordinary launcher; the
+  CLI option remains available inside Flatpak. Native desktop entries include
+  the action.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
   recents, dream and assistant tasks stay.

@@ -24,6 +24,7 @@ import android.view.WindowInsets
 import android.view.WindowManagerGlobal
 import dev.linuxapk.system.Feature
 import dev.linuxapk.system.SystemProps
+import dev.linuxapk.system.apps.AppIcons
 import dev.linuxapk.system.bridge.Wire
 import dev.linuxapk.system.input.HostEvent
 import dev.linuxapk.system.input.HostInputClient
@@ -274,7 +275,14 @@ class WindowManagerFeature(
     val sizing =
       if (r.widthDp > 0 && r.heightDp > 0) WindowSizing(r.widthDp, r.heightDp, 0, 0)
       else sizingFor(intent)
-    val w = createWindow(r.pkg, label, sizing, r.token) ?: return "error: no virtual display"
+    val w =
+      createWindow(
+        r.pkg,
+        label,
+        sizing,
+        r.token,
+        if (r.newWindow) null else recent?.taskDescription,
+      ) ?: return "error: no virtual display"
     // An existing task (say, started on display 0) moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
     if (!r.newWindow && existing != null && r.uri == null && r.launchIntent == null) {
@@ -312,6 +320,7 @@ class WindowManagerFeature(
     label: String,
     sizing: WindowSizing,
     token: String = "",
+    description: ActivityManager.TaskDescription? = null,
   ): AppWindow? {
     val s = scale
     val width = (sizing.widthDp * s).roundToInt()
@@ -351,6 +360,8 @@ class WindowManagerFeature(
       return null
     }
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
+    w.lastColor = description?.primaryColor ?: 0
+    w.lastIcon = Wire.Writer().image(iconFor(pkg, description)).bytes()
     windows[w.id] = w
     changed()
     try {
@@ -381,17 +392,20 @@ class WindowManagerFeature(
   // Asks the bridge for the window, then gives the display its surface: SurfaceFlinger creates
   // the HWC virtual display at that point, and the bridge shows it in the requested window.
   private fun attachSurface(w: AppWindow) {
-    input.requestWindow(
-      w.id,
-      w.width,
-      w.height,
-      w.dpi,
-      w.sizing.minWidthDp,
-      w.sizing.minHeightDp,
-      APP_ID_PREFIX + w.pkg,
-      w.label,
-      w.token,
-    )
+    val requested =
+      input.requestWindow(
+        w.id,
+        w.width,
+        w.height,
+        w.dpi,
+        w.sizing.minWidthDp,
+        w.sizing.minHeightDp,
+        APP_ID_PREFIX + w.pkg,
+        w.label,
+        w.token,
+      )
+    if (!requested || !input.windowAppearance(w.id, w.lastColor ?: 0, w.lastIcon!!, wait = true))
+      return
     w.token = "" // used once
     w.display.surface = w.reader.surface
   }
@@ -528,8 +542,6 @@ class WindowManagerFeature(
           it.mapped = true
           it.shown.countDown()
           sendPolicy(it)
-          it.lastColor = null
-          it.lastIcon = null
           queueAppearance(it)
         }
       is HostEvent.WindowUnmapped -> {
@@ -563,6 +575,28 @@ class WindowManagerFeature(
     w.display.resize(width, height, dpi)
   }
 
+  private fun iconFor(pkg: String, description: ActivityManager.TaskDescription?): Wire.Rgba? =
+    TaskIcon.choose(
+      {
+        try {
+          description?.let { Tasks.descriptionIcon(context, it) }
+        } catch (e: Exception) {
+          Log.w(TAG, "task icon for $pkg: $e")
+          null
+        }
+      },
+      {
+        try {
+          val pm = context.packageManager
+          val app = pm.getApplicationInfo(pkg, 0)
+          AppIcons.rgba(AppIcons.load(pm, app, AppIcons.launcherActivity(pm, pkg)), 256)
+        } catch (e: Exception) {
+          Log.w(TAG, "launcher icon for $pkg: $e")
+          null
+        }
+      },
+    )
+
   // Coalesce TaskDescription churn before loading/copying a bitmap or creating a memfd.
   private fun queueAppearance(w: AppWindow) {
     w.appearance?.let(handler::removeCallbacks)
@@ -577,8 +611,7 @@ class WindowManagerFeature(
       val description = top.taskDescription
       try {
         val color = description?.primaryColor ?: 0
-        val icon =
-          Wire.Writer().image(description?.let { Tasks.descriptionIcon(context, it) }).bytes()
+        val icon = Wire.Writer().image(iconFor(w.pkg, description)).bytes()
         if (w.lastColor != color || w.lastIcon?.contentEquals(icon) != true) {
           if (input.windowAppearance(w.id, color, icon)) {
             w.lastColor = color
@@ -720,6 +753,7 @@ class WindowManagerFeature(
               labelOf(component.packageName),
               sizingFor(t.baseIntent ?: Intent()),
               token = if (source in windows) input.activationToken(source) else "",
+              description = t.taskDescription,
             )
           TaskRouting.Destination.Ignore -> null
         } ?: continue

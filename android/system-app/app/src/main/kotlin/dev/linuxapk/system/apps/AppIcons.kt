@@ -11,6 +11,8 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.DisplayMetrics
 import android.util.Log
+import dev.linuxapk.system.bridge.Wire
+import dev.linuxapk.system.bridge.toRgba
 import java.io.ByteArrayOutputStream
 
 /**
@@ -51,14 +53,29 @@ object AppIcons {
     return launcher?.loadIcon(pm) ?: app.loadIcon(pm)
   }
 
-  /** [icon] as a [size]-pixel square PNG. */
-  fun png(icon: Drawable, size: Int): ByteArray {
+  private fun bitmap(icon: Drawable, size: Int): Bitmap {
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     // Adaptive icons fill their mask edge to edge; leave a small margin like desktop icon themes
     // do. Legacy icons carry their own padding.
     val pad = if (icon is AdaptiveIconDrawable) size / 24 else 0
     icon.setBounds(pad, pad, size - pad, size - pad)
     icon.draw(Canvas(bmp))
+    return bmp
+  }
+
+  /** The same masked launcher pixels as desktop entries, for a task window. */
+  fun rgba(icon: Drawable, size: Int): Wire.Rgba? {
+    val bmp = bitmap(icon, size)
+    return try {
+      bmp.toRgba(size)
+    } finally {
+      bmp.recycle()
+    }
+  }
+
+  /** [icon] as a [size]-pixel square PNG. */
+  fun png(icon: Drawable, size: Int): ByteArray {
+    val bmp = bitmap(icon, size)
     val out = ByteArrayOutputStream()
     bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
     bmp.recycle()

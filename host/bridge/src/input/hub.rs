@@ -44,9 +44,17 @@ pub struct Hub {
     pub pointer_positions: Mutex<HashMap<u32, PointerPosition>>,
 }
 
+/// The appearance must travel with the request until HWC creates its toplevel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingWindow {
+    pub request: WindowRequest,
+    pub color: u32,
+    pub icon: Option<crate::ipc::blob::Image>,
+}
+
 #[derive(Default)]
 struct State {
-    queued: Vec<(WindowRequest, Instant)>,
+    queued: Vec<(PendingWindow, Instant)>,
     /// Window -> the display connection and HWC display showing it.
     shown: HashMap<u32, (u64, u32)>,
     /// Display connections: their Wayland threads.
@@ -103,8 +111,15 @@ impl Hub {
         }
         let now = Instant::now();
         s.queued
-            .retain(|(q, at)| q.window != r.window && now - *at < REQUEST_TIMEOUT);
-        s.queued.push((r, now));
+            .retain(|(q, at)| q.request.window != r.window && now - *at < REQUEST_TIMEOUT);
+        s.queued.push((
+            PendingWindow {
+                request: r,
+                color: 0,
+                icon: None,
+            },
+            now,
+        ));
         Ok(())
     }
 
@@ -147,7 +162,16 @@ impl Hub {
         color: u32,
         icon: Option<crate::ipc::blob::Image>,
     ) -> Result<(), i32> {
-        let s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap();
+        if let Some((pending, _)) = s
+            .queued
+            .iter_mut()
+            .find(|(p, _)| p.request.window == window)
+        {
+            pending.color = color;
+            pending.icon = icon;
+            return Ok(());
+        }
         let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
         s.displays[conn]
             .send(Cmd::WindowAppearance {
@@ -170,7 +194,7 @@ impl Hub {
     /// Drops a queued request, or closes a shown window.
     pub fn destroy(&self, window: u32) {
         let mut s = self.state.lock().unwrap();
-        s.queued.retain(|(q, _)| q.window != window);
+        s.queued.retain(|(q, _)| q.request.window != window);
         if let Some((conn, _)) = s.shown.remove(&window) {
             let _ = s.displays[&conn].send(Cmd::Destroy(window));
             drop(s);
@@ -222,14 +246,14 @@ impl Hub {
     }
 
     /// The request a new HWC display of this size answers, if any.
-    pub fn claim(&self, width: u32, height: u32) -> Option<WindowRequest> {
+    pub fn claim(&self, width: u32, height: u32) -> Option<PendingWindow> {
         let mut s = self.state.lock().unwrap();
         let now = Instant::now();
         s.queued.retain(|(_, at)| now - *at < REQUEST_TIMEOUT);
         let i = s
             .queued
             .iter()
-            .position(|(q, _)| q.width == width && q.height == height)?;
+            .position(|(q, _)| q.request.width == width && q.request.height == height)?;
         Some(s.queued.remove(i).0)
     }
 
@@ -333,9 +357,38 @@ mod tests {
         let hub = Hub::new();
         hub.request(request(5, 1280)).unwrap();
         hub.request(request(6, 1000)).unwrap();
-        assert_eq!(hub.claim(1000, 800).map(|r| r.window), Some(6));
+        assert_eq!(hub.claim(1000, 800).map(|r| r.request.window), Some(6));
         assert_eq!(hub.claim(1000, 800), None);
-        assert_eq!(hub.claim(1280, 800).map(|r| r.window), Some(5));
+        assert_eq!(hub.claim(1280, 800).map(|r| r.request.window), Some(5));
+    }
+
+    #[test]
+    fn a_queued_window_accepts_its_initial_icon_before_a_display_claims_it() {
+        let hub = Hub::new();
+        hub.request(request(5, 1280)).unwrap();
+        let icon = crate::ipc::blob::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 255, 255],
+        };
+        assert_eq!(hub.window_appearance(5, 0xff1976d2, Some(icon)), Ok(()));
+    }
+
+    #[test]
+    fn initial_appearance_is_claimed_with_the_window_before_it_is_shown() {
+        let hub = Hub::new();
+        hub.request(request(5, 1280)).unwrap();
+        let icon = crate::ipc::blob::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 255, 255],
+        };
+        hub.window_appearance(5, 0xff1976d2, Some(icon.clone()))
+            .unwrap();
+        let pending = hub.claim(1280, 800).unwrap();
+        assert_eq!(pending.request.window, 5);
+        assert_eq!(pending.color, 0xff1976d2);
+        assert_eq!(pending.icon, Some(icon));
     }
 
     #[test]
@@ -345,7 +398,7 @@ mod tests {
         let conn = hub.add_display_connection(tx);
         hub.request(request(5, 1280)).unwrap();
         let r = hub.claim(1280, 800).unwrap();
-        hub.mapped(conn, 2, &r);
+        hub.mapped(conn, 2, &r.request);
         assert_eq!(hub.request(request(5, 1280)), Err(-EBUSY));
         hub.activate(5, "t".into()).unwrap();
         assert!(matches!(rx.try_recv(), Ok(Cmd::Activate(5, Some(t))) if t == "t"));
@@ -366,7 +419,7 @@ mod tests {
         assert_eq!(hub.claim(1280, 800), None);
         hub.request(request(6, 1280)).unwrap();
         let r = hub.claim(1280, 800).unwrap();
-        hub.mapped(conn, 2, &r);
+        hub.mapped(conn, 2, &r.request);
         hub.destroy(6);
         assert!(matches!(rx.try_recv(), Ok(Cmd::Destroy(6))));
         // Its display going away later closes nothing more.
@@ -380,7 +433,7 @@ mod tests {
         let conn = hub.add_display_connection(tx);
         hub.request(request(5, 1280)).unwrap();
         let r = hub.claim(1280, 800).unwrap();
-        hub.mapped(conn, 2, &r);
+        hub.mapped(conn, 2, &r.request);
         hub.remove_display_connection(conn);
         hub.request(request(5, 1280)).unwrap();
     }
