@@ -1134,7 +1134,11 @@ impl BinderDriver {
                 return;
             }
         }
-        if read_avail > 0 {
+        // A signal can end the seccomp wait even when NOTIF_SEND succeeds.
+        // In that case these read bytes are already committed and published;
+        // libbinder retries with their read_consumed intact. Return them before
+        // waiting for new work (which can depend on the caller freeing them).
+        if read_avail > 0 && bwr.read_consumed == 0 {
             let nonblock = self.procs[&proc].nonblock;
             self.serve_read(proc, tid, Read { call, bwr }, nonblock, us);
         } else {
