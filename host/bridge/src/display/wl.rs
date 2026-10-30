@@ -768,8 +768,14 @@ impl State {
         {
             t.set_serial(self.seat.last_serial, seat);
         }
-        if let Some(f) = self.seat.keyboard_focus.and_then(|f| self.windows.get(&f)) {
-            t.set_surface(f.window.wl_surface());
+        let source = if internal {
+            None
+        } else {
+            self.windows.get(&id)
+        }
+        .or_else(|| self.seat.keyboard_focus.and_then(|f| self.windows.get(&f)));
+        if let Some(source) = source {
+            t.set_surface(source.window.wl_surface());
         }
         if internal && let Some(w) = self.windows.get(&id) {
             t.set_app_id(w.app_id.clone());

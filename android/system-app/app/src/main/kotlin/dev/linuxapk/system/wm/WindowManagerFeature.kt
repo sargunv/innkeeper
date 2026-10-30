@@ -709,6 +709,7 @@ class WindowManagerFeature(
               component.packageName,
               labelOf(component.packageName),
               sizingFor(t.baseIntent ?: Intent()),
+              token = if (source in windows) input.activationToken(source) else "",
             )
           TaskRouting.Destination.Ignore -> null
         } ?: continue

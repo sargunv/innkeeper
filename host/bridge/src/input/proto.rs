@@ -47,6 +47,9 @@
 //! `EVDEV` (0x0608): u32 device (0 keyboard, display + 1 mouse), u64 monotonic
 //! microseconds, u32 count (1..32), then count records of u16 type, u16 code,
 //! i32 value. The bridge adds SYN_REPORT and writes to the broker's evdev.sock.
+//! `WINDOW_TOKEN` (0x060c): u32 source display; reply: name token (empty if
+//! unavailable). Requests `xdg_activation_v1` authority from that window's surface
+//! before moving a newly created task to its own display.
 //! `POINTER_CAPTURE` (0x060b): u32 enabled, Android InputReader capture state.
 //! The bridge locks only its focused content surface.
 //!
@@ -125,6 +128,7 @@ pub mod ty {
     pub const POINTER_POSITION: u16 = 0x0609;
     pub const EVDEV_DEVICE: u16 = 0x060a;
     pub const POINTER_CAPTURE: u16 = 0x060b;
+    pub const WINDOW_TOKEN: u16 = 0x060c;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -185,6 +189,9 @@ pub enum Request {
         window: u32,
         token: String,
     },
+    WindowToken {
+        window: u32,
+    },
     WindowDestroy {
         window: u32,
     },
@@ -235,6 +242,7 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             window: r.u32()?,
             token: r.name()?,
         },
+        ty::WINDOW_TOKEN => Request::WindowToken { window: r.u32()? },
         ty::WINDOW_MINIMIZE => Request::WindowMinimize { window: r.u32()? },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
         ty::WINDOW_APPEARANCE => Request::WindowAppearance {
@@ -307,6 +315,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::WindowActivate { window, token } => {
             w = Writer::message(ty::WINDOW_ACTIVATE, tag);
             w.u32(*window).name(token);
+        }
+        Request::WindowToken { window } => {
+            w = Writer::message(ty::WINDOW_TOKEN, tag);
+            w.u32(*window);
         }
         Request::WindowMinimize { window } => {
             w = Writer::message(ty::WINDOW_MINIMIZE, tag);
@@ -416,6 +428,7 @@ mod tests {
                 window: 3,
                 token: String::new(),
             },
+            Request::WindowToken { window: 3 },
             Request::WindowDestroy { window: 3 },
             Request::WindowMinimize { window: 3 },
             Request::WindowAppearance {
