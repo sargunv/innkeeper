@@ -8,6 +8,7 @@
 
 #include <sys/mman.h>
 
+#include "../../allocator/gpu_buffer.h"
 #include "Buffer.h"
 #include "GpuCopy.h"
 #include "linuxapk/buffer_alloc.h"
@@ -48,6 +49,22 @@ int main() {
   GpuCopy live;
   CHECK(live.copy(*source, *target));
   CHECK(*reinterpret_cast<const uint32_t*>(target->map()) == 0xff123456);
+  native_handle_t* gpuHandle = nullptr;
+  CHECK(
+    allocateBuffer(
+      {"gpu-tiled-copy", 64, 64, 1, fmt::RGBA_8888,
+       usage::GPU_TEXTURE | usage::GPU_RENDER_TARGET, 0},
+      &gpuHandle, allocateGpuBuffer
+    ) == AllocStatus::Ok
+  );
+  BufferRef tiled(gpuHandle);
+  CHECK(live.copy(*source, tiled));
+  CHECK(live.copy(tiled, *target));
+  CHECK(*reinterpret_cast<const uint32_t*>(target->map()) == 0xff123456);
+  std::printf(
+    "ok: GPU target flags=0x%x copied through CPU-readable sink\n",
+    tiled.info()->flags
+  );
   std::atomic<bool> stop = false;
   std::atomic<int> failures = 0;
   auto other = buffer();

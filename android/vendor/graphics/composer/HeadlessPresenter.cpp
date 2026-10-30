@@ -9,7 +9,9 @@
 #include <string.h>
 
 #include "FrameDumper.h"
+#include "GpuCopy.h"
 #include "Presenter.h"
+#include "linuxapk/buffer_alloc.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
@@ -86,13 +88,38 @@ void HeadlessPresenter::present(const FrameInput& frame) {
   if (!mWorker && mDumper->enabled())
     mWorker = std::make_unique<Worker>(mDumper.get());
   if (mWorker && ct && ct->buffer && mDumper->shouldDump(now)) {
-    const BufferHandle* bh = ct->buffer->info();
-    const uint8_t* base = ct->buffer->map();
-    if (bh && base) {
-      // The client target is complete once its acquire fence signals.
-      if (!waitFence(ct->acquireFence.get(), 1000)) {
-        LOGW("client target fence did not signal; dumping anyway");
+    BufferPtr pixels = ct->buffer;
+    const BufferHandle* bh = pixels->info();
+    if (!bh || !waitFence(ct->acquireFence.get(), 1000)) return;
+    if (bh->flags & kFlagTiled) {
+      // PNG encoding is a CPU consumer. Read tiled targets through the GPU,
+      // rather than interpreting their physical tile bytes as scanlines.
+      const auto* previous = mReadback ? mReadback->info() : nullptr;
+      if (
+        !previous || previous->width != bh->width ||
+        previous->height != bh->height ||
+        previous->resolvedFormat != bh->resolvedFormat
+      ) {
+        native_handle_t* handle = nullptr;
+        if (
+          allocateBuffer(
+            {"frame-dump", bh->width, bh->height, 1, bh->resolvedFormat,
+             usage::CPU_READ_MASK | usage::GPU_RENDER_TARGET |
+               usage::GPU_TEXTURE,
+             0},
+            &handle
+          ) != AllocStatus::Ok
+        )
+          return;
+        mReadback = std::make_shared<BufferRef>(handle);
       }
+      if (!mReadbackCopy) mReadbackCopy = std::make_unique<GpuCopy>();
+      if (!mReadbackCopy->copy(*pixels, *mReadback)) return;
+      pixels = mReadback;
+      bh = pixels->info();
+    }
+    const uint8_t* base = pixels->map();
+    if (base) {
       FrameView v{
         base + bh->planes[0].offset.get(), bh->width, bh->height,
         bh->planes[0].stride, bh->resolvedFormat

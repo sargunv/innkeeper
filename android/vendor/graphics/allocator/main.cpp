@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // android.hardware.graphics.allocator.IAllocator/default (AIDL V3).
-// Buffers are linear memfd-backed dma-bufs; see common/buffer_alloc.cpp.
+// GPU-only RGB targets are driver-allocated; CPU buffers use udmabuf.
 #define LOG_TAG "linuxapk-allocator"
 
 #include <cerrno>
@@ -14,6 +14,7 @@
 #include <grp.h>
 #include <unistd.h>
 
+#include "gpu_buffer.h"
 #include "linuxapk/buffer_alloc.h"
 #include "linuxapk/gralloc_handle.h"
 #include "linuxapk/log.h"
@@ -102,9 +103,10 @@ class Allocator : public BnAllocator {
     r.stride = int32_t(layout.stridePixels);
     for (int32_t i = 0; i < count; i++) {
       native_handle_t* h = nullptr;
-      st = allocateBuffer(req, &h);
+      st = allocateBuffer(req, &h, allocateGpuBuffer);
       if (st != AllocStatus::Ok)
         return toStatus(st);  // r's fds close on return
+      r.stride = int32_t(asBufferHandle(h)->stridePixels);
       r.buffers.push_back(toAidl(h));
     }
     LOGD(

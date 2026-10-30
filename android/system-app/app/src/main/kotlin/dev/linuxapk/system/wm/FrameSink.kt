@@ -30,7 +30,10 @@ class FrameSink(
       .setUsage(
         HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or
           HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or
-          HardwareBuffer.USAGE_COMPOSER_OVERLAY,
+          HardwareBuffer.USAGE_COMPOSER_OVERLAY or
+          // The desktop bridge reads these pixels for hidden-window snapshots
+          // and wl_shm fallback. Keep this consumer's buffers CPU-readable.
+          HardwareBuffer.USAGE_CPU_READ_RARELY,
       )
       .build()
   private val frames = RetainedFrames<Image>(reader.maxImages) { it.close() }

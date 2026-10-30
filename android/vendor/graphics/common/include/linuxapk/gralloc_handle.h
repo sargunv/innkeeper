@@ -2,7 +2,9 @@
 // The buffer_handle_t layout shared by our allocator, mapper and composer.
 //
 // One fd: a dma-buf from /dev/udmabuf (or a plain memfd if udmabuf is not
-// available, flagged by kFlagDmabuf being clear). The fd covers:
+// available, flagged by kFlagDmabuf being clear). GPU-only RGB targets use
+// driver-exported dma-bufs and carry their DRM modifier in metadata. The fd
+// covers:
 //   [0, pixelBytes)                      pixel data, layerCount layers
 //   [metadataOffset, +kPageSize)         SharedMetadata (mutable metadata)
 //   [reservedOffset, +reservedSize)      client reserved region (optional)
@@ -22,6 +24,7 @@ namespace linuxapk {
 constexpr uint32_t kHandleMagic = 0x4b50414c;  // "LAPK"
 constexpr uint32_t kHandleVersion = 1;
 constexpr uint32_t kFlagDmabuf = 1u << 0;
+constexpr uint32_t kFlagTiled = 1u << 1;
 
 struct U64 {
   uint32_t lo, hi;
@@ -106,6 +109,7 @@ struct SharedMetadata {
   // Wayland (or has been released). The token is unique for each frame;
   // access it atomically across the composer and the ImageReader consumer.
   alignas(8) uint64_t presentationToken;
+  uint64_t modifier;  // DRM modifier; CPU-accessed buffers are LINEAR (zero).
 };
 static_assert(sizeof(SharedMetadata) <= kPageSize);
 

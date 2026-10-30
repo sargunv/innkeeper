@@ -344,11 +344,22 @@ sequenceDiagram
 ## Buffers
 
 The allocator ([android/vendor/graphics](../android/vendor/graphics/README.md))
-makes every buffer a sealed memfd turned into a dma-buf through `/dev/udmabuf`:
-linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
+allocates GPU-only, single-layer RGB render/composer targets through the
+selected Vulkan driver. It exports a dma-buf with the driver's single-plane
+tiled modifier, row pitch and allocation size. The handle layout stays the same;
+its shared metadata page carries the modifier for IMapper. Auxiliary compression
+planes and dedicated-only allocations are excluded so the same fd can retain
+that metadata page. Intel GPUs render several times faster to tiled memory than
+to LINEAR; ANV exports such targets. RADV requires dedicated allocations for
+shareable tiled images, so AMD targets stay LINEAR.
 
-- **Row pitch is a multiple of 256 bytes on every plane**, which RADV requires
-  for linear images. YV12 keeps Android's rule
+CPU-accessed buffers, cursor buffers, YUV and unsupported GPU allocations use
+the sealed memfd and `/dev/udmabuf` path: LINEAR, CPU-mappable and importable by
+RADV, ANV, lavapipe and linux-dmabuf. Like minigbm's i915 policy, CPU access
+keeps LINEAR while rendering prefers tiled memory.
+
+- **LINEAR row pitch is a multiple of 256 bytes on every plane**, which RADV
+  requires for linear images. YV12 keeps Android's rule
   (`c_stride = align(y_stride / 2, 16)`) by padding luma to 512.
 - All planes of a YUV buffer share one dma-buf; offsets and strides are in
   `PLANE_LAYOUTS`, and `DATASPACE` carries the colour model (unset means BT.601
@@ -356,12 +367,18 @@ linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
 - GPU and composer usages fail rather than fall back to a plain memfd, which
   their consumers can't import.
 
-The bridge imports the allocator's actual DRM fourcc and LINEAR modifier,
-including RGBA FP16 and 10-bit targets, only when that pair is advertised in
-linux-dmabuf feedback (or v3 modifier events). Unsupported pairs and failed
-imports use an ARGB8888 wl_shm snapshot; half-floats and 10-bit channels are
-clamped and rounded to their 8-bit SDR equivalents. Ordinary supported frames
-still use their original dma-buf without a copy. KWin 6.3 predates the standard
+The window sink requests CPU-read access because the bridge reads its pixels for
+hidden-window snapshots and fallback. These exported buffers remain LINEAR;
+tiled app buffers and SurfaceFlinger targets are imported by the Android GPU
+compositor. Headless PNG dumps copy tiled targets through the GPU into a
+CPU-readable buffer before encoding.
+
+The bridge imports the sink's actual DRM fourcc and LINEAR modifier, including
+RGBA FP16 and 10-bit targets, only when that pair is advertised in linux-dmabuf
+feedback (or v3 modifier events). Unsupported pairs and failed imports use an
+ARGB8888 wl_shm snapshot; half-floats and 10-bit channels are clamped and
+rounded to their 8-bit SDR equivalents. Ordinary supported frames still use
+their original dma-buf without a copy. KWin 6.3 predates the standard
 colour-management protocol, so no wide-gamut/HDR output capability is
 advertised; SurfaceFlinger performs colour conversion for the SDR virtual
 display.

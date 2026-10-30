@@ -24,10 +24,17 @@ enum class AllocStatus { Ok, BadDescriptor, Unsupported, NoResources };
 // Checks the request without allocating.
 AllocStatus checkRequest(const AllocRequest& req, Layout* outLayout = nullptr);
 
+struct GpuBuffer {
+  int fd = -1;
+  uint64_t modifier = 0;
+};
+using GpuAllocate = GpuBuffer (*)(const AllocRequest&, Layout*);
+
 // Allocates one buffer and returns a new native handle (caller owns fds +
 // struct).
 AllocStatus allocateBuffer(
-  const AllocRequest& req, native_handle_t** outHandle
+  const AllocRequest& req, native_handle_t** outHandle,
+  GpuAllocate gpuAllocate = nullptr
 );
 
 // True if the last allocation produced a dma-buf (udmabuf available).

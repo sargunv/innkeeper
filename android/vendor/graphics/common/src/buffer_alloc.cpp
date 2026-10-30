@@ -66,24 +66,39 @@ AllocStatus checkRequest(const AllocRequest& req, Layout* outLayout) {
 }
 
 AllocStatus allocateBuffer(
-  const AllocRequest& req, native_handle_t** outHandle
+  const AllocRequest& req, native_handle_t** outHandle, GpuAllocate gpuAllocate
 ) {
   Layout l;
   AllocStatus st = checkRequest(req, &l);
   if (st != AllocStatus::Ok) return st;
 
+  // CPU mappings (cursors and our software codecs and cameras read them too)
+  // and multi-plane formats retain the existing LINEAR path, as in minigbm.
+  const bool gpuOnly =
+    !(req.usage &
+      (usage::CPU_READ_MASK | usage::CPU_WRITE_MASK | usage::COMPOSER_CURSOR |
+       usage::PROTECTED | usage::VIDEO_ENCODER | usage::VIDEO_DECODER |
+       usage::CAMERA_OUTPUT | usage::CAMERA_INPUT)) &&
+    (req.usage & (usage::GPU_RENDER_TARGET | usage::COMPOSER_OVERLAY |
+                  usage::COMPOSER_CLIENT_TARGET)) &&
+    l.numPlanes == 1 && req.layerCount == 1;
+  const GpuBuffer gpu =
+    gpuOnly && gpuAllocate ? gpuAllocate(req, &l) : GpuBuffer{};
   const uint64_t metadataOffset = l.pixelBytes;
   const uint64_t reservedOffset = metadataOffset + kPageSize;
   const uint64_t reservedSize = alignUp(req.reservedSize, kPageSize);
   const uint64_t total = reservedOffset + reservedSize;
 
   std::string memfdName = "gralloc:" + std::string(req.name.substr(0, 200));
-  int memfd = memfd_create(memfdName.c_str(), MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  int memfd =
+    gpu.fd >= 0
+      ? gpu.fd
+      : memfd_create(memfdName.c_str(), MFD_CLOEXEC | MFD_ALLOW_SEALING);
   if (memfd < 0) {
     LOGE("memfd_create: %s", strerror(errno));
     return AllocStatus::NoResources;
   }
-  if (ftruncate(memfd, off_t(total)) != 0) {
+  if (gpu.fd < 0 && ftruncate(memfd, off_t(total)) != 0) {
     LOGE("ftruncate(%llu): %s", (unsigned long long)total, strerror(errno));
     close(memfd);
     return AllocStatus::NoResources;
@@ -91,23 +106,36 @@ AllocStatus allocateBuffer(
 
   SharedMetadata md{};
   md.magic = SharedMetadata::kMagic;
+  md.modifier = gpu.modifier;
   md.dataspace = 0;  // UNKNOWN
   md.blendMode = 0;  // INVALID until set
   md.nameLen =
     uint32_t(std::min<size_t>(req.name.size(), SharedMetadata::kMaxName));
   memcpy(md.name, req.name.data(), md.nameLen);
-  if (
-    pwrite(memfd, &md, sizeof(md), off_t(metadataOffset)) != ssize_t(sizeof(md))
-  ) {
-    LOGE("pwrite metadata: %s", strerror(errno));
+  bool wrote = false;
+  if (gpu.fd >= 0) {
+    void* p = mmap(
+      nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, gpu.fd,
+      off_t(metadataOffset)
+    );
+    if (p != MAP_FAILED) {
+      memcpy(p, &md, sizeof(md));
+      munmap(p, kPageSize);
+      wrote = true;
+    }
+  } else
+    wrote = pwrite(memfd, &md, sizeof(md), off_t(metadataOffset)) ==
+            ssize_t(sizeof(md));
+  if (!wrote) {
+    LOGE("initialize buffer metadata: %s", strerror(errno));
     close(memfd);
     return AllocStatus::NoResources;
   }
 
-  int bufFd = -1;
-  uint32_t flags = 0;
+  int bufFd = gpu.fd;
+  uint32_t flags = gpu.fd >= 0 ? kFlagDmabuf | kFlagTiled : 0;
   int dev = udmabufDevice();
-  if (dev >= 0) {
+  if (gpu.fd < 0 && dev >= 0) {
     fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK);
     struct udmabuf_create create{};
     create.memfd = uint32_t(memfd);

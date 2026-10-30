@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -502,6 +503,62 @@ static void testAllFormats() {
   );
 }
 
+static int gpuAllocations;
+static GpuBuffer testGpuAllocation(const AllocRequest& req, Layout* layout) {
+  ++gpuAllocations;
+  layout->planes[0].stride *= 2;
+  layout->stridePixels *= 2;
+  layout->planes[0].size =
+    uint64_t(layout->planes[0].stride) * alignUp(req.height, 32);
+  layout->layerSize = alignUp(layout->planes[0].size, kPageSize);
+  layout->pixelBytes = layout->layerSize;
+  int fd = memfd_create("gpu-layout-fixture", MFD_CLOEXEC);
+  if (
+    fd < 0 || ftruncate(
+                fd, off_t(
+                      layout->pixelBytes + kPageSize +
+                      alignUp(req.reservedSize, kPageSize)
+                    )
+              )
+  )
+    abort();
+  return {fd, 0x0100000000000002};
+}
+
+static void testGpuLayout() {
+  for (uint64_t cpu :
+       {uint64_t(0), usage::CPU_READ_MASK, usage::CPU_WRITE_MASK,
+        usage::COMPOSER_CURSOR, usage::VIDEO_ENCODER}) {
+    const int before = gpuAllocations;
+    native_handle_t* raw = nullptr;
+    CHECK_EQ(
+      allocateBuffer(
+        {"gpu-layout", 100, 50, 1, fmt::RGBA_8888,
+         usage::GPU_RENDER_TARGET | cpu, 64},
+        &raw, testGpuAllocation
+      ),
+      AllocStatus::Ok
+    );
+    if (!raw) continue;
+    CHECK_EQ(gpuAllocations, before + (cpu == 0));
+    buffer_handle_t imported = nullptr;
+    CHECK_EQ(gMapper->v5.importBuffer(raw, &imported), AIMAPPER_ERROR_NONE);
+    if (imported) {
+      CHECK_EQ(
+        *get<StandardMetadataType::PIXEL_FORMAT_MODIFIER>(imported),
+        cpu ? uint64_t(0) : uint64_t(0x0100000000000002)
+      );
+      CHECK_EQ(*get<StandardMetadataType::STRIDE>(imported), cpu ? 128u : 256u);
+      CHECK_EQ(
+        get<StandardMetadataType::PLANE_LAYOUTS>(imported)->at(0).strideInBytes,
+        cpu ? 512 : 1024
+      );
+      gMapper->v5.freeBuffer(imported);
+    }
+    nativeHandleCloseAndDelete(raw);
+  }
+}
+
 int main(int argc, char** argv) {
   const char* lib = argc > 1 ? argv[1] : "./mapper.linuxapk.so";
   void* so = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
@@ -551,6 +608,8 @@ int main(int argc, char** argv) {
   testLayouts();
   printf("mapper\n");
   testMapper();
+  printf("GPU layout and CPU usage policy\n");
+  testGpuLayout();
   printf("formats\n");
   testAllFormats();
   printf("%d checks, %d failures\n", gChecks, gFailures);

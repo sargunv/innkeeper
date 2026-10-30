@@ -300,7 +300,7 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
   if (cursor && cursor->buffer) {
     const auto* bh = cursor->buffer->info();
     if (
-      !bh || bh->width > 512 || bh->height > 512 ||
+      !bh || (bh->flags & kFlagTiled) || bh->width > 512 || bh->height > 512 ||
       (bh->resolvedFormat != fmt::RGBA_8888 &&
        bh->resolvedFormat != fmt::BGRA_8888)
     )
@@ -389,7 +389,8 @@ void BridgeDisplay::present(const FrameInput& frame) {
   }
   if (!buffer) return;
   const BufferHandle* bh = buffer->info();
-  if (!bh || !(bh->flags & kFlagDmabuf)) return;
+  // The sink requests CPU reads, so its buffers stay LINEAR (see FrameSink).
+  if (!bh || !(bh->flags & kFlagDmabuf) || (bh->flags & kFlagTiled)) return;
   // The allocator's concrete DRM format, including FP16 and 10-bit targets.
   const uint32_t format = bh->fourcc;
   if (!waitFence(ct->acquireFence.get(), 1000)) {
