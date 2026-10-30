@@ -17,12 +17,19 @@ that touches gralloc buffers.
   rules are in [docs/display.md](../../../docs/display.md#buffers). Only the
   session's root may open `/dev/udmabuf`, so the allocator opens it before
   dropping to `system:graphics`.
-- **Composer:** one headless display 0 (1280x800, 60 Hz timer vsync) plus up to
-  32 HWC-backed virtual displays; content layers are CLIENT and CURSOR layers
-  are exported separately to Wayland. `Presenter.cpp` picks the backend from
+- **Composer:** one headless display 0 (1280x800) plus up to 32 HWC-backed
+  virtual displays; content layers are CLIENT and CURSOR layers are exported
+  separately to Wayland. `Presenter.cpp` picks the backend from
   `vendor.linuxapk.hwc.backend`: `bridge` (the session default) sends virtual
   displays to the bridge's display service, `headless` shows nothing.
-  `vendor.linuxapk.hwc.dump.dir` writes PNG frame dumps.
+  `vendor.linuxapk.hwc.dump.dir` writes PNG frame dumps. Display 0 supplies
+  Android's scheduling clock for the virtual displays. It follows a visible
+  mapped window's output refresh and `wp_presentation` phase, retaining that
+  phase while the window is static. Visibility, surface enter/leave and teardown
+  select the source; without a visible mapped source it uses a 60 Hz timer. The
+  output mode seeds the period before the first feedback. Startup rc sets app/SF
+  work durations to 4/4 ms, fitting within a 120 Hz frame. Set
+  `vendor.linuxapk.hwc.host_clock=0` to compare against the fixed timer.
 - **LL-NDK only.** `third_party/aosp` holds the frozen AIDL snapshots and binder
   NDK and IMapper headers (`tools/sync-aosp.sh`); `tools/gen-aidl.sh` generates
   the NDK backend with the build-tools' `aidl`, and `tools/gen-stub.py` turns
