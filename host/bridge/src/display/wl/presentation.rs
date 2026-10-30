@@ -5,6 +5,49 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
 pub(super) type Presentation = wp_presentation::WpPresentation;
 
+// A callback-only commit can supersede the previous content commit's feedback
+// without replacing its pixels. Observe that commit separately for benchmarks.
+pub(super) struct Probe {
+    pub stamp: u64,
+    pub window: u32,
+}
+
+impl Dispatch2<wp_presentation_feedback::WpPresentationFeedback, State> for Probe {
+    fn event(
+        &self,
+        _: &mut State,
+        _: &wp_presentation_feedback::WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        match event {
+            wp_presentation_feedback::Event::Presented {
+                tv_sec_hi,
+                tv_sec_lo,
+                tv_nsec,
+                refresh,
+                flags,
+                ..
+            } => {
+                let ns = ((u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo)) * 1_000_000_000
+                    + u64::from(tv_nsec);
+                crate::bench::trace(format_args!(
+                    "probe_present frame={} window={} ns={ns} refresh_ns={refresh} flags={flags:?}",
+                    self.stamp, self.window
+                ));
+            }
+            wp_presentation_feedback::Event::Discarded => {
+                crate::bench::trace(format_args!(
+                    "probe_discard frame={} window={}",
+                    self.stamp, self.window
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Sample {
     ns: u64,

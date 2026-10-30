@@ -592,6 +592,20 @@ impl State {
                     &self.qh,
                     sctk::compositor::FrameCallbackData(surface.clone()),
                 );
+                if crate::bench::enabled()
+                    && let Some(p) = &self.presentation
+                {
+                    let stamp = crate::bench::now();
+                    crate::bench::trace(format_args!("probe ns={stamp} window={}", w.id));
+                    p.feedback(
+                        surface,
+                        &self.qh,
+                        presentation::Probe {
+                            stamp,
+                            window: w.id,
+                        },
+                    );
+                }
                 surface.commit();
             }
             if visible != w.visibility.visible {

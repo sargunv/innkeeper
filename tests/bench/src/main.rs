@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail, ensure};
 use linuxapk_bench::{
-    binder, default_max_load, field, frames, input, launched_display, number, score,
+    binder, default_max_load, field, frames, input, launched_display, number, presented, score,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -420,9 +420,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 wait(
                     || {
                         let b = bridge();
-                        b.contains("BENCH capabilities presentation=0")
-                            || b.contains(&format!("BENCH present frame={frame} "))
-                            || b.contains(&format!("BENCH discard frame={frame} "))
+                        b.contains("BENCH capabilities presentation=0") || presented(&b, frame)
                     },
                     5,
                 )?;

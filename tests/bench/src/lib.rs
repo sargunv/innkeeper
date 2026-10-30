@@ -1,6 +1,6 @@
 //! Parsing and statistics for manual runs. Missing observations stay missing.
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn default_max_load(logical_cpus: usize) -> f64 {
     (logical_cpus as f64 * 0.5).max(1.0)
@@ -53,18 +53,61 @@ pub fn intervals(mut times: Vec<u64>) -> Value {
     )
 }
 
+// Visibility-only commits retain the last submitted content on that surface.
+// Resolve their feedback to that content, keeping its first observed presentation.
+fn presentations(trace: &str) -> HashMap<u64, u64> {
+    let mut commits = HashSet::new();
+    let mut current = HashMap::new();
+    let mut probes = HashMap::new();
+    for line in trace.lines() {
+        if line.starts_with("BENCH commit ")
+            && let Some(at) = number(line, "ns")
+        {
+            commits.insert(at);
+            if let Some(window) = number(line, "window") {
+                current.insert(window, at);
+            }
+        } else if line.starts_with("BENCH probe ")
+            && let (Some(at), Some(window)) = (number(line, "ns"), number(line, "window"))
+            && let Some(content) = current.get(&window)
+        {
+            probes.insert(at, *content);
+        }
+    }
+    let mut result = HashMap::<u64, u64>::new();
+    for line in trace.lines() {
+        let (Some(frame), Some(at)) = (number(line, "frame"), number(line, "ns")) else {
+            continue;
+        };
+        let content = if line.starts_with("BENCH present ") && commits.contains(&frame) {
+            Some(frame)
+        } else if line.starts_with("BENCH probe_present ") {
+            probes.get(&frame).copied()
+        } else {
+            None
+        };
+        if let Some(content) = content {
+            result
+                .entry(content)
+                .and_modify(|old| *old = (*old).min(at))
+                .or_insert(at);
+        }
+    }
+    result
+}
+
+/// A discarded request alone cannot establish that its content was displayed.
+pub fn presented(trace: &str, frame: u64) -> bool {
+    presentations(trace).contains_key(&frame)
+}
+
 pub fn frames(trace: &str) -> Value {
     let commits: Vec<_> = trace
         .lines()
         .filter(|l| l.starts_with("BENCH commit "))
         .filter_map(|l| number(l, "ns"))
         .collect();
-    let presented: Vec<_> = trace
-        .lines()
-        .filter(|l| l.starts_with("BENCH present "))
-        .filter(|l| number(l, "frame").is_some_and(|id| commits.contains(&id)))
-        .filter_map(|l| number(l, "ns"))
-        .collect();
+    let presented = presentations(trace).into_values().collect();
     json!({"commit_intervals":intervals(commits.clone()), "presentation_intervals":intervals(presented), "discarded":trace.lines().filter(|l| l.starts_with("BENCH discard ") && number(l,"frame").is_some_and(|id| commits.contains(&id))).count()})
 }
 
@@ -88,11 +131,7 @@ pub fn launched_display(reply: &str) -> Option<u64> {
 /// Match a SPACE press to a *changed solid colour*, then its presentation id.
 /// Repainting the old colour or presenting another buffer cannot satisfy it.
 pub fn input(trace: &str) -> Value {
-    let presentations: HashMap<_, _> = trace
-        .lines()
-        .filter(|l| l.starts_with("BENCH present "))
-        .filter_map(|l| Some((number(l, "frame")?, number(l, "ns")?)))
-        .collect();
+    let presentations = presentations(trace);
     let monotonic = trace.lines().any(|l| l == "BENCH clock id=1");
     let mut pending = None;
     let mut previous = None;
@@ -203,6 +242,44 @@ mod tests {
         assert_eq!(input(t)["input_to_commit"]["mean_ms"], 2.0);
         assert_eq!(input(t)["input_to_presentation"]["mean_ms"], 4.0);
         assert!(input(&t.replace("id=1", "id=4"))["input_to_presentation"].is_null());
+    }
+    #[test]
+    fn visibility_commits_present_existing_content_without_adding_frames() {
+        let trace = "BENCH clock id=1\n\
+BENCH commit ns=100 window=3 color=255\n\
+BENCH input ns=1000000 key 2 57 1\n\
+BENCH commit ns=2000000 window=3 color=16711680\n\
+BENCH probe ns=2100000 window=3\n\
+BENCH discard frame=2000000 window=3\n\
+BENCH probe ns=3100000 window=3\n\
+BENCH probe_present frame=3100000 window=3 ns=4000000\n\
+BENCH probe_present frame=2100000 window=3 ns=3000000\n\
+BENCH input ns=5000000 key 2 57 1\n\
+BENCH commit ns=6000000 window=3 color=255\n\
+BENCH present frame=6000000 window=3 ns=7000000\n\
+BENCH probe ns=7100000 window=3\n\
+BENCH probe_present frame=7100000 window=3 ns=8000000\n";
+        assert_eq!(input(trace)["input_to_presentation"]["n"], 2);
+        assert!(presented(trace, 2000000));
+        assert_eq!(input(trace)["input_to_presentation"]["mean_ms"], 2.0);
+        assert_eq!(frames(trace)["presentation_intervals"]["n"], 1);
+        assert_eq!(frames(trace)["presentation_intervals"]["mean_ms"], 4.0);
+    }
+
+    #[test]
+    fn missing_feedback_and_other_windows_cannot_prove_presentation() {
+        let trace = "BENCH clock id=1\n\
+BENCH commit ns=100 window=3 color=255\n\
+BENCH input ns=1000000 key 2 57 1\n\
+BENCH commit ns=2000000 window=3 color=16711680\n\
+BENCH probe ns=2100000 window=3\n\
+BENCH discard frame=2000000 window=3\n\
+BENCH commit ns=2200000 window=4 color=255\n\
+BENCH probe ns=2300000 window=4\n\
+BENCH probe_present frame=2300000 window=4 ns=3000000\n";
+        assert_eq!(input(trace)["input_to_commit"]["n"], 1);
+        assert!(input(trace)["input_to_presentation"].is_null());
+        assert!(!presented(trace, 2000000));
     }
     #[test]
     fn discarded_frames_and_out_of_order_feedback() {
