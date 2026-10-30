@@ -233,6 +233,31 @@ subsequent frames. Wayland releases the old dma-bufs, allowing FrameSink to
 close the retained ImageReader images through their normal lease release path
 without reusing pixels that the compositor is still reading.
 
+### Keeping the desktop awake
+
+The window manager observes Android 17's per-display screen-timeout policy
+through IPowerManager.addScreenTimeoutPolicyListener. WMS translates
+FLAG_KEEP_SCREEN_ON into a display-specific screen wake lock; the policy also
+includes SCREEN_BRIGHT, SCREEN_DIM and FULL wake locks. The hidden platform
+listener is needed because the SDK cannot observe other applications' aggregate
+screen wake locks. It is compile-only against the pinned Android 17 signature;
+no framework patch or polling is involved.
+
+A visible window with that policy owns a zwp_idle_inhibitor_v1. Clearing the
+request, hiding the window or closing it destroys the inhibitor. Restoring a
+window reapplies its current request. Android's SCREEN_OFF_TIMEOUT is set to
+Int.MAX_VALUE so ordinary Android idle timeout cannot stop an activity behind
+its visible desktop window; host visibility controls its power group instead.
+The system app holds no screen wake lock of its own, which would feed back into
+desktop idle inhibition.
+
+Both baseline desktops advertise idle-inhibit v1:
+[GNOME 48](https://github.com/GNOME/mutter/blob/48.0/src/wayland/meta-wayland-versions.h)
+and
+[Plasma 6.3](https://github.com/KDE/kwin/blob/v6.3.0/src/wayland/idleinhibit_v1.cpp).
+The global is optional: if absent, windows and Android lifecycle keep working
+and desktop idle inhibition is unavailable. This path uses no portal service.
+
 ### Launch feedback
 
 ```mermaid

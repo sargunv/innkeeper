@@ -328,6 +328,12 @@ sys.exit(1)
       resumed_again() { [[ $(resumes) -gt $before ]]; }
       until_ok resumed_again
       echo 'ok   minimizing stops the activity and restoring resumes the same display'
+      launch WindowProbe
+      s am broadcast -a dev.linuxapk.WINDOW_PROBE -p dev.linuxapk.probes --es mode flag --ez enabled true >/dev/null
+      until_ok file_has "$bridge_log" "window $display idle-inhibit on"
+      s am broadcast -a dev.linuxapk.WINDOW_PROBE -p dev.linuxapk.probes --es mode flag --ez enabled false >/dev/null
+      until_ok file_has "$bridge_log" "window $display idle-inhibit off"
+      echo 'ok   a visible keep-screen-on request inhibits desktop idle until cleared'
       launch TaskWindowProbe
       first=$display
       # shellcheck disable=SC2329 # invoked through until_ok

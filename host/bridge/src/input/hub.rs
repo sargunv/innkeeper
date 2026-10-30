@@ -191,6 +191,14 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
+    pub fn keep_awake(&self, window: u32, requested: bool) -> Result<(), i32> {
+        let s = self.state.lock().unwrap();
+        let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
+        s.displays[conn]
+            .send(Cmd::KeepAwake { window, requested })
+            .map_err(|_| -EIO)
+    }
+
     /// Drops a queued request, or closes a shown window.
     pub fn destroy(&self, window: u32) {
         let mut s = self.state.lock().unwrap();

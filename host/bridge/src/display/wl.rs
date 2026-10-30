@@ -52,6 +52,9 @@ use super::proto::{BufferSpec, event, ty};
 use crate::input::proto::WindowPolicy;
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
+use wayland_protocols::wp::idle_inhibit::zv1::client::{
+    zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1, zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
+};
 use wayland_protocols::xdg::toplevel_icon::v1::client::{
     xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1, xdg_toplevel_icon_v1::XdgToplevelIconV1,
 };
@@ -61,6 +64,7 @@ pub(crate) mod cursor;
 mod data_device;
 mod foreign;
 mod frames;
+mod inhibit;
 mod policy;
 mod presentation;
 mod visibility;
@@ -93,6 +97,10 @@ pub enum Cmd {
     TextInput(ime::Req),
     PointerCapture(bool),
     WindowPolicy(WindowPolicy),
+    KeepAwake {
+        window: u32,
+        requested: bool,
+    },
     Cursor {
         window: u32,
         image: cursor::Image,
@@ -133,6 +141,8 @@ struct Win {
     width: u32,
     height: u32,
     scale120: u32,
+    inhibit: inhibit::Inhibit,
+    inhibitor: Option<ZwpIdleInhibitorV1>,
     frozen: Option<sctk::shm::slot::Buffer>,
     visibility: visibility::Visibility,
     configured: bool,
@@ -162,6 +172,7 @@ pub(crate) struct State {
     presentation: Option<presentation::Presentation>,
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
+    idle_inhibit: Option<ZwpIdleInhibitManagerV1>,
     icon_manager: Option<XdgToplevelIconManagerV1>,
     appearance: appearance::Appearance,
     exporter:
@@ -240,7 +251,12 @@ macro_rules! ignore_events {
         }
     )* };
 }
-ignore_events!(XdgToplevelIconManagerV1, XdgToplevelIconV1);
+ignore_events!(
+    XdgToplevelIconManagerV1,
+    XdgToplevelIconV1,
+    ZwpIdleInhibitManagerV1,
+    ZwpIdleInhibitorV1
+);
 
 /// A window's fractional-scale object.
 struct ScaleOf(u32);
@@ -495,10 +511,36 @@ impl State {
         }
     }
 
+    fn sync_inhibit(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        match w
+            .inhibit
+            .update(w.visibility.visible, self.idle_inhibit.is_some())
+        {
+            Some(true) => {
+                w.inhibitor = self
+                    .idle_inhibit
+                    .as_ref()
+                    .map(|m| m.create_inhibitor(w.window.wl_surface(), &self.qh, Unit));
+                crate::info!("display: window {id} idle-inhibit on");
+            }
+            Some(false) => {
+                if let Some(inhibitor) = w.inhibitor.take() {
+                    inhibitor.destroy();
+                }
+                crate::info!("display: window {id} idle-inhibit off");
+            }
+            None => {}
+        }
+    }
+
     // The single visibility transition hook: suspended configures, callback
     // absence and restore all arrive here. Host pacing consumes it through
     // window_timing when its presentation-clock branch is integrated.
     fn send_visibility(&mut self, id: u32) {
+        self.sync_inhibit(id);
         if self.windows.get(&id).is_some_and(|w| !w.visibility.visible) {
             self.freeze(id);
         }
@@ -617,6 +659,8 @@ impl State {
                 width,
                 height,
                 scale120: 120,
+                inhibit: inhibit::Inhibit::default(),
+                inhibitor: None,
                 frozen: None,
                 visibility: visibility::Visibility::new(Instant::now()),
                 configured: false,
@@ -661,6 +705,9 @@ impl State {
         }
         if let Some(f) = &w.fractional {
             f.destroy();
+        }
+        if let Some(inhibitor) = &w.inhibitor {
+            inhibitor.destroy();
         }
         foreign::forget(id, w.exported.clone());
         // Buffers of this window go too; busy ones were in use by the
@@ -968,6 +1015,12 @@ impl State {
                 self.update_capture();
             }
             Cmd::WindowPolicy(p) => self.window_policy(p),
+            Cmd::KeepAwake { window, requested } => {
+                if let Some(w) = self.windows.get_mut(&window) {
+                    w.inhibit.requested = requested;
+                }
+                self.sync_inhibit(window);
+            }
             Cmd::Cursor { window, image } => self.cursor(window, image),
             Cmd::Quit => self.quit = true,
         }
@@ -1356,6 +1409,7 @@ pub fn run(
         },
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
+        idle_inhibit: bind_opt(&globals, &qh, 1),
         icon_manager: bind_opt(&globals, &qh, 1),
         appearance: appearance::Appearance::default(),
         exporter: bind_opt(&globals, &qh, 1),
