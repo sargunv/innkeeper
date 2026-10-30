@@ -6,10 +6,10 @@ overlay in `/apex/com.android.hardware.audio/`; the image stays unmodified. Its
 frozen NDK AIDL bindings are generated at configure time with the pinned
 build-tools, like the graphics HAL.
 
-The image's default primary HAL still handles capture and telephony through our
-`libtinyalsav2.so`. The policy XML removes its speaker, MMAP and offload ports;
-MMAP and offload were silent stubs. Keeping capture on the original module lets
-its tinyalsa implementation evolve independently of the output stream.
+Microphone capture uses a separate `StreamInBridge` in the same module, through
+our existing `libtinyalsav2.so` capture backend. The image's default primary HAL
+retains its microphone route as a fallback, plus telephony. The policy XML
+removes its speaker, MMAP and offload ports; MMAP and offload were silent stubs.
 
 - **Why an output module.** The image's primary HAL hardcodes an 85 ms nominal
   latency and a 4096-frame minimum buffer at 48 kHz. Its emulator workaround
@@ -31,10 +31,23 @@ its tinyalsa implementation evolve independently of the output stream.
   monitor). No source, a stalled backend or a bridge restart returns paced
   silence while retrying once a second. Standby releases the host record stream;
   the next read opens a fresh ring. The Flatpak's existing `--socket=pulseaudio`
-  grants playback and capture. Capture retains the HAL's requested buffer, since
-  the source cannot wait for a reader. Sustained recording still has periodic
-  gaps through the stock AOSP HAL's input pipe; see
-  [#168](https://github.com/sargunv/linux.apk/issues/168).
+  grants playback and capture. The input profile is 48 kHz, s16, mono or stereo;
+  AudioFlinger converts other app formats. Capture transfers use 480-frame / 10
+  ms bursts directly to the framework FMQ, with no intermediate MonoPipe. The
+  capture ring holds eight periods (80 ms) for scheduling jitter; reads return
+  as soon as their requested samples arrive. Standby closes the PCM and discards
+  the previous ring. Module microphone mute zeroes captured samples.
+- **Why an input stream.** The stock HAL's blocking MonoPipe writes sleep for
+  1.15 times the requested audio duration. Instrumented 4096-frame writes at 48
+  kHz ran every 98.13 ms while RecordThread consumed every 85.33 ms, inserting
+  silence. Explicit PCM pacing only moved that delay into `pcm_read`; smaller
+  tinyalsa periods and a policy FAST hint left its fixed 4096-frame request
+  unchanged. Even a 262144-frame capture ring with no overruns left empty pipe
+  reads. A direct AIDL input transfer removes that throttle while reusing the
+  same tinyalsa client, reconnect and silence behavior. The original microphone
+  remains attached with address `bottom`; the bridge microphone's empty address
+  is selected by default. Selecting the original device exercises the stock HAL
+  fallback, which still has its pipe limitation.
 - **Capture overrides.** `audio.prop` keeps the original HAL at two periods. Its
   rc preloads the session shim to make priority changes best effort in the
   rootless session. Output does not require that workaround.
@@ -44,4 +57,6 @@ checks cover output buffer sizes, position and latency arithmetic, and FMQ
 wrapping and wakeups. `tests/abi.sh` checks the tinyalsa exports; the audio
 group of `mise run test:e2e` plays a 440 Hz tone into a private null sink and
 checks its frequency, then detects a known marker through AudioRecord from that
-sink's monitor. `mise run bench -- audio` measures app-visible output latency.
+sink's monitor. `tests/e2e/audio/capture.sh` verifies 30 s of continuous 440 Hz
+capture against a simultaneous native control. `mise run bench -- audio`
+measures app-visible output latency and software capture round trip.

@@ -5,6 +5,8 @@
 
 #include "Queue.h"
 
+#include "Input.h"
+
 #define CHECK(cond)                                                   \
   do {                                                                \
     if (!(cond)) {                                                    \
@@ -15,6 +17,13 @@
 
 int main() {
   using linuxapk::audio::Queue;
+  using namespace linuxapk::audio::input;
+  CHECK(validBufferSize(480));
+  CHECK(!validBufferSize(479) && !validBufferSize(48001));
+  CHECK(validBurst(960, 2, 960));
+  CHECK(!validBurst(-2, 2, 960));
+  CHECK(!validBurst(959, 2, 960));
+  CHECK(!validBurst(964, 4, 960));
   Queue<uint32_t> queue(3);
   auto descriptor = queue.descriptor();
   CHECK(descriptor.quantum == 4 && descriptor.flags == 1);
@@ -50,6 +59,16 @@ int main() {
   CHECK(queue.read(wrapped, 3));
   CHECK(wrapped[0] == 33 && wrapped[1] == 44 && wrapped[2] == 55);
   CHECK(!queue.read(values, 1));
+  uint32_t capture[] = {71, 72, 73, 74};
+  CHECK(!queue.write(capture, 4));
+  CHECK(queue.write(capture, 2));
+  CHECK(!queue.write(capture, 2));
+  CHECK(queue.available() == 2);
+  CHECK(queue.read(values, 1) && values[0] == 71);
+  // Capture publishes a block across the ring end, leaving unread data intact.
+  CHECK(queue.write(capture + 2, 2));
+  CHECK(queue.read(wrapped, 3));
+  CHECK(wrapped[0] == 72 && wrapped[1] == 73 && wrapped[2] == 74);
   std::atomic<bool> closed{false};
   uint32_t received = 0;
   std::thread reader([&] { CHECK(queue.readBlocking(&received, closed)); });

@@ -78,10 +78,21 @@ if(ANDROID)
       ${CMAKE_CURRENT_SOURCE_DIR}/../graphics/third_party/aosp/include)
   target_compile_options(audio_aidl PRIVATE -w)
   target_link_libraries(audio_aidl PUBLIC binder_ndk_stub log)
-  add_executable(audio_bridge stream/Module.cpp stream/StreamBridge.cpp)
+  add_executable(audio_bridge stream/Module.cpp stream/StreamBridge.cpp
+                 stream/StreamInBridge.cpp)
   target_compile_features(audio_bridge PRIVATE cxx_std_20)
   target_include_directories(audio_bridge PRIVATE third_party/aosp/include)
   target_link_libraries(audio_bridge PRIVATE audio_aidl tinyalsav2)
+  add_executable(
+    audio_input_test tests/input_test.cpp stream/StreamInBridge.cpp)
+  target_compile_features(audio_input_test PRIVATE cxx_std_20)
+  target_include_directories(
+    audio_input_test
+    PRIVATE stream third_party/aosp/include)
+  target_link_libraries(audio_input_test PRIVATE audio_aidl)
+  set_target_properties(
+    audio_input_test
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-bin)
   install(
     TARGETS audio_bridge
     RUNTIME DESTINATION ${HAL_APEX}/bin/hw COMPONENT audio)

@@ -83,18 +83,19 @@ class Queue {
     wake(1);
     return true;
   }
-  bool write(const T& value) {
+  bool write(const T& value) { return write(&value, 1); }
+  bool write(const T* values, size_t count) {
+    if (count > size()) return false;
     auto w = counter(8)->load(std::memory_order_relaxed);
     auto r = counter(0)->load(std::memory_order_acquire);
-    if (w - r > capacity_ - sizeof(T)) return false;
-    size_t offset = w % capacity_,
-           first = std::min(sizeof(T), capacity_ - offset);
-    memcpy(map_ + 24 + offset, &value, first);
+    size_t bytes = count * sizeof(T);
+    if (w - r > capacity_ - bytes) return false;
+    size_t offset = w % capacity_, first = std::min(bytes, capacity_ - offset);
+    memcpy(map_ + 24 + offset, values, first);
     memcpy(
-      map_ + 24, reinterpret_cast<const uint8_t*>(&value) + first,
-      sizeof(T) - first
+      map_ + 24, reinterpret_cast<const uint8_t*>(values) + first, bytes - first
     );
-    counter(8)->store(w + sizeof(T), std::memory_order_release);
+    counter(8)->store(w + bytes, std::memory_order_release);
     wake(2);
     return true;
   }

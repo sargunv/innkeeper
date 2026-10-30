@@ -39,6 +39,9 @@ $("$S" exec am get-started-user-state 0 2>/dev/null) == RUNNING_UNLOCKED ]]; do
 done
 "$S" exec sh -c 'echo ready; sleep 60' >"$O/keeper.log" &
 keeper=$!
+testbin=$repo/out/build/android/android/vendor/audio/test-bin/audio_input_test
+"$S" exec sh -c 'cat > /data/local/tmp/audio_input_test; chmod 700 /data/local/tmp/audio_input_test' <"$testbin"
+"$S" exec /data/local/tmp/audio_input_test | tee "$O/input-test.log"
 apk=$repo/out/test/probes/LinuxApkProbes.apk
 apk_size=$(stat -c %s "$apk")
 "$S" exec cmd package install -r -g -S "$apk_size" <"$apk"
@@ -71,6 +74,8 @@ until "$S" exec logcat -d -s CaptureProof:I | grep -q 'complete'; do
 done
 "$S" exec logcat -d -t 200 -s CaptureProof:I >"$O/probe.log"
 "$S" exec cat /data/user/0/dev.linuxapk.probes/files/capture.raw >"$O/capture.raw"
+"$S" exec dumpsys media.audio_flinger >"$O/audio-flinger.txt"
+"$S" exec dumpsys media.audio_policy >"$O/audio-policy.txt"
 kill "$monitor"
 wait "$monitor" || true
 monitor=''

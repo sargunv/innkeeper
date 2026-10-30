@@ -50,4 +50,7 @@ warmup, and checks a simultaneous native monitor recording as a control. Each
 100 ms window must contain the tone; crossing intervals and a sample recurrence
 detect gaps, dropped samples and transients. This manual check is separate from
 the e2e gate. PCM and JSON results stay under `out/test/audio/<instance>/`; the
-harness stops its session and virtual source.
+harness stops its session and virtual source. It first runs the Android-side
+input FMQ test with a fake PCM, covering mono/stereo, pause/flush standby and a
+fresh PCM on restart, mute, invalid bursts and close. Build that test with
+`mise run build:audio`; it never accesses audio.
