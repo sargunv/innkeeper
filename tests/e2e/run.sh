@@ -118,6 +118,44 @@ if [[ ${1:-} == --group ]]; then
       s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow
       s am broadcast -n dev.linuxapk.probes/.StorageProbe >/dev/null
       until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
+      # A non-game probe activity, opened in a window and then closed as the
+      # storage check did before #139: it handles no configuration changes and
+      # ends its own task like the scan end did. On the software renderer the
+      # pre-fix window manager released the display with task removal still in
+      # flight, and Android 17's display-compat recovery then relaunched onto
+      # the removed display id, which crashed system_server (#50).
+      syspid=$(s pidof system_server)
+      am_start() { s am start -n "dev.linuxapk.probes/.$1" >/dev/null; }
+      am_start TeardownProbe
+      until_ok log_has LinuxApkTeardownProbe 'created, display='
+      until_ok log_has LinuxApkTeardownProbe 'self-finishing like the storage scan end'
+      until_ok log_has LinuxApkTeardownProbe 'destroyed, display='
+      # The fix schedules the release instead of releasing inline, so the risky
+      # window lives after close(): wait until the closed windows are gone from
+      # the window manager (no more probes windows) and their displays have left
+      # Android's display list (the window manager names its virtual displays
+      # "linuxapk:<package>") before comparing the pid, so a release that
+      # crashes the framework now happens before the assertion reads it.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      no_probe_windows() { ! wm LIST | grep -q 'package=dev.linuxapk.probes .*window='; }
+      # Only a successful dump that lists displays can report "gone": on a
+      # failed or outputless dumpsys keep waiting (until_ok's timeout then
+      # fails the check) — a transient query failure must not read as a
+      # teardown it never observed.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      probe_display_gone() {
+        local dump
+        dump=$(s dumpsys display 2>/dev/null) || return 1
+        [[ $dump == *'Display Devices:'* ]] || return 1
+        ! grep -q 'linuxapk:' <<<"$dump"
+      }
+      until_ok no_probe_windows
+      until_ok probe_display_gone
+      [[ $(s pidof system_server) == "$syspid" ]] || {
+        echo 'FAIL framework restarted while closing a probe window' >&2
+        exit 1
+      }
+      echo 'ok   a self-finishing windowed probe closes without restarting the framework'
       ;;
     input)
       launch InputProbeActivity

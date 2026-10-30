@@ -23,9 +23,11 @@
 
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+  <!-- An ordinary (non-game) application: Android 17 suppresses density-driven
+       restarts only for game-category apps (AppCompatDisplayCompatPolicy), and the
+       teardown probes must restart for the display-move relaunch we exercise. -->
   <application
     android:allowBackup="false"
-    android:appCategory="game"
     android:label="@string/app_name">
 
     <activity android:name=".BenchProbe" android:exported="true" android:label="Benchmark probe" />
@@ -117,6 +119,13 @@
       android:name=".WindowProbeActivity"
       android:exported="true"
       android:label="@string/window_probe_name" />
+
+    <!-- Configuration-change-naive closing/recreating fixture for the boot group's teardown
+         check: no configChanges, it relaunches on every display move. -->
+    <activity
+      android:name=".TeardownProbe"
+      android:exported="true"
+      android:label="@string/teardown_probe_name" />
 
     <!-- A notification with an action and an inline reply. -->
     <activity
