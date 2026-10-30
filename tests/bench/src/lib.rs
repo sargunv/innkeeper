@@ -73,6 +73,18 @@ pub fn score(s: &str) -> Option<u64> {
         .find_map(|l| l.split_once("glmark2 Score:")?.1.trim().parse().ok())
 }
 
+/// A new app window must be displayed before launching a pause-sensitive workload.
+pub fn launched_display(reply: &str) -> Option<u64> {
+    let data = reply.lines().find_map(|line| {
+        line.strip_prefix("Broadcast completed: result=-1, data=\"launched ")?
+            .strip_suffix('"')
+    })?;
+    if field(data, "shown") == Some("no") {
+        return None;
+    }
+    number(data, "display").filter(|id| *id > 0)
+}
+
 /// Match a SPACE press to a *changed solid colour*, then its presentation id.
 /// Repainting the old colour or presenting another buffer cannot satisfy it.
 pub fn input(trace: &str) -> Value {
@@ -149,6 +161,24 @@ pub fn binder(log: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gpu_launch_requires_a_visible_app_display() {
+        assert_eq!(
+            launched_display(
+                "Broadcasting: Intent { ... }\nBroadcast completed: result=-1, data=\"launched display=3 package=org.linaro.glmark2 size=1280x800 dpi=160\"\n"
+            ),
+            Some(3)
+        );
+        for reply in [
+            "Broadcast completed: result=0, data=\"error: no virtual display\"",
+            "Broadcast completed: result=-1, data=\"launched display=3 shown=no\"",
+            "Broadcast completed: result=-1, data=\"launched display=0\"",
+            "Broadcast completed: result=-1, data=\"launched display=bad\"",
+        ] {
+            assert_eq!(launched_display(reply), None, "{reply}");
+        }
+    }
+
     #[test]
     fn load_limit_scales_with_cpu_capacity() {
         assert_eq!(default_max_load(32), 16.0);
