@@ -54,12 +54,9 @@ Ubuntu 26.04 supplies the project's GTK baseline, Mutter and Flatpak. Only
 `setup.sh`, guarded by `GITHUB_ACTIONS=true`, uses sudo. It enables unprivileged
 user namespaces, starts the systemd user manager and runner PipeWire server, and
 grants runner-local read/write access to udmabuf (built into the runner's Azure
-kernel). It also sets Yama `ptrace_scope=0` on the disposable runner: Ubuntu's
-default blocks the sibling broker's process-memory access and prevents init from
-creating its property area. #52 tracks the supervisor ancestry change needed to
-run under that default without host configuration. A missing udmabuf module
-fails setup: software Vulkan still needs real dma-buf allocations, so a fake
-device or skipping the runtime tests would not test Android graphics.
+kernel). A missing udmabuf module fails setup: software Vulkan still needs real
+dma-buf allocations, so a fake device or skipping the runtime tests would not
+test Android graphics.
 
 The GPU-less hosted VM runs headless GNOME Shell/Mutter with surfaceless
 llvmpipe. Unlike KWin's OpenGL virtual backend, this needs no DRM node and
