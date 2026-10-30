@@ -1,0 +1,5 @@
+service vendor.audio-bridge /apex/com.android.hardware.audio/bin/hw/audio_bridge
+    class hal
+    user audioserver
+    group audio
+    onrestart restart audioserver
