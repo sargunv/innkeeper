@@ -378,6 +378,16 @@ fn stable_id(identity: &str) -> u32 {
     FIRST + (hash & 0x3fffffff)
 }
 
+// Device readiness wakes immediately; the timeout only drives hotplug scans.
+fn wait_for_input(polls: &mut [libc::pollfd], next_scan: Instant) {
+    let remaining = next_scan.saturating_duration_since(Instant::now());
+    let timeout =
+        remaining.as_millis() + u128::from(!remaining.subsec_nanos().is_multiple_of(1_000_000));
+    unsafe {
+        libc::poll(polls.as_mut_ptr(), polls.len() as _, timeout as i32);
+    }
+}
+
 pub fn start(broker: PathBuf, test_session: bool) {
     let fake = test_session
         .then(|| std::env::var_os("LINUXAPK_GAMEPAD_TEST_DIR"))
@@ -458,9 +468,7 @@ pub fn start(broker: PathBuf, test_session: bool) {
                     revents: 0,
                 })
                 .collect();
-            unsafe {
-                libc::poll(polls.as_mut_ptr(), polls.len() as _, 10);
-            }
+            wait_for_input(&mut polls, next_scan);
             controllers.retain(|_, controller| match controller.read(&writer) {
                 Ok(()) => true,
                 Err(e) => {
@@ -476,6 +484,28 @@ pub fn start(broker: PathBuf, test_session: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn idle_wait_reaches_scan_deadline_but_input_wakes_it() {
+        use std::os::unix::net::UnixDatagram;
+        let start = Instant::now();
+        wait_for_input(&mut [], start + Duration::from_millis(50));
+        assert!(start.elapsed() >= Duration::from_millis(50));
+
+        let (input, sender) = UnixDatagram::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            sender.send(b"input").unwrap();
+        });
+        let mut polls = [libc::pollfd {
+            fd: input.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        wait_for_input(&mut polls, Instant::now() + Duration::from_secs(5));
+        assert_eq!(polls[0].revents, libc::POLLIN);
+        worker.join().unwrap();
+    }
+
     #[test]
     fn xbox_axes_buttons_and_dpad_follow_android_generic_layout() {
         let mut m = Mapping::new(
