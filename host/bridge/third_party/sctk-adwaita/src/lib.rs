@@ -59,7 +59,7 @@ mod title;
 mod wl_typed;
 
 use crate::parts::{LayoutConfig, PartId};
-use crate::theme::{ColorMap, ColorTheme, CORNER_RADIUS, HEADER_SIZE, RESIZE_HANDLE_CORNER_SIZE};
+use crate::theme::{ColorMap, ColorTheme, CORNER_RADIUS, HEADER_SIZE};
 
 use buttons::Buttons;
 use parts::DecorationParts;
@@ -212,14 +212,15 @@ where
             return None;
         }
         self.dirty = true;
-        self.mouse.set_pressed(click, pressed);
+        let location = self.pointer_location(self.header_offset());
+        self.mouse.set_pressed(location, click, pressed);
         self.redraw_inner();
         if matches!(click, FrameClick::Normal) {
-            if let Some(action) = self.mouse.button_click(pressed) {
+            if let Some(action) = self.mouse.button_click(location, pressed) {
                 return Some(action);
             }
         }
-        if self.state.contains(WindowState::FULLSCREEN) && self.mouse.location == Location::Head {
+        if self.state.contains(WindowState::FULLSCREEN) && location == Location::Head {
             return None;
         }
         self.on_click(timestamp, click, pressed).map(Action::Window)
@@ -259,62 +260,23 @@ where
         }
     }
 
-    fn precise_location(
-        &self,
-        location: Location,
-        decoration: &DecorationParts,
-        x: f64,
-        y: f64,
-    ) -> Location {
-        let header_width = decoration.header().surface_rect.width;
-        let side_height = decoration.side_height();
+    fn header_offset(&self) -> i32 {
+        self.reveal_started
+            .map(|t| reveal_offset(t.elapsed()))
+            .unwrap_or(0)
+    }
 
-        let edge_size = theme::edge_size(self.hide_border);
-
-        let left_corner_x = edge_size + RESIZE_HANDLE_CORNER_SIZE;
-        let right_corner_x = (header_width + edge_size).saturating_sub(RESIZE_HANDLE_CORNER_SIZE);
-        let top_corner_y = RESIZE_HANDLE_CORNER_SIZE;
-        let bottom_corner_y = side_height.saturating_sub(RESIZE_HANDLE_CORNER_SIZE);
-        match location {
-            Location::Head | Location::Button(_) => self.buttons.find_button(x, y),
-            Location::Top | Location::TopLeft | Location::TopRight => {
-                if x <= f64::from(left_corner_x) {
-                    Location::TopLeft
-                } else if x >= f64::from(right_corner_x) {
-                    Location::TopRight
-                } else {
-                    Location::Top
-                }
-            }
-            Location::Bottom | Location::BottomLeft | Location::BottomRight => {
-                if x <= f64::from(left_corner_x) {
-                    Location::BottomLeft
-                } else if x >= f64::from(right_corner_x) {
-                    Location::BottomRight
-                } else {
-                    Location::Bottom
-                }
-            }
-            Location::Left => {
-                if y <= f64::from(top_corner_y) {
-                    Location::TopLeft
-                } else if y >= f64::from(bottom_corner_y) {
-                    Location::BottomLeft
-                } else {
-                    Location::Left
-                }
-            }
-            Location::Right => {
-                if y <= f64::from(top_corner_y) {
-                    Location::TopRight
-                } else if y >= f64::from(bottom_corner_y) {
-                    Location::BottomRight
-                } else {
-                    Location::Right
-                }
-            }
-            other => other,
-        }
+    fn pointer_location(&self, header_offset: i32) -> Location {
+        let Some(decorations) = self.decorations.as_ref() else {
+            return Location::None;
+        };
+        self.mouse.location(
+            &self.buttons,
+            header_offset,
+            decorations.header().surface_rect.width,
+            decorations.side_height(),
+            self.hide_border,
+        )
     }
 
     fn layout_config(&self) -> LayoutConfig {
@@ -333,6 +295,8 @@ where
 
     fn redraw_inner(&mut self) -> Option<bool> {
         let layout_config = self.layout_config();
+        let reveal_offset = self.header_offset();
+        let mouse_location = self.pointer_location(reveal_offset);
         let decorations = self.decorations.as_mut()?;
 
         // Reset the dirty bit.
@@ -367,11 +331,6 @@ where
             label.update_scale(self.scale_factor);
             label.update_color(colors.button_icon);
         }
-        let reveal_offset = self
-            .reveal_started
-            .map(|t| reveal_offset(t.elapsed()))
-            .unwrap_or(0);
-
         // Draw the borders.
         for (idx, part) in decorations.parts().filter(|(_, part)| !part.hide) {
             let scale = self.scale_factor;
@@ -410,7 +369,7 @@ where
                         &self.state,
                         colors,
                         &self.buttons,
-                        self.mouse.location,
+                        mouse_location,
                         self.mouse.pressed_location(),
                         self.fullscreen_label.as_ref().and_then(|t| t.pixmap()),
                         layout_config.hide_border,
@@ -623,18 +582,24 @@ where
         click: FrameClick,
         pressed: bool,
     ) -> Option<FrameAction> {
+        let offset = self.header_offset();
+        let location = self.pointer_location(offset);
         match click {
             FrameClick::Normal => self.mouse.click(
+                location,
                 timestamp,
                 pressed,
                 self.resizable,
                 &self.state,
                 &self.wm_capabilities,
             ),
-            FrameClick::Alternate => {
-                self.mouse
-                    .alternate_click(pressed, &self.wm_capabilities, self.hide_border)
-            }
+            FrameClick::Alternate => self.mouse.alternate_click(
+                location,
+                offset,
+                pressed,
+                &self.wm_capabilities,
+                self.hide_border,
+            ),
             _ => None,
         }
     }
@@ -671,24 +636,16 @@ where
                 self.dirty = true;
             }
         }
-        let y = if self.state.contains(WindowState::FULLSCREEN) {
-            y - f64::from(
-                self.reveal_started
-                    .map(|t| reveal_offset(t.elapsed()))
-                    .unwrap_or(0),
-            )
-        } else {
-            y
-        };
-        let old_location = self.mouse.location;
-        let decorations = self.decorations.as_ref()?;
-        let location = self.precise_location(location, decorations, x, y);
-        let new_cursor = self.mouse.moved(location, x, y, self.resizable);
+        let offset = self.header_offset();
+        let old_location = self.pointer_location(offset);
+        self.mouse.moved(location, x, y);
+        let location = self.pointer_location(offset);
+        let new_cursor = location.cursor(self.resizable);
 
         // Set dirty if we moved the cursor between the buttons.
         self.dirty |= (matches!(old_location, Location::Button(_))
-            || matches!(self.mouse.location, Location::Button(_)))
-            && old_location != self.mouse.location;
+            || matches!(location, Location::Button(_)))
+            && old_location != location;
 
         if self.dirty {
             let _ = self.redraw_inner();
@@ -697,7 +654,10 @@ where
     }
 
     fn click_point_left(&mut self) {
-        self.dirty |= matches!(self.mouse.location, Location::Button(_));
+        self.dirty |= matches!(
+            self.pointer_location(self.header_offset()),
+            Location::Button(_)
+        );
         self.mouse.left();
         if self.fullscreen_revealed {
             self.fullscreen_revealed = false;
@@ -1092,6 +1052,34 @@ fn reveal_offset(elapsed: Duration) -> i32 {
 #[cfg(test)]
 mod animation_tests {
     use super::*;
+    #[test]
+    fn stationary_pointer_clicks_control_after_fullscreen_slide() {
+        let mut buttons = Buttons::new(None);
+        buttons.set_fullscreen(true);
+        buttons.arrange(600, 0.);
+        let mut mouse = MouseState::default();
+        let (x, y) = (23., 23.);
+        let offset = reveal_offset(Duration::from_millis(40));
+        mouse.moved(Location::Head, x, y);
+        assert_eq!(
+            mouse.location(&buttons, offset, 600, 800, false),
+            Location::Head
+        );
+
+        // The animation completes with no further pointer motion.
+        let offset = reveal_offset(REVEAL_DURATION);
+        let location = mouse.location(&buttons, offset, 600, 800, false);
+        assert_eq!(location, Location::Button(buttons::ButtonKind::Back));
+        mouse.set_pressed(location, FrameClick::Normal, true);
+        assert_eq!(mouse.pressed_location(), location);
+        assert!(mouse.button_click(location, true).is_none());
+        let location = mouse.location(&buttons, offset, 600, 800, false);
+        assert!(matches!(
+            mouse.button_click(location, false),
+            Some(Action::Back)
+        ));
+    }
+
     #[test]
     fn fullscreen_header_keeps_title_pixels_with_its_shadow_extension() {
         for scale in [1u32, 2] {
