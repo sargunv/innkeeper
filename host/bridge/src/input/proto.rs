@@ -36,6 +36,10 @@
 //! or a one-second outstanding frame callback. A pending callback remains live
 //! while hidden so restoring can resume Android without a new application frame.
 //!
+//! `WINDOW_KEEP_AWAKE` (0x060d): u32 window, u32 requested (0 or 1).
+//! Android's per-display screen-timeout policy includes SCREEN_* wake locks
+//! and FLAG_KEEP_SCREEN_ON. Only visible windows own a Wayland idle inhibitor.
+//!
 //! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
 //! 1 portrait, 2 landscape), u32 legacy automatic fullscreen (0 or 1), u32
 //! immersive request (both bars hidden, 0 or 1). The bridge ignores the last two
@@ -136,6 +140,7 @@ pub mod ty {
     pub const EVDEV_DEVICE: u16 = 0x060a;
     pub const POINTER_CAPTURE: u16 = 0x060b;
     pub const WINDOW_TOKEN: u16 = 0x060c;
+    pub const WINDOW_KEEP_AWAKE: u16 = 0x060d;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -208,6 +213,10 @@ pub enum Request {
     },
     TextInput(ime::Req),
     WindowPolicy(WindowPolicy),
+    KeepAwake {
+        window: u32,
+        requested: bool,
+    },
     WindowAppearance {
         window: u32,
         color: u32,
@@ -251,6 +260,10 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             token: r.name()?,
         },
         ty::WINDOW_TOKEN => Request::WindowToken { window: r.u32()? },
+        ty::WINDOW_KEEP_AWAKE => Request::KeepAwake {
+            window: r.u32()?,
+            requested: r.u32_in(0..=1, "keep awake")? != 0,
+        },
         ty::WINDOW_MINIMIZE => Request::WindowMinimize { window: r.u32()? },
         ty::WINDOW_DESTROY => Request::WindowDestroy { window: r.u32()? },
         ty::WINDOW_APPEARANCE => Request::WindowAppearance {
@@ -327,6 +340,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::WindowToken { window } => {
             w = Writer::message(ty::WINDOW_TOKEN, tag);
             w.u32(*window);
+        }
+        Request::KeepAwake { window, requested } => {
+            w = Writer::message(ty::WINDOW_KEEP_AWAKE, tag);
+            w.u32(*window).u32(u32::from(*requested));
         }
         Request::WindowMinimize { window } => {
             w = Writer::message(ty::WINDOW_MINIMIZE, tag);
@@ -449,6 +466,14 @@ mod tests {
             Request::WindowActivate {
                 window: 3,
                 token: String::new(),
+            },
+            Request::KeepAwake {
+                window: 3,
+                requested: true,
+            },
+            Request::KeepAwake {
+                window: 3,
+                requested: false,
             },
             Request::WindowToken { window: 3 },
             Request::WindowDestroy { window: 3 },

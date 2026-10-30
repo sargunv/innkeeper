@@ -99,6 +99,9 @@ impl Service for InputService {
                 };
                 status(self.hub.window_appearance(window, color, icon))
             }
+            Request::KeepAwake { window, requested } => {
+                status(self.hub.keep_awake(window, requested))
+            }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
             Request::PointerCapture { enabled } => {
                 self.hub.pointer_capture(enabled);

@@ -154,6 +154,9 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     }
   }
 
+  fun keepAwake(window: Int, requested: Boolean) =
+    connection.send(WINDOW_KEEP_AWAKE) { u32(window).u32(if (requested) 1 else 0) }
+
   fun minimizeWindow(window: Int) = connection.send(WINDOW_MINIMIZE) { u32(window) }
 
   fun destroyWindow(window: Int): Boolean {
@@ -300,6 +303,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val WINDOW_APPEARANCE = 0x0606
     private const val WINDOW_MINIMIZE = 0x0607
     private const val WINDOW_TOKEN = 0x060c
+    private const val WINDOW_KEEP_AWAKE = 0x060d
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603

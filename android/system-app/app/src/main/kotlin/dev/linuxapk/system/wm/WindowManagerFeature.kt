@@ -18,6 +18,7 @@ import android.os.HandlerThread
 import android.os.IPowerManager
 import android.os.ServiceManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.WindowInsets
 import android.view.WindowManagerGlobal
@@ -113,6 +114,8 @@ class WindowManagerFeature(
     var tasks: List<Int> = emptyList()
     var hadTask = false
     val visibility = WindowVisibility()
+    var timeoutPolicy: ScreenTimeoutPolicy? = null
+    var keepAwake = false
     var mapped = false
     var resize: Runnable? = null
     var appearance: Runnable? = null
@@ -148,6 +151,13 @@ class WindowManagerFeature(
     handler = Handler(thread.looper)
     frames.start()
     frameHandler = Handler(frames.looper)
+    // Host visibility owns display power. Do not acquire our own screen wake lock:
+    // it would feed back into the policy observed for desktop idle inhibition.
+    Settings.System.putInt(
+      context.contentResolver,
+      Settings.System.SCREEN_OFF_TIMEOUT,
+      Int.MAX_VALUE,
+    )
     input.addListener(this)
     atm.registerTaskStackListener(taskListener)
     // AppWarnings shows these on the default display, which has no window; AppWarningActivity
@@ -399,6 +409,7 @@ class WindowManagerFeature(
     if (windows.remove(w.id) == null) return
     Log.i(TAG, "closing display ${w.id} (${w.pkg}), finishTasks=$finishTasks")
     changed()
+    w.timeoutPolicy?.close()
     w.appearance?.let(handler::removeCallbacks)
     w.resize?.let(handler::removeCallbacks)
     if (finishTasks) {
@@ -528,6 +539,18 @@ class WindowManagerFeature(
       is HostEvent.WindowMapped ->
         windows[e.display]?.let {
           it.mapped = true
+          if (it.timeoutPolicy == null) {
+            val w = it
+            w.timeoutPolicy =
+              ScreenTimeoutPolicy(w.id) { keepAwake ->
+                handler.post {
+                  if (windows[w.id] === w) {
+                    w.keepAwake = keepAwake
+                    input.keepAwake(w.id, keepAwake)
+                  }
+                }
+              }
+          } else input.keepAwake(it.id, it.keepAwake)
           it.shown.countDown()
           sendPolicy(it)
           queueAppearance(it)
