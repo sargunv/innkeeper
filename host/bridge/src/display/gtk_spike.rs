@@ -35,6 +35,16 @@ pub(super) fn start(rx: Channel<Cmd>, events: Events, hub: Arc<Hub>) -> Result<J
                         let _ = tx.send(Err(e.to_string()));
                         return;
                     }
+                    // Keep one application registered for the UI thread's lifetime.
+                    // Sequential Android windows must not re-export its D-Bus path.
+                    let application = adw::Application::builder()
+                        .application_id("dev.linuxapk.GtkSpike")
+                        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+                        .build();
+                    if let Err(e) = application.register(None::<&gtk::gio::Cancellable>) {
+                        let _ = tx.send(Err(e.to_string()));
+                        return;
+                    }
                     crate::info!(
                         "GTK spike: GTK {}.{}.{}; libadwaita {}.{}.{}",
                         gtk::major_version(),
@@ -268,11 +278,10 @@ fn center_pixel(fd: &OwnedFd, spec: &BufferSpec) -> Option<u32> {
 impl Win {
     fn new(req: WindowRequest, hub: Arc<Hub>) -> Result<Self> {
         let id = req.window;
-        let application = adw::Application::builder()
-            .application_id("dev.linuxapk.GtkSpike")
-            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
-            .build();
-        application.register(None::<&gtk::gio::Cancellable>)?;
+        let application = gtk::gio::Application::default()
+            .context("missing GTK application")?
+            .downcast::<adw::Application>()
+            .map_err(|_| anyhow::anyhow!("unexpected GTK application"))?;
         let picture = gtk::Picture::builder()
             .can_shrink(true)
             .hexpand(true)
@@ -467,18 +476,6 @@ fn input_controllers(
         let y = y * bh as f64 / p.height().max(1) as f64;
         let time = event.time();
         match event.event_type() {
-            gdk::EventType::EnterNotify => {
-                input.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
-                if let Some(p) = protocol.borrow_mut().as_mut() {
-                    p.focus(true);
-                }
-            }
-            gdk::EventType::LeaveNotify => {
-                input.input(&format!("pointer_leave {id}"));
-                if let Some(p) = protocol.borrow_mut().as_mut() {
-                    p.focus(false);
-                }
-            }
             gdk::EventType::MotionNotify
                 if !protocol.borrow().as_ref().is_some_and(|p| p.active()) =>
             {
@@ -550,6 +547,7 @@ fn input_controllers(
             let x = x * bw as f64 / p.width().max(1) as f64;
             let y = y * bh as f64 / p.height().max(1) as f64;
             input.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
+            input.input("pointer_frame");
             if let Some(p) = protocol.borrow_mut().as_mut() {
                 p.focus(true);
             }
@@ -559,6 +557,7 @@ fn input_controllers(
     let protocol = interop.clone();
     motion.connect_leave(move |_| {
         input.input(&format!("pointer_leave {id}"));
+        input.input("pointer_frame");
         if let Some(p) = protocol.borrow_mut().as_mut() {
             p.focus(false);
         }
@@ -591,10 +590,16 @@ fn input_controllers(
     });
     window.add_controller(key);
     let motion = gtk::EventControllerMotion::new();
+    motion.set_propagation_phase(gtk::PropagationPhase::Capture);
     let weak = window.downgrade();
     let bars = toolbar.clone();
     let height = header.clone();
-    motion.connect_motion(move |_, _, y| {
+    motion.connect_motion(move |controller, _, y| {
+        // Revealing the bar changes layout and synthesizes stationary motion.
+        // That must not immediately hide a bar just revealed by touch.
+        if controller.current_event_time() == 0 {
+            return;
+        }
         if weak.upgrade().is_some_and(|w| w.is_fullscreen()) {
             bars.set_reveal_top_bars(
                 y <= if bars.reveals_top_bars() {
