@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
-use linuxapk_bench::{binder, field, frames, input, number, score};
+use linuxapk_bench::{binder, default_max_load, field, frames, input, number, score};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -486,7 +486,9 @@ fn main() -> Result<()> {
     };
     let seconds = value("--seconds", "5").parse::<u64>()?;
     ensure!((1..=60).contains(&seconds), "seconds must be 1..60");
-    let max_load = value("--max-load", "2").parse::<f64>()?;
+    let logical_cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let default_load = default_max_load(logical_cpus).to_string();
+    let max_load = value("--max-load", &default_load).parse::<f64>()?;
     ensure!(
         max_load.is_finite() && max_load > 0.0,
         "max load must be positive"

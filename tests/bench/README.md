@@ -19,14 +19,15 @@ private audio sink is removed after collection.
 
 The runner prints CPU, kernel, load average, CPU frequency governors, compositor
 and other Linux.apk broker PIDs before starting. It refuses when one-minute load
-exceeds `--max-load` (default 2.0) or another session is present. `--noisy`
-permits harness proof on a busy machine and always sets `noisy: true` and
-`valid_for_comparison: false`. It checks load again after collection. Always
-inspect context, renderer, refresh rate, display size and raw traces before
-comparing runs. A quiet load average alone does not establish a valid
-experiment. Use the same release build, hardware, compositor, power settings and
-workloads for comparisons; debug builds and nested/software compositors are
-proof only.
+exceeds `--max-load` (default half the available logical CPUs, minimum 1.0; 16.0
+on a 32-CPU machine) or another session is present. An explicit `--max-load N`
+overrides that default. `--noisy` permits harness proof on a busy machine and
+always sets `noisy: true` and `valid_for_comparison: false`. It checks load
+again after collection. Always inspect context, renderer, refresh rate, display
+size and raw traces before comparing runs. A quiet load average alone does not
+establish a valid experiment. Use the same release build, hardware, compositor,
+power settings and workloads for comparisons; debug builds and nested/software
+compositors are proof only.
 
 ```sh
 mise run bench -- input --noisy
