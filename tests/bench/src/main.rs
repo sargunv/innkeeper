@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail, ensure};
-use linuxapk_bench::{binder, default_max_load, field, frames, input, number, score};
+use linuxapk_bench::{
+    binder, default_max_load, field, frames, input, launched_display, number, score,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -242,25 +244,61 @@ fn gpu(out: &Path) -> Result<Value> {
     }
     if let Ok(path) = std::env::var("LINUXAPK_GLMARK2_APK") {
         install(Path::new(&path))?;
+        // Upstream kills its benchmark process in onPause(). Starting on display 0
+        // lets our window manager's display move kill it before EGL initializes.
+        let launched = android(&[
+            "am",
+            "broadcast",
+            "-n",
+            "dev.linuxapk.system/.wm.ControlReceiver",
+            "-a",
+            "dev.linuxapk.LAUNCH",
+            "--es",
+            "package",
+            "org.linaro.glmark2",
+            "--ei",
+            "width",
+            "1280",
+            "--ei",
+            "height",
+            "800",
+            "--ez",
+            "wait",
+            "true",
+        ])?;
+        fs::write(out.join("glmark2-launch.txt"), &launched)?;
+        let display = launched_display(&launched)
+            .context("glmark2 launcher window did not become visible; inspect glmark2-launch.txt")?
+            .to_string();
         android(&[
             "am",
             "start",
             "-W",
+            "--display",
+            &display,
             "-n",
             "org.linaro.glmark2/.Glmark2Activity",
             "--es",
             "args",
             "--benchmark build:duration=2 --benchmark texture:duration=2 --size 1280x800",
         ])?;
-        wait(
+        let mut text = String::new();
+        let completed = wait(
             || {
-                android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])
-                    .is_ok_and(|s| score(&s).is_some())
+                text = android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])
+                    .unwrap_or_default();
+                score(&text).is_some()
             },
             180,
-        )?;
-        let text = android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])?;
+        );
         fs::write(out.join("glmark2-android.txt"), &text)?;
+        fs::write(
+            out.join("glmark2-logcat.txt"),
+            android(&["logcat", "-d", "-t", "2000"]).unwrap_or_else(|e| format!("{e:#}")),
+        )?;
+        completed.context(
+            "waiting for glmark2 score; inspect glmark2-android.txt and glmark2-logcat.txt",
+        )?;
         result["android"] = json!({"status":"collected","score":score(&text).context("glmark2 completed without a score; inspect raw log")?});
     }
     Ok(result)

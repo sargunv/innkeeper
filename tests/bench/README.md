@@ -96,16 +96,25 @@ measurements are recorded.
   record its commit and build native Wayland/GLES and Android x86_64 variants
   using upstream instructions in a bounded build container or mise toolchain.
   Keep the APK and all build products under `out/`, never in Git. The Android
-  package/activity must be `org.linaro.glmark2/.Glmark2Activity`. Upstream's old
+  package must be `org.linaro.glmark2`, with its launcher and
+  `.Glmark2Activity`. The harness opens the launcher through Linux.apk's window
+  manager, waits for its first frame, then starts the benchmark on that display.
+  Upstream kills its benchmark process in `onPause()`, so starting it on the
+  default display and moving it into a window prevents a run. Upstream's old
   Android wrapper targets SDK 23: provide a build updated to the current SDK,
   with an exported benchmark activity, rather than weakening installation
   policy. Both variants run `build:duration=2` and `texture:duration=2` at
   1280x800; Android receives upstream's `args` intent extra, and the runner
-  reads its native `files/last_run.log`. Use the host GLES binary
-  (`glmark2-es2-wayland`) to match Android's API. Record renderer, resolution,
-  GLES version and benchmark list from the raw logs. GPU deadlines are bounded;
-  variants with another activity/log path need manual execution and score
-  collection.
+  reads its native `files/last_run.log` (retained even on timeout, alongside
+  bounded logcat diagnostics). Android's initial `Surface Size: 100x100` log
+  precedes GLSurfaceView's resize callback; verify the actual surface dimensions
+  from the Android window/surface trace. Its default RGB565/depth16 visual also
+  differs from the native default: record both, or pass the same
+  `--visual-config` when collecting a controlled comparison. Use the host GLES
+  binary (`glmark2-es2-wayland`) to match Android's API. Record renderer,
+  resolution, GLES version and benchmark list from the raw logs. GPU deadlines
+  are bounded; variants with another activity/log path need manual execution and
+  score collection.
 - **CPU/memory:** one interval with no probe app and one with the static colour
   probe. Reports session cgroup CPU usage as percent of one core, cgroup charged
   memory, and per-process PSS from `smaps_rollup` (null if procfs denies it).
