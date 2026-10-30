@@ -26,6 +26,7 @@
 //! | Event    | Message | Body                                         |
 //! | -------- | ------- | -------------------------------------------- |
 //! | `0x4201` | RELEASE | `u32 buffer`, `u32 invalid` (0: reusable, 1: remove cached import)   |
+//! | `0x4202` | VSYNC | `u64 monotonic ns`, `u32 period ns`; both zero return display 0 to its timer |
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -40,6 +41,8 @@ pub mod ty {
 
     /// Events (bridge to composer, tag 0).
     pub const RELEASE: u16 = 0x4201;
+    /// Primary scheduler phase: u64 CLOCK_MONOTONIC ns, u32 refresh period ns.
+    pub const VSYNC: u16 = 0x4202;
 }
 
 /// Bounds on what a client may ask for.

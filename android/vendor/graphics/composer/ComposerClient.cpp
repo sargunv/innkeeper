@@ -281,7 +281,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayConfigurations(
   dc.height = c.height;
   dc.dpi = DisplayConfiguration::Dpi{float(c.dpi), float(c.dpi)};
   dc.configGroup = 0;
-  dc.vsyncPeriod = c.vsyncPeriodNs;
+  dc.vsyncPeriod = int32_t(d->vsync().period());
   dc.hdrOutputType = OutputType::SYSTEM;
   *out = {dc};
   return ndk::ScopedAStatus::ok();
@@ -301,7 +301,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayAttribute(
       *out = c.height;
       break;
     case DisplayAttribute::VSYNC_PERIOD:
-      *out = c.vsyncPeriodNs;
+      *out = int32_t(d->vsync().period());
       break;
     case DisplayAttribute::DPI_X:
     case DisplayAttribute::DPI_Y:
@@ -320,7 +320,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayVsyncPeriod(
   int64_t displayId, int32_t* out
 ) {
   DISPLAY_OR_RETURN();
-  *out = d->config().vsyncPeriodNs;
+  *out = int32_t(d->vsync().period());
   return ndk::ScopedAStatus::ok();
 }
 

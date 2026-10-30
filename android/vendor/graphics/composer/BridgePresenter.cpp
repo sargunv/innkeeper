@@ -18,6 +18,7 @@
 #include "BridgePresenter.h"
 
 #include "Properties.h"
+#include "VsyncThread.h"
 #include "linuxapk/bridge_client.h"
 #include "linuxapk/layout.h"
 #include "linuxapk/log.h"
@@ -177,6 +178,15 @@ void Bridge::removeDisplay(uint32_t id) {
 }
 
 void Bridge::handle(const lxb_packet& p) {
+  if (p.type == 0x4202 && p.len == 12) {
+    VsyncThread::hostTiming(
+      int64_t(
+        (uint64_t(lxb_u32(p.body)) | (uint64_t(lxb_u32(p.body + 4)) << 32))
+      ),
+      lxb_u32(p.body + 8)
+    );
+    return;
+  }
   if (p.type == LXB_REPLY) {
     std::lock_guard lock(mutex);
     auto add = mAdds.find(p.tag);
@@ -226,6 +236,7 @@ void Bridge::loop() {
       }
       LOGW("bridge: connection lost (%s); reconnecting", strerror(-r));
       mSock = -1;
+      VsyncThread::hostTiming(0, 0);
       close(s);
     }
     if (const int ms = lxb_backoff_ms(&backoff); ms > 0) {

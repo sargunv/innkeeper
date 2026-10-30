@@ -20,3 +20,12 @@ on post-fs-data
 # SurfaceFlinger starts; it reads the property once in init().
 on early-init
     setprop debug.sf.enable_hwc_vds 1
+
+    # Fit app + SF work inside a 120 Hz frame instead of queuing whole frames.
+    setprop debug.sf.use_phase_offsets_as_durations 1
+    setprop debug.sf.late.app.duration 4000000
+    setprop debug.sf.late.sf.duration 4000000
+    setprop debug.sf.early.app.duration 4000000
+    setprop debug.sf.early.sf.duration 4000000
+    setprop debug.sf.earlyGl.app.duration 4000000
+    setprop debug.sf.earlyGl.sf.duration 4000000

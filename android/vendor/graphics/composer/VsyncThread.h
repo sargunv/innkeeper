@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Software vsync: a CLOCK_MONOTONIC timer thread per display.
+// Primary scheduling clock follows host presentation phase; other displays
+// and the no-window fallback use a CLOCK_MONOTONIC timer.
 #pragma once
 
 #include <atomic>
@@ -22,7 +23,8 @@ class VsyncThread {
       ::aidl::android::hardware::graphics::composer3::IComposerCallback>
   );
   void setEnabled(bool enabled);
-  int64_t period() const { return mPeriodNs; }
+  int64_t period() const { return mPeriodNs.load(); }
+  static void hostTiming(int64_t timestampNs, int64_t periodNs);
   // Most recent vsync timestamp (whether or not it was delivered).
   int64_t lastVsyncNs() const { return mLastVsyncNs.load(); }
 
@@ -30,7 +32,7 @@ class VsyncThread {
   void loop();
 
   const int64_t mDisplayId;
-  const int64_t mPeriodNs;
+  std::atomic<int64_t> mPeriodNs;
   std::atomic<int64_t> mLastVsyncNs{0};
   std::atomic<bool> mEnabled{false};
   std::mutex mMutex;

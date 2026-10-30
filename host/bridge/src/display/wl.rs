@@ -173,6 +173,7 @@ pub(crate) struct State {
     dmabuf: DmabufState,
     viewporter: Option<WpViewporter>,
     presentation: Option<presentation::Presentation>,
+    presentation_clock: presentation::Clock,
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
     idle_inhibit: Option<ZwpIdleInhibitManagerV1>,
@@ -540,8 +541,8 @@ impl State {
     }
 
     // The single visibility transition hook: suspended configures, callback
-    // absence and restore all arrive here. Host pacing consumes it through
-    // window_timing when its presentation-clock branch is integrated.
+    // absence and restore all arrive here. Output reporting also reconciles
+    // the primary scheduling clock from the same visible-output membership.
     fn send_visibility(&mut self, id: u32) {
         self.sync_inhibit(id);
         if self.windows.get(&id).is_some_and(|w| !w.visibility.visible) {
@@ -621,6 +622,7 @@ impl State {
     }
 
     fn send_output(&mut self, id: u32) {
+        self.window_timing(id);
         let mut outputs: Vec<_> = self
             .visible_outputs(id)
             .iter()
@@ -767,6 +769,7 @@ impl State {
         let Some(w) = self.windows.remove(&id) else {
             return;
         };
+        self.window_timing(id);
         if let Some(v) = &w.viewport {
             v.destroy();
         }
@@ -894,8 +897,20 @@ impl State {
         {
             f.draw();
         }
+        let stamp = crate::bench::now();
+        if let Some(p) = &self.presentation {
+            p.feedback(
+                &surface,
+                &self.qh,
+                presentation::Frame {
+                    stamp,
+                    window: id,
+                    generation: self.presentation_clock.generation(id),
+                    output: Default::default(),
+                },
+            );
+        }
         if crate::bench::enabled() {
-            let stamp = crate::bench::now();
             let mut pixel = [0u8; 4];
             let color = Some(&b.source).and_then(|fd| {
                 use std::os::fd::AsRawFd;
@@ -927,13 +942,6 @@ impl State {
                 }
                 Some(u32::from_le_bytes(pixel) & 0xffffff)
             });
-            if let Some(p) = &self.presentation {
-                p.feedback(
-                    &surface,
-                    &self.qh,
-                    presentation::Frame { stamp, window: id },
-                );
-            }
             crate::bench::trace(format_args!(
                 "commit ns={stamp} window={id} color={}",
                 color.map_or(-1, i64::from)
@@ -1481,11 +1489,8 @@ pub fn run(
         xdg: XdgShell::bind(&globals, &qh).context("xdg_wm_base")?,
         dmabuf: DmabufState::new(&globals, &qh),
         viewporter: bind_opt(&globals, &qh, 1),
-        presentation: if crate::bench::enabled() {
-            bind_opt(&globals, &qh, 1)
-        } else {
-            None
-        },
+        presentation: bind_opt(&globals, &qh, 1),
+        presentation_clock: presentation::Clock::default(),
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
         idle_inhibit: bind_opt(&globals, &qh, 1),

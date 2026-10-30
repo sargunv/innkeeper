@@ -6,9 +6,21 @@
 #include "VsyncThread.h"
 
 #include "Common.h"
+#include "HostClock.h"
+#include "Properties.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
+
+namespace {
+std::mutex gClockMutex;
+HostClock gClock;
+}  // namespace
+
+void VsyncThread::hostTiming(int64_t timestampNs, int64_t periodNs) {
+  std::lock_guard lock(gClockMutex);
+  gClock.update(timestampNs, periodNs, nowNs());
+}
 
 VsyncThread::VsyncThread(int64_t displayId, int64_t periodNs)
     : mDisplayId(displayId), mPeriodNs(periodNs) {
@@ -48,23 +60,44 @@ void VsyncThread::loop() {
   int64_t next = nowNs();
   std::unique_lock lock(mMutex);
   while (!mStop) {
-    const int64_t period = mPeriodNs;
-    next += period;
     const int64_t now = nowNs();
-    if (next < now)
-      next = now + period - (now - next) % period;  // skip missed ticks
-    lock.unlock();
-    timespec ts = {time_t(next / 1000000000), long(next % 1000000000)};
-    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr) ==
-           EINTR) {
+    int64_t period = mPeriodNs.load();
+    if (
+      mDisplayId == 0 && getProperty("vendor.linuxapk.hwc.host_clock") != "0"
+    ) {
+      std::lock_guard clockLock(gClockMutex);
+      next = gClock.next(now, mLastVsyncNs.load());
+      period = gClock.period(now);
+    } else {
+      next += period;
+      if (next <= now) next += ((now - next) / period + 1) * period;
     }
-    lock.lock();
+    const bool changed = period != mPeriodNs.exchange(period);
+    if (
+      mCv.wait_for(
+        lock, std::chrono::nanoseconds(std::max(int64_t(0), next - nowNs())),
+        [this] { return mStop; }
+      )
+    )
+      break;
     mLastVsyncNs = next;
     if (mStop) break;
-    if (mEnabled && mCallback) {
+    if (mCallback && (mEnabled || changed)) {
       auto cb = mCallback;
       lock.unlock();
-      auto st = cb->onVsync(mDisplayId, next, int32_t(period));
+      // Re-enumeration updates SF's mode period as well as its samples.
+      if (changed)
+        cb->onHotplugEvent(
+          mDisplayId, ::aidl::android::hardware::graphics::common::
+                        DisplayHotplugEvent::CONNECTED
+        );
+      if (mEnabled && getProperty("vendor.linuxapk.hwc.bench") == "1")
+        LOGI(
+          "BENCH vsync display=%lld ns=%lld period_ns=%lld",
+          (long long)mDisplayId, (long long)next, (long long)period
+        );
+      auto st = mEnabled ? cb->onVsync(mDisplayId, next, int32_t(period))
+                         : ndk::ScopedAStatus::ok();
       if (!st.isOk()) LOGW("onVsync failed: %s", st.getDescription().c_str());
       lock.lock();
     }
