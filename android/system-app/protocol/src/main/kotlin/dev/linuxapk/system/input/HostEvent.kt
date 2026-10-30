@@ -15,6 +15,8 @@ sealed interface HostEvent {
   data class Window(val width: Int, val height: Int, val scale: Double, val display: Int = 0) :
     HostEvent
 
+  data class WindowVisible(val visible: Boolean, val display: Int) : HostEvent
+
   /** The pointer entered the window of [display]; later pointer events go there. */
   data class PointerEnter(val x: Float, val y: Float, val display: Int = 0) : HostEvent
 
@@ -192,6 +194,7 @@ sealed interface HostEvent {
       fun display(i: Int, default: Int) = if (args >= i) int(i) else default
 
       return when (f[0]) {
+        "window_visible" -> need(args, 2) { WindowVisible(bool(1), int(2)) }
         "window" -> need(args, 3) { Window(int(1), int(2), f[3].toDouble(), display(4, 0)) }
         "pointer_enter" -> need(args, 2) { PointerEnter(float(1), float(2), display(3, 0)) }
         "pointer_leave" -> PointerLeave(display(1, -1))

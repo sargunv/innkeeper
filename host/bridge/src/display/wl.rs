@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use calloop::EventLoop;
@@ -63,6 +63,7 @@ mod foreign;
 mod frames;
 mod policy;
 mod presentation;
+mod visibility;
 
 use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_window_state};
 
@@ -110,7 +111,8 @@ struct Buf {
     wl: Option<wl_buffer::WlBuffer>,
     /// Attached and not yet released by the compositor.
     frames: frames::Frames,
-    bench_fd: Option<OwnedFd>,
+    source: OwnedFd,
+    spec: BufferSpec,
     bench_offset: u64,
 }
 
@@ -131,6 +133,8 @@ struct Win {
     width: u32,
     height: u32,
     scale120: u32,
+    frozen: Option<sctk::shm::slot::Buffer>,
+    visibility: visibility::Visibility,
     configured: bool,
     mapped: bool,
     fullscreen: bool,
@@ -491,6 +495,67 @@ impl State {
         }
     }
 
+    // The single visibility transition hook: suspended configures, callback
+    // absence and restore all arrive here. Host pacing consumes it through
+    // window_timing when its presentation-clock branch is integrated.
+    fn send_visibility(&mut self, id: u32) {
+        if self.windows.get(&id).is_some_and(|w| !w.visibility.visible) {
+            self.freeze(id);
+        }
+        if let Some(w) = self.windows.get(&id) {
+            self.hub.input(&format!(
+                "window_visible {} {id}",
+                u8::from(w.visibility.visible)
+            ));
+        }
+    }
+
+    // Never return an ImageReader lease while Wayland still reads it. Replacing
+    // the last dma-buf with a shm snapshot lets wl_buffer.release retire every
+    // image even when Android has stopped producing. The surface stays mapped,
+    // including the outstanding callback that observes an eventual restore.
+    fn freeze(&mut self, id: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        let Some(b) = w.shown.and_then(|id| self.buffers.get(&id)) else {
+            return;
+        };
+        match visibility::snapshot(&b.source, &b.spec, &self.shm) {
+            Ok(buffer) => {
+                let surface = w.window.wl_surface();
+                surface.attach(Some(buffer.wl_buffer()), 0, 0);
+                surface.damage_buffer(0, 0, b.width as i32, b.height as i32);
+                surface.commit();
+                w.frozen = Some(buffer);
+            }
+            Err(e) => crate::warn!("display: snapshot of hidden window {id}: {e}"),
+        }
+    }
+
+    fn probe_visibility(&mut self) {
+        let now = Instant::now();
+        let mut changed = Vec::new();
+        for w in self.windows.values_mut().filter(|w| w.shown.is_some()) {
+            let visible = w.visibility.visible;
+            if w.visibility.tick(now) {
+                w.visibility.requested(now);
+                let surface = w.window.wl_surface();
+                surface.frame(
+                    &self.qh,
+                    sctk::compositor::FrameCallbackData(surface.clone()),
+                );
+                surface.commit();
+            }
+            if visible != w.visibility.visible {
+                changed.push(w.id);
+            }
+        }
+        for id in changed {
+            self.send_visibility(id);
+        }
+    }
+
     fn send_configure(&self, id: u32) {
         let Some(w) = self.windows.get(&id) else {
             return;
@@ -552,6 +617,8 @@ impl State {
                 width,
                 height,
                 scale120: 120,
+                frozen: None,
+                visibility: visibility::Visibility::new(Instant::now()),
                 configured: false,
                 mapped: false,
                 fullscreen: false,
@@ -639,19 +706,14 @@ impl State {
                 height: b.height,
                 wl: None,
                 frames: frames::Frames::default(),
-                bench_fd: if crate::bench::enabled() {
-                    fd.try_clone().ok()
-                } else {
-                    None
-                },
+                source: fd,
+                spec: b.clone(),
                 bench_offset: b.offset as u64
                     + (b.height / 2) as u64 * b.stride as u64
                     + (b.width / 2) as u64 * 4,
             },
         );
-        // `fd` closes here; the compositor has its own copy once the request
-        // is flushed (libwayland dups fds it sends).
-        drop(fd);
+        // Keep the fd for a host-owned snapshot when the window goes hidden.
     }
 
     fn remove_buffer(&mut self, id: u32) {
@@ -667,7 +729,10 @@ impl State {
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
         self.cursor_frame(id);
-        let configured = self.windows.get(&id).is_some_and(|w| w.configured);
+        let configured = self
+            .windows
+            .get(&id)
+            .is_some_and(|w| w.configured && w.visibility.visible);
         let b = self.buffers.get_mut(&buffer);
         let imported = b.as_ref().is_some_and(|b| b.wl.is_some());
         let configured = configured && b.as_ref().is_none_or(|b| b.window == id);
@@ -679,7 +744,11 @@ impl State {
     }
 
     fn present_frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
-        if !self.windows.get(&id).is_some_and(|w| w.configured) {
+        if !self
+            .windows
+            .get(&id)
+            .is_some_and(|w| w.configured && w.visibility.visible)
+        {
             let count = self.buffers.get_mut(&buffer).unwrap().frames.release();
             for _ in 0..count {
                 self.release(buffer, false);
@@ -701,6 +770,7 @@ impl State {
         if let Some(v) = &w.viewport {
             v.set_destination(w.width as i32, w.height as i32);
         }
+        w.frozen = None;
         let first = w.shown.is_none();
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
@@ -713,7 +783,7 @@ impl State {
         if crate::bench::enabled() {
             let stamp = crate::bench::now();
             let mut pixel = [0u8; 4];
-            let color = b.bench_fd.as_ref().and_then(|fd| {
+            let color = Some(&b.source).and_then(|fd| {
                 use std::os::fd::AsRawFd;
                 // dma-buf descriptors support mmap, not read/pread.
                 let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
@@ -756,6 +826,7 @@ impl State {
             ));
         }
         if first {
+            w.visibility.requested(Instant::now());
             surface.frame(
                 &self.qh,
                 sctk::compositor::FrameCallbackData(surface.clone()),
@@ -1000,6 +1071,12 @@ impl WindowHandler for State {
         };
         w.width = width;
         w.height = height;
+        let was_visible = w.visibility.visible;
+        w.visibility.configure(
+            c.state
+                .contains(sctk::reexports::csd_frame::WindowState::SUSPENDED),
+            Instant::now(),
+        );
         w.configured = true;
         w.fullscreen = c.is_fullscreen();
         w.constrained = c.is_maximized() || c.is_tiled();
@@ -1012,6 +1089,9 @@ impl WindowHandler for State {
             f.draw();
         }
         w.window.commit();
+        if was_visible != self.windows[&id].visibility.visible {
+            self.send_visibility(id);
+        }
         self.send_configure(id);
         self.apply_window_policy(id, PolicyEvent::Configure);
     }
@@ -1070,10 +1150,17 @@ impl CompositorHandler for State {
             .windows
             .values_mut()
             .find(|w| w.window.wl_surface() == surface)
-            && !w.mapped
         {
-            w.mapped = true;
-            self.hub.first_frame(w.id);
+            let was_visible = w.visibility.visible;
+            w.visibility.callback();
+            if !w.mapped {
+                w.mapped = true;
+                self.hub.first_frame(w.id);
+            }
+            let id = w.id;
+            if was_visible != w.visibility.visible {
+                self.send_visibility(id);
+            }
         }
     }
     fn surface_enter(
@@ -1326,8 +1413,14 @@ pub fn run(
             .windows
             .values()
             .any(|w| w.frame.as_ref().is_some_and(|f| f.is_animating()));
-        ev.dispatch(animating.then_some(Duration::from_millis(16)), &mut st)
+        let interval = if animating {
+            Duration::from_millis(16)
+        } else {
+            visibility::PROBE_INTERVAL
+        };
+        ev.dispatch((!st.windows.is_empty()).then_some(interval), &mut st)
             .context("dispatch")?;
+        st.probe_visibility();
         for w in st.windows.values_mut() {
             if let Some(frame) = w.frame.as_mut().filter(|f| f.is_animating()) {
                 frame.animate();

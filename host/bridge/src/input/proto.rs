@@ -32,6 +32,10 @@
 //! screen, so the compositor focuses it without flagging it as demanding
 //! attention.
 //!
+//! Input line `window_visible <0|1> <display>` reports compositor suspension
+//! or a one-second outstanding frame callback. A pending callback remains live
+//! while hidden so restoring can resume Android without a new application frame.
+//!
 //! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
 //! 1 portrait, 2 landscape), u32 legacy automatic fullscreen (0 or 1), u32
 //! immersive request (both bars hidden, 0 or 1). The bridge ignores the last two

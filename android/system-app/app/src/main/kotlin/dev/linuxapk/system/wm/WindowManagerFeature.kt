@@ -15,6 +15,8 @@ import android.hardware.display.VirtualDisplayConfig
 import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.IPowerManager
+import android.os.ServiceManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.WindowInsets
@@ -62,6 +64,7 @@ class WindowManagerFeature(
   private lateinit var frameHandler: Handler
   private val atm by lazy { ActivityTaskManager.getService() }
   private val wms by lazy { WindowManagerGlobal.getWindowManagerService() }
+  private val power by lazy { IPowerManager.Stub.asInterface(ServiceManager.getService("power")) }
   private val dm by lazy { context.getSystemService(DisplayManager::class.java) }
   private val prefs by lazy {
     context.createDeviceProtectedStorageContext().getSharedPreferences("wm", Context.MODE_PRIVATE)
@@ -109,6 +112,7 @@ class WindowManagerFeature(
     var taskId: Int? = null
     var tasks: List<Int> = emptyList()
     var hadTask = false
+    val visibility = WindowVisibility()
     var mapped = false
     var resize: Runnable? = null
     var appearance: Runnable? = null
@@ -483,6 +487,7 @@ class WindowManagerFeature(
   // On the input connection's thread.
   override fun onHostEvent(e: HostEvent) {
     when (e) {
+      is HostEvent.WindowVisible,
       is HostEvent.Window,
       is HostEvent.Close,
       is HostEvent.KeyboardEnter,
@@ -499,6 +504,10 @@ class WindowManagerFeature(
 
   private fun onWindowEvent(e: HostEvent) {
     when (e) {
+      is HostEvent.WindowVisible -> {
+        val w = windows[e.display] ?: return
+        setVisible(w, e.visible)
+      }
       is HostEvent.Window -> {
         val w = windows[e.display] ?: return
         if (e.scale != scale && e.scale in 0.5..8.0) {
@@ -534,10 +543,26 @@ class WindowManagerFeature(
     }
   }
 
+  private fun setVisible(w: AppWindow, shown: Boolean) {
+    val visible = w.visibility.update(shown) ?: return
+    val now = SystemClock.uptimeMillis()
+    if (visible)
+      power.wakeUpWithDisplayId(
+        now,
+        WAKE_REASON_APPLICATION,
+        "linuxapk:visible",
+        context.packageName,
+        w.id,
+      )
+    else power.goToSleepWithDisplayId(w.id, now, SLEEP_REASON_APPLICATION, SLEEP_FLAG_NO_DOZE)
+    Log.i(TAG, "display ${w.id}: visible=$visible")
+  }
+
   // Detaching and re-attaching the surface makes SurfaceFlinger create a new HWC virtual display,
   // which picks up the new window request.
   private fun remap(w: AppWindow) {
     if (windows[w.id] !== w) return
+    setVisible(w, true)
     w.display.surface = null
     attachSurface(w)
   }
@@ -791,6 +816,10 @@ class WindowManagerFeature(
   companion object {
     const val TAG = "LinuxApkWm"
     const val APP_ID_PREFIX = "dev.linuxapk."
+    // PowerManager: operate on this window's OWN_DISPLAY_GROUP, never the whole session.
+    private const val WAKE_REASON_APPLICATION = 2
+    private const val SLEEP_REASON_APPLICATION = 0
+    private const val SLEEP_FLAG_NO_DOZE = 1
     private const val PREF_SCALE = "scale"
     private const val BASE_DPI = 160
     private const val DEFAULT_DISPLAY = 0

@@ -311,6 +311,23 @@ sys.exit(1)
       source "$here/production.sh"
       ;;
     lifecycle)
+      launch BenchProbe
+      until_ok log_has LinuxApkBench "BENCH resumed display=$display"
+      # shellcheck disable=SC2329 # invoked through until_ok
+      bench_mapped() { wm LIST | grep -q "display=$display package=dev.linuxapk.probes .*window=yes"; }
+      until_ok bench_mapped
+      resumes() { s logcat -d -s LinuxApkBench:I | grep -c "BENCH resumed display=$display"; }
+      before=$(resumes)
+      until_ok /usr/bin/python3 "$here/windows.py" minimize
+      until_ok log_has LinuxApkBench "BENCH stopped display=$display"
+      # A stop followed by an unintended resume while minimized is a failure.
+      [[ $(resumes) -eq $before ]]
+      before=$(resumes)
+      until_ok /usr/bin/python3 "$here/windows.py" restore
+      # shellcheck disable=SC2329 # invoked through until_ok
+      resumed_again() { [[ $(resumes) -gt $before ]]; }
+      until_ok resumed_again
+      echo 'ok   minimizing stops the activity and restoring resumes the same display'
       launch TaskWindowProbe
       first=$display
       # shellcheck disable=SC2329 # invoked through until_ok

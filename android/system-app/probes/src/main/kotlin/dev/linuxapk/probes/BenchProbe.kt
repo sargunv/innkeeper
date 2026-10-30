@@ -47,6 +47,16 @@ class BenchProbe : Activity() {
     registerReceiver(control, IntentFilter("dev.linuxapk.BENCH_BEGIN"), Context.RECEIVER_EXPORTED)
   }
 
+  override fun onResume() {
+    super.onResume()
+    Log.i("LinuxApkBench", "BENCH resumed display=${display?.displayId}")
+  }
+
+  override fun onStop() {
+    Log.i("LinuxApkBench", "BENCH stopped display=${display?.displayId}")
+    super.onStop()
+  }
+
   private fun begin() {
     // The runner starts workers after the desktop window has mapped, so moving
     // the activity off display 0 cannot create duplicate measurement workers.
