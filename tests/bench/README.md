@@ -57,8 +57,12 @@ measurements are recorded.
   enables bridge timestamps at input dispatch and immediately before surface
   commit, a centre-pixel read from that dma-buf, and `wp_presentation` feedback.
   The parser matches changed colours to their commit ids and presentation ids;
-  painting the old colour cannot count. It subtracts presentation timestamps
-  only when the compositor advertises `CLOCK_MONOTONIC`, shared with Android's
+  painting the old colour cannot count. Callback-only visibility commits can
+  supersede content feedback while retaining the same pixels. Bench mode
+  observes their presentation too; the parser attributes it to the content on
+  that window and counts only its earliest presentation. A discard alone never
+  counts as presentation. It subtracts presentation timestamps only when the
+  compositor advertises `CLOCK_MONOTONIC`, shared with Android's
   `System.nanoTime`. Raw feedback includes refresh and presentation flags. The
   bridge trace stops after 20,000 records. Reading one pixel and logging add
   overhead; use the same instrumentation for every comparison. Compositor
