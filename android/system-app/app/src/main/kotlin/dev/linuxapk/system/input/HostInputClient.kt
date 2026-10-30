@@ -14,6 +14,7 @@ import android.view.KeyEvent
 import dev.linuxapk.system.Feature
 import dev.linuxapk.system.LinuxApkSystemApp
 import dev.linuxapk.system.SystemProps
+import dev.linuxapk.system.bridge.Blob
 import dev.linuxapk.system.bridge.BridgeConnection
 import dev.linuxapk.system.bridge.Wire
 import java.io.FileDescriptor
@@ -133,8 +134,23 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     }
 
   /** TaskDescription primary colour and a bounded RGBA icon in a sealed blob. */
-  fun windowAppearance(window: Int, color: Int, icon: ByteArray) =
-    connection.send(WINDOW_APPEARANCE, blob = icon) { u32(window).u32(color).u32(icon.size) }
+  fun windowAppearance(window: Int, color: Int, icon: ByteArray, wait: Boolean = false): Boolean {
+    if (!wait)
+      return connection.send(WINDOW_APPEARANCE, blob = icon) {
+        u32(window).u32(color).u32(icon.size)
+      }
+    val fd = Blob.create(icon)
+    try {
+      val reply =
+        connection.call(WINDOW_APPEARANCE, fd = fd, timeoutMs = 2000) {
+          u32(window).u32(color).u32(icon.size)
+        }
+      reply?.closeFds()
+      return reply?.ok == true
+    } finally {
+      Blob.close(fd)
+    }
+  }
 
   fun minimizeWindow(window: Int) = connection.send(WINDOW_MINIMIZE) { u32(window) }
 

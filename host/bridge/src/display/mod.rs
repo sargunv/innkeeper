@@ -106,11 +106,12 @@ impl DisplayService {
         if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
             return Reply::err(-EBUSY);
         }
-        let Some(req) = self.hub.claim(width, height) else {
+        let Some(pending) = self.hub.claim(width, height) else {
             return Reply::err(-ENOENT);
         };
+        let req = pending.request.clone();
         let (tx, rx) = std::sync::mpsc::channel();
-        if self.cmd.send(Cmd::Create(req.clone(), tx)).is_err() {
+        if self.cmd.send(Cmd::Create(pending, tx)).is_err() {
             return Reply::err(-EIO);
         }
         match rx.recv_timeout(std::time::Duration::from_secs(5)) {

@@ -21,7 +21,7 @@ pub mod xkb;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 
-pub use hub::{Hub, PointerPosition};
+pub use hub::{Hub, PendingWindow, PointerPosition};
 
 use crate::ipc::server::{Events, Peer, Reply, Service};
 use crate::ipc::wire::errno::*;

@@ -49,7 +49,7 @@ use wayland_protocols::xdg::activation::v1::client::{
 };
 
 use super::proto::{BufferSpec, event, ty};
-use crate::input::proto::{WindowPolicy, WindowRequest};
+use crate::input::proto::WindowPolicy;
 use crate::input::{Hub, ime, seat::Seat};
 use crate::ipc::server::Events;
 use wayland_protocols::xdg::toplevel_icon::v1::client::{
@@ -67,7 +67,7 @@ use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_wind
 
 /// Work for the Wayland thread.
 pub enum Cmd {
-    Create(WindowRequest, std::sync::mpsc::Sender<i32>),
+    Create(crate::input::PendingWindow, std::sync::mpsc::Sender<i32>),
     Destroy(u32),
     WindowAppearance {
         window: u32,
@@ -499,7 +499,12 @@ impl State {
         }
     }
 
-    fn create(&mut self, s: WindowRequest) -> i32 {
+    fn create(&mut self, pending: crate::input::PendingWindow) -> i32 {
+        let crate::input::PendingWindow {
+            request: s,
+            color,
+            icon,
+        } = pending;
         use crate::ipc::wire::errno::*;
         if self.windows.contains_key(&s.window) {
             return -EBUSY;
@@ -522,7 +527,6 @@ impl State {
             .as_ref()
             .map(|f| f.get_fractional_scale(window.wl_surface(), &qh, ScaleOf(s.window)));
         let exported = foreign::export(self.exporter.as_ref(), window.wl_surface(), s.window, &qh);
-        window.commit();
         crate::info!(
             "display: window {} \"{}\" ({}) {width}x{height}",
             s.window,
@@ -555,6 +559,8 @@ impl State {
                 token: (!s.token.is_empty()).then_some(s.token),
             },
         );
+        self.window_appearance(s.window, color, icon);
+        self.windows[&s.window].window.commit();
         0
     }
 
@@ -832,7 +838,6 @@ impl State {
             }
             w.icon = icon;
         }
-        w.window.commit();
     }
 
     fn command(&mut self, c: Cmd) {
@@ -845,7 +850,12 @@ impl State {
                 window,
                 color,
                 icon,
-            } => self.window_appearance(window, color, icon),
+            } => {
+                self.window_appearance(window, color, icon);
+                if let Some(w) = self.windows.get(&window) {
+                    w.window.commit();
+                }
+            }
             Cmd::Destroy(id) => self.destroy(id),
             Cmd::Minimize(id) => {
                 if let Some(w) = self.windows.get(&id) {
