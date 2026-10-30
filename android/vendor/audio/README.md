@@ -24,7 +24,8 @@ its tinyalsa implementation evolve independently of the output stream.
 - **Buffers.** The PCM backend uses two 240-frame periods (10 ms total). The
   bridge requests another 20 ms downstream, so the output port reports a 30 ms
   nominal latency, while stream replies report the observed queued frames.
-  AudioFlinger's normal mixer and its pipe to FastMixer add their own queue.
+  `audio.prop` sets AudioFlinger's normal playback period to 10 ms (480 frames),
+  reducing the queue in its pipe to FastMixer. Capture periods are unchanged.
 - **Capture.** Android's `RECORD_AUDIO` runtime permission is the consent. The
   bridge records the default Pulse/PipeWire source into a capture ring;
   `LINUXAPK_AUDIO_SOURCE` selects a source explicitly (tests use a null-sink
