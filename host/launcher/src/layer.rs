@@ -7,6 +7,7 @@
 //!   audio), the driver selection, the composer backend and
 //!   image/vendor.prop. RADV only if the render node is driven by amdgpu,
 //!   else lavapipe.
+//! - `vendor/etc/permissions/`: Vulkan features matching that driver.
 //! - `apex/<name>/`: our files for the APEXes this image has (the stage's,
 //!   then the addons'), so the tree gains no directories apexd and
 //!   linkerconfig don't know about.
@@ -33,12 +34,6 @@ const CMDLINE: &[&str] = &[
     "androidboot.boot_devices=linuxapk",
     "androidboot.dalvik.vm.heapsize=512m",
 ];
-
-/// The render node's kernel driver (`amdgpu`, `i915`...), if any.
-fn render_driver() -> Option<String> {
-    let p = fs::canonicalize("/sys/class/drm/renderD128/device/driver").ok()?;
-    Some(p.file_name()?.to_string_lossy().into_owned())
-}
 
 /// Our properties: what vendor/build.prop gets on top of the image's.
 fn our_props(cfg: &Config) -> Result<String> {
@@ -69,16 +64,7 @@ fn our_props(cfg: &Config) -> Result<String> {
             s.push('\n');
         }
     }
-    let drv = render_driver();
-    let vk = if drv.as_deref() == Some("amdgpu") {
-        "radv"
-    } else {
-        "lvp"
-    };
-    s += &format!(
-        "# --- linuxapk-session: render node driver: {} ---\n",
-        drv.as_deref().unwrap_or("none")
-    );
+    let vk = crate::graphics::driver(cfg.render_node.as_deref());
     s += &format!("ro.hardware.vulkan={vk}\n");
     // Composer backend: windows through the bridge, or none.
     let backend = if cfg.headless { "headless" } else { "bridge" };
@@ -135,6 +121,11 @@ pub fn write(cfg: &Config) -> Result<()> {
     let layer = cfg.run_layer();
     fs::create_dir_all(layer.join("vendor"))?;
     fs::create_dir_all(layer.join("apex"))?;
+    let permissions = layer.join("vendor/etc/permissions");
+    fs::create_dir_all(&permissions)?;
+    for (name, xml) in crate::graphics::feature_xmls(cfg.render_node.as_deref()) {
+        fs::write(permissions.join(name), xml)?;
+    }
     let image_props = cfg.image.img.join("vendor/build.prop");
     let image_props = fs::read_to_string(&image_props)
         .with_context(|| format!("read {}", image_props.display()))?;

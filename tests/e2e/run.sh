@@ -102,6 +102,13 @@ if [[ ${1:-} == --group ]]; then
       cat "$T/ancestry.txt"
       echo 'ok   Android init is a child of the broker'
       "$S" selftest
+      driver=$(s getprop ro.hardware.vulkan)
+      feature=android.hardware.vulkan.level=1
+      # pm omits =0 when printing a version-zero feature.
+      if [[ $driver == lvp ]]; then feature=android.hardware.vulkan.level; fi
+      s pm list features >"$T/features.txt"
+      file_has "$T/features.txt" "^feature:$feature$"
+      echo "ok   Vulkan feature matches $driver: $feature"
       # Session1 reports the same completed boot as the launcher's property check.
       # shellcheck disable=SC2329 # invoked through until_ok
       session_booted() {

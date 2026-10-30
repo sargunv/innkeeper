@@ -7,6 +7,7 @@ mod conf;
 mod control;
 mod exec;
 mod flatpak;
+mod graphics;
 mod image;
 mod init;
 mod layer;

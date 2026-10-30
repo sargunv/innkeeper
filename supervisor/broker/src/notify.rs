@@ -667,7 +667,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         }
         // Every openat in the session lands here: let the ones that can't be a
         // binder device through without taking the lock.
-        if nr == libc::SYS_openat && !maybe_dev_path(req.pid as i32, req.data.args[1]) {
+        if nr == libc::SYS_openat && !binder_path(req.pid as i32, req.data.args[1]) {
             if let Some(f) = &flat {
                 f.submit(req);
             } else {
@@ -685,13 +685,16 @@ fn is_binder_syscall(nr: i64, args: &[u64; 6]) -> bool {
     nr == libc::SYS_openat || (nr == libc::SYS_ioctl && is_binder_ioctl(args[1] as u32))
 }
 
-/// Could the path at `addr` start with "/dev/"? (Reads at most to the end of
-/// its page.)
-fn maybe_dev_path(pid: i32, addr: u64) -> bool {
+/// Only binder devices take the binder lock. Other device opens still need
+/// Flatpak policy (in particular the selected DRM node).
+fn binder_path(pid: i32, addr: u64) -> bool {
     let n = (4096 - (addr as usize & 4095)).min(5);
     match vm_read(pid, addr, n) {
-        Some(b) => b"/dev/".starts_with(&b) || b == b"/dev/",
-        None => false,
+        Some(b) if b"/dev/".starts_with(&b) || b == b"/dev/" => matches!(
+            read_path(pid, addr).as_deref(),
+            Some(b"/dev/binder" | b"/dev/hwbinder" | b"/dev/vndbinder")
+        ),
+        _ => false,
     }
 }
 

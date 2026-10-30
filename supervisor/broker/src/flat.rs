@@ -41,6 +41,8 @@ pub(crate) struct Flat {
     /// The kernel's uid and gid for every Android process (the user's).
     uid: u32,
     gid: u32,
+    /// Set by the launcher, including an empty path for software rendering.
+    render_node: Option<std::path::PathBuf>,
 }
 
 /// Filesystem lookups can wait on a mount. Keep them off the binder receive
@@ -140,6 +142,11 @@ pub(crate) fn to_host(p: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// DRM enumeration may read directories, but only the chosen device opens.
+fn drm_path_allowed(path: &std::path::Path, selected: &std::path::Path) -> bool {
+    !path.starts_with("/dev/dri") || path == selected || path.is_dir()
+}
+
 /// Flatpak mode: init isn't pid 1, but its property service treats a peer
 /// that isn't pid 1 as a client (and init's own setprop from its restorecon
 /// thread as a new restorecon request, forever). Show init as pid 1 to
@@ -210,6 +217,7 @@ impl Flat {
         Some(Flat {
             listener,
             resp_sz,
+            render_node: std::env::var_os("LINUXAPK_RENDER_NODE").map(Into::into),
             map,
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
@@ -465,8 +473,23 @@ impl Flat {
     pub(crate) fn openat(&self, req: &SeccompNotif) -> bool {
         let tid = req.pid as i32;
         let a = req.data.args;
+        // Flatpak grants DRM to the bridge as well. Android may only open
+        // the selected render node: Mesa (including the composer's ANGLE)
+        // cannot pick a different GPU from the allocator's consumers.
         let n = (4096 - (a[1] as usize & 4095)).min(6);
-        match vm_read(tid, a[1], n) {
+        let prefix = vm_read(tid, a[1], n);
+        if let Some(selected) = &self.render_node
+            && prefix
+                .as_ref()
+                .is_some_and(|p| !p.starts_with(b"/") || p.starts_with(b"/dev/") || p.len() < 6)
+            && let Some(path) = self.target_path(tid, a[0] as i32, a[1])
+            && let Ok(path) = std::fs::canonicalize(OsStr::from_bytes(path.to_bytes()))
+            && !drm_path_allowed(&path, selected)
+        {
+            self.reply(req.id, 0, libc::EACCES);
+            return true;
+        }
+        match prefix {
             Some(b) if b"/proc/".starts_with(&b) || b == b"/proc/" => {}
             _ => return false,
         }
@@ -579,6 +602,7 @@ mod tests {
             map: Vec::new(),
             uid: 0,
             gid: 0,
+            render_node: None,
         };
         let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
         // The syscall caller's fd namespace must survive path resolution,
