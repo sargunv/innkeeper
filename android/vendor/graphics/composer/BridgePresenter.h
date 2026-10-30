@@ -4,7 +4,7 @@
 // display/proto.rs). The composer only presents: it adds each virtual display
 // to the bridge, and the bridge shows it in the window that the window
 // manager (the Linux.apk System app) asked for at that size, if any. Frames
-// go over as dma-buf fds of the composer's own udmabuf pool.
+// go over as the ImageReader sink's own dma-buf fds, retained until RELEASE.
 #pragma once
 
 #include <memory>

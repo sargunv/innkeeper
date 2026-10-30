@@ -16,6 +16,9 @@
 //! | `0x4602` | WINDOW_MAPPED   | `u32 window`: its first frame is on screen                           |
 //! | `0x4603` | WINDOW_UNMAPPED | `u32 window`: its display went away, or it was destroyed               |
 //!
+//! IMAGE_RELEASE (0x4604): u32 window, u64 presentation token. The system app
+//! closes that display/ImageReader's acquired image only after this event.
+//!
 //! **Windows.** A queued request waits up to 10 s for the composer to add an
 //! HWC virtual display of exactly `width`×`height` (display service
 //! `DISPLAY_ADD`); that display then shows in a new toplevel, which starts at
@@ -134,6 +137,7 @@ pub mod ty {
     pub const INPUT: u16 = 0x4601;
     pub const WINDOW_MAPPED: u16 = 0x4602;
     pub const WINDOW_UNMAPPED: u16 = 0x4603;
+    pub const IMAGE_RELEASE: u16 = 0x4604;
 }
 
 /// Bounds on what the client may ask for.
@@ -389,6 +393,11 @@ pub mod event {
         w.u32(window);
         w.into_vec()
     }
+    pub fn image_released(window: u32, token: u64) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u32(window).u64(token);
+        w.into_vec()
+    }
     pub fn window_unmapped(window: u32) -> Vec<u8> {
         let mut w = Writer::default();
         w.u32(window);
@@ -418,6 +427,15 @@ mod tests {
             title: "Wikipedia".into(),
             token: "kwin-12".into(),
         }
+    }
+
+    #[test]
+    fn image_release_wire_order() {
+        let bytes = event::image_released(9, 0x123456789abcdef0);
+        assert_eq!(bytes.len(), 12);
+        let mut r = Reader::new(&bytes);
+        assert_eq!(r.u32().unwrap(), 9);
+        assert_eq!(r.u64().unwrap(), 0x123456789abcdef0);
     }
 
     #[test]

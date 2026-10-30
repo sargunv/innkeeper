@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Where composed frames go. Every layer is CLIENT: SurfaceFlinger's
 // RenderEngine composites them into the client target, and the Presenter
-// shows that. It holds no buffer after present() returns, so there are no
-// present or release fences.
+// shows that. The bridge imports the sink's dma-buf and the system app owns
+// its Image until Wayland releases it. Mixed virtual composition is blitted
+// into the sink on the GPU before submission.
 //
-// HeadlessPresenter: the client target is optionally dumped to PNG.
-// BridgePresenter.h: the client target is copied into a window's buffer pool
-// and shown on the host through the bridge.
+// HeadlessPresenter optionally dumps the client target to PNG.
 #pragma once
 
 #include <memory>
@@ -36,6 +35,7 @@ struct FrameInput {
   ClientTargetState* clientTarget;
   BufferPtr outputBuffer;  // virtual displays: the sink's buffer
   CursorState* cursor = nullptr;
+  bool clientTargetUpdated = true;
 };
 
 class Presenter {

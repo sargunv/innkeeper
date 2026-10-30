@@ -86,11 +86,10 @@ ndk::ScopedAStatus ComposerClient::destroyLayer(
   return toStatus(d->destroyLayer(layer));
 }
 
-// HWC-backed virtual displays (SurfaceFlinger uses them when
-// debug.sf.enable_hwc_vds=1, set by our .rc). Every layer stays CLIENT, so
-// SurfaceFlinger renders each frame straight into the sink's buffer and hands
-// it to us as both client target and output buffer; the presenter shows it in
-// the window that the window manager asked for (docs/display.md).
+// HWC-backed virtual displays (debug.sf.enable_hwc_vds=1 in our .rc).
+// SurfaceFlinger renders CLIENT layers into the sink, or scratch storage
+// when a CURSOR layer makes composition mixed; Display handles that GPU blit.
+// The presenter shows the sink in the requested window (docs/display.md).
 ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
   int32_t width, int32_t height, common::PixelFormat format,
   int32_t outputSlotCount, VirtualDisplay* out
@@ -213,7 +212,12 @@ void ComposerClient::executeDisplayCommand(
       results.error(e);
       return;
     }
-    // No present fence, and no layer to release (Presenter.h).
+    if (d->presentFence() >= 0) {
+      PresentFence pf;
+      pf.display = d->id();
+      pf.fence = ndk::ScopedFileDescriptor(dupFd(d->presentFence()));
+      results.add(std::move(pf));
+    }
     ReleaseFences rf;
     rf.display = d->id();
     results.add(std::move(rf));

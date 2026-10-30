@@ -49,6 +49,7 @@ pub struct DisplayService {
     /// This connection's key in the hub.
     conn: u64,
     cmd: Sender<Cmd>,
+    events: Events,
     thread: Option<JoinHandle<()>>,
     limits: Limits,
     /// HWC display -> the window it shows.
@@ -71,6 +72,7 @@ impl DisplayService {
             .context("connecting to the host Wayland compositor")?;
         let (tx, rx) = calloop::channel::channel();
         let ender = events.clone();
+        let service_events = events.clone();
         let seat_hub = hub.clone();
         let thread = std::thread::Builder::new()
             .name("display".into())
@@ -87,6 +89,7 @@ impl DisplayService {
             conn: hub.add_display_connection(tx.clone()),
             hub,
             cmd: tx,
+            events: service_events,
             thread: Some(thread),
             limits,
             displays: HashMap::new(),
@@ -158,6 +161,12 @@ impl Service for DisplayService {
             return Reply::err(-EPROTO);
         }
         match req {
+            Request::ImageRelease { display, token } => {
+                if let Some(window) = self.displays.get(&display) {
+                    self.hub.image_released(*window, token);
+                }
+                Reply::ok()
+            }
             Request::Cursor {
                 display,
                 width,
@@ -231,11 +240,30 @@ impl Service for DisplayService {
                 damage,
             } => {
                 if self.buffers.get(&buffer) != Some(&display) {
+                    // A failed/removed import can still have a FRAME in flight.
+                    // A request error alone does not return its image lease.
+                    if self
+                        .events
+                        .try_send(
+                            proto::ty::RELEASE,
+                            &proto::event::release(buffer, true),
+                            &[],
+                        )
+                        .is_err()
+                    {
+                        self.events.shutdown();
+                    }
                     return Reply::err(-ENOENT);
                 }
                 // An acquire fence, if any, is ignored: the composer only
                 // sends frames it has finished writing.
                 drop(fds);
+                if crate::bench::enabled() {
+                    crate::bench::trace(format_args!(
+                        "receive ns={} buffer={buffer}",
+                        crate::bench::now()
+                    ));
+                }
                 self.send(Cmd::Frame {
                     window: self.displays[&display],
                     buffer,
@@ -254,5 +282,67 @@ impl Drop for DisplayService {
         }
         self.hub.remove_display_connection(self.conn);
         crate::info!("{}: display connection closed", self.label);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::{
+        transport,
+        wire::{MAX_MSG, Reader},
+    };
+
+    #[test]
+    fn frame_after_buffer_removal_still_returns_its_lease() {
+        let (server, client) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::NONBLOCK,
+            None,
+        )
+        .unwrap();
+        let (cmd, _rx) = calloop::channel::channel();
+        let mut service = DisplayService {
+            hub: Hub::new(),
+            conn: 1,
+            cmd,
+            events: Events::new(Arc::new(server)),
+            thread: None,
+            limits: Limits::default(),
+            displays: HashMap::from([(100, 2)]),
+            buffers: HashMap::from([(7, 100)]),
+            label: "test".into(),
+        };
+        // Composer invalidates the failed import on the service before re-add.
+        assert_eq!(
+            service
+                .handle(proto::ty::BUFFER_REMOVE, &7u32.to_le_bytes(), vec![])
+                .status,
+            0
+        );
+        let request = proto::encode(
+            1,
+            &Request::Frame {
+                display: 100,
+                buffer: 7,
+                damage: [0; 4],
+            },
+        );
+        assert_eq!(
+            service
+                .handle(proto::ty::FRAME, &request[crate::ipc::wire::HDR..], vec![])
+                .status,
+            -ENOENT
+        );
+        let mut bytes = [0; MAX_MSG + 1];
+        let packet = transport::recv(&client, &mut bytes).unwrap().unwrap();
+        let header = crate::ipc::wire::decode_header(&bytes[..packet.len]).unwrap();
+        assert_eq!(header.ty, proto::ty::RELEASE);
+        let mut body = Reader::new(&bytes[crate::ipc::wire::HDR..packet.len]);
+        assert_eq!(body.u32().unwrap(), 7);
+        assert_eq!(body.u32().unwrap(), 1); // invalid, not reusable
+        body.end().unwrap();
+        assert!(transport::recv(&client, &mut bytes).is_err()); // exactly one
     }
 }

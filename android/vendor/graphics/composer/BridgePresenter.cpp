@@ -10,15 +10,14 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/udmabuf.h>
 #include <pthread.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 #include "BridgePresenter.h"
 
+#include "Properties.h"
 #include "linuxapk/bridge_client.h"
 #include "linuxapk/layout.h"
 #include "linuxapk/log.h"
@@ -34,7 +33,8 @@ constexpr uint16_t kBufferAdd = 0x0203;
 constexpr uint16_t kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205;
 constexpr uint16_t kEvRelease = 0x4201;
-constexpr int kPoolSize = 3;
+constexpr uint16_t kImageRelease = 0x0207;
+constexpr size_t kMaxPending = 2;
 constexpr uint32_t kXBGR8888 = fourcc('X', 'B', '2', '4');  // R,G,B,X bytes
 constexpr uint32_t kXRGB8888 = fourcc('X', 'R', '2', '4');  // B,G,R,X bytes
 
@@ -50,16 +50,10 @@ lxb_msg message(
 }  // namespace
 
 struct BridgeBuffer {
-  uint32_t id = 0;
-  int memfd = -1;
-  uint8_t* map = nullptr;
-  size_t size = 0;
-  bool busy = false;  // sent in a FRAME, not yet released
-};
-
-struct Pool {
-  std::vector<BridgeBuffer> bufs;
-  uint32_t width = 0, height = 0, stride = 0, format = 0;
+  uint32_t id;
+  BufferPtr source;
+  bool busy = false;
+  uint64_t token = 0;
 };
 
 class Bridge;
@@ -69,14 +63,17 @@ class BridgeDisplay {
  public:
   BridgeDisplay(Bridge* b, uint32_t id, uint32_t width, uint32_t height)
       : b(b), mId(id), mWidth(width), mHeight(height) {}
-  ~BridgeDisplay();
+  ~BridgeDisplay() {
+    for (auto& [_, buf] : mBuffers) buf.source->setPresentationToken(0);
+  }
   uint32_t id() const { return mId; }
   uint32_t width() const { return mWidth; }
   uint32_t height() const { return mHeight; }
   void present(const FrameInput& frame);
+  void releaseImage(uint64_t token);
   void cursor(const CursorState* cursor);
   // The rest: bridge lock held.
-  void onRelease(uint32_t buffer);
+  void onRelease(uint32_t buffer, bool invalid);
   // DISPLAY_ADD's answer: shown in `window`, or not shown (-1).
   void setWindow(int64_t window) { mWindow = window; }
   bool shown() const { return mWindow >= 0; }
@@ -84,20 +81,20 @@ class BridgeDisplay {
   // so again, and the next frame adds a new pool.
   void reset() {
     mWindow = -1;
-    mPoolStale = true;
+    for (auto& [_, buf] : mBuffers) {
+      buf.source->setPresentationToken(0);
+      if (buf.busy) releaseImage(buf.token);
+    }
+    mBuffers.clear();
     mCursorKnown = false;
   }
 
  private:
-  bool makePool(uint32_t w, uint32_t h, uint32_t format, Pool* out);
-  void freePool(Pool& p, bool tellBridge);
   Bridge* b;
   const uint32_t mId;
   const uint32_t mWidth, mHeight;
-  int64_t mWindow = -1;  // guarded by the bridge lock
-  Pool mPool;  // written by present(); busy flags under the bridge lock
-  bool mPoolStale = false;  // guarded by the bridge lock
-  int mLast = -1;
+  int64_t mWindow = -1;                       // guarded by the bridge lock
+  std::map<uint64_t, BridgeBuffer> mBuffers;  // guarded by the bridge lock
   uint64_t mFrames = 0, mDropped = 0;
   int64_t mLastLogNs = 0;
   bool mWarnedFormat = false;
@@ -204,10 +201,11 @@ void Bridge::handle(const lxb_packet& p) {
     }
     return;
   }
-  if (p.type == kEvRelease && p.len >= 4) {
+  if (p.type == kEvRelease && p.len >= 8) {
     const uint32_t buffer = lxb_u32(p.body);
     std::lock_guard lock(mutex);
-    for (auto& [id, d] : mDisplays) d->onRelease(buffer);
+    for (auto& [id, d] : mDisplays)
+      d->onRelease(buffer, lxb_u32(p.body + 4) != 0);
   }
 }
 
@@ -260,77 +258,29 @@ void Bridge::loop() {
 // ---- display
 // ---------------------------------------------------------------------
 
-BridgeDisplay::~BridgeDisplay() {
-  std::lock_guard lock(b->mutex);
-  freePool(mPool, /*tellBridge=*/false);
+void BridgeDisplay::onRelease(uint32_t buffer, bool invalid) {
+  for (auto it = mBuffers.begin(); it != mBuffers.end(); ++it) {
+    auto& buf = it->second;
+    if (buf.id != buffer) continue;
+    if (buf.busy) {
+      buf.source->setPresentationToken(0);
+      buf.busy = false;
+      releaseImage(buf.token);
+    }
+    if (invalid) {
+      // Remove the service's id too, before any replacement BUFFER_ADD on
+      // this connection. The same allocation must get a fresh Wayland import.
+      b->send(message(kBufferRemove, b->tag(), {buffer}));
+      mBuffers.erase(it);
+    }
+    return;
+  }
 }
 
-void BridgeDisplay::freePool(Pool& p, bool tellBridge) {
-  for (auto& buf : p.bufs) {
-    if (tellBridge) b->send(message(kBufferRemove, b->tag(), {buf.id}));
-    if (buf.map) munmap(buf.map, buf.size);
-    if (buf.memfd >= 0) close(buf.memfd);
-  }
-  p.bufs.clear();
-  p.width = p.height = 0;
-}
-
-void BridgeDisplay::onRelease(uint32_t buffer) {
-  for (auto& buf : mPool.bufs) {
-    if (buf.id == buffer) buf.busy = false;
-  }
-}
-
-bool BridgeDisplay::makePool(
-  uint32_t w, uint32_t h, uint32_t format, Pool* out
-) {
-  Pool pool;
-  pool.width = w;
-  pool.height = h;
-  pool.format = format;
-  pool.stride = uint32_t(alignUp(uint64_t(w) * 4, 256));
-  const size_t size = alignUp(uint64_t(pool.stride) * h, kPageSize);
-  bool ok = true;
-  for (int i = 0; i < kPoolSize && ok; i++) {
-    BridgeBuffer buf;
-    buf.size = size;
-    buf.id = b->nextBuffer.fetch_add(1);
-    buf.memfd = memfd_create("linuxapk-frame", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    ok = buf.memfd >= 0 && ftruncate(buf.memfd, off_t(size)) == 0;
-    if (ok) {
-      void* p =
-        mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, buf.memfd, 0);
-      ok = p != MAP_FAILED;
-      if (ok) buf.map = static_cast<uint8_t*>(p);
-    }
-    int dmabuf = -1;
-    if (ok) {
-      fcntl(buf.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
-      int dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
-      udmabuf_create create{};
-      create.memfd = uint32_t(buf.memfd);
-      create.flags = UDMABUF_FLAGS_CLOEXEC;
-      create.size = size;
-      dmabuf = dev >= 0 ? ioctl(dev, UDMABUF_CREATE, &create) : -1;
-      if (dev >= 0) close(dev);
-      ok = dmabuf >= 0;
-    }
-    if (ok) {
-      lxb_msg m = message(
-        kBufferAdd, b->tag(), {buf.id, mId, w, h, format, pool.stride, 0}
-      );
-      lxb_put_u64(&m, 0);  // modifier: LINEAR
-      ok = b->send(m, dmabuf);
-    }
-    if (dmabuf >= 0) close(dmabuf);
-    pool.bufs.push_back(buf);
-  }
-  if (!ok) {
-    freePool(pool, /*tellBridge=*/true);
-    return false;
-  }
-  *out = std::move(pool);
-  return true;
+void BridgeDisplay::releaseImage(uint64_t token) {
+  auto m = message(kImageRelease, b->tag(), {mId});
+  lxb_put_u64(&m, token);
+  b->send(m);
 }
 
 // CURSOR is accepted by validate rather than converted to CLIENT: these
@@ -412,22 +362,26 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
 }
 
 void BridgeDisplay::present(const FrameInput& frame) {
-  {
-    std::lock_guard lock(b->mutex);
-    if (!shown()) return;
-    if (mPoolStale) {
-      freePool(mPool, /*tellBridge=*/false);
-      mPoolStale = false;
-      mLast = -1;
-    }
-  }
+  const bool bench = getProperty("vendor.linuxapk.hwc.bench") == "1";
+  timespec cpuStart{};
+  if (bench) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
+  const int64_t begin = bench ? nowNs() : 0;
   cursor(frame.cursor);
   ClientTargetState* ct = frame.clientTarget;
-  BufferPtr buffer = ct && ct->buffer ? ct->buffer : frame.outputBuffer;
+  BufferPtr buffer = ct ? ct->buffer : nullptr;
+  // Reused client composition leaves a stale client target while the sink
+  // dequeues an unrelated output buffer. Only new sink frames are queued to
+  // ImageReader and can be retained until Wayland releases them.
+  if (
+    !frame.clientTargetUpdated || !buffer || !frame.outputBuffer ||
+    !buffer->info() || !frame.outputBuffer->info() ||
+    buffer->info()->bufferId.get() != frame.outputBuffer->info()->bufferId.get()
+  ) {
+    return;
+  }
   if (!buffer) return;
   const BufferHandle* bh = buffer->info();
-  const uint8_t* src = buffer->map();
-  if (!bh || !src) return;
+  if (!bh || !(bh->flags & kFlagDmabuf)) return;
   const int32_t f = bh->resolvedFormat;
   uint32_t format;
   if (f == fmt::RGBA_8888 || f == fmt::RGBX_8888) {
@@ -439,55 +393,75 @@ void BridgeDisplay::present(const FrameInput& frame) {
     mWarnedFormat = true;
     return;
   }
-  if (ct && ct->buffer == buffer && !waitFence(ct->acquireFence.get(), 1000))
+  if (!waitFence(ct->acquireFence.get(), 1000)) {
     LOGW("bridge: client target fence timeout");
-  src += bh->planes[0].offset.get();
-  const uint32_t srcStride = bh->planes[0].stride;
+    return;
+  }
+  const int64_t acquired = bench ? nowNs() : 0;
   const uint32_t w = bh->width, h = bh->height;
   if (w == 0 || h == 0 || !b->connected()) return;
 
-  if (w != mPool.width || h != mPool.height || format != mPool.format) {
-    Pool np;
-    if (!makePool(w, h, format, &np)) {
-      LOGE("bridge: display %u: no %ux%u buffers", mId, w, h);
-      return;
-    }
-    std::lock_guard lock(b->mutex);
-    freePool(mPool, /*tellBridge=*/true);
-    mPool = std::move(np);
-    mLast = -1;
-  }
-
-  int idx = -1;
+  const uint64_t source = bh->bufferId.get();
   uint32_t id = 0;
   {
     std::lock_guard lock(b->mutex);
-    mFrames++;
-    for (size_t i = 0; i < mPool.bufs.size(); i++) {
-      if (!mPool.bufs[i].busy && int(i) != mLast) {
-        idx = int(i);
-        break;
-      }
-    }
-    if (idx < 0) {
-      mDropped++;  // every buffer is still on screen or queued
+    // Keep fewer Wayland frames than the ImageReader's maxImages (3). A
+    // stalled/hidden compositor cannot exhaust its producer: excess frames
+    // are released without ever being handed to Wayland.
+    size_t pending = 0;
+    for (auto& [_, buf] : mBuffers) pending += buf.busy;
+    if (!shown() || pending >= kMaxPending) {
+      ++mDropped;
       return;
     }
-    mPool.bufs[size_t(idx)].busy = true;
-    id = mPool.bufs[size_t(idx)].id;
-  }
-  uint8_t* dst = mPool.bufs[size_t(idx)].map;
-  for (uint32_t y = 0; y < h; y++) {
-    memcpy(
-      dst + size_t(y) * mPool.stride, src + size_t(y) * srcStride, size_t(w) * 4
-    );
-  }
-  mLast = idx;
-  if (!b->send(message(kFrame, b->tag(), {mId, id, 0, 0, 0, 0}))) {
-    std::lock_guard lock(b->mutex);
-    mPool.bufs[size_t(idx)].busy = false;
+    auto it = mBuffers.find(source);
+    if (it == mBuffers.end()) {
+      // Resize and slot replacement retire old imports. Busy imports stay
+      // alive until wl_buffer.release; active ImageReader queues are small.
+      for (auto old = mBuffers.begin(); old != mBuffers.end();) {
+        if (mBuffers.size() >= 4 && !old->second.busy) {
+          b->send(message(kBufferRemove, b->tag(), {old->second.id}));
+          old = mBuffers.erase(old);
+        } else {
+          ++old;
+        }
+      }
+      id = b->nextBuffer.fetch_add(1);
+      auto m = message(
+        kBufferAdd, b->tag(),
+        {id, mId, w, h, format, bh->planes[0].stride,
+         uint32_t(bh->planes[0].offset.get())}
+      );
+      lxb_put_u64(&m, 0);  // allocator's modifier: LINEAR
+      if (!b->send(m, bh->fd)) return;
+      it = mBuffers.emplace(source, BridgeBuffer{id, buffer}).first;
+    }
+    id = it->second.id;
+    if (it->second.busy) return;
+    static std::atomic<uint32_t> sequence{1};
+    const uint64_t token = (uint64_t(getpid()) << 32) | sequence.fetch_add(1);
+    if (!buffer->setPresentationToken(token)) return;
+    it->second.token = token;
+    it->second.busy = true;
+    ++mFrames;
+    if (!b->send(message(kFrame, b->tag(), {mId, id, 0, 0, 0, 0}))) {
+      it->second.source->setPresentationToken(0);
+      it->second.busy = false;
+      releaseImage(it->second.token);
+    }
   }
   const int64_t now = nowNs();
+  if (bench) {
+    timespec cpuEnd{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuEnd);
+    LOGI(
+      "BENCH composer display=%u buffer=%u begin_ns=%lld acquired_ns=%lld "
+      "sent_ns=%lld cpu_ns=%lld",
+      mId, id, (long long)begin, (long long)acquired, (long long)now,
+      (long long)((cpuEnd.tv_sec - cpuStart.tv_sec) * 1000000000LL +
+                  cpuEnd.tv_nsec - cpuStart.tv_nsec)
+    );
+  }
   if (now - mLastLogNs > 60'000'000'000) {
     LOGI(
       "bridge: display %u: %llu frames, %llu dropped (all buffers busy), "

@@ -38,6 +38,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     /** Reader thread. */
     fun onHostEvent(e: HostEvent)
 
+    fun onImageReleased(display: Int, buffer: Long) {}
+
     /** A new connection (the bridge restarted), on a thread of its own. */
     fun onConnected() {}
   }
@@ -185,6 +187,12 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   }
 
   override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) {
+    if (type == IMAGE_RELEASE) {
+      val display = body.int
+      val buffer = body.long
+      listeners.forEach { it.onImageReleased(display, buffer) }
+      return
+    }
     val e =
       when (type) {
         INPUT -> {
@@ -295,6 +303,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603
+    private const val IMAGE_RELEASE = 0x4604
     private const val MAX_TEXT_INPUT_LINE = 480
     private const val MAX_KEY_TEXTS = 64
     private const val DISPLAY_PREFIX = "linuxapk:"

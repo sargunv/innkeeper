@@ -60,6 +60,7 @@ pub(crate) mod appearance;
 pub(crate) mod cursor;
 mod data_device;
 mod foreign;
+mod frames;
 mod policy;
 mod presentation;
 
@@ -108,7 +109,7 @@ struct Buf {
     height: u32,
     wl: Option<wl_buffer::WlBuffer>,
     /// Attached and not yet released by the compositor.
-    busy: bool,
+    frames: frames::Frames,
     bench_fd: Option<OwnedFd>,
     bench_offset: u64,
 }
@@ -131,6 +132,7 @@ struct Win {
     height: u32,
     scale120: u32,
     configured: bool,
+    mapped: bool,
     fullscreen: bool,
     constrained: bool,
     policy: Policy,
@@ -479,12 +481,13 @@ impl State {
 // ---- window handling --------------------------------------------------------------
 
 impl State {
-    fn release(&self, buffer: u32) {
+    fn release(&self, buffer: u32, invalid: bool) {
         if let Err(e) = self
             .events
-            .try_send(ty::RELEASE, &event::release(buffer), &[])
+            .try_send(ty::RELEASE, &event::release(buffer, invalid), &[])
         {
             crate::warn!("display: release of buffer {buffer} lost: {e}");
+            self.events.shutdown();
         }
     }
 
@@ -550,6 +553,7 @@ impl State {
                 height,
                 scale120: 120,
                 configured: false,
+                mapped: false,
                 fullscreen: false,
                 constrained: false,
                 policy: Policy::default(),
@@ -634,7 +638,7 @@ impl State {
                 width: b.width,
                 height: b.height,
                 wl: None,
-                busy: false,
+                frames: frames::Frames::default(),
                 bench_fd: if crate::bench::enabled() {
                     fd.try_clone().ok()
                 } else {
@@ -651,27 +655,38 @@ impl State {
     }
 
     fn remove_buffer(&mut self, id: u32) {
-        if let Some(b) = self.buffers.remove(&id)
-            && let Some(wl) = b.wl
-        {
-            wl.destroy();
+        if let Some(mut b) = self.buffers.remove(&id) {
+            for _ in 0..b.frames.release() {
+                self.release(id, true);
+            }
+            if let Some(wl) = b.wl {
+                wl.destroy();
+            }
         }
     }
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
         self.cursor_frame(id);
-        let ready = self
-            .buffers
-            .get(&buffer)
-            .is_some_and(|b| b.window == id && b.wl.is_some() && !b.busy);
         let configured = self.windows.get(&id).is_some_and(|w| w.configured);
-        if !ready || !configured {
-            // Not shown: hand the buffer straight back.
-            self.release(buffer);
+        let b = self.buffers.get_mut(&buffer);
+        let imported = b.as_ref().is_some_and(|b| b.wl.is_some());
+        let configured = configured && b.as_ref().is_none_or(|b| b.window == id);
+        match frames::Frames::submit(b.map(|b| &mut b.frames), imported, configured, damage) {
+            frames::Action::Release { invalid } => self.release(buffer, invalid),
+            frames::Action::Wait => {}
+            frames::Action::Present(damage) => self.present_frame(id, buffer, damage),
+        }
+    }
+
+    fn present_frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
+        if !self.windows.get(&id).is_some_and(|w| w.configured) {
+            let count = self.buffers.get_mut(&buffer).unwrap().frames.release();
+            for _ in 0..count {
+                self.release(buffer, false);
+            }
             return;
         }
         let b = self.buffers.get_mut(&buffer).unwrap();
-        b.busy = true;
         let (bw, bh) = (b.width, b.height);
         let wl = b.wl.clone().unwrap();
         let w = self.windows.get_mut(&id).unwrap();
@@ -740,6 +755,12 @@ impl State {
                 color.map_or(-1, i64::from)
             ));
         }
+        if first {
+            surface.frame(
+                &self.qh,
+                sctk::compositor::FrameCallbackData(surface.clone()),
+            );
+        }
         surface.commit();
         if first {
             // Mapped now: the launch's token can focus it.
@@ -747,7 +768,6 @@ impl State {
                 a.activate(t, &surface);
             }
             crate::info!("display: window {id} shows its first frame");
-            self.hub.first_frame(id);
         }
     }
 
@@ -1039,7 +1059,23 @@ impl CompositorHandler for State {
         _: wl_output::Transform,
     ) {
     }
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        if let Some(w) = self
+            .windows
+            .values_mut()
+            .find(|w| w.window.wl_surface() == surface)
+            && !w.mapped
+        {
+            w.mapped = true;
+            self.hub.first_frame(w.id);
+        }
+    }
     fn surface_enter(
         &mut self,
         _: &Connection,
@@ -1129,7 +1165,13 @@ impl DmabufHandler for State {
         // Re-home the buffer's events on our own user data (release).
         let _ = qh;
         match self.buffers.get_mut(&id) {
-            Some(b) => b.wl = Some(buffer),
+            Some(b) => {
+                b.wl = Some(buffer);
+                if let Some(damage) = b.frames.imported() {
+                    let window = b.window;
+                    self.present_frame(window, id, damage);
+                }
+            }
             None => buffer.destroy(),
         }
     }
@@ -1142,7 +1184,11 @@ impl DmabufHandler for State {
         params.destroy();
         if let Some(id) = self.params.remove(&params.id()) {
             crate::warn!("display: the compositor refused dma-buf {id}");
-            self.buffers.remove(&id);
+            if let Some(mut b) = self.buffers.remove(&id) {
+                for _ in 0..b.frames.release() {
+                    self.release(id, true);
+                }
+            }
         }
     }
     fn released(&mut self, _: &Connection, _: &QueueHandle<Self>, buffer: &wl_buffer::WlBuffer) {
@@ -1153,10 +1199,11 @@ impl DmabufHandler for State {
             .map(|(k, _)| *k);
         if let Some(id) = id
             && let Some(b) = self.buffers.get_mut(&id)
-            && b.busy
         {
-            b.busy = false;
-            self.release(id);
+            let count = b.frames.release();
+            for _ in 0..count {
+                self.release(id, false);
+            }
         }
     }
 }

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "linuxapk-hwc"
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
+
 #include "Display.h"
 
+#include "GpuCopy.h"
+#include "Properties.h"
 #include "linuxapk/log.h"
 
 namespace linuxapk::hwc {
@@ -47,6 +52,7 @@ Error Display::setClientTarget(const c3::Buffer& buffer) {
   Error e = mClientTargetSlots.update(buffer, &b);
   if (e != Error::None) return e;
   mClientTarget.buffer = std::move(b);
+  mClientTargetUpdated = true;
   mClientTarget.acquireFence.reset(
     buffer.fence.get() >= 0 ? dupFd(buffer.fence.get()) : -1
   );
@@ -54,12 +60,16 @@ Error Display::setClientTarget(const c3::Buffer& buffer) {
 }
 
 Error Display::setOutputBuffer(const c3::Buffer& buffer) {
-  // The release fence only matters to a composer that writes the output
-  // buffer. Content layers are CLIENT, so SurfaceFlinger renders into this
-  // buffer (it is also the client target) and we only read it.
+  // GPU-only composition already rendered the sink. Mixed composition uses
+  // scratch storage, which we blit into this buffer after its fence signals.
   BufferPtr b;
   Error e = mOutputSlots.update(buffer, &b);
-  if (e == Error::None) mOutputBuffer = std::move(b);
+  if (e == Error::None) {
+    mOutputBuffer = std::move(b);
+    mOutputAcquireFence.reset(
+      buffer.fence.get() >= 0 ? dupFd(buffer.fence.get()) : -1
+    );
+  }
   return e;
 }
 
@@ -87,6 +97,10 @@ void Display::setColorTransform(const std::vector<float>&) {
 }
 
 Error Display::validate(std::optional<c3::ChangedCompositionTypes>* changes) {
+  if (mVirtual && getProperty("vendor.linuxapk.hwc.bench") == "1")
+    LOGI(
+      "BENCH validate display=%lld ns=%lld", (long long)mId, (long long)nowNs()
+    );
   mPendingChanges.clear();
   for (auto& [id, l] : mLayers) {
     if (
@@ -131,6 +145,11 @@ Error Display::present() {
   if (mState == State::NeedAccept)
     acceptChanges();  // SF may present right after validate
   mState = State::NeedValidate;
+  const bool bench =
+    mVirtual && getProperty("vendor.linuxapk.hwc.bench") == "1";
+  timespec cpuStart{};
+  if (bench) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
+  const int64_t begin = bench ? nowNs() : 0;
   CursorState* cursor = nullptr;
   for (auto& [id, l] : mLayers) {
     if (
@@ -139,8 +158,49 @@ Error Display::present() {
     )
       cursor = &l.cursor;
   }
+  ClientTargetState sink;
+  ClientTargetState* target = &mClientTarget;
+  bool sinkReady = mVirtual && mClientTargetUpdated && mOutputBuffer &&
+                   mOutputBuffer->info() && mClientTarget.buffer &&
+                   mClientTarget.buffer->info();
+  if (
+    sinkReady && mClientTarget.buffer->info()->bufferId.get() !=
+                   mOutputBuffer->info()->bufferId.get()
+  ) {
+    sinkReady = waitFence(mClientTarget.acquireFence.get(), 1000) &&
+                waitFence(mOutputAcquireFence.get(), 1000) &&
+                mGpuCopy.copy(*mClientTarget.buffer, *mOutputBuffer);
+    if (sinkReady) {
+      sink.buffer = mOutputBuffer;
+      target = &sink;
+    }
+  }
   if (mPower == c3::PowerMode::ON)
-    mPresenter->present({mId, &mClientTarget, mOutputBuffer, cursor});
+    mPresenter->present(
+      {mId, target, mOutputBuffer, cursor,
+       mVirtual ? sinkReady : mClientTargetUpdated}
+    );
+  mPresentFence.reset();
+  if (sinkReady) {
+    dma_buf_export_sync_file fence{.flags = DMA_BUF_SYNC_READ, .fd = -1};
+    if (
+      ioctl(
+        mOutputBuffer->info()->fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &fence
+      ) == 0
+    )
+      mPresentFence.reset(fence.fd);
+  }
+  mClientTargetUpdated = false;
+  if (bench) {
+    timespec cpuEnd{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuEnd);
+    LOGI(
+      "BENCH hwc display=%lld begin_ns=%lld end_ns=%lld cpu_ns=%lld",
+      (long long)mId, (long long)begin, (long long)nowNs(),
+      (long long)((cpuEnd.tv_sec - cpuStart.tv_sec) * 1000000000LL +
+                  cpuEnd.tv_nsec - cpuStart.tv_nsec)
+    );
+  }
   return Error::None;
 }
 

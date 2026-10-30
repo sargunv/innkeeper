@@ -312,6 +312,15 @@ impl Hub {
         *repeat = Some(l);
     }
 
+    pub fn image_released(&self, window: u32, token: u64) {
+        self.clients.broadcast(
+            ty::IMAGE_RELEASE,
+            &event::image_released(window, token),
+            &[],
+            None,
+        );
+    }
+
     /// One input line to every input connection.
     pub fn input(&self, line: &str) {
         self.clients

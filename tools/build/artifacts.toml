@@ -40,6 +40,7 @@ artifacts = [
   "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk",
   "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk",
   "share/linuxapk/android/vendor/lib64/hw/mapper.linuxapk.so",
+  "share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/lib/x86_64/libframe_sink.so",
 ]
 
 [module.health]

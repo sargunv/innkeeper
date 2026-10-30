@@ -137,10 +137,10 @@ can avoid our final frame copy, and its distinct Android uids retain file and
 process isolation. Kernel binder also avoids our broker's emulation overhead.
 Those are real advantages; its privileged service, image mounts and host network
 setup are the installation cost. Our virtual displays avoid framework patches
-for extracting task layers, but have different system-dialog behavior and
-currently copy frames to preserve buffer ownership ([display.md](display.md)).
-Our shared session amortizes Android's services across apps; Lepton's separate
-game instances give each game its own lifecycle and state.
+for extracting task layers, but have different system-dialog behavior and retain
+ImageReader buffers until host release ([display.md](display.md)). Our shared
+session amortizes Android's services across apps; Lepton's separate game
+instances give each game its own lifecycle and state.
 
 Halium and libhybris solve the inverse hardware problem: running a Linux
 distribution on devices whose usable drivers target Android. libhybris loads
