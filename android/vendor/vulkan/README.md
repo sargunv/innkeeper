@@ -11,8 +11,15 @@ every process that uses Vulkan. GLES comes from the image's ANGLE on top
 - **One self-contained `.so` per driver.** libdrm, zlib, LLVM (lavapipe only;
   RADV uses ACO) and libc++ are linked statically; `DT_NEEDED` is LL-NDK only
   and the only export is `HMI`. `build.sh` checks both.
-- **Driver choice:** the launcher sets `ro.hardware.vulkan=radv` when the render
-  node's kernel driver is amdgpu, else `lvp`.
+- **Driver choice:** the launcher scans every `/sys/class/drm/renderD*` and
+  selects the first amdgpu node (RADV), else lavapipe. `LINUXAPK_VULKAN=lvp`
+  forces software rendering. The choice is saved in session.conf: the broker
+  permits Android to open only that DRM device, so Mesa and the composer's ANGLE
+  use the same GPU. Gralloc allocates udmabuf buffers for their imports.
+  Flatpak's existing DRM grant to the desktop bridge stays the same.
+- **Features:** the launcher writes Vulkan permission XMLs into the runtime
+  layer alongside `ro.hardware.vulkan`: Vulkan 1.3, compute level 0, and
+  hardware level 1 for RADV or 0 for lavapipe.
 - **`-Dandroid-strict=false`** on purpose: strict mode caps the drivers at
   Vulkan 1.1 and the CTS extension allowlist. Both report Vulkan 1.4.
 - **What the drivers need from the gralloc:** IMapper v5 metadata

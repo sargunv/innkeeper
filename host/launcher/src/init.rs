@@ -14,7 +14,11 @@ pub fn command(cfg: &Config, root: &Path, extra: &[(&str, String)]) -> Command {
         .env("PATH", "/system/bin:/system/xbin:/vendor/bin")
         // Absolute: a bare name is not found from APEX linker namespaces.
         .env("LD_PRELOAD", "/system/lib64/liblinuxapk_shim.so")
-        .env("LINUXAPK_BROKER", "/system/bin/linuxapk-broker");
+        .env("LINUXAPK_BROKER", "/system/bin/linuxapk-broker")
+        .env(
+            "LINUXAPK_RENDER_NODE",
+            cfg.render_node.as_deref().unwrap_or(Path::new("")),
+        );
     if let Some(d) = &cfg.broker_debug {
         c.env("LINUXAPK_BROKER_DEBUG", d);
     }

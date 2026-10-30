@@ -3,7 +3,7 @@
 # x86_64, cross-built with the NDK pin in the build container
 # (tools/container/run.sh), into out/build/vulkan/install:
 #   share/linuxapk/android/vendor/lib64/hw/vulkan.{radv,lvp}.so
-#   share/linuxapk/android/vendor/etc/{libdrm/amdgpu.ids,permissions/*.xml}
+#   share/linuxapk/android/vendor/etc/libdrm/amdgpu.ids
 #   share/linuxapk/props.d/vulkan.prop
 # and the test programs tests/run.sh runs (out/build/vulkan/{test,test-vendor}).
 # Skipped when its inputs (this directory, the container, the toolchain pin)
@@ -253,9 +253,8 @@ check_elf() {
   return $bad
 }
 
-# The Vulkan feature XMLs, and the graphics properties for the launcher.
+# Graphics properties for the launcher; feature XMLs are written at start.
 install_etc() {
-  install -D -m644 -t "$vendor/etc/permissions" "$here"/etc/permissions/*.xml
   install -D -m644 -t "$work/install/share/linuxapk/props.d" "$here/etc/vulkan.prop"
 }
 

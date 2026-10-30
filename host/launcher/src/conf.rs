@@ -16,6 +16,9 @@ use crate::sys;
 pub struct Config {
     /// No windows (tests): the composer's headless backend.
     pub headless: bool,
+    /// The only DRM render node Android may open; None selects lavapipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_node: Option<PathBuf>,
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland: Option<PathBuf>,
@@ -40,6 +43,11 @@ impl Config {
     pub fn new(paths: Paths, image: Image, headless: bool, wayland: Option<PathBuf>) -> Self {
         let mut c = Config {
             headless,
+            render_node: if env::var("LINUXAPK_VULKAN").as_deref() == Ok("lvp") {
+                None
+            } else {
+                crate::graphics::select_node(Path::new("/sys/class/drm"), Path::new("/dev/dri"))
+            },
             wayland,
             idle_grace: crate::lifecycle::grace_secs(headless),
             start_env: crate::lifecycle::start_env(),
