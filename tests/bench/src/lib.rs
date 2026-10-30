@@ -2,6 +2,10 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+pub fn default_max_load(logical_cpus: usize) -> f64 {
+    (logical_cpus as f64 * 0.5).max(1.0)
+}
+
 pub fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.split_whitespace()
         .find_map(|s| s.strip_prefix(&format!("{key}=")))
@@ -145,6 +149,14 @@ pub fn binder(log: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn load_limit_scales_with_cpu_capacity() {
+        assert_eq!(default_max_load(32), 16.0);
+        assert_eq!(default_max_load(4), 2.0);
+        assert_eq!(default_max_load(2), 1.0);
+        assert_eq!(default_max_load(1), 1.0);
+    }
+
     #[test]
     fn percentiles_and_histogram() {
         let s = stats(&[50.0, 1.0, 4.0, 4.0, f64::NAN, -1.0]);
