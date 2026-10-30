@@ -76,6 +76,12 @@ impl Service for InputService {
                 status(self.hub.request(r))
             }
             Request::WindowActivate { window, token } => status(self.hub.activate(window, token)),
+            Request::WindowToken { window } => {
+                let token = self.hub.activation_token(window).unwrap_or_default();
+                let mut w = crate::ipc::wire::Writer::default();
+                w.name(&token);
+                Reply::with_body(w.into_vec())
+            }
             Request::WindowMinimize { window } => status(self.hub.minimize(window)),
             Request::WindowDestroy { window } => {
                 self.hub.destroy(window);

@@ -15,6 +15,7 @@ import dev.linuxapk.system.Feature
 import dev.linuxapk.system.LinuxApkSystemApp
 import dev.linuxapk.system.SystemProps
 import dev.linuxapk.system.bridge.BridgeConnection
+import dev.linuxapk.system.bridge.Wire
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
@@ -115,6 +116,16 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   /** Focuses a shown window, with the launch's activation [token] if there is one. */
   fun activateWindow(window: Int, token: String = "") =
     connection.send(WINDOW_ACTIVATE) { u32(window).name(token) }
+
+  /** Requests activation authority from the caller's surface before its new task moves away. */
+  fun activationToken(source: Int): String {
+    val r = connection.call(WINDOW_TOKEN, timeoutMs = 1500) { u32(source) } ?: return ""
+    return try {
+      if (r.ok) Wire.name(r.body) else ""
+    } finally {
+      r.closeFds()
+    }
+  }
 
   fun windowPolicy(window: Int, orientation: Int, fullscreen: Boolean, immersive: Boolean) =
     connection.send(WINDOW_POLICY) {
@@ -264,6 +275,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val WINDOW_POLICY = 0x0605
     private const val WINDOW_APPEARANCE = 0x0606
     private const val WINDOW_MINIMIZE = 0x0607
+    private const val WINDOW_TOKEN = 0x060c
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603

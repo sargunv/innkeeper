@@ -126,7 +126,10 @@ not constrain the host pointer.
   the package of its top activity. A start without `NEW_TASK` stays in that task
   and window. A new task on an occupied app display gets a VirtualDisplay of its
   own, including a second task of the same package; all its windows share the
-  package's `app_id`. A desktop launch restores the package's most recent task.
+  package's `app_id`. Before moving a new task off its caller's display, the
+  bridge requests an `xdg_activation_v1` token from the caller's surface and
+  uses it when the new window first maps. A desktop launch restores the
+  package's most recent task.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
   recents, dream and assistant tasks stay.
