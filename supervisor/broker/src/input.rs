@@ -36,17 +36,16 @@ pub fn event(micros: i64, ty: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
 struct Client {
     device: u32,
     peer: OwnedFd,
-    /// Keep the installed endpoint alive for its inode identity. A peer with
-    /// no Android references is detected by comparing its installed /proc fd.
-    endpoint: OwnedFd,
+    /// Remember the installed socket's identity without retaining its endpoint:
+    /// the peer must receive POLLHUP when Android closes the last reference.
+    identity: std::path::PathBuf,
     pid: u32,
     fd: i32,
 }
 impl Client {
     fn live(&self) -> bool {
         let link = std::fs::read_link(format!("/proc/{}/fd/{}", self.pid, self.fd));
-        let ours = std::fs::read_link(format!("/proc/self/fd/{}", self.endpoint.as_raw_fd()));
-        link.is_ok() && link.ok() == ours.ok()
+        link.as_ref().ok() == Some(&self.identity)
     }
 
     fn deliver(&self, packet: &[u8]) -> std::io::Result<()> {
@@ -88,7 +87,7 @@ impl Client {
                         revents: 0,
                     };
                     // Recheck the installed fd when a reader closes without
-                    // draining: we retain its endpoint for ioctl identity.
+                    // draining, including closure of its installed fd.
                     let n = unsafe { libc::poll(&mut poll, 1, 100) };
                     if n < 0
                         && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
@@ -109,6 +108,7 @@ struct Pad {
 }
 
 struct Devices {
+    wake: Option<UnixDatagram>,
     clients: Vec<Arc<Client>>,
     keys: HashMap<u32, [u8; 96]>,
     leds: [u8; 8],
@@ -318,6 +318,7 @@ fn receive(socket: &UnixDatagram, bytes: &mut [u8]) -> std::io::Result<(usize, O
 impl Default for Devices {
     fn default() -> Self {
         Self {
+            wake: None,
             clients: Vec::new(),
             keys: HashMap::from([(KEYBOARD, [0; 96])]),
             leds: [0; 8],
@@ -327,10 +328,18 @@ impl Default for Devices {
 }
 
 impl Devices {
+    fn changed(&self) {
+        if let Some(wake) = &self.wake {
+            // Nonblocking: an already queued notification also wakes the poll.
+            let _ = wake.send(&[1]);
+        }
+    }
+
     fn remove(&mut self, device: u32, dir: &std::path::Path) {
         self.keys.remove(&device);
         self.pads.remove(&device);
         self.clients.retain(|c| c.device != device);
+        self.changed();
         let _ = std::fs::remove_file(dir.join(format!("linuxapk-event{device}")));
     }
 }
@@ -389,9 +398,41 @@ fn reap_closed_clients(state: &mut Devices) {
             .get_mut(&client.device)
             .and_then(|p| p.feedback.as_mut())
         {
-            feedback.close_client(client.endpoint.as_raw_fd());
+            feedback.close_client(client.peer.as_raw_fd());
         }
     }
+}
+
+// New opens/removals wake the snapshot poll; writes and final closes wake
+// directly on the peer. There is no timer when Android has no input work.
+fn wait_for_writes(devices: &Mutex<Devices>, wake: &UnixDatagram) -> std::io::Result<()> {
+    let clients = devices.lock().unwrap().clients.clone();
+    let mut polls: Vec<_> = std::iter::once(wake.as_raw_fd())
+        .chain(clients.iter().map(|c| c.peer.as_raw_fd()))
+        .map(|fd| libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        })
+        .collect();
+    if unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as _, -1) } < 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.kind() == std::io::ErrorKind::Interrupted {
+            Ok(())
+        } else {
+            Err(error)
+        };
+    }
+    while wake.recv(&mut [0]).is_ok() {}
+    let mut state = devices.lock().unwrap();
+    reap_closed_clients(&mut state);
+    for (client, poll) in clients.iter().zip(&polls[1..]) {
+        if poll.revents & libc::POLLIN != 0 && state.clients.iter().any(|c| Arc::ptr_eq(c, client))
+        {
+            drain_writes(client, &mut state);
+        }
+    }
+    Ok(())
 }
 
 fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Path) {
@@ -402,6 +443,7 @@ fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Pat
         // EventHub caches an effect ID for its open. Reopen after replacing the
         // host fd, whose RAII owner has erased and forgotten the old effects.
         state.clients.retain(|c| c.device != device);
+        state.changed();
         let _ = std::fs::remove_file(&path);
     }
     if new || replaced {
@@ -432,34 +474,15 @@ impl Input {
         let path = "/dev/socket/linuxapk/evdev.sock";
         let _ = std::fs::remove_file(path);
         let socket = UnixDatagram::bind(path).ok()?;
-        let devices = Arc::new(Mutex::new(Devices::default()));
+        let (wake, changed) = UnixDatagram::pair().ok()?;
+        wake.set_nonblocking(true).ok()?;
+        changed.set_nonblocking(true).ok()?;
+        let devices = Arc::new(Mutex::new(Devices {
+            wake: Some(changed),
+            ..Devices::default()
+        }));
         let writes = Arc::clone(&devices);
-        std::thread::spawn(move || {
-            loop {
-                let clients = writes.lock().unwrap().clients.clone();
-                let mut polls: Vec<_> = clients
-                    .iter()
-                    .map(|c| libc::pollfd {
-                        fd: c.peer.as_raw_fd(),
-                        events: libc::POLLIN,
-                        revents: 0,
-                    })
-                    .collect();
-                unsafe {
-                    libc::poll(polls.as_mut_ptr(), polls.len() as _, 10);
-                }
-                let mut state = writes.lock().unwrap();
-                reap_closed_clients(&mut state);
-                for (client, poll) in clients.iter().zip(polls) {
-                    if poll.revents & libc::POLLIN == 0
-                        || !state.clients.iter().any(|c| Arc::ptr_eq(c, client))
-                    {
-                        continue;
-                    }
-                    drain_writes(client, &mut state);
-                }
-            }
-        });
+        std::thread::spawn(move || while wait_for_writes(&writes, &wake).is_ok() {});
         let state = Arc::clone(&devices);
         std::thread::spawn(move || {
             let mut buf = [0; 4 + 64 * EVENT_SIZE];
@@ -640,17 +663,7 @@ impl Input {
                 return false;
             };
             let mut state = self.devices.lock().unwrap();
-            let Some(c) = state
-                .clients
-                .iter()
-                .find(|c| {
-                    std::fs::read_link(format!("/proc/self/fd/{}", c.endpoint.as_raw_fd()))
-                        .ok()
-                        .as_ref()
-                        == Some(&link)
-                })
-                .cloned()
-            else {
+            let Some(c) = state.clients.iter().find(|c| c.identity == link).cloned() else {
                 return false;
             };
             let Some(mem) = open_mem(req.pid as i32) else {
@@ -686,7 +699,7 @@ impl Input {
                                     return Err(libc::EINVAL);
                                 }
                                 let val = feedback.ioctl(
-                                    c.endpoint.as_raw_fd(),
+                                    c.peer.as_raw_fd(),
                                     cmd,
                                     &mut data,
                                     req.data.args[2],
@@ -753,10 +766,12 @@ impl Input {
             state.clients.push(Arc::new(Client {
                 device,
                 peer,
-                endpoint,
+                identity: std::fs::read_link(format!("/proc/self/fd/{}", endpoint.as_raw_fd()))
+                    .expect("installed input socket"),
                 pid: req.pid,
                 fd,
             }));
+            state.changed();
         }
         true
     }
@@ -783,11 +798,52 @@ mod tests {
         let client = Client {
             device,
             peer: unsafe { OwnedFd::from_raw_fd(fds[1]) },
-            endpoint: reader.try_clone().unwrap(),
+            identity: std::fs::read_link(format!("/proc/self/fd/{}", reader.as_raw_fd())).unwrap(),
             pid: std::process::id(),
             fd: reader.as_raw_fd(),
         };
         (client, reader)
+    }
+
+    #[test]
+    fn idle_input_waits_for_new_clients_writes_and_final_close() {
+        let (wake, changed) = UnixDatagram::pair().unwrap();
+        wake.set_nonblocking(true).unwrap();
+        changed.set_nonblocking(true).unwrap();
+        let state = Arc::new(Mutex::new(Devices {
+            wake: Some(changed),
+            ..Devices::default()
+        }));
+        let shared = Arc::clone(&state);
+        let (done, completed) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..3 {
+                wait_for_writes(&shared, &wake).unwrap();
+                done.send(()).unwrap();
+            }
+        });
+        let idle = std::time::Duration::from_millis(50);
+        let deadline = std::time::Duration::from_secs(1);
+        assert!(completed.recv_timeout(idle).is_err());
+        let (client, reader) = client(KEYBOARD);
+        {
+            let mut state = state.lock().unwrap();
+            state.clients.push(Arc::new(client));
+            state.changed();
+        }
+        completed.recv_timeout(deadline).unwrap();
+        assert!(completed.recv_timeout(idle).is_err());
+        let packet = event(0, 17, 0, 1); // keyboard LED write
+        assert_eq!(
+            unsafe { libc::send(reader.as_raw_fd(), packet.as_ptr().cast(), packet.len(), 0) },
+            packet.len() as isize
+        );
+        completed.recv_timeout(deadline).unwrap();
+        assert_eq!(state.lock().unwrap().leds[0], 1);
+        drop(reader);
+        completed.recv_timeout(deadline).unwrap();
+        assert!(state.lock().unwrap().clients.is_empty());
+        worker.join().unwrap();
     }
 
     fn receive(fd: &OwnedFd) -> Vec<u8> {
@@ -895,7 +951,7 @@ mod tests {
         effect[..2].copy_from_slice(&0x50u16.to_le_bytes());
         effect[2..4].copy_from_slice(&(-1i16).to_le_bytes());
         assert_eq!(
-            feedback.ioctl(client.endpoint.as_raw_fd(), 0x40304580, &mut effect, 0),
+            feedback.ioctl(client.peer.as_raw_fd(), 0x40304580, &mut effect, 0),
             Ok(0)
         );
     }
