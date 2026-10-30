@@ -109,17 +109,25 @@ pub fn begin_boot(data: &Path, image: &Image, linuxapk: &Path) -> Result<()> {
     if let Some(state) = &previous {
         state.check(data, &current)?;
     }
+    let record_attempt = previous
+        .as_ref()
+        .is_none_or(|s| s.started != current || s.booted.as_ref() != Some(&current));
     let mut state = DataVersion {
         started: current.clone(),
         booted: previous.and_then(|s| s.booted),
     };
     fs::create_dir_all(data)?;
-    let tmp = data.join(format!("{DATA_VERSION}.next"));
-    let mut f = fs::File::create(&tmp)?;
-    f.write_all(toml::to_string(&state)?.as_bytes())?;
-    f.sync_all()?;
-    fs::rename(tmp, data.join(DATA_VERSION))?;
-    fs::File::open(data)?.sync_all()?;
+    // A completed boot of this framework already has a durable attempt.
+    // An interrupted attempt may have stopped between rename and directory
+    // sync, so retries must reestablish durability before Android runs.
+    if record_attempt {
+        let tmp = data.join(format!("{DATA_VERSION}.next"));
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(toml::to_string(&state)?.as_bytes())?;
+        f.sync_all()?;
+        fs::rename(tmp, data.join(DATA_VERSION))?;
+        fs::File::open(data)?.sync_all()?;
+    }
     state.booted = Some(current);
     fs::write(
         linuxapk.join("data-version-booted"),
@@ -250,6 +258,7 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::MetadataExt;
 
     fn framework(sdk: u32, build: u64) -> Framework {
         Framework {
@@ -319,6 +328,18 @@ mod tests {
             linuxapk.join("data-version-booted"),
             data.join(DATA_VERSION),
         )?;
+        // A cached restart already has a durable attempt for this framework.
+        // Keep the original inode open so inode reuse cannot hide a rewrite.
+        let record = fs::File::open(data.join(DATA_VERSION))?;
+        begin_boot(&data, &image, &linuxapk)?;
+        assert_eq!(
+            fs::metadata(data.join(DATA_VERSION))?.ino(),
+            record.metadata()?.ino()
+        );
+        assert_eq!(
+            DataVersion::load(&data)?.unwrap().booted,
+            Some(framework(37, 9))
+        );
         fs::write(data.join("app-data"), b"preserve me")?;
         image.name = "ci-10".into();
         fs::write(
@@ -330,7 +351,16 @@ mod tests {
             DataVersion::load(&data)?.unwrap().booted,
             Some(framework(37, 9))
         );
+        let record = fs::File::open(data.join(DATA_VERSION))?;
         begin_boot(&data, &image, &linuxapk)?; // Retry an interrupted upgrade.
+        assert_ne!(
+            fs::metadata(data.join(DATA_VERSION))?.ino(),
+            record.metadata()?.ino()
+        );
+        assert_eq!(
+            DataVersion::load(&data)?.unwrap().booted,
+            Some(framework(37, 9))
+        );
         fs::copy(
             linuxapk.join("data-version-booted"),
             data.join(DATA_VERSION),
