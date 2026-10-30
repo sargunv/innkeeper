@@ -89,7 +89,7 @@ impl Appearance {
                     ((argb >> 8) & 255) as f64 / 255.,
                     (argb & 255) as f64 / 255.,
                 ];
-                bg = mix(bg, caption, 0.18);
+                bg = caption_tint(bg, caption);
             }
             let foreground = if contrast(bg, [0.; 3]) > contrast(bg, [1.; 3]) {
                 [0.; 3]
@@ -135,6 +135,17 @@ fn rgb(color: Color) -> [f64; 3] {
 }
 fn mix(a: [f64; 3], b: [f64; 3], amount: f64) -> [f64; 3] {
     std::array::from_fn(|i| a[i] * (1. - amount) + b[i] * amount)
+}
+fn caption_tint(base: [f64; 3], caption: [f64; 3]) -> [f64; 3] {
+    // Keep every sRGB channel within three 8-bit levels of Adwaita. Bounding
+    // channels keeps both lightness and saturation subtle, even for opposite
+    // schemes or saturated captions; scaling the blend preserves the hue.
+    let distance = base
+        .into_iter()
+        .zip(caption)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0., f64::max);
+    mix(base, caption, 0.18_f64.min((3. / 255.) / distance))
 }
 fn luminance(rgb: [f64; 3]) -> f64 {
     let linear = |v: f64| {
@@ -239,6 +250,40 @@ mod tests {
         w.0.push(0);
         assert!(decode_icon(&w.0).is_err());
         assert!(decode_icon(&[1, 1, 1, 0]).is_err()); // width 257
+    }
+
+    #[test]
+    fn caption_tint_stays_close_to_adwaita_in_both_schemes() {
+        for dark in [false, true] {
+            let appearance = Appearance {
+                dark,
+                ..Appearance::default()
+            };
+            let base = appearance.config(0).theme;
+            // Dark toolbar on light, light toolbar on dark, and saturated hues.
+            for caption in [
+                0xff1c1b1f, 0xff000000, 0xffffffff, 0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffff00,
+                0xffff00ff,
+            ] {
+                let tinted = appearance.config(caption).theme;
+                for (base, tinted) in [
+                    (base.active.headerbar, tinted.active.headerbar),
+                    (base.inactive.headerbar, tinted.inactive.headerbar),
+                ] {
+                    let (base, tinted) = (rgb(base), rgb(tinted));
+                    for (base, tinted) in base.into_iter().zip(tinted) {
+                        assert!(
+                            (base - tinted).abs() <= 3. / 255. + 1e-7,
+                            "dark={dark} caption={caption:x}: {base} -> {tinted}"
+                        );
+                    }
+                    assert_ne!(base, tinted, "retain a subtle caption tint");
+                    if caption == 0xffff0000 {
+                        assert!(tinted[0] > tinted[1] && tinted[0] > tinted[2]);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
