@@ -4,7 +4,9 @@
 //!
 //! Linux.apk changes for upstream sync: buttons.rs adds and draws Back and Fullscreen;
 //! pointer.rs tracks completed custom button clicks; on_frame_click returns them alongside
-//! SCTK window actions. The bridge still uses upstream resize/menu/fullscreen code.
+//! SCTK window actions. Header metrics, symbolic controls, states and shadows match
+//! Adwaita; fullscreen reveal animates the header without altering its title.
+//! The bridge supplies live portal appearance and button-layout settings.
 //! ab_glyph_renderer.rs uses the system font without the bundled binary fallback;
 //! only the default ab_glyph renderer is kept. No fonts or snapshot fixtures are
 //! vendored. Upstream rendering snapshot tests are omitted; our button behaviour
@@ -26,7 +28,7 @@ use std::error::Error;
 use std::mem;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tiny_skia::{
     Color, FillRule, Mask, Path, PathBuilder, Pixmap, PixmapMut, PixmapPaint, Point, Rect,
@@ -49,7 +51,6 @@ use smithay_client_toolkit::subcompositor::SubcompositorState;
 use smithay_client_toolkit::subcompositor::SubsurfaceData;
 
 mod buttons;
-mod config;
 mod parts;
 mod pointer;
 mod shadow;
@@ -58,10 +59,9 @@ mod title;
 mod wl_typed;
 
 use crate::parts::{LayoutConfig, PartId};
-use crate::theme::{ColorMap, ColorTheme, CORNER_RADIUS, HEADER_SIZE, RESIZE_HANDLE_CORNER_SIZE};
+use crate::theme::{ColorMap, ColorTheme, CORNER_RADIUS, HEADER_SIZE};
 
 use buttons::Buttons;
-use config::get_button_layout_config;
 use parts::DecorationParts;
 use pointer::{Location, MouseState};
 use shadow::Shadow;
@@ -124,6 +124,9 @@ pub struct AdwaitaFrame<State> {
     hide_titlebar: bool,
     hide_border: bool,
     fullscreen_revealed: bool,
+    reveal_started: Option<Instant>,
+    fullscreen_label: Option<TitleText>,
+    button_layout: Option<String>,
 
     width: NonZeroU32,
     height: NonZeroU32,
@@ -166,7 +169,7 @@ where
             title: None,
             title_text: TitleText::new(theme.active.font_color),
             theme,
-            buttons: Buttons::new(get_button_layout_config()),
+            buttons: Buttons::new(frame_config.button_layout.clone()),
             mouse: Default::default(),
             state: WindowState::empty(),
             wm_capabilities: WindowManagerCapabilities::all(),
@@ -175,18 +178,49 @@ where
             hide_titlebar: frame_config.hide_titlebar,
             hide_border: frame_config.hide_border,
             fullscreen_revealed: false,
+            reveal_started: None,
+            fullscreen_label: TitleText::new(theme::Color::BLACK),
+            button_layout: frame_config.button_layout,
             width: NonZeroU32::MIN,
             height: NonZeroU32::MIN,
         })
     }
 
-    /// Handle the app button before delegating normal window actions to SCTK.
-    pub fn on_frame_click(&mut self, timestamp: Duration, click: FrameClick, pressed: bool) -> Option<Action> {
-        if self.is_hidden() { return None; }
-        if matches!(click, FrameClick::Normal) {
-            if let Some(action) = self.mouse.button_click(pressed) { return Some(action); }
+    /// Tick only while a revealed header is sliding; the caller sleeps when idle.
+    pub fn animate(&mut self) {
+        if let Some(started) = self.reveal_started {
+            if started.elapsed() >= REVEAL_DURATION {
+                self.reveal_started = None;
+            }
+            self.dirty = true;
+            self.draw();
         }
-        if self.state.contains(WindowState::FULLSCREEN) && self.mouse.location == Location::Head {
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.reveal_started.is_some()
+    }
+
+    /// Handle the app button before delegating normal window actions to SCTK.
+    pub fn on_frame_click(
+        &mut self,
+        timestamp: Duration,
+        click: FrameClick,
+        pressed: bool,
+    ) -> Option<Action> {
+        if self.is_hidden() {
+            return None;
+        }
+        self.dirty = true;
+        let location = self.pointer_location(self.header_offset());
+        self.mouse.set_pressed(location, click, pressed);
+        self.redraw_inner();
+        if matches!(click, FrameClick::Normal) {
+            if let Some(action) = self.mouse.button_click(location, pressed) {
+                return Some(action);
+            }
+        }
+        if self.state.contains(WindowState::FULLSCREEN) && location == Location::Head {
             return None;
         }
         self.on_click(timestamp, click, pressed).map(Action::Window)
@@ -201,6 +235,18 @@ where
     /// Update the current frame config.
     pub fn set_config(&mut self, config: FrameConfig) {
         self.theme = config.theme;
+        if self.button_layout != config.button_layout {
+            self.button_layout = config.button_layout.clone();
+            self.buttons = Buttons::new(config.button_layout);
+            self.buttons.update_wm_capabilities(self.wm_capabilities);
+            self.buttons
+                .set_fullscreen(self.state.contains(WindowState::FULLSCREEN));
+            self.buttons.arrange(
+                self.width.get(),
+                get_margin_h_lp(&self.state, self.hide_border),
+            );
+            self.mouse.left();
+        }
         self.dirty = true;
 
         if self.hide_titlebar != config.hide_titlebar || self.hide_border != config.hide_border {
@@ -214,62 +260,23 @@ where
         }
     }
 
-    fn precise_location(
-        &self,
-        location: Location,
-        decoration: &DecorationParts,
-        x: f64,
-        y: f64,
-    ) -> Location {
-        let header_width = decoration.header().surface_rect.width;
-        let side_height = decoration.side_height();
+    fn header_offset(&self) -> i32 {
+        self.reveal_started
+            .map(|t| reveal_offset(t.elapsed()))
+            .unwrap_or(0)
+    }
 
-        let edge_size = theme::edge_size(self.hide_border);
-
-        let left_corner_x = edge_size + RESIZE_HANDLE_CORNER_SIZE;
-        let right_corner_x = (header_width + edge_size).saturating_sub(RESIZE_HANDLE_CORNER_SIZE);
-        let top_corner_y = RESIZE_HANDLE_CORNER_SIZE;
-        let bottom_corner_y = side_height.saturating_sub(RESIZE_HANDLE_CORNER_SIZE);
-        match location {
-            Location::Head | Location::Button(_) => self.buttons.find_button(x, y),
-            Location::Top | Location::TopLeft | Location::TopRight => {
-                if x <= f64::from(left_corner_x) {
-                    Location::TopLeft
-                } else if x >= f64::from(right_corner_x) {
-                    Location::TopRight
-                } else {
-                    Location::Top
-                }
-            }
-            Location::Bottom | Location::BottomLeft | Location::BottomRight => {
-                if x <= f64::from(left_corner_x) {
-                    Location::BottomLeft
-                } else if x >= f64::from(right_corner_x) {
-                    Location::BottomRight
-                } else {
-                    Location::Bottom
-                }
-            }
-            Location::Left => {
-                if y <= f64::from(top_corner_y) {
-                    Location::TopLeft
-                } else if y >= f64::from(bottom_corner_y) {
-                    Location::BottomLeft
-                } else {
-                    Location::Left
-                }
-            }
-            Location::Right => {
-                if y <= f64::from(top_corner_y) {
-                    Location::TopRight
-                } else if y >= f64::from(bottom_corner_y) {
-                    Location::BottomRight
-                } else {
-                    Location::Right
-                }
-            }
-            other => other,
-        }
+    fn pointer_location(&self, header_offset: i32) -> Location {
+        let Some(decorations) = self.decorations.as_ref() else {
+            return Location::None;
+        };
+        self.mouse.location(
+            &self.buttons,
+            header_offset,
+            decorations.header().surface_rect.width,
+            decorations.side_height(),
+            self.hide_border,
+        )
     }
 
     fn layout_config(&self) -> LayoutConfig {
@@ -278,7 +285,9 @@ where
             height: self.height.get(),
             hide_titlebar: self.hide_titlebar,
             hide_border: self.hide_border || self.state.contains(WindowState::FULLSCREEN),
-            hide_edges: self.state.intersects(WindowState::MAXIMIZED | WindowState::FULLSCREEN),
+            hide_edges: self
+                .state
+                .intersects(WindowState::MAXIMIZED | WindowState::FULLSCREEN),
             fullscreen: self.state.contains(WindowState::FULLSCREEN),
             revealed: self.fullscreen_revealed,
         }
@@ -286,6 +295,8 @@ where
 
     fn redraw_inner(&mut self) -> Option<bool> {
         let layout_config = self.layout_config();
+        let reveal_offset = self.header_offset();
+        let mouse_location = self.pointer_location(reveal_offset);
         let decorations = self.decorations.as_mut()?;
 
         // Reset the dirty bit.
@@ -310,15 +321,16 @@ where
 
         if let Some(title_text) = self.title_text.as_mut() {
             let title = self.title.as_deref().unwrap_or_default();
-            title_text.update_title(if layout_config.fullscreen {
-                format!("{title} — Leave fullscreen")
-            } else {
-                title.to_owned()
-            });
+            title_text.update_title(title);
             title_text.update_scale(self.scale_factor);
             title_text.update_color(colors.font_color);
         }
 
+        if let Some(label) = self.fullscreen_label.as_mut() {
+            label.update_title("Leave fullscreen");
+            label.update_scale(self.scale_factor);
+            label.update_color(colors.button_icon);
+        }
         // Draw the borders.
         for (idx, part) in decorations.parts().filter(|(_, part)| !part.hide) {
             let scale = self.scale_factor;
@@ -346,21 +358,39 @@ where
 
             // In fullscreen the transparent header keeps only its top-edge input strip.
             if !layout_config.fullscreen || layout_config.revealed {
-                draw_part(
-                    idx,
-                    rect,
-                    &mut pixmap,
-                    self.title_text.as_ref().map(|t| t.pixmap()).unwrap_or(None),
-                    scale,
-                    self.resizable,
-                    &self.state,
-                    colors,
-                    &self.buttons,
-                    self.mouse.location,
-                    layout_config.hide_border,
-                    self.hide_titlebar,
-                    &mut self.shadow,
-                );
+                let mut draw = |target: &mut PixmapMut<'_>| {
+                    draw_part(
+                        idx,
+                        rect,
+                        target,
+                        self.title_text.as_ref().map(|t| t.pixmap()).unwrap_or(None),
+                        scale,
+                        self.resizable,
+                        &self.state,
+                        colors,
+                        &self.buttons,
+                        mouse_location,
+                        self.mouse.pressed_location(),
+                        self.fullscreen_label.as_ref().and_then(|t| t.pixmap()),
+                        layout_config.hide_border,
+                        self.hide_titlebar,
+                        &mut self.shadow,
+                    )
+                };
+                if layout_config.fullscreen {
+                    let mut overlay = Pixmap::new(rect.width, rect.height)?;
+                    draw(&mut overlay.as_mut());
+                    pixmap.draw_pixmap(
+                        0,
+                        reveal_offset * scale as i32,
+                        overlay.as_ref(),
+                        &PixmapPaint::default(),
+                        Transform::identity(),
+                        None,
+                    );
+                } else {
+                    draw(&mut pixmap);
+                }
             }
 
             // Debug fill all subsurfaces with solid colors
@@ -432,7 +462,10 @@ where
         self.state = state;
         if difference.contains(WindowState::FULLSCREEN) {
             self.fullscreen_revealed = false;
+            self.reveal_started = None;
             self.mouse.left();
+            self.buttons
+                .set_fullscreen(state.contains(WindowState::FULLSCREEN));
         }
         self.dirty |= difference.intersects(
             WindowState::ACTIVATED
@@ -446,6 +479,8 @@ where
         self.dirty |= self.wm_capabilities != wm_capabilities;
         self.wm_capabilities = wm_capabilities;
         self.buttons.update_wm_capabilities(wm_capabilities);
+        self.buttons
+            .set_fullscreen(self.state.contains(WindowState::FULLSCREEN));
     }
 
     fn set_hidden(&mut self, hidden: bool) {
@@ -547,18 +582,24 @@ where
         click: FrameClick,
         pressed: bool,
     ) -> Option<FrameAction> {
+        let offset = self.header_offset();
+        let location = self.pointer_location(offset);
         match click {
             FrameClick::Normal => self.mouse.click(
+                location,
                 timestamp,
                 pressed,
                 self.resizable,
                 &self.state,
                 &self.wm_capabilities,
             ),
-            FrameClick::Alternate => {
-                self.mouse
-                    .alternate_click(pressed, &self.wm_capabilities, self.hide_border)
-            }
+            FrameClick::Alternate => self.mouse.alternate_click(
+                location,
+                offset,
+                pressed,
+                &self.wm_capabilities,
+                self.hide_border,
+            ),
             _ => None,
         }
     }
@@ -584,24 +625,27 @@ where
         }
 
         if self.state.contains(WindowState::FULLSCREEN) {
-            if !parts::fullscreen_header_contains(self.width.get(), x, y, self.fullscreen_revealed) {
+            if !parts::fullscreen_header_contains(self.width.get(), x, y, self.fullscreen_revealed)
+            {
                 self.click_point_left();
                 return Some(CursorIcon::Default);
             }
             if !self.fullscreen_revealed {
                 self.fullscreen_revealed = true;
+                self.reveal_started = Some(Instant::now());
                 self.dirty = true;
             }
         }
-        let old_location = self.mouse.location;
-        let decorations = self.decorations.as_ref()?;
-        let location = self.precise_location(location, decorations, x, y);
-        let new_cursor = self.mouse.moved(location, x, y, self.resizable);
+        let offset = self.header_offset();
+        let old_location = self.pointer_location(offset);
+        self.mouse.moved(location, x, y);
+        let location = self.pointer_location(offset);
+        let new_cursor = location.cursor(self.resizable);
 
         // Set dirty if we moved the cursor between the buttons.
         self.dirty |= (matches!(old_location, Location::Button(_))
-            || matches!(self.mouse.location, Location::Button(_)))
-            && old_location != self.mouse.location;
+            || matches!(location, Location::Button(_)))
+            && old_location != location;
 
         if self.dirty {
             let _ = self.redraw_inner();
@@ -610,10 +654,17 @@ where
     }
 
     fn click_point_left(&mut self) {
+        self.dirty |= matches!(
+            self.pointer_location(self.header_offset()),
+            Location::Button(_)
+        );
         self.mouse.left();
         if self.fullscreen_revealed {
             self.fullscreen_revealed = false;
+            self.reveal_started = None;
             self.dirty = true;
+        }
+        if self.dirty {
             let _ = self.redraw_inner();
         }
     }
@@ -635,6 +686,7 @@ pub struct FrameConfig {
     pub hide_titlebar: bool,
     /// Draw decorations but without the window border
     pub hide_border: bool,
+    pub button_layout: Option<String>,
 }
 
 impl FrameConfig {
@@ -644,14 +696,8 @@ impl FrameConfig {
             theme,
             hide_titlebar: false,
             hide_border: false,
+            button_layout: None,
         }
-    }
-
-    /// This is equivalent of calling `FrameConfig::new(ColorTheme::auto())`.
-    ///
-    /// For details see [`ColorTheme::auto`].
-    pub fn auto() -> Self {
-        Self::new(ColorTheme::auto())
     }
 
     /// This is equivalent of calling `FrameConfig::new(ColorTheme::light())`.
@@ -693,11 +739,13 @@ fn draw_part(
     colors: &ColorMap,
     buttons: &Buttons,
     mouse: Location,
+    pressed: Location,
+    fullscreen_label: Option<&Pixmap>,
     hide_border: bool,
     hide_titlebar: bool,
     shadow: &mut Shadow,
 ) {
-    if !state.intersects(WindowState::TILED) {
+    if !state.intersects(WindowState::TILED | WindowState::FULLSCREEN) {
         shadow.draw(
             pixmap,
             scale,
@@ -725,6 +773,8 @@ fn draw_part(
                 colors,
                 buttons,
                 mouse,
+                pressed,
+                fullscreen_label,
                 hide_border,
             );
         }
@@ -787,15 +837,17 @@ fn draw_headerbar(
     colors: &ColorMap,
     buttons: &Buttons,
     mouse: Location,
+    pressed: Location,
+    fullscreen_label: Option<&Pixmap>,
     hider_border: bool,
 ) {
     let _ = draw_headerbar_bg(pixmap, scale, colors, state);
 
     // Horizontal margin.
-    let margin_h = get_margin_h_lp(state, hider_border) * 2.0;
+    let margin_h = get_margin_h_lp(state, hider_border) * scale;
 
     let canvas_w = pixmap.width() as f32;
-    let canvas_h = pixmap.height() as f32;
+    let canvas_h = HEADER_SIZE as f32 * scale;
 
     let header_w = canvas_w - margin_h * 2.0;
     let header_h = canvas_h;
@@ -836,7 +888,7 @@ fn draw_headerbar(
             if let Some(clip) =
                 Rect::from_xywh(text_canvas_start_x, 0., text_canvas_end_x, canvas_h)
             {
-                if let Some(mut mask) = Mask::new(canvas_w as u32, canvas_h as u32) {
+                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
                     mask.fill_path(
                         &PathBuilder::from_rect(clip),
                         FillRule::Winding,
@@ -864,7 +916,14 @@ fn draw_headerbar(
 
     // Draw the buttons.
     buttons.draw(
-        margin_h, header_w, scale, colors, mouse, pixmap, resizable, state,
+        scale,
+        colors,
+        mouse,
+        pressed,
+        fullscreen_label,
+        pixmap,
+        resizable,
+        state,
     );
 }
 
@@ -876,9 +935,11 @@ fn draw_headerbar_bg(
     state: &WindowState,
 ) -> SkiaResult {
     let w = pixmap.width() as f32;
-    let h = pixmap.height() as f32;
+    let h = HEADER_SIZE as f32 * scale;
 
-    let radius = if state.intersects(WindowState::MAXIMIZED | WindowState::TILED | WindowState::FULLSCREEN) {
+    let radius = if state
+        .intersects(WindowState::MAXIMIZED | WindowState::TILED | WindowState::FULLSCREEN)
+    {
         0.
     } else {
         CORNER_RADIUS as f32 * scale
@@ -894,12 +955,19 @@ fn draw_headerbar_bg(
         None,
     );
 
-    pixmap.fill_rect(
-        Rect::from_xywh(0., h - 1., w, h)?,
-        &colors.border_paint(),
-        Transform::identity(),
-        None,
-    );
+    if state.contains(WindowState::FULLSCREEN) {
+        for row in 0..(parts::REVEAL_SHADOW as f32 * scale) as u32 {
+            let alpha = (0.24 * (-0.45 * row as f32 / scale).exp() * 255.) as u8;
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(0, 0, 0, alpha);
+            pixmap.fill_rect(
+                Rect::from_xywh(0., h + row as f32, w, 1.)?,
+                &paint,
+                Transform::identity(),
+                None,
+            );
+        }
+    }
 
     Some(())
 }
@@ -971,5 +1039,94 @@ fn get_margin_h_lp(state: &WindowState, hider_border: bool) -> f32 {
         0.0
     } else {
         theme::border_size(hider_border) as f32
+    }
+}
+
+const REVEAL_DURATION: Duration = Duration::from_millis(180);
+
+fn reveal_offset(elapsed: Duration) -> i32 {
+    let t = (elapsed.as_secs_f32() / REVEAL_DURATION.as_secs_f32()).clamp(0., 1.);
+    (-(HEADER_SIZE as f32) * (1. - t).powi(3)).round() as i32
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+    #[test]
+    fn stationary_pointer_clicks_control_after_fullscreen_slide() {
+        let mut buttons = Buttons::new(None);
+        buttons.set_fullscreen(true);
+        buttons.arrange(600, 0.);
+        let mut mouse = MouseState::default();
+        let (x, y) = (23., 23.);
+        let offset = reveal_offset(Duration::from_millis(40));
+        mouse.moved(Location::Head, x, y);
+        assert_eq!(
+            mouse.location(&buttons, offset, 600, 800, false),
+            Location::Head
+        );
+
+        // The animation completes with no further pointer motion.
+        let offset = reveal_offset(REVEAL_DURATION);
+        let location = mouse.location(&buttons, offset, 600, 800, false);
+        assert_eq!(location, Location::Button(buttons::ButtonKind::Back));
+        mouse.set_pressed(location, FrameClick::Normal, true);
+        assert_eq!(mouse.pressed_location(), location);
+        assert!(mouse.button_click(location, true).is_none());
+        let location = mouse.location(&buttons, offset, 600, 800, false);
+        assert!(matches!(
+            mouse.button_click(location, false),
+            Some(Action::Back)
+        ));
+    }
+
+    #[test]
+    fn fullscreen_header_keeps_title_pixels_with_its_shadow_extension() {
+        for scale in [1u32, 2] {
+            let mut header = Pixmap::new(600 * scale, (HEADER_SIZE + parts::REVEAL_SHADOW) * scale)
+                .unwrap_or_else(|| unreachable!());
+            let mut text = Pixmap::new(20 * scale, 8 * scale).unwrap_or_else(|| unreachable!());
+            text.fill(Color::from_rgba8(255, 0, 255, 255));
+            let mut buttons = Buttons::new(None);
+            buttons.set_fullscreen(true);
+            buttons.arrange(600, 0.);
+            draw_headerbar(
+                &mut header.as_mut(),
+                Some(&text),
+                scale as f32,
+                true,
+                &WindowState::FULLSCREEN,
+                &ColorTheme::light().active,
+                &buttons,
+                Location::None,
+                Location::None,
+                None,
+                true,
+            );
+            let title_pixel = header
+                .pixel(300 * scale, HEADER_SIZE * scale / 2)
+                .unwrap_or_else(|| unreachable!());
+            assert_eq!(
+                (title_pixel.red(), title_pixel.green(), title_pixel.blue()),
+                (255, 0, 255)
+            );
+            assert!(header
+                .pixel(300 * scale, (HEADER_SIZE + 1) * scale)
+                .is_some_and(|p| p.alpha() > 0));
+        }
+    }
+
+    #[test]
+    fn reveal_slides_to_rest_without_overshooting() {
+        assert_eq!(reveal_offset(Duration::ZERO), -(HEADER_SIZE as i32));
+        let offsets: Vec<_> = (0..=240)
+            .map(|ms| reveal_offset(Duration::from_millis(ms)))
+            .collect();
+        assert!(offsets
+            .iter()
+            .zip(offsets.iter().skip(1))
+            .all(|(a, b)| a <= b));
+        assert_eq!(reveal_offset(REVEAL_DURATION), 0);
+        assert_eq!(reveal_offset(Duration::MAX), 0);
     }
 }

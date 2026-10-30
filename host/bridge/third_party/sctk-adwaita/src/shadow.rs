@@ -2,20 +2,31 @@ use crate::{parts::PartId, theme};
 use std::collections::{btree_map, BTreeMap};
 use tiny_skia::{Pixmap, PixmapMut, PixmapRef, Point, PremultipliedColorU8};
 
-// These values were generated from a screenshot of an libadwaita window using a script.
-// For more details see: https://github.com/PolyMeilex/sctk-adwaita/pull/43
+// Adwaita window.csd: 14px blur / 5px spread at 15%, 5px / 2px at
+// 10%, and a 1px outline at 5%. CSS blur uses half its radius as sigma.
 pub const SHADOW_SIZE: u32 = 43;
-const SHADOW_PARAMS_ACTIVE: (f32, f32, f32) = (0.206_505_5, 0.104_617_53, -0.000_542_446_2);
-const SHADOW_PARAMS_INACTIVE: (f32, f32, f32) = (0.168_297_29, 0.204_299_8, 0.001_769_798_6);
 
 fn shadow(pixel_dist: f32, scale: u32, active: bool) -> f32 {
-    let (a, b, c) = if active {
-        SHADOW_PARAMS_ACTIVE
-    } else {
-        SHADOW_PARAMS_INACTIVE
+    let d = pixel_dist / scale as f32;
+    // Normal tail approximation for the Gaussian blur of a straight edge.
+    let tail = |x: f32| {
+        let t = 1. / (1. + 0.231_641_9 * x.abs());
+        let p = t
+            * (0.319_381_54
+                + t * (-0.356_563_78 + t * (1.781_477_9 + t * (-1.821_255_9 + t * 1.330_274_5))));
+        let p = (-x * x / 2.).exp() * 0.398_942_3 * p;
+        if x >= 0. {
+            p
+        } else {
+            1. - p
+        }
     };
-
-    a * (-b * (pixel_dist / scale as f32)).exp() + c
+    let outline = if d < 1. { 0.05 } else { 0. };
+    if active {
+        1. - (1. - 0.15 * tail((d - 5.) / 7.)) * (1. - 0.10 * tail((d - 2.) / 2.5)) * (1. - outline)
+    } else {
+        1. - (1. - 0.08 * tail((d - 5.) / 5.)) * (1. - outline)
+    }
 }
 
 #[derive(Debug)]
@@ -410,5 +421,24 @@ impl Shadow {
                 pixmap.copy_from_slice(src_data);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn adwaita_shadow_fades_and_scales_in_logical_pixels() {
+        for active in [false, true] {
+            let values: Vec<_> = (0..=43).map(|x| shadow(x as f32, 1, active)).collect();
+            assert!(values.iter().all(|v| (0. ..=1.).contains(v)));
+            assert!(values
+                .iter()
+                .zip(values.iter().skip(1))
+                .all(|(a, b)| a >= b));
+            assert!(shadow(43., 1, active) < 0.001);
+            assert_eq!(shadow(10., 1, active), shadow(20., 2, active));
+        }
+        assert!(shadow(5., 1, true) > shadow(5., 1, false));
     }
 }

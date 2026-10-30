@@ -20,7 +20,7 @@ pub struct AbGlyphTitleText {
 
 impl AbGlyphTitleText {
     pub fn new(color: Color) -> Option<Self> {
-        let font_pref = config::titlebar_font().unwrap_or_default();
+        let font_pref = config::titlebar_font();
         let font_pref_pt_size = font_pref.pt_size;
         let font = font_file_matching(&font_pref)
             .and_then(|f| mmap(&f))
@@ -182,6 +182,7 @@ fn font_file_matching(pref: &FontPreference) -> Option<File> {
     let mut pattern = pref.name.clone();
     if let Some(style) = &pref.style {
         pattern.push(':');
+        pattern.push_str("style=");
         pattern.push_str(style);
     }
     Command::new("fc-match")
