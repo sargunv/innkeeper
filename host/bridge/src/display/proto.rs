@@ -13,6 +13,9 @@
 //! | `0x0204` | BUFFER_REMOVE  | `u32 buffer`                                                                                                                                                                         |                                                                                             |
 //! | `0x0205` | FRAME          | `u32 display`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's again at RELEASE; one the window can't show yet is released at once |
 //!
+//! IMAGE_RELEASE (0x0207): u32 display, u64 presentation token: release a
+//! leased ImageReader image after HWC observes RELEASE. Forwarded to that window on the input service.
+//!
 //! CURSOR (0x0206): u32 display, u32 width, u32 height (each <=512),
 //! i32 x, i32 y (layer origin in display pixels). Nonzero dimensions carry
 //! one sealed memfd with width*height*4 premultiplied BGRA bytes (wl_shm
@@ -33,6 +36,7 @@ pub mod ty {
     pub const BUFFER_REMOVE: u16 = 0x0204;
     pub const FRAME: u16 = 0x0205;
     pub const CURSOR: u16 = 0x0206;
+    pub const IMAGE_RELEASE: u16 = 0x0207;
 
     /// Events (bridge to composer, tag 0).
     pub const RELEASE: u16 = 0x4201;
@@ -82,6 +86,10 @@ impl BufferSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
+    ImageRelease {
+        display: u32,
+        token: u64,
+    },
     Cursor {
         display: u32,
         width: u32,
@@ -118,6 +126,10 @@ fn dim(r: &mut Reader<'_>, what: &'static str) -> Result<u32, DecodeError> {
 pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
     let mut r = Reader::new(body);
     let req = match ty {
+        ty::IMAGE_RELEASE => Request::ImageRelease {
+            display: r.u32()?,
+            token: r.u64()?,
+        },
         ty::CURSOR => Request::Cursor {
             display: r.u32()?,
             width: r.u32_in(0..=512, "cursor width")?,
@@ -168,6 +180,10 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let mut w;
     match req {
+        Request::ImageRelease { display, token } => {
+            w = Writer::message(ty::IMAGE_RELEASE, tag);
+            w.u32(*display).u64(*token);
+        }
         Request::Cursor {
             display,
             width,
@@ -265,6 +281,10 @@ mod tests {
             Request::DisplayRemove { display: 3 },
             buffer(5120),
             Request::BufferRemove { buffer: 7 },
+            Request::ImageRelease {
+                display: 3,
+                token: 0x123456789abcdef0,
+            },
             Request::Frame {
                 display: 3,
                 buffer: 7,

@@ -158,6 +158,12 @@ impl Service for DisplayService {
             return Reply::err(-EPROTO);
         }
         match req {
+            Request::ImageRelease { display, token } => {
+                if let Some(window) = self.displays.get(&display) {
+                    self.hub.image_released(*window, token);
+                }
+                Reply::ok()
+            }
             Request::Cursor {
                 display,
                 width,
@@ -236,6 +242,12 @@ impl Service for DisplayService {
                 // An acquire fence, if any, is ignored: the composer only
                 // sends frames it has finished writing.
                 drop(fds);
+                if crate::bench::enabled() {
+                    crate::bench::trace(format_args!(
+                        "receive ns={} buffer={buffer}",
+                        crate::bench::now()
+                    ));
+                }
                 self.send(Cmd::Frame {
                     window: self.displays[&display],
                     buffer,

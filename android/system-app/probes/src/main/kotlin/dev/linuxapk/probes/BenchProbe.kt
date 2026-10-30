@@ -78,11 +78,20 @@ class BenchProbe : Activity() {
     override fun onKeyDown(code: Int, event: KeyEvent): Boolean {
       if (code != KeyEvent.KEYCODE_SPACE) return super.onKeyDown(code, event)
       blue = !blue
+      Log.i(
+        "LinuxApkBench",
+        "BENCH receive ns=${System.nanoTime()} color=${if (blue) 16711680 else 255}",
+      )
       invalidate()
       return true
     }
 
     override fun onDraw(canvas: Canvas) {
+      if (mode == "input")
+        Log.i(
+          "LinuxApkBench",
+          "BENCH draw ns=${System.nanoTime()} color=${if (blue) 16711680 else 255}",
+        )
       canvas.drawColor(if (blue) Color.BLUE else Color.RED)
       if (mode == "scroll") {
         // A real scrolling list, with the same fixed workload on each run.

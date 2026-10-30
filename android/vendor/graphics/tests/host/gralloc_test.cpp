@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -168,6 +169,26 @@ static native_handle_t* alloc(
   return nh;
 }
 
+// Verify actual VM mappings, including udmabuf-backed GPU allocations.
+static bool mapsPixels(int fd) {
+  struct stat st{};
+  if (fstat(fd, &st) != 0) abort();
+  FILE* maps = fopen("/proc/self/maps", "r");
+  if (!maps) abort();
+  char line[1024];
+  bool found = false;
+  while (fgets(line, sizeof(line), maps)) {
+    unsigned long long offset = 0, inode = 0;
+    if (
+      sscanf(line, "%*x-%*x %*s %llx %*s %llu", &offset, &inode) == 2 &&
+      inode == static_cast<unsigned long long>(st.st_ino) && offset == 0
+    )
+      found = true;
+  }
+  fclose(maps);
+  return found;
+}
+
 static void testMapper() {
   const uint64_t u = 0x33 | usage::GPU_TEXTURE | usage::GPU_RENDER_TARGET;
   native_handle_t* raw = alloc(fmt::RGBA_8888, 320, 200, u, "host-test", 100);
@@ -187,6 +208,7 @@ static void testMapper() {
   CHECK_EQ(gMapper->v5.importBuffer(raw, &a), AIMAPPER_ERROR_NONE);
   CHECK_EQ(gMapper->v5.importBuffer(raw, &b), AIMAPPER_ERROR_NONE);
   CHECK(a != b && a != raw);
+  CHECK(!mapsPixels(bh->fd));
 
   uint32_t nfds = 0, nints = 0;
   CHECK_EQ(gMapper->v5.getTransportSize(a, &nfds, &nints), AIMAPPER_ERROR_NONE);
@@ -199,6 +221,7 @@ static void testMapper() {
     gMapper->v5.lock(a, 0x30, ARect{0, 0, 320, 200}, -1, &p),
     AIMAPPER_ERROR_NONE
   );
+  CHECK(mapsPixels(bh->fd));
   auto* px = static_cast<uint32_t*>(p);
   const uint32_t stride = *get<StandardMetadataType::STRIDE>(a);
   for (uint32_t y = 0; y < 200; y++)

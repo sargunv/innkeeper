@@ -14,6 +14,7 @@
 
 #include "Buffer.h"
 #include "Common.h"
+#include "GpuCopy.h"
 #include "Presenter.h"
 #include "VsyncThread.h"
 
@@ -66,6 +67,7 @@ class Display {
   Error validate(std::optional<c3::ChangedCompositionTypes>* changes);
   Error acceptChanges();
   Error present();
+  int presentFence() const { return mPresentFence.get(); }
   // Any layer/display state change invalidates a previous validate.
   void invalidate() { mState = State::NeedValidate; }
 
@@ -81,8 +83,12 @@ class Display {
   int64_t mNextLayerId = 1;
   BufferSlots mClientTargetSlots;
   ClientTargetState mClientTarget;
+  bool mClientTargetUpdated = false;
   BufferSlots mOutputSlots;
   BufferPtr mOutputBuffer;
+  UniqueFd mOutputAcquireFence;
+  UniqueFd mPresentFence;
+  GpuCopy mGpuCopy;
   State mState = State::NeedValidate;
   std::vector<int64_t> mPendingChanges;  // layers that become CLIENT
   c3::PowerMode mPower = c3::PowerMode::OFF;

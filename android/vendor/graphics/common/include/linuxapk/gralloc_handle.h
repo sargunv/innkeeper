@@ -102,6 +102,10 @@ struct SharedMetadata {
   // SMPTE2094_10, SMPTE2094_40, SMPTE2094_50; len 0 = unset
   uint32_t blobLen[3];
   uint8_t blob[3][kMaxBlob];
+  // Composer's lease of this sink image. Zero means it was not handed to
+  // Wayland (or has been released). The token is unique for each frame;
+  // access it atomically across the composer and the ImageReader consumer.
+  alignas(8) uint64_t presentationToken;
 };
 static_assert(sizeof(SharedMetadata) <= kPageSize);
 

@@ -13,7 +13,24 @@ namespace linuxapk::hwc {
 
 BufferRef::~BufferRef() {
   if (mMap) munmap(mMap, mMapSize);
+  if (mMetadata) munmap(mMetadata, kPageSize);
   nativeHandleCloseAndDelete(mHandle);
+}
+
+bool BufferRef::setPresentationToken(uint64_t token) {
+  const auto* h = info();
+  if (!h) return false;
+  if (!mMetadata) {
+    void* p = mmap(
+      nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, h->fd,
+      off_t(h->metadataOffset.get())
+    );
+    if (p == MAP_FAILED) return false;
+    mMetadata = p;
+  }
+  auto* md = static_cast<SharedMetadata*>(mMetadata);
+  __atomic_store_n(&md->presentationToken, token, __ATOMIC_RELEASE);
+  return true;
 }
 
 const uint8_t* BufferRef::map() {

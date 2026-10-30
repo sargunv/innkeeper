@@ -124,6 +124,10 @@ struct Cleanup {
 }
 impl Drop for Cleanup {
     fn drop(&mut self) {
+        let _ = fs::write(
+            self.out.join("sf.txt"),
+            android(&["dumpsys", "SurfaceFlinger"]).unwrap_or_default(),
+        );
         let _ = fs::write(self.out.join("bridge-log.txt"), bridge());
         let _ = fs::write(
             self.out.join("android-errors.txt"),
@@ -136,6 +140,10 @@ impl Drop for Cleanup {
                 "LinuxApkBench:I",
                 "AndroidRuntime:E",
                 "ActivityTaskManager:I",
+                "SurfaceFlinger:V",
+                "BufferQueueProducer:V",
+                "VirtualDisplaySurface:V",
+                "BLASTBufferQueue:W",
             ])
             .unwrap_or_else(|e| format!("{e:#}")),
         );
@@ -350,6 +358,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         30,
     )?;
     session(&["selftest"])?;
+    android(&["setprop", "vendor.linuxapk.hwc.bench", "1"])?;
     cleanup.logger = Some(
         Command::new("timeout")
             .args([
@@ -364,6 +373,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 "raw",
                 "-s",
                 "LinuxApkBench:I",
+                "linuxapk-hwc:I",
                 "AndroidRuntime:E",
             ])
             .stdout(fs::File::create(out.join("probe-log.txt"))?)
@@ -382,6 +392,19 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         "input" => {
             launch("input")?;
             wait(|| solid_frame(&bridge()).is_some(), 10)?;
+            // A submitted first frame precedes InputDispatcher publishing the
+            // moved activity as its target. Exclude that launch/focus wait.
+            wait(
+                || {
+                    android(&["dumpsys", "input"]).is_ok_and(|dump| {
+                        dump.split("FocusedWindows:")
+                            .nth(1)
+                            .and_then(|s| s.split("FocusRequests:").next())
+                            .is_some_and(|s| s.contains("BenchProbe"))
+                    })
+                },
+                10,
+            )?;
             // Wait for the *changed* solid frame, not a transition or repaint.
             for _ in 0..10 {
                 let before = solid_frame(&bridge()).context("missing initial colour")?;
@@ -490,6 +513,10 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
             &[out.join("probe.png").to_str().unwrap(), "Benchmark probe"],
         )?;
     }
+    fs::write(
+        out.join("gfxinfo.txt"),
+        android(&["dumpsys", "gfxinfo", "dev.linuxapk.probes", "framestats"]).unwrap_or_default(),
+    )?;
     result
 }
 fn native_audio(out: &Path, sink: &str) -> Result<Value> {

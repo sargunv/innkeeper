@@ -27,10 +27,12 @@ sequenceDiagram
   BR-->>WM: WINDOW_MAPPED
   loop every frame
     SF->>HWC: validate (content CLIENT, cursor CURSOR), present with the output buffer
-    HWC->>HWC: copy into one of 3 udmabufs for the display
+    HWC->>HWC: lease the sink dma-buf (GPU blit for mixed composition)
     HWC->>BR: FRAME (buffer id, damage)
     BR->>WL: attach the linux-dmabuf buffer, viewporter to the logical size
     BR-->>HWC: RELEASE when wl_buffer.release arrives
+    HWC->>BR: IMAGE_RELEASE (presentation token)
+    BR-->>WM: IMAGE_RELEASE, close the retained Image
   end
 ```
 
@@ -38,9 +40,9 @@ sequenceDiagram
   with `TRUSTED`, `OWN_DISPLAY_GROUP`, `ALWAYS_UNLOCKED`, `OWN_FOCUS`,
   `OWN_CONTENT_ONLY`, `SUPPORTS_TOUCH`, `DESTROY_CONTENT_ON_REMOVAL` and
   `SECURE`, with no system decorations (apps see zero system-bar insets), and
-  starts the app on it with `setLaunchDisplayId`. Its sink is a `PRIVATE`
-  ImageReader that drops every frame; it exists because a virtual display needs
-  a consumer.
+  starts the app on it with `setLaunchDisplayId`. Its sink is an RGBA
+  ImageReader owned by `FrameSink`. Each acquired image stays alive until the
+  host compositor releases its pixels.
 - **HWC-backed virtual displays.** The composer's rc sets
   `debug.sf.enable_hwc_vds=1` and reports 32 virtual displays, so SurfaceFlinger
   hands the composer every frame. Content layers stay CLIENT: RenderEngine
@@ -54,10 +56,16 @@ sequenceDiagram
   MediaProjection) stay headless. A foreign display of exactly the same size
   created in the same commit could take the window; that is unlikely and
   accepted.
-- **Why a copy, not zero-copy.** The sink buffer returns to SurfaceFlinger as
-  soon as the ImageReader drops it, so showing it directly would tear. The copy
-  of a 2176x1360 frame costs 1 to 2 ms; RGBA goes as XBGR8888 so it is a plain
-  `memcpy`.
+- **Buffer ownership.** The composer imports the sink's own dma-buf into
+  linux-dmabuf, using its linear format, stride and offset. It writes a unique
+  presentation token to the allocation's metadata page before submitting it.
+  `FrameSink` reads that token without mapping pixels and retains the image
+  until HWC observes Wayland RELEASE and forwards the token. Unsubmitted images
+  close immediately. At most two host leases leave room in the three-image
+  reader for dropped frames, even if the host stops releasing. Display teardown
+  closes the retained images. For mixed composition, where SF provides a
+  separate scratch client target, HWC blits it into the sink on the GPU; the
+  common path imports the client target directly.
 - **The bridge is the Wayland client**, because the composer is a Bionic process
   with no libdecor, GTK or host fonts. Decorations are always an Adwaita-style
   client frame, matching the GTK/libadwaita manager on every desktop, including
@@ -267,12 +275,12 @@ linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
 
 ## Fences
 
-The composer reports `PRESENT_FENCE_IS_NOT_RELIABLE` and returns no present or
-release fences ("already signalled"): it copies the client target before
-`present` returns, waiting on the acquire fence first. The Vulkan drivers hand
-SurfaceFlinger real sync_files (amdgpu syncobjs), so no sw_sync is needed. Real
-present fences would come from `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` or a GPU
-semaphore.
+The composer waits on acquire fences before submitting buffers. It exports real
+sync_files with `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` for completed virtual sink work
+when supported. Mixed composition completes its GPU blit before releasing the
+scratch client target. `PRESENT_FENCE_IS_NOT_RELIABLE` remains: these fences
+describe GPU completion, while ImageReader leases protect the pixels until host
+release. They do not describe host presentation.
 
 ## Control interface
 

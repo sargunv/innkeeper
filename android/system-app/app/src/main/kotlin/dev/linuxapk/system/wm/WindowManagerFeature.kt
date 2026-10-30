@@ -9,12 +9,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.graphics.ImageFormat
-import android.hardware.HardwareBuffer
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.hardware.display.VirtualDisplayConfig
-import android.media.ImageReader
 import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
@@ -96,7 +93,7 @@ class WindowManagerFeature(
     val pkg: String,
     val label: String,
     val display: VirtualDisplay,
-    val reader: ImageReader,
+    val reader: FrameSink,
     var width: Int,
     var height: Int,
     var dpi: Int,
@@ -326,26 +323,7 @@ class WindowManagerFeature(
     val width = (sizing.widthDp * s).roundToInt()
     val height = (sizing.heightDp * s).roundToInt()
     val dpi = (BASE_DPI * s).roundToInt()
-    // SurfaceFlinger renders each frame into one of these buffers and hands the same buffer to
-    // the composer, which copies it into the window; the frames themselves are dropped here.
-    val reader =
-      ImageReader.newInstance(
-        width,
-        height,
-        ImageFormat.PRIVATE,
-        3,
-        HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_COMPOSER_OVERLAY,
-      )
-    reader.setOnImageAvailableListener(
-      { r ->
-        try {
-          r.acquireLatestImage()?.close()
-        } catch (e: IllegalStateException) {
-          Log.w(TAG, "frame: ${e.message}")
-        }
-      },
-      frameHandler,
-    )
+    val reader = FrameSink(width, height, frameHandler, input)
     val config =
       VirtualDisplayConfig.Builder("linuxapk:$pkg", width, height, dpi).setFlags(FLAGS).build()
     val vd =
@@ -362,6 +340,7 @@ class WindowManagerFeature(
     val w = AppWindow(pkg, label, vd, reader, width, height, dpi, sizing, token)
     w.lastColor = description?.primaryColor ?: 0
     w.lastIcon = Wire.Writer().image(iconFor(pkg, description)).bytes()
+    reader.bind(w.id)
     windows[w.id] = w
     changed()
     try {

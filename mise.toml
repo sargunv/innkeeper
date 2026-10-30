@@ -139,6 +139,7 @@ run = """
 set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gralloc_test
+tests/bionic/run.sh -v "$v" -- /vendor/bin/gpu_copy_test
 tests/bionic/run.sh -v "$v" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
   -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
 android/vendor/vulkan/tests/run.sh

@@ -45,10 +45,23 @@ struct Imported {
     nullptr;  // our clone; this pointer is the imported handle
   const BufferHandle* bh = nullptr;
   uint8_t* base = nullptr;
-  size_t mapSize = 0;
+  uint8_t* metadata = nullptr;
+  size_t metadataSize = 0;
+  std::mutex mapMutex;
 
   SharedMetadata* md() const {
-    return reinterpret_cast<SharedMetadata*>(base + bh->metadataOffset.get());
+    return reinterpret_cast<SharedMetadata*>(metadata);
+  }
+  bool mapPixels() {
+    std::lock_guard lock(mapMutex);
+    if (base) return true;
+    void* p = mmap(
+      nullptr, bh->metadataOffset.get(), PROT_READ | PROT_WRITE, MAP_SHARED,
+      bh->fd, 0
+    );
+    if (p == MAP_FAILED) return false;
+    base = static_cast<uint8_t*>(p);
+    return true;
   }
 };
 
@@ -117,7 +130,8 @@ AIMapper_Error importBuffer(
   const uint64_t resEnd = in->reservedOffset.get() + in->reservedSize.get();
   if (
     in->numPlanes == 0 || in->numPlanes > kMaxPlanes || mdEnd > total ||
-    resEnd > total ||
+    in->metadataOffset.get() % kPageSize != 0 ||
+    in->reservedOffset.get() < mdEnd || resEnd > total ||
     in->layerSize.get() * in->layerCount > in->metadataOffset.get()
   ) {
     LOGE("importBuffer: inconsistent handle");
@@ -141,18 +155,20 @@ AIMapper_Error importBuffer(
   auto b = std::make_unique<Imported>();
   b->handle = clone;
   b->bh = reinterpret_cast<const BufferHandle*>(clone);
-  b->mapSize = size_t(total);
-  void* p =
-    mmap(nullptr, b->mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, b->bh->fd, 0);
+  b->metadataSize = size_t(total - in->metadataOffset.get());
+  void* p = mmap(
+    nullptr, b->metadataSize, PROT_READ | PROT_WRITE, MAP_SHARED, b->bh->fd,
+    off_t(in->metadataOffset.get())
+  );
   if (p == MAP_FAILED) {
-    LOGE("importBuffer: mmap(%zu): %s", b->mapSize, strerror(errno));
+    LOGE("importBuffer: metadata mmap: %s", strerror(errno));
     nativeHandleCloseAndDelete(clone);
     return AIMAPPER_ERROR_NO_RESOURCES;
   }
-  b->base = static_cast<uint8_t*>(p);
+  b->metadata = static_cast<uint8_t*>(p);
   if (b->md()->magic != SharedMetadata::kMagic) {
     LOGE("importBuffer: bad metadata magic");
-    munmap(p, b->mapSize);
+    munmap(p, b->metadataSize);
     nativeHandleCloseAndDelete(clone);
     return AIMAPPER_ERROR_BAD_BUFFER;
   }
@@ -164,7 +180,8 @@ AIMapper_Error importBuffer(
 AIMapper_Error freeBuffer(buffer_handle_t buffer) {
   auto b = registry().remove(buffer);
   if (!b) return AIMAPPER_ERROR_BAD_BUFFER;
-  munmap(b->base, b->mapSize);
+  if (b->base) munmap(b->base, b->bh->metadataOffset.get());
+  munmap(b->metadata, b->metadataSize);
   nativeHandleCloseAndDelete(b->handle);
   return AIMAPPER_ERROR_NONE;
 }
@@ -200,6 +217,7 @@ AIMapper_Error lock(
     return AIMAPPER_ERROR_BAD_VALUE;
   }
   waitFence(acquireFence);
+  if (!b->mapPixels()) return AIMAPPER_ERROR_NO_RESOURCES;
   // Memory is CPU-coherent shmem on x86; no DMA_BUF_IOCTL_SYNC needed.
   *outData = b->base;
   return AIMAPPER_ERROR_NONE;
@@ -533,7 +551,9 @@ AIMapper_Error getReservedRegion(
   Imported* b = registry().find(buffer);
   if (!b) return AIMAPPER_ERROR_BAD_BUFFER;
   const uint64_t size = b->bh->reservedSize.get();
-  *outRegion = size ? b->base + b->bh->reservedOffset.get() : nullptr;
+  *outRegion = size ? b->metadata + (b->bh->reservedOffset.get() -
+                                     b->bh->metadataOffset.get())
+                    : nullptr;
   *outSize = size;
   return AIMAPPER_ERROR_NONE;
 }

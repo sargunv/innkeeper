@@ -55,6 +55,14 @@ target_link_options(
     -Wl,--no-undefined)
 
 if(ANDROID)
+  add_library(frame_sink SHARED composer/FrameSink.cpp)
+  target_link_libraries(frame_sink PRIVATE lapk_common android nativewindow dl)
+  install(
+    TARGETS frame_sink
+    LIBRARY
+      DESTINATION
+                  share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/lib/x86_64
+      COMPONENT graphics)
   # Link-only stub for LL-NDK libbinder_ndk, including platform symbols that
   # the public NDK stub omits (AServiceManager_addService, ...).
   set(STUB ${CMAKE_CURRENT_BINARY_DIR}/libbinder_ndk_stub)
@@ -89,6 +97,7 @@ if(ANDROID)
 
   add_executable(
     composer
+    composer/GpuCopy.cpp
     composer/BridgePresenter.cpp
     composer/main.cpp
     composer/Composer.cpp
@@ -108,9 +117,23 @@ if(ANDROID)
   # libz is not LL-NDK: link the NDK's static copy.
   target_link_libraries(
     composer
-    PRIVATE lapk_common lapk_aidl linuxapk_bridge_client -l:libz.a)
+    PRIVATE
+      lapk_common
+      lapk_aidl
+      linuxapk_bridge_client
+      EGL
+      GLESv3
+      nativewindow
+      dl
+      -l:libz.a)
 
   # On-device tests (never installed).
+  add_executable(gpu_copy_test tests/android/gpu_copy_test.cpp
+                 composer/GpuCopy.cpp composer/Buffer.cpp)
+  target_include_directories(gpu_copy_test PRIVATE ${HAL}/composer)
+  target_link_libraries(
+    gpu_copy_test
+    PRIVATE lapk_common lapk_aidl EGL GLESv3 nativewindow dl)
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
   target_link_libraries(
     gralloc_test
@@ -119,7 +142,7 @@ if(ANDROID)
   target_link_libraries(hwc_test PRIVATE lapk_common lapk_aidl)
   # A /vendor layer for tests/bionic/run.sh -v.
   set_target_properties(
-    gralloc_test hwc_test
+    gralloc_test hwc_test gpu_copy_test
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-vendor/bin)
 
@@ -138,6 +161,9 @@ if(ANDROID)
     DESTINATION ${VENDOR}/etc/vintf/manifest
     COMPONENT graphics)
 else()
+  add_executable(import_cache_test tests/host/import_cache_test.cpp)
+  target_include_directories(import_cache_test PRIVATE ${HAL}/composer)
+  add_test(NAME import_cache COMMAND import_cache_test)
   add_executable(gralloc_host_test tests/host/gralloc_test.cpp)
   target_link_libraries(gralloc_host_test PRIVATE lapk_common dl)
   add_executable(dump_host_test tests/host/dump_test.cpp

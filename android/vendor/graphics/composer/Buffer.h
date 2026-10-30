@@ -25,9 +25,11 @@ class BufferRef {
   const BufferHandle* info() const { return asBufferHandle(mHandle); }
   // CPU mapping of the whole fd (lazy, cached); nullptr on failure.
   const uint8_t* map();
+  bool setPresentationToken(uint64_t token);
 
  private:
   native_handle_t* mHandle;
+  void* mMetadata = nullptr;
   void* mMap = nullptr;
   size_t mMapSize = 0;
 };
