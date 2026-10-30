@@ -96,6 +96,12 @@ jobs:
           mode: build
       - uses: ./.github/actions/build-cached
         if: steps.stage.outputs.cache-hit != 'true'
+      - uses: actions/cache@v4
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/linuxapk-dev/keys
+          key:
+            platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
       - run: mise run build
         if: steps.stage.outputs.cache-hit != 'true'
       - uses: actions/cache/save@v4
@@ -238,6 +244,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/build-cached
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/linuxapk-dev/keys
+          key:
+            platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
       - name: Build the stage and Flatpak
         run: mise run package:flatpak
       - name: Stage manifest
