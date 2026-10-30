@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
 use linuxapk_bridge::audio::proto::{
-    self as audio, OpenOutputReply, OutputConfig, Request, SampleFormat,
+    self as audio, OpenReply, Request, SampleFormat, StreamConfig,
 };
 use linuxapk_bridge::ipc::proto::{Hello, service};
 use linuxapk_bridge::ipc::wire;
@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         &sock,
         &audio::encode(
             2,
-            &Request::OpenOutput(OutputConfig {
+            &Request::OpenOutput(StreamConfig {
                 rate,
                 channels: 2,
                 format: SampleFormat::S16Le,
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
     if st != 0 {
         bail!("open: {st}");
     }
-    let r = OpenOutputReply::decode(&body).context("open reply")?;
+    let r = OpenReply::decode(&body).context("open reply")?;
     let [memfd, data, space]: [OwnedFd; 3] = fds
         .try_into()
         .map_err(|_| anyhow::anyhow!("expected 3 fds"))?;

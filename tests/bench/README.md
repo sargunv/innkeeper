@@ -79,16 +79,16 @@ measurements are recorded.
   software estimate, not an acoustic DAC measurement. Concurrent AudioRecord
   capture looks for the same 127-sample pseudo-random marker with a normalized
   matched filter; a detection yields a round-trip upper bound at read-return,
-  including capture buffering. Today's input HAL supplies silence: absent
-  markers are explicitly unavailable. An acoustic/wired output-to-input route
-  and a working Android capture backend are prerequisites for that comparison.
-  The native baseline uses libpulse-simple on PipeWire, the same sample rate,
-  private sink and marker. It reports a first-sample output estimate
-  extrapolated from write completion plus queued output time minus the submitted
-  100 ms buffer, the raw queued output latency, and the monitor round-trip upper
-  bound. Queue estimates and timestamp estimates have different error sources;
-  keep both methods visible in comparisons. Physical tests should use a wired
-  loopback with the same route and buffer sizes for both clients.
+  including capture buffering. Capture uses the private null sink's monitor;
+  absent markers are explicitly unavailable. This is a software loopback;
+  acoustic/wired comparisons need the corresponding physical route. The native
+  baseline uses libpulse-simple on PipeWire, the same sample rate, private sink
+  and marker. It reports a first-sample output estimate extrapolated from write
+  completion plus queued output time minus the submitted 100 ms buffer, the raw
+  queued output latency, and the monitor round-trip upper bound. Queue estimates
+  and timestamp estimates have different error sources; keep both methods
+  visible in comparisons. Physical tests should use a wired loopback with the
+  same route and buffer sizes for both clients.
 - **GPU:** provide `LINUXAPK_GLMARK2_APK=/absolute/path/glmark2.apk` and/or
   `LINUXAPK_GLMARK2_HOST=/absolute/path/glmark2-wayland`. Without them the
   result explains what is unavailable; it does not download arbitrary APKs.

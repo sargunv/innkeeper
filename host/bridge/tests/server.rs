@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use linuxapk_bridge::audio::proto::{
-    self as audio, OpenOutputReply, OutputConfig, Request, SampleFormat,
+    self as audio, OpenReply, Request, SampleFormat, StreamConfig,
 };
 use linuxapk_bridge::audio::{AudioService, Backend, Limits};
 use linuxapk_bridge::ipc::proto::{Hello, hello_reply_body, service};
@@ -211,7 +211,7 @@ impl Client {
 }
 
 fn out_cfg(period: u32, periods: u32) -> Request {
-    Request::OpenOutput(OutputConfig {
+    Request::OpenOutput(StreamConfig {
         rate: 48000,
         channels: 2,
         format: SampleFormat::S16Le,
@@ -237,7 +237,7 @@ fn stream_through_ring() {
     c.hello();
     let (status, body, fds) = c.call(&out_cfg(480, 4)).unwrap();
     assert_eq!(status, 0);
-    let r = OpenOutputReply::decode(&body).unwrap();
+    let r = OpenReply::decode(&body).unwrap();
     assert_eq!((r.capacity_frames, r.data_offset), (1920, 4096));
     assert_eq!(fds.len(), 3);
     let [memfd, data, space]: [OwnedFd; 3] = fds.try_into().unwrap();
@@ -336,7 +336,7 @@ fn stream_fds_cannot_block_the_bridge() {
     c.hello();
     let (status, body, fds) = c.call(&out_cfg(480, 4)).unwrap();
     assert_eq!(status, 0);
-    let r = OpenOutputReply::decode(&body).unwrap();
+    let r = OpenReply::decode(&body).unwrap();
     let [memfd, data, space]: [OwnedFd; 3] = fds.try_into().unwrap();
     for fd in [&data, &space] {
         rustix::fs::fcntl_setfl(fd, rustix::fs::OFlags::empty()).unwrap();

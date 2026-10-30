@@ -1,4 +1,4 @@
-//! One thread per output stream: waits on the client's "data" eventfd, the
+//! One thread per PCM stream: waits on the client's "data" eventfd, the
 //! output's own fd (PipeWire socket or a timer) and a control eventfd, moves
 //! PCM from the ring to the output, and signals the client's "space" pipe
 //! whenever it consumed frames. The client can't make either block us: data
@@ -14,7 +14,7 @@ use anyhow::Result;
 use rustix::event::{EventfdFlags, PollFd, PollFlags};
 use rustix::time::{ClockId, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags};
 
-use super::proto::OutputConfig;
+use super::proto::StreamConfig;
 use super::ring::{Ring, STATE_DEAD, STATE_PLAYING};
 
 /// Control messages from the client thread.
@@ -26,8 +26,8 @@ pub enum Ctl {
     Metadata(u32, String),
 }
 
-/// Where a stream's PCM goes.
-pub trait Output: Send {
+/// Moves PCM between a shared ring and the desktop, in either direction.
+pub trait StreamIo: Send {
     fn poll_fd(&self) -> BorrowedFd<'_>;
     /// `poll_fd` is readable. Returns whether frames were consumed.
     fn on_readable(&mut self, ring: &mut Ring) -> Result<bool>;
@@ -65,7 +65,7 @@ pub struct NullOut {
 }
 
 impl NullOut {
-    pub fn new(cfg: &OutputConfig) -> Result<NullOut> {
+    pub fn new(cfg: &StreamConfig) -> Result<NullOut> {
         let timer = rustix::time::timerfd_create(
             TimerfdClockId::Monotonic,
             TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
@@ -90,7 +90,7 @@ impl NullOut {
     }
 }
 
-impl Output for NullOut {
+impl StreamIo for NullOut {
     fn poll_fd(&self) -> BorrowedFd<'_> {
         self.timer.as_fd()
     }
@@ -155,7 +155,7 @@ pub fn spawn(
     ring: Ring,
     data: OwnedFd,
     space: OwnedFd,
-    out: Box<dyn Output>,
+    out: Box<dyn StreamIo>,
 ) -> Result<StreamHandle> {
     let wake = Arc::new(rustix::event::eventfd(
         0,
@@ -204,7 +204,7 @@ fn run(
     wake: Arc<OwnedFd>,
     stop: Arc<AtomicBool>,
     rx: Receiver<Ctl>,
-    mut out: Box<dyn Output>,
+    mut out: Box<dyn StreamIo>,
 ) -> Result<()> {
     let res = (|| -> Result<()> {
         loop {

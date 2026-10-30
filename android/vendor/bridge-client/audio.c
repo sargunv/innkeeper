@@ -1,4 +1,4 @@
-// The bridge's audio service. See audio_service.h.
+// The bridge's audio service. See linuxapk/audio.h.
 
 #include <errno.h>
 #include <poll.h>
@@ -9,13 +9,26 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audio_service.h"
+#include "linuxapk/audio.h"
 
 #include "linuxapk/bridge_client.h"
-#include "log.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#define ALOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "linuxapk-audio", __VA_ARGS__)
+#define ALOGW(...) \
+  __android_log_print(ANDROID_LOG_WARN, "linuxapk-audio", __VA_ARGS__)
+#define ALOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "linuxapk-audio", __VA_ARGS__)
+#else
+#define ALOGI(...) ((void)0)
+#define ALOGW(...) ((void)0)
+#define ALOGE(...) ((void)0)
+#endif
 
 // Wire constants, mirrored from host/bridge/src/audio/{proto,ring}.rs.
 #define T_OPEN_OUTPUT 0x0101
+#define T_OPEN_INPUT 0x0107
 #define T_CLOSE 0x0102
 #define T_STANDBY 0x0103
 #define T_SET_MASTER 0x0105
@@ -102,7 +115,9 @@ static _Atomic uint32_t* hdr32(const struct lxb_stream* s, size_t off) {
   return (_Atomic uint32_t*)(s->map + off);
 }
 
-int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s) {
+static int open_stream(
+  const struct lxb_audio_cfg* cfg, struct lxb_stream* s, bool input
+) {
   memset(s, 0, sizeof(*s));
   s->data_fd = s->space_fd = -1;
   uint32_t sample = cfg->format == LXB_F32LE ? 4 : 2;
@@ -113,7 +128,7 @@ int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s) {
     return r;
   }
   struct lxb_msg req;
-  request(&req, T_OPEN_OUTPUT);
+  request(&req, input ? T_OPEN_INPUT : T_OPEN_OUTPUT);
   lxb_put_u32(&req, cfg->rate);
   lxb_put_u8(&req, cfg->channels);
   lxb_put_u8(&req, cfg->format);
@@ -126,7 +141,7 @@ int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s) {
   pthread_mutex_unlock(&g_lock);
   if (st != 0 || reply.len < 20 || reply.nfds != 3) {
     lxb_close_fds(&reply);
-    ALOGE("bridge: open output failed (%d)", st);
+    ALOGE("bridge: open stream failed (%d)", st);
     return st < 0 ? st : -EPROTO;
   }
   int* fds = reply.fds;
@@ -151,20 +166,35 @@ int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s) {
   void* m =
     mmap(NULL, s->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fds[0], 0);
   close(fds[0]);
-  if (m == MAP_FAILED || *(uint32_t*)m != RING_MAGIC) {
+  if (
+    m == MAP_FAILED || lxb_u32(m) != RING_MAGIC ||
+    lxb_u32((uint8_t*)m + 4) != 1 ||
+    lxb_u32((uint8_t*)m + 8) != s->frame_bytes ||
+    lxb_u32((uint8_t*)m + 12) != s->capacity ||
+    lxb_u32((uint8_t*)m + 16) != cfg->rate ||
+    lxb_u32((uint8_t*)m + 20) != DATA_OFFSET
+  ) {
     if (m != MAP_FAILED) munmap(m, s->map_size);
     close(fds[1]);
     close(fds[2]);
     return -EPROTO;
   }
+  s->input = input;
   s->map = m;
   s->data_fd = fds[1];
   s->space_fd = fds[2];
   ALOGI(
-    "bridge: output #%u %u Hz, ring %u frames, downstream %u us", s->id,
+    "bridge: stream #%u %u Hz, ring %u frames, downstream %u us", s->id,
     s->rate, s->capacity, s->latency_us
   );
   return 0;
+}
+
+int lxb_open_output(const struct lxb_audio_cfg* cfg, struct lxb_stream* s) {
+  return open_stream(cfg, s, false);
+}
+int lxb_open_input(const struct lxb_audio_cfg* cfg, struct lxb_stream* s) {
+  return open_stream(cfg, s, true);
 }
 
 static int stream_call(uint16_t type, uint32_t id) {
@@ -180,7 +210,7 @@ static int stream_call(uint16_t type, uint32_t id) {
   return st;
 }
 
-void lxb_close_output(struct lxb_stream* s) {
+void lxb_close_stream(struct lxb_stream* s) {
   if (!s->map) return;
   stream_call(T_CLOSE, s->id);
   munmap(s->map, s->map_size);
@@ -191,6 +221,11 @@ void lxb_close_output(struct lxb_stream* s) {
 }
 
 int lxb_standby(struct lxb_stream* s) {
+  if (s->input) {
+    int r = s->map ? stream_call(T_STANDBY, s->id) : -ENOTCONN;
+    lxb_close_stream(s);
+    return r;
+  }
   return s->map ? stream_call(T_STANDBY, s->id) : -ENOTCONN;
 }
 
@@ -259,6 +294,57 @@ int lxb_write(
     );
     uint64_t one = 1;
     (void)!write(s->data_fd, &one, sizeof(one));
+  }
+  return (int)done;
+}
+
+uint64_t lxb_available(const struct lxb_stream* s) {
+  uint64_t w =
+    atomic_load_explicit(hdr64(s, OFF_WRITE_POS), memory_order_acquire);
+  uint64_t n = w >= s->read ? w - s->read : 0;
+  return n > s->capacity ? s->capacity : n;
+}
+
+int lxb_read(struct lxb_stream* s, void* buf, uint32_t frames, int timeout_ms) {
+  uint8_t* dst = buf;
+  uint32_t done = 0;
+  int64_t deadline = now_ns() + (int64_t)timeout_ms * 1000000;
+  if (lxb_dead(s)) return -EPIPE;
+  uint64_t one = 1;
+  (void)!write(s->data_fd, &one, sizeof(one));  // resume capture on first read
+  while (done < frames) {
+    if (lxb_dead(s)) return done ? (int)done : -EPIPE;
+    uint64_t ready = lxb_available(s);
+    if (!ready) {
+      int64_t left = (deadline - now_ns()) / 1000000;
+      if (left <= 0) break;
+      struct pollfd p = {.fd = s->space_fd, .events = POLLIN};
+      if (poll(&p, 1, (int)left) > 0) {
+        uint8_t token[64];
+        (void)!read(s->space_fd, token, sizeof(token));
+        if (p.revents & (POLLHUP | POLLERR)) return done ? (int)done : -EPIPE;
+      }
+      continue;
+    }
+    uint32_t n = frames - done;
+    if (n > ready) n = (uint32_t)ready;
+    uint32_t idx = (uint32_t)(s->read % s->capacity);
+    uint32_t first = s->capacity - idx;
+    if (first > n) first = n;
+    memcpy(
+      dst + (size_t)done * s->frame_bytes,
+      s->map + DATA_OFFSET + (size_t)idx * s->frame_bytes,
+      (size_t)first * s->frame_bytes
+    );
+    memcpy(
+      dst + (size_t)(done + first) * s->frame_bytes, s->map + DATA_OFFSET,
+      (size_t)(n - first) * s->frame_bytes
+    );
+    s->read += n;
+    done += n;
+    atomic_store_explicit(
+      hdr64(s, OFF_READ_POS), s->read, memory_order_release
+    );
   }
   return (int)done;
 }

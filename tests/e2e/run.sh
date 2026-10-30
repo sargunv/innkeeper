@@ -268,6 +268,12 @@ sys.exit(1)
       until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/audio.raw" --expect 440
       # Android am returns 1 when a service was successfully stopped.
       s am stopservice -n "dev.linuxapk.probes/.LifecycleProbe\$Media" >/dev/null || true
+      launch BenchProbe
+      s am start --display "$display" -n dev.linuxapk.probes/.BenchProbe --es mode audio >/dev/null
+      s am broadcast -a dev.linuxapk.BENCH_BEGIN -p dev.linuxapk.probes >/dev/null
+      until_ok log_has LinuxApkBench 'BENCH audio .*roundtrip_ns=[1-9][0-9]*'
+      echo 'ok   AudioRecord detected the known marker from the private sink monitor'
+      wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
     desktop)
       # One live preference round trip, through the same Session1 API as GTK.
@@ -366,6 +372,7 @@ fi
 mkdir -p "$T"
 : >"$T/timings.log"
 export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
+export LINUXAPK_AUDIO_SOURCE=$LINUXAPK_AUDIO_SINK.monitor
 keeper=""
 events=""
 setup_lock=""
@@ -471,25 +478,15 @@ run_group() {
   fi
   return "$result"
 }
-# Audio uses a foreground service and a private sink; it can run alongside
-# the sequential activity/window checks; lifecycle changes session state last.
-audio_pid=""
-for group in "${groups[@]}"; do
-  if [[ $group == audio ]]; then
-    run_group audio &
-    audio_pid=$!
-  fi
-done
+# AudioRecord needs a visible activity. Run it after the window/input checks,
+# before lifecycle stops the session; it shares no foreground window with them.
 for group in "${groups[@]}"; do
   case $group in audio | lifecycle) continue ;; esac
-  if [[ $group == desktop && -n $audio_pid ]]; then
-    # The sidecar restarts the probe process; finish audio before that teardown.
-    wait "$audio_pid" || failed+=(audio)
-    audio_pid=""
-  fi
   run_group "$group" || failed+=("$group")
 done
-if [[ -n $audio_pid ]]; then wait "$audio_pid" || failed+=(audio); fi
+for group in "${groups[@]}"; do
+  if [[ $group == audio ]]; then run_group audio || failed+=(audio); fi
+done
 for group in "${groups[@]}"; do
   if [[ $group == lifecycle ]]; then
     # Logging is an exec too: release its busy lock before testing idle stop.

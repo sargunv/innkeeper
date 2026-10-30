@@ -1,6 +1,6 @@
-//! Output to PipeWire through its PulseAudio protocol server
+//! StreamIo to PipeWire through its PulseAudio protocol server
 //! (`pipewire-pulse`), using the pure-Rust `pulseaudio` crate for the wire
-//! format. One native-protocol connection per Android output stream, so
+//! format. One native-protocol connection per Android PCM stream, so
 //! each shows up as its own stream in the desktop mixer.
 //!
 //! Why not libpipewire: the host has no PipeWire development headers (no
@@ -19,9 +19,9 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{Context, Result, anyhow, bail};
 use pulseaudio::protocol::{self, Command, Prop, Props};
 
-use super::proto::{OutputConfig, SampleFormat};
+use super::proto::{SampleFormat, StreamConfig};
 use super::ring::{Ring, STATE_IDLE, STATE_PLAYING};
-use super::stream::{Ctl, Output, monotonic_ns, usage_name_role};
+use super::stream::{Ctl, StreamIo, monotonic_ns, usage_name_role};
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Largest control frame we accept from the server.
@@ -36,7 +36,8 @@ const TIMING_INTERVAL: Duration = Duration::from_millis(20);
 /// so 10 ms measured the same.
 pub const TARGET_LATENCY_US: u32 = 20_000;
 
-pub struct PulseOut {
+pub struct PulseStream {
+    input: bool,
     sock: UnixStream,
     rbuf: Vec<u8>,
     version: u16,
@@ -75,15 +76,16 @@ struct Stats {
 /// The native protocol's cookie length.
 const COOKIE_LEN: usize = 256;
 
-impl PulseOut {
-    pub fn connect(cfg: &OutputConfig, sink: Option<&str>) -> Result<PulseOut> {
+impl PulseStream {
+    pub fn connect(cfg: &StreamConfig, device: Option<&str>, input: bool) -> Result<PulseStream> {
         let path = pulseaudio::socket_path_from_env().context("no PulseAudio/PipeWire socket")?;
         let sock =
             UnixStream::connect(&path).with_context(|| format!("connect {}", path.display()))?;
         sock.set_read_timeout(Some(SETUP_TIMEOUT))?;
         sock.set_write_timeout(Some(SETUP_TIMEOUT))?;
         let fb = cfg.frame_bytes() as usize;
-        let mut p = PulseOut {
+        let mut p = PulseStream {
+            input,
             sock,
             rbuf: Vec::with_capacity(4096),
             version: protocol::MAX_VERSION,
@@ -142,40 +144,66 @@ impl PulseOut {
         } else {
             protocol::ChannelMap::stereo()
         };
-        let seq = p.send(&Command::CreatePlaybackStream(
-            protocol::PlaybackStreamParams {
-                sample_spec: protocol::SampleSpec {
-                    format: match cfg.format {
-                        SampleFormat::S16Le => protocol::SampleFormat::S16Le,
-                        SampleFormat::F32Le => protocol::SampleFormat::Float32Le,
-                    },
-                    channels: cfg.channels,
-                    sample_rate: cfg.rate,
-                },
+        let sample_spec = protocol::SampleSpec {
+            format: match cfg.format {
+                SampleFormat::S16Le => protocol::SampleFormat::S16Le,
+                SampleFormat::F32Le => protocol::SampleFormat::Float32Le,
+            },
+            channels: cfg.channels,
+            sample_rate: cfg.rate,
+        };
+        if input {
+            let seq = p.send(&Command::CreateRecordStream(protocol::RecordStreamParams {
+                sample_spec,
                 channel_map,
-                sink_name: Some(match sink {
-                    Some(s) => CString::new(s)?,
-                    None => protocol::DEFAULT_SINK.to_owned(),
-                }),
+                source_name: device.map(CString::new).transpose()?,
                 buffer_attr: protocol::stream::BufferAttr {
-                    max_length: u32::MAX,
-                    target_length: bytes_per_us(TARGET_LATENCY_US),
-                    pre_buffering: u32::MAX,
-                    minimum_request_length: bytes_per_us(TARGET_LATENCY_US / 4),
-                    fragment_size: u32::MAX,
+                    max_length: bytes_per_us(TARGET_LATENCY_US * 2),
+                    fragment_size: bytes_per_us(TARGET_LATENCY_US / 2),
+                    ..Default::default()
                 },
-                props: sprops,
                 flags: protocol::stream::StreamFlags {
+                    start_corked: true,
                     adjust_latency: true,
                     ..Default::default()
                 },
+                props: sprops,
                 ..Default::default()
-            },
-        ))?;
-        let reply: protocol::CreatePlaybackStreamReply = p.wait_reply(seq)?;
-        p.channel = reply.channel;
-        p.sink_input = reply.stream_index;
-        p.pending = reply.requested_bytes as u64;
+            }))?;
+            let reply: protocol::CreateRecordStreamReply = p.wait_reply(seq)?;
+            validate_spec(sample_spec, reply.sample_spec)?;
+            p.channel = reply.channel;
+            p.corked = true;
+        } else {
+            let seq = p.send(&Command::CreatePlaybackStream(
+                protocol::PlaybackStreamParams {
+                    sample_spec,
+                    channel_map,
+                    sink_name: Some(match device {
+                        Some(s) => CString::new(s)?,
+                        None => protocol::DEFAULT_SINK.to_owned(),
+                    }),
+                    buffer_attr: protocol::stream::BufferAttr {
+                        max_length: u32::MAX,
+                        target_length: bytes_per_us(TARGET_LATENCY_US),
+                        pre_buffering: u32::MAX,
+                        minimum_request_length: bytes_per_us(TARGET_LATENCY_US / 4),
+                        fragment_size: u32::MAX,
+                    },
+                    props: sprops,
+                    flags: protocol::stream::StreamFlags {
+                        adjust_latency: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ))?;
+            let reply: protocol::CreatePlaybackStreamReply = p.wait_reply(seq)?;
+            validate_spec(sample_spec, reply.sample_spec)?;
+            p.channel = reply.channel;
+            p.sink_input = reply.stream_index;
+            p.pending = reply.requested_bytes as u64;
+        }
         p.sock.set_read_timeout(None)?;
         Ok(p)
     }
@@ -224,6 +252,17 @@ impl PulseOut {
 
     fn handle_frame(&mut self, ring: &mut Ring, frame: &[u8]) -> Result<()> {
         if !is_control(frame) {
+            if self.input
+                && !self.corked
+                && u32::from_be_bytes(frame[4..8].try_into().unwrap()) == self.channel
+            {
+                let pcm = &frame[protocol::DESCRIPTOR_SIZE..];
+                if !pcm.len().is_multiple_of(self.frame_bytes) {
+                    bail!("unaligned capture data");
+                }
+                ring.write(pcm);
+                ring.set_state(STATE_PLAYING);
+            }
             return Ok(());
         }
         let mut cur = Cursor::new(&frame[protocol::DESCRIPTOR_SIZE..]);
@@ -258,7 +297,9 @@ impl PulseOut {
                     self.cork(ring, true)?;
                 }
             }
-            Command::PlaybackStreamKilled(ch) if ch == self.channel => {
+            Command::PlaybackStreamKilled(ch) | Command::RecordStreamKilled(ch)
+                if ch == self.channel =>
+            {
                 bail!("stream killed by the server")
             }
             _ => {}
@@ -288,12 +329,15 @@ impl PulseOut {
     }
 
     fn cork(&mut self, ring: &Ring, cork: bool) -> Result<()> {
-        self.send(&Command::CorkPlaybackStream(
-            protocol::stream::CorkStreamParams {
-                channel: self.channel,
-                cork,
-            },
-        ))?;
+        let params = protocol::stream::CorkStreamParams {
+            channel: self.channel,
+            cork,
+        };
+        self.send(&if self.input {
+            Command::CorkRecordStream(params)
+        } else {
+            Command::CorkPlaybackStream(params)
+        })?;
         self.corked = cork;
         if cork {
             ring.set_state(STATE_IDLE);
@@ -378,7 +422,7 @@ fn is_control(frame: &[u8]) -> bool {
     frame.len() >= protocol::DESCRIPTOR_SIZE && frame[4..8] == [0xff; 4]
 }
 
-impl Output for PulseOut {
+impl StreamIo for PulseStream {
     fn poll_fd(&self) -> BorrowedFd<'_> {
         self.sock.as_fd()
     }
@@ -413,7 +457,7 @@ impl Output for PulseOut {
             off = end;
         }
         self.rbuf.drain(..off);
-        Ok(ring.read_pos() != before)
+        Ok(self.input || ring.read_pos() != before)
     }
 
     fn on_data(&mut self, ring: &mut Ring) -> Result<bool> {
@@ -421,10 +465,20 @@ impl Output for PulseOut {
             self.cork(ring, false)?;
         }
         self.standby = false;
-        self.pump(ring)
+        if self.input {
+            Ok(false)
+        } else {
+            self.pump(ring)
+        }
     }
 
     fn control(&mut self, ring: &mut Ring, c: Ctl) -> Result<()> {
+        if self.input {
+            if c == Ctl::Standby {
+                self.cork(ring, true)?;
+            }
+            return Ok(());
+        }
         match c {
             Ctl::Volume(l, r) => {
                 self.volume = (l, r);
@@ -461,5 +515,43 @@ impl Output for PulseOut {
             }
         }
         Ok(())
+    }
+}
+
+/// Pulse must resample/remix to the requested PCM ABI, never silently change it.
+fn validate_spec(want: protocol::SampleSpec, got: protocol::SampleSpec) -> Result<()> {
+    if want != got {
+        bail!("server changed PCM specification: {want:?} -> {got:?}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn rejects_changed_capture_spec() {
+        let want = protocol::SampleSpec {
+            format: protocol::SampleFormat::S16Le,
+            channels: 1,
+            sample_rate: 48000,
+        };
+        assert!(validate_spec(want, want).is_ok());
+        for got in [
+            protocol::SampleSpec {
+                sample_rate: 44100,
+                ..want
+            },
+            protocol::SampleSpec {
+                channels: 2,
+                ..want
+            },
+            protocol::SampleSpec {
+                format: protocol::SampleFormat::Float32Le,
+                ..want
+            },
+        ] {
+            assert!(validate_spec(want, got).is_err());
+        }
     }
 }

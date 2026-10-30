@@ -3,7 +3,7 @@
 Android's audio reaches PipeWire through our own `libtinyalsav2.so`, which
 replaces the image's tinyalsa inside the AIDL audio HAL's APEX
 (`/apex/com.android.hardware.audio/lib64/`). It presents one card, "Linux.apk",
-whose PCM writes into a shared ring that the bridge's audio service plays
+whose PCM shares playback and capture rings with the bridge's audio service
 ([host/bridge/src/audio](../../../host/bridge/src/audio/proto.rs)).
 `mise run build:audio` builds it in the NDK superbuild, with the policy XML, the
 HAL's rc override and `audio.prop`.
@@ -13,11 +13,21 @@ HAL's rc override and `audio.prop`.
   positions, runs in-process with no supervisor hop, and patches nothing. Our
   own AIDL `IModule` would mean weeks of reimplementation that drifts from AOSP;
   emulating `/dev/snd` through seccomp would cost a round trip per write. If a
-  future HAL stopped linking tinyalsa dynamically, `audio_service.c` (no
+  future HAL stopped linking tinyalsa dynamically, the shared C audio client (no
   tinyalsa types) is ready to back an AIDL stream instead.
 - **Pacing.** Blocking writes wait for ring space, so the host's audio clock
   paces the HAL; without a bridge, writes are paced by `CLOCK_MONOTONIC` and
   dropped, and the stream reconnects once a second.
+- **Capture.** Android's `RECORD_AUDIO` runtime permission is the consent. The
+  bridge records the default Pulse/PipeWire source into a capture ring;
+  `LINUXAPK_AUDIO_SOURCE` selects a source explicitly (tests use a null-sink
+  monitor). No source, a stalled backend or a bridge restart returns paced
+  silence while retrying once a second. Standby releases the host record stream;
+  the next read opens a fresh ring. The Flatpak's existing `--socket=pulseaudio`
+  grants playback and capture. Capture retains the HAL's requested buffer, since
+  the source cannot wait for a reader. Sustained recording still has periodic
+  gaps through the stock AOSP HAL's input pipe; see
+  [#168](https://github.com/sargunv/linux.apk/issues/168).
 - **Overrides:** `primary_audio_policy_configuration.xml` drops the HAL's MMAP
   and offload ports, which it serves with silent stubs; the HAL's rc preloads
   the shim, because its stream threads fail on `setpriority` without
@@ -28,5 +38,6 @@ HAL's rc override and `audio.prop`.
 
 Tests: `tests/abi.sh` (in `mise run test:bionic`) checks that we export the
 image library's symbols; the audio suite of `mise run test:e2e` plays a 440 Hz
-AAudio tone into a private null sink and checks its frequency. Start reading at
-`tinyalsa/pcm.c` and `tinyalsa/audio_service.c`.
+AAudio tone into a private null sink and checks its frequency, then detects a
+known marker through AudioRecord from that sink's monitor. Start reading at
+`tinyalsa/pcm.c` and `../bridge-client/audio.c`.

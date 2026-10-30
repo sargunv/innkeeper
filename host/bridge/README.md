@@ -22,6 +22,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
   `--test-session` (also `LINUXAPK_TEST=1`) makes a test session
   ([docs/security.md](../../docs/security.md#test-sessions)).
 - **Environment:** `LINUXAPK_AUDIO_SINK` (one PipeWire sink),
+  `LINUXAPK_AUDIO_SOURCE` (capture source, default: desktop default),
   `LINUXAPK_BRIDGE_VERBOSE=1` (per-stream stats), and the caller's
   `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`,
   `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's `plasma-localerc`), which

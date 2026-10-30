@@ -1,4 +1,4 @@
-//! The audio service: output streams from the Android audio HAL to PipeWire.
+//! The audio service: playback and capture between Android and PipeWire.
 
 pub mod proto;
 pub mod pulse;
@@ -14,16 +14,19 @@ use rustix::event::EventfdFlags;
 
 use crate::ipc::server::{Peer, Reply, Service};
 use crate::ipc::wire::errno::*;
-use proto::{OpenOutputReply, OutputConfig, Request};
+use proto::{OpenReply, Request, StreamConfig};
 use ring::{DATA_OFFSET, Ring};
-use stream::{Ctl, NullOut, Output, StreamHandle};
+use stream::{Ctl, NullOut, StreamHandle, StreamIo};
 
 /// Where streams play.
 #[derive(Debug, Clone)]
 pub enum Backend {
     /// PipeWire through its Pulse protocol server; `sink` is a sink name
     /// (default: the desktop's default output).
-    Pulse { sink: Option<String> },
+    Pulse {
+        sink: Option<String>,
+        source: Option<String>,
+    },
     /// Nowhere, at the nominal rate.
     Null,
 }
@@ -79,7 +82,7 @@ impl AudioService {
         }
     }
 
-    fn open_output(&mut self, cfg: OutputConfig) -> Reply {
+    fn open(&mut self, cfg: StreamConfig, input: bool) -> Reply {
         // Streams whose thread died (PipeWire went away) still count until
         // the client closes them; reap them here so they can reconnect.
         let dead: Vec<u32> = self
@@ -104,17 +107,17 @@ impl AudioService {
             self.total.fetch_sub(1, Ordering::AcqRel);
             return Reply::err(-EBUSY);
         }
-        match self.spawn(&cfg, map_size) {
+        match self.spawn(&cfg, map_size, input) {
             Ok(r) => r,
             Err(e) => {
                 self.total.fetch_sub(1, Ordering::AcqRel);
-                crate::warn!("{}: open output failed: {e:#}", self.peer);
+                crate::warn!("{}: open stream failed: {e:#}", self.peer);
                 Reply::err(-EIO)
             }
         }
     }
 
-    fn spawn(&mut self, cfg: &OutputConfig, map_size: usize) -> anyhow::Result<Reply> {
+    fn spawn(&mut self, cfg: &StreamConfig, map_size: usize, input: bool) -> anyhow::Result<Reply> {
         let ring = Ring::new(cfg.frame_bytes(), cfg.capacity_frames(), cfg.rate)?;
         debug_assert_eq!(ring.map_len(), map_size);
         // The client shares the data eventfd's open file description, so it
@@ -132,10 +135,21 @@ impl AudioService {
             rustix::io::fcntl_dupfd_cloexec(data.as_fd(), 3)?,
             space_rd,
         ];
-        let (out, latency_us): (Box<dyn Output>, u32) = match &self.backend {
-            Backend::Pulse { sink } => match pulse::PulseOut::connect(cfg, sink.as_deref()) {
+        let (out, latency_us): (Box<dyn StreamIo>, u32) = match &self.backend {
+            Backend::Pulse { sink, source } => match pulse::PulseStream::connect(
+                cfg,
+                if input {
+                    source.as_deref()
+                } else {
+                    sink.as_deref()
+                },
+                input,
+            ) {
                 Ok(p) => (Box::new(p), pulse::TARGET_LATENCY_US),
                 Err(e) => {
+                    if input {
+                        return Err(e);
+                    }
                     crate::warn!(
                         "{}: PipeWire unavailable ({e:#}); stream plays nowhere",
                         self.peer
@@ -143,6 +157,7 @@ impl AudioService {
                     (Box::new(NullOut::new(cfg)?), 0)
                 }
             },
+            Backend::Null if input => anyhow::bail!("no capture backend"),
             Backend::Null => (Box::new(NullOut::new(cfg)?), 0),
         };
         let id = self.next_id;
@@ -154,8 +169,9 @@ impl AudioService {
         }
         self.streams.insert(id, handle);
         crate::info!(
-            "{}: output #{id} {} Hz x{} {:?}, {} x {} frames, \"{}\"",
+            "{}: {} #{id} {} Hz x{} {:?}, {} x {} frames, \"{}\"",
             self.peer,
+            if input { "input" } else { "output" },
             cfg.rate,
             cfg.channels,
             cfg.format,
@@ -163,7 +179,7 @@ impl AudioService {
             cfg.period_frames,
             cfg.name
         );
-        let body = OpenOutputReply {
+        let body = OpenReply {
             stream: id,
             capacity_frames: capacity,
             data_offset: DATA_OFFSET as u32,
@@ -211,10 +227,11 @@ impl Service for AudioService {
             }
         };
         match req {
-            Request::OpenOutput(cfg) => self.open_output(cfg),
+            Request::OpenOutput(cfg) => self.open(cfg, false),
+            Request::OpenInput(cfg) => self.open(cfg, true),
             Request::Close { stream } => {
                 if self.remove(stream) {
-                    crate::info!("{}: output #{stream} closed", self.peer);
+                    crate::info!("{}: stream #{stream} closed", self.peer);
                     Reply::ok()
                 } else {
                     Reply::err(-ENOENT)

@@ -86,6 +86,37 @@ echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
 exec sleep infinity
 HOLD
 chmod +x "$N/hold.sh"
+# Explicit daemon config avoids system fragments (including network devices).
+mkdir -p "$N/config/pipewire" "$N/config/wireplumber/wireplumber.conf.d"
+cat >"$N/config/pipewire/test.conf" <<'AUDIO'
+context.properties = { core.daemon = true core.name = pipewire-0 }
+context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
+context.modules = [
+  { name = libpipewire-module-protocol-native }
+  { name = libpipewire-module-metadata }
+  { name = libpipewire-module-spa-node-factory }
+  { name = libpipewire-module-client-node }
+  { name = libpipewire-module-access }
+  { name = libpipewire-module-adapter }
+  { name = libpipewire-module-link-factory }
+]
+context.objects = [
+  { factory = spa-node-factory args = { factory.name = support.node.driver node.name = Dummy-Driver node.group = pipewire.dummy priority.driver = 20000 } }
+]
+AUDIO
+cp /usr/share/pipewire/pipewire-pulse.conf "$N/config/pipewire/test-pulse.conf"
+# No hardware monitors: test capture must never see a real microphone.
+cat >"$N/config/wireplumber/wireplumber.conf.d/90-private-audio.conf" <<'AUDIO'
+wireplumber.profiles = {
+  main = {
+    monitor.alsa = disabled
+    monitor.bluez = disabled
+    monitor.bluez-midi = disabled
+    monitor.v4l2 = disabled
+    monitor.libcamera = disabled
+  }
+}
+AUDIO
 cat >"$N/compositor.sh" <<HOLD
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -94,6 +125,9 @@ if [ "${LINUXAPK_E2E:-}" = 1 ]; then
   /usr/bin/python3 "$repo/tests/e2e/desktop.py" "$N/data/picked.txt" >"$N/desktop.log" 2>&1 &
   gdbus wait --session --timeout 10 org.freedesktop.portal.Desktop
 fi
+pipewire -c "$N/config/pipewire/test.conf" >"$N/pipewire.log" 2>&1 &
+pipewire-pulse -c "$N/config/pipewire/test-pulse.conf" >"$N/pulse.log" 2>&1 &
+wireplumber >"$N/wireplumber.log" 2>&1 &
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
 gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
@@ -108,7 +142,7 @@ HOLD
 chmod +x "$N/compositor.sh"
 printf '%s\n' "$rt" >"$N/runtime"
 rm -f "$N/bus"
-export PULSE_SERVER=${PULSE_SERVER:-unix:$host_runtime/pulse/native}
+export PULSE_SERVER=unix:$rt/pulse/native
 export FLATPAK_USER_DIR=$repo/out/flatpak/user
 export XDG_DATA_DIRS=$FLATPAK_USER_DIR/exports/share:/usr/local/share:/usr/share
 export LANG=C.UTF-8 LANGUAGE=C
@@ -156,5 +190,11 @@ else
   gdbus call --session --dest org.kde.KWin --object-path /KWin \
     --method org.kde.KWin.supportInformation >"$N/kwin-support.txt"
 fi
+phase='waiting for private audio server'
+for _ in $(seq 100); do
+  if pactl info >/dev/null 2>&1; then break; fi
+  sleep 0.05
+done
+pactl info >"$N/audio-server.txt"
 phase='running nested command'
 "$@"
