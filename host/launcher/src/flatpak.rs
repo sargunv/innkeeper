@@ -423,6 +423,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     apply_run_layer(cfg).context("add the start-time layer")?;
     trace.mark(p, "start-time layer applied");
     crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("linuxapk"))?;
+    trace.mark(p, "data version recorded");
     sandbox_root(cfg).context("set up the sandbox's /")?;
     trace.mark(p, "sandbox root ready");
     session::start_kmsg_reader(p)?;
