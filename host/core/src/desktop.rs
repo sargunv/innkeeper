@@ -170,6 +170,8 @@ pub struct AppEntry {
     /// What its launch splash looks like, as `X-LinuxApk-Splash` and
     /// `X-LinuxApk-Window`.
     pub splash: Option<Splash>,
+    /// The launcher activity accepts Android MULTIPLE_TASK.
+    pub new_window: bool,
 }
 
 /// An app's launch splash: the window its launcher activity opens in, in
@@ -254,6 +256,13 @@ impl AppEntry {
             writeln!(s, "X-LinuxApk-Splash=#{:06x}", sp.color & 0xff_ffff)?;
             writeln!(s, "X-LinuxApk-Window={}x{}", sp.width, sp.height)?;
         }
+        writeln!(s, "X-LinuxApk-NewWindow={}", self.new_window)?;
+        if self.new_window {
+            s.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\n");
+            let mut run = self.run.clone();
+            run.extend(["--new-window".into(), self.package.clone()]);
+            writeln!(s, "Exec={}", exec_line(&run, None)?)?;
+        }
         Ok(s)
     }
 }
@@ -330,12 +339,17 @@ pub fn read_key(text: &str, key: &str) -> Option<String> {
 /// `value` (already escaped); every other line is kept as it is. None if the
 /// key isn't there.
 pub fn replace_key(text: &str, key: &str, value: &str) -> Option<String> {
+    replace_group_key(text, "Desktop Entry", key, value)
+}
+
+/// Replaces a key in a named desktop-file group, keeping all other lines.
+pub fn replace_group_key(text: &str, group: &str, key: &str, value: &str) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut in_group = false;
     let mut found = false;
     for line in text.split_inclusive('\n') {
         if line.starts_with('[') {
-            in_group = line.trim_end() == "[Desktop Entry]";
+            in_group = line.trim_end() == format!("[{group}]");
         } else if in_group
             && !found
             && line
@@ -370,6 +384,7 @@ mod tests {
             schemes: vec!["wikipedia".into()],
             web_hosts: vec!["*.wikipedia.org".into()],
             origin: None,
+            new_window: false,
             splash: Some(Splash {
                 color: 0xf8f9fa,
                 width: 1280,
@@ -391,7 +406,7 @@ mod tests {
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
              X-LinuxApk-Package=org.wikipedia\nX-LinuxApk-Version=2.7.50\n\
              X-LinuxApk-Web-Hosts=*.wikipedia.org;\nX-LinuxApk-Splash=#f8f9fa\n\
-             X-LinuxApk-Window=1280x800\n"
+             X-LinuxApk-Window=1280x800\nX-LinuxApk-NewWindow=false\n"
         );
         assert_eq!(
             Splash::parse(
@@ -404,6 +419,22 @@ mod tests {
         assert_eq!(Splash::parse("#000000", "0x1"), None);
         assert_eq!(Splash::parse("000000", "1x1"), None);
         assert!(!s.contains("x-scheme-handler/http"));
+    }
+
+    #[test]
+    fn new_window_action_keeps_the_launcher_command_and_instance() {
+        let mut e = entry();
+        assert!(!e.render().unwrap().contains("Desktop Action"));
+        e.new_window = true;
+        e.run = vec![
+            "env".into(),
+            "LINUXAPK_INSTANCE=test".into(),
+            "/opt/linux apk/bin/linuxapk".into(),
+            "run".into(),
+        ];
+        let text = e.render().unwrap();
+        assert!(text.contains("Actions=NewWindow;\n"));
+        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env LINUXAPK_INSTANCE=test \"/opt/linux apk/bin/linuxapk\" run --new-window org.wikipedia\n"));
     }
 
     #[test]

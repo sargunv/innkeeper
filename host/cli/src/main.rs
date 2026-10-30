@@ -38,6 +38,9 @@ enum Cmd {
     /// Launch an app, optionally opening files or a URI in it.
     Run {
         package: String,
+        /// Open a separate task/window, if the launcher activity supports it.
+        #[arg(long)]
+        new_window: bool,
         files_or_uri: Vec<String>,
     },
     /// Uninstall an app and remove its desktop entry and icons.
@@ -114,6 +117,7 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
             &args,
             token,
             Some("dev.linuxapk.system/.documents.OpenWithActivity"),
+            false,
         )?;
     }
     Ok(())
@@ -142,7 +146,12 @@ fn run(
     args: &[String],
     token: Option<String>,
     file_component: Option<&str>,
+    new_window: bool,
 ) -> Result<()> {
+    anyhow::ensure!(
+        !new_window || args.is_empty(),
+        "--new-window opens the launcher activity; omit files and URIs"
+    );
     let pkg = validate::package(pkg)?;
     let session = Session::find()?;
     let splash = if session.running() {
@@ -176,6 +185,7 @@ fn run(
         let opts = LaunchOptions {
             token,
             wait: splash.is_some(),
+            new_window,
         };
         if args.iter().all(|s| s.is_empty()) {
             return ops::run(pkg, None, &opts, &stderr);
@@ -305,7 +315,8 @@ fn main() -> ExitCode {
         Cmd::Run {
             package,
             files_or_uri,
-        } => run(&package, &files_or_uri, token, None),
+            new_window,
+        } => run(&package, &files_or_uri, token, None, new_window),
         Cmd::List => list(),
         Cmd::App {
             package,

@@ -7,17 +7,17 @@ privileged app that is Android's side of the desktop.
 `/system_ext/etc/permissions/`; system_server starts it at `systemReady` and
 restarts it if it dies.
 
-| Feature (`app/.../system/`)             | Bridge service | What it does                                                                           |
-| --------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| `wm/HomeActivity.kt`                    | none           | empty HOME on the windowless default display, replacing Launcher3/QuickStep            |
-| `wm/`                                   | input          | one trusted virtual display and host window per app ([display](../../docs/display.md)) |
-| `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))          |
-| `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up    |
-| `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))          |
-| `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked             |
-| `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host             |
-| `net/`                                  | none           | Flatpak mode: the host's network as Android's default network                          |
-| `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI  |
+| Feature (`app/.../system/`)             | Bridge service | What it does                                                                            |
+| --------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `wm/HomeActivity.kt`                    | none           | empty HOME on the windowless default display, replacing Launcher3/QuickStep             |
+| `wm/`                                   | input          | one trusted virtual display and host window per task ([display](../../docs/display.md)) |
+| `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))           |
+| `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up     |
+| `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))           |
+| `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked              |
+| `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host              |
+| `net/`                                  | none           | Flatpak mode: the host's network as Android's default network                           |
+| `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI   |
 
 Gradle modules:
 

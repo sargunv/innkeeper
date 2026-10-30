@@ -175,6 +175,7 @@ class WindowManagerFeature(
     val file: Boolean = false,
     /** An explicit file handoff prepared by the system app (VIEW or SEND). */
     val launchIntent: Intent? = null,
+    val newWindow: Boolean = false,
   )
 
   /** Opens [r]'s app in a new window, or focuses its window. Returns a one-line result. */
@@ -239,6 +240,13 @@ class WindowManagerFeature(
       }
     // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher does: an existing task comes to the front.
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    if (r.newWindow) {
+      val activity =
+        pm.resolveActivity(intent, 0)?.activityInfo ?: return "error: no launcher activity"
+      if (!LaunchPolicy.multipleTasks(activity.launchMode, activity.documentLaunchMode))
+        return "error: launcher activity does not support multiple tasks"
+      intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+    }
     // A desktop link is an untrusted-origin VIEW: only activities that accept web links.
     if (r.uri != null && !r.file) intent.addCategory(Intent.CATEGORY_BROWSABLE)
 
@@ -253,13 +261,15 @@ class WindowManagerFeature(
           windows.values.map { TaskRouting.Window(it.id, it.taskId, it.pkg) },
         )
         ?.let(windows::get)
-    existingWindow?.let { w ->
-      // A link or another activity opens in the app's window; its launcher activity just
-      // brings the task back.
-      if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
-      focus(w, activate = true, token = r.token)
-      return "focused display=${w.id} package=${r.pkg}"
-    }
+    existingWindow
+      ?.takeUnless { r.newWindow }
+      ?.let { w ->
+        // A link or another activity opens in the app's window; its launcher activity just
+        // brings the task back.
+        if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
+        focus(w, activate = true, token = r.token)
+        return "focused display=${w.id} package=${r.pkg}"
+      }
 
     val sizing =
       if (r.widthDp > 0 && r.heightDp > 0) WindowSizing(r.widthDp, r.heightDp, 0, 0)
@@ -267,7 +277,7 @@ class WindowManagerFeature(
     val w = createWindow(r.pkg, label, sizing, r.token) ?: return "error: no virtual display"
     // An existing task (say, started on display 0) moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
-    if (existing != null && r.uri == null && r.launchIntent == null) {
+    if (!r.newWindow && existing != null && r.uri == null && r.launchIntent == null) {
       move(existing, w)
     } else {
       start(intent, w.id)

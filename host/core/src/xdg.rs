@@ -216,20 +216,13 @@ fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu> {
         .unwrap_or_else(|| MANAGER_ICON_SVG.as_bytes().to_vec());
     // The portal sets Name and Icon from its dialog; the record's own keys
     // (DECLINED) stay out.
-    let entry: String = text
+    let entry: String = portal_entry(text)
         .lines()
         .filter(|l| !l.starts_with("Icon=") && !l.starts_with(&format!("{DECLINED}=")))
         .map(|l| format!("{l}\n"))
         .collect();
     let answer = dynlauncher::install(&id, &name, &icon, &entry)?;
-    let mut record = text
-        .lines()
-        .filter(|l| !l.starts_with(&format!("{DECLINED}=")))
-        .map(|l| format!("{l}\n"))
-        .collect::<String>();
-    if answer == Answer::Declined {
-        record.push_str(&format!("{DECLINED}=declined\n"));
-    }
+    let record = menu_record(text, answer == Answer::Declined);
     if record != text {
         write_atomic(&d.app_desktop(pkg), record.as_bytes())?;
     }
@@ -237,6 +230,32 @@ fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu> {
         Answer::Added => Menu::Portal(id),
         Answer::Declined => Menu::Declined,
     })
+}
+
+// The decline belongs to Desktop Entry, even when action groups follow it.
+fn menu_record(text: &str, declined: bool) -> String {
+    let mut record = String::new();
+    for line in text
+        .lines()
+        .filter(|l| !l.starts_with(&format!("{DECLINED}=")))
+    {
+        record.push_str(line);
+        record.push('\n');
+        if declined && line == "[Desktop Entry]" {
+            record.push_str(&format!("{DECLINED}=declined\n"));
+        }
+    }
+    record
+}
+
+// DynamicLauncher 1.20 accepts exactly one group. Keep the native action in
+// our record, but omit it from portal installs so the app launcher still works.
+fn portal_entry(text: &str) -> String {
+    text.lines()
+        .take_while(|line| !line.starts_with('[') || *line == "[Desktop Entry]")
+        .filter(|line| !line.starts_with("Actions="))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 /// Removes an app's desktop entry and icons. Returns whether anything existed.
@@ -359,12 +378,20 @@ pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
         if missing || elsewhere || inv.foreign_env || inv.program.is_none() {
             let mut run = paths::command(linuxapk, inv.instance);
             run.extend(["run".into(), pkg.clone()]);
-            let Some(new) = desktop::exec_line(&run, Some("%U"))
+            let Some(mut new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
                 .and_then(|line| desktop::replace_key(&text, "Exec", &line))
             else {
                 continue;
             };
+            run.pop();
+            run.extend(["--new-window".into(), pkg.clone()]);
+            if let Ok(line) = desktop::exec_line(&run, None)
+                && let Some(updated) =
+                    desktop::replace_group_key(&new, "Desktop Action NewWindow", "Exec", &line)
+            {
+                new = updated;
+            }
             match write_atomic(&path, new.as_bytes()) {
                 Ok(()) => n += 1,
                 Err(e) => eprintln!("linuxapk: {e:#}"),
@@ -386,6 +413,24 @@ pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portal_keeps_only_the_main_launcher() {
+        let entry = "[Desktop Entry]\nName=App\nExec=linuxapk run a.b %U\nActions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=linuxapk run --new-window a.b\n";
+        let record = menu_record(entry, true);
+        // The repair path reads exactly this key before requesting installation again.
+        assert_eq!(
+            desktop::read_key(&record, DECLINED).as_deref(),
+            Some("declined")
+        );
+        assert!(record.ends_with("Exec=linuxapk run --new-window a.b\n"));
+        assert_eq!(menu_record(&record, false), entry);
+        let portal = portal_entry(entry);
+        assert_eq!(
+            portal,
+            "[Desktop Entry]\nName=App\nExec=linuxapk run a.b %U\n\n"
+        );
+    }
 
     #[test]
     fn instance_of_exec() {
@@ -418,6 +463,7 @@ mod tests {
             web_hosts: vec![],
             origin: None,
             splash: None,
+            new_window: false,
         };
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());
@@ -481,6 +527,9 @@ mod tests {
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
         let moved = entry("org.ex.moved", "/gone/linuxapk run org.ex.moved %U");
+        let mut moved_text = fs::read_to_string(&moved).unwrap();
+        moved_text.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=/gone/linuxapk run --new-window org.ex.moved\n");
+        fs::write(&moved, moved_text).unwrap();
         let fine = entry("org.ex.fine", &want("org.ex.fine", "").unwrap());
         let on_path = entry("org.ex.path", "linuxapk run org.ex.path %U");
 
@@ -488,6 +537,11 @@ mod tests {
         assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
         assert_eq!(exec_instance(&exec_of(&old).unwrap()), "cli");
         assert_eq!(exec_of(&moved), want("org.ex.moved", ""));
+        let moved_text = fs::read_to_string(&moved).unwrap();
+        assert!(moved_text.contains(&format!(
+            "Exec={} run --new-window org.ex.moved\n",
+            binary.display()
+        )));
         assert_eq!(exec_of(&fine), want("org.ex.fine", ""));
         assert_eq!(
             exec_of(&on_path).as_deref(),
