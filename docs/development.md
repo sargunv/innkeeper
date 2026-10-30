@@ -57,8 +57,9 @@ flowchart LR
 - `tools/dev/linuxapk.sh install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of
   its own: `LINUXAPK_INSTANCE=cli tests/nested.sh tools/dev/linuxapk.sh list`
-  runs it on a nested KWin with a private bus, AT-SPI bus, runtime dir and
-  HOME/XDG dirs, and removes them after.
+  runs it on a nested KWin with private PipeWire/Pulse (no hardware monitors), a
+  private bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them
+  after.
 - `packaging/flatpak/build.sh` builds the Flatpak from the committed tree and
   installs it into `FLATPAK_USER_DIR`; use a private one under `out/`
   ([packaging/flatpak](../packaging/flatpak/README.md)).

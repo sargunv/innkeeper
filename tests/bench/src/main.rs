@@ -669,6 +669,10 @@ fn main() -> Result<()> {
         .env("LINUXAPK_BENCH_OUT", &out)
         .env("LINUXAPK_AUDIO_SINK", format!("linuxapk_bench_{id}"))
         .env(
+            "LINUXAPK_AUDIO_SOURCE",
+            format!("linuxapk_bench_{id}.monitor"),
+        )
+        .env(
             "LINUXAPK_DATA",
             std::env::current_dir()?
                 .join("out/dev/flatpak")

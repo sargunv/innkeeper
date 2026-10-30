@@ -9,7 +9,7 @@
 #include <string.h>
 #include <tinyalsa/mixer.h>
 
-#include "audio_service.h"
+#include "linuxapk/audio.h"
 
 #define API __attribute__((visibility("default")))
 

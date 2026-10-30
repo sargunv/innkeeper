@@ -5,6 +5,7 @@
 //! | Type     | Request      | Body                                                                                                                                               | Reply                                                                                                                                          |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 //! | `0x0101` | OPEN_OUTPUT  | `u32 rate` (8000–192000), `u8 channels` (1–2), `u8 format` (1 s16le, 2 f32le), `u16 0`, `u32 period_frames` (16–16384), `u32 periods` (2–16), name | `u32 stream`, `u32 capacity_frames`, `u32 data_offset`, `u32 map_size`, `u32 latency_us`; fds: ring memfd, data eventfd, space pipe (read end) |
+//! | `0x0107` | OPEN_INPUT | Same PCM config as OPEN_OUTPUT | Same reply and fds; bridge produces, client consumes |
 //! | `0x0102` | CLOSE        | `u32 stream`                                                                                                                                       |                                                                                                                                                |
 //! | `0x0103` | STANDBY      | `u32 stream`                                                                                                                                       | Once the ring drains and PipeWire underruns, the stream is corked so the sink can suspend                                                     |
 //! | `0x0104` | SET_VOLUME   | `u32 stream`, `f32 left`, `f32 right` (each 0–1)                                                                                                   |                                                                                                                                                |
@@ -23,6 +24,7 @@ use crate::ipc::wire::{DecodeError, Reader, Writer};
 
 pub mod ty {
     pub const OPEN_OUTPUT: u16 = 0x0101;
+    pub const OPEN_INPUT: u16 = 0x0107;
     pub const CLOSE: u16 = 0x0102;
     pub const STANDBY: u16 = 0x0103;
     pub const SET_VOLUME: u16 = 0x0104;
@@ -58,7 +60,7 @@ pub mod limits {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OutputConfig {
+pub struct StreamConfig {
     pub rate: u32,
     pub channels: u8,
     pub format: SampleFormat,
@@ -67,7 +69,7 @@ pub struct OutputConfig {
     pub name: String,
 }
 
-impl OutputConfig {
+impl StreamConfig {
     pub fn frame_bytes(&self) -> u32 {
         self.channels as u32 * self.format.bytes()
     }
@@ -79,7 +81,8 @@ impl OutputConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Request {
-    OpenOutput(OutputConfig),
+    OpenOutput(StreamConfig),
+    OpenInput(StreamConfig),
     Close {
         stream: u32,
     },
@@ -107,7 +110,7 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
     use limits::*;
     let mut r = Reader::new(body);
     let req = match t {
-        ty::OPEN_OUTPUT => {
+        ty::OPEN_OUTPUT | ty::OPEN_INPUT => {
             let rate = r.u32_in(MIN_RATE..=MAX_RATE, "rate")?;
             let channels = r.u8()?;
             let format = match r.u8()? {
@@ -124,14 +127,19 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
             if !(1..=MAX_CHANNELS).contains(&channels) {
                 return Err(DecodeError::Invalid("channels"));
             }
-            Request::OpenOutput(OutputConfig {
+            let cfg = StreamConfig {
                 rate,
                 channels,
                 format,
                 period_frames,
                 periods,
                 name,
-            })
+            };
+            if t == ty::OPEN_INPUT {
+                Request::OpenInput(cfg)
+            } else {
+                Request::OpenOutput(cfg)
+            }
         }
         ty::CLOSE => Request::Close { stream: r.u32()? },
         ty::STANDBY => Request::Standby { stream: r.u32()? },
@@ -156,11 +164,18 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
 }
 
 /// Encodes a request (the client side: tests, the example client, and the
-/// reference for `android/vendor/audio/tinyalsa/audio_service.c`).
+/// reference for `android/vendor/bridge-client/audio.c`).
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match req {
-        Request::OpenOutput(c) => {
-            let mut w = Writer::message(ty::OPEN_OUTPUT, tag);
+        Request::OpenOutput(c) | Request::OpenInput(c) => {
+            let mut w = Writer::message(
+                if matches!(req, Request::OpenInput(_)) {
+                    ty::OPEN_INPUT
+                } else {
+                    ty::OPEN_OUTPUT
+                },
+                tag,
+            );
             w.u32(c.rate)
                 .u8(c.channels)
                 .u8(c.format as u8)
@@ -207,11 +222,12 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// OPEN_OUTPUT reply body. The reply also carries three fds, in order: the
+/// OPEN_OUTPUT / OPEN_INPUT reply body. The reply also carries three fds, in order: the
 /// ring memfd, the "data" eventfd (client signals) and the "space" eventfd
-/// (bridge signals).
+/// (bridge signals). Input uses the same notification direction: the client
+/// signals a read request, the bridge signals data availability or death.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OpenOutputReply {
+pub struct OpenReply {
     pub stream: u32,
     pub capacity_frames: u32,
     pub data_offset: u32,
@@ -219,7 +235,7 @@ pub struct OpenOutputReply {
     pub latency_us: u32,
 }
 
-impl OpenOutputReply {
+impl OpenReply {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::default();
         w.u32(self.stream)
@@ -231,7 +247,7 @@ impl OpenOutputReply {
     }
     pub fn decode(b: &[u8]) -> Option<Self> {
         let mut r = Reader::new(b);
-        let v = OpenOutputReply {
+        let v = OpenReply {
             stream: r.u32().ok()?,
             capacity_frames: r.u32().ok()?,
             data_offset: r.u32().ok()?,
@@ -249,7 +265,7 @@ mod tests {
     use crate::ipc::wire::{HDR, decode_header};
 
     fn out(rate: u32, ch: u8, pf: u32, p: u32) -> Request {
-        Request::OpenOutput(OutputConfig {
+        Request::OpenOutput(StreamConfig {
             rate,
             channels: ch,
             format: SampleFormat::S16Le,
@@ -266,7 +282,11 @@ mod tests {
 
     #[test]
     fn roundtrip_examples() {
+        let Request::OpenOutput(cfg) = out(44100, 1, 441, 4) else {
+            unreachable!()
+        };
         let reqs = [
+            Request::OpenInput(cfg),
             out(48000, 2, 480, 2),
             Request::Close { stream: 7 },
             Request::Standby { stream: 7 },
@@ -308,6 +328,13 @@ mod tests {
                 matches!(roundtrip(&encode(5, &r)), Err(DecodeError::Invalid(_))),
                 "{r:?}"
             );
+            let Request::OpenOutput(cfg) = r else {
+                unreachable!()
+            };
+            assert!(matches!(
+                roundtrip(&encode(5, &Request::OpenInput(cfg))),
+                Err(DecodeError::Invalid(_))
+            ));
         }
         assert!(
             roundtrip(&encode(

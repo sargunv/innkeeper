@@ -29,7 +29,7 @@ import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-/** Manual benchmarks only. No benchmark runs during unit or end-to-end tests. */
+/** Manual benchmarks; e2e also reuses the audio marker to prove capture. */
 class BenchProbe : Activity() {
   private var connection: ServiceConnection? = null
   private var started = false

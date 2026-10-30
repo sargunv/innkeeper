@@ -1,12 +1,12 @@
 // tinyalsa PCM API for Linux.apk: one virtual card ("Linux.apk", card 0,
-// device 0) whose playback goes to the host bridge through a shared ring
-// (audio_service.c), and whose capture is silence for now.
+// device 0) whose playback and capture use shared rings in the host bridge
+// (bridge-client/audio.c).
 //
 // This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
 // HAL plays to the desktop without changes. See ../README.md.
 //
 // Behaviour notes:
-// - The bridge stream is opened lazily on the first write, so the HAL's
+// - The bridge stream is opened lazily on the first read/write, so the HAL's
 //   capability probes (open/close at each rate) are free.
 // - Writes block while the ring is full: the HAL is paced by the host's
 //   audio clock. Without a bridge (not running, or it went away) writes are
@@ -30,7 +30,7 @@
 #include <tinyalsa/pcm.h>
 #include <unistd.h>
 
-#include "audio_service.h"
+#include "linuxapk/audio.h"
 #include "linuxapk/bridge_client.h"
 #include "log.h"
 
@@ -67,7 +67,7 @@ struct pcm {
   int64_t fb_t0;
   uint64_t fb_f0;
   struct lxb_backoff retry;  // reopening the stream
-  // Input (silence).
+  // Input fallback clock.
   int64_t in_t0;
   uint64_t in_frames;
   bool running;
@@ -189,7 +189,7 @@ API struct pcm* pcm_open_by_name(
 static void disconnect_locked(struct pcm* p) {
   if (p->s.map) {
     p->base += __atomic_load_n(&p->s.written, __ATOMIC_ACQUIRE);
-    lxb_close_output(&p->s);
+    lxb_close_stream(&p->s);
   }
 }
 
@@ -293,7 +293,7 @@ static uint32_t ring_period(const struct pcm* p) {
 
 static void connect_locked(struct pcm* p) {
   if (p->s.map || lxb_backoff_ms(&p->retry) != 0) return;
-  struct lxb_out_cfg c = {
+  struct lxb_audio_cfg c = {
     .rate = p->config.rate,
     .channels = (uint8_t)p->config.channels,
     .format = p->config.format == PCM_FORMAT_FLOAT_LE ? LXB_F32LE : LXB_S16LE,
@@ -301,6 +301,10 @@ static void connect_locked(struct pcm* p) {
     .periods = 2,
     .name = "Android",
   };
+  if (p->flags & PCM_IN) {
+    lxb_open_input(&c, &p->s);
+    return;
+  }
   uint64_t pos = presented_locked(p);
   if (lxb_open_output(&c, &p->s) == 0) {
     // Whatever the virtual clock hadn't played yet is lost; start the
@@ -391,19 +395,44 @@ API int pcm_mmap_write(struct pcm* p, const void* data, unsigned int count) {
   return pcm_write(p, data, count);
 }
 
-// --- input (silence, paced by the clock)
+// --- input (bridge capture, or paced silence)
 // --------------------------------------
 
 API int pcm_readi(struct pcm* p, void* data, unsigned int frames) {
   if (!pcm_is_ready(p)) return -EBADFD;
   if (!(p->flags & PCM_IN)) return -EINVAL;
+  if (frames == 0) return 0;
+  int64_t read_start = now_ns();
   if (!p->running || !p->in_t0) {
     p->in_t0 = now_ns();
     p->in_frames = 0;
     p->running = true;
   }
+  pthread_mutex_lock(&p->lock);
+  if (p->s.map && lxb_dead(&p->s)) {
+    disconnect_locked(p);
+    p->retry = (struct lxb_backoff){0};
+  }
+  connect_locked(p);
+  int got = p->s.map ? lxb_read(
+                         &p->s, data, frames,
+                         (int)((uint64_t)frames * 1000 / p->config.rate) + 50
+                       )
+                     : 0;
+  if (got < 0) got = 0;
+  if (p->s.map && ((unsigned int)got < frames)) disconnect_locked(p);
+  pthread_mutex_unlock(&p->lock);
+  if ((unsigned int)got == frames) {
+    p->in_t0 = now_ns();
+    p->in_frames = 0;
+    return (int)frames;
+  }
   uint64_t due_ns = (p->in_frames + frames) * 1000000000ULL / p->config.rate;
   int64_t wake = p->in_t0 + (int64_t)due_ns;
+  // A slow reopen must not be followed by a burst of unpaced silence.
+  int64_t earliest =
+    read_start + (int64_t)((uint64_t)frames * 1000000000ULL / p->config.rate);
+  if (wake < earliest) wake = earliest;
   int64_t t = now_ns();
   if (wake > t) {
     struct timespec ts = {
@@ -412,7 +441,10 @@ API int pcm_readi(struct pcm* p, void* data, unsigned int frames) {
     };
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
   }
-  memset(data, 0, pcm_frames_to_bytes(p, frames));
+  memset(
+    (uint8_t*)data + pcm_frames_to_bytes(p, (unsigned int)got), 0,
+    pcm_frames_to_bytes(p, frames - (unsigned int)got)
+  );
   p->in_frames += frames;
   return (int)frames;
 }
@@ -456,6 +488,7 @@ API int pcm_stop(struct pcm* p) {
   if (p->s.map) lxb_standby(&p->s);
   p->running = false;
   p->in_t0 = 0;
+  if (p->flags & PCM_IN) p->retry = (struct lxb_backoff){0};
   pthread_mutex_unlock(&p->lock);
   return 0;
 }
@@ -496,6 +529,9 @@ API int pcm_get_htimestamp(
         (uint64_t)(now_ns() - p->in_t0) * p->config.rate / 1000000000ULL;
       ready = now_frames > p->in_frames ? now_frames - p->in_frames : 0;
     }
+    pthread_mutex_lock(&p->lock);
+    if (p->s.map) ready = lxb_available(&p->s);
+    pthread_mutex_unlock(&p->lock);
     *avail = (unsigned int)(ready > buf ? buf : ready);
     return 0;
   }

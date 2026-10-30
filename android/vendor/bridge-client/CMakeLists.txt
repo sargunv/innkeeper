@@ -2,7 +2,7 @@
 # liblinuxapk_bridge_client.a: the client side of the bridge protocol, linked
 # into the composer and libtinyalsav2. It installs nothing. Natively (preset
 # "host-tests") it also builds its framing test.
-add_library(linuxapk_bridge_client STATIC bridge_client.c)
+add_library(linuxapk_bridge_client STATIC bridge_client.c audio.c)
 set_target_properties(
   linuxapk_bridge_client
   PROPERTIES
@@ -14,4 +14,10 @@ if(NOT ANDROID)
   add_executable(bridge_client_test tests/framing_test.c)
   target_link_libraries(bridge_client_test PRIVATE linuxapk_bridge_client)
   add_test(NAME bridge_client COMMAND bridge_client_test)
+  add_executable(audio_client_test tests/audio_test.c)
+  target_link_libraries(
+    audio_client_test
+    PRIVATE linuxapk_bridge_client pthread)
+  target_compile_options(audio_client_test PRIVATE -UNDEBUG)
+  add_test(NAME audio_client COMMAND audio_client_test)
 endif()

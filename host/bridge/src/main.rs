@@ -74,7 +74,10 @@ fn main() -> Result<()> {
     if allow.is_empty() {
         allow.push(rustix::process::getuid().as_raw());
     }
-    let backend = Backend::Pulse { sink };
+    let backend = Backend::Pulse {
+        sink,
+        source: std::env::var("LINUXAPK_AUDIO_SOURCE").ok(),
+    };
     linuxapk_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));

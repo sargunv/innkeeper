@@ -1,4 +1,4 @@
-//! The shared PCM ring: one sealed memfd per output stream, created here and
+//! The shared PCM ring: one sealed memfd per PCM stream, created here and
 //! handed to the Android client with an eventfd ("data") and the read end of
 //! a pipe ("space"). Layout, all little-endian:
 //!
@@ -35,6 +35,11 @@
 //!   `read_pos`; app-visible latency is written minus presented.
 //! - When the bridge drops a stream (PipeWire went away, or CLOSE) it sets
 //!   `state = 2` and signals space, so a blocked writer wakes up.
+//!
+//! Capture reverses ownership: the bridge publishes write_pos, the client
+//! publishes read_pos after copying. New frames are dropped on overrun so
+//! unread samples are never overwritten. The same pipe signals available
+//! capture data (or death); the eventfd requests recording.
 //!
 //! The client can write anything into the mapping at any time, so the bridge
 //! never reads back what it owns: `read_pos` lives in this struct and is only
@@ -73,6 +78,7 @@ pub struct Ring {
     frame_bytes: usize,
     capacity: u64,
     read_pos: u64,
+    write_pos: u64,
 }
 
 // SAFETY: the mapping is owned by this struct and only touched through it
@@ -120,6 +126,7 @@ impl Ring {
             frame_bytes: frame_bytes as usize,
             capacity: capacity_frames as u64,
             read_pos: 0,
+            write_pos: 0,
         };
         ring.u32_at(0).store(MAGIC, Ordering::Relaxed);
         ring.u32_at(4).store(VERSION, Ordering::Relaxed);
@@ -197,6 +204,31 @@ impl Ring {
         n as usize
     }
 
+    /// Capture producer: never overwrite frames the client is still reading.
+    /// On overrun drop the new frames; only the consumer owns read_pos.
+    pub fn write(&mut self, input: &[u8]) -> usize {
+        let read = self
+            .u64_at(OFF_READ_POS)
+            .load(Ordering::Acquire)
+            .min(self.write_pos);
+        let queued = self.write_pos.saturating_sub(read).min(self.capacity);
+        let n = (input.len() / self.frame_bytes).min((self.capacity - queued) as usize);
+        let start = (self.write_pos % self.capacity) as usize;
+        let first = n.min(self.capacity as usize - start);
+        let fb = self.frame_bytes;
+        // SAFETY: both wrapped ranges fit the mapping and input; the client
+        // publishes read_pos only after copying, so unread samples stay intact.
+        unsafe {
+            let data = self.map.as_ptr().add(DATA_OFFSET);
+            std::ptr::copy_nonoverlapping(input.as_ptr(), data.add(start * fb), first * fb);
+            std::ptr::copy_nonoverlapping(input.as_ptr().add(first * fb), data, (n - first) * fb);
+        }
+        self.write_pos += n as u64;
+        self.u64_at(OFF_WRITE_POS)
+            .store(self.write_pos, Ordering::Release);
+        n
+    }
+
     /// Publishes a presentation estimate (seqlock-protected for the client).
     pub fn publish_timing(&self, played_frames: u64, ts_ns: u64, latency_ns: u64) {
         let seq = self.u64_at(OFF_TIMING_SEQ);
@@ -255,6 +287,22 @@ impl Drop for Ring {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_wraps_without_overwriting_unread_frames() {
+        let mut r = Ring::new(2, 4, 48000).unwrap();
+        assert_eq!(r.write(&[1, 2, 3, 4, 5, 6]), 3);
+        assert_eq!(r.write(&[7, 8, 9, 10]), 1); // drop newest on overrun
+        assert_eq!(r.write(&[99, 99]), 0);
+        let mut out = [0; 6];
+        assert_eq!(r.read(&mut out), 3); // capture consumer publishes read_pos
+        assert_eq!(out, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(r.write(&[9, 10, 11, 12, 13, 14]), 3);
+        let mut out = [0; 8];
+        assert_eq!(r.read(&mut out), 4);
+        assert_eq!(out, [7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(r.read(&mut out), 0); // underrun
+    }
 
     #[test]
     fn wraps_and_clamps() {

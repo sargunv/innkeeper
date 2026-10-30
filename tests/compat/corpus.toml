@@ -487,3 +487,16 @@ framework = "Android Views"
 url = "https://f-droid.org/repo/net.gsantner.markor_164.apk"
 sha256 = "c29412e02d03e4f0511746a1bcef48c6b73fc1f70c1024fbf04903b0b3f4c485"
 note = "document task windows; manual multi-document proof for #10"
+
+[[app]]
+package = "org.fossify.voicerecorder"
+name = "Fossify Voice Recorder"
+group = "native"
+version_code = 21
+version_name = "1.7.4"
+native = "arm64-v8a, armeabi-v7a, x86, x86_64"
+framework = "Android Views"
+url = "https://f-droid.org/repo/org.fossify.voicerecorder_21.apk"
+sha256 = "1b3efb263bd152299aada8bb6ed3cca4a340425cd755472f7d799c9e0e024cc8"
+note = "Microphone capture through MediaRecorder"
+manual = "Revoke RECORD_AUDIO, accept its runtime prompt, record a private virtual source, then play the saved recording and check the known signal."

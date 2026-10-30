@@ -24,6 +24,7 @@ session in a sandbox of its own.
 
 | Knob                                               | For                                                                |
 | -------------------------------------------------- | ------------------------------------------------------------------ |
+| `LINUXAPK_AUDIO_SOURCE`                            | users: Pulse/PipeWire capture source (default: desktop default)    |
 | `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio                   |
 | `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never)            |
 | `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session             |

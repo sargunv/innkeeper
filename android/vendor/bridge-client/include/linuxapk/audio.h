@@ -1,11 +1,11 @@
 // The bridge's audio service (host/bridge/src/audio/proto.rs): one
-// shared connection per process, and output streams that write PCM into a
-// shared ring the bridge plays to PipeWire.
+// shared connection per process, and PCM rings for playback and capture.
 //
 // Kept free of tinyalsa types so an AIDL StreamBridge can reuse it as is.
 #pragma once
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -15,7 +15,7 @@ extern "C" {
 
 enum lxb_format { LXB_S16LE = 1, LXB_F32LE = 2 };
 
-struct lxb_out_cfg {
+struct lxb_audio_cfg {
   uint32_t rate;
   uint8_t channels;
   uint8_t format;  // enum lxb_format
@@ -25,13 +25,15 @@ struct lxb_out_cfg {
 };
 
 struct lxb_stream {
+  bool input;
+  uint64_t read;  // capture frames consumed
   uint32_t id;
   uint32_t capacity;  // frames
   uint32_t frame_bytes;
   uint32_t rate;
   uint32_t latency_us;  // bridge's nominal downstream latency
-  int data_fd;          // we signal: frames written
-  int space_fd;         // bridge signals: frames consumed (or stream died)
+  int data_fd;          // client signals: output written / input requested
+  int space_fd;         // bridge signals: output space / input data / death
   uint8_t* map;
   size_t map_size;
   uint64_t written;  // frames written into this ring (atomic access)
@@ -39,8 +41,13 @@ struct lxb_stream {
 
 // Opens an output stream (connecting to the bridge if needed).
 // Returns 0 or -errno.
-int lxb_open_output(const struct lxb_out_cfg* cfg, struct lxb_stream* s);
-void lxb_close_output(struct lxb_stream* s);
+int lxb_open_output(const struct lxb_audio_cfg* cfg, struct lxb_stream* s);
+int lxb_open_input(const struct lxb_audio_cfg* cfg, struct lxb_stream* s);
+void lxb_close_stream(struct lxb_stream* s);
+// Capture: wait for frames, return a short count on underrun or -EPIPE on
+// death.
+int lxb_read(struct lxb_stream* s, void* buf, uint32_t frames, int timeout_ms);
+uint64_t lxb_available(const struct lxb_stream* s);
 int lxb_standby(struct lxb_stream* s);
 // Applies to every stream of this process, including later ones.
 int lxb_set_master(float volume, int muted);

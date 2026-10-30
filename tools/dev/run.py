@@ -111,7 +111,6 @@ def command(program, args, gate=None, instance_fd=None):
       or k in XDG
       or k
       in (
-        "PULSE_SERVER",
         "LANG",
         "LANGUAGE",
         "LC_ALL",
