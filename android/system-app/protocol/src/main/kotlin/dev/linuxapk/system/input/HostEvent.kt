@@ -15,6 +15,9 @@ sealed interface HostEvent {
   data class Window(val width: Int, val height: Int, val scale: Double, val display: Int = 0) :
     HostEvent
 
+  /** Visible output IDs and current mode refresh in mHz; zero is an unknown rate. */
+  data class WindowOutputs(val outputs: Map<Int, Int>, val display: Int) : HostEvent
+
   data class WindowVisible(val visible: Boolean, val display: Int) : HostEvent
 
   /** The pointer entered the window of [display]; later pointer events go there. */
@@ -194,6 +197,9 @@ sealed interface HostEvent {
       fun display(i: Int, default: Int) = if (args >= i) int(i) else default
 
       return when (f[0]) {
+        "window_outputs" ->
+          if (args < 1 || args % 2 == 0) null
+          else WindowOutputs((2..args step 2).associate { int(it) to int(it + 1) }, int(1))
         "window_visible" -> need(args, 2) { WindowVisible(bool(1), int(2)) }
         "window" -> need(args, 3) { Window(int(1), int(2), f[3].toDouble(), display(4, 0)) }
         "pointer_enter" -> need(args, 2) { PointerEnter(float(1), float(2), display(3, 0)) }

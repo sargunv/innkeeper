@@ -7,9 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Bundle
 import android.os.PowerManager
 import android.util.Log
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.TextView
 
@@ -49,7 +51,18 @@ class WindowProbe : Activity() {
     text =
       TextView(this).apply {
         textSize = 24f
-        setPadding(24, 24, 24, 24)
+        setTextColor(Color.BLACK)
+        setOnApplyWindowInsetsListener { view, insets ->
+          val bars = insets.getInsets(WindowInsets.Type.systemBars())
+          val margin = (24 * resources.displayMetrics.density).toInt()
+          view.setPadding(
+            bars.left + margin,
+            bars.top + margin,
+            bars.right + margin,
+            bars.bottom + margin,
+          )
+          insets
+        }
       }
     setContentView(text)
     registerReceiver(control, IntentFilter("dev.linuxapk.WINDOW_PROBE"), Context.RECEIVER_EXPORTED)
@@ -64,7 +77,8 @@ class WindowProbe : Activity() {
   private fun report(event: String) {
     val line =
       "$event instance=$identity display=${display?.displayId} dpi=${resources.configuration.densityDpi} size=${resources.configuration.screenWidthDp}x${resources.configuration.screenHeightDp}"
-    text.text = line
+    text.textSize = 24f
+    text.text = line.replace(" ", "\n")
     Log.i("LinuxApkWindowProbe", line)
   }
 

@@ -271,6 +271,7 @@ class InputTranslator(
       }
       is HostEvent.Close,
       is HostEvent.RepeatInfo,
+      is HostEvent.WindowOutputs,
       is HostEvent.WindowVisible,
       is HostEvent.WindowMapped,
       is HostEvent.PointerRelative, // VirtualInput sends these straight to evdev.
