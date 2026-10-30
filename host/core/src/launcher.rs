@@ -256,12 +256,18 @@ impl Session {
         Ok(())
     }
 
-    /// Waits until Android has booted. Progress goes to `status`.
+    /// Waits for boot and user 0's credential-encrypted apps. Progress goes to `status`.
     pub fn wait_booted(&self, status: &dyn Fn(&str)) -> Result<()> {
         let t = Instant::now();
         let limit = Duration::from_secs(300);
         let mut said = false;
-        while !self.booted() {
+        // Boot completion can precede user unlock. Until then PackageManager
+        // filters out direct-boot-unaware launcher activities, even for root.
+        while !self.booted()
+            || !self
+                .exec(15, &["am", "get-started-user-state", "0"])
+                .is_ok_and(|o| o.ok() && o.text().trim() == "RUNNING_UNLOCKED")
+        {
             if !self.running() {
                 return Err(anyhow::anyhow!(
                     "the session stopped while booting (see `linuxapk-session log`)"
@@ -300,3 +306,51 @@ impl Session {
 
 /// The status line for a first start's image download.
 pub const PREPARING: &str = "preparing Android (first run: downloading about 1.2 GB)";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn cold_open_waits_for_user_unlock() {
+        let dir = crate::test_dir("cold-open-unlock");
+        let launcher = dir.join("session");
+        std::fs::write(
+            &launcher,
+            r#"#!/bin/sh
+cd "$(dirname "$0")" || exit 1
+case "$*" in
+  status) echo 'running: host pid 1' ;;
+  'exec getprop sys.boot_completed') echo 1 ;;
+  'exec am get-started-user-state 0')
+    n=$(cat attempts 2>/dev/null || echo 0)
+    n=$((n + 1)); echo "$n" >attempts
+    case "$n" in
+      1) exit 1 ;;
+      2) echo RUNNING_LOCKED ;;
+      3) echo RUNNING_UNLOCKING ;;
+      *) touch unlocked; echo RUNNING_UNLOCKED ;;
+    esac ;;
+  'exec cmd package resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER dev.linuxapk.proof')
+    echo resolve >>lookups
+    if test -f unlocked; then echo dev.linuxapk.proof/.MainActivity
+    else echo 'No activity found'; fi ;;
+  *) exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let session = Session::at(launcher);
+        session.ensure(&|_| {}).unwrap();
+        assert_eq!(
+            crate::android::launcher_component(&session, "dev.linuxapk.proof").unwrap(),
+            "dev.linuxapk.proof/.MainActivity"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("lookups")).unwrap(),
+            "resolve\n"
+        );
+    }
+}
