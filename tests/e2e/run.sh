@@ -298,6 +298,33 @@ sys.exit(1)
       source "$here/production.sh"
       ;;
     lifecycle)
+      launch TaskWindowProbe
+      first=$display
+      # shellcheck disable=SC2329 # invoked through until_ok
+      first_task_mapped() { wm LIST | grep -q "display=$first package=dev.linuxapk.probes .*window=yes"; }
+      until_ok first_task_mapped
+      # The sole multiple-task scenario: an app's New Window starts another task on
+      # the caller's display. Both tasks must get real toplevels; closing one must
+      # leave the other task and window alive.
+      s am start --display "$first" --activity-single-top \
+        -n dev.linuxapk.probes/.TaskWindowProbe --ez new-window true >/dev/null
+      # shellcheck disable=SC2329 # invoked through until_ok
+      two_task_windows() {
+        wm LIST >"$T/task-windows.txt"
+        [[ $(grep -c 'package=dev.linuxapk.probes .*window=yes' "$T/task-windows.txt") == 2 ]]
+      }
+      until_ok two_task_windows
+      second=$(sed -n 's/.*display=\([0-9]*\) package=dev.linuxapk.probes .*/\1/p' "$T/task-windows.txt" | grep -vx "$first")
+      wm CLOSE --ei display "$first" >/dev/null
+      # shellcheck disable=SC2329 # invoked through until_ok
+      second_task_survives() {
+        wm LIST >"$T/task-survivor.txt"
+        ! grep -q "display=$first package=" "$T/task-survivor.txt" &&
+          grep -Eq "display=$second package=dev.linuxapk.probes .*tasks=[0-9]+ window=yes" "$T/task-survivor.txt"
+      }
+      until_ok second_task_survives
+      wm CLOSE --ei display "$second" >/dev/null
+      echo 'ok   a second task has its own toplevel and survives closing the first'
       s cmd appops set dev.linuxapk.probes SCHEDULE_EXACT_ALARM allow
       # Allow four seconds to observe idle stop before the six-second wake lead.
       s am start -n dev.linuxapk.probes/.LifecycleProbe --es action alarm --ei seconds 10 >/dev/null
