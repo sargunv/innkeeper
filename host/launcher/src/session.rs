@@ -137,11 +137,8 @@ pub fn start_bridge(cfg: &Config) -> Result<()> {
         }
     });
     let sock = p.run.join("bridge/bridge.sock");
-    for _ in 0..50 {
-        if sock.exists() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(20));
+    if wait_for_bridge(&sock) {
+        return Ok(());
     }
     bail!(
         "the bridge did not start (see {})",
@@ -169,5 +166,49 @@ pub fn tail(file: &Path, alive: &dyn Fn() -> bool) -> Result<()> {
             f.seek(SeekFrom::Start(0))?;
         }
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Desktop service registration can take time before the bridge binds its socket.
+/// Give it the same startup allowance as pivot/init, including a restart backoff.
+fn wait_for_bridge(sock: &Path) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if sock.exists() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn bridge_can_take_more_than_a_second_to_register_desktop_services() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/bridge-ready-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let sock = dir.canonicalize().unwrap().join("bridge.sock");
+        let delayed_socket = sock.clone();
+        let bridge = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(1500));
+            UnixListener::bind(delayed_socket).unwrap()
+        });
+        let ready = wait_for_bridge(&sock);
+        let listener = bridge.join().unwrap();
+        drop(listener);
+        fs::remove_dir_all(dir).unwrap();
+        assert!(
+            ready,
+            "a slow bridge was rejected before binding its socket"
+        );
     }
 }
