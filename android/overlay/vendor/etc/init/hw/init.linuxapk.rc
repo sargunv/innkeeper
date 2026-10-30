@@ -42,7 +42,8 @@ on property:sys.boot_completed=1
     # to lmkd (1024 cached processes allowed), and lmkd only acts on memory
     # pressure, which the session's cgroup rarely sees: every process the
     # session ever started stayed. 16 cached processes, at most 8 of them
-    # empty (no activity, service or provider), trimmed from 60 s after boot
-    # instead of 10 minutes.
+    # empty (no activity, service or provider). Apply the limit immediately:
+    # the post-boot grace period otherwise keeps boot receivers resident until
+    # another OOM adjustment happens after it expires, even in an idle session.
     exec_background - root root -- /system/bin/device_config put activity_manager max_cached_processes 16
-    exec_background - root root -- /system/bin/device_config put activity_manager no_kill_cached_processes_post_boot_completed_duration_millis 60000
+    exec_background - root root -- /system/bin/device_config put activity_manager no_kill_cached_processes_post_boot_completed_duration_millis 0
