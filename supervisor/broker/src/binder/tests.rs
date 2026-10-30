@@ -518,6 +518,43 @@ fn interrupted_delivery_is_read_again() {
     assert!(find(&s.read(s.client, 1, 256), BR_REPLY).is_some());
 }
 
+/// NOTIF_SEND can succeed after the tracee's interruptible wait chose EINTR
+/// but before the tracee reacquires the kernel's notification lock. libbinder
+/// retries with the published read_consumed, even though delivery committed.
+#[test]
+fn published_read_survives_notification_restart() {
+    let mut s = setup();
+    let parked = s.wr(s.server, 2, &[], 256);
+    s.write(
+        s.client,
+        1,
+        &Bc::default()
+            .cmd(BC_TRANSACTION)
+            .td(&BinderTransactionData {
+                flags: TF_ONE_WAY,
+                ..Default::default()
+            })
+            .done(),
+    );
+    let delivered = s.stream(parked);
+    assert!(find(&delivered, BR_TRANSACTION).is_some());
+    // The model's answer succeeded, but the caller saw EINTR: same argument,
+    // including the already published read counters, rather than a new read.
+    let retry = s.ioctl(s.server, 2, BINDER_WRITE_READ, parked.arg);
+    assert!(
+        !s.us.is_pending(retry),
+        "return published bytes before waiting for new work"
+    );
+    assert_eq!(s.stream(retry), delivered);
+    let td = td_from(find(&delivered, BR_TRANSACTION).unwrap());
+    s.write(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_FREE_BUFFER).u64(td.data_buffer).done(),
+    );
+    s.b.check_invariants();
+}
+
 /// Process work whose reader can't take it (its read buffer faults) goes
 /// back to the process, for the next looper that reads.
 #[test]
