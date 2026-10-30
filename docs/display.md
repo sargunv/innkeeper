@@ -356,6 +356,16 @@ linear, CPU-mappable, importable by RADV (as GTT), lavapipe and linux-dmabuf.
 - GPU and composer usages fail rather than fall back to a plain memfd, which
   their consumers can't import.
 
+The bridge imports the allocator's actual DRM fourcc and LINEAR modifier,
+including RGBA FP16 and 10-bit targets, only when that pair is advertised in
+linux-dmabuf feedback (or v3 modifier events). Unsupported pairs and failed
+imports use an ARGB8888 wl_shm snapshot; half-floats and 10-bit channels are
+clamped and rounded to their 8-bit SDR equivalents. Ordinary supported frames
+still use their original dma-buf without a copy. KWin 6.3 predates the standard
+colour-management protocol, so no wide-gamut/HDR output capability is
+advertised; SurfaceFlinger performs colour conversion for the SDR virtual
+display.
+
 ## Fences
 
 The composer waits on acquire fences before submitting buffers. It exports real

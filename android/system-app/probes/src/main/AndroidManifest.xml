@@ -33,6 +33,8 @@
 
     <activity android:name=".AudioCaptureProbe" android:exported="true" />
     <activity android:name=".WindowProbe" android:exported="true" android:label="Window probe" android:configChanges="density|screenSize|smallestScreenSize|orientation|screenLayout" />
+    <activity android:name=".WideColorProbe" android:exported="true" android:label="Wide colour probe" />
+    <activity android:name=".WideColorProbe$Hdr" android:exported="true" android:label="HDR probe" />
     <activity android:name=".BenchProbe" android:exported="true" android:label="Benchmark probe" />
     <service android:name=".BenchService" android:process=":bench" android:exported="false" />
 
