@@ -75,7 +75,7 @@ flowchart LR
     shim["liblinuxapk_shim.so (supervisor/shim)"]
     sysapp["LinuxApkSystem.apk (android/system-app)"]
     hwc["composer + gralloc (android/vendor/graphics)"]
-    vk["RADV / lavapipe (android/vendor/vulkan)"]
+    vk["RADV / ANV / lavapipe (android/vendor/vulkan)"]
     snd["libtinyalsav2 (android/vendor/audio)"]
     health["Health HAL (android/vendor/health)"]
     sysbin["linuxapk-exec (android/system)"]
@@ -106,7 +106,7 @@ flowchart LR
 | [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | sandbox; the shim inside Android           | `broker/src/notify.rs`         |
 | [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared        | `fetch.sh`, `pin.toml`         |
 | [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                          | `composer/Display.cpp`         |
-| [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.lvp.so`                      | Android, in every Vulkan user              | `build.sh`, `patches/mesa/`    |
+| [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.anv.so`, `vulkan.lvp.so`     | Android, in every Vulkan user              | `build.sh`, `patches/mesa/`    |
 | [android/vendor/audio](android/vendor/audio/README.md)                 | `libtinyalsav2.so`                                     | Android, in the audio HAL                  | `tinyalsa/pcm.c`               |
 | [android/vendor/health](android/vendor/health/README.md)               | `android.hardware.health-service.linuxapk`             | Android `/vendor`                          | `src/battery.c`                |
 | [android/vendor/bridge-client](android/vendor/bridge-client/README.md) | static library                                         | linked into the composer, audio and health | `bridge_client.c`              |

@@ -3,9 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Only RADV is shipped for hardware rendering. Unsupported nodes must not
-/// hide a supported GPU later in sysfs (for example on a hybrid laptop).
-pub fn select_node(drm: &Path, dev: &Path) -> Option<PathBuf> {
+/// Prefer RADV on hybrid hosts, then ANV on i915. Unsupported nodes must not
+/// hide a supported GPU later in sysfs. Return the matching HAL with its node.
+pub fn select_node(drm: &Path, dev: &Path) -> Option<(PathBuf, &'static str)> {
     let mut nodes: Vec<_> = fs::read_dir(drm)
         .ok()?
         .flatten()
@@ -18,29 +18,35 @@ pub fn select_node(drm: &Path, dev: &Path) -> Option<PathBuf> {
         })
         .collect();
     nodes.sort();
-    nodes.into_iter().find_map(|node| {
-        let driver = fs::canonicalize(node.join("device/driver")).ok()?;
-        if driver.file_name()? != "amdgpu" {
-            return None;
-        }
-        let node = dev.join(node.file_name()?);
-        fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&node)
-            .ok()?;
-        Some(node)
-    })
+    let mut supported: Vec<_> = nodes
+        .into_iter()
+        .filter_map(|node| {
+            let driver = fs::canonicalize(node.join("device/driver")).ok()?;
+            let (priority, hal) = match driver.file_name()?.to_str()? {
+                "amdgpu" => (0, "radv"),
+                "i915" => (1, "anv"),
+                _ => return None,
+            };
+            let node = dev.join(node.file_name()?);
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&node)
+                .ok()?;
+            Some((priority, node, hal))
+        })
+        .collect();
+    supported.sort_by_key(|(priority, _, _)| *priority);
+    supported
+        .into_iter()
+        .next()
+        .map(|(_, node, hal)| (node, hal))
 }
 
-pub fn driver(node: Option<&Path>) -> &'static str {
-    if node.is_some() { "radv" } else { "lvp" }
-}
-
-/// Both shipped drivers support Vulkan 1.3 and compute level 0. Software
+/// All shipped drivers support Vulkan 1.3 and compute level 0. Software
 /// rendering does not satisfy Android's hardware Vulkan level 1 guarantee.
-pub fn feature_xmls(node: Option<&Path>) -> Vec<(String, String)> {
-    [("level", u32::from(node.is_some())), ("version", 4_206_592), ("compute", 0)]
+pub fn feature_xmls(driver: &str) -> Vec<(String, String)> {
+    [("level", u32::from(driver != "lvp")), ("version", 4_206_592), ("compute", 0)]
         .into_iter()
         .map(|(feature, version)| {
             let name = format!("android.hardware.vulkan.{feature}");
@@ -60,14 +66,22 @@ mod tests {
     fn selection_scans_all_nodes() {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         for (nodes, expected) in [
-            (vec![(128, "amdgpu")], Some(128)),
-            (vec![(128, "i915"), (129, "amdgpu")], Some(129)),
-            (vec![(128, "amdgpu"), (129, "i915")], Some(128)),
-            (vec![(128, "i915")], None),
+            (vec![(128, "amdgpu")], Some((128, "radv"))),
+            (vec![(128, "i915"), (129, "amdgpu")], Some((129, "radv"))),
+            (vec![(128, "amdgpu"), (129, "i915")], Some((128, "radv"))),
+            (vec![(128, "i915")], Some((128, "anv"))),
+            (vec![(128, "nouveau"), (129, "i915")], Some((129, "anv"))),
+            (vec![(128, "i915-unreadable")], None),
             (vec![], None),
-            (vec![(128, "unreadable"), (129, "amdgpu")], Some(129)),
+            (
+                vec![(128, "unreadable"), (129, "amdgpu")],
+                Some((129, "radv")),
+            ),
             (vec![(128, "unreadable")], None),
-            (vec![(128, "amdgpu-unreadable"), (129, "amdgpu")], Some(129)),
+            (
+                vec![(128, "amdgpu-unreadable"), (129, "amdgpu")],
+                Some((129, "radv")),
+            ),
             (vec![(128, "amdgpu-unreadable")], None),
         ] {
             let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
@@ -80,7 +94,7 @@ mod tests {
                 fs::write(root.join(format!("dev/renderD{number}")), "").unwrap();
                 let device = root.join(format!("renderD{number}/device"));
                 fs::create_dir_all(&device).unwrap();
-                if driver == "amdgpu-unreadable" {
+                if driver.ends_with("-unreadable") {
                     fs::set_permissions(
                         root.join(format!("dev/renderD{number}")),
                         fs::Permissions::from_mode(0o0),
@@ -96,7 +110,7 @@ mod tests {
             }
             assert_eq!(
                 select_node(&root, &root.join("dev")),
-                expected.map(|n| root.join(format!("dev/renderD{n}")))
+                expected.map(|(n, hal)| (root.join(format!("dev/renderD{n}")), hal))
             );
             fs::remove_dir_all(root).unwrap();
         }
@@ -104,12 +118,8 @@ mod tests {
 
     #[test]
     fn vulkan_features_match_the_driver() {
-        for (node, vk, level) in [
-            (Some(Path::new("/dev/dri/renderD129")), "radv", 1),
-            (None, "lvp", 0),
-        ] {
-            assert_eq!(driver(node), vk);
-            let xmls = feature_xmls(node);
+        for (vk, level) in [("radv", 1), ("anv", 1), ("lvp", 0)] {
+            let xmls = feature_xmls(vk);
             assert_eq!(xmls.len(), 3);
             for (feature, version) in [("level", level), ("version", 4_206_592), ("compute", 0)] {
                 let name = format!("android.hardware.vulkan.{feature}");

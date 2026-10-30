@@ -1,0 +1,80 @@
+anv/android: use the mapper's explicit layout for ANB imports
+
+ANV queries the gralloc modifier but discards its row pitches and offsets,
+using VkNativeBufferANDROID::stride instead. Our padded-row ANB test on
+UHD 630 imports a 100x64 linear udmabuf with 512-byte rows and passes a
+100-pixel stride: the unpatched driver corrupts 6300 pixels and 5600 bytes
+of padding. Pass the full DRM explicit layout into image initialization,
+as the AHB import path already does.
+
+Deferred swapchain binds also use that explicit layout. Query their native
+handle directly instead of requiring the optional API-29 AHardwareBuffer
+pointer; the ANB test and older native-buffer callers don't supply one.
+No Intel tiling or CCS policy is added: the mapper advertises LINEAR and
+ANV's existing modifier handling disables auxiliary compression for it.
+
+diff --git a/src/intel/vulkan/anv_android.c b/src/intel/vulkan/anv_android.c
+index 01d5c0e..ab453bb 100644
+--- a/src/intel/vulkan/anv_android.c
++++ b/src/intel/vulkan/anv_android.c
+@@ -126,8 +126,9 @@ anv_image_init_from_gralloc(struct anv_device *device,
+ {
+    VkResult result;
+ 
++   VkImageCreateInfo info = *base_info;
+    struct anv_image_create_info anv_info = {
+-      .vk_info = base_info,
++      .vk_info = &info,
+       .isl_extra_usage_flags = ISL_SURF_USAGE_DISABLE_AUX_BIT,
+    };
+ 
+@@ -135,9 +136,9 @@ anv_image_init_from_gralloc(struct anv_device *device,
+       .drmFormatModifier = DRM_FORMAT_MOD_INVALID,
+    };
+ 
++   VkSubresourceLayout layouts[ISL_MODIFIER_MAX_PLANES];
+    enum isl_tiling tiling;
+    if (vk_android_get_ugralloc()) {
+-      VkSubresourceLayout layouts[ISL_MODIFIER_MAX_PLANES];
+       assert(vk_find_struct_const(base_info->pNext, NATIVE_BUFFER_ANDROID));
+       result = vk_android_get_anb_layout(base_info,
+                                          &mod_info,
+@@ -153,6 +154,12 @@ anv_image_init_from_gralloc(struct anv_device *device,
+                           mod_info.drmFormatModifier);
+       }
+       tiling = isl_mod_info->tiling;
++      /* The mapper's plane offsets and row pitches describe the imported BO.
++       * VkNativeBufferANDROID::stride need not describe its allocation.
++       */
++      mod_info.pNext = info.pNext;
++      info.pNext = &mod_info;
++      info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+    }
+ 
+    struct anv_bo *bo = NULL;
+diff --git a/src/intel/vulkan/anv_image.c b/src/intel/vulkan/anv_image.c
+index 270f885..24a7c39 100644
+--- a/src/intel/vulkan/anv_image.c
++++ b/src/intel/vulkan/anv_image.c
+@@ -2556,7 +2556,11 @@ resolve_anb_image(struct anv_device *device,
+    /* Query DRM modifier. */
+    VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info;
+    VkSubresourceLayout layouts[ISL_MODIFIER_MAX_PLANES];
+-   result = vk_android_get_ahb_layout(gralloc_info->ahb,
++   const VkImageCreateInfo info = {
++      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++      .pNext = gralloc_info,
++   };
++   result = vk_android_get_anb_layout(&info,
+                                       &mod_info, layouts,
+                                       ISL_MODIFIER_MAX_PLANES);
+    if (result != VK_SUCCESS)
+@@ -2590,7 +2594,7 @@ resolve_anb_image(struct anv_device *device,
+    /* Now we are able to fill anv_image fields properly and create
+     * isl_surface for it.
+     */
+-   result = add_all_surfaces_implicit_layout(device, image, NULL, gralloc_info->stride,
++   result = add_all_surfaces_explicit_layout(device, image, NULL, &mod_info,
+                                              1u << isl_mod_info->tiling,
+                                              allow_aux ? 0 : ISL_SURF_USAGE_DISABLE_AUX_BIT);
+    if (result != VK_SUCCESS) {

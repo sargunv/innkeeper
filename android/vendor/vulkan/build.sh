@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# build:vulkan: the vendor Vulkan drivers (Mesa RADV and lavapipe) for Android
+# build:vulkan: the vendor Vulkan drivers (Mesa RADV, ANV and lavapipe) for Android
 # x86_64, cross-built with the NDK pin in the build container
 # (tools/container/run.sh), into out/build/vulkan/install:
-#   share/linuxapk/android/vendor/lib64/hw/vulkan.{radv,lvp}.so
+#   share/linuxapk/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
 #   share/linuxapk/android/vendor/etc/libdrm/amdgpu.ids
 #   share/linuxapk/props.d/vulkan.prop
 # and the test programs tests/run.sh runs (out/build/vulkan/{test,test-vendor}).
@@ -129,7 +129,24 @@ Cflags:
 EOF
 }
 
-build_radv() {
+# ANV compiles internal OpenCL shaders at build time. These native tools stay
+# in the container; LLVM/Clang are never linked into the Android hardware HALs.
+build_shader_tools() {
+  fetch mesa "$MESA_URL" "$MESA_TAG"
+  local b=$build/mesa-tools
+  # Do not search the Android dependencies when configuring native tools.
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
+  env -u PKG_CONFIG_LIBDIR -u PKG_CONFIG_SYSROOT_DIR meson setup $(reconf "$b") "$b" "$src/mesa" \
+    -Dbuildtype=release -Dplatforms= -Dvulkan-drivers= -Dgallium-drivers= \
+    -Dmesa-clc=enabled -Dinstall-mesa-clc=true -Dllvm=enabled -Dshared-llvm=enabled \
+    -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dopengl=false \
+    -Dgles1=disabled -Dgles2=disabled -Dbuild-tests=false
+  meson compile -C "$b" -j "$JOBS" mesa_clc vtn_bindgen2
+  export PATH="$b/src/compiler/clc:$b/src/compiler/spirv:$PATH"
+}
+
+build_hardware() {
+  build_shader_tools
   build_libdrm
   static_zlib
   fetch mesa "$MESA_URL" "$MESA_TAG"
@@ -140,7 +157,8 @@ build_radv() {
     -Dbuildtype=release -Db_ndebug=true \
     -Dplatforms=android -Dplatform-sdk-version="$API" \
     -Dandroid-stub=true -Dandroid-libbacktrace=disabled -Dandroid-strict=false \
-    -Dvulkan-drivers=amd -Dgallium-drivers= -Dllvm=disabled -Damd-use-llvm=false \
+    -Dvulkan-drivers=amd,intel -Dgallium-drivers= -Dllvm=disabled -Damd-use-llvm=false \
+    -Dmesa-clc=system -Dintel-rt=disabled \
     -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dopengl=false \
     -Dgles1=disabled -Dgles2=disabled \
     -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
@@ -149,6 +167,7 @@ build_radv() {
     -Dvideo-codecs=all_free -Dspirv-tools=disabled
   meson compile -C "$b" -j "$JOBS"
   install_driver "$b/src/amd/vulkan/libvulkan_radeon.so" radv
+  install_driver "$b/src/intel/vulkan/libvulkan_intel.so" anv
 }
 
 # LLVM static libraries for lavapipe, as in Mesa's
@@ -280,7 +299,7 @@ build_test() {
   "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$work/test-vendor/lib64/hw/mapper.lapktest.so" "$here/tests/mock_mapper.c"
 }
 
-build_radv
+build_hardware
 build_lvp
 install_etc
 build_test

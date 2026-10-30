@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Vulkan/GLES test programs (built by build:vulkan into
 # out/build/vulkan/test) through tests/bionic/run.sh, on lavapipe and, when
-# there is an amdgpu render node, on RADV.
+# a supported render node exists, on RADV or ANV.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../../.." && pwd)
@@ -35,11 +35,13 @@ driver_tests() {
 }
 
 drivers=(lvp)
-for n in /dev/dri/renderD*; do
-  if [[ $(readlink -f "/sys/class/drm/${n##*/}/device/driver") == */amdgpu ]]; then
-    drivers+=(radv)
-    break
-  fi
+for pair in amdgpu:radv i915:anv; do
+  for n in /dev/dri/renderD*; do
+    if [[ $(readlink -f "/sys/class/drm/${n##*/}/device/driver") == */"${pair%:*}" ]]; then
+      drivers+=("${pair#*:}")
+      break
+    fi
+  done
 done
 for d in "${drivers[@]}"; do
   echo "== vulkan tests: $d"

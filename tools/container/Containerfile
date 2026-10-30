@@ -11,6 +11,7 @@ RUN dnf -y \
       --setopt='updates.baseurl=https://dl.fedoraproject.org/pub/fedora/linux/updates/$releasever/Everything/$basearch/' \
       install \
       meson ninja-build cmake make pkgconf-pkg-config git patch patchelf file \
+      llvm-devel clang-devel spirv-tools-devel spirv-llvm-translator-devel libclc-devel \
       python3 python3-mako python3-pyyaml python3-packaging \
       glslang bison flex gcc gcc-c++ diffutils curl tar xz bzip2 \
       autoconf automake libtool glibc-static libstdc++-static zlib-ng-compat-static \
