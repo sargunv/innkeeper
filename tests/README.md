@@ -42,3 +42,15 @@ desktop to check real policy without opening host apps or dialogs.
 - `mise run test:compat -- --only <package>`: manual app troubleshooting; see
   [compat/README.md](compat/README.md). The full corpus runs only in nightly CI.
   Never trigger, run or wait for it during development or PR work.
+
+For sustained capture proof, build and stage, then run
+`tests/e2e/audio/capture.sh` with a fresh `LINUXAPK_INSTANCE`. It records 32 s
+from a private 440 Hz source through AudioRecord and checks 30 s after initial
+warmup, and checks a simultaneous native monitor recording as a control. Each
+100 ms window must contain the tone; crossing intervals and a sample recurrence
+detect gaps, dropped samples and transients. This manual check is separate from
+the e2e gate. PCM and JSON results stay under `out/test/audio/<instance>/`; the
+harness stops its session and virtual source. It first runs the Android-side
+input FMQ test with a fake PCM, covering mono/stereo, pause/flush standby and a
+fresh PCM on restart, mute, invalid bursts and close. Build that test with
+`mise run build:audio`; it never accesses audio.
