@@ -292,6 +292,7 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         schemes: base.schemes.clone(),
         web_hosts: base.web_hosts.clone(),
         origin: None,
+        new_window: info.new_window,
         splash: info
             .splash
             .zip(info.window)

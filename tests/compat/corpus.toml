@@ -475,3 +475,15 @@ script = [
   "shot:overlay",
 ]
 manual = "Grant 'display over other apps': does the floating button stay on top of other apps and stay draggable?"
+
+[[app]]
+package = "net.gsantner.markor"
+name = "Markor"
+group = "noarch"
+version_code = 164
+version_name = "2026.10.0"
+native = "none"
+framework = "Android Views"
+url = "https://f-droid.org/repo/net.gsantner.markor_164.apk"
+sha256 = "c29412e02d03e4f0511746a1bcef48c6b73fc1f70c1024fbf04903b0b3f4c485"
+note = "document task windows; manual multi-document proof for #10"

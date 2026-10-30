@@ -576,7 +576,11 @@ impl Window {
             &[],
         )
         .and_then(|t| linuxapk_core::validate::activation_token(&t).map(str::to_string));
-        let opts = ops::LaunchOptions { token, wait: false };
+        let opts = ops::LaunchOptions {
+            token,
+            wait: false,
+            new_window: false,
+        };
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {
             let p = pkg.clone();

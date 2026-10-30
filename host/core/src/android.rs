@@ -171,6 +171,8 @@ pub struct LaunchOptions {
     pub token: Option<String>,
     /// Return only once a new window shows its first frame.
     pub wait: bool,
+    /// Request a separate task even if the app already has a window.
+    pub new_window: bool,
 }
 
 /// The window manager's control command (docs/display.md): opens the app
@@ -225,6 +227,9 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
     }
     if let Some(t) = &o.token {
         v.extend(["--es", "token", t].map(String::from));
+    }
+    if o.new_window {
+        v.extend(["--ez", "new-window", "true"].map(String::from));
     }
     if o.wait {
         v.extend(["--ez", "wait", "true"].map(String::from));
@@ -315,6 +320,7 @@ pub struct AppInfo {
     /// (size, PNG bytes)
     pub icons: Vec<(u32, Vec<u8>)>,
     pub mime_types: Vec<String>,
+    pub new_window: bool,
 }
 
 pub fn parse_helper_output(out: &str) -> AppInfo {
@@ -323,6 +329,8 @@ pub fn parse_helper_output(out: &str) -> AppInfo {
     for l in out.lines() {
         if let Some(v) = l.strip_prefix("label ") {
             info.label = v.to_string();
+        } else if let Some(v) = l.strip_prefix("new-window ") {
+            info.new_window = v == "true";
         } else if let Some(v) = l.strip_prefix("mime ") {
             info.mime_types.push(v.to_string());
         } else if let Some(v) = l.strip_prefix("category ") {
@@ -422,10 +430,12 @@ mod tests {
             &LaunchOptions {
                 token: Some("kwin-3".into()),
                 wait: true,
+                new_window: true,
             },
         );
         assert!(v.windows(3).any(|w| w == ["--es", "token", "kwin-3"]));
         assert!(v.windows(3).any(|w| w == ["--ez", "wait", "true"]));
+        assert!(v.windows(3).any(|w| w == ["--ez", "new-window", "true"]));
         assert!(
             v.windows(3)
                 .any(|w| w == ["--es", "uri", "https://en.wikipedia.org/wiki/Linux"])
@@ -469,12 +479,13 @@ mod tests {
     fn helper_output() {
         let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
         let i = parse_helper_output(&format!(
-            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
+            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nnew-window true\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
         ));
         assert_eq!(i.label, "Calc");
         assert_eq!(i.category, Some(-1));
         assert_eq!(i.splash, Some(0x202124));
         assert_eq!(i.window, Some((412, 915)));
+        assert!(i.new_window);
         assert_eq!(i.icons.len(), 1);
         assert_eq!(i.icons[0].0, 48);
     }

@@ -24,7 +24,7 @@ import kotlin.concurrent.thread
  * ```
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LAUNCH --es package PKG \
  *   [--es component PKG/.Activity] [--es uri URI] [--ei width DP --ei height DP] \
- *   [--es token XDG_ACTIVATION_TOKEN] [--ez wait true]
+ *   [--es token XDG_ACTIVATION_TOKEN] [--ez wait true] [--ez new-window true]
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LIST
  * am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.CLOSE \
  *   (--ei display ID | --es package PKG)
@@ -104,6 +104,7 @@ class ControlReceiver : BroadcastReceiver() {
               i.getIntExtra("height", 0),
               i.getStringExtra("token").orEmpty(),
               file != null,
+              newWindow = i.getBooleanExtra("new-window", false),
               launchIntent =
                 if (files != null && files.size > 1) {
                   Intent(Intent.ACTION_VIEW)
