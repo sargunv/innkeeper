@@ -25,7 +25,7 @@
 //!
 //! | Event    | Message | Body                                         |
 //! | -------- | ------- | -------------------------------------------- |
-//! | `0x4201` | RELEASE | `u32 buffer` (mirrors `wl_buffer.release`)   |
+//! | `0x4201` | RELEASE | `u32 buffer`, `u32 invalid` (0: reusable, 1: remove cached import)   |
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -240,9 +240,9 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
 pub mod event {
     use super::*;
 
-    pub fn release(buffer: u32) -> Vec<u8> {
+    pub fn release(buffer: u32, invalid: bool) -> Vec<u8> {
         let mut w = Writer::default();
-        w.u32(buffer);
+        w.u32(buffer).u32(u32::from(invalid));
         w.into_vec()
     }
 }

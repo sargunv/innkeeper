@@ -60,6 +60,7 @@ pub(crate) mod appearance;
 pub(crate) mod cursor;
 mod data_device;
 mod foreign;
+mod frames;
 mod policy;
 mod presentation;
 
@@ -108,8 +109,7 @@ struct Buf {
     height: u32,
     wl: Option<wl_buffer::WlBuffer>,
     /// Attached and not yet released by the compositor.
-    busy: bool,
-    pending: Option<[i32; 4]>,
+    frames: frames::Frames,
     bench_fd: Option<OwnedFd>,
     bench_offset: u64,
 }
@@ -481,12 +481,13 @@ impl State {
 // ---- window handling --------------------------------------------------------------
 
 impl State {
-    fn release(&self, buffer: u32) {
+    fn release(&self, buffer: u32, invalid: bool) {
         if let Err(e) = self
             .events
-            .try_send(ty::RELEASE, &event::release(buffer), &[])
+            .try_send(ty::RELEASE, &event::release(buffer, invalid), &[])
         {
             crate::warn!("display: release of buffer {buffer} lost: {e}");
+            self.events.shutdown();
         }
     }
 
@@ -637,8 +638,7 @@ impl State {
                 width: b.width,
                 height: b.height,
                 wl: None,
-                busy: false,
-                pending: None,
+                frames: frames::Frames::default(),
                 bench_fd: if crate::bench::enabled() {
                     fd.try_clone().ok()
                 } else {
@@ -655,32 +655,38 @@ impl State {
     }
 
     fn remove_buffer(&mut self, id: u32) {
-        if let Some(b) = self.buffers.remove(&id)
-            && let Some(wl) = b.wl
-        {
-            wl.destroy();
+        if let Some(mut b) = self.buffers.remove(&id) {
+            for _ in 0..b.frames.release() {
+                self.release(id, true);
+            }
+            if let Some(wl) = b.wl {
+                wl.destroy();
+            }
         }
     }
 
     fn frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
         self.cursor_frame(id);
-        let Some(b) = self.buffers.get_mut(&buffer) else {
-            return;
-        };
-        if b.window != id || b.busy {
-            return;
-        }
-        if b.wl.is_none() {
-            b.pending = Some(damage);
-            return;
-        }
         let configured = self.windows.get(&id).is_some_and(|w| w.configured);
-        if !configured {
-            self.release(buffer);
+        let b = self.buffers.get_mut(&buffer);
+        let imported = b.as_ref().is_some_and(|b| b.wl.is_some());
+        let configured = configured && b.as_ref().is_none_or(|b| b.window == id);
+        match frames::Frames::submit(b.map(|b| &mut b.frames), imported, configured, damage) {
+            frames::Action::Release { invalid } => self.release(buffer, invalid),
+            frames::Action::Wait => {}
+            frames::Action::Present(damage) => self.present_frame(id, buffer, damage),
+        }
+    }
+
+    fn present_frame(&mut self, id: u32, buffer: u32, damage: [i32; 4]) {
+        if !self.windows.get(&id).is_some_and(|w| w.configured) {
+            let count = self.buffers.get_mut(&buffer).unwrap().frames.release();
+            for _ in 0..count {
+                self.release(buffer, false);
+            }
             return;
         }
         let b = self.buffers.get_mut(&buffer).unwrap();
-        b.busy = true;
         let (bw, bh) = (b.width, b.height);
         let wl = b.wl.clone().unwrap();
         let w = self.windows.get_mut(&id).unwrap();
@@ -1161,9 +1167,9 @@ impl DmabufHandler for State {
         match self.buffers.get_mut(&id) {
             Some(b) => {
                 b.wl = Some(buffer);
-                if let Some(damage) = b.pending.take() {
+                if let Some(damage) = b.frames.imported() {
                     let window = b.window;
-                    self.frame(window, id, damage);
+                    self.present_frame(window, id, damage);
                 }
             }
             None => buffer.destroy(),
@@ -1178,8 +1184,11 @@ impl DmabufHandler for State {
         params.destroy();
         if let Some(id) = self.params.remove(&params.id()) {
             crate::warn!("display: the compositor refused dma-buf {id}");
-            self.release(id);
-            self.buffers.remove(&id);
+            if let Some(mut b) = self.buffers.remove(&id) {
+                for _ in 0..b.frames.release() {
+                    self.release(id, true);
+                }
+            }
         }
     }
     fn released(&mut self, _: &Connection, _: &QueueHandle<Self>, buffer: &wl_buffer::WlBuffer) {
@@ -1190,10 +1199,11 @@ impl DmabufHandler for State {
             .map(|(k, _)| *k);
         if let Some(id) = id
             && let Some(b) = self.buffers.get_mut(&id)
-            && b.busy
         {
-            b.busy = false;
-            self.release(id);
+            let count = b.frames.release();
+            for _ in 0..count {
+                self.release(id, false);
+            }
         }
     }
 }

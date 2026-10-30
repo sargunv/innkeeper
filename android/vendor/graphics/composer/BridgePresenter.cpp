@@ -73,7 +73,7 @@ class BridgeDisplay {
   void releaseImage(uint64_t token);
   void cursor(const CursorState* cursor);
   // The rest: bridge lock held.
-  void onRelease(uint32_t buffer);
+  void onRelease(uint32_t buffer, bool invalid);
   // DISPLAY_ADD's answer: shown in `window`, or not shown (-1).
   void setWindow(int64_t window) { mWindow = window; }
   bool shown() const { return mWindow >= 0; }
@@ -201,10 +201,11 @@ void Bridge::handle(const lxb_packet& p) {
     }
     return;
   }
-  if (p.type == kEvRelease && p.len >= 4) {
+  if (p.type == kEvRelease && p.len >= 8) {
     const uint32_t buffer = lxb_u32(p.body);
     std::lock_guard lock(mutex);
-    for (auto& [id, d] : mDisplays) d->onRelease(buffer);
+    for (auto& [id, d] : mDisplays)
+      d->onRelease(buffer, lxb_u32(p.body + 4) != 0);
   }
 }
 
@@ -257,13 +258,22 @@ void Bridge::loop() {
 // ---- display
 // ---------------------------------------------------------------------
 
-void BridgeDisplay::onRelease(uint32_t buffer) {
-  for (auto& [source, buf] : mBuffers) {
-    if (buf.id == buffer && buf.busy) {
+void BridgeDisplay::onRelease(uint32_t buffer, bool invalid) {
+  for (auto it = mBuffers.begin(); it != mBuffers.end(); ++it) {
+    auto& buf = it->second;
+    if (buf.id != buffer) continue;
+    if (buf.busy) {
       buf.source->setPresentationToken(0);
       buf.busy = false;
       releaseImage(buf.token);
     }
+    if (invalid) {
+      // Remove the service's id too, before any replacement BUFFER_ADD on
+      // this connection. The same allocation must get a fresh Wayland import.
+      b->send(message(kBufferRemove, b->tag(), {buffer}));
+      mBuffers.erase(it);
+    }
+    return;
   }
 }
 
