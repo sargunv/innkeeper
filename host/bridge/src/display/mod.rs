@@ -5,6 +5,8 @@
 //! ([`wl`]), whose seat feeds the input service; this connection thread only
 //! validates requests and forwards them.
 
+#[cfg(feature = "gtk-spike")]
+mod gtk_spike;
 pub mod proto;
 pub(crate) mod wl;
 
@@ -67,6 +69,21 @@ impl DisplayService {
         events: Events,
         shared: Arc<crate::system::Shared>,
     ) -> Result<DisplayService> {
+        #[cfg(feature = "gtk-spike")]
+        if std::env::var("LINUXAPK_GTK_SPIKE").is_ok_and(|v| v == "1") {
+            let (tx, rx) = calloop::channel::channel();
+            let thread = gtk_spike::start(rx, events, hub.clone())?;
+            return Ok(Self {
+                conn: hub.add_display_connection(tx.clone()),
+                hub,
+                cmd: tx,
+                thread: Some(thread),
+                limits,
+                displays: HashMap::new(),
+                buffers: HashMap::new(),
+                label: peer.label.clone(),
+            });
+        }
         let conn = wayland_client::Connection::connect_to_env()
             .context("connecting to the host Wayland compositor")?;
         let (tx, rx) = calloop::channel::channel();

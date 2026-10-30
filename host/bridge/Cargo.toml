@@ -5,7 +5,17 @@ edition = "2024"
 publish = false
 description = "Linux.apk desktop bridge: host-side services (audio, windows, desktop integration) for the Android session"
 
+[features]
+# One-window experiment; normal builds retain the raw Wayland renderer.
+gtk-spike = ["dep:gtk", "dep:adw", "wayland-client/system"]
+
 [dependencies]
+gtk = { package = "gtk4", version = "0.11.5", features = [
+  "v4_14",
+], optional = true }
+adw = { package = "libadwaita", version = "0.9.2", features = [
+  "v1_7",
+], optional = true }
 anyhow = "1"
 libc = "0.2"
 linuxapk-broker = { path = "../../supervisor/broker" }

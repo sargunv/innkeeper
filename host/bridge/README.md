@@ -57,3 +57,27 @@ Incoming files become private system-app `content://` URIs, with read access
 granted by Android's ClipboardService to the pasting app. Only the latest
 incoming file selection is retained. Test sessions never read or publish the
 desktop clipboard, on either backend.
+
+## GTK window experiment
+
+An optional `gtk-spike` Cargo feature adds a development-only display backend.
+Build with `cargo build --release -p linuxapk-bridge --features gtk-spike`, then
+copy that binary into a development stage's `libexec/linuxapk/linuxapk-bridge`.
+`LINUXAPK_GTK_SPIKE=1` selects it; without the variable the same binary uses the
+existing Wayland frame. Normal builds do not link GTK. The launcher forwards
+this variable to the bridge.
+
+The experiment shows one Android window at a time in an `AdwApplicationWindow`,
+with Back, fullscreen and a revealing `AdwToolbarView`. Frames are
+`GdkDmabufTexture`s in a `GtkPicture` inside `GtkGraphicsOffload`; each texture
+keeps its dma-buf and delays the composer's RELEASE until GDK drops it. It uses
+GTK >= 4.14 and libadwaita >= 1.7. Run it only in a named disposable session,
+using the isolation and memory caps in [AGENTS.md](../../AGENTS.md).
+
+This is not a feature-complete backend: task appearance, activation tokens,
+portal parenting, IME/compose, repeat, gestures, tablets and Android cursor
+hotspot inference are unported. Keyboard forwarding currently uses physical keys
+and basic modifiers. The native pointer-constraint objects borrow GDK's Wayland
+handles and dispatch on its GLib thread. Benchmark traces mark GTK's
+`before-paint` boundary and parent-surface presentation feedback explicitly;
+those are not the raw backend's owned surface commits or physical photons.
