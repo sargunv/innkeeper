@@ -5,11 +5,11 @@ installed on Android's init and inherited by every Android process, turns what
 an unprivileged namespace can't do into user notifications.
 `mise run build:supervisor` builds all three artifacts.
 
-| Dir          | Artifact (stage path)                                             | Runs                                                      | Start reading                 |
-| ------------ | ----------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------- |
-| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | static pivot/namespace bootstrap and subreaper            | `pivot-exec.c`                |
-| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | forked by pivot-exec in the sandbox, host-user privileges | `src/notify.rs`, `src/bpf.rs` |
-| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it  | `linuxapk_shim.c`             |
+| Dir          | Artifact (stage path)                                             | Runs                                                     | Start reading                 |
+| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
+| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | static pivot/namespace bootstrap                         | `pivot-exec.c`                |
+| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | execed by pivot-exec in the sandbox, Android's parent    | `src/notify.rs`, `src/bpf.rs` |
+| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it | `linuxapk_shim.c`             |
 
 ## What is trapped, and who serves it
 
@@ -24,13 +24,18 @@ an unprivileged namespace can't do into user notifications.
 The broker constructs and installs the filter (`src/filter.rs`) in its `--init`
 entry point, hands the listener to pivot-exec, then execs Android. The outer
 broker receives and serves every notification directly: binder, credentials,
-Flatpak filesystem calls and BPF emulation share one Rust boundary. Each BPF
-object retains one memfd inode; opening a pin reopens that inode with an
-independent file description, so netd's OFD map locks conflict correctly.
+Flatpak filesystem calls and BPF emulation share one Rust boundary. Flatpak
+filesystem notifications run on four workers so a slow lookup (including `fstat`
+through a caller's fd) cannot block the binder receive thread. Each BPF object
+retains one memfd inode; opening a pin reopens that inode with an independent
+file description, so netd's OFD map locks conflict correctly.
 
 pivot-exec stays static C because it runs before pivot_root, before Android's
 bootstrap linker exists. It only establishes the root and namespaces, execs the
-dynamic Rust broker and reaps children; it defines no syscall policy.
+dynamic Rust broker in the same process; it defines no syscall policy. The
+broker inherits its subreaper role, reaps children and exits with init's status.
+It stays an ancestor of every Android process, so process-memory access works
+with Yama's default `ptrace_scope=1` without capabilities or a sysctl override.
 
 ## Binder
 
@@ -68,8 +73,9 @@ Not supported: priority inheritance, binder netlink reports and `TF_UPDATE_TXN`
   only a cycle of nested callbacks that needs a new looper waits for its
   restart.
 
-One broker thread serves the whole session, about 70k to 90k transactions per
-second; a round trip costs 15 µs against 3.8 µs for kernel binder.
+One broker thread serves binder for the whole session, about 70k to 90k
+transactions per second; a round trip costs 15 µs against 3.8 µs for kernel
+binder.
 
 ## Single-uid credentials
 

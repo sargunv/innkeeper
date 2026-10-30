@@ -43,10 +43,7 @@ static int flat;
 static void die(const char* what);
 
 // The broker stays in the outer namespaces to see every Android pid.
-static void spawn_broker(int pins, int listener, pid_t init) {
-  pid_t p = fork();
-  if (p < 0) die("fork broker");
-  if (p != 0) return;
+static void exec_broker(int pins, int listener, pid_t init) {
   // Flatpak mode: init's pid, which the broker shows as 1.
   if (flat) {
     char pid[16];
@@ -56,10 +53,13 @@ static void spawn_broker(int pins, int listener, pid_t init) {
   // Inherited fds must survive exec; clear CLOEXEC.
   if (pins >= 0) fcntl(pins, F_SETFD, 0);
   fcntl(listener, F_SETFD, 0);
-  char pinbuf[16], fdbuf[16];
+  char pinbuf[16], fdbuf[16], initbuf[16];
   snprintf(pinbuf, sizeof(pinbuf), "%d", pins);
   snprintf(fdbuf, sizeof(fdbuf), "%d", listener);
-  char* argv[] = {(char*)broker, fdbuf, pinbuf, NULL};
+  snprintf(initbuf, sizeof(initbuf), "%d", init);
+  // Init inherited the shim preload; the supervisor must not load it.
+  unsetenv("LD_PRELOAD");
+  char* argv[] = {(char*)broker, fdbuf, pinbuf, initbuf, NULL};
   execve(broker, argv, environ);
   die("exec broker");
 }
@@ -240,18 +240,7 @@ int main(int argc, char** argv) {
   memcpy(&listener, CMSG_DATA(cm), sizeof(int));
   close(sync_sock[1]);
 
-  spawn_broker(pins, listener, pid);
-  close(listener);
-  if (pins >= 0) close(pins);
-
-  // We are pid 1 of the outer pid namespace (Flatpak mode: init's
-  // subreaper): reap until the child is gone.
-  int status;
-  for (;;) {
-    pid_t w = waitpid(-1, &status, 0);
-    if (w == pid) break;
-    if (w < 0 && errno != EINTR) die("waitpid");
-  }
-  if (WIFEXITED(status)) return WEXITSTATUS(status);
-  return 128 + WTERMSIG(status);
+  // Keep this pid: the broker must be Android's ancestor for memory access
+  // under Yama ptrace_scope=1. Rust also takes over our child reaping.
+  exec_broker(pins, listener, pid);
 }

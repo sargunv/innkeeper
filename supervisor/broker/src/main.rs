@@ -13,10 +13,14 @@ fn main() {
         args.get(i)
             .and_then(|a| a.to_str())
             .and_then(|s| s.parse::<i32>().ok())
-            .expect("usage: linuxapk-broker <listener-fd> <pin-dir-fd>")
+            .expect("usage: linuxapk-broker <listener-fd> <pin-dir-fd> <init-pid>")
     };
     let listener = fd(0);
     let pins = fd(1);
+    let init = fd(2);
+    // pivot-exec execs us without changing pid. Reap orphans as its subreaper
+    // (pid 1 in the bootless harness), and end the session when init exits.
+    std::thread::spawn(move || reap(init));
     if !harness() {
         unsafe { libc::umask(0) };
     }
@@ -24,6 +28,24 @@ fn main() {
         listener,
         (pins >= 0).then(|| unsafe { OwnedFd::from_raw_fd(pins) }),
     );
+}
+fn reap(init: i32) -> ! {
+    loop {
+        let mut status = 0;
+        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+        if pid == init {
+            let code = if libc::WIFEXITED(status) {
+                libc::WEXITSTATUS(status)
+            } else {
+                128 + libc::WTERMSIG(status)
+            };
+            std::process::exit(code);
+        }
+        if pid < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            eprintln!("broker: waitpid: {}", std::io::Error::last_os_error());
+            std::process::exit(1);
+        }
+    }
 }
 fn harness() -> bool {
     std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1")

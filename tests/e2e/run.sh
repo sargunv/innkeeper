@@ -85,6 +85,21 @@ stop_session() {
 if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
+      # Check the real session tree even on hosts with Yama disabled. Memory
+      # access on Ubuntu's default ptrace_scope=1 needs an ancestor broker.
+      # shellcheck disable=SC2016 # expanded inside Android
+      s sh -c '
+        for init in $(pidof init); do
+          parent=$(sed -n "s/^PPid:[[:space:]]*//p" "/proc/$init/status")
+          if test "$(cat /proc/$parent/comm)" = linuxapk-broker; then
+            echo "init=$init parent=$parent (linuxapk-broker)"
+            exit 0
+          fi
+        done
+        exit 1
+      ' >"$T/ancestry.txt"
+      cat "$T/ancestry.txt"
+      echo 'ok   Android init is a child of the broker'
       "$S" selftest
       # Session1 reports the same completed boot as the launcher's property check.
       # shellcheck disable=SC2329 # invoked through until_ok

@@ -40,7 +40,7 @@ flowchart LR
   can't do (binder, eBPF, single-uid credentials). The Rust broker defines the
   filter and serves every notification, including binder, credentials, BPF and
   session-local evdev. The static pivot-exec bootstrap establishes the root and
-  namespaces and reaps children. See
+  namespaces, then becomes the broker that reaps children. See
   [supervisor/README.md](../supervisor/README.md).
 - **Android.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).

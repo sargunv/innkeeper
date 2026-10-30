@@ -8,8 +8,9 @@
 //!   goes on at each start.
 //! - `/` gets symlinks to it, the binder nodes and socket dirs; the broker
 //!   shows the Android paths behind the links (supervisor/broker/src/flat.rs).
-//! - init is pivot-exec's child, and the session lives as long as the
-//!   process that started it, which serves the control socket
+//! - init is the broker's child (execed from pivot-exec), and the session
+//!   lives as long as the process that started it, which serves the control
+//!   socket
 //!   ([`crate::control`]).
 
 use std::env;
@@ -437,7 +438,8 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         p.data.join("media").display()
     );
     let mut cmd = init::command(cfg, Path::new("/"), &[("LINUXAPK_ROOT_MAP", root_map)]);
-    // pivot-exec, init's subreaper, dies with this thread.
+    // pivot-exec becomes the broker, init's parent and subreaper; it dies
+    // with this thread.
     unsafe {
         cmd.pre_exec(|| {
             sys::die_with_parent(libc::SIGKILL);
@@ -477,7 +479,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     let (idle, paths) = (idle.clone(), p.clone());
     lifecycle::watch(cfg, move |wakeup| {
         *idle.lock().unwrap() = Some(wakeup);
-        // As `stop` does: killing pivot-exec alone would orphan init.
+        // As `stop` does: killing the broker alone would orphan init.
         teardown(&paths);
     });
     println!(
