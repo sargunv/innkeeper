@@ -36,8 +36,6 @@ constexpr uint16_t kFrame = 0x0205;
 constexpr uint16_t kEvRelease = 0x4201;
 constexpr uint16_t kImageRelease = 0x0207;
 constexpr size_t kMaxPending = 2;
-constexpr uint32_t kXBGR8888 = fourcc('X', 'B', '2', '4');  // R,G,B,X bytes
-constexpr uint32_t kXRGB8888 = fourcc('X', 'R', '2', '4');  // B,G,R,X bytes
 
 lxb_msg message(
   uint16_t type, uint32_t tag, std::initializer_list<uint32_t> fields
@@ -98,7 +96,6 @@ class BridgeDisplay {
   std::map<uint64_t, BridgeBuffer> mBuffers;  // guarded by the bridge lock
   uint64_t mFrames = 0, mDropped = 0;
   int64_t mLastLogNs = 0;
-  bool mWarnedFormat = false;
   std::vector<uint8_t> mCursor;
   int mCursorX = 0, mCursorY = 0;
   uint32_t mCursorWidth = 0, mCursorHeight = 0;
@@ -393,17 +390,8 @@ void BridgeDisplay::present(const FrameInput& frame) {
   if (!buffer) return;
   const BufferHandle* bh = buffer->info();
   if (!bh || !(bh->flags & kFlagDmabuf)) return;
-  const int32_t f = bh->resolvedFormat;
-  uint32_t format;
-  if (f == fmt::RGBA_8888 || f == fmt::RGBX_8888) {
-    format = kXBGR8888;
-  } else if (f == fmt::BGRA_8888) {
-    format = kXRGB8888;
-  } else {
-    if (!mWarnedFormat) LOGW("bridge: frame format 0x%x not supported yet", f);
-    mWarnedFormat = true;
-    return;
-  }
+  // The allocator's concrete DRM format, including FP16 and 10-bit targets.
+  const uint32_t format = bh->fourcc;
   if (!waitFence(ct->acquireFence.get(), 1000)) {
     LOGW("bridge: client target fence timeout");
     return;

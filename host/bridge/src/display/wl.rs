@@ -63,6 +63,7 @@ pub(crate) mod appearance;
 pub(crate) mod cursor;
 mod data_device;
 mod foreign;
+mod formats;
 mod frames;
 mod inhibit;
 mod policy;
@@ -118,6 +119,7 @@ struct Buf {
     width: u32,
     height: u32,
     wl: Option<wl_buffer::WlBuffer>,
+    fallback: bool,
     /// Attached and not yet released by the compositor.
     frames: frames::Frames,
     source: OwnedFd,
@@ -171,6 +173,7 @@ pub(crate) struct State {
     shm: Shm,
     xdg: XdgShell,
     dmabuf: DmabufState,
+    formats: Vec<(u32, u64)>,
     viewporter: Option<WpViewporter>,
     presentation: Option<presentation::Presentation>,
     presentation_clock: presentation::Clock,
@@ -568,6 +571,9 @@ impl State {
         let Some(b) = w.shown.and_then(|id| self.buffers.get(&id)) else {
             return;
         };
+        if b.fallback {
+            return;
+        } // Its host-owned snapshot is already attached.
         match visibility::snapshot(&b.source, &b.spec, &self.shm) {
             Ok(buffer) => {
                 let surface = w.window.wl_surface();
@@ -800,21 +806,38 @@ impl State {
         if self.buffers.contains_key(&b.buffer) || !self.windows.contains_key(&window) {
             return;
         }
-        let params = match self.dmabuf.create_params(&self.qh) {
-            Ok(p) => p,
-            Err(e) => {
-                crate::warn!("display: no linux-dmabuf: {e}");
-                return;
-            }
-        };
-        params.add(fd.as_fd(), 0, b.offset, b.stride, b.modifier);
-        let p = params.create(
-            b.width as i32,
-            b.height as i32,
+        let advertised: Vec<_> = self
+            .dmabuf
+            .modifiers()
+            .iter()
+            .map(|f| (f.format, f.modifier))
+            .chain(self.formats.iter().copied())
+            .collect();
+        let params = formats::direct(b.fourcc, b.modifier, &advertised)
+            .then(|| self.dmabuf.create_params(&self.qh).ok())
+            .flatten();
+        let direct = params.is_some();
+        if let Some(params) = params {
+            params.add(fd.as_fd(), 0, b.offset, b.stride, b.modifier);
+            let p = params.create(
+                b.width as i32,
+                b.height as i32,
+                b.fourcc,
+                zwp_linux_buffer_params_v1::Flags::empty(),
+            );
+            self.params.insert(p.id(), b.buffer);
+        }
+        crate::info!(
+            "display: buffer {} format={:#x} modifier={:#x} {}",
+            b.buffer,
             b.fourcc,
-            zwp_linux_buffer_params_v1::Flags::empty(),
+            b.modifier,
+            if direct {
+                "dma-buf"
+            } else {
+                "SDR shm fallback"
+            }
         );
-        self.params.insert(p.id(), b.buffer);
         self.buffers.insert(
             b.buffer,
             Buf {
@@ -822,6 +845,7 @@ impl State {
                 width: b.width,
                 height: b.height,
                 wl: None,
+                fallback: !direct,
                 frames: frames::Frames::default(),
                 source: fd,
                 spec: b.clone(),
@@ -851,7 +875,7 @@ impl State {
             .get(&id)
             .is_some_and(|w| w.configured && w.visibility.visible);
         let b = self.buffers.get_mut(&buffer);
-        let imported = b.as_ref().is_some_and(|b| b.wl.is_some());
+        let imported = b.as_ref().is_some_and(|b| b.wl.is_some() || b.fallback);
         let configured = configured && b.as_ref().is_none_or(|b| b.window == id);
         match frames::Frames::submit(b.map(|b| &mut b.frames), imported, configured, damage) {
             frames::Action::Release { invalid } => self.release(buffer, invalid),
@@ -874,10 +898,28 @@ impl State {
         }
         let b = self.buffers.get_mut(&buffer).unwrap();
         let (bw, bh) = (b.width, b.height);
-        let wl = b.wl.clone().unwrap();
+        let snapshot = if b.fallback {
+            match visibility::snapshot(&b.source, &b.spec, &self.shm) {
+                Ok(buffer) => Some(buffer),
+                Err(e) => {
+                    crate::warn!("display: SDR fallback: {e}");
+                    let count = b.frames.release();
+                    for _ in 0..count {
+                        self.release(buffer, true);
+                    }
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let w = self.windows.get_mut(&id).unwrap();
         let surface = w.window.wl_surface().clone();
-        surface.attach(Some(&wl), 0, 0);
+        if let Some(snapshot) = &snapshot {
+            let _ = snapshot.attach_to(&surface);
+        } else {
+            surface.attach(b.wl.as_ref(), 0, 0);
+        }
         let [x, y, dw, dh] = damage;
         if dw > 0 && dh > 0 {
             surface.damage_buffer(x, y, dw, dh);
@@ -887,7 +929,7 @@ impl State {
         if let Some(v) = &w.viewport {
             v.set_destination(w.width as i32, w.height as i32);
         }
-        w.frozen = None;
+        w.frozen = snapshot;
         let first = w.shown.is_none();
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
@@ -955,12 +997,16 @@ impl State {
             );
         }
         surface.commit();
+        let releases = if b.fallback { b.frames.release() } else { 0 };
         if first {
             // Mapped now: the launch's token can focus it.
             if let (Some(t), Some(a)) = (w.token.take(), &self.activation) {
                 a.activate(t, &surface);
             }
             crate::info!("display: window {id} shows its first frame");
+        }
+        for _ in 0..releases {
+            self.release(buffer, false);
         }
     }
 
@@ -1373,8 +1419,15 @@ impl DmabufHandler for State {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &zwp_linux_dmabuf_feedback_v1::ZwpLinuxDmabufFeedbackV1,
-        _: DmabufFeedback,
+        feedback: DmabufFeedback,
     ) {
+        self.formats = feedback
+            .tranches()
+            .iter()
+            .flat_map(|t| &t.formats)
+            .filter_map(|&index| feedback.format_table().get(index as usize))
+            .map(|f| (f.format, f.modifier))
+            .collect();
     }
     fn created(
         &mut self,
@@ -1410,9 +1463,11 @@ impl DmabufHandler for State {
         params.destroy();
         if let Some(id) = self.params.remove(&params.id()) {
             crate::warn!("display: the compositor refused dma-buf {id}");
-            if let Some(mut b) = self.buffers.remove(&id) {
-                for _ in 0..b.frames.release() {
-                    self.release(id, true);
+            if let Some(b) = self.buffers.get_mut(&id) {
+                b.fallback = true;
+                if let Some(damage) = b.frames.imported() {
+                    let window = b.window;
+                    self.present_frame(window, id, damage);
                 }
             }
         }
@@ -1472,7 +1527,7 @@ pub fn run(
     hub: Arc<Hub>,
     shared: Arc<crate::system::Shared>,
 ) -> Result<()> {
-    let (globals, queue) = registry_queue_init::<State>(&conn).context("registry")?;
+    let (globals, mut queue) = registry_queue_init::<State>(&conn).context("registry")?;
     let qh = queue.handle();
     let compositor = CompositorState::bind(&globals, &qh).context("wl_compositor")?;
     let subcompositor = SubcompositorState::bind(compositor.wl_compositor().clone(), &globals, &qh)
@@ -1488,6 +1543,7 @@ pub fn run(
         shm: Shm::bind(&globals, &qh).context("wl_shm")?,
         xdg: XdgShell::bind(&globals, &qh).context("xdg_wm_base")?,
         dmabuf: DmabufState::new(&globals, &qh),
+        formats: Vec::new(),
         viewporter: bind_opt(&globals, &qh, 1),
         presentation: bind_opt(&globals, &qh, 1),
         presentation_clock: presentation::Clock::default(),
@@ -1521,6 +1577,9 @@ pub fn run(
         st.activation.is_some(),
         st.seat.text.available()
     );
+    // Complete default feedback before accepting any BUFFER_ADD commands.
+    let _feedback = st.dmabuf.get_default_feedback(&qh).ok();
+    queue.roundtrip(&mut st).context("dma-buf formats")?;
     WaylandSource::new(conn, queue)
         .insert(ev.handle())
         .map_err(|e| anyhow::anyhow!("wayland source: {e}"))?;

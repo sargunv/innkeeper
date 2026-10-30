@@ -2,6 +2,7 @@
 import Clutter from "gi://Clutter";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import Shell from "gi://Shell";
 import St from "gi://St";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 
@@ -40,9 +41,31 @@ export async function run() {
     `<node><interface name="dev.linuxapk.TestDesktop">
       <method name="Input"><arg type="s" direction="in"/></method>
       <method name="Visibility"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
+      <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
     </interface></node>`,
     {
+      async ScreenshotAsync([path], invocation) {
+        try {
+          const stream = Gio.File.new_for_path(path).replace(
+            null,
+            false,
+            Gio.FileCreateFlags.REPLACE_DESTINATION,
+            null,
+          );
+          try {
+            await new Shell.Screenshot().screenshot(false, stream);
+          } finally {
+            stream.close(null);
+          }
+          invocation.return_value(null);
+        } catch (error) {
+          invocation.return_dbus_error(
+            "dev.linuxapk.Screenshot",
+            String(error),
+          );
+        }
+      },
       Input(action) {
         const [kind, values] = action.split(":");
         const [x, y] = values.split(",").map(Number);

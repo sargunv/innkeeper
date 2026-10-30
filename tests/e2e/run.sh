@@ -283,6 +283,26 @@ sys.exit(1)
       wm CLOSE --es package dev.linuxapk.probes >/dev/null
       ;;
     desktop)
+      launch WideColorProbe
+      # A host screenshot checks the displayed pixels, not just Android's buffer.
+      # shellcheck disable=SC2329 # invoked through until_ok
+      wide_colour_visible() {
+        if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+          gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
+            --method dev.linuxapk.TestDesktop.Screenshot "$T/wide-colour.png" >/dev/null || return 1
+        else
+          spectacle -b -n -a -o "$T/wide-colour.png" >/dev/null 2>&1 || return 1
+        fi
+        /usr/bin/python3 - "$T/wide-colour.png" <<'PYTHON'
+import sys
+from PIL import Image
+image = Image.open(sys.argv[1]).convert("RGB")
+assert sum(n for n, (r, g, b) in image.getcolors(image.width * image.height)
+           if r > 220 and 60 < g < 100 and 10 < b < 50) > 10000
+PYTHON
+      }
+      until_ok wide_colour_visible
+      echo 'ok   wide-colour window displays its SDR pixels on the host'
       # One live preference round trip, through the same Session1 API as GTK.
       dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}
       gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \

@@ -9,7 +9,7 @@
 //! | -------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 //! | `0x0201` | DISPLAY_ADD    | `u32 display`, `u32 width`, `u32 height` (pixels)                                                                                                                                    | `u32 window`: shown in that window; `-ENOENT`: no window asked for it (it stays headless)   |
 //! | `0x0202` | DISPLAY_REMOVE | `u32 display`                                                                                                                                                                        | Closes its window and drops its buffers                                                     |
-//! | `0x0203` | BUFFER_ADD     | `u32 buffer`, `u32 display`, `u32 width`, `u32 height`, `u32 fourcc` (XBGR/ABGR/XRGB/ARGB8888), `u32 stride` (≥ 4×width), `u32 offset`, `u64 modifier` (0, LINEAR); fd: the dma-buf | The fd's size must cover `offset + stride × height`                                        |
+//! | `0x0203` | BUFFER_ADD     | `u32 buffer`, `u32 display`, `u32 width`, `u32 height`, `u32 fourcc` (8888, ABGR2101010 or ABGR16161616F), `u32 stride` (≥ bytes-per-pixel×width), `u32 offset`, `u64 modifier` (allocator: LINEAR); fd: the dma-buf | The fd's size must cover `offset + stride × height`                                        |
 //! | `0x0204` | BUFFER_REMOVE  | `u32 buffer`                                                                                                                                                                         |                                                                                             |
 //! | `0x0205` | FRAME          | `u32 display`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's again at RELEASE; one the window can't show yet is released at once |
 //!
@@ -50,10 +50,10 @@ pub mod limits {
     /// Display and buffer sizes, in pixels.
     pub const MAX_DIM: u32 = 16384;
     /// Bytes per row, as a multiple of the width's minimum.
-    pub const MAX_STRIDE: u32 = 4 * MAX_DIM + 4096;
+    pub const MAX_STRIDE: u32 = 8 * MAX_DIM + 4096;
 }
 
-/// DRM fourccs the bridge accepts (linear, 4 bytes per pixel).
+/// Packed RGB formats supplied by the allocator.
 pub mod fourcc {
     const fn cc(a: u8, b: u8, c: u8, d: u8) -> u32 {
         a as u32 | (b as u32) << 8 | (c as u32) << 16 | (d as u32) << 24
@@ -62,8 +62,14 @@ pub mod fourcc {
     pub const ABGR8888: u32 = cc(b'A', b'B', b'2', b'4');
     pub const XRGB8888: u32 = cc(b'X', b'R', b'2', b'4');
     pub const ARGB8888: u32 = cc(b'A', b'R', b'2', b'4');
-    pub fn supported(f: u32) -> bool {
-        matches!(f, XBGR8888 | ABGR8888 | XRGB8888 | ARGB8888)
+    pub const ABGR2101010: u32 = cc(b'A', b'B', b'3', b'0');
+    pub const ABGR16161616F: u32 = cc(b'A', b'B', b'4', b'H');
+    pub fn bytes_per_pixel(f: u32) -> Option<u32> {
+        match f {
+            XBGR8888 | ABGR8888 | XRGB8888 | ARGB8888 | ABGR2101010 => Some(4),
+            ABGR16161616F => Some(8),
+            _ => None,
+        }
     }
 }
 
@@ -76,7 +82,7 @@ pub struct BufferSpec {
     pub fourcc: u32,
     pub stride: u32,
     pub offset: u32,
-    /// DRM format modifier; only LINEAR (0) for now.
+    /// DRM format modifier (our allocator supplies LINEAR).
     pub modifier: u64,
 }
 
@@ -157,10 +163,8 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 offset: r.u32()?,
                 modifier: r.u64()?,
             };
-            if !fourcc::supported(b.fourcc) {
-                return Err(DecodeError::Invalid("format"));
-            }
-            if b.stride < b.width * 4 {
+            let bpp = fourcc::bytes_per_pixel(b.fourcc).ok_or(DecodeError::Invalid("format"))?;
+            if b.stride < b.width * bpp {
                 return Err(DecodeError::Invalid("stride below width"));
             }
             if b.modifier != 0 {
@@ -296,6 +300,23 @@ mod tests {
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
         }
+    }
+
+    #[test]
+    fn wide_buffers_require_the_real_pixel_size() {
+        let mut b = buffer(5120);
+        if let Request::BufferAdd(s) = &mut b {
+            s.fourcc = fourcc::ABGR2101010;
+        }
+        assert_eq!(roundtrip(&encode(1, &b)), Ok(b.clone()));
+        if let Request::BufferAdd(s) = &mut b {
+            s.fourcc = fourcc::ABGR16161616F;
+        }
+        assert!(roundtrip(&encode(1, &b)).is_err());
+        if let Request::BufferAdd(s) = &mut b {
+            s.stride = 10240;
+        }
+        assert_eq!(roundtrip(&encode(1, &b)), Ok(b));
     }
 
     #[test]

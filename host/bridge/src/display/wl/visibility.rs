@@ -58,14 +58,14 @@ impl Visibility {
     }
 }
 
-/// All supported dma-bufs are linear, four bytes per pixel. Copy only when
-/// hiding; the rendering path keeps its zero-copy imports.
+/// An SDR snapshot, also used when linux-dmabuf cannot import a linear buffer.
 pub(super) fn snapshot(
     fd: &std::os::fd::OwnedFd,
     spec: &super::BufferSpec,
     shm: &sctk::shm::Shm,
 ) -> anyhow::Result<sctk::shm::slot::Buffer> {
     use std::os::fd::AsRawFd;
+    anyhow::ensure!(spec.modifier == 0, "cannot snapshot a non-linear buffer");
     let len = spec.bytes() as usize;
     let ptr = unsafe {
         libc::mmap(
@@ -104,16 +104,43 @@ pub(super) fn snapshot(
 fn copy_pixels(source: &[u8], canvas: &mut [u8], spec: &super::BufferSpec) {
     use super::super::proto::fourcc;
     let stride = spec.width as usize * 4;
+    let bpp = fourcc::bytes_per_pixel(spec.fourcc).unwrap() as usize;
     for (row, dst) in canvas.chunks_exact_mut(stride).enumerate() {
         let offset = spec.offset as usize + row * spec.stride as usize;
-        dst.copy_from_slice(&source[offset..offset + stride]);
-        for pixel in dst.as_chunks_mut::<4>().0 {
-            if matches!(spec.fourcc, fourcc::XBGR8888 | fourcc::ABGR8888) {
-                pixel.swap(0, 2);
-            }
-            if matches!(spec.fourcc, fourcc::XRGB8888 | fourcc::XBGR8888) {
-                pixel[3] = 255;
-            }
+        for (x, pixel) in dst.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let src = &source[offset + x * bpp..][..bpp];
+            *pixel = match spec.fourcc {
+                fourcc::ABGR16161616F => {
+                    let channel = |i: usize| {
+                        let h = u16::from_le_bytes([src[i * 2], src[i * 2 + 1]]);
+                        let sign = if h & 0x8000 == 0 { 1.0 } else { -1.0 };
+                        let exponent = (h >> 10) & 31;
+                        let mantissa = (h & 1023) as f32;
+                        let value = match exponent {
+                            0 => mantissa * 2f32.powi(-24),
+                            31 => {
+                                if mantissa == 0.0 {
+                                    f32::INFINITY
+                                } else {
+                                    0.0
+                                }
+                            }
+                            _ => (1.0 + mantissa / 1024.0) * 2f32.powi(exponent as i32 - 15),
+                        };
+                        (sign * value * 255.0).round().clamp(0.0, 255.0) as u8
+                    };
+                    [channel(2), channel(1), channel(0), channel(3)]
+                }
+                fourcc::ABGR2101010 => {
+                    let v = u32::from_le_bytes(src.try_into().unwrap());
+                    let c = |shift: u32| (((v >> shift) & 1023u32) * 255 + 511) / 1023;
+                    [c(20) as u8, c(10) as u8, c(0) as u8, ((v >> 30) * 85) as u8]
+                }
+                fourcc::ABGR8888 => [src[2], src[1], src[0], src[3]],
+                fourcc::XBGR8888 => [src[2], src[1], src[0], 255],
+                fourcc::XRGB8888 => [src[0], src[1], src[2], 255],
+                _ => src.try_into().unwrap(),
+            };
         }
     }
 }
@@ -121,6 +148,37 @@ fn copy_pixels(source: &[u8], canvas: &mut [u8], spec: &super::BufferSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_formats_downconvert_to_the_same_sdr_pixel() {
+        use super::super::super::proto::{BufferSpec, fourcc};
+        let mut spec = BufferSpec {
+            buffer: 1,
+            display: 1,
+            width: 1,
+            height: 1,
+            fourcc: fourcc::ABGR16161616F,
+            stride: 8,
+            offset: 0,
+            modifier: 0,
+        };
+        let mut pixel = [0; 4];
+        // RGBA half-floats: 1, .5, 0, 1.
+        copy_pixels(&[0, 0x3c, 0, 0x38, 0, 0, 0, 0x3c], &mut pixel, &spec);
+        assert_eq!(pixel, [0, 128, 255, 255]);
+        spec.fourcc = fourcc::ABGR2101010;
+        spec.stride = 4;
+        copy_pixels(
+            &(1023u32 | (512 << 10) | (3 << 30)).to_le_bytes(),
+            &mut pixel,
+            &spec,
+        );
+        assert_eq!(pixel, [0, 128, 255, 255]);
+        // Negative, over-range, NaN and infinity remain bounded in SDR.
+        spec.fourcc = fourcc::ABGR16161616F;
+        copy_pixels(&[0, 0xbc, 0, 0x40, 1, 0x7c, 0, 0x7c], &mut pixel, &spec);
+        assert_eq!(pixel, [0, 255, 0, 255]);
+    }
 
     #[test]
     fn snapshot_preserves_colour_and_alpha_without_copying_padding() {
