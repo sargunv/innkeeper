@@ -122,6 +122,11 @@ not constrain the host pointer.
   captions on every desktop use the primary RGB with a contrasting title and
   button foreground; a zero primary colour restores the desktop theme. Clearing
   a task icon restores the compositor's default icon.
+- **Task ownership.** A window is owned by an Android task id, independent of
+  the package of its top activity. A start without `NEW_TASK` stays in that task
+  and window. A new task on an occupied app display gets a VirtualDisplay of its
+  own, including a second task of the same package; all its windows share the
+  package's `app_id`. A desktop launch restores the package's most recent task.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
   recents, dream and assistant tasks stay.

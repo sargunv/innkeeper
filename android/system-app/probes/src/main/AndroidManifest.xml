@@ -51,6 +51,8 @@
       </intent-filter>
     </activity>
 
+    <activity android:name=".TaskWindowProbe" android:exported="true" />
+
     <activity android:name=".TaskAppearanceProbe" android:exported="true" android:launchMode="singleTop" />
 
     <activity android:name=".ShareProbe" android:exported="true" android:label="Share probe">

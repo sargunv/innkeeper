@@ -107,6 +107,8 @@ class WindowManagerFeature(
     /** Counted down once the window shows its first frame. */
     val shown = CountDownLatch(1)
     val created = SystemClock.uptimeMillis()
+    /** The owning Android task; null only while a desktop launch is starting. */
+    var taskId: Int? = null
     var tasks: List<Int> = emptyList()
     var hadTask = false
     var mapped = false
@@ -241,15 +243,23 @@ class WindowManagerFeature(
     if (r.uri != null && !r.file) intent.addCategory(Intent.CATEGORY_BROWSABLE)
 
     refreshTasks()
-    windows.values
-      .firstOrNull { it.pkg == r.pkg }
-      ?.let { w ->
-        // A link or another activity opens in the app's window; its launcher activity just
-        // brings the task back.
-        if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
-        focus(w, activate = true, token = r.token)
-        return "focused display=${w.id} package=${r.pkg}"
-      }
+    // Like a launcher, restore the most recently used task of the package, not the oldest
+    // window. Window ownership itself is always by task, including a cross-app activity stack.
+    val recent = tasksOf(r.pkg).firstOrNull()
+    val existingWindow =
+      TaskRouting.launcherWindow(
+          recent?.taskId,
+          r.pkg,
+          windows.values.map { TaskRouting.Window(it.id, it.taskId, it.pkg) },
+        )
+        ?.let(windows::get)
+    existingWindow?.let { w ->
+      // A link or another activity opens in the app's window; its launcher activity just
+      // brings the task back.
+      if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
+      focus(w, activate = true, token = r.token)
+      return "focused display=${w.id} package=${r.pkg}"
+    }
 
     val sizing =
       if (r.widthDp > 0 && r.heightDp > 0) WindowSizing(r.widthDp, r.heightDp, 0, 0)
@@ -271,6 +281,7 @@ class WindowManagerFeature(
   }
 
   private fun move(task: ActivityManager.RunningTaskInfo, w: AppWindow) {
+    w.taskId = task.taskId
     Log.i(TAG, "moving task ${task.taskId} (${task.baseActivity}) to display ${w.id}")
     atm.moveRootTaskToDisplay(task.taskId, w.id)
     atm.focusTopTask(w.id)
@@ -674,8 +685,40 @@ class WindowManagerFeature(
   // Syncs windows with the tasks on their displays: closes windows whose app is gone, shows
   // app warnings once a window has its task, and adopts app tasks from display 0.
   private fun refreshTasks() {
-    val tasks = allTasks()
-    val byDisplay = tasks.groupBy(Tasks::displayId)
+    val tasks = allTasksOrError() ?: return
+    // Oldest first: a desktop launch claims its pending display before an activity it starts
+    // creates another task there. Activity starts without NEW_TASK keep the same task id.
+    for (t in tasks.asReversed()) {
+      if (!Tasks.isAppTask(t)) continue
+      val component = t.baseActivity ?: t.topActivity ?: continue
+      if (component.className == AppWarningActivity::class.java.name) continue
+      val source = Tasks.displayId(t)
+      // Our display-0 handoff trampolines finish immediately; HOME is filtered above.
+      if (source == DEFAULT_DISPLAY && component.packageName == context.packageName) continue
+      val destination =
+        TaskRouting.destination(
+          t.taskId,
+          source,
+          windows.values.map { TaskRouting.Window(it.id, it.taskId) },
+        )
+      val w =
+        when (destination) {
+          is TaskRouting.Destination.Existing -> windows[destination.display]
+          TaskRouting.Destination.NewWindow ->
+            createWindow(
+              component.packageName,
+              labelOf(component.packageName),
+              sizingFor(t.baseIntent ?: Intent()),
+            )
+          TaskRouting.Destination.Ignore -> null
+        } ?: continue
+      w.taskId = t.taskId
+      // Record ownership before moving: the next callback must not create another display.
+      if (source != w.id) move(t, w)
+    }
+    val byDisplay = tasks.groupBy { t ->
+      windows.values.firstOrNull { it.taskId == t.taskId }?.id ?: Tasks.displayId(t)
+    }
     val now = SystemClock.uptimeMillis()
     for (w in windows.values.toList()) {
       val ts =
@@ -709,18 +752,6 @@ class WindowManagerFeature(
           close(w, finishTasks = false)
         }
       }
-    }
-    for (t in byDisplay[DEFAULT_DISPLAY].orEmpty()) {
-      if (!Tasks.isAppTask(t)) continue
-      val pkg = (t.baseActivity ?: t.topActivity)?.packageName ?: continue
-      // Our own activities on display 0 (the desktop browser stand-in) finish at once and never
-      // need a window.
-      if (pkg == context.packageName) continue
-      val w =
-        windows.values.firstOrNull { it.pkg == pkg }
-          ?: createWindow(pkg, labelOf(pkg), sizingFor(t.baseIntent ?: Intent()))
-          ?: continue
-      move(t, w)
     }
   }
 
