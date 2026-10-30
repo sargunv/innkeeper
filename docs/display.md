@@ -258,6 +258,39 @@ and
 The global is optional: if absent, windows and Android lifecycle keep working
 and desktop idle inhibition is unavailable. This path uses no portal service.
 
+### Moving between outputs
+
+Each surface tracks the outputs it has entered. Fractional-scale v1 supplies its
+preferred pixel scale; without that optional global, SCTK uses
+wl_surface.preferred_buffer_scale or the entered outputs' integer scales.
+Changing scale resizes the existing VirtualDisplay's pixel dimensions and
+density together, keeping the logical content size. It does not recreate the
+display. Android delivers its normal density/size configuration change to the
+activity; activities declaring those configuration changes can redraw in place.
+
+The bridge reports every visible output's ID and current mode refresh rate.
+Membership comes directly from SCTK's per-surface enter/leave set, so a window
+spanning two outputs keeps both until it leaves one. Mode changes and hot unplug
+update affected observations. Zero means the output rate is unknown; an empty
+set means hidden or unmapped. Window LIST reports these as `hostOutputs=id@Hz`.
+
+Android 17's VirtualDisplayConfig.setRequestedRefreshRate is a creation-time
+setting: VirtualDisplayAdapter keeps mRequestedRefreshRate final and
+IDisplayManager has no live setter. Linux.apk leaves the requested rate at zero
+so SurfaceFlinger follows the primary display; it never recreates an app's
+VirtualDisplay to change the rate. Per-window host output-rate reporting is
+separate from that immutable Android configuration. Pacing follows the host
+through primary display 0.
+
+`State::visible_outputs(window)` is the shared bridge boundary for output
+reporting and presentation pacing. It returns SCTK's complete output membership
+for a mapped visible window, and an empty set while hidden or after teardown.
+Lifecycle, surface enter/leave and output-mode events drive observations; no
+additional poll, heartbeat or membership tracker is needed. Fractional density
+uses that same surface's compositor-supplied preferred scale. Fractional-scale
+v1 is available on the baseline GNOME 48 and Plasma 6.3 stacks, with integer
+scale fallback when the global is absent.
+
 ### Launch feedback
 
 ```mermaid

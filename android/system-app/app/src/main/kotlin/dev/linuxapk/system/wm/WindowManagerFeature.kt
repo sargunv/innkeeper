@@ -116,6 +116,7 @@ class WindowManagerFeature(
     val visibility = WindowVisibility()
     var timeoutPolicy: ScreenTimeoutPolicy? = null
     var keepAwake = false
+    var hostOutputs: Map<Int, Int> = emptyMap()
     var mapped = false
     var resize: Runnable? = null
     var appearance: Runnable? = null
@@ -139,11 +140,12 @@ class WindowManagerFeature(
     val dpi: Int,
     val tasks: List<Int>,
     val mapped: Boolean,
+    val hostOutputs: Map<Int, Int>,
   ) {
     override fun toString() =
       "display=$display package=$pkg size=${width}x$height dpi=$dpi " +
         "tasks=${tasks.joinToString(",").ifEmpty { "-" }} window=${if (mapped) "yes" else "no"} " +
-        "label=$label"
+        "hostOutputs=${hostOutputs.entries.joinToString(",") { "${it.key}@${it.value / 1000.0}" }} label=$label"
   }
 
   override fun start() {
@@ -205,7 +207,17 @@ class WindowManagerFeature(
   fun list(): List<WindowInfo> = onWm {
     refreshTasks()
     windows.values.map {
-      WindowInfo(it.id, it.pkg, it.label, it.width, it.height, it.dpi, it.tasks, it.mapped)
+      WindowInfo(
+        it.id,
+        it.pkg,
+        it.label,
+        it.width,
+        it.height,
+        it.dpi,
+        it.tasks,
+        it.mapped,
+        it.hostOutputs,
+      )
     }
   }
 
@@ -498,6 +510,7 @@ class WindowManagerFeature(
   // On the input connection's thread.
   override fun onHostEvent(e: HostEvent) {
     when (e) {
+      is HostEvent.WindowOutputs,
       is HostEvent.WindowVisible,
       is HostEvent.Window,
       is HostEvent.Close,
@@ -515,6 +528,11 @@ class WindowManagerFeature(
 
   private fun onWindowEvent(e: HostEvent) {
     when (e) {
+      is HostEvent.WindowOutputs -> {
+        val w = windows[e.display] ?: return
+        w.hostOutputs = e.outputs
+        Log.i(TAG, "display ${w.id}: host outputs ${w.hostOutputs}")
+      }
       is HostEvent.WindowVisible -> {
         val w = windows[e.display] ?: return
         setVisible(w, e.visible)
@@ -558,7 +576,6 @@ class WindowManagerFeature(
       is HostEvent.WindowUnmapped -> {
         // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
         val w = windows[e.display] ?: return
-        w.mapped = false
         Log.w(TAG, "window of display ${w.id} disappeared; requesting it again")
         remap(w)
       }
@@ -585,15 +602,16 @@ class WindowManagerFeature(
   // which picks up the new window request.
   private fun remap(w: AppWindow) {
     if (windows[w.id] !== w) return
+    w.mapped = false
+    w.hostOutputs = emptyMap()
     setVisible(w, true)
     w.display.surface = null
     attachSurface(w)
   }
 
   private fun applySize(w: AppWindow, widthDp: Int, heightDp: Int, s: Double) {
-    val width = (widthDp * s).roundToInt().coerceAtLeast(1)
-    val height = (heightDp * s).roundToInt().coerceAtLeast(1)
-    val dpi = (BASE_DPI * s).roundToInt().coerceAtLeast(1)
+    val metrics = WindowMetrics.from(widthDp, heightDp, s) ?: return
+    val (width, height, dpi) = metrics
     if (width == w.width && height == w.height && dpi == w.dpi) return
     Log.i(TAG, "display ${w.id}: ${w.width}x${w.height}@${w.dpi} -> ${width}x$height@$dpi")
     w.width = width

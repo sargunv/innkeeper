@@ -67,6 +67,7 @@ mod frames;
 mod inhibit;
 mod policy;
 mod presentation;
+mod scale;
 mod visibility;
 
 use policy::{AppRequest, Event as PolicyEvent, Policy, WindowState, desired_window_state};
@@ -140,7 +141,8 @@ struct Win {
     /// Logical content size and scale×120.
     width: u32,
     height: u32,
-    scale120: u32,
+    scale: scale::Scale,
+    reported_outputs: Option<Vec<(u32, u32)>>,
     inhibit: inhibit::Inhibit,
     inhibitor: Option<ZwpIdleInhibitorV1>,
     frozen: Option<sctk::shm::slot::Buffer>,
@@ -163,6 +165,7 @@ pub(crate) struct State {
     registry: RegistryState,
     seat_state: SeatState,
     output_state: OutputState,
+    outputs_changed: bool,
     compositor: Arc<CompositorState>,
     subcompositor: Arc<SubcompositorState>,
     shm: Shm,
@@ -271,10 +274,10 @@ impl Dispatch2<WpFractionalScaleV1, State> for ScaleOf {
     ) {
         if let wp_fractional_scale_v1::Event::PreferredScale { scale } = e
             && let Some(w) = st.windows.get_mut(&self.0)
+            && w.scale.update(scale)
         {
-            w.scale120 = scale.clamp(60, 120 * 8);
             if let Some(f) = w.frame.as_mut() {
-                f.set_scaling_factor(scale as f64 / 120.0);
+                f.set_scaling_factor(w.scale.get() as f64 / 120.0);
             }
             st.send_configure(self.0);
         }
@@ -336,7 +339,7 @@ impl State {
 
     /// The window's scale × 120.
     pub(crate) fn scale120(&self, id: u32) -> u32 {
-        self.windows.get(&id).map_or(120, |w| w.scale120.max(1))
+        self.windows.get(&id).map_or(120, |w| w.scale.get())
     }
 
     pub(crate) fn toggle_fullscreen(&mut self, id: u32) {
@@ -550,6 +553,7 @@ impl State {
                 u8::from(w.visibility.visible)
             ));
         }
+        self.send_output(id);
     }
 
     // Never return an ImageReader lease while Wayland still reads it. Replacing
@@ -598,12 +602,74 @@ impl State {
         }
     }
 
+    /// Shared window-state boundary for output reporting and presentation
+    /// pacing: the full SCTK membership, or empty while hidden/unmapped.
+    /// Read on lifecycle/output events; it needs no poll or heartbeat.
+    pub(crate) fn visible_outputs(&self, id: u32) -> Vec<wl_output::WlOutput> {
+        self.windows
+            .get(&id)
+            .filter(|w| w.mapped && w.visibility.visible)
+            .and_then(|w| {
+                w.window
+                    .wl_surface()
+                    .data::<sctk::compositor::SurfaceData<()>>()
+            })
+            .into_iter()
+            .flat_map(|surface| surface.outputs())
+            .filter(|output| self.output_state.info(output).is_some())
+            .collect()
+    }
+
+    fn send_output(&mut self, id: u32) {
+        let mut outputs: Vec<_> = self
+            .visible_outputs(id)
+            .iter()
+            .map(|o| (o.id().protocol_id(), self.output_rate(o)))
+            .collect();
+        outputs.sort_unstable();
+        outputs.dedup();
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if w.reported_outputs.as_ref() == Some(&outputs) {
+            return;
+        }
+        let mut line = format!("window_outputs {id}");
+        for (output, rate) in &outputs {
+            use std::fmt::Write;
+            let _ = write!(line, " {output} {rate}");
+        }
+        crate::info!("display: {line}");
+        self.hub.input(&line);
+        w.reported_outputs = Some(outputs);
+    }
+
+    fn output_rate(&self, output: &wl_output::WlOutput) -> u32 {
+        self.output_state
+            .info(output)
+            .and_then(|info| {
+                info.modes
+                    .into_iter()
+                    .find(|m| m.current)
+                    .and_then(|m| u32::try_from(m.refresh_rate).ok())
+            })
+            .unwrap_or(0)
+    }
+
+    fn report_outputs(&mut self) {
+        // Membership lives in SCTK. Only changed Android observations are sent.
+        let ids: Vec<_> = self.windows.keys().copied().collect();
+        for id in ids {
+            self.send_output(id);
+        }
+    }
+
     fn send_configure(&self, id: u32) {
         let Some(w) = self.windows.get(&id) else {
             return;
         };
         if w.configured {
-            let scale = w.scale120 as f64 / 120.0;
+            let scale = w.scale.get() as f64 / 120.0;
             self.hub
                 .input(&format!("window {} {} {scale:.3} {id}", w.width, w.height));
         }
@@ -658,7 +724,8 @@ impl State {
                 app_id: s.app_id,
                 width,
                 height,
-                scale120: 120,
+                scale: scale::Scale::default(),
+                reported_outputs: None,
                 inhibit: inhibit::Inhibit::default(),
                 inhibitor: None,
                 frozen: None,
@@ -1072,7 +1139,7 @@ impl WindowHandler for State {
             ) {
                 Ok(mut f) => {
                     f.set_title(w.title.clone());
-                    f.set_scaling_factor(w.scale120 as f64 / 120.0);
+                    f.set_scaling_factor(w.scale.get() as f64 / 120.0);
                     w.frame = Some(f);
                 }
                 Err(e) => crate::warn!("display: no client-side frame: {e}"),
@@ -1168,18 +1235,16 @@ impl CompositorHandler for State {
         else {
             return;
         };
-        let scale120 = factor.clamp(1, 8) as u32 * 120;
-        if scale120 == w.scale120 {
+        if !w.scale.update(factor.clamp(1, 8) as u32 * 120) {
             return;
         }
-        w.scale120 = scale120;
         // Without a viewport, the buffer scale maps the frame's pixels to
         // the window's logical size.
         if w.viewport.is_none() {
             surface.set_buffer_scale(factor.clamp(1, 8));
         }
         if let Some(f) = w.frame.as_mut() {
-            f.set_scaling_factor(factor as f64);
+            f.set_scaling_factor(w.scale.get() as f64 / 120.0);
         }
         let id = w.id;
         self.send_configure(id);
@@ -1214,23 +1279,30 @@ impl CompositorHandler for State {
             if was_visible != w.visibility.visible {
                 self.send_visibility(id);
             }
+            self.send_output(id);
         }
     }
     fn surface_enter(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _: &wl_output::WlOutput,
     ) {
+        if let Some((id, false)) = self.window_of(surface) {
+            self.send_output(id);
+        }
     }
     fn surface_leave(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _: &wl_output::WlOutput,
     ) {
+        if let Some((id, false)) = self.window_of(surface) {
+            self.send_output(id);
+        }
     }
 }
 
@@ -1238,9 +1310,15 @@ impl OutputHandler for State {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
     }
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.outputs_changed = true;
+    }
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.outputs_changed = true;
+    }
+    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.outputs_changed = true;
+    }
 }
 
 impl ShmHandler for State {
@@ -1396,6 +1474,7 @@ pub fn run(
         registry: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &qh),
         output_state: OutputState::new(&globals, &qh),
+        outputs_changed: false,
         compositor: Arc::new(compositor),
         subcompositor: Arc::new(subcompositor),
         shm: Shm::bind(&globals, &qh).context("wl_shm")?,
@@ -1474,6 +1553,11 @@ pub fn run(
         };
         ev.dispatch((!st.windows.is_empty()).then_some(interval), &mut st)
             .context("dispatch")?;
+        // SCTK calls output_destroyed before removing OutputState's entry.
+        // Reconcile after dispatch, when all output mutations are complete.
+        if std::mem::take(&mut st.outputs_changed) {
+            st.report_outputs();
+        }
         st.probe_visibility();
         for w in st.windows.values_mut() {
             if let Some(frame) = w.frame.as_mut().filter(|f| f.is_animating()) {
