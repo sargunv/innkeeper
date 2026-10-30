@@ -168,6 +168,7 @@ build_hardware() {
   meson compile -C "$b" -j "$JOBS"
   install_driver "$b/src/amd/vulkan/libvulkan_radeon.so" radv
   install_driver "$b/src/intel/vulkan/libvulkan_intel.so" anv
+  python3 "$here/anv-pci-ids.py" "$src/mesa" >"$work/install/share/linuxapk/anv-pci-ids"
 }
 
 # LLVM static libraries for lavapipe, as in Mesa's

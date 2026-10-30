@@ -3,9 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Prefer RADV on hybrid hosts, then ANV on i915. Unsupported nodes must not
+/// Prefer RADV on hybrid hosts, then ANV on supported i915 devices. Unsupported nodes must not
 /// hide a supported GPU later in sysfs. Return the matching HAL with its node.
-pub fn select_node(drm: &Path, dev: &Path) -> Option<(PathBuf, &'static str)> {
+pub fn select_node(drm: &Path, dev: &Path, anv_ids: &str) -> Option<(PathBuf, &'static str)> {
     let mut nodes: Vec<_> = fs::read_dir(drm)
         .ok()?
         .flatten()
@@ -24,7 +24,14 @@ pub fn select_node(drm: &Path, dev: &Path) -> Option<(PathBuf, &'static str)> {
             let driver = fs::canonicalize(node.join("device/driver")).ok()?;
             let (priority, hal) = match driver.file_name()?.to_str()? {
                 "amdgpu" => (0, "radv"),
-                "i915" => (1, "anv"),
+                "i915" => {
+                    let id = fs::read_to_string(node.join("device/device")).ok()?;
+                    let id = id.trim().strip_prefix("0x")?;
+                    if !anv_ids.lines().any(|supported| supported == id) {
+                        return None;
+                    }
+                    (1, "anv")
+                }
                 _ => return None,
             };
             let node = dev.join(node.file_name()?);
@@ -70,6 +77,8 @@ mod tests {
             (vec![(128, "i915"), (129, "amdgpu")], Some((129, "radv"))),
             (vec![(128, "amdgpu"), (129, "i915")], Some((128, "radv"))),
             (vec![(128, "i915")], Some((128, "anv"))),
+            (vec![(128, "i915-gen8")], None),
+            (vec![(128, "i915-unknown")], None),
             (vec![(128, "nouveau"), (129, "i915")], Some((129, "anv"))),
             (vec![(128, "i915-unreadable")], None),
             (vec![], None),
@@ -94,6 +103,12 @@ mod tests {
                 fs::write(root.join(format!("dev/renderD{number}")), "").unwrap();
                 let device = root.join(format!("renderD{number}/device"));
                 fs::create_dir_all(&device).unwrap();
+                let id = match driver {
+                    "i915-gen8" => "0x1612\n",
+                    "i915-unknown" => "0xffff\n",
+                    _ => "0x1912\n",
+                };
+                fs::write(device.join("device"), id).unwrap();
                 if driver.ends_with("-unreadable") {
                     fs::set_permissions(
                         root.join(format!("dev/renderD{number}")),
@@ -101,7 +116,16 @@ mod tests {
                     )
                     .unwrap();
                 }
-                let target = root.join(driver.strip_suffix("-unreadable").unwrap_or(driver));
+                let driver_name = if driver.starts_with("i915-") {
+                    "i915"
+                } else {
+                    driver
+                };
+                let target = root.join(
+                    driver_name
+                        .strip_suffix("-unreadable")
+                        .unwrap_or(driver_name),
+                );
                 // A dangling link models a node whose driver cannot be read.
                 if driver != "unreadable" {
                     fs::create_dir_all(&target).unwrap();
@@ -109,7 +133,7 @@ mod tests {
                 symlink(target, device.join("driver")).unwrap();
             }
             assert_eq!(
-                select_node(&root, &root.join("dev")),
+                select_node(&root, &root.join("dev"), "1912\n9bc8\n"),
                 expected.map(|(n, hal)| (root.join(format!("dev/renderD{n}")), hal))
             );
             fs::remove_dir_all(root).unwrap();

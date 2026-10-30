@@ -48,7 +48,11 @@ impl Config {
         let selection = if env::var("LINUXAPK_VULKAN").as_deref() == Ok("lvp") {
             None
         } else {
-            crate::graphics::select_node(Path::new("/sys/class/drm"), Path::new("/dev/dri"))
+            crate::graphics::select_node(
+                Path::new("/sys/class/drm"),
+                Path::new("/dev/dri"),
+                &std::fs::read_to_string(paths.share.join("anv-pci-ids")).unwrap_or_default(),
+            )
         };
         let (render_node, vulkan_driver) = selection
             .map(|(node, driver)| (Some(node), driver.to_string()))
