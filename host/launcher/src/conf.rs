@@ -19,6 +19,10 @@ pub struct Config {
     /// The only DRM render node Android may open; None selects lavapipe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_node: Option<PathBuf>,
+    /// The Vulkan HAL matched to render_node at start (radv, anv or lvp).
+    // Older configs are read only for their image and sandbox paths.
+    #[serde(default)]
+    pub vulkan_driver: String,
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland: Option<PathBuf>,
@@ -41,13 +45,22 @@ pub struct Config {
 
 impl Config {
     pub fn new(paths: Paths, image: Image, headless: bool, wayland: Option<PathBuf>) -> Self {
+        let selection = if env::var("LINUXAPK_VULKAN").as_deref() == Ok("lvp") {
+            None
+        } else {
+            crate::graphics::select_node(
+                Path::new("/sys/class/drm"),
+                Path::new("/dev/dri"),
+                &std::fs::read_to_string(paths.share.join("anv-pci-ids")).unwrap_or_default(),
+            )
+        };
+        let (render_node, vulkan_driver) = selection
+            .map(|(node, driver)| (Some(node), driver.to_string()))
+            .unwrap_or((None, "lvp".to_string()));
         let mut c = Config {
             headless,
-            render_node: if env::var("LINUXAPK_VULKAN").as_deref() == Ok("lvp") {
-                None
-            } else {
-                crate::graphics::select_node(Path::new("/sys/class/drm"), Path::new("/dev/dri"))
-            },
+            render_node,
+            vulkan_driver,
             wayland,
             idle_grace: crate::lifecycle::grace_secs(headless),
             start_env: crate::lifecycle::start_env(),
@@ -145,5 +158,39 @@ impl Config {
                 e.insert(v.into(), d);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_session_configs_still_expose_their_image() {
+        // Pruning reads configs from answering sessions started before an update.
+        let legacy = r#"
+headless = false
+bridge_args = []
+bridge_env = {}
+[paths]
+instance = "old"
+libexec = "/app/libexec/linuxapk"
+share = "/app/share/linuxapk"
+run = "/runtime/linuxapk-old"
+state = "/state"
+data_home = "/data-home"
+data = "/data"
+images = "/images"
+pin = "/pin"
+root = "/root"
+[image]
+name = "ci-old"
+dir = "/images/ci-old"
+img = "/images/ci-old/img"
+apexdir = "/images/ci-old/apex-selected"
+derived = "/images/ci-old/derived"
+"#;
+        let cfg: Config = toml::from_str(legacy).unwrap();
+        assert_eq!(cfg.image.dir, Path::new("/images/ci-old"));
     }
 }

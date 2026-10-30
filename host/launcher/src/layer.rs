@@ -5,8 +5,7 @@
 //! The layer holds:
 //! - `vendor/build.prop`: the image's, plus every `props.d/*.prop` (graphics,
 //!   audio), the driver selection, the composer backend and
-//!   image/vendor.prop. RADV only if the render node is driven by amdgpu,
-//!   else lavapipe.
+//!   image/vendor.prop. RADV for amdgpu, ANV for i915, else lavapipe.
 //! - `vendor/etc/permissions/`: Vulkan features matching that driver.
 //! - `apex/<name>/`: our files for the APEXes this image has (the stage's,
 //!   then the addons'), so the tree gains no directories apexd and
@@ -64,7 +63,7 @@ fn our_props(cfg: &Config) -> Result<String> {
             s.push('\n');
         }
     }
-    let vk = crate::graphics::driver(cfg.render_node.as_deref());
+    let vk = &cfg.vulkan_driver;
     s += &format!("ro.hardware.vulkan={vk}\n");
     // Composer backend: windows through the bridge, or none.
     let backend = if cfg.headless { "headless" } else { "bridge" };
@@ -123,7 +122,7 @@ pub fn write(cfg: &Config) -> Result<()> {
     fs::create_dir_all(layer.join("apex"))?;
     let permissions = layer.join("vendor/etc/permissions");
     fs::create_dir_all(&permissions)?;
-    for (name, xml) in crate::graphics::feature_xmls(cfg.render_node.as_deref()) {
+    for (name, xml) in crate::graphics::feature_xmls(&cfg.vulkan_driver) {
         fs::write(permissions.join(name), xml)?;
     }
     let image_props = cfg.image.img.join("vendor/build.prop");

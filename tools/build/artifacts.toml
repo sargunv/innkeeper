@@ -56,6 +56,8 @@ task = "build:vulkan"
 runs = "in Android, loaded by apps through libvulkan"
 artifacts = [
   "share/linuxapk/android/vendor/lib64/hw/vulkan.radv.so",
+  "share/linuxapk/android/vendor/lib64/hw/vulkan.anv.so",
+  "share/linuxapk/anv-pci-ids",
   "share/linuxapk/android/vendor/lib64/hw/vulkan.lvp.so",
   "share/linuxapk/props.d/vulkan.prop",
 ]

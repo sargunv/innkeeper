@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Vulkan/GLES test programs (built by build:vulkan into
 # out/build/vulkan/test) through tests/bionic/run.sh, on lavapipe and, when
-# there is an amdgpu render node, on RADV.
+# selected by the launcher, on RADV or ANV.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../../.." && pwd)
@@ -34,13 +34,21 @@ driver_tests() {
   bionic -- "$t/gles_yuv_test"
 }
 
+# Ask a normal session, so the hardware test uses exactly the node and HAL
+# selected by the launcher and permitted by its broker (also on hybrid hosts).
+# shellcheck disable=SC2016 # getprop runs inside Android
+selected=$(LINUXAPK_BIONIC_HARNESS=0 "$repo/tests/bionic/run.sh" -- /system/bin/sh -c \
+  'echo "linuxapk-selected-driver=$(getprop ro.hardware.vulkan)"' |
+  sed -n 's/^linuxapk-selected-driver=//p')
 drivers=(lvp)
-for n in /dev/dri/renderD*; do
-  if [[ $(readlink -f "/sys/class/drm/${n##*/}/device/driver") == */amdgpu ]]; then
-    drivers+=(radv)
-    break
-  fi
-done
+case $selected in
+  radv | anv) drivers+=("$selected") ;;
+  lvp) ;;
+  *)
+    echo "unexpected selected Vulkan driver: $selected" >&2
+    exit 1
+    ;;
+esac
 for d in "${drivers[@]}"; do
   echo "== vulkan tests: $d"
   driver_tests "$d"

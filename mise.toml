@@ -65,7 +65,7 @@ depends = ["ndk"]
 run = "tools/build/install-component.sh health"
 
 [tasks."build:vulkan"]
-description = "Mesa RADV and lavapipe (build container; skipped when its inputs are unchanged)"
+description = "Mesa RADV, ANV and lavapipe (build container; skipped when its inputs are unchanged)"
 run = "android/vendor/vulkan/build.sh"
 
 [tasks."build:audio"]
