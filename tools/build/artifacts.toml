@@ -64,6 +64,9 @@ task = "build:audio"
 runs = "in Android, loaded by the AIDL audio HAL"
 artifacts = [
   "share/linuxapk/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so",
+  "share/linuxapk/android/apex/com.android.hardware.audio/bin/hw/audio_bridge",
+  "share/linuxapk/android/apex/com.android.hardware.audio/etc/audio-bridge.rc",
+  "share/linuxapk/android/vendor/etc/vintf/manifest/audio-bridge.xml",
   "share/linuxapk/android/vendor/etc/primary_audio_policy_configuration.xml",
   "share/linuxapk/props.d/audio.prop",
 ]

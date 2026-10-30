@@ -1,23 +1,30 @@
 # audio
 
-Android's audio reaches PipeWire through our own `libtinyalsav2.so`, which
-replaces the image's tinyalsa inside the AIDL audio HAL's APEX
-(`/apex/com.android.hardware.audio/lib64/`). It presents one card, "Linux.apk",
-whose PCM shares playback and capture rings with the bridge's audio service
-([host/bridge/src/audio](../../../host/bridge/src/audio/proto.rs)).
-`mise run build:audio` builds it in the NDK superbuild, with the policy XML, the
-HAL's rc override and `audio.prop`.
+Speaker playback uses our AIDL `IModule/linuxapk` and `StreamBridge`, over the
+shared bridge client and the bridge's PipeWire output. The service and rc are an
+overlay in `/apex/com.android.hardware.audio/`; the image stays unmodified. Its
+frozen NDK AIDL bindings are generated at configure time with the pinned
+build-tools, like the graphics HAL.
 
-- **Why tinyalsa.** The image's AOSP default AIDL HAL plays through tinyalsa.
-  Replacing that one library keeps the HAL's state machine, routing and
-  positions, runs in-process with no supervisor hop, and patches nothing. Our
-  own AIDL `IModule` would mean weeks of reimplementation that drifts from AOSP;
-  emulating `/dev/snd` through seccomp would cost a round trip per write. If a
-  future HAL stopped linking tinyalsa dynamically, the shared C audio client (no
-  tinyalsa types) is ready to back an AIDL stream instead.
-- **Pacing.** Blocking writes wait for ring space, so the host's audio clock
-  paces the HAL; without a bridge, writes are paced by `CLOCK_MONOTONIC` and
-  dropped, and the stream reconnects once a second.
+The image's default primary HAL still handles capture and telephony through our
+`libtinyalsav2.so`. The policy XML removes its speaker, MMAP and offload ports;
+MMAP and offload were silent stubs. Keeping capture on the original module lets
+its tinyalsa implementation evolve independently of the output stream.
+
+- **Why an output module.** The image's primary HAL hardcodes an 85 ms nominal
+  latency and a 4096-frame minimum buffer at 48 kHz. Its emulator workaround
+  also skips transfers when uptime pacing falls behind. Smaller rings alone
+  cannot change that contract. Our module offers a 240-frame / 5 ms burst and
+  the `FAST` flag, so AudioFlinger can use FastMixer.
+- **Pacing and timestamps.** `StreamBridge` reuses our PCM backend's blocking
+  writes and presentation estimate. Ring space follows PipeWire's audio clock;
+  there is no second uptime pacer and no deliberate skipped transfer.
+  Presentation timestamps include both the ring and the downstream queue.
+  Without the bridge the existing virtual clock and reconnect behavior apply.
+- **Buffers.** The PCM backend uses two 240-frame periods (10 ms total). The
+  bridge requests another 20 ms downstream, so the output port reports a 30 ms
+  nominal latency, while stream replies report the observed queued frames.
+  AudioFlinger's normal mixer and its pipe to FastMixer add their own queue.
 - **Capture.** Android's `RECORD_AUDIO` runtime permission is the consent. The
   bridge records the default Pulse/PipeWire source into a capture ring;
   `LINUXAPK_AUDIO_SOURCE` selects a source explicitly (tests use a null-sink
@@ -28,16 +35,13 @@ HAL's rc override and `audio.prop`.
   the source cannot wait for a reader. Sustained recording still has periodic
   gaps through the stock AOSP HAL's input pipe; see
   [#168](https://github.com/sargunv/linux.apk/issues/168).
-- **Overrides:** `primary_audio_policy_configuration.xml` drops the HAL's MMAP
-  and offload ports, which it serves with silent stubs; the HAL's rc preloads
-  the shim, because its stream threads fail on `setpriority` without
-  `CAP_SYS_NICE`, which stalled boot; `audio.prop` sets 2 periods.
-- **Latency** is about 86 ms as apps see it: our ring and PipeWire are about 34
-  ms, the rest is the HAL's hardcoded 85 ms nominal latency. Getting under 50 ms
-  needs our own stream in the HAL.
+- **Capture overrides.** `audio.prop` keeps the original HAL at two periods. Its
+  rc preloads the session shim to make priority changes best effort in the
+  rootless session. Output does not require that workaround.
 
-Tests: `tests/abi.sh` (in `mise run test:bionic`) checks that we export the
-image library's symbols; the audio suite of `mise run test:e2e` plays a 440 Hz
-AAudio tone into a private null sink and checks its frequency, then detects a
-known marker through AudioRecord from that sink's monitor. Start reading at
-`tinyalsa/pcm.c` and `../bridge-client/audio.c`.
+`mise run build:audio` builds and stages both services' artifacts. Host unit
+checks cover output buffer sizes, position and latency arithmetic, and FMQ
+wrapping and wakeups. `tests/abi.sh` checks the tinyalsa exports; the audio
+group of `mise run test:e2e` plays a 440 Hz tone into a private null sink and
+checks its frequency, then detects a known marker through AudioRecord from that
+sink's monitor. `mise run bench -- audio` measures app-visible output latency.
