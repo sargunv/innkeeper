@@ -208,6 +208,31 @@ Android rejects it before dispatch because each app task already fills its
 Android virtual display. It does not control desktop fullscreen; that remains a
 user choice ([#77](https://github.com/sargunv/linux.apk/issues/77)).
 
+### Hidden windows
+
+Each host window observes xdg-shell's `suspended` configure state (v6), and
+probes visibility with a frame callback every 250 ms. Both baseline desktops
+advertise xdg-shell v6:
+[GNOME 48](https://github.com/GNOME/mutter/blob/48.0/src/wayland/meta-wayland-versions.h)
+and
+[Plasma 6.3](https://github.com/KDE/kwin/blob/v6.3.0/src/wayland/xdgshell.cpp).
+An outstanding callback without a response for one second also means hidden. The
+latter works on compositors without the suspended state, including when a window
+is fully occluded. A static window still probes; a hidden window leaves its
+callback pending so showing it can resume Android without waiting for an app
+frame.
+
+The window manager sleeps the existing VirtualDisplay's own power group through
+Android 17's platform `IPowerManager.goToSleepWithDisplayId` API. Android stops
+the activity; restore wakes the same group with `wakeUpWithDisplayId`. Each
+window already owns a display group, so these requests cannot sleep another
+window or the session's primary display. The display and tasks stay registered,
+including the separate closing-display hold described above. The bridge replaces
+the last Android buffer with a host-owned snapshot on hide and returns
+subsequent frames. Wayland releases the old dma-bufs, allowing FrameSink to
+close the retained ImageReader images through their normal lease release path
+without reusing pixels that the compositor is still reading.
+
 ### Launch feedback
 
 ```mermaid

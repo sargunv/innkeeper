@@ -39,6 +39,7 @@ export async function run() {
   control = Gio.DBusExportedObject.wrapJSObject(
     `<node><interface name="dev.linuxapk.TestDesktop">
       <method name="Input"><arg type="s" direction="in"/></method>
+      <method name="Visibility"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
     </interface></node>`,
     {
@@ -76,6 +77,25 @@ export async function run() {
           default:
             throw new Error(`Unknown test seat action: ${action}`);
         }
+      },
+      Visibility(visible) {
+        let matched = false;
+        for (const actor of global.get_window_actors()) {
+          const window = actor.meta_window;
+          if (
+            (!visible && !actor.mapped) ||
+            !String(window.get_wm_class()).includes("dev.linuxapk.probes")
+          )
+            continue;
+          matched = true;
+          if (visible) {
+            window.unminimize();
+            window.activate(global.get_current_time());
+          } else {
+            window.minimize();
+          }
+        }
+        return matched;
       },
       async PositionAsync(_args, invocation) {
         let positioned = 0;
