@@ -1,0 +1,16 @@
+name: Restore built stage
+description:
+  Restore this run's stage and probes with executable modes and symlinks
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: stage
+        path: out/artifact
+    - name: Extract stage and probes
+      shell: bash
+      run: |
+        mkdir -p out/stage out/test/probes
+        tar -C out/stage -xzf out/artifact/stage.tar.gz
+        tar -C out/test/probes -xzf out/artifact/probes.tar.gz

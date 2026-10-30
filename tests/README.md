@@ -25,14 +25,16 @@ failure. Never use the main session or the user's desktop for tests. Check
 [nested desktop rules](../docs/development.md#a-nested-isolated-desktop).
 
 Local e2e has a 55 s deadline plus at most 4 s cleanup. Groups wait for
-observations; audio runs concurrently. CI uses headless Mutter/llvmpipe with
-`LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1` and a 180 s deadline
-(`LINUXAPK_E2E_DEADLINE`, honored only with `GITHUB_ACTIONS=true`). Observation
-and group limits scale with that deadline. Logs, captures and phase timings land
-in `out/test/e2e/<instance>/`; desktop logs are in
-`out/test/nested/<instance>/`. CI uploads these in `checks-logs`. Android log
-captures are bounded. `desktop` uses a capped bridge sidecar on the same private
-desktop to check real policy without opening host apps or dialogs.
+observations; audio runs concurrently. Setup observes user 0's
+`RUNNING_UNLOCKED` state before installing probes: boot completion alone can
+precede credential-encrypted app-data preparation. CI uses headless
+Mutter/llvmpipe with `LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1`
+and a 180 s deadline (`LINUXAPK_E2E_DEADLINE`, honored only with
+`GITHUB_ACTIONS=true`). Observation and group limits scale with that deadline.
+Logs, captures and phase timings land in `out/test/e2e/<instance>/`; desktop
+logs are in `out/test/nested/<instance>/`. CI uploads these in `checks-logs`.
+Android log captures are bounded. `desktop` uses a capped bridge sidecar on the
+same private desktop to check real policy without opening host apps or dialogs.
 
 - `mise run test:bionic`: manual Android-side HAL diagnostics.
 - `mise run test:compat -- --only <package>`: manual app troubleshooting; see

@@ -1,14 +1,23 @@
 # GitHub Actions
 
-`CI` runs `mise run check` in parallel with `build`, `test` and `test:e2e` on
-every push and pull request. The checks build uploads a `stage` artifact
-containing the release stage tarball and its `manifest.tsv` (path, owning module
-and SHA-256). The tarball preserves executable modes and symlinks. The scheduled
-run (08:23 UTC daily) and `workflow_dispatch` run `package:flatpak`, then the
-full `test:compat` corpus twice: headless and windowed. Each mode keeps its
-report and session logs in the `compatibility` artifact, including on failure.
-Both compare against the committed baselines; the wrapper restores the harness's
-tracked output files after each run.
+`CI` runs on pull requests and pushes to main, avoiding duplicate feature-branch
+push and PR jobs and their large, separately scoped cache copies. It classifies
+changes, then runs lint and a single release build. Unit tests and e2e run in
+parallel on separate runners, using that build's `stage` artifact (release
+tarball, test probes and `manifest.tsv`). Tarballs preserve executable modes and
+symlinks. The `checks` gate requires every applicable job to succeed; a failed
+or cancelled dependency cannot turn into a green skipped gate.
+
+Changes only to README files, `AGENTS.md`, Markdown under `docs/`, or `LICENSE`
+run formatting and script/workflow lint without Clippy, build or runtime tests.
+Unknown paths, missing history and new branches run all checks. PRs compare the
+base and merge commit; pushes compare the previous and current commit.
+
+The scheduled run (08:23 UTC daily) and `workflow_dispatch` run
+`package:flatpak`, then the full `test:compat` corpus twice: headless and
+windowed. Each mode keeps its report and session logs in the `compatibility`
+artifact, including on failure. Both compare against the committed baselines;
+the wrapper restores tracked output files after each run.
 
 The nightly renders both modes' unmerged `fresh-results.json` to the
 [Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility),
@@ -33,21 +42,21 @@ python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
   --output out/wiki-fixture/Compatibility.md
 ```
 
-```sh
-gh workflow run ci.yml --ref <branch>
-gh run watch <run-id> --exit-status
-```
+Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
+workflow to test CI changes: dispatch runs the nightly corpus.
+
+To measure incremental compilation, rerun a PR run at its pinned commit after
+removing only its exact stage cache. Keep dependency and toolchain caches. New
+PR events can include a newer merge of main and changed dependency pins, so they
+may legitimately be cold. A rerun replaces stage and diagnostic artifacts.
 
 Ubuntu 26.04 supplies the project's GTK baseline, Mutter and Flatpak. Only
 `setup.sh`, guarded by `GITHUB_ACTIONS=true`, uses sudo. It enables unprivileged
 user namespaces, starts the systemd user manager and runner PipeWire server, and
 grants runner-local read/write access to udmabuf (built into the runner's Azure
-kernel). It also sets Yama `ptrace_scope=0` on the disposable runner: Ubuntu's
-default blocks the sibling broker's process-memory access and prevents init from
-creating its property area. #52 tracks the supervisor ancestry change needed to
-run under that default without host configuration. A missing udmabuf module
-fails setup: software Vulkan still needs real dma-buf allocations, so a fake
-device or skipping the runtime tests would not test Android graphics.
+kernel). A missing udmabuf module fails setup: software Vulkan still needs real
+dma-buf allocations, so a fake device or skipping the runtime tests would not
+test Android graphics.
 
 The GPU-less hosted VM runs headless GNOME Shell/Mutter with surfaceless
 llvmpipe. Unlike KWin's OpenGL virtual backend, this needs no DRM node and
@@ -68,15 +77,35 @@ nightly also builds and installs the distributable Flatpak. CI sets
 `LINUXAPK_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
 remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
 
-An exact stage cache skips building when none of its source, build script or
-toolchain inputs changed; the probes APK is restored with the stage. Tests still
-run on every push and PR. Gradle outputs and dependency caches restore on their
-source/toolchain hash, with incremental reuse after source changes.
+An exact stage cache skips building when none of its source, build script,
+workflow or toolchain inputs changed; it restores the probes APK with the stage.
+Its Git tree digest includes paths, modes, symlinks and contents. An exact hit
+also skips the build runner's package, SDK and compiler-cache setup. Tests still
+run for code changes even when the stage is restored.
 
-Mise caches its pinned tools. Separate caches cover the SDK pin, Cargo and
-Gradle inputs, the Mesa/LLVM and image-tool install trees on separate input
-hashes, the Android image on its pin/extraction inputs, and the APK corpus on
-its checksums. Each expensive module is saved immediately after it builds,
-before the rest of the build or tests can fail. The first build is substantially
-slower than a warm run; the 120-minute check timeout allows a cold LLVM build.
-No Android image or third-party APK is uploaded as a workflow artifact.
+Build, unit and lint jobs cache Cargo's target directory and registry by
+OS/architecture, job mode, dependency/toolchain pins and sources. A prefix
+restore reuses dependency compilation after source changes; Cargo still checks
+all inputs. C/C++ uses ccache, whose compiler/flags/input checks decide reuse.
+Gradle's build cache and outputs use source/toolchain keys and incremental
+restores; Gradle always checks its tasks. The native Mesa/LLVM and image-tool
+caches retain their independent input hashes and immediate saves.
+
+Build and unit caches save at the end of their own successful job, before or
+independently of e2e. SDK caches save immediately after provisioning, and image
+and private Flatpak caches save immediately after preparation, so a runtime
+failure cannot discard them. Mise caches pinned tools. E2e installs runtime
+packages only and restores no compiler, Gradle or Android SDK cache. Other jobs
+install only their host build dependencies; docs install no system packages.
+
+The prepared Android image hashes its pin, preparation scripts, image tools,
+container and launcher preparation code; documentation and tests do not
+invalidate it. Cache archives omit xattrs, so preparation always regenerates the
+small single-user CLAT layer that carries Android ownership xattrs; partitions
+and flattened APEXes stay cached. The private Flatpak cache hashes the
+development driver, bootstrap script and Flatpak manifest; its registered
+development deployment always runs the current artifact through
+`--app-path=out/stage`, with permissions read from the current manifest. Neither
+Android session data nor a running instance is cached. No Android image or
+third-party APK is uploaded as a workflow artifact. Cold Mesa/LLVM builds still
+have a 120-minute build timeout.

@@ -6,21 +6,32 @@ set -euo pipefail
   exit 1
 }
 sudo apt-get update -qq
+mode=${LINUXAPK_CI_MODE:-nightly}
+if [[ $mode != e2e ]]; then
+  sudo apt-get install -y --no-install-recommends \
+    clang ccache pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev
+fi
+if [[ $mode == build ]]; then
+  sudo apt-get install -y --no-install-recommends podman uidmap passt
+fi
+if [[ $mode == build || $mode == unit || $mode == e2e || $mode == nightly ]]; then
+  # The build container, supervisor unit tests and Flatpak need unprivileged mount namespaces.
+  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+fi
+if [[ $mode == unit || $mode == e2e || $mode == nightly ]]; then
+  # Gralloc's host unit tests also exercise real dma-buf allocations.
+  if [[ ! -e /dev/udmabuf ]]; then
+    sudo modprobe udmabuf
+  fi
+  sudo chmod 666 /dev/udmabuf
+  test -r /dev/udmabuf && test -w /dev/udmabuf
+fi
+[[ $mode == e2e || $mode == nightly ]] || exit 0
 sudo apt-get install -y --no-install-recommends \
-  clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev
-[[ ${LINUXAPK_CI_RUNTIME:-true} == true ]] || exit 0
-sudo apt-get install -y --no-install-recommends \
-  podman uidmap passt flatpak cpio dbus-user-session gnome-shell mutter \
-  xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-kde \
+  podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
+  xdg-desktop-portal xdg-desktop-portal-gtk \
   at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
-# Ubuntu restricts mounts in unprivileged user namespaces by default.
-sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-if [[ ! -e /dev/udmabuf ]]; then
-  sudo modprobe udmabuf
-fi
-sudo chmod 666 /dev/udmabuf
-test -r /dev/udmabuf && test -w /dev/udmabuf
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 sudo loginctl enable-linger "$USER"
@@ -33,7 +44,3 @@ systemctl --user set-environment LIBGL_ALWAYS_SOFTWARE=1
   echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus"
 } >>"$GITHUB_ENV"
-# Container builds mount the runner's home. Put the NDK inside that mount.
-mkdir -p "$HOME/Android/Sdk"
-cp -a "$ANDROID_HOME/licenses" "$HOME/Android/Sdk/"
-echo "ANDROID_HOME=$HOME/Android/Sdk" >>"$GITHUB_ENV"
