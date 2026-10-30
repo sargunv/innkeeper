@@ -30,7 +30,7 @@ fi
 sudo apt-get install -y --no-install-recommends \
   podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk \
-  at-spi2-core python3-pyatspi python3-dbus python3-gi python3-pil wl-clipboard \
+  at-spi2-core python3-pyatspi python3-dbus python3-gi wl-clipboard \
   libgl1-mesa-dri mesa-vulkan-drivers pipewire pipewire-pulse wireplumber pulseaudio-utils
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR

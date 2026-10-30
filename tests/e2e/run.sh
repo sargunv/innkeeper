@@ -293,13 +293,7 @@ sys.exit(1)
         else
           spectacle -b -n -a -o "$T/wide-colour.png" >/dev/null 2>&1 || return 1
         fi
-        /usr/bin/python3 - "$T/wide-colour.png" <<'PYTHON'
-import sys
-from PIL import Image
-image = Image.open(sys.argv[1]).convert("RGB")
-assert sum(n for n, (r, g, b) in image.getcolors(image.width * image.height)
-           if r > 220 and 60 < g < 100 and 10 < b < 50) > 10000
-PYTHON
+        /usr/bin/python3 "$repo/tests/e2e/wide_colour.py" "$T/wide-colour.png"
       }
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
