@@ -19,6 +19,7 @@ const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(400);
 pub(crate) struct MouseState {
     pub location: Location,
     button_pressed: Option<ButtonKind>,
+    visual_pressed: Location,
 
     /// The surface local location inside the surface.
     position: (f64, f64),
@@ -28,6 +29,27 @@ pub(crate) struct MouseState {
 }
 
 impl MouseState {
+    pub fn set_pressed(
+        &mut self,
+        click: smithay_client_toolkit::reexports::csd_frame::FrameClick,
+        pressed: bool,
+    ) {
+        if matches!(
+            click,
+            smithay_client_toolkit::reexports::csd_frame::FrameClick::Normal
+        ) {
+            self.visual_pressed = if pressed {
+                self.location
+            } else {
+                Location::None
+            };
+        }
+    }
+
+    pub fn pressed_location(&self) -> Location {
+        self.visual_pressed
+    }
+
     /// Activate custom controls only after a press and release on the same button.
     pub fn button_click(&mut self, pressed: bool) -> Option<crate::Action> {
         let button = match self.location {
@@ -40,7 +62,9 @@ impl MouseState {
         }
         match (self.button_pressed.take(), button) {
             (Some(ButtonKind::Back), Some(ButtonKind::Back)) => Some(crate::Action::Back),
-            (Some(ButtonKind::Fullscreen), Some(ButtonKind::Fullscreen)) => Some(crate::Action::ToggleFullscreen),
+            (Some(ButtonKind::Fullscreen), Some(ButtonKind::Fullscreen)) => {
+                Some(crate::Action::ToggleFullscreen)
+            }
             _ => None,
         }
     }
@@ -144,6 +168,7 @@ impl MouseState {
         // Reset only the location.
         self.location = Location::None;
         self.button_pressed = None;
+        self.visual_pressed = Location::None;
     }
 }
 
@@ -167,16 +192,44 @@ pub enum Location {
 mod tests {
     use super::*;
     #[test]
+    fn visual_press_tracks_button_and_clears_on_release_or_leave() {
+        use smithay_client_toolkit::reexports::csd_frame::FrameClick;
+        let mut mouse = MouseState::default();
+        mouse.moved(Location::Button(ButtonKind::Close), 20., 23., true);
+        mouse.set_pressed(FrameClick::Normal, true);
+        assert_eq!(
+            mouse.pressed_location(),
+            Location::Button(ButtonKind::Close)
+        );
+        mouse.set_pressed(FrameClick::Normal, false);
+        assert_eq!(mouse.pressed_location(), Location::None);
+        mouse.set_pressed(FrameClick::Normal, true);
+        mouse.left();
+        assert_eq!(mouse.pressed_location(), Location::None);
+    }
+
+    #[test]
     fn normal_taps_activate_controls_and_title_press_starts_move() {
         let mut mouse = MouseState::default();
         let state = WindowState::empty();
         let caps = WindowManagerCapabilities::all();
-        for button in [ButtonKind::Close, ButtonKind::Minimize, ButtonKind::Maximize] {
+        for button in [
+            ButtonKind::Close,
+            ButtonKind::Minimize,
+            ButtonKind::Maximize,
+        ] {
             mouse.moved(Location::Button(button), 20., 17., true);
-            assert!(mouse.click(Duration::ZERO, true, true, &state, &caps).is_none());
+            assert!(mouse
+                .click(Duration::ZERO, true, true, &state, &caps)
+                .is_none());
             assert!(matches!(
-                (button, mouse.click(Duration::ZERO, false, true, &state, &caps)),
-                (ButtonKind::Close, Some(FrameAction::Close)) | (ButtonKind::Minimize, Some(FrameAction::Minimize)) | (ButtonKind::Maximize, Some(FrameAction::Maximize))
+                (
+                    button,
+                    mouse.click(Duration::ZERO, false, true, &state, &caps)
+                ),
+                (ButtonKind::Close, Some(FrameAction::Close))
+                    | (ButtonKind::Minimize, Some(FrameAction::Minimize))
+                    | (ButtonKind::Maximize, Some(FrameAction::Maximize))
             ));
             mouse.left();
         }
@@ -186,41 +239,53 @@ mod tests {
             Some(FrameAction::UnMaximize),
         ));
         mouse.moved(Location::Head, 200., 17., true);
-        assert!(matches!(mouse.click(Duration::ZERO, true, true, &state, &caps), Some(FrameAction::Move)));
+        assert!(matches!(
+            mouse.click(Duration::ZERO, true, true, &state, &caps),
+            Some(FrameAction::Move)
+        ));
         mouse.left();
-        assert!(mouse.click(Duration::ZERO, false, true, &state, &caps).is_none());
+        assert!(mouse
+            .click(Duration::ZERO, false, true, &state, &caps)
+            .is_none());
     }
 
     #[test]
     fn custom_controls_require_a_click_and_do_not_move_or_resize() {
         for kind in [ButtonKind::Back, ButtonKind::Fullscreen] {
-        let mut mouse = MouseState::default();
-        mouse.moved(Location::Button(kind), 19., 17., true);
-        assert!(mouse.button_click(false).is_none());
-        assert!(mouse.button_click(true).is_none());
-        assert!(mouse
-            .click(
-                Duration::ZERO,
-                true,
-                true,
-                &WindowState::empty(),
-                &WindowManagerCapabilities::all()
-            )
-            .is_none());
-        assert!(matches!((kind, mouse.button_click(false)), (ButtonKind::Back, Some(crate::Action::Back)) | (ButtonKind::Fullscreen, Some(crate::Action::ToggleFullscreen))));
-        assert!(mouse.button_click(false).is_none());
-        mouse.button_click(true);
-        mouse.left();
-        mouse.moved(Location::Button(kind), 19., 17., true);
-        assert!(mouse.button_click(false).is_none());
-        mouse.moved(Location::Head, 50., 17., true);
-        mouse.button_click(true);
-        mouse.moved(Location::Button(kind), 19., 17., true);
-        assert!(mouse.button_click(false).is_none());
-        assert!(matches!(
-            mouse.alternate_click(true, &WindowManagerCapabilities::all(), false),
-            Some(FrameAction::ShowMenu(_, _))
-        ));
+            let mut mouse = MouseState::default();
+            mouse.moved(Location::Button(kind), 19., 17., true);
+            assert!(mouse.button_click(false).is_none());
+            assert!(mouse.button_click(true).is_none());
+            assert!(mouse
+                .click(
+                    Duration::ZERO,
+                    true,
+                    true,
+                    &WindowState::empty(),
+                    &WindowManagerCapabilities::all()
+                )
+                .is_none());
+            assert!(matches!(
+                (kind, mouse.button_click(false)),
+                (ButtonKind::Back, Some(crate::Action::Back))
+                    | (
+                        ButtonKind::Fullscreen,
+                        Some(crate::Action::ToggleFullscreen)
+                    )
+            ));
+            assert!(mouse.button_click(false).is_none());
+            mouse.button_click(true);
+            mouse.left();
+            mouse.moved(Location::Button(kind), 19., 17., true);
+            assert!(mouse.button_click(false).is_none());
+            mouse.moved(Location::Head, 50., 17., true);
+            mouse.button_click(true);
+            mouse.moved(Location::Button(kind), 19., 17., true);
+            assert!(mouse.button_click(false).is_none());
+            assert!(matches!(
+                mouse.alternate_click(true, &WindowManagerCapabilities::all(), false),
+                Some(FrameAction::ShowMenu(_, _))
+            ));
         }
     }
 }

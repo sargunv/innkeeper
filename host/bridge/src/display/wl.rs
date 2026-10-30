@@ -157,7 +157,7 @@ pub(crate) struct State {
     fractional: Option<WpFractionalScaleManagerV1>,
     activation: Option<XdgActivationV1>,
     icon_manager: Option<XdgToplevelIconManagerV1>,
-    caption_theme: sctk_adwaita::theme::ColorTheme,
+    appearance: appearance::Appearance,
     exporter:
         Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2>,
     qh: QueueHandle<State>,
@@ -784,7 +784,7 @@ impl State {
         if w.color != color {
             w.color = color;
             if let Some(frame) = w.frame.as_mut() {
-                frame.set_config(appearance::caption_config(&self.caption_theme, color));
+                frame.set_config(self.appearance.config(color));
                 if !frame.is_hidden() {
                     frame.draw();
                 }
@@ -908,7 +908,7 @@ impl WindowHandler for State {
                 compositor,
                 subcompositor,
                 qh.clone(),
-                appearance::caption_config(&self.caption_theme, w.color),
+                self.appearance.config(w.color),
             ) {
                 Ok(mut f) => {
                     f.set_title(w.title.clone());
@@ -1207,7 +1207,7 @@ pub fn run(
         fractional: bind_opt(&globals, &qh, 1),
         activation: bind_opt(&globals, &qh, 1),
         icon_manager: bind_opt(&globals, &qh, 1),
-        caption_theme: sctk_adwaita::theme::ColorTheme::auto(),
+        appearance: appearance::Appearance::default(),
         exporter: bind_opt(&globals, &qh, 1),
         qh: qh.clone(),
         events,
@@ -1242,8 +1242,35 @@ pub fn run(
             ChannelEvent::Closed => st.quit = true,
         })
         .map_err(|e| anyhow::anyhow!("command source: {e}"))?;
+    ev.handle()
+        .insert_source(appearance::subscribe(), |event, _, st: &mut State| {
+            if let ChannelEvent::Msg(appearance) = event {
+                st.appearance = appearance;
+                for w in st.windows.values_mut() {
+                    if let Some(frame) = w.frame.as_mut() {
+                        frame.set_config(st.appearance.config(w.color));
+                        if !frame.is_hidden() {
+                            frame.draw();
+                            w.window.commit();
+                        }
+                    }
+                }
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("appearance source: {e}"))?;
     while !st.quit {
-        ev.dispatch(None, &mut st).context("dispatch")?;
+        let animating = st
+            .windows
+            .values()
+            .any(|w| w.frame.as_ref().is_some_and(|f| f.is_animating()));
+        ev.dispatch(animating.then_some(Duration::from_millis(16)), &mut st)
+            .context("dispatch")?;
+        for w in st.windows.values_mut() {
+            if let Some(frame) = w.frame.as_mut().filter(|f| f.is_animating()) {
+                frame.animate();
+                w.window.commit();
+            }
+        }
     }
     for id in st.windows.keys().copied().collect::<Vec<_>>() {
         st.destroy(id);

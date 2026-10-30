@@ -5,8 +5,8 @@ use tiny_skia::{Paint, Shader};
 pub(crate) const RESIZE_HANDLE_SIZE: u32 = 12;
 // https://gitlab.gnome.org/GNOME/gtk/-/blob/1bf88f1d81043fd99740e2f91e56ade7ede7303b/gtk/gtkwindow.c#L166
 pub(crate) const RESIZE_HANDLE_CORNER_SIZE: u32 = 24;
-pub(crate) const HEADER_SIZE: u32 = 35;
-pub(crate) const CORNER_RADIUS: u32 = 10;
+pub(crate) const HEADER_SIZE: u32 = 47;
+pub(crate) const CORNER_RADIUS: u32 = 12;
 
 pub(crate) fn header_height(hide_header: bool) -> u32 {
     if hide_header {
@@ -38,57 +38,29 @@ pub struct ColorTheme {
 }
 
 impl ColorTheme {
-    /// Automatically choose between light & dark themes based on:
-    /// * dbus org.freedesktop.portal.Settings
-    ///   <https://flatpak.github.io/xdg-desktop-portal/#gdbus-interface-org-freedesktop-portal-Settings>
-    pub fn auto() -> Self {
-        match crate::config::prefer_dark() {
-            true => Self::dark(),
-            false => Self::light(),
-        }
-    }
-
     /// Predefined light variant, which aims to replecate Adwaita theme.
     pub fn light() -> Self {
-        Self {
-            active: ColorMap {
-                headerbar: Color::from_rgba8(235, 235, 235, 255),
-                button_idle: Color::from_rgba8(216, 216, 216, 255),
-                button_hover: Color::from_rgba8(207, 207, 207, 255),
-                button_icon: Color::from_rgba8(42, 42, 42, 255),
-                border_color: Color::from_rgba8(220, 220, 220, 255),
-                font_color: Color::from_rgba8(47, 47, 47, 255),
-            },
-            inactive: ColorMap {
-                headerbar: Color::from_rgba8(250, 250, 250, 255),
-                button_idle: Color::from_rgba8(240, 240, 240, 255),
-                button_hover: Color::from_rgba8(216, 216, 216, 255),
-                button_icon: Color::from_rgba8(148, 148, 148, 255),
-                border_color: Color::from_rgba8(220, 220, 220, 255),
-                font_color: Color::from_rgba8(150, 150, 150, 255),
-            },
-        }
+        Self::palette(0xeb, 0xfa, 0x2e)
     }
 
-    /// Predefined dark variant, which aims to replecate Adwaita-dark theme.
+    /// Adwaita's dark headerbar and backdrop colours (stored in shm BGR order).
     pub fn dark() -> Self {
+        Self::palette(0x30, 0x24, 0xff)
+    }
+
+    fn palette(header: u8, backdrop: u8, foreground: u8) -> Self {
+        let map = |bg| ColorMap {
+            headerbar: Color::from_rgba8(bg, bg, bg, 255),
+            button_idle: Color::from_rgba8(foreground, foreground, foreground, 20),
+            button_hover: Color::from_rgba8(foreground, foreground, foreground, 38),
+            button_pressed: Color::from_rgba8(foreground, foreground, foreground, 64),
+            button_icon: Color::from_rgba8(foreground, foreground, foreground, 255),
+            border_color: Color::from_rgba8(0, 0, 0, 35),
+            font_color: Color::from_rgba8(foreground, foreground, foreground, 255),
+        };
         Self {
-            active: ColorMap {
-                headerbar: Color::from_rgba8(50, 46, 46, 255),
-                button_idle: Color::from_rgba8(71, 67, 67, 255),
-                button_hover: Color::from_rgba8(79, 79, 79, 255),
-                button_icon: Color::from_rgba8(255, 255, 255, 255),
-                border_color: Color::from_rgba8(58, 58, 58, 255),
-                font_color: Color::from_rgba8(255, 255, 255, 255),
-            },
-            inactive: ColorMap {
-                headerbar: Color::from_rgba8(38, 34, 34, 255),
-                button_idle: Color::from_rgba8(49, 45, 45, 255),
-                button_hover: Color::from_rgba8(57, 57, 57, 255),
-                button_icon: Color::from_rgba8(144, 144, 144, 255),
-                border_color: Color::from_rgba8(58, 58, 58, 255),
-                font_color: Color::from_rgba8(144, 144, 144, 255),
-            },
+            active: map(header),
+            inactive: map(backdrop),
         }
     }
 
@@ -103,7 +75,7 @@ impl ColorTheme {
 
 impl Default for ColorTheme {
     fn default() -> Self {
-        Self::auto()
+        Self::light()
     }
 }
 
@@ -113,6 +85,7 @@ pub struct ColorMap {
     pub headerbar: Color,
     pub button_idle: Color,
     pub button_hover: Color,
+    pub button_pressed: Color,
     pub button_icon: Color,
     pub border_color: Color,
     pub font_color: Color,
@@ -138,6 +111,14 @@ impl ColorMap {
     pub(crate) fn button_hover_paint(&self) -> Paint<'_> {
         Paint {
             shader: Shader::SolidColor(self.button_hover),
+            anti_alias: true,
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn button_pressed_paint(&self) -> Paint<'_> {
+        Paint {
+            shader: Shader::SolidColor(self.button_pressed),
             anti_alias: true,
             ..Default::default()
         }

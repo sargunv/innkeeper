@@ -282,7 +282,7 @@ impl PartLayout {
                 x: 0,
                 y: 0,
                 width,
-                height: theme::HEADER_SIZE,
+                height: theme::HEADER_SIZE + REVEAL_SHADOW,
             };
             parts[PartId::HEADER].input_rect = Some(Rect {
                 x: 0,
@@ -297,6 +297,8 @@ impl PartLayout {
 }
 
 /// A small transparent strip receives pointer/touch input while the header is hidden.
+pub(crate) const REVEAL_SHADOW: u32 = 12;
+
 const FULLSCREEN_REVEAL_HEIGHT: u32 = 4;
 
 fn fullscreen_header_height(revealed: bool) -> u32 {
