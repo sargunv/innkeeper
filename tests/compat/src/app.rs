@@ -140,6 +140,33 @@ fn parse_list_size(text: &str, display: i32) -> Option<(i32, i32)> {
     Some((w.parse().ok()?, h.parse().ok()?))
 }
 
+/// Keep the launch window while it exists; follow an unambiguous replacement
+/// after a startup trampoline finishes its task (e.g. Thunderbird onboarding).
+fn app_display(text: &str, pkg: &str, original: i32) -> Option<i32> {
+    let key = format!("package={pkg} ");
+    let displays: Vec<i32> = text
+        .lines()
+        .filter_map(|line| {
+            if !line.contains(&key) || !line.contains("window=yes") {
+                return None;
+            }
+            line.split_once("display=")?
+                .1
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect();
+    if displays.contains(&original) {
+        Some(original)
+    } else if let [display] = displays.as_slice() {
+        Some(*display)
+    } else {
+        None
+    }
+}
+
 /// SurfaceFlinger's display id for virtual display `name`
 /// (`dumpsys SurfaceFlinger --display-id`).
 fn parse_sf_id(text: &str, name: &str) -> Option<String> {
@@ -521,6 +548,7 @@ impl<'a> Run<'a> {
         }
         self.check("alive after launch", true, "");
 
+        self.refresh_window();
         // Platform compatibility warnings ("built for an older version of
         // Android") sit over a working app; note them and dismiss them. The
         // window manager shows the first in the app's window
@@ -947,8 +975,8 @@ impl<'a> Run<'a> {
         Err(format!("uiautomator dump failed: {last}"))
     }
 
-    /// Re-reads the window's size: the first window after boot opens at
-    /// scale 1 and is resized when the compositor reports its real scale.
+    /// Follow a replacement startup task, then re-read the window size after
+    /// the compositor reports its real scale.
     fn refresh_window(&mut self) {
         let Some(display) = self.win.as_ref().map(|w| w.display) else {
             return;
@@ -964,7 +992,20 @@ impl<'a> Run<'a> {
                 "dev.linuxapk.LIST",
             ],
         );
-        if let Some((w, h)) = parse_list_size(&o.text, display)
+        let Some(current) = app_display(&o.text, &self.app.package, display) else {
+            return;
+        };
+        if current != display {
+            let sf = self
+                .s
+                .run(20, &["dumpsys", "SurfaceFlinger", "--display-id"]);
+            if let Some(win) = self.win.as_mut() {
+                win.display = current;
+                win.sf_id = parse_sf_id(&sf.text, &format!("linuxapk:{}", self.app.package))
+                    .unwrap_or_default();
+            }
+        }
+        if let Some((w, h)) = parse_list_size(&o.text, current)
             && let Some(win) = self.win.as_mut()
         {
             win.w = w;
@@ -1116,6 +1157,25 @@ mod tests {
         let w = "  Display: mDisplayId=0 (organized)\n  mCurrentFocus=null\n  Display: mDisplayId=4 (organized)\n  mCurrentFocus=Window{1 a.b/a.b.Main}";
         assert_eq!(parse_focus(w, 4).as_deref(), Some("Window{1 a.b/a.b.Main}"));
         assert_eq!(parse_focus(w, 0).as_deref(), Some("null"));
+    }
+
+    #[test]
+    fn follows_the_only_replacement_task_window() {
+        let replacement = "display=5 package=mail.app size=1280x800 tasks=12 window=yes\n";
+        assert_eq!(app_display(replacement, "mail.app", 4), Some(5));
+        assert_eq!(app_display(replacement, "other.app", 4), None);
+        let both =
+            format!("display=4 package=mail.app size=1280x800 tasks=11 window=yes\n{replacement}");
+        assert_eq!(app_display(&both, "mail.app", 4), Some(4));
+        assert_eq!(app_display(&both, "mail.app", 3), None);
+        assert_eq!(
+            app_display(
+                "display=5 package=mail.app size=1280x800 window=no",
+                "mail.app",
+                4
+            ),
+            None
+        );
     }
 
     #[test]
