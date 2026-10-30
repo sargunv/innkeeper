@@ -24,7 +24,10 @@ HAL's rc override and `audio.prop`.
   monitor). No source, a stalled backend or a bridge restart returns paced
   silence while retrying once a second. Standby releases the host record stream;
   the next read opens a fresh ring. The Flatpak's existing `--socket=pulseaudio`
-  grants playback and capture.
+  grants playback and capture. Capture retains the HAL's requested buffer, since
+  the source cannot wait for a reader. Sustained recording still has periodic
+  gaps through the stock AOSP HAL's input pipe; see
+  [#168](https://github.com/sargunv/linux.apk/issues/168).
 - **Overrides:** `primary_audio_policy_configuration.xml` drops the HAL's MMAP
   and offload ports, which it serves with silent stubs; the HAL's rc preloads
   the shim, because its stream threads fail on `setpriority` without

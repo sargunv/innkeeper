@@ -297,8 +297,11 @@ static void connect_locked(struct pcm* p) {
     .rate = p->config.rate,
     .channels = (uint8_t)p->config.channels,
     .format = p->config.format == PCM_FORMAT_FLOAT_LE ? LXB_F32LE : LXB_S16LE,
-    .period_frames = ring_period(p),
-    .periods = 2,
+    // Capture cannot backpressure the source: retain the HAL's buffer so
+    // a burst read does not lose samples while its consumer is scheduled out.
+    .period_frames =
+      (p->flags & PCM_IN) ? p->config.period_size : ring_period(p),
+    .periods = (p->flags & PCM_IN) ? p->config.period_count : 2,
     .name = "Android",
   };
   if (p->flags & PCM_IN) {
