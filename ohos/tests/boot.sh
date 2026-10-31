@@ -1,55 +1,58 @@
-# shellcheck shell=sh
+# shellcheck shell=sh disable=SC2329 # functions run through retry
 # Runs inside the OpenHarmony session with OH's own sh (ohos/run.py --probe),
-# once samgr is ready: OH's core system abilities register with samgr and
-# hidumper (itself a system ability samgr starts on demand) lists them, then
-# render_service has the display, then SceneBoard has loaded its desktop at
-# the composer's density.
+# once samgr is ready.
+
+# retry <tries> <command...>: every 0.2 s until it succeeds.
+retry() {
+  n=$1
+  shift
+  while [ "$n" -gt 0 ]; do
+    "$@" && return 0
+    n=$((n - 1))
+    sleep 0.2
+  done
+  return 1
+}
+
+# hidumper is itself a system ability samgr starts on demand.
 want="SystemAbilityManager AccessTokenManagerService BundleMgr AbilityManagerService RenderService"
-i=0
-while [ $i -lt 150 ]; do
+registered() {
   list=$(/system/bin/hidumper -ls 2>&1)
   missing=""
   for sa in $want; do
     echo "$list" | grep -qw "$sa" || missing="$missing $sa"
   done
-  if [ -z "$missing" ]; then
-    echo "$list"
-    break
-  fi
-  i=$((i + 1))
-  sleep 0.2
-done
-if [ -n "$missing" ]; then
+  [ -z "$missing" ]
+}
+if ! retry 150 registered; then
   echo "not registered:$missing"
   echo "$list"
   exit 1
 fi
-# render_service has screen 0 from our composer (ohos/vendor/display), which
-# needs its ashmem command queue to the HDI.
-i=0
-while [ $i -lt 50 ]; do
+echo "$list"
+
+# Screen 0 comes from our composer (ohos/vendor/display), over its ashmem
+# command queue to the HDI.
+has_screen() {
   screen=$(/system/bin/hidumper -s RenderService -a screen 2>&1)
-  echo "$screen" | grep -q "screen\[0\]: id=0.*render resolution=720x1280" && break
-  i=$((i + 1))
-  sleep 0.2
-done
-if [ $i -eq 50 ]; then
+  echo "$screen" | grep -q "screen\[0\]: id=0.*render resolution=720x1280"
+}
+if ! retry 50 has_screen; then
   echo "no screen 0"
   echo "$screen"
   exit 1
 fi
-# SceneBoard, OH's window manager and home screen, is the home ability AMS
-# starts once user 100 is active; it sets this once its desktop has loaded.
-i=0
-while [ $i -lt 200 ]; do
-  /system/bin/param get bootevent.launcher.ready | grep -q true && break
-  i=$((i + 1))
-  sleep 0.2
-done
-if [ $i -eq 200 ]; then
+
+# SceneBoard, the home ability AMS starts once user 100 is active, sets this
+# once its desktop has loaded.
+launcher_ready() {
+  /system/bin/param get bootevent.launcher.ready | grep -q true
+}
+if ! retry 200 launcher_ready; then
   echo "SceneBoard not ready: $(/system/bin/pidof com.ohos.sceneboard || echo not running)"
   exit 1
 fi
+
 # DMS lays the screen out at the composer's dpi (ohos/sandbox.sh).
 dpi=$(/system/bin/param get persist.window.screen.dpi)
 dpi=${dpi%% *}
