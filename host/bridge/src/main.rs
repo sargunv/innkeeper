@@ -1,23 +1,24 @@
 //! `innkeeper-bridge --run-dir DIR --state-dir DIR [--allow-uid UID]...
-//!                  [--system-app-dir DIR] [--mirror-apps] [--test-session] [--sink NAME] [-v]`
+//!                  [--system-app-dir DIR] [--mirror-apps] [--test-session]
+//!                  [--sink NAME] [-v]`
 //!
-//! Listens on `<run-dir>/bridge/bridge.sock` for clients from the Android
-//! session (the launcher binds `<run-dir>/bridge` into it), keeps MPRIS
-//! artwork in `<run-dir>/art`, and writes the system app's activity reports
-//! to `<run-dir>/lifecycle` for the launcher. Only the given host uids may connect (default:
-//! our own uid). Audio plays to the desktop's default PipeWire sink, or
-//! `--sink NAME`.
-//! `--system-app-dir DIR` (the Innkeeper System app's data directory, as
-//! seen from the host) admits the uid that owns DIR to the system, documents
-//! and apps services, and to the input and a11y services, which nobody else
-//! may use.
-//! `--mirror-apps` turns on desktop entries for apps
-//! installed inside Android (`$XDG_DATA_HOME`). The documents service's
-//! grants (host files the user picked) persist in
+//! Listens on `<run-dir>/bridge/bridge.sock` (the launcher binds
+//! `<run-dir>/bridge` into the Android session), keeps MPRIS artwork in
+//! `<run-dir>/art` and writes the system app's activity reports to
+//! `<run-dir>/lifecycle` for the launcher. Document grants persist in
 //! `<state-dir>/documents.grants`.
-//! `--test-session` (also `INNKEEPER_TEST=1`) isolates clipboard, portals,
-//! OpenURI, notifications, MPRIS, AT-SPI and location from the desktop.
-//! `-v` logs per-stream statistics.
+//!
+//! - `--allow-uid`: host uids that may connect (default: our own).
+//! - `--system-app-dir`: the Innkeeper System app's data directory as seen
+//!   from the host; its owner may use the system, documents, apps,
+//!   hoststate, input and a11y services. Nobody else may use input, a11y or
+//!   apps.
+//! - `--mirror-apps`: desktop entries for apps installed inside Android.
+//! - `--test-session` (also `INNKEEPER_TEST=1`): isolates the clipboard,
+//!   portals, OpenURI, notifications, MPRIS, AT-SPI and location from the
+//!   desktop, and turns off `--mirror-apps`.
+//! - `--sink`: the PipeWire sink for audio (default: the desktop's default).
+//! - `-v`: per-stream statistics.
 
 use std::path::PathBuf;
 use std::sync::Arc;
