@@ -67,6 +67,8 @@ struct pcm {
   int64_t fb_t0;
   uint64_t fb_f0;
   struct lxb_backoff retry;  // reopening the stream
+  bool usage_set;            // a playback usage has been reported
+  uint32_t usage;
   // Input fallback clock.
   int64_t in_t0;
   uint64_t in_frames;
@@ -231,6 +233,22 @@ API int pcm_get_poll_fd(struct pcm* p) {
   return -1;
 }
 
+// Playback only. Reports the usage once it differs from the last one sent
+// on this pcm, including across a bridge reconnect. Capture ignores it:
+// the bridge drops SET_METADATA on record streams.
+API void pcm_set_usage(struct pcm* p, uint32_t usage) {
+  if (!p || (p->flags & PCM_IN)) return;
+  pthread_mutex_lock(&p->lock);
+  if (p->usage_set && p->usage == usage) {
+    pthread_mutex_unlock(&p->lock);
+    return;
+  }
+  p->usage = usage;
+  p->usage_set = true;
+  if (p->s.map) lxb_set_metadata(&p->s, usage, "");
+  pthread_mutex_unlock(&p->lock);
+}
+
 API int pcm_set_config(struct pcm* p, const struct pcm_config* config) {
   if (!p) return -EFAULT;
   pthread_mutex_lock(&p->lock);
@@ -314,6 +332,8 @@ static void connect_locked(struct pcm* p) {
     // new ring's positions from here.
     p->base = total_of(p);
     p->fallback = false;
+    // A reopened ring starts as "Android"; restore the last reported usage.
+    if (p->usage_set) lxb_set_metadata(&p->s, p->usage, "");
   } else if (!p->fallback) {
     p->fallback = true;
     p->fb_t0 = now_ns();
