@@ -7,94 +7,60 @@ what each directory is and where it runs.
 
 ## Commands
 
-- `mise install`: toolchains and the pre-commit hook.
-  `tools/build/toolchain.env` pins the NDK, API and build-tools.
-- `mise run check` / `mise run fix`: lint and format everything (hk, dprint).
-  The pre-commit hook runs hk on staged files; fix lints, never bypass it.
-- `mise run build`: every `build:<module>`, staged into `out/stage`.
-  `mise run clean` removes build output.
-- `mise run session -- start|stop|status|log|exec|shell|selftest|prepare`.
-- `mise run test` (unit), `test:e2e` (grouped runtime checks), `test:bionic`,
-  `test:compat`; see [tests/README.md](tests/README.md).
+- `mise install`: toolchains ([toolchain.env](tools/build/toolchain.env) pins
+  the Android ones) and hk's pre-commit hook, which fixes staged files; fix what
+  it reports, never bypass it.
+- `mise run check` / `fix`, `build` (into `out/stage`), `clean`,
+  `session -- start|stop|status|log|exec|shell|selftest|prepare`.
+- `mise run test`, `test:e2e -- [group]`, `test:bionic`,
+  `test:compat -- --only <package>` ([tests/README.md](tests/README.md)).
 
-## Rules
+## Hard constraints
 
-- **Never sudo.** Nothing the project needs to build or run may require root, a
-  system package, an SELinux module, an AppArmor profile or a kernel module.
-  Build dependencies go in the build container or mise. The one exception is
-  disposable GitHub-hosted CI runners: `tools/ci/setup.sh` may provision their
-  packages, kernel devices and namespace settings with sudo, and refuses to run
-  outside GitHub Actions. Contributors' machines get no exception.
-- **Memory caps** (a global OOM once crashed the user's desktop). `/tmp` is a
-  RAM-backed tmpfs: never write large files there; use `out/`. Development and
-  test sessions run capped from the host (`MemoryHigh=6G`, `MemoryMax=8G`),
-  container builds always pass `--memory` and `--pids-limit`
-  (`tools/container/run.sh`), and long jobs run under `systemd-run --user` with
-  a `MemoryMax`. Check `free -g` before starting another session.
-- **Never `logcat -b all`** or an unbounded `logcat` into a file; bound it with
-  `-d`, `-t <n>` or `-s <tags>`.
-- **Host safety.** Android's root is the host user. The Flatpak sandbox is the
-  boundary: every namespace running Android code masks and locks host sysfs and
-  never binds host `/run/user`, `$HOME` or `/dev` wholesale. Android shares the
-  host's network, as any `--share=network` app does
-  ([docs/security.md](docs/security.md#the-sandbox)).
-  `innkeeper-session selftest` must pass (`mise run test:e2e -- boot`).
-- **Test sessions are named.** Run anything with `INNKEEPER_PROFILE=<name>` and
-  a fresh data dir, and stop it when done. The dev runner defaults to a test
-  session off a nested desktop; `INNKEEPER_TEST=0` opts out. Don't start,
-  restart or reset the user's own profiles (such as `default`), and don't
-  install host integration (`mise run package -- --install`, desktop entries,
-  MIME handlers) unless the user asks.
-- **Test what you touched, in under a minute.** Keep only tests of observable
-  behaviour we own. Unit and low-level tests cover branches, edge cases and
-  error handling; e2e keeps one common-path scenario per user-visible feature,
-  never variants of the same path. A bug fix comes with a test that fails
-  without it; no reproduction, no fix. Iterate on `mise run test` plus the
-  relevant `mise run test:e2e -- <group>`. The whole local e2e run must take
-  under 60 s, waiting for observations, never fixed delays. GitHub Actions has
-  its own deadline for its slower software-rendered desktop
-  ([tests/README.md](tests/README.md)). The compat corpus is a manual harness
-  for one app (`mise run test:compat -- --only <package>`).
-- **Nested test desktops are fully isolated** (a nested plasmashell once started
-  kded, KDE Connect and Akonadi against the user's real config, and nested
-  portals opened dialogs on the real desktop): a private `dbus-run-session`, a
-  private `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY` set to the nested socket before
-  the bus starts, `DISPLAY` unset, and
-  `HOME`/`XDG_{CONFIG,DATA,CACHE,STATE}_HOME` under `out/`. Never start
-  plasmashell, kded, Akonadi or KDE Connect against the user's real dirs, and
-  kill everything you started. Recipe:
-  [docs/development.md](docs/development.md#a-nested-isolated-desktop).
-- **Test buses must not reach the user's runtime dir.** A private D-Bus that can
-  activate services while `XDG_RUNTIME_DIR` is the real one starts a second
-  `xdg-document-portal`, which takes over `/run/user/$UID/doc` and unmounts the
-  user's on exit (this once broke `flatpak run` for half an hour). Always pair a
-  private bus with a private `XDG_RUNTIME_DIR`, or use a bus that can't activate
-  services. Never restart the user's own portal or D-Bus services.
-- **Desktop baseline: current major distro releases only.** Support the oldest
-  desktop stack in a current release of Debian, Ubuntu, Fedora, openSUSE or
-  Arch. As of 2026-10 that is Debian 13: GNOME 48, Plasma 6.3,
-  xdg-desktop-portal 1.20. Use portals and freedesktop specs first, a
-  desktop-specific path only where a baseline desktop has no standard one, and
-  no fallback for anything older than the baseline.
-- **Stable boundaries only.** Never patch the image in place; prefer HAL AIDL,
-  NDK APIs, rc and overlay files. Any AOSP patch needs a written reason.
-- **Vendor binaries link only LL-NDK system libraries** plus what we ship in
-  `/vendor/lib64`, built out of tree with the NDK.
-- **Languages:** C/C++ for code loaded into Android processes or on C ABIs; Rust
-  for standalone components; Kotlin for the system app.
-- **Threat model: desktop parity** ([docs/security.md](docs/security.md)). Keep
-  simple bounds and correctness checks; don't add guards that only defend
-  against deliberately malicious Android processes.
+- **Never sudo**, nor anything that needs root, a system package, an SELinux or
+  AppArmor profile or a kernel module; build dependencies go in the build
+  container or mise. Only `tools/ci/setup.sh` uses sudo, on GitHub-hosted
+  runners.
+- **Memory.** `/tmp` is RAM: large files go in `out/`. Run long jobs under
+  `systemd-run --user -p MemoryMax=…`, and check `free -g` before a session.
+- **Bounded logcat** only (`-d`, `-t <n>`, `-s <tags>`), never `-b all`.
+- **Host safety.** The Flatpak sandbox is the boundary
+  ([security.md](docs/security.md#the-sandbox)); `selftest` must pass
+  (`mise run test:e2e -- boot`).
+- **Throwaway profiles.** Run anything with a fresh `INNKEEPER_PROFILE=<name>`
+  and stop it after. Never touch `default` or the user's own profiles, or
+  install host integration (`mise run package -- --install`), unless asked. The
+  dev runner makes a test session unless it runs on a nested desktop.
+- **Isolated desktops and buses.** Anything that opens windows, portals or
+  notifications runs under `tests/nested.sh`. Never pair a private D-Bus with
+  the real `XDG_RUNTIME_DIR`, never start plasmashell, kded, Akonadi or KDE
+  Connect on the user's dirs, and never restart the user's portals or buses.
+- **Desktop baseline:** current major distro releases
+  ([architecture.md](docs/architecture.md#packaging-scope)).
+- **Stable boundaries.** Never patch the image; use HAL AIDL, NDK APIs, rc and
+  overlay files, and give any AOSP patch a written reason. Vendor binaries link
+  only LL-NDK libraries plus what we ship in `/vendor/lib64`, built with the
+  NDK.
+- **Languages:** C/C++ in Android processes or on C ABIs, Rust for standalone
+  components, Kotlin for the system app.
+- **Threat model: desktop parity** ([security.md](docs/security.md)): simple
+  bounds and correctness checks, no guards against malicious Android processes.
+
+## Tests
+
+Test observable behaviour we own: unit tests take branches, edge cases and
+errors; e2e keeps one common-path scenario per user-visible feature and waits
+for observations, never fixed delays. A bug fix comes with a test that fails
+without it: no reproduction, no fix.
 
 ## Workflow
 
-- Every change goes through a PR (the full-send workflow): a branch, proof,
-  review, a PR, CI and review bots green, then merge. Logical commits with clear
-  messages; `mise run check` passes before every push. Never force-push `main`.
-- The repo is public: never commit secrets, image contents or third-party APKs.
-  Generated files go in `out/`. Post nothing outside this repo.
-- Never commit media. A visual change needs screenshots on its own PR:
-  `gh issue comment <pr> --attach <file>#<alt>`, linked from the description.
-  README images go on the README media issue (#1) the same way.
-- Plans and open work are GitHub issues, not docs. Docs say what is true now and
-  why; code comments say what the code can't.
+- One PR per change, logical commits, `mise run check` before every push; never
+  force-push `main`.
+- The repo is public: no secrets, image contents or third-party APKs; generated
+  files go in `out/`; post nothing outside this repo.
+- Never commit media: attach screenshots to the PR
+  (`gh issue comment <pr> --attach <file>#<alt>`) and link them from its
+  description.
+- Plans and open work are GitHub issues. Docs say what is true now and why; code
+  comments say what the code can't.
