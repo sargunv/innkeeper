@@ -6,10 +6,10 @@ An OpenHarmony userspace as a second guest, on the same supervisor as Android
 host kernel: OH's init starts its services, samgr comes up and OH's core system
 abilities register with it. render_service composes OH's screen through our
 display HDI ([vendor/display](vendor/display/README.md)), and with the bridge it
-shows in a desktop window. Apps spawn and run their ArkTS code, but SceneBoard,
-OH's window manager, doesn't start yet, so no app has a window; there is no
-input or app install. Nothing here is part of the Android session,
-`mise run build` or the stage.
+shows in a desktop window. SceneBoard, OH's window manager and home screen,
+starts and draws the lock screen; built-in apps such as Settings run in it.
+There is no desktop input or app install yet. Nothing here is part of the
+Android session, `mise run build` or the stage.
 
 | File                      | What                                                          |
 | ------------------------- | ------------------------------------------------------------- |
@@ -28,7 +28,8 @@ is `ohos-kmsg.log` there; once hilogd runs, services log to hilog instead. To
 look around, write a script for OH's `/system/bin/sh` and pass it with
 `ohos/run.py --probe <script>`: it runs as root, with a native token holding
 `ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and its output
-comes back (`hidumper -ls`, `hilog -x`, `ps -A`).
+comes back (`hidumper -ls`, `hilog -x`, `ps -A`). hilog's buffer is 256 KiB and
+boot fills it within a minute: read early boot from `ohos-kmsg.log`.
 
 ## Display
 
@@ -40,6 +41,11 @@ LINUXAPK_PROFILE=ohos tests/nested.sh ohos/run.py --display --timeout 60
 720x1280 window (log: `ohos-bridge.log`). Run it on a nested desktop
 ([docs/development.md](../docs/development.md#a-nested-isolated-desktop)), never
 on your own.
+
+SceneBoard shows the lock screen about 30 s after samgr. Until desktop input
+lands, OH's own injector drives it from a probe:
+`uinput -T -m 360 1150 360 300 300` swipes it open to the home screen, and
+`uinput -T -c 120 146` taps Settings there.
 
 - **GPU.** Only the first render node opens (the broker's DRM policy): the
   image's Mesa otherwise opens the host's card node, and its composer would
@@ -67,7 +73,9 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   mounts block devices and switches root. The shim makes `getpid()` 1 in init
   (it refuses to run otherwise), makes mounts and namespace calls no-ops
   (Flatpak's seccomp filter refuses them before ours sees them) and priority
-  raises best-effort.
+  raises best-effort. A mount namespace's `setns` still returns init to `/`, as
+  the kernel does: init's `mksandbox` changes into its sandbox first, and
+  services inherit init's cwd.
 - **Apps.** appspawn gives each app a mount namespace: bind mounts into
   `/mnt/sandbox/<user>/<bundle>`, then `pivot_root` there, and apps find their
   own files only at those paths (`/data/storage/el1/bundle` is the app's code).
@@ -75,6 +83,9 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   their mount points, and `pivot_root` keeps the sandbox's `/data/storage` open
   on a fixed fd; the session's `/data/storage` links to `/proc/self/fd/<fd>`, so
   each app process sees its own. The rest of an app's root is the session's.
+- **Inodes.** BMS checks free inodes before each install, and btrfs (no fixed
+  inode table) reports none, so SceneBoard and the larger apps failed to
+  install. The shim's `statfs` reports a free inode per free block there.
 - **Broker.** The same broker, built static for musl (OH's root has no Bionic),
   with `LINUXAPK_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
   `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's
@@ -84,6 +95,9 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
 Known gaps, visible in the logs and not fatal: no SELinux policy (the image
 ships none), `mksandbox` can't `pivot_root`, ueventd's coldboot can't write the
 read-only host sysfs, there are no cgroups or `/dev/memcg`, and hilogd reads
-part of init's `/dev/kmsg`. SceneBoard doesn't start: BMS's home-ability queries
-match nothing (it logs the legacy launcher as disabled in SceneBoard mode), so
-UI abilities have no window manager.
+part of init's `/dev/kmsg`. storage_daemon's mounts for user 100 fail, so
+there's no `/storage/media` view of user files.
+
+render_service sometimes segfaults on llvmpipe as SceneBoard animates (in the
+image's Mesa, `lp_setup_bin_triangle` with no scene), and init restarts it with
+foundation and SceneBoard.
