@@ -31,9 +31,7 @@ use crate::ipc::blob;
 use crate::ipc::server::{Peer, Reply, Service};
 use crate::ipc::wire::errno::*;
 use crate::ipc::wire::{DecodeError, Reader, Writer};
-
-pub mod file;
-pub mod session;
+use crate::session;
 
 pub mod ty {
     pub const HAVE: u16 = 0x0501;

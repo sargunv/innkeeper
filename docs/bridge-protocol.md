@@ -219,15 +219,15 @@ CLI examples: `innkeeper app org.example.app`,
 `innkeeper app org.example.app escape-back --setting on`, and
 `innkeeper app org.example.app permission --permission android.permission.CAMERA --setting off`.
 
-`GetPreferences() → s json` reads the profile's persisted Innkeeper preferences.
-`SetPreferences(s json)` validates and atomically replaces them, then broadcasts
-the filtered desktop settings. The JSON object (at most 4096 bytes) has boolean
-fields `follow_dark`, `follow_accent`, `follow_locale`, `follow_clock`,
-`keep_running`, `mirror_apps`, and integer `idle_minutes` (1–120). Missing
-fields take their defaults: all following and mirroring on, keep-running off,
-timeout 2 minutes. Unknown fields or invalid values fail with `InvalidArgs`.
-Persistence failures return `Failed`. The manager can also save these
-preferences while the session is stopped.
+`ReloadPreferences()` applies the profile's preferences file, which the caller
+has just written (`innkeeper-core` writes it whether or not a session runs): the
+bridge broadcasts the filtered desktop settings and picks up `mirror_apps`. An
+unreadable or invalid file fails with `Failed`.
+
+`Import(h fd, s name) → t grant` makes a read-only documents grant for the
+regular file `fd`, shown to Android as `name` (a file name, no `/`), for a
+launch to pass to an app. Only the fd reaches the bridge, never a host path.
+Other file types and bad names fail with `InvalidArgs`.
 
 The desktop client obtains Background portal permission before enabling
 `keep_running`, setting `autostart` with the session launcher's `start` command;

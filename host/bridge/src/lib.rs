@@ -15,6 +15,8 @@
 //!   Innkeeper System app
 //! - `hoststate` (id 8): battery, power saver, network and location, for the
 //!   Health HAL and the Innkeeper System app
+//! - `session`: the `dev.sargunv.Innkeeper.Session1` D-Bus API for desktop
+//!   clients, relayed to the system app over the apps channel
 //! - `log`: stderr logging and the debug trace (`INNKEEPER_BRIDGE_DEBUG=1`)
 
 pub mod a11y;
@@ -26,6 +28,7 @@ pub mod hoststate;
 pub mod input;
 pub mod ipc;
 pub mod log;
+pub mod session;
 pub mod system;
 
 /// A fresh, empty directory for one test's files:

@@ -18,6 +18,7 @@ pub mod paths;
 pub mod preferences;
 pub mod proc;
 pub mod profiles;
+pub mod uri;
 pub mod validate;
 pub mod xdg;
 
