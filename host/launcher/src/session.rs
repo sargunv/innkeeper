@@ -1,5 +1,5 @@
-//! What runs beside Android: the kmsg log reader and the
-//! desktop bridge, plus the session's pid files.
+//! What runs beside Android: the kmsg log reader and the desktop bridge, plus
+//! the session's pid files.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};

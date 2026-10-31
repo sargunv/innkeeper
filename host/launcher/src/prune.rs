@@ -1,6 +1,7 @@
-//! Cache collection is serialized with preparation. Build/APEX leases live
-//! outside collected trees and stay locked from prepare through session exit,
-//! including while a session is starting and has no control socket yet.
+//! Image cache collection, serialized with preparation. Build and APEX tree
+//! leases live outside collected trees and stay locked from prepare through
+//! session exit, including while a session is starting and has no control
+//! socket yet.
 
 use std::fs::{self, File};
 use std::io;

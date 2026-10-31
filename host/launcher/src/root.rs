@@ -1,5 +1,5 @@
-//! Android's root: the partitions, the image's
-//! top-level entries, the binder nodes and `/innkeeper`.
+//! Android's root: the partitions, the image's top-level entries, the binder
+//! nodes and `/innkeeper`.
 
 use std::fs;
 use std::io::Write;

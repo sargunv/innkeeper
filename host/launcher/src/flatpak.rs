@@ -1,6 +1,6 @@
 //! The session (docs/session.md, "Flatpak mode") runs in Innkeeper's own
-//! sandbox, which allows no namespaces, mounts or systemd
-//! units, but whose `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
+//! sandbox, which allows no namespaces, mounts or systemd units, but whose
+//! `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!
 //! - The root is composed on disk: per partition, hardlinks to the (read-only)
 //!   image cache plus copies of the layers above it, files read-only. It is
