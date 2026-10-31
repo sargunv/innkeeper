@@ -11,6 +11,10 @@ our existing `libtinyalsav2.so` capture backend. The image's default primary HAL
 retains its microphone route as a fallback, plus telephony. The policy XML
 removes its speaker, MMAP and offload ports; MMAP and offload were silent stubs.
 
+- **One volume control.** Android's stream volumes stay at maximum
+  (`config_useFixedVolume`): the desktop mixer is the only volume control, so an
+  app slider and the mixer do not stack. An app's own per-player gain still
+  applies.
 - **Why an output module.** The image's primary HAL hardcodes an 85 ms nominal
   latency and a 4096-frame minimum buffer at 48 kHz. Its emulator workaround
   also skips transfers when uptime pacing falls behind. Smaller rings alone

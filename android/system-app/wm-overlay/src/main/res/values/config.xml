@@ -3,4 +3,6 @@
 <resources>
   <!-- Enable the remote-controller path; the system app registers only on its own displays. -->
   <bool name="config_remoteInsetsControllerControlsSystemBars">true</bool>
+  <!-- The desktop mixer is the one volume control; Android's stream volumes stay at maximum. -->
+  <bool name="config_useFixedVolume">true</bool>
 </resources>
