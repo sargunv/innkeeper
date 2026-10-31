@@ -106,10 +106,7 @@ adb -s emulator-5556 install app.apk
 Run instrumented tests that take screenshots (`UiAutomation.takeScreenshot`,
 screenshot-diff libraries) in phone mode (`linuxapk profile set --mode phone`).
 In windowed mode each app window is its own virtual display, so a capture of the
-default display does not show the app. MapLibre Compose's
-`AndroidMapPresentationTest` failed that way headless (the center pixel never
-became the map's color) and passed once the same profile ran in phone mode,
-where the app is on display 0.
+default display does not show the app.
 
 ## Android logs
 
