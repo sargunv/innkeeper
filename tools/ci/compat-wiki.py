@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import tomllib
 
-REPO = "https://github.com/sargunv/linux.apk"
+REPO = "https://github.com/sargunv/innkeeper"
 STATUSES = {
   "works": "✅ Works",
   "partly": "⚠️ Partly works",

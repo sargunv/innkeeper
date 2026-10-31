@@ -16,7 +16,7 @@
 //! sends focus events only for the focused window, as AT-SPI expects.
 //!
 //! Limits: every Android window is a frame of one AT-SPI application named
-//! after this process (`linuxapk-bridge`), since AccessKit has one per
+//! after this process (`innkeeper-bridge`), since AccessKit has one per
 //! process. Extents are relative to the window, because Wayland tells no
 //! client where its windows are, so a screen reader's mouse review can't find
 //! Android nodes under the pointer.

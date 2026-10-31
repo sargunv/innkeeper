@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Linux.apk display HALs, part of the root superbuild. With the NDK (preset
+# Innkeeper display HALs, part of the root superbuild. With the NDK (preset
 # "android"): the vendor binaries and on-device tests. Natively (preset
 # "host-tests"): host (glibc) unit tests of the buffer/mapper code.
 set(CMAKE_CXX_STANDARD 20)
@@ -35,19 +35,21 @@ if(NOT ANDROID)
 endif()
 
 add_library(
-  lapk_common
+  innkeeper_common
   STATIC
     common/src/native_handle.cpp common/src/layout.cpp
     common/src/buffer_alloc.cpp)
-target_include_directories(lapk_common PUBLIC ${HAL_INCLUDES})
+target_include_directories(innkeeper_common PUBLIC ${HAL_INCLUDES})
 if(ANDROID)
-  target_link_libraries(lapk_common PUBLIC log)
+  target_link_libraries(innkeeper_common PUBLIC log)
 endif()
 
 # IMapper v5: exports only AIMapper_loadIMapper + ANDROID_HAL_STABLEC_VERSION.
 add_library(mapper SHARED mapper/mapper.cpp)
-set_target_properties(mapper PROPERTIES PREFIX "" OUTPUT_NAME "mapper.linuxapk")
-target_link_libraries(mapper PRIVATE lapk_common)
+set_target_properties(
+  mapper
+  PROPERTIES PREFIX "" OUTPUT_NAME "mapper.innkeeper")
+target_link_libraries(mapper PRIVATE innkeeper_common)
 target_link_options(
   mapper
   PRIVATE
@@ -56,12 +58,14 @@ target_link_options(
 
 if(ANDROID)
   add_library(frame_sink SHARED composer/FrameSink.cpp)
-  target_link_libraries(frame_sink PRIVATE lapk_common android nativewindow dl)
+  target_link_libraries(
+    frame_sink
+    PRIVATE innkeeper_common android nativewindow dl)
   install(
     TARGETS frame_sink
     LIBRARY
       DESTINATION
-                  share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/lib/x86_64
+                  share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/lib/x86_64
       COMPONENT graphics)
   # Link-only stub for LL-NDK libbinder_ndk, including platform symbols that
   # the public NDK stub omits (AServiceManager_addService, ...).
@@ -84,16 +88,18 @@ if(ANDROID)
     PRIVATE -Wl,--version-script=${STUB}.ver -nostdlib)
 
   file(GLOB_RECURSE AIDL_SRCS ${AIDL_GEN_DIR}/src/*.cpp)
-  add_library(lapk_aidl STATIC ${AIDL_SRCS})
-  target_include_directories(lapk_aidl PUBLIC ${HAL_INCLUDES})
-  target_compile_options(lapk_aidl PRIVATE -w)
-  target_link_libraries(lapk_aidl PUBLIC binder_ndk_stub log)
+  add_library(innkeeper_aidl STATIC ${AIDL_SRCS})
+  target_include_directories(innkeeper_aidl PUBLIC ${HAL_INCLUDES})
+  target_compile_options(innkeeper_aidl PRIVATE -w)
+  target_link_libraries(innkeeper_aidl PUBLIC binder_ndk_stub log)
 
   add_executable(allocator allocator/main.cpp allocator/gpu_buffer.cpp)
   set_target_properties(
     allocator
-    PROPERTIES OUTPUT_NAME android.hardware.graphics.allocator-service.linuxapk)
-  target_link_libraries(allocator PRIVATE lapk_common lapk_aidl vulkan)
+    PROPERTIES OUTPUT_NAME android.hardware.graphics.allocator-service.innkeeper)
+  target_link_libraries(
+    allocator
+    PRIVATE innkeeper_common innkeeper_aidl vulkan)
 
   add_executable(
     composer
@@ -112,15 +118,15 @@ if(ANDROID)
     composer/Properties.cpp)
   set_target_properties(
     composer
-    PROPERTIES OUTPUT_NAME android.hardware.graphics.composer3-service.linuxapk)
+    PROPERTIES OUTPUT_NAME android.hardware.graphics.composer3-service.innkeeper)
   target_include_directories(composer PRIVATE ${HAL}/composer)
   # libz is not LL-NDK: link the NDK's static copy.
   target_link_libraries(
     composer
     PRIVATE
-      lapk_common
-      lapk_aidl
-      linuxapk_bridge_client
+      innkeeper_common
+      innkeeper_aidl
+      innkeeper_bridge_client
       EGL
       GLESv3
       nativewindow
@@ -135,8 +141,8 @@ if(ANDROID)
   target_link_libraries(
     gpu_copy_test
     PRIVATE
-      lapk_common
-      lapk_aidl
+      innkeeper_common
+      innkeeper_aidl
       EGL
       GLESv3
       nativewindow
@@ -145,16 +151,16 @@ if(ANDROID)
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
   target_link_libraries(
     gralloc_test
-    PRIVATE lapk_common lapk_aidl dl nativewindow)
+    PRIVATE innkeeper_common innkeeper_aidl dl nativewindow)
   add_executable(hwc_test tests/android/hwc_test.cpp)
-  target_link_libraries(hwc_test PRIVATE lapk_common lapk_aidl)
+  target_link_libraries(hwc_test PRIVATE innkeeper_common innkeeper_aidl)
   # A /vendor layer for tests/bionic/run.sh -v.
   set_target_properties(
     gralloc_test hwc_test gpu_copy_test
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-vendor/bin)
 
-  set(VENDOR ${LINUXAPK_ANDROID}/vendor)
+  set(VENDOR ${INNKEEPER_ANDROID}/vendor)
   install(
     TARGETS allocator composer
     RUNTIME DESTINATION ${VENDOR}/bin/hw COMPONENT graphics)
@@ -176,18 +182,18 @@ else()
   target_include_directories(import_cache_test PRIVATE ${HAL}/composer)
   add_test(NAME import_cache COMMAND import_cache_test)
   add_executable(gralloc_host_test tests/host/gralloc_test.cpp)
-  target_link_libraries(gralloc_host_test PRIVATE lapk_common dl)
+  target_link_libraries(gralloc_host_test PRIVATE innkeeper_common dl)
   add_executable(dump_host_test tests/host/dump_test.cpp
                  composer/FrameDumper.cpp composer/Properties.cpp)
   target_include_directories(dump_host_test PRIVATE ${HAL}/composer)
-  target_link_libraries(dump_host_test PRIVATE lapk_common z)
+  target_link_libraries(dump_host_test PRIVATE innkeeper_common z)
   add_test(NAME gralloc COMMAND gralloc_host_test $<TARGET_FILE:mapper>)
   add_test(
     NAME gralloc_no_udmabuf
     COMMAND gralloc_host_test $<TARGET_FILE:mapper>)
   set_tests_properties(
     gralloc_no_udmabuf
-    PROPERTIES ENVIRONMENT LINUXAPK_UDMABUF=/nonexistent)
+    PROPERTIES ENVIRONMENT INNKEEPER_UDMABUF=/nonexistent)
   add_test(
     NAME dump
     COMMAND dump_host_test ${CMAKE_CURRENT_BINARY_DIR}/dump-test)

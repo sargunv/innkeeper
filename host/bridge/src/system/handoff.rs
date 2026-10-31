@@ -79,13 +79,13 @@ pub struct Handoffs {
 
 impl Handoffs {
     pub fn new(input: Arc<crate::input::Hub>) -> Arc<Self> {
-        let profile = linuxapk_core::paths::profile().unwrap_or_default();
+        let profile = innkeeper_core::paths::profile().unwrap_or_default();
         let name = if profile.is_empty() {
-            "linuxapk".into()
+            "innkeeper".into()
         } else {
-            format!("linuxapk-{profile}")
+            format!("innkeeper-{profile}")
         };
-        let root = linuxapk_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
+        let root = innkeeper_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
             .join(name)
             .join("handoff");
         Arc::new(Self {

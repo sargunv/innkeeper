@@ -14,7 +14,7 @@ import sys
 import time
 
 TOP = Path(__file__).resolve().parents[2]
-APP = "dev.linuxapk.Manager"
+APP = "dev.sargunv.Innkeeper"
 STAGE = TOP / "out/stage"
 BASE = TOP / "out/dev"
 ENV = os.environ.copy()
@@ -23,15 +23,15 @@ ENV["PATH"] = os.pathsep.join(
   for p in ENV.get("PATH", "/usr/bin:/bin").split(os.pathsep)
   if not p.endswith("/mise/shims")
 )
-PROFILE = ENV.get("LINUXAPK_PROFILE", "dev")
+PROFILE = ENV.get("INNKEEPER_PROFILE", "dev")
 if not re.fullmatch(r"[a-z0-9-]+", PROFILE):
-  sys.exit("dev runner requires a named LINUXAPK_PROFILE")
-ENV["LINUXAPK_PROFILE"] = PROFILE
+  sys.exit("dev runner requires a named INNKEEPER_PROFILE")
+ENV["INNKEEPER_PROFILE"] = PROFILE
 ENV.setdefault(
-  "LINUXAPK_IMAGES", str(Path.home() / ".local/share/linuxapk/images")
+  "INNKEEPER_IMAGES", str(Path.home() / ".local/share/innkeeper/images")
 )
 ENV.setdefault(
-  "LINUXAPK_DATA", str(BASE / "flatpak" / PROFILE / "android-data")
+  "INNKEEPER_DATA", str(BASE / "flatpak" / PROFILE / "android-data")
 )
 SCRATCH = BASE / "flatpak" / PROFILE
 SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -82,18 +82,18 @@ def command(program, args, gate=None, instance_fd=None):
     f"--app-path={STAGE}",
   ]
   # The manifest's current permissions, which dev-init.sh's snapshot may lack.
-  manifest = (TOP / "packaging/flatpak/dev.linuxapk.Manager.yml").read_text()
+  manifest = (TOP / "packaging/flatpak/dev.sargunv.Innkeeper.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   argv += re.findall(r"^  - (--\S+)$", finish, re.MULTILINE)
   argv.append(f"--filesystem={STAGE}:ro")
   # Exact scratch paths and the image cache only; never --filesystem=home/host.
   paths = {
     str(SCRATCH),
-    str(Path(ENV["LINUXAPK_DATA"]).parent),
-    ENV["LINUXAPK_IMAGES"],
+    str(Path(ENV["INNKEEPER_DATA"]).parent),
+    ENV["INNKEEPER_IMAGES"],
   }
   paths.update(ENV[k] for k in XDG)
-  if program == "linuxapk":
+  if program == "innkeeper":
     for arg in args:
       p = Path(arg)
       if p.is_absolute() and p.is_file():
@@ -107,7 +107,7 @@ def command(program, args, gate=None, instance_fd=None):
   # Flatpak sets XDG_*_HOME over any --env; env(1) sets them after it.
   for k, v in ENV.items():
     if (
-      k.startswith("LINUXAPK_")
+      k.startswith("INNKEEPER_")
       or k in XDG
       or k
       in (
@@ -124,9 +124,9 @@ def command(program, args, gate=None, instance_fd=None):
     ):
       inner_env.append(f"{k}={v}")
   target = (
-    str(STAGE / "bin/linuxapk")
-    if program == "linuxapk"
-    else str(STAGE / "libexec/linuxapk/linuxapk-session")
+    str(STAGE / "bin/innkeeper")
+    if program == "innkeeper"
+    else str(STAGE / "libexec/innkeeper/innkeeper-session")
   )
   if gate:
     argv += [
@@ -149,7 +149,7 @@ def command(program, args, gate=None, instance_fd=None):
 
 def connect():
   runtime = ENV.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-  path = Path(runtime) / "app" / APP / f"linuxapk-{PROFILE}/control.sock"
+  path = Path(runtime) / "app" / APP / f"innkeeper-{PROFILE}/control.sock"
   sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
   sock.settimeout(120)
   try:
@@ -207,7 +207,7 @@ def control(args):
 
 
 def available():
-  minimum = int(ENV.get("LINUXAPK_MIN_AVAILABLE_GIB", "25"))
+  minimum = int(ENV.get("INNKEEPER_MIN_AVAILABLE_GIB", "25"))
   subprocess.run(["free", "-g"], check=True)
   while True:
     fields = Path("/proc/meminfo").read_text().splitlines()
@@ -346,7 +346,7 @@ def serve(args):
 
 def supervise(action, args=()):
   # Python's monitor is capped too; Flatpak moves its app to a separate scope.
-  restore = [f"LINUXAPK_PROFILE={PROFILE}"]
+  restore = [f"INNKEEPER_PROFILE={PROFILE}"]
   for key in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
     if key in os.environ:
       restore.append(f"{key}={os.environ[key]}")
@@ -375,7 +375,7 @@ def supervise(action, args=()):
 
 
 def run_capped(program, args):
-  if program == "linuxapk":
+  if program == "innkeeper":
     if not running():
       available()
     supervise("_watch")
@@ -430,13 +430,13 @@ def main():
   args = sys.argv[1:]
   program = "session"
   if args[:1] == ["--cli"]:
-    program = "linuxapk"
+    program = "innkeeper"
     args = args[1:]
   if args[:1] == ["paths"]:
     print(
       json.dumps(
         {
-          "state": str(Path(ENV["XDG_STATE_HOME"]) / f"linuxapk-{PROFILE}"),
+          "state": str(Path(ENV["XDG_STATE_HOME"]) / f"innkeeper-{PROFILE}"),
           "data_home": ENV["XDG_DATA_HOME"],
         }
       )
@@ -456,7 +456,7 @@ def main():
     # This only reads the pin and paths; the launcher allows it outside
     # Flatpak. Core checks it before every start, so avoid a second sandbox.
     return run(
-      [str(STAGE / "libexec/linuxapk/linuxapk-session"), *args]
+      [str(STAGE / "libexec/innkeeper/innkeeper-session"), *args]
     ).returncode
   bootstrap()
   if args[:1] == ["_watch"]:
@@ -485,7 +485,7 @@ def main():
   if program == "session" and args[:1] == ["cgroup"]:
     print((SCRATCH / "cgroup").read_text())
     return 0
-  if program == "linuxapk":
+  if program == "innkeeper":
     if ENV.get("DBUS_SESSION_BUS_ADDRESS", HOST_BUS) == HOST_BUS:
       sys.exit(
         "CLI integration tests require tests/nested.sh (a private desktop bus)"

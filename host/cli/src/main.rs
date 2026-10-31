@@ -1,6 +1,6 @@
-//! `linuxapk`: install Android apps into the Linux.apk session with desktop
+//! `innkeeper`: install Android apps into the Innkeeper session with desktop
 //! entries and icons, run, list and uninstall them. A thin front end over
-//! `linuxapk-core` (shared with `linuxapk-manager`). See host/cli/README.md.
+//! `innkeeper-core` (shared with `innkeeper-manager`). See host/cli/README.md.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
-use linuxapk_core::launcher::Session;
-use linuxapk_core::ops::{self, Event, LaunchOptions};
-use linuxapk_core::profiles::{self, Settings};
-use linuxapk_core::{desktop, validate, xdg};
+use innkeeper_core::launcher::Session;
+use innkeeper_core::ops::{self, Event, LaunchOptions};
+use innkeeper_core::profiles::{self, Settings};
+use innkeeper_core::{desktop, validate, xdg};
 use rustix::fs::{FileType, OFlags};
 
 mod splash;
@@ -21,9 +21,9 @@ use splash::Splash;
 
 #[derive(Parser)]
 #[command(
-    name = "linuxapk",
+    name = "innkeeper",
     version,
-    about = "Android apps on the Linux desktop (Linux.apk)"
+    about = "Run Android and OpenHarmony apps on Linux"
 )]
 struct Cli {
     /// The profile to work with (`default`, or a name from `profile list`).
@@ -118,7 +118,7 @@ enum ProfileCmd {
 /// Progress and warnings on stderr.
 fn stderr(e: Event) {
     match e {
-        Event::Status(m) | Event::Warning(m) => eprintln!("linuxapk: {m}"),
+        Event::Status(m) | Event::Warning(m) => eprintln!("innkeeper: {m}"),
     }
 }
 
@@ -143,8 +143,9 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
         })
     });
     if files.is_empty() || !packages.is_empty() {
-        let mut manager =
-            std::process::Command::new(std::env::current_exe()?.with_file_name("linuxapk-manager"));
+        let mut manager = std::process::Command::new(
+            std::env::current_exe()?.with_file_name("innkeeper-manager"),
+        );
         manager.args(packages);
         if let Some(t) = &token {
             manager.env("XDG_ACTIVATION_TOKEN", t);
@@ -157,10 +158,10 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
             .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         run(
-            "dev.linuxapk.system",
+            "dev.sargunv.innkeeper.system",
             &args,
             token,
-            Some("dev.linuxapk.system/.documents.OpenWithActivity"),
+            Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity"),
             false,
         )?;
     }
@@ -175,7 +176,7 @@ fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
             if keep_data { " (data kept)" } else { "" }
         );
     } else {
-        eprintln!("linuxapk: {pkg} isn't an installed user app");
+        eprintln!("innkeeper: {pkg} isn't an installed user app");
     }
     if u.from_desktop {
         println!("removed the desktop entry and icons");
@@ -234,13 +235,13 @@ fn run(
         if args.iter().all(|s| s.is_empty()) {
             return ops::run(pkg, None, &opts, &stderr);
         }
-        let paths = linuxapk_core::paths::Prefix::locate()?.session_paths()?;
+        let paths = innkeeper_core::paths::Prefix::locate()?.session_paths()?;
         let mut reply = String::new();
         let mut chooser_grants = Vec::new();
         for arg in args.iter().filter(|s| !s.is_empty()) {
             let path = if arg.starts_with("file:") {
                 Some(
-                    linuxapk_bridge::documents::portal::file_path(arg)
+                    innkeeper_bridge::documents::portal::file_path(arg)
                         .ok_or_else(|| anyhow::anyhow!("invalid file URI"))?,
                 )
             } else if !arg.contains(":") || Path::new(arg).exists() {
@@ -255,7 +256,7 @@ fn run(
                         .file_name()
                         .and_then(|n| n.to_str())
                         .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
-                    let grant = linuxapk_bridge::apps::file::grant(
+                    let grant = innkeeper_bridge::apps::file::grant(
                         &paths.run.join("bridge/bridge.sock"),
                         &file,
                         name,
@@ -264,9 +265,9 @@ fn run(
                         chooser_grants.push(grant);
                         continue;
                     }
-                    linuxapk_core::android::launch(
+                    innkeeper_core::android::launch(
                         &session,
-                        &linuxapk_core::android::Launch::File {
+                        &innkeeper_core::android::Launch::File {
                             package: pkg.into(),
                             grants: vec![grant],
                             component: file_component.map(str::to_string),
@@ -278,9 +279,9 @@ fn run(
             };
         }
         if !chooser_grants.is_empty() {
-            reply = linuxapk_core::android::launch(
+            reply = innkeeper_core::android::launch(
                 &session,
-                &linuxapk_core::android::Launch::File {
+                &innkeeper_core::android::Launch::File {
                     package: pkg.into(),
                     grants: chooser_grants,
                     component: file_component.map(str::to_string),
@@ -360,7 +361,7 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                     profiles::Mode::Phone => format!("phone {}", p.settings.size.name()),
                 };
                 let adb = if p.settings.debug_bridge {
-                    format!("adb {}", linuxapk_core::adb::serial(&p.settings))
+                    format!("adb {}", innkeeper_core::adb::serial(&p.settings))
                 } else {
                     String::new()
                 };
@@ -387,7 +388,7 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
             println!("deleted profile {n}");
         }
         ProfileCmd::Start { name: n } => {
-            profiles::start(&name(n)?, &|m| eprintln!("linuxapk: {m}"))?;
+            profiles::start(&name(n)?, &|m| eprintln!("innkeeper: {m}"))?;
         }
         ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
         ProfileCmd::Set {
@@ -422,12 +423,12 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                 );
             }
             if let Some(on) = adb {
-                let s = linuxapk_core::adb::set(&n, on == "on", &stderr)?;
+                let s = innkeeper_core::adb::set(&n, on == "on", &stderr)?;
                 if s.debug_bridge {
                     println!(
                         "adb on: {} ({})",
-                        linuxapk_core::adb::serial(&s),
-                        linuxapk_core::adb::address(&s)
+                        innkeeper_core::adb::serial(&s),
+                        innkeeper_core::adb::address(&s)
                     );
                 } else {
                     println!("adb off");
@@ -438,7 +439,7 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
     Ok(())
 }
 
-/// The profile a command works with: `--profile`, `LINUXAPK_PROFILE`, the
+/// The profile a command works with: `--profile`, `INNKEEPER_PROFILE`, the
 /// one in use, or, for a command that needs one, a first one made now.
 fn select_profile(named: Option<&str>, create: bool) -> Result<()> {
     let p = match named {
@@ -453,7 +454,7 @@ fn select_profile(named: Option<&str>, create: bool) -> Result<()> {
         },
     };
     // SAFETY: no other threads yet.
-    unsafe { std::env::set_var("LINUXAPK_PROFILE", p) };
+    unsafe { std::env::set_var("INNKEEPER_PROFILE", p) };
     Ok(())
 }
 
@@ -472,7 +473,7 @@ fn main() -> ExitCode {
     // Profile commands name theirs; the others need one.
     let create = !matches!(cli.cmd, Cmd::Profile(_));
     if let Err(e) = select_profile(cli.profile.as_deref(), create) {
-        eprintln!("linuxapk: {e:#}");
+        eprintln!("innkeeper: {e:#}");
         return ExitCode::FAILURE;
     }
     let res = match cli.cmd {
@@ -496,10 +497,10 @@ fn main() -> ExitCode {
                     == matches!(action.as_str(), "permission" | "escape-back" | "background"),
                 "use --setting on|off for a switch"
             );
-            let mut command = linuxapk_core::app_settings::Command::new(&package, &action);
+            let mut command = innkeeper_core::app_settings::Command::new(&package, &action);
             command.permission = permission.unwrap_or_default();
             command.enabled = setting.as_deref() == Some("on");
-            let info = linuxapk_core::app_settings::request(command, &stderr)?;
+            let info = innkeeper_core::app_settings::request(command, &stderr)?;
             println!("{}", serde_json::to_string_pretty(&info)?);
             Ok(())
         })(),
@@ -512,19 +513,19 @@ fn main() -> ExitCode {
         }
         Cmd::Profile(cmd) => profile(cmd),
         Cmd::Adb => profiles::resolve(false)
-            .and_then(|n| linuxapk_core::adb::connect(&n, &stderr))
+            .and_then(|n| innkeeper_core::adb::connect(&n, &stderr))
             .map(|serial| println!("connected: adb -s {serial} shell")),
     };
     if let Some(n) = Session::find()
         .ok()
         .and_then(|s| ops::single_uid_notice(s.running()))
     {
-        eprintln!("linuxapk: note: {n} See {}", ops::SINGLE_UID_DOCS);
+        eprintln!("innkeeper: note: {n} See {}", ops::SINGLE_UID_DOCS);
     }
     match res {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("linuxapk: {e:#}");
+            eprintln!("innkeeper: {e:#}");
             ExitCode::FAILURE
         }
     }

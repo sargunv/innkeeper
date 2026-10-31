@@ -7,7 +7,7 @@
 #include <aidl/android/hardware/graphics/composer3/IComposerClient.h>
 #include <android/binder_auto_utils.h>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 namespace c3 = ::aidl::android::hardware::graphics::composer3;
 namespace common = ::aidl::android::hardware::graphics::common;
@@ -38,4 +38,4 @@ inline int64_t nowNs() {
   return int64_t(ts.tv_sec) * 1000000000 + ts.tv_nsec;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

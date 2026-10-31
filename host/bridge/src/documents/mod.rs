@@ -1,5 +1,5 @@
 //! The documents service (id 4): host files and folders the user picks in the
-//! FileChooser portal, for the Linux.apk System app's document picker and
+//! FileChooser portal, for the Innkeeper System app's document picker and
 //! DocumentsProvider. Messages: [`proto`].
 //!
 //! The bridge is the only one that knows host paths. Android gets opaque
@@ -659,7 +659,7 @@ impl Service for DocumentsService {
                     m.put(&mut w);
                 }
                 let b = w.into_vec();
-                let fd = blob::create("linuxapk-list", &b).map_err(|_| -ENOMEM)?;
+                let fd = blob::create("innkeeper-list", &b).map_err(|_| -ENOMEM)?;
                 let mut out = Writer::default();
                 out.u32(b.len() as u32).u32(list.len() as u32);
                 let mut r = Reply::with_body(out.into_vec());

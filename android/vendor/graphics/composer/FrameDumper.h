@@ -6,7 +6,7 @@
 #include <mutex>
 #include <string>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 struct FrameView {
   const uint8_t* data;
@@ -19,7 +19,7 @@ struct FrameView {
 bool convertRowToRgb8(const FrameView& f, uint32_t y, uint8_t* rgbOut);
 bool writePng(const std::string& path, const FrameView& f);
 
-// Dumps to vendor.linuxapk.hwc.dump.dir (empty: off) at most once a second.
+// Dumps to vendor.innkeeper.hwc.dump.dir (empty: off) at most once a second.
 class FrameDumper {
  public:
   explicit FrameDumper(std::string dir) : mDir(std::move(dir)) {}
@@ -45,4 +45,4 @@ class FrameDumper {
   bool mWroteFirst = false;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

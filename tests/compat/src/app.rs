@@ -77,7 +77,7 @@ const UI_DUMP_SECS: u64 = 150;
 const GESTURE_SH: &str = include_str!("../android/gesture.sh");
 /// The probes APK, copied in for its input harness (app_process loads it from
 /// there; it isn't installed).
-const PROBES_APK: &str = "/data/local/tmp/linuxapk-probes.apk";
+const PROBES_APK: &str = "/data/local/tmp/innkeeper-probes.apk";
 
 pub struct Run<'a> {
     s: &'a Session,
@@ -250,9 +250,9 @@ impl<'a> Run<'a> {
                 "am",
                 "broadcast",
                 "-n",
-                "dev.linuxapk.system/.wm.ControlReceiver",
+                "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
                 "-a",
-                "dev.linuxapk.LAUNCH",
+                "dev.sargunv.innkeeper.LAUNCH",
                 "--es",
                 "package",
                 &pkg,
@@ -328,7 +328,7 @@ impl<'a> Run<'a> {
             .s
             .run(20, &["dumpsys", "SurfaceFlinger", "--display-id"])
             .text;
-        let sf_id = parse_sf_id(&sf, &format!("linuxapk:{pkg}")).unwrap_or_default();
+        let sf_id = parse_sf_id(&sf, &format!("innkeeper:{pkg}")).unwrap_or_default();
         self.check(
             "launch",
             true,
@@ -771,8 +771,8 @@ impl<'a> Run<'a> {
             let (op, arg) = step.split_once(':').ok_or(format!("bad step {step}"))?;
             match op {
                 "audio" => {
-                    let sink = std::env::var("LINUXAPK_AUDIO_SINK")
-                        .map_err(|_| "audio: no LINUXAPK_AUDIO_SINK".to_string())?;
+                    let sink = std::env::var("INNKEEPER_AUDIO_SINK")
+                        .map_err(|_| "audio: no INNKEEPER_AUDIO_SINK".to_string())?;
                     let path = self.dir.join("audio.raw");
                     let file = fs::File::create(&path).map_err(|e| e.to_string())?;
                     // Bound the recorder and its artifact to three seconds of PCM.
@@ -835,7 +835,7 @@ impl<'a> Run<'a> {
                     );
                     sleep(Duration::from_secs(1));
                 }
-                // pinch|pan|doubletap X Y, as touch through Linux.apk System's
+                // pinch|pan|doubletap X Y, as touch through Innkeeper System's
                 // translator and injector (the probes' input harness;
                 // multi-touch, which `input` can't do).
                 "gesture" => {
@@ -855,7 +855,7 @@ impl<'a> Run<'a> {
                         "sh",
                         "-c",
                         "apk=$1 script=$2; shift 2; sh -c \"$script\" gesture.sh \"$@\" | \
-                         CLASSPATH=$apk app_process / dev.linuxapk.probes.InputStdinHarness",
+                         CLASSPATH=$apk app_process / dev.sargunv.innkeeper.probes.InputStdinHarness",
                         "sh",
                         PROBES_APK,
                         GESTURE_SH,
@@ -987,9 +987,9 @@ impl<'a> Run<'a> {
                 "am",
                 "broadcast",
                 "-n",
-                "dev.linuxapk.system/.wm.ControlReceiver",
+                "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
                 "-a",
-                "dev.linuxapk.LIST",
+                "dev.sargunv.innkeeper.LIST",
             ],
         );
         let Some(current) = app_display(&o.text, &self.app.package, display) else {
@@ -1001,7 +1001,7 @@ impl<'a> Run<'a> {
                 .run(20, &["dumpsys", "SurfaceFlinger", "--display-id"]);
             if let Some(win) = self.win.as_mut() {
                 win.display = current;
-                win.sf_id = parse_sf_id(&sf.text, &format!("linuxapk:{}", self.app.package))
+                win.sf_id = parse_sf_id(&sf.text, &format!("innkeeper:{}", self.app.package))
                     .unwrap_or_default();
             }
         }
@@ -1149,9 +1149,9 @@ mod tests {
             Some((4, 2176, 1360))
         );
         assert_eq!(parse_launched("Broadcast completed: result=0"), None);
-        let sf = "Display 0 (HWC display 0): no display identification data\nDisplay 9223372039441632759 (Virtual display): displayName=\"linuxapk:a.b\" uniqueId=\"virtual:x\"";
+        let sf = "Display 0 (HWC display 0): no display identification data\nDisplay 9223372039441632759 (Virtual display): displayName=\"innkeeper:a.b\" uniqueId=\"virtual:x\"";
         assert_eq!(
-            parse_sf_id(sf, "linuxapk:a.b").as_deref(),
+            parse_sf_id(sf, "innkeeper:a.b").as_deref(),
             Some("9223372039441632759")
         );
         let w = "  Display: mDisplayId=0 (organized)\n  mCurrentFocus=null\n  Display: mDisplayId=4 (organized)\n  mCurrentFocus=Window{1 a.b/a.b.Main}";

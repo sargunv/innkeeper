@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #define EGL_EGLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
 #include <mutex>
@@ -15,9 +15,9 @@
 #include "GpuCopy.h"
 
 #include "ImportCache.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 namespace {
 struct Context {
   std::mutex mutex;
@@ -185,4 +185,4 @@ bool GpuCopy::copy(const BufferRef& source, const BufferRef& target) {
   if (!ok) LOGW("GPU copy to virtual-display sink failed");
   return ok;
 }
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

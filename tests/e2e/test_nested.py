@@ -25,7 +25,7 @@ class NestedCleanupTest(unittest.TestCase):
           tempfile.TemporaryDirectory(dir=OUTPUT) as work,
         ):
           work = Path(work)
-          runtime = work / "lapk-private"
+          runtime = work / "inkp-private"
           runtime.mkdir()
           (runtime / "mounted").touch()
           binary = work / "bin"
@@ -72,8 +72,8 @@ elif name == "rm":
             repo=str(work),
             unit="nested-test",
             phase="command",
-            LINUXAPK_TEST_COMPOSITOR="test",
-            LINUXAPK_E2E="0",
+            INNKEEPER_TEST_COMPOSITOR="test",
+            INNKEEPER_E2E="0",
             private_bus=f"unix:path={runtime}/bus",
             mode=mode,
             trace=str(work / "trace"),

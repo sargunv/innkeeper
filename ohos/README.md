@@ -14,7 +14,7 @@ Android session, `mise run build` or the stage.
 | File                      | What                                                          |
 | ------------------------- | ------------------------------------------------------------- |
 | `build.sh`                | `mise run ohos:build`: the layer in `out/build/ohos/layer`    |
-| `shim/ohos_shim.c`        | `liblinuxapk_ohos_shim.so`, preloaded into all of OH          |
+| `shim/ohos_shim.c`        | `libinnkeeper_ohos_shim.so`, preloaded into all of OH         |
 | `sandbox.sh`              | inside the sandbox: OH's root, then pivot-exec runs OH's init |
 | `run.py`                  | outside: a memory-capped dev sandbox, the boot log, probes    |
 | `sys_prod/etc/init/*.cfg` | our init services, on OH's product partition                  |
@@ -34,7 +34,7 @@ boot fills it within a minute: read early boot from `ohos-kmsg.log`.
 ## Display
 
 ```sh
-LINUXAPK_PROFILE=ohos tests/nested.sh ohos/run.py --display --timeout 60
+INNKEEPER_PROFILE=ohos tests/nested.sh ohos/run.py --display --timeout 60
 ```
 
 `--display` also starts the bridge in the sandbox, so screen 0 opens as one
@@ -93,7 +93,7 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   inode table) reports none, so SceneBoard and the larger apps failed to
   install. The shim's `statfs` reports a free inode per free block there.
 - **Broker.** The same broker, built static for musl (OH's root has no Bionic),
-  with `LINUXAPK_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
+  with `INNKEEPER_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
   `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's
   binder ioctls and serves `/dev/access_token_id`
   ([supervisor/README.md](../supervisor/README.md#openharmony)).

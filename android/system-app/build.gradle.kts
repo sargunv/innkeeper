@@ -40,7 +40,7 @@ val platformKey =
 val keyDir =
   File(
     System.getenv("XDG_CACHE_HOME") ?: "${System.getProperty("user.home")}/.cache",
-    "linuxapk-dev/keys",
+    "innkeeper-dev/keys",
   )
 
 val fetchPlatformKey =

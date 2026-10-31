@@ -1,2 +1,2 @@
-<!-- linuxapk: biometrics HAL declared but never started (disabled service); see android/overlay/README.md -->
+<!-- innkeeper: biometrics HAL declared but never started (disabled service); see android/overlay/README.md -->
 <manifest version="9.0" type="device"/>

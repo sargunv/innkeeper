@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The exec relay: an init service, and the client `linuxapk-session exec` runs.
+# The exec relay: an init service, and the client `innkeeper-session exec` runs.
 if(ANDROID)
-  add_executable(linuxapk-exec linuxapk-exec.c)
-  target_compile_options(linuxapk-exec PRIVATE -Wall -Werror)
-  target_link_options(linuxapk-exec PRIVATE -static)
+  add_executable(innkeeper-exec innkeeper-exec.c)
+  target_compile_options(innkeeper-exec PRIVATE -Wall -Werror)
+  target_link_options(innkeeper-exec PRIVATE -static)
   install(
-    TARGETS linuxapk-exec
-    RUNTIME DESTINATION ${LINUXAPK_ANDROID}/system/bin COMPONENT system)
+    TARGETS innkeeper-exec
+    RUNTIME DESTINATION ${INNKEEPER_ANDROID}/system/bin COMPONENT system)
   install(
-    FILES linuxapk-exec.rc
-    DESTINATION ${LINUXAPK_ANDROID}/system/etc/init
+    FILES innkeeper-exec.rc
+    DESTINATION ${INNKEEPER_ANDROID}/system/etc/init
     COMPONENT system)
 else()
   find_package(Python3 REQUIRED COMPONENTS Interpreter)

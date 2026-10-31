@@ -6,10 +6,10 @@
 # at paths relative to the stage prefix (see tools/build/artifacts.toml);
 # `mise run build:<module>` installs it.
 cmake_minimum_required(VERSION 3.22)
-project(linuxapk C CXX)
+project(innkeeper C CXX)
 
 # The stage's Android tree: one dir per partition, plus apex/<name>.
-set(LINUXAPK_ANDROID share/linuxapk/android)
+set(INNKEEPER_ANDROID share/innkeeper/android)
 
 if(ANDROID)
   add_subdirectory(supervisor/pivot-exec)

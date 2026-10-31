@@ -10,122 +10,123 @@
 task = "build:host"
 runs = "on the desktop, as the user (glibc)"
 artifacts = [
-  "bin/linuxapk",
-  "bin/linuxapk-manager",
-  "libexec/linuxapk/linuxapk-bridge",
-  "share/applications/dev.linuxapk.Manager.desktop",
-  "share/metainfo/dev.linuxapk.Manager.metainfo.xml",
-  "share/icons/hicolor/scalable/apps/dev.linuxapk.Manager.svg",
-  "share/mime/packages/dev.linuxapk.Manager.xml",
+  "bin/innkeeper",
+  "bin/innkeeper-manager",
+  "libexec/innkeeper/innkeeper-bridge",
+  "share/applications/dev.sargunv.Innkeeper.desktop",
+  "share/metainfo/dev.sargunv.Innkeeper.metainfo.xml",
+  "share/icons/hicolor/scalable/apps/dev.sargunv.Innkeeper.svg",
+  "share/icons/hicolor/symbolic/apps/dev.sargunv.Innkeeper-symbolic.svg",
+  "share/mime/packages/dev.sargunv.Innkeeper.xml",
 ]
 
 [module.launcher]
 task = "build:host"
 runs = "in the Flatpak sandbox (glibc)"
-artifacts = ["libexec/linuxapk/linuxapk-session"]
+artifacts = ["libexec/innkeeper/innkeeper-session"]
 
 [module.supervisor]
 task = "build:supervisor"
 runs = "pivot-exec and the broker beside Android in the Flatpak sandbox; the shim in Android processes"
 artifacts = [
-  "libexec/linuxapk/pivot-exec",
-  "share/linuxapk/android/system/bin/linuxapk-broker",
-  "share/linuxapk/android/system/lib64/liblinuxapk_shim.so",
+  "libexec/innkeeper/pivot-exec",
+  "share/innkeeper/android/system/bin/innkeeper-brk",
+  "share/innkeeper/android/system/lib64/libinnkeeper_shim.so",
 ]
 
 [module.graphics]
 task = "build:graphics"
 runs = "in Android, as /vendor HAL services"
 artifacts = [
-  "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk",
-  "share/linuxapk/android/vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk",
-  "share/linuxapk/android/vendor/lib64/hw/mapper.linuxapk.so",
-  "share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/lib/x86_64/libframe_sink.so",
+  "share/innkeeper/android/vendor/bin/hw/android.hardware.graphics.allocator-service.innkeeper",
+  "share/innkeeper/android/vendor/bin/hw/android.hardware.graphics.composer3-service.innkeeper",
+  "share/innkeeper/android/vendor/lib64/hw/mapper.innkeeper.so",
+  "share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/lib/x86_64/libframe_sink.so",
 ]
 
 [module.health]
 task = "build:health"
 runs = "in Android, as a /vendor HAL service"
 artifacts = [
-  "share/linuxapk/android/vendor/bin/hw/android.hardware.health-service.linuxapk",
-  "share/linuxapk/android/vendor/etc/vintf/manifest/android.hardware.health-service.linuxapk.xml",
+  "share/innkeeper/android/vendor/bin/hw/android.hardware.health-service.innkeeper",
+  "share/innkeeper/android/vendor/etc/vintf/manifest/android.hardware.health-service.innkeeper.xml",
 ]
 
 [module.vulkan]
 task = "build:vulkan"
 runs = "in Android, loaded by apps through libvulkan"
 artifacts = [
-  "share/linuxapk/android/vendor/lib64/hw/vulkan.radv.so",
-  "share/linuxapk/android/vendor/lib64/hw/vulkan.anv.so",
-  "share/linuxapk/anv-pci-ids",
-  "share/linuxapk/android/vendor/lib64/hw/vulkan.lvp.so",
-  "share/linuxapk/props.d/vulkan.prop",
+  "share/innkeeper/android/vendor/lib64/hw/vulkan.radv.so",
+  "share/innkeeper/android/vendor/lib64/hw/vulkan.anv.so",
+  "share/innkeeper/anv-pci-ids",
+  "share/innkeeper/android/vendor/lib64/hw/vulkan.lvp.so",
+  "share/innkeeper/props.d/vulkan.prop",
 ]
 
 [module.audio]
 task = "build:audio"
 runs = "in Android, loaded by the AIDL audio HAL"
 artifacts = [
-  "share/linuxapk/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so",
-  "share/linuxapk/android/apex/com.android.hardware.audio/bin/hw/audio_bridge",
-  "share/linuxapk/android/apex/com.android.hardware.audio/etc/audio-bridge.rc",
-  "share/linuxapk/android/vendor/etc/vintf/manifest/audio-bridge.xml",
-  "share/linuxapk/android/vendor/etc/primary_audio_policy_configuration.xml",
-  "share/linuxapk/props.d/audio.prop",
+  "share/innkeeper/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so",
+  "share/innkeeper/android/apex/com.android.hardware.audio/bin/hw/audio_bridge",
+  "share/innkeeper/android/apex/com.android.hardware.audio/etc/audio-bridge.rc",
+  "share/innkeeper/android/vendor/etc/vintf/manifest/audio-bridge.xml",
+  "share/innkeeper/android/vendor/etc/primary_audio_policy_configuration.xml",
+  "share/innkeeper/props.d/audio.prop",
 ]
 
 [module.system]
 task = "build:system"
 runs = "in Android, as /system binaries"
 artifacts = [
-  "share/linuxapk/android/system/bin/linuxapk-exec",
-  "share/linuxapk/android/system/bin/linuxapk-iptables",
-  "share/linuxapk/android/system/bin/iptables",
-  "share/linuxapk/android/system/bin/iptables-restore",
-  "share/linuxapk/android/system/bin/ip6tables",
-  "share/linuxapk/android/system/bin/ip6tables-restore",
-  "share/linuxapk/android/system/etc/init/linuxapk-exec.rc",
+  "share/innkeeper/android/system/bin/innkeeper-exec",
+  "share/innkeeper/android/system/bin/innkeeper-iptables",
+  "share/innkeeper/android/system/bin/iptables",
+  "share/innkeeper/android/system/bin/iptables-restore",
+  "share/innkeeper/android/system/bin/ip6tables",
+  "share/innkeeper/android/system/bin/ip6tables-restore",
+  "share/innkeeper/android/system/etc/init/innkeeper-exec.rc",
 ]
 
 [module.system-app]
 task = "build:system-app"
 runs = "in Android, as a privileged system app"
 artifacts = [
-  "share/linuxapk/android/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk",
-  "share/linuxapk/android/system_ext/overlay/LinuxApkWindowPolicy.apk",
-  "share/linuxapk/android/system_ext/etc/permissions/dev.linuxapk.system.xml",
+  "share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/InnkeeperSystem.apk",
+  "share/innkeeper/android/system_ext/overlay/InnkeeperWindowPolicy.apk",
+  "share/innkeeper/android/system_ext/etc/permissions/dev.sargunv.innkeeper.system.xml",
 ]
 
 [module.overlay]
 task = "build:data"
 runs = "in Android: config files layered over the image's partitions"
 artifacts = [
-  "share/linuxapk/android/system/etc/init/hw/init.rc",
-  "share/linuxapk/android/vendor/etc/init/hw/init.linuxapk.rc",
+  "share/innkeeper/android/system/etc/init/hw/init.rc",
+  "share/innkeeper/android/vendor/etc/init/hw/init.innkeeper.rc",
 ]
 
 [module.image]
 task = "build:data"
 runs = "on the desktop, when the launcher prepares the image"
 artifacts = [
-  "share/linuxapk/image/pin.toml",
-  "share/linuxapk/image/bootconfig",
-  "share/linuxapk/image/vendor.prop",
-  "libexec/linuxapk/image/fetch.sh",
-  "libexec/linuxapk/image/extract.sh",
-  "libexec/linuxapk/image/flatten-apex.sh",
-  "libexec/linuxapk/image/fs-extract.sh",
-  "libexec/linuxapk/image/derive.sh",
+  "share/innkeeper/image/pin.toml",
+  "share/innkeeper/image/bootconfig",
+  "share/innkeeper/image/vendor.prop",
+  "libexec/innkeeper/image/fetch.sh",
+  "libexec/innkeeper/image/extract.sh",
+  "libexec/innkeeper/image/flatten-apex.sh",
+  "libexec/innkeeper/image/fs-extract.sh",
+  "libexec/innkeeper/image/derive.sh",
 ]
 
 [module.image-tools]
 task = "build:image-tools"
 runs = "on the desktop, when the launcher prepares the image (static)"
 artifacts = [
-  "libexec/linuxapk/simg2img",
-  "libexec/linuxapk/lpunpack",
-  "libexec/linuxapk/fsck.erofs",
-  "libexec/linuxapk/debugfs",
+  "libexec/innkeeper/simg2img",
+  "libexec/innkeeper/lpunpack",
+  "libexec/innkeeper/fsck.erofs",
+  "libexec/innkeeper/debugfs",
 ]
 
 [overrides]

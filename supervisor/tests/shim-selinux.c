@@ -29,19 +29,20 @@ int main(int argc, char** argv) {
     char* context = NULL;
     assert(native(path, &context) == -1 && errno == ENODATA);
     assert(getters[i](path, &context) > 0);
-    assert(strcmp("u:object_r:linuxapk_exec:s0", context) == 0);
+    assert(strcmp("u:object_r:innkeeper_exec:s0", context) == 0);
     free(context);
     const char label[] = "u:object_r:test_exec:s0";
     assert(
-      setxattr(path, "user.linuxapk.test.selinux", label, sizeof(label), 0) == 0
+      setxattr(path, "user.innkeeper.test.selinux", label, sizeof(label), 0) ==
+      0
     );
     assert(getters[i](path, &context) > 0);
     assert(strcmp(label, context) == 0);
     free(context);
-    assert(removexattr(path, "user.linuxapk.test.selinux") == 0);
+    assert(removexattr(path, "user.innkeeper.test.selinux") == 0);
     context = NULL;
     errno = 0;
-    assert(getters[i]("/linuxapk-nonexistent-label-test", &context) == -1);
+    assert(getters[i]("/innkeeper-nonexistent-label-test", &context) == -1);
     assert(errno == ENOENT);
     printf(
       "ok   %s: unlabeled fallback; real label and ENOENT preserved\n", names[i]
@@ -50,7 +51,7 @@ int main(int argc, char** argv) {
   // The lget variants must inspect the link, not inherit its target's label.
   const char label[] = "u:object_r:test_target:s0";
   assert(
-    setxattr(path, "user.linuxapk.test.selinux", label, sizeof(label), 0) == 0
+    setxattr(path, "user.innkeeper.test.selinux", label, sizeof(label), 0) == 0
   );
   char link[4096];
   assert(snprintf(link, sizeof(link), "%s/link", argv[1]) > 0);
@@ -58,7 +59,9 @@ int main(int argc, char** argv) {
   for (unsigned i = 0; i < 4; i++) {
     char* context = NULL;
     assert(getters[i](link, &context) > 0);
-    assert(strcmp(i < 2 ? label : "u:object_r:linuxapk_exec:s0", context) == 0);
+    assert(
+      strcmp(i < 2 ? label : "u:object_r:innkeeper_exec:s0", context) == 0
+    );
     free(context);
   }
   assert(unlink(link) == 0);

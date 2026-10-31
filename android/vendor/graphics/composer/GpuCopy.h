@@ -2,7 +2,7 @@
 #pragma once
 #include "Buffer.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 // Mixed virtual-display composition renders into scratch storage. Copy it on
 // the GPU into the ImageReader's sink, whose ownership can follow RELEASE.
 class GpuCopy {
@@ -15,4 +15,4 @@ class GpuCopy {
   struct State;
   std::unique_ptr<State> mState;
 };
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

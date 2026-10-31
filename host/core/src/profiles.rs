@@ -1,4 +1,4 @@
-//! Profiles ([`linuxapk_session::profile`]) as the CLI and the manager show
+//! Profiles ([`innkeeper_session::profile`]) as the CLI and the manager show
 //! them: listed with their state and settings, created, renamed, deleted,
 //! started and stopped, and the one to use when none is named. Each works on
 //! the named profile, whatever this process's is.
@@ -6,8 +6,8 @@
 use std::fs;
 
 use anyhow::{Result, bail};
-use linuxapk_session::profile;
-pub use linuxapk_session::profile::{FIRST, Mode, Settings, Size, check_name};
+use innkeeper_session::profile;
+pub use innkeeper_session::profile::{FIRST, Mode, Settings, Size, check_name};
 
 use crate::launcher::Session;
 use crate::paths::Prefix;
@@ -21,14 +21,14 @@ pub struct Profile {
     pub settings: Settings,
 }
 
-fn paths(name: &str) -> Result<linuxapk_session::Paths> {
+fn paths(name: &str) -> Result<innkeeper_session::Paths> {
     Prefix::locate()?.profile_paths(name)
 }
 
 /// The profiles' names.
 fn names() -> Vec<String> {
-    let mut v = profile::list(&linuxapk_session::paths::data_home());
-    // One whose data lives elsewhere (`LINUXAPK_DATA`) is still one.
+    let mut v = profile::list(&innkeeper_session::paths::data_home());
+    // One whose data lives elsewhere (`INNKEEPER_DATA`) is still one.
     if let Ok(p) = crate::paths::profile()
         && !v.contains(&p)
     {
@@ -45,7 +45,7 @@ pub fn list() -> Result<Vec<Profile>> {
         .map(|name| {
             let p = paths(&name)?;
             Ok(Profile {
-                running: linuxapk_session::status(&p).pid.is_some(),
+                running: innkeeper_session::status(&p).pid.is_some(),
                 settings: Settings::load(&p.data).unwrap_or_default(),
                 name,
             })
@@ -53,7 +53,7 @@ pub fn list() -> Result<Vec<Profile>> {
         .collect()
 }
 
-/// The profile to use when none is named (`--profile`, `LINUXAPK_PROFILE`):
+/// The profile to use when none is named (`--profile`, `INNKEEPER_PROFILE`):
 /// the one last [`choose`]n, else the first. With none, `create` makes
 /// [`FIRST`].
 pub fn resolve(create: bool) -> Result<String> {
@@ -65,7 +65,7 @@ pub fn resolve(create: bool) -> Result<String> {
 
 /// [`resolve`], whatever this process's profile is.
 pub fn fallback(create: bool) -> Result<String> {
-    let names = profile::list(&linuxapk_session::paths::data_home());
+    let names = profile::list(&innkeeper_session::paths::data_home());
     let chosen = fs::read_to_string(profile::chosen_file()).ok();
     if let Some(p) = profile::pick(&names, chosen.as_deref().map(str::trim)) {
         return Ok(p.clone());
@@ -115,7 +115,7 @@ pub fn create(name: &str, settings: &Settings) -> Result<()> {
 /// be stopped.
 pub fn rename(from: &str, to: &str) -> Result<()> {
     profile::rename(&paths(from)?, &paths(to)?)?;
-    if let Ok(cli) = crate::ops::linuxapk() {
+    if let Ok(cli) = crate::ops::innkeeper() {
         xdg::move_entries(&Dirs::from_env(), &cli, from, to);
     }
     if chosen().as_deref() == Some(from) {

@@ -27,7 +27,7 @@ class VulkanRunnerTests(unittest.TestCase):
       bionic.write_text(
         "#!/bin/bash\n"
         "if [[ $* == *getprop* ]]; then\n"
-        '  echo "linuxapk-selected-driver=$TEST_SELECTED_DRIVER"\n'
+        '  echo "innkeeper-selected-driver=$TEST_SELECTED_DRIVER"\n'
         "fi\n"
       )
       bionic.chmod(0o755)

@@ -11,7 +11,7 @@
 #include "Common.h"
 #include "Display.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 using namespace ::aidl::android::hardware::graphics::composer3;
 using ::aidl::android::hardware::common::NativeHandle;
@@ -168,4 +168,4 @@ class ComposerClient : public BnComposerClient {
   std::function<void()> mOnDestroyed;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

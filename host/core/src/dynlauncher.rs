@@ -38,7 +38,7 @@ fn connect() -> Result<Connection> {
 pub fn install(id: &str, name: &str, icon: &[u8], entry: &str) -> Result<Answer> {
     let conn = connect()?;
     let token = format!(
-        "linuxapk{}_{}",
+        "innkeeper{}_{}",
         std::process::id(),
         TOKEN.fetch_add(1, Ordering::Relaxed)
     );
@@ -175,32 +175,35 @@ mod tests {
 
     #[test]
     fn reads_rewritten_exec() {
-        // What xdg-desktop-portal 1.22 writes for `Exec=linuxapk run a.b %U`.
-        let exec = "flatpak run --command=linuxapk 'dev.linuxapk.Manager' run a.b %U";
+        // What xdg-desktop-portal 1.22 writes for `Exec=innkeeper run a.b %U`.
+        let exec = "flatpak run --command=innkeeper 'dev.sargunv.Innkeeper' run a.b %U";
         assert_eq!(
-            app_command(exec, "dev.linuxapk.Manager").unwrap(),
-            ["linuxapk", "run", "a.b", "%U"]
+            app_command(exec, "dev.sargunv.Innkeeper").unwrap(),
+            ["innkeeper", "run", "a.b", "%U"]
         );
-        let named = "flatpak run --branch=master --command=env 'dev.linuxapk.Manager' \
-                     LINUXAPK_PROFILE=gui linuxapk run \"a b\" %U";
+        let named = "flatpak run --branch=master --command=env 'dev.sargunv.Innkeeper' \
+                     INNKEEPER_PROFILE=gui innkeeper run \"a b\" %U";
         assert_eq!(
-            app_command(named, "dev.linuxapk.Manager").unwrap(),
+            app_command(named, "dev.sargunv.Innkeeper").unwrap(),
             [
                 "env",
-                "LINUXAPK_PROFILE=gui",
-                "linuxapk",
+                "INNKEEPER_PROFILE=gui",
+                "innkeeper",
                 "run",
                 "a b",
                 "%U"
             ]
         );
         assert_eq!(
-            app_command("/x/linuxapk run a.b", "dev.linuxapk.Manager"),
+            app_command("/x/innkeeper run a.b", "dev.sargunv.Innkeeper"),
             None
         );
         assert_eq!(app_command(exec, "org.other.App"), None);
         assert_eq!(
-            app_command("flatpak run 'dev.linuxapk.Manager'", "dev.linuxapk.Manager"),
+            app_command(
+                "flatpak run 'dev.sargunv.Innkeeper'",
+                "dev.sargunv.Innkeeper"
+            ),
             None
         );
     }

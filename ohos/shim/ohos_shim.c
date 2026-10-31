@@ -94,13 +94,13 @@ static int same(const char* a, const char* b) {
   return starts(a, b) && starts(b, a);
 }
 
-// pivot-exec marks init with LINUXAPK_SHIM_INIT, which the services init
+// pivot-exec marks init with INNKEEPER_SHIM_INIT, which the services init
 // starts don't inherit. The spawners are known by name; the apps they fork
 // inherit the flag.
 __attribute__((constructor)) static void ohos_shim_init(void) {
-  if (getenv("LINUXAPK_SHIM_INIT")) {
+  if (getenv("INNKEEPER_SHIM_INIT")) {
     init_pid = sys0(SYS_getpid);
-    unsetenv("LINUXAPK_SHIM_INIT");
+    unsetenv("INNKEEPER_SHIM_INIT");
     return;
   }
   char comm[32] = {0};

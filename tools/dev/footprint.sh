@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Memory of a running session (LINUXAPK_PROFILE names its profile): PSS and RSS of every
+# Memory of a running session (INNKEEPER_PROFILE names its profile): PSS and RSS of every
 # process in it, largest PSS first, then the session cgroup's totals.
 #   tools/dev/footprint.sh [-n N]    (only the N largest processes)
 # Android's processes are read from inside the session, since
@@ -13,7 +13,7 @@ top=0
 
 pid=$("$session" status | sed -n 's/^running: host pid //p')
 [[ -n $pid ]] || {
-  echo "no running session${LINUXAPK_PROFILE:+ ($LINUXAPK_PROFILE)}" >&2
+  echo "no running session${INNKEEPER_PROFILE:+ ($INNKEEPER_PROFILE)}" >&2
   exit 1
 }
 cg=$("$session" cgroup)

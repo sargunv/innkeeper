@@ -1,7 +1,7 @@
 // Exercise the real connection handler with a private socketpair, without
 // binding the production /dev/socket path or starting Android.
 #define main relay_main
-#include "../linuxapk-exec.c"
+#include "../innkeeper-exec.c"
 #undef main
 
 int main(int argc, char** argv) {

@@ -25,8 +25,8 @@ wait_service() {
 
 servicemanager &
 wait_service manager
-/vendor/bin/hw/android.hardware.graphics.allocator-service.linuxapk &
-/vendor/bin/hw/android.hardware.graphics.composer3-service.linuxapk &
+/vendor/bin/hw/android.hardware.graphics.allocator-service.innkeeper &
+/vendor/bin/hw/android.hardware.graphics.composer3-service.innkeeper &
 wait_service android.hardware.graphics.allocator.IAllocator/default
 wait_service android.hardware.graphics.composer3.IComposer/default
 

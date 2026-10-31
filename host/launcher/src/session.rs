@@ -27,7 +27,7 @@ pub fn append(path: &Path) -> Result<File> {
 /// Appends a line to session.log.
 pub fn log(paths: &Paths, msg: &str) {
     if let Ok(mut f) = append(&paths.session_log()) {
-        let _ = writeln!(f, "linuxapk-session: {msg}");
+        let _ = writeln!(f, "innkeeper-session: {msg}");
     }
 }
 
@@ -107,7 +107,7 @@ pub static ENDING: AtomicBool = AtomicBool::new(false);
 /// Starts the bridge, restarts it whenever it exits, and waits for its socket.
 pub fn start_bridge(cfg: &Config) -> Result<()> {
     let p = &cfg.paths;
-    let bridge = p.libexec.join("linuxapk-bridge");
+    let bridge = p.libexec.join("innkeeper-bridge");
     let (args, env, log) = (
         cfg.bridge_args.clone(),
         cfg.bridge_env.clone(),
@@ -128,7 +128,7 @@ pub fn start_bridge(cfg: &Config) -> Result<()> {
             })()
             .unwrap_or_else(|e| format!("{e:#}"));
             if let Ok(mut f) = append(&log) {
-                let _ = writeln!(f, "linuxapk-session: bridge exited ({st}); restarting");
+                let _ = writeln!(f, "innkeeper-session: bridge exited ({st}); restarting");
             }
             thread::sleep(Duration::from_secs(1));
             if ENDING.load(Ordering::SeqCst) {

@@ -1,7 +1,7 @@
 //! Plays a sine through a running bridge, the way the Android client does
 //! (ring + eventfds), and reports the bridge's timing estimates.
 //!
-//!   cargo run -p linuxapk-bridge --example tone -- SOCKET [SECONDS] [HZ]
+//!   cargo run -p innkeeper-bridge --example tone -- SOCKET [SECONDS] [HZ]
 
 use std::io::IoSliceMut;
 use std::mem::MaybeUninit;
@@ -9,11 +9,11 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::audio::proto::{
+use innkeeper_bridge::audio::proto::{
     self as audio, OpenReply, Request, SampleFormat, StreamConfig,
 };
-use linuxapk_bridge::ipc::proto::{Hello, service};
-use linuxapk_bridge::ipc::wire;
+use innkeeper_bridge::ipc::proto::{Hello, service};
+use innkeeper_bridge::ipc::wire;
 use rustix::event::{PollFd, PollFlags};
 use rustix::net::{
     AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendFlags, SocketAddrUnix,
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         let ts = hdr(208).load(Ordering::Acquire);
         if ts != 0 && w - last_report >= rate as u64 / 10 {
             last_report = w;
-            let now = linuxapk_bridge::audio::stream::monotonic_ns();
+            let now = innkeeper_bridge::audio::stream::monotonic_ns();
             let presented_now = played as f64 + (now.saturating_sub(ts)) as f64 * rate as f64 / 1e9;
             let ms = (w as f64 - presented_now) * 1000.0 / rate as f64;
             lat_samples.push(ms);

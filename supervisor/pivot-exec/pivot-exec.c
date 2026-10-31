@@ -48,7 +48,7 @@ static void exec_broker(int pins, int listener, pid_t init) {
   if (flat) {
     char pid[16];
     snprintf(pid, sizeof(pid), "%d", init);
-    setenv("LINUXAPK_INIT_PID", pid, 1);
+    setenv("INNKEEPER_INIT_PID", pid, 1);
   }
   // Inherited fds must survive exec; clear CLOEXEC.
   if (pins >= 0) fcntl(pins, F_SETFD, 0);
@@ -128,15 +128,15 @@ static int child_main(void* arg) {
       0
     )
       die("mount /proc");
-    bind_if_present("/linuxapk/proc/cmdline", "/proc/cmdline");
-    bind_if_present("/linuxapk/proc/bootconfig", "/proc/bootconfig");
+    bind_if_present("/innkeeper/proc/cmdline", "/proc/cmdline");
+    bind_if_present("/innkeeper/proc/bootconfig", "/proc/bootconfig");
     bind_if_present(
-      "/linuxapk/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
+      "/innkeeper/proc/sys/vm/mmap_rnd_bits", "/proc/sys/vm/mmap_rnd_bits"
     );
   } else {
     // The shim's cue that this process is init (it isn't pid 1 here): init
     // keeps the shim, its services don't inherit it.
-    setenv("LINUXAPK_SHIM_INIT", "1", 1);
+    setenv("INNKEEPER_SHIM_INIT", "1", 1);
   }
 
   // Rust installs the filter, hands its listener to our parent, then execs
@@ -157,7 +157,7 @@ static int child_main(void* arg) {
   // only in the environment Rust hands to the final Android exec.
   const char* preload = getenv("LD_PRELOAD");
   if (preload) {
-    if (setenv("LINUXAPK_INIT_PRELOAD", preload, 1) != 0) die("save preload");
+    if (setenv("INNKEEPER_INIT_PRELOAD", preload, 1) != 0) die("save preload");
     unsetenv("LD_PRELOAD");
   }
   execve(broker, args, environ);
@@ -171,12 +171,12 @@ int main(int argc, char** argv) {
     return 2;
   }
   child_argv = argv + 2;
-  broker = getenv("LINUXAPK_BROKER");
+  broker = getenv("INNKEEPER_BROKER");
   if (broker == NULL || broker[0] == '\0') {
-    fprintf(stderr, "pivot-exec: LINUXAPK_BROKER (the broker) is not set\n");
+    fprintf(stderr, "pivot-exec: INNKEEPER_BROKER (the broker) is not set\n");
     return 2;
   }
-  const char* harness = getenv("LINUXAPK_BIONIC_HARNESS");
+  const char* harness = getenv("INNKEEPER_BIONIC_HARNESS");
   flat = !(harness && strcmp(harness, "1") == 0);
 
   if (flat) {

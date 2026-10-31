@@ -14,7 +14,7 @@ dumb buffers on `/dev/dri/card0`), installed in `/vendor/lib64` by
 | `log.h`        | hilog through `libhilog.so`'s C API                   |                                               |
 
 - **Composer.** One display, 0, at 60 Hz: by default a 720x1280 phone panel at
-  320 dpi (`LINUXAPK_OHOS_DISPLAY`, `<width>x<height>@<dpi>`, which
+  320 dpi (`INNKEEPER_OHOS_DISPLAY`, `<width>x<height>@<dpi>`, which
   `ohos/sandbox.sh` also gives DMS), reported as a built-in panel so it is OH's
   main screen. Every layer is composed by render_service (`COMPOSITION_CLIENT`);
   each committed client target goes to the bridge's display service

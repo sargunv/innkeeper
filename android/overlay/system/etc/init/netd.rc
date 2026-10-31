@@ -1,6 +1,6 @@
 # This should be similar to proper 'netd' below, this is merely a quick self test during bootup.
 # If this invocation fails during a mainline module update it should trigger a module rollback.
-# linuxapk: netd can't load its eBPF maps in a user namespace, so the self
+# innkeeper: netd can't load its eBPF maps in a user namespace, so the self
 # test always fails and would reboot the session. Make it a no-op.
 service netd1shot /system/bin/true
     disabled # only started once bpf programs are loaded
@@ -29,11 +29,11 @@ service netd /system/bin/netd
     # netd is not updatable, but depends on libs provided by tethering apex.
     # Mark it as updatable so init won't start it until all APEX packages are ready.
     updatable
-    # linuxapk: in Flatpak mode the session shares the host's network, where
+    # innkeeper: in Flatpak mode the session shares the host's network, where
     # netd's routing rules are refused; the shim reports them done.
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
-    setenv LINUXAPK_NETLINK_ACCEPT 1
-    # linuxapk: netd aborts without its eBPF programs (unavailable in a user
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    setenv INNKEEPER_NETLINK_ACCEPT 1
+    # innkeeper: netd aborts without its eBPF programs (unavailable in a user
     # namespace). Run it once instead of crash-looping, and don't take zygote
     # down with it.
     oneshot

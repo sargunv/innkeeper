@@ -9,7 +9,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$(dirname "$here")")
 : "${ANDROID_HOME:?not set (run through mise)}"
-img=linuxapk-build:$(sha256sum "$here/Containerfile" | cut -c1-12)
+img=innkeeper-build:$(sha256sum "$here/Containerfile" | cut -c1-12)
 if ! podman image exists "$img"; then
   podman build -q -t "$img" -f "$here/Containerfile" "$here" >/dev/null
 fi

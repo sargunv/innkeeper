@@ -5,7 +5,7 @@
 
 #include "Input.h"
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 StreamInBridge::StreamInBridge(
   size_t frames, uint32_t channels, std::shared_ptr<std::atomic<bool>> muted
 )
@@ -117,4 +117,4 @@ void StreamInBridge::run() {
   }
   stop();
 }
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

@@ -1,0 +1,71 @@
+# The Innkeeper Flatpak (README.md here). build.sh fills the two out/flatpak
+# dirs this reads: src (`git archive HEAD`, a clean tree) with the vendored
+# crates, and prebuilt (what runs inside Android, from `mise run build`).
+id: dev.sargunv.Innkeeper
+runtime: org.gnome.Platform
+runtime-version: "51"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: innkeeper
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=pulseaudio
+  # The render node and /dev/udmabuf. --device=all would bind the host's /dev
+  # over the sandbox's writable one, where the session makes its binder nodes.
+  - --device=dri
+  # Controllers through evdev; also exposes host keyboards/mice (desktop parity).
+  - --device=input
+  # The host's network, as any desktop app has; Android uses it directly.
+  - --share=network
+  # Android's notifications, with replace-in-place, progress and inline reply,
+  # which the Notification portal lacks.
+  - --talk-name=org.freedesktop.Notifications
+  # The desktop's assistive-technology switch (Flatpak's AT-SPI proxy alone
+  # exposes GetAddress, not org.a11y.Status properties).
+  - --talk-name=org.a11y.Bus
+  # adb into a profile (off by default): only the user's adb public key, read
+  # to authorize it in the profile's data (host/launcher/src/adb.rs).
+  - --filesystem=~/.android/adbkey.pub:ro
+  # No battery portal exists on the supported desktop baseline.
+  - --system-talk-name=org.freedesktop.UPower
+modules:
+  # Bionic and static binaries, Android's partitions and the image scripts:
+  # nothing in them links the runtime.
+  - name: android
+    buildsystem: simple
+    build-commands:
+      - cp -a --no-preserve=ownership . /app/
+    sources:
+      - type: dir
+        path: ../../out/flatpak/prebuilt
+
+  # Everything that runs on the desktop, built against the runtime.
+  - name: innkeeper
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/innkeeper/cargo
+        CARGO_NET_OFFLINE: "true"
+    build-commands:
+      - mkdir -p cargo
+      - printf '[source.crates-io]\nreplace-with =
+        "vendored"\n[source.vendored]\ndirectory = "vendor"\n'
+        >cargo/config.toml
+      - tools/build/host.sh
+      - cp -a out/build/host/install/. out/build/launcher/install/. /app/
+      # This module's rows of the stage manifest (tools/build/stage.sh).
+      - |
+        for m in host launcher; do
+          (cd out/build/$m/install && find . -type f -printf '%P\n' | sort | while read -r p; do
+            printf '%s\t%s\t%s\n' "$p" "$m" "$(sha256sum <"$p" | cut -d' ' -f1)"
+          done)
+        done >>/app/share/innkeeper/manifest.tsv
+    sources:
+      - type: dir
+        path: ../../out/flatpak/src
+      - type: dir
+        path: ../../out/flatpak/vendor
+        dest: vendor

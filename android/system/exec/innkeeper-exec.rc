@@ -1,0 +1,11 @@
+# innkeeper: binder is served through the seccomp filter on init, which
+# `innkeeper-session exec` processes don't have. This relay, an init
+# descendant, runs their commands instead (android/system/exec/innkeeper-exec.c).
+service innkeeper-execd /system/bin/innkeeper-exec --serve
+    class core
+    user root
+    group root
+    disabled
+
+on post-fs-data
+    start innkeeper-execd

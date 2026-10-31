@@ -419,7 +419,7 @@ mod tests {
                     class_name: "android.widget.EditText".into(),
                     text: "héllo".into(),
                     hint: "Name".into(),
-                    view_id: "dev.linuxapk.probes:id/name".into(),
+                    view_id: "dev.sargunv.innkeeper.probes:id/name".into(),
                     selection: (1, 3),
                     live: 1,
                     range: Some(Range {

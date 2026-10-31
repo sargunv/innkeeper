@@ -5,11 +5,11 @@ installed on Android's init and inherited by every Android process, turns what
 an unprivileged namespace can't do into user notifications.
 `mise run build:supervisor` builds all three artifacts.
 
-| Dir          | Artifact (stage path)                                             | Runs                                                     | Start reading                 |
-| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
-| `pivot-exec` | `libexec/linuxapk/pivot-exec` (static C)                          | static pivot/namespace bootstrap                         | `pivot-exec.c`                |
-| `broker`     | `share/linuxapk/android/system/bin/linuxapk-broker` (bionic Rust) | execed by pivot-exec in the sandbox, Android's parent    | `src/notify.rs`, `src/bpf.rs` |
-| `shim`       | `share/linuxapk/android/system/lib64/liblinuxapk_shim.so`         | LD_PRELOADed into init and the services whose rc sets it | `linuxapk_shim.c`             |
+| Dir          | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
+| ------------ | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
+| `pivot-exec` | `libexec/innkeeper/pivot-exec` (static C)                        | static pivot/namespace bootstrap                         | `pivot-exec.c`                |
+| `broker`     | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | execed by pivot-exec in the sandbox, Android's parent    | `src/notify.rs`, `src/bpf.rs` |
+| `shim`       | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so`      | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
 
 ## What is trapped, and who serves it
 
@@ -87,12 +87,12 @@ applied to the virtual ids, and capabilities are virtual.
 
 **The owner contract.** A `chown` runs as a no-op `fchownat(-1, -1)` (for the
 kernel's errors and side effects) and records the owner as
-`user.linuxapk.owner` = `"uid:gid"`. Readers:
+`user.innkeeper.owner` = `"uid:gid"`. Readers:
 
 - the broker's emulated `lstat` and `faccessat(W_OK)` for `/data`, the BPF pins,
   `/metadata` and clatd (a file without a record inherits its closest recorded
   ancestor's owner, so ART sees an app's APK as not writable by it);
-- the shim's `stat` family in installd (`LINUXAPK_VSTAT=1` in its rc);
+- the shim's `stat` family in installd (`INNKEEPER_VSTAT=1` in its rc);
 - `image/derive.sh single`, which writes the same xattr on image files whose
   owner Android verifies.
 
@@ -111,13 +111,13 @@ In Flatpak mode the sandbox's own seccomp filter refuses some calls before ours
 sees them, so the shim covers them where it is loaded: `mount`, `umount`,
 `unshare`, `setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)`
 (which the connectivity stack only opens and closes) gets an eventfd; netd's
-refused rtnetlink requests read as done (`LINUXAPK_NETLINK_ACCEPT`); vold's
+refused rtnetlink requests read as done (`INNKEEPER_NETLINK_ACCEPT`); vold's
 uevent socket binds to a kernel-chosen port (concurrent sessions share the
 host's network, so their pid-numbered ports collide); and lmkd's PSI trigger
-windows are widened to 2 s (`LINUXAPK_PSI_WINDOW`). Init isn't pid 1 there, so
-pivot-exec marks it with `LINUXAPK_SHIM_INIT`.
+windows are widened to 2 s (`INNKEEPER_PSI_WINDOW`). Init isn't pid 1 there, so
+pivot-exec marks it with `INNKEEPER_SHIM_INIT`.
 
-lmkd also opts into `LINUXAPK_OOM_ADJ`: its writes to
+lmkd also opts into `INNKEEPER_OOM_ADJ`: its writes to
 `/proc/<pid>/oom_score_adj` map Android's -1000…1000 range into the inherited
 session score…1000 (with a minimum floor of 0). The kernel lets an unprivileged
 process lower a score back to that floor, so a cached app returning to the
@@ -127,9 +127,9 @@ scores for its own kill policy.
 Android 17 mounts every visible emulated volume through FUSE; the old
 `persist.sys.fuse` switch no longer selects a non-FUSE path. Flatpak has no
 `/dev/fuse` and cannot mount filesystems. For vold only
-(`LINUXAPK_EMULATED_STORAGE=1`), `shim/fuse.h` provides a socket with the stable
-FUSE INIT request so MediaProvider starts its storage session. The launcher
-links `/storage/emulated`, `/mnt/user/0/emulated` and
+(`INNKEEPER_EMULATED_STORAGE=1`), `shim/fuse.h` provides a socket with the
+stable FUSE INIT request so MediaProvider starts its storage session. The
+launcher links `/storage/emulated`, `/mnt/user/0/emulated` and
 `/mnt/pass_through/0/emulated` to `/data/media`. All file access uses that same
 filesystem, with no FUSE cache or filesystem requests. MediaProvider receives
 the mounted-volume notification, scans the volume and serves MediaStore; apps
@@ -142,7 +142,7 @@ unmount.
 
 ## OpenHarmony
 
-`LINUXAPK_GUEST=ohos` ([ohos/](../ohos/README.md)) keeps everything above and
+`INNKEEPER_GUEST=ohos` ([ohos/](../ohos/README.md)) keeps everything above and
 adds what OpenHarmony's userspace expects of its kernel. Android sessions never
 set it, and their filter and driver are unchanged.
 
@@ -172,7 +172,7 @@ set it, and their filter and driver are unchanged.
 
 ## Tests
 
-- `cargo test -p linuxapk-broker` (binder transactions, failure delivery,
+- `cargo test -p innkeeper-broker` (binder transactions, failure delivery,
   freezing and credential behaviour) runs in `mise run test`.
 - `tests/bpfemu.sh` and `tests/seccomp-filter.sh` (in `mise run test`) check the
   emulator's bounds and exactly which syscalls notify in each mode;

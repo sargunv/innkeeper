@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -11,10 +11,10 @@
 #include "FrameDumper.h"
 #include "GpuCopy.h"
 #include "Presenter.h"
-#include "linuxapk/buffer_alloc.h"
-#include "linuxapk/log.h"
+#include "innkeeper/buffer_alloc.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 // Encodes dumps off the present path: present() copies the pixels (a few ms)
 // and the worker compresses/writes them. Frames are dropped while it is busy.
@@ -136,4 +136,4 @@ void HeadlessPresenter::present(const FrameInput& frame) {
   }
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

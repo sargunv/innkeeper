@@ -8,12 +8,12 @@
 #include <string.h>
 
 #include "FrameDumper.h"
-#include "linuxapk/layout.h"
+#include "innkeeper/layout.h"
 
-using namespace linuxapk;
-using namespace linuxapk::hwc;
+using namespace innkeeper;
+using namespace innkeeper::hwc;
 
-void linuxapk_host_assert(
+void innkeeper_host_assert(
   const char* file, int line, const char* msg
 ) noexcept {
   abort();

@@ -12,13 +12,13 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_core::launcher;
+use innkeeper_core::launcher;
 
 use crate::budget::Measured;
 
 /// How long the session idles after a cold start before its memory is read:
 /// past the 60 s after boot in which Android keeps the processes the boot
-/// broadcasts started (init.linuxapk.rc).
+/// broadcasts started (init.innkeeper.rc).
 const IDLE_SETTLE: Duration = Duration::from_secs(90);
 
 /// A session it started itself is stopped again when this is dropped, so a
@@ -30,7 +30,7 @@ pub struct Session {
     driver: PathBuf,
     /// The host bridge's log, in the session's state directory.
     bridge_log: PathBuf,
-    /// LinuxApkProbes.apk (out/test/probes), for its input harness.
+    /// InnkeeperProbes.apk (out/test/probes), for its input harness.
     pub probes: PathBuf,
 }
 
@@ -157,7 +157,7 @@ impl Session {
         self.start(!window, &|m: &str| eprintln!("compat: {m}"))?;
         while !self.booted() {
             if !self.running() {
-                bail!("the session stopped while booting (see `linuxapk-session log`)");
+                bail!("the session stopped while booting (see `innkeeper-session log`)");
             }
             if t.elapsed() > Duration::from_secs(300) {
                 bail!("the session did not finish booting in 300 s");
@@ -271,7 +271,7 @@ impl Session {
 
     /// Whether the composer runs without host windows.
     pub fn headless(&self) -> bool {
-        self.getprop("vendor.linuxapk.hwc.backend") == "headless"
+        self.getprop("vendor.innkeeper.hwc.backend") == "headless"
     }
 }
 

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
-  Linux.apk System: privileged, platform-signed, persistent. Installed in
-  /system_ext/priv-app/LinuxApkSystem with
-  /system_ext/etc/permissions/dev.linuxapk.system.xml.
+  Innkeeper System: privileged, platform-signed, persistent. Installed in
+  /system_ext/priv-app/InnkeeperSystem with
+  /system_ext/etc/permissions/dev.sargunv.innkeeper.system.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -37,21 +37,21 @@
   <uses-permission android:name="android.permission.SET_ORIENTATION" />
   <!-- Labels and launch intents of the apps it opens. -->
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-  <!-- signature|privileged: listed in dev.linuxapk.system.xml. -->
+  <!-- signature|privileged: listed in dev.sargunv.innkeeper.system.xml. -->
   <uses-permission android:name="android.permission.REAL_GET_TASKS" />
   <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
-  <!-- signature|privileged: makes the Linux.apk Keyboard the default input method, turns the
+  <!-- signature|privileged: makes the Innkeeper Keyboard the default input method, turns the
        accessibility service on and off, and applies the desktop settings below. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
   <!-- Desktop integration (host/bridge/src/system/proto.rs). Holders get the "audio" group,
-       which may enter the host bridge's socket directory (/dev/socket/linuxapk, root:audio 0750);
+       which may enter the host bridge's socket directory (/dev/socket/innkeeper, root:audio 0750);
        the bridge then admits only this app's uid to its system service. -->
   <permission
-    android:name="dev.linuxapk.permission.HOST_BRIDGE"
+    android:name="dev.sargunv.innkeeper.permission.HOST_BRIDGE"
     android:protectionLevel="signature" />
 
-  <uses-permission android:name="dev.linuxapk.permission.HOST_BRIDGE" />
+  <uses-permission android:name="dev.sargunv.innkeeper.permission.HOST_BRIDGE" />
   <!-- Desktop settings: night mode, theme seed, contrast and animation scales, time zone,
        locales, 12/24-hour clock, font scale. -->
   <uses-permission android:name="android.permission.MODIFY_DAY_NIGHT_MODE" />
@@ -80,13 +80,13 @@
   <uses-permission android:name="android.permission.NETWORK_FACTORY" />
 
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through
-       "linuxapk-session exec") passes any permission check. -->
+       "innkeeper-session exec") passes any permission check. -->
   <permission
-    android:name="dev.linuxapk.permission.CONTROL_WINDOWS"
+    android:name="dev.sargunv.innkeeper.permission.CONTROL_WINDOWS"
     android:protectionLevel="signature" />
 
   <application
-    android:name=".LinuxApkSystemApp"
+    android:name=".InnkeeperSystemApp"
     android:allowBackup="false"
     android:directBootAware="true"
     android:label="@string/app_name"
@@ -116,7 +116,7 @@
       android:taskAffinity=""
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-    <!-- Linux.apk Keyboard: host keyboard and input methods through zwp_text_input_v3
+    <!-- Innkeeper Keyboard: host keyboard and input methods through zwp_text_input_v3
          (docs/input.md). -->
     <service
       android:name=".ime.HostImeService"
@@ -189,7 +189,7 @@
     <!-- The picked host files as documents; reachable only through granted URIs. -->
     <provider
       android:name=".documents.HostDocumentsProvider"
-      android:authorities="dev.linuxapk.system.documents"
+      android:authorities="dev.sargunv.innkeeper.system.documents"
       android:exported="true"
       android:grantUriPermissions="true"
       android:permission="android.permission.MANAGE_DOCUMENTS">
@@ -201,12 +201,12 @@
     <receiver
       android:name=".wm.ControlReceiver"
       android:exported="true"
-      android:permission="dev.linuxapk.permission.CONTROL_WINDOWS">
+      android:permission="dev.sargunv.innkeeper.permission.CONTROL_WINDOWS">
       <intent-filter>
-        <action android:name="dev.linuxapk.LAUNCH" />
-        <action android:name="dev.linuxapk.LIST" />
-        <action android:name="dev.linuxapk.CLOSE" />
-        <action android:name="dev.linuxapk.BACKGROUND" />
+        <action android:name="dev.sargunv.innkeeper.LAUNCH" />
+        <action android:name="dev.sargunv.innkeeper.LIST" />
+        <action android:name="dev.sargunv.innkeeper.CLOSE" />
+        <action android:name="dev.sargunv.innkeeper.BACKGROUND" />
       </intent-filter>
     </receiver>
 
@@ -308,12 +308,12 @@
     <!-- Images copied on the desktop, pasted into Android apps. -->
     <provider
       android:name=".integration.clipboard.ClipFileProvider"
-      android:authorities="dev.linuxapk.system.clipboard.files"
+      android:authorities="dev.sargunv.innkeeper.system.clipboard.files"
       android:exported="false"
       android:grantUriPermissions="true" />
     <provider
       android:name=".integration.clipboard.ClipImageProvider"
-      android:authorities="dev.linuxapk.system.clipboard"
+      android:authorities="dev.sargunv.innkeeper.system.clipboard"
       android:exported="false"
       android:grantUriPermissions="true" />
   </application>

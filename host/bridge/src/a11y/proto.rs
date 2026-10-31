@@ -1,5 +1,5 @@
 //! Accessibility service messages (id 7, types 0x0700..=0x07ff, events
-//! 0x4700..=0x47ff). The client is the Linux.apk System app's accessibility
+//! 0x4700..=0x47ff). The client is the Innkeeper System app's accessibility
 //! service; only the system app's uid may open the service, since its trees
 //! are the screen contents of every app and its actions click for the user.
 //!

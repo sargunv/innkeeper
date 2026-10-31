@@ -4,7 +4,7 @@ use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use linuxapk_core::app_settings::{self, Command, Response};
+use innkeeper_core::app_settings::{self, Command, Response};
 
 use crate::ipc::{
     blob,
@@ -157,7 +157,7 @@ impl Relay {
         let relay = self.clone();
         input.watch_windows(move || relay.changed());
         let bus = zbus::blocking::connection::Builder::session()?
-            .name(app_settings::bus_name(&linuxapk_core::paths::profile()?))?
+            .name(app_settings::bus_name(&innkeeper_core::paths::profile()?))?
             .serve_at(
                 app_settings::PATH,
                 SessionApi {
@@ -182,7 +182,7 @@ struct SessionApi {
     preferences: Mutex<()>,
 }
 
-#[zbus::interface(name = "dev.linuxapk.Session1")]
+#[zbus::interface(name = "dev.sargunv.Innkeeper.Session1")]
 impl SessionApi {
     /// Booted only after the system app observes sys.boot_completed=1.
     fn state(&self) -> (bool, Vec<String>) {
@@ -194,16 +194,16 @@ impl SessionApi {
 
     fn get_preferences(&self) -> zbus::fdo::Result<String> {
         let _guard = self.preferences.lock().unwrap();
-        linuxapk_core::preferences::Preferences::load()
-            .and_then(|p| linuxapk_core::preferences::encode(&p))
+        innkeeper_core::preferences::Preferences::load()
+            .and_then(|p| innkeeper_core::preferences::encode(&p))
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
     fn set_preferences(&self, json: &str) -> zbus::fdo::Result<()> {
         let _guard = self.preferences.lock().unwrap();
-        let prefs = linuxapk_core::preferences::decode(json)
+        let prefs = innkeeper_core::preferences::decode(json)
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
-        let old = linuxapk_core::preferences::Preferences::load()
+        let old = innkeeper_core::preferences::Preferences::load()
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         prefs
             .save()

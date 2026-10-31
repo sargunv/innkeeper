@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <linux/dma-buf.h>
 #include <sys/ioctl.h>
 
@@ -7,9 +7,9 @@
 
 #include "GpuCopy.h"
 #include "Properties.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 Display::Display(
   int64_t id, DisplayConfig config, std::unique_ptr<Presenter> presenter,
@@ -97,7 +97,7 @@ void Display::setColorTransform(const std::vector<float>&) {
 }
 
 Error Display::validate(std::optional<c3::ChangedCompositionTypes>* changes) {
-  if (mVirtual && getProperty("vendor.linuxapk.hwc.bench") == "1")
+  if (mVirtual && getProperty("vendor.innkeeper.hwc.bench") == "1")
     LOGI(
       "BENCH validate display=%lld ns=%lld", (long long)mId, (long long)nowNs()
     );
@@ -146,7 +146,7 @@ Error Display::present() {
     acceptChanges();  // SF may present right after validate
   mState = State::NeedValidate;
   const bool bench =
-    mVirtual && getProperty("vendor.linuxapk.hwc.bench") == "1";
+    mVirtual && getProperty("vendor.innkeeper.hwc.bench") == "1";
   timespec cpuStart{};
   if (bench) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
   const int64_t begin = bench ? nowNs() : 0;
@@ -204,4 +204,4 @@ Error Display::present() {
   return Error::None;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

@@ -1,26 +1,26 @@
-//! Talks to a running bridge's system service the way the Linux.apk System
+//! Talks to a running bridge's system service the way the Innkeeper System
 //! app does, for testing the desktop side without Android:
 //!
-//!   cargo run -p linuxapk-bridge --example system -- SOCKET listen
+//!   cargo run -p innkeeper-bridge --example system -- SOCKET listen
 //!   ... SOCKET notify TITLE BODY      (with an action and an inline reply)
 //!   ... SOCKET clip TEXT
 //!   ... SOCKET open URL
 //!   ... SOCKET media TITLE ARTIST     (a player that obeys play/pause)
 //!
-//! Every command then prints the events it gets for `LINUXAPK_WAIT` seconds
+//! Every command then prints the events it gets for `INNKEEPER_WAIT` seconds
 //! (default 30; `listen` runs until killed).
 
 use std::os::fd::{AsFd, OwnedFd};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::ipc::blob::{self, Image};
-use linuxapk_bridge::ipc::proto::{Hello, service};
-use linuxapk_bridge::ipc::transport;
-use linuxapk_bridge::ipc::wire::{self, MAX_MSG, Reader};
-use linuxapk_bridge::system::mpris::{Media, actions, state};
-use linuxapk_bridge::system::notify::{Action, Note, flags};
-use linuxapk_bridge::system::proto::{
+use innkeeper_bridge::ipc::blob::{self, Image};
+use innkeeper_bridge::ipc::proto::{Hello, service};
+use innkeeper_bridge::ipc::transport;
+use innkeeper_bridge::ipc::wire::{self, MAX_MSG, Reader};
+use innkeeper_bridge::system::mpris::{Media, actions, state};
+use innkeeper_bridge::system::notify::{Action, Note, flags};
+use innkeeper_bridge::system::proto::{
     self as p, ClipKind, Request, Settings, ev, feature, media_cmd,
 };
 use rustix::event::{PollFd, PollFlags};
@@ -156,8 +156,8 @@ fn main() -> Result<()> {
         "listen" => {}
         "notify" => {
             let note = Note {
-                package: "dev.linuxapk.example".into(),
-                app_name: "Linux.apk example".into(),
+                package: "dev.sargunv.innkeeper.example".into(),
+                app_name: "Innkeeper example".into(),
                 title: arg(2),
                 body: arg(3),
                 flags: flags::CLICKABLE,
@@ -216,8 +216,8 @@ fn main() -> Result<()> {
         }
         "media" => {
             let m = Media {
-                package: "dev.linuxapk.example".into(),
-                app_name: "Linux.apk example".into(),
+                package: "dev.sargunv.innkeeper.example".into(),
+                app_name: "Innkeeper example".into(),
                 title: arg(2),
                 artist: arg(3),
                 album: "Examples".into(),
@@ -246,7 +246,7 @@ fn main() -> Result<()> {
         _ => bail!("unknown command {cmd}"),
     }
 
-    let wait: u64 = std::env::var("LINUXAPK_WAIT")
+    let wait: u64 = std::env::var("INNKEEPER_WAIT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(30);

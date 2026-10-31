@@ -1,8 +1,8 @@
-# linuxapk: apexd can't mount APEXes in a user namespace (no loop/dm). The
-# session pre-mounts flattened APEXes; linuxapk-apexd shows apexd matching
+# innkeeper: apexd can't mount APEXes in a user namespace (no loop/dm). The
+# session pre-mounts flattened APEXes; innkeeper-apexd shows apexd matching
 # "file-backed erofs" entries in its /proc/mounts (private mount namespace),
 # so apexservice reports every APEX as active to system_server.
-service apexd /system/bin/linuxapk-apexd
+service apexd /system/bin/innkeeper-apexd
     namespace mnt
     interface aidl apexservice
     class core

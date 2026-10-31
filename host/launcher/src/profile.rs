@@ -1,6 +1,6 @@
 //! Profiles: separate Android setups, each with its own apps, data and
 //! settings, that can run side by side. A running profile is a session. Each
-//! is named, by `LINUXAPK_PROFILE` or [`crate::paths::select`], and suffixes
+//! is named, by `INNKEEPER_PROFILE` or [`crate::paths::select`], and suffixes
 //! every path of its own ([`crate::paths`]). None is special: the first is
 //! made on demand as [`FIRST`], and can be renamed or deleted like any other.
 //!
@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 /// The settings file in a profile's data directory.
-const FILE: &str = ".linuxapk-profile.toml";
+const FILE: &str = ".innkeeper-profile.toml";
 
 /// The settings format this build reads and writes. A newer one is refused
 /// rather than rewritten without the settings it doesn't know.
@@ -46,7 +46,7 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The profiles under `data_home` (`$XDG_DATA_HOME/linuxapk`): its
+/// The profiles under `data_home` (`$XDG_DATA_HOME/innkeeper`): its
 /// `data-<name>` directories, by name.
 pub fn list(data_home: &Path) -> Vec<String> {
     let mut v: Vec<String> = fs::read_dir(data_home)
@@ -67,7 +67,7 @@ pub fn list(data_home: &Path) -> Vec<String> {
 
 /// Where the profile last chosen is remembered (shared by every profile).
 pub fn chosen_file() -> PathBuf {
-    crate::paths::xdg_home("XDG_STATE_HOME", ".local/state").join("linuxapk/profile")
+    crate::paths::xdg_home("XDG_STATE_HOME", ".local/state").join("innkeeper/profile")
 }
 
 /// The profile to use when none is named, of `profiles`: the one last
@@ -215,7 +215,7 @@ impl Settings {
                 .context("version is not a number")?,
         };
         if version > VERSION {
-            bail!("made by a newer Linux.apk (version {version}; this one reads {VERSION})");
+            bail!("made by a newer Innkeeper (version {version}; this one reads {VERSION})");
         }
         let mut s: Self = toml::from_str(text)?;
         s.version = VERSION;
@@ -255,7 +255,7 @@ impl Settings {
 /// Profile `name`'s desktop preferences directory.
 fn config_dir(name: &str) -> PathBuf {
     crate::paths::xdg_home("XDG_CONFIG_HOME", ".config")
-        .join(crate::paths::per_profile("linuxapk", name))
+        .join(crate::paths::per_profile("innkeeper", name))
 }
 
 fn ensure_stopped(paths: &crate::Paths) -> Result<()> {

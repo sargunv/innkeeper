@@ -1,5 +1,5 @@
 //! The system service (id 3): the channel between the bridge and the
-//! Linux.apk System app. It carries desktop settings to Android, Android
+//! Innkeeper System app. It carries desktop settings to Android, Android
 //! notifications, the clipboard both ways, web links to open, and media
 //! sessions (messages: [`proto`]). Each feature lives in its
 //! own module and talks to the desktop over D-Bus or Wayland:
@@ -238,8 +238,8 @@ const INDICATOR_ID: u32 = u32::MAX;
 /// session running with no window open.
 fn background_note(labels: &[&str]) -> Note {
     Note {
-        package: "dev.linuxapk.system".into(),
-        app_name: "Linux.apk".into(),
+        package: "dev.sargunv.innkeeper.system".into(),
+        app_name: "Innkeeper".into(),
         title: "Running in the background".into(),
         body: format!(
             "{} {} running with no window open.",
@@ -646,12 +646,12 @@ impl Drop for SystemService {
 
 /// The mixer label for a PLAYBACK_APP. An empty package restores the name,
 /// icon and id the stream was opened with. The icon is the desktop entry id,
-/// the same one `linuxapk-core`'s entries use.
+/// the same one `innkeeper-core`'s entries use.
 fn mixer_app(app: &PlaybackApp) -> Option<crate::audio::stream::PlaybackApp> {
     if app.package.is_empty() {
         return None;
     }
-    let id = linuxapk_core::desktop::app_id(&app.package);
+    let id = innkeeper_core::desktop::app_id(&app.package);
     let name = if app.label.is_empty() {
         app.package.clone()
     } else {
@@ -699,7 +699,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(named.name, "Example Player");
-        assert_eq!(named.icon_name, "dev.linuxapk.org.example.player");
+        assert_eq!(named.icon_name, "dev.sargunv.innkeeper.org.example.player");
         assert_eq!(named.id, named.icon_name);
         assert_eq!(named.binary, named.icon_name);
         let bare = mixer_app(&PlaybackApp {

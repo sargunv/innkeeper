@@ -15,7 +15,7 @@
 #include "StreamBridge.h"
 #include "StreamInBridge.h"
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 namespace common = aidl::android::media::audio::common;
 using common::AudioPort;
 using common::AudioPortConfig;
@@ -254,7 +254,7 @@ class Module : public core::IModuleDelegator {
     std::vector<common::MicrophoneInfo>* out
   ) override {
     common::MicrophoneInfo mic;
-    mic.id = "linuxapk-microphone";
+    mic.id = "innkeeper-microphone";
     mic.device = ports_[3].ext.get<common::AudioPortExt::Tag::device>().device;
     mic.location = common::MicrophoneInfo::Location::PERIPHERAL;
     *out = {mic};
@@ -289,14 +289,14 @@ class Module : public core::IModuleDelegator {
     std::make_shared<std::atomic<bool>>(false);
   int32_t nextConfig_ = 5, nextPatch_ = 1;
 };
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio
 int main() {
   ABinderProcess_setThreadPoolMaxThreadCount(4);
   ABinderProcess_startThreadPool();
-  auto module = ndk::SharedRefBase::make<linuxapk::audio::Module>();
+  auto module = ndk::SharedRefBase::make<innkeeper::audio::Module>();
   if (
     AServiceManager_addService(
-      module->asBinder().get(), "android.hardware.audio.core.IModule/linuxapk"
+      module->asBinder().get(), "android.hardware.audio.core.IModule/innkeeper"
     ) != STATUS_OK
   )
     return 1;

@@ -67,7 +67,7 @@ index 0000000..46f14cb
 +/*
 + * Mesa 3-D graphics library
 + *
-+ * Copyright (C) 2026 Linux.apk contributors
++ * Copyright (C) 2026 Innkeeper contributors
 + * SPDX-License-Identifier: MIT
 + *
 + * u_gralloc backend for the stable-C IMapper v5 (AIMapper) interface.

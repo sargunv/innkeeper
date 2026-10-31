@@ -9,7 +9,7 @@
 // Health starts with the other HALs, before the bridge may be up: until the
 // bridge answers it reports AC power and no battery, and it reconnects
 // whenever the bridge goes away, as the composer does.
-#define LOG_TAG "linuxapk-health"
+#define LOG_TAG "innkeeper-health"
 
 #include <algorithm>
 #include <mutex>
@@ -27,8 +27,8 @@
 #include <unistd.h>
 
 #include "battery.h"
-#include "linuxapk/bridge_client.h"
-#include "linuxapk/log.h"
+#include "innkeeper/bridge_client.h"
+#include "innkeeper/log.h"
 
 using aidl::android::hardware::health::BatteryCapacityLevel;
 using aidl::android::hardware::health::BatteryChargingPolicy;
@@ -52,12 +52,12 @@ ScopedAStatus unsupported() {
 
 class Health : public BnHealth {
  public:
-  Health() { set(LAPK_BATTERY_AC_ONLY); }
+  Health() { set(INNKEEPER_BATTERY_AC_ONLY); }
 
   // A new state from the bridge: every callback hears it.
-  void set(const lapk_battery& b) {
-    lapk_health h;
-    lapk_health_from(&b, &h);
+  void set(const innkeeper_battery& b) {
+    innkeeper_health h;
+    innkeeper_health_from(&b, &h);
     HealthInfo i;
     i.chargerAcOnline = h.ac_online;
     i.batteryPresent = h.battery_present;
@@ -208,8 +208,8 @@ void bridgeLoop(std::shared_ptr<Health> health) {
     }
     lastError = 0;
     lxb_msg m;
-    lxb_msg_init(&m, LAPK_HOSTSTATE_START, 2);
-    lxb_put_u32(&m, LAPK_FEATURE_BATTERY);
+    lxb_msg_init(&m, INNKEEPER_HOSTSTATE_START, 2);
+    lxb_put_u32(&m, INNKEEPER_FEATURE_BATTERY);
     int r = lxb_send(s, &m, -1);
     // The current state comes as an event, possibly before START's reply.
     while (r == 0) {
@@ -218,9 +218,9 @@ void bridgeLoop(std::shared_ptr<Health> health) {
       if (r != 0) break;
       if (p.type == LXB_REPLY && p.status != 0)
         LOGW("bridge: START refused: %d", p.status);
-      lapk_battery b;
-      if (p.type == LAPK_EV_BATTERY) {
-        if (lapk_battery_decode(p.body, p.len, &b) == 0)
+      innkeeper_battery b;
+      if (p.type == INNKEEPER_EV_BATTERY) {
+        if (innkeeper_battery_decode(p.body, p.len, &b) == 0)
           health->set(b);
         else
           LOGW("bridge: malformed BATTERY event (%zu bytes)", p.len);

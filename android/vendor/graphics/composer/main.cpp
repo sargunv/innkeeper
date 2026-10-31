@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // android.hardware.graphics.composer3.IComposer/default (AIDL V5).
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 
 #include <string>
 
@@ -10,10 +10,10 @@
 
 #include "Composer.h"
 #include "Presenter.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
 int main() {
-  using namespace linuxapk::hwc;
+  using namespace innkeeper::hwc;
   startPresenterBackend();
   // Same priority as SurfaceFlinger's main thread (best effort in a userns).
   struct sched_param param = {.sched_priority = 2};

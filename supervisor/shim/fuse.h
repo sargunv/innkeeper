@@ -13,7 +13,7 @@ static int fuse_peer = -1;
 static const char kEmulatedMount[] = "/mnt/user/0/emulated";
 
 static int fuse_enabled(void) {
-  const char* e = getenv("LINUXAPK_EMULATED_STORAGE");
+  const char* e = getenv("INNKEEPER_EMULATED_STORAGE");
   return e && !strcmp(e, "1") && flatpak();
 }
 

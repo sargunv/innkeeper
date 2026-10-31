@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <string>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 // System property, or `def` if unset (always on the host).
 std::string getProperty(const char* name, const std::string& def = "");
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

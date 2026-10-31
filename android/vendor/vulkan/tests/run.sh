@@ -15,14 +15,14 @@ driver_tests() {
   local d=$1 t=/data/nativetest64
   bionic() {
     "$repo/tests/bionic/run.sh" -t "$build/test" -v "$build/test-vendor" \
-      -e "LINUXAPK_PROPS=ro.hardware.vulkan=$d;ro.hardware.egl=angle" "$@"
+      -e "INNKEEPER_PROPS=ro.hardware.vulkan=$d;ro.hardware.egl=angle" "$@"
   }
   local vk=("$t/vkdriver_test" --hal "vulkan.$d.so")
   bionic -- "${vk[@]}" --udmabuf
   # --anb hands the driver a deliberately wrong stride: it passes only if the
   # layout came from the mapper (mock_mapper.c here, ours with --anb-hal).
-  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=lapktest -- "${vk[@]}" --anb
-  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=lapktest -- "${vk[@]}" --anb --deferred
+  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=inkptest -- "${vk[@]}" --anb
+  bionic -e MESA_GRALLOC_MAPPER_SUFFIX=inkptest -- "${vk[@]}" --anb --deferred
   bionic -- "${vk[@]}" --anb-hal --deferred
   bionic -- "$t/vkdriver_test" --loader
   # fake_sf stands in for SurfaceFlinger's getDisplayStats.
@@ -37,9 +37,9 @@ driver_tests() {
 # Ask a normal session, so the hardware test uses exactly the node and HAL
 # selected by the launcher and permitted by its broker (also on hybrid hosts).
 # shellcheck disable=SC2016 # getprop runs inside Android
-selected=$(LINUXAPK_BIONIC_HARNESS=0 "$repo/tests/bionic/run.sh" -- /system/bin/sh -c \
-  'echo "linuxapk-selected-driver=$(getprop ro.hardware.vulkan)"' |
-  sed -n 's/^linuxapk-selected-driver=//p')
+selected=$(INNKEEPER_BIONIC_HARNESS=0 "$repo/tests/bionic/run.sh" -- /system/bin/sh -c \
+  'echo "innkeeper-selected-driver=$(getprop ro.hardware.vulkan)"' |
+  sed -n 's/^innkeeper-selected-driver=//p')
 drivers=(lvp)
 case $selected in
   radv | anv) drivers+=("$selected") ;;

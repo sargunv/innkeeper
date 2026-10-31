@@ -18,8 +18,8 @@ pub const KEYBOARD: u32 = 0;
 pub const MOUSE: u32 = 1;
 // Flatpak's input grant mounts a host-owned directory at /dev/input. Discovery
 // uses our own tmpfs directory; virtual names cannot shadow host eventN nodes.
-const DIRECTORY: &str = "/dev/linuxapk-input";
-const PREFIX: &[u8] = b"/dev/input/linuxapk-event";
+const DIRECTORY: &str = "/dev/innkeeper-input";
+const PREFIX: &[u8] = b"/dev/input/innkeeper-event";
 
 /// x86_64 Linux input_event, with a CLOCK_MONOTONIC timeval. Kept explicit:
 /// Rust struct padding is not part of the bridge protocol.
@@ -151,23 +151,23 @@ fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i
             let s = match nr {
                 0x06 => {
                     if device == KEYBOARD {
-                        "Linux.apk Keyboard".to_owned()
+                        "Innkeeper Keyboard".to_owned()
                     } else {
-                        format!("Linux.apk Mouse {}", device - 1)
+                        format!("Innkeeper Mouse {}", device - 1)
                     }
                 }
                 0x07 => {
                     if device == KEYBOARD {
-                        "linuxapk/keyboard".to_owned()
+                        "innkeeper/keyboard".to_owned()
                     } else {
-                        format!("linuxapk/mouse/{}", device - 1)
+                        format!("innkeeper/mouse/{}", device - 1)
                     }
                 }
                 _ => {
                     if device == KEYBOARD {
-                        "linuxapk-keyboard".to_owned()
+                        "innkeeper-keyboard".to_owned()
                     } else {
-                        format!("linuxapk-mouse-{}", device - 1)
+                        format!("innkeeper-mouse-{}", device - 1)
                     }
                 }
             };
@@ -237,8 +237,8 @@ fn pad_answer(device: u32, pad: &Pad, cmd: u32, keys: &[u8]) -> Result<(Vec<u8>,
             .into_iter()
             .flat_map(u16::to_le_bytes)
             .collect(),
-        6 => format!("Linux.apk Gamepad {}\0", device - gamepad::FIRST).into_bytes(),
-        7 | 8 => format!("linuxapk/gamepad/{}\0", pad.identity).into_bytes(),
+        6 => format!("Innkeeper Gamepad {}\0", device - gamepad::FIRST).into_bytes(),
+        7 | 8 => format!("innkeeper/gamepad/{}\0", pad.identity).into_bytes(),
         0x20 => bitmap(
             size,
             if pad.feedback.is_some() {
@@ -341,7 +341,7 @@ impl Devices {
         self.pads.remove(&device);
         self.clients.retain(|c| c.device != device);
         self.changed();
-        let _ = std::fs::remove_file(dir.join(format!("linuxapk-event{device}")));
+        let _ = std::fs::remove_file(dir.join(format!("innkeeper-event{device}")));
     }
 }
 
@@ -439,7 +439,7 @@ fn wait_for_writes(devices: &Mutex<Devices>, wake: &UnixDatagram) -> std::io::Re
 fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Path) {
     let replaced = state.pads.insert(device, pad).is_some();
     let new = state.keys.insert(device, [0; 96]).is_none();
-    let path = dir.join(format!("linuxapk-event{device}"));
+    let path = dir.join(format!("innkeeper-event{device}"));
     if replaced {
         // EventHub caches an effect ID for its open. Reopen after replacing the
         // host fd, whose RAII owner has erased and forgotten the old effects.
@@ -456,7 +456,7 @@ fn prepare_directories(dev: &std::path::Path) -> std::io::Result<()> {
     // EventHub checks existence before its redirected scan. Flatpak only
     // supplies /dev/input when the host has one; leave an existing bind intact.
     std::fs::create_dir_all(dev.join("input"))?;
-    std::fs::create_dir_all(dev.join("linuxapk-input"))
+    std::fs::create_dir_all(dev.join("innkeeper-input"))
 }
 
 // Registration has a fixed eight-digit port identity. Event packets are
@@ -467,12 +467,12 @@ fn is_registration(packet: &[u8]) -> bool {
 
 impl Input {
     pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Option<Self> {
-        if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
+        if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
             return None;
         }
         let dir = std::path::Path::new(DIRECTORY);
         prepare_directories(std::path::Path::new("/dev")).ok()?;
-        let path = "/dev/socket/linuxapk/evdev.sock";
+        let path = "/dev/socket/innkeeper/evdev.sock";
         let _ = std::fs::remove_file(path);
         let socket = UnixDatagram::bind(path).ok()?;
         let (wake, changed) = UnixDatagram::pair().ok()?;
@@ -514,7 +514,7 @@ impl Input {
                     continue;
                 }
                 if n == 5 && device != KEYBOARD {
-                    let path = dir.join(format!("linuxapk-event{device}"));
+                    let path = dir.join(format!("innkeeper-event{device}"));
                     if buf[4] != 0 {
                         if let std::collections::hash_map::Entry::Vacant(e) = s.keys.entry(device) {
                             e.insert([0; 96]);
@@ -566,7 +566,7 @@ impl Input {
         // Create after the input socket is ready; EventHub observes these via
         // its initial scan or inotify. /dev is the sandbox's private tmpfs.
         for n in 0..1 {
-            std::fs::write(dir.join(format!("linuxapk-event{n}")), []).ok()?;
+            std::fs::write(dir.join(format!("innkeeper-event{n}")), []).ok()?;
         }
         Some(Self {
             listener,
@@ -601,7 +601,7 @@ impl Input {
                             unsafe {
                                 libc::inotify_add_watch(
                                     fd.as_raw_fd(),
-                                    c"/dev/linuxapk-input".as_ptr(),
+                                    c"/dev/innkeeper-input".as_ptr(),
                                     req.data.args[2] as u32,
                                 )
                             }
@@ -906,7 +906,7 @@ mod tests {
         assert!(!root.join("input").exists());
         prepare_directories(&root).unwrap();
         assert!(root.join("input").is_dir()); // EventHub's existence check
-        assert!(root.join("linuxapk-input").is_dir()); // redirected discovery
+        assert!(root.join("innkeeper-input").is_dir()); // redirected discovery
         std::fs::write(root.join("input/event0"), b"host node").unwrap();
         prepare_directories(&root).unwrap();
         assert_eq!(
@@ -914,7 +914,7 @@ mod tests {
             b"host node"
         );
         assert_eq!(
-            std::fs::read_dir(root.join("linuxapk-input"))
+            std::fs::read_dir(root.join("innkeeper-input"))
                 .unwrap()
                 .count(),
             0
@@ -1059,7 +1059,7 @@ mod tests {
         );
         assert_eq!(
             answer(KEYBOARD, get(6, 8), &[], &[]).unwrap(),
-            (b"Linux.ap".to_vec(), 8)
+            (b"Innkeepe".to_vec(), 8)
         );
         let keys = answer(KEYBOARD, get(0x21, 96), &[], &[]).unwrap().0;
         assert_ne!(keys[30 / 8] & (1 << (30 % 8)), 0); // KEY_A: alphabetic keyboard
@@ -1073,11 +1073,11 @@ mod tests {
     fn display_mice_have_distinct_permanent_ports() {
         assert_eq!(
             answer(3, get(7, 80), &[], &[]).unwrap().0,
-            b"linuxapk/mouse/2\0"
+            b"innkeeper/mouse/2\0"
         );
         assert_eq!(
             answer(8, get(7, 80), &[], &[]).unwrap().0,
-            b"linuxapk/mouse/7\0"
+            b"innkeeper/mouse/7\0"
         );
         assert_ne!(
             answer(3, get(8, 80), &[], &[]).unwrap().0,
@@ -1099,13 +1099,13 @@ mod tests {
         state.clients.extend([Arc::new(first), Arc::new(second)]);
         for device in [3, 8] {
             state.keys.insert(device, [0; 96]);
-            std::fs::write(dir.join(format!("linuxapk-event{device}")), []).unwrap();
+            std::fs::write(dir.join(format!("innkeeper-event{device}")), []).unwrap();
         }
         state.remove(8, &dir);
-        assert!(!dir.join("linuxapk-event8").exists());
+        assert!(!dir.join("innkeeper-event8").exists());
         assert!(!state.keys.contains_key(&8));
         assert_eq!(state.clients.len(), 1);
-        assert!(dir.join("linuxapk-event3").exists());
+        assert!(dir.join("innkeeper-event3").exists());
         assert!(state.keys.contains_key(&3));
         let packet = event(0, 2, 0, 1);
         let remaining = state.clients[0].clone();

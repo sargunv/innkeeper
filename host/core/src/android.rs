@@ -11,7 +11,7 @@ use crate::launcher::Session;
 use crate::{ErrorKind, validate};
 
 /// The system app, whose `IconDump` renders app icons (and reports labels).
-const SYSTEM_APK: &str = "/system_ext/priv-app/LinuxApkSystem/LinuxApkSystem.apk";
+const SYSTEM_APK: &str = "/system_ext/priv-app/InnkeeperSystem/InnkeeperSystem.apk";
 
 /// `Success: created install session [1234]` -> 1234.
 pub fn parse_session_id(out: &str) -> Option<u32> {
@@ -184,9 +184,9 @@ pub fn wm_launch_args(l: &Launch, o: &LaunchOptions) -> Vec<String> {
         "--user",
         "current",
         "-n",
-        "dev.linuxapk.system/.wm.ControlReceiver",
+        "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
         "-a",
-        "dev.linuxapk.LAUNCH",
+        "dev.sargunv.innkeeper.LAUNCH",
     ]
     .map(String::from)
     .to_vec();
@@ -263,7 +263,7 @@ pub fn launch(s: &Session, l: &Launch, o: &LaunchOptions) -> Result<String> {
         Some(Ok(r)) => Ok(r),
         Some(Err(e)) => bail!("launch failed: {e}"),
         None => Err(anyhow::anyhow!(
-            "launch failed: Linux.apk System's window manager did not answer (Android {})",
+            "launch failed: Innkeeper System's window manager did not answer (Android {})",
             if s.booted() {
                 "has booted"
             } else {
@@ -283,9 +283,9 @@ pub fn background(s: &Session, set: Option<(&str, bool)>) -> Result<Vec<String>>
         "--user",
         "current",
         "-n",
-        "dev.linuxapk.system/.wm.ControlReceiver",
+        "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
         "-a",
-        "dev.linuxapk.BACKGROUND",
+        "dev.sargunv.innkeeper.BACKGROUND",
     ];
     if let Some((pkg, on)) = set {
         argv.extend(["--es", "package", pkg, "--ez", "allowed"]);
@@ -294,7 +294,7 @@ pub fn background(s: &Session, set: Option<(&str, bool)>) -> Result<Vec<String>>
     match wm_reply(&s.exec(30, &argv)?.text()) {
         Some(Ok(r)) => Ok(background_reply(&r)),
         Some(Err(e)) => bail!("{e}"),
-        None => Err(anyhow::anyhow!("Linux.apk System did not answer").context(ErrorKind::Timeout)),
+        None => Err(anyhow::anyhow!("Innkeeper System did not answer").context(ErrorKind::Timeout)),
     }
 }
 
@@ -370,7 +370,7 @@ pub fn app_info(s: &Session, pkg: &str, sizes: &[u32]) -> Result<AppInfo> {
         &cp,
         "app_process",
         "/",
-        "dev.linuxapk.system.apps.IconDump",
+        "dev.sargunv.innkeeper.system.apps.IconDump",
         pkg,
     ];
     argv.extend(sizes.iter().map(String::as_str));
@@ -457,9 +457,9 @@ mod tests {
     fn file_chooser_is_an_explicit_target_with_the_original_grant() {
         let args = wm_launch_args(
             &Launch::File {
-                package: "dev.linuxapk.system".into(),
+                package: "dev.sargunv.innkeeper.system".into(),
                 grants: vec![0xabc, 0xdef],
-                component: Some("dev.linuxapk.system/.documents.OpenWithActivity".into()),
+                component: Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity".into()),
             },
             &LaunchOptions::default(),
         );
@@ -471,7 +471,7 @@ mod tests {
             == [
                 "--es",
                 "component",
-                "dev.linuxapk.system/.documents.OpenWithActivity"
+                "dev.sargunv.innkeeper.system/.documents.OpenWithActivity"
             ]));
     }
 

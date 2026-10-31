@@ -13,20 +13,20 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "linuxapk/buffer_alloc.h"
+#include "innkeeper/buffer_alloc.h"
 
-#include "linuxapk/gralloc_handle.h"
-#include "linuxapk/log.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/gralloc_handle.h"
+#include "innkeeper/log.h"
+#include "innkeeper/native_handle.h"
 
-namespace linuxapk {
+namespace innkeeper {
 namespace {
 
 std::atomic<bool> gUdmabufOk{false};
 
 int udmabufDevice() {
   static int fd = [] {
-    const char* path = getenv("LINUXAPK_UDMABUF");
+    const char* path = getenv("INNKEEPER_UDMABUF");
     int f = open(path ? path : "/dev/udmabuf", O_RDWR | O_CLOEXEC);
     if (f < 0)
       LOGW("udmabuf unavailable (%s); falling back to memfd", strerror(errno));
@@ -205,4 +205,4 @@ AllocStatus allocateBuffer(
   return AllocStatus::Ok;
 }
 
-}  // namespace linuxapk
+}  // namespace innkeeper

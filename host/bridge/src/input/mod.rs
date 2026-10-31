@@ -1,4 +1,4 @@
-//! The input service (id 6): the Linux.apk System app's window requests, the
+//! The input service (id 6): the Innkeeper System app's window requests, the
 //! host seat as input lines, and the host's input methods for its IME. The
 //! wire spec is in [`proto`].
 //!
@@ -64,7 +64,7 @@ impl Service for InputService {
         };
         match req {
             Request::WindowRequest(mut r) => {
-                r.app_id = linuxapk_core::desktop::desktop_app_id(&r.app_id);
+                r.app_id = innkeeper_core::desktop::desktop_app_id(&r.app_id);
                 crate::info!(
                     "input: window {} requested: {}x{} @ {} dpi, {}",
                     r.window,

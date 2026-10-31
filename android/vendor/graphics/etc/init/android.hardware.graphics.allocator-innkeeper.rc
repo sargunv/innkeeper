@@ -1,0 +1,9 @@
+service vendor.graphics.allocator-innkeeper /vendor/bin/hw/android.hardware.graphics.allocator-service.innkeeper
+    class hal animation
+    interface aidl android.hardware.graphics.allocator.IAllocator/default
+    # Starts as root to open /dev/udmabuf, then drops to system:graphics.
+    user root
+    group graphics
+    capabilities SYS_NICE
+    onrestart restart surfaceflinger
+    task_profiles ServiceCapacityLow

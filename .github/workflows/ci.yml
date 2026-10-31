@@ -26,11 +26,11 @@ env:
   CMAKE_CXX_COMPILER_LAUNCHER: ccache
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_MAXSIZE: 500M
-  LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
+  INNKEEPER_IMAGES: ${{ github.workspace }}/out/ci/images
   FLATPAK_USER_DIR: ${{ github.workspace }}/out/flatpak/user
-  LINUXAPK_PROFILE: ci
+  INNKEEPER_PROFILE: ci
   # The 16 GB runner runs one capped (8 GiB) Android session at a time.
-  LINUXAPK_MIN_AVAILABLE_GIB: 10
+  INNKEEPER_MIN_AVAILABLE_GIB: 10
 
 jobs:
   changes:
@@ -99,7 +99,7 @@ jobs:
       - uses: actions/cache@v4
         if: steps.stage.outputs.cache-hit != 'true'
         with:
-          path: ~/.cache/linuxapk-dev/keys
+          path: ~/.cache/innkeeper-dev/keys
           key:
             platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
       - run: mise run build
@@ -123,7 +123,7 @@ jobs:
           path: |
             out/stage.tar.gz
             out/probes.tar.gz
-            out/stage/share/linuxapk/manifest.tsv
+            out/stage/share/innkeeper/manifest.tsv
           if-no-files-found: error
           retention-days: 7
 
@@ -156,7 +156,7 @@ jobs:
             image/tools tools/container/Containerfile tools/container/run.sh \
             host/launcher/src/image.rs | sha256sum)
           flatpak=$(git ls-tree -r HEAD -- packaging/flatpak/dev-init.sh \
-            packaging/flatpak/dev.linuxapk.Manager.yml tools/dev/run.py | sha256sum)
+            packaging/flatpak/dev.sargunv.Innkeeper.yml tools/dev/run.py | sha256sum)
           echo "image=${image%% *}" >>"$GITHUB_OUTPUT"
           echo "flatpak=${flatpak%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
@@ -176,12 +176,12 @@ jobs:
       - name: Prepare the image and private Flatpak for the timed run
         run: |
           # Flatpak must see a host directory before sharing it.
-          mkdir -p "$LINUXAPK_IMAGES"
+          mkdir -p "$INNKEEPER_IMAGES"
           # actions/cache drops xattrs. Recreate the tiny CLAT ownership layer;
           # extracted partitions and flattened APEXes remain cached.
-          find "$LINUXAPK_IMAGES" -path '*/derived/single.source' -delete
+          find "$INNKEEPER_IMAGES" -path '*/derived/single.source' -delete
           mise run session -- prepare
-          img=$(out/stage/libexec/linuxapk/linuxapk-session image | sed -n 's/^img=//p')
+          img=$(out/stage/libexec/innkeeper/innkeeper-session image | sed -n 's/^img=//p')
           test -f "$img/system/system/build.prop"
       # Save before e2e, whose failures must not discard expensive preparation.
       - uses: actions/cache/save@v4
@@ -197,7 +197,7 @@ jobs:
       - name: End-to-end tests on an isolated software desktop
         run: mise run test:e2e
         env:
-          LINUXAPK_E2E_DEADLINE: 180
+          INNKEEPER_E2E_DEADLINE: 180
       - name: Test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -246,7 +246,7 @@ jobs:
       - uses: ./.github/actions/build-cached
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/linuxapk-dev/keys
+          path: ~/.cache/innkeeper-dev/keys
           key:
             platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
       - name: Build the stage and Flatpak
@@ -255,7 +255,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stage-manifest
-          path: out/stage/share/linuxapk/manifest.tsv
+          path: out/stage/share/innkeeper/manifest.tsv
       - name: Full headless compatibility corpus
         id: headless
         run: tools/ci/compat.sh headless
@@ -273,15 +273,15 @@ jobs:
         if: ${{ !cancelled() && steps.wiki.outcome == 'success' }}
         continue-on-error: true # Publishing must never mask the corpus result.
         env:
-          GH_TOKEN: ${{ secrets.LINUXAPK_WIKI_TOKEN }}
+          GH_TOKEN: ${{ secrets.INNKEEPER_WIKI_TOKEN }}
         run: |
           if [[ -z "$GH_TOKEN" ]]; then
-            echo '::notice::Wiki publishing skipped: LINUXAPK_WIKI_TOKEN is not set. Compatibility results remain in the artifact.'
+            echo '::notice::Wiki publishing skipped: INNKEEPER_WIKI_TOKEN is not set. Compatibility results remain in the artifact.'
             exit 0
           fi
           if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
-            clone https://github.com/sargunv/linux.apk.wiki.git out/ci/wiki; then
-            echo '::warning::Wiki clone failed; check LINUXAPK_WIKI_TOKEN and wiki initialization. See tests/README.md.'
+            clone https://github.com/sargunv/innkeeper.wiki.git out/ci/wiki; then
+            echo '::warning::Wiki clone failed; check INNKEEPER_WIKI_TOKEN and wiki initialization. See tests/README.md.'
             exit 1
           fi
           cp out/ci/reports/Compatibility.md out/ci/wiki/Compatibility.md

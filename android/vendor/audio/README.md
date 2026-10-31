@@ -1,6 +1,6 @@
 # audio
 
-Speaker playback uses our AIDL `IModule/linuxapk` and `StreamBridge`, over the
+Speaker playback uses our AIDL `IModule/innkeeper` and `StreamBridge`, over the
 shared bridge client and the bridge's PipeWire output. The service and rc are an
 overlay in `/apex/com.android.hardware.audio/`; the image stays unmodified. Its
 frozen NDK AIDL bindings are generated at configure time with the pinned
@@ -39,7 +39,7 @@ removes its speaker, MMAP and offload ports; MMAP and offload were silent stubs.
   reducing the queue in its pipe to FastMixer. Capture periods are unchanged.
 - **Capture.** Android's `RECORD_AUDIO` runtime permission is the consent. The
   bridge records the default Pulse/PipeWire source into a capture ring;
-  `LINUXAPK_AUDIO_SOURCE` selects a source explicitly (tests use a null-sink
+  `INNKEEPER_AUDIO_SOURCE` selects a source explicitly (tests use a null-sink
   monitor). No source, a stalled backend or a bridge restart returns paced
   silence while retrying once a second. Standby releases the host record stream;
   the next read opens a fresh ring. The Flatpak's existing `--socket=pulseaudio`

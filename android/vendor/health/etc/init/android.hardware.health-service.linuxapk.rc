@@ -1,6 +1,0 @@
-# The host's battery for Android (android/vendor/health). The audio group
-# enters the bridge's socket directory (/dev/socket/linuxapk, root:audio).
-service vendor.health-linuxapk /vendor/bin/hw/android.hardware.health-service.linuxapk
-    class hal
-    user system
-    group system audio

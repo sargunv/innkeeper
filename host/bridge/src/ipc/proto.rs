@@ -19,7 +19,7 @@ pub mod service {
     /// The composer's displays in host windows (`display::proto`, types
     /// 0x0200..=0x02ff, events 0x4200..=0x42ff).
     pub const DISPLAY: u32 = 2;
-    /// The Linux.apk System app's channel: settings, notifications,
+    /// The Innkeeper System app's channel: settings, notifications,
     /// clipboard, links, media (`system`, types 0x0300..=0x03ff,
     /// events 0x4300..=0x43ff).
     pub const SYSTEM: u32 = 3;

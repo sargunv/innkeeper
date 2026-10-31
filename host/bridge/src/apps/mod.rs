@@ -1,7 +1,7 @@
 //! The apps service (id 5): apps installed or removed inside Android (an app
 //! store, PackageInstaller, `pm install`) get or lose their desktop entry and
-//! icons. The Linux.apk System app reports package events; the entries are
-//! written with `linuxapk-core`, the same code as `linuxapk install`.
+//! icons. The Innkeeper System app reports package events; the entries are
+//! written with `innkeeper-core`, the same code as `innkeeper install`.
 //!
 //! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
 //! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -13,8 +13,8 @@
 //! app, so installs made while the bridge was away catch up; then it follows
 //! package broadcasts.
 //!
-//! Entries this service writes say `X-LinuxApk-Origin=android`. An entry
-//! written by `linuxapk install` (which has more metadata, such as URL
+//! Entries this service writes say `X-Innkeeper-Origin=android`. An entry
+//! written by `innkeeper install` (which has more metadata, such as URL
 //! schemes) is never replaced; an entry for another session profile is never
 //! touched; an uninstall inside Android removes this profile's entry,
 //! whoever wrote it. Without `--mirror-apps` (only the main session passes
@@ -25,8 +25,8 @@ use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use linuxapk_core::desktop::{self, AppEntry};
-use linuxapk_core::{ops, paths, validate, xdg};
+use innkeeper_core::desktop::{self, AppEntry};
+use innkeeper_core::{ops, paths, validate, xdg};
 
 use crate::ipc::blob;
 use crate::ipc::server::{Peer, Reply, Service};
@@ -82,7 +82,7 @@ pub mod have {
     /// No entry, or ours for another version: send ADDED.
     pub const MISSING: u8 = 0;
     pub const CURRENT: u8 = 1;
-    /// Someone else's entry (`linuxapk install`, another profile), or
+    /// Someone else's entry (`innkeeper install`, another profile), or
     /// mirroring is off: leave it.
     pub const NOT_OURS: u8 = 2;
 }
@@ -188,7 +188,7 @@ pub struct Config {
     pub dirs: xdg::Dirs,
     /// The session profile entries are made for (see `paths::profile`).
     pub profile: String,
-    /// `Exec` prefix: `linuxapk run` (with the profile), the package and
+    /// `Exec` prefix: `innkeeper run` (with the profile), the package and
     /// `%U` are appended.
     pub run: Vec<String>,
 }
@@ -197,14 +197,14 @@ impl Config {
     pub fn from_env(enabled: bool) -> Config {
         let profile = paths::profile().unwrap_or_default();
         let mut run = ops::cli_command().unwrap_or_else(|e| {
-            crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
-            paths::command(&["linuxapk".into()], &profile)
+            crate::warn!("apps: {e:#}; desktop entries will run `innkeeper` from PATH");
+            paths::command(&["innkeeper".into()], &profile)
         });
         run.push("run".into());
         Config {
             enabled,
             mirror_apps: AtomicBool::new(
-                linuxapk_core::preferences::Preferences::load()
+                innkeeper_core::preferences::Preferences::load()
                     .map(|p| p.mirror_apps)
                     .unwrap_or(true),
             ),
@@ -218,11 +218,11 @@ impl Config {
     fn existing(&self, pkg: &str) -> Option<(bool, Option<String>)> {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
-        let ours = desktop::read_key(&text, "X-LinuxApk-Origin").as_deref() == Some("android")
+        let ours = desktop::read_key(&text, "X-Innkeeper-Origin").as_deref() == Some("android")
             && xdg::exec_profile(&exec) == self.profile;
         // Rebuild pre-action mirrored entries once, even when the APK is unchanged.
-        let version = desktop::read_key(&text, "X-LinuxApk-NewWindow")
-            .map(|_| desktop::read_key(&text, "X-LinuxApk-Version").unwrap_or_default());
+        let version = desktop::read_key(&text, "X-Innkeeper-NewWindow")
+            .map(|_| desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default());
         Some((ours, version))
     }
 
@@ -502,7 +502,7 @@ mod tests {
             },
             profile: "t".into(),
             run: [
-                paths::command(&["linuxapk".into()], "t"),
+                paths::command(&["innkeeper".into()], "t"),
                 vec!["run".into()],
             ]
             .concat(),
@@ -525,28 +525,32 @@ mod tests {
         );
         assert_eq!(r.status, 0);
         let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
-        assert!(text.contains("X-LinuxApk-Origin=android"), "{text}");
+        assert!(text.contains("X-Innkeeper-Origin=android"), "{text}");
         assert!(text.contains("[Desktop Action NewWindow]"), "{text}");
         assert!(
             text.contains(&format!("Exec={}\n", exec("org.ex.a"))),
             "{text}"
         );
-        assert!(cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").is_file());
+        assert!(
+            cfg.dirs
+                .icon_path(48, "dev.sargunv.innkeeper.org.ex.a")
+                .is_file()
+        );
         assert_eq!(cfg.have("org.ex.a", "1"), have::CURRENT);
         assert_eq!(cfg.have("org.ex.a", "2"), have::MISSING);
-        let old = text.replace("X-LinuxApk-NewWindow=true\n", "");
+        let old = text.replace("X-Innkeeper-NewWindow=true\n", "");
         std::fs::write(cfg.dirs.app_desktop("org.ex.a"), old).unwrap();
         assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
-        let no_version = text.replace("X-LinuxApk-Version=1\n", "");
+        let no_version = text.replace("X-Innkeeper-Version=1\n", "");
         std::fs::write(cfg.dirs.app_desktop("org.ex.a"), no_version).unwrap();
         assert_eq!(cfg.have("org.ex.a", ""), have::CURRENT);
-        // An entry from `linuxapk install` is left alone, and so is another
+        // An entry from `innkeeper install` is left alone, and so is another
         // profile's.
         let cli = format!("[Desktop Entry]\nName=B\nExec={}\n", exec("org.ex.b"));
         std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
         assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
         let other =
-            "[Desktop Entry]\nName=C\nX-LinuxApk-Origin=android\nExec=linuxapk run org.ex.c %U\n";
+            "[Desktop Entry]\nName=C\nX-Innkeeper-Origin=android\nExec=innkeeper run org.ex.c %U\n";
         std::fs::write(cfg.dirs.app_desktop("org.ex.c"), other).unwrap();
         assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
         s.removed("org.ex.c");
@@ -555,7 +559,11 @@ mod tests {
         s.removed("org.ex.a");
         s.removed("org.ex.b");
         assert!(!cfg.dirs.app_desktop("org.ex.a").exists());
-        assert!(!cfg.dirs.icon_path(48, "dev.linuxapk.org.ex.a").exists());
+        assert!(
+            !cfg.dirs
+                .icon_path(48, "dev.sargunv.innkeeper.org.ex.a")
+                .exists()
+        );
         assert!(!cfg.dirs.app_desktop("org.ex.b").exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }

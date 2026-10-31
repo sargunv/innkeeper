@@ -1,1 +1,1 @@
-# linuxapk: disabled cuttlefish-only service; see android/overlay/README.md (logcat -b all to a virtio console)
+# innkeeper: disabled cuttlefish-only service; see android/overlay/README.md (logcat -b all to a virtio console)

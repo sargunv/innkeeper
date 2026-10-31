@@ -1,4 +1,4 @@
-// tinyalsa mixer API for Linux.apk's virtual card: the controls Android's
+// tinyalsa mixer API for Innkeeper's virtual card: the controls Android's
 // audio HALs look for. "Master Playback Volume/Switch" are forwarded to the
 // bridge (PipeWire stream volume and mute); capture controls are stored only.
 
@@ -9,7 +9,7 @@
 #include <string.h>
 #include <tinyalsa/mixer.h>
 
-#include "linuxapk/audio.h"
+#include "innkeeper/audio.h"
 
 #define API __attribute__((visibility("default")))
 
@@ -57,7 +57,7 @@ API int mixer_add_new_ctls(struct mixer* m) {
 }
 API const char* mixer_get_name(const struct mixer* m) {
   (void)m;
-  return "Linux.apk";
+  return "Innkeeper";
 }
 API unsigned int mixer_get_num_ctls(const struct mixer* m) {
   return m ? NCTLS : 0;

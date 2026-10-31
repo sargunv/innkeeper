@@ -1,5 +1,5 @@
 //! Documents service messages (id 4, types 0x0400..=0x04ff, events
-//! 0x4400..=0x44ff). The client is the Linux.apk System app's document
+//! 0x4400..=0x44ff). The client is the Innkeeper System app's document
 //! picker (`PickerActivity.kt`) and DocumentsProvider
 //! (`HostDocumentsProvider.kt`); only its uid may open the service.
 //!

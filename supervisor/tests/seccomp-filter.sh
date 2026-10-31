@@ -12,7 +12,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=$here/../../out/test/supervisor/seccomp-filter
 mkdir -p "$out"
-cargo build -q -p linuxapk-broker --example supervisor-probes
+cargo build -q -p innkeeper-broker --example supervisor-probes
 cc -O1 -Wall -Werror -o "$out/t" "$here/seccomp-filter.c" "$here/../../out/cargo/debug/examples/libsupervisor_probes.a" -lpthread -ldl -lm
 fail=0
 # Name, harness flag, the probes expected to be notified, then environment.
@@ -28,5 +28,5 @@ check "bootless harness" 1 "bpf,openat,ioctl binder"
 single="bpf,openat,ioctl binder,getuid,getgroups,setresuid,setgroups,fchownat,getsockopt SO_PEERCRED,lstat,access W_OK"
 flat="fstat,readlinkat,getcwd,setsockopt SO_MARK,capget,capset,mkdirat,fchmodat,prctl PR_CAPBSET_DROP"
 check "flatpak" 0 "$single,$flat"
-check "flatpak, OpenHarmony" 0 "bpf,openat,ioctl binder,open,ioctl access token,ioctl ashmem,${single#bpf,openat,ioctl binder,},$flat" LINUXAPK_GUEST=ohos
+check "flatpak, OpenHarmony" 0 "bpf,openat,ioctl binder,open,ioctl access token,ioctl ashmem,${single#bpf,openat,ioctl binder,},$flat" INNKEEPER_GUEST=ohos
 exit $fail

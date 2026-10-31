@@ -4,7 +4,7 @@
 
 #include "StreamBridge.h"
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 class StreamInBridge : public core::IStreamCommonDelegator {
  public:
   StreamInBridge(
@@ -62,7 +62,7 @@ class StreamIn : public core::IStreamInDelegator {
   ) override {
     using Info = aidl::android::media::audio::common::MicrophoneDynamicInfo;
     Info info;
-    info.id = "linuxapk-microphone";
+    info.id = "innkeeper-microphone";
     info.channelMapping.assign(channels_, Info::ChannelMapping::DIRECT);
     *out = {info};
     return ndk::ScopedAStatus::ok();
@@ -72,4 +72,4 @@ class StreamIn : public core::IStreamInDelegator {
   std::shared_ptr<StreamInBridge> stream_;
   uint32_t channels_;
 };
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

@@ -1,4 +1,4 @@
-//! The Linux.apk session launcher (`linuxapk-session`, host/launcher/README.md)
+//! The Innkeeper session launcher (`innkeeper-session`, host/launcher/README.md)
 //! and what host/core reads of a session without running it: its paths, its
 //! status and its cgroup. docs/session.md describes the session.
 
@@ -34,7 +34,7 @@ pub struct Status {
 }
 
 impl Status {
-    /// `linuxapk-session status`'s output.
+    /// `innkeeper-session status`'s output.
     pub fn text(&self) -> String {
         let head = match self.pid {
             Some(p) => format!("running: host pid {p}"),

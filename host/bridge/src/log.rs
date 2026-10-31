@@ -14,19 +14,19 @@ pub fn verbose() -> bool {
 
 #[macro_export]
 macro_rules! info {
-    ($($t:tt)*) => { eprintln!("linuxapk-bridge: {}", format_args!($($t)*)) };
+    ($($t:tt)*) => { eprintln!("innkeeper-bridge: {}", format_args!($($t)*)) };
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($t:tt)*) => { eprintln!("linuxapk-bridge: warning: {}", format_args!($($t)*)) };
+    ($($t:tt)*) => { eprintln!("innkeeper-bridge: warning: {}", format_args!($($t)*)) };
 }
 
 #[macro_export]
 macro_rules! debug {
     ($($t:tt)*) => {
         if $crate::log::verbose() {
-            eprintln!("linuxapk-bridge: debug: {}", format_args!($($t)*))
+            eprintln!("innkeeper-bridge: debug: {}", format_args!($($t)*))
         }
     };
 }

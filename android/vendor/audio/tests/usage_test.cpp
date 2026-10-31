@@ -13,7 +13,7 @@
   } while (0)
 
 int main() {
-  using namespace linuxapk::audio;
+  using namespace innkeeper::audio;
   // No tracks: nothing to report, so the caller sends no SET_METADATA.
   CHECK(!selectUsage(nullptr, 0));
 

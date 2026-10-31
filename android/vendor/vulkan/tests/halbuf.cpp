@@ -1,13 +1,13 @@
 // Test helper for vkdriver_test --anb-hal: allocate a buffer with the graphics
-// HAL's allocator code (memfd -> udmabuf, linuxapk handle layout) and import
-// it through the real mapper.linuxapk.so, as libui would in an app process.
+// HAL's allocator code (memfd -> udmabuf, innkeeper handle layout) and import
+// it through the real mapper.innkeeper.so, as libui would in an app process.
 // Built from the graphics HAL sources by android/vendor/vulkan/build.sh.
 #include <dlfcn.h>
 #include <stdio.h>
 #include <sys/mman.h>
 
-#include "linuxapk/buffer_alloc.h"
-#include "linuxapk/gralloc_handle.h"
+#include "innkeeper/buffer_alloc.h"
+#include "innkeeper/gralloc_handle.h"
 
 namespace {
 struct AIMapperV5Subset {
@@ -25,7 +25,7 @@ extern "C" __attribute__((visibility("default"))) int halbuf_alloc(
   int* out_stride_px, size_t* out_stride_bytes, void** out_map,
   size_t* out_map_size
 ) {
-  using namespace linuxapk;
+  using namespace innkeeper;
   AllocRequest req{
     "vkdriver_test",
     uint32_t(width),
@@ -56,7 +56,7 @@ extern "C" __attribute__((visibility("default"))) int halbuf_alloc(
                            )
                          : nullptr;
   void* so = load_sphal
-               ? load_sphal("mapper.linuxapk.so", RTLD_NOW | RTLD_LOCAL)
+               ? load_sphal("mapper.innkeeper.so", RTLD_NOW | RTLD_LOCAL)
                : nullptr;
   auto load = so ? reinterpret_cast<int32_t (*)(AIMapperSubset**)>(
                      dlsym(so, "AIMapper_loadIMapper")
@@ -64,7 +64,7 @@ extern "C" __attribute__((visibility("default"))) int halbuf_alloc(
                  : nullptr;
   AIMapperSubset* mapper = nullptr;
   if (!load || load(&mapper) != 0 || mapper->version < 5) {
-    printf("halbuf: cannot load mapper.linuxapk.so: %s\n", dlerror());
+    printf("halbuf: cannot load mapper.innkeeper.so: %s\n", dlerror());
     return -1;
   }
   if (mapper->v5.importBuffer(raw, out_imported) != 0) {

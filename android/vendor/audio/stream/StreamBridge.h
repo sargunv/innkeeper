@@ -13,7 +13,7 @@
 #include "Queue.h"
 #include "Usage.h"
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 namespace core = aidl::android::hardware::audio::core;
 using Descriptor = core::StreamDescriptor;
 
@@ -73,4 +73,4 @@ class StreamOut : public core::IStreamOutDelegator {
  private:
   std::shared_ptr<StreamBridge> stream_;
 };
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

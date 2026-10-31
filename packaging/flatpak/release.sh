@@ -42,10 +42,10 @@ git_branch=$(git symbolic-ref --quiet --short HEAD || true)
 short=$(git rev-parse --short=7 HEAD)
 count=$(git rev-list --count HEAD)
 if [[ $channel == stable ]]; then
-  version=${LINUXAPK_RELEASE_VERSION:-${git_branch#v}}
+  version=${INNKEEPER_RELEASE_VERSION:-${git_branch#v}}
   [[ $version != "$git_branch" && -n $version ]] || version=$(git describe --tags --exact-match 2>/dev/null || true)
   [[ -n $version ]] || {
-    echo "release.sh: a stable export needs a version tag (or LINUXAPK_RELEASE_VERSION)" >&2
+    echo "release.sh: a stable export needs a version tag (or INNKEEPER_RELEASE_VERSION)" >&2
     exit 1
   }
   version=${version#v}
@@ -59,7 +59,7 @@ if ! git diff --quiet HEAD --; then
   echo "release.sh: uncommitted changes; the Flatpak is built from HEAD" >&2
   exit 1
 fi
-[[ -f out/stage/share/linuxapk/manifest.tsv ]] || {
+[[ -f out/stage/share/innkeeper/manifest.tsv ]] || {
   echo "release.sh: run mise run build first" >&2
   exit 1
 }
@@ -71,17 +71,17 @@ git archive HEAD | tar -x -C "$out/src"
 cargo vendor -q --locked --manifest-path "$out/src/Cargo.toml" "$out/vendor" >/dev/null
 
 # The Android side: every staged file the host modules didn't write, with
-# their rows of the stage manifest (the linuxapk module adds its own).
+# their rows of the stage manifest (the innkeeper module adds its own).
 stage=out/stage
-m=share/linuxapk/manifest.tsv
-mkdir -p "$out/prebuilt/share/linuxapk"
+m=share/innkeeper/manifest.tsv
+mkdir -p "$out/prebuilt/share/innkeeper"
 awk -F'\t' '$2 != "host" && $2 != "launcher"' "$stage/$m" >"$out/prebuilt/$m"
 cut -f1 "$out/prebuilt/$m" | (cd "$stage" && cpio -pdm --quiet "$out/prebuilt")
 
 # Builder runs from its own installation: Flatpak hides that installation
 # inside the sandbox, so the SDK it builds against lives in another one.
-tools=${LINUXAPK_FLATPAK_TOOLS:-$out/tools}
-sdk=${LINUXAPK_FLATPAK_SDK:-$out/sdk}
+tools=${INNKEEPER_FLATPAK_TOOLS:-$out/tools}
+sdk=${INNKEEPER_FLATPAK_SDK:-$out/sdk}
 flathub=https://dl.flathub.org/repo/flathub.flatpakrepo
 for d in "$tools" "$sdk"; do
   FLATPAK_USER_DIR=$d flatpak remote-add --user --if-not-exists flathub "$flathub"

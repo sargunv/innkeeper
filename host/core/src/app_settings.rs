@@ -5,12 +5,12 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-pub const INTERFACE: &str = "dev.linuxapk.Session1";
-pub const PATH: &str = "/dev/linuxapk/Session";
+pub const INTERFACE: &str = "dev.sargunv.Innkeeper.Session1";
+pub const PATH: &str = "/dev/sargunv/Innkeeper/Session";
 pub const MAX_JSON: usize = 64 * 1024;
 
 pub fn bus_name(profile: &str) -> String {
-    let base = "dev.linuxapk.Manager.Session";
+    let base = "dev.sargunv.Innkeeper.Session";
     // `.p_<name>` is the session bus name. Hyphens become underscores.
     if profile.is_empty() {
         base.into()
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn api_encoding_and_validation() {
-        let mut c = Command::new("dev.linuxapk.probes", "permission");
+        let mut c = Command::new("dev.sargunv.innkeeper.probes", "permission");
         c.permission = "android.permission.CAMERA".into();
         c.enabled = true;
         assert_eq!(
@@ -182,10 +182,10 @@ mod tests {
         }
         assert!(Response::decode(br#"{"error":"","info":null}"#).is_err());
         assert!(Response::decode(&vec![b' '; MAX_JSON + 1]).is_err());
-        assert_eq!(bus_name(""), "dev.linuxapk.Manager.Session");
+        assert_eq!(bus_name(""), "dev.sargunv.Innkeeper.Session");
         assert_eq!(
             bus_name("page-test"),
-            "dev.linuxapk.Manager.Session.p_page_test"
+            "dev.sargunv.Innkeeper.Session.p_page_test"
         );
     }
 }

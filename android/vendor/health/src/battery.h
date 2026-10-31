@@ -12,12 +12,12 @@
 extern "C" {
 #endif
 
-#define LAPK_EV_BATTERY 0x4801
-#define LAPK_HOSTSTATE_START 0x0801
-#define LAPK_FEATURE_BATTERY 1u
+#define INNKEEPER_EV_BATTERY 0x4801
+#define INNKEEPER_HOSTSTATE_START 0x0801
+#define INNKEEPER_FEATURE_BATTERY 1u
 
 // UPower's view, as the bridge sends it.
-struct lapk_battery {
+struct innkeeper_battery {
   bool present;
   uint8_t state;  // UPower State: 0 unknown .. 6 pending discharge
   bool ac;
@@ -28,7 +28,7 @@ struct lapk_battery {
 
 // The HealthInfo fields Android reads. Status and capacity level use the
 // AIDL enums' values (BatteryStatus, BatteryCapacityLevel).
-struct lapk_health {
+struct innkeeper_health {
   bool ac_online;
   bool battery_present;
   int32_t status;
@@ -38,15 +38,17 @@ struct lapk_health {
 };
 
 // 0, or -EINVAL for a malformed body.
-int lapk_battery_decode(
-  const uint8_t* body, size_t len, struct lapk_battery* out
+int innkeeper_battery_decode(
+  const uint8_t* body, size_t len, struct innkeeper_battery* out
 );
 
 // Android's view of `b`. A host without a battery is on AC and full.
-void lapk_health_from(const struct lapk_battery* b, struct lapk_health* out);
+void innkeeper_health_from(
+  const struct innkeeper_battery* b, struct innkeeper_health* out
+);
 
 // What to report before the bridge answers: AC, no battery.
-extern const struct lapk_battery LAPK_BATTERY_AC_ONLY;
+extern const struct innkeeper_battery INNKEEPER_BATTERY_AC_ONLY;
 
 #ifdef __cplusplus
 }

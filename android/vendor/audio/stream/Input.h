@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace linuxapk::audio::input {
+namespace innkeeper::audio::input {
 inline constexpr uint32_t kRate = 48000;
 inline constexpr uint32_t kPeriodFrames = 480;  // 10 ms capture bursts
 // The source cannot backpressure: retain 80 ms for scheduling jitter without
@@ -17,4 +17,4 @@ inline bool validBurst(int32_t bytes, uint32_t frameBytes, size_t space) {
   return bytes >= 0 && bytes % frameBytes == 0 &&
          static_cast<size_t>(bytes) <= space;
 }
-}  // namespace linuxapk::audio::input
+}  // namespace innkeeper::audio::input

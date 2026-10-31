@@ -6,11 +6,11 @@
 static int filecon(const char* path, char** context, int nofollow) {
   ssize_t (*get)(const char*, const char*, void*, size_t) =
     nofollow ? lgetxattr : getxattr;
-  ssize_t n = get(path, "user.linuxapk.test.selinux", NULL, 0);
+  ssize_t n = get(path, "user.innkeeper.test.selinux", NULL, 0);
   if (n < 0) return -1;
   char* label = malloc(n + 1);
   if (!label) return -1;
-  n = get(path, "user.linuxapk.test.selinux", label, n);
+  n = get(path, "user.innkeeper.test.selinux", label, n);
   if (n < 0) {
     free(label);
     return -1;

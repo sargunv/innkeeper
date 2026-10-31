@@ -1,4 +1,4 @@
-//! The text-input line protocol between the Linux.apk IME (an
+//! The text-input line protocol between the Innkeeper IME (an
 //! `InputMethodService` in the system app) and the seat's `zwp_text_input_v3`
 //! (`text_input.rs`).
 //!

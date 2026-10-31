@@ -37,7 +37,7 @@ env:
   CMAKE_CXX_COMPILER_LAUNCHER: ccache
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_MAXSIZE: 500M
-  LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
+  INNKEEPER_IMAGES: ${{ github.workspace }}/out/ci/images
 
 jobs:
   build:
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/cache@v4
         if: steps.stage.outputs.cache-hit != 'true'
         with:
-          path: ~/.cache/linuxapk-dev/keys
+          path: ~/.cache/innkeeper-dev/keys
           key:
             platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
       - run: mise run build
@@ -134,7 +134,7 @@ jobs:
           mode: nightly
       - name: Build the bundle
         env:
-          LINUXAPK_RELEASE_VERSION:
+          INNKEEPER_RELEASE_VERSION:
             ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           packaging/flatpak/release.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'

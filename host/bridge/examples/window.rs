@@ -4,7 +4,7 @@
 //! (DISPLAY_ADD, a udmabuf pool, BUFFER_ADD, FRAME, RELEASE). It animates a
 //! test pattern and prints the input service's events.
 //!
-//!   cargo run -p linuxapk-bridge --example window -- SOCKET [SECONDS]
+//!   cargo run -p innkeeper-bridge --example window -- SOCKET [SECONDS]
 //!
 //! Only the system app may use the input service: run the bridge with
 //! `--system-app-dir` pointing at a directory you own.
@@ -15,10 +15,10 @@ use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::display::proto::{self as d, BufferSpec, Request, fourcc};
-use linuxapk_bridge::input::proto::{self as input, WindowRequest};
-use linuxapk_bridge::ipc::proto::{Hello, service};
-use linuxapk_bridge::ipc::wire;
+use innkeeper_bridge::display::proto::{self as d, BufferSpec, Request, fourcc};
+use innkeeper_bridge::input::proto::{self as input, WindowRequest};
+use innkeeper_bridge::ipc::proto::{Hello, service};
+use innkeeper_bridge::ipc::wire;
 use rustix::net::{
     AddressFamily, RecvAncillaryBuffer, RecvFlags, SendAncillaryBuffer, SendAncillaryMessage,
     SendFlags, SocketAddrUnix, SocketFlags, SocketType,
@@ -230,7 +230,7 @@ fn main() -> Result<()> {
         dpi: 160,
         min_width: 0,
         min_height: 0,
-        app_id: "dev.linuxapk.example".into(),
+        app_id: "dev.sargunv.innkeeper.example".into(),
         title: "Bridge window example".into(),
         token: String::new(),
     });

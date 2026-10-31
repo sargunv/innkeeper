@@ -3,7 +3,7 @@
 // binaries without init. Test only; never installed.
 //  - __system_property_*: no property service. A per-process store, seeded
 //    with servicemanager.ready=true (libbinder's defaultServiceManager() waits
-//    for it) and LINUXAPK_PROPS="name=value;name=value".
+//    for it) and INNKEEPER_PROPS="name=value;name=value".
 //  - selinux_status_*: no selinuxfs; servicemanager CHECKs
 //    selinux_status_open().
 //  - __android_log_write_log_message: no logd; mirror logs to stderr.
@@ -76,7 +76,7 @@ static void setLocked(const char* name, const char* value) {
 
 static void init(void) {
   setLocked("servicemanager.ready", "true");
-  const char* env = getenv("LINUXAPK_PROPS");
+  const char* env = getenv("INNKEEPER_PROPS");
   if (!env) return;
   char* copy = strdup(env);
   char* save = NULL;

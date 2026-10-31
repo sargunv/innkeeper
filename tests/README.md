@@ -14,8 +14,8 @@ level.
 
   ```sh
   mise run build
-  LINUXAPK_PROFILE=prepare-tests mise run session -- prepare
-  LINUXAPK_PROFILE=e2e-local mise run test:e2e
+  INNKEEPER_PROFILE=prepare-tests mise run session -- prepare
+  INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
 The runner owns private D-Bus/runtime/HOME/XDG dirs, private PipeWire/Pulse
@@ -30,8 +30,8 @@ observations; audio capture runs after window checks so AudioRecord stays
 visible. Setup observes user 0's `RUNNING_UNLOCKED` state before installing
 probes: boot completion alone can precede credential-encrypted app-data
 preparation. CI uses headless Mutter/llvmpipe with
-`LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1` and a 180 s deadline
-(`LINUXAPK_E2E_DEADLINE`, honored only with `GITHUB_ACTIONS=true`). Observation
+`INNKEEPER_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1` and a 180 s deadline
+(`INNKEEPER_E2E_DEADLINE`, honored only with `GITHUB_ACTIONS=true`). Observation
 and group limits scale with that deadline. Logs, captures and phase timings land
 in `out/test/e2e/<profile>/`; desktop logs are in `out/test/nested/<profile>/`.
 CI uploads these in `checks-logs`. Android log captures are bounded. `desktop`
@@ -44,7 +44,7 @@ without opening host apps or dialogs.
   Never trigger, run or wait for it during development or PR work.
 
 For sustained capture proof, build and stage, then run
-`tests/e2e/audio/capture.sh` with a fresh `LINUXAPK_PROFILE`. It records 32 s
+`tests/e2e/audio/capture.sh` with a fresh `INNKEEPER_PROFILE`. It records 32 s
 from a private 440 Hz source through AudioRecord and checks 30 s after initial
 warmup, and checks a simultaneous native monitor recording as a control. Each
 100 ms window must contain the tone; crossing intervals and a sample recurrence

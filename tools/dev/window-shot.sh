@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Screenshot the Linux.apk Wayland window (KDE Plasma): activates it through a
+# Screenshot the Innkeeper Wayland window (KDE Plasma): activates it through a
 # KWin script, then captures only that window with Spectacle. This steals
-# focus. Usage: tools/dev/window-shot.sh <out.png> [window caption, default Linux.apk]
+# focus. Usage: tools/dev/window-shot.sh <out.png> [window caption, default Innkeeper]
 set -euo pipefail
 out=${1:?usage: window-shot.sh <out.png> [caption]}
-caption=${2:-Linux.apk}
+caption=${2:-Innkeeper}
 js=$(mktemp --suffix=.js)
 trap 'rm -f "$js"' EXIT
 cat >"$js" <<JS
@@ -15,7 +15,7 @@ for (const w of workspace.windowList()) {
   }
 }
 JS
-name=linuxapk-activate-$$
+name=innkeeper-activate-$$
 id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
   --method org.kde.kwin.Scripting.loadScript "$js" "$name" | grep -oE '[0-9]+')
 gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$id" \

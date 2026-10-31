@@ -330,7 +330,7 @@ mod tests {
                 width: 720,
                 height: 1280,
                 dpi: 320,
-                app_id: "dev.linuxapk.ohos".into(),
+                app_id: "dev.sargunv.innkeeper.ohos".into(),
                 title: "OpenHarmony".into(),
             },
             buffer(5120),

@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # Touch gestures for compat scripts, as input lines (protocol v2,
 # host/bridge/src/input/proto.rs) paced in real time. Runs inside the session
-# and is piped into the probes APK's dev.linuxapk.probes.InputStdinHarness.
+# and is piped into the probes APK's dev.sargunv.innkeeper.probes.InputStdinHarness.
 #   gesture.sh pinch|pan|doubletap X Y DISPLAY W H
 # X Y are in the pixels of the app's W x H window on Android display DISPLAY.
 g=$1 x=$2 y=$3 t=1000 d=$4 w=$5 h=$6

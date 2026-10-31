@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// See linuxapk/bridge_client.h.
+// See innkeeper/bridge_client.h.
 
 #include <errno.h>
 #include <poll.h>
@@ -9,7 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "linuxapk/bridge_client.h"
+#include "innkeeper/bridge_client.h"
 
 #define LXB_HELLO 0x0001
 #define LXB_MAJOR 1

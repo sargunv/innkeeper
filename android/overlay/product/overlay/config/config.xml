@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Linux.apk: default to gesture navigation. On our 1280x800 display Launcher3
+  Innkeeper: default to gesture navigation. On our 1280x800 display Launcher3
   shows the taskbar, and with three-button navigation (the framework default)
   its bubble bar calls TaskbarNavButtonController before init: an NPE on
   cueBarController that crash-loops the launcher whenever it is in front.

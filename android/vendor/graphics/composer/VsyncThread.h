@@ -11,7 +11,7 @@
 
 #include <aidl/android/hardware/graphics/composer3/IComposerCallback.h>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 class VsyncThread {
  public:
@@ -44,4 +44,4 @@ class VsyncThread {
   std::thread mThread;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

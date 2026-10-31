@@ -1,9 +1,9 @@
 # system-app
 
-"Linux.apk System" (`dev.linuxapk.system`): a persistent, platform-signed
-privileged app that is Android's side of the desktop.
-`mise run build:system-app` (Gradle) installs `LinuxApkSystem.apk` to
-`/system_ext/priv-app/LinuxApkSystem/` and its permissions XML to
+"Innkeeper System" (`dev.sargunv.innkeeper.system`): a persistent,
+platform-signed privileged app that is Android's side of the desktop.
+`mise run build:system-app` (Gradle) installs `InnkeeperSystem.apk` to
+`/system_ext/priv-app/InnkeeperSystem/` and its permissions XML to
 `/system_ext/etc/permissions/`; system_server starts it at `systemReady` and
 restarts it if it dies.
 
@@ -11,7 +11,7 @@ restarts it if it dies.
 | --------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
 | `wm/HomeActivity.kt`                    | none           | empty HOME on the windowless default display, replacing Launcher3/QuickStep             |
 | `wm/`                                   | input          | one trusted virtual display and host window per task ([display](../../docs/display.md)) |
-| `input/`, `ime/`                        | input          | host seat injection and the Linux.apk Keyboard ([input](../../docs/input.md))           |
+| `input/`, `ime/`                        | input          | host seat injection and the Innkeeper Keyboard ([input](../../docs/input.md))           |
 | `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up     |
 | `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))           |
 | `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked              |
@@ -35,7 +35,7 @@ Gradle modules:
 - `:wm-overlay`: resource-only, platform-signed RRO enabling per-display remote
   insets requests, and fixing Android's stream volumes at maximum so the desktop
   mixer is the only volume control.
-- `:probes`: `LinuxApkProbes.apk`, diagnostic activities and the input harness
+- `:probes`: `InnkeeperProbes.apk`, diagnostic activities and the input harness
   for the e2e and compat tests. Installed to `out/test/probes`, never staged.
 
 Notes:
@@ -43,13 +43,14 @@ Notes:
 - **Signing:** AGP leaves release APKs unsigned; `signRelease` signs them with
   AOSP's public test-keys platform key, which also signs the CI image. The key
   is fetched from googlesource, checked by SHA-256 and cached in
-  `~/.cache/linuxapk-dev/keys`, never committed.
+  `~/.cache/innkeeper-dev/keys`, never committed.
 - **Privileged permissions:** the image enforces
   `ro.control_privapp_permissions`, so every privileged permission the manifest
-  adds must also be listed in `etc/permissions/dev.linuxapk.system.xml`, or
-  system_server won't boot.
+  adds must also be listed in
+  `etc/permissions/dev.sargunv.innkeeper.system.xml`, or system_server won't
+  boot.
 - **IconDump** (`apps/IconDump.kt`) runs under `app_process` from the installed
-  APK for `linuxapk install`, so the host needs no Android SDK to render icons.
+  APK for `innkeeper install`, so the host needs no Android SDK to render icons.
 - `tools/gen-keymap.py` regenerates `EvdevKeymap.kt` from AOSP's `Generic.kl`.
 
 ## Host state
@@ -78,7 +79,7 @@ The browser and `integration/handoff/` forward external VIEWs through OpenURI.
 Custom Tabs VIEWs from apps with a verified App Link host use an installed
 Android browser, allowing https sign-in redirects to return through Android App
 Links. Ordinary links still use the desktop browser, including from those same
-apps. The browser role stays with Linux.apk System.
+apps. The browser role stays with Innkeeper System.
 
 A priority -1000 wildcard MIME filter handles files with no Android handler;
 explicit scheme filters cover mailto, tel, sms, smsto, geo, market, magnet,
@@ -96,7 +97,7 @@ Known limits:
 
 - Without an Android browser installed, Custom Tabs still open on the desktop.
   An https App Link sign-in redirect then stays in the desktop browser and
-  cannot return to the Android app; Linux.apk does not own desktop https links.
+  cannot return to the Android app; Innkeeper does not own desktop https links.
 - Shares are capped at three attachments, 64 MiB each, and 32 KiB of text.
   Opened files and email attachments are retained in the profile cache until
   session shutdown, up to 256 MiB per session; saved copies are removed

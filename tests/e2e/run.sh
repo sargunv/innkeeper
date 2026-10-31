@@ -11,17 +11,17 @@ report_error() {
 trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-e2e}
-export LINUXAPK_E2E=1
+export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-e2e}
+export INNKEEPER_E2E=1
 S=$repo/tools/dev/session.sh
-T=$repo/out/test/e2e/$LINUXAPK_PROFILE
-desktop_log=$repo/out/test/nested/$LINUXAPK_PROFILE/desktop.log
-bridge_log=$repo/out/test/nested/$LINUXAPK_PROFILE/state/linuxapk-$LINUXAPK_PROFILE/bridge.log
-apk=$repo/out/test/probes/LinuxApkProbes.apk
+T=$repo/out/test/e2e/$INNKEEPER_PROFILE
+desktop_log=$repo/out/test/nested/$INNKEEPER_PROFILE/desktop.log
+bridge_log=$repo/out/test/nested/$INNKEEPER_PROFILE/state/innkeeper-$INNKEEPER_PROFILE/bridge.log
+apk=$repo/out/test/probes/InnkeeperProbes.apk
 # GitHub's software-rendered desktop is slower than local development.
 deadline=55
 if [[ ${GITHUB_ACTIONS:-} == true ]]; then
-  deadline=${LINUXAPK_E2E_DEADLINE:-55}
+  deadline=${INNKEEPER_E2E_DEADLINE:-55}
 fi
 observation_wait=$(((20 * deadline + 54) / 55))
 timed() (
@@ -42,7 +42,7 @@ timed() (
   "$@"
 )
 s() { "$S" exec "$@"; }
-wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }
+wm() { s am broadcast -n dev.sargunv.innkeeper.system/.wm.ControlReceiver -a "dev.sargunv.innkeeper.$1" "${@:2}"; }
 # Poll observations, returning as soon as they arrive; the outer group deadline
 # also bounds a command that stops answering.
 until_ok() {
@@ -63,8 +63,8 @@ file_has() { grep -E "$2" "$1" >/dev/null; }
 window_ready() { s dumpsys activity activities | grep "topResumedActivity=.*$1" >/dev/null; }
 launch() {
   local out
-  wm CLOSE --es package dev.linuxapk.probes >/dev/null
-  out=$(wm LAUNCH --es package dev.linuxapk.probes --es component "dev.linuxapk.probes/.$1")
+  wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
+  out=$(wm LAUNCH --es package dev.sargunv.innkeeper.probes --es component "dev.sargunv.innkeeper.probes/.$1")
   display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$out")
   [[ -n $display ]] || {
     echo "FAIL launch: $out"
@@ -78,8 +78,8 @@ stop_session() {
   "$S" stop >/dev/null
   # The dev supervisor publishes its exit after the sandbox closes. Wait for
   # it before a restart, so its old completion cannot fail the new start.
-  if [[ -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
-    until_setup test -f "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/ended"
+  if [[ -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
+    until_setup test -f "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/ended"
   fi
 }
 
@@ -92,8 +92,8 @@ if [[ ${1:-} == --group ]]; then
       s sh -c '
         for init in $(pidof init); do
           parent=$(sed -n "s/^PPid:[[:space:]]*//p" "/proc/$init/status")
-          if test "$(cat /proc/$parent/comm)" = linuxapk-broker; then
-            echo "init=$init parent=$parent (linuxapk-broker)"
+          if test "$(cat /proc/$parent/comm)" = innkeeper-brk; then
+            echo "init=$init parent=$parent (innkeeper-brk)"
             exit 0
           fi
         done
@@ -110,10 +110,10 @@ if [[ ${1:-} == --group ]]; then
       # where it looks for the user's, in the dev sandbox's home.
       rm -rf "$T/adbhome" && mkdir -p "$T/adbhome/.android"
       "$adb" keygen "$T/adbhome/.android/adbkey" >/dev/null 2>&1
-      keys=$repo/out/dev/flatpak/$LINUXAPK_PROFILE/home/.android
+      keys=$repo/out/dev/flatpak/$INNKEEPER_PROFILE/home/.android
       mkdir -p "$keys"
       cp "$T/adbhome/.android/adbkey.pub" "$keys/"
-      "$repo/tools/dev/linuxapk.sh" profile set --adb on >"$T/adb-on.txt" 2>&1
+      "$repo/tools/dev/innkeeper.sh" profile set --adb on >"$T/adb-on.txt" 2>&1
       serial=$(grep -o '127\.0\.0\.1:[0-9]*' "$T/adb-on.txt")
       port=${serial#*:}
       # shellcheck disable=SC2329 # invoked through until_ok
@@ -130,7 +130,7 @@ if [[ ${1:-} == --group ]]; then
       adb_shell() { [[ $("${A[@]}" -s "$serial" shell echo ok 2>/dev/null) == ok ]]; }
       until_ok adb_shell
       "${A[@]}" kill-server
-      "$repo/tools/dev/linuxapk.sh" profile set --adb off >/dev/null 2>&1
+      "$repo/tools/dev/innkeeper.sh" profile set --adb off >/dev/null 2>&1
       echo "ok   adb is off by default; on, a loopback port the user's key reaches"
       driver=$(s getprop ro.hardware.vulkan)
       feature=android.hardware.vulkan.level=1
@@ -142,8 +142,8 @@ if [[ ${1:-} == --group ]]; then
       # Session1 reports the same completed boot as the launcher's property check.
       # shellcheck disable=SC2329 # invoked through until_ok
       session_booted() {
-        gdbus call --session --dest "dev.linuxapk.Manager.Session.p_${LINUXAPK_PROFILE//-/_}" \
-          --object-path /dev/linuxapk/Session --method dev.linuxapk.Session1.State >"$T/session-state.txt" &&
+        gdbus call --session --dest "dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}" \
+          --object-path /dev/sargunv/Innkeeper/Session --method dev.sargunv.Innkeeper.Session1.State >"$T/session-state.txt" &&
           file_has "$T/session-state.txt" '^\(true,'
       }
       until_ok session_booted
@@ -151,10 +151,10 @@ if [[ ${1:-} == --group ]]; then
       echo 'ok   Session1 booted follows Android boot completion'
       s cmd package resolve-activity --brief -a android.intent.action.MAIN \
         -c android.intent.category.HOME >"$T/home.txt"
-      file_has "$T/home.txt" '^dev.linuxapk.system/.wm.HomeActivity$'
-      s cmd appops set dev.linuxapk.probes MANAGE_EXTERNAL_STORAGE allow
-      s am broadcast -n dev.linuxapk.probes/.StorageProbe >/dev/null
-      until_ok log_has LinuxApkStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
+      file_has "$T/home.txt" '^dev.sargunv.innkeeper.system/.wm.HomeActivity$'
+      s cmd appops set dev.sargunv.innkeeper.probes MANAGE_EXTERNAL_STORAGE allow
+      s am broadcast -n dev.sargunv.innkeeper.probes/.StorageProbe >/dev/null
+      until_ok log_has InnkeeperStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
       # A non-game probe activity, opened in a window and then closed as the
       # storage check did before #139: it handles no configuration changes and
       # ends its own task like the scan end did. On the software renderer the
@@ -162,19 +162,19 @@ if [[ ${1:-} == --group ]]; then
       # flight, and Android 17's display-compat recovery then relaunched onto
       # the removed display id, which crashed system_server (#50).
       syspid=$(s pidof system_server)
-      am_start() { s am start -n "dev.linuxapk.probes/.$1" >/dev/null; }
+      am_start() { s am start -n "dev.sargunv.innkeeper.probes/.$1" >/dev/null; }
       am_start TeardownProbe
-      until_ok log_has LinuxApkTeardownProbe 'created, display='
-      until_ok log_has LinuxApkTeardownProbe 'self-finishing like the storage scan end'
-      until_ok log_has LinuxApkTeardownProbe 'destroyed, display='
+      until_ok log_has InnkeeperTeardownProbe 'created, display='
+      until_ok log_has InnkeeperTeardownProbe 'self-finishing like the storage scan end'
+      until_ok log_has InnkeeperTeardownProbe 'destroyed, display='
       # The fix schedules the release instead of releasing inline, so the risky
       # window lives after close(): wait until the closed windows are gone from
       # the window manager (no more probes windows) and their displays have left
       # Android's display list (the window manager names its virtual displays
-      # "linuxapk:<package>") before comparing the pid, so a release that
+      # "innkeeper:<package>") before comparing the pid, so a release that
       # crashes the framework now happens before the assertion reads it.
       # shellcheck disable=SC2329 # invoked through until_ok
-      no_probe_windows() { ! wm LIST | grep -q 'package=dev.linuxapk.probes .*window='; }
+      no_probe_windows() { ! wm LIST | grep -q 'package=dev.sargunv.innkeeper.probes .*window='; }
       # Only a successful dump that lists displays can report "gone": on a
       # failed or outputless dumpsys keep waiting (until_ok's timeout then
       # fails the check) — a transient query failure must not read as a
@@ -184,7 +184,7 @@ if [[ ${1:-} == --group ]]; then
         local dump
         dump=$(s dumpsys display 2>/dev/null) || return 1
         [[ $dump == *'Display Devices:'* ]] || return 1
-        ! grep -q 'linuxapk:' <<<"$dump"
+        ! grep -q 'innkeeper:' <<<"$dump"
       }
       until_ok no_probe_windows
       until_ok probe_display_gone
@@ -197,23 +197,23 @@ if [[ ${1:-} == --group ]]; then
     input)
       launch InputProbeActivity
       # shellcheck disable=SC2329 # invoked through until_ok
-      mapped() { wm LIST | grep "display=$display package=dev.linuxapk.probes .*window=yes" >/dev/null; }
+      mapped() { wm LIST | grep "display=$display package=dev.sargunv.innkeeper.probes .*window=yes" >/dev/null; }
       until_ok mapped
       # Position the window for absolute input without resizing Android's
       # display: resize snapshots temporarily block otherwise valid touches.
-      if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+      if [[ ${INNKEEPER_TEST_COMPOSITOR:-kwin} == mutter ]]; then
         # HWC's first frame can precede Mutter creating its window actor.
         # Retry the compositor operation until it actually found the window.
         # shellcheck disable=SC2329 # invoked through until_ok
         positioned() {
-          gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
-            --method dev.linuxapk.TestDesktop.Position | grep -q true
+          gdbus call --session --dest dev.sargunv.Innkeeper.TestDesktop --object-path /dev/sargunv/Innkeeper/TestDesktop \
+            --method dev.sargunv.Innkeeper.TestDesktop.Position | grep -q true
         }
         until_ok positioned
       else
         cat >"$T/input-window.js" <<'JS'
 for (const w of workspace.windowList()) {
-  if (String(w.resourceClass).includes("dev.linuxapk.probes")) {
+  if (String(w.resourceClass).includes("dev.sargunv.innkeeper.probes")) {
     const geometry = w.frameGeometry;
     geometry.x = 300;
     geometry.y = 100;
@@ -223,11 +223,11 @@ for (const w of workspace.windowList()) {
 }
 JS
         script_id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-          --method org.kde.kwin.Scripting.loadScript "$T/input-window.js" linuxapk-input-window | grep -oE '[0-9]+')
+          --method org.kde.kwin.Scripting.loadScript "$T/input-window.js" innkeeper-input-window | grep -oE '[0-9]+')
         gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$script_id" \
           --method org.kde.kwin.Script.run >/dev/null
         gdbus call --session --dest org.kde.KWin --object-path /Scripting \
-          --method org.kde.kwin.Scripting.unloadScript linuxapk-input-window >/dev/null
+          --method org.kde.kwin.Scripting.unloadScript innkeeper-input-window >/dev/null
       fi
       # Activity resume precedes InputDispatcher's focused-window publication.
       # Wait for the actual input target before submitting the burst.
@@ -251,12 +251,12 @@ JS
       # shellcheck disable=SC2329 # invoked through until_ok
       pointer_ready() {
         printf 'abs:800,300\nabs:900,300\n' >&"$seat_fd"
-        log_has LinuxApkProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Linux.apk Mouse $display windowDisplay=$display"
+        log_has InnkeeperProbe "generic .*ACTION_HOVER_(ENTER|MOVE).*deviceName=Innkeeper Mouse $display windowDisplay=$display"
       }
       until_ok pointer_ready
       printf '%s\n' key:30,1 key:30,0 button:272,1 button:272,0 >&"$seat_fd"
-      until_ok log_has LinuxApkProbe 'key .*KEYCODE_A.*deviceId=-1'
-      until_ok log_has LinuxApkProbe "touch .*ACTION_UP.*deviceName=Linux.apk Mouse $display windowDisplay=$display"
+      until_ok log_has InnkeeperProbe 'key .*KEYCODE_A.*deviceId=-1'
+      until_ok log_has InnkeeperProbe "touch .*ACTION_UP.*deviceName=Innkeeper Mouse $display windowDisplay=$display"
       echo 'ok   native keyboard and mouse reach the app'
       launch CaptureProbeActivity
       until_ok mapped
@@ -266,7 +266,7 @@ JS
       # shellcheck disable=SC2329 # invoked through until_ok
       captured_motion() {
         printf '%s\n' rel:20,-10 >&"$seat_fd"
-        log_has LinuxApkCaptureProbe 'relative source=131076 x=20.0 y=-10.0 device=Linux.apk Mouse'
+        log_has InnkeeperCaptureProbe 'relative source=131076 x=20.0 y=-10.0 device=Innkeeper Mouse'
       }
       until_ok captured_motion
       printf '%s\n' key:19,1 key:19,0 >&"$seat_fd"
@@ -288,7 +288,7 @@ sys.exit(1)
       }
       # Establish the starting shape so an unchanged window cannot pass the request.
       until_ok shape portrait
-      s am start --display "$display" -n dev.linuxapk.probes/.WindowModeProbe --es action landscape >/dev/null
+      s am start --display "$display" -n dev.sargunv.innkeeper.probes/.WindowModeProbe --es action landscape >/dev/null
       until_ok shape landscape
       wm CLOSE --ei display "$display" >/dev/null
       echo 'ok   requested orientation reshapes the host window'
@@ -317,30 +317,30 @@ if (
     sys.exit(1)
 ' "$audio_dump"
       echo 'ok   stream volume stays at maximum; the desktop mixer is the control'
-      parec -d "$LINUXAPK_AUDIO_SINK.monitor" --format=s16le --rate=48000 --channels=2 --raw >"$T/audio.raw" &
+      parec -d "$INNKEEPER_AUDIO_SINK.monitor" --format=s16le --rate=48000 --channels=2 --raw >"$T/audio.raw" &
       recorder=$!
       trap 'kill "$recorder" 2>/dev/null || true; wait "$recorder" 2>/dev/null || true' EXIT
-      s am start-foreground-service -n "dev.linuxapk.probes/.LifecycleProbe\$Media" >/dev/null
-      until_ok log_has LinuxApkLifecycleProbe 'foreground audio started'
+      s am start-foreground-service -n "dev.sargunv.innkeeper.probes/.LifecycleProbe\$Media" >/dev/null
+      until_ok log_has InnkeeperLifecycleProbe 'foreground audio started'
       # FFT succeeds only after the capture has enough non-silent tone samples.
       until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/audio.raw" --expect 440
       # Android am returns 1 when a service was successfully stopped.
-      s am stopservice -n "dev.linuxapk.probes/.LifecycleProbe\$Media" >/dev/null || true
+      s am stopservice -n "dev.sargunv.innkeeper.probes/.LifecycleProbe\$Media" >/dev/null || true
       launch BenchProbe
-      s am start --display "$display" -n dev.linuxapk.probes/.BenchProbe --es mode audio >/dev/null
-      s am broadcast -a dev.linuxapk.BENCH_BEGIN -p dev.linuxapk.probes >/dev/null
-      until_ok log_has LinuxApkBench 'BENCH audio .*roundtrip_ns=[1-9][0-9]*'
+      s am start --display "$display" -n dev.sargunv.innkeeper.probes/.BenchProbe --es mode audio >/dev/null
+      s am broadcast -a dev.sargunv.innkeeper.BENCH_BEGIN -p dev.sargunv.innkeeper.probes >/dev/null
+      until_ok log_has InnkeeperBench 'BENCH audio .*roundtrip_ns=[1-9][0-9]*'
       echo 'ok   AudioRecord detected the known marker from the private sink monitor'
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
       ;;
     desktop)
       launch WideColorProbe
       # A host screenshot checks the displayed pixels, not just Android's buffer.
       # shellcheck disable=SC2329 # invoked through until_ok
       wide_colour_visible() {
-        if [[ ${LINUXAPK_TEST_COMPOSITOR:-kwin} == mutter ]]; then
-          gdbus call --session --dest dev.linuxapk.TestDesktop --object-path /dev/linuxapk/TestDesktop \
-            --method dev.linuxapk.TestDesktop.Screenshot "$T/wide-colour.png" >/dev/null || return 1
+        if [[ ${INNKEEPER_TEST_COMPOSITOR:-kwin} == mutter ]]; then
+          gdbus call --session --dest dev.sargunv.Innkeeper.TestDesktop --object-path /dev/sargunv/Innkeeper/TestDesktop \
+            --method dev.sargunv.Innkeeper.TestDesktop.Screenshot "$T/wide-colour.png" >/dev/null || return 1
         else
           spectacle -b -n -a -o "$T/wide-colour.png" >/dev/null 2>&1 || return 1
         fi
@@ -349,42 +349,42 @@ if (
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
       # One live preference round trip, through the same Session1 API as GTK.
-      dest=dev.linuxapk.Manager.Session.p_${LINUXAPK_PROFILE//-/_}
-      gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
-        --method dev.linuxapk.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
-      until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=false'
+      dest=dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}
+      gdbus call --session --dest "$dest" --object-path /dev/sargunv/Innkeeper/Session \
+        --method dev.sargunv.Innkeeper.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
+      until_ok log_has InnkeeperSettings 'desktop settings: .*followAccent=false'
       echo 'ok   preference applied live over Session1'
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
-      printf '# linuxapk-open-with\n' >"$T/file.md"
-      "$repo/tools/dev/linuxapk.sh" open "$T/file.md"
-      until_ok log_has LinuxApkOpenWith 'chooser type=text/markdown apps=dev.linuxapk.probes'
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
+      printf '# innkeeper-open-with\n' >"$T/file.md"
+      "$repo/tools/dev/innkeeper.sh" open "$T/file.md"
+      until_ok log_has InnkeeperOpenWith 'chooser type=text/markdown apps=dev.sargunv.innkeeper.probes'
       until_ok window_ready OpenWithActivity
-      chooser=$(wm LIST | sed -n 's/.*display=\([0-9]*\) package=dev.linuxapk.system .*/\1/p')
+      chooser=$(wm LIST | sed -n 's/.*display=\([0-9]*\) package=dev.sargunv.innkeeper.system .*/\1/p')
       s input -d "$chooser" keyevent KEYCODE_DPAD_DOWN KEYCODE_ENTER
-      until_ok log_has LinuxApkOpenWith 'selected dev.linuxapk.probes:'
-      until_ok log_has LinuxApkFileProbe 'uri=content://dev.linuxapk.system.documents/document/.*type=text/markdown read=true content=# linuxapk-open-with'
+      until_ok log_has InnkeeperOpenWith 'selected dev.sargunv.innkeeper.probes:'
+      until_ok log_has InnkeeperFileProbe 'uri=content://dev.sargunv.innkeeper.system.documents/document/.*type=text/markdown read=true content=# innkeeper-open-with'
       until_ok window_ready FileProbe
-      s logcat -d -s LinuxApkOpenWith:I LinuxApkFileProbe:I >"$T/open-with.txt"
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      s logcat -d -s InnkeeperOpenWith:I InnkeeperFileProbe:I >"$T/open-with.txt"
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
       echo 'ok   Open With opens the selected app with a readable file grant'
       "$here/share.sh"
-      s am start -n dev.linuxapk.probes/.HandoffProbe --es action view >/dev/null
+      s am start -n dev.sargunv.innkeeper.probes/.HandoffProbe --es action view >/dev/null
       until_ok file_has "$bridge_log" 'handoff: .*action 2, 1 files'
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
       # Real desktop requests use a capped production-policy sidecar on the private bus.
       # shellcheck source=tests/e2e/production.sh
       source "$here/production.sh"
       ;;
     lifecycle)
       launch BenchProbe
-      until_ok log_has LinuxApkBench "BENCH resumed display=$display"
+      until_ok log_has InnkeeperBench "BENCH resumed display=$display"
       # shellcheck disable=SC2329 # invoked through until_ok
-      bench_mapped() { wm LIST | grep -q "display=$display package=dev.linuxapk.probes .*window=yes"; }
+      bench_mapped() { wm LIST | grep -q "display=$display package=dev.sargunv.innkeeper.probes .*window=yes"; }
       until_ok bench_mapped
-      resumes() { s logcat -d -s LinuxApkBench:I | grep -c "BENCH resumed display=$display"; }
+      resumes() { s logcat -d -s InnkeeperBench:I | grep -c "BENCH resumed display=$display"; }
       before=$(resumes)
       until_ok /usr/bin/python3 "$here/windows.py" minimize
-      until_ok log_has LinuxApkBench "BENCH stopped display=$display"
+      until_ok log_has InnkeeperBench "BENCH stopped display=$display"
       # A stop followed by an unintended resume while minimized is a failure.
       [[ $(resumes) -eq $before ]]
       before=$(resumes)
@@ -394,43 +394,43 @@ if (
       until_ok resumed_again
       echo 'ok   minimizing stops the activity and restoring resumes the same display'
       launch WindowProbe
-      s am broadcast -a dev.linuxapk.WINDOW_PROBE -p dev.linuxapk.probes --es mode flag --ez enabled true >/dev/null
+      s am broadcast -a dev.sargunv.innkeeper.WINDOW_PROBE -p dev.sargunv.innkeeper.probes --es mode flag --ez enabled true >/dev/null
       until_ok file_has "$bridge_log" "window $display idle-inhibit on"
-      s am broadcast -a dev.linuxapk.WINDOW_PROBE -p dev.linuxapk.probes --es mode flag --ez enabled false >/dev/null
+      s am broadcast -a dev.sargunv.innkeeper.WINDOW_PROBE -p dev.sargunv.innkeeper.probes --es mode flag --ez enabled false >/dev/null
       until_ok file_has "$bridge_log" "window $display idle-inhibit off"
       echo 'ok   a visible keep-screen-on request inhibits desktop idle until cleared'
       launch TaskWindowProbe
       first=$display
       # shellcheck disable=SC2329 # invoked through until_ok
-      first_task_mapped() { wm LIST | grep -q "display=$first package=dev.linuxapk.probes .*window=yes"; }
+      first_task_mapped() { wm LIST | grep -q "display=$first package=dev.sargunv.innkeeper.probes .*window=yes"; }
       until_ok first_task_mapped
       # The sole multiple-task scenario: an app's New Window starts another task on
       # the caller's display. Both tasks must get real toplevels; closing one must
       # leave the other task and window alive.
       s am start --display "$first" --activity-single-top \
-        -n dev.linuxapk.probes/.TaskWindowProbe --ez new-window true >/dev/null
+        -n dev.sargunv.innkeeper.probes/.TaskWindowProbe --ez new-window true >/dev/null
       # shellcheck disable=SC2329 # invoked through until_ok
       two_task_windows() {
         wm LIST >"$T/task-windows.txt"
-        [[ $(grep -c 'package=dev.linuxapk.probes .*window=yes' "$T/task-windows.txt") == 2 ]]
+        [[ $(grep -c 'package=dev.sargunv.innkeeper.probes .*window=yes' "$T/task-windows.txt") == 2 ]]
       }
       until_ok two_task_windows
-      second=$(sed -n 's/.*display=\([0-9]*\) package=dev.linuxapk.probes .*/\1/p' "$T/task-windows.txt" | grep -vx "$first")
+      second=$(sed -n 's/.*display=\([0-9]*\) package=dev.sargunv.innkeeper.probes .*/\1/p' "$T/task-windows.txt" | grep -vx "$first")
       wm CLOSE --ei display "$first" >/dev/null
       # shellcheck disable=SC2329 # invoked through until_ok
       second_task_survives() {
         wm LIST >"$T/task-survivor.txt"
         ! grep -q "display=$first package=" "$T/task-survivor.txt" &&
-          grep -Eq "display=$second package=dev.linuxapk.probes .*tasks=[0-9]+ window=yes" "$T/task-survivor.txt"
+          grep -Eq "display=$second package=dev.sargunv.innkeeper.probes .*tasks=[0-9]+ window=yes" "$T/task-survivor.txt"
       }
       until_ok second_task_survives
       wm CLOSE --ei display "$second" >/dev/null
       echo 'ok   a second task has its own toplevel and survives closing the first'
-      s cmd appops set dev.linuxapk.probes SCHEDULE_EXACT_ALARM allow
+      s cmd appops set dev.sargunv.innkeeper.probes SCHEDULE_EXACT_ALARM allow
       # Allow four seconds to observe idle stop before the six-second wake lead.
-      s am start -n dev.linuxapk.probes/.LifecycleProbe --es action alarm --ei seconds 10 >/dev/null
-      until_ok log_has LinuxApkLifecycleProbe 'alarm scheduled at='
-      wm CLOSE --es package dev.linuxapk.probes >/dev/null
+      s am start -n dev.sargunv.innkeeper.probes/.LifecycleProbe --es action alarm --ei seconds 10 >/dev/null
+      until_ok log_has InnkeeperLifecycleProbe 'alarm scheduled at='
+      wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
       s touch /data/local/tmp/e2e-idle
       until_ok stopped
       echo 'ok   session stopped idle with an alarm pending'
@@ -451,7 +451,7 @@ for group in "${groups[@]}"; do
     ;;
   esac
 done
-if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
+if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   start=$(date +%s%N)
   result=0
   echo "e2e: deadline=${deadline}s (plus at most 4s cleanup)"
@@ -466,8 +466,8 @@ if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
 fi
 mkdir -p "$T"
 : >"$T/timings.log"
-export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_PROFILE
-export LINUXAPK_AUDIO_SOURCE=$LINUXAPK_AUDIO_SINK.monitor
+export INNKEEPER_IDLE_GRACE=1 INNKEEPER_TEST_TIMERS=1 INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
+export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
 keeper=""
 events=""
 setup_lock=""
@@ -477,8 +477,8 @@ cleanup() {
   local result=$?
   if [[ -n $setup_lock ]]; then exec {setup_lock}>&-; fi
   if ((result != 0)); then
-    for log in "$desktop_log" "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/runner.log" \
-      "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/supervisor.log"; do
+    for log in "$desktop_log" "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/runner.log" \
+      "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/supervisor.log"; do
       if [[ -f $log ]]; then
         echo "e2e: last 60 lines of $log:" >&2
         tail -n 60 "$log" >&2
@@ -505,11 +505,11 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
-export LINUXAPK_GAMEPAD_TEST_DIR=$repo/out/dev/flatpak/$LINUXAPK_PROFILE/gp
-/usr/bin/python3 "$here/gamepads.py" serve "$LINUXAPK_GAMEPAD_TEST_DIR" &
+export INNKEEPER_GAMEPAD_TEST_DIR=$repo/out/dev/flatpak/$INNKEEPER_PROFILE/gp
+/usr/bin/python3 "$here/gamepads.py" serve "$INNKEEPER_GAMEPAD_TEST_DIR" &
 gamepads=$!
-until_ok test -f "$LINUXAPK_GAMEPAD_TEST_DIR/ready"
-mod=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
+until_ok test -f "$INNKEEPER_GAMEPAD_TEST_DIR/ready"
+mod=$(pactl load-module module-null-sink sink_name="$INNKEEPER_AUDIO_SINK" rate=48000 channels=2)
 timed setup-stop stop_session
 timed setup-reset "$S" reset
 mkdir -p "$(dirname "$bridge_log")"
@@ -518,7 +518,7 @@ timed setup-desktop until_setup file_has "$desktop_log" ready
 timed setup-start "$S" start
 # The exec service is not ready immediately after start. Hold its existing
 # busy lock from the host until a booted Android can run the keeper instead.
-exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_PROFILE/exec.lock"
+exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.sargunv.Innkeeper/innkeeper-$INNKEEPER_PROFILE/exec.lock"
 flock --shared "$setup_lock"
 timed setup-boot until_setup booted
 # BOOT_COMPLETED can precede CE app-data preparation on the software runner.
@@ -558,11 +558,11 @@ run_group() {
   if ((result != 0)); then
     # Preserve the failed activity sequence before lifecycle restarts logd.
     tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
-    timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
+    timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I InnkeeperHandoff:V >"$T/$1-activities.txt" 2>&1 || true
     timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
-    if [[ -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
+    if [[ -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
       local cg stat
-      cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup")
+      cg=$(cat "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup")
       for stat in memory.events memory.peak memory.max; do
         if [[ -r $cg/$stat ]]; then
           printf '%s\n' "$stat"

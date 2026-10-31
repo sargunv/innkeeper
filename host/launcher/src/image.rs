@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::paths::{Image, Paths};
 
-const DATA_VERSION: &str = ".linuxapk-data-version";
+const DATA_VERSION: &str = ".innkeeper-data-version";
 
 /// Order Google's CI frameworks by SDK, then numeric build ID, never by the
 /// cache directory's name. Read the actual system image, not the pin's label.
@@ -103,7 +103,7 @@ pub fn check_data(data: &Path, image: &Image) -> Result<()> {
 /// Called before any setup of /data or Android process. Persist the attempt
 /// before exposing data, and give init an atomic replacement to commit at
 /// sys.boot_completed=1. An interrupted boot keeps the old `booted` value.
-pub fn begin_boot(data: &Path, image: &Image, linuxapk: &Path) -> Result<()> {
+pub fn begin_boot(data: &Path, image: &Image, innkeeper: &Path) -> Result<()> {
     let current = Framework::read(image)?;
     let previous = DataVersion::load(data)?;
     if let Some(state) = &previous {
@@ -130,7 +130,7 @@ pub fn begin_boot(data: &Path, image: &Image, linuxapk: &Path) -> Result<()> {
     }
     state.booted = Some(current);
     fs::write(
-        linuxapk.join("data-version-booted"),
+        innkeeper.join("data-version-booted"),
         toml::to_string(&state)?,
     )?;
     Ok(())
@@ -305,7 +305,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&base);
         let data = base.join("data");
-        let linuxapk = base.join("linuxapk");
+        let innkeeper = base.join("innkeeper");
         let mut image = Image {
             name: "ci-9".into(),
             dir: base.clone(),
@@ -314,7 +314,7 @@ mod tests {
             derived: base.join("derived"),
         };
         fs::create_dir_all(image.img.join("system/system"))?;
-        fs::create_dir_all(&linuxapk)?;
+        fs::create_dir_all(&innkeeper)?;
         let props = image.img.join("system/system/build.prop");
         fs::write(
             &props,
@@ -322,16 +322,16 @@ mod tests {
         )?;
         check_data(&data, &image)?;
         assert!(!data.exists());
-        begin_boot(&data, &image, &linuxapk)?;
+        begin_boot(&data, &image, &innkeeper)?;
         assert!(DataVersion::load(&data)?.unwrap().booted.is_none());
         fs::copy(
-            linuxapk.join("data-version-booted"),
+            innkeeper.join("data-version-booted"),
             data.join(DATA_VERSION),
         )?;
         // A cached restart already has a durable attempt for this framework.
         // Keep the original inode open so inode reuse cannot hide a rewrite.
         let record = fs::File::open(data.join(DATA_VERSION))?;
-        begin_boot(&data, &image, &linuxapk)?;
+        begin_boot(&data, &image, &innkeeper)?;
         assert_eq!(
             fs::metadata(data.join(DATA_VERSION))?.ino(),
             record.metadata()?.ino()
@@ -346,13 +346,13 @@ mod tests {
             &props,
             "ro.build.version.sdk=37\nro.build.version.incremental=10\n",
         )?;
-        begin_boot(&data, &image, &linuxapk)?;
+        begin_boot(&data, &image, &innkeeper)?;
         assert_eq!(
             DataVersion::load(&data)?.unwrap().booted,
             Some(framework(37, 9))
         );
         let record = fs::File::open(data.join(DATA_VERSION))?;
-        begin_boot(&data, &image, &linuxapk)?; // Retry an interrupted upgrade.
+        begin_boot(&data, &image, &innkeeper)?; // Retry an interrupted upgrade.
         assert_ne!(
             fs::metadata(data.join(DATA_VERSION))?.ino(),
             record.metadata()?.ino()
@@ -362,7 +362,7 @@ mod tests {
             Some(framework(37, 9))
         );
         fs::copy(
-            linuxapk.join("data-version-booted"),
+            innkeeper.join("data-version-booted"),
             data.join(DATA_VERSION),
         )?;
         assert_eq!(
@@ -374,7 +374,7 @@ mod tests {
             &props,
             "ro.build.version.sdk=37\nro.build.version.incremental=9\n",
         )?;
-        let error = begin_boot(&data, &image, &linuxapk)
+        let error = begin_boot(&data, &image, &innkeeper)
             .unwrap_err()
             .to_string();
         assert!(error.contains("refusing Android data downgrade"));

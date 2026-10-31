@@ -1,17 +1,17 @@
 //! Talks to a running bridge's host state service the way the Health HAL and
-//! the Linux.apk System app do, for testing the desktop side without
+//! the Innkeeper System app do, for testing the desktop side without
 //! Android:
 //!
-//!   cargo run -p linuxapk-bridge --example hoststate -- SOCKET [location]
+//!   cargo run -p innkeeper-bridge --example hoststate -- SOCKET [location]
 //!
 //! Subscribes to the battery, power saver and network (and with `location`,
 //! starts location) and prints every event until killed.
 
 use anyhow::{Context, Result, bail};
-use linuxapk_bridge::hoststate::proto::{self as p, Battery, Fix, Network, Request, ev, feature};
-use linuxapk_bridge::ipc::proto::{Hello, service};
-use linuxapk_bridge::ipc::transport;
-use linuxapk_bridge::ipc::wire::{self, MAX_MSG};
+use innkeeper_bridge::hoststate::proto::{self as p, Battery, Fix, Network, Request, ev, feature};
+use innkeeper_bridge::ipc::proto::{Hello, service};
+use innkeeper_bridge::ipc::transport;
+use innkeeper_bridge::ipc::wire::{self, MAX_MSG};
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
 
 fn main() -> Result<()> {

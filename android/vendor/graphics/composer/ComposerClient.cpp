@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <android/binder_ibinder_platform.h>
 
 #include "ComposerClient.h"
 
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 namespace {
 constexpr int64_t kPrimaryDisplay = 0;
@@ -397,7 +397,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayName(
   int64_t displayId, std::string* out
 ) {
   DISPLAY_OR_RETURN();
-  *out = "Linux.apk";
+  *out = "Innkeeper";
   return ndk::ScopedAStatus::ok();
 }
 
@@ -627,4 +627,4 @@ ndk::ScopedAStatus ComposerClient::registerCallback(
   return ndk::ScopedAStatus::ok();
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

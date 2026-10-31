@@ -12,7 +12,7 @@
 // reports this playback stream's Android audio_usage_t to the bridge.
 extern "C" void pcm_set_usage(struct pcm* pcm, unsigned int usage);
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 StreamBridge::StreamBridge(size_t frames)
     : IStreamCommonDelegator(
         ndk::SharedRefBase::make<
@@ -164,4 +164,4 @@ void StreamBridge::run() {
   }
   stop();
 }
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

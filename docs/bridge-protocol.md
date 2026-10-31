@@ -1,8 +1,8 @@
 # Bridge protocol
 
-`linuxapk-bridge` serves Android-side clients over one socket,
-`$XDG_RUNTIME_DIR/linuxapk[-<profile>]/bridge/bridge.sock`, bound into Android
-as `/dev/socket/linuxapk/bridge.sock`. This file is the cross-language spec;
+`innkeeper-bridge` serves Android-side clients over one socket,
+`$XDG_RUNTIME_DIR/innkeeper[-<profile>]/bridge/bridge.sock`, bound into Android
+as `/dev/socket/innkeeper/bridge.sock`. This file is the cross-language spec;
 each service's messages are in the module doc of its Rust `proto.rs`.
 
 | Implementation | Where                                                                                             |
@@ -82,11 +82,11 @@ Who may open which service: [security.md](security.md#the-bridge-socket).
 
 System request `0x030a` (PLAYBACK_APP) names the app on Android's one mixed
 playback stream, so the desktop mixer (GNOME Settings, pavucontrol, Plasma's
-volume applet) shows that app instead of a generic Linux.apk entry. Body: a
+volume applet) shows that app instead of a generic Innkeeper entry. Body: a
 package name, then the app's label, each a protocol name (`u16` length plus
 UTF-8, at most 96 bytes, no control characters). An empty package means nothing
 is playing, and the bridge writes the name, icon and id the stream was opened
-with (`Linux.apk`, `android`, `dev.linuxapk`) back onto it, and clears
+with (`Innkeeper`, `android`, `dev.sargunv.innkeeper`) back onto it, and clears
 `application.process.binary`, which the open does not set. The label may be
 empty; the bridge then shows the package. Android mixes every app into that one
 stream, so this is a label for the newest app that is currently playing, not a
@@ -116,7 +116,7 @@ The bridge obtains a fresh xdg-activation token from the source Wayland
 connection and supplies it to the portal; xdg-foreign supplies the parent.
 Text-only open/save creates a `.txt` file; text-only email creates a draft body.
 Text Copy uses the existing clipboard protocol. The reverse direction is tracked
-separately in [#66](https://github.com/sargunv/linux.apk/issues/66).
+separately in [#66](https://github.com/sargunv/innkeeper/issues/66).
 
 ## Clipboard blobs
 
@@ -128,9 +128,9 @@ and 3 (1–16 files, 16 MiB total including metadata). The file blob starts with
 name (1–255 bytes, no path separators), `u32 MIME length` plus MIME (1–255
 bytes), then `u32 byte count` and raw bytes (at most 16 MiB minus 1024). No
 trailing bytes are accepted. The system app exposes incoming bytes through a
-read-only `content://dev.linuxapk.system.clipboard.files/…` URI per item and
-lets ClipboardService grant the pasting app access. No new request types are
-used.
+read-only `content://dev.sargunv.innkeeper.system.clipboard.files/…` URI per
+item and lets ClipboardService grant the pasting app access. No new request
+types are used.
 
 ## Versioning
 
@@ -159,12 +159,13 @@ ignore reply bytes they don't know. A new major version means a new HELLO.
 
 ## Desktop session API (version 1)
 
-The bridge owns `dev.linuxapk.Manager.Session` on the desktop session bus,
+The bridge owns `dev.sargunv.Innkeeper.Session` on the desktop session bus,
 inside the Flatpak app-id namespace. A named profile owns
-`dev.linuxapk.Manager.Session.p_<profile>` (hyphens become underscores). The
-object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
-and CLI calls use this interface for per-app management; they do not run
-commands inside Android. Starting a stopped session still uses the launcher.
+`dev.sargunv.Innkeeper.Session.p_<profile>` (hyphens become underscores). The
+object is `/dev/sargunv/Innkeeper/Session`, interface
+`dev.sargunv.Innkeeper.Session1`. Manager and CLI calls use this interface for
+per-app management; they do not run commands inside Android. Starting a stopped
+session still uses the launcher.
 
 `State() → (b booted, as open_packages)` reads a snapshot without starting
 Android. Name ownership means the bridge is running; `booted` means the system
@@ -212,18 +213,18 @@ ignored. The apps service, like input and accessibility, only admits the system
 app's uid.
 
 Escape-as-Back is stored per package in the system app's device-protected
-preferences, default off. Input resolves the `linuxapk:<package>` display on
+preferences, default off. Input resolves the `innkeeper:<package>` display on
 each new key press. Changes apply to existing windows immediately, while a held
 key retains its original code through release. The global
-`persist.linuxapk.input.escape_back` property is no longer read. Background uses
-the existing lifecycle allow-list and prompts a fresh activity report.
+`persist.innkeeper.input.escape_back` property is no longer read. Background
+uses the existing lifecycle allow-list and prompts a fresh activity report.
 
-CLI examples: `linuxapk app org.example.app`,
-`linuxapk app org.example.app clear-cache`,
-`linuxapk app org.example.app escape-back --setting on`, and
-`linuxapk app org.example.app permission --permission android.permission.CAMERA --setting off`.
+CLI examples: `innkeeper app org.example.app`,
+`innkeeper app org.example.app clear-cache`,
+`innkeeper app org.example.app escape-back --setting on`, and
+`innkeeper app org.example.app permission --permission android.permission.CAMERA --setting off`.
 
-`GetPreferences() → s json` reads the profile's persisted Linux.apk preferences.
+`GetPreferences() → s json` reads the profile's persisted Innkeeper preferences.
 `SetPreferences(s json)` validates and atomically replaces them, then broadcasts
 the filtered desktop settings. The JSON object (at most 4096 bytes) has boolean
 fields `follow_dark`, `follow_accent`, `follow_locale`, `follow_clock`,

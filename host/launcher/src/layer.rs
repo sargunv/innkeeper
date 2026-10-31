@@ -24,13 +24,13 @@ use crate::conf::Config;
 /// `androidboot.*` values (passed through /proc/bootconfig) become `ro.boot.*`
 /// properties.
 const CMDLINE: &[&str] = &[
-    "androidboot.hardware=linuxapk",
+    "androidboot.hardware=innkeeper",
     "androidboot.selinux=permissive",
     "androidboot.verifiedbootstate=orange",
     "androidboot.veritymode=disabled",
-    "androidboot.serialno=linuxapk0",
+    "androidboot.serialno=innkeeper0",
     "androidboot.debuggable=1",
-    "androidboot.boot_devices=linuxapk",
+    "androidboot.boot_devices=innkeeper",
     "androidboot.dalvik.vm.heapsize=512m",
 ];
 
@@ -52,7 +52,7 @@ fn our_props(cfg: &Config) -> Result<String> {
     let mut s = String::new();
     for p in props {
         s += &format!(
-            "# --- linuxapk-session: {} ---\n",
+            "# --- innkeeper-session: {} ---\n",
             p.file_name().unwrap().to_string_lossy()
         );
         for l in fs::read_to_string(&p)?
@@ -67,13 +67,13 @@ fn our_props(cfg: &Config) -> Result<String> {
     s += &format!("ro.hardware.vulkan={vk}\n");
     // Composer backend: windows through the bridge, or none.
     let backend = if cfg.headless { "headless" } else { "bridge" };
-    s += &format!("vendor.linuxapk.hwc.backend={backend}\n");
+    s += &format!("vendor.innkeeper.hwc.backend={backend}\n");
 
     // No mounts, so zygote can't hide other apps' data dirs.
     s += "persist.zygote.app_data_isolation=false\n";
     // The host's network is Android's (the system app's
     // HostNetworkFeature, which follows the sandbox's resolv.conf).
-    s += "# --- linuxapk-session: image/vendor.prop ---\n";
+    s += "# --- innkeeper-session: image/vendor.prop ---\n";
     s += &fs::read_to_string(share.join("image/vendor.prop"))?;
     Ok(s)
 }
@@ -129,10 +129,10 @@ pub fn write(cfg: &Config) -> Result<()> {
     let image_props = fs::read_to_string(&image_props)
         .with_context(|| format!("read {}", image_props.display()))?;
     let bp = layer.join("vendor/build.prop");
-    let ours = our_props(cfg)? + "# --- linuxapk-session: the profile's adb ---\n";
+    let ours = our_props(cfg)? + "# --- innkeeper-session: the profile's adb ---\n";
     let ours = ours + &crate::adb::prepare(&cfg.paths)?;
     let ours = ours
-        + "# --- linuxapk-session: the profile's mode ---\n"
+        + "# --- innkeeper-session: the profile's mode ---\n"
         + &crate::phone::props(&crate::profile::Settings::load(&cfg.paths.data)?);
     fs::write(&bp, merge_props(&image_props, &ours))?;
     fs::set_permissions(&bp, fs::Permissions::from_mode(0o644))?;

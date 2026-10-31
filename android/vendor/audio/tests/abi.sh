@@ -4,12 +4,12 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../../../.." && pwd)
 stage=$repo/out/stage
-ours=$stage/share/linuxapk/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so
+ours=$stage/share/innkeeper/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so
 [[ -f $ours ]] || {
   echo "no $ours (run \`mise run build\`)" >&2
   exit 1
 }
-apex=$("$stage/libexec/linuxapk/linuxapk-session" image | sed -n 's/^apex=//p')
+apex=$("$stage/libexec/innkeeper/innkeeper-session" image | sed -n 's/^apex=//p')
 theirs=$apex/com.android.hardware.audio/lib64/libtinyalsav2.so
 [[ -f $theirs ]] || {
   echo "image not prepared: no $theirs (run \`mise run session -- prepare\`)" >&2

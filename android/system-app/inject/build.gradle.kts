@@ -6,7 +6,7 @@ plugins { id("com.android.library") }
 val sdk = extra["compileSdk"] as Int
 
 android {
-  namespace = "dev.linuxapk.system.input"
+  namespace = "dev.sargunv.innkeeper.system.input"
   compileSdk = sdk
   defaultConfig { minSdk = sdk }
 

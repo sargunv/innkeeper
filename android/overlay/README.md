@@ -1,15 +1,15 @@
 # overlay
 
 The checked-in config layer over the image's partitions, one dir per partition.
-`mise run build:data` copies it into the stage's `share/linuxapk/android/`,
+`mise run build:data` copies it into the stage's `share/innkeeper/android/`,
 which the session stacks above the image
 ([docs/session.md](../../docs/session.md#overlay-stack)). A zero-byte file or an
 empty manifest blanks the image's file of the same path.
 
 ## Forked files
 
-Copies of image files with our edits (each edit is marked `linuxapk:`). They are
-guarded by the upstream base hashes in
+Copies of image files with our edits (each edit is marked `innkeeper:`). They
+are guarded by the upstream base hashes in
 [image/fork-bases.sha256](../../image/fork-bases.sha256): `prepare` fails and
 prints image-to-overlay diffs if the image's copies change. Port those changes
 before refreshing hashes when the pin moves
@@ -19,23 +19,23 @@ before refreshing hashes when the pin moves
 | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `system/etc/init/hw/init.rc`                        | no ueventd (`ro.cold_boot_done` set directly), `sys.use_memfd` (no ashmem), the flattened `/apex` bind instead of apexd-bootstrap, no binderfs |
 | `system/etc/init/hw/init.zygote64.rc`               | preloads the shim (`selinux_android_setcon`)                                                                                                   |
-| `system/etc/init/{servicemanager,vold,installd}.rc` | preload the shim (SELinux status and labels); installd also sets `LINUXAPK_VSTAT`                                                              |
-| `system/etc/init/apexd.rc`                          | runs `linuxapk-apexd`, which shows apexd the pre-mounted APEXes                                                                                |
+| `system/etc/init/{servicemanager,vold,installd}.rc` | preload the shim (SELinux status and labels); installd also sets `INNKEEPER_VSTAT`                                                             |
+| `system/etc/init/apexd.rc`                          | runs `innkeeper-apexd`, which shows apexd the pre-mounted APEXes                                                                               |
 | `system/etc/init/netd.rc`                           | `netd1shot` is a no-op; netd runs once instead of crash-looping, and preloads the shim (Flatpak mode's refused rtnetlink requests)             |
-| `system/etc/init/hw/init.usb.rc`                    | adbd never starts from the USB configuration; `init.linuxapk.rc` starts it for a profile with adb on                                           |
+| `system/etc/init/hw/init.usb.rc`                    | adbd never starts from the USB configuration; `init.innkeeper.rc` starts it for a profile with adb on                                          |
 | `system/etc/cgroups.json`                           | cgroup2 only: the session has no v1 hierarchies                                                                                                |
-| `apex/com.android.tethering/etc/netbpfload.35rc`    | runs netbpfload through `linuxapk-bpfload` against the emulated `bpf()`                                                                        |
+| `apex/com.android.tethering/etc/netbpfload.35rc`    | runs netbpfload through `innkeeper-bpfload` against the emulated `bpf()`                                                                       |
 
 ## Added files
 
-| File                                                       | Why                                                                                               |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `vendor/etc/init/hw/init.linuxapk.rc`                      | the device rc for `androidboot.hardware=linuxapk`, in place of cuttlefish's; adb, navigation mode |
-| `system/bin/linuxapk-apexd`, `linuxapk-bpfload`            | wrappers with private mount namespaces (see their headers)                                        |
-| `system/bin/linuxapk-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                                     |
-| `product/overlay/config/config.xml`                        | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar                  |
-| `vendor/etc/permissions/linuxapk-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop                           |
-| `system_ext/etc/init/linuxapk-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service                   |
+| File                                                        | Why                                                                                                |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `vendor/etc/init/hw/init.innkeeper.rc`                      | the device rc for `androidboot.hardware=innkeeper`, in place of cuttlefish's; adb, navigation mode |
+| `system/bin/innkeeper-apexd`, `innkeeper-bpfload`           | wrappers with private mount namespaces (see their headers)                                         |
+| `system/bin/innkeeper-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                                      |
+| `product/overlay/config/config.xml`                         | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar                   |
+| `vendor/etc/permissions/innkeeper-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop                            |
+| `system_ext/etc/init/innkeeper-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service                    |
 
 ## Blanked files
 
@@ -72,5 +72,5 @@ APK paths inside APEXes carry the build id (`CellBroadcastApp@CP2A.260605.016`),
 so check them when the pin moves; the compat run's idle-memory budget fails if
 one stops matching. Sample HALs for hardware the session lacks are dropped with
 the vendor APEX selection in [image/bootconfig](../../image/bootconfig), and
-[init.linuxapk.rc](vendor/etc/init/hw/init.linuxapk.rc) caps how many idle
+[init.innkeeper.rc](vendor/etc/init/hw/init.innkeeper.rc) caps how many idle
 processes Android keeps.

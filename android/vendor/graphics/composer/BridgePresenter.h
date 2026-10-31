@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // HWC virtual displays shown in host windows through the host bridge's
-// display service (linuxapk-bridge, Rust, on the host; host/bridge/src/
+// display service (innkeeper-bridge, Rust, on the host; host/bridge/src/
 // display/proto.rs). The composer only presents: it adds each virtual display
 // to the bridge, and the bridge shows it in the window that the window
-// manager (the Linux.apk System app) asked for at that size, if any. Frames
+// manager (the Innkeeper System app) asked for at that size, if any. Frames
 // go over as the ImageReader sink's own dma-buf fds, retained until RELEASE.
 #pragma once
 
@@ -11,11 +11,11 @@
 
 #include "Presenter.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 class HeadlessPresenter;
 
-// Connects to the bridge (/dev/socket/linuxapk/bridge.sock) in the
+// Connects to the bridge (/dev/socket/innkeeper/bridge.sock) in the
 // background, and again whenever the connection drops: displays wait while it
 // is unreachable or restarting.
 void startBridge();
@@ -28,10 +28,10 @@ std::unique_ptr<Presenter> createBridgeVirtualPresenter(
   std::unique_ptr<HeadlessPresenter> secondary
 );
 
-// Phone mode's display 0 (vendor.linuxapk.mode=phone), shown in the window
+// Phone mode's display 0 (vendor.innkeeper.mode=phone), shown in the window
 // the window manager asks for it.
 std::unique_ptr<Presenter> createBridgePrimaryPresenter(
   uint32_t width, uint32_t height, std::unique_ptr<HeadlessPresenter> secondary
 );
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

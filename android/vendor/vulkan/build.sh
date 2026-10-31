@@ -2,9 +2,9 @@
 # build:vulkan: the vendor Vulkan drivers (Mesa RADV, ANV and lavapipe) for Android
 # x86_64, cross-built with the NDK pin in the build container
 # (tools/container/run.sh), into out/build/vulkan/install:
-#   share/linuxapk/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
-#   share/linuxapk/android/vendor/etc/libdrm/amdgpu.ids
-#   share/linuxapk/props.d/vulkan.prop
+#   share/innkeeper/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
+#   share/innkeeper/android/vendor/etc/libdrm/amdgpu.ids
+#   share/innkeeper/props.d/vulkan.prop
 # and the test programs tests/run.sh runs (out/build/vulkan/{test,test-vendor}).
 # Skipped when its inputs (this directory, the container, the toolchain pin)
 # still hash to out/build/vulkan/.stamp.
@@ -52,7 +52,7 @@ ndk_sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
 src=$work/src
 build=$work/build
 deps=$work/deps # static libs + pkg-config for Mesa
-vendor=$work/install/share/linuxapk/android/vendor
+vendor=$work/install/share/innkeeper/android/vendor
 rm -rf "$work/install"
 mkdir -p "$src" "$build" "$deps" "$vendor"
 
@@ -168,7 +168,7 @@ build_hardware() {
   meson compile -C "$b" -j "$JOBS"
   install_driver "$b/src/amd/vulkan/libvulkan_radeon.so" radv
   install_driver "$b/src/intel/vulkan/libvulkan_intel.so" anv
-  python3 "$here/anv-pci-ids.py" "$src/mesa" >"$work/install/share/linuxapk/anv-pci-ids"
+  python3 "$here/anv-pci-ids.py" "$src/mesa" >"$work/install/share/innkeeper/anv-pci-ids"
 }
 
 # LLVM static libraries for lavapipe, as in Mesa's
@@ -275,7 +275,7 @@ check_elf() {
 
 # Graphics properties for the launcher; feature XMLs are written at start.
 install_etc() {
-  install -D -m644 -t "$work/install/share/linuxapk/props.d" "$here/etc/vulkan.prop"
+  install -D -m644 -t "$work/install/share/innkeeper/props.d" "$here/etc/vulkan.prop"
 }
 
 # Test programs for tests/run.sh: $work/test (bound at /data/nativetest64)
@@ -297,7 +297,7 @@ build_test() {
     -I"$graphics/common/include" -o "$t/libhalbuf.so" "$here/tests/halbuf.cpp" \
     "$graphics"/common/src/{buffer_alloc,layout,native_handle}.cpp -llog
   # The mock IMapper v5.
-  "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$work/test-vendor/lib64/hw/mapper.lapktest.so" "$here/tests/mock_mapper.c"
+  "$cc" -O2 -Wall -shared -fPIC -fvisibility=hidden -o "$work/test-vendor/lib64/hw/mapper.inkptest.so" "$here/tests/mock_mapper.c"
 }
 
 build_hardware

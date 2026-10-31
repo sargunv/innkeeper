@@ -23,7 +23,7 @@ use crate::conf::Config;
 use crate::paths::Paths;
 use crate::session;
 
-/// The grace period of a session with windows, unless `LINUXAPK_IDLE_GRACE`
+/// The grace period of a session with windows, unless `INNKEEPER_IDLE_GRACE`
 /// says otherwise.
 pub const DEFAULT_GRACE_SECS: u64 = 120;
 /// How often activity is checked.
@@ -44,15 +44,15 @@ pub fn wake_lead() -> Duration {
 
 // Short real idle/alarm round trips, only in explicitly named test sessions.
 fn test_timers() -> bool {
-    std::env::var("LINUXAPK_TEST_TIMERS").is_ok_and(|v| v == "1")
-        && std::env::var("LINUXAPK_PROFILE").is_ok_and(|v| !v.is_empty())
+    std::env::var("INNKEEPER_TEST_TIMERS").is_ok_and(|v| v == "1")
+        && std::env::var("INNKEEPER_PROFILE").is_ok_and(|v| !v.is_empty())
 }
 
 /// The grace period for a new session, in seconds; 0: it never stops by
-/// itself. Headless sessions (tests) never do unless `LINUXAPK_IDLE_GRACE`
+/// itself. Headless sessions (tests) never do unless `INNKEEPER_IDLE_GRACE`
 /// is set.
 pub fn grace_secs(headless: bool) -> u64 {
-    match std::env::var("LINUXAPK_IDLE_GRACE")
+    match std::env::var("INNKEEPER_IDLE_GRACE")
         .ok()
         .and_then(|v| v.parse().ok())
     {
@@ -181,7 +181,7 @@ fn busy(paths: &Paths) -> Option<String> {
 /// `cfg.idle_grace` seconds of idleness it calls `end` with the next wakeup
 /// (ms since the epoch), once. Preferences are re-read so timeout changes apply live.
 pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
-    let fixed_grace = (cfg.headless || std::env::var_os("LINUXAPK_IDLE_GRACE").is_some())
+    let fixed_grace = (cfg.headless || std::env::var_os("INNKEEPER_IDLE_GRACE").is_some())
         .then_some(cfg.idle_grace);
     let paths = cfg.paths.clone();
     thread::spawn(move || {
@@ -237,7 +237,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
 }
 
 /// What a woken session starts with of `start`'s environment: what shapes
-/// the session (the desktop's sockets, the XDG dirs, Linux.apk's own knobs).
+/// the session (the desktop's sockets, the XDG dirs, Innkeeper's own knobs).
 const START_ENV: &[&str] = &[
     "WAYLAND_DISPLAY",
     "DBUS_SESSION_BUS_ADDRESS",
@@ -255,7 +255,7 @@ const START_ENV: &[&str] = &[
 
 pub fn start_env() -> BTreeMap<String, String> {
     std::env::vars()
-        .filter(|(k, _)| k.starts_with("LINUXAPK_") || START_ENV.contains(&k.as_str()))
+        .filter(|(k, _)| k.starts_with("INNKEEPER_") || START_ENV.contains(&k.as_str()))
         .collect()
 }
 

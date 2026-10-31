@@ -14,7 +14,7 @@ bus = dbus.SessionBus()
 PATH = "/org/freedesktop/portal/desktop"
 NOTIFY = "org.freedesktop.Notifications"
 selected = Path(sys.argv[1])
-selected.write_text("linuxapk-e2e-file")
+selected.write_text("innkeeper-e2e-file")
 
 
 class Request(dbus.service.Object):

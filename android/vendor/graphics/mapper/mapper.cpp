@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// IMapper v5 (stable-C) for linuxapk buffers. Built as
-// /vendor/lib64/hw/mapper.linuxapk.so and dlopen'ed by libui (Gralloc5) and
+// IMapper v5 (stable-C) for innkeeper buffers. Built as
+// /vendor/lib64/hw/mapper.innkeeper.so and dlopen'ed by libui (Gralloc5) and
 // any other gralloc user in the process.
-#define LOG_TAG "linuxapk-mapper"
+#define LOG_TAG "innkeeper-mapper"
 
 #include <cinttypes>
 #include <memory>
@@ -23,9 +23,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "linuxapk/gralloc_handle.h"
-#include "linuxapk/log.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/gralloc_handle.h"
+#include "innkeeper/log.h"
+#include "innkeeper/native_handle.h"
 
 using namespace ::android::hardware::graphics::mapper;
 using ::aidl::android::hardware::graphics::common::ChromaSiting;
@@ -34,7 +34,7 @@ using ::aidl::android::hardware::graphics::common::Interlaced;
 using AidlPlaneLayout =
   ::aidl::android::hardware::graphics::common::PlaneLayout;
 
-namespace linuxapk {
+namespace innkeeper {
 namespace {
 
 constexpr const char* kStandardName =
@@ -578,7 +578,7 @@ AIMapper gMapper = {
 };
 
 }  // namespace
-}  // namespace linuxapk
+}  // namespace innkeeper
 
 extern "C" {
 __attribute__((visibility("default"))) uint32_t ANDROID_HAL_STABLEC_VERSION =
@@ -586,7 +586,7 @@ __attribute__((visibility("default"))) uint32_t ANDROID_HAL_STABLEC_VERSION =
 
 __attribute__((visibility("default"))) AIMapper_Error
 AIMapper_loadIMapper(AIMapper* _Nullable* _Nonnull outImplementation) {
-  *outImplementation = &linuxapk::gMapper;
+  *outImplementation = &innkeeper::gMapper;
   return AIMAPPER_ERROR_NONE;
 }
 }

@@ -13,7 +13,7 @@ fn main() {
         args.get(i)
             .and_then(|a| a.to_str())
             .and_then(|s| s.parse::<i32>().ok())
-            .expect("usage: linuxapk-broker <listener-fd> <pin-dir-fd> <init-pid>")
+            .expect("usage: innkeeper-brk <listener-fd> <pin-dir-fd> <init-pid>")
     };
     let listener = fd(0);
     let pins = fd(1);
@@ -24,7 +24,7 @@ fn main() {
     if !harness() {
         unsafe { libc::umask(0) };
     }
-    linuxapk_broker::notify::serve(
+    innkeeper_broker::notify::serve(
         listener,
         (pins >= 0).then(|| unsafe { OwnedFd::from_raw_fd(pins) }),
     );
@@ -48,7 +48,7 @@ fn reap(init: i32) -> ! {
     }
 }
 fn harness() -> bool {
-    std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1")
+    std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1")
 }
 fn init(args: &[std::ffi::OsString]) -> ! {
     let sock: i32 = args
@@ -63,7 +63,7 @@ fn init(args: &[std::ffi::OsString]) -> ! {
     assert!(!argv.is_empty(), "missing Android program");
     let env: Vec<_> = std::env::vars_os()
         .map(|(k, v)| {
-            let mut s = if k == "LINUXAPK_INIT_PRELOAD" {
+            let mut s = if k == "INNKEEPER_INIT_PRELOAD" {
                 b"LD_PRELOAD".to_vec()
             } else {
                 k.into_vec()
@@ -77,7 +77,7 @@ fn init(args: &[std::ffi::OsString]) -> ! {
     argv_ptr.push(std::ptr::null());
     let mut env_ptr: Vec<_> = env.iter().map(|s| s.as_ptr()).collect();
     env_ptr.push(std::ptr::null());
-    let listener = linuxapk_broker::filter::install(harness()).expect("install seccomp filter");
+    let listener = innkeeper_broker::filter::install(harness()).expect("install seccomp filter");
     unsafe {
         // A usize buffer gives cmsghdr its required alignment.
         let mut control = [0usize; 4];

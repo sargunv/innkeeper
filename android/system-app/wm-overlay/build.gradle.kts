@@ -12,11 +12,11 @@ configurations
   }
 
 android {
-  namespace = "dev.linuxapk.windowpolicy"
+  namespace = "dev.sargunv.innkeeper.windowpolicy"
   compileSdk = sdk
   buildToolsVersion = File(buildTools).name
   defaultConfig {
-    applicationId = "dev.linuxapk.windowpolicy"
+    applicationId = "dev.sargunv.innkeeper.windowpolicy"
     minSdk = sdk
     targetSdk = sdk
     versionCode = 1

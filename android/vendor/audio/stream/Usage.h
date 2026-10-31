@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 // Android audio_usage_t / AudioUsage values the bridge maps to a mixer name.
 // Mirrors android.media.audio.common.AudioUsage; kept as integers so host
 // tests can compile this header without the generated AIDL bindings.
@@ -75,4 +75,4 @@ inline std::optional<int32_t> selectUsage(const int32_t* usages, size_t count) {
   }
   return best;
 }
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

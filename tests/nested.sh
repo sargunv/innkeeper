@@ -3,13 +3,13 @@
 set -Eeuo pipefail
 trap 'echo "nested: command failed (status=$?) at line $LINENO: $BASH_COMMAND" >&2' ERR
 repo=$(cd "$(dirname "$0")/.." && pwd)
-export LINUXAPK_IMAGES=${LINUXAPK_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/images}
-export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-nested}
-export LINUXAPK_TEST_COMPOSITOR=${LINUXAPK_TEST_COMPOSITOR:-kwin}
-N=$repo/out/test/nested/$LINUXAPK_PROFILE
+export INNKEEPER_IMAGES=${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}
+export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-nested}
+export INNKEEPER_TEST_COMPOSITOR=${INNKEEPER_TEST_COMPOSITOR:-kwin}
+N=$repo/out/test/nested/$INNKEEPER_PROFILE
 host_runtime=$XDG_RUNTIME_DIR
-rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
-unit=linuxapk-nested-$LINUXAPK_PROFILE
+rt=$(mktemp -d -p "$host_runtime" inkp-XXXXXX)
+unit=inkp-nested-$INNKEEPER_PROFILE
 phase=bootstrap
 private_bus=""
 cleanup() {
@@ -19,7 +19,7 @@ cleanup() {
   set +e
   journalctl --user -u "$unit" --no-pager -n 80 >"$N/service.log" 2>&1 || true
   if ((result != 0)); then
-    echo "nested: $phase failed (compositor=$LINUXAPK_TEST_COMPOSITOR, status=$result)" >&2
+    echo "nested: $phase failed (compositor=$INNKEEPER_TEST_COMPOSITOR, status=$result)" >&2
     for log in "$N/desktop.log" "$N/compositor.log" "$N/service.log"; do
       if [[ -f $log ]]; then
         echo "nested: last 80 lines of $log:" >&2
@@ -29,9 +29,9 @@ cleanup() {
   fi
   # A deadline can interrupt the runner before its trap reaches session stop.
   # Flatpak's scope is outside this desktop's service; reap that test scope too.
-  if [[ ${LINUXAPK_E2E:-} == 1 && -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
+  if [[ ${INNKEEPER_E2E:-} == 1 && -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
     local cg
-    cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup")
+    cg=$(cat "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup")
     DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
       systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
@@ -66,19 +66,19 @@ mkdir -p "$N"/{home,config,data,cache,state}
 # KWin grants fake seat input only to an executable whose desktop file names
 # the protocol. This entry lives solely on this disposable desktop.
 mkdir -p "$N/data/applications"
-cat >"$N/data/applications/dev.linuxapk.TestSeat.desktop" <<DESKTOP
+cat >"$N/data/applications/dev.sargunv.Innkeeper.TestSeat.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Linux.apk test seat
+Name=Innkeeper test seat
 Exec=$(readlink -f /usr/bin/python3)
 NoDisplay=true
 X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input
 DESKTOP
 
-if [[ -n ${LINUXAPK_TEST_LAUNCHER_PORTAL:-} ]]; then
+if [[ -n ${INNKEEPER_TEST_LAUNCHER_PORTAL:-} ]]; then
   mkdir -p "$N/config/xdg-desktop-portal"
   printf '[preferred]\norg.freedesktop.impl.portal.DynamicLauncher=%s\n' \
-    "$LINUXAPK_TEST_LAUNCHER_PORTAL" >"$N/config/xdg-desktop-portal/portals.conf"
+    "$INNKEEPER_TEST_LAUNCHER_PORTAL" >"$N/config/xdg-desktop-portal/portals.conf"
 fi
 cat >"$N/hold.sh" <<HOLD
 #!/bin/sh
@@ -121,7 +121,7 @@ cat >"$N/compositor.sh" <<HOLD
 #!/usr/bin/env bash
 set -Eeuo pipefail
 trap 'echo "nested bootstrap: command failed (status=\$?) at line \$LINENO: \$BASH_COMMAND" >&2' ERR
-if [ "${LINUXAPK_E2E:-}" = 1 ]; then
+if [ "${INNKEEPER_E2E:-}" = 1 ]; then
   /usr/bin/python3 "$repo/tests/e2e/desktop.py" "$N/data/picked.txt" >"$N/desktop.log" 2>&1 &
   gdbus wait --session --timeout 10 org.freedesktop.portal.Desktop
 fi
@@ -131,12 +131,12 @@ wireplumber >"$N/wireplumber.log" 2>&1 &
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
 gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
-if [ "$LINUXAPK_TEST_COMPOSITOR" = mutter ]; then
+if [ "$INNKEEPER_TEST_COMPOSITOR" = mutter ]; then
   echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
   exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 3200x1080 \\
-    --wayland-display lapk-nested --automation-script "$repo/tests/e2e/mutter.js"
+    --wayland-display inkp-nested --automation-script "$repo/tests/e2e/mutter.js"
 fi
-exec kwin_wayland --virtual --no-lockscreen --socket lapk-nested \\
+exec kwin_wayland --virtual --no-lockscreen --socket inkp-nested \\
   --width 1920 --height 1080 --exit-with-session "$N/hold.sh"
 HOLD
 chmod +x "$N/compositor.sh"
@@ -149,7 +149,7 @@ export LANG=C.UTF-8 LANGUAGE=C
 export HOME=$N/home XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data
 export XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
 export XDG_CURRENT_DESKTOP=KDE
-if [[ $LINUXAPK_TEST_COMPOSITOR == mutter ]]; then export XDG_CURRENT_DESKTOP=GNOME; fi
+if [[ $INNKEEPER_TEST_COMPOSITOR == mutter ]]; then export XDG_CURRENT_DESKTOP=GNOME; fi
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 # Explicit renderer overrides belong to this desktop, not the user's manager.
 renderer_env=()
@@ -165,26 +165,26 @@ DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemd-run --user --quie
   PATH="$PATH" LANG="$LANG" LANGUAGE="$LANGUAGE" HOME="$HOME" XDG_RUNTIME_DIR="$rt" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
   XDG_DATA_HOME="$XDG_DATA_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" \
   XDG_DATA_DIRS="$XDG_DATA_DIRS" XDG_CURRENT_DESKTOP="$XDG_CURRENT_DESKTOP" FLATPAK_USER_DIR="$FLATPAK_USER_DIR" \
-  LINUXAPK_TEST_COMPOSITOR="$LINUXAPK_TEST_COMPOSITOR" \
-  PULSE_SERVER="$PULSE_SERVER" WAYLAND_DISPLAY=lapk-nested \
+  INNKEEPER_TEST_COMPOSITOR="$INNKEEPER_TEST_COMPOSITOR" \
+  PULSE_SERVER="$PULSE_SERVER" WAYLAND_DISPLAY=inkp-nested \
   "${renderer_env[@]}" \
   dbus-run-session -- "$N/compositor.sh"
 phase='waiting for private Wayland socket'
 for _ in $(seq 100); do
-  [[ -s $N/bus && -S $rt/lapk-nested ]] && break
+  [[ -s $N/bus && -S $rt/inkp-nested ]] && break
   sleep 0.1
 done
-[[ -s $N/bus && -S $rt/lapk-nested ]] || {
+[[ -s $N/bus && -S $rt/inkp-nested ]] || {
   echo 'nested desktop did not start' >&2
   exit 1
 }
 DBUS_SESSION_BUS_ADDRESS=$(cat "$N/bus")
 private_bus=$DBUS_SESSION_BUS_ADDRESS
-export XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=lapk-nested DBUS_SESSION_BUS_ADDRESS
-export LINUXAPK_NESTED=1
-if [[ $LINUXAPK_TEST_COMPOSITOR == mutter ]]; then
-  phase='waiting for Mutter automation service dev.linuxapk.TestDesktop'
-  gdbus wait --session --timeout 10 dev.linuxapk.TestDesktop
+export XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=inkp-nested DBUS_SESSION_BUS_ADDRESS
+export INNKEEPER_NESTED=1
+if [[ $INNKEEPER_TEST_COMPOSITOR == mutter ]]; then
+  phase='waiting for Mutter automation service dev.sargunv.Innkeeper.TestDesktop'
+  gdbus wait --session --timeout 10 dev.sargunv.Innkeeper.TestDesktop
 else
   phase='reading KWin support information'
   gdbus call --session --dest org.kde.KWin --object-path /KWin \

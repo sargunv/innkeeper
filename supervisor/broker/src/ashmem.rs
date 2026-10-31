@@ -1,4 +1,4 @@
-//! Ashmem for OpenHarmony (`LINUXAPK_GUEST=ohos`): OH's kernel keeps the
+//! Ashmem for OpenHarmony (`INNKEEPER_GUEST=ohos`): OH's kernel keeps the
 //! staging ashmem driver, and its c_utils (`AshmemCreate`) and everything on
 //! it (IPC parcels, the display HDI's shared command queues) need
 //! `/dev/ashmem`. The host has none, so each open of it gets a fresh sealable

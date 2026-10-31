@@ -7,14 +7,14 @@ from pathlib import Path
 
 import dbus
 
-name = "dev.linuxapk.Manager.Session.p_" + os.environ[
-  "LINUXAPK_PROFILE"
+name = "dev.sargunv.Innkeeper.Session.p_" + os.environ[
+  "INNKEEPER_PROFILE"
 ].replace("-", "_")
 proxy = dbus.Interface(
-  dbus.SessionBus().get_object(name, "/dev/linuxapk/Session"),
-  "dev.linuxapk.Session1",
+  dbus.SessionBus().get_object(name, "/dev/sargunv/Innkeeper/Session"),
+  "dev.sargunv.Innkeeper.Session1",
 )
-package = "dev.linuxapk.probes"
+package = "dev.sargunv.innkeeper.probes"
 
 
 def call(action, permission="", enabled=False):
@@ -32,12 +32,12 @@ def granted(info):
 
 
 permission = "android.permission.POST_NOTIFICATIONS"
-data = Path(os.environ.get("LINUXAPK_DATA", ""))
+data = Path(os.environ.get("INNKEEPER_DATA", ""))
 if not str(data) or data == Path("."):
   data = (
     Path(__file__).resolve().parents[2]
     / "out/dev/flatpak"
-    / os.environ["LINUXAPK_PROFILE"]
+    / os.environ["INNKEEPER_PROFILE"]
     / "android-data"
   )
 cache = data / "data" / package / "cache/session-api-probe"

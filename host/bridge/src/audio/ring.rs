@@ -99,7 +99,7 @@ impl Ring {
         let len = Self::map_size(frame_bytes, capacity_frames)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let memfd = rustix::fs::memfd_create(
-            "linuxapk-ring",
+            "innkeeper-ring",
             MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
         )?;
         rustix::fs::ftruncate(&memfd, len as u64)?;

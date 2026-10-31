@@ -11,14 +11,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use linuxapk_bridge::audio::proto::{
+use innkeeper_bridge::audio::proto::{
     self as audio, OpenReply, Request, SampleFormat, StreamConfig,
 };
-use linuxapk_bridge::audio::{AudioService, Backend, Limits};
-use linuxapk_bridge::ipc::proto::{Hello, hello_reply_body, service};
-use linuxapk_bridge::ipc::server::{self, Config, Events, Registry, Reply, Service};
-use linuxapk_bridge::ipc::transport;
-use linuxapk_bridge::ipc::wire::{self, errno::*};
+use innkeeper_bridge::audio::{AudioService, Backend, Limits};
+use innkeeper_bridge::ipc::proto::{Hello, hello_reply_body, service};
+use innkeeper_bridge::ipc::server::{self, Config, Events, Registry, Reply, Service};
+use innkeeper_bridge::ipc::transport;
+use innkeeper_bridge::ipc::wire::{self, errno::*};
 
 use rustix::event::{PollFd, PollFlags};
 use rustix::net::{

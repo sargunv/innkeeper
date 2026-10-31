@@ -41,7 +41,7 @@ use crate::ipc::server::Events;
 pub mod files;
 
 /// Marks our own selection, so it isn't echoed back to Android.
-pub(crate) const MARKER: &str = "application/x-linuxapk-bridge";
+pub(crate) const MARKER: &str = "application/x-innkeeper-bridge";
 pub(crate) const PASSWORD_HINT: &str = "x-kde-passwordManagerHint";
 const TEXT_TYPES: [&str; 5] = [
     "text/plain;charset=utf-8",
@@ -81,7 +81,7 @@ impl Clip {
                 (ClipKind::Image, w.into_vec())
             }
         };
-        let fd = blob::create("linuxapk-clip", &bytes)?;
+        let fd = blob::create("innkeeper-clip", &bytes)?;
         Ok((clip_event(kind, self.sensitive, bytes.len() as u32), fd))
     }
 }

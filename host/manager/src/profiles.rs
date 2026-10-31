@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use linuxapk_core::profiles::{self, Mode, Profile, Settings, Size};
+use innkeeper_core::profiles::{self, Mode, Profile, Settings, Size};
 
 use crate::{
     errors::Op,
@@ -105,7 +105,7 @@ impl Page {
             match worker::run_quiet(|| {
                 Ok::<_, anyhow::Error>((
                     profiles::list()?,
-                    linuxapk_core::paths::profile().unwrap_or_default(),
+                    innkeeper_core::paths::profile().unwrap_or_default(),
                 ))
             })
             .await
@@ -317,7 +317,7 @@ impl Page {
             .subtitle(if on {
                 format!(
                     "On · <tt>{}</tt> in adb and Android Studio",
-                    linuxapk_core::adb::serial(&p.settings)
+                    innkeeper_core::adb::serial(&p.settings)
                 )
             } else {
                 "For Android Studio, Gradle and adb on this computer".into()
@@ -335,8 +335,8 @@ impl Page {
             s.work(
                 &name,
                 move || {
-                    linuxapk_core::adb::set(&n, on, &linuxapk_core::ops::quiet)?;
-                    match linuxapk_core::adb::missing_key().filter(|_| on) {
+                    innkeeper_core::adb::set(&n, on, &innkeeper_core::ops::quiet)?;
+                    match innkeeper_core::adb::missing_key().filter(|_| on) {
                         Some(why) => Err(anyhow::anyhow!("adb is on, but {why}")),
                         None => Ok(()),
                     }

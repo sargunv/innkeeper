@@ -1,2 +1,2 @@
-<!-- linuxapk: blanks the image's minigbm mapper; our mapper (android/vendor/graphics) replaces it -->
+<!-- innkeeper: blanks the image's minigbm mapper; our mapper (android/vendor/graphics) replaces it -->
 <manifest version="9.0" type="device"/>

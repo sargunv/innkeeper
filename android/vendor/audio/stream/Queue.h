@@ -16,7 +16,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 // Synchronized FMQ ABI: byte counters, ring storage and an EventFlag word.
 // The descriptors and notification bits are defined by
 // android.hardware.common.fmq and libfmq's MessageQueueBase (NOT_FULL=1,
@@ -28,7 +28,7 @@ class Queue {
     T, aidl::android::hardware::common::fmq::SynchronizedReadWrite>;
   explicit Queue(size_t count)
       : capacity_(count * sizeof(T)), size_(24 + capacity_) {
-    fd_ = memfd_create("linuxapk-audio-fmq", MFD_CLOEXEC);
+    fd_ = memfd_create("innkeeper-audio-fmq", MFD_CLOEXEC);
     if (fd_ < 0) throw std::runtime_error("FMQ memfd");
     if (ftruncate(fd_, size_) != 0) {
       close(fd_);
@@ -129,4 +129,4 @@ class Queue {
   uint8_t* map_;
   size_t capacity_, size_;
 };
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

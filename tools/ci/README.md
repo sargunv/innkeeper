@@ -20,14 +20,14 @@ artifact, including on failure. Both compare against the committed baselines;
 the wrapper restores tracked output files after each run.
 
 The nightly renders both modes' unmerged `fresh-results.json` to the
-[Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility),
+[Compatibility wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility),
 including app versions, frameworks, native code, results, notes and the image
 build. Missing mode results are marked explicitly. Run metadata, timings, memory
 and budget measurements stay in the logs and artifacts so repeated runs with
 unchanged compatibility produce the same page. The rendered page is also saved
 in the artifact. Wiki errors are warnings and never replace the corpus exit
 status; unchanged pages are not committed. Publishing uses the repository
-Actions secret `LINUXAPK_WIKI_TOKEN` described in
+Actions secret `INNKEEPER_WIKI_TOKEN` described in
 [tests/README.md](../../tests/README.md). Without it, publishing is skipped with
 a notice. The job's `GITHUB_TOKEN` keeps only `contents: read`. A newly enabled
 wiki needs an initial page created by the owner before its Git remote exists.
@@ -78,11 +78,11 @@ The test tasks run the stage through the repository's Flatpak development
 driver. `test:e2e` starts its own isolated desktop; both compatibility modes use
 `tests/nested.sh`. That runner provides a private bus, runtime directory and
 HOME/XDG directories, and stops the desktop when done. CI selects Mutter with
-`LINUXAPK_TEST_COMPOSITOR=mutter`; local runs default to virtual KWin. The
+`INNKEEPER_TEST_COMPOSITOR=mutter`; local runs default to virtual KWin. The
 runner forwards explicit software-rendering settings only to its desktop.
 Android sessions are named and memory capped by the development driver. The
 nightly also builds and installs the distributable Flatpak. CI sets
-`LINUXAPK_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
+`INNKEEPER_MIN_AVAILABLE_GIB=10` for the 16 GB runner; the driver's default
 remains 25 GiB for local desktops, and its 8 GiB hard cap remains.
 
 An exact stage cache skips building when none of its source, build script,

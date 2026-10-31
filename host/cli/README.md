@@ -1,25 +1,25 @@
-# linuxapk
+# innkeeper
 
-The scriptable user surface: `bin/linuxapk`, built by `mise run build:host`, run
-from a shell or from the `Exec` of the desktop entries it writes. Shared
-operations are in [linuxapk-core](../core/README.md); file grants use the bridge
-IPC client.
+The scriptable user surface: `bin/innkeeper`, built by `mise run build:host`,
+run from a shell or from the `Exec` of the desktop entries it writes. Shared
+operations are in [innkeeper-core](../core/README.md); file grants use the
+bridge IPC client.
 
 ```sh
-linuxapk install App.apk             # also .apks, .xapk, .apkm
-linuxapk open [FILE...]              # choose an Android app; no files opens the manager
-linuxapk run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
-linuxapk uninstall org.wikipedia [--keep-data]
-linuxapk list                        # user apps; repairs stale desktop entries first
-linuxapk background [PKG on|off]     # may PKG run with no window open (lists them)
-linuxapk profile list                # profiles and whether they run
-linuxapk profile create|use|delete NAME  # delete removes its apps, data and settings
-linuxapk profile rename OLD NEW
-linuxapk profile start|stop [NAME]
-linuxapk profile set [NAME] --adb on|off     # adb on a loopback port, live
-linuxapk profile set [NAME] --mode phone --size medium-phone  # one device window, next start
-linuxapk adb                         # have your adb list the profile (emulator-<port - 1>)
-linuxapk --profile NAME install App.apk      # any command, on another profile
+innkeeper install App.apk             # also .apks, .xapk, .apkm
+innkeeper open [FILE...]              # choose an Android app; no files opens the manager
+innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
+innkeeper uninstall org.wikipedia [--keep-data]
+innkeeper list                        # user apps; repairs stale desktop entries first
+innkeeper background [PKG on|off]     # may PKG run with no window open (lists them)
+innkeeper profile list                # profiles and whether they run
+innkeeper profile create|use|delete NAME  # delete removes its apps, data and settings
+innkeeper profile rename OLD NEW
+innkeeper profile start|stop [NAME]
+innkeeper profile set [NAME] --adb on|off     # adb on a loopback port, live
+innkeeper profile set [NAME] --mode phone --size medium-phone  # one device window, next start
+innkeeper adb                         # have your adb list the profile (emulator-<port - 1>)
+innkeeper --profile NAME install App.apk      # any command, on another profile
 ```
 
 - Every command starts the session if needed; the first start downloads the
@@ -31,7 +31,7 @@ linuxapk --profile NAME install App.apk      # any command, on another profile
   type and `FLAG_GRANT_READ_URI_PERMISSION`, restricted to that package. These
   grants last until the session stops; they expose no host directories. Files
   must already be accessible to the CLI's Flatpak sandbox.
-- The static Linux.apk desktop entry accepts common document, text and media
+- The static Innkeeper desktop entry accepts common document, text and media
   types. Flatpak exports its `%F` as `--file-forwarding … @@ %F @@`, granting
   those files through the document portal. `open` uses the same read-only grants
   as `run`, then shows **Open or share with Android app…**. **Open** lists VIEW
@@ -50,11 +50,11 @@ linuxapk --profile NAME install App.apk      # any command, on another profile
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
 - A profile is a separate Android with its own apps, data and settings
   ([session](../../docs/session.md#profiles)). `--profile NAME` or
-  `LINUXAPK_PROFILE` selects it, else the one in use (`profile use`); the first
+  `INNKEEPER_PROFILE` selects it, else the one in use (`profile use`); the first
   command that needs one creates `default`. Entries bake it into their `Exec`,
   so an app's entry keeps using its profile.
 
-Tests: `cargo test -p linuxapk` and the shared core tests in `mise run test`
+Tests: `cargo test -p innkeeper` and the shared core tests in `mise run test`
 cover command results, metadata, validation and desktop entries.
 
 Host text sharing has no standard desktop hook on the supported desktops (Debian

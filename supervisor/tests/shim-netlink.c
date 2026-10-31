@@ -11,9 +11,9 @@ static void check(int protocol, int flatpak, int allocated) {
   assert(a >= 0 && b >= 0);
   struct sockaddr_nl address = {.nl_family = AF_NETLINK, .nl_pid = getpid()};
   assert(
-    linuxapk_netlink_bind(a, (void*)&address, sizeof(address), flatpak) == 0
+    innkeeper_netlink_bind(a, (void*)&address, sizeof(address), flatpak) == 0
   );
-  int rc = linuxapk_netlink_bind(b, (void*)&address, sizeof(address), flatpak);
+  int rc = innkeeper_netlink_bind(b, (void*)&address, sizeof(address), flatpak);
   if (allocated) {
     assert(rc == 0);
     struct sockaddr_nl first, second;

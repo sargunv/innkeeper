@@ -3,8 +3,8 @@ service servicemanager /system/bin/servicemanager
     user system
     group system readproc
     critical
-    # linuxapk: CHECKs selinux_status_open(), which needs the shim.
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    # innkeeper: CHECKs selinux_status_open(), which needs the shim.
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     file /dev/kmsg w
     onrestart setprop servicemanager.ready false
     onrestart restart --only-if-running apexd

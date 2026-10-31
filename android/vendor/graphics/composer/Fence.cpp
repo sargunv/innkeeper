@@ -5,7 +5,7 @@
 
 #include "Fence.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 bool waitFence(int fd, int timeoutMs) {
   if (fd < 0) return true;
@@ -19,4 +19,4 @@ bool waitFence(int fd, int timeoutMs) {
 
 int dupFd(int fd) { return fd < 0 ? -1 : fcntl(fd, F_DUPFD_CLOEXEC, 0); }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

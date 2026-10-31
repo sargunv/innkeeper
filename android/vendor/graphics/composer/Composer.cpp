@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <chrono>
 
 #include <android/binder_ibinder_platform.h>
@@ -8,9 +8,9 @@
 
 #include "Common.h"
 #include "ComposerClient.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 using namespace ::aidl::android::hardware::graphics::composer3;
 
@@ -49,4 +49,4 @@ ndk::SpAIBinder Composer::createBinder() {
   return binder;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

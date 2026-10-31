@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linuxapk_core::app_settings::{self, AppInfo, Command};
-use linuxapk_core::xdg::DesktopApp;
+use innkeeper_core::app_settings::{self, AppInfo, Command};
+use innkeeper_core::xdg::DesktopApp;
 
 use crate::{
     errors::Op,
