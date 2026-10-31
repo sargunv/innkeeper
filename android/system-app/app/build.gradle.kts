@@ -49,9 +49,13 @@ tasks.register<Sync>("install") {
     into("$systemExt/priv-app/InnkeeperSystem")
     rename { "InnkeeperSystem.apk" }
   }
-  from(project(":wm-overlay").tasks.named("signRelease")) {
+  from(project(":framework-overlay").tasks.named("signRelease")) {
     into("$systemExt/overlay")
-    rename { "InnkeeperWindowPolicy.apk" }
+    rename { "InnkeeperFrameworkOverlay.apk" }
+  }
+  from(project(":settings-overlay").tasks.named("signRelease")) {
+    into("$systemExt/overlay")
+    rename { "InnkeeperSettingsOverlay.apk" }
   }
   from(rootDir.resolve("etc/permissions")) { into("$systemExt/etc/permissions") }
 }

@@ -32,9 +32,12 @@ Gradle modules:
   framework at runtime.
 - `:app`: the APK. `bridge/BridgeConnection.kt` is the one Kotlin client of the
   bridge.
-- `:wm-overlay`: resource-only, platform-signed RRO enabling per-display remote
-  insets requests, and fixing Android's stream volumes at maximum so the desktop
-  mixer is the only volume control.
+- `:framework-overlay`, `:settings-overlay`: resource-only, platform-signed RROs
+  for desktop defaults (`init.innkeeper.rc` sets only what each boot
+  re-applies). The framework's enables per-display remote insets requests and
+  fixes Android's stream volumes at maximum, so the desktop mixer is the only
+  volume control; SettingsProvider's turns off touch sounds and haptics on a
+  fresh `/data`.
 - `:probes`: `InnkeeperProbes.apk`, diagnostic activities and the input harness
   for the e2e and compat tests. Installed to `out/test/probes`, never staged.
 

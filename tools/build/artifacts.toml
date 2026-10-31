@@ -93,7 +93,8 @@ task = "build:system-app"
 runs = "in Android, as a privileged system app"
 artifacts = [
   "share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/InnkeeperSystem.apk",
-  "share/innkeeper/android/system_ext/overlay/InnkeeperWindowPolicy.apk",
+  "share/innkeeper/android/system_ext/overlay/InnkeeperFrameworkOverlay.apk",
+  "share/innkeeper/android/system_ext/overlay/InnkeeperSettingsOverlay.apk",
   "share/innkeeper/android/system_ext/etc/permissions/dev.sargunv.innkeeper.system.xml",
 ]
 
