@@ -24,7 +24,37 @@ pub enum Ctl {
     Master(f32, bool),
     Standby,
     Metadata(u32, String),
+    /// The app on Android's mixed playback stream, or `None` to restore the
+    /// stream's default application name.
+    App(Option<PlaybackApp>),
 }
+
+/// What the desktop mixer shows for a playback stream. `icon_name` is the
+/// desktop entry id (`dev.linuxapk.<package>`, or the Flatpak form), the same
+/// name the app's `.desktop` file uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackApp {
+    pub name: String,
+    pub icon_name: String,
+    pub id: String,
+    pub binary: String,
+}
+
+/// Pulse application properties for [PlaybackApp]. `application.name` is the
+/// label, and the other three are the desktop id, which is a safe C string
+/// (the package was already checked).
+pub fn playback_app_props(app: &PlaybackApp) -> [(&'static str, &str); 4] {
+    [
+        ("application.name", &app.name),
+        ("application.icon_name", &app.icon_name),
+        ("application.id", &app.id),
+        ("application.process.binary", &app.binary),
+    ]
+}
+
+/// The application name a playback stream is opened with, restored when no
+/// app is playing.
+pub const DEFAULT_APP_NAME: &str = "Linux.apk";
 
 /// Moves PCM between a shared ring and the desktop, in either direction.
 pub trait StreamIo: Send {
@@ -128,13 +158,36 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
+    /// A copy of the control channel. Dropping it does not stop the stream,
+    /// so a caller can send without holding the connection's stream map.
+    pub fn sender(&self) -> StreamSender {
+        StreamSender {
+            tx: self.tx.clone(),
+            wake: self.wake.clone(),
+        }
+    }
+
+    pub fn send(&self, c: Ctl) {
+        self.sender().send(c);
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.join.as_ref().is_none_or(|j| j.is_finished())
+    }
+}
+
+/// Control messages only. Unlike [`StreamHandle`], dropping this leaves the
+/// stream thread running.
+pub struct StreamSender {
+    tx: Sender<Ctl>,
+    wake: Arc<OwnedFd>,
+}
+
+impl StreamSender {
     pub fn send(&self, c: Ctl) {
         if self.tx.send(c).is_ok() {
             let _ = rustix::io::write(&*self.wake, &1u64.to_ne_bytes());
         }
-    }
-    pub fn is_finished(&self) -> bool {
-        self.join.as_ref().is_none_or(|j| j.is_finished())
     }
 }
 
@@ -260,5 +313,25 @@ mod tests {
     fn drain_never_waits() {
         let fd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC).unwrap();
         drain(&fd);
+    }
+
+    #[test]
+    fn playback_app_properties() {
+        let app = PlaybackApp {
+            name: "Example Player".into(),
+            icon_name: "dev.linuxapk.org.example.player".into(),
+            id: "dev.linuxapk.org.example.player".into(),
+            binary: "dev.linuxapk.org.example.player".into(),
+        };
+        let props = playback_app_props(&app);
+        assert_eq!(props[0], ("application.name", "Example Player"));
+        assert_eq!(
+            props[1],
+            ("application.icon_name", "dev.linuxapk.org.example.player")
+        );
+        assert_eq!(props[2].0, "application.id");
+        assert_eq!(props[3].0, "application.process.binary");
+        assert_eq!(props[2].1, props[1].1);
+        assert_eq!(props[3].1, props[1].1);
     }
 }

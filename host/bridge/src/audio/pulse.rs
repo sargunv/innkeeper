@@ -21,7 +21,7 @@ use pulseaudio::protocol::{self, Command, Prop, Props};
 
 use super::proto::{SampleFormat, StreamConfig};
 use super::ring::{Ring, STATE_IDLE, STATE_PLAYING};
-use super::stream::{Ctl, StreamIo, monotonic_ns, usage_name_role};
+use super::stream::{Ctl, StreamIo, monotonic_ns, playback_app_props, usage_name_role};
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Largest control frame we accept from the server.
@@ -123,7 +123,10 @@ impl PulseStream {
         p.version = protocol::MAX_VERSION.min(auth.version);
 
         let mut props = Props::new();
-        props.set(Prop::ApplicationName, c"Linux.apk");
+        props.set(
+            Prop::ApplicationName,
+            CString::new(super::stream::DEFAULT_APP_NAME)?,
+        );
         props.set(Prop::ApplicationId, c"dev.linuxapk");
         props.set(Prop::ApplicationIconName, c"android");
         let seq = p.send(&Command::SetClientName(props))?;
@@ -392,6 +395,17 @@ impl PulseStream {
         Ok(moved)
     }
 
+    fn replace_props(&mut self, props: Props) -> Result<()> {
+        self.send(&Command::UpdatePlaybackStreamProplist(
+            protocol::UpdatePropsParams {
+                index: self.channel,
+                mode: protocol::props::PropsUpdateMode::Replace,
+                props,
+            },
+        ))?;
+        Ok(())
+    }
+
     fn apply_volume(&mut self) -> Result<()> {
         let (mv, mute) = self.master;
         let mut cv = protocol::ChannelVolume::empty();
@@ -505,13 +519,28 @@ impl StreamIo for PulseStream {
                 };
                 props.set(Prop::MediaName, CString::new(label)?);
                 props.set(Prop::MediaRole, CString::new(role)?);
-                self.send(&Command::UpdatePlaybackStreamProplist(
-                    protocol::UpdatePropsParams {
-                        index: self.channel,
-                        mode: protocol::props::PropsUpdateMode::Replace,
-                        props,
-                    },
-                ))?;
+                self.replace_props(props)?;
+            }
+            Ctl::App(app) => {
+                let mut props = Props::new();
+                match app {
+                    Some(app) => {
+                        let [name, icon, id, binary] = playback_app_props(&app);
+                        props.set(Prop::ApplicationName, CString::new(name.1)?);
+                        props.set(Prop::ApplicationIconName, CString::new(icon.1)?);
+                        props.set(Prop::ApplicationId, CString::new(id.1)?);
+                        props.set(Prop::ApplicationProcessBinary, CString::new(binary.1)?);
+                    }
+                    None => {
+                        // Replace drops a property set to empty, which puts
+                        // the stream back to the name it was opened with.
+                        props.set(Prop::ApplicationName, c"");
+                        props.set(Prop::ApplicationIconName, c"");
+                        props.set(Prop::ApplicationId, c"");
+                        props.set(Prop::ApplicationProcessBinary, c"");
+                    }
+                }
+                self.replace_props(props)?;
             }
         }
         Ok(())

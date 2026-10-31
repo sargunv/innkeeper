@@ -81,14 +81,6 @@ fn main() -> Result<()> {
     linuxapk_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));
-    services.register(service::AUDIO, "audio", move |peer, _events| {
-        Ok(Box::new(AudioService::new(
-            backend.clone(),
-            Limits::default(),
-            streams.clone(),
-            peer,
-        )))
-    });
     // The composer's displays in host windows (needs $WAYLAND_DISPLAY), and
     // the system app's side of them: window requests, the seat, the IME.
     let hub = Hub::new();
@@ -98,6 +90,21 @@ fn main() -> Result<()> {
     linuxapk_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"), test_session);
     // Not in the socket directory, which is shared with Android.
     let shared = Shared::with_input(&run_dir, policy, hub.clone());
+    // The system app names the playing app; each audio connection applies
+    // that name to the playback streams it has open and the next one it opens.
+    let audio_shared = shared.clone();
+    services.register(service::AUDIO, "audio", move |peer, _events| {
+        let opened = Arc::default();
+        let app = audio_shared.register_playback(&opened);
+        Ok(Box::new(AudioService::with_playback(
+            backend.clone(),
+            Limits::default(),
+            streams.clone(),
+            peer,
+            app,
+            opened,
+        )))
+    });
     let display_shared = shared.clone();
     let display_hub = hub.clone();
     let session_hub = hub.clone();

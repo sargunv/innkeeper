@@ -53,28 +53,49 @@ pub struct AudioService {
     backend: Backend,
     limits: Limits,
     total: Arc<AtomicUsize>,
-    streams: HashMap<u32, StreamHandle>,
+    streams: Arc<std::sync::Mutex<HashMap<u32, StreamHandle>>>,
     next_id: u32,
     master: (f32, bool),
+    /// The app a playback stream opened now is labelled with.
+    playback: Arc<std::sync::Mutex<Option<stream::PlaybackApp>>>,
     peer: String,
 }
 
 impl AudioService {
     /// `total` counts streams across all connections (for the global cap).
     pub fn new(backend: Backend, limits: Limits, total: Arc<AtomicUsize>, peer: &Peer) -> Self {
+        Self::with_playback(backend, limits, total, peer, Arc::default(), Arc::default())
+    }
+
+    /// `playback` is the app the system service last named. `streams` is this
+    /// connection's streams; the system service sends [`Ctl::App`] on it when
+    /// the app changes, and a stream opened afterwards reads `playback`.
+    pub fn with_playback(
+        backend: Backend,
+        limits: Limits,
+        total: Arc<AtomicUsize>,
+        peer: &Peer,
+        playback: Arc<std::sync::Mutex<Option<stream::PlaybackApp>>>,
+        streams: Arc<std::sync::Mutex<HashMap<u32, StreamHandle>>>,
+    ) -> Self {
         AudioService {
             backend,
             limits,
             total,
-            streams: HashMap::new(),
+            streams,
             next_id: 1,
             master: (1.0, false),
+            playback,
             peer: peer.label.clone(),
         }
     }
 
+    fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<u32, StreamHandle>> {
+        self.streams.lock().unwrap()
+    }
+
     fn remove(&mut self, id: u32) -> bool {
-        if self.streams.remove(&id).is_some() {
+        if self.streams().remove(&id).is_some() {
             self.total.fetch_sub(1, Ordering::AcqRel);
             true
         } else {
@@ -86,7 +107,7 @@ impl AudioService {
         // Streams whose thread died (PipeWire went away) still count until
         // the client closes them; reap them here so they can reconnect.
         let dead: Vec<u32> = self
-            .streams
+            .streams()
             .iter()
             .filter(|(_, s)| s.is_finished())
             .map(|(id, _)| *id)
@@ -97,8 +118,8 @@ impl AudioService {
         let Some(map_size) = Ring::map_size(cfg.frame_bytes(), cfg.capacity_frames()) else {
             return Reply::err(-EINVAL);
         };
-        let used: usize = self.streams.values().map(|s| s.ring_bytes).sum();
-        if self.streams.len() >= self.limits.streams_per_client
+        let used: usize = self.streams().values().map(|s| s.ring_bytes).sum();
+        if self.streams().len() >= self.limits.streams_per_client
             || used + map_size > self.limits.ring_bytes_per_client
         {
             return Reply::err(-EBUSY);
@@ -167,7 +188,12 @@ impl AudioService {
         if self.master != (1.0, false) {
             handle.send(Ctl::Master(self.master.0, self.master.1));
         }
-        self.streams.insert(id, handle);
+        // A stream opened while an app is already playing gets that app's
+        // name; an input stream ignores it.
+        if !input && let Some(app) = self.playback.lock().unwrap().clone() {
+            handle.send(Ctl::App(Some(app)));
+        }
+        self.streams().insert(id, handle);
         crate::info!(
             "{}: {} #{id} {} Hz x{} {:?}, {} x {} frames, \"{}\"",
             self.peer,
@@ -195,7 +221,7 @@ impl AudioService {
     }
 
     fn with_stream(&self, id: u32, c: Ctl) -> Reply {
-        match self.streams.get(&id) {
+        match self.streams().get(&id) {
             Some(s) => {
                 s.send(c);
                 Reply::ok()
@@ -207,7 +233,7 @@ impl AudioService {
 
 impl Drop for AudioService {
     fn drop(&mut self) {
-        let ids: Vec<u32> = self.streams.keys().copied().collect();
+        let ids: Vec<u32> = self.streams().keys().copied().collect();
         for id in ids {
             self.remove(id);
         }
@@ -250,7 +276,7 @@ impl Service for AudioService {
             } => self.with_stream(stream, Ctl::Metadata(usage, label)),
             Request::SetMaster { volume, muted } => {
                 self.master = (volume, muted);
-                for s in self.streams.values() {
+                for s in self.streams().values() {
                     s.send(Ctl::Master(volume, muted));
                 }
                 Reply::ok()
