@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use innkeeper_core::android::{self, Launch};
 use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
+use innkeeper_core::paths::ProfileName;
 use innkeeper_core::profiles::{self, Settings};
 use innkeeper_core::{desktop, validate, xdg};
 use rustix::fs::{FileType, OFlags};
@@ -23,9 +24,9 @@ use splash::Splash;
 #[derive(Parser)]
 #[command(name = "innkeeper", version, about = "Run Android apps on Linux")]
 struct Cli {
-    /// The profile to work with (`default`, or a name from `profile list`).
-    #[arg(long, global = true, value_name = "NAME")]
-    profile: Option<String>,
+    /// The profile to work with, a name from `profile list`.
+    #[arg(long, global = true, value_name = "NAME", default_value = profiles::FIRST)]
+    profile: String,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -112,29 +113,24 @@ enum ProfileCmd {
     List,
     /// Create a profile.
     Create { name: String },
-    /// Use a profile when none is named (the manager's Show Apps does too).
-    Use { name: String },
     /// Rename a stopped profile; its app-menu entries follow.
     Rename { from: String, to: String },
     /// Delete a stopped profile, with its apps and their data.
     Delete { name: String },
-    /// Start a profile (default: the one in use) and wait for Android.
+    /// Start the profile and wait for Android.
     Start {
-        #[arg(conflicts_with = "all")]
-        name: Option<String>,
-        /// Every profile (Keep Running's login command).
+        /// Every profile instead (Keep Running's login command).
         #[arg(long)]
         all: bool,
     },
-    /// Stop a profile (default: the one in use).
-    Stop { name: Option<String> },
-    /// Change a profile's settings (default: the one in use).
+    /// Stop the profile.
+    Stop,
+    /// Change the profile's settings.
     Set(SetArgs),
 }
 
 #[derive(clap::Args)]
 struct SetArgs {
-    name: Option<String>,
     /// Apps in windows of their own, or the whole device in one window the
     /// size of a preset; applies at the next start.
     #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
@@ -200,9 +196,9 @@ fn stderr(e: Event) {
     }
 }
 
-fn install(file: &Path) -> Result<()> {
+fn install(profile: &ProfileName, file: &Path) -> Result<()> {
     let p = ops::inspect(file, &stderr)?;
-    let i = ops::install(&p, &stderr)?;
+    let i = ops::install(profile, &p, &stderr)?;
     println!("installed {} as \"{}\"", i.package, i.name);
     println!("  app menu: {}", i.menu);
     if !i.schemes.is_empty() {
@@ -212,7 +208,7 @@ fn install(file: &Path) -> Result<()> {
 }
 
 /// The static desktop entry handles both APK installation and file VIEW.
-fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
+fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Result<()> {
     let (packages, documents): (Vec<_>, Vec<_>) = files.iter().partition(|p| {
         p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
             ["apk", "apks", "xapk", "apkm"]
@@ -224,7 +220,10 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
         let mut manager = std::process::Command::new(
             std::env::current_exe()?.with_file_name("innkeeper-manager"),
         );
-        manager.args(packages);
+        manager
+            .arg("--profile")
+            .arg(profile.as_str())
+            .args(packages);
         if let Some(t) = &token {
             manager.env("XDG_ACTIVATION_TOKEN", t);
         }
@@ -236,6 +235,7 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
             .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         run(
+            profile,
             "dev.sargunv.innkeeper.system",
             &args,
             token,
@@ -246,8 +246,8 @@ fn open(files: &[PathBuf], token: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
-    let u = ops::uninstall(pkg, keep_data, &stderr)?;
+fn uninstall(profile: &ProfileName, pkg: &str, keep_data: bool) -> Result<()> {
+    let u = ops::uninstall(profile, pkg, keep_data, &stderr)?;
     if u.from_android {
         println!(
             "uninstalled {pkg}{}",
@@ -265,6 +265,7 @@ fn uninstall(pkg: &str, keep_data: bool) -> Result<()> {
 /// Launches an app. From a desktop launch on a stopped session, a splash
 /// window shows at once and hands its focus on to the app's window.
 fn run(
+    profile: &ProfileName,
     pkg: &str,
     args: &[String],
     token: Option<String>,
@@ -276,7 +277,7 @@ fn run(
         "--new-window opens the launcher activity; omit files and URIs"
     );
     let pkg = validate::package(pkg)?;
-    let session = Session::find()?;
+    let session = Session::of_profile(profile)?;
     let splash = if session.running() {
         None
     } else {
@@ -298,7 +299,7 @@ fn run(
         })
     };
     let r = (|| {
-        ops::ensure_session(&stderr)?;
+        ops::ensure_session(profile, &stderr)?;
         // The splash used the launch's token; the app's window gets one of
         // the splash's.
         let token = match &splash {
@@ -311,7 +312,7 @@ fn run(
             new_window,
         };
         if args.iter().all(|s| s.is_empty()) {
-            return ops::run(pkg, None, &opts, &stderr);
+            return ops::run(profile, pkg, None, &opts, &stderr);
         }
         let mut reply = String::new();
         let mut chooser_grants = Vec::new();
@@ -333,7 +334,7 @@ fn run(
                         .file_name()
                         .and_then(|n| n.to_str())
                         .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
-                    let grant = innkeeper_core::app_settings::import(&file, name)?;
+                    let grant = innkeeper_core::app_settings::import(profile, &file, name)?;
                     if file_component.is_some() {
                         chooser_grants.push(grant);
                         continue;
@@ -348,7 +349,7 @@ fn run(
                         &opts,
                     )?
                 }
-                None => ops::run(pkg, Some(arg), &opts, &stderr)?,
+                None => ops::run(profile, pkg, Some(arg), &opts, &stderr)?,
             };
         }
         if !chooser_grants.is_empty() {
@@ -394,7 +395,7 @@ fn open_input(path: &Path) -> Result<File> {
 /// window background).
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
-fn app(cmd: AppCmd) -> Result<()> {
+fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
     use innkeeper_core::app_settings::{Command, request};
     let switch = |package: &str, action: &str, on: bool| {
         let mut c = Command::new(package, action);
@@ -403,7 +404,7 @@ fn app(cmd: AppCmd) -> Result<()> {
     };
     let commands = match cmd {
         AppCmd::Info { package, json } => {
-            let info = request(Command::new(&package, "info"), &stderr)?;
+            let info = request(profile, Command::new(&package, "info"), &stderr)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
@@ -440,7 +441,7 @@ fn app(cmd: AppCmd) -> Result<()> {
         }
     };
     for c in commands {
-        request(c, &stderr)?;
+        request(profile, c, &stderr)?;
     }
     Ok(())
 }
@@ -471,8 +472,8 @@ fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
     s
 }
 
-fn list() -> Result<()> {
-    for a in ops::list(&stderr)? {
+fn list(profile: &ProfileName) -> Result<()> {
+    for a in ops::list(profile, &stderr)? {
         let label = a.label.map_or("(no desktop entry)".into(), |l| {
             validate::truncate(&l, 128).to_string()
         });
@@ -486,20 +487,11 @@ fn list() -> Result<()> {
     Ok(())
 }
 
-fn profile(cmd: ProfileCmd) -> Result<()> {
-    let name = |n: Option<String>| match n {
-        Some(n) => profiles::check_name(&n).map(|()| n),
-        None => profiles::resolve(false),
-    };
+/// `profile`: `name` is `--profile`'s.
+fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
     match cmd {
         ProfileCmd::List => {
-            let current = profiles::resolve(false).ok();
             for p in profiles::list()? {
-                let mark = if Some(&p.name) == current.as_ref() {
-                    "*"
-                } else {
-                    " "
-                };
                 let state = if p.running { "running" } else { "stopped" };
                 let display = p.settings.display.name();
                 let adb = if p.settings.adb {
@@ -507,19 +499,12 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                 } else {
                     String::new()
                 };
-                println!("{mark} {:<16} {state:<8} {display:<14} {adb}", p.name);
+                println!("{:<16} {state:<8} {display:<14} {adb}", p.name);
             }
         }
         ProfileCmd::Create { name: n } => {
             profiles::create(&n, &Settings::default())?;
             println!("created profile {n}");
-        }
-        ProfileCmd::Use { name: n } => {
-            ensure!(
-                profiles::list()?.iter().any(|p| p.name == n),
-                "no profile {n}"
-            );
-            profiles::choose(&n)?;
         }
         ProfileCmd::Rename { from, to } => {
             profiles::rename(&from, &to)?;
@@ -529,7 +514,7 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
             profiles::delete(&n)?;
             println!("deleted profile {n}");
         }
-        ProfileCmd::Start { name: n, all } => {
+        ProfileCmd::Start { all } => {
             let report = |m: &str| eprintln!("innkeeper: {m}");
             if all {
                 // One that fails doesn't keep the others from starting.
@@ -544,17 +529,17 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                     return Err(e);
                 }
             } else {
-                profiles::start(&name(n)?, &report)?;
+                profiles::start(&profiles::existing(name)?, &report)?;
             }
         }
-        ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
-        ProfileCmd::Set(args) => set(name(args.name.clone())?, &args)?,
+        ProfileCmd::Stop => profiles::stop(&profiles::existing(name)?)?,
+        ProfileCmd::Set(args) => set(&profiles::existing(name)?, &args)?,
     }
     Ok(())
 }
 
 /// `profile set`.
-fn set(name: String, args: &SetArgs) -> Result<()> {
+fn set(name: &str, args: &SetArgs) -> Result<()> {
     let mut probe = profiles::Settings::default();
     let profile_change = args.apply(&mut probe);
     ensure!(
@@ -562,7 +547,7 @@ fn set(name: String, args: &SetArgs) -> Result<()> {
         "nothing to change (see --help)"
     );
     if profile_change {
-        let s = profiles::update(&name, |s| {
+        let s = profiles::update(name, |s| {
             args.apply(s);
         })?;
         if args.display.is_some() {
@@ -575,7 +560,7 @@ fn set(name: String, args: &SetArgs) -> Result<()> {
         })?;
     }
     if let Some(on) = &args.adb {
-        let s = innkeeper_core::adb::set(&name, on == "on", &stderr)?;
+        let s = innkeeper_core::adb::set(name, on == "on", &stderr)?;
         if s.adb {
             println!(
                 "adb on: {} ({})",
@@ -586,25 +571,6 @@ fn set(name: String, args: &SetArgs) -> Result<()> {
             println!("adb off");
         }
     }
-    Ok(())
-}
-
-/// The profile a command works with: `--profile`, `INNKEEPER_PROFILE`, the
-/// one in use, or, for a command that needs one, a first one made now.
-fn select_profile(named: Option<&str>, create: bool) -> Result<()> {
-    let p = match named {
-        Some(p) => {
-            profiles::check_name(p)?;
-            p.to_string()
-        }
-        None => match profiles::resolve(create) {
-            Ok(p) => p,
-            Err(_) if !create => return Ok(()),
-            Err(e) => return Err(e),
-        },
-    };
-    // SAFETY: no other threads yet.
-    unsafe { std::env::set_var("INNKEEPER_PROFILE", p) };
     Ok(())
 }
 
@@ -620,28 +586,27 @@ fn main() -> ExitCode {
         std::env::remove_var("DESKTOP_STARTUP_ID");
     }
     let cli = Cli::parse();
-    // Profile commands name theirs; the others need one.
-    let create = !matches!(cli.cmd, Cmd::Profile(_));
-    if let Err(e) = select_profile(cli.profile.as_deref(), create) {
-        eprintln!("innkeeper: {e:#}");
-        return ExitCode::FAILURE;
-    }
-    let res = match cli.cmd {
-        Cmd::Open { files } => open(&files, token),
-        Cmd::Install { file } => install(&file),
-        Cmd::Uninstall { package, keep_data } => uninstall(&package, keep_data),
-        Cmd::Run {
-            package,
-            files_or_uri,
-            new_window,
-        } => run(&package, &files_or_uri, token, None, new_window),
-        Cmd::List => list(),
-        Cmd::App(cmd) => app(cmd),
-        Cmd::Profile(cmd) => profile(cmd),
-        Cmd::Adb => profiles::resolve(false)
-            .and_then(|n| innkeeper_core::adb::connect(&n, &stderr))
+    let res = (|| match cli.cmd {
+        Cmd::Profile(cmd) => profile(&cli.profile, cmd),
+        Cmd::Adb => innkeeper_core::adb::connect(&profiles::existing(&cli.profile)?, &stderr)
             .map(|serial| println!("connected: adb -s {serial} shell")),
-    };
+        cmd => {
+            let p = profiles::existing(&cli.profile)?;
+            match cmd {
+                Cmd::Open { files } => open(&p, &files, token),
+                Cmd::Install { file } => install(&p, &file),
+                Cmd::Uninstall { package, keep_data } => uninstall(&p, &package, keep_data),
+                Cmd::Run {
+                    package,
+                    files_or_uri,
+                    new_window,
+                } => run(&p, &package, &files_or_uri, token, None, new_window),
+                Cmd::List => list(&p),
+                Cmd::App(cmd) => app(&p, cmd),
+                Cmd::Profile(_) | Cmd::Adb => unreachable!("handled above"),
+            }
+        }
+    })();
     match res {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -704,14 +669,25 @@ mod tests {
     }
 
     #[test]
+    fn profile_is_named_by_flag_else_default() {
+        let p = |args: &str| Cli::try_parse_from(args.split_whitespace()).map(|c| c.profile);
+        assert_eq!(p("innkeeper list").unwrap(), "default");
+        assert_eq!(p("innkeeper list --profile work").unwrap(), "work");
+        assert_eq!(p("innkeeper --profile work run a.b").unwrap(), "work");
+    }
+
+    #[test]
     fn profile_set_covers_every_setting() {
-        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse(
-            "profile set work --display small-phone --idle-minutes 30 --follow-dark off \
-             --mirror-apps on",
-        ) else {
+        let cli = Cli::try_parse_from(
+            "innkeeper --profile work profile set --display small-phone --idle-minutes 30 \
+             --follow-dark off --mirror-apps on"
+                .split_whitespace(),
+        )
+        .unwrap();
+        assert_eq!(cli.profile, "work");
+        let Cmd::Profile(ProfileCmd::Set(a)) = cli.cmd else {
             panic!("profile set did not parse");
         };
-        assert_eq!(a.name.as_deref(), Some("work"));
         let mut s = profiles::Settings {
             mirror_apps: false,
             ..Default::default()
@@ -732,16 +708,15 @@ mod tests {
             "profile set --display phone",
             "profile set --mode phone",
             "profile set --follow-dark maybe",
-            "profile start work --all",
+            "profile start work",
+            "profile set work --adb on",
+            "profile use work",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
         assert!(matches!(
             parse("profile start --all"),
-            Ok(Cmd::Profile(ProfileCmd::Start {
-                all: true,
-                name: None
-            }))
+            Ok(Cmd::Profile(ProfileCmd::Start { all: true }))
         ));
     }
 

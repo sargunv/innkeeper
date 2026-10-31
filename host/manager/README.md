@@ -75,6 +75,7 @@ window.
 
 `src/profiles.rs`: every profile and whether it runs, to create, rename, delete,
 start and stop. The window shows one profile's apps, named under its title;
-**Show Apps** switches to another and remembers it for the CLI. Opening the
-manager with no profile creates `default`. Deleting asks first and removes the
-profile's apps, data, settings and app-menu entries.
+**Show Apps** switches to another, which the manager shows again the next time
+it opens (`$XDG_STATE_HOME/innkeeper/manager-profile`; `--profile NAME`
+overrides it). Opening the manager with no profile creates `default`. Deleting
+asks first and removes the profile's apps, data, settings and app-menu entries.

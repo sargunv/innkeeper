@@ -16,12 +16,13 @@ innkeeper app clear-cache|clear-data|stop org.wikipedia
 innkeeper app set org.wikipedia [--background on|off] [--escape-back on|off]
               [--permission android.permission.CAMERA=on|off]...
 innkeeper profile list                # profiles and whether they run
-innkeeper profile create|use|delete NAME  # delete removes its apps, data and settings
+innkeeper profile create|delete NAME  # delete removes its apps, data and settings
 innkeeper profile rename OLD NEW
-innkeeper profile start|stop [NAME]
-innkeeper profile set [NAME] --adb on|off     # adb on a loopback port, live
-innkeeper profile set [NAME] --display windowed|small-phone|medium-phone|medium-tablet
-innkeeper profile set [NAME] --idle-minutes 10 --mirror-apps off --follow-dark off ...
+innkeeper [--profile NAME] profile start|stop
+innkeeper profile start --all         # every profile (Keep Running's login command)
+innkeeper profile set --adb on|off    # adb on a loopback port, live
+innkeeper profile set --display windowed|small-phone|medium-phone|medium-tablet
+innkeeper profile set --idle-minutes 10 --mirror-apps off --follow-dark off ...
 innkeeper profile set --keep-running on       # every profile: never idle, start at login
 innkeeper adb                         # have your adb list the profile (emulator-<port - 1>)
 innkeeper --profile NAME install App.apk      # any command, on another profile
@@ -51,10 +52,10 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
   ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
 - A profile is a separate Android with its own apps, data and settings
-  ([session](../../docs/session.md#profiles)). `--profile NAME` or
-  `INNKEEPER_PROFILE` selects one, else the one in use (`profile use`); the
-  first command that needs one creates `default`. Desktop entries name their
-  profile in `Exec`, so an app's entry keeps using it.
+  ([session](../../docs/session.md#profiles)). `--profile NAME` selects one;
+  without it, commands work with `default`, created the first time. Desktop
+  entries run `innkeeper --profile NAME run PKG`, so an app's entry keeps using
+  its profile.
 - The supported desktops have no standard hook for sharing text from the host,
   so the desktop entry accepts files only.
 

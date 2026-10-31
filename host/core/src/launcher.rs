@@ -21,7 +21,8 @@ use crate::proc;
 
 pub struct Session {
     launcher: PathBuf,
-    /// The profile it runs, if not the environment's.
+    /// The profile it runs; None for a harness's launcher, which knows its
+    /// own.
     profile: Option<crate::paths::ProfileName>,
 }
 
@@ -41,11 +42,6 @@ pub struct Status {
 }
 
 impl Session {
-    /// The session of this program's prefix and profile.
-    pub fn find() -> Result<Self> {
-        Ok(Self::at(Prefix::locate()?.launcher()))
-    }
-
     /// The session `launcher` runs (for harnesses outside a prefix).
     pub fn at(launcher: PathBuf) -> Self {
         Self {
@@ -57,15 +53,15 @@ impl Session {
     /// The session of profile `name` of this program's prefix.
     pub fn of_profile(name: &str) -> Result<Self> {
         Ok(Self {
+            launcher: Prefix::locate()?.launcher(),
             profile: Some(crate::paths::ProfileName::new(name)?),
-            ..Self::find()?
         })
     }
 
     /// The launcher, run for this session's profile.
     fn command(&self) -> Command {
         let mut c = Command::new(&self.launcher);
-        if let Some(p) = self.profile.clone().or(crate::paths::profile().ok()) {
+        if let Some(p) = &self.profile {
             c.env("INNKEEPER_PROFILE", p.as_str());
         }
         c

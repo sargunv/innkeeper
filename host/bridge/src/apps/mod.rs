@@ -185,15 +185,10 @@ pub struct Config {
     pub dirs: xdg::Dirs,
     /// The session profile entries are made for.
     pub profile: paths::ProfileName,
-    /// `Exec` prefix: `innkeeper run` (with the profile), the package and
-    /// `%U` are appended.
-    pub run: Vec<String>,
 }
 
 impl Config {
     pub fn from_env(enabled: bool, profile: paths::ProfileName) -> Config {
-        let mut run = paths::command(&[xdg::INNKEEPER.into()], &profile);
-        run.push("run".into());
         Config {
             enabled,
             mirror_apps: AtomicBool::new(
@@ -203,16 +198,19 @@ impl Config {
             ),
             dirs: xdg::Dirs::from_env(),
             profile,
-            run,
         }
+    }
+
+    /// Whether entry `text` is this profile's.
+    fn owns(&self, text: &str) -> bool {
+        desktop::read_key(text, "X-Innkeeper-Profile").as_deref() == Some(self.profile.as_str())
     }
 
     /// The existing entry for `pkg`: (ours, its version), or None.
     fn existing(&self, pkg: &str) -> Option<(bool, String)> {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
-        let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
         let ours = desktop::read_key(&text, "X-Innkeeper-Origin").as_deref() == Some("android")
-            && xdg::exec_profile(&exec).as_deref() == Some(self.profile.as_str());
+            && self.owns(&text);
         let version = desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default();
         Some((ours, version))
     }
@@ -271,7 +269,7 @@ impl AppsService {
             package: pkg.clone(),
             name,
             names: vec![],
-            run: self.cfg.run.clone(),
+            profile: self.cfg.profile.clone(),
             icon: None,
             version,
             categories,
@@ -315,8 +313,7 @@ impl AppsService {
         let Some(text) = std::fs::read_to_string(self.cfg.dirs.app_desktop(pkg)).ok() else {
             return Reply::ok();
         };
-        let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
-        if xdg::exec_profile(&exec).as_deref() != Some(self.cfg.profile.as_str()) {
+        if !self.cfg.owns(&text) {
             return Reply::ok();
         }
         xdg::remove_app(&self.cfg.dirs, pkg);
@@ -490,19 +487,9 @@ mod tests {
                 portal: None,
             },
             profile: paths::ProfileName::new("t").unwrap(),
-            run: [
-                paths::command(
-                    &["innkeeper".into()],
-                    &paths::ProfileName::new("t").unwrap(),
-                ),
-                vec!["run".into()],
-            ]
-            .concat(),
         });
         let exec = |pkg: &str| {
-            let mut run = cfg.run.clone();
-            run.push(pkg.into());
-            desktop::exec_line(&run, Some("%U")).unwrap()
+            desktop::exec_line(&paths::cli(&cfg.profile, &["run", pkg]), Some("%U")).unwrap()
         };
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
@@ -535,11 +522,13 @@ mod tests {
         assert_eq!(cfg.have("org.ex.a", ""), have::CURRENT);
         // An entry from `innkeeper install` is left alone, and so is another
         // profile's.
-        let cli = format!("[Desktop Entry]\nName=B\nExec={}\n", exec("org.ex.b"));
+        let cli = format!(
+            "[Desktop Entry]\nName=B\nExec={}\nX-Innkeeper-Profile=t\n",
+            exec("org.ex.b")
+        );
         std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
         assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
-        let other =
-            "[Desktop Entry]\nName=C\nX-Innkeeper-Origin=android\nExec=innkeeper run org.ex.c %U\n";
+        let other = "[Desktop Entry]\nName=C\nX-Innkeeper-Origin=android\nX-Innkeeper-Profile=u\n";
         std::fs::write(cfg.dirs.app_desktop("org.ex.c"), other).unwrap();
         assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
         s.removed("org.ex.c");

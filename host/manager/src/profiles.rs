@@ -102,14 +102,10 @@ impl Page {
 
     fn load(self: &Rc<Self>) {
         let s = self.clone();
+        let shown = self.window.upgrade().map(|w| w.profile().to_string());
         glib::spawn_future_local(async move {
-            match worker::run_quiet(|| {
-                Ok::<_, anyhow::Error>((
-                    profiles::list()?,
-                    innkeeper_core::paths::profile().ok().map(String::from),
-                ))
-            })
-            .await
+            match worker::run_quiet(move || Ok::<_, anyhow::Error>((profiles::list()?, shown)))
+                .await
             {
                 Ok((list, current)) => {
                     s.current.replace(current);
@@ -201,7 +197,7 @@ impl Page {
         if !current {
             let show = adw::ActionRow::builder()
                 .title("Show Apps")
-                .subtitle("Show this profile’s apps in the window, and use it when none is named")
+                .subtitle("Show this profile’s apps in the window")
                 .activatable(true)
                 .build();
             show.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -396,7 +392,7 @@ impl Page {
                     // The window shows another profile's apps, or a new one's.
                     if current {
                         glib::spawn_future_local(async move {
-                            match worker::run_quiet(|| profiles::fallback(true)).await {
+                            match worker::run_quiet(crate::first_profile).await {
                                 Ok(next) => {
                                     if let Err(e) = w.switch_profile(&next) {
                                         w.show_error(Op::Profiles, None, &e);

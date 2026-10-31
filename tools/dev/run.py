@@ -149,6 +149,9 @@ def command(program, args):
     if program == "innkeeper"
     else str(STAGE / "libexec/innkeeper/innkeeper-session")
   )
+  # The CLI is told its profile; the launcher reads INNKEEPER_PROFILE.
+  if program == "innkeeper":
+    args = ["--profile", PROFILE, *args]
   argv += ["--command=env", APP, *inner_env, target, *args]
   return argv
 

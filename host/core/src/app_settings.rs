@@ -121,12 +121,12 @@ impl Response {
     }
 }
 
-/// The running session's Session1 object.
-fn proxy() -> Result<zbus::blocking::Proxy<'static>> {
+/// Profile `profile`'s running session's Session1 object.
+fn proxy(profile: &crate::paths::ProfileName) -> Result<zbus::blocking::Proxy<'static>> {
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(25))
         .build()?;
-    let name = bus_name(&crate::paths::profile()?);
+    let name = bus_name(profile);
     Ok(zbus::blocking::Proxy::new_owned(
         connection,
         name,
@@ -136,10 +136,14 @@ fn proxy() -> Result<zbus::blocking::Proxy<'static>> {
 }
 
 /// Starts Android if needed, then calls the bridge over the desktop bus.
-pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> {
+pub fn request(
+    profile: &crate::paths::ProfileName,
+    command: Command,
+    report: crate::ops::Report,
+) -> Result<AppInfo> {
     command.validate()?;
-    crate::ops::ensure_session(report)?;
-    let json: String = proxy()?.call(
+    crate::ops::ensure_session(profile, report)?;
+    let json: String = proxy(profile)?.call(
         "App",
         &(
             &command.package,
@@ -157,10 +161,14 @@ pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> 
 
 /// A read-only grant on the running session's bridge for `file` (only its
 /// fd reaches the bridge, never its path), shown to Android as `name`.
-pub fn import(file: &std::fs::File, name: &str) -> Result<u64> {
+pub fn import(
+    profile: &crate::paths::ProfileName,
+    file: &std::fs::File,
+    name: &str,
+) -> Result<u64> {
     use std::os::fd::AsFd;
     let fd = zbus::zvariant::Fd::from(file.as_fd());
-    proxy()?
+    proxy(profile)?
         .call("Import", &(fd, name))
         .context("import the file into the session")
 }
