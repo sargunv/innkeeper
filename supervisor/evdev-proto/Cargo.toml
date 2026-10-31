@@ -1,0 +1,6 @@
+[package]
+name = "innkeeper-evdev-proto"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The bridge-to-broker evdev.sock protocol: messages, input_event records and the gamepad layout"

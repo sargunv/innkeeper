@@ -10,25 +10,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::notify::{Listener, SeccompNotif, mem_read, mem_write, open_mem, read_path};
 
-pub const EVENT_SIZE: usize = 24;
-pub const KEYBOARD: u32 = 0;
-pub const MOUSE: u32 = 1;
+pub use innkeeper_evdev_proto::{EVENT_SIZE, KEYBOARD, MOUSE, Message, event};
 // Flatpak's input grant mounts a host-owned directory at /dev/input. Discovery
 // uses our own tmpfs directory; virtual names cannot shadow host eventN nodes.
 const DIRECTORY: &str = "/dev/innkeeper-input";
 const PREFIX: &[u8] = b"/dev/input/innkeeper-event";
-
-/// x86_64 Linux input_event, with a CLOCK_MONOTONIC timeval. Kept explicit:
-/// Rust struct padding is not part of the bridge protocol.
-pub fn event(micros: i64, ty: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
-    let mut b = [0; EVENT_SIZE];
-    b[..8].copy_from_slice(&(micros / 1_000_000).to_le_bytes());
-    b[8..16].copy_from_slice(&(micros % 1_000_000).to_le_bytes());
-    b[16..18].copy_from_slice(&ty.to_le_bytes());
-    b[18..20].copy_from_slice(&code.to_le_bytes());
-    b[20..].copy_from_slice(&value.to_le_bytes());
-    b
-}
 
 struct Client {
     device: u32,
@@ -455,12 +441,6 @@ fn prepare_directories(dev: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dev.join("innkeeper-input"))
 }
 
-// Registration has a fixed eight-digit port identity. Event packets are
-// 4 + N*EVENT_SIZE bytes, so timestamp bytes can never look like control data.
-fn is_registration(packet: &[u8]) -> bool {
-    packet.len() == 14 && matches!(packet[4], 2 | 3)
-}
-
 impl Input {
     pub(crate) fn new(listener: Listener) -> Option<Self> {
         let dir = std::path::Path::new(DIRECTORY);
@@ -487,41 +467,49 @@ impl Input {
                 if n < 4 {
                     continue;
                 }
-                let device = u32::from_le_bytes(buf[..4].try_into().unwrap());
+                let Some(message) = Message::decode(&buf[..n]) else {
+                    continue;
+                };
                 let mut s = state.lock().unwrap();
-                if device >= gamepad::FIRST && is_registration(&buf[..n]) {
-                    let Ok(identity) = std::str::from_utf8(&buf[6..n]) else {
-                        continue;
-                    };
-                    let feedback = feedback.map(|fd| gamepad::Feedback::new(fd, buf[4] == 3));
-                    register_pad(
-                        &mut s,
+                let (device, records) = match message {
+                    Message::Gamepad {
                         device,
-                        Pad {
-                            identity: identity.into(),
-                            feedback,
-                            axes: [0; 8],
-                        },
-                        dir,
-                    );
-                    continue;
-                }
-                if n == 5 && device != KEYBOARD {
-                    let path = dir.join(format!("innkeeper-event{device}"));
-                    if buf[4] != 0 {
-                        if let std::collections::hash_map::Entry::Vacant(e) = s.keys.entry(device) {
-                            e.insert([0; 96]);
-                            let _ = std::fs::write(path, []);
-                        }
-                    } else {
-                        s.remove(device, dir);
+                        identity,
+                        synthetic,
+                    } => {
+                        let feedback = feedback.map(|fd| gamepad::Feedback::new(fd, synthetic));
+                        register_pad(
+                            &mut s,
+                            device,
+                            Pad {
+                                identity: identity.into(),
+                                feedback,
+                                axes: [0; 8],
+                            },
+                            dir,
+                        );
+                        continue;
                     }
+                    Message::Device { device, enabled } => {
+                        let path = dir.join(format!("innkeeper-event{device}"));
+                        if enabled {
+                            if let std::collections::hash_map::Entry::Vacant(e) =
+                                s.keys.entry(device)
+                            {
+                                e.insert([0; 96]);
+                                let _ = std::fs::write(path, []);
+                            }
+                        } else {
+                            s.remove(device, dir);
+                        }
+                        continue;
+                    }
+                    Message::Events { device, records } => (device, records),
+                };
+                if !s.keys.contains_key(&device) {
                     continue;
                 }
-                if (n - 4) % EVENT_SIZE != 0 || !s.keys.contains_key(&device) {
-                    continue;
-                }
-                for ev in buf[4..n].as_chunks::<EVENT_SIZE>().0 {
+                for ev in records.as_chunks::<EVENT_SIZE>().0 {
                     let ty = u16::from_le_bytes(ev[16..18].try_into().unwrap());
                     let code = u16::from_le_bytes(ev[18..20].try_into().unwrap()) as usize;
                     let value = i32::from_le_bytes(ev[20..24].try_into().unwrap());
@@ -550,7 +538,7 @@ impl Input {
                 // Do not hold device state while waiting: EventHub may need an
                 // ioctl answer before it can drain its socket.
                 for client in clients {
-                    if let Err(e) = client.deliver(&buf[4..n]) {
+                    if let Err(e) = client.deliver(records) {
                         eprintln!("evdev: delivery failed: {e}");
                     }
                 }
@@ -1069,20 +1057,6 @@ mod tests {
         assert_eq!(receive(&first_fd), packet);
         delivery.join().unwrap();
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn gamepad_timestamp_bytes_never_register_a_device() {
-        let mut registration = gamepad::FIRST.to_le_bytes().to_vec();
-        registration.extend_from_slice(b"\x02\x001234abcd");
-        assert!(is_registration(&registration));
-        for seconds in [258, 259] {
-            let mut packet = gamepad::FIRST.to_le_bytes().to_vec();
-            packet.extend_from_slice(&event(seconds * 1_000_000, 1, 304, 1));
-            packet.extend_from_slice(&event(seconds * 1_000_000, 0, 0, 0));
-            assert!(matches!(packet[4], 2 | 3));
-            assert!(!is_registration(&packet));
-        }
     }
 
     #[test]

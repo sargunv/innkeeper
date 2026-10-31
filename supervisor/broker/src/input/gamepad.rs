@@ -3,10 +3,7 @@
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
-pub const FIRST: u32 = 0x10000;
-pub const AXES: [u16; 8] = [0, 1, 2, 5, 9, 10, 16, 17];
-pub const BUTTONS: [u16; 11] = [304, 305, 307, 308, 314, 316, 315, 317, 318, 310, 311];
-pub const EFFECT_SIZE: usize = 48;
+pub use innkeeper_evdev_proto::gamepad::{AXES, BUTTONS, EFFECT_SIZE, FIRST};
 
 pub fn absinfo(code: u16, value: i32) -> Option<Vec<u8>> {
     if !AXES.contains(&code) {
