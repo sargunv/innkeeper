@@ -54,7 +54,6 @@ pub struct PulseStream {
     timing_seq: Option<(u32, Instant)>,
     last_timing: Instant,
     volume: (f32, f32),
-    master: (f32, bool),
     tmp: Vec<u8>,
     stats: Stats,
 }
@@ -101,7 +100,6 @@ impl PulseStream {
             timing_seq: None,
             last_timing: Instant::now(),
             volume: (1.0, 1.0),
-            master: (1.0, false),
             tmp: vec![0; MAX_CHUNK - MAX_CHUNK % fb],
             stats: Stats::default(),
         };
@@ -409,7 +407,6 @@ impl PulseStream {
     }
 
     fn apply_volume(&mut self) -> Result<()> {
-        let (mv, mute) = self.master;
         let mut cv = protocol::ChannelVolume::empty();
         let (l, r) = self.volume;
         let vols: &[f32] = if self.channels == 1 {
@@ -418,7 +415,7 @@ impl PulseStream {
             &[l, r]
         };
         for v in vols {
-            cv.push(protocol::Volume::from_linear(v * mv));
+            cv.push(protocol::Volume::from_linear(*v));
         }
         self.send(&Command::SetSinkInputVolume(
             protocol::SetStreamVolumeParams {
@@ -426,10 +423,6 @@ impl PulseStream {
                 volume: cv,
             },
         ))?;
-        self.send(&Command::SetSinkInputMute(protocol::SetStreamMuteParams {
-            index: self.sink_input,
-            mute,
-        }))?;
         Ok(())
     }
 }
@@ -498,10 +491,6 @@ impl StreamIo for PulseStream {
         match c {
             Ctl::Volume(l, r) => {
                 self.volume = (l, r);
-                self.apply_volume()?;
-            }
-            Ctl::Master(v, m) => {
-                self.master = (v, m);
                 self.apply_volume()?;
             }
             Ctl::Standby => {

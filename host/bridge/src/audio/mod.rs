@@ -55,7 +55,6 @@ pub struct AudioService {
     total: Arc<AtomicUsize>,
     streams: Arc<std::sync::Mutex<HashMap<u32, StreamHandle>>>,
     next_id: u32,
-    master: (f32, bool),
     /// The app a playback stream opened now is labelled with.
     playback: Arc<std::sync::Mutex<Option<stream::PlaybackApp>>>,
     peer: String,
@@ -84,7 +83,6 @@ impl AudioService {
             total,
             streams,
             next_id: 1,
-            master: (1.0, false),
             playback,
             peer: peer.label.clone(),
         }
@@ -185,9 +183,6 @@ impl AudioService {
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let capacity = cfg.capacity_frames();
         let handle = stream::spawn(format!("{}#{id}", self.peer), ring, data, space, out)?;
-        if self.master != (1.0, false) {
-            handle.send(Ctl::Master(self.master.0, self.master.1));
-        }
         // A stream opened while an app is already playing gets that app's
         // name; an input stream ignores it.
         if !input && let Some(app) = self.playback.lock().unwrap().clone() {
@@ -274,13 +269,6 @@ impl Service for AudioService {
                 usage,
                 label,
             } => self.with_stream(stream, Ctl::Metadata(usage, label)),
-            Request::SetMaster { volume, muted } => {
-                self.master = (volume, muted);
-                for s in self.streams().values() {
-                    s.send(Ctl::Master(volume, muted));
-                }
-                Reply::ok()
-            }
         }
     }
 }
