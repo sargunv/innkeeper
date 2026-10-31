@@ -132,9 +132,10 @@ jobs:
         run: |
           # Flatpak must see a host directory before sharing it.
           mkdir -p "$INNKEEPER_IMAGES"
-          # actions/cache drops xattrs. Recreate the tiny CLAT ownership layer;
-          # extracted partitions and flattened APEXes remain cached.
-          find "$INNKEEPER_IMAGES" -path '*/derived/single.source' -delete
+          # actions/cache drops xattrs. Recreate the derived layer (it holds
+          # CLAT's owner record); extracted partitions and flattened APEXes
+          # remain cached.
+          find "$INNKEEPER_IMAGES" -path '*/derived/.source' -delete
           mise run session -- prepare
           img=$(out/stage/libexec/innkeeper/innkeeper-session image | sed -n 's/^img=//p')
           test -f "$img/system/system/build.prop"

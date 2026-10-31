@@ -243,7 +243,7 @@ impl Paths {
 /// The pinned AOSP CI build's files: its extracted partitions (`img`), its
 /// flattened APEXes (`apexdir`, one per vendor APEX selection, shared by
 /// every profile and never rewritten under a running session) and the
-/// layers derived from them (image/README.md).
+/// layer derived from them (image/README.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
     pub name: String,
@@ -253,8 +253,15 @@ pub struct Image {
     pub derived: PathBuf,
 }
 
-/// The pin's top-level name: the keys before the first `[table]` header (the
-/// `[[artifact]]` tables have names of their own).
+impl Image {
+    /// What the derived layer was made from (`image::prepare`); absent until
+    /// derive.sh has finished.
+    pub fn derived_source(&self) -> PathBuf {
+        self.derived.join(".source")
+    }
+}
+
+/// The pin's top-level name: the keys before any `[table]` header.
 fn pin_name(pin: &str) -> Option<String> {
     for line in pin.lines() {
         let l = line.trim_start();

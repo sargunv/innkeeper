@@ -95,16 +95,14 @@ pub fn remove_tree(dir: &Path) -> Result<()> {
     fs::remove_dir_all(dir).with_context(|| format!("remove {}", dir.display()))
 }
 
-/// What the composed root is made of: the image, its derived layers, the
+/// What the composed root is made of: the image, its derived layer, the
 /// stage (its manifest has every file's hash) and the addons' files.
 fn compose_key(cfg: &Config) -> Result<String> {
     let mut h = Sha256::new();
     h.update(COMPOSE_VERSION);
     h.update(cfg.image.img.as_os_str().as_encoded_bytes());
     h.update(cfg.image.apexdir.as_os_str().as_encoded_bytes());
-    for l in ["common", "single"] {
-        h.update(fs::read(cfg.image.derived.join(format!("{l}.source"))).unwrap_or_default());
-    }
+    h.update(fs::read(cfg.image.derived_source()).unwrap_or_default());
     h.update(fs::read(cfg.paths.share.join("manifest.tsv"))?);
     h.update(format!("{:?}", crate::phone::mode(&cfg.paths.data)?));
     for a in cfg.paths.addon_layers() {
@@ -159,11 +157,7 @@ fn compose(cfg: &Config) -> Result<()> {
         let dst = r.join(part);
         link(&src, &dst)?;
         if LAYERED.contains(part) {
-            let mut layers = vec![
-                cfg.image.derived.join("common").join(part),
-                cfg.image.derived.join("single").join(part),
-                p.android().join(part),
-            ];
+            let mut layers = vec![cfg.image.derived.join(part), p.android().join(part)];
             layers.extend(addons.iter().map(|a| a.join(part)));
             for l in layers {
                 over(&l, &dst)?;
@@ -182,11 +176,11 @@ fn compose(cfg: &Config) -> Result<()> {
     }
     let apex = r.join("apex");
     link(&cfg.image.apexdir, &apex)?;
-    over(&cfg.image.derived.join("single").join("apex"), &apex)?;
+    over(&cfg.image.derived.join("apex"), &apex)?;
     files_read_only(r)?;
-    // The uid mode's layer sets exact modes that code verifies (clatd's
-    // 06755), so it goes on again.
-    over(&cfg.image.derived.join("single").join("apex"), &apex)?;
+    // The derived APEX files have exact modes that code verifies (clatd's
+    // 06755), so they go on again.
+    over(&cfg.image.derived.join("apex"), &apex)?;
     fs::write(&key_file, key)?;
     Ok(())
 }
