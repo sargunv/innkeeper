@@ -14,12 +14,10 @@ Build and dev tooling; never shipped.
   jobs). Used for Mesa and the static image tools.
 - **`dev/session.sh`, `dev/innkeeper.sh`** (both `dev/run.py`): the staged
   launcher and CLI in a private Flatpak, capped from the host
-  ([packaging/flatpak](../packaging/flatpak/README.md#development));
-  **`dev/benchmark.sh`**: boot, idle memory, frame timing, for comparing the
-  two.
+  ([packaging/flatpak](../packaging/flatpak/README.md#development)).
 - **`dev/footprint.sh`**: PSS and RSS of every process in a running session, and
   its cgroup's memory, to see what an idle session holds.
-- **`dev/window-shot.sh`**: a screenshot of just a Innkeeper window on KDE, for
+- **`dev/window-shot.sh`**: a screenshot of just an Innkeeper window on KDE, for
   PRs, bug reports and the README media issue.
 
 How these fit together: [docs/development.md](../docs/development.md).
