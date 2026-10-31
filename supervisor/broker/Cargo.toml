@@ -8,7 +8,7 @@ description = "Innkeeper broker: serves the session's seccomp user notifications
 [dependencies]
 libc = "0.2"
 
-# Installed as /system/bin/innkeeper-brk. Tests match the name in
+# Installed as libexec/innkeeper/innkeeper-brk, static musl for both guests. Tests match the name in
 # /proc/<pid>/comm, so it stays within TASK_COMM_LEN (15 characters).
 [[bin]]
 name = "innkeeper-brk"

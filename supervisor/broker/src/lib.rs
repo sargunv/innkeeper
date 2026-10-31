@@ -40,7 +40,7 @@ pub enum Guest {
 /// The session as the launcher describes it to the broker.
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// `INNKEEPER_GUEST`: `ohos`, or anything else for Android.
+    /// `INNKEEPER_GUEST`: `android` or `ohos`.
     pub guest: Guest,
     /// `INNKEEPER_ROOT_MAP`, lines of `<host dir>=<guest path>`: the host
     /// dirs behind the guest's paths, longest host dir first.
@@ -55,9 +55,13 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Config {
         let var = |k| std::env::var_os(k).filter(|v| !v.is_empty());
-        let guest = match std::env::var("INNKEEPER_GUEST").as_deref() {
-            Ok("ohos") => Guest::Ohos,
-            _ => Guest::Android,
+        let guest = match std::env::var("INNKEEPER_GUEST")
+            .unwrap_or_default()
+            .as_str()
+        {
+            "android" => Guest::Android,
+            "ohos" => Guest::Ohos,
+            v => panic!("INNKEEPER_GUEST must be android or ohos, not {v:?}"),
         };
         let map = std::env::var("INNKEEPER_ROOT_MAP").unwrap_or_default();
         // INNKEEPER_BROKER_DEBUG: unset, empty or "0" = off.

@@ -2,13 +2,13 @@
 
 The syscall boundary between the host kernel and Android. One seccomp filter,
 installed on Android's init and inherited by every Android process, turns what
-an unprivileged namespace can't do into user notifications. `mise run build:ndk`
-builds both artifacts.
+an unprivileged namespace can't do into user notifications.
+`mise run build:broker` builds the broker, `mise run build:ndk` the shim.
 
-| Dir      | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
-| -------- | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
-| `broker` | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | started by the launcher: init's parent                   | `src/notify.rs`, `src/bpf.rs` |
-| `shim`   | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so`      | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
+| Dir      | Artifact (stage path)                                       | Runs                                                     | Start reading                 |
+| -------- | ----------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
+| `broker` | `libexec/innkeeper/innkeeper-brk` (static musl Rust)        | started by the launcher: init's parent                   | `src/notify.rs`, `src/bpf.rs` |
+| `shim`   | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so` | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
 
 ## What is trapped, and who serves it
 
@@ -140,14 +140,15 @@ unmount.
 ## OpenHarmony
 
 `INNKEEPER_GUEST=ohos` ([ohos/](../ohos/README.md)) keeps everything above and
-adds what OpenHarmony's userspace expects of its kernel. Android sessions never
-set it, and their filter and driver are unchanged.
+adds what OpenHarmony's userspace expects of its kernel. The launcher sets
+`INNKEEPER_GUEST=android`, whose filter and driver have none of it; the broker
+refuses to start without one of the two.
 
-- **musl.** The broker is also built static for `x86_64-unknown-linux-musl`
-  (`mise run ohos:build`), since OH's root has no Bionic. musl opens with
-  `open(2)`, so the filter also traps it and the broker serves it as
-  `openat(AT_FDCWD, ...)`. `/etc/passwd` and `/etc/group` get `/system/etc`'s:
-  musl resolves service users there, and Flatpak binds its own over both.
+- **musl.** The broker is static (`x86_64-unknown-linux-musl`), so it runs in
+  either guest's root, OH's with no Bionic. musl opens with `open(2)`, so the
+  filter also traps it and the broker serves it as `openat(AT_FDCWD, ...)`.
+  `/etc/passwd` and `/etc/group` get `/system/etc`'s: musl resolves service
+  users there, and Flatpak binds its own over both.
 - **Binder.** OH's kernel adds `BINDER_FEATURE_SET` (access tokens and sender
   info), `BINDER_GET_ACCESS_TOKEN` and `BINDER_GET_SENDER_INFO`. A transaction
   carries its sender's token and first token, and the reading thread keeps them,

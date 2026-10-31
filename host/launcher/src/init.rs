@@ -9,7 +9,7 @@ use crate::conf::Config;
 /// `innkeeper-brk --preload <shim> /system/bin/init second_stage`, plus
 /// `extra` variables.
 pub fn command(cfg: &Config, extra: &[(&str, String)]) -> Command {
-    let mut c = Command::new("/system/bin/innkeeper-brk");
+    let mut c = Command::new(cfg.paths.libexec.join("innkeeper-brk"));
     c.args([
         // Absolute: a bare name is not found from APEX linker namespaces.
         "--preload",
@@ -20,6 +20,7 @@ pub fn command(cfg: &Config, extra: &[(&str, String)]) -> Command {
     c.current_dir("/")
         .env_clear()
         .env("PATH", "/system/bin:/system/xbin:/vendor/bin")
+        .env("INNKEEPER_GUEST", "android")
         .env(
             "INNKEEPER_RENDER_NODE",
             cfg.render_node.as_deref().unwrap_or(Path::new("")),
