@@ -8,7 +8,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.job.JobInfo
+import android.app.job.JobParameters
+import android.app.job.JobScheduler
+import android.app.job.JobService
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
@@ -18,11 +23,15 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Bundle
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-/** Real alarm-clock and foreground audio APIs for the e2e audio/lifecycle groups; never shipped. */
+/**
+ * Real alarm-clock and foreground audio APIs for the e2e audio/lifecycle groups, and a JobScheduler
+ * job for reproducing job timing by hand (#54); never shipped.
+ */
 class LifecycleProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -34,8 +43,26 @@ class LifecycleProbe : Activity() {
         getSharedPreferences("alarm", 0).edit().putLong("at", at).commit()
         schedule(this, at)
       }
+      "job" -> {
+        // A CPU-only job: a minimum latency in seconds, or a period with --ei period.
+        val job = JobInfo.Builder(1, ComponentName(this, Job::class.java))
+        val period = intent.getIntExtra("period", 0)
+        if (period > 0) job.setPeriodic(period * 1000L)
+        else job.setMinimumLatency(intent.getIntExtra("seconds", 20) * 1000L)
+        getSystemService(JobScheduler::class.java).schedule(job.build())
+        Log.i(TAG, "job scheduled elapsed=${SystemClock.elapsedRealtime()}")
+      }
     }
     finish()
+  }
+
+  class Job : JobService() {
+    override fun onStartJob(params: JobParameters): Boolean {
+      Log.i(TAG, "job ran elapsed=${SystemClock.elapsedRealtime()}")
+      return false
+    }
+
+    override fun onStopJob(params: JobParameters) = false
   }
 
   class Alarm : BroadcastReceiver() {
