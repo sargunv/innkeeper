@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::paths::Paths;
+use crate::profile::{Settings, System};
 use crate::{control, image, layer, sandbox, selftest, session, sys};
 
 const USAGE: &str = "\
@@ -70,17 +71,16 @@ fn run(args: &[OsString]) -> Result<i32> {
             r.map(|_| 0)
         }
         "prepare" => {
-            image::prepare(&paths, &paths.image()?)?;
+            prepare(&paths, system(&paths)?)?;
             Ok(0)
         }
         "image" => {
-            let i = paths.image()?;
-            println!(
-                "image={}\nimg={}\napex={}",
-                i.name,
-                i.img.display(),
-                i.apexdir.display()
-            );
+            let system = system(&paths)?;
+            let i = paths.image_of(system)?;
+            println!("image={}\nimg={}", i.name, i.img.display());
+            if system == System::Android {
+                println!("apex={}", i.apexdir.display());
+            }
             Ok(0)
         }
         "stop" => {
@@ -128,6 +128,24 @@ fn run(args: &[OsString]) -> Result<i32> {
             Ok(1)
         }
     }
+}
+
+/// The profile's guest system, from its settings.
+fn system(paths: &Paths) -> Result<System> {
+    Ok(Settings::load(&paths.data)?.system)
+}
+
+/// Prepares `system`'s image: fetched and extracted, and for Android
+/// flattened and derived. The lease keeps Android's from being pruned.
+fn prepare(paths: &Paths, system: System) -> Result<Option<crate::prune::Lease>> {
+    let image = paths.image_of(system)?;
+    Ok(match system {
+        System::Android => Some(image::prepare(paths, &image)?),
+        System::Ohos => {
+            crate::ohos::prepare(paths, &image)?;
+            None
+        }
+    })
 }
 
 fn check_kernel() -> Result<()> {
@@ -202,24 +220,27 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     } else {
         Some(wayland_socket()?)
     };
-    let image = paths.image()?;
-    let image_lease = image::prepare(paths, &image)?;
-    image::check_data(&paths.data, &image)?;
+    let system = system(paths)?;
+    let image = paths.image_of(system)?;
+    let image_lease = prepare(paths, system)?;
+    if system == System::Android {
+        image::check_data(&paths.data, &image)?;
+    }
     if !follow && !serve {
         return sandbox::spawn(paths, &exe, headless);
     }
     session::fresh_dirs(paths)?;
     trace.mark(paths, "image prepared, runtime ready");
-    let cfg = Config::new(paths.clone(), image, headless, wayland);
-    layer::write(&cfg)?;
-    trace.mark(paths, "start-time layer written");
+    let cfg = Config::new(system, paths.clone(), image, headless, wayland);
+    if system == System::Android {
+        layer::write(&cfg)?;
+        trace.mark(paths, "start-time layer written");
+    }
     cfg.save()?;
     sandbox::run(&cfg, follow, image_lease, &trace)
 }
 
-/// Deletes Android's /data, as Android's root: its files belong to Android's
-/// uids.
-/// Deletes Android's `/data`, keeping the profile's settings in it.
+/// Deletes the guest's `/data`, keeping the profile's settings in it.
 fn reset(paths: &Paths) -> Result<()> {
     if let Some(p) = crate::status(paths).pid {
         bail!("running (pid {p}); stop it first");

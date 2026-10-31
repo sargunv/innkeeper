@@ -14,13 +14,14 @@ use crate::errors::{self, Op};
 use crate::permissions;
 use crate::window::{Window, details_expander};
 use crate::worker;
+use innkeeper_profile::profile::System;
 
 /// Permissions listed before the rest fold into "N more".
 const SHOWN_PERMISSIONS: usize = 6;
 
 /// Progress text for a core status message.
 pub fn status_text(m: &str) -> String {
-    if m == launcher::PREPARING {
+    if m == launcher::preparing(System::Android) {
         "Downloading Android (about 1.2 GB)…".into()
     } else if m.starts_with("starting the Android session") {
         "Starting Android…".into()

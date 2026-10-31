@@ -533,7 +533,7 @@ fn ohos_etc(path: &[u8]) -> Option<&'static str> {
 }
 
 /// `path` with each directory on the way that is a symlink through
-/// `/proc/self` (OpenHarmony's per-app `/data/storage`, ohos/sandbox.sh)
+/// `/proc/self` (OpenHarmony's per-app `/data/storage`, host/launcher/src/ohos.rs)
 /// replaced by the caller's: the kernel would resolve it as the broker's.
 fn caller_links(tid: i32, mut path: Vec<u8>) -> Option<Vec<u8>> {
     let (mut end, mut hops) = (0, 0);

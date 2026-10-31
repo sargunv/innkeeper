@@ -1,6 +1,7 @@
 # shellcheck shell=sh disable=SC2329 # functions run through retry
-# Runs inside the OpenHarmony session with OH's own sh (ohos/run.py --probe),
-# once samgr is ready.
+# Runs inside an OpenHarmony profile with OH's own sh, as root with
+# ohos.permission.DUMP (`innkeeper-session exec /system/bin/sh -s <boot.sh`):
+# waits for its core system abilities, screen 0 and SceneBoard.
 
 # retry <tries> <command...>: every 0.2 s until it succeeds.
 retry() {
@@ -13,6 +14,14 @@ retry() {
   done
   return 1
 }
+
+samgr_ready() {
+  /system/bin/param get bootevent.samgr.ready | grep -q true
+}
+if ! retry 300 samgr_ready; then
+  echo "samgr not ready"
+  exit 1
+fi
 
 # hidumper is itself a system ability samgr starts on demand.
 want="SystemAbilityManager AccessTokenManagerService BundleMgr AbilityManagerService RenderService"
@@ -32,10 +41,13 @@ fi
 echo "$list"
 
 # Screen 0 comes from our composer (ohos/vendor/display), over its ashmem
-# command queue to the HDI.
+# command queue to the HDI, in the panel's mode (<width>x<height>@<dpi>, from
+# the launcher).
+panel=$(/system/bin/param get const.innkeeper.display)
+panel=${panel%% *}
 has_screen() {
   screen=$(/system/bin/hidumper -s RenderService -a screen 2>&1)
-  echo "$screen" | grep -q "screen\[0\]: id=0.*render resolution=720x1280"
+  echo "$screen" | grep -q "screen\[0\]: id=0.*render resolution=${panel%@*}"
 }
 if ! retry 50 has_screen; then
   echo "no screen 0"
@@ -53,9 +65,9 @@ if ! retry 200 launcher_ready; then
   exit 1
 fi
 
-# DMS lays the screen out at the composer's dpi (ohos/sandbox.sh).
+# DMS lays the screen out at the panel's dpi.
 dpi=$(/system/bin/param get persist.window.screen.dpi)
 dpi=${dpi%% *}
-[ "$dpi" = "${INNKEEPER_OHOS_DISPLAY#*@}" ] && exit 0
-echo "DMS at $dpi dpi, the composer at ${INNKEEPER_OHOS_DISPLAY#*@}"
+[ "$dpi" = "${panel#*@}" ] && exit 0
+echo "DMS at $dpi dpi, the panel at ${panel#*@}"
 exit 1

@@ -41,7 +41,7 @@ pub fn remove_tree(dir: &Path) -> Result<()> {
 /// A session's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
-    /// Android init's pid in the session's sandbox, while it runs.
+    /// The guest's init's pid in the session's sandbox, while it runs.
     pub pid: Option<i32>,
 }
 

@@ -16,15 +16,23 @@ use innkeeper_profile::control::{addr, recv, send, socket};
 pub use innkeeper_profile::control::{exec, status, stop};
 
 use crate::exec;
+use crate::profile::System;
 use crate::sys;
+
+/// How the session runs `exec`'s commands.
+pub struct Exec {
+    /// The lock a running exec holds shared ([`crate::lifecycle`]).
+    pub lock: std::path::PathBuf,
+    /// The guest, whose exec relay runs them.
+    pub system: System,
+}
 
 /// What the session serves.
 pub struct Served {
     /// The answer to `status`.
     pub status: String,
-    /// The lock a running exec holds shared ([`crate::lifecycle`]); none
-    /// for a waiter, which runs no commands.
-    pub exec_lock: Option<std::path::PathBuf>,
+    /// None for a waiter, which runs no commands.
+    pub exec: Option<Exec>,
     /// Ends the session.
     pub stop: Box<dyn Fn() + Send + Sync>,
 }
@@ -80,12 +88,12 @@ fn handle(c: &OwnedFd, served: &Served) -> Result<()> {
         }
         Some(b"exec") => {
             let argv: Vec<&OsStr> = words.map(OsStr::from_bytes).collect();
-            let Some(lock) = &served.exec_lock else {
+            let Some(exec) = &served.exec else {
                 send(c.as_raw_fd(), b"127", &[])?;
                 return Ok(());
             };
-            let _running = crate::lifecycle::hold_exec_lock(lock);
-            let code = run_exec(c, &argv, fds).unwrap_or(127);
+            let _running = crate::lifecycle::hold_exec_lock(&exec.lock);
+            let code = run_exec(c, exec.system, &argv, fds).unwrap_or(127);
             send(c.as_raw_fd(), code.to_string().as_bytes(), &[])?;
         }
         _ => {}
@@ -95,7 +103,7 @@ fn handle(c: &OwnedFd, served: &Served) -> Result<()> {
 
 /// Starts the exec relay with the client's stdio and waits for it, killing it
 /// if the client goes away.
-fn run_exec(c: &OwnedFd, argv: &[&OsStr], fds: Vec<OwnedFd>) -> Result<i32> {
+fn run_exec(c: &OwnedFd, system: System, argv: &[&OsStr], fds: Vec<OwnedFd>) -> Result<i32> {
     let mut fds = fds.into_iter();
     let (Some(i), Some(o), Some(e)) = (fds.next(), fds.next(), fds.next()) else {
         bail!("exec without stdio");
@@ -103,10 +111,10 @@ fn run_exec(c: &OwnedFd, argv: &[&OsStr], fds: Vec<OwnedFd>) -> Result<i32> {
     if argv.is_empty() {
         bail!("exec without a command");
     }
-    let mut cmd = Command::new(exec::RELAY);
+    let mut cmd = Command::new(exec::relay(system));
     cmd.args(argv)
         .env_clear()
-        .envs(exec::android_env())
+        .envs(exec::env(system))
         .current_dir("/")
         .stdin(Stdio::from(i))
         .stdout(Stdio::from(o))

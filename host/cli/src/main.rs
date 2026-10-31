@@ -1,6 +1,7 @@
-//! `innkeeper`: install Android apps into the Innkeeper session with desktop
-//! entries and icons, run, list and uninstall them. A thin front end over
-//! `innkeeper-core` (shared with `innkeeper-manager`). See host/cli/README.md.
+//! `innkeeper`: manage profiles, each running Android or OpenHarmony; install
+//! Android apps into one with desktop entries and icons, run, list and
+//! uninstall them. A thin front end over `innkeeper-core` (shared with
+//! `innkeeper-manager`). See host/cli/README.md.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
@@ -15,15 +16,18 @@ use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
 use innkeeper_core::profiles;
 use innkeeper_core::{desktop, validate, xdg};
-use innkeeper_profile::profile::ProfileName;
-use innkeeper_profile::profile::Settings;
+use innkeeper_profile::profile::{ProfileName, Settings, System};
 use rustix::fs::{FileType, OFlags};
 
 mod splash;
 use splash::Splash;
 
 #[derive(Parser)]
-#[command(name = "innkeeper", version, about = "Run Android apps on Linux")]
+#[command(
+    name = "innkeeper",
+    version,
+    about = "Run Android and OpenHarmony apps on Linux"
+)]
 struct Cli {
     /// The profile to work with, a name from `profile list`.
     #[arg(long, global = true, value_name = "NAME", default_value = innkeeper_profile::profile::FIRST)]
@@ -63,8 +67,8 @@ enum Cmd {
     /// List installed (user) apps, with whether each may run in the
     /// background.
     List,
-    /// Manage profiles: separate Android setups, each with its own apps,
-    /// data and settings.
+    /// Manage profiles: separate Android or OpenHarmony setups, each with its
+    /// own apps, data and settings.
     #[command(subcommand)]
     Profile(ProfileCmd),
 }
@@ -113,12 +117,18 @@ enum ProfileCmd {
     /// List the profiles and whether they are running.
     List,
     /// Create a profile.
-    Create { name: String },
+    Create {
+        name: String,
+        /// The system it runs, fixed once it is made. OpenHarmony runs its
+        /// built-in apps in one phone window; it can't install apps yet.
+        #[arg(long, default_value = "android", value_parser = ["android", "ohos"])]
+        system: String,
+    },
     /// Rename a stopped profile; its app-menu entries follow.
     Rename { from: String, to: String },
     /// Delete a stopped profile, with its apps and their data.
     Delete { name: String },
-    /// Start the profile and wait for Android.
+    /// Start the profile and wait for it to boot.
     Start {
         /// Every profile instead (Keep Running's login command).
         #[arg(long)]
@@ -126,10 +136,10 @@ enum ProfileCmd {
     },
     /// Stop the profile.
     Stop,
-    /// Delete the profile's apps and Android data, keeping its settings
-    /// (stop it first).
+    /// Delete the profile's apps and data, keeping its settings (stop it
+    /// first).
     Reset,
-    /// Print Android's kernel log for the profile.
+    /// Print the profile's kernel log (init's and early services').
     Log {
         /// Keep printing as it grows.
         #[arg(short, long)]
@@ -142,7 +152,8 @@ enum ProfileCmd {
 #[derive(clap::Args)]
 struct SetArgs {
     /// Apps in windows of their own, or the whole device in one window the
-    /// size of a preset; applies at the next start.
+    /// size of a preset (OpenHarmony: small-phone or medium-phone); applies
+    /// at the next start.
     #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
     display: Option<String>,
     /// adb on loopback TCP, for Android Studio, Gradle and adb.
@@ -172,6 +183,23 @@ struct SetArgs {
 }
 
 impl SetArgs {
+    /// The first given setting that only Android has: OpenHarmony has no
+    /// adb, app-menu mirroring or desktop following, and its session never
+    /// stops idle (only the system app reports activity).
+    fn android_only(&self) -> Option<&'static str> {
+        [
+            (self.adb.is_some(), "--adb"),
+            (self.idle_minutes.is_some(), "--idle-minutes"),
+            (self.mirror_apps.is_some(), "--mirror-apps"),
+            (self.follow_dark.is_some(), "--follow-dark"),
+            (self.follow_accent.is_some(), "--follow-accent"),
+            (self.follow_locale.is_some(), "--follow-locale"),
+            (self.follow_clock.is_some(), "--follow-clock"),
+        ]
+        .into_iter()
+        .find_map(|(given, what)| given.then_some(what))
+    }
+
     /// The profile settings to change, if any, applied to `s`.
     fn apply(&self, s: &mut innkeeper_profile::profile::Settings) -> bool {
         let on = |v: &Option<String>| v.as_deref().map(|v| v == "on");
@@ -485,18 +513,20 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
         ProfileCmd::List => {
             for p in profiles::list()? {
                 let state = if p.running { "running" } else { "stopped" };
+                let system = p.settings.system.name();
                 let display = p.settings.display.name();
                 let adb = if p.settings.adb {
                     format!("adb {}", innkeeper_core::adb::serial(&p.settings))
                 } else {
                     String::new()
                 };
-                println!("{:<16} {state:<8} {display:<14} {adb}", p.name);
+                println!("{:<16} {state:<8} {system:<8} {display:<14} {adb}", p.name);
             }
         }
-        ProfileCmd::Create { name: n } => {
-            profiles::create(&n, &Settings::default())?;
-            println!("created profile {n}");
+        ProfileCmd::Create { name: n, system } => {
+            let system = System::parse(&system).expect("clap checks it");
+            profiles::create(&n, &Settings::new(system))?;
+            println!("created profile {n} ({})", system.title());
         }
         ProfileCmd::Rename { from, to } => {
             profiles::rename(&from, &to)?;
@@ -528,7 +558,7 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
         ProfileCmd::Reset => {
             let p = profiles::existing(name)?;
             profiles::reset(&p)?;
-            println!("reset profile {p}; Android starts over at its next start");
+            println!("reset profile {p}; it starts over at its next start");
         }
         ProfileCmd::Log { follow } => profiles::log(&profiles::existing(name)?, follow)?,
         ProfileCmd::Set(args) => set(&profiles::existing(name)?, &args)?,
@@ -544,6 +574,9 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
         profile_change || args.adb.is_some() || args.keep_running.is_some(),
         "nothing to change (see --help)"
     );
+    if let Some(what) = args.android_only() {
+        profiles::need_android(name, what)?;
+    }
     if profile_change {
         let s = profiles::update(name, |s| {
             args.apply(s);
@@ -588,6 +621,7 @@ fn main() -> ExitCode {
         Cmd::Profile(cmd) => profile(&cli.profile, cmd),
         cmd => {
             let p = profiles::existing(&cli.profile)?;
+            profiles::need_android(&p, "managing apps")?;
             match cmd {
                 Cmd::Open { files } => open(&p, &files, token),
                 Cmd::Install { file } => install(&p, &file),
@@ -724,6 +758,38 @@ mod tests {
             parse("profile start --all"),
             Ok(Cmd::Profile(ProfileCmd::Start { all: true }))
         ));
+    }
+
+    #[test]
+    fn profiles_pick_a_system_and_android_only_settings_are_named() {
+        let Ok(Cmd::Profile(ProfileCmd::Create { name, system })) =
+            parse("profile create --system ohos harmony")
+        else {
+            panic!("profile create did not parse");
+        };
+        assert_eq!((name.as_str(), system.as_str()), ("harmony", "ohos"));
+        assert!(matches!(
+            parse("profile create work"),
+            Ok(Cmd::Profile(ProfileCmd::Create { system, .. })) if system == "android"
+        ));
+        assert!(parse("profile create --system harmonyos x").is_err());
+        assert!(parse("profile set --system ohos").is_err());
+        let android_only = |args: &str| {
+            let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse(args) else {
+                panic!("{args} did not parse");
+            };
+            a.android_only()
+        };
+        assert_eq!(android_only("profile set --display medium-phone"), None);
+        assert_eq!(android_only("profile set --keep-running on"), None);
+        assert_eq!(
+            android_only("profile set --display small-phone --adb on"),
+            Some("--adb")
+        );
+        assert_eq!(
+            android_only("profile set --follow-clock off"),
+            Some("--follow-clock")
+        );
     }
 
     #[test]

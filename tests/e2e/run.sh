@@ -12,6 +12,9 @@ trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-e2e}
+# OpenHarmony runs in a profile of its own: the Android groups reset theirs
+# but keep its settings, which choose the system.
+if [[ $* == ohos && ${INNKEEPER_NESTED:-} != 1 ]]; then INNKEEPER_PROFILE+=-ohos; fi
 export INNKEEPER_E2E=1
 # The nested desktop is the isolation: the session is a production one, and its
 # desktop requests reach desktop.py's fake portals and notifications.
@@ -414,34 +417,51 @@ fi
 
 groups=("$@")
 ((${#groups[@]})) || groups=(boot input audio desktop lifecycle)
-# OpenHarmony is its own session, without a desktop window: it runs alone.
-if [[ ${groups[*]} == ohos ]]; then
-  "$repo/image/ohos/fetch.sh" "$repo/image/ohos/pin.toml" "$repo/out/ohos/images" \
-    "$repo/out/stage/libexec/innkeeper/image/fs-extract.sh" >/dev/null
+if [[ ${groups[*]} != ohos ]]; then
+  for group in "${groups[@]}"; do
+    case $group in boot | input | audio | desktop | lifecycle) ;; *)
+      echo "unknown e2e group: $group (ohos runs alone)" >&2
+      exit 2
+      ;;
+    esac
+  done
+elif [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
+  # Fetching the image is setup, outside the deadline.
+  st=$repo/out/stage
+  "$st/libexec/innkeeper/image/ohos/fetch.sh" "$st/share/innkeeper/image/ohos/pin.toml" \
+    "${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}/ohos" \
+    "$st/libexec/innkeeper/image/fs-extract.sh" >/dev/null
+else
+  # OpenHarmony is a session of its own: a fresh profile, made by the CLI and
+  # started by the same launcher as Android's, with its window on this
+  # desktop.
   mkdir -p "$T"
   : >"$T/timings.log"
-  echo "e2e: deadline=${deadline}s"
+  cli=$repo/tools/dev/innkeeper.sh
+  stop_session
+  "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
+  "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
+  trap stop_session EXIT
   # shellcheck disable=SC2329 # invoked through timed
   ohos_boot() {
-    timeout --kill-after=4 "$deadline" "$repo/ohos/run.py" --timeout "$deadline" \
-      --probe "$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1
+    "$S" start >/dev/null
+    # The exec relay starts with OH's post-fs-data.
+    until s /system/bin/sh -c : 2>/dev/null; do sleep 0.1; done
+    s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1
+    "$S" selftest >>"$T/ohos.txt"
+    # Screen 0 in a window of its own on this desktop.
+    until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
+    until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
   }
   if ! timed ohos ohos_boot; then
     tail -n 60 "$T/ohos.txt" >&2
-    echo "e2e: FAIL (ohos); init's log: $repo/out/dev/flatpak/$INNKEEPER_PROFILE/ohos-kmsg.log"
+    echo "e2e: FAIL (ohos); init's log: $(dirname "$bridge_log")/kmsg.log" >&2
     exit 1
   fi
-  echo 'ok   OpenHarmony registers its core system abilities, shows screen 0 and starts SceneBoard'
+  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
   echo 'e2e: PASS'
   exit
 fi
-for group in "${groups[@]}"; do
-  case $group in boot | input | audio | desktop | lifecycle) ;; *)
-    echo "unknown e2e group: $group (ohos runs alone)" >&2
-    exit 2
-    ;;
-  esac
-done
 if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   start=$(date +%s%N)
   result=0

@@ -1,12 +1,15 @@
 # The session
 
 A session is one rootless Android userspace inside Innkeeper's Flatpak sandbox,
-with the bridge and Android's real `init`. `innkeeper-session`
-([host/launcher](../host/launcher/README.md)) starts it on demand; it stops
-itself when nothing needs it ([Lifecycle](#lifecycle)). `start` prepares the
-pinned image and writes `session.conf` with the paths, image and bridge setup.
-The launcher supplies second-stage init's root, flattened APEXes and bootconfig;
-the supervisor emulates binder, eBPF and credentials.
+with the bridge and Android's real `init`. An OpenHarmony profile's session
+takes the same path with OH's root and init
+([ohos/README.md](../ohos/README.md#how-it-boots)); this page describes
+Android's. `innkeeper-session` ([host/launcher](../host/launcher/README.md))
+starts it on demand; it stops itself when nothing needs it
+([Lifecycle](#lifecycle)). `start` prepares the pinned image and writes
+`session.conf` with the paths, image and bridge setup. The launcher supplies
+second-stage init's root, flattened APEXes and bootconfig; the supervisor
+emulates binder, eBPF and credentials.
 
 The session runs in the app's own sandbox, which allows no mounts, no
 namespaces, no capabilities and no systemd units (its seccomp filter fails them
@@ -145,36 +148,41 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                                  | Contents                                                                                                                                                                                                            |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and `.innkeeper-profile.toml`, the profile's settings), `root-<profile>/` (the composed root), `addons/` |
-| `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                         |
-| `$XDG_CONFIG_HOME/innkeeper/`                        | `preferences.toml`: Keep Running, shared by every profile                                                                                                                                                           |
-| `$XDG_STATE_HOME/innkeeper/`                         | `manager-profile`, the profile the manager showed last                                                                                                                                                              |
-| `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                        |
+| Dir                                                  | Contents                                                                                                                                                                                                                                           |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` and `images/ohos/<name>/img` (shared by every profile), `data-<profile>/` (the guest's `/data` and `.innkeeper-profile.toml`, the profile's settings), `root-<profile>/` (the composed root), `addons/` |
+| `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                                                        |
+| `$XDG_CONFIG_HOME/innkeeper/`                        | `preferences.toml`: Keep Running, shared by every profile                                                                                                                                                                                          |
+| `$XDG_STATE_HOME/innkeeper/`                         | `manager-profile`, the profile the manager showed last                                                                                                                                                                                             |
+| `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                                                       |
 
 A profile's name goes on every per-profile path.
 
 ## Profiles
 
-A profile is a separate Android setup with its own apps, data and settings; a
-session is a running profile, and profiles run side by side. Profiles are listed
-from their `data-<name>` directories, and created, renamed, deleted, started and
-stopped with `innkeeper profile` or the manager's Profiles page
-(`host/core/src/profiles.rs`). None is special. `--profile NAME` is the only way
-to name one: the CLI works with `default` without it, creating it the first
-time; an app entry runs `innkeeper --profile NAME run PKG` and records
+A profile is a separate Android or OpenHarmony setup with its own apps, data and
+settings; a session is a running profile, and profiles run side by side. Its
+system is chosen when it is made (`innkeeper profile create --system ohos NAME`,
+or the manager's New Profile) and never changes: the data is that system's.
+Profiles are listed from their `data-<name>` directories, and created, renamed,
+deleted, started and stopped with `innkeeper profile` or the manager's Profiles
+page (`host/core/src/profiles.rs`). None is special. `--profile NAME` is the
+only way to name one: the CLI works with `default` without it, creating it the
+first time; an app entry runs `innkeeper --profile NAME run PKG` and records
 `X-Innkeeper-Profile`; the manager shows the profile it showed last. Core takes
 the profile from its caller; only the launcher and the programs it starts read
 `INNKEEPER_PROFILE`. Tests use named profiles with fresh data dirs.
 
 A profile's settings are one file, `.innkeeper-profile.toml` in its data dir,
 beside the data version record, so they move and back up with its data
-(`host/launcher/src/profile.rs`): its display, adb and port, idle timeout, app
-mirroring and desktop following. A missing file or setting means its default; an
-unknown setting is an error. `innkeeper profile set` and the manager's Profile
-Settings page change them, and a running profile applies the live ones at once.
-Keep Running is Innkeeper's own preference, shared by every profile
+(`host/launcher/src/profile.rs`): its system, display, adb and port, idle
+timeout, app mirroring and desktop following. A missing file or setting means
+its default; an unknown setting is an error. Only the display applies to
+OpenHarmony (a phone preset; it has no windowed mode), and the CLI and the
+manager refuse the rest there, with app install and app commands.
+`innkeeper profile set` and the manager's Profile Settings page change them, and
+a running profile applies the live ones at once. Keep Running is Innkeeper's own
+preference, shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`): no profile stops when idle, and
 every profile starts at login. Deleting a profile removes its data, settings,
 composed root, logs, runtime files and app-menu entries; renaming moves them,

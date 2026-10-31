@@ -1,4 +1,5 @@
-//! Profiles ([`innkeeper_profile::profile`]) as the CLI and the manager show
+//! Profiles ([`innkeeper_profile::profile`]), each running Android or
+//! OpenHarmony, as the CLI and the manager show
 //! them: listed with their state and settings, created, renamed, deleted,
 //! started and stopped, and the one to use when none is named. Each works on
 //! the named profile, whatever this process's is.
@@ -73,6 +74,14 @@ pub fn settings(name: &str) -> Result<Settings> {
     Settings::load(&paths(name)?.data)
 }
 
+/// Fails unless profile `name` runs Android: `what` is Android's alone.
+pub fn need_android(name: &str, what: &str) -> Result<()> {
+    settings(name)?
+        .system
+        .need_android(what)
+        .with_context(|| format!("profile {name}"))
+}
+
 /// The settings of this process's own profile (`INNKEEPER_PROFILE`), as its
 /// bridge reads them.
 pub fn own() -> Result<Settings> {
@@ -113,7 +122,7 @@ fn reload(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Creates profile `name` with `settings`. Android sets up its data at the
+/// Creates profile `name` with `settings`. The guest sets up its data at the
 /// first start.
 pub fn create(name: &str, settings: &Settings) -> Result<()> {
     let p = paths(name)?;

@@ -18,6 +18,12 @@
 #include "innkeeper/bridge_client.h"
 #include "log.h"
 
+// libbegetutil's (base/startup/init interfaces/innerkits/include/
+// param/parameter.h): the value's length, or a negative error.
+extern "C" int GetParameter(
+  const char* key, const char* def, char* value, uint32_t len
+);
+
 #define LOG_TAG "innkeeper-composer"
 #define EXPORT extern "C" __attribute__((visibility("default")))
 
@@ -34,8 +40,9 @@ constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205, kDisplayWindow = 0x0208;
 constexpr uint16_t kEvRelease = 0x4201;
 
-// The panel, and so the window: INNKEEPER_OHOS_DISPLAY,
-// <width>x<height>@<dpi> (ohos/sandbox.sh, which gives DMS the same dpi).
+// The panel, and so the window: the const.innkeeper.display parameter,
+// <width>x<height>@<dpi>, which the launcher sets from the profile's display
+// and whose dpi it gives DMS too (host/launcher/src/ohos.rs).
 struct Mode {
   uint32_t width = 720, height = 1280, dpi = 320;
 };
@@ -43,8 +50,12 @@ struct Mode {
 Mode mode() {
   Mode m;
   unsigned w, h, d;
-  const char* s = getenv("INNKEEPER_OHOS_DISPLAY");
-  if (s && sscanf(s, "%ux%u@%u", &w, &h, &d) == 3 && w && h && d) m = {w, h, d};
+  char s[64] = "";
+  if (
+    GetParameter("const.innkeeper.display", "", s, sizeof(s)) > 0 &&
+    sscanf(s, "%ux%u@%u", &w, &h, &d) == 3 && w && h && d
+  )
+    m = {w, h, d};
   return m;
 }
 

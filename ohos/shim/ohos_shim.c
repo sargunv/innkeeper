@@ -1,6 +1,6 @@
-// LD_PRELOADed into OpenHarmony's init and what it starts (ohos/sandbox.sh),
-// the musl counterpart of supervisor/shim for what the Flatpak sandbox can't
-// give OH:
+// LD_PRELOADed into OpenHarmony's init and what it starts
+// (host/launcher/src/ohos.rs), the musl counterpart of supervisor/shim for what
+// the Flatpak sandbox can't give OH:
 //
 //  - init runs only as pid 1 ("Process id error"), and in the sandbox it is
 //    the broker's child: getpid() is 1 in init itself, and real in the

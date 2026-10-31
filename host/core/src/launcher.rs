@@ -1,4 +1,4 @@
-//! Driving the Android session through `innkeeper-session` (the prefix's, or
+//! Driving a profile's session through `innkeeper-session` (the prefix's, or
 //! any launcher for test harnesses). Its state (running, the image) comes
 //! from the launcher's library, or, for a launcher outside a prefix (the dev
 //! driver, tools/dev/session.sh), from its `status` and `image`; starting, stopping and commands go through the launcher
@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use innkeeper_profile::Paths;
+use innkeeper_profile::profile::{Settings, System};
 
 use crate::paths::Prefix;
 use crate::proc;
@@ -214,30 +215,56 @@ impl Session {
         }
     }
 
+    /// The guest system it runs, from the profile's settings.
+    pub fn system(&self) -> System {
+        self.paths()
+            .and_then(|p| Settings::load(&p.data).ok())
+            .map_or(System::Android, |s| s.system)
+    }
+
     pub fn booted(&self) -> bool {
-        self.getprop("sys.boot_completed") == "1"
+        self.booted_as(self.system())
+    }
+
+    /// Android's boot_completed, or OpenHarmony's SceneBoard (its home screen)
+    /// having loaded.
+    fn booted_as(&self, system: System) -> bool {
+        match system {
+            System::Android => self.getprop("sys.boot_completed") == "1",
+            System::Ohos => self
+                .exec(15, &["param", "get", "bootevent.launcher.ready"])
+                .is_ok_and(|o| o.ok() && o.text().trim() == "true"),
+        }
     }
 
     /// Whether the image is fetched, extracted and flattened (so starting
     /// doesn't download it first).
     pub fn image_ready(&self) -> bool {
+        // OpenHarmony's image has no APEX tree.
         let dirs = match self.paths() {
-            Some(paths) => paths.image().ok().map(|i| (i.img, i.apexdir)),
+            Some(paths) => {
+                let system = self.system();
+                paths
+                    .image_of(system)
+                    .ok()
+                    .map(|i| (i.img, (system == System::Android).then_some(i.apexdir)))
+            }
             None => self.query("image").and_then(|text| {
                 let dir = |key: &str| {
                     text.lines()
                         .find_map(|l| l.strip_prefix(key))
                         .map(PathBuf::from)
                 };
-                Some((dir("img=")?, dir("apex=")?))
+                Some((dir("img=")?, dir("apex=")))
             }),
         };
         dirs.is_some_and(|(img, apex)| {
-            img.join("system/system").is_dir() && apex.join("apex-info-list.xml").is_file()
+            img.join("system/system").is_dir()
+                && apex.is_none_or(|a| a.join("apex-info-list.xml").is_file())
         })
     }
 
-    /// Fetches and unpacks the image (about 1.2 GB to download). Its
+    /// Fetches and unpacks the image ([`preparing`] says its size). Its
     /// progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
         self.run_prepare()
@@ -253,7 +280,8 @@ impl Session {
             .status()?;
         if !st.success() {
             bail!(
-                "preparing the Android image failed ({} prepare)",
+                "preparing the {} image failed ({} prepare)",
+                self.system().title(),
                 self.launcher.display()
             );
         }
@@ -263,12 +291,13 @@ impl Session {
     /// Starts the session (headless: with no windows, for tests), preparing
     /// the image first if this is the first start. Progress goes to `status`.
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
+        let system = self.system();
         if !self.image_ready() {
-            status(PREPARING);
+            status(preparing(system));
             self.run_prepare()
                 .context(crate::ErrorKind::ImageNotPrepared)?;
         }
-        status("starting the Android session");
+        status(&format!("starting the {} session", system.title()));
         let mut c = self.command();
         c.arg("start").stdin(Stdio::null()).stdout(Stdio::null());
         if headless {
@@ -288,17 +317,21 @@ impl Session {
         Ok(())
     }
 
-    /// Waits for boot and user 0's credential-encrypted apps. Progress goes to `status`.
+    /// Waits for boot and, on Android, user 0's credential-encrypted apps.
+    /// Progress goes to `status`.
     pub fn wait_booted(&self, status: &dyn Fn(&str)) -> Result<()> {
         let t = Instant::now();
         let limit = Duration::from_secs(300);
         let mut said = false;
+        let system = self.system();
+        let android = system == System::Android;
         // Boot completion can precede user unlock. Until then PackageManager
         // filters out direct-boot-unaware launcher activities, even for root.
-        while !self.booted()
-            || !self
-                .exec(15, &["am", "get-started-user-state", "0"])
-                .is_ok_and(|o| o.ok() && o.text().trim() == "RUNNING_UNLOCKED")
+        while !self.booted_as(system)
+            || android
+                && !self
+                    .exec(15, &["am", "get-started-user-state", "0"])
+                    .is_ok_and(|o| o.ok() && o.text().trim() == "RUNNING_UNLOCKED")
         {
             if !self.running() {
                 return Err(anyhow::anyhow!(
@@ -313,12 +346,12 @@ impl Session {
                 );
             }
             if !said && t.elapsed() > Duration::from_secs(3) {
-                status("waiting for Android to boot");
+                status(&format!("waiting for {} to boot", system.title()));
                 said = true;
             }
             sleep(Duration::from_secs(1));
         }
-        if said {
+        if said && android {
             // Freshly booted: wake the display and dismiss the keyguard.
             let _ = self.exec(15, &["input", "keyevent", "WAKEUP"]);
             let _ = self.exec(15, &["wm", "dismiss-keyguard"]);
@@ -337,7 +370,12 @@ impl Session {
 }
 
 /// The status line for a first start's image download.
-pub const PREPARING: &str = "preparing Android (first run: downloading about 1.2 GB)";
+pub fn preparing(system: System) -> &'static str {
+    match system {
+        System::Android => "preparing Android (first run: downloading about 1.2 GB)",
+        System::Ohos => "preparing OpenHarmony (first run: downloading about 1 GB)",
+    }
+}
 
 #[cfg(test)]
 mod tests {

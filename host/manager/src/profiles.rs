@@ -1,6 +1,6 @@
-//! The Profiles page: every profile, each a separate Android setup with its
-//! own apps, data and settings, to create, delete, start and stop. Every core
-//! call runs off the GTK thread.
+//! The Profiles page: every profile, each a separate Android or OpenHarmony
+//! setup with its own apps, data and settings, to create, delete, start and
+//! stop. Every core call runs off the GTK thread.
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::glib;
 use innkeeper_core::profiles::{self, Profile};
-use innkeeper_profile::profile::Settings;
+use innkeeper_profile::profile::{Settings, System};
 
 use crate::{
     errors::Op,
@@ -42,8 +42,8 @@ pub fn page(window: &Window) -> adw::NavigationPage {
     let group = adw::PreferencesGroup::builder()
         .title("Profiles")
         .description(
-            "Each profile is a separate Android with its own apps, data and settings. \
-             Profiles can run side by side.",
+            "Each profile is a separate Android or OpenHarmony with its own apps, data and \
+             settings. Profiles can run side by side.",
         )
         .header_suffix(&add)
         .build();
@@ -140,6 +140,9 @@ impl Page {
         } else {
             "Stopped".into()
         };
+        if p.settings.system != System::Android {
+            subtitle = format!("{} · {subtitle}", p.settings.system.title());
+        }
         if current {
             subtitle += " · Apps shown here";
         }
@@ -312,19 +315,36 @@ impl Page {
     }
 
     fn create(self: &Rc<Self>) {
-        let d = adw::AlertDialog::new(
-            Some("New Profile"),
-            Some("A separate Android with its own apps, data and settings."),
-        );
+        let body = |system: Option<&System>| match system {
+            Some(System::Ohos) => {
+                "OpenHarmony runs its built-in apps in one phone window. It can’t install apps \
+                 yet. A profile’s system can’t be changed later."
+            }
+            _ => {
+                "A separate system with its own apps, data and settings. A profile’s system \
+                 can’t be changed later."
+            }
+        };
+        let d = adw::AlertDialog::new(Some("New Profile"), Some(body(None)));
         let entry = adw::EntryRow::builder()
             .title("Name")
             .activates_default(true)
             .build();
+        let titles: Vec<_> = System::ALL.iter().map(|s| s.title()).collect();
+        let system = adw::ComboRow::builder()
+            .title("System")
+            .model(&gtk::StringList::new(&titles))
+            .build();
+        let d2 = d.clone();
+        system.connect_selected_notify(move |r| {
+            d2.set_body(body(System::ALL.get(r.selected() as usize)));
+        });
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
             .build();
         list.append(&entry);
+        list.append(&system);
         d.set_extra_child(Some(&list));
         d.add_responses(&[("cancel", "_Cancel"), ("create", "C_reate")]);
         d.set_response_appearance("create", adw::ResponseAppearance::Suggested);
@@ -351,9 +371,10 @@ impl Page {
             }
             let name = entry.text().to_string();
             let n = name.clone();
+            let sys = System::ALL[system.selected() as usize];
             s.work(
                 &name,
-                move || profiles::create(&n, &Settings::default()),
+                move || profiles::create(&n, &Settings::new(sys)),
                 Some(format!("Profile {name} created")),
             );
         });
