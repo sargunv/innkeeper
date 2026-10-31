@@ -21,7 +21,7 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
-// --- messages --------------------------------------------------------------
+// ---- messages ----
 
 static void put(struct lxb_msg* m, const void* p, size_t n) {
   if (m->n + n > sizeof(m->b)) {
@@ -71,7 +71,7 @@ void lxb_msg_init(struct lxb_msg* m, uint16_t type, uint32_t tag) {
   lxb_put_u32(m, tag);
 }
 
-// --- packets ---------------------------------------------------------------
+// ---- packets ----
 
 void lxb_close_fds(struct lxb_packet* p) {
   for (int i = 0; i < p->nfds; i++) close(p->fds[i]);
@@ -164,7 +164,7 @@ int lxb_call(int sock, const struct lxb_msg* req, struct lxb_packet* reply) {
   }
 }
 
-// --- connecting ------------------------------------------------------------
+// ---- connecting ----
 
 int lxb_connect(uint32_t service, const char* name) {
   const int s = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);

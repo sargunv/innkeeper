@@ -131,7 +131,7 @@ void HeadlessPresenter::present(const FrameInput& frame) {
       snprintf(
         prefix, sizeof prefix, "display%lld", (long long)frame.displayId
       );
-      mWorker->submit(mPrefix.empty() ? prefix : mPrefix, v);
+      mWorker->submit(prefix, v);
     }
   }
 }

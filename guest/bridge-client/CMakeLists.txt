@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# libinnkeeper_bridge_client.a: the client side of the bridge protocol, linked
-# into the composer and libtinyalsav2. It installs nothing. Natively (preset
-# "host-tests") it also builds its framing test.
+# libinnkeeper_bridge_client.a: the client side of the bridge protocol
+# (README.md).
+# It installs nothing. Natively (preset "host-tests") it also builds its tests.
 add_library(innkeeper_bridge_client STATIC bridge_client.c audio.c)
 set_target_properties(
   innkeeper_bridge_client

@@ -139,8 +139,7 @@ class Bridge {
 
 static Bridge* gBridge = nullptr;
 
-// ---- connection
-// ------------------------------------------------------------------
+// ---- connection ----
 
 bool Bridge::send(const lxb_msg& m, int fd) {
   const int s = mSock.load();
@@ -279,8 +278,7 @@ void Bridge::loop() {
   }
 }
 
-// ---- display
-// ---------------------------------------------------------------------
+// ---- display ----
 
 void BridgeDisplay::onRelease(uint32_t buffer, bool invalid) {
   for (auto it = mBuffers.begin(); it != mBuffers.end(); ++it) {
@@ -494,8 +492,7 @@ void BridgeDisplay::present(const FrameInput& frame) {
   }
 }
 
-// ---- presenters
-// ------------------------------------------------------------------
+// ---- presenters ----
 
 namespace {
 class BridgeVirtualPresenter : public Presenter {

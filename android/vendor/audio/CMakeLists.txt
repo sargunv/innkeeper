@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# libtinyalsav2.so: the tinyalsa API backed by the host bridge, replacing the
-# image's copy in the AIDL audio HAL's APEX (README.md).
+# The audio_bridge AIDL module and libtinyalsav2.so, both installed into the
+# AIDL audio HAL's APEX overlay (README.md).
 set(CMAKE_C_STANDARD 17)
 set(AUDIO_AIDL ${CMAKE_CURRENT_BINARY_DIR}/aidl)
 file(GLOB_RECURSE AUDIO_AIDL_INPUTS CONFIGURE_DEPENDS
@@ -77,37 +77,34 @@ install(
   DESTINATION share/innkeeper/props.d
   COMPONENT audio)
 
-if(ANDROID)
-  file(GLOB_RECURSE AUDIO_AIDL_SRCS ${AUDIO_AIDL}/src/*.cpp)
-  add_library(audio_aidl STATIC ${AUDIO_AIDL_SRCS})
-  target_include_directories(
-    audio_aidl
-    PUBLIC
-      ${AUDIO_AIDL}/include
-      ${CMAKE_CURRENT_SOURCE_DIR}/../graphics/third_party/aosp/include)
-  target_compile_options(audio_aidl PRIVATE -w)
-  target_link_libraries(audio_aidl PUBLIC binder_ndk_stub log)
-  add_executable(audio_bridge stream/Module.cpp stream/StreamBridge.cpp
-                 stream/StreamInBridge.cpp)
-  target_compile_features(audio_bridge PRIVATE cxx_std_20)
-  target_include_directories(audio_bridge PRIVATE third_party/aosp/include)
-  target_link_libraries(audio_bridge PRIVATE audio_aidl tinyalsav2)
-  add_executable(
-    audio_input_test tests/input_test.cpp stream/StreamInBridge.cpp)
-  target_compile_features(audio_input_test PRIVATE cxx_std_20)
-  target_include_directories(
-    audio_input_test
-    PRIVATE stream third_party/aosp/include)
-  target_link_libraries(audio_input_test PRIVATE audio_aidl)
-  set_target_properties(
-    audio_input_test
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-bin)
-  install(
-    TARGETS audio_bridge
-    RUNTIME DESTINATION ${HAL_APEX}/bin/hw COMPONENT audio)
-  install(FILES etc/audio-bridge.rc DESTINATION ${HAL_APEX}/etc COMPONENT audio)
-  install(
-    FILES etc/audio-bridge.xml
-    DESTINATION ${INNKEEPER_ANDROID}/vendor/etc/vintf/manifest
-    COMPONENT audio)
-endif()
+file(GLOB_RECURSE AUDIO_AIDL_SRCS ${AUDIO_AIDL}/src/*.cpp)
+add_library(audio_aidl STATIC ${AUDIO_AIDL_SRCS})
+target_include_directories(
+  audio_aidl
+  PUBLIC
+    ${AUDIO_AIDL}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../graphics/third_party/aosp/include)
+target_compile_options(audio_aidl PRIVATE -w)
+target_link_libraries(audio_aidl PUBLIC binder_ndk_stub log)
+add_executable(audio_bridge stream/Module.cpp stream/StreamBridge.cpp
+               stream/StreamInBridge.cpp)
+target_compile_features(audio_bridge PRIVATE cxx_std_20)
+target_include_directories(audio_bridge PRIVATE third_party/aosp/include)
+target_link_libraries(audio_bridge PRIVATE audio_aidl tinyalsav2)
+add_executable(audio_input_test tests/input_test.cpp stream/StreamInBridge.cpp)
+target_compile_features(audio_input_test PRIVATE cxx_std_20)
+target_include_directories(
+  audio_input_test
+  PRIVATE stream third_party/aosp/include)
+target_link_libraries(audio_input_test PRIVATE audio_aidl)
+set_target_properties(
+  audio_input_test
+  PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-bin)
+install(
+  TARGETS audio_bridge
+  RUNTIME DESTINATION ${HAL_APEX}/bin/hw COMPONENT audio)
+install(FILES etc/audio-bridge.rc DESTINATION ${HAL_APEX}/etc COMPONENT audio)
+install(
+  FILES etc/audio-bridge.xml
+  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc/vintf/manifest
+  COMPONENT audio)
