@@ -8,19 +8,20 @@ starts its services, samgr comes up and OH's core system abilities register with
 it. render_service composes OH's screen through our display HDI, and with the
 bridge it shows in a desktop window. SceneBoard, OH's window manager and home
 screen, starts and draws the lock screen; built-in apps such as Settings run in
-it. There is no desktop input or app install yet. Nothing here is part of the
-Android session, `mise run build` or the stage; `ohos/build.sh`
-(`mise run ohos:build`) builds the layer into `out/build/ohos/layer`.
+it. There is no desktop input or app install yet. `ohos/build.sh`
+(`mise run build:ohos`) builds our layer, which `mise run build` stages in
+`share/innkeeper/ohos` beside Android's tree; both guests run the same static
+broker, `libexec/innkeeper/innkeeper-brk`. Nothing starts OH but `run.py`.
 
-`mise run build` first (the stage's debugfs), then `mise run ohos:test`: it
-fetches the image if needed and boots it as profile `ohos` (scratch in
-`out/dev/flatpak/ohos/`, data wiped at each run). Init's log is `ohos-kmsg.log`
-there; once hilogd runs, services log to hilog instead. To look around, write a
-script for OH's `/system/bin/sh` and pass it with
-`ohos/run.py --probe <script>`: it runs as root, with a native token holding
-`ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and its output
-comes back (`hidumper -ls`, `hilog -x`, `ps -A`). hilog's buffer is 256 KiB and
-boot fills it within a minute: read early boot from `ohos-kmsg.log`.
+`mise run build` first, then `mise run test:e2e -- ohos`: it fetches the image
+if needed and boots it as profile `e2e` until SceneBoard is ready (scratch in
+`out/dev/flatpak/e2e/`, data wiped at each run). `ohos/run.py` alone uses
+profile `ohos`. Init's log is `ohos-kmsg.log` there; once hilogd runs, services
+log to hilog instead. To look around, write a script for OH's `/system/bin/sh`
+and pass it with `ohos/run.py --probe <script>`: it runs as root, with a native
+token holding `ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and
+its output comes back (`hidumper -ls`, `hilog -x`, `ps -A`). hilog's buffer is
+256 KiB and boot fills it within a minute: read early boot from `ohos-kmsg.log`.
 
 ## Image
 
@@ -39,7 +40,8 @@ runs on the host kernel in our sandbox, never in QEMU. The cache is
 To bump the pin, take a newer `oniro_emulator.zip` from
 [device_board_oniro releases](https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases)
 (`gh release view <tag> --json assets` gives the size and digest), update
-`name`, `version`, `url`, `size` and `sha256`, then run `mise run ohos:test`.
+`name`, `version`, `url`, `size` and `sha256`, then run
+`mise run test:e2e -- ohos`.
 
 ## Display
 
@@ -87,7 +89,7 @@ and `allocator_host` load them; no image file changes.
   `DISPLAY_WINDOW` gives the display a desktop window of its own. Commit waits
   (up to two frames) for the compositor to release every other target, so
   render_service never draws into one being shown. A 60 Hz timer is the vsync.
-  Without a bridge (`mise run ohos:test`) the display is headless.
+  Without a bridge (`mise run test:e2e -- ohos`) the display is headless.
 - **Buffers** (`passthrough/libdisplay_buffer_vdi_impl.z.so`). Sealed memfds
   made into dma-bufs by `/dev/udmabuf`, as Android's CPU buffers are: LINEAR,
   256-byte row pitch, mappable, importable by llvmpipe and the compositor. RGB
@@ -136,8 +138,8 @@ root of symlinks in the sandbox's own `/`, then the broker, then init.
 - **Inodes.** BMS checks free inodes before each install, and btrfs (no fixed
   inode table) reports none, which would refuse SceneBoard and the larger apps.
   The shim's `statfs` reports a free inode per free block there.
-- **Broker.** The same broker, built static for musl (OH's root has no Bionic),
-  with `INNKEEPER_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
-  `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's
-  binder ioctls and serves `/dev/access_token_id`
+- **Broker.** The same static musl broker as Android's (OH's root has no
+  Bionic), with `INNKEEPER_GUEST=ohos`: it also traps `open(2)` (musl doesn't
+  use `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds
+  OH's binder ioctls and serves `/dev/access_token_id`
   ([supervisor/README.md](../supervisor/README.md#openharmony)).

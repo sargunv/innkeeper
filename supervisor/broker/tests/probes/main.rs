@@ -89,11 +89,16 @@ fn run(c: &mut Command, secs: u64) -> Option<ExitStatus> {
 
 /// The broker as the launcher runs it: init (a shell here) is its child,
 /// under the filter and with the shim preloaded, and init's status is the
-/// broker's, even with Yama off.
+/// broker's, even with Yama off. Without a guest it starts nothing.
 fn bootstrap() -> bool {
-    let broker = |script: &str| {
+    let broker = |guest: Option<&str>, script: &str| {
         let mut c = Command::new(env!("CARGO_BIN_EXE_innkeeper-brk"));
-        c.args(["--preload", "libc.so.6", "/bin/sh", "-c", script]);
+        c.args(["--preload", "libc.so.6", "/bin/sh", "-c", script])
+            .env_remove("INNKEEPER_GUEST");
+        match guest {
+            Some(g) => c.env("INNKEEPER_GUEST", g),
+            None => c.stderr(std::process::Stdio::null()),
+        };
         unsafe {
             c.pre_exec(|| {
                 libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
@@ -103,11 +108,13 @@ fn bootstrap() -> bool {
         run(&mut c, 5).and_then(|s| s.code())
     };
     let parent = broker(
+        Some("android"),
         r#"test "$(cat /proc/$PPID/comm)" = innkeeper-brk || exit 99
            test "$LD_PRELOAD" = libc.so.6 && test "$INNKEEPER_SHIM_ROLE" = init || exit 98
            exit 42"#,
     );
-    let signal = broker("kill -TERM $$");
+    let signal = broker(Some("android"), "kill -TERM $$");
+    let unset = broker(None, "exit 0");
     report(
         parent == Some(42),
         &format!(
@@ -116,6 +123,9 @@ fn bootstrap() -> bool {
     ) & report(
         signal == Some(143),
         &format!("init killed by a signal: 128 + the signal ({signal:?})"),
+    ) & report(
+        unset.is_some_and(|s| s != 0),
+        &format!("no INNKEEPER_GUEST: the broker refuses to start init ({unset:?})"),
     )
 }
 

@@ -94,7 +94,7 @@ specifiers = ["1.99.1"]
 [tools.rust.options]
 components = "clippy,rustfmt"
 profile = "minimal"
-targets = "x86_64-linux-android,x86_64-unknown-linux-musl"
+targets = "x86_64-unknown-linux-musl"
 
 [[tools.sccache]]
 version = "0.19.0"

@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# ohos:build: the OpenHarmony guest's layer in out/build/ohos/layer, kept
-# out of out/stage and the Android build:
-#   bin/innkeeper-brk  the broker, static musl (OH's root has no Bionic)
-#   sys_prod/          our files on OH's product partition (ohos/sandbox.sh)
-#   vendor/            our VDIs, in place of the image's (ohos/vendor)
+# build:ohos: the OpenHarmony guest's layer, into
+# out/build/ohos/install/share/innkeeper/ohos:
+#   sys_prod/  our files on OH's product partition (ohos/sandbox.sh)
+#   vendor/    our VDIs, in place of the image's (ohos/vendor)
+# The broker is the shared one (build:broker).
 set -euo pipefail
 top=$(cd "$(dirname "$0")/.." && pwd)
 cd "$top"
-out=out/build/ohos/layer
+out=out/build/ohos/install/share/innkeeper/ohos
 rm -rf "$out"
-mkdir -p "$out/bin" "$out/sys_prod/lib64" "$out/vendor/lib64/passthrough"
-cargo build -q --release --target x86_64-unknown-linux-musl -p innkeeper-broker --bin innkeeper-brk
+mkdir -p "$out/sys_prod/lib64" "$out/vendor/lib64/passthrough"
 llvm=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
-install -m 755 -s --strip-program="$llvm/llvm-strip" \
-  out/cargo/x86_64-unknown-linux-musl/release/innkeeper-brk "$out/bin/"
 # Freestanding: no libc headers or link, so the NDK's clang builds it.
 "$llvm/clang" --target=x86_64-linux-musl -O2 -fPIC -shared -nostdlib -ffreestanding \
   -fno-stack-protector -Wall -Wextra -Werror \
@@ -21,21 +18,17 @@ install -m 755 -s --strip-program="$llvm/llvm-strip" \
 cp -r ohos/sys_prod/. "$out/sys_prod/"
 
 # The VDIs link against the image's musl libc, libc++ (std::__h) and hilog,
-# which OH's SDK would provide. Without it: musl's own headers (pinned
-# release, headers only) and empty stand-ins that give each library's soname
-# to the linker; the image's libraries resolve the symbols at load time.
-musl_version=1.2.5
-musl_sha256=a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4
-musl=out/ohos/musl-$musl_version
-if [[ ! -f $musl/include/stdio.h ]]; then
-  rm -rf "$musl" "$musl.src"
-  mkdir -p "$musl.src"
-  curl -fsSL "https://musl.libc.org/releases/musl-$musl_version.tar.gz" -o "$musl.tar.gz"
-  echo "$musl_sha256  $musl.tar.gz" | sha256sum -c --quiet
-  tar -xzf "$musl.tar.gz" -C "$musl.src" --strip-components=1
-  make -s -C "$musl.src" ARCH=x86_64 prefix= includedir=/include \
-    DESTDIR="$top/$musl" install-headers
-  rm -rf "$musl.src" "$musl.tar.gz"
+# which OH's SDK would provide. Without it: musl's headers from the build
+# container (copied out once per Containerfile) and empty stand-ins that give
+# each library's soname to the linker; the image's libraries resolve the
+# symbols at load time.
+musl=out/build/ohos/musl
+want=$(sha256sum tools/container/Containerfile | cut -d' ' -f1)
+if [[ $(cat "$musl/.stamp" 2>/dev/null) != "$want" ]]; then
+  rm -rf "$musl"
+  mkdir -p "$musl"
+  tools/container/run.sh cp -r /usr/x86_64-linux-musl/include "$musl/"
+  echo "$want" >"$musl/.stamp"
 fi
 stubs=out/build/ohos/stubs
 mkdir -p "$stubs"

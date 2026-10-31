@@ -2,17 +2,19 @@
 # Inside the Flatpak sandbox: make its `/` OpenHarmony's root, then run OH's
 # init under the broker. Started by ohos/run.py; never run it on the host.
 #
-# usage: sandbox.sh <image-dir> <layer-dir> <data-dir>
+# usage: sandbox.sh <image-dir> <data-dir>
 #
-# <image-dir> is image/ohos/fetch.sh's img/, <layer-dir> ohos:build's output.
+# <image-dir> is image/ohos/fetch.sh's img/. Our layer (build:ohos) and the
+# broker come from the stage, at /app.
 # With INNKEEPER_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
 # display shows in a desktop window.
 # The sandbox's / is a writable tmpfs, so OH's root is built from symlinks
 # beside the runtime's /usr, as the Android session does
 # (host/launcher/src/sandbox.rs). The image is never changed.
 set -euo pipefail
-usage="usage: sandbox.sh <image-dir> <layer-dir> <data-dir>"
-img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage}
+usage="usage: sandbox.sh <image-dir> <data-dir>"
+img=${1:?$usage} data=${2:?$usage}
+layer=/app/share/innkeeper/ohos
 [[ -f /.flatpak-info ]] || {
   echo 'sandbox.sh: not in a Flatpak sandbox' >&2
   exit 1
@@ -127,5 +129,5 @@ $layer/vendor=/vendor
 $layer/sys_prod=/sys_prod
 $data=/data" \
   ${INNKEEPER_BROKER_DEBUG:+INNKEEPER_BROKER_DEBUG="$INNKEEPER_BROKER_DEBUG"} \
-  "$layer/bin/innkeeper-brk" --preload /sys_prod/lib64/libinnkeeper_ohos_shim.so \
+  /app/libexec/innkeeper/innkeeper-brk --preload /sys_prod/lib64/libinnkeeper_ohos_shim.so \
   /system/bin/init --second-stage 0

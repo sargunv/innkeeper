@@ -34,7 +34,6 @@ os.environ.setdefault("INNKEEPER_PROFILE", "ohos")
 import run as dev  # noqa: E402
 
 IMAGES = TOP / "out/ohos/images"
-LAYER = TOP / "out/build/ohos/layer"
 
 
 def pin_name():
@@ -48,7 +47,7 @@ def argv(instance_fd, img, data, log, bridge):
   a = ["flatpak", "run", "--user", "--no-documents-portal"]
   a.append(f"--app-path={dev.STAGE}")
   a += re.findall(r"^  - (--\S+)$", finish, re.MULTILINE)
-  for p in (dev.STAGE, TOP / "ohos", LAYER, img):
+  for p in (dev.STAGE, TOP / "ohos", img):
     a.append(f"--filesystem={p}:ro")
   a.append(f"--filesystem={dev.SCRATCH}")
   a += [
@@ -65,7 +64,6 @@ def argv(instance_fd, img, data, log, bridge):
     "bash",
     str(TOP / "ohos/sandbox.sh"),
     str(img),
-    str(LAYER),
     str(data),
   ]
   return a
@@ -80,8 +78,8 @@ def main():
   img = IMAGES / pin_name() / "img"
   if not (img / "system/system/bin/init").exists():
     sys.exit(f"no image at {img}; run image/ohos/fetch.sh first")
-  if not (LAYER / "bin/innkeeper-brk").exists():
-    sys.exit(f"no {LAYER}; run mise run ohos:build first")
+  if not (dev.STAGE / "share/innkeeper/ohos").is_dir():
+    sys.exit(f"no OpenHarmony layer in {dev.STAGE}; run mise run build first")
   data = dev.SCRATCH / "ohos-data"
   subprocess.run(["rm", "-rf", str(data)], check=True)
   probe = data / "innkeeper"

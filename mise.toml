@@ -10,7 +10,7 @@ lockfile = true
 "aqua:koalaman/shellcheck" = "0.11.0"
 "aqua:mvdan/sh" = "3.14.1"
 "aqua:ninja-build/ninja" = "1.13.2"
-"core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-linux-android,x86_64-unknown-linux-musl" }
+"core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-unknown-linux-musl" }
 "github:jdx/hk" = "2.8.1"
 "core:java" = "zulu-25.36.205.0"
 sccache = "0.19.0"
@@ -19,7 +19,6 @@ sccache = "0.19.0"
 _.file = "tools/build/toolchain.env"
 ANDROID_HOME = "{{ env.ANDROID_HOME | default(value=env.HOME ~ '/Android/Sdk') }}"
 ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.ANDROID_NDK_VERSION }}"
-CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "{{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android{{ env.ANDROID_API }}-clang"
 # One compiler cache for every checkout on the machine (tools/build/sccache.sh),
 # with its own server port so another project's sccache server, started with
 # other settings and another cache, never answers ours.
@@ -32,7 +31,9 @@ RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
 
 # ---- build -------------------------------------------------------------------
 # Each build:<module> fills out/build/<module>/install/, a tree of paths
-# relative to the stage prefix; `build` merges them into out/stage.
+# relative to the stage prefix; `build` merges them into out/stage. Shared:
+# host, broker, image-tools. Android: ndk, vulkan, system-app, data.
+# OpenHarmony: ohos.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"
@@ -43,8 +44,19 @@ run = "tools/build/stage.sh"
 description = "innkeeper, innkeeper-manager, innkeeper-bridge, innkeeper-session, the manager's desktop data"
 run = "tools/build/host.sh"
 
+[tasks."build:broker"]
+description = "innkeeper-brk, static musl: the supervisor of both guests"
+run = """
+set -euo pipefail
+cargo build -q --release --target x86_64-unknown-linux-musl -p innkeeper-broker --bin innkeeper-brk
+i=out/build/broker/install
+rm -rf "$i"
+install -D -m 755 -s --strip-program="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
+  out/cargo/x86_64-unknown-linux-musl/release/innkeeper-brk "$i/libexec/innkeeper/innkeeper-brk"
+"""
+
 [tasks."build:ndk"]
-description = "Android's C/C++ (the NDK superbuild: shim, HALs, exec relay), the firewall front ends and the broker"
+description = "Android's C/C++ (the NDK superbuild: shim, HALs, exec relay) and the firewall front ends"
 run = """
 set -euo pipefail
 tools/build/sccache.sh cmake --preset android >/dev/null
@@ -52,10 +64,6 @@ tools/build/sccache.sh cmake --build --preset android
 i=out/build/ndk/install
 rm -rf "$i"
 cmake --install out/build/android --strip --prefix "$i" >/dev/null
-cargo build -q --release --target x86_64-linux-android -p innkeeper-broker --bin innkeeper-brk
-install -D -m 755 -s --strip-program="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-  out/cargo/x86_64-linux-android/release/innkeeper-brk \
-  "$i/share/innkeeper/android/system/bin/innkeeper-brk"
 """
 
 [tasks."build:vulkan"]
@@ -83,8 +91,8 @@ install -D -m 644 -t $i/share/innkeeper/image image/pin.toml image/bootconfig im
 install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 """
 
-[tasks."ohos:build"]
-description = "The OpenHarmony session's broker (static musl) and init shim, in out/build/ohos; not in build or the stage"
+[tasks."build:ohos"]
+description = "OpenHarmony's layer: its shim, display VDIs and init cfgs"
 run = "ohos/build.sh"
 
 [tasks.package]
@@ -124,23 +132,13 @@ android/vendor/vulkan/tests/run.sh
 """
 
 [tasks."test:e2e"]
-description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle]); whole run <60 s"
+description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle] | ohos); whole run <60 s"
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
 description = "Manual app troubleshooting (-- --only PKG), never a gate"
 env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
-
-[tasks."ohos:test"]
-description = "Boot the pinned OpenHarmony image in a test sandbox until its core system abilities register; needs mise run build"
-depends = ["ohos:build"]
-env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='ohos') }}" }
-run = """
-set -euo pipefail
-image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/innkeeper/image/fs-extract.sh
-ohos/run.py --timeout 90 --probe ohos/tests/boot.sh
-"""
 
 [tasks.bench]
 description = "Manual input and frame latency measurements (-- input|frame); never a test gate"

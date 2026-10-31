@@ -2,9 +2,9 @@
 
 ## Prerequisites
 
-mise provides Rust (with the `x86_64-linux-android` target), Java, CMake, Ninja,
-dprint, shellcheck, shfmt, hk and jactionlint (`mise install`). The rest comes
-from the host; none of it needs root.
+mise provides Rust (with the `x86_64-unknown-linux-musl` target), Java, CMake,
+Ninja, dprint, shellcheck, shfmt, hk and jactionlint (`mise install`). The rest
+comes from the host; none of it needs root.
 
 | For               | What                                                                                                                                                                                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -22,11 +22,13 @@ if two modules write the same path. Nothing at runtime builds anything.
 ```mermaid
 flowchart LR
   host["build:host<br/>cargo (glibc)"] --> stage
-  ndk["build:ndk<br/>CMake superbuild<br/>+ cargo (bionic broker)"] --> stage
+  brk["build:broker<br/>cargo (static musl)"] --> stage
+  ndk["build:ndk<br/>CMake superbuild"] --> stage
   vk["build:vulkan<br/>Mesa (container)"] --> stage
   it["build:image-tools<br/>(container)"] --> stage
   app["build:system-app<br/>Gradle"] --> stage
   data["build:data<br/>overlay, image config"] --> stage
+  oh["build:ohos<br/>OpenHarmony layer"] --> stage
   stage["stage → out/stage"]
 ```
 
