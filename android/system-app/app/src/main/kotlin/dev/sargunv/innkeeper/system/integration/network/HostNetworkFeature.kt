@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-package dev.sargunv.innkeeper.system.net
+package dev.sargunv.innkeeper.system.integration.network
 
 import android.content.Context
 import android.net.LinkProperties
@@ -23,7 +23,8 @@ import java.net.InetAddress
  * The resolvers come from the sandbox's `/etc/resolv.conf`, which Flatpak keeps current (a link
  * into `/run/host/monitor`), and are sent again whenever it changes, such as when the host joins a
  * VPN or another Wi-Fi network. The host connection's metering ([setMetered], from the host state
- * service) is the agent's `NOT_METERED`.
+ * service's NetworkMonitor portal reading) is the agent's `NOT_METERED`, so apps that honour
+ * "unmetered only" (F-Droid, AntennaPod) see the host's state.
  */
 class HostNetworkFeature(private val context: Context) : Feature {
   override val name = "host network"
@@ -34,14 +35,9 @@ class HostNetworkFeature(private val context: Context) : Feature {
   private var watch: FileObserver? = null
   private var dns: List<InetAddress> = emptyList()
 
-  /** Whether the host network agent is up (Flatpak mode). */
-  val running
-    get() = agent != null
-
   override fun start() {
     val t = HandlerThread("HostNetwork").also { it.start() }
     thread = t
-    instance = this
     dns = resolvers()
     val a =
       object :
@@ -72,16 +68,6 @@ class HostNetworkFeature(private val context: Context) : Feature {
       a.sendNetworkCapabilities(capabilities())
       Log.i(TAG, "host network ${if (m) "metered" else "not metered"}")
     }
-  }
-
-  override fun stop() {
-    instance = null
-    watch?.stopWatching()
-    watch = null
-    agent?.unregister()
-    agent = null
-    thread?.quitSafely()
-    thread = null
   }
 
   /**
@@ -164,9 +150,6 @@ class HostNetworkFeature(private val context: Context) : Feature {
   }
 
   companion object {
-    /** The started feature, for the host state's metering. */
-    @Volatile var instance: HostNetworkFeature? = null
-
     private const val TAG = "InnkeeperHostNetwork"
     private const val RESOLV_CONF = "/etc/resolv.conf"
     private const val LINK_KBPS = 1_000_000

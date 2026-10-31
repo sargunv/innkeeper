@@ -9,7 +9,7 @@ import dev.sargunv.innkeeper.system.Feature
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 import dev.sargunv.innkeeper.system.bridge.Wire
 import dev.sargunv.innkeeper.system.integration.location.HostLocation
-import dev.sargunv.innkeeper.system.integration.network.HostMetered
+import dev.sargunv.innkeeper.system.integration.network.HostNetworkFeature
 import dev.sargunv.innkeeper.system.integration.power.PowerSaver
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
@@ -19,7 +19,8 @@ import java.nio.ByteBuffer
  * power saver, the network's metering and location. (The battery goes to the Health HAL,
  * android/vendor/health, over a connection of its own.) Events are handled on the feature's thread.
  */
-class HostStateFeature(private val context: Context) : Feature, BridgeConnection.Listener {
+class HostStateFeature(private val context: Context, private val network: HostNetworkFeature) :
+  Feature, BridgeConnection.Listener {
   override val name = "host state"
 
   private val thread = HandlerThread("innkeeper-hoststate")
@@ -29,7 +30,6 @@ class HostStateFeature(private val context: Context) : Feature, BridgeConnection
   val connection =
     BridgeConnection(BridgeConnection.SERVICE_HOSTSTATE, "Innkeeper System host state", this)
   private val saver = PowerSaver(context)
-  private val metered = HostMetered()
   val location = HostLocation(context, this)
 
   override fun start() {
@@ -40,18 +40,10 @@ class HostStateFeature(private val context: Context) : Feature, BridgeConnection
     connection.start()
   }
 
-  override fun stop() {
-    connection.stop()
-    handler.post { location.stop() }
-    instance = null
-    thread.quitSafely()
-  }
-
   // The current state follows START as events, so the resets go first.
   override fun onConnected() {
     handler.post {
       saver.reset()
-      metered.reset()
     }
     connection.send(Wire.HS_START, onReply = ::onStarted) { u32(FEATURES) }
   }
@@ -75,7 +67,9 @@ class HostStateFeature(private val context: Context) : Feature, BridgeConnection
       Wire.EV_NETWORK -> {
         body.get() // available
         val m = body.get().toInt() and 0xff
-        handler.post { metered.apply(m) }
+        // 0 unknown, 1 not metered, 2 metered. Unknown reads as unmetered, as Android's own
+        // default for wired networks.
+        network.setMetered(m == 2)
       }
       Wire.EV_LOCATION -> {
         val fix = HostLocation.Fix.decode(body) ?: return
