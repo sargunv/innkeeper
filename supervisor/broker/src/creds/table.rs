@@ -1,10 +1,10 @@
 //! Virtual ids for Android processes (supervisor/README.md).
 //!
-//! In single-uid mode the session's user namespace maps only uid/gid 0 (the
-//! host user), so the kernel can't give Android's processes their own uids.
-//! The seccomp supervisor traps the credential syscalls instead, and this
-//! module is their pure model: per-process credentials, the kernel's
-//! `set*id` rules (`kernel/sys.c`), and an interning table.
+//! The session's user namespace maps only the user's uid and gid, so the
+//! kernel can't give Android's processes their own uids. The broker traps the
+//! credential syscalls instead, and this module is their pure model:
+//! per-process credentials, the kernel's `set*id` rules (`kernel/sys.c`), and
+//! an interning table.
 //!
 //! Where the credentials live: in the process itself, as the soft
 //! `RLIMIT_RTTIME` limit, which holds an id into the [`CredTable`]. Rlimits

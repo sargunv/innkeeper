@@ -1,20 +1,19 @@
 // pivot-exec NEWROOT PROG [ARGS...]
 //
-// The session runs inside Flatpak (see below). The namespace path
-// is retained only for the bootless bionic test harness, which assembles
-// NEWROOT in tests/bionic/lib.sh.
+// Starts Android's init (PROG) under the session's seccomp filter. A child
+// execs `$INNKEEPER_BROKER --init`, which installs the filter, hands its
+// listener back and execs PROG; this process then execs the broker to serve
+// that listener as init's parent. Built static with the NDK: it runs before
+// Android's linker exists.
 //
-// In those developer harnesses, pivot to NEWROOT, clone nested namespaces
-// with locked mounts, and install the seccomp filter before executing PROG.
-// The parent serves notifications through the Rust broker.
+// In a Flatpak session NEWROOT is "/": the sandbox forbids mounts and
+// namespaces, and the launcher already built Android's root out of symlinks
+// in the sandbox's "/". Init is a plain child and this process its
+// subreaper; the broker fakes the /proc entries the harness binds.
 //
-// Built static with the NDK so it keeps working after the host root is gone.
-//
-// Flatpak runtime (NEWROOT "/"): the sandbox forbids mounts
-// and namespaces, and the launcher already built Android's root out of
-// symlinks in the sandbox's own "/". Steps 1 and 2 are skipped: init is a
-// plain child, and this process becomes its subreaper instead of pid 1. The
-// broker fakes the /proc entries step 4 would bind.
+// The bootless bionic harness (INNKEEPER_BIONIC_HARNESS=1, NEWROOT assembled
+// by tests/bionic/lib.sh) pivots to NEWROOT and clones init into nested
+// namespaces with a fresh /proc.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -34,17 +33,18 @@
 
 extern char** environ;
 
-// The static bootstrap runs before Android's linker exists. After pivot it
-// execs the dynamic Rust broker, which owns the entire syscall boundary.
 static const char* broker;
-// Flatpak mode (see the header).
+// A Flatpak session, not the harness.
 static int flat;
 
-static void die(const char* what);
+static void die(const char* what) {
+  fprintf(stderr, "pivot-exec: %s: %s\n", what, strerror(errno));
+  _exit(1);
+}
 
 // The broker stays in the outer namespaces to see every Android pid.
 static void exec_broker(int pins, int listener, pid_t init) {
-  // Flatpak mode: init's pid, which the broker shows as 1.
+  // Init's pid, which the broker shows as 1.
   if (flat) {
     char pid[16];
     snprintf(pid, sizeof(pid), "%d", init);
@@ -76,11 +76,6 @@ static int setgroups_denied(void) {
 
 static char** child_argv;
 static int sync_sock[2];  // [0] child end, [1] parent end
-
-static void die(const char* what) {
-  fprintf(stderr, "pivot-exec: %s: %s\n", what, strerror(errno));
-  _exit(1);
-}
 
 // Write "<in> <in> <count>" for each line of our own /proc/self/<map>: an
 // identity map over everything the outer namespace maps.
@@ -139,8 +134,6 @@ static int child_main(void* arg) {
     setenv("INNKEEPER_SHIM_INIT", "1", 1);
   }
 
-  // Rust installs the filter, hands its listener to our parent, then execs
-  // Android. No syscall policy or emulator runs in this static bootstrap.
   fcntl(sync_sock[0], F_SETFD, 0);
   char syncbuf[16];
   snprintf(syncbuf, sizeof(syncbuf), "%d", sync_sock[0]);
@@ -196,9 +189,8 @@ int main(int argc, char** argv) {
     if (chdir("/") != 0) die("chdir /");
 
     // Drop the host user's supplementary groups (wheel etc.): they are
-    // unmapped here but would still grant access to host files.
-    // (Test harnesses run under `unshare --map-root-user`, where setgroups is
-    // denied; their supplementary groups are already unmapped.)
+    // unmapped here but would still grant access to host files. Under
+    // `unshare --map-root-user` setgroups is denied and they are already gone.
     if (setgroups(0, NULL) != 0 && !setgroups_denied()) die("setgroups");
   }
 
@@ -241,6 +233,6 @@ int main(int argc, char** argv) {
   close(sync_sock[1]);
 
   // Keep this pid: the broker must be Android's ancestor for memory access
-  // under Yama ptrace_scope=1. Rust also takes over our child reaping.
+  // under Yama ptrace_scope=1. It also takes over reaping.
   exec_broker(pins, listener, pid);
 }

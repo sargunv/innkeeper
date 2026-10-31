@@ -1,10 +1,7 @@
-//! Seccomp user-notification binding: serves the [`BinderDriver`] to real
-//! Android processes in a Innkeeper session.
-//!
-//! The broker bootstrap installs one seccomp filter on Android init
-//! (inherited by every process) that turns `bpf()`, `openat()` and binder
-//! `ioctl()`s into user notifications, all received by [`serve`] in this
-//! helper process outside the Android namespaces, serving the entire boundary.
+//! The serve loop: [`serve`] receives every notification of the session's
+//! seccomp filter ([`crate::filter`]) and either answers it here or hands it
+//! to the module that owns it. Binder is served here, binding the
+//! [`BinderDriver`] to real Android processes:
 //!
 //!  * `openat` of a binder device path -> inject a memfd (`ADDFD`+`SEND`); the
 //!    process mmaps it as its receive region, and the broker writes
@@ -185,7 +182,7 @@ impl ProcState {
                 continue;
             };
             if ino.parse::<u64>().ok() != Some(self.memfd_ino)
-                || !path.starts_with("/memfd:lxbinder-")
+                || !path.starts_with("/memfd:innkeeper-binder-")
                 || !off.trim_start_matches('0').is_empty()
             {
                 continue;
@@ -238,7 +235,7 @@ impl ProcState {
 pub struct Supervisor {
     broker: BinderDriver,
     us: SeccompUserspace,
-    /// Single-uid mode's virtual ids (binder's sender_euid comes from them).
+    /// Virtual ids, outside the harness (binder's sender_euid comes from them).
     vid: Option<Arc<crate::creds::Vid>>,
     /// (tgid, fd) -> broker process
     fd_index: HashMap<(i32, u32), ProcId>,
@@ -600,9 +597,8 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
         start: std::time::Instant::now(),
         at: AtomicU64::new(u64::MAX),
     });
-    // Single-uid mode (supervisor/README.md): virtual ids for every process.
-    let vid = (std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() != Ok("1"))
-        .then(|| crate::creds::Vid::new(listener, resp_sz));
+    // Virtual ids for every process (supervisor/README.md).
+    let vid = (!crate::harness()).then(|| crate::creds::Vid::new(listener, resp_sz));
     let flat = crate::flat::Workers::new(listener, resp_sz);
     let input = crate::input::Input::new(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {
@@ -667,7 +663,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
             emulation.serve(&req);
             continue;
         }
-        // Single-uid mode: /proc/<pid>/status with the virtual ids.
+        // /proc/<pid>/status with the virtual ids.
         if nr == libc::SYS_openat
             && let Some(v) = &vid
             && v.proc_status(&req)
@@ -699,8 +695,8 @@ fn as_openat(req: &mut SeccompNotif) {
     }
 }
 
-/// Is this notification the broker's to serve (every `openat`, and binder
-/// `ioctl`s) rather than the C supervisor's?
+/// Is this notification for [`Supervisor::dispatch`] (every `openat`, binder
+/// `ioctl`s and OpenHarmony's device `ioctl`s) rather than the BPF emulation?
 fn is_binder_syscall(nr: i64, args: &[u64; 6]) -> bool {
     nr == libc::SYS_openat
         || (nr == libc::SYS_ioctl
@@ -875,7 +871,7 @@ impl Supervisor {
         // Drop any earlier binder fds of this process that are gone (exec).
         self.release_closed(Some(pid));
         let flags = req.data.args[2] as u32;
-        let name = format!("lxbinder-{}", self.next_memfd);
+        let name = format!("innkeeper-binder-{}", self.next_memfd);
         self.next_memfd += 1;
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
         let Some(memfd) =
@@ -923,8 +919,8 @@ impl Supervisor {
         if newfd < 0 {
             return; // target gone
         }
-        // The opener's euid, as the kernel records proc->cred at open; in
-        // single-uid mode its virtual one.
+        // The opener's (virtual) euid, as the kernel records proc->cred at
+        // open.
         let euid = match &self.vid {
             Some(v) => v.creds(pid).map(|c| c.euid).unwrap_or(0),
             None => status_field(pid, "Uid:")

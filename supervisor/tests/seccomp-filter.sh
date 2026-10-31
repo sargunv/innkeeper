@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# The session's seccomp filter (broker/src/filter.rs) traps exactly the syscalls
-# each mode needs: bpf and friends, openat and binder ioctls always; the
-# credential syscalls, SO_PEERCRED, lstat-shaped newfstatat and W_OK access
-# checks in single-uid mode (supervisor/README.md); readlink, getcwd, fstat,
-# mkdir, chmod, SO_MARK, capget, capset and the capability prctls in
-# Flatpak mode; open(2), access-token and ashmem ioctls for an OpenHarmony
-# guest only;
-# and nothing hot besides.
-# Builds into out/test/supervisor/seccomp-filter.
+# The session's seccomp filter (broker/src/filter.rs) traps exactly what the
+# broker serves, and nothing hot besides: bpf, openat and binder ioctls always;
+# outside the bootless harness also the credential, Flatpak filesystem and
+# capability calls; open(2), access-token and ashmem ioctls for an
+# OpenHarmony guest only.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=$here/../../out/test/supervisor/seccomp-filter

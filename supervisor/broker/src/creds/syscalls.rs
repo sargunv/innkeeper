@@ -1,13 +1,11 @@
-//! Single-uid mode's syscall side (supervisor/README.md): answers the credential
-//! syscalls that the session's seccomp filter traps,
-//! using the model in [`crate::creds::table`].
+//! The credential syscalls the session's seccomp filter traps
+//! (supervisor/README.md), answered with the model in [`crate::creds::table`].
 //!
 //!  * `get*id`/`getgroups`: the caller's virtual credentials.
 //!  * `set*id`/`setgroups`: the kernel's rules, applied to the virtual
 //!    credentials; the new ones are interned and stored in the process's soft
-//!    `RLIMIT_RTTIME` (see `table.rs`). Privilege is the caller's real effective
-//!    CAP_SETUID/CAP_SETGID, so capabilities dropped with capset stay dropped
-//!    (in Flatpak mode, which has no capabilities, virtual root's euid).
+//!    `RLIMIT_RTTIME` (see `table.rs`). Virtual root is privileged (see
+//!    `caps`).
 //!  * `chown` family: unmapped ids would fail with EINVAL, so the call is
 //!    emulated: the file is resolved in the caller's root, a no-op
 //!    `fchownat(-1, -1)` keeps the kernel's checks (EROFS, ENOENT, ...), and
@@ -89,7 +87,7 @@ fn owner_tracked(path: &[u8]) -> bool {
         .any(|p| path.starts_with(p) && (path.len() == p.len() || path[p.len()] == b'/'))
 }
 
-/// Is this notification one of single-uid mode's?
+/// Is this notification a credential syscall?
 pub(crate) fn is_cred_syscall(nr: i64, args: &[u64; 6]) -> bool {
     const NRS: [i64; 20] = [
         libc::SYS_getuid,
@@ -701,14 +699,11 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
     if r == 0 { Ok(()) } else { Err(errno()) }
 }
 
-/// The thread's real effective CAP_SETUID/CAP_SETGID. In Flatpak mode
-/// no process has capabilities, so virtual root has
-/// both.
+/// CAP_SETUID/CAP_SETGID: virtual root has both, since no process in the
+/// sandbox has real capabilities; anyone else, the thread's real effective
+/// ones.
 fn caps(tid: i32, c: &Creds) -> table::Caps {
-    static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *FLAT.get_or_init(|| std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() != Ok("1"))
-        && c.euid == 0
-    {
+    if c.euid == 0 {
         return table::Caps {
             setgid: true,
             setuid: true,
@@ -795,7 +790,7 @@ fn resolve_how(
     // from the directory itself.
     let mut abs: Option<Vec<u8>> = None;
     if path[0] == b'/' {
-        // Flatpak mode: /data is a symlink to its host dir.
+        // /data is a symlink to its host dir.
         abs = Some(crate::flat::to_host(path).unwrap_or_else(|| path.to_vec()));
     } else {
         let link = if dirfd == AT_FDCWD {
@@ -882,7 +877,7 @@ fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     if r != 0 {
         return Answer::Errno(errno());
     }
-    // Flatpak mode: a bind mount inside /data is a symlink to another /data
+    // A bind mount inside /data is a symlink to another /data
     // dir (/data/user/0 -> /data/data); show what it stands for.
     if st.st_mode & libc::S_IFMT == libc::S_IFLNK
         && let Some(target) = crate::flat::bind_target(&fd)

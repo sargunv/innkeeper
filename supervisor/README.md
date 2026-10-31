@@ -7,8 +7,8 @@ an unprivileged namespace can't do into user notifications.
 
 | Dir          | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
 | ------------ | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
-| `pivot-exec` | `libexec/innkeeper/pivot-exec` (static C)                        | static pivot/namespace bootstrap                         | `pivot-exec.c`                |
-| `broker`     | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | execed by pivot-exec in the sandbox, Android's parent    | `src/notify.rs`, `src/bpf.rs` |
+| `pivot-exec` | `libexec/innkeeper/pivot-exec` (static C)                        | starts init under the filter, then becomes the broker    | `pivot-exec.c`                |
+| `broker`     | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | pivot-exec's process: Android's parent                   | `src/notify.rs`, `src/bpf.rs` |
 | `shim`       | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so`      | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
 
 ## What is trapped, and who serves it
@@ -20,22 +20,21 @@ an unprivileged namespace can't do into user notifications.
 | `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)  | virtual Android uids without a subordinate id range                    |
 | `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                            | broker (`flat`) | no mounts or user namespace in the sandbox (docs/session.md)           |
 | `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | broker (`bpf`)  | no capabilities in the sandbox; the host's network                     |
+| `openat` and `inotify_add_watch` of `/dev/input`, `ioctl` type `'E'`                                                                          | broker (input)  | session-local evdev devices the bridge feeds, never the host's         |
 
-The broker constructs and installs the filter (`src/filter.rs`) in its `--init`
-entry point, hands the listener to pivot-exec, then execs Android. The outer
-broker receives and serves every notification directly: binder, credentials,
-Flatpak filesystem calls and BPF emulation share one Rust boundary. Flatpak
-filesystem notifications run on four workers so a slow lookup (including `fstat`
-through a caller's fd) cannot block the binder receive thread. Each BPF object
-retains one memfd inode; opening a pin reopens that inode with an independent
-file description, so netd's OFD map locks conflict correctly.
+pivot-exec is static C because it runs before Android's linker exists, and
+defines no syscall policy. Its child execs `innkeeper-brk --init`, which
+installs the filter (`src/filter.rs`), hands the listener back and execs init.
+pivot-exec then execs the broker in its own process, which serves every
+notification, reaps orphans as the subreaper and exits with init's status. It
+stays an ancestor of every Android process, so process-memory access works with
+Yama's default `ptrace_scope=1` without capabilities or a sysctl override.
 
-pivot-exec stays static C because it runs before pivot_root, before Android's
-bootstrap linker exists. It only establishes the root and namespaces, execs the
-dynamic Rust broker in the same process; it defines no syscall policy. The
-broker inherits its subreaper role, reaps children and exits with init's status.
-It stays an ancestor of every Android process, so process-memory access works
-with Yama's default `ptrace_scope=1` without capabilities or a sysctl override.
+Filesystem notifications (`flat`) run on four workers so a slow lookup
+(including `fstat` through a caller's fd) cannot block the binder receive
+thread. Each BPF object retains one memfd inode; opening a pin reopens that
+inode with an independent file description, so netd's OFD map locks conflict
+correctly.
 
 ## Binder
 
@@ -104,17 +103,17 @@ files created without a `chown`, and vold's `/proc` scan.
 Hidden SELinux breaks call sites in init and a few services that assume a policy
 (`security_compute_create`, `set*con`, `selinux_status_*`); the shim turns them
 into no-ops. It also makes priority and rlimit changes best-effort, treats
-vold's refused quota-project ioctl as success, skips POSIX ACL xattrs in
-single-uid mode, and serves the staged `/proc/config.gz`.
+vold's refused quota-project ioctl as success, skips POSIX ACL xattrs, and
+serves the staged `/proc/config.gz`.
 
-In Flatpak mode the sandbox's own seccomp filter refuses some calls before ours
-sees them, so the shim covers them where it is loaded: `mount`, `umount`,
-`unshare`, `setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)`
-(which the connectivity stack only opens and closes) gets an eventfd; netd's
-refused rtnetlink requests read as done (`INNKEEPER_NETLINK_ACCEPT`); vold's
-uevent socket binds to a kernel-chosen port (concurrent sessions share the
-host's network, so their pid-numbered ports collide); and lmkd's PSI trigger
-windows are widened to 2 s (`INNKEEPER_PSI_WINDOW`). Init isn't pid 1 there, so
+The Flatpak sandbox's own seccomp filter refuses some calls before ours sees
+them, so the shim covers them where it is loaded: `mount`, `umount`, `unshare`,
+`setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)` (which the
+connectivity stack only opens and closes) gets an eventfd; netd's refused
+rtnetlink requests read as done (`INNKEEPER_NETLINK_ACCEPT`); vold's uevent
+socket binds to a kernel-chosen port (concurrent sessions share the host's
+network, so their pid-numbered ports collide); and lmkd's PSI trigger windows
+are widened to 2 s (`INNKEEPER_PSI_WINDOW`). Init isn't pid 1 in the sandbox, so
 pivot-exec marks it with `INNKEEPER_SHIM_INIT`.
 
 lmkd also opts into `INNKEEPER_OOM_ADJ`: its writes to
@@ -124,8 +123,7 @@ process lower a score back to that floor, so a cached app returning to the
 foreground regains its relative protection. lmkd keeps the original Android
 scores for its own kill policy.
 
-Android 17 mounts every visible emulated volume through FUSE; the old
-`persist.sys.fuse` switch no longer selects a non-FUSE path. Flatpak has no
+Android 17 mounts every visible emulated volume through FUSE, but Flatpak has no
 `/dev/fuse` and cannot mount filesystems. For vold only
 (`INNKEEPER_EMULATED_STORAGE=1`), `shim/fuse.h` provides a socket with the
 stable FUSE INIT request so MediaProvider starts its storage session. The
@@ -164,7 +162,7 @@ set it, and their filter and driver are unchanged.
   counts are absent (`ENOTTY`), as on a kernel built without them.
 - **Ashmem** (`src/ashmem.rs`). OH's c_utils and everything on it (IPC parcels,
   the display HDI's command queues) need `/dev/ashmem`. Each open gets a fresh
-  sealable memfd named `ashmem`, which Flatpak mode's fstat shows as a character
+  sealable memfd named `ashmem`, which the broker's fstat shows as a character
   device (c_utils checks), and the broker serves ashmem's ioctls on it: the size
   is the memfd's, a mask without `PROT_WRITE` is `F_SEAL_FUTURE_WRITE`, and
   pinning and purging do nothing (memfd pages are never purged). The state lives
@@ -172,11 +170,13 @@ set it, and their filter and driver are unchanged.
 
 ## Tests
 
-- `cargo test -p innkeeper-broker` (binder transactions, failure delivery,
-  freezing and credential behaviour) runs in `mise run test`.
-- `tests/bpfemu.sh` and `tests/seccomp-filter.sh` (in `mise run test`) check the
-  emulator's bounds and exactly which syscalls notify in each mode;
-  `tests/shim-netlink.sh` the uevent port choice.
+`mise run test` runs `cargo test -p innkeeper-broker` (binder transactions,
+failure delivery, freezing, credentials) and every `tests/*.sh`: C probes that
+drive the real filter and broker (`seccomp-filter` checks exactly which syscalls
+notify, `bpfemu` the emulator's bounds, `binder-restarts` interrupted ioctls,
+`drm-node` the render-node policy, `bootstrap` pivot-exec), and unit checks of
+the shim's headers.
+
 - `mise run test:e2e -- boot` boots and runs `selftest`.
 - `mise run ohos:test` boots OpenHarmony until its system abilities register.
 
