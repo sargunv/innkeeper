@@ -154,6 +154,10 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     }
   }
 
+  /** Android's rotation of [window]'s content in its buffer, in quarter turns (phone mode). */
+  fun windowRotation(window: Int, rotation: Int) =
+    connection.send(WINDOW_ROTATION) { u32(window).u32(rotation) }
+
   fun keepAwake(window: Int, requested: Boolean) =
     connection.send(WINDOW_KEEP_AWAKE) { u32(window).u32(if (requested) 1 else 0) }
 
@@ -304,6 +308,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     private const val WINDOW_MINIMIZE = 0x0607
     private const val WINDOW_TOKEN = 0x060c
     private const val WINDOW_KEEP_AWAKE = 0x060d
+    private const val WINDOW_ROTATION = 0x060e
     private const val INPUT = 0x4601
     private const val WINDOW_MAPPED = 0x4602
     private const val WINDOW_UNMAPPED = 0x4603

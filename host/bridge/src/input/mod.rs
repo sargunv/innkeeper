@@ -103,6 +103,9 @@ impl Service for InputService {
                 status(self.hub.keep_awake(window, requested))
             }
             Request::WindowPolicy(p) => status(self.hub.window_policy(p)),
+            Request::WindowRotation { window, rotation } => {
+                status(self.hub.window_rotation(window, rotation))
+            }
             Request::PointerCapture { enabled } => {
                 self.hub.pointer_capture(enabled);
                 Reply::ok()

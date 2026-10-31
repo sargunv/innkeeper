@@ -7,7 +7,7 @@ use std::fs;
 
 use anyhow::{Result, bail};
 use linuxapk_session::profile;
-pub use linuxapk_session::profile::{FIRST, Settings, check_name};
+pub use linuxapk_session::profile::{FIRST, Mode, Settings, Size, check_name};
 
 use crate::launcher::Session;
 use crate::paths::Prefix;
@@ -89,6 +89,16 @@ pub fn choose(name: &str) -> Result<()> {
 /// Profile `name`'s settings.
 pub fn settings(name: &str) -> Result<Settings> {
     Settings::load(&paths(name)?.data)
+}
+
+/// Sets profile `name`'s mode and screen preset, for its next start.
+pub fn set_mode(name: &str, mode: Option<Mode>, size: Option<Size>) -> Result<Settings> {
+    let data = paths(name)?.data;
+    let mut s = Settings::load(&data)?;
+    s.mode = mode.unwrap_or(s.mode);
+    s.size = size.unwrap_or(s.size);
+    s.save(&data)?;
+    Ok(s)
 }
 
 /// Creates profile `name` with `settings`. Android sets up its data at the

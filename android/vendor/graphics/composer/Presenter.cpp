@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "linuxapk-hwc"
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 
 #include "Presenter.h"
 
 #include "BridgePresenter.h"
+#include "Display.h"
 #include "FrameDumper.h"
 #include "Properties.h"
 #include "linuxapk/log.h"
@@ -29,7 +33,29 @@ void startPresenterBackend() {
   }
 }
 
-std::unique_ptr<Presenter> createPrimaryPresenter() { return makeHeadless(); }
+std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config) {
+  if (bridgeStarted() && getProperty("vendor.linuxapk.mode", "") == "phone")
+    return createBridgePrimaryPresenter(
+      uint32_t(config.width), uint32_t(config.height), makeHeadless()
+    );
+  return makeHeadless();
+}
+
+DisplayConfig primaryConfig() {
+  DisplayConfig config;
+  int w = 0, h = 0;
+  const std::string size = getProperty("vendor.linuxapk.hwc.primary", "");
+  if (
+    sscanf(size.c_str(), "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 &&
+    h <= 8192
+  ) {
+    config.width = w;
+    config.height = h;
+    config.dpi =
+      std::max(1, atoi(getProperty("ro.sf.lcd_density", "160").c_str()));
+  }
+  return config;
+}
 
 std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height

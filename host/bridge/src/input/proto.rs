@@ -47,6 +47,12 @@
 //! sends the current policy when mapped and when it changes; only orientation
 //! reshapes floating toplevels.
 //!
+//! `WINDOW_ROTATION` (0x060e): u32 display, u32 rotation (quarter turns,
+//! Surface.ROTATION_*). A display whose buffer keeps its natural orientation
+//! while Android rotates its content (phone mode's display 0): the bridge
+//! shows its frames turned back upright, with the turned window shape, and
+//! maps input to the rotated display. `-ENOENT` if not shown.
+//!
 //! `WINDOW_MINIMIZE` (0x0607): u32 display; minimize the toplevel when Android
 //! moves its root task to the back. `-ENOENT` if not shown.
 //!
@@ -141,6 +147,7 @@ pub mod ty {
     pub const POINTER_CAPTURE: u16 = 0x060b;
     pub const WINDOW_TOKEN: u16 = 0x060c;
     pub const WINDOW_KEEP_AWAKE: u16 = 0x060d;
+    pub const WINDOW_ROTATION: u16 = 0x060e;
 
     /// Events (bridge to system app, tag 0).
     pub const INPUT: u16 = 0x4601;
@@ -198,6 +205,10 @@ pub struct WindowPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     WindowRequest(WindowRequest),
+    WindowRotation {
+        window: u32,
+        rotation: u32,
+    },
     WindowActivate {
         window: u32,
         token: String,
@@ -277,6 +288,10 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             fullscreen: r.u32_in(0..=1, "fullscreen")? != 0,
             immersive: r.u32_in(0..=1, "immersive")? != 0,
         }),
+        ty::WINDOW_ROTATION => Request::WindowRotation {
+            window: r.u32()?,
+            rotation: r.u32_in(0..=3, "rotation")?,
+        },
         ty::POINTER_CAPTURE => Request::PointerCapture {
             enabled: r.u32_in(0..=1, "capture enabled")? != 0,
         },
@@ -363,6 +378,10 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(p.orientation)
                 .u32(u32::from(p.fullscreen))
                 .u32(u32::from(p.immersive));
+        }
+        Request::WindowRotation { window, rotation } => {
+            w = Writer::message(ty::WINDOW_ROTATION, tag);
+            w.u32(*window).u32(*rotation);
         }
         Request::PointerCapture { enabled } => {
             w = Writer::message(ty::POINTER_CAPTURE, tag);
@@ -496,6 +515,10 @@ mod tests {
                 fullscreen: true,
                 immersive: true,
             }),
+            Request::WindowRotation {
+                window: 0,
+                rotation: 3,
+            },
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));
         }
@@ -519,6 +542,11 @@ mod tests {
             ))
             .is_err()
         );
+        let turn = Request::WindowRotation {
+            window: 0,
+            rotation: 4,
+        };
+        assert!(roundtrip(&encode(1, &turn)).is_err());
         assert_eq!(decode(0x06ff, &[]), Err(DecodeError::UnknownType(0x06ff)));
     }
 

@@ -28,14 +28,14 @@ before refreshing hashes when the pin moves
 
 ## Added files
 
-| File                                                       | Why                                                                              |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `vendor/etc/init/hw/init.linuxapk.rc`                      | the device rc for `androidboot.hardware=linuxapk`, in place of cuttlefish's      |
-| `system/bin/linuxapk-apexd`, `linuxapk-bpfload`            | wrappers with private mount namespaces (see their headers)                       |
-| `system/bin/linuxapk-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                    |
-| `product/overlay/config/config.xml`                        | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar |
-| `vendor/etc/permissions/linuxapk-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop          |
-| `system_ext/etc/init/linuxapk-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service  |
+| File                                                       | Why                                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `vendor/etc/init/hw/init.linuxapk.rc`                      | the device rc for `androidboot.hardware=linuxapk`, in place of cuttlefish's; adb, navigation mode |
+| `system/bin/linuxapk-apexd`, `linuxapk-bpfload`            | wrappers with private mount namespaces (see their headers)                                        |
+| `system/bin/linuxapk-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                                     |
+| `product/overlay/config/config.xml`                        | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar                  |
+| `vendor/etc/permissions/linuxapk-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop                           |
+| `system_ext/etc/init/linuxapk-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service                   |
 
 ## Blanked files
 
@@ -64,7 +64,7 @@ session doesn't have (#28). Each is blanked like the files above;
 | `system/priv-app/CellBroadcastLegacyApp`, `apex/com.android.cellbroadcast/priv-app/*`                         | emergency alerts arrive over a modem                                                  |
 | `product/app/messaging`, `product/priv-app/ImsServiceEntitlement`                                             | SMS and carrier IMS need a modem                                                      |
 | `product/app/Camera2`                                                                                         | no camera                                                                             |
-| `system_ext/priv-app/Launcher3QuickStep`                                                                      | HOME is the system app’s empty activity; the desktop owns launches and task switching |
+| `system_ext/priv-app/Launcher3QuickStep` (windowed profiles only; phone mode keeps the image's)               | HOME is the system app’s empty activity; the desktop owns launches and task switching |
 | `product/app/QuickSearchBox`                                                                                  | the home screen's search widget; nobody sees the launcher                             |
 | `system/app/Traceur`, `system/priv-app/DeviceDiagnostics`, `system/priv-app/DynamicSystemInstallationService` | on-device tracing, trade-in diagnostics, GSI installs                                 |
 

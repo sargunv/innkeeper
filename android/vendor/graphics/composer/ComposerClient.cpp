@@ -37,10 +37,11 @@ class ComposerClient::Results {
 ComposerClient::ComposerClient() {
   mNextVirtualDisplay = kFirstVirtualDisplay;
   // One primary display; windows show virtual displays.
-  const DisplayConfig config;
+  const DisplayConfig config = primaryConfig();
   mDisplays.emplace(
-    kPrimaryDisplay,
-    std::make_unique<Display>(kPrimaryDisplay, config, createPrimaryPresenter())
+    kPrimaryDisplay, std::make_unique<Display>(
+                       kPrimaryDisplay, config, createPrimaryPresenter(config)
+                     )
   );
 }
 

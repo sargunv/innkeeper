@@ -5,7 +5,7 @@ Each Android app task gets its own Wayland window: titled with the app's label,
 `dev.linuxapk.Manager.<package>`; the `StartupWMClass` of its desktop entry),
 resized with the app, closed with its task. Android's default display 0 has no
 window; it keeps running headless with the system app’s empty HomeActivity as
-HOME.
+HOME. A profile in [phone mode](#phone-mode) shows display 0 instead.
 
 ## Frame path
 
@@ -340,6 +340,50 @@ sequenceDiagram
   (`AppWarningActivity`).
 - Other `AppWarnings` and SystemUI dialogs not tied to an activity (volume, USB)
   still go to display 0, unseen.
+
+## Phone mode
+
+A profile's `mode = "phone"` (`linuxapk profile set --mode phone`, the manager's
+Display row) shows the whole device in one window, for developing apps: display
+0, with SystemUI's status and navigation bars and the image's Launcher3, where
+apps start instead of in windows of their own. It applies at the next start.
+
+**Why display 0.** It is where Android already runs SystemUI, the launcher,
+recents, the keyguard, rotation and system dialogs, as on a phone. A new
+VirtualDisplay would need system decorations, a secondary home and rotation
+emulated for it, and still wouldn't behave like a phone's screen. The cost is in
+the composer: display 0's mode is fixed at boot, so a preset applies at the next
+start, and its frames are SurfaceFlinger's own client targets rather than an
+ImageReader's.
+
+- **Size.** linuxapk-session sets display 0's mode from the preset
+  (`vendor.linuxapk.hwc.primary`, `ro.sf.lcd_density`): small phone 720 × 1280
+  at 320 dpi, medium phone 1080 × 2400 at 420 dpi, medium tablet 2560 × 1600 at
+  320 dpi, as Android Studio's devices of those names. Apps keep their data
+  across presets and modes.
+- **Frames.** The composer's display 0 presenter copies each client target on
+  the GPU into a pool of its own LINEAR buffers and hands those to the bridge,
+  so SurfaceFlinger gets its buffers back at once. Display 0 exists before the
+  window manager asks for its window, so the composer offers it again every half
+  second until the request (`WINDOW_REQUEST` for display 0) claims it.
+- **Window manager.** In phone mode it asks for display 0's window, starts
+  launches there (`linuxapk run`, notifications, `am start` alike), never moves
+  display 0's tasks to windows of their own, and disables its empty HOME so the
+  launcher is home. Closing the window powers the profile off, as closing an
+  emulator does.
+- **Navigation.** Phone-sized presets use three-button navigation, which a mouse
+  can click; the tablet keeps gestures, whose taskbar crash-loops with buttons.
+  The window's ‹ Back works too.
+- **Rotation.** Android rotates display 0 (an app's requested orientation, or
+  `adb shell wm user-rotation lock 1`) inside its buffer, which keeps its
+  natural orientation. The window manager sends the rotation
+  (`WINDOW_ROTATION`); the bridge shows the frames turned back with a
+  `wl_surface` buffer transform, gives the window the turned shape and maps
+  input to the rotated display. Launcher3 stays portrait on phones, as it does
+  on devices.
+- Every boot, the framework warns on display 0 that the build is inconsistent
+  (VINTF finds no kernel SELinux policy, as the session has none); init closes
+  that dialog in phone mode.
 
 ## Buffers
 

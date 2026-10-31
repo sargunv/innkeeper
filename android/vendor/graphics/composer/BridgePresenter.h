@@ -28,4 +28,10 @@ std::unique_ptr<Presenter> createBridgeVirtualPresenter(
   std::unique_ptr<HeadlessPresenter> secondary
 );
 
+// Phone mode's display 0 (vendor.linuxapk.mode=phone), shown in the window
+// the window manager asks for it.
+std::unique_ptr<Presenter> createBridgePrimaryPresenter(
+  uint32_t width, uint32_t height, std::unique_ptr<HeadlessPresenter> secondary
+);
+
 }  // namespace linuxapk::hwc

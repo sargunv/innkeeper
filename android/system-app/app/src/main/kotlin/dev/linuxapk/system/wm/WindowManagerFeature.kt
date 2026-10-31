@@ -9,6 +9,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.hardware.display.VirtualDisplayConfig
@@ -72,6 +73,25 @@ class WindowManagerFeature(
   }
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
+  /**
+   * Phone mode (linuxapk-session's vendor.linuxapk.mode): display 0, with SystemUI and the
+   * launcher, in one window; apps start there instead of in windows of their own.
+   */
+  private val phone = SystemProps.get("vendor.linuxapk.mode") == "phone"
+  /** Phone mode: the bridge shows display 0's window. */
+  private var phoneMapped = false
+  /** Phone mode: display 0's rotation, as its window shows it. */
+  private var phoneRotation = 0
+  private val phoneDisplays =
+    object : DisplayManager.DisplayListener {
+      override fun onDisplayChanged(id: Int) {
+        if (id == DEFAULT_DISPLAY) sendPhoneRotation()
+      }
+
+      override fun onDisplayAdded(id: Int) {}
+
+      override fun onDisplayRemoved(id: Int) {}
+    }
   // The scale new windows start at: the last one a window reported (kept across restarts, so the
   // first window after boot opens at the desktop's scale).
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
@@ -90,6 +110,7 @@ class WindowManagerFeature(
 
   private fun changed() {
     packages = windows.values.mapTo(HashSet()) { it.pkg }
+    if (phoneMapped) packages = packages + PHONE_PACKAGE
     changeListeners.forEach { it() }
   }
 
@@ -165,8 +186,16 @@ class WindowManagerFeature(
     // AppWarnings shows these on the default display, which has no window; AppWarningActivity
     // shows the same warning in the app's own window instead.
     SystemProps.set("debug.wm.disable_deprecated_target_sdk_dialog", "true")
-    Log.i(TAG, "window manager started")
-    handler.post { refreshTasks() }
+    // Our empty HOME is for windowed profiles; a phone's is its launcher.
+    context.packageManager.setComponentEnabledSetting(
+      ComponentName(context, HomeActivity::class.java),
+      if (phone) PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+      else PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+      PackageManager.DONT_KILL_APP,
+    )
+    Log.i(TAG, "window manager started${if (phone) " (phone)" else ""}")
+    if (phone) dm.registerDisplayListener(phoneDisplays, handler)
+    handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
   }
 
   override fun stop() {
@@ -205,6 +234,7 @@ class WindowManagerFeature(
   }
 
   fun list(): List<WindowInfo> = onWm {
+    if (phone) return@onWm phoneWindows()
     refreshTasks()
     windows.values.map {
       WindowInfo(
@@ -239,6 +269,81 @@ class WindowManagerFeature(
 
   // ---- launching -------------------------------------------------------------
 
+  // ---- phone mode --------------------------------------------------------------
+
+  /** Asks the bridge for display 0's window, which the composer's display 0 claims. */
+  private fun requestPhoneWindow() {
+    val mode = dm.getDisplay(DEFAULT_DISPLAY)?.mode ?: return
+    input.requestWindow(
+      DEFAULT_DISPLAY,
+      mode.physicalWidth,
+      mode.physicalHeight,
+      SystemProps.getInt("ro.sf.lcd_density", BASE_DPI),
+      0,
+      0,
+      APP_ID_PREFIX + PHONE_PACKAGE,
+      PHONE_TITLE,
+    )
+  }
+
+  // Android rotates display 0's content inside its natural-orientation buffer; the bridge turns
+  // the window to match.
+  private fun sendPhoneRotation(force: Boolean = false) {
+    val rotation = dm.getDisplay(DEFAULT_DISPLAY)?.rotation ?: return
+    if (!phoneMapped || (rotation == phoneRotation && !force)) return
+    phoneRotation = rotation
+    input.windowRotation(DEFAULT_DISPLAY, rotation)
+  }
+
+  private fun phoneWindows(): List<WindowInfo> {
+    if (!phoneMapped) return emptyList()
+    val mode = dm.getDisplay(DEFAULT_DISPLAY)?.mode ?: return emptyList()
+    val tasks = allTasks().filter { Tasks.displayId(it) == DEFAULT_DISPLAY }
+    return listOf(
+      WindowInfo(
+        DEFAULT_DISPLAY,
+        tasks.firstOrNull()?.topActivity?.packageName ?: PHONE_PACKAGE,
+        PHONE_TITLE,
+        mode.physicalWidth,
+        mode.physicalHeight,
+        SystemProps.getInt("ro.sf.lcd_density", BASE_DPI),
+        tasks.map { it.taskId },
+        true,
+        emptyMap(),
+      ),
+    )
+  }
+
+  private fun displayOf(e: HostEvent): Int? =
+    when (e) {
+      is HostEvent.WindowOutputs -> e.display
+      is HostEvent.WindowVisible -> e.display
+      is HostEvent.Window -> e.display
+      is HostEvent.Close -> e.display
+      is HostEvent.KeyboardEnter -> e.display
+      is HostEvent.WindowMapped -> e.display
+      is HostEvent.WindowUnmapped -> e.display
+      else -> null
+    }
+
+  private fun onPhoneWindowEvent(e: HostEvent) {
+    when (e) {
+      is HostEvent.WindowMapped -> {
+        phoneMapped = true
+        changed()
+        sendPhoneRotation(force = true)
+      }
+      is HostEvent.WindowUnmapped -> {
+        phoneMapped = false
+        changed()
+        requestPhoneWindow()
+      }
+      // Closing the device's window powers it off, as closing an emulator does.
+      is HostEvent.Close -> power.shutdown(false, "linuxapk: phone window closed", false)
+      else -> {}
+    }
+  }
+
   private fun launchLocked(r: LaunchRequest): String {
     val pm = context.packageManager
     val label =
@@ -264,6 +369,11 @@ class WindowManagerFeature(
       }
     // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher does: an existing task comes to the front.
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    if (phone) {
+      start(intent, DEFAULT_DISPLAY)
+      if (phoneMapped) input.activateWindow(DEFAULT_DISPLAY, r.token) else requestPhoneWindow()
+      return "launched display=$DEFAULT_DISPLAY package=${r.pkg}"
+    }
     if (r.newWindow) {
       val activity =
         pm.resolveActivity(intent, 0)?.activityInfo ?: return "error: no launcher activity"
@@ -523,10 +633,14 @@ class WindowManagerFeature(
 
   // A new connection (the bridge restarted, without our windows): ask for them again.
   override fun onConnected() {
-    handler.post { windows.values.forEach(::remap) }
+    handler.post {
+      if (phone) requestPhoneWindow()
+      windows.values.forEach(::remap)
+    }
   }
 
   private fun onWindowEvent(e: HostEvent) {
+    if (phone && displayOf(e) == DEFAULT_DISPLAY) return onPhoneWindowEvent(e)
     when (e) {
       is HostEvent.WindowOutputs -> {
         val w = windows[e.display] ?: return
@@ -773,6 +887,8 @@ class WindowManagerFeature(
   // Syncs windows with the tasks on their displays: closes windows whose app is gone, shows
   // app warnings once a window has its task, and adopts app tasks from display 0.
   private fun refreshTasks() {
+    // A phone's apps stay on display 0, in its one window.
+    if (phone) return
     val tasks = allTasksOrError() ?: return
     // Oldest first: a desktop launch claims its pending display before an activity it starts
     // creates another task there. Activity starts without NEW_TASK keep the same task id.
@@ -857,6 +973,9 @@ class WindowManagerFeature(
   companion object {
     const val TAG = "LinuxApkWm"
     const val APP_ID_PREFIX = "dev.linuxapk."
+    /** Phone mode's window: its `app_id` suffix, and its package in [packages]. */
+    private const val PHONE_PACKAGE = "phone"
+    private const val PHONE_TITLE = "Android"
     // PowerManager: operate on this window's OWN_DISPLAY_GROUP, never the whole session.
     private const val WAKE_REASON_APPLICATION = 2
     private const val SLEEP_REASON_APPLICATION = 0
