@@ -3,9 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 case ${1:-} in
-  input | frame | audio | gpu | memory | binder) ;;
+  input | frame) ;;
   *)
-    echo 'usage: mise run bench -- input|frame|audio|gpu|memory|binder [--noisy] [--seconds N] [--max-load N]'
+    echo 'usage: mise run bench -- input|frame [--noisy] [--seconds N] [--max-load N]'
     exit 0
     ;;
 esac

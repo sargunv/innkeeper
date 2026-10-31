@@ -121,23 +121,6 @@ pub fn frames(trace: &str) -> Value {
     json!({"commit_intervals":intervals(commits.clone()), "presentation_intervals":intervals(presented), "discarded":trace.lines().filter(|l| l.starts_with("discard ") && number(l,"frame").is_some_and(|id| commits.contains(&id))).count()})
 }
 
-pub fn score(s: &str) -> Option<u64> {
-    s.lines()
-        .find_map(|l| l.split_once("glmark2 Score:")?.1.trim().parse().ok())
-}
-
-/// A new app window must be displayed before launching a pause-sensitive workload.
-pub fn launched_display(reply: &str) -> Option<u64> {
-    let data = reply.lines().find_map(|line| {
-        line.strip_prefix("Broadcast completed: result=-1, data=\"launched ")?
-            .strip_suffix('"')
-    })?;
-    if field(data, "shown") == Some("no") {
-        return None;
-    }
-    number(data, "display").filter(|id| *id > 0)
-}
-
 /// Match a SPACE press to a *changed solid colour*, then its presentation id.
 /// Repainting the old colour or presenting another buffer cannot satisfy it.
 pub fn input(trace: &str) -> Value {
@@ -173,38 +156,6 @@ pub fn input(trace: &str) -> Value {
     json!({"input_to_commit":stats(&commit_ms), "input_to_presentation":stats(&present_ms), "presentation_clock_monotonic":monotonic, "physical_photon":"not measured; use a photodiode/high-speed camera"})
 }
 
-pub fn binder(log: &str) -> Value {
-    let mut results = vec![];
-    for workers in [1, 8] {
-        let mut samples = vec![];
-        let mut total = None;
-        for line in log
-            .lines()
-            .filter(|l| number(l, "workers") == Some(workers))
-        {
-            if line.contains("BENCH binder_sample ")
-                && let Some(ns) = field(line, "ns")
-            {
-                samples.extend(
-                    ns.split(',')
-                        .filter_map(|n| n.parse::<u64>().ok())
-                        .map(|n| n as f64 / 1e6),
-                );
-            } else if line.contains("BENCH binder ")
-                && let (Some(count), Some(elapsed)) =
-                    (number(line, "count"), number(line, "elapsed_ns"))
-                && elapsed > 0
-            {
-                total = Some((count, elapsed));
-            }
-        }
-        if let Some((count, elapsed)) = total {
-            results.push(json!({"workers":workers,"transactions":count,"elapsed_ns":elapsed,"txn_per_s":count as f64 * 1e9 / elapsed as f64,"roundtrip":stats(&samples),"samples_complete":samples.len() == count as usize}));
-        }
-    }
-    json!(results)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,24 +165,6 @@ mod tests {
 innkeeper-bridge: debug: pulse: standby\ninnkeeper-bridge: trace: commit ns=1 window=3\n";
         assert_eq!(trace(log), "clock id=1\ncommit ns=1 window=3\n");
     }
-    #[test]
-    fn gpu_launch_requires_a_visible_app_display() {
-        assert_eq!(
-            launched_display(
-                "Broadcasting: Intent { ... }\nBroadcast completed: result=-1, data=\"launched display=3 package=org.linaro.glmark2 size=1280x800 dpi=160\"\n"
-            ),
-            Some(3)
-        );
-        for reply in [
-            "Broadcast completed: result=0, data=\"error: no virtual display\"",
-            "Broadcast completed: result=-1, data=\"launched display=3 shown=no\"",
-            "Broadcast completed: result=-1, data=\"launched display=0\"",
-            "Broadcast completed: result=-1, data=\"launched display=bad\"",
-        ] {
-            assert_eq!(launched_display(reply), None, "{reply}");
-        }
-    }
-
     #[test]
     fn load_limit_scales_with_cpu_capacity() {
         assert_eq!(default_max_load(32), 16.0);
@@ -300,20 +233,5 @@ probe_present frame=2300000 window=4 ns=3000000\n";
         let t = "commit ns=1\ncommit ns=2\ncommit ns=3\npresent frame=1 ns=5000000\ndiscard frame=2\npresent frame=3 ns=1000000\npresent frame=0 ns=100000";
         assert_eq!(frames(t)["discarded"], 1);
         assert_eq!(frames(t)["presentation_intervals"]["mean_ms"], 4.0);
-    }
-    #[test]
-    fn gpu_score_and_missing_values() {
-        assert_eq!(score("noise\nI glmark2: glmark2 Score: 42\n"), Some(42));
-        assert_eq!(score("glmark2 Score: unavailable"), None);
-        assert_eq!(number("output_ns=-1", "output_ns"), None);
-    }
-    #[test]
-    fn binder_output_not_shell_timing() {
-        let r = binder(
-            "I InnkeeperBench: BENCH binder_sample workers=8 ns=1000,3000\nI InnkeeperBench: BENCH binder workers=8 count=2 elapsed_ns=10000",
-        );
-        assert_eq!(r[0]["txn_per_s"], 200000.0);
-        assert_eq!(r[0]["roundtrip"]["mean_ms"], 0.002);
-        assert!(binder("no observation").as_array().unwrap().is_empty());
     }
 }

@@ -58,5 +58,4 @@ wrapping and wakeups, paced capture without a bridge, and the audio client's
 capture underruns, partial reads and bridge death. The audio group of
 `mise run test:e2e` plays a 440 Hz tone into a private null sink and checks its
 frequency, then detects a known marker through AudioRecord from that sink's
-monitor. `mise run bench -- audio` measures app-visible output latency and
-capture round trip.
+monitor.
