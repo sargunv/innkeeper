@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use innkeeper_core::desktop::{self, AppEntry};
-use innkeeper_core::{paths, validate, xdg};
+use innkeeper_core::{validate, xdg};
 
 use crate::ipc::blob;
 use crate::ipc::server::{Peer, Reply, Service};
@@ -212,7 +212,7 @@ pub struct Config {
     pub mirror_apps: AtomicBool,
     pub dirs: xdg::Dirs,
     /// The session profile entries are made for.
-    pub profile: paths::ProfileName,
+    pub profile: innkeeper_profile::profile::ProfileName,
     /// Android's `/data` on the host, where installed APKs are.
     pub data: std::path::PathBuf,
 }
@@ -220,7 +220,7 @@ pub struct Config {
 impl Config {
     pub fn from_env(
         enabled: bool,
-        profile: paths::ProfileName,
+        profile: innkeeper_profile::profile::ProfileName,
         data: std::path::PathBuf,
     ) -> Config {
         Config {
@@ -277,7 +277,7 @@ struct Added {
 /// The entry for `a`, with what its APK (`info`, if it could be read) adds:
 /// localized names and URL schemes.
 fn entry(
-    profile: &paths::ProfileName,
+    profile: &innkeeper_profile::profile::ProfileName,
     a: Added,
     info: Option<&innkeeper_core::apk::ApkInfo>,
 ) -> AppEntry {
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn entries_take_names_and_schemes_from_the_apk() {
-        let profile = paths::ProfileName::new("t").unwrap();
+        let profile = innkeeper_profile::profile::ProfileName::new("t").unwrap();
         let info = innkeeper_core::apk::ApkInfo {
             package: "org.ex.a".into(),
             version_code: "1".into(),
@@ -633,11 +633,15 @@ mod tests {
                 cache: tmp.join("cache"),
                 portal: None,
             },
-            profile: paths::ProfileName::new("t").unwrap(),
+            profile: innkeeper_profile::profile::ProfileName::new("t").unwrap(),
             data: tmp.join("android-data"),
         });
         let exec = |pkg: &str| {
-            desktop::exec_line(&paths::cli(&cfg.profile, &["run", pkg]), Some("%U")).unwrap()
+            desktop::exec_line(
+                &innkeeper_core::paths::cli(&cfg.profile, &["run", pkg]),
+                Some("%U"),
+            )
+            .unwrap()
         };
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);

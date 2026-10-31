@@ -10,7 +10,8 @@ use anyhow::{Context, Result};
 
 use crate::desktop::{self, AppEntry, MANAGER_ICON_SVG, PREFIX};
 use crate::dynlauncher::{self, Answer};
-use crate::paths::{self, xdg_home};
+use crate::paths;
+use innkeeper_profile::paths::xdg_home;
 
 /// Sizes we render icons at; all are hicolor theme directories.
 pub const ICON_SIZES: &[u32] = &[48, 64, 128, 256, 512];
@@ -303,7 +304,7 @@ fn rewrite_entries(d: &Dirs, (from, to): (&str, &str)) -> usize {
     let mut n = 0;
     for (pkg, path, mut text) in app_entries(d) {
         if desktop::read_key(&text, "X-Innkeeper-Profile").as_deref() == Some(from)
-            && let Ok(to) = paths::ProfileName::new(to)
+            && let Ok(to) = innkeeper_profile::profile::ProfileName::new(to)
         {
             let run = paths::cli(&to, &["run", &pkg]);
             let Some(new) = desktop::exec_line(&run, Some("%U"))
@@ -355,7 +356,7 @@ mod tests {
             package: "org.example.app".into(),
             name: "Example".into(),
             names: vec![],
-            profile: paths::ProfileName::new("work").unwrap(),
+            profile: innkeeper_profile::profile::ProfileName::new("work").unwrap(),
             icon: None,
             version: String::new(),
             categories: vec!["Utility".into()],
@@ -419,7 +420,7 @@ mod tests {
             package: pkg.into(),
             name: pkg.into(),
             names: vec![],
-            profile: paths::ProfileName::new(profile).unwrap(),
+            profile: innkeeper_profile::profile::ProfileName::new(profile).unwrap(),
             icon: None,
             version: String::new(),
             categories: vec![],

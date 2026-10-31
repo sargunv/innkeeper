@@ -13,7 +13,7 @@
 //!   serving `status` and `stop` on the control socket, and starts the
 //!   session again at that time.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::thread;
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::conf::Config;
 use crate::paths::Paths;
 use crate::session;
+pub use innkeeper_profile::activity::Activity;
 
 /// How often activity is checked.
 fn poll() -> Duration {
@@ -61,74 +62,29 @@ fn grace_secs(headless: bool, paths: &Paths) -> u64 {
     }
 }
 
-/// What the system app last reported (`<run>/lifecycle`, `key=value` lines).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Activity {
-    /// App windows, shown or starting.
-    pub windows: u32,
-    /// Running foreground services.
-    pub services: u32,
-    /// Installed apps the user lets run in the background.
-    pub background: Vec<String>,
-    /// The next alarm clock or exact wakeup alarm, in ms since the epoch.
-    pub wakeup_ms: Option<u64>,
-}
-
-impl Activity {
-    pub fn parse(text: &str) -> Activity {
-        let mut a = Activity::default();
-        for l in text.lines() {
-            let Some((k, v)) = l.split_once('=') else {
-                continue;
-            };
-            match k {
-                "windows" => a.windows = v.parse().unwrap_or(0),
-                "services" => a.services = v.parse().unwrap_or(0),
-                "background" => {
-                    a.background = v
-                        .split(',')
-                        .filter(|p| !p.is_empty())
-                        .map(str::to_string)
-                        .collect()
-                }
-                "wakeup" => a.wakeup_ms = v.parse().ok().filter(|&t| t > 0),
-                _ => {}
-            }
-        }
-        a
+/// Why `a` keeps the session up at `now` (ms since the epoch), if it does.
+fn busy_reason(a: &Activity, now_ms: u64) -> Option<String> {
+    if a.windows > 0 {
+        return Some(format!("{} window(s)", a.windows));
     }
-
-    pub fn read(paths: &Paths) -> Option<Activity> {
-        fs::read_to_string(paths.lifecycle())
-            .ok()
-            .map(|t| Activity::parse(&t))
+    if a.services > 0 {
+        return Some(format!("{} foreground service(s)", a.services));
     }
-
-    /// Why this keeps the session up at `now` (ms since the epoch), if it
-    /// does.
-    pub fn busy(&self, now_ms: u64) -> Option<String> {
-        if self.windows > 0 {
-            return Some(format!("{} window(s)", self.windows));
-        }
-        if self.services > 0 {
-            return Some(format!("{} foreground service(s)", self.services));
-        }
-        if !self.background.is_empty() {
-            return Some(format!(
-                "running in the background: {}",
-                self.background.join(", ")
-            ));
-        }
-        // A wakeup that has just passed is likely ringing now; one long past
-        // is stale.
-        let soon = |t: u64| {
-            t.saturating_sub(now_ms) < imminent().as_millis() as u64
-                && now_ms.saturating_sub(t) < imminent().as_millis() as u64
-        };
-        match self.wakeup_ms {
-            Some(t) if soon(t) => Some(format!("the alarm at {}", calendar(t / 1000))),
-            _ => None,
-        }
+    if !a.background.is_empty() {
+        return Some(format!(
+            "running in the background: {}",
+            a.background.join(", ")
+        ));
+    }
+    // A wakeup that has just passed is likely ringing now; one long past
+    // is stale.
+    let soon = |t: u64| {
+        t.saturating_sub(now_ms) < imminent().as_millis() as u64
+            && now_ms.saturating_sub(t) < imminent().as_millis() as u64
+    };
+    match a.wakeup_ms {
+        Some(t) if soon(t) => Some(format!("the alarm at {}", calendar(t / 1000))),
+        _ => None,
     }
 }
 
@@ -172,7 +128,7 @@ fn busy(paths: &Paths) -> Option<String> {
     }
     match Activity::read(paths) {
         None => Some("no report from the system app yet".into()),
-        Some(a) => a.busy(now_ms()),
+        Some(a) => busy_reason(&a, now_ms()),
     }
 }
 
@@ -271,21 +227,18 @@ mod tests {
         );
         let idle = Activity::parse("windows=0\nservices=0\nbackground=\nwakeup=0\n");
         assert_eq!(idle, Activity::default());
-        assert_eq!(idle.busy(1_000), None);
-        assert!(a.busy(0).unwrap().contains("foreground"));
+        assert_eq!(busy_reason(&idle, 1_000), None);
+        assert!(busy_reason(&a, 0).unwrap().contains("foreground"));
         let bg = Activity {
             background: vec!["me.ash.reader".into()],
             ..Activity::default()
         };
-        assert!(bg.busy(0).unwrap().contains("me.ash.reader"));
-        assert!(
-            Activity {
-                windows: 1,
-                ..Activity::default()
-            }
-            .busy(0)
-            .is_some()
-        );
+        assert!(busy_reason(&bg, 0).unwrap().contains("me.ash.reader"));
+        let window = Activity {
+            windows: 1,
+            ..Activity::default()
+        };
+        assert!(busy_reason(&window, 0).is_some());
     }
 
     #[test]
@@ -295,11 +248,11 @@ mod tests {
             ..Activity::default()
         };
         let now = 1_000_000_000;
-        assert!(at(1_000_000 + 60).busy(now).is_some());
+        assert!(busy_reason(&at(1_000_000 + 60), now).is_some());
         // Just past: ringing now. Long past: stale.
-        assert!(at(999_990).busy(now).is_some());
-        assert_eq!(at(990_000).busy(now), None);
-        assert_eq!(at(1_000_000 + 600).busy(now), None);
+        assert!(busy_reason(&at(999_990), now).is_some());
+        assert_eq!(busy_reason(&at(990_000), now), None);
+        assert_eq!(busy_reason(&at(1_000_000 + 600), now), None);
     }
 
     #[test]

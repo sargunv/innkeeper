@@ -42,11 +42,11 @@ own; `cargo test -p innkeeper-core` tests it.
   (`preferences.rs`) go through the bridge's session D-Bus API, or are saved for
   the next start when no session runs.
 - **Paths** (`paths.rs`): the prefix relative to the running executable and the
-  XDG dirs. A profile's own paths and settings come from the launcher's library
-  ([host/launcher](../launcher/README.md)).
+  XDG dirs. A profile's own paths and settings come from `innkeeper-profile`
+  (`host/profile`), which the launcher shares.
 - **Session** (`launcher.rs`): starts the session on demand and waits for boot
-  and user unlock. Whether it runs and whether the image is ready come from the
-  launcher's library, in-process; start, stop and `exec` run
+  and user unlock. Whether it runs and whether the image is ready come from
+  `innkeeper-profile`, in-process; start, stop and `exec` run
   `innkeeper-session`, whose `exec` must join the session from a single-threaded
   process. Commands inside Android are argv, never shell strings.
 - **Errors** (`errors.rs`): `ErrorKind` context on anyhow errors lets front ends

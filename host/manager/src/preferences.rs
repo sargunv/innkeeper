@@ -5,8 +5,10 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use innkeeper_core::preferences::{self, Preferences};
-use innkeeper_core::profiles::{self, Display, Settings};
+use innkeeper_core::preferences;
+use innkeeper_core::profiles;
+use innkeeper_profile::preferences::Preferences;
+use innkeeper_profile::profile::{Display, Settings};
 
 use crate::{
     errors::Op,

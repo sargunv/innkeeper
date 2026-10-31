@@ -11,7 +11,7 @@ pub const PATH: &str = "/dev/sargunv/Innkeeper/Session";
 pub const MAX_JSON: usize = 64 * 1024;
 
 /// The session's bus name: `.p_<name>`, with hyphens as underscores.
-pub fn bus_name(profile: &crate::paths::ProfileName) -> String {
+pub fn bus_name(profile: &innkeeper_profile::profile::ProfileName) -> String {
     format!(
         "dev.sargunv.Innkeeper.Session.p_{}",
         profile.replace('-', "_")
@@ -208,7 +208,9 @@ impl WindowResponse {
 }
 
 /// Profile `profile`'s running session's Session1 object.
-fn proxy(profile: &crate::paths::ProfileName) -> Result<zbus::blocking::Proxy<'static>> {
+fn proxy(
+    profile: &innkeeper_profile::profile::ProfileName,
+) -> Result<zbus::blocking::Proxy<'static>> {
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(45))
         .build()?;
@@ -223,7 +225,7 @@ fn proxy(profile: &crate::paths::ProfileName) -> Result<zbus::blocking::Proxy<'s
 
 /// Starts Android if needed, then calls the bridge over the desktop bus.
 pub fn request(
-    profile: &crate::paths::ProfileName,
+    profile: &innkeeper_profile::profile::ProfileName,
     command: Command,
     report: crate::ops::Report,
 ) -> Result<AppInfo> {
@@ -304,7 +306,7 @@ fn launch_args<'a>(
 /// per app). Returns the window manager's reply (`launched display=N ...` or
 /// `focused ...`).
 pub fn launch(
-    profile: &crate::paths::ProfileName,
+    profile: &innkeeper_profile::profile::ProfileName,
     l: &crate::android::Launch,
     o: &crate::android::LaunchOptions,
 ) -> Result<String> {
@@ -314,14 +316,14 @@ pub fn launch(
 }
 
 /// Profile `profile`'s windows, one line each (`display=N package=P ...`).
-pub fn windows(profile: &crate::paths::ProfileName) -> Result<Vec<String>> {
+pub fn windows(profile: &innkeeper_profile::profile::ProfileName) -> Result<Vec<String>> {
     Ok(proxy(profile)?.call("Windows", &())?)
 }
 
 /// A read-only grant on the running session's bridge for `file` (only its
 /// fd reaches the bridge, never its path), shown to Android as `name`.
 pub fn import(
-    profile: &crate::paths::ProfileName,
+    profile: &innkeeper_profile::profile::ProfileName,
     file: &std::fs::File,
     name: &str,
 ) -> Result<u64> {
@@ -451,7 +453,7 @@ mod tests {
         );
         assert!(Response::decode(&vec![b' '; MAX_JSON + 1]).is_err());
         assert_eq!(
-            bus_name(&crate::paths::ProfileName::new("page-test").unwrap()),
+            bus_name(&innkeeper_profile::profile::ProfileName::new("page-test").unwrap()),
             "dev.sargunv.Innkeeper.Session.p_page_test"
         );
     }

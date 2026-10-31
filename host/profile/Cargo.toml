@@ -1,0 +1,13 @@
+[package]
+name = "innkeeper-profile"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Innkeeper profiles as the launcher and host/core share them: names, settings, paths, status"
+
+[dependencies]
+anyhow = "1.0.104"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
+toml = "1"

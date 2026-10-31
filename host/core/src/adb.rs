@@ -1,11 +1,11 @@
-//! adb into a profile ([`innkeeper_session::adb`]): turning it on and off,
+//! adb into a profile ([`innkeeper_profile::adb`]): turning it on and off,
 //! live if the profile runs, and telling the user's adb server about it.
 
 use std::time::Duration;
 
 use anyhow::Result;
-use innkeeper_session::adb;
-use innkeeper_session::profile::Settings;
+use innkeeper_profile::adb;
+use innkeeper_profile::profile::Settings;
 
 use crate::launcher::Session;
 use crate::ops::{Event, Report};

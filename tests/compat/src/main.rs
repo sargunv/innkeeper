@@ -134,7 +134,7 @@ fn real_main() -> Result<ExitCode> {
         bail!("no apps selected");
     }
     let out = repo.join("out/test/compat").join(
-        innkeeper_core::paths::ProfileName::new(
+        innkeeper_profile::profile::ProfileName::new(
             &std::env::var("INNKEEPER_PROFILE").unwrap_or_default(),
         )?
         .as_str(),

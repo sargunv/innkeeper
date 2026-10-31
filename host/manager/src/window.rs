@@ -11,8 +11,8 @@ use gtk::{gdk, gio, glib};
 use innkeeper_core::desktop::{MANAGER_ID, PREFIX};
 use innkeeper_core::launcher::{Session, Status};
 use innkeeper_core::ops::{self, Event};
-use innkeeper_core::paths::ProfileName;
 use innkeeper_core::xdg::{DesktopApp, Dirs};
+use innkeeper_profile::profile::ProfileName;
 
 use crate::errors::{self, Op};
 use crate::{install, worker};

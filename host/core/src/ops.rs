@@ -12,9 +12,9 @@ use crate::android::{self, Launch};
 use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
 use crate::launcher::Session;
-use crate::paths::ProfileName;
 use crate::xdg::{self, DesktopApp, Dirs};
 use crate::{ErrorKind, validate};
+use innkeeper_profile::profile::ProfileName;
 
 /// Progress from a long operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,7 +294,7 @@ pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
     let d = Dirs::from_env();
     let background = s
         .paths()
-        .and_then(|p| innkeeper_session::lifecycle::Activity::read(&p))
+        .and_then(|p| innkeeper_profile::activity::Activity::read(&p))
         .map(|a| a.background);
     Ok(android::user_packages(&s)?
         .into_iter()

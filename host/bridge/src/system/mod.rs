@@ -80,7 +80,7 @@ impl Shared {
         run_dir: &std::path::Path,
         desktop: bool,
         input: Arc<crate::input::Hub>,
-        profile: &innkeeper_core::paths::ProfileName,
+        profile: &innkeeper_profile::profile::ProfileName,
     ) -> Arc<Shared> {
         if !desktop {
             crate::info!("system: test session (log-only sinks)");
@@ -90,7 +90,7 @@ impl Shared {
             handoffs: handoff::Handoffs::new(input, profile),
             lifecycle: run_dir.join("lifecycle"),
             lifecycle_owner: Default::default(),
-            clipboard_cache: innkeeper_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
+            clipboard_cache: innkeeper_profile::paths::xdg_home("XDG_CACHE_HOME", ".cache")
                 .join(format!("innkeeper-{profile}/clipboard")),
             desktop,
             dbus: OnceLock::new(),
@@ -637,7 +637,7 @@ mod tests {
             &dir,
             false,
             crate::input::Hub::new(),
-            &innkeeper_core::paths::ProfileName::new("t").unwrap(),
+            &innkeeper_profile::profile::ProfileName::new("t").unwrap(),
         );
         // Gating the hub itself prevents both clipboard publication and subscriptions,
         // and even a NOTIFY_CLOSE must not connect to the real notification server.

@@ -152,7 +152,7 @@ fn filtered(settings: Settings) -> Settings {
     )
 }
 
-fn filter(mut settings: Settings, p: &innkeeper_core::profiles::Settings) -> Settings {
+fn filter(mut settings: Settings, p: &innkeeper_profile::profile::Settings) -> Settings {
     if !p.follow_dark {
         settings.color_scheme = 0;
     }
@@ -432,9 +432,9 @@ mod tests {
             contrast: 1,
             ..Settings::default()
         };
-        let p = innkeeper_core::profiles::Settings::default();
+        let p = innkeeper_profile::profile::Settings::default();
         assert_eq!(filter(settings.clone(), &p), settings);
-        let off = innkeeper_core::profiles::Settings {
+        let off = innkeeper_profile::profile::Settings {
             follow_dark: false,
             follow_accent: false,
             follow_clock: false,

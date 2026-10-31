@@ -42,21 +42,17 @@ impl Prefix {
 
     /// The runtime paths of the profile in `INNKEEPER_PROFILE`: for programs
     /// the launcher starts, such as the bridge.
-    pub fn session_paths(&self) -> Result<innkeeper_session::Paths> {
-        innkeeper_session::Paths::new(&self.0)
+    pub fn session_paths(&self) -> Result<innkeeper_profile::Paths> {
+        innkeeper_profile::Paths::new(&self.0)
     }
 
     /// Runtime paths of profile `name`.
-    pub fn profile_paths(&self, name: &str) -> Result<innkeeper_session::Paths> {
-        innkeeper_session::Paths::for_profile(&self.0, name)
+    pub fn profile_paths(&self, name: &str) -> Result<innkeeper_profile::Paths> {
+        innkeeper_profile::Paths::for_profile(&self.0, name)
     }
 }
 
-pub use innkeeper_session::profile::ProfileName;
-
-/// An XDG base directory: `$var` if it is absolute, else `default` under
-/// `$HOME`.
-pub use innkeeper_session::paths::xdg_home;
+use innkeeper_profile::profile::ProfileName;
 
 /// The argv that runs the CLI ([`crate::xdg::INNKEEPER`]) against profile
 /// `profile` with `args`: `innkeeper --profile <profile> <args>`.

@@ -13,9 +13,10 @@ use clap::{Parser, Subcommand};
 use innkeeper_core::android::Launch;
 use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
-use innkeeper_core::paths::ProfileName;
-use innkeeper_core::profiles::{self, Settings};
+use innkeeper_core::profiles;
 use innkeeper_core::{desktop, validate, xdg};
+use innkeeper_profile::profile::ProfileName;
+use innkeeper_profile::profile::Settings;
 use rustix::fs::{FileType, OFlags};
 
 mod splash;
@@ -25,7 +26,7 @@ use splash::Splash;
 #[command(name = "innkeeper", version, about = "Run Android apps on Linux")]
 struct Cli {
     /// The profile to work with, a name from `profile list`.
-    #[arg(long, global = true, value_name = "NAME", default_value = profiles::FIRST)]
+    #[arg(long, global = true, value_name = "NAME", default_value = innkeeper_profile::profile::FIRST)]
     profile: String,
     #[command(subcommand)]
     cmd: Cmd,
@@ -172,7 +173,7 @@ struct SetArgs {
 
 impl SetArgs {
     /// The profile settings to change, if any, applied to `s`.
-    fn apply(&self, s: &mut profiles::Settings) -> bool {
+    fn apply(&self, s: &mut innkeeper_profile::profile::Settings) -> bool {
         let on = |v: &Option<String>| v.as_deref().map(|v| v == "on");
         let mut changed = false;
         let mut set = |field: &mut bool, v: Option<bool>| {
@@ -186,7 +187,11 @@ impl SetArgs {
         set(&mut s.follow_accent, on(&self.follow_accent));
         set(&mut s.follow_locale, on(&self.follow_locale));
         set(&mut s.follow_clock, on(&self.follow_clock));
-        if let Some(d) = self.display.as_deref().and_then(profiles::Display::parse) {
+        if let Some(d) = self
+            .display
+            .as_deref()
+            .and_then(innkeeper_profile::profile::Display::parse)
+        {
             s.display = d;
             changed = true;
         }
@@ -533,7 +538,7 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
 
 /// `profile set`.
 fn set(name: &str, args: &SetArgs) -> Result<()> {
-    let mut probe = profiles::Settings::default();
+    let mut probe = innkeeper_profile::profile::Settings::default();
     let profile_change = args.apply(&mut probe);
     ensure!(
         profile_change || args.adb.is_some() || args.keep_running.is_some(),
@@ -548,7 +553,7 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
         }
     }
     if let Some(on) = &args.keep_running {
-        innkeeper_core::preferences::save(innkeeper_core::preferences::Preferences {
+        innkeeper_core::preferences::save(innkeeper_profile::preferences::Preferences {
             keep_running: on == "on",
         })?;
     }
@@ -679,12 +684,12 @@ mod tests {
         let Cmd::Profile(ProfileCmd::Set(a)) = cli.cmd else {
             panic!("profile set did not parse");
         };
-        let mut s = profiles::Settings {
+        let mut s = innkeeper_profile::profile::Settings {
             mirror_apps: false,
             ..Default::default()
         };
         assert!(a.apply(&mut s));
-        assert_eq!(s.display, profiles::Display::SmallPhone);
+        assert_eq!(s.display, innkeeper_profile::profile::Display::SmallPhone);
         assert_eq!(s.idle_minutes, 30);
         assert!(!s.follow_dark && s.follow_accent && s.mirror_apps);
         // Global and live-applied ones aren't profile file changes.
@@ -692,7 +697,7 @@ mod tests {
         else {
             panic!("profile set did not parse");
         };
-        assert!(!a.apply(&mut profiles::Settings::default()));
+        assert!(!a.apply(&mut innkeeper_profile::profile::Settings::default()));
         for bad in [
             "profile set --idle-minutes 0",
             "profile set --idle-minutes 121",

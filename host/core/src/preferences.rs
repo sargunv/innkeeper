@@ -1,12 +1,12 @@
 //! Innkeeper's own preferences, shared by every profile
-//! ([`innkeeper_session::preferences`]): Keep Running, with the Background
+//! ([`innkeeper_profile::preferences`]): Keep Running, with the Background
 //! portal's login command. Running sessions read them as they poll.
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
 use zbus::zvariant::{OwnedValue, Value};
 
-pub use innkeeper_session::preferences::Preferences;
+use innkeeper_profile::preferences::Preferences;
 
 /// Set the Background portal's login command. Never create an autostart file.
 fn autostart(enabled: bool) -> Result<()> {

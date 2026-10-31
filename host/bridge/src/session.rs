@@ -214,7 +214,7 @@ impl Relay {
         apps: Arc<crate::apps::Config>,
         documents: Arc<crate::documents::Store>,
         input: Arc<crate::input::Hub>,
-        profile: &innkeeper_core::paths::ProfileName,
+        profile: &innkeeper_profile::profile::ProfileName,
     ) -> anyhow::Result<zbus::blocking::Connection> {
         let relay = self.clone();
         input.watch_windows(move || relay.changed());
