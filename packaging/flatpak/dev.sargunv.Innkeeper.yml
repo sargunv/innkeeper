@@ -55,13 +55,11 @@ modules:
         "vendored"\n[source.vendored]\ndirectory = "vendor"\n'
         >cargo/config.toml
       - tools/build/host.sh
-      - cp -a out/build/host/install/. out/build/launcher/install/. /app/
+      - cp -a out/build/host/install/. /app/
       # This module's rows of the stage manifest (tools/build/stage.sh).
       - |
-        for m in host launcher; do
-          (cd out/build/$m/install && find . -type f -printf '%P\n' | sort | while read -r p; do
-            printf '%s\t%s\t%s\n' "$p" "$m" "$(sha256sum <"$p" | cut -d' ' -f1)"
-          done)
+        cd out/build/host/install && find . -type f -printf '%P\n' | sort | while read -r p; do
+          printf '%s\thost\t%s\n' "$p" "$(sha256sum <"$p" | cut -d' ' -f1)"
         done >>/app/share/innkeeper/manifest.tsv
     sources:
       - type: dir

@@ -10,7 +10,7 @@ members = [
   "tests/bench",
 ]
 # A plain `cargo build` builds only what runs on the desktop: the broker is a
-# bionic binary (`mise run build:supervisor`) and compat is a test harness.
+# bionic binary (`mise run build:ndk`) and compat is a test harness.
 default-members = [
   "host/bridge",
   "host/cli",

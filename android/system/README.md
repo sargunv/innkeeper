@@ -1,6 +1,6 @@
 # system
 
-`/system/bin` additions, built by `mise run build:system` and staged under
+`/system/bin` additions, built by `mise run build:ndk` and staged under
 `share/innkeeper/android/system/`.
 
 - **`exec/`: `innkeeper-exec`** (static C, NDK superbuild) and its rc. Binder

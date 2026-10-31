@@ -55,8 +55,7 @@ if(ANDROID)
     TARGETS frame_sink
     LIBRARY
       DESTINATION
-                  share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/lib/x86_64
-      COMPONENT graphics)
+                  share/innkeeper/android/system_ext/priv-app/InnkeeperSystem/lib/x86_64)
   # Link-only stub for LL-NDK libbinder_ndk, including platform symbols that
   # the public NDK stub omits (AServiceManager_addService, ...).
   set(STUB ${CMAKE_CURRENT_BINARY_DIR}/libbinder_ndk_stub)
@@ -145,19 +144,12 @@ if(ANDROID)
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-vendor/bin)
 
   set(VENDOR ${INNKEEPER_ANDROID}/vendor)
-  install(
-    TARGETS allocator composer
-    RUNTIME DESTINATION ${VENDOR}/bin/hw COMPONENT graphics)
-  install(
-    TARGETS mapper
-    LIBRARY DESTINATION ${VENDOR}/lib64/hw COMPONENT graphics)
+  install(TARGETS allocator composer RUNTIME DESTINATION ${VENDOR}/bin/hw)
+  install(TARGETS mapper LIBRARY DESTINATION ${VENDOR}/lib64/hw)
   file(GLOB INIT_RCS etc/init/*.rc)
-  install(FILES ${INIT_RCS} DESTINATION ${VENDOR}/etc/init COMPONENT graphics)
+  install(FILES ${INIT_RCS} DESTINATION ${VENDOR}/etc/init)
   file(GLOB VINTF_XMLS etc/vintf/*.xml)
-  install(
-    FILES ${VINTF_XMLS}
-    DESTINATION ${VENDOR}/etc/vintf/manifest
-    COMPONENT graphics)
+  install(FILES ${VINTF_XMLS} DESTINATION ${VENDOR}/etc/vintf/manifest)
 else()
   add_executable(host_clock_test tests/host/host_clock_test.cpp)
   target_include_directories(host_clock_test PRIVATE ${HAL}/composer)

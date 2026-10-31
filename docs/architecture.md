@@ -54,9 +54,9 @@ network ([session.md](session.md)).
 
 ## Modules
 
-What each directory builds and where it runs.
-[tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
-module stages.
+What each directory builds and where it runs. The stage's
+`share/innkeeper/manifest.tsv` lists every staged file and the module that built
+it.
 
 | Dir                                                             | Artifact                                            | Runs                                                          | Start reading at                |
 | --------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------- | ------------------------------- |
@@ -79,7 +79,7 @@ module stages.
 | [android/overlay](../android/overlay/README.md)                 | config files over the image's partitions            | Android                                                       | its README                      |
 | [tests](../tests/README.md)                                     | test harnesses and suites                           | desktop, never shipped                                        | its README                      |
 | [packaging/flatpak](../packaging/flatpak/README.md)             | the Flatpak, `dev.sargunv.Innkeeper`                | build time                                                    | `build.sh`                      |
-| [tools](../tools/README.md)                                     | build container, staging, dev scripts               | build time                                                    | `build/artifacts.toml`          |
+| [tools](../tools/README.md)                                     | build container, staging, dev scripts               | build time                                                    | `build/stage.sh`                |
 
 ## Decisions
 

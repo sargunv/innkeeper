@@ -32,7 +32,7 @@ RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
 
 # ---- build -------------------------------------------------------------------
 # Each build:<module> fills out/build/<module>/install/, a tree of paths
-# relative to the stage prefix; `stage` merges them into out/stage.
+# relative to the stage prefix; `build` merges them into out/stage.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"
@@ -43,56 +43,24 @@ run = "tools/build/stage.sh"
 description = "innkeeper, innkeeper-manager, innkeeper-bridge, innkeeper-session, the manager's desktop data"
 run = "tools/build/host.sh"
 
-# The NDK superbuild (CMakeLists.txt) that the modules below install from.
-[tasks.ndk]
-hide = true
+[tasks."build:ndk"]
+description = "Android's C/C++ (the NDK superbuild: shim, HALs, exec relay), the firewall front ends and the broker"
 run = """
 set -euo pipefail
 tools/build/sccache.sh cmake --preset android >/dev/null
 tools/build/sccache.sh cmake --build --preset android
-"""
-
-[tasks."build:supervisor"]
-description = "The broker and the shim"
-depends = ["ndk"]
-run = """
-set -euo pipefail
-tools/build/install-component.sh supervisor
+i=out/build/ndk/install
+rm -rf "$i"
+cmake --install out/build/android --strip --prefix "$i" >/dev/null
 cargo build -q --release --target x86_64-linux-android -p innkeeper-broker --bin innkeeper-brk
 install -D -m 755 -s --strip-program="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
   out/cargo/x86_64-linux-android/release/innkeeper-brk \
-  out/build/supervisor/install/share/innkeeper/android/system/bin/innkeeper-brk
+  "$i/share/innkeeper/android/system/bin/innkeeper-brk"
 """
-
-[tasks."build:graphics"]
-description = "The display HALs: allocator, mapper, composer"
-depends = ["ndk"]
-run = "tools/build/install-component.sh graphics"
-
-[tasks."build:health"]
-description = "The Health HAL: the host's battery for Android"
-depends = ["ndk"]
-run = "tools/build/install-component.sh health"
 
 [tasks."build:vulkan"]
 description = "Mesa RADV, ANV and lavapipe (build container; skipped when its inputs are unchanged)"
 run = "android/vendor/vulkan/build.sh"
-
-[tasks."build:audio"]
-description = "The audio module (IModule/innkeeper) for the audio HAL's APEX, the policy XML and audio.prop"
-depends = ["ndk"]
-run = "tools/build/install-component.sh audio"
-
-[tasks."build:system"]
-description = "The exec relay and no-op firewall front ends"
-depends = ["ndk"]
-run = """
-set -euo pipefail
-tools/build/install-component.sh system
-d=out/build/system/install/share/innkeeper/android/system/bin
-install -m 755 android/system/iptables/innkeeper-iptables "$d/"
-for f in iptables iptables-restore ip6tables ip6tables-restore; do cp -P "android/system/iptables/$f" "$d/"; done
-"""
 
 [tasks."build:system-app"]
 description = "InnkeeperSystem.apk, platform-signed; InnkeeperProbes.apk for the tests (out/test/probes)"
@@ -123,10 +91,6 @@ run = "ohos/build.sh"
 description = "Build the stage and the Flatpak bundle in out/release/ (-- [stable] [--install])"
 depends = ["build"]
 run = "packaging/flatpak/build.sh"
-
-[tasks.stage]
-description = "Merge the module install trees into out/stage (and write its manifest)"
-run = "tools/build/stage.sh"
 
 [tasks.clean]
 description = "Remove build output (out/build, out/stage, out/cargo, the probes APK in out/test/probes); keeps test results"

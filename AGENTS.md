@@ -11,7 +11,7 @@ what each directory is and where it runs.
   `tools/build/toolchain.env` pins the NDK, API and build-tools.
 - `mise run check` / `mise run fix`: lint and format everything (hk, dprint).
   The pre-commit hook runs hk on staged files; fix lints, never bypass it.
-- `mise run build`: every `build:<module>`, then `stage` into `out/stage`.
+- `mise run build`: every `build:<module>`, staged into `out/stage`.
   `mise run clean` removes build output.
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare`.
 - `mise run test` (unit), `test:e2e` (grouped runtime checks), `test:bionic`,

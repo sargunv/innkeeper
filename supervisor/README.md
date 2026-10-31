@@ -2,8 +2,8 @@
 
 The syscall boundary between the host kernel and Android. One seccomp filter,
 installed on Android's init and inherited by every Android process, turns what
-an unprivileged namespace can't do into user notifications.
-`mise run build:supervisor` builds both artifacts.
+an unprivileged namespace can't do into user notifications. `mise run build:ndk`
+builds both artifacts.
 
 | Dir      | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
 | -------- | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |

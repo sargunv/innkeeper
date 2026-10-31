@@ -33,15 +33,13 @@ if(ANDROID)
     PRIVATE innkeeper_health_battery innkeeper_bridge_client binder_ndk_stub log)
 
   set(VENDOR ${INNKEEPER_ANDROID}/vendor)
-  install(TARGETS health RUNTIME DESTINATION ${VENDOR}/bin/hw COMPONENT health)
+  install(TARGETS health RUNTIME DESTINATION ${VENDOR}/bin/hw)
   install(
     FILES etc/init/android.hardware.health-service.innkeeper.rc
-    DESTINATION ${VENDOR}/etc/init
-    COMPONENT health)
+    DESTINATION ${VENDOR}/etc/init)
   install(
     FILES etc/vintf/android.hardware.health-service.innkeeper.xml
-    DESTINATION ${VENDOR}/etc/vintf/manifest
-    COMPONENT health)
+    DESTINATION ${VENDOR}/etc/vintf/manifest)
 else()
   add_executable(health_battery_test tests/battery_test.c)
   target_link_libraries(health_battery_test PRIVATE innkeeper_health_battery)

@@ -13,7 +13,7 @@
 // relays its exit status, and kills the command's process group if the client
 // goes away. This is what adbd does for `adb shell`.
 //
-// Built static with the NDK (build:system). The socket lives on the
+// Built static with the NDK (build:ndk). The socket lives on the
 // session's private /dev, mode 0600 root, so only root inside the session can
 // use it, and it grants nothing joining the namespaces doesn't already give.
 #define _GNU_SOURCE
