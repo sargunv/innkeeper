@@ -24,12 +24,12 @@
 
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 
 use crate::creds::table::{self, CredTable, Creds, SetId};
+use crate::fs::Fs;
 use crate::notify::{
-    MemFd, PinnedMem, SeccompNotif, mem_read, mem_read_path, mem_write, notif_id_valid, open_mem,
+    Listener, MemFd, PinnedMem, Pool, SeccompNotif, mem_read, mem_read_path, mem_write, open_mem,
     read_path, status_field, vm_read,
 };
 
@@ -56,21 +56,6 @@ pub(crate) enum Answer {
     Deferred,
     /// Let the kernel run it.
     Continue,
-}
-
-/// Counters, logged every 10 s when tracing is on (`INNKEEPER_BROKER_DEBUG`).
-#[derive(Default)]
-struct Stats {
-    getid: AtomicU64,
-    setid: AtomicU64,
-    chown: AtomicU64,
-    peercred: AtomicU64,
-    lstat_trapped: AtomicU64,
-    lstat_emulated: AtomicU64,
-    status: AtomicU64,
-    access: AtomicU64,
-    /// Time spent answering on the receive thread, ns.
-    busy_ns: AtomicU64,
 }
 
 /// Could `path` (absolute) carry a recorded owner? Never true for FUSE mounts
@@ -135,112 +120,58 @@ struct Job {
 
 pub(crate) struct Vid {
     table: Mutex<CredTable>,
-    listener: RawFd,
-    resp_sz: usize,
-    jobs: Mutex<mpsc::Sender<Job>>,
-    stats: Stats,
+    listener: Listener,
+    pool: Arc<Pool>,
+    fs: Arc<Fs>,
+    /// Init's pid, which SO_PEERCRED shows as 1: init isn't pid 1, but its
+    /// property service treats a peer that isn't as a client (and init's own
+    /// setprop from its restorecon thread as a new restorecon request,
+    /// forever).
+    init: i32,
 }
 
 impl Vid {
-    pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Arc<Vid> {
-        let (tx, rx) = mpsc::channel::<Job>();
-        let v = Arc::new(Vid {
+    pub(crate) fn new(listener: Listener, pool: Arc<Pool>, fs: Arc<Fs>, init: i32) -> Arc<Vid> {
+        Arc::new(Vid {
             table: Mutex::new(CredTable::new()),
             listener,
-            resp_sz,
-            jobs: Mutex::new(tx),
-            stats: Stats::default(),
-        });
-        let rx = Arc::new(Mutex::new(rx));
-        for _ in 0..4 {
-            let v = Arc::clone(&v);
-            let rx = Arc::clone(&rx);
-            std::thread::spawn(move || {
-                loop {
-                    let job = match rx.lock().unwrap().recv() {
-                        Ok(j) => j,
-                        Err(_) => return,
-                    };
-                    // A queued job's task may be gone (signal, exit, exec)
-                    // and its tid reused: pin the address space tid has
-                    // now, then drop the job unless tid is still the caller.
-                    // The job's memory access goes through that pinned fd,
-                    // so nothing reaches a later image.
-                    let mem = open_mem(job.tid);
-                    if !notif_id_valid(v.listener, job.id) {
-                        continue;
-                    }
-                    let Some(mem) = mem else {
-                        v.finish(job.id, Answer::Errno(libc::ESRCH));
-                        continue;
-                    };
-                    let mem = mem.raw();
-                    let t = std::time::Instant::now();
-                    let r = match job.nr {
-                        libc::SYS_newfstatat => lstat(&job, v.listener, mem),
-                        libc::SYS_faccessat | SYS_FACCESSAT2 => access(&job),
-                        _ => chown(&job, v.listener, mem),
-                    };
-                    v.finish(job.id, r);
-                    let dt = t.elapsed();
-                    if dt.as_millis() >= 500 {
-                        eprintln!(
-                            "vid: slow syscall {} by tid {}: {} ms ({})",
-                            job.nr,
-                            job.tid,
-                            dt.as_millis(),
-                            String::from_utf8_lossy(&job.path)
-                        );
-                    }
-                }
-            });
-        }
-        if crate::DEBUG.load(Ordering::Relaxed) {
-            let v = Arc::clone(&v);
-            std::thread::spawn(move || v.report());
-        }
-        v
+            pool,
+            fs,
+            init,
+        })
     }
 
-    fn report(&self) {
-        let mut last = String::new();
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(10));
-            let s = &self.stats;
-            let g = |c: &AtomicU64| c.load(Ordering::Relaxed);
-            let line = format!(
-                "vid: getid={} setid={} chown={} peercred={} lstat={}/{} emulated, status={} access={} busy={}ms creds={}",
-                g(&s.getid),
-                g(&s.setid),
-                g(&s.chown),
-                g(&s.peercred),
-                g(&s.lstat_emulated),
-                g(&s.lstat_trapped),
-                g(&s.status),
-                g(&s.access),
-                g(&s.busy_ns) / 1_000_000,
-                self.table.lock().unwrap().len()
-            );
-            if line != last {
-                crate::log(format_args!("{line}"));
-                last = line;
-            }
+    /// Run a chown, lstat or access on a worker thread.
+    fn run(&self, job: Job) {
+        // A queued job's task may be gone (signal, exit, exec) and its tid
+        // reused: pin the address space tid has now, then drop the job unless
+        // tid is still the caller. The job's memory access goes through that
+        // pinned fd, so nothing reaches a later image.
+        let mem = open_mem(job.tid);
+        if !self.listener.valid(job.id) {
+            return;
         }
+        let Some(mem) = mem else {
+            return self.finish(job.id, Answer::Errno(libc::ESRCH));
+        };
+        let mem = mem.raw();
+        let r = match job.nr {
+            libc::SYS_newfstatat => lstat(&job, self, mem),
+            libc::SYS_faccessat | SYS_FACCESSAT2 => access(&job, &self.fs),
+            _ => chown(&job, self, mem),
+        };
+        self.finish(job.id, r);
     }
 
-    /// Time and answer one notification on the receive thread.
-    pub(crate) fn serve(&self, req: &SeccompNotif) {
-        let t = std::time::Instant::now();
+    /// Answer one notification on the receive thread.
+    pub(crate) fn serve(self: &Arc<Self>, req: &SeccompNotif) {
         let a = self.handle(req);
         self.finish(req.id, a);
-        self.stats
-            .busy_ns
-            .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
     fn finish(&self, id: u64, a: Answer) {
         if matches!(a, Answer::Continue) {
-            crate::notify::send_resp(self.listener, self.resp_sz, id, 0, 0, true);
+            self.listener.cont(id);
         } else {
             self.send(id, a);
         }
@@ -266,18 +197,17 @@ impl Vid {
     pub(crate) fn send(&self, id: u64, a: Answer) {
         let (val, error) = match a {
             Answer::Val(v) => (v, 0),
-            Answer::Errno(e) => (0, -e.abs()),
+            Answer::Errno(e) => (0, e),
             Answer::Deferred | Answer::Continue => return,
         };
-        crate::notify::send_resp(self.listener, self.resp_sz, id, val, error, false);
+        self.listener.reply(id, val, error);
     }
 
     /// Answer one notification (see the module docs).
-    pub(crate) fn handle(&self, req: &SeccompNotif) -> Answer {
+    fn handle(self: &Arc<Self>, req: &SeccompNotif) -> Answer {
         let tid = req.pid as i32;
         let nr = req.data.nr as i64;
         let a = req.data.args;
-        let st = &self.stats;
         let mut path = Vec::new();
         let mut job_creds = None;
         if nr == libc::SYS_faccessat || nr == SYS_FACCESSAT2 {
@@ -294,20 +224,12 @@ impl Vid {
                 Some(p) if owner_tracked(&p) => path = p,
                 _ => return Answer::Continue,
             }
-            st.access.fetch_add(1, Ordering::Relaxed);
             job_creds = Some(c);
         } else if nr == libc::SYS_newfstatat {
-            st.lstat_trapped.fetch_add(1, Ordering::Relaxed);
             match read_path(tid, a[1]) {
                 Some(p) if owner_tracked(&p) => path = p,
                 _ => return Answer::Continue,
             }
-            st.lstat_emulated.fetch_add(1, Ordering::Relaxed);
-        } else if matches!(
-            nr,
-            libc::SYS_chown | libc::SYS_fchown | libc::SYS_lchown | libc::SYS_fchownat
-        ) {
-            st.chown.fetch_add(1, Ordering::Relaxed);
         }
         if job_creds.is_some()
             || !path.is_empty()
@@ -324,28 +246,12 @@ impl Vid {
                 path,
                 creds: job_creds,
             };
-            return match self.jobs.lock().unwrap().send(job) {
-                Ok(()) => Answer::Deferred,
-                Err(_) => Answer::Errno(libc::EAGAIN),
-            };
+            let v = Arc::clone(self);
+            self.pool.run(move || v.run(job));
+            return Answer::Deferred;
         }
         if nr == libc::SYS_getsockopt {
-            st.peercred.fetch_add(1, Ordering::Relaxed);
             return self.peercred(req.id, tid, a);
-        }
-        if matches!(
-            nr,
-            libc::SYS_getuid
-                | libc::SYS_geteuid
-                | libc::SYS_getgid
-                | libc::SYS_getegid
-                | libc::SYS_getresuid
-                | libc::SYS_getresgid
-                | libc::SYS_getgroups
-        ) {
-            st.getid.fetch_add(1, Ordering::Relaxed);
-        } else {
-            st.setid.fetch_add(1, Ordering::Relaxed);
         }
         let Some(c) = self.creds(tid) else {
             return Answer::Errno(libc::ESRCH);
@@ -456,15 +362,7 @@ impl Vid {
         let Some(which) = table::parse_proc_status(&path) else {
             return false;
         };
-        let t = std::time::Instant::now();
-        let r = self.serve_status(req, which);
-        self.stats
-            .busy_ns
-            .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        if r {
-            self.stats.status.fetch_add(1, Ordering::Relaxed);
-        }
-        r
+        self.serve_status(req, which)
     }
 
     fn serve_status(&self, req: &SeccompNotif, which: table::ProcStatus) -> bool {
@@ -502,24 +400,11 @@ impl Vid {
         {
             return false;
         }
-        let add = crate::notify::SeccompNotifAddfd {
-            id: req.id,
-            flags: crate::notify::SECCOMP_ADDFD_FLAG_SEND,
-            srcfd: fd.as_raw_fd() as u32,
-            newfd: 0,
-            newfd_flags: (req.data.args[2] as u32) & libc::O_CLOEXEC as u32,
-        };
-        let r = unsafe {
-            libc::ioctl(
-                self.listener,
-                crate::notify::notif_addfd_cmd(size_of::<crate::notify::SeccompNotifAddfd>()) as _,
-                &add as *const _,
-            )
-        };
         // On failure the target is gone (or the id went stale): it was
-        // answered either way only if r >= 0; otherwise let the kernel run it.
-        r >= 0 || {
-            crate::notify::send_resp(self.listener, self.resp_sz, req.id, 0, 0, true);
+        // answered either way only if this succeeds; otherwise let the kernel
+        // run it.
+        self.listener.open_with(req, fd.as_raw_fd()) >= 0 || {
+            self.listener.cont(req.id);
             true
         }
     }
@@ -530,7 +415,7 @@ impl Vid {
     /// writing by numeric tid could reach the new image.
     fn pin(&self, id: u64, tid: i32) -> Result<PinnedMem, Answer> {
         let mem = open_mem(tid);
-        if !notif_id_valid(self.listener, id) {
+        if !self.listener.valid(id) {
             return Err(Answer::Deferred);
         }
         mem.ok_or(Answer::Errno(libc::ESRCH))
@@ -584,7 +469,7 @@ impl Vid {
                     uc.gid = AID_NOBODY;
                 }
             }
-            uc.pid = crate::fs::init_as_pid1(peer);
+            uc.pid = if peer == self.init { 1 } else { peer };
         }
         let n = (len as usize).min(size_of::<libc::ucred>());
         let bytes: [u8; 12] = unsafe { std::mem::transmute(uc) };
@@ -713,11 +598,12 @@ struct OpenHow {
 
 /// Resolve `path` (relative to `dirfd`, which is AT_FDCWD or a fd number in
 /// the target) inside thread `tid`'s root, as an O_PATH fd.
-fn resolve(tid: i32, dirfd: i32, path: &[u8], nofollow: bool) -> Result<OwnedFd, i32> {
-    resolve_how(tid, dirfd, path, nofollow, 0)
+fn resolve(fs: &Fs, tid: i32, dirfd: i32, path: &[u8], nofollow: bool) -> Result<OwnedFd, i32> {
+    resolve_how(fs, tid, dirfd, path, nofollow, 0)
 }
 
 fn resolve_how(
+    fs: &Fs,
     tid: i32,
     dirfd: i32,
     path: &[u8],
@@ -733,7 +619,7 @@ fn resolve_how(
     let mut abs: Option<Vec<u8>> = None;
     if path[0] == b'/' {
         // /data is a symlink to its host dir.
-        abs = Some(crate::fs::to_host(path).unwrap_or_else(|| path.to_vec()));
+        abs = Some(fs.to_host(path).unwrap_or_else(|| path.to_vec()));
     } else {
         let link = if dirfd == AT_FDCWD {
             format!("/proc/{tid}/cwd")
@@ -808,8 +694,8 @@ fn recorded_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
 /// Emulate lstat(path, st) for a path that can carry a recorded owner.
 /// Paths with symlinks before the last component continue natively
 /// (RESOLVE_NO_SYMLINKS), so a lookup never wanders onto a FUSE mount.
-fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
-    let mut fd = match resolve_how(j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
+fn lstat(j: &Job, v: &Vid, mem: MemFd) -> Answer {
+    let mut fd = match resolve_how(&v.fs, j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
         Ok(f) => f,
         Err(libc::ELOOP) | Err(libc::EXDEV) => return Answer::Continue,
         Err(e) => return Answer::Errno(e),
@@ -823,7 +709,7 @@ fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
     // dir (/data/user/0 -> /data/data); show what it stands for.
     if st.st_mode & libc::S_IFMT == libc::S_IFLNK
         && let Some(target) = crate::fs::bind_target(&fd)
-        && let Ok(t) = resolve_how(j.tid, AT_FDCWD, &target, true, RESOLVE_NO_SYMLINKS)
+        && let Ok(t) = resolve_how(&v.fs, j.tid, AT_FDCWD, &target, true, RESOLVE_NO_SYMLINKS)
         && unsafe { libc::fstatat(t.as_raw_fd(), c"".as_ptr(), &mut st, AT_EMPTY_PATH as i32) } == 0
     {
         fd = t;
@@ -844,7 +730,7 @@ fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
         )
     };
     // The path was resolved in tid's root: still the caller's?
-    if !notif_id_valid(listener, j.id) {
+    if !v.listener.valid(j.id) {
         return Answer::Deferred;
     }
     if !mem_write(mem, j.args[2], b) {
@@ -857,7 +743,7 @@ fn lstat(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
 /// that has one: files an app creates in its directories (with no chown)
 /// belong to the app, and APKs that system_server writes under /data/app to
 /// system.
-fn inherited_owner(tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
+fn inherited_owner(fs: &Fs, tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
     if let Some(o) = recorded_owner(fd) {
         return o;
     }
@@ -870,7 +756,7 @@ fn inherited_owner(tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
         if !owner_tracked(p) {
             break;
         }
-        if let Ok(f) = resolve(tid, AT_FDCWD, p, false)
+        if let Ok(f) = resolve(fs, tid, AT_FDCWD, p, false)
             && let Some(o) = recorded_owner(&f)
         {
             return o;
@@ -884,13 +770,19 @@ fn inherited_owner(tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
 /// the recorded (or inherited) owner and the caller's virtual ids, the way
 /// the kernel checks real ones. ART refuses to load a dex file the app can
 /// write (`access(W_OK)`), and to the one kernel uid every APK is writable.
-fn access(j: &Job) -> Answer {
+fn access(j: &Job, fs: &Fs) -> Answer {
     let Some(c) = &j.creds else {
         return Answer::Continue;
     };
     let mode = j.args[2] as u32 & 7;
     let flags = if j.nr == SYS_FACCESSAT2 { j.args[3] } else { 0 };
-    let fd = match resolve(j.tid, AT_FDCWD, &j.path, flags & AT_SYMLINK_NOFOLLOW != 0) {
+    let fd = match resolve(
+        fs,
+        j.tid,
+        AT_FDCWD,
+        &j.path,
+        flags & AT_SYMLINK_NOFOLLOW != 0,
+    ) {
         Ok(f) => f,
         Err(e) => return Answer::Errno(e),
     };
@@ -898,7 +790,7 @@ fn access(j: &Job) -> Answer {
     if unsafe { libc::fstatat(fd.as_raw_fd(), c"".as_ptr(), &mut st, AT_EMPTY_PATH as i32) } != 0 {
         return Answer::Errno(errno());
     }
-    let (owner, group) = inherited_owner(j.tid, &j.path, &fd);
+    let (owner, group) = inherited_owner(fs, j.tid, &j.path, &fd);
     let (uid, gid) = if flags & AT_EACCESS != 0 {
         (c.euid, c.egid)
     } else {
@@ -919,7 +811,7 @@ fn access(j: &Job) -> Answer {
 }
 
 /// Emulate one chown-family call (see the module docs).
-fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
+fn chown(j: &Job, v: &Vid, mem: MemFd) -> Answer {
     let a = j.args;
     let (fd, uid, gid) = match j.nr {
         libc::SYS_fchown => (getfd(j.tid, a[0] as i32), a[1] as u32, a[2] as u32),
@@ -928,7 +820,7 @@ fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
                 return Answer::Errno(libc::EFAULT);
             };
             (
-                resolve(j.tid, AT_FDCWD, &p, j.nr == libc::SYS_lchown),
+                resolve(&v.fs, j.tid, AT_FDCWD, &p, j.nr == libc::SYS_lchown),
                 a[1] as u32,
                 a[2] as u32,
             )
@@ -946,7 +838,13 @@ fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
                     getfd(j.tid, a[0] as i32)
                 }
             } else {
-                resolve(j.tid, a[0] as i32, &p, flags & AT_SYMLINK_NOFOLLOW != 0)
+                resolve(
+                    &v.fs,
+                    j.tid,
+                    a[0] as i32,
+                    &p,
+                    flags & AT_SYMLINK_NOFOLLOW != 0,
+                )
             };
             (fd, a[2] as u32, a[3] as u32)
         }
@@ -956,7 +854,7 @@ fn chown(j: &Job, listener: RawFd, mem: MemFd) -> Answer {
         Err(e) => return Answer::Errno(e),
     };
     // The path and fd were resolved through tid: still the caller's?
-    if !notif_id_valid(listener, j.id) {
+    if !v.listener.valid(j.id) {
         return Answer::Deferred;
     }
     // The kernel's own checks (read-only mounts, immutable files, ...), and

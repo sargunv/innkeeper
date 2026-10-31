@@ -70,18 +70,9 @@
 //! ioctl never replays it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::sync::atomic::Ordering;
 
 use crate::binder::uapi::*;
-use crate::{DEBUG, log};
-
-macro_rules! tlog {
-    ($($a:tt)*) => {
-        if DEBUG.load(Ordering::Relaxed) {
-            log(format_args!("broker: {}", format_args!($($a)*)));
-        }
-    };
-}
+use crate::trace;
 
 pub type ProcId = u32;
 pub type NodeId = u64;
@@ -110,7 +101,7 @@ pub enum InstallError {
 /// `copy_{from,to}_user`, the binder mapping, `fd_install` and returning
 /// from the ioctl). The real implementation (`src/notify.rs`) uses each
 /// process's pinned `/proc/<pid>/mem`, a per-process memfd, `pidfd_getfd`
-/// and seccomp user notifications; tests use [`crate::fake`].
+/// and seccomp user notifications; tests use an in-memory fake.
 pub trait Userspace {
     /// Read `len` bytes from `proc`'s address space at `addr`.
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>>;
@@ -1006,7 +997,7 @@ impl BinderDriver {
         // (a signal interrupted it, and this may be its restart).
         let t = self.thread_mut(proc, tid);
         match std::mem::take(&mut t.wait) {
-            Wait::Blocked { .. } => tlog!("proc={proc} tid={tid} wait abandoned"),
+            Wait::Blocked { .. } => trace!("proc={proc} tid={tid} wait abandoned"),
             Wait::Freezing(f) => self.freeze_interrupted(&f),
             _ => {}
         }
@@ -1278,7 +1269,7 @@ impl BinderDriver {
     /// The reader never got the delivery: put its work back at the front of
     /// the lists it came from.
     fn rollback(&mut self, proc: ProcId, tid: u32, d: Delivery) {
-        tlog!(
+        trace!(
             "proc={proc} tid={tid} read rolled back: {} items",
             d.taken.len()
         );
@@ -1322,7 +1313,7 @@ impl BinderDriver {
                     // A signal ended its wait: the read is abandoned, and
                     // nothing is written to the thread, which may be stopped.
                     // It finds its own work when it restarts.
-                    tlog!("proc={proc} tid={tid} woken, but its wait is over");
+                    trace!("proc={proc} tid={tid} woken, but its wait is over");
                     self.pass_on_proc_work(proc);
                 }
             }
@@ -1401,7 +1392,7 @@ impl BinderDriver {
                         Err(())
                     };
                     if r.is_err() {
-                        tlog!("proc={proc} refcount change {cmd:#x} on invalid ref {target}");
+                        trace!("proc={proc} refcount change {cmd:#x} on invalid ref {target}");
                     }
                 }
                 BC_INCREFS_DONE | BC_ACQUIRE_DONE => {
@@ -1514,7 +1505,9 @@ impl BinderDriver {
         errno: i32,
         in_reply_to: Option<TxnId>,
     ) {
-        tlog!("txn fail proc={proc} tid={tid} err={err:#x} errno={errno} reply_to={in_reply_to:?}");
+        trace!(
+            "txn fail proc={proc} tid={tid} err={err:#x} errno={errno} reply_to={in_reply_to:?}"
+        );
         let t = self.thread_mut(proc, tid);
         t.ee = BinderExtendedError {
             id: 0,
@@ -1541,12 +1534,9 @@ impl BinderDriver {
         us: &mut dyn Userspace,
     ) {
         let oneway = td.flags & TF_ONE_WAY != 0;
-        tlog!(
+        trace!(
             "txn proc={proc} tid={tid} reply={reply} oneway={oneway} handle={} code={:#x} dsz={} osz={}",
-            td.target as u32,
-            td.code,
-            td.data_size,
-            td.offsets_size
+            td.target as u32, td.code, td.data_size, td.offsets_size
         );
         let target_proc;
         let mut target_thread: Option<u32> = None;
@@ -2054,7 +2044,7 @@ impl BinderDriver {
                 || !obj_off.is_multiple_of(4)
                 || obj_off.checked_add(8).ok_or(fail)? > data.len()
             {
-                tlog!(
+                trace!(
                     "xlate: bad object offset {obj_off} (min {off_min}, size {})",
                     data.len()
                 );
@@ -2095,7 +2085,7 @@ impl BinderDriver {
                     let strong = hdr == BINDER_TYPE_HANDLE;
                     let h = fbo.binder_or_handle as u32;
                     let Some(nid) = self.ref_node(proc, h, strong) else {
-                        tlog!("xlate: proc={proc} handle {h} not found");
+                        trace!("xlate: proc={proc} handle {h} not found");
                         return Err(fail);
                     };
                     if self.nodes[&nid].proc == Some(target_proc) {
@@ -2203,7 +2193,7 @@ impl BinderDriver {
                     off_min = obj_off + size_of::<BinderFdArrayObject>();
                 }
                 _ => {
-                    tlog!("xlate: bad object type {hdr:#x}");
+                    trace!("xlate: bad object type {hdr:#x}");
                     return Err(fail);
                 }
             }
@@ -2218,11 +2208,11 @@ impl BinderDriver {
     fn free_buffer_cmd(&mut self, proc: ProcId, ptr: u64, us: &mut dyn Userspace) {
         let key = (proc, ptr);
         let Some(b) = self.buffers.get(&key) else {
-            tlog!("proc={proc} BC_FREE_BUFFER {ptr:#x} no match");
+            trace!("proc={proc} BC_FREE_BUFFER {ptr:#x} no match");
             return;
         };
         if !b.allow_user_free {
-            tlog!("proc={proc} BC_FREE_BUFFER {ptr:#x} not freeable");
+            trace!("proc={proc} BC_FREE_BUFFER {ptr:#x} not freeable");
             return;
         }
         self.free_buf(key, us);
@@ -2281,7 +2271,7 @@ impl BinderDriver {
 
     fn death_cmd(&mut self, proc: ProcId, tid: u32, desc: u32, cookie: u64, request: bool) {
         let Some(r) = self.procs[&proc].refs_by_desc.get(&desc) else {
-            tlog!("proc={proc} death notification on invalid ref {desc}");
+            trace!("proc={proc} death notification on invalid ref {desc}");
             return;
         };
         let nid = r.node;
@@ -2394,11 +2384,9 @@ impl BinderDriver {
             return;
         }
         targets.sort();
-        tlog!(
+        trace!(
             "proc={proc} tid={tid} freeze pid={} enable={} timeout={}",
-            info.pid,
-            info.enable,
-            info.timeout_ms
+            info.pid, info.enable, info.timeout_ms
         );
         let f = Freezing {
             call,
@@ -2477,7 +2465,7 @@ impl BinderDriver {
 
     /// A signal ended a freeze's wait (`-ERESTARTSYS`): its target thaws.
     fn freeze_interrupted(&mut self, f: &Freezing) {
-        tlog!("freeze of {:?} interrupted", f.targets.first());
+        trace!("freeze of {:?} interrupted", f.targets.first());
         if f.deadline.is_some()
             && let Some(p) = f.targets.first().and_then(|t| self.procs.get_mut(t))
         {
@@ -3291,7 +3279,7 @@ impl BinderDriver {
             Some(InstallError::Interrupted) => return TxnRead::Interrupted,
             Some(InstallError::Failed) if !first => return TxnRead::NotFirst,
             Some(InstallError::Failed) => {
-                tlog!("proc={proc} fd fixups failed for txn {txid}");
+                trace!("proc={proc} fd fixups failed for txn {txid}");
                 let reply = self.buffers[&key].target_node.is_none();
                 if flags & TF_ONE_WAY == 0 && !reply {
                     self.send_failed_reply(txid, BR_FAILED_REPLY);
@@ -3357,7 +3345,7 @@ impl BinderDriver {
                 sender_pid_nr,
             };
         }
-        tlog!("read proc={proc} tid={tid} txn={txid} cmd={cmd:#x} code={code:#x}");
+        trace!("read proc={proc} tid={tid} txn={txid} cmd={cmd:#x} code={code:#x}");
         TxnRead::Rendered(out)
     }
 
@@ -3391,8 +3379,9 @@ impl BinderDriver {
             .map(|r| (r.strong, r.weak))
     }
 
-    /// Internal consistency checks between ioctls, used by tests.
-    pub fn check_invariants(&self) {
+    /// Internal consistency checks between ioctls.
+    #[cfg(test)]
+    pub(crate) fn check_invariants(&self) {
         assert!(self.woken.is_empty(), "woken threads left unserved");
         let mut strong_refs: HashMap<NodeId, i32> = HashMap::new();
         for (&pid, p) in &self.procs {
@@ -3496,34 +3485,21 @@ impl BinderDriver {
     }
 
     /// Number of live transactions, buffers and nodes (leak checks).
-    pub fn counts(&self) -> (usize, usize, usize) {
+    #[cfg(test)]
+    pub(crate) fn counts(&self) -> (usize, usize, usize) {
         (self.txns.len(), self.buffers.len(), self.nodes.len())
     }
 
     /// Freeze notifications alive, and whether any binder instance is
     /// frozen (leak checks).
-    pub fn freezer_state(&self) -> (usize, bool) {
+    #[cfg(test)]
+    pub(crate) fn freezer_state(&self) -> (usize, bool) {
         (self.freezes.len(), self.procs.values().any(|p| p.is_frozen))
     }
 
-    /// Work items queued anywhere that a read would return for: process
-    /// lists, and thread lists flagged `process_todo`.
-    pub fn queued_work(&self) -> usize {
-        self.procs
-            .values()
-            .map(|p| {
-                p.todo.len()
-                    + p.threads
-                        .values()
-                        .filter(|t| t.process_todo)
-                        .map(|t| t.todo.len())
-                        .sum::<usize>()
-            })
-            .sum()
-    }
-
-    /// The threads blocked in a read or a freeze (tests).
-    pub fn blocked_threads(&self) -> Vec<(ProcId, u32)> {
+    /// The threads blocked in a read or a freeze.
+    #[cfg(test)]
+    pub(crate) fn blocked_threads(&self) -> Vec<(ProcId, u32)> {
         let mut v: Vec<(ProcId, u32)> = self
             .procs
             .iter()

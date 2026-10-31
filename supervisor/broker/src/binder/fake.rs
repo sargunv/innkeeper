@@ -25,29 +25,6 @@ const CALL_SPAN: u64 = 0x2_0000;
 const WRITE_AT: u64 = 0x100;
 const READ_AT: u64 = 0x1_0000;
 
-/// SplitMix64: a tiny deterministic PRNG, so a failing run is reproducible
-/// from its seed with no external crates.
-pub struct Rng(pub u64);
-
-impl Rng {
-    pub fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-    pub fn below(&mut self, n: u64) -> u64 {
-        self.next_u64() % n.max(1)
-    }
-    pub fn byte(&mut self) -> u8 {
-        (self.next_u64() & 0xff) as u8
-    }
-    pub fn chance(&mut self, pct: u64) -> bool {
-        self.below(100) < pct
-    }
-}
-
 /// A fallible operation that [`FakeUserspace::fault`] can fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
@@ -72,7 +49,6 @@ pub enum Fault {
 #[derive(Default)]
 pub struct FakeProc {
     pages: HashMap<u64, Box<[u8; PAGE as usize]>>,
-    pub recv_base: u64,
     recv_next: u64,
     /// Receive allocations not freed yet.
     pub live_recv: BTreeSet<u64>,
@@ -131,8 +107,6 @@ pub struct FakeUserspace {
     next_token: u64,
     calls: BTreeMap<u64, CallRecord>,
     next_call: u64,
-    /// Calls answered since the last [`FakeUserspace::take_answered`].
-    answered: Vec<Call>,
     bwr_addrs: HashSet<u64>,
     /// The latest call whose bwr and buffers are at each `bwr_addrs` address
     /// (a restart reuses its call's).
@@ -156,7 +130,6 @@ impl FakeUserspace {
         self.procs.insert(
             id,
             FakeProc {
-                recv_base,
                 recv_next: recv_base,
                 next_fd: 100,
                 ..Default::default()
@@ -316,35 +289,6 @@ impl FakeUserspace {
         }
     }
 
-    /// The thread that issued `call`.
-    pub fn caller(&self, call: Call) -> (ProcId, u32) {
-        let r = &self.calls[&call.id];
-        (r.proc, r.tid)
-    }
-
-    /// The calls waiting for an answer (blocked in a read).
-    pub fn pending_calls(&self) -> Vec<Call> {
-        self.calls_where(|s| matches!(s, Status::Pending))
-    }
-
-    /// The calls a signal interrupted, not restarted yet.
-    pub fn interrupted_calls(&self) -> Vec<Call> {
-        self.calls_where(|s| matches!(s, Status::Interrupted))
-    }
-
-    fn calls_where(&self, f: impl Fn(&Status) -> bool) -> Vec<Call> {
-        self.calls
-            .iter()
-            .filter(|(_, r)| f(&r.status))
-            .map(|(&id, r)| Call { id, arg: r.arg })
-            .collect()
-    }
-
-    /// The calls answered since the last time, in answer order.
-    pub fn take_answered(&mut self) -> Vec<Call> {
-        std::mem::take(&mut self.answered)
-    }
-
     fn pending_call(&mut self, call: Call) -> Option<&mut CallRecord> {
         let r = self.calls.get_mut(&call.id)?;
         matches!(r.status, Status::Pending).then_some(r)
@@ -485,7 +429,6 @@ impl Userspace for FakeUserspace {
             out.write_consumed = bwr.write_consumed;
         }
         self.end(call, Status::Answered(out));
-        self.answered.push(call);
         true
     }
 

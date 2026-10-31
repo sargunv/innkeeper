@@ -4,9 +4,9 @@
 //! answered with, asserting the kernel's observable behaviour.
 #![allow(clippy::field_reassign_with_default)] // readable struct-by-field setup
 
+use super::fake::{FakeUserspace, Fault};
 use crate::binder::driver::*;
 use crate::binder::uapi::*;
-use crate::fake::{FakeUserspace, Fault};
 
 // ---- command-stream helpers -------------------------------------------
 
@@ -593,7 +593,7 @@ fn interrupted_delivery_is_read_again() {
     );
     assert!(matches!(
         s.us.status(park),
-        crate::fake::Status::Interrupted
+        super::fake::Status::Interrupted
     ));
     let again = s.us.restart(&mut s.b, park);
     assert!(find(&s.stream(again), BR_TRANSACTION).is_some());
@@ -877,7 +877,7 @@ fn poll_setup_is_retried_by_the_restart() {
     fail_once(&mut s, Fault::Signal);
     let enter = Bc::default().cmd(BC_ENTER_LOOPER).done();
     let c = s.wr(s.server, 3, &enter, 0);
-    assert!(matches!(s.us.status(c), crate::fake::Status::Interrupted));
+    assert!(matches!(s.us.status(c), super::fake::Status::Interrupted));
     assert_eq!(s.us.procs[&s.server].poll_swaps, 0);
     let c = s.us.restart(&mut s.b, c);
     assert_eq!(s.us.outcome(c).errno, 0);

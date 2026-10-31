@@ -12,6 +12,7 @@ use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 fn main() {
+    let mut cfg = innkeeper_broker::Config::from_env();
     let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let mut env: Vec<_> = std::env::vars_os()
         .filter(|(k, _)| k != "LD_PRELOAD" && k != "INNKEEPER_SHIM_ROLE")
@@ -70,7 +71,7 @@ fn main() {
     }
     if init == 0 {
         unsafe { libc::close(sock[0]) };
-        start_init(sock[1], &argv, &env);
+        start_init(cfg.guest, sock[1], &argv, &env);
     }
     unsafe { libc::close(sock[1]) };
     let listener = receive_fd(sock[0]).unwrap_or_else(|| {
@@ -80,7 +81,8 @@ fn main() {
     unsafe { libc::close(sock[0]) };
     std::thread::spawn(move || reap(init));
     unsafe { libc::umask(0) };
-    innkeeper_broker::notify::serve(listener, pins, init);
+    cfg.init = init;
+    innkeeper_broker::notify::serve(listener, pins, cfg);
 }
 
 fn reap(init: i32) -> ! {
@@ -104,12 +106,12 @@ fn reap(init: i32) -> ! {
 
 /// In the forked child: install the filter, send its listener over `sock`
 /// and exec init.
-fn start_init(sock: i32, argv: &[CString], env: &[CString]) -> ! {
+fn start_init(guest: innkeeper_broker::Guest, sock: i32, argv: &[CString], env: &[CString]) -> ! {
     let mut argv_ptr: Vec<_> = argv.iter().map(|s| s.as_ptr()).collect();
     argv_ptr.push(std::ptr::null());
     let mut env_ptr: Vec<_> = env.iter().map(|s| s.as_ptr()).collect();
     env_ptr.push(std::ptr::null());
-    let listener = match innkeeper_broker::filter::install() {
+    let listener = match innkeeper_broker::filter::install(guest) {
         Ok(fd) => fd,
         Err(e) => {
             eprintln!("broker: install seccomp filter: {e}");

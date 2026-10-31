@@ -3,7 +3,7 @@
 //! bpffs directory; maps share data and an inode, with independent opens for
 //! OFD locking. Programs and attachments succeed without affecting traffic.
 
-use crate::notify::{self, MemFd, SeccompNotif, SeccompNotifAddfd};
+use crate::notify::{self, Listener, MemFd, SeccompNotif, SeccompNotifAddfd};
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
@@ -203,8 +203,7 @@ enum Reply {
 }
 
 pub(crate) struct Emulation {
-    listener: RawFd,
-    resp_size: usize,
+    listener: Listener,
     pins: Option<OwnedFd>,
     objects: [Vec<Object>; 4],
     ncpus: usize,
@@ -212,10 +211,9 @@ pub(crate) struct Emulation {
     attached: [u32; 128],
 }
 impl Emulation {
-    pub(crate) fn new(listener: RawFd, resp_size: usize, pins: Option<OwnedFd>) -> Self {
+    pub(crate) fn new(listener: Listener, pins: Option<OwnedFd>) -> Self {
         Self {
             listener,
-            resp_size,
             pins,
             objects: std::array::from_fn(|_| Vec::new()),
             ncpus: unsafe { libc::sysconf(libc::_SC_NPROCESSORS_CONF) }.max(1) as usize,
@@ -224,14 +222,12 @@ impl Emulation {
         }
     }
     pub(crate) fn serve(&mut self, req: &SeccompNotif) {
-        let r = self.handle(req);
-        let (val, error, cont) = match r {
-            Ok(Reply::Injected) => return,
-            Ok(Reply::Continue) => (0, 0, true),
-            Ok(Reply::Value(v)) => (v, 0, false),
-            Err(e) => (0, -e, false),
+        match self.handle(req) {
+            Ok(Reply::Injected) => true,
+            Ok(Reply::Continue) => self.listener.cont(req.id),
+            Ok(Reply::Value(v)) => self.listener.reply(req.id, v, 0),
+            Err(e) => self.listener.reply(req.id, 0, e),
         };
-        notify::send_resp(self.listener, self.resp_size, req.id, val, error, cont);
     }
     fn new_obj(&mut self, kind: usize) -> Result<usize> {
         if self.objects.iter().map(Vec::len).sum::<usize>() >= MAX_OBJS {
@@ -357,14 +353,7 @@ impl Emulation {
             newfd: 0,
             newfd_flags: flags,
         };
-        let r = unsafe {
-            libc::ioctl(
-                self.listener,
-                notify::notif_addfd_cmd(size_of::<SeccompNotifAddfd>()) as _,
-                &a,
-            )
-        };
-        if r < 0 {
+        if self.listener.addfd(&a) < 0 {
             Err(errno())
         } else {
             Ok(Reply::Injected)
@@ -618,7 +607,7 @@ impl Emulation {
     fn handle(&mut self, req: &SeccompNotif) -> Result<Reply> {
         use libc::*;
         let mem = notify::open_mem(req.pid as i32).ok_or(EFAULT)?;
-        if !notify::notif_id_valid(self.listener, req.id) {
+        if !self.listener.valid(req.id) {
             return Err(ESRCH);
         }
         let m = mem.raw();
