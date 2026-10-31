@@ -79,9 +79,14 @@ mkdir -p "$out/prebuilt/share/linuxapk"
 awk -F'\t' '$2 != "host" && $2 != "launcher"' "$stage/$m" >"$out/prebuilt/$m"
 cut -f1 "$out/prebuilt/$m" | (cd "$stage" && cpio -pdm --quiet "$out/prebuilt")
 
+# Builder runs from its own installation: Flatpak hides that installation
+# inside the sandbox, so the SDK it builds against lives in another one.
 tools=${LINUXAPK_FLATPAK_TOOLS:-$out/tools}
+sdk=${LINUXAPK_FLATPAK_SDK:-$out/sdk}
 flathub=https://dl.flathub.org/repo/flathub.flatpakrepo
-FLATPAK_USER_DIR=$tools flatpak remote-add --user --if-not-exists flathub "$flathub"
+for d in "$tools" "$sdk"; do
+  FLATPAK_USER_DIR=$d flatpak remote-add --user --if-not-exists flathub "$flathub"
+done
 FLATPAK_USER_DIR=$tools flatpak install --user -y --noninteractive --or-update \
   flathub org.flatpak.Builder
 
@@ -114,7 +119,8 @@ fi
 # sandbox, then the host's flatpak build-export signs the only commit. An
 # unsigned dry run lets the builder commit.
 builder=(
-  flatpak run --user --command=flatpak-builder org.flatpak.Builder
+  flatpak run --user --env=FLATPAK_USER_DIR="$sdk" --command=flatpak-builder
+  org.flatpak.Builder
   --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse
   --state-dir="$out/state"
 )
