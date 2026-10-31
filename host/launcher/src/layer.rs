@@ -129,7 +129,9 @@ pub fn write(cfg: &Config) -> Result<()> {
     let image_props = fs::read_to_string(&image_props)
         .with_context(|| format!("read {}", image_props.display()))?;
     let bp = layer.join("vendor/build.prop");
-    fs::write(&bp, merge_props(&image_props, &our_props(cfg)?))?;
+    let ours = our_props(cfg)? + "# --- linuxapk-session: the profile's adb ---\n";
+    let ours = ours + &crate::adb::prepare(&cfg.paths)?;
+    fs::write(&bp, merge_props(&image_props, &ours))?;
     fs::set_permissions(&bp, fs::Permissions::from_mode(0o644))?;
     let mut srcs = vec![cfg.paths.android().join("apex")];
     srcs.extend(cfg.paths.addon_layers().into_iter().map(|a| a.join("apex")));

@@ -25,6 +25,9 @@ finish-args:
   # The desktop's assistive-technology switch (Flatpak's AT-SPI proxy alone
   # exposes GetAddress, not org.a11y.Status properties).
   - --talk-name=org.a11y.Bus
+  # adb into a profile (off by default): only the user's adb public key, read
+  # to authorize it in the profile's data (host/launcher/src/adb.rs).
+  - --filesystem=~/.android/adbkey.pub:ro
   # No battery portal exists on the supported desktop baseline.
   - --system-talk-name=org.freedesktop.UPower
 modules:

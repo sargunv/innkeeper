@@ -47,3 +47,13 @@ on property:sys.boot_completed=1
     # another OOM adjustment happens after it expires, even in an idle session.
     exec_background - root root -- /system/bin/device_config put activity_manager max_cached_processes 16
     exec_background - root root -- /system/bin/device_config put activity_manager no_kill_cached_processes_post_boot_completed_duration_millis 0
+
+# adb, for a profile with it on (linuxapk-session sets vendor.linuxapk.adb and
+# service.adb.listen_addrs, a loopback port, from the profile's settings; the
+# CLI and manager change them live). ro.adb.secure=1: only keys in
+# /data/misc/adb/adb_keys get in. init.usb.rc no longer starts adbd.
+on property:vendor.linuxapk.adb=1
+    start adbd
+
+on property:vendor.linuxapk.adb=0
+    stop adbd
