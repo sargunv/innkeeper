@@ -6,16 +6,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "role.h"
+
 // VolumeManager serializes mount/unmount. Only the primary emulated volume is
 // supported; other FUSE users (AppFuse) must still fail rather than claim a
 // mount.
 static int fuse_peer = -1;
 static const char kEmulatedMount[] = "/mnt/user/0/emulated";
 
-static int fuse_enabled(void) {
-  const char* e = getenv("INNKEEPER_EMULATED_STORAGE");
-  return e && !strcmp(e, "1") && flatpak();
-}
+static int fuse_enabled(void) { return shim_role("vold") && flatpak(); }
 
 static int fuse_open(void) {
   if (!fuse_enabled()) return -1;

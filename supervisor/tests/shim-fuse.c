@@ -27,9 +27,9 @@ static int mount_volume(void) {
 }
 
 int main(void) {
-  unsetenv("INNKEEPER_EMULATED_STORAGE");
+  unsetenv("INNKEEPER_SHIM_ROLE");
   assert(fuse_open() == -1);
-  setenv("INNKEEPER_EMULATED_STORAGE", "1", 1);
+  setenv("INNKEEPER_SHIM_ROLE", "vold", 1);
   sandboxed = 0;
   assert(fuse_open() == -1);
   sandboxed = 1;

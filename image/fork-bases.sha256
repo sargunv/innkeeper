@@ -1,11 +1,12 @@
 # Upstream bases reviewed for ci-16644040; never hash the overlay copies.
 8b8d9d9c2c17fcb1f907b0a369aae03632976dff8f4cf603b1d5ef83cad78225  system/etc/init/hw/init.rc
-7be8fde03ec2cc4417aecf1a79163e0e4088fdff02ee6cd2426d02f91127e479  system/etc/init/hw/init.zygote64.rc
+7be8fde03ec2cc4417aecf1a79163e0e4088fdff02ee6cd2426d02f91127e479  system/etc/init/hw/init.zygote64.rc  system_ext/etc/init/innkeeper-services.rc
 4baae395daa83df7a35debff152cd8cdedb3bf7b9d87abb5c4ebb9fdde6fabe6  system/etc/init/apexd.rc
-fcb59d1c3f8e49c5348d383805ca287b54c24d8f8fc3b70378078736676ed4a2  system/etc/init/installd.rc
-51039198c9ec69111b1f7f1c8257ae12ee0a677c14599a87416c5b24b112948b  system/etc/init/netd.rc
-36b87b60901affd28b0c500190fac30f1b7ebb9c8db63c0d14a08094ed756460  system/etc/init/servicemanager.rc
-655dabdfc2899115be32ff7ca923070c76443caced6923996fb0a07d42e2097b  system/etc/init/vold.rc
+fcb59d1c3f8e49c5348d383805ca287b54c24d8f8fc3b70378078736676ed4a2  system/etc/init/installd.rc  system_ext/etc/init/innkeeper-services.rc
+51039198c9ec69111b1f7f1c8257ae12ee0a677c14599a87416c5b24b112948b  system/etc/init/netd.rc  system_ext/etc/init/innkeeper-services.rc
+36b87b60901affd28b0c500190fac30f1b7ebb9c8db63c0d14a08094ed756460  system/etc/init/servicemanager.rc  system_ext/etc/init/innkeeper-services.rc
+655dabdfc2899115be32ff7ca923070c76443caced6923996fb0a07d42e2097b  system/etc/init/vold.rc  system_ext/etc/init/innkeeper-services.rc
 ab2ed667ff45958843fb0c6ee953a5512def0ae87470c4358aa9576a6a4b2e22  system/etc/cgroups.json
 55945ada803b79cbc79e4be49ee6a56ff4c1848fd743bbc6cbc5246265bdbe9d  apex/com.android.tethering/etc/netbpfload.35rc
 0f08f29820a03ee5a145a2b91638f57f873c2cf87875e9429046a3a835ddce17  system/etc/init/hw/init.usb.rc
+85aa14d9d568e14025c38d7dbd905aaa247b186b56ce7bbbc54d34aad4c3af8b  system/etc/init/lmkd.rc  system_ext/etc/init/innkeeper-services.rc

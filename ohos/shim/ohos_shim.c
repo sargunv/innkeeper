@@ -94,13 +94,14 @@ static int same(const char* a, const char* b) {
   return starts(a, b) && starts(b, a);
 }
 
-// pivot-exec marks init with INNKEEPER_SHIM_INIT, which the services init
+// pivot-exec gives init INNKEEPER_SHIM_ROLE=init, which the services init
 // starts don't inherit. The spawners are known by name; the apps they fork
 // inherit the flag.
 __attribute__((constructor)) static void ohos_shim_init(void) {
-  if (getenv("INNKEEPER_SHIM_INIT")) {
+  const char* role = getenv("INNKEEPER_SHIM_ROLE");
+  if (role && same(role, "init")) {
     init_pid = sys0(SYS_getpid);
-    unsetenv("INNKEEPER_SHIM_INIT");
+    unsetenv("INNKEEPER_SHIM_ROLE");
     return;
   }
   char comm[32] = {0};

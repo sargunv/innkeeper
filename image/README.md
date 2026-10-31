@@ -46,15 +46,15 @@ it first.
 2. `mise run session -- prepare`, then list `img/vendor/apex` and add a
    selection to `bootconfig` for every new multi-install or VM-only APEX.
 3. `prepare` checks the upstream SHA-256 bases in
-   [fork-bases.sha256](fork-bases.sha256) for all nine overlay forks and fails
-   with each changed path and an image-to-overlay diff. Port upstream changes
-   into the forks listed in
-   [android/overlay/README.md](../android/overlay/README.md), then update the
-   hashes from the **image copies**, never the edited overlays. System paths
-   resolve under `img/system/system/`; APEX paths under the selected
-   `apex-<hash>/`. Stage the updated hashes with `mise run build:data` and
-   `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to the
-   new build id.
+   [fork-bases.sha256](fork-bases.sha256) for the overlay's forks and overridden
+   services, and fails with each changed path and an image-to-overlay diff or
+   the file holding its override stanzas. Port upstream changes into the files
+   listed in [android/overlay/README.md](../android/overlay/README.md), then
+   update the hashes from the **image copies**, never the edited overlays.
+   System paths resolve under `img/system/system/`; APEX paths under the
+   selected `apex-<hash>/`. Stage the updated hashes with `mise run build:data`
+   and `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to
+   the new build id.
 4. Prove it: `mise run test:e2e` passes, and the next nightly compatibility
    report shows no regressions against the previous one.
 
