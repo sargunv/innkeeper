@@ -1,3 +1,0 @@
-Copied from AOSP refs/tags/android-17.0.0_r1 by android/vendor/audio/tools/sync-aosp.sh:
-include/tinyalsa (external/tinyalsa_new, BSD-3-Clause, see NOTICE.tinyalsa);
-aidl (hardware/interfaces and system/hardware/interfaces, Apache-2.0).

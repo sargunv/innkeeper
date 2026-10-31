@@ -33,12 +33,12 @@ that touches gralloc buffers.
   keeping that phase while the window is static, and falls back to a 60 Hz timer
   without one. The rc sets app and SF work durations to 4 ms each, to fit a 120
   Hz frame.
-- **LL-NDK only.** `third_party/aosp` holds the frozen AIDL snapshots and binder
-  NDK and IMapper headers (`tools/sync-aosp.sh`); `tools/gen-aidl.sh` generates
-  the NDK backend with the build-tools' `aidl`, and `tools/gen-stub.py` turns
-  AOSP's `libbinder_ndk.map.txt` into a link-only stub for the platform symbols.
-  GPU allocation uses LL-NDK libvulkan; its native handle and usage policy stay
-  in our allocator, without a GBM/minigbm allocator or another gralloc HAL.
+- **LL-NDK only.** The binder NDK and IMapper headers and the frozen AIDL
+  snapshots come from `android/vendor/third_party/aosp`; `gen-stub.py` (in
+  `android/vendor/tools`) turns AOSP's `libbinder_ndk.map.txt` into a link-only
+  stub for the platform symbols, which every HAL links. GPU allocation uses
+  LL-NDK libvulkan; its native handle and usage policy stay in our allocator,
+  without a GBM/minigbm allocator or another gralloc HAL.
 
 Tests: `tests/host` runs in `mise run test` (layouts, every format, the mapper
 through `dlopen`, metadata across imports and `fork`); `tests/android`

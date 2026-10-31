@@ -23,5 +23,10 @@ launcher merges them at start.
 - **NDK only.** C and C++ build in the root CMake superbuild with the NDK pin
   (`tools/build/toolchain.env`). Vendor code links only LL-NDK libraries plus
   what we install in `/vendor/lib64`; libc++ is static.
+- **AOSP interfaces.** `vendor/third_party/aosp` holds every frozen AIDL
+  snapshot the HALs implement and the AOSP headers they build against, copied
+  from one AOSP tag by `vendor/tools/sync-aosp.sh`. At configure time
+  `vendor/tools/gen-aidl.sh` generates each HAL's NDK backend with the
+  build-tools' `aidl`.
 - **Gradle** builds the system app with the SDK's `platforms;android-37.0` and
   build-tools; the wrapper is checked in.

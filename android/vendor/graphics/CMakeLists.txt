@@ -10,24 +10,14 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 add_compile_options(-Wall -Wextra -Wno-unused-parameter
                     -Wno-missing-field-initializers)
 
-# NDK-backend C++ for the frozen AIDL snapshots, generated at configure time
-# with the build-tools pin's aidl.
 set(AIDL_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/aidl)
-file(GLOB_RECURSE AIDL_INPUTS CONFIGURE_DEPENDS third_party/aosp/aidl/*.aidl)
-set_property(
-  DIRECTORY
-  APPEND
-  PROPERTY
-    CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen-aidl.sh
-    ${AIDL_INPUTS})
-execute_process(
-  COMMAND
-    ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen-aidl.sh ${AIDL_GEN_DIR} OUTPUT_QUIET
-  COMMAND_ERROR_IS_FATAL ANY)
+innkeeper_gen_aidl(
+  ${AIDL_GEN_DIR} android.hardware.common android.hardware.drm.common
+  android.hardware.graphics.common android.hardware.graphics.allocator
+  android.hardware.graphics.composer3)
 
 set(HAL ${CMAKE_CURRENT_SOURCE_DIR})
-set(HAL_INCLUDES ${HAL}/common/include ${HAL}/third_party/aosp/include
-    ${AIDL_GEN_DIR}/include)
+set(HAL_INCLUDES ${HAL}/common/include ${AOSP}/include ${AIDL_GEN_DIR}/include)
 if(NOT ANDROID)
   # glibc host: shims for headers that assume Bionic.
   list(APPEND HAL_INCLUDES ${HAL}/common/host-compat)
@@ -73,10 +63,8 @@ if(ANDROID)
   add_custom_command(
     OUTPUT ${STUB}.c ${STUB}.ver
     COMMAND
-      python3 ${HAL}/tools/gen-stub.py
-      ${HAL}/third_party/aosp/libbinder_ndk.map.txt ${STUB}
-    DEPENDS
-      ${HAL}/tools/gen-stub.py ${HAL}/third_party/aosp/libbinder_ndk.map.txt)
+      python3 ${VENDOR_TOOLS}/gen-stub.py ${AOSP}/libbinder_ndk.map.txt ${STUB}
+    DEPENDS ${VENDOR_TOOLS}/gen-stub.py ${AOSP}/libbinder_ndk.map.txt)
   add_library(binder_ndk_stub SHARED ${STUB}.c)
   set_target_properties(
     binder_ndk_stub
