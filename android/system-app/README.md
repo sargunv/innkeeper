@@ -15,7 +15,7 @@ restarts it if it dies.
 | `integration/`                          | system         | desktop settings, notifications, clipboard, links, MPRIS, what keeps the session up     |
 | `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))           |
 | `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked              |
-| `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host              |
+| `apps/`                                 | apps           | desktop entries for apps installed inside Android                                       |
 | `net/`                                  | none           | the host's network as Android's default network                                         |
 | `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI   |
 | `alarms/`                               | none           | a minute tick that delivers due inexact alarms, so ready jobs run on time               |
@@ -52,8 +52,6 @@ Notes:
   adds must also be listed in
   `etc/permissions/dev.sargunv.innkeeper.system.xml`, or system_server won't
   boot.
-- **IconDump** (`apps/IconDump.kt`) runs under `app_process` from the installed
-  APK for `innkeeper install`, so the host needs no Android SDK to render icons.
 - `tools/gen-keymap.py` regenerates `EvdevKeymap.kt` from AOSP's `Generic.kl`.
 
 ## Host state

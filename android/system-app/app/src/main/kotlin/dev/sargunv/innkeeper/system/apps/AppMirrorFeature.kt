@@ -15,6 +15,7 @@ import dev.sargunv.innkeeper.system.Feature
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 import dev.sargunv.innkeeper.system.wm.WindowCommands
+import dev.sargunv.innkeeper.system.wm.WindowSizing
 import java.io.ByteArrayOutputStream
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
@@ -168,6 +169,9 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
     have.closeFds()
     if (!have.ok || have.body.remaining() < 1 || have.body.get().toInt() != MISSING) return
     val label = ai.loadLabel(pm).toString()
+    val launcher = AppIcons.launcherActivity(pm, pkg)
+    val splash = AppIcons.splashColor(pm, ai, launcher)
+    val window = WindowSizing.of(launcher)
     val icons = icons(ai)
     val fd = Blob.create(icons)
     try {
@@ -178,6 +182,12 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
           name(label)
           i32(ai.category)
           u8(if (ai.category == ApplicationInfo.CATEGORY_GAME) 1 else 0)
+          // The launch splash: its colour (alpha 0: none) and window size.
+          u32(splash?.let { it or (0xff shl 24) } ?: 0)
+          u16(window.widthDp)
+          u16(window.heightDp)
+          // The installed APK, which the bridge reads for localized names and URL schemes.
+          line(ai.sourceDir, 1024)
           u32(icons.size)
         }
       r?.closeFds()

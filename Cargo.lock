@@ -1328,6 +1328,7 @@ dependencies = [
  "pulseaudio",
  "rustix",
  "sctk-adwaita",
+ "serde_json",
  "signal-hook",
  "smithay-client-toolkit",
  "url",

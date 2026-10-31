@@ -120,13 +120,6 @@ impl std::fmt::Display for Menu {
     }
 }
 
-/// Installs an app's record and asks the user to add it to the app menu
-/// unless the menu already runs it.
-pub fn install_app(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) -> Result<Menu> {
-    let text = write_record(d, entry, icons)?;
-    add_to_menu(d, &entry.package, &text, false)
-}
-
 /// Writes an app's record and icons, replacing any previous ones, and
 /// returns the record. `icons` are (size, PNG); sizes that aren't hicolor
 /// directories are skipped.
@@ -296,27 +289,20 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     v
 }
 
-/// Offers every app entry missing from the app menu to the portal again,
-/// unless the user declined it. Returns how many were rewritten (none).
-pub fn refresh_entries(d: &Dirs) -> usize {
-    rewrite_entries(d, None)
-}
-
-/// Points the entries of profile `from`'s apps at profile `to` (renamed),
-/// as [`refresh_entries`] writes them. Returns how many were rewritten.
+/// Points the entries of profile `from`'s apps at profile `to` (renamed).
+/// Returns how many were rewritten.
 pub fn move_entries(d: &Dirs, from: &str, to: &str) -> usize {
-    rewrite_entries(d, Some((from, to)))
+    rewrite_entries(d, (from, to))
 }
 
 /// The program desktop entries run, which the DynamicLauncher portal runs as
 /// `flatpak run --command=innkeeper`.
 pub const INNKEEPER: &str = "innkeeper";
 
-fn rewrite_entries(d: &Dirs, rename: Option<(&str, &str)>) -> usize {
+fn rewrite_entries(d: &Dirs, (from, to): (&str, &str)) -> usize {
     let mut n = 0;
     for (pkg, path, mut text) in app_entries(d) {
-        if let Some((from, to)) = rename
-            && desktop::read_key(&text, "X-Innkeeper-Profile").as_deref() == Some(from)
+        if desktop::read_key(&text, "X-Innkeeper-Profile").as_deref() == Some(from)
             && let Ok(to) = paths::ProfileName::new(to)
         {
             let run = paths::cli(&to, &["run", &pkg]);
@@ -374,18 +360,13 @@ mod tests {
             version: String::new(),
             categories: vec!["Utility".into()],
             schemes: vec![],
-            web_hosts: vec![],
-            origin: None,
             splash: None,
         };
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());
         png.extend(48u32.to_be_bytes());
         // A wrong-size PNG is skipped rather than misfiled.
-        assert_eq!(
-            install_app(&d, &mut e, &[(48, png.clone()), (64, png.clone())]).unwrap(),
-            Menu::None
-        );
+        write_record(&d, &mut e, &[(48, png.clone()), (64, png.clone())]).unwrap();
         let p = d.app_desktop("org.example.app");
         assert!(p.ends_with("applications/dev.sargunv.innkeeper.org.example.app.desktop"));
         assert!(
@@ -413,7 +394,7 @@ mod tests {
             )
         );
         // Reinstall replaces; remove cleans up.
-        install_app(&d, &mut e, &[]).unwrap();
+        write_record(&d, &mut e, &[]).unwrap();
         assert!(
             !d.icon_path(48, "dev.sargunv.innkeeper.org.example.app")
                 .exists()
@@ -443,15 +424,12 @@ mod tests {
             version: String::new(),
             categories: vec![],
             schemes: vec![],
-            web_hosts: vec![],
-            origin: None,
             splash: None,
         };
-        install_app(&d, &mut entry("org.ex.a", "p"), &[]).unwrap();
-        install_app(&d, &mut entry("org.ex.b", "other"), &[]).unwrap();
+        write_record(&d, &mut entry("org.ex.a", "p"), &[]).unwrap();
+        write_record(&d, &mut entry("org.ex.b", "other"), &[]).unwrap();
         let text = |pkg: &str| fs::read_to_string(d.app_desktop(pkg)).unwrap();
         let before_b = text("org.ex.b");
-        assert_eq!(refresh_entries(&d), 0);
         assert_eq!(move_entries(&d, "p", "q"), 1);
         let mut want = entry("org.ex.a", "q");
         want.icon = Some("android-package-archive".into());

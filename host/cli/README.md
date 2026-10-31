@@ -6,7 +6,7 @@ operations are in [innkeeper-core](../core/README.md); app settings and file
 grants go through the session's `Session1` D-Bus API.
 
 ```sh
-innkeeper install App.apk             # also .apks, .xapk, .apkm
+innkeeper install App.apk             # also .apks, .xapk, .apkm; the session mirrors it to the app menu
 innkeeper open FILE...                # open documents with an Android app you pick
 innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 innkeeper uninstall org.wikipedia [--keep-data]

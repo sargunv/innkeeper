@@ -309,19 +309,20 @@ fn details(
             page.set_can_pop(true);
             w.read_session();
             match r {
-                Ok(i) => {
+                Ok(()) => {
                     w.refresh();
                     if w.nav.visible_page().as_ref() == Some(&page) {
                         w.nav.pop();
                     }
                     let t = adw::Toast::builder()
-                        .title(format!("{} installed", i.name))
+                        .title(format!("{} installed", p.label))
                         .use_markup(false)
                         .button_label("Open")
                         .timeout(8)
                         .build();
                     let w2 = w.clone();
-                    t.connect_button_clicked(move |_| w2.launch(&i.package, &i.name));
+                    let (pkg, name) = (p.package.clone(), p.label.clone());
+                    t.connect_button_clicked(move |_| w2.launch(&pkg, &name));
                     w.toast(t);
                 }
                 Err(e) => {

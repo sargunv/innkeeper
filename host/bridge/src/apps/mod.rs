@@ -1,24 +1,25 @@
 //! The apps service (id 5): apps installed or removed inside Android (an app
 //! store, PackageInstaller, `pm install`) get or lose their desktop entry and
 //! icons. The Innkeeper System app reports package events; the entries are
-//! written with `innkeeper-core`, the same code as `innkeeper install`.
+//! written with `innkeeper-core`. This is the only writer of app entries:
+//! `innkeeper install` installs, and the entry follows from here.
 //!
 //! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
 //! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 //! | `0x0501` | HAVE    | name package, name version                                                                                | `u8`: 0 missing or outdated (send ADDED), 1 current, 2 not ours (leave it)                             |
-//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 len`; fd: sealed memfd                | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
+//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 splash` (ARGB; alpha 0: none), `u16 width`, `u16 height` (the launch window, dp), `u16 len` + the APK's Android path (≤ 1024 B, under `/data/app/`), `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
 //! | `0x0503` | REMOVED | name package                                                                                              |                                                                                                        |
 //!
 //! At each connection the system app sends HAVE for every launchable user
 //! app, so installs made while the bridge was away catch up; then it follows
 //! package broadcasts.
 //!
-//! Entries this service writes say `X-Innkeeper-Origin=android`. An entry
-//! written by `innkeeper install` (which has more metadata, such as URL
-//! schemes) is never replaced; an entry for another session profile is never
-//! touched; an uninstall inside Android removes this profile's entry,
-//! whoever wrote it. In a test session every request succeeds and does
-//! nothing, so tests don't fill the user's app menu.
+//! The bridge reads the installed APK (Android's `/data` is the profile's
+//! data dir) with `innkeeper-core`'s parser for the entry's localized names
+//! and URL schemes. An entry for another session profile is never touched;
+//! an uninstall inside Android removes this profile's entry. With app
+//! mirroring off nothing is added, and in a test session every request
+//! succeeds and does nothing, so tests don't fill the user's app menu.
 
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -60,6 +61,12 @@ pub enum Request {
         /// `ApplicationInfo.category` (-1 for none).
         category: i32,
         game: bool,
+        /// The launch splash colour (ARGB; alpha 0: none) and window size
+        /// in dp.
+        splash: u32,
+        window: (u16, u16),
+        /// The installed base APK's path in Android.
+        apk: String,
         icons_len: u32,
     },
     Removed {
@@ -89,6 +96,20 @@ fn package(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     Ok(p)
 }
 
+/// The APK's Android path: `u16 len` + UTF-8, at most 1024 bytes, an `.apk`
+/// under `/data/app/` with no `..`.
+fn apk_path(r: &mut Reader<'_>) -> Result<String, DecodeError> {
+    let n = r.u16()? as usize;
+    if n > 1024 {
+        return Err(DecodeError::Invalid("apk path"));
+    }
+    let p = std::str::from_utf8(r.take(n)?).map_err(|_| DecodeError::Invalid("apk path"))?;
+    if !p.starts_with("/data/app/") || !p.ends_with(".apk") || p.split('/').any(|c| c == "..") {
+        return Err(DecodeError::Invalid("apk path"));
+    }
+    Ok(p.to_string())
+}
+
 pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
     let mut r = Reader::new(body);
     let req = match t {
@@ -110,6 +131,9 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 label,
                 category,
                 game: r.bool()?,
+                splash: r.u32()?,
+                window: (r.u16()?, r.u16()?),
+                apk: apk_path(&mut r)?,
                 icons_len: r.u32()?,
             }
         }
@@ -135,6 +159,9 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             label,
             category,
             game,
+            splash,
+            window,
+            apk,
             icons_len,
         } => {
             w = Writer::message(ty::ADDED, tag);
@@ -143,7 +170,12 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .name(label)
                 .i32(*category)
                 .u8(*game as u8)
-                .u32(*icons_len);
+                .u32(*splash)
+                .u16(window.0)
+                .u16(window.1)
+                .u16(apk.len() as u16);
+            w.0.extend_from_slice(apk.as_bytes());
+            w.u32(*icons_len);
         }
         Request::Removed { package } => {
             w = Writer::message(ty::REMOVED, tag);
@@ -181,10 +213,16 @@ pub struct Config {
     pub dirs: xdg::Dirs,
     /// The session profile entries are made for.
     pub profile: paths::ProfileName,
+    /// Android's `/data` on the host, where installed APKs are.
+    pub data: std::path::PathBuf,
 }
 
 impl Config {
-    pub fn from_env(enabled: bool, profile: paths::ProfileName) -> Config {
+    pub fn from_env(
+        enabled: bool,
+        profile: paths::ProfileName,
+        data: std::path::PathBuf,
+    ) -> Config {
         Config {
             enabled,
             mirror_apps: AtomicBool::new(
@@ -194,6 +232,7 @@ impl Config {
             ),
             dirs: xdg::Dirs::from_env(),
             profile,
+            data,
         }
     }
 
@@ -205,8 +244,7 @@ impl Config {
     /// The existing entry for `pkg`: (ours, its version), or None.
     fn existing(&self, pkg: &str) -> Option<(bool, String)> {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
-        let ours = desktop::read_key(&text, "X-Innkeeper-Origin").as_deref() == Some("android")
-            && self.owns(&text);
+        let ours = self.owns(&text);
         let version = desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default();
         Some((ours, version))
     }
@@ -221,6 +259,57 @@ impl Config {
             Some((true, v)) if v == version => have::CURRENT,
             Some((true, _)) => have::MISSING,
         }
+    }
+}
+
+/// What ADDED says about an app.
+struct Added {
+    package: String,
+    version: String,
+    label: String,
+    category: Option<i32>,
+    game: bool,
+    splash: u32,
+    window: (u16, u16),
+    apk: String,
+}
+
+/// The entry for `a`, with what its APK (`info`, if it could be read) adds:
+/// localized names and URL schemes.
+fn entry(
+    profile: &paths::ProfileName,
+    a: Added,
+    info: Option<&innkeeper_core::apk::ApkInfo>,
+) -> AppEntry {
+    let name = validate::label(&a.label).unwrap_or_else(|| a.package.clone());
+    let mut seen = std::collections::BTreeSet::new();
+    let names = info
+        .map(|i| {
+            i.labels
+                .iter()
+                .filter_map(|(tag, l)| Some((validate::desktop_locale(tag)?, validate::label(l)?)))
+                .filter(|(loc, l)| *l != name && seen.insert(loc.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let (w, h) = a.window;
+    AppEntry {
+        package: a.package,
+        name,
+        names,
+        profile: profile.clone(),
+        icon: None,
+        version: a.version,
+        categories: desktop::categories_for(
+            a.category.or(info.and_then(|i| i.app_category)),
+            a.game || info.is_some_and(|i| i.is_game),
+        ),
+        schemes: info.map(|i| i.schemes.clone()).unwrap_or_default(),
+        splash: (a.splash >> 24 != 0 && w > 0 && h > 0).then_some(desktop::Splash {
+            color: a.splash & 0xff_ffff,
+            width: w.into(),
+            height: h.into(),
+        }),
     }
 }
 
@@ -248,31 +337,16 @@ impl AppsService {
         self
     }
 
-    fn added(
-        &self,
-        pkg: String,
-        version: String,
-        label: String,
-        categories: Vec<String>,
-        icons: Vec<(u32, Vec<u8>)>,
-    ) -> Reply {
-        if self.cfg.have(&pkg, &version) != have::MISSING {
+    fn added(&self, a: Added, icons: Vec<(u32, Vec<u8>)>) -> Reply {
+        if self.cfg.have(&a.package, &a.version) != have::MISSING {
             return Reply::ok();
         }
-        let name = validate::label(&label).unwrap_or_else(|| pkg.clone());
-        let mut entry = AppEntry {
-            package: pkg.clone(),
-            name,
-            names: vec![],
-            profile: self.cfg.profile.clone(),
-            icon: None,
-            version,
-            categories,
-            schemes: vec![],
-            web_hosts: vec![],
-            origin: Some("android".into()),
-            splash: None,
-        };
+        let host = self.cfg.data.join(a.apk.trim_start_matches("/data/"));
+        let info = innkeeper_core::apk::read(&host)
+            .map_err(|e| crate::warn!("apps: {}: read the APK: {e:#}", a.package))
+            .ok();
+        let pkg = a.package.clone();
+        let mut entry = entry(&self.cfg.profile, a, info.as_ref());
         // The record is written before the portal's dialog shows, so a HAVE
         // meanwhile finds it current.
         let text = match xdg::write_record(&self.cfg.dirs, &mut entry, &icons) {
@@ -373,6 +447,9 @@ impl Service for AppsService {
                 label,
                 category,
                 game,
+                splash,
+                window,
+                apk,
                 icons_len,
             } => {
                 let fd = fds.pop().expect("checked above");
@@ -385,10 +462,16 @@ impl Service for AppsService {
                     Err(e) => return Reply::err(e),
                 };
                 self.added(
-                    package,
-                    version,
-                    label,
-                    desktop::categories_for((category >= 0).then_some(category), game),
+                    Added {
+                        package,
+                        version,
+                        label,
+                        category: (category >= 0).then_some(category),
+                        game,
+                        splash,
+                        window,
+                        apk,
+                    },
                     icons,
                 )
             }
@@ -437,6 +520,9 @@ mod tests {
                 label: "Example ✓".into(),
                 category: 4,
                 game: false,
+                splash: 0xff20_2124,
+                window: (412, 915),
+                apk: "/data/app/~~x==/org.example.app-y==/base.apk".into(),
                 icons_len: 1000,
             },
             Request::Removed {
@@ -465,6 +551,76 @@ mod tests {
         assert!(parse_icons(&icons(&many)).is_err());
     }
 
+    fn added(pkg: &str, version: &str) -> Added {
+        Added {
+            package: pkg.into(),
+            version: version.into(),
+            label: "A".into(),
+            category: None,
+            game: false,
+            splash: 0xff20_2124,
+            window: (412, 915),
+            apk: format!("/data/app/~~x==/{pkg}-y==/base.apk"),
+        }
+    }
+
+    #[test]
+    fn entries_take_names_and_schemes_from_the_apk() {
+        let profile = paths::ProfileName::new("t").unwrap();
+        let info = innkeeper_core::apk::ApkInfo {
+            package: "org.ex.a".into(),
+            version_code: "1".into(),
+            version_name: "1".into(),
+            split: String::new(),
+            label: "A".into(),
+            labels: vec![("de".into(), "A DE".into()), ("pt-BR".into(), "A".into())],
+            icons: vec![],
+            native_code: vec![],
+            permissions: vec![],
+            app_category: Some(1),
+            is_game: false,
+            schemes: vec!["exa".into()],
+            web_hosts: vec![],
+        };
+        let e = entry(&profile, added("org.ex.a", "1"), Some(&info));
+        assert_eq!(e.names, [("de".to_string(), "A DE".to_string())]);
+        assert_eq!(e.schemes, ["exa"]);
+        assert_eq!(e.categories, ["AudioVideo", "Audio"]);
+        assert_eq!(
+            e.splash,
+            Some(desktop::Splash {
+                color: 0x20_2124,
+                width: 412,
+                height: 915
+            })
+        );
+        // No APK: the system app's label alone; no splash without a colour.
+        let mut a = added("org.ex.a", "1");
+        a.splash = 0x0020_2124;
+        let e = entry(&profile, a, None);
+        assert!(e.names.is_empty() && e.schemes.is_empty() && e.splash.is_none());
+        assert_eq!(e.name, "A");
+    }
+
+    #[test]
+    fn apk_paths_stay_under_data_app() {
+        let body = |p: &str| {
+            let mut w = Writer::default();
+            w.u16(p.len() as u16);
+            w.0.extend_from_slice(p.as_bytes());
+            w.into_vec()
+        };
+        let ok = body("/data/app/~~x==/org.ex.a-y==/base.apk");
+        assert!(apk_path(&mut Reader::new(&ok)).is_ok());
+        for bad in [
+            "/data/app/../../etc/passwd.apk",
+            "/system/app/x/base.apk",
+            "/data/app/x/base.so",
+        ] {
+            assert!(apk_path(&mut Reader::new(&body(bad))).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn mirror_writes_and_removes_only_its_own_entries() {
         let tmp = crate::test_dir("apps-mirror");
@@ -478,6 +634,7 @@ mod tests {
                 portal: None,
             },
             profile: paths::ProfileName::new("t").unwrap(),
+            data: tmp.join("android-data"),
         });
         let exec = |pkg: &str| {
             desktop::exec_line(&paths::cli(&cfg.profile, &["run", pkg]), Some("%U")).unwrap()
@@ -485,20 +642,15 @@ mod tests {
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
         assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
-        let r = s.added(
-            "org.ex.a".into(),
-            "1".into(),
-            "A".into(),
-            desktop::categories_for(None, false),
-            vec![(48, png(48))],
-        );
+        // The APK isn't there: the entry is written without what it adds.
+        let r = s.added(added("org.ex.a", "1"), vec![(48, png(48))]);
         assert_eq!(r.status, 0);
         let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
-        assert!(text.contains("X-Innkeeper-Origin=android"), "{text}");
         assert!(
             text.contains(&format!("Exec={}\n", exec("org.ex.a"))),
             "{text}"
         );
+        assert!(text.contains("X-Innkeeper-Splash=#202124\n"), "{text}");
         assert!(
             cfg.dirs
                 .icon_path(48, "dev.sargunv.innkeeper.org.ex.a")
@@ -509,29 +661,24 @@ mod tests {
         let no_version = text.replace("X-Innkeeper-Version=1\n", "");
         std::fs::write(cfg.dirs.app_desktop("org.ex.a"), no_version).unwrap();
         assert_eq!(cfg.have("org.ex.a", ""), have::CURRENT);
-        // An entry from `innkeeper install` is left alone, and so is another
-        // profile's.
-        let cli = format!(
-            "[Desktop Entry]\nName=B\nExec={}\nX-Innkeeper-Profile=t\n",
-            exec("org.ex.b")
-        );
-        std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
-        assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
-        let other = "[Desktop Entry]\nName=C\nX-Innkeeper-Origin=android\nX-Innkeeper-Profile=u\n";
+        // Another profile's entry is left alone.
+        let other = "[Desktop Entry]\nName=C\nX-Innkeeper-Profile=u\n";
         std::fs::write(cfg.dirs.app_desktop("org.ex.c"), other).unwrap();
         assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
         s.removed("org.ex.c");
         assert!(cfg.dirs.app_desktop("org.ex.c").is_file());
-        // Uninstalled here: the entry goes, whoever wrote it.
+        // Mirroring off: nothing is added.
+        cfg.mirror_apps.store(false, Ordering::Relaxed);
+        assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
+        cfg.mirror_apps.store(true, Ordering::Relaxed);
+        // Uninstalled here: this profile's entry goes.
         s.removed("org.ex.a");
-        s.removed("org.ex.b");
         assert!(!cfg.dirs.app_desktop("org.ex.a").exists());
         assert!(
             !cfg.dirs
                 .icon_path(48, "dev.sargunv.innkeeper.org.ex.a")
                 .exists()
         );
-        assert!(!cfg.dirs.app_desktop("org.ex.b").exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

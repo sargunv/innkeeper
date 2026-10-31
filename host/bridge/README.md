@@ -12,7 +12,7 @@ restarts it if it exits; clients reconnect.
 | input     | the seat, its xkb keymap, gestures, tablets, cursor shape, `zwp_text_input_v3`                                                                                                   | `src/input/`     |
 | system    | portal Settings, `org.freedesktop.Notifications`, `ext_data_control_v1` / `wl_data_device`, OpenURI, Email, FileChooser SaveFile, MPRIS; the session's activity for the launcher | `src/system/`    |
 | documents | the FileChooser portal, parented through `zxdg_exporter_v2`                                                                                                                      | `src/documents/` |
-| apps      | desktop entries through `innkeeper-core`                                                                                                                                         | `src/apps/`      |
+| apps      | the only writer of app entries, through `innkeeper-core`, with names and URL schemes from the installed APK                                                                      | `src/apps/`      |
 | a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                                                                              | `src/a11y/`      |
 | hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                                             | `src/hoststate/` |
 
