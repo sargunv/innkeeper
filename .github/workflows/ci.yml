@@ -28,7 +28,7 @@ env:
   CCACHE_MAXSIZE: 500M
   LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
   FLATPAK_USER_DIR: ${{ github.workspace }}/out/flatpak/user
-  LINUXAPK_INSTANCE: ci
+  LINUXAPK_PROFILE: ci
   # The 16 GB runner runs one capped (8 GiB) Android session at a time.
   LINUXAPK_MIN_AVAILABLE_GIB: 10
 
