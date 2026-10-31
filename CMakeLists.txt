@@ -10,6 +10,23 @@ project(innkeeper C CXX)
 # The stage's Android tree: one dir per partition, plus apex/<name>.
 set(INNKEEPER_ANDROID share/innkeeper/android)
 
+# The frozen AOSP interfaces and headers the HALs build against
+# (android/vendor/tools/sync-aosp.sh).
+set(AOSP ${CMAKE_SOURCE_DIR}/android/vendor/third_party/aosp)
+set(VENDOR_TOOLS ${CMAKE_SOURCE_DIR}/android/vendor/tools)
+# NDK-backend C++ for the frozen AIDL packages in ARGN, generated into
+# <out>/{include,src} at configure time with the build-tools pin's aidl.
+function(innkeeper_gen_aidl out)
+  file(GLOB_RECURSE inputs CONFIGURE_DEPENDS ${AOSP}/aidl/*.aidl)
+  set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS ${VENDOR_TOOLS}/gen-aidl.sh ${inputs})
+  execute_process(
+    COMMAND ${VENDOR_TOOLS}/gen-aidl.sh ${out} ${ARGN} OUTPUT_QUIET
+    COMMAND_ERROR_IS_FATAL ANY)
+endfunction()
+
 if(ANDROID)
   add_subdirectory(supervisor/pivot-exec)
   add_subdirectory(supervisor/shim)

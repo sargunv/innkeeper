@@ -21,9 +21,9 @@ APEX is dropped in [image/bootconfig](../../../image/bootconfig)), so
   `IHealthInfoCallback` gets the current `HealthInfo` at once, then every
   change. Storage, disk stats, charging policy and battery health data are
   unsupported.
-- `third_party/aosp/aidl` is the frozen V5 snapshot from AOSP
-  `android-17.0.0_r1` (Apache-2.0); the graphics HALs' `tools/gen-aidl.sh`
-  generates its NDK backend and their libbinder_ndk stub links it.
+- It implements the frozen IHealth V5 snapshot in
+  `android/vendor/third_party/aosp`, and links the graphics HALs' libbinder_ndk
+  stub.
 
 Tests: `tests/battery_test.c` (in `mise run test`) checks the `BATTERY` decoder
 and the `HealthInfo` mapping. Start reading at `src/battery.c`.

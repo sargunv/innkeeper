@@ -13,17 +13,10 @@ set_target_properties(
 target_compile_options(innkeeper_health_battery PRIVATE -Wall -Wextra -Werror)
 
 if(ANDROID)
-  # NDK-backend C++ for the frozen IHealth snapshot, generated at configure
-  # time with the graphics HALs' script and linked against their
-  # libbinder_ndk stub.
+  # The IHealth V5 backend, linked against the graphics HALs' libbinder_ndk
+  # stub.
   set(HEALTH_AIDL_GEN ${CMAKE_CURRENT_BINARY_DIR}/aidl)
-  file(GLOB_RECURSE HEALTH_AIDL CONFIGURE_DEPENDS third_party/aosp/aidl/*.aidl)
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HEALTH_AIDL})
-  execute_process(
-    COMMAND
-      ${GRAPHICS}/tools/gen-aidl.sh ${HEALTH_AIDL_GEN}
-      ${HEALTH}/third_party/aosp/aidl OUTPUT_QUIET
-    COMMAND_ERROR_IS_FATAL ANY)
+  innkeeper_gen_aidl(${HEALTH_AIDL_GEN} android.hardware.health)
   file(GLOB_RECURSE HEALTH_AIDL_SRCS ${HEALTH_AIDL_GEN}/src/*.cpp)
 
   add_executable(health src/main.cpp ${HEALTH_AIDL_SRCS})
@@ -34,8 +27,7 @@ if(ANDROID)
   target_include_directories(
     health
     PRIVATE
-      ${HEALTH_AIDL_GEN}/include ${GRAPHICS}/third_party/aosp/include
-      ${GRAPHICS}/common/include)
+      ${HEALTH_AIDL_GEN}/include ${AOSP}/include ${GRAPHICS}/common/include)
   target_link_libraries(
     health
     PRIVATE innkeeper_health_battery innkeeper_bridge_client binder_ndk_stub log)
