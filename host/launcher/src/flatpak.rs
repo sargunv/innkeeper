@@ -8,7 +8,7 @@
 //!   goes on at each start.
 //! - `/` gets symlinks to it, the binder nodes and socket dirs; the broker
 //!   shows the Android paths behind the links (supervisor/broker/src/fs.rs).
-//! - init is the broker's child (execed from pivot-exec), and the session
+//! - init is the broker's child, and the session
 //!   lives as long as the process that started it, which serves the control
 //!   socket ([`crate::control`]).
 
@@ -441,27 +441,26 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         p.data.display(),
         p.data.join("media").display()
     );
-    let mut cmd = init::command(cfg, Path::new("/"), &[("INNKEEPER_ROOT_MAP", root_map)]);
-    // pivot-exec becomes the broker, init's parent and subreaper; it dies
-    // with this thread.
+    let mut cmd = init::command(cfg, &[("INNKEEPER_ROOT_MAP", root_map)]);
+    // The broker, init's parent and subreaper, dies with this thread.
     unsafe {
         cmd.pre_exec(|| {
             sys::die_with_parent(libc::SIGKILL);
             Ok(())
         })
     };
-    let mut pivot = cmd
+    let mut broker = cmd
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
         .spawn()
-        .context("start pivot-exec")?;
-    let outer = pivot.id() as i32;
-    trace.mark(p, "pivot spawned");
+        .context("start the broker")?;
+    let outer = broker.id() as i32;
+    trace.mark(p, "broker spawned");
     let mut init = None;
     for _ in 0..300 {
         init = sys::children(outer, &["init"]).first().copied();
-        if init.is_some() || pivot.try_wait()?.is_some() {
+        if init.is_some() || broker.try_wait()?.is_some() {
             break;
         }
         sleep(Duration::from_millis(50));
@@ -494,7 +493,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         // A closed stdout ends the log, not the session.
         let _ = session::tail(&p.kmsg_log(), &|| sys::alive(init));
     }
-    pivot.wait()?;
+    broker.wait()?;
     Ok(())
 }
 

@@ -104,7 +104,7 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
 }
 
 /// `/innkeeper/`: what the session fakes for Android, read by the shim, the
-/// broker, pivot-exec and our init scripts.
+/// broker and our init scripts.
 ///  - `apexd-mounts`: what apexd would see in /proc/mounts had it mounted
 ///    each APEX itself (erofs file-backed: `<file> /apex/<name>@<version>`),
 ///    for /system/bin/innkeeper-apexd.

@@ -94,7 +94,7 @@ static int same(const char* a, const char* b) {
   return starts(a, b) && starts(b, a);
 }
 
-// pivot-exec gives init INNKEEPER_SHIM_ROLE=init, which the services init
+// The broker gives init INNKEEPER_SHIM_ROLE=init, which the services init
 // starts don't inherit. The spawners are known by name; the apps they fork
 // inherit the flag.
 __attribute__((constructor)) static void ohos_shim_init(void) {

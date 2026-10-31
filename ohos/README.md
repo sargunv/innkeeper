@@ -16,17 +16,17 @@ the Android session, `mise run build` or the stage.
 | ------------------------- | ------------------------------------------------------------- |
 | `build.sh`                | `mise run ohos:build`: the layer in `out/build/ohos/layer`    |
 | `shim/ohos_shim.c`        | `libinnkeeper_ohos_shim.so`, preloaded into all of OH         |
-| `sandbox.sh`              | inside the sandbox: OH's root, then pivot-exec runs OH's init |
+| `sandbox.sh`              | inside the sandbox: OH's root, then the broker runs OH's init |
 | `run.py`                  | outside: a memory-capped dev sandbox, the boot log, probes    |
 | `sys_prod/etc/init/*.cfg` | our init services, on OH's product partition                  |
 | `vendor/display/`         | our composer and buffer VDIs, in place of the image's         |
 | `tests/boot.sh`           | `mise run ohos:test`'s check, run inside OH                   |
 
-`mise run build` first (the stage's pivot-exec and debugfs), then
-`mise run ohos:test`: it fetches the image if needed and boots it as profile
-`ohos` (scratch in `out/dev/flatpak/ohos/`, data wiped at each run). Init's log
-is `ohos-kmsg.log` there; once hilogd runs, services log to hilog instead. To
-look around, write a script for OH's `/system/bin/sh` and pass it with
+`mise run build` first (the stage's debugfs), then `mise run ohos:test`: it
+fetches the image if needed and boots it as profile `ohos` (scratch in
+`out/dev/flatpak/ohos/`, data wiped at each run). Init's log is `ohos-kmsg.log`
+there; once hilogd runs, services log to hilog instead. To look around, write a
+script for OH's `/system/bin/sh` and pass it with
 `ohos/run.py --probe <script>`: it runs as root, with a native token holding
 `ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and its output
 comes back (`hidumper -ls`, `hilog -x`, `ps -A`). hilog's buffer is 256 KiB and
@@ -68,7 +68,7 @@ lands, OH's own injector drives it from a probe:
 
 The same path as Android's Flatpak mode
 ([docs/session.md](../docs/session.md#flatpak-mode)): a root of symlinks in the
-sandbox's own `/`, then pivot-exec and the broker, then init.
+sandbox's own `/`, then the broker, then init.
 
 - **Root.** `/system` is the extracted partition, `/vendor` its symlinks with
   our VDIs in place of the image's, and `/sys_prod` is our layer. OH's product

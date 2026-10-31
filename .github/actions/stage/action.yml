@@ -14,7 +14,7 @@ runs:
       shell: bash
       run: |
         # Include paths, symlinks and executable modes as well as contents.
-        digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
+        digest=$(git ls-tree -r HEAD -- host supervisor/shim \
           supervisor/broker android image tools/build tools/container \
           packaging/flatpak Cargo.toml Cargo.lock \
           .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \

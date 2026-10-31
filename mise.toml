@@ -43,7 +43,7 @@ cmake --build --preset android
 """
 
 [tasks."build:supervisor"]
-description = "pivot-exec, the shim and the broker"
+description = "The broker and the shim"
 depends = ["ndk"]
 run = """
 set -euo pipefail

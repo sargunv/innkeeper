@@ -20,15 +20,15 @@ are writable tmpfs dirs of its own, so Android's root is built from symlinks.
 sequenceDiagram
   participant C as innkeeper-session start (CLI or manager's sandbox)
   participant S as _serve (a sandbox of its own)
-  participant P as pivot-exec
+  participant B as innkeeper-brk
   participant I as Android init
   C->>C: prepare the image (its files read-only)
   C->>S: flatpak-spawn: the portal's Spawn, a new instance of the app
   S->>S: compose the root (cached), the start-time layer, links in /
   S->>S: start innkeeper-bridge, listen on control.sock
-  S->>P: NEWROOT /
-  P->>I: fork init under the seccomp filter (no namespaces)
-  Note over P: exec broker in the same process (init's parent)
+  S->>B: spawn
+  B->>I: fork init under the seccomp filter (no namespaces)
+  Note over B: serve the filter as init's parent
   C->>S: status over control.sock: up
 ```
 

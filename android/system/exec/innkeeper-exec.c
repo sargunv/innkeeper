@@ -4,7 +4,7 @@
 //   innkeeper-exec CMD [ARGS...]      (client; used by `innkeeper-session
 //   exec`)
 //
-// Binder is served through the seccomp filter pivot-exec installs on init,
+// Binder is served through the seccomp filter the broker installs on init,
 // which only init's descendants inherit. `innkeeper-session
 // exec` joins the session's namespaces, so its processes have no filter and
 // no binder (am, pm, cmd, dumpsys, service ...). The client instead hands its
