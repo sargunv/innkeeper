@@ -1,6 +1,8 @@
-# The OpenHarmony image the OH guest boots; see README.md.
+# The OpenHarmony image an OpenHarmony profile boots: Oniro's x86_64 emulator
+# release (ohos/README.md#image, which explains how to bump it). The schema is
+# every guest's (image/README.md).
 
-# The directory under images/ohos/ in the image cache.
+# The image's directory in the image cache.
 name = "oniro-7.0"
 # const.product.software.version in /system/etc/param/ohos.para.
 version = "OpenHarmony 7.0.0.39"

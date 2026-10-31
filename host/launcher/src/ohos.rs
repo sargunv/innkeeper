@@ -11,13 +11,13 @@
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::Path;
-use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::conf::Config;
 use crate::paths::{Image, Paths};
+use crate::profile::System;
 use crate::sandbox::{files_read_only, link, over, remove_tree, tree_linker};
 
 /// Bumped when the composition below changes.
@@ -26,22 +26,17 @@ const COMPOSE_VERSION: &str = "ohos-1";
 /// DMS's config, whose `<dpi>` is the only place it takes density from.
 const DMS_CONFIG: &str = "vendor/etc/window/resources/display_manager_config.xml";
 
-/// Fetches and extracts the pinned image unless it is there.
-pub fn prepare(paths: &Paths, image: &Image) -> Result<()> {
-    if image.img.join("system/system/bin/init").exists() {
-        return Ok(());
+/// Fetches and extracts the pinned image unless it is there, then prunes
+/// the cache as Android's preparation does. The lease keeps the image while
+/// the session runs.
+pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
+    let _prepare = crate::prune::prepare_lock(&paths.images)?;
+    let lease = crate::prune::lease(paths, image)?;
+    if !image.img.join("system/system/bin/init").exists() {
+        crate::image::fetch(paths, System::Ohos)?;
     }
-    let tools = paths.libexec.join("image");
-    let st = Command::new(tools.join("ohos/fetch.sh"))
-        .arg(paths.share.join("image/ohos/pin.toml"))
-        .arg(image.dir.parent().context("image dir")?)
-        .arg(tools.join("fs-extract.sh"))
-        .status()
-        .context("run image/ohos/fetch.sh")?;
-    if !st.success() {
-        bail!("fetching the OpenHarmony image failed ({st})");
-    }
-    Ok(())
+    crate::prune::prune(paths, &crate::prune::pinned(paths)?)?;
+    Ok(lease)
 }
 
 /// The panel: the profile's display preset, `(width, height, dpi)`.

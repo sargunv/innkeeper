@@ -136,16 +136,13 @@ fn system(paths: &Paths) -> Result<System> {
 }
 
 /// Prepares `system`'s image: fetched and extracted, and for Android
-/// flattened and derived. The lease keeps Android's from being pruned.
-fn prepare(paths: &Paths, system: System) -> Result<Option<crate::prune::Lease>> {
+/// flattened and derived. The lease keeps it from being pruned.
+fn prepare(paths: &Paths, system: System) -> Result<crate::prune::Lease> {
     let image = paths.image_of(system)?;
-    Ok(match system {
-        System::Android => Some(image::prepare(paths, &image)?),
-        System::Ohos => {
-            crate::ohos::prepare(paths, &image)?;
-            None
-        }
-    })
+    match system {
+        System::Android => image::prepare(paths, &image),
+        System::Ohos => crate::ohos::prepare(paths, &image),
+    }
 }
 
 fn check_kernel() -> Result<()> {

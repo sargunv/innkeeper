@@ -70,8 +70,6 @@ pub struct Paths {
     pub data: PathBuf,
     /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
-    /// The prefix's Android image pin.
-    pub pin: PathBuf,
     /// The composed root: `root-<profile>`.
     pub root: PathBuf,
 }
@@ -110,7 +108,6 @@ impl Paths {
             state: xdg_home("XDG_STATE_HOME", ".local/state").join(sfx("innkeeper")),
             data: data_env.unwrap_or_else(|| data_home.join(sfx("data"))),
             images: env_path("INNKEEPER_IMAGES").unwrap_or_else(|| data_home.join("images")),
-            pin: share.join("image/pin.toml"),
             root: data_home.join(sfx("root")),
             data_home,
             share,
@@ -203,37 +200,30 @@ impl Paths {
 
     /// The pinned image of `system` and where its files go.
     pub fn image_of(&self, system: System) -> Result<Image> {
-        match system {
-            System::Android => self.image(),
-            System::Ohos => {
-                let pin = self.share.join("image/ohos/pin.toml");
-                let name = read_pin_name(&pin)?;
-                let dir = self.images.join("ohos").join(&name);
-                Ok(Image {
-                    img: dir.join("img"),
-                    apexdir: dir.join("apex"),
-                    derived: dir.join("derived"),
-                    dir,
-                    name,
-                })
-            }
-        }
-    }
-
-    /// The pinned Android image and where its files go.
-    pub fn image(&self) -> Result<Image> {
-        let name = read_pin_name(&self.pin)?;
+        let pin = self.pin(system);
+        let name = pin_name(&fs::read_to_string(&pin).unwrap_or_default())
+            .with_context(|| format!("no image name in {}", pin.display()))?;
         let dir = self.images.join(&name);
-        Ok(Image {
-            img: dir.join("img"),
-            apexdir: dir.join(format!(
+        let apexdir = match system {
+            System::Android => dir.join(format!(
                 "apex-{}",
                 apex_selection_hash(&self.image_bootconfig()?)
             )),
+            System::Ohos => dir.join("apex"),
+        };
+        Ok(Image {
+            img: dir.join("img"),
+            apexdir,
             derived: dir.join("derived"),
             dir,
             name,
         })
+    }
+
+    /// `system`'s image pin: `share/innkeeper/<system>/pin.toml`, from the
+    /// guest's tree (android/pin.toml, ohos/pin.toml).
+    pub fn pin(&self, system: System) -> PathBuf {
+        self.share.join(system.name()).join("pin.toml")
     }
 }
 
@@ -241,7 +231,8 @@ impl Paths {
 /// Android's AOSP CI build, its flattened APEXes (`apexdir`, one per vendor
 /// APEX selection, shared by every profile and never rewritten under a
 /// running session) and the layer derived from them (image/README.md).
-/// OpenHarmony's image has neither of those two; they stay unused there.
+/// OpenHarmony's image has neither: its `apexdir` (`apex`, not an
+/// `apex-<hash>` tree) and `derived` are never made.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
     pub name: String,
@@ -257,12 +248,6 @@ impl Image {
     pub fn derived_source(&self) -> PathBuf {
         self.derived.join(".source")
     }
-}
-
-/// The name in the pin at `path`.
-fn read_pin_name(path: &Path) -> Result<String> {
-    let pin = fs::read_to_string(path).unwrap_or_default();
-    pin_name(&pin).with_context(|| format!("no image name in {}", path.display()))
 }
 
 /// The pin's top-level name: the keys before any `[table]` header.

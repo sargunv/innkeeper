@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::paths::{Image, Paths};
+use crate::profile::System;
 
 const DATA_VERSION: &str = ".innkeeper-data-version";
 
@@ -198,9 +199,7 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
     let lease = crate::prune::lease(paths, image)?;
     let tools = paths.libexec.join("image");
     if !image.img.join("system/system").is_dir() {
-        run(Command::new(tools.join("fetch.sh"))
-            .arg(&paths.pin)
-            .arg(&paths.images))?;
+        fetch(paths, System::Android)?;
     }
     make_read_only(&image.img, &image.img.join("system/system/build.prop"))?;
     let info = image.apexdir.join("apex-info-list.xml");
@@ -242,8 +241,16 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
             .arg(&image.derived))?;
         fs::write(&source, format!("{want}\n"))?;
     }
-    crate::prune::prune(paths, image)?;
+    crate::prune::prune(paths, &crate::prune::pinned(paths)?)?;
     Ok(lease)
+}
+
+/// Downloads and extracts `system`'s pinned image (image/fetch.sh).
+pub fn fetch(paths: &Paths, system: System) -> Result<()> {
+    run(Command::new(paths.libexec.join("image/fetch.sh"))
+        .arg(system.name())
+        .arg(paths.pin(system))
+        .arg(&paths.images))
 }
 
 #[cfg(test)]

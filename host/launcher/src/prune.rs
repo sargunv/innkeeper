@@ -1,7 +1,8 @@
 //! Image cache collection, serialized with preparation. Build and APEX tree
 //! leases live outside collected trees and stay locked from prepare through
 //! session exit, including while a session is starting and has no control
-//! socket yet.
+//! socket yet. Every guest's images share the cache: each guest's pinned
+//! image is kept whichever guest prepares.
 
 use std::fs::{self, File};
 use std::io;
@@ -15,7 +16,8 @@ use crate::paths::{Image, Paths};
 pub struct Lease {
     pub was_in_use: bool,
     _build: File,
-    _apex: File,
+    /// Android's APEX tree; OpenHarmony's image has none.
+    _apex: Option<File>,
 }
 
 fn lock_file(path: &Path) -> Result<File> {
@@ -40,8 +42,14 @@ pub fn lease(paths: &Paths, image: &Image) -> Result<Lease> {
         || running_images(paths)?.iter().any(|i| i.dir == image.dir);
     let build = lock_file(&dir.join("image"))?;
     build.lock_shared()?;
-    let apex = lock_file(&dir.join(image.apexdir.file_name().unwrap()))?;
-    apex.lock_shared()?;
+    let apex = image.apexdir.file_name().unwrap().to_string_lossy();
+    let apex = if apex_tree(&apex) {
+        let f = lock_file(&dir.join(&*apex))?;
+        f.lock_shared()?;
+        Some(f)
+    } else {
+        None
+    };
     Ok(Lease {
         was_in_use,
         _build: build,
@@ -99,8 +107,16 @@ fn running_images(paths: &Paths) -> Result<Vec<Image>> {
     Ok(images)
 }
 
-fn selected(path: &Path, current: &Image, running: &[Image]) -> bool {
-    std::iter::once(current).chain(running).any(|image| {
+/// Every guest's pinned image, which prune keeps.
+pub fn pinned(paths: &Paths) -> Result<Vec<Image>> {
+    crate::profile::System::ALL
+        .iter()
+        .map(|s| paths.image_of(*s))
+        .collect()
+}
+
+fn selected(path: &Path, pinned: &[Image], running: &[Image]) -> bool {
+    pinned.iter().chain(running).any(|image| {
         // A build cannot be removed while any of its trees is selected.
         image.dir == path || image.apexdir == path || image.derived == path
     })
@@ -139,8 +155,9 @@ fn remove(path: &Path) -> Result<()> {
 }
 
 /// Called only under the cache's prepare lock, with the current lease held.
-/// Unknown directories, symlinks and unfinished APEX extractions are left alone.
-pub fn prune(paths: &Paths, current: &Image) -> Result<()> {
+/// Keeps the `pinned` images ([`pinned`]) and running sessions'. Unknown
+/// directories, symlinks and unfinished APEX extractions are left alone.
+pub fn prune(paths: &Paths, pinned: &[Image]) -> Result<()> {
     let running = running_images(paths).context("find running images before pruning")?;
     for entry in fs::read_dir(&paths.images)? {
         let entry = entry?;
@@ -153,7 +170,7 @@ pub fn prune(paths: &Paths, current: &Image) -> Result<()> {
             continue;
         }
         let locks = build_lock(&paths.images, &build);
-        if !selected(&build, current, &running)
+        if !selected(&build, pinned, &running)
             && let Some(_unused) = unused(&locks.join("image"))?
         {
             remove(&build)?;
@@ -165,7 +182,7 @@ pub fn prune(paths: &Paths, current: &Image) -> Result<()> {
                 continue;
             }
             let path = tree.path();
-            if !selected(&path, current, &running)
+            if !selected(&path, pinned, &running)
                 && let Some(_unused) = unused(&locks.join(tree.file_name()))?
             {
                 remove(&path)?;
@@ -208,7 +225,7 @@ mod tests {
 
     #[test]
     fn selection_preserves_current_and_running_builds_and_apexes() {
-        let current = image("ci-new", "aaaaaaaaaaaa");
+        let current = [image("ci-new", "aaaaaaaaaaaa")];
         let running = [
             image("ci-old", "bbbbbbbbbbbb"),
             image("ci-new", "cccccccccccc"),
@@ -253,7 +270,6 @@ mod tests {
             data_home: base.clone(),
             data: base.join("data"),
             images: images.clone(),
-            pin: base.join("pin"),
             root: base.join("root"),
         };
         let make = |name, hash| {
@@ -268,6 +284,11 @@ mod tests {
         let old = make("ci-old", "bbbbbbbbbbbb");
         let same_build = make("ci-new", "cccccccccccc");
         let stale = make("ci-stale", "dddddddddddd");
+        // The other guest's pinned image: no APEX tree, no lease.
+        let mut ohos = make("oniro-1", "");
+        ohos.apexdir = ohos.dir.join("apex");
+        fs::create_dir_all(&ohos.img)?;
+        let pinned = [current.clone(), ohos.clone()];
         for i in [&current, &old, &same_build, &stale] {
             fs::create_dir_all(&i.img)?;
             fs::create_dir_all(&i.derived)?;
@@ -288,14 +309,19 @@ mod tests {
         let old_lease = lease(&paths, &old)?;
         let same_lease = lease(&paths, &same_build)?;
         assert!(same_lease.was_in_use);
-        prune(&paths, &current)?;
+        drop(lease(&paths, &ohos)?);
+        assert!(!images.join(".locks/oniro-1/apex").exists());
+        prune(&paths, &pinned)?;
         assert!(!stale.dir.exists());
         assert!(old.apexdir.is_dir());
         assert!(old.derived.is_dir());
         assert!(same_build.apexdir.is_dir());
         drop(old_lease);
         drop(same_lease);
-        prune(&paths, &current)?;
+        prune(&paths, &pinned)?;
+        assert!(ohos.img.is_dir());
+        prune(&paths, &pinned[..1])?;
+        assert!(!ohos.dir.exists());
         assert!(!old.dir.exists());
         assert!(!same_build.apexdir.exists());
         assert!(current.apexdir.is_dir());

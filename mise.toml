@@ -87,7 +87,8 @@ rm -rf out/build/overlay/install out/build/image/install
 mkdir -p out/build/overlay/install/share/innkeeper/android
 cp -a android/overlay/. out/build/overlay/install/share/innkeeper/android/
 i=out/build/image/install
-install -D -m 644 -t $i/share/innkeeper/image image/pin.toml image/bootconfig image/vendor.prop image/fork-bases.sha256
+install -D -m 644 -t $i/share/innkeeper/image image/bootconfig image/vendor.prop image/fork-bases.sha256
+install -D -m 644 -t $i/share/innkeeper/android android/pin.toml
 install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 """
 
