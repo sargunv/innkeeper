@@ -75,7 +75,7 @@ jobs:
       - name: Runtime input tree
         id: runtime
         run: |
-          image=$(git ls-tree -r HEAD -- image/pin.toml image/*.sh image/bootconfig \
+          image=$(git ls-tree -r HEAD -- android/pin.toml image/*.sh image/bootconfig \
             image/tools tools/container/Containerfile tools/container/run.sh \
             host/launcher/src/image.rs | sha256sum)
           flatpak=$(git ls-tree -r HEAD -- packaging/flatpak/dev-init.sh \
@@ -165,20 +165,19 @@ jobs:
       - uses: actions/cache/restore@v4
         id: image
         with:
-          path: out/ci/images/ohos
+          path: out/ci/images
           key:
-            ohos-image-v2-${{ runner.os }}-${{ runner.arch }}-${{
-            hashFiles('image/ohos/pin.toml', 'image/ohos/fetch.sh',
-            'image/fs-extract.sh', 'image/tools/**') }}
+            ohos-image-v3-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('ohos/pin.toml', 'image/fetch.sh',
+            'image/extract-ohos.sh', 'image/fs-extract.sh', 'image/tools/**') }}
       - name: Fetch the OpenHarmony image
         run:
-          out/stage/libexec/innkeeper/image/ohos/fetch.sh
-          out/stage/share/innkeeper/image/ohos/pin.toml "$INNKEEPER_IMAGES/ohos"
-          out/stage/libexec/innkeeper/image/fs-extract.sh
+          out/stage/libexec/innkeeper/image/fetch.sh ohos
+          out/stage/share/innkeeper/ohos/pin.toml "$INNKEEPER_IMAGES"
       - uses: actions/cache/save@v4
         if: steps.image.outputs.cache-hit != 'true'
         with:
-          path: out/ci/images/ohos
+          path: out/ci/images
           key: ${{ steps.image.outputs.cache-primary-key }}
       - name: Boot OpenHarmony until SceneBoard is ready
         run: mise run test:e2e -- ohos

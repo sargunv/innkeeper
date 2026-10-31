@@ -428,9 +428,8 @@ if [[ ${groups[*]} != ohos ]]; then
 elif [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   # Fetching the image is setup, outside the deadline.
   st=$repo/out/stage
-  "$st/libexec/innkeeper/image/ohos/fetch.sh" "$st/share/innkeeper/image/ohos/pin.toml" \
-    "${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}/ohos" \
-    "$st/libexec/innkeeper/image/fs-extract.sh" >/dev/null
+  "$st/libexec/innkeeper/image/fetch.sh" ohos "$st/share/innkeeper/ohos/pin.toml" \
+    "${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}" >/dev/null
 else
   # OpenHarmony is a session of its own: a fresh profile, made by the CLI and
   # started by the same launcher as Android's, with its window on this

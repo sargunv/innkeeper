@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
-# Download the pinned Android image from Android's public CI, verify it, and
-# extract its partitions (see image/README.md):
-#   <images>/<name>/dl/   the image zip from image/pin.toml (resumable),
-#                         deleted once extracted
-#   <images>/<name>/img/  system, system_ext, product, vendor, odm, *_dlkm
-#                         (image/extract.sh)
-# The session flattens the APEXes itself (per vendor APEX selection).
+# Download a guest's pinned image, verify it, and extract its partitions with
+# the guest's hook, extract-<system>.sh (see image/README.md):
+#   <images>/<name>/dl/   the zip from the pin (resumable), deleted once
+#                         extracted
+#   <images>/<name>/img/  the partitions
+# For Android, the session flattens the APEXes itself (per vendor APEX
+# selection).
 #
-# usage: fetch.sh <pin.toml> <images>
+# usage: fetch.sh <android|ohos> <pin.toml> <images>
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-usage="usage: fetch.sh <pin.toml> <images>"
-pin=${1:?$usage} images=${2:?$usage}
+usage="usage: fetch.sh <android|ohos> <pin.toml> <images>"
+system=${1:?$usage} pin=${2:?$usage} images=${3:?$usage}
 
 die() {
   echo "fetch.sh: $*" >&2
   exit 1
 }
 
+[[ $system == android || $system == ohos ]] || die "no such system: $system"
 IFS=$'\t' read -r name url size sha < <(
   python3 -Ic 'import sys, tomllib; p = tomllib.load(open(sys.argv[1], "rb")); print(*(p[k] for k in ("name", "url", "size", "sha256")), sep="\t")' "$pin"
 )
-[[ $name =~ ^[a-z0-9-]+$ ]] || die "bad image name in $pin: $name"
+[[ $name =~ ^[a-z0-9.-]+$ && $name != .* ]] || die "bad image name in $pin: $name"
 dest=$images/$name
 mkdir -p "$dest/dl"
 
@@ -29,6 +30,8 @@ mkdir -p "$dest/dl"
 exec 9>"$dest/.lock"
 flock 9
 
+# Extracted images may have read-only directories.
+remove() { if [[ -e $1 ]]; then chmod -R u+w "$1" && rm -rf "$1"; fi; }
 zip=$dest/dl/${url##*/}
 extracted() { [[ $(cat "$dest/img/.source" 2>/dev/null) == "$sha" ]]; }
 
@@ -43,7 +46,8 @@ elif verify "$zip" "$size" "$sha"; then
 else
   rm -f "$zip"
   echo "downloading ${zip##*/} ($((size / 1048576)) MiB) from $url"
-  # The CI serves GET only (HEAD is 404); -C - resumes a partial download.
+  # Android's CI serves GET only (HEAD is 404); -C - resumes a partial
+  # download.
   if [[ ! -f $zip.part || $(stat -c %s "$zip.part") -lt $size ]]; then
     curl -fL --retry 5 --retry-delay 5 -C - -o "$zip.part" "$url"
   fi
@@ -57,10 +61,10 @@ fi
 if extracted; then
   echo "already extracted: $dest/img"
 else
-  rm -rf "$dest/img.tmp"
-  "$here/extract.sh" "$zip" "$dest/img.tmp"
+  remove "$dest/img.tmp"
+  "$here/extract-$system.sh" "$zip" "$dest/img.tmp"
   echo "$sha" >"$dest/img.tmp/.source"
-  rm -rf "$dest/img"
+  remove "$dest/img"
   mv "$dest/img.tmp" "$dest/img"
   echo "extracted $name into $dest/img"
 fi

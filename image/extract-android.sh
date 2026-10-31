@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Extract an AOSP CI "-img-<build>.zip" (as downloaded by image/fetch.sh)
+# fetch.sh's hook for Android: an AOSP CI "-img-<build>.zip"
 # into plain directory trees:
 #   <out>/{system,system_ext,product,vendor,odm,*_dlkm}
 # The zip's sparse super.img holds the dynamic partitions (A/B: the _a slot is
 # taken; the _b slot is empty or system_other). Unprivileged, with the static
 # tools from image/tools.
 #
-# usage: extract.sh <ci-img.zip> <out-dir>
+# usage: extract-android.sh <ci-img.zip> <out-dir>
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tools=$(dirname "$here")
-usage="usage: extract.sh <ci-img.zip> <out-dir>"
+usage="usage: extract-android.sh <ci-img.zip> <out-dir>"
 src=${1:?$usage}
 out=${2:?$usage}
 work="$out/.work"

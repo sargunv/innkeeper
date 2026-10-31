@@ -317,7 +317,7 @@ type Idle = Arc<Mutex<Option<Option<u64>>>>;
 pub fn run(
     cfg: &Config,
     follow: bool,
-    image_lease: Option<crate::prune::Lease>,
+    image_lease: crate::prune::Lease,
     trace: &session::BootTrace,
 ) -> Result<()> {
     let sigs = sys::block_signals(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]);

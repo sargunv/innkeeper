@@ -3,8 +3,8 @@
 #   share/innkeeper/ohos/sys_prod/  our files on OH's product partition
 #                                   (the shim, the exec relay, init cfgs)
 #   share/innkeeper/ohos/vendor/    our VDIs, in place of the image's
-#   share/innkeeper/image/ohos/     the image pin; libexec/.../image/ohos/
-#                                   its fetcher
+#   share/innkeeper/ohos/pin.toml   the image pin (image/fetch.sh fetches
+#                                   it)
 # The broker is the shared one (build:broker).
 set -euo pipefail
 top=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,8 +13,7 @@ install=out/build/ohos/install
 out=$install/share/innkeeper/ohos
 rm -rf "$install"
 mkdir -p "$out/sys_prod/lib64" "$out/sys_prod/bin" "$out/vendor/lib64/passthrough"
-install -D -m 644 -t "$install/share/innkeeper/image/ohos" image/ohos/pin.toml
-install -D -m 755 -t "$install/libexec/innkeeper/image/ohos" image/ohos/fetch.sh
+install -D -m 644 -t "$out" ohos/pin.toml
 llvm=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 # Freestanding: no libc headers or link, so the NDK's clang builds it.
 "$llvm/clang" --target=x86_64-linux-musl -O2 -fPIC -shared -nostdlib -ffreestanding \

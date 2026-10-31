@@ -630,7 +630,6 @@ mod tests {
             data_home: d.clone(),
             data: d.join(format!("data-{name}")),
             images: d.join("images"),
-            pin: d.join("pin.toml"),
             root: d.join(format!("root-{name}")),
         };
         let (old, gone) = (p("unit-test-old"), p("unit-test-gone"));

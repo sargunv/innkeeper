@@ -31,17 +31,18 @@ early boot from the kmsg log.
 
 ## Image
 
-[image/ohos/pin.toml](../image/ohos/pin.toml) pins Oniro's x86_64 emulator
-release, built on an OpenHarmony release. It is downloaded from GitHub on the
-user's machine at an OpenHarmony profile's first start and never redistributed
-or committed. No OpenHarmony source publishes an anonymous x86_64
-standard-system image, so this is the closest to Android's CI pin.
-`image/ohos/fetch.sh` downloads the zip (resumable, size and SHA-256 checked),
-then extracts `system.img` and `vendor.img` with `image/fs-extract.sh`'s static
-debugfs, read-only as on a mount: no loop mounts, no root. The guest kernel,
-ramdisk and other images are discarded; the guest runs on the host kernel in our
-sandbox, never in QEMU. The partitions go to `images/ohos/<name>/img/` in the
-image cache (`system/`, system.img's system-as-root tree, and `vendor/`).
+[ohos/pin.toml](pin.toml) pins Oniro's x86_64 emulator release, built on an
+OpenHarmony release. It is downloaded from GitHub on the user's machine at an
+OpenHarmony profile's first start and never redistributed or committed. No
+OpenHarmony source publishes an anonymous x86_64 standard-system image, so this
+is the closest to Android's CI pin. The shared fetcher
+([image/fetch.sh](../image/fetch.sh), same pin schema, cache, leases and prune
+as Android's) downloads it, and `image/extract-ohos.sh` extracts `system.img`
+and `vendor.img` with `image/fs-extract.sh`'s static debugfs, read-only as on a
+mount: no loop mounts, no root. The guest kernel, ramdisk and other images are
+discarded; the guest runs on the host kernel in our sandbox, never in QEMU. The
+partitions go to `images/<name>/img/` in the image cache (`system/`,
+system.img's system-as-root tree, and `vendor/`).
 
 To bump the pin, take a newer `oniro_emulator.zip` from
 [device_board_oniro releases](https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases)
