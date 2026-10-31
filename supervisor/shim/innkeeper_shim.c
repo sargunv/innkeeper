@@ -1,9 +1,10 @@
-// LD_PRELOAD shim that lets an unmodified Android userspace run in a rootless
-// user namespace. Mostly SELinux; see also rlimits/priorities at the end.
+// LD_PRELOAD shim for calls an unmodified Android userspace makes that the
+// Flatpak sandbox refuses or a host kernel answers differently
+// (supervisor/README.md, "The shim").
 //
-// The session hides /sys/fs/selinux, so Android's libselinux reports SELinux
-// as disabled and skips access checks, restorecon and app domain transitions.
-// A few call sites in init still assume an Android policy is loaded:
+// SELinux: the session hides /sys/fs/selinux, so libselinux reports SELinux as
+// disabled and skips access checks, restorecon and app domain transitions. A
+// few call sites in init still assume an Android policy is loaded:
 //
 //   * Service::Start computes a domain with security_compute_create(), which
 //     needs selinuxfs and fails, so no service without a seclabel can start.
@@ -11,15 +12,42 @@
 //     rejects Android contexts with EINVAL, and init treats that as fatal.
 //   * Sockets and files get setsockcreatecon()/setfscreatecon() contexts.
 //
-// This shim makes those calls succeed as no-ops. File contexts fall back to
-// a synthetic label on hosts without SELinux. Process and peer contexts keep
-// their host labels, used only in logs and checks libselinux already skips.
+// Those calls succeed as no-ops. File contexts fall back to a synthetic label
+// on hosts without SELinux. Process and peer contexts keep their host labels,
+// used only in logs and checks libselinux already skips.
+#include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <linux/netlink.h>
+#include <sched.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
+#include <sys/mount.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #define EXPORT __attribute__((visibility("default")))
+
+// In a Flatpak session, not the bootless developer harness, which runs with
+// real credentials and mounts.
+static int flatpak_state = -1;
+static int flatpak(void) {
+  if (flatpak_state < 0) {
+    const char* e = getenv("INNKEEPER_BIONIC_HARNESS");
+    flatpak_state = !(e && !strcmp(e, "1"));
+  }
+  return flatpak_state;
+}
 
 typedef unsigned short security_class_t;
 
@@ -91,32 +119,19 @@ EXPORT int selinux_status_deny_unknown(void) { return 0; }
 // property area setup, restorecon fallbacks): the host kernel rejects Android
 // contexts, and bionic's __system_property_area_init() fails, which is fatal
 // for init. Pretend success for that one xattr; pass everything else through.
-#include <sys/syscall.h>
-#include <unistd.h>
-
 static int is_selinux_xattr(const char* name) {
   return name && strcmp(name, "security.selinux") == 0;
 }
 
-// Single-uid mode (supervisor/README.md): the kernel rejects POSIX ACL entries
+// The kernel rejects POSIX ACL entries
 // naming Android's uids and gids, which aren't mapped. vold gives
 // /data/media/<user> a default ACL (group media_rw/everybody) and fails user
 // storage preparation without it, and system_server then reboots to recovery
 // to wipe /data. Every Android process is the same kernel uid there, so the
 // ACL has nothing to grant: skip it.
-//
-// The bootless developer harness uses real credentials and mounts.
-static int single_uid_state = -1;
-static int single_uid(void) {
-  if (single_uid_state < 0) {
-    const char* e = getenv("INNKEEPER_BIONIC_HARNESS");
-    single_uid_state = !(e && !strcmp(e, "1"));
-  }
-  return single_uid_state;
-}
 static int is_skipped_xattr(const char* name) {
   if (is_selinux_xattr(name)) return 1;
-  return name && !strncmp(name, "system.posix_acl_", 17) && single_uid();
+  return name && !strncmp(name, "system.posix_acl_", 17) && flatpak();
 }
 
 EXPORT int fsetxattr(
@@ -144,8 +159,6 @@ EXPORT int lsetxattr(
 // setrlimit/setpriority in a service's "rlimit"/"priority" option as fatal
 // for that service (zygote has "priority -20"). Clamp limits to what we may
 // set and treat priority changes we aren't allowed to make as best-effort.
-#include <stdlib.h>
-#include <sys/resource.h>
 
 EXPORT int setpriority(int which, id_t who, int prio) {
   long rc = syscall(SYS_setpriority, which, who, prio);
@@ -200,7 +213,7 @@ EXPORT int prlimit(
 // them fail to link. init's forked children still run the shim between fork
 // and exec, which is where init needs it. Services that need it themselves
 // get "setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so" in their rc.
-// In Flatpak mode init isn't pid 1; pivot-exec marks it with
+// In a Flatpak session init isn't pid 1; pivot-exec marks it with
 // INNKEEPER_SHIM_INIT instead.
 __attribute__((constructor)) static void innkeeper_shim_init(void) {
   if (syscall(SYS_getpid) == 1 || getenv("INNKEEPER_SHIM_INIT")) {
@@ -209,24 +222,11 @@ __attribute__((constructor)) static void innkeeper_shim_init(void) {
   }
 }
 
-// Flatpak: the sandbox's seccomp filter fails mount, umount,
+// The sandbox's seccomp filter fails mount, umount,
 // unshare and setns with EPERM, ahead of any filter of ours. Android's root is
 // already assembled (symlinks, see host/launcher/src/flatpak.rs) and has no
 // namespaces to make, so a refused call is treated as done: init's mounts,
 // zygote's per-app mount namespace and storage views, vold's binds.
-#include <dlfcn.h>
-#include <sys/mount.h>
-static int flatpak_state = -1;
-static int flatpak(void) {
-  if (flatpak_state < 0) {
-    const char* e = getenv("INNKEEPER_BIONIC_HARNESS");
-    flatpak_state = !(e && !strcmp(e, "1"));
-  }
-  return flatpak_state;
-}
-#include <fcntl.h>
-#include <stdarg.h>
-
 #include "fuse.h"
 
 static int do_open(const char* path, int flags, mode_t mode) {
@@ -278,15 +278,13 @@ EXPORT int unshare(int flags) {
 EXPORT int setns(int fd, int nstype) {
   return refused_ok(syscall(SYS_setns, fd, nstype));
 }
-// netd in Flatpak mode (its rc sets INNKEEPER_NETLINK_ACCEPT=1): the session
+// netd (its rc sets INNKEEPER_NETLINK_ACCEPT=1): the session
 // shares the host's network namespace, where netd may change nothing. The
 // kernel answers its rtnetlink requests (rules, routes, addresses) with
 // EPERM, and netd won't start without its routing rules: report them done.
 // Its routing then means nothing, as its marks (SO_MARK, bpfemu) and
 // firewall rules don't; sockets use the host's routes,
 // as every desktop app does.
-#include <linux/netlink.h>
-#include <sys/socket.h>
 static int netlink_accept_state = -1;
 static void netlink_accept(int fd, void* buf, long n) {
   if (n <= 0 || !flatpak()) return;
@@ -327,7 +325,7 @@ EXPORT ssize_t recvfrom(
 EXPORT ssize_t recv(int fd, void* buf, size_t len, int flags) {
   return recvfrom(fd, buf, len, flags, NULL, NULL);
 }
-// vold's uevent socket in Flatpak mode (netlink.h).
+// vold's uevent socket (netlink.h).
 #include "netlink.h"
 EXPORT int bind(int fd, const struct sockaddr* addr, socklen_t len) {
   return innkeeper_netlink_bind(fd, addr, len, flatpak());
@@ -347,12 +345,10 @@ EXPORT ssize_t __recvfrom_chk(
   return recvfrom(fd, buf, len, flags, addr, alen);
 }
 
-// lmkd in Flatpak mode (its rc sets INNKEEPER_PSI_WINDOW=1): the kernel takes
+// lmkd (its rc sets INNKEEPER_PSI_WINDOW=1): the kernel takes
 // PSI triggers with a window under 2 s (lmkd asks for 1 s) only from a
 // process with CAP_SYS_RESOURCE, which the sandbox never has. Widen the
 // window to 2 s; lmkd still polls the same memory pressure.
-#include <fcntl.h>
-#include <stdio.h>
 static int psi_window_state = -1;
 static long psi_write(int fd, const void* buf, size_t n) {
   char kind[8], link[64], path[32], out[64];
@@ -435,11 +431,10 @@ EXPORT ssize_t __write_chk(int fd, const void* buf, size_t n, size_t buf_size) {
   return do_write(fd, buf, n);
 }
 
-// socket(AF_KEY) in Flatpak mode: the sandbox refuses the family before our
+// socket(AF_KEY): the sandbox refuses the family before our
 // seccomp filter sees the call. The connectivity stack opens and closes one
 // only to wait for an RCU grace period after swapping eBPF maps, which
 // emulated maps don't need (supervisor/broker/src/bpf.rs).
-#include <sys/eventfd.h>
 EXPORT int socket(int domain, int type, int protocol) {
   long r = syscall(SYS_socket, domain, type, protocol);
   if (r < 0 && errno == EAFNOSUPPORT && domain == AF_KEY && flatpak())
@@ -449,8 +444,6 @@ EXPORT int socket(int domain, int type, int protocol) {
 
 // init forks services with "namespace mnt|pid" through clone(); without the
 // namespaces they share the session's.
-#include <sched.h>
-#include <stdarg.h>
 #define CLONE_NEW_ALL                                                        \
   (CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWIPC | \
    CLONE_NEWUSER | CLONE_NEWCGROUP)
@@ -478,7 +471,6 @@ EXPORT int clone(int (*fn)(void*), void* stack, int flags, void* arg, ...) {
 // file it lacks. The session launcher stages the host's /boot/config-$(uname
 // -r) as /innkeeper/config.gz; serve that when /proc/config.gz is missing.
 // (zygote, and so system_server and apps, preload this shim.)
-#include <dlfcn.h>
 typedef void* gzFile;
 EXPORT gzFile gzopen(const char* path, const char* mode) {
   static gzFile (*real)(const char*, const char*);
@@ -499,9 +491,6 @@ EXPORT gzFile gzopen(const char* path, const char* mode) {
 // getExternalFilesDir() returns null, and apps that use it crash (Godot does
 // at startup). Treat the refusal as success, as vold does on ext4, and set the
 // other flags without FS_PROJINHERIT_FL.
-#include <linux/fs.h>
-#include <stdarg.h>
-#include <sys/ioctl.h>
 EXPORT int ioctl(int fd, int request, ...) {
   va_list ap;
   va_start(ap, request);
@@ -521,7 +510,8 @@ EXPORT int ioctl(int fd, int request, ...) {
   return rc;
 }
 
-// Single-uid mode (supervisor/README.md): the kernel sees every file as owned
+// Single-uid credentials (supervisor/README.md): the kernel sees every file
+// as owned
 // by uid 0, and the seccomp supervisor records the owner a chown asked for in
 // the "user.innkeeper.owner" xattr ("uid:gid"). installd verifies the owners of
 // the app directories it prepares (fs_prepare_dir_strict, the cache dirs, the
@@ -532,16 +522,12 @@ EXPORT int ioctl(int fd, int request, ...) {
 // zygote: its children include sandboxed processes (WebView renderers) whose
 // own seccomp policy kills them for a syscall it doesn't allow. Bionic's own
 // callers (fts) reach these wrappers through the PLT too.
-#include <fcntl.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <sys/stat.h>
 
 static int vstat_state = -1;
 static int vstat_on(void) {
   if (vstat_state < 0) {
     const char* e = getenv("INNKEEPER_VSTAT");
-    vstat_state = e && !strcmp(e, "1") && single_uid();
+    vstat_state = e && !strcmp(e, "1") && flatpak();
   }
   return vstat_state;
 }
