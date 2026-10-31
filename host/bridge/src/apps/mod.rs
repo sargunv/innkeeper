@@ -6,7 +6,7 @@
 //! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
 //! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 //! | `0x0501` | HAVE    | name package, name version                                                                                | `u8`: 0 missing or outdated (send ADDED), 1 current, 2 not ours (leave it)                             |
-//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u8 new_window`, `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
+//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 len`; fd: sealed memfd                | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
 //! | `0x0503` | REMOVED | name package                                                                                              |                                                                                                        |
 //!
 //! At each connection the system app sends HAVE for every launchable user
@@ -60,7 +60,6 @@ pub enum Request {
         /// `ApplicationInfo.category` (-1 for none).
         category: i32,
         game: bool,
-        new_window: bool,
         icons_len: u32,
     },
     Removed {
@@ -111,7 +110,6 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 label,
                 category,
                 game: r.bool()?,
-                new_window: r.bool()?,
                 icons_len: r.u32()?,
             }
         }
@@ -137,7 +135,6 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             label,
             category,
             game,
-            new_window,
             icons_len,
         } => {
             w = Writer::message(ty::ADDED, tag);
@@ -146,7 +143,6 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .name(label)
                 .i32(*category)
                 .u8(*game as u8)
-                .u8(*new_window as u8)
                 .u32(*icons_len);
         }
         Request::Removed { package } => {
@@ -258,7 +254,6 @@ impl AppsService {
         version: String,
         label: String,
         categories: Vec<String>,
-        new_window: bool,
         icons: Vec<(u32, Vec<u8>)>,
     ) -> Reply {
         if self.cfg.have(&pkg, &version) != have::MISSING {
@@ -277,7 +272,6 @@ impl AppsService {
             web_hosts: vec![],
             origin: Some("android".into()),
             splash: None,
-            new_window,
         };
         // The record is written before the portal's dialog shows, so a HAVE
         // meanwhile finds it current.
@@ -379,7 +373,6 @@ impl Service for AppsService {
                 label,
                 category,
                 game,
-                new_window,
                 icons_len,
             } => {
                 let fd = fds.pop().expect("checked above");
@@ -396,7 +389,6 @@ impl Service for AppsService {
                     version,
                     label,
                     desktop::categories_for((category >= 0).then_some(category), game),
-                    new_window,
                     icons,
                 )
             }
@@ -445,7 +437,6 @@ mod tests {
                 label: "Example ✓".into(),
                 category: 4,
                 game: false,
-                new_window: true,
                 icons_len: 1000,
             },
             Request::Removed {
@@ -499,13 +490,11 @@ mod tests {
             "1".into(),
             "A".into(),
             desktop::categories_for(None, false),
-            true,
             vec![(48, png(48))],
         );
         assert_eq!(r.status, 0);
         let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
         assert!(text.contains("X-Innkeeper-Origin=android"), "{text}");
-        assert!(text.contains("[Desktop Action NewWindow]"), "{text}");
         assert!(
             text.contains(&format!("Exec={}\n", exec("org.ex.a"))),
             "{text}"

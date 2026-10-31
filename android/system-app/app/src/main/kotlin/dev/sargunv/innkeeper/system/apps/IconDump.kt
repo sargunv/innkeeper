@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.os.Looper
 import android.util.Base64
 import android.util.TypedValue
-import dev.sargunv.innkeeper.system.wm.LaunchPolicy
 import dev.sargunv.innkeeper.system.wm.WindowSizing
 import kotlin.system.exitProcess
 
@@ -57,9 +56,6 @@ object IconDump {
     out.append("category ${app.category}\n")
     for (mime in FileAssociations.mimeTypes(pm, pkg)) out.append("mime $mime\n")
     splashColor(pm, app, launcher)?.let { out.append("splash %08x\n".format(it)) }
-    val multiple =
-      launcher?.let { LaunchPolicy.multipleTasks(it.launchMode, it.documentLaunchMode) } == true
-    out.append("new-window $multiple\n")
     val size = WindowSizing.of(launcher)
     out.append("window ${size.widthDp} ${size.heightDp}\n")
     val icon = AppIcons.load(pm, app, launcher)

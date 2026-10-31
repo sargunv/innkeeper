@@ -272,7 +272,6 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<Ins
         schemes: base.schemes.clone(),
         web_hosts: base.web_hosts.clone(),
         origin: None,
-        new_window: info.new_window,
         splash: info
             .splash
             .zip(info.window)

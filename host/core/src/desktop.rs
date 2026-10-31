@@ -174,8 +174,6 @@ pub struct AppEntry {
     /// What its launch splash looks like, as `X-Innkeeper-Splash` and
     /// `X-Innkeeper-Window`.
     pub splash: Option<Splash>,
-    /// The launcher activity accepts Android MULTIPLE_TASK.
-    pub new_window: bool,
 }
 
 /// An app's launch splash: the window its launcher activity opens in, in
@@ -205,12 +203,9 @@ impl Splash {
 }
 
 impl AppEntry {
-    /// `innkeeper --profile <profile> run <opts> <package>`.
-    pub fn run(&self, opts: &[&str]) -> Vec<String> {
-        let mut args = vec!["run"];
-        args.extend_from_slice(opts);
-        args.push(&self.package);
-        crate::paths::cli(&self.profile, &args)
+    /// `innkeeper --profile <profile> run <package>`.
+    pub fn run(&self) -> Vec<String> {
+        crate::paths::cli(&self.profile, &["run", &self.package])
     }
 
     pub fn id(&self) -> String {
@@ -231,7 +226,7 @@ impl AppEntry {
         if let Some(icon) = &self.icon {
             writeln!(s, "Icon={}", escape_value(icon)?)?;
         }
-        writeln!(s, "Exec={}", exec_line(&self.run(&[]), Some("%U"))?)?;
+        writeln!(s, "Exec={}", exec_line(&self.run(), Some("%U"))?)?;
         // The launcher then passes an activation token (XDG_ACTIVATION_TOKEN),
         // which `run` hands on to the app's window.
         s.push_str("Terminal=false\nStartupNotify=true\n");
@@ -266,11 +261,6 @@ impl AppEntry {
         if let Some(sp) = &self.splash {
             writeln!(s, "X-Innkeeper-Splash=#{:06x}", sp.color & 0xff_ffff)?;
             writeln!(s, "X-Innkeeper-Window={}x{}", sp.width, sp.height)?;
-        }
-        writeln!(s, "X-Innkeeper-NewWindow={}", self.new_window)?;
-        if self.new_window {
-            s.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\n");
-            writeln!(s, "Exec={}", exec_line(&self.run(&["--new-window"]), None)?)?;
         }
         Ok(s)
     }
@@ -408,7 +398,6 @@ mod tests {
             schemes: vec!["wikipedia".into()],
             web_hosts: vec!["*.wikipedia.org".into()],
             origin: None,
-            new_window: false,
             splash: Some(Splash {
                 color: 0xf8f9fa,
                 width: 1280,
@@ -430,7 +419,7 @@ mod tests {
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
              X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Profile=work\nX-Innkeeper-Version=2.7.50\n\
              X-Innkeeper-Web-Hosts=*.wikipedia.org;\nX-Innkeeper-Splash=#f8f9fa\n\
-             X-Innkeeper-Window=1280x800\nX-Innkeeper-NewWindow=false\n"
+             X-Innkeeper-Window=1280x800\n"
         );
         assert_eq!(
             Splash::parse(
@@ -443,16 +432,6 @@ mod tests {
         assert_eq!(Splash::parse("#000000", "0x1"), None);
         assert_eq!(Splash::parse("000000", "1x1"), None);
         assert!(!s.contains("x-scheme-handler/http"));
-    }
-
-    #[test]
-    fn new_window_action_keeps_the_launcher_command_and_profile() {
-        let mut e = entry();
-        assert!(!e.render().unwrap().contains("Desktop Action"));
-        e.new_window = true;
-        let text = e.render().unwrap();
-        assert!(text.contains("Actions=NewWindow;\n"));
-        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=innkeeper --profile work run --new-window org.wikipedia\n"));
     }
 
     #[test]

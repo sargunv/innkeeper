@@ -140,15 +140,11 @@ not constrain the host pointer.
   package's `app_id`. Before moving a new task off its caller's display, the
   bridge requests an `xdg_activation_v1` token from the caller's surface and
   uses it when the new window first maps. A desktop launch restores the
-  package's most recent task. `innkeeper run --new-window <package>` and the
-  desktop entry's **New Window** action request `NEW_TASK | MULTIPLE_TASK` on a
-  fresh display. Entries advertise it only for launcher activities whose launch
-  and document modes permit multiple tasks; singleton or document-never
-  launchers keep the ordinary launch action. DynamicLauncher 1.20 accepts only
-  one desktop-entry group, so its upstream restriction prevents installing a New
-  Window action group. Flatpak portal entries retain the ordinary launcher; the
-  CLI option remains available inside Flatpak. Native desktop entries include
-  the action.
+  package's most recent task. `innkeeper run --new-window <package>` requests
+  `NEW_TASK | MULTIPLE_TASK` on a fresh display, if the launcher activity's
+  launch and document modes permit multiple tasks. App entries have no New
+  Window action: the DynamicLauncher portal accepts only one desktop-entry
+  group.
 - **Display 0.** Any ordinary app task that appears there (`am start` without a
   display, notification `PendingIntent`s) moves into a window of its own; home,
   recents, dream and assistant tasks stay.
