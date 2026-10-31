@@ -106,6 +106,7 @@ flowchart LR
 | [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | sandbox; the shim inside Android           | `broker/src/notify.rs`         |
 | [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared        | `fetch.sh`, `pin.toml`         |
 | [image/ohos](image/ohos/README.md)                                     | the OpenHarmony image pin                              | desktop, for the OpenHarmony guest         | `fetch.sh`, `pin.toml`         |
+| [ohos](ohos/README.md)                                                 | OpenHarmony guest: broker layer, init shim, runner     | test sandbox (not in the stage)            | `sandbox.sh`, `run.py`         |
 | [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                          | `composer/Display.cpp`         |
 | [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.anv.so`, `vulkan.lvp.so`     | Android, in every Vulkan user              | `build.sh`, `patches/mesa/`    |
 | [android/vendor/audio](android/vendor/audio/README.md)                 | `libtinyalsav2.so`                                     | Android, in the audio HAL                  | `tinyalsa/pcm.c`               |

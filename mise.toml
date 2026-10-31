@@ -105,6 +105,10 @@ install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig ima
 install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
 """
 
+[tasks."ohos:build"]
+description = "The OpenHarmony session's broker (static musl) and init shim, in out/build/ohos; not in build or the stage"
+run = "ohos/build.sh"
+
 [tasks."package:flatpak"]
 description = "Build the stage and install the Flatpak into FLATPAK_USER_DIR"
 run = "packaging/flatpak/build.sh"
@@ -156,6 +160,16 @@ description = "Manual app troubleshooting (-- --only PKG); full corpus only in n
 # and notifications and media players stay off the real desktop.
 env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
+
+[tasks."ohos:test"]
+description = "Boot the pinned OpenHarmony image in a test sandbox until samgr is ready; needs mise run build"
+depends = ["ohos:build"]
+env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='ohos') }}" }
+run = """
+set -euo pipefail
+image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/linuxapk/image/fs-extract.sh
+ohos/run.py --timeout 50 --probe ohos/tests/boot.sh
+"""
 
 [tasks.bench]
 description = "Manual measurement harness (-- input frame audio gpu memory binder); never a test gate"
