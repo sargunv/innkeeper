@@ -34,6 +34,7 @@ static struct probe probes[] = {
   {"ioctl binder", __NR_ioctl, {-1, 0xc0306201}},
   {"ioctl other", __NR_ioctl, {-1, 0x5401}},
   {"open", __NR_open, {(long)"/nonexistent", O_RDONLY}},
+  {"ioctl access token", __NR_ioctl, {-1, 0x80084101}},
   {"getuid", __NR_getuid},
   {"getgroups", __NR_getgroups, {0, 0}},
   {"setresuid", __NR_setresuid, {-1, -1, -1}},

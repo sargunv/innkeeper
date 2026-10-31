@@ -403,6 +403,8 @@ struct SeccompUserspace {
     captured: HashMap<u64, OwnedFd>,
     next_token: u64,
     timer: Arc<Timer>,
+    /// OpenHarmony's access tokens (empty for Android).
+    tokens: crate::ohos::Tokens,
 }
 
 /// The driver's clock, and when it asked to be woken (`monitor` calls
@@ -432,6 +434,11 @@ impl SeccompUserspace {
 }
 
 impl Userspace for SeccompUserspace {
+    fn access_token(&mut self, proc: ProcId, _tid: u32) -> (u64, u64) {
+        self.procs
+            .get(&proc)
+            .map_or((0, 0), |p| self.tokens.get(p.pid))
+    }
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>> {
         mem_read(self.procs.get(&proc)?.mem.raw(), addr, len)
     }
@@ -608,6 +615,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
             captured: HashMap::new(),
             next_token: 0,
             timer: Arc::clone(&timer),
+            tokens: Default::default(),
         },
         vid: vid.clone(),
         fd_index: HashMap::new(),
@@ -694,7 +702,11 @@ fn as_openat(req: &mut SeccompNotif) {
 /// Is this notification the broker's to serve (every `openat`, and binder
 /// `ioctl`s) rather than the C supervisor's?
 fn is_binder_syscall(nr: i64, args: &[u64; 6]) -> bool {
-    nr == libc::SYS_openat || (nr == libc::SYS_ioctl && is_binder_ioctl(args[1] as u32))
+    nr == libc::SYS_openat
+        || (nr == libc::SYS_ioctl
+            && (is_binder_ioctl(args[1] as u32)
+                || (crate::guest() == crate::Guest::Ohos
+                    && crate::ohos::is_token_ioctl(args[1] as u32))))
 }
 
 /// Only binder devices take the binder lock. Other device opens still need
@@ -926,6 +938,9 @@ impl Supervisor {
             })
             .unwrap_or(pid);
         let procid = self.broker.open(ns_pid, euid, ctx, flags & O_NONBLOCK != 0);
+        if crate::guest() == crate::Guest::Ohos {
+            self.us.tokens.resolve(pid, &crate::ohos::proc_stat);
+        }
         ps.fd = newfd as u32;
         self.us.procs.insert(procid, ps);
         self.fd_index.insert((pid, newfd as u32), procid);
@@ -935,6 +950,10 @@ impl Supervisor {
 
     fn handle_ioctl(&mut self, req: SeccompNotif) {
         let fd = req.data.args[0] as u32;
+        let cmd = req.data.args[1] as u32;
+        if crate::guest() == crate::Guest::Ohos && crate::ohos::is_token_ioctl(cmd) {
+            return self.token_ioctl(req);
+        }
         let procid = match self
             .tgid(req.pid as i32)
             .and_then(|pid| self.fd_index.get(&(pid, fd)))
@@ -949,8 +968,40 @@ impl Supervisor {
             id: req.id,
             arg: req.data.args[2],
         };
-        let cmd = req.data.args[1] as u32;
         self.broker.ioctl(procid, req.pid, cmd, call, &mut self.us);
+    }
+
+    /// An OpenHarmony access-token ioctl on [`crate::ohos::NODE`]; other
+    /// type-`'A'` ioctls (ALSA's) go through.
+    fn token_ioctl(&mut self, req: SeccompNotif) {
+        let tid = req.pid as i32;
+        let [fd, cmd, arg, ..] = req.data.args;
+        let node = std::fs::read_link(format!("/proc/{tid}/fd/{fd}"))
+            .is_ok_and(|p| p.as_os_str() == crate::ohos::NODE);
+        let (Some(pid), true) = (self.tgid(tid), node) else {
+            return self.respond(req.id, 0, true);
+        };
+        let Some(mem) = open_mem(tid) else {
+            return self.respond(req.id, libc::EPERM, false);
+        };
+        struct Mem(MemFd, u64);
+        impl crate::ohos::Arg for Mem {
+            fn read(&mut self, len: usize) -> Option<Vec<u8>> {
+                mem_read(self.0, self.1, len)
+            }
+            fn write(&mut self, data: &[u8]) -> bool {
+                mem_write(self.0, self.1, data)
+            }
+        }
+        let r = self.us.tokens.ioctl(
+            pid,
+            cmd as u32,
+            &crate::ohos::proc_stat,
+            &mut Mem(mem.raw(), arg),
+        );
+        dlog!("token pid={pid} cmd={cmd:#x} {r:?}");
+        let (val, errno) = r.map_or_else(|e| (0, -e), |v| (v, 0));
+        send_resp(self.us.listener, self.us.resp_sz, req.id, val, errno, false);
     }
 
     fn release_proc(&mut self, procid: ProcId) {

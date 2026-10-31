@@ -59,9 +59,14 @@ pub fn install(harness: bool) -> std::io::Result<i32> {
     f[1].jt = 1; // Other architectures retain the kernel's handling.
     rule(&mut f, SYS_openat, &[]);
     // OpenHarmony: musl opens with open(2), which the broker serves as
-    // openat.
+    // openat, and its access-token device's ioctls are type 'A'.
     if crate::guest() == crate::Guest::Ohos {
         rule(&mut f, SYS_open, &[]);
+        rule(
+            &mut f,
+            SYS_ioctl,
+            &[(1, 0xff00, (crate::ohos::IOCTL_TYPE as u32) << 8)],
+        );
     }
     if !harness {
         rule(&mut f, SYS_inotify_add_watch, &[]);

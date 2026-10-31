@@ -9,6 +9,8 @@
 //!     user notifications and serves binder ioctls to real Android processes.
 //!   * `creds`: single-uid mode's credential model and the syscalls it
 //!     answers.
+//!   * [`ohos`]: OpenHarmony's access tokens, beside the binder ioctls the
+//!     driver adds for that guest.
 //!   * `flat`: what Flatpak mode's missing mounts did (Android paths for
 //!     /proc magic links, faked /proc files).
 //!
@@ -24,6 +26,7 @@ pub mod filter;
 mod flat;
 pub mod input;
 pub mod notify;
+pub mod ohos;
 
 use std::io::Write;
 use std::sync::Mutex;

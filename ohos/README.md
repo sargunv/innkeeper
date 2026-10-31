@@ -3,10 +3,9 @@
 An OpenHarmony userspace as a second guest, on the same supervisor as Android
 (feasibility and milestones: #191). The pinned image
 ([image/ohos](../image/ohos/README.md)) boots in a test Flatpak sandbox on the
-host kernel: OH's init starts its services under the supervisor and samgr comes
-up. System abilities can't register yet: OH's binder extensions and access
-tokens are missing. There is no display, input or app install yet, and nothing
-here is part of the Android session, `mise run build` or the stage.
+host kernel: OH's init starts its services, samgr comes up and OH's core system
+abilities register with it. There is no display, input or app install yet, and
+nothing here is part of the Android session, `mise run build` or the stage.
 
 | File                      | What                                                          |
 | ------------------------- | ------------------------------------------------------------- |
@@ -22,8 +21,9 @@ here is part of the Android session, `mise run build` or the stage.
 `ohos` (scratch in `out/dev/flatpak/ohos/`, data wiped at each run). Init's log
 is `ohos-kmsg.log` there; once hilogd runs, services log to hilog instead. To
 look around, write a script for OH's `/system/bin/sh` and pass it with
-`ohos/run.py --probe <script>`: it runs as root once `bootevent.samgr.ready` is
-set, and its output comes back (`hilog -x`, `ps -A`).
+`ohos/run.py --probe <script>`: it runs as root, with a native token holding
+`ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and its output
+comes back (`hidumper -ls`, `hilog -x`, `ps -A`).
 
 ## How it boots
 
@@ -43,7 +43,8 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   raises best-effort.
 - **Broker.** The same broker, built static for musl (OH's root has no Bionic),
   with `LINUXAPK_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
-  `openat`) and serves `/etc/passwd` and `/etc/group` from `/system/etc`
+  `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's
+  binder ioctls and serves `/dev/access_token_id`
   ([supervisor/README.md](../supervisor/README.md#openharmony)).
 
 Known gaps, visible in the logs and not fatal: no SELinux policy (the image

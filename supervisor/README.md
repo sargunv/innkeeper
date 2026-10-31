@@ -155,6 +155,13 @@ set it, and their filter and driver are unchanged.
   info), `BINDER_GET_ACCESS_TOKEN` and `BINDER_GET_SENDER_INFO`. A transaction
   carries its sender's token and first token, and the reading thread keeps them,
   with the sender's pid for synchronous calls, until its next read.
+- **Access tokens** (`src/ohos.rs`). `/dev/access_token_id` is an empty file
+  whose type-`'A'` ioctls the broker serves: each process's token and first
+  token, set by init or appspawn before exec and inherited across fork, and the
+  kernel's per-token permission maps, which init fills from the service cfgs and
+  the access-token service checks. Records are keyed by pid and start time, so a
+  reused pid starts from its parent's. Newer kernels' SPM entries and reference
+  counts are absent (`ENOTTY`), as on a kernel built without them.
 
 ## Tests
 
@@ -164,7 +171,7 @@ set it, and their filter and driver are unchanged.
   emulator's bounds and exactly which syscalls notify in each mode;
   `tests/shim-netlink.sh` the uevent port choice.
 - `mise run test:e2e -- boot` boots and runs `selftest`.
-- `mise run ohos:test` boots OpenHarmony until samgr is ready.
+- `mise run ohos:test` boots OpenHarmony until its system abilities register.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).
