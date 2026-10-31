@@ -24,14 +24,13 @@ rewritten under a running session), `derived/` (the layers
 [docs/session.md](../docs/session.md#overlay-stack) stacks above the image).
 About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
 
-After successful preparation, stale build directories (including their derived
-layers) and unselected `apex-<hash>` trees are pruned, with paths and allocated
-bytes released logged to stderr. The current pin and running sessions keep
-leases on their build and APEX tree; a cache-wide prepare lock serializes
-preparation and collection across profiles, even with private runtime dirs. Lock
-files under `images/.locks/` stay in place. Symlinks, unknown directories and
-incomplete APEX extractions are left alone. Changed derived layers cannot be
-regenerated while another session uses that build; stop those sessions first.
+A successful `prepare` prunes stale builds (with their derived layers) and
+unselected `apex-<hash>` trees, logging what it frees. The current pin and every
+running session hold leases on their build and APEX tree, and a cache-wide lock
+in `images/.locks/` serializes preparation and pruning across profiles. Pruning
+skips symlinks, unknown directories and incomplete APEX extractions. A changed
+derived layer can't be regenerated while another session uses that build; stop
+it first.
 
 - **apexd and flatten-apex.sh must agree.** [bootconfig](bootconfig) selects
   multi-install vendor APEXes the way cuttlefish's launcher does
@@ -56,9 +55,8 @@ regenerated while another session uses that build; stop those sessions first.
    `apex-<hash>/`. Stage the updated hashes with `mise run build:data` and
    `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to the
    new build id.
-4. Prove it: `mise run test:e2e -- boot`, `mise run test:e2e` and
-   `mise run test:compat` with no regressions, then regenerate the
-   [Compatibility wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility).
+4. Prove it: `mise run test:e2e` passes, and the next nightly compatibility
+   report shows no regressions against the previous one.
 
 ## Licensing
 
@@ -73,7 +71,6 @@ for packaging:
   compiled into Launcher3 and SystemUI), not on any installed file.
 - The kernel and dtb (GPL-2.0) are in `boot.img`, which we never extract.
 
-Tests: launcher units cover pin selection and pruning, including active leases,
-read-only trees and symlinks. `tests/fork-drift.sh` (in `mise run test`) checks
-unchanged, changed and missing overlay bases with a self-contained fixture.
-Image preparation checks all nine real upstream bases against the pinned image.
+Tests: launcher unit tests cover pin selection and pruning.
+`tests/fork-drift.sh` (in `mise run test`) checks the fork-base check against a
+fixture; `prepare` checks the real bases against the pinned image.

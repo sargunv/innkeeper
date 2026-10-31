@@ -10,13 +10,11 @@ import android.util.Log
 import android.widget.TextView
 
 /**
- * A configuration-change-naive activity for closing and recreating windows (tests/e2e storage, the
- * display teardown check): it handles no configuration changes, so moving its task between displays
- * relaunches it for the configuration change, and it finishes itself like the storage probe did
- * when the scan completed (InnkeeperStorageProbe pre-#139).
+ * An activity that handles no configuration changes, for the display teardown check: moving its
+ * task between displays relaunches it, and it finishes itself while that happens.
  *
  * Modes (via --es mode):
- * - default: finishes itself ~1.5 s after creation, as the old storage scan did.
+ * - default: finishes itself ~1.5 s after creation.
  * - `finish`: finishes itself whenever it is recreated (self-kill on display move).
  * - `kill`: kills its own process whenever it is recreated.
  *

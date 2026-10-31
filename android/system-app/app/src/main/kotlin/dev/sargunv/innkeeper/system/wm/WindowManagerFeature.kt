@@ -267,8 +267,6 @@ class WindowManagerFeature(
     return task.get(20, TimeUnit.SECONDS)
   }
 
-  // ---- launching -------------------------------------------------------------
-
   // ---- phone mode --------------------------------------------------------------
 
   /** Asks the bridge for display 0's window, which the composer's display 0 claims. */
@@ -343,6 +341,8 @@ class WindowManagerFeature(
       else -> {}
     }
   }
+
+  // ---- launching -------------------------------------------------------------
 
   private fun launchLocked(r: LaunchRequest): String {
     val pm = context.packageManager
@@ -546,12 +546,9 @@ class WindowManagerFeature(
     input.destroyWindow(w.id)
     // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
     wms.setDisplayWindowInsetsController(w.id, null)
-    // Detach the output surface now: SurfaceFlinger stops rendering frames into
-    // this display's ImageReader buffers for the whole hold, so the deferred
-    // release below never races an in-flight frame against the reader close
-    // (the software renderer keeps presenting during teardown otherwise). The
-    // display stays registered for a recovery relaunch to land on; it just has
-    // nothing left to draw until it is released.
+    // Detach the surface now so no in-flight frame races the reader close at the deferred
+    // release (the software renderer keeps presenting during teardown). The display stays
+    // registered for a recovery relaunch to land on.
     try {
       w.display.surface = null
     } catch (e: Exception) {
@@ -560,20 +557,15 @@ class WindowManagerFeature(
     releaseDisplayWhenTasksGone(w, w.tasks.toSet())
   }
 
-  // Android 17 relaunches an activity that finished while it was being relaunched for a display
-  // move onto the display the task moved to, at the end of that transition
-  // (AppCompatDisplayCompatPolicy's self-kill recovery). Releasing the display while a task's
-  // removal or such a relaunch is still in flight makes that launch target a display id that no
-  // longer exists; it fails on the framework's display thread and system_server goes down with
-  // it, closing every app window (#50). [close] therefore only tears the window down and
-  // schedules the release: [releaseDisplayWhenTasksGone] polls on its own thread (the gettasks
-  // binder walk against the activity task manager must not delay the window manager's thread)
-  // until no task is on the display or still being removed here, then posts the release back to
-  // the window manager after a short settle — so a recovery relaunch queued at the removal's
-  // end still finds a registered display. A task that never leaves, and new tasks on the
-  // display (a relaunch that came back here), still close at RELEASE_TIMEOUT_MS: releasing then
-  // finishes the display's contents, whose tasks are reparented to the default display and
-  // adopted into a new window.
+  // Android 17 relaunches an activity that finished mid-relaunch for a display move onto the
+  // task's new display at the end of that transition (AppCompatDisplayCompatPolicy's self-kill
+  // recovery). If the display is released first, that launch targets a missing display id and
+  // takes system_server down with every app window (#50). So [close] only tears the window down;
+  // [releaseDisplayWhenTasksGone] polls on its own thread (the gettasks binder walk must not
+  // delay the window manager's thread) until no task is on the display or still being removed,
+  // then posts the release after a short settle. A task that never leaves, or a relaunch that
+  // came back here, is cut off at RELEASE_TIMEOUT_MS: the release reparents it to the default
+  // display, where it is adopted into a new window.
   private fun releaseDisplayWhenTasksGone(
     w: AppWindow,
     removed: Set<Int>,

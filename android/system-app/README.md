@@ -75,44 +75,38 @@ HAL would remove that.
 
 ## Desktop handoff
 
-The browser and `integration/handoff/` forward external VIEWs through OpenURI.
-Custom Tabs VIEWs from apps with a verified App Link host use an installed
-Android browser, allowing https sign-in redirects to return through Android App
-Links. Ordinary links still use the desktop browser, including from those same
-apps. The browser role stays with Innkeeper System.
+Innkeeper System holds the browser role, and it and `integration/handoff/`
+forward external VIEWs to the desktop through OpenURI. A Custom Tabs VIEW from
+an app with a verified App Link host goes to an installed Android browser
+instead, so an https sign-in redirect can return to the app as an App Link; the
+same app's ordinary links still open on the desktop.
 
-A priority -1000 wildcard MIME filter handles files with no Android handler;
-explicit scheme filters cover mailto, tel, sms, smsto, geo, market, magnet,
-webcal(s) and ftp(s). Android handlers at normal priority take precedence.
-Android 17 matches URI schemes literally: a wildcard scheme filter cannot catch
-arbitrary untyped custom schemes.
+Files with no Android handler reach a priority -1000 `*/*` filter; Android
+handlers at normal priority win. Android 17 matches URI schemes literally, so
+the manifest lists each external scheme (mailto, tel, sms, smsto, geo, market,
+magnet, webcal(s), ftp(s)), and any other custom scheme needs its own filter.
 
 The sharesheet's **Desktop** target offers **Open with a desktop app** (OpenFile
-with `ask=true`), **Save to file…** (SaveFile), **Copy** (text, through
-clipboard sync), and **Send by email** (Email, including attachments). Text
-opens/saves as a `.txt` file. The bridge requests an xdg-activation token from
-the source window's seat and parents portal dialogs with xdg-foreign.
+with `ask=true`), **Save to file…** (SaveFile), **Copy** (text only, through
+clipboard sync) and **Send by email** (Email, with attachments). Text is shared
+as a `.txt` file. The bridge takes an xdg-activation token from the source
+window's seat and parents portal dialogs with xdg-foreign.
+
+From the host, the desktop entry's chooser offers Open and Share for files,
+reusing read-only document grants; Share sends EXTRA_STREAM and ClipData, with
+SEND_MULTIPLE for batches.
 
 Known limits:
 
-- Without an Android browser installed, Custom Tabs still open on the desktop.
-  An https App Link sign-in redirect then stays in the desktop browser and
-  cannot return to the Android app; Innkeeper does not own desktop https links.
+- Without an Android browser, Custom Tabs open on the desktop, and an https App
+  Link sign-in redirect can't return to the app: Innkeeper doesn't own desktop
+  https links.
 - Shares are capped at three attachments, 64 MiB each, and 32 KiB of text.
-  Opened files and email attachments are retained in the profile cache until
-  session shutdown, up to 256 MiB per session; saved copies are removed
-  immediately. Shutdown cleans the cache; a later bridge reaps crash leftovers.
-- Copy is offered only for text: Android content URIs cannot be pasted into a
-  desktop file manager. For host → Android files, the static desktop entry
-  offers Open and Share sections in its chooser, reusing read-only document
-  grants. Share uses EXTRA_STREAM and ClipData, with SEND_MULTIPLE for batches.
-  There is no standard host text-sharing hook in the supported desktop baseline
-  (xdg-desktop-portal 1.20); text sharing from the host remains an upstream
-  limit.
-- Arbitrary untyped custom URI schemes need an explicit manifest filter; the
-  Android 17 resolver has no catch-all scheme filter.
+  Opened files and email attachments stay in the profile cache until session
+  shutdown, up to 256 MiB per session; saved copies are removed at once. A later
+  bridge reaps what a crash leaves.
+- Copy is text only: a desktop file manager can't paste Android content URIs.
+- Sharing text from the host has no standard hook in xdg-desktop-portal 1.20.
 
-Tests: `:protocol` unit tests (`mise run test`) and the grouped e2e runner
-(`mise run test:e2e -- input desktop a11y audio lifecycle`). These exercise app
-windows, delivered input, desktop handoffs, accessible actions, audio at
-PipeWire, and idle stop/alarm restart. The probes APK is never staged.
+Tests: `:protocol` unit tests (`mise run test`) and
+`mise run test:e2e -- input desktop a11y audio lifecycle`.

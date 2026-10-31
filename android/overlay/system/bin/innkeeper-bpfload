@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Wrapper for netbpfload in a Innkeeper session (see the tethering APEX's
+# Wrapper for netbpfload in an Innkeeper session (see the tethering APEX's
 # netbpfload.35rc override). Runs in its own mount namespace. netbpfload
 # writes /proc/sys/kernel/unprivileged_bpf_disabled and
 # /proc/sys/net/core/bpf_jit_{enable,kallsyms}; in our user and network
