@@ -318,7 +318,7 @@ pub fn reset(data: &Path) -> Result<()> {
             continue;
         }
         if e.file_type()?.is_dir() {
-            crate::sandbox::remove_tree(&e.path())?;
+            crate::remove_tree(&e.path())?;
         } else {
             fs::remove_file(e.path()).with_context(|| format!("remove {}", e.path().display()))?;
         }
@@ -344,12 +344,12 @@ pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
     ensure!(!to.data.exists(), "profile {} exists already", to.profile);
     for (a, b) in [(&from.data, &to.data), (&from.state, &to.state)] {
         if a.exists() {
-            crate::sandbox::remove_tree(b)?;
+            crate::remove_tree(b)?;
             fs::rename(a, b).with_context(|| format!("move {} to {}", a.display(), b.display()))?;
         }
     }
-    crate::sandbox::remove_tree(&from.root)?;
-    crate::sandbox::remove_tree(&from.run)
+    crate::remove_tree(&from.root)?;
+    crate::remove_tree(&from.run)
 }
 
 /// Deletes profile `paths.profile`'s files: its data, settings, composed
@@ -357,7 +357,7 @@ pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
 pub fn delete(paths: &crate::Paths) -> Result<()> {
     ensure_stopped(paths)?;
     for dir in [&paths.data, &paths.root, &paths.state, &paths.run] {
-        crate::sandbox::remove_tree(dir)?;
+        crate::remove_tree(dir)?;
     }
     Ok(())
 }

@@ -5,15 +5,12 @@ edition = "2024"
 publish = false
 description = "Innkeeper session launcher: boots the Android image inside the Flatpak sandbox"
 
-[lib]
-name = "innkeeper_session"
-path = "src/lib.rs"
-
 [[bin]]
 name = "innkeeper-session"
 path = "src/main.rs"
 
 [dependencies]
+innkeeper-profile = { path = "../profile" }
 anyhow = "1.0.104"
 flate2 = "1.1"
 libc = "0.2"

@@ -5,6 +5,7 @@ members = [
   "host/core",
   "host/launcher",
   "host/manager",
+  "host/profile",
   "supervisor/broker",
   "tests/compat",
   "tests/bench",
@@ -17,5 +18,6 @@ default-members = [
   "host/core",
   "host/launcher",
   "host/manager",
+  "host/profile",
 ]
 resolver = "3"

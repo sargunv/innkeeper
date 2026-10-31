@@ -12,6 +12,7 @@
 //!   lives as long as the process that started it, which serves the control
 //!   socket ([`crate::control`]).
 
+pub use innkeeper_profile::remove_tree;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -74,25 +75,6 @@ fn files_read_only(dir: &Path) -> Result<()> {
         }
         Ok(())
     })
-}
-
-/// Deletes a tree whose dirs may be read-only.
-pub fn remove_tree(dir: &Path) -> Result<()> {
-    if dir.symlink_metadata().is_err() {
-        return Ok(());
-    }
-    fn writable(d: &Path) {
-        if let Ok(m) = d.symlink_metadata()
-            && m.is_dir()
-        {
-            let _ = fs::set_permissions(d, fs::Permissions::from_mode((m.mode() & 0o7777) | 0o700));
-            for e in fs::read_dir(d).into_iter().flatten().flatten() {
-                writable(&e.path());
-            }
-        }
-    }
-    writable(dir);
-    fs::remove_dir_all(dir).with_context(|| format!("remove {}", dir.display()))
 }
 
 /// What the composed root is made of: the image, its derived layer, the

@@ -6,8 +6,9 @@
 `mise run session -- CMD`. It runs as the user inside the Innkeeper Flatpak,
 builds nothing and finds the stage relative to itself. What the session is and
 does is in [docs/session.md](../../docs/session.md); `--help` prints the usage.
-Its library gives [host/core](../core/README.md) a profile's paths, settings and
-status without running the launcher.
+What it shares with [host/core](../core/README.md), a profile's name, settings,
+paths, status, activity report, control client and adb keys, is the
+`innkeeper-profile` crate (`host/profile`); the launcher itself is a binary.
 
 Subcommands: `start [-f] [--headless]`, `stop`, `status` (prints
 `running: host pid N` or `stopped`), `prepare`, `image`, `reset`, `log [-f]`,

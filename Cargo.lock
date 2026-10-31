@@ -1297,6 +1297,7 @@ dependencies = [
  "anyhow",
  "clap",
  "innkeeper-core",
+ "innkeeper-profile",
  "png",
  "rustix",
  "serde_json",
@@ -1322,6 +1323,7 @@ dependencies = [
  "calloop",
  "innkeeper-broker",
  "innkeeper-core",
+ "innkeeper-profile",
  "libc",
  "mime_guess",
  "png",
@@ -1351,6 +1353,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "innkeeper-core",
+ "innkeeper-profile",
  "png",
  "serde",
  "serde_json",
@@ -1364,7 +1367,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
- "innkeeper-session",
+ "innkeeper-profile",
  "resvg",
  "serde",
  "serde_json",
@@ -1380,7 +1383,19 @@ dependencies = [
  "async-channel",
  "gtk4",
  "innkeeper-core",
+ "innkeeper-profile",
  "libadwaita",
+]
+
+[[package]]
+name = "innkeeper-profile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "sha2",
+ "toml",
 ]
 
 [[package]]
@@ -1389,6 +1404,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "flate2",
+ "innkeeper-profile",
  "libc",
  "serde",
  "sha2",

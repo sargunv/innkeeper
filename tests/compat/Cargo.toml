@@ -8,6 +8,7 @@ description = "Innkeeper compat harness: install, launch and smoke-test the F-Dr
 [dependencies]
 anyhow = "1"
 innkeeper-core = { path = "../../host/core" }
+innkeeper-profile = { path = "../../host/profile" }
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

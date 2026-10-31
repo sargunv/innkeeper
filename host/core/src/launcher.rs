@@ -14,7 +14,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use innkeeper_session::Paths;
+use innkeeper_profile::Paths;
 
 use crate::paths::Prefix;
 use crate::proc;
@@ -23,7 +23,7 @@ pub struct Session {
     launcher: PathBuf,
     /// The profile it runs; None for a harness's launcher, which knows its
     /// own.
-    profile: Option<crate::paths::ProfileName>,
+    profile: Option<innkeeper_profile::profile::ProfileName>,
 }
 
 /// Lines of session stderr worth keeping (the session's linker warns there).
@@ -54,7 +54,7 @@ impl Session {
     pub fn of_profile(name: &str) -> Result<Self> {
         Ok(Self {
             launcher: Prefix::locate()?.launcher(),
-            profile: Some(crate::paths::ProfileName::new(name)?),
+            profile: Some(innkeeper_profile::profile::ProfileName::new(name)?),
         })
     }
 
@@ -76,10 +76,10 @@ impl Session {
         }
     }
 
-    fn state(&self) -> Option<innkeeper_session::Status> {
+    fn state(&self) -> Option<innkeeper_profile::Status> {
         match self.paths() {
-            Some(paths) => Some(innkeeper_session::status(&paths)),
-            None => Some(innkeeper_session::Status::parse(&self.query("status")?)),
+            Some(paths) => Some(innkeeper_profile::status(&paths)),
+            None => Some(innkeeper_profile::Status::parse(&self.query("status")?)),
         }
     }
 

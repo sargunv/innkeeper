@@ -19,13 +19,13 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use innkeeper_core::desktop::MANAGER_ID;
 
-use innkeeper_core::paths::ProfileName;
+use innkeeper_profile::profile::ProfileName;
 
 use crate::window::Window;
 
 /// Where the manager remembers the profile it last showed.
 fn remembered_file() -> std::path::PathBuf {
-    innkeeper_core::paths::xdg_home("XDG_STATE_HOME", ".local/state")
+    innkeeper_profile::paths::xdg_home("XDG_STATE_HOME", ".local/state")
         .join("innkeeper/manager-profile")
 }
 
@@ -41,7 +41,7 @@ pub fn first_profile() -> anyhow::Result<String> {
     match innkeeper_core::profiles::list()?.into_iter().next() {
         Some(p) => Ok(p.name),
         None => {
-            innkeeper_core::profiles::existing(innkeeper_core::profiles::FIRST).map(String::from)
+            innkeeper_core::profiles::existing(innkeeper_profile::profile::FIRST).map(String::from)
         }
     }
 }

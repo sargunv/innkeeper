@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::profile::ProfileName;
-use crate::sys;
 
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.sargunv.Innkeeper";
@@ -98,7 +97,7 @@ impl Paths {
             env_path("INNKEEPER_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));
         let sfx = |n: &str| per_profile(n, &profile);
         let runtime = env_path("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|| format!("/run/user/{}", sys::uid()).into());
+            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }).into());
         // The app's runtime dir is shared by every sandbox instance.
         let run = runtime
             .join("app")

@@ -57,8 +57,8 @@ impl Session {
     }
 
     /// The profile the harness runs (`INNKEEPER_PROFILE`).
-    pub fn profile(&self) -> anyhow::Result<innkeeper_core::paths::ProfileName> {
-        innkeeper_core::paths::ProfileName::new(
+    pub fn profile(&self) -> anyhow::Result<innkeeper_profile::profile::ProfileName> {
+        innkeeper_profile::profile::ProfileName::new(
             &std::env::var("INNKEEPER_PROFILE").unwrap_or_default(),
         )
     }

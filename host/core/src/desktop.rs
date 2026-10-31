@@ -158,7 +158,7 @@ pub struct AppEntry {
     pub names: Vec<(String, String)>,
     /// The profile it runs in: `Exec` is `innkeeper --profile <profile> run
     /// <package> %U`, and `X-Innkeeper-Profile` names it.
-    pub profile: crate::paths::ProfileName,
+    pub profile: innkeeper_profile::profile::ProfileName,
     pub icon: Option<String>,
     /// `versionName`, recorded as `X-Innkeeper-Version` (omitted if empty).
     pub version: String,
@@ -379,7 +379,7 @@ mod tests {
                 ("de".into(), "Wikipedia DE".into()),
                 ("pt_BR".into(), "Wikipédia".into()),
             ],
-            profile: crate::paths::ProfileName::new("work").unwrap(),
+            profile: innkeeper_profile::profile::ProfileName::new("work").unwrap(),
             icon: Some("dev.sargunv.innkeeper.org.wikipedia".into()),
             version: "2.7.50".into(),
             categories: vec!["Utility".into()],

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use innkeeper_core::profiles::{self, Profile, Settings};
+use innkeeper_core::profiles::{self, Profile};
+use innkeeper_profile::profile::Settings;
 
 use crate::{
     errors::Op,
@@ -225,7 +226,7 @@ impl Page {
             .sensitive(idle && !p.running)
             .build();
         rename.connect_changed(|e| {
-            if e.text().is_empty() || profiles::check_name(&e.text()).is_ok() {
+            if e.text().is_empty() || innkeeper_profile::profile::check_name(&e.text()).is_ok() {
                 e.remove_css_class("error");
             } else {
                 e.add_css_class("error");
@@ -245,7 +246,7 @@ impl Page {
         if from == to {
             return;
         }
-        if let Err(e) = profiles::check_name(to) {
+        if let Err(e) = innkeeper_profile::profile::check_name(to) {
             return self.error(&e);
         }
         let current = self.current.borrow().as_deref() == Some(from);
@@ -332,7 +333,7 @@ impl Page {
         d.set_close_response("cancel");
         let d2 = d.clone();
         entry.connect_changed(move |e| {
-            let ok = profiles::check_name(&e.text()).is_ok();
+            let ok = innkeeper_profile::profile::check_name(&e.text()).is_ok();
             d2.set_response_enabled("create", ok);
             if ok || e.text().is_empty() {
                 e.remove_css_class("error");

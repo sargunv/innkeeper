@@ -1,4 +1,4 @@
-//! Profiles ([`innkeeper_session::profile`]) as the CLI and the manager show
+//! Profiles ([`innkeeper_profile::profile`]) as the CLI and the manager show
 //! them: listed with their state and settings, created, renamed, deleted,
 //! started and stopped, and the one to use when none is named. Each works on
 //! the named profile, whatever this process's is.
@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use innkeeper_session::profile;
-pub use innkeeper_session::profile::{Display, FIRST, Settings, check_name};
+use innkeeper_profile::profile;
+use innkeeper_profile::profile::{FIRST, ProfileName, Settings};
 
 use crate::launcher::Session;
 use crate::paths::Prefix;
@@ -21,16 +21,16 @@ pub struct Profile {
     pub settings: Settings,
 }
 
-fn paths(name: &str) -> Result<innkeeper_session::Paths> {
+fn paths(name: &str) -> Result<innkeeper_profile::Paths> {
     Prefix::locate()?.profile_paths(name)
 }
 
 /// The profiles' names.
-fn names() -> Vec<crate::paths::ProfileName> {
-    let mut v = profile::list(&innkeeper_session::paths::data_home());
+fn names() -> Vec<ProfileName> {
+    let mut v = profile::list(&innkeeper_profile::paths::data_home());
     // A test profile whose data lives elsewhere (`INNKEEPER_DATA`, with its
     // `INNKEEPER_PROFILE`) is still one.
-    if let Ok(p) = innkeeper_session::paths::profile()
+    if let Ok(p) = innkeeper_profile::paths::profile()
         && std::env::var_os("INNKEEPER_DATA").is_some()
         && !v.contains(&p)
     {
@@ -47,7 +47,7 @@ pub fn list() -> Result<Vec<Profile>> {
         .map(|name| {
             let p = paths(&name)?;
             Ok(Profile {
-                running: innkeeper_session::status(&p).pid.is_some(),
+                running: innkeeper_profile::status(&p).pid.is_some(),
                 settings: Settings::load(&p.data).unwrap_or_default(),
                 name: name.into(),
             })
@@ -57,8 +57,8 @@ pub fn list() -> Result<Vec<Profile>> {
 
 /// Profile `name`, which must exist; [`FIRST`] is created if it doesn't,
 /// so a first command works with no setup.
-pub fn existing(name: &str) -> Result<crate::paths::ProfileName> {
-    let p = crate::paths::ProfileName::new(name)?;
+pub fn existing(name: &str) -> Result<ProfileName> {
+    let p = ProfileName::new(name)?;
     if !paths(&p)?.data.exists() {
         if name != FIRST {
             bail!("no profile {name} (`innkeeper profile create {name}` makes it)");
@@ -96,7 +96,7 @@ fn reload(name: &str) -> Result<()> {
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(5))
         .build()?;
-    let bus_name = crate::app_settings::bus_name(&crate::paths::ProfileName::new(name)?);
+    let bus_name = crate::app_settings::bus_name(&ProfileName::new(name)?);
     let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
     if !bus.name_has_owner(bus_name.as_str().try_into()?)? {
         return Ok(());
