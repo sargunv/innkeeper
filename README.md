@@ -96,30 +96,30 @@ flowchart LR
   bridge <--> desk
 ```
 
-| Dir                                                                    | Artifact                                               | Runs                                       | Start reading at               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------ | ------------------------------ |
-| [host/core](host/core/README.md)                                       | `linuxapk-core` (library)                              | inside the CLI, manager and bridge         | `src/ops.rs`                   |
-| [host/cli](host/cli/README.md)                                         | `bin/linuxapk`                                         | desktop, as you                            | `src/main.rs`                  |
-| [host/manager](host/manager/README.md)                                 | `bin/linuxapk-manager`                                 | desktop, as you                            | `src/window.rs`                |
-| [host/bridge](host/bridge/README.md)                                   | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's sandbox          | `src/main.rs`, `src/ipc/`      |
-| [host/launcher](host/launcher/README.md)                               | `libexec/linuxapk/linuxapk-session`                    | Flatpak sandbox                            | `src/cli.rs`                   |
-| [supervisor](supervisor/README.md)                                     | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | sandbox; the shim inside Android           | `broker/src/notify.rs`         |
-| [image](image/README.md)                                               | image scripts, config and static tools                 | desktop, when the image is prepared        | `fetch.sh`, `pin.toml`         |
-| [image/ohos](image/ohos/README.md)                                     | the OpenHarmony image pin                              | desktop, for the OpenHarmony guest         | `fetch.sh`, `pin.toml`         |
-| [ohos](ohos/README.md)                                                 | OpenHarmony guest: broker layer, init shim, runner     | test sandbox (not in the stage)            | `sandbox.sh`, `run.py`         |
-| [android/vendor/graphics](android/vendor/graphics/README.md)           | allocator, mapper, composer                            | Android `/vendor`                          | `composer/Display.cpp`         |
-| [android/vendor/vulkan](android/vendor/vulkan/README.md)               | `vulkan.radv.so`, `vulkan.anv.so`, `vulkan.lvp.so`     | Android, in every Vulkan user              | `build.sh`, `patches/mesa/`    |
-| [android/vendor/audio](android/vendor/audio/README.md)                 | `libtinyalsav2.so`                                     | Android, in the audio HAL                  | `tinyalsa/pcm.c`               |
-| [android/vendor/health](android/vendor/health/README.md)               | `android.hardware.health-service.linuxapk`             | Android `/vendor`                          | `src/battery.c`                |
-| [android/vendor/bridge-client](android/vendor/bridge-client/README.md) | static library                                         | linked into the composer, audio and health | `bridge_client.c`              |
-| [android/system](android/system/README.md)                             | `linuxapk-exec`                                        | Android `/system`                          | `exec/linuxapk-exec.c`         |
-| [android/system-app](android/system-app/README.md)                     | `LinuxApkSystem.apk`                                   | Android, as a privileged app               | `app/.../LinuxApkSystemApp.kt` |
-| [android/overlay](android/overlay/README.md)                           | config files over the image's partitions               | Android                                    | its README                     |
-| [android/microg](android/microg/README.md)                             | optional microG addon                                  | Android                                    | `install.sh`                   |
-| [tests](tests/README.md)                                               | test harnesses and suites                              | desktop, never shipped                     | its README                     |
-| [packaging/flatpak](packaging/flatpak/README.md)                       | the Flatpak, `dev.linuxapk.Manager`                    | build time                                 | `build.sh`                     |
-| [tools](tools/README.md)                                               | build container, staging, dev scripts                  | build time                                 | `build/artifacts.toml`         |
-| [docs](docs/)                                                          | cross-cutting design                                   |                                            | `architecture.md`              |
+| Dir                                                          | Artifact                                               | Runs                                                          | Start reading at               |
+| ------------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------ |
+| [host/core](host/core/README.md)                             | `linuxapk-core` (library)                              | inside the CLI, manager and bridge                            | `src/ops.rs`                   |
+| [host/cli](host/cli/README.md)                               | `bin/linuxapk`                                         | desktop, as you                                               | `src/main.rs`                  |
+| [host/manager](host/manager/README.md)                       | `bin/linuxapk-manager`                                 | desktop, as you                                               | `src/window.rs`                |
+| [host/bridge](host/bridge/README.md)                         | `libexec/linuxapk/linuxapk-bridge`                     | desktop, in the session's sandbox                             | `src/main.rs`, `src/ipc/`      |
+| [host/launcher](host/launcher/README.md)                     | `libexec/linuxapk/linuxapk-session`                    | Flatpak sandbox                                               | `src/cli.rs`                   |
+| [supervisor](supervisor/README.md)                           | `pivot-exec`, `linuxapk-broker`, `liblinuxapk_shim.so` | sandbox; the shim inside Android                              | `broker/src/notify.rs`         |
+| [image](image/README.md)                                     | image scripts, config and static tools                 | desktop, when the image is prepared                           | `fetch.sh`, `pin.toml`         |
+| [image/ohos](image/ohos/README.md)                           | the OpenHarmony image pin                              | desktop, for the OpenHarmony guest                            | `fetch.sh`, `pin.toml`         |
+| [guest/bridge-client](guest/bridge-client/README.md)         | static library                                         | linked into the guests' composers, Android's audio and health | `bridge_client.c`              |
+| [ohos](ohos/README.md)                                       | OpenHarmony guest: broker layer, init shim, runner     | test sandbox (not in the stage)                               | `sandbox.sh`, `run.py`         |
+| [android/vendor/graphics](android/vendor/graphics/README.md) | allocator, mapper, composer                            | Android `/vendor`                                             | `composer/Display.cpp`         |
+| [android/vendor/vulkan](android/vendor/vulkan/README.md)     | `vulkan.radv.so`, `vulkan.anv.so`, `vulkan.lvp.so`     | Android, in every Vulkan user                                 | `build.sh`, `patches/mesa/`    |
+| [android/vendor/audio](android/vendor/audio/README.md)       | `libtinyalsav2.so`                                     | Android, in the audio HAL                                     | `tinyalsa/pcm.c`               |
+| [android/vendor/health](android/vendor/health/README.md)     | `android.hardware.health-service.linuxapk`             | Android `/vendor`                                             | `src/battery.c`                |
+| [android/system](android/system/README.md)                   | `linuxapk-exec`                                        | Android `/system`                                             | `exec/linuxapk-exec.c`         |
+| [android/system-app](android/system-app/README.md)           | `LinuxApkSystem.apk`                                   | Android, as a privileged app                                  | `app/.../LinuxApkSystemApp.kt` |
+| [android/overlay](android/overlay/README.md)                 | config files over the image's partitions               | Android                                                       | its README                     |
+| [android/microg](android/microg/README.md)                   | optional microG addon                                  | Android                                                       | `install.sh`                   |
+| [tests](tests/README.md)                                     | test harnesses and suites                              | desktop, never shipped                                        | its README                     |
+| [packaging/flatpak](packaging/flatpak/README.md)             | the Flatpak, `dev.linuxapk.Manager`                    | build time                                                    | `build.sh`                     |
+| [tools](tools/README.md)                                     | build container, staging, dev scripts                  | build time                                                    | `build/artifacts.toml`         |
+| [docs](docs/)                                                | cross-cutting design                                   |                                                               | `architecture.md`              |
 
 ## Develop
 
