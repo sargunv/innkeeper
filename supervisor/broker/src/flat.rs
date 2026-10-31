@@ -19,6 +19,9 @@
 //!    capabilities, Android's root can't write into a 0511 directory such as
 //!    `/data/user` that it made itself. (Files keep their mode: code checks
 //!    exact modes, such as ClatCoordinator's 0440 eBPF pins.)
+//!    The broker runs these itself, so a path through `/proc/self`, directly
+//!    or by a symlink (OpenHarmony's per-app `/data/storage`), names the
+//!    caller's.
 //!  * `openat` of a `/proc` file the session fakes (`/linuxapk/proc/<path>`,
 //!    which bind mounts covered otherwise) gets a memfd copy of it, and
 //!    apexd's `/proc/mounts` lists the pre-mounted APEXes
@@ -396,7 +399,7 @@ impl Flat {
         } else {
             full
         };
-        std::ffi::CString::new(full).ok()
+        std::ffi::CString::new(caller_links(tid, full)?).ok()
     }
 
     /// mkdir/mkdirat with the owner's rwx kept (the caller's umask applies).
@@ -606,6 +609,29 @@ fn ohos_etc(path: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// `path` with each directory on the way that is a symlink through
+/// `/proc/self` (OpenHarmony's per-app `/data/storage`, ohos/sandbox.sh)
+/// replaced by the caller's: the kernel would resolve it as the broker's.
+fn caller_links(tid: i32, mut path: Vec<u8>) -> Option<Vec<u8>> {
+    let (mut end, mut hops) = (0, 0);
+    while let Some(i) = path.get(end + 1..)?.iter().position(|&c| c == b'/') {
+        end += 1 + i;
+        let Ok(target) = std::fs::read_link(OsStr::from_bytes(&path[..end])) else {
+            continue;
+        };
+        let Some((mut next, true)) = proc_path(tid, target.as_os_str().as_bytes()) else {
+            continue;
+        };
+        hops += 1;
+        if hops > 8 {
+            return None;
+        }
+        next.extend_from_slice(&path[end..]);
+        (path, end) = (next, 0);
+    }
+    Some(path)
+}
+
 /// `/proc/self/...` and `/proc/thread-self/...` as the broker must name them
 /// for task `tid`, plus whether the request names the caller; None outside /proc.
 fn proc_path(tid: i32, p: &[u8]) -> Option<(Vec<u8>, bool)> {
@@ -669,6 +695,34 @@ mod tests {
         assert_eq!(
             resolved.to_bytes(),
             format!("/proc/{}/task/{tid}/fd/3", std::process::id()).as_bytes()
+        );
+    }
+
+    #[test]
+    fn paths_through_a_proc_self_link_name_the_callers() {
+        let f = Flat {
+            listener: -1,
+            resp_sz: 0,
+            map: Vec::new(),
+            uid: 0,
+            gid: 0,
+            render_node: None,
+        };
+        let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
+        // OpenHarmony's /data/storage -> /proc/self/fd/990: the kernel would
+        // follow the link in the broker.
+        let dir = std::env::temp_dir().join(format!("linuxapk-flat-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join("storage");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("/proc/self/fd/3", &link).unwrap();
+        let path = std::ffi::CString::new(link.join("el1/database").into_os_string().into_vec());
+        let path = path.unwrap();
+        let resolved = f.target_path(tid, libc::AT_FDCWD, path.as_ptr() as u64);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            resolved.unwrap().to_bytes(),
+            format!("/proc/{}/fd/3/el1/database", std::process::id()).as_bytes()
         );
     }
 
