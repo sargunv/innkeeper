@@ -42,7 +42,7 @@ timed() (
   "$@"
 )
 s() { "$S" exec "$@"; }
-wm() { s am broadcast -n dev.sargunv.innkeeper.system/.wm.ControlReceiver -a "dev.sargunv.innkeeper.$1" "${@:2}"; }
+wm() { /usr/bin/python3 "$here/wm.py" "$@"; }
 # Poll observations, returning as soon as they arrive; the outer group deadline
 # also bounds a command that stops answering.
 until_ok() {

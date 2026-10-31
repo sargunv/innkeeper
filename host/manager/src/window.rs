@@ -581,6 +581,7 @@ impl Window {
             token,
             wait: false,
             new_window: false,
+            size: None,
         };
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {

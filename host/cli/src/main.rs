@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
-use innkeeper_core::android::{self, Launch};
+use innkeeper_core::android::Launch;
 use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
 use innkeeper_core::paths::ProfileName;
@@ -229,8 +229,8 @@ fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Resu
         .iter()
         .map(|p| grant(profile, p))
         .collect::<Result<Vec<_>>>()?;
-    android::launch(
-        &Session::of_profile(profile)?,
+    innkeeper_core::app_settings::launch(
+        profile,
         &Launch::File {
             package: "dev.sargunv.innkeeper.system".into(),
             grants,
@@ -240,6 +240,7 @@ fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Resu
             token,
             wait: false,
             new_window: false,
+            size: None,
         },
     )
     .map(drop)
@@ -318,6 +319,7 @@ fn run(
             token,
             wait: splash.is_some(),
             new_window,
+            size: None,
         };
         if args.iter().all(|s| s.is_empty()) {
             return ops::run(profile, pkg, None, &opts, &stderr);
@@ -335,8 +337,8 @@ fn run(
                 None
             };
             reply = match path {
-                Some(path) => android::launch(
-                    &session,
+                Some(path) => innkeeper_core::app_settings::launch(
+                    profile,
                     &Launch::File {
                         package: pkg.into(),
                         grants: vec![grant(profile, &path)?],

@@ -97,12 +97,13 @@ const REF_W: i32 = 1280;
 const REF_H: i32 = 800;
 
 /// `launched display=N package=P size=WxH ...` from the window manager.
-fn parse_launched(text: &str) -> Option<(i32, i32, i32)> {
-    let data = text.split("data=\"").nth(1)?;
+/// A window manager reply `launched display=N ... size=WxH`.
+fn parse_launched(reply: &str) -> Option<(i32, i32, i32)> {
+    let data = reply.strip_prefix("launched ")?;
     let field = |k: &str| {
         data.split_whitespace()
             .find_map(|f| f.strip_prefix(k))
-            .map(|v| v.trim_end_matches('"').to_string())
+            .map(str::to_string)
     };
     let d = field("display=")?.parse().ok()?;
     let (w, h) = field("size=")?
@@ -236,39 +237,22 @@ impl<'a> Run<'a> {
     /// waits for its first frame ("Displayed" in the log).
     fn launch_in_window(&mut self, component: &str) -> Result<(), Stop> {
         let pkg = self.app.package.clone();
-        let o = self.s.run(
-            60,
-            &[
-                "am",
-                "broadcast",
-                "-n",
-                "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
-                "-a",
-                "dev.sargunv.innkeeper.LAUNCH",
-                "--es",
-                "package",
-                &pkg,
-                "--es",
-                "component",
-                component,
-                "--ei",
-                "width",
-                &REF_W.to_string(),
-                "--ei",
-                "height",
-                &REF_H.to_string(),
-            ],
-        );
-        self.save("am-start.txt", &o.text);
-        let Some((display, w, h)) = parse_launched(&o.text) else {
-            let why = o
-                .text
-                .split("data=\"")
-                .nth(1)
-                .unwrap_or("no window manager reply")
-                .trim()
-                .trim_end_matches('"')
-                .to_string();
+        let reply = self.s.profile().and_then(|p| {
+            innkeeper_core::app_settings::launch(
+                &p,
+                &innkeeper_core::android::Launch::Main {
+                    component: component.into(),
+                },
+                &innkeeper_core::android::LaunchOptions {
+                    size: Some((REF_W as u32, REF_H as u32)),
+                    ..Default::default()
+                },
+            )
+        });
+        let text = reply.unwrap_or_else(|e| format!("error: {e:#}"));
+        self.save("am-start.txt", &text);
+        let Some((display, w, h)) = parse_launched(&text) else {
+            let why = text.trim().to_string();
             self.check("launch", false, why.clone());
             return Err(Stop(Status::Broken, format!("launch: {why}")));
         };
@@ -974,18 +958,15 @@ impl<'a> Run<'a> {
         let Some(display) = self.win.as_ref().map(|w| w.display) else {
             return;
         };
-        let o = self.s.run(
-            30,
-            &[
-                "am",
-                "broadcast",
-                "-n",
-                "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
-                "-a",
-                "dev.sargunv.innkeeper.LIST",
-            ],
-        );
-        let Some(current) = app_display(&o.text, &self.app.package, display) else {
+        let Ok(windows) = self
+            .s
+            .profile()
+            .and_then(|p| innkeeper_core::app_settings::windows(&p))
+        else {
+            return;
+        };
+        let windows = windows.join("\n");
+        let Some(current) = app_display(&windows, &self.app.package, display) else {
             return;
         };
         if current != display {
@@ -998,7 +979,7 @@ impl<'a> Run<'a> {
                     .unwrap_or_default();
             }
         }
-        if let Some((w, h)) = parse_list_size(&o.text, current)
+        if let Some((w, h)) = parse_list_size(&windows, current)
             && let Some(win) = self.win.as_mut()
         {
             win.w = w;
@@ -1136,12 +1117,10 @@ mod tests {
     #[test]
     fn parses_window_manager_output() {
         assert_eq!(
-            parse_launched(
-                "Broadcast completed: result=-1, data=\"launched display=4 package=a.b size=2176x1360 dpi=272\""
-            ),
+            parse_launched("launched display=4 package=a.b size=2176x1360 dpi=272"),
             Some((4, 2176, 1360))
         );
-        assert_eq!(parse_launched("Broadcast completed: result=0"), None);
+        assert_eq!(parse_launched("error: no launcher activity"), None);
         let sf = "Display 0 (HWC display 0): no display identification data\nDisplay 9223372039441632759 (Virtual display): displayName=\"innkeeper:a.b\" uniqueId=\"virtual:x\"";
         assert_eq!(
             parse_sf_id(sf, "innkeeper:a.b").as_deref(),

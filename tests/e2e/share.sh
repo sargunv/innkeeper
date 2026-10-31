@@ -5,7 +5,7 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 T=$repo/out/test/e2e/$INNKEEPER_PROFILE
 S=$repo/tools/dev/session.sh
 s() { "$S" exec "$@"; }
-wm() { s am broadcast -n dev.sargunv.innkeeper.system/.wm.ControlReceiver -a "dev.sargunv.innkeeper.$1" "${@:2}"; }
+wm() { /usr/bin/python3 "$repo/tests/e2e/wm.py" "$@"; }
 until_ok() {
   local end=$((SECONDS + 10))
   until "$@"; do

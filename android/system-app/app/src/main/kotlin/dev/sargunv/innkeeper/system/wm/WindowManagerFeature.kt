@@ -198,7 +198,7 @@ class WindowManagerFeature(
     handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
   }
 
-  // ---- control API (ControlReceiver) ---------------------------------------
+  // ---- control API (WindowCommands) ----------------------------------------
 
   data class LaunchRequest(
     val pkg: String,

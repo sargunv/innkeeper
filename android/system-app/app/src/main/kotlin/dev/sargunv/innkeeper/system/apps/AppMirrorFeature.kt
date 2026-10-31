@@ -14,9 +14,11 @@ import android.util.Log
 import dev.sargunv.innkeeper.system.Feature
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
+import dev.sargunv.innkeeper.system.wm.WindowCommands
 import java.io.ByteArrayOutputStream
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
+import kotlin.concurrent.thread
 import org.json.JSONObject
 
 /**
@@ -35,6 +37,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
   private val thread = HandlerThread("innkeeper-apps")
   private lateinit var handler: Handler
   private val pm = context.packageManager
+  private val windows = WindowCommands(context)
   private val channel: BridgeConnection =
     BridgeConnection(
       BridgeConnection.SERVICE_APPS,
@@ -53,9 +56,15 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
           val len = body.int
           require(!body.hasRemaining() && fds.size == 1)
           val command = JSONObject(String(Blob.read(fds[0], len, 65536), Charsets.UTF_8))
-          handler.post {
-            val response = settings.execute(command).toString().toByteArray(Charsets.UTF_8)
+          val reply = { r: JSONObject ->
+            val response = r.toString().toByteArray(Charsets.UTF_8)
             channel.send(RESULT, blob = response) { u64(id).u32(response.size) }
+          }
+          if (command.getString("action") in WINDOW_ACTIONS) {
+            // A launch can wait for its first frame: off the apps worker.
+            thread(name = "innkeeper-windows") { reply(windows.execute(command)) }
+          } else {
+            handler.post { reply(settings.execute(command)) }
           }
         }
       },
@@ -207,6 +216,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
     private const val HAVE = 0x0501
     private const val ADDED = 0x0502
     private const val REMOVED = 0x0503
+    private val WINDOW_ACTIONS = setOf("launch", "windows", "close")
     private const val COMMAND = 0x4501
     private const val RESULT = 0x0504
     private const val BOOT_COMPLETED = 0x0505
