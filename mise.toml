@@ -113,6 +113,14 @@ run = "ohos/build.sh"
 description = "Build the stage and install the Flatpak into FLATPAK_USER_DIR"
 run = "packaging/flatpak/build.sh"
 
+[tasks."package:release"]
+description = "Build the stage and export a snapshot Flatpak bundle into out/release/"
+run = """
+set -euo pipefail
+mise run build
+packaging/flatpak/release.sh snapshot
+"""
+
 [tasks.stage]
 description = "Merge the module install trees into out/stage (and write its manifest)"
 run = "tools/build/stage.sh"
