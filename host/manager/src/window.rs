@@ -356,11 +356,7 @@ impl Window {
         });
         w.win.add_action(&profiles);
         w.watch_entries();
-        let w2 = w.clone();
-        glib::spawn_future_local(async move {
-            worker::run_quiet(ops::refresh_entries).await;
-            w2.refresh();
-        });
+        w.refresh();
         w.prepare_if_needed();
         w.watch_session();
         w

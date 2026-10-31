@@ -198,12 +198,8 @@ fn stderr(e: Event) {
 
 fn install(profile: &ProfileName, file: &Path) -> Result<()> {
     let p = ops::inspect(file, &stderr)?;
-    let i = ops::install(profile, &p, &stderr)?;
-    println!("installed {} as \"{}\"", i.package, i.name);
-    println!("  app menu: {}", i.menu);
-    if !i.schemes.is_empty() {
-        println!("  URI schemes: {}", i.schemes.join(", "));
-    }
+    ops::install(profile, &p, &stderr)?;
+    println!("installed {} as \"{}\"", p.package, p.label);
     Ok(())
 }
 
@@ -257,17 +253,13 @@ fn grant(profile: &ProfileName, path: &Path) -> Result<u64> {
 }
 
 fn uninstall(profile: &ProfileName, pkg: &str, keep_data: bool) -> Result<()> {
-    let u = ops::uninstall(profile, pkg, keep_data, &stderr)?;
-    if u.from_android {
+    if ops::uninstall(profile, pkg, keep_data, &stderr)? {
         println!(
             "uninstalled {pkg}{}",
             if keep_data { " (data kept)" } else { "" }
         );
     } else {
         eprintln!("innkeeper: {pkg} isn't an installed user app");
-    }
-    if u.from_desktop {
-        println!("removed the desktop entry and icons");
     }
     Ok(())
 }

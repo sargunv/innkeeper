@@ -165,12 +165,6 @@ pub struct AppEntry {
     pub categories: Vec<String>,
     /// Custom URI schemes, declared as `x-scheme-handler/<scheme>`.
     pub schemes: Vec<String>,
-    /// Hosts of the app's verified-style `http(s)` deep links. Metadata only:
-    /// `http`/`https` are never declared for an app.
-    pub web_hosts: Vec<String>,
-    /// Who wrote the entry, as `X-Innkeeper-Origin` (`android`: the bridge, for
-    /// an app installed inside Android). None: `innkeeper install`.
-    pub origin: Option<String>,
     /// What its launch splash looks like, as `X-Innkeeper-Splash` and
     /// `X-Innkeeper-Window`.
     pub splash: Option<Splash>,
@@ -251,12 +245,6 @@ impl AppEntry {
         writeln!(s, "X-Innkeeper-Profile={}", self.profile)?;
         if !self.version.is_empty() {
             writeln!(s, "X-Innkeeper-Version={}", escape_value(&self.version)?)?;
-        }
-        if !self.web_hosts.is_empty() {
-            writeln!(s, "X-Innkeeper-Web-Hosts={}", list(&self.web_hosts)?)?;
-        }
-        if let Some(o) = &self.origin {
-            writeln!(s, "X-Innkeeper-Origin={}", escape_value(o)?)?;
         }
         if let Some(sp) = &self.splash {
             writeln!(s, "X-Innkeeper-Splash=#{:06x}", sp.color & 0xff_ffff)?;
@@ -396,8 +384,6 @@ mod tests {
             version: "2.7.50".into(),
             categories: vec!["Utility".into()],
             schemes: vec!["wikipedia".into()],
-            web_hosts: vec!["*.wikipedia.org".into()],
-            origin: None,
             splash: Some(Splash {
                 color: 0xf8f9fa,
                 width: 1280,
@@ -418,7 +404,7 @@ mod tests {
              StartupNotify=true\nStartupWMClass=dev.sargunv.Innkeeper.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
              X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Profile=work\nX-Innkeeper-Version=2.7.50\n\
-             X-Innkeeper-Web-Hosts=*.wikipedia.org;\nX-Innkeeper-Splash=#f8f9fa\n\
+             X-Innkeeper-Splash=#f8f9fa\n\
              X-Innkeeper-Window=1280x800\n"
         );
         assert_eq!(
@@ -438,10 +424,8 @@ mod tests {
     fn no_mimetype_without_schemes() {
         let mut e = entry();
         e.schemes.clear();
-        e.web_hosts.clear();
         let s = e.render().unwrap();
         assert!(!s.contains("MimeType="));
-        assert!(!s.contains("X-Innkeeper-Web-Hosts"));
     }
 
     #[test]

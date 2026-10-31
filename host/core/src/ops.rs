@@ -11,7 +11,6 @@ pub use crate::android::LaunchOptions;
 use crate::android::{self, Launch};
 use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
-use crate::desktop::{self, AppEntry};
 use crate::launcher::Session;
 use crate::paths::ProfileName;
 use crate::xdg::{self, DesktopApp, Dirs};
@@ -166,19 +165,10 @@ fn version_name(v: &str) -> String {
         .unwrap_or_default()
 }
 
-/// What [`install`] did.
-#[derive(Debug, Clone)]
-pub struct Installed {
-    pub package: String,
-    pub name: String,
-    pub menu: xdg::Menu,
-    pub schemes: Vec<String>,
-}
-
-/// Installs an inspected package into the session (starting it if needed)
-/// and adds it to the app menu.
-pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<Installed> {
-    let dirs = Dirs::from_env();
+/// Installs an inspected package into the session (starting it if needed).
+/// The session's bridge adds it to the app menu (if mirroring is on), as for
+/// any app installed inside Android.
+pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()> {
     let pkg = p.package.clone();
     let s = session(profile, report)?;
     let abis: Vec<String> = s
@@ -232,126 +222,24 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<Ins
         apks.len(),
         if apks.len() == 1 { "" } else { "s" }
     )));
-    android::install(&s, &apks)?;
-
-    report(Event::Status("adding it to the app menu".into()));
-    let info = android::app_info(&s, &pkg, xdg::ICON_SIZES).unwrap_or_else(|e| {
-        report(Event::Warning(format!(
-            "couldn't render the icon in Android ({e:#}); using the APK's PNG if it has one"
-        )));
-        android::AppInfo::default()
-    });
-    let mut icons = info.icons.clone();
-    if icons.is_empty() {
-        icons = apk_png_icons(base_path, &base.icons);
-    }
-
-    let name = validate::label(&base.label)
-        .or_else(|| validate::label(&info.label))
-        .unwrap_or_else(|| {
-            report(Event::Warning(
-                "the app's label is missing or unsafe; using the package name".into(),
-            ));
-            pkg.clone()
-        });
-    let mut seen = BTreeSet::new();
-    let names = base
-        .labels
-        .iter()
-        .filter_map(|(tag, l)| Some((validate::desktop_locale(tag)?, validate::label(l)?)))
-        .filter(|(loc, l)| *l != name && seen.insert(loc.clone()))
-        .collect();
-    let mut entry = AppEntry {
-        package: pkg.clone(),
-        name: name.clone(),
-        names,
-        profile: profile.clone(),
-        icon: None,
-        version: p.version.clone(),
-        categories: desktop::categories_for(base.app_category.or(info.category), base.is_game),
-        schemes: base.schemes.clone(),
-        web_hosts: base.web_hosts.clone(),
-        origin: None,
-        splash: info
-            .splash
-            .zip(info.window)
-            .map(|(color, (width, height))| desktop::Splash {
-                color,
-                width,
-                height,
-            }),
-    };
-    let menu = xdg::install_app(&dirs, &mut entry, &icons)?;
-    Ok(Installed {
-        package: pkg,
-        name,
-        menu,
-        schemes: entry.schemes,
-    })
+    android::install(&s, &apks)
 }
 
-/// Reads up to 4 MiB of one zip entry.
-fn zip_entry(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<Vec<u8>> {
-    let e = zip.by_name(path).ok()?;
-    let mut buf = vec![];
-    std::io::Read::read_to_end(&mut std::io::Read::take(e, 4 << 20), &mut buf).ok()?;
-    Some(buf)
-}
-
-/// Fallback icons: the APK's own PNG launcher icons, by pixel size.
-fn apk_png_icons(apk: &Path, icons: &[(u32, String)]) -> Vec<(u32, Vec<u8>)> {
-    let Ok(f) = std::fs::File::open(apk) else {
-        return vec![];
-    };
-    let Ok(mut zip) = zip::ZipArchive::new(f) else {
-        return vec![];
-    };
-    let mut out: Vec<(u32, Vec<u8>)> = vec![];
-    for (_, path) in icons {
-        if !path.ends_with(".png") {
-            continue;
-        }
-        let Some(buf) = zip_entry(&mut zip, path) else {
-            continue;
-        };
-        if let Some((w, h)) = xdg::png_size(&buf)
-            && w == h
-            && !out.iter().any(|(s, _)| *s == w)
-        {
-            out.push((w, buf));
-        }
-    }
-    out
-}
-
-/// What [`uninstall`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Uninstalled {
-    /// Android had it installed (as a user app) and removed it.
-    pub from_android: bool,
-    /// Its desktop entry or icons existed and were removed.
-    pub from_desktop: bool,
-}
-
-/// Uninstalls a user app (system apps are refused) and removes its desktop
-/// entry and icons.
+/// Uninstalls a user app (system apps are refused); the session's bridge
+/// removes its app-menu entry. Returns whether Android had it installed.
 pub fn uninstall(
     profile: &ProfileName,
     pkg: &str,
     keep_data: bool,
     report: Report,
-) -> Result<Uninstalled> {
+) -> Result<bool> {
     let pkg = validate::package(pkg)?;
     let s = session(profile, report)?;
     let from_android = android::user_packages(&s)?.iter().any(|p| p == pkg);
     if from_android {
         android::uninstall(&s, pkg, keep_data)?;
     }
-    let from_desktop = xdg::remove_app(&Dirs::from_env(), pkg);
-    Ok(Uninstalled {
-        from_android,
-        from_desktop,
-    })
+    Ok(from_android)
 }
 
 /// Launches an app (in a window of its own), optionally opening a URI in it.
@@ -453,12 +341,6 @@ pub fn android_packages(profile: &ProfileName) -> Option<Vec<String>> {
         return None;
     }
     android::user_packages(&s).ok()
-}
-
-/// Repairs app entries and offers missing app-menu entries again (see
-/// [`xdg::refresh_entries`]). Returns how many entries were rewritten.
-pub fn refresh_entries() -> usize {
-    xdg::refresh_entries(&Dirs::from_env())
 }
 
 #[cfg(test)]

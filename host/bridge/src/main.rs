@@ -35,7 +35,8 @@ fn main() -> Result<()> {
     let env = |v: &str| std::env::var(v).ok().filter(|v| !v.is_empty());
     let desktop = env("INNKEEPER_TEST").as_deref() != Some("1");
     let paths = innkeeper_core::paths::Prefix::locate()?.session_paths()?;
-    let (run_dir, state_dir, profile) = (paths.run, paths.state, paths.profile);
+    let (run_dir, state_dir, data_dir, profile) =
+        (paths.run, paths.state, paths.data, paths.profile);
     let socket = run_dir.join("bridge/bridge.sock");
     // A report from before a restart is stale; the system app sends a new one.
     let _ = std::fs::remove_file(run_dir.join("lifecycle"));
@@ -146,6 +147,7 @@ fn main() -> Result<()> {
     let apps = Arc::new(innkeeper_bridge::apps::Config::from_env(
         desktop,
         profile.clone(),
+        data_dir,
     ));
     let _session_bus = match session_api.serve(
         for_preferences,

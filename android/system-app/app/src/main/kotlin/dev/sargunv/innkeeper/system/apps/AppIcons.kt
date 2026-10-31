@@ -11,14 +11,15 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.DisplayMetrics
 import android.util.Log
+import android.util.TypedValue
 import dev.sargunv.innkeeper.system.bridge.Wire
 import dev.sargunv.innkeeper.system.bridge.toRgba
 import java.io.ByteArrayOutputStream
 
 /**
  * App icons for the desktop, drawn by Android itself: adaptive icons get the system mask and vector
- * drawables are rasterized by the framework. `innkeeper install` (through [IconDump]) and the
- * bridge's apps service (through [AppMirrorFeature]) get the same pixels.
+ * drawables are rasterized by the framework. The bridge's apps service (through [AppMirrorFeature])
+ * get the same pixels.
  */
 object AppIcons {
   private const val TAG = "InnkeeperApps"
@@ -81,4 +82,33 @@ object AppIcons {
     bmp.recycle()
     return out.toByteArray()
   }
+
+  /**
+   * The colour the app's launch window starts with: `windowSplashScreenBackground`, else its window
+   * background if that is a colour, else `colorBackground`. Transparent ones (the framework's
+   * default splash background, trampoline activities) don't count.
+   */
+  fun splashColor(pm: PackageManager, app: ApplicationInfo, a: ActivityInfo?): Int? =
+    try {
+      val theme = pm.getResourcesForApplication(app).newTheme()
+      val res = a?.themeResource?.takeIf { it != 0 } ?: app.theme
+      if (res != 0) theme.applyStyle(res, true)
+      val v = TypedValue()
+      listOf(
+          android.R.attr.windowSplashScreenBackground,
+          android.R.attr.windowBackground,
+          android.R.attr.colorBackground,
+        )
+        .firstNotNullOfOrNull { attr ->
+          v.takeIf {
+              theme.resolveAttribute(attr, it, true) &&
+                it.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT &&
+                it.data ushr 24 != 0
+            }
+            ?.data
+        }
+    } catch (e: Exception) {
+      Log.w(TAG, "splash colour of ${app.packageName}: $e")
+      null
+    }
 }

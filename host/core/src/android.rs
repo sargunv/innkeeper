@@ -5,13 +5,9 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use base64::Engine as _;
 
 use crate::launcher::Session;
 use crate::{ErrorKind, validate};
-
-/// The system app, whose `IconDump` renders app icons (and reports labels).
-const SYSTEM_APK: &str = "/system_ext/priv-app/InnkeeperSystem/InnkeeperSystem.apk";
 
 /// `Success: created install session [1234]` -> 1234.
 pub fn parse_session_id(out: &str) -> Option<u32> {
@@ -177,87 +173,6 @@ pub struct LaunchOptions {
     pub size: Option<(u32, u32)>,
 }
 
-/// What Android itself reports for an installed app.
-#[derive(Debug, Default)]
-pub struct AppInfo {
-    pub label: String,
-    pub category: Option<i32>,
-    /// Its launcher activity's splash background (`0xRRGGBB`) and window
-    /// size in dp.
-    pub splash: Option<u32>,
-    pub window: Option<(u32, u32)>,
-    /// (size, PNG bytes)
-    pub icons: Vec<(u32, Vec<u8>)>,
-    pub mime_types: Vec<String>,
-}
-
-pub fn parse_helper_output(out: &str) -> AppInfo {
-    let mut info = AppInfo::default();
-    let b64 = base64::engine::general_purpose::STANDARD;
-    for l in out.lines() {
-        if let Some(v) = l.strip_prefix("label ") {
-            info.label = v.to_string();
-        } else if let Some(v) = l.strip_prefix("mime ") {
-            info.mime_types.push(v.to_string());
-        } else if let Some(v) = l.strip_prefix("category ") {
-            info.category = v.trim().parse().ok();
-        } else if let Some(v) = l.strip_prefix("splash ") {
-            // AARRGGBB; a transparent one shows whatever is behind.
-            info.splash = u32::from_str_radix(v.trim(), 16)
-                .ok()
-                .filter(|c| c >> 24 != 0)
-                .map(|c| c & 0xff_ffff);
-        } else if let Some(v) = l.strip_prefix("window ")
-            && let Some((w, h)) = v.trim().split_once(' ')
-            && let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>())
-            && (1..=16384).contains(&w)
-            && (1..=16384).contains(&h)
-        {
-            info.window = Some((w, h));
-        } else if let Some(v) = l.strip_prefix("icon ")
-            && let Some((size, data)) = v.split_once(' ')
-            && let Ok(size) = size.parse::<u32>()
-            && let Ok(png) = b64.decode(data.trim())
-            && png.starts_with(b"\x89PNG\r\n\x1a\n")
-        {
-            info.icons.push((size, png));
-        }
-    }
-    info
-}
-
-/// Asks Android to render the app's launcher icon at `sizes` (and report its
-/// label and category), via the system app's `IconDump` under `app_process`.
-pub fn app_info(s: &Session, pkg: &str, sizes: &[u32]) -> Result<AppInfo> {
-    let sizes: Vec<String> = sizes.iter().map(u32::to_string).collect();
-    let cp = format!("CLASSPATH={SYSTEM_APK}");
-    let mut argv = vec![
-        "env",
-        &cp,
-        "app_process",
-        "/",
-        "dev.sargunv.innkeeper.system.apps.IconDump",
-        pkg,
-    ];
-    argv.extend(sizes.iter().map(String::as_str));
-    let o = s.exec(120, &argv)?;
-    if !o.ok() {
-        bail!(
-            "icon helper failed: {}",
-            validate::truncate(o.stderr.trim(), 600)
-        );
-    }
-    let info = parse_helper_output(&o.text());
-    if info.icons.len() < sizes.len() {
-        bail!(
-            "the icon helper rendered {} of {} icons",
-            info.icons.len(),
-            sizes.len()
-        );
-    }
-    Ok(info)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,19 +184,5 @@ mod tests {
             Some(1834552)
         );
         assert_eq!(parse_session_id("Failure [x]\n"), None);
-    }
-
-    #[test]
-    fn helper_output() {
-        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
-        let i = parse_helper_output(&format!(
-            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
-        ));
-        assert_eq!(i.label, "Calc");
-        assert_eq!(i.category, Some(-1));
-        assert_eq!(i.splash, Some(0x202124));
-        assert_eq!(i.window, Some((412, 915)));
-        assert_eq!(i.icons.len(), 1);
-        assert_eq!(i.icons[0].0, 48);
     }
 }

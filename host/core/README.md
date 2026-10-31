@@ -17,11 +17,11 @@ own; `cargo test -p innkeeper-core` tests it.
   script, closest region), so a desktop entry's `Name[xx]` matches what the app
   shows. Only what an install uses is decoded; malformed input is an error,
   never a panic.
-- **Icons** come from Android: the system app's `IconDump` runs under
-  `app_process` and renders the launcher icon at 48 to 512 px, so adaptive and
-  vector icons get the system mask. The APK's own PNGs are the fallback. Before
-  installation, `apk/icon.rs` renders static adaptive and vector layers on the
-  host with resvg ([manager limits](../manager/README.md#install-page)).
+- **Icons** come from Android: the system app renders the launcher icon at 48 to
+  512 px for the bridge's app mirror, so adaptive and vector icons get the
+  system mask. Before installation, `apk/icon.rs` renders static adaptive and
+  vector layers on the host with resvg
+  ([manager limits](../manager/README.md#install-page)).
 - **Desktop entries** (`desktop.rs`, `xdg.rs`, `dynlauncher.rs`): each app's
   record, `dev.sargunv.innkeeper.<pkg>.desktop`, stays in the Flatpak's own data
   dir, with custom URL schemes as `x-scheme-handler/*` (never `http(s)`, `file`,
@@ -30,12 +30,10 @@ own; `cargo test -p innkeeper-core` tests it.
   `dev.sargunv.Innkeeper.<pkg>.desktop` running
   `flatpak run --command=innkeeper` for the entry's profile, which survives
   updates. Windows (`StartupWMClass`), notifications and MPRIS players use that
-  id. At manager start, entry repair offers an entry again when it is missing or
-  runs another command, unless the user declined it.
-- **File types:** the system app reports, through `IconDump`, the concrete MIME
-  types of each app's exported, enabled, default VIEW filters that accept
-  `content://` files. Innkeeper's own desktop entry registers common document,
-  text and media types and forwards files to an **Open with Android app…**
+  id. Only the bridge's app mirror writes them (`install` only installs), with
+  names and URL schemes from the installed APK.
+- **File types:** Innkeeper's own desktop entry claims only the APK and bundle
+  types; `innkeeper open` hands documents to an **Open with Android app…**
   chooser ([the CLI](../cli/README.md)).
 - **Profiles and adb** (`profiles.rs`, `adb.rs`): listing, creating, renaming,
   deleting, starting and stopping profiles, and connecting the user's adb server
