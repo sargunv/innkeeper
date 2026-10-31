@@ -6,15 +6,8 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-  <!-- NotificationProbe posts one, LocationProbe asks for locations (the tests install with
-       -g). -->
+  <!-- NotificationProbe posts one (the tests install with -g). -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-
-  <!-- ClipProbe has no window; its platform signature permits reading without focus. -->
-  <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" />
-  <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -38,27 +31,7 @@
     <activity android:name=".BenchProbe" android:exported="true" android:label="Benchmark probe" />
     <service android:name=".BenchService" android:process=":bench" android:exported="false" />
 
-    <activity android:name=".BackProbe" android:exported="true">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-        <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
-    </activity>
-    <activity android:name=".BackProbe$Details" android:exported="false" />
-
-    <activity android:name=".CustomTabProbe" android:exported="true"
-      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection">
-      <intent-filter android:autoVerify="true">
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <category android:name="android.intent.category.BROWSABLE" />
-        <data android:scheme="https" android:host="innkeeper-probe.example.org" />
-      </intent-filter>
-    </activity>
-
     <activity android:name=".TaskWindowProbe" android:exported="true" />
-
-    <activity android:name=".TaskAppearanceProbe" android:exported="true" android:launchMode="singleTop" />
 
     <activity android:name=".ShareProbe" android:exported="true" android:label="Share probe">
       <intent-filter>
@@ -101,13 +74,6 @@
 
     <activity android:name=".CaptureProbeActivity" android:exported="true" android:label="Capture probe" />
 
-    <activity android:name=".CursorProbeActivity" android:exported="true" android:label="Cursor probe" />
-
-    <!-- A focused text field that logs its text and keys (tag InnkeeperProbe). -->
-    <activity
-      android:name=".TextProbeActivity"
-      android:exported="true"
-      android:label="@string/text_probe_name" />
 
     <!-- Game-category probe for immersive + requested orientation. -->
     <activity
@@ -145,24 +111,6 @@
       android:name=".NotificationProbe$Receiver"
       android:exported="false" />
 
-    <!-- Sets or logs the clipboard. -->
-    <activity
-      android:name=".ClipProbe"
-      android:excludeFromRecents="true"
-      android:exported="true"
-      android:noHistory="true"
-      android:theme="@android:style/Theme.NoDisplay" />
-    <provider
-      android:name=".ClipImageProbe"
-      android:authorities="dev.sargunv.innkeeper.probes.clip"
-      android:exported="false"
-      android:grantUriPermissions="true" />
-
-    <!-- Asks for locations and logs them (host location). -->
-    <activity
-      android:name=".LocationProbe"
-      android:excludeFromRecents="true"
-      android:exported="true" />
     <activity
       android:name=".DesktopProbe"
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"

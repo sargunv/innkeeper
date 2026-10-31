@@ -3,7 +3,6 @@
 <resources>
   <string name="app_name">Innkeeper probes</string>
   <string name="input_probe_name">Innkeeper input probe</string>
-  <string name="text_probe_name">Innkeeper text probe</string>
   <string name="window_probe_name">Innkeeper window probe</string>
   <string name="teardown_probe_name">Innkeeper teardown probe</string>
 </resources>
