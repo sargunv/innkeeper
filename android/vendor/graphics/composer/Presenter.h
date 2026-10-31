@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Where composed frames go. Every layer is CLIENT: SurfaceFlinger's
+// Where composed frames go. Content layers are CLIENT: SurfaceFlinger's
 // RenderEngine composites them into the client target, and the Presenter
-// shows that. The bridge imports the sink's dma-buf and the system app owns
-// its Image until Wayland releases it. Mixed virtual composition is blitted
-// into the sink on the GPU before submission.
-//
-// HeadlessPresenter optionally dumps the client target to PNG.
+// shows that; a CURSOR layer is passed separately. The bridge imports the
+// sink's dma-buf and the system app owns its Image until Wayland releases it.
+// Mixed virtual composition is blitted into the sink on the GPU before
+// submission.
 #pragma once
 
 #include <memory>
-#include <string>
-#include <utility>
 
 #include "Buffer.h"
 #include "Common.h"
@@ -55,8 +52,6 @@ class HeadlessPresenter : public Presenter {
   ~HeadlessPresenter() override;
   const char* name() const override { return "headless"; }
   void present(const FrameInput& frame) override;
-  // Dump file prefix (default "display<hwc id>").
-  void setDumpPrefix(std::string prefix) { mPrefix = std::move(prefix); }
 
  private:
   struct Worker;
@@ -66,7 +61,6 @@ class HeadlessPresenter : public Presenter {
   std::unique_ptr<GpuCopy> mReadbackCopy;
   uint64_t mPresented = 0;
   int64_t mLastLogNs = 0;
-  std::string mPrefix;
 };
 
 // The presenters' backend, from vendor.innkeeper.hwc.backend, read once at

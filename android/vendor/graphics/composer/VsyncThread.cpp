@@ -81,7 +81,6 @@ void VsyncThread::loop() {
     )
       break;
     mLastVsyncNs = next;
-    if (mStop) break;
     if (mCallback && (mEnabled || changed)) {
       auto cb = mCallback;
       lock.unlock();

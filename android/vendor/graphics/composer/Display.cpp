@@ -5,7 +5,6 @@
 
 #include "Display.h"
 
-#include "GpuCopy.h"
 #include "Properties.h"
 #include "innkeeper/log.h"
 
@@ -92,7 +91,7 @@ Error Display::setPowerMode(c3::PowerMode mode) {
 }
 
 void Display::setColorTransform(const std::vector<float>&) {
-  // Not applied by us; every layer is CLIENT, so RenderEngine applies it.
+  // RenderEngine applies it to the CLIENT layers.
   invalidate();
 }
 
