@@ -27,6 +27,7 @@ session in a sandbox of its own.
 | `LINUXAPK_AUDIO_SOURCE`                            | users: Pulse/PipeWire capture source (default: desktop default)    |
 | `LINUXAPK_AUDIO_SINK`                              | users: one PipeWire sink for the session's audio                   |
 | `LINUXAPK_IDLE_GRACE`                              | users: seconds idle before the session stops (0: never)            |
+| `LINUXAPK_GLES`                                    | experiments: `zink` or `angle` (default), chosen at session start  |
 | `--headless`, `LINUXAPK_INSTANCE`                  | tests: no windows; an independent named (test) session             |
 | `LINUXAPK_TEST_TIMERS`                             | tests: short idle polling and alarm wake lead, named sessions only |
 | `LINUXAPK_TEST`                                    | tests: isolate desktop integration even without an instance name   |

@@ -65,6 +65,7 @@ fn our_props(cfg: &Config) -> Result<String> {
     }
     let vk = &cfg.vulkan_driver;
     s += &format!("ro.hardware.vulkan={vk}\n");
+    s += cfg.gles.properties();
     // Composer backend: windows through the bridge, or none.
     let backend = if cfg.headless { "headless" } else { "bridge" };
     s += &format!("vendor.linuxapk.hwc.backend={backend}\n");

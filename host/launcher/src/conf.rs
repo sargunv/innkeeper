@@ -23,6 +23,9 @@ pub struct Config {
     // Older configs are read only for their image and sandbox paths.
     #[serde(default)]
     pub vulkan_driver: String,
+    /// GLES implementation, fixed for the lifetime of this session.
+    #[serde(default)]
+    pub gles: crate::graphics::Gles,
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland: Option<PathBuf>,
@@ -61,6 +64,7 @@ impl Config {
             headless,
             render_node,
             vulkan_driver,
+            gles: crate::graphics::Gles::select(env::var("LINUXAPK_GLES").ok().as_deref()),
             wayland,
             idle_grace: crate::lifecycle::grace_secs(headless),
             start_env: crate::lifecycle::start_env(),

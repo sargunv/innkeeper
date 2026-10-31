@@ -3,6 +3,34 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
+/// ANGLE remains the default on every Vulkan driver. Zink is opt-in so both
+/// GLES implementations can be compared without changing the stage.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Gles {
+    #[default]
+    Angle,
+    Zink,
+}
+
+impl Gles {
+    pub fn select(value: Option<&str>) -> Self {
+        match value {
+            Some("zink") => Self::Zink,
+            _ => Self::Angle,
+        }
+    }
+
+    pub fn properties(self) -> &'static str {
+        match self {
+            Self::Angle => "ro.hardware.egl=angle\n",
+            Self::Zink => "ro.hardware.egl=zink\nmesa.loader.driver.override=zink\n",
+        }
+    }
+}
+
 /// Prefer RADV on hybrid hosts, then ANV on supported i915 devices. Unsupported nodes must not
 /// hide a supported GPU later in sysfs. Return the matching HAL with its node.
 pub fn select_node(drm: &Path, dev: &Path, anv_ids: &str) -> Option<(PathBuf, &'static str)> {
@@ -68,6 +96,22 @@ mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn gles_selection_is_opt_in() {
+        for value in [None, Some("angle"), Some(""), Some("unknown")] {
+            let gles = Gles::select(value);
+            assert_eq!(gles, Gles::Angle);
+            assert_eq!(gles.properties(), "ro.hardware.egl=angle\n");
+        }
+        let gles = Gles::select(Some("zink"));
+        assert_eq!(gles, Gles::Zink);
+        assert!(gles.properties().contains("ro.hardware.egl=zink\n"));
+        assert!(
+            gles.properties()
+                .contains("mesa.loader.driver.override=zink\n")
+        );
+    }
 
     #[test]
     fn selection_scans_all_nodes() {
