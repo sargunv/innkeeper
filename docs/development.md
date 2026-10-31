@@ -43,7 +43,14 @@ flowchart LR
   its CMake component.
 - **One build container**, [tools/container](../tools/README.md), for Mesa and
   the static image tools. Every run is capped (`--memory`, `--pids-limit`);
-  those builds are skipped while their inputs hash to the same stamp.
+  those builds are skipped while their inputs hash to the same stamp, and it
+  runs at nice 10.
+- **One compiler cache**: every C/C++ compile, in the container or not, goes
+  through sccache into `~/.cache/innkeeper/sccache`, which every checkout and
+  worktree shares. [tools/build/sccache.sh](../tools/build/sccache.sh) keys it
+  on paths relative to the checkout and keeps each depfile local, so a new
+  worktree's first build reuses its siblings' objects and Ninja still tracks its
+  own headers.
 - `mise run clean` removes build output and keeps test results.
 
 ## Run
