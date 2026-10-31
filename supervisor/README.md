@@ -16,7 +16,7 @@ an unprivileged namespace can't do into user notifications.
 | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------- |
 | `openat` of `/dev/{binder,hwbinder,vndbinder}`, `ioctl` type `'b'`                                                                            | broker (binder) | binder in userspace: no binderfs, no SELinux module                    |
 | `bpf`, `statfs` of `/sys/fs/bpf`, BPF-pin `getxattr`, `SO_ANDROID_DROP_REASON`, `RLIMIT_MEMLOCK`, alarm `timerfd_create`, RT scheduling       | broker (`bpf`)  | netd and the BPF loaders need eBPF; the rest fails in a user namespace |
-| `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)  | virtual Android uids without a subordinate id range                    |
+| `get*id`/`set*id`, groups, the `chown` family, `SO_PEERCRED`, `lstat` of owner-tracked paths, `faccessat(W_OK)`, opening `/proc/<pid>/status` | broker (creds)  | virtual Android uids over one kernel uid                               |
 | `readlink`/`readlinkat`, `getcwd`, `fstat`, `mkdir`/`mkdirat`, the `chmod` family; `openat` of faked `/proc` files                            | broker (`fs`)   | no mounts or user namespace in the sandbox (docs/session.md)           |
 | `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | broker (`bpf`)  | no capabilities in the sandbox; the host's network                     |
 | `openat` and `inotify_add_watch` of `/dev/input`, `ioctl` type `'E'`                                                                          | broker (input)  | session-local evdev devices the bridge feeds, never the host's         |
@@ -73,7 +73,7 @@ One broker thread serves binder for the whole session, about 70k to 90k
 transactions per second; a round trip costs 15 µs against 3.8 µs for kernel
 binder.
 
-## Single-uid credentials
+## Android credentials
 
 `src/creds/table.rs` is the pure model, `src/creds/syscalls.rs` the syscall
 side. A process's identity is an id in its soft `RLIMIT_RTTIME`, which `fork`

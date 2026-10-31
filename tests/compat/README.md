@@ -38,6 +38,6 @@ available for a run.
 - **Triage:** inspect a failing app's failure signature in its
   `out/test/compat/<profile>/<pkg>/` logs; `manual` notes in the corpus list
   checks the harness doesn't automate yet.
-- **Flatpak**: there is no TUN device, so Rethink's VPN check fails and it
+- **VPN apps:** there is no TUN device, so Rethink's VPN check fails and it
   partly works. A `--window` run gets a nested desktop of its own
   (`tests/nested.sh`).

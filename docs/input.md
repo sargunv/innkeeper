@@ -87,7 +87,7 @@ never discarded for EAGAIN.
 The bridge reads host `/dev/input/event*` nodes allowed by the user's existing
 ACLs, without grabbing them or using uinput. Flatpak's `--device=input` grant
 makes those nodes visible; it includes keyboards and mice as well as gamepads
-([security.md](security.md#flatpak-mode)). Every 250 ms it discovers added or
+([security.md](security.md#the-sandbox)). Every 250 ms it discovers added or
 newly accessible controllers; an unplug closes that controller's virtual device.
 The reader uses the kernel's standard Linux gamepad button layout, maps common
 `RX/RY` right-stick and `Z/RZ` trigger arrangements to Android's `Generic.kl`,

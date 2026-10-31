@@ -19,8 +19,8 @@ import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
  * unlocked: the app is direct-boot aware) and restarts it if it dies. Each desktop-integration area
  * is a [Feature]: host input, then the window manager and the IME, which share its connection to
  * the bridge's input service, then desktop integration (settings, notifications, clipboard, links,
- * media), the app mirror, in Flatpak mode the host network, the host's state (power saver,
- * metering, location), accessibility, and a tick that delivers due inexact alarms.
+ * media), the app mirror, the host network, the host's state (power saver, metering, location),
+ * accessibility, and a tick that delivers due inexact alarms.
  */
 class InnkeeperSystemApp : Application() {
   private val features = mutableListOf<Feature>()

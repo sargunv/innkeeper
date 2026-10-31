@@ -16,7 +16,7 @@ restarts it if it dies.
 | `integration/{location,power,network}/` | hoststate      | the network location provider, battery saver, metering ([below](#host-state))           |
 | `documents/`                            | documents      | the document picker and a DocumentsProvider for host files the user picked              |
 | `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host              |
-| `net/`                                  | none           | Flatpak mode: the host's network as Android's default network                           |
+| `net/`                                  | none           | the host's network as Android's default network                                         |
 | `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI   |
 | `alarms/`                               | none           | a minute tick that delivers due inexact alarms, so ready jobs run on time               |
 
@@ -70,8 +70,8 @@ battery goes to the Health HAL,
   off for the session.
 - **Power saver:** the desktop's power-saver profile is Android's battery saver
   (`setPowerSaveModeEnabled`), applied at each connect and change.
-- **Metered:** applied only in Flatpak mode, to
-  `integration/network/HostNetworkFeature.kt`'s network agent.
+- **Metered:** applied to `integration/network/HostNetworkFeature.kt`'s network
+  agent.
 
 Known limits: `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL
 HAL would remove that.

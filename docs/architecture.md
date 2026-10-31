@@ -4,26 +4,29 @@ Innkeeper runs a near-stock AOSP userspace (ART, system_server, SurfaceFlinger)
 as ordinary host processes in a rootless, on-demand session. Our code sits at
 Android's stable boundaries, so routine work never needs an AOSP build.
 
-## Three runtime zones
+## Runtime zones
+
+Everything runs as the user inside Innkeeper's Flatpak sandbox; only the
+desktop's own services are outside it.
 
 ```mermaid
 flowchart LR
-  subgraph desk["Desktop (glibc, runs as the user)"]
+  host["Desktop: Wayland, PipeWire, portals, D-Bus"]
+  subgraph sandbox["Flatpak sandbox (the user)"]
     cli["innkeeper / innkeeper-manager"]
     launcher["innkeeper-session"]
     bridge["innkeeper-bridge"]
-    host["Wayland, PipeWire, portals, D-Bus"]
-  end
-  subgraph sup["Supervisor (Flatpak sandbox, host-user privileges)"]
-    broker["innkeeper-brk"]
-  end
-  subgraph droid["Android (Flatpak sandbox)"]
-    init["init, servicemanager, system_server, zygote, apps"]
-    hal["vendor HALs: composer, gralloc, Vulkan, audio, health"]
-    sysapp["Innkeeper System app"]
+    subgraph sup["Broker"]
+      broker["innkeeper-brk"]
+    end
+    subgraph droid["Guest: Android, under the seccomp filter"]
+      init["init, servicemanager, system_server, zygote, apps"]
+      hal["vendor HALs: composer, gralloc, Vulkan, audio, health"]
+      sysapp["Innkeeper System app"]
+    end
   end
   cli -->|"start, exec"| launcher
-  launcher -->|"Flatpak sandbox, composed root"| broker
+  launcher -->|"composed root"| broker
   launcher --> bridge
   broker -->|"fork, exec init"| init
   init -. "seccomp user notifications: binder, bpf, credentials, evdev" .-> broker
@@ -32,15 +35,15 @@ flowchart LR
   bridge <--> host
 ```
 
-- **Desktop.** The CLI and manager install and launch apps through
+- **Host side.** The CLI and manager install and launch apps through
   `innkeeper-core`; the launcher assembles and starts the session; the bridge is
   the only process that talks to the desktop.
-- **Supervisor.** One seccomp filter on Android's init traps what the sandbox
-  can't do (binder, eBPF, single-uid credentials, session-local evdev). The Rust
-  broker defines the filter, starts init under it as its child, serves every
-  notification and reaps orphans. See
+- **Broker.** One seccomp filter on Android's init traps what the sandbox can't
+  do (binder, eBPF, Android credentials over one kernel uid, session-local
+  evdev). The Rust broker defines the filter, starts init under it as its child,
+  serves every notification and reaps orphans. See
   [supervisor/README.md](../supervisor/README.md).
-- **Android.** The pinned image plus our overlay layer, vendor HALs and the
+- **Guest.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).
 
 The channels between zones are the seccomp notification fd and one socket,
@@ -121,10 +124,10 @@ module stages.
   executable, and runtime state lives in the XDG dirs, so dev, test and packaged
   runs share one code path.
 - Inside Flatpak there are no nested user namespaces, mounts or capabilities, so
-  the session runs in the app's own sandbox in single-uid mode, with a root
-  built from symlinks (Flatpak's `/` is a writable tmpfs) and the host's network
-  ([Flatpak mode](session.md#flatpak-mode)). No `flatpak-spawn --host`: that is
-  a sandbox escape.
+  the session runs in the app's own sandbox as one kernel uid, with a root built
+  from symlinks (Flatpak's `/` is a writable tmpfs) and the host's network
+  ([session.md](session.md)). No `flatpak-spawn --host`: that is a sandbox
+  escape.
 
 ## Non-goals
 
@@ -154,7 +157,7 @@ patching Bionic and binder libraries. Our seccomp supervisor keeps those changes
 outside the image and needs neither kernel binder nor nested user namespaces.
 That makes an unmodified CI image usable inside Flatpak, at the cost of owning
 binder semantics and giving up kernel isolation between Android apps
-([security.md](security.md#single-uid-mode)).
+([security.md](security.md#app-isolation)).
 
 Waydroid's
 [GBM allocator and Wayland buffer imports](https://github.com/waydroid/android_hardware_waydroid/tree/5af0c114a19fc916de837ad553524cd2aade2719)

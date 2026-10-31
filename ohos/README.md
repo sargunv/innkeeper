@@ -66,9 +66,8 @@ lands, OH's own injector drives it from a probe:
 
 ## How it boots
 
-The same path as Android's Flatpak mode
-([docs/session.md](../docs/session.md#flatpak-mode)): a root of symlinks in the
-sandbox's own `/`, then the broker, then init.
+The same path as Android's session ([docs/session.md](../docs/session.md)): a
+root of symlinks in the sandbox's own `/`, then the broker, then init.
 
 - **Root.** `/system` is the extracted partition, `/vendor` its symlinks with
   our VDIs in place of the image's, and `/sys_prod` is our layer. OH's product

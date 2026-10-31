@@ -196,7 +196,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
                     .is_some_and(|a| a.windows == 0 && (a.services > 0 || !a.background.is_empty()))
             {
                 asked_background = true;
-                crate::flatpak::request_background(&paths);
+                crate::sandbox::request_background(&paths);
             }
             let state = why.clone().unwrap_or_else(|| "idle".into());
             if state != last {

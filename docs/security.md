@@ -24,10 +24,9 @@ flowchart LR
   root["Android root = host user"] -->|"Flatpak sandbox"| host["host files the user owns"]
 ```
 
-- **Android root is the host user.** Inside the user namespace it has the user's
-  file access, limited by the Flatpak sandbox:
-  [session.md](session.md#host-safety) lists its grants and probes, and
-  `selftest` proves them.
+- **Android root is the host user.** It has the user's file access, limited by
+  the Flatpak sandbox: [session.md](session.md#host-safety) lists its grants and
+  probes, and `selftest` proves them.
 - **The supervisor** (the Rust broker) runs in the sandbox with the host user's
   privileges and reads and writes Android processes' memory. It serves only
   callers inside the session's seccomp filter. It keeps bounds checks and pins
@@ -47,7 +46,7 @@ flowchart LR
 - One service per connection (HELLO); anything else gets `-EPROTO` and is
   closed.
 
-## Single-uid mode
+## App isolation
 
 Every Android process is the same kernel uid, so **apps are not isolated from
 each other**: any app can read or write another app's files and signal its
@@ -62,11 +61,11 @@ but that is policy enforced by Android's own processes, not by the kernel.
   checks admit any app to every service, including input. That matches desktop
   parity: a native app running as the user can reach the same desktop services.
 
-## Flatpak mode
+## The sandbox
 
 The Flatpak sandbox is the boundary, as for any Flatpak app
-([session.md](session.md#flatpak-mode)). `selftest` checks the sandbox's grants
-and what it shows Android.
+([session.md](session.md)). `selftest` checks the sandbox's grants and what it
+shows Android.
 
 - **Network.** Android has no network namespace of its own: it uses the host's
   network, as a native app with `--share=network` does. netd's routing and
@@ -74,9 +73,8 @@ and what it shows Android.
   traffic statistics don't exist, and data-usage and firewall apps can't work.
   There is no TUN device, so `VpnService` apps can't start a VPN. Both are
   accepted.
-- **No cgroups.** Only single-uid mode exists, and a session has no memory cap
-  of its own. Development and test sessions are capped from the host; the app
-  gets no systemd permission.
+- **No cgroups.** A session has no memory cap of its own. Development and test
+  sessions are capped from the host; the app gets no systemd permission.
 - **Input devices.** `--device=input` lets the bridge open controllers the user
   can already access through uaccess ACLs, including rumble writes. It also lets
   every Android app read the host's input devices, keyboards and mice included,

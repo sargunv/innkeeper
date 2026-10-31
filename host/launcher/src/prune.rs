@@ -130,7 +130,7 @@ fn freed_bytes(path: &Path) -> Result<u64> {
 
 fn remove(path: &Path) -> Result<()> {
     let bytes = freed_bytes(path)?;
-    crate::flatpak::remove_tree(path)?;
+    crate::sandbox::remove_tree(path)?;
     eprintln!(
         "innkeeper-session: pruned {} (freed {bytes} bytes)",
         path.display()
@@ -304,7 +304,7 @@ mod tests {
         assert!(images.join("unknown").is_dir());
         assert!(images.join("symlink-build").is_symlink());
         assert!(sentinel.join("keep").is_file());
-        crate::flatpak::remove_tree(&base)?;
+        crate::sandbox::remove_tree(&base)?;
         Ok(())
     }
 }

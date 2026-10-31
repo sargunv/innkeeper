@@ -67,13 +67,12 @@ flatpak install --user --reinstall ./<app>-snapshot.flatpak
 `mise run package` builds the same bundle, unpublished, on the snapshot channel;
 `mise run package -- stable` needs a `v*` tag on HEAD.
 
-The session runs inside the sandbox
-([Flatpak mode](../../docs/session.md#flatpak-mode)): `start` in a sandbox of
-its own through the Flatpak portal's Spawn, `start -f` in the caller's, and the
-other commands from any instance of the app
+The session runs inside the sandbox ([session.md](../../docs/session.md)):
+`start` in a sandbox of its own through the Flatpak portal's Spawn, `start -f`
+in the caller's, and the other commands from any instance of the app
 (`--command=/app/libexec/innkeeper/innkeeper-session`). Permissions and what
 each desktop service goes through:
-[security.md](../../docs/security.md#flatpak-mode). `--device=dri` gives the
+[security.md](../../docs/security.md#the-sandbox). `--device=dri` gives the
 render node and `/dev/udmabuf`; `--device=all` would bind the host's `/dev` over
 the sandbox's writable one. Never `flatpak-spawn --host` or
 `--talk-name=org.freedesktop.Flatpak`.

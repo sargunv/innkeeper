@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::paths::Paths;
-use crate::{control, flatpak, image, layer, selftest, session, sys};
+use crate::{control, image, layer, sandbox, selftest, session, sys};
 
 const USAGE: &str = "\
 Innkeeper session launcher: boots the pinned Android image (image/pin.toml)
@@ -71,7 +71,7 @@ Debugging:
 const KERNEL_FLOOR: (u32, u32) = (5, 14);
 /// Unprivileged PSI triggers (6.5), without which lmkd exits and every
 /// ActivityManager write to it stalls 3 s.
-const FLATPAK_KERNEL_FLOOR: (u32, u32) = (6, 5);
+const PSI_KERNEL_FLOOR: (u32, u32) = (6, 5);
 
 pub fn main() {
     let args: Vec<OsString> = env::args_os().skip(1).collect();
@@ -184,11 +184,11 @@ fn check_kernel() -> Result<()> {
             KERNEL_FLOOR.1
         );
     }
-    if v < FLATPAK_KERNEL_FLOOR {
+    if v < PSI_KERNEL_FLOOR {
         eprintln!(
             "innkeeper-session: Linux {rel} has no unprivileged PSI triggers ({}.{}+): \
              Android's low-memory killer won't run, and app starts stall",
-            FLATPAK_KERNEL_FLOOR.0, FLATPAK_KERNEL_FLOOR.1
+            PSI_KERNEL_FLOOR.0, PSI_KERNEL_FLOOR.1
         );
     }
     Ok(())
@@ -248,7 +248,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     let image_lease = image::prepare(paths, &image)?;
     image::check_data(&paths.data, &image)?;
     if !follow && !serve {
-        return flatpak::spawn(paths, &exe, headless);
+        return sandbox::spawn(paths, &exe, headless);
     }
     session::fresh_dirs(paths)?;
     trace.mark(paths, "image prepared, runtime ready");
@@ -256,7 +256,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     layer::write(&cfg)?;
     trace.mark(paths, "start-time layer written");
     cfg.save()?;
-    flatpak::run(&cfg, follow, image_lease, &trace)
+    sandbox::run(&cfg, follow, image_lease, &trace)
 }
 
 /// Deletes Android's /data, as Android's root: its files belong to Android's
@@ -268,7 +268,7 @@ fn reset(paths: &Paths) -> Result<()> {
     if paths.data.symlink_metadata().is_err() {
         return Ok(());
     }
-    flatpak::remove_tree(&paths.data)?;
+    sandbox::remove_tree(&paths.data)?;
     println!("removed {}", paths.data.display());
     Ok(())
 }

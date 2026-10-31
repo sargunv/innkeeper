@@ -94,8 +94,8 @@ fn single_mode_groups(r: &mut Report, pid: i32) {
     let setgroups = fs::read_to_string(format!("/proc/{pid}/setgroups")).unwrap_or_default();
     r.check(
         setgroups.trim() == "deny",
-        "single mode: setgroups denied in the session",
-        "single mode: setgroups allowed in the session",
+        "setgroups denied in the session",
+        "setgroups allowed in the session",
     );
     r.check(
         extra.is_empty(),
