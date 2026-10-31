@@ -25,6 +25,10 @@ CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "{{ env.ANDROID_NDK_HOME }}/toolchain
 # other settings and another cache, never answers ours.
 SCCACHE_DIR = "{{ env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache') }}/innkeeper/sccache"
 SCCACHE_SERVER_PORT = "4227"
+# Dependency crates (glib, gtk, ...) come from the cache in a new worktree.
+# sccache passes incremental compilations through, so dev builds of workspace
+# crates stay incremental. CI sets it empty (tools/ci/setup.sh).
+RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
 
 # ---- build -------------------------------------------------------------------
 # Each build:<module> fills out/build/<module>/install/, a tree of paths
