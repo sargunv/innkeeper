@@ -103,6 +103,10 @@ def command(program, args):
     ENV["INNKEEPER_IMAGES"],
   }
   paths.update(ENV[k] for k in XDG)
+  # Flatpak skips a --filesystem path that doesn't exist, so the image
+  # download would land in the sandbox's RAM-backed tmpfs.
+  for p in paths:
+    Path(p).mkdir(parents=True, exist_ok=True)
   if program == "innkeeper":
     for arg in args:
       p = Path(arg)
