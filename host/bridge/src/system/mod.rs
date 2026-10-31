@@ -44,33 +44,6 @@ use openuri::RateLimit;
 use proto::{ClipKind, Lifecycle, PlaybackApp, Request, feature};
 use settings::SettingsHub;
 
-/// What a session may do on the desktop. All desktop effects share one
-/// switch, including reads of the clipboard and user-facing portals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Policy {
-    pub open_urls: bool,
-    pub presence: bool,
-    pub clipboard: bool,
-    pub portals: bool,
-}
-
-impl Policy {
-    pub fn for_session(test_session: bool) -> Self {
-        Self {
-            open_urls: !test_session,
-            presence: !test_session,
-            clipboard: !test_session,
-            portals: !test_session,
-        }
-    }
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Self::for_session(false)
-    }
-}
-
 /// Bridge-wide state, created once in `main.rs`; each part starts the first
 /// time a client asks for it.
 pub struct Shared {
@@ -79,7 +52,9 @@ pub struct Shared {
     /// `<run-dir>/lifecycle`, and the client whose report it holds.
     lifecycle: PathBuf,
     lifecycle_owner: std::sync::Mutex<Option<u64>>,
-    policy: Policy,
+    /// False in a test session: no desktop effects at all, including reads of
+    /// the clipboard and user-facing portals.
+    desktop: bool,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     settings: OnceLock<Arc<SettingsHub>>,
     notify: OnceLock<Option<Arc<NotifyHub>>>,
@@ -102,24 +77,20 @@ impl Shared {
     /// `run_dir`: the session's runtime dir (not the socket dir, which
     /// Android shares): MPRIS artwork goes in `art/`, the lifecycle report in
     /// `lifecycle`.
-    pub fn with_policy(run_dir: &std::path::Path, policy: Policy) -> Arc<Shared> {
-        Self::with_input(run_dir, policy, crate::input::Hub::new())
-    }
-
-    pub fn with_input(
+    pub fn new(
         run_dir: &std::path::Path,
-        policy: Policy,
+        desktop: bool,
         input: Arc<crate::input::Hub>,
     ) -> Arc<Shared> {
-        if policy != Policy::default() {
-            crate::info!("system: test session: {policy:?} (log-only sinks)");
+        if !desktop {
+            crate::info!("system: test session (log-only sinks)");
         }
         Arc::new(Shared {
             art_dir: run_dir.join("art"),
             handoffs: handoff::Handoffs::new(input),
             lifecycle: run_dir.join("lifecycle"),
             lifecycle_owner: Default::default(),
-            policy,
+            desktop,
             dbus: OnceLock::new(),
             settings: OnceLock::new(),
             notify: OnceLock::new(),
@@ -174,7 +145,7 @@ impl Shared {
     }
 
     fn dbus(&self) -> Option<&zbus::blocking::Connection> {
-        if !self.policy.portals {
+        if !self.desktop {
             return None;
         }
         self.dbus
@@ -198,7 +169,7 @@ impl Shared {
     }
 
     fn notify(&self) -> Option<&Arc<NotifyHub>> {
-        if !self.policy.presence {
+        if !self.desktop {
             return None;
         }
         self.notify
@@ -212,7 +183,7 @@ impl Shared {
     }
 
     pub(crate) fn clipboard(&self) -> Option<&Arc<ClipboardHub>> {
-        if !self.policy.clipboard {
+        if !self.desktop {
             return None;
         }
         self.clipboard
@@ -293,7 +264,7 @@ impl SystemService {
         }
         have |= feature::SETTINGS;
         if want & feature::NOTIFICATIONS != 0
-            && (!self.shared.policy.presence || self.shared.notify().is_some())
+            && (!self.shared.desktop || self.shared.notify().is_some())
         {
             have |= feature::NOTIFICATIONS;
         }
@@ -323,7 +294,7 @@ impl SystemService {
             Ok(n) => n,
             Err(e) => return Reply::err(e.status()),
         };
-        if !self.shared.policy.presence {
+        if !self.shared.desktop {
             crate::info!(
                 "notify: {}: not shown (test session): {} {:?} progress={} badge={}",
                 self.label,
@@ -404,7 +375,7 @@ impl SystemService {
             crate::warn!("openuri: {}: rate limited", self.label);
             return Reply::err(-EAGAIN);
         }
-        if !self.shared.policy.open_urls {
+        if !self.shared.desktop {
             if let Err(why) = openuri::validate(&url) {
                 crate::warn!("openuri: {}: refused ({why})", self.label);
                 return Reply::err(-EINVAL);
@@ -460,7 +431,7 @@ impl SystemService {
         if want == self.indicator {
             return Reply::ok();
         }
-        if !self.shared.policy.presence {
+        if !self.shared.desktop {
             crate::info!("lifecycle: background indicator {want:?} (test session)");
         } else if let Some(hub) = self.shared.notify() {
             match &want {
@@ -491,7 +462,7 @@ impl SystemService {
             Ok(m) => m,
             Err(e) => return Reply::err(e.status()),
         };
-        if !self.shared.policy.presence {
+        if !self.shared.desktop {
             crate::debug!(
                 "mpris: {}: not published (test session): {}",
                 self.label,
@@ -546,7 +517,7 @@ impl Service for SystemService {
             if !self.uri_rate.allow(Instant::now()) {
                 return Reply::err(-EAGAIN);
             }
-            if !self.shared.policy.open_urls {
+            if !self.shared.desktop {
                 crate::info!(
                     "handoff: {}: not opened (test session): action {action}, {} files, {}",
                     self.label,
@@ -595,7 +566,7 @@ impl Service for SystemService {
             Request::OpenUri { len } => self.open_uri(len, fd()),
             Request::Media { player, len } => self.media(player, len, fd()),
             Request::MediaClose { player } => {
-                if self.shared.policy.presence {
+                if self.shared.desktop {
                     self.shared.mpris().remove(self.client, player);
                 }
                 Reply::ok()
@@ -680,18 +651,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_policy_matrix() {
-        for test_session in [false, true] {
-            let p = Policy::for_session(test_session);
-            assert_eq!(
-                [p.open_urls, p.presence, p.clipboard, p.portals],
-                [!test_session; 4]
-            );
-        }
-        assert_eq!(Policy::default(), Policy::for_session(false));
-    }
-
-    #[test]
     fn playback_app_uses_the_desktop_icon_id() {
         let named = mixer_app(&PlaybackApp {
             package: "org.example.player".into(),
@@ -714,7 +673,7 @@ mod tests {
     #[test]
     fn test_session_does_not_start_desktop_hubs() {
         let dir = crate::test_dir("system-test-policy");
-        let shared = Shared::with_policy(&dir, Policy::for_session(true));
+        let shared = Shared::new(&dir, false, crate::input::Hub::new());
         // Gating the hub itself prevents both clipboard publication and subscriptions,
         // and even a NOTIFY_CLOSE must not connect to the real notification server.
         assert!(shared.clipboard().is_none());

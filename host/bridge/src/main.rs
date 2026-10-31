@@ -65,7 +65,7 @@ fn main() -> Result<()> {
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
     }
-    let policy = innkeeper_bridge::system::Policy::for_session(test_session);
+    let desktop = !test_session;
     let mirror_apps = mirror_apps && !test_session;
     let run_dir = run_dir.context("--run-dir is required")?;
     let state_dir = state_dir.context("--state-dir is required")?;
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     )?);
     innkeeper_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"), test_session);
     // Not in the socket directory, which is shared with Android.
-    let shared = Shared::with_input(&run_dir, policy, hub.clone());
+    let shared = Shared::new(&run_dir, desktop, hub.clone());
     // The system app names the playing app; each audio connection applies
     // that name to the playback streams it has open and the next one it opens.
     let audio_shared = shared.clone();
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
     // Android apps' accessibility trees on AT-SPI, while the desktop's
     // assistive technologies are on (never in a test session on the user's
     // own bus).
-    let a11y = innkeeper_bridge::a11y::Shared::new(policy.presence);
+    let a11y = innkeeper_bridge::a11y::Shared::new(desktop);
     let focus = a11y.clone();
     a11y_hub.watch_focus(Box::new(move |w| focus.keyboard_focus(w)));
     services.register(service::A11Y, "a11y", move |peer, events| {
@@ -157,7 +157,7 @@ fn main() -> Result<()> {
     });
     // The host's battery, power saver, network and location. Location asks
     // the user, so a test session on the real desktop gets none.
-    let host_state = innkeeper_bridge::hoststate::HostState::new(policy.portals);
+    let host_state = innkeeper_bridge::hoststate::HostState::new(desktop);
     services.register(service::HOSTSTATE, "hoststate", move |peer, events| {
         Ok(Box::new(
             innkeeper_bridge::hoststate::HostStateService::new(host_state.clone(), peer, events),
@@ -167,7 +167,12 @@ fn main() -> Result<()> {
     let store = innkeeper_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
         Ok(Box::new(
-            innkeeper_bridge::documents::DocumentsService::new(store.clone(), peer, events, policy),
+            innkeeper_bridge::documents::DocumentsService::new(
+                store.clone(),
+                peer,
+                events,
+                desktop,
+            ),
         ))
     });
     // Apps installed inside Android get desktop entries; only with
