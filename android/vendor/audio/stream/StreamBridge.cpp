@@ -37,9 +37,8 @@ ndk::ScopedAStatus StreamBridge::close() {
   return ndk::ScopedAStatus::ok();
 }
 void StreamBridge::publishUsage() {
-  if (pcm_ && pendingUsage_ && reportedUsage_ != pendingUsage_) {
+  if (pcm_ && pendingUsage_) {
     pcm_set_usage(pcm_, static_cast<unsigned>(*pendingUsage_));
-    reportedUsage_ = pendingUsage_;
   }
 }
 void StreamBridge::noteUsage(std::optional<int32_t> usage) {
@@ -69,7 +68,6 @@ void StreamBridge::stop() {
   if (pcm_) {
     pcm_close(pcm_);
     pcm_ = nullptr;
-    reportedUsage_ = std::nullopt;
   }
 }
 void StreamBridge::position(Descriptor::Reply* reply) {
@@ -89,8 +87,8 @@ ndk::ScopedAStatus StreamOut::updateMetadata(
   for (const auto& track : metadata.tracks) {
     usages.push_back(static_cast<int32_t>(track.usage));
   }
-  // Empty track list: leave the last label in place. A repeated usage is
-  // not resent; noteUsage applies that once the bridge stream exists.
+  // Empty track list: leave the last label in place. pcm_set_usage skips
+  // a repeated usage once the bridge stream exists.
   stream_->noteUsage(selectUsage(usages.data(), usages.size()));
   return ndk::ScopedAStatus::ok();
 }

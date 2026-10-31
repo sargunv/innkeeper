@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <cstdio>
 #include <cstdlib>
-#include <optional>
-#include <vector>
 
 #include "Usage.h"
 
@@ -63,23 +61,4 @@ int main() {
   auto again = selectUsage(tie, 3);
   CHECK(first == kUsageNotification);
   CHECK(again == first);
-
-  // The sender used by StreamOut: empty sends nothing, a repeat is not
-  // resent, a new usage is.
-  std::optional<int32_t> reported;
-  std::vector<int32_t> sent;
-  auto apply = [&](const int32_t* u, size_t n) {
-    reportUsage(u, n, &reported, [&](int32_t usage) { sent.push_back(usage); });
-  };
-  apply(nullptr, 0);
-  CHECK(sent.empty());
-  const int32_t one[] = {kUsageMedia};
-  apply(one, 1);
-  apply(one, 1);
-  CHECK(sent.size() == 1 && sent[0] == kUsageMedia);
-  const int32_t next[] = {kUsageMedia, kUsageGame};
-  apply(next, 2);
-  CHECK(sent.size() == 2 && sent[1] == kUsageGame);
-  apply(nullptr, 0);
-  CHECK(sent.size() == 2);
 }

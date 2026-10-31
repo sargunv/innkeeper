@@ -75,17 +75,4 @@ inline std::optional<int32_t> selectUsage(const int32_t* usages, size_t count) {
   }
   return best;
 }
-
-// Sends SET_METADATA with an empty label only when the chosen usage changes.
-// No tracks sends nothing. `reported` is the usage last sent, if any.
-template <class Send>
-inline void reportUsage(
-  const int32_t* usages, size_t count, std::optional<int32_t>* reported,
-  Send&& send
-) {
-  auto chosen = selectUsage(usages, count);
-  if (!chosen || *reported == chosen) return;
-  *reported = chosen;
-  send(*chosen);
-}
 }  // namespace linuxapk::audio

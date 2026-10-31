@@ -46,10 +46,10 @@ class StreamBridge : public core::IStreamCommonDelegator {
   pcm* pcm_ = nullptr;
   uint64_t written_ = 0;
   Descriptor::State state_ = Descriptor::State::STANDBY;
-  // Usage to report once the bridge stream exists. Written by updateMetadata,
-  // read by the worker under closeMutex_.
+  // Usage to forward once the bridge stream exists. Written by
+  // updateMetadata, read by the worker under closeMutex_. pcm_set_usage
+  // drops a repeat, including across a reconnect.
   std::optional<int32_t> pendingUsage_;
-  std::optional<int32_t> reportedUsage_;
 };
 
 class StreamOut : public core::IStreamOutDelegator {
