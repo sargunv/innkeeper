@@ -32,15 +32,6 @@ apex_fs_config=(
   "com.android.tethering/bin/for-system 0750 1029 1000"       # AID_CLAT:AID_SYSTEM
   "com.android.tethering/bin/for-system/clatd 6755 1029 1029" # ClatCoordinator checks
 )
-copy_apex_files() {
-  local e rel
-  for e in "${apex_fs_config[@]}"; do
-    read -r rel _ <<<"$e"
-    [[ -e $apex/$rel ]] || continue
-    mkdir -p "$(dirname "$out/apex/$rel")"
-    if [[ -d $apex/$rel ]]; then mkdir -p "$out/apex/$rel"; else cp -p "$apex/$rel" "$out/apex/$rel"; fi
-  done
-}
 
 case $layer in
   common)
@@ -55,10 +46,11 @@ case $layer in
   single)
     rm -rf "$out"
     mkdir -p "$out"
-    copy_apex_files
     for e in "${apex_fs_config[@]}"; do
       read -r rel mode uid gid <<<"$e"
-      [[ -e $out/apex/$rel ]] || continue
+      [[ -e $apex/$rel ]] || continue
+      mkdir -p "$(dirname "$out/apex/$rel")"
+      if [[ -d $apex/$rel ]]; then mkdir -p "$out/apex/$rel"; else cp -p "$apex/$rel" "$out/apex/$rel"; fi
       chmod "$mode" "$out/apex/$rel"
       python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.innkeeper.owner", sys.argv[2].encode())' \
         "$out/apex/$rel" "$uid:$gid"
