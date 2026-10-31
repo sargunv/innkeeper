@@ -306,6 +306,26 @@ impl Settings {
     }
 }
 
+/// Deletes everything in data directory `data` but the profile's settings
+/// file: Android starts over, and the profile keeps its settings.
+pub fn reset(data: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(data) else {
+        return Ok(());
+    };
+    for e in entries {
+        let e = e?;
+        if e.file_name() == FILE {
+            continue;
+        }
+        if e.file_type()?.is_dir() {
+            crate::sandbox::remove_tree(&e.path())?;
+        } else {
+            fs::remove_file(e.path()).with_context(|| format!("remove {}", e.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
 fn ensure_stopped(paths: &crate::Paths) -> Result<()> {
     ensure!(
         crate::status(paths).pid.is_none(),
@@ -418,6 +438,28 @@ mod tests {
         }
         fs::write(settings_path(&data), "display = [").unwrap();
         assert!(Settings::load(&data).is_err());
+    }
+
+    #[test]
+    fn reset_keeps_only_the_settings() {
+        let d = dir("reset").join("data-x");
+        Settings {
+            idle_minutes: 9,
+            ..Settings::default()
+        }
+        .save(&d)
+        .unwrap();
+        fs::create_dir_all(d.join("app/a")).unwrap();
+        fs::write(d.join("app/a/base.apk"), "").unwrap();
+        fs::write(d.join(".innkeeper-data-version"), "1").unwrap();
+        reset(&d).unwrap();
+        let left: Vec<_> = fs::read_dir(&d)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, [FILE]);
+        assert_eq!(Settings::load(&d).unwrap().idle_minutes, 9);
+        reset(&d.join("missing")).unwrap();
     }
 
     #[test]

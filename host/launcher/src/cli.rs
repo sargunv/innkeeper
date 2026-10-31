@@ -14,56 +14,14 @@ use crate::paths::Paths;
 use crate::{control, image, layer, sandbox, selftest, session, sys};
 
 const USAGE: &str = "\
-Innkeeper session launcher: boots the pinned Android image (image/pin.toml)
-inside Innkeeper's Flatpak sandbox (docs/session.md).
+innkeeper-session: Innkeeper's internal session launcher for the profile in
+INNKEEPER_PROFILE (docs/session.md). Use `innkeeper profile` instead; in a
+checkout, `mise run session -- CMD` runs it in the development Flatpak.
 
-  innkeeper-session start [-f]    boot (in the background unless -f),
-                                 preparing the image first if needed. Each
-                                 app gets its own host Wayland window
-    --headless                   (tests only) open no windows
-  innkeeper-session prepare       fetch, extract, flatten and derive the image
-                                 without booting
-  innkeeper-session image         print the selected image and its paths
-  innkeeper-session stop          kill the session and clean up
-  innkeeper-session status        running or stopped
-  innkeeper-session reset         delete Android's /data (session stopped)
-  innkeeper-session log [-f]      Android init's kernel log (/dev/kmsg)
-  innkeeper-session exec CMD...   run CMD inside the live session as root
-  innkeeper-session shell         interactive /system/bin/sh inside
-  innkeeper-session selftest      host-safety probes against the live session
+  start [-f] [--headless] | _serve | prepare | image | stop | status
+  reset | log [-f] | exec CMD... | shell | selftest
 
-Every Android process runs as the host user; the supervisor virtualizes
-Android uids. start -f runs the session in this sandbox, for as long as it
-runs; plain start runs it in a sandbox of its own (the Flatpak portal's
-Spawn), which the other commands reach through a control socket.
-
-It runs from an installed prefix (libexec/innkeeper; in a checkout, out/stage
-after `mise run build`) and builds nothing. Its files:
-  $XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/  session.conf, pid
-    files, the kmsg FIFO, the bridge's socket, the control socket, the
-    start-time layer over the image
-  $XDG_STATE_HOME/innkeeper-<profile>/   logs (session, kmsg, bridge) and the
-    documents service's grants
-  $XDG_DATA_HOME/innkeeper/              images/, data-<profile>/ (Android's
-    /data), addons/ (test layers over the partitions),
-    root-<profile>/ (the composed root)
-
-Environment:
-  INNKEEPER_PROFILE         the profile to run (required; `innkeeper` and the
-                           manager set it)
-Tests only:
-  INNKEEPER_TEST=1          a test session, isolated from the desktop
-  INNKEEPER_TEST_TIMERS=1   short idle polling, a 1 s idle timeout and a short
-                           wakeup lead
-  INNKEEPER_AUDIO_SINK, INNKEEPER_AUDIO_SOURCE  PipeWire sink and capture
-                           source (default: the desktop's)
-  INNKEEPER_DATA            Android's /data (default
-                           $XDG_DATA_HOME/innkeeper/data-<profile>)
-  INNKEEPER_IMAGES          the image cache
-Debugging:
-  INNKEEPER_BRIDGE_DEBUG=1  debug lines and the frame and input trace in
-                           bridge.log
-  INNKEEPER_BROKER_DEBUG=1  broker tracing in session.log
+Its environment variables are in host/launcher/README.md.
 ";
 
 /// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)
@@ -261,14 +219,12 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
 
 /// Deletes Android's /data, as Android's root: its files belong to Android's
 /// uids.
+/// Deletes Android's `/data`, keeping the profile's settings in it.
 fn reset(paths: &Paths) -> Result<()> {
     if let Some(p) = crate::status(paths).pid {
         bail!("running (pid {p}); stop it first");
     }
-    if paths.data.symlink_metadata().is_err() {
-        return Ok(());
-    }
-    sandbox::remove_tree(&paths.data)?;
-    println!("removed {}", paths.data.display());
+    crate::profile::reset(&paths.data)?;
+    println!("reset {}", paths.data.display());
     Ok(())
 }
