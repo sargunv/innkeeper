@@ -2,8 +2,8 @@
 
 Run Android and OpenHarmony apps on Linux: a real AOSP 17 userspace in a Flatpak
 session, with our own vendor HALs, a seccomp supervisor and a desktop bridge.
-Start with [README.md](README.md) (the module table says what each dir is and
-where it runs), then [docs/architecture.md](docs/architecture.md).
+Start with [docs/architecture.md](docs/architecture.md); its module table says
+what each directory is and where it runs.
 
 ## Commands
 
@@ -19,12 +19,12 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
 
 ## Rules
 
-- **Never sudo.** Nothing the project needs, to build or to run, may require
-  root, a system package, an SELinux module, an AppArmor profile or a kernel
-  module. Build dependencies go in the build container or mise. Disposable
-  GitHub-hosted CI runners are the exception: `tools/ci/setup.sh` may provision
-  their packages, kernel devices and namespace settings with sudo, and refuses
-  to run outside GitHub Actions. This does not apply to contributors' machines.
+- **Never sudo.** Nothing the project needs to build or run may require root, a
+  system package, an SELinux module, an AppArmor profile or a kernel module.
+  Build dependencies go in the build container or mise. The one exception is
+  disposable GitHub-hosted CI runners: `tools/ci/setup.sh` may provision their
+  packages, kernel devices and namespace settings with sudo, and refuses to run
+  outside GitHub Actions. Contributors' machines get no exception.
 - **Memory caps** (a global OOM once crashed the user's desktop). `/tmp` is a
   RAM-backed tmpfs: never write large files there; use `out/`. Development and
   test sessions run capped from the host (`MemoryHigh=6G`, `MemoryMax=8G`),
@@ -33,28 +33,28 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
   a `MemoryMax`. Check `free -g` before starting another session.
 - **Never `logcat -b all`** or an unbounded `logcat` into a file; bound it with
   `-d`, `-t <n>` or `-s <tags>`.
-- **Host safety.** Inside the session Android's root is the host user. The
-  Flatpak sandbox is the boundary: every namespace running Android code masks
-  and locks host sysfs and never binds host `/run/user`, `$HOME` or `/dev`
-  wholesale. Android shares the host's network, as any `--share=network` app
-  does ([docs/security.md](docs/security.md#flatpak-mode)).
+- **Host safety.** Android's root is the host user. The Flatpak sandbox is the
+  boundary: every namespace running Android code masks and locks host sysfs and
+  never binds host `/run/user`, `$HOME` or `/dev` wholesale. Android shares the
+  host's network, as any `--share=network` app does
+  ([docs/security.md](docs/security.md#flatpak-mode)).
   `innkeeper-session selftest` must pass (`mise run test:e2e -- boot`).
-- **Test sessions are named.** Use `INNKEEPER_PROFILE=<name>` with a fresh data
-  dir for anything you run, and stop it when done. Don't start, restart or reset
-  the user's main session (no profile name), and don't install host integration
+- **Test sessions are named.** Run anything with `INNKEEPER_PROFILE=<name>` and
+  a fresh data dir, and stop it when done. Don't start, restart or reset the
+  user's main session (no profile name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
 - **Test what you touched, in under a minute.** Keep only tests of observable
   behaviour we own. Unit and low-level tests cover branches, edge cases and
   error handling; e2e keeps one common-path scenario per user-visible feature,
   never variants of the same path. A bug fix comes with a test that fails
-  without it; no reproduction, no fix. Iterate on `mise run test` plus relevant
-  `mise run test:e2e -- <group>` checks; the whole local e2e run must take under
-  60 s, with waits for observations instead of fixed delays. GitHub Actions uses
-  its own deadline for the slower software-rendered desktop, documented in
-  [tests/README.md](tests/README.md). The compat corpus is a manual harness for
-  investigating one app (`mise run test:compat -- --only <package>`) and a
-  nightly CI job. Never run the full corpus, and never trigger, run or wait for
-  the nightly job.
+  without it; no reproduction, no fix. Iterate on `mise run test` plus the
+  relevant `mise run test:e2e -- <group>`. The whole local e2e run must take
+  under 60 s, waiting for observations, never fixed delays. GitHub Actions has
+  its own deadline for its slower software-rendered desktop
+  ([tests/README.md](tests/README.md)). The compat corpus is a manual harness
+  for one app (`mise run test:compat -- --only <package>`) plus a nightly CI
+  job. Never run the full corpus, and never trigger, run or wait for the nightly
+  job.
 - **Nested test desktops are fully isolated** (a nested plasmashell once started
   kded, KDE Connect and Akonadi against the user's real config, and nested
   portals opened dialogs on the real desktop): a private `dbus-run-session`, a
@@ -67,13 +67,13 @@ where it runs), then [docs/architecture.md](docs/architecture.md).
 - **Test buses must not reach the user's runtime dir.** A private D-Bus that can
   activate services while `XDG_RUNTIME_DIR` is the real one starts a second
   `xdg-document-portal`, which takes over `/run/user/$UID/doc` and unmounts the
-  user's on exit (this broke `flatpak run` for half an hour once). Always pair a
+  user's on exit (this once broke `flatpak run` for half an hour). Always pair a
   private bus with a private `XDG_RUNTIME_DIR`, or use a bus that can't activate
   services. Never restart the user's own portal or D-Bus services.
 - **Desktop baseline: current major distro releases only.** Support the oldest
-  desktop stack a current release of Debian, Ubuntu, Fedora, openSUSE or Arch
-  ships. As of 2026-10 that is Debian 13: GNOME 48, Plasma 6.3,
-  xdg-desktop-portal 1.20. Use portals and freedesktop specs first. Add a
+  desktop stack in a current release of Debian, Ubuntu, Fedora, openSUSE or
+  Arch. As of 2026-10 that is Debian 13: GNOME 48, Plasma 6.3,
+  xdg-desktop-portal 1.20. Use portals and freedesktop specs first, a
   desktop-specific path only where a baseline desktop has no standard one, and
   no fallback for anything older than the baseline.
 - **Stable boundaries only.** Never patch the image in place; prefer HAL AIDL,
