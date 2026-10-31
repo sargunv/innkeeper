@@ -8,7 +8,10 @@
 //  - Flatpak's seccomp filter refuses mount, umount2, unshare, setns, chroot
 //    and pivot_root before ours sees them; init's mounts succeed as no-ops, as
 //    the Android shim does for its init (the composed root already has what
-//    they'd mount).
+//    they'd mount). A mount namespace's setns still moves the caller to its
+//    root, as the kernel does: init's mksandbox chdirs into the sandbox, and
+//    services would otherwise inherit that cwd, which breaks the relative
+//    paths apps load from (system/lib64/extensionability).
 //  - Services get their cfg's "importance" through setpriority before exec,
 //    and exit if it fails: without CAP_SYS_NICE, raising priority is
 //    best-effort, as in the Android shim.
@@ -20,6 +23,10 @@
 //    keeps the sandbox's /data/storage open on kViewFd: the session's
 //    /data/storage links to /proc/self/fd/<kViewFd>, so each app process sees
 //    its own. The rest of the app's root is the session's.
+//  - Filesystems without a fixed inode table (btrfs) report 0 total and free
+//    inodes from statfs, and BMS refuses any install that needs more than
+//    are free ("Insufficient inodes"), SceneBoard's among them. There,
+//    statfs reports a free inode per free block.
 //
 // Built freestanding (no libc headers or link): it binds to the guest's musl
 // at load time, so one file works with whichever libc the image ships.
@@ -39,11 +46,13 @@
 #define SYS_unshare 272
 #define SYS_setns 308
 #define SYS_setpriority 141
+#define SYS_statfs 137
 #define AT_FDCWD (-100)
 #define O_DIRECTORY 0200000
 #define O_CLOEXEC 02000000
 #define O_PATH 010000000
 #define MS_BIND 4096
+#define CLONE_NEWNS 0x00020000
 
 extern char* getenv(const char*);
 extern int unsetenv(const char*);
@@ -176,7 +185,11 @@ int unshare(int flags) {
 }
 
 int setns(int fd, int type) {
-  if (init_pid || spawner) return 0;
+  if (init_pid || spawner) {
+    if (!type || (type & CLONE_NEWNS))
+      sys6(SYS_chdir, (long)"/", 0, 0, 0, 0, 0);
+    return 0;
+  }
   return (int)ret(sys6(SYS_setns, fd, type, 0, 0, 0, 0));
 }
 
@@ -184,6 +197,20 @@ int chroot(const char* root) {
   if (!spawner) return (int)ret(sys6(SYS_chroot, (long)root, 0, 0, 0, 0, 0));
   enter(root);
   return 0;
+}
+
+// The x86_64 kernel's struct statfs, which is musl's.
+struct statfs {
+  unsigned long f_type, f_bsize;
+  unsigned long f_blocks, f_bfree, f_bavail, f_files, f_ffree;
+  int f_fsid[2];
+  unsigned long f_namelen, f_frsize, f_flags, f_spare[4];
+};
+
+int statfs(const char* path, struct statfs* st) {
+  long r = ret(sys6(SYS_statfs, (long)path, (long)st, 0, 0, 0, 0));
+  if (r == 0 && st->f_files == 0) st->f_files = st->f_ffree = st->f_bavail;
+  return (int)r;
 }
 
 int setpriority(int which, unsigned who, int prio) {

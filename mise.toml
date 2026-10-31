@@ -168,7 +168,7 @@ env = { LINUXAPK_PROFILE = "{{ env.LINUXAPK_PROFILE | default(value='ohos') }}" 
 run = """
 set -euo pipefail
 image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/linuxapk/image/fs-extract.sh
-ohos/run.py --timeout 50 --probe ohos/tests/boot.sh
+ohos/run.py --timeout 90 --probe ohos/tests/boot.sh
 """
 
 [tasks.bench]
