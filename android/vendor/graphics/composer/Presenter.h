@@ -46,6 +46,7 @@ class Presenter {
 };
 
 class FrameDumper;
+class GpuCopy;
 
 // No output; optional rate-limited PNG dumps of the client target.
 class HeadlessPresenter : public Presenter {
@@ -61,6 +62,8 @@ class HeadlessPresenter : public Presenter {
   struct Worker;
   std::unique_ptr<FrameDumper> mDumper;
   std::unique_ptr<Worker> mWorker;
+  BufferPtr mReadback;
+  std::unique_ptr<GpuCopy> mReadbackCopy;
   uint64_t mPresented = 0;
   int64_t mLastLogNs = 0;
   std::string mPrefix;

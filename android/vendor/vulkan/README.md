@@ -22,8 +22,10 @@ image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   IDs keep the software fallback. `LINUXAPK_VULKAN=lvp` forces software
   rendering. The choice is saved in session.conf: the broker permits Android to
   open only that DRM device, so Mesa and the composer's ANGLE use the same GPU.
-  Gralloc allocates udmabuf buffers for their imports. Flatpak's existing DRM
-  grant to the desktop bridge stays the same.
+  Gralloc uses driver-allocated tiled RGB render targets where the driver can
+  export them without a dedicated allocation (ANV, not RADV), keeping udmabuf
+  for CPU-accessed buffers. Flatpak's existing DRM grant to the desktop bridge
+  stays the same.
 - **Features:** the launcher writes Vulkan permission XMLs into the runtime
   layer alongside `ro.hardware.vulkan`: Vulkan 1.3, compute level 0, and
   hardware level 1 for RADV/ANV or 0 for lavapipe.
@@ -40,8 +42,9 @@ image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   0004); YUV hardware-buffer formats through the gralloc, without which video
   aborted SurfaceFlinger (0005); ANV’s regular and deferred ANB imports use the
   mapper’s explicit row pitches and offsets, without requiring the optional
-  AHardwareBuffer pointer (0006). Our buffers are LINEAR; no Intel tiling or CCS
-  override is needed.
+  AHardwareBuffer pointer (0006). The mapper supplies the allocated modifier and
+  explicit layout for both LINEAR and tiled imports; no Intel tiling or CCS
+  override is needed in Mesa.
 
 Tests: `tests/run.sh` (in `mise run test:bionic`) runs `vkdriver_test` (loading,
 compute, udmabuf import, ANB images, deferred binds), `swapchain_test`,

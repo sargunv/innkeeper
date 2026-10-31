@@ -302,7 +302,7 @@ int32_t getStandard(
       } else if constexpr (T == S::PIXEL_FORMAT_FOURCC) {
         return provide(bh.fourcc);
       } else if constexpr (T == S::PIXEL_FORMAT_MODIFIER) {
-        return provide(uint64_t(0));  // DRM_FORMAT_MOD_LINEAR
+        return provide(md.modifier);
       } else if constexpr (T == S::USAGE) {
         return provide(static_cast<BufferUsage>(bh.usage.get()));
       } else if constexpr (T == S::ALLOCATION_SIZE) {

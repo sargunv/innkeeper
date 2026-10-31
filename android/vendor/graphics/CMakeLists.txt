@@ -89,11 +89,11 @@ if(ANDROID)
   target_compile_options(lapk_aidl PRIVATE -w)
   target_link_libraries(lapk_aidl PUBLIC binder_ndk_stub log)
 
-  add_executable(allocator allocator/main.cpp)
+  add_executable(allocator allocator/main.cpp allocator/gpu_buffer.cpp)
   set_target_properties(
     allocator
     PROPERTIES OUTPUT_NAME android.hardware.graphics.allocator-service.linuxapk)
-  target_link_libraries(allocator PRIVATE lapk_common lapk_aidl)
+  target_link_libraries(allocator PRIVATE lapk_common lapk_aidl vulkan)
 
   add_executable(
     composer
@@ -128,12 +128,20 @@ if(ANDROID)
       -l:libz.a)
 
   # On-device tests (never installed).
-  add_executable(gpu_copy_test tests/android/gpu_copy_test.cpp
-                 composer/GpuCopy.cpp composer/Buffer.cpp)
+  add_executable(
+    gpu_copy_test tests/android/gpu_copy_test.cpp composer/GpuCopy.cpp
+    composer/Buffer.cpp allocator/gpu_buffer.cpp)
   target_include_directories(gpu_copy_test PRIVATE ${HAL}/composer)
   target_link_libraries(
     gpu_copy_test
-    PRIVATE lapk_common lapk_aidl EGL GLESv3 nativewindow dl)
+    PRIVATE
+      lapk_common
+      lapk_aidl
+      EGL
+      GLESv3
+      nativewindow
+      dl
+      vulkan)
   add_executable(gralloc_test tests/android/gralloc_test.cpp)
   target_link_libraries(
     gralloc_test
