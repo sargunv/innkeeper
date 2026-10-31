@@ -12,7 +12,7 @@
 //!
 //! The state lives in the memfd itself, so a region passed to another process
 //! answers the same there. c_utils also checks that the opened node is a
-//! character device: Flatpak mode's fstat ([`crate::flat`]) shows a region as
+//! character device: the broker's fstat ([`crate::flat`]) shows a region as
 //! [`RDEV`].
 
 use std::fs::File;
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn regions_are_named_memfds() {
         assert!(is_region(b"/memfd:ashmem (deleted)"));
-        assert!(!is_region(b"/memfd:lxbinder-3 (deleted)"));
+        assert!(!is_region(b"/memfd:innkeeper-binder-3 (deleted)"));
         assert!(!is_region(b"/dev/ashmem"));
         let mut name = Vec::new();
         let f = create().unwrap();

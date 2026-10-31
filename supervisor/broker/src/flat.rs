@@ -1,5 +1,5 @@
-//! Flatpak runtime: the session runs in the sandbox's own
-//! namespaces, with no mounts. Android's root is the sandbox's `/`, where
+//! The session runs in the Flatpak sandbox's own namespaces, with no mounts.
+//! Android's root is the sandbox's `/`, where
 //! `/system`, `/apex`, `/data`... are symlinks into a composed tree on disk
 //! (`host/launcher/src/flatpak.rs`). The broker covers what the mounts did:
 //!
@@ -110,9 +110,9 @@ pub(crate) fn is_flat_syscall(nr: i64) -> bool {
     )
 }
 
-/// Flatpak mode's path map, for the credential side (`creds`): Android
+/// The path map, for the credential side (`creds`): Android
 /// paths of mapped host dirs (such as `/data`) as host paths, so lookups
-/// that refuse symlinks can start past them. None outside Flatpak mode.
+/// that refuse symlinks can start past them. None in the harness.
 pub(crate) fn to_host(p: &[u8]) -> Option<Vec<u8>> {
     static F: std::sync::OnceLock<Option<Flat>> = std::sync::OnceLock::new();
     let f = F.get_or_init(|| Flat::from_env(-1, 0)).as_ref()?;
@@ -153,7 +153,7 @@ fn drm_path_allowed(path: &std::path::Path, selected: &std::path::Path) -> bool 
     !path.starts_with("/dev/dri") || path == selected || path.is_dir()
 }
 
-/// Flatpak mode: init isn't pid 1, but its property service treats a peer
+/// Init isn't pid 1, but its property service treats a peer
 /// that isn't pid 1 as a client (and init's own setprop from its restorecon
 /// thread as a new restorecon request, forever). Show init as pid 1 to
 /// SO_PEERCRED; pivot-exec passes its pid in `INNKEEPER_INIT_PID`.
@@ -163,10 +163,10 @@ pub(crate) fn init_as_pid1(pid: i32) -> i32 {
     if *init == Some(pid) { 1 } else { pid }
 }
 
-/// In Flatpak mode, the Android path a symlink (O_PATH fd) that stands in
+/// The Android path a symlink (O_PATH fd) that stands in
 /// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
-    if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
+    if crate::harness() {
         return None;
     }
     let mut buf = [0u8; 256];
@@ -182,14 +182,12 @@ pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
     (t.starts_with(b"/data/") && !t.split(|&c| c == b'/').any(|c| c == b"..")).then(|| t.to_vec())
 }
 
-/// In Flatpak mode, `st`'s owner as Android sees it: the user's ids are
+/// `st`'s owner as Android sees it: the user's ids are
 /// root's (see [`Flat::fstat`]).
 pub(crate) fn root_ids(st: &mut libc::stat) {
     static IDS: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
-    let ids = IDS.get_or_init(|| {
-        (std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() != Ok("1"))
-            .then(|| unsafe { (libc::getuid(), libc::getgid()) })
-    });
+    let ids = IDS
+        .get_or_init(|| (!crate::harness()).then(|| unsafe { (libc::getuid(), libc::getgid()) }));
     if let Some((u, g)) = *ids {
         if st.st_uid == u {
             st.st_uid = 0;
@@ -204,7 +202,7 @@ impl Flat {
     /// From `INNKEEPER_ROOT_MAP` (lines of
     /// `<host dir>=<Android path>`), or None in the bootless developer harness.
     pub(crate) fn from_env(listener: RawFd, resp_sz: usize) -> Option<Flat> {
-        if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
+        if crate::harness() {
             return None;
         }
         let spec = std::env::var("INNKEEPER_ROOT_MAP").unwrap_or_default();

@@ -1,8 +1,10 @@
-//! Dynamic bionic bootstrap and supervisor, entered after pivot-exec has
-//! established the root. --init installs the filter before execing Android;
-//! the outer process serves its listener without a forwarding socket.
+//! innkeeper-brk, which pivot-exec execs twice (supervisor/README.md).
+//! `--init <sync-fd> <program>...` installs the seccomp filter, sends its
+//! listener over the sync socket and execs Android's init.
+//! `<listener-fd> <pin-dir-fd> <init-pid>` serves that listener as init's
+//! parent and exits with init's status.
 use std::os::fd::{FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -21,7 +23,7 @@ fn main() {
     // pivot-exec execs us without changing pid. Reap orphans as its subreaper
     // (pid 1 in the bootless harness), and end the session when init exits.
     std::thread::spawn(move || reap(init));
-    if !harness() {
+    if !innkeeper_broker::harness() {
         unsafe { libc::umask(0) };
     }
     innkeeper_broker::notify::serve(
@@ -46,9 +48,6 @@ fn reap(init: i32) -> ! {
             std::process::exit(1);
         }
     }
-}
-fn harness() -> bool {
-    std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1")
 }
 fn init(args: &[std::ffi::OsString]) -> ! {
     let sock: i32 = args
@@ -77,7 +76,8 @@ fn init(args: &[std::ffi::OsString]) -> ! {
     argv_ptr.push(std::ptr::null());
     let mut env_ptr: Vec<_> = env.iter().map(|s| s.as_ptr()).collect();
     env_ptr.push(std::ptr::null());
-    let listener = innkeeper_broker::filter::install(harness()).expect("install seccomp filter");
+    let listener = innkeeper_broker::filter::install(innkeeper_broker::harness())
+        .expect("install seccomp filter");
     unsafe {
         // A usize buffer gives cmsghdr its required alignment.
         let mut control = [0usize; 4];
@@ -105,4 +105,3 @@ fn init(args: &[std::ffi::OsString]) -> ! {
         libc::_exit(1);
     }
 }
-use std::os::unix::ffi::OsStringExt;

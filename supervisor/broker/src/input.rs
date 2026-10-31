@@ -467,7 +467,7 @@ fn is_registration(packet: &[u8]) -> bool {
 
 impl Input {
     pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Option<Self> {
-        if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
+        if crate::harness() {
             return None;
         }
         let dir = std::path::Path::new(DIRECTORY);
