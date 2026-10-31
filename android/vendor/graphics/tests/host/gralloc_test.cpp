@@ -507,13 +507,18 @@ static void testAllFormats() {
 }
 
 static int gpuAllocations;
+static uint64_t gpuPlaneOffset;  // where the fixture driver puts plane 0
+static bool gpuOffsetCovered;    // and whether its allocation covers that
 static GpuBuffer testGpuAllocation(const AllocRequest& req, Layout* layout) {
   ++gpuAllocations;
+  layout->planes[0].offset = gpuPlaneOffset;
   layout->planes[0].stride *= 2;
   layout->stridePixels *= 2;
   layout->planes[0].size =
     uint64_t(layout->planes[0].stride) * alignUp(req.height, 32);
-  layout->layerSize = alignUp(layout->planes[0].size, kPageSize);
+  layout->layerSize = alignUp(
+    layout->planes[0].size + (gpuOffsetCovered ? gpuPlaneOffset : 0), kPageSize
+  );
   layout->pixelBytes = layout->layerSize;
   // Exactly the image, as a driver's dedicated allocation is.
   int fd = memfd_create("gpu-layout-fixture", MFD_CLOEXEC);
@@ -561,6 +566,36 @@ static void testGpuLayout() {
     }
     nativeHandleCloseAndDelete(raw);
   }
+  // A plane at a nonzero offset stays tiled when the allocation covers it,
+  // and falls back to LINEAR rather than producing an unimportable handle.
+  for (bool covered : {true, false}) {
+    gpuPlaneOffset = kPageSize;
+    gpuOffsetCovered = covered;
+    native_handle_t* raw = nullptr;
+    CHECK_EQ(
+      allocateBuffer(
+        {"gpu-offset", 100, 50, 1, fmt::RGBA_8888, usage::GPU_RENDER_TARGET, 0},
+        &raw, testGpuAllocation
+      ),
+      AllocStatus::Ok
+    );
+    if (!raw) continue;
+    buffer_handle_t imported = nullptr;
+    CHECK_EQ(gMapper->v5.importBuffer(raw, &imported), AIMAPPER_ERROR_NONE);
+    if (imported) {
+      CHECK_EQ(
+        *get<StandardMetadataType::PIXEL_FORMAT_MODIFIER>(imported),
+        covered ? uint64_t(0x0100000000000002) : uint64_t(0)
+      );
+      CHECK_EQ(
+        get<StandardMetadataType::PLANE_LAYOUTS>(imported)->at(0).offsetInBytes,
+        covered ? int64_t(kPageSize) : int64_t(0)
+      );
+      gMapper->v5.freeBuffer(imported);
+    }
+    nativeHandleCloseAndDelete(raw);
+  }
+  gpuPlaneOffset = 0;
 }
 
 int main(int argc, char** argv) {

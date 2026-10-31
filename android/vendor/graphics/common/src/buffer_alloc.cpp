@@ -82,8 +82,18 @@ AllocStatus allocateBuffer(
     (req.usage & (usage::GPU_RENDER_TARGET | usage::COMPOSER_OVERLAY |
                   usage::COMPOSER_CLIENT_TARGET)) &&
     l.numPlanes == 1 && req.layerCount == 1;
-  const GpuBuffer gpu =
-    gpuOnly && gpuAllocate ? gpuAllocate(req, &l) : GpuBuffer{};
+  const Layout linear = l;
+  GpuBuffer gpu = gpuOnly && gpuAllocate ? gpuAllocate(req, &l) : GpuBuffer{};
+  // Importers need the driver's plane inside the exported allocation.
+  if (
+    gpu.fd >= 0 && (l.planes[0].offset + l.planes[0].size > l.layerSize ||
+                    lseek(gpu.fd, 0, SEEK_END) < off_t(l.pixelBytes))
+  ) {
+    LOGW("GPU layout outside its allocation; using LINEAR");
+    close(gpu.fd);
+    gpu = {};
+    l = linear;
+  }
   const uint64_t total = l.pixelBytes;
   const uint64_t reservedSize = alignUp(req.reservedSize, kPageSize);
 
