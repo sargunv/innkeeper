@@ -57,10 +57,11 @@ Environment:
                            wakeup for its next alarm (default 120; 0: never;
                            headless sessions never unless it is set)
   INNKEEPER_PROFILE         the profile to run (required; `innkeeper` and the
-                           manager set it)
+                           manager set it). Every profile's session is a test
+                           session: it isolates clipboard, portals, links,
+                           notifications, media players, AT-SPI and location
+                           from the desktop.
 Tests only:
-  INNKEEPER_TEST=1          isolate clipboard, portals, links, notifications,
-                           media players, AT-SPI and location from the desktop
   INNKEEPER_DATA            Android's /data (default
                            $XDG_DATA_HOME/innkeeper/data[-<profile>])
   INNKEEPER_IMAGES, INNKEEPER_PIN  the image cache and the pin
