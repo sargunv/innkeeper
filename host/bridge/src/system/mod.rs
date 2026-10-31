@@ -644,9 +644,9 @@ impl Drop for SystemService {
     }
 }
 
-/// The mixer label for a PLAYBACK_APP. An empty package restores the
-/// stream's default name. The icon is the desktop entry id, the same one
-/// `linuxapk-core`'s entries use.
+/// The mixer label for a PLAYBACK_APP. An empty package restores the name,
+/// icon and id the stream was opened with. The icon is the desktop entry id,
+/// the same one `linuxapk-core`'s entries use.
 fn mixer_app(app: &PlaybackApp) -> Option<crate::audio::stream::PlaybackApp> {
     if app.package.is_empty() {
         return None;

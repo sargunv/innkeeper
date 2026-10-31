@@ -123,12 +123,14 @@ impl PulseStream {
         p.version = protocol::MAX_VERSION.min(auth.version);
 
         let mut props = Props::new();
-        props.set(
-            Prop::ApplicationName,
-            CString::new(super::stream::DEFAULT_APP_NAME)?,
-        );
-        props.set(Prop::ApplicationId, c"dev.linuxapk");
-        props.set(Prop::ApplicationIconName, c"android");
+        // The client defaults. A later Ctl::App(None) writes these back; the
+        // empty process.binary in that set is only for clearing a stream key.
+        for (key, value) in playback_app_props(None) {
+            if value.is_empty() {
+                continue;
+            }
+            set_app_prop(&mut props, key, value)?;
+        }
         let seq = p.send(&Command::SetClientName(props))?;
         let _: protocol::SetClientNameReply = p.wait_reply(seq)?;
 
@@ -523,28 +525,26 @@ impl StreamIo for PulseStream {
             }
             Ctl::App(app) => {
                 let mut props = Props::new();
-                match app {
-                    Some(app) => {
-                        let [name, icon, id, binary] = playback_app_props(&app);
-                        props.set(Prop::ApplicationName, CString::new(name.1)?);
-                        props.set(Prop::ApplicationIconName, CString::new(icon.1)?);
-                        props.set(Prop::ApplicationId, CString::new(id.1)?);
-                        props.set(Prop::ApplicationProcessBinary, CString::new(binary.1)?);
-                    }
-                    None => {
-                        // Replace drops a property set to empty, which puts
-                        // the stream back to the name it was opened with.
-                        props.set(Prop::ApplicationName, c"");
-                        props.set(Prop::ApplicationIconName, c"");
-                        props.set(Prop::ApplicationId, c"");
-                        props.set(Prop::ApplicationProcessBinary, c"");
-                    }
+                for (key, value) in playback_app_props(app.as_ref()) {
+                    set_app_prop(&mut props, key, value)?;
                 }
                 self.replace_props(props)?;
             }
         }
         Ok(())
     }
+}
+
+fn set_app_prop(props: &mut Props, key: &str, value: &str) -> Result<()> {
+    let value = CString::new(value)?;
+    match key {
+        "application.name" => props.set(Prop::ApplicationName, value),
+        "application.icon_name" => props.set(Prop::ApplicationIconName, value),
+        "application.id" => props.set(Prop::ApplicationId, value),
+        "application.process.binary" => props.set(Prop::ApplicationProcessBinary, value),
+        _ => bail!("unknown application property {key}"),
+    }
+    Ok(())
 }
 
 /// Pulse must resample/remix to the requested PCM ABI, never silently change it.

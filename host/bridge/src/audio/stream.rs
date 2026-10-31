@@ -40,21 +40,39 @@ pub struct PlaybackApp {
     pub binary: String,
 }
 
-/// Pulse application properties for [PlaybackApp]. `application.name` is the
-/// label, and the other three are the desktop id, which is a safe C string
-/// (the package was already checked).
-pub fn playback_app_props(app: &PlaybackApp) -> [(&'static str, &str); 4] {
-    [
-        ("application.name", &app.name),
-        ("application.icon_name", &app.icon_name),
-        ("application.id", &app.id),
-        ("application.process.binary", &app.binary),
-    ]
-}
-
 /// The application name a playback stream is opened with, restored when no
 /// app is playing.
 pub const DEFAULT_APP_NAME: &str = "Linux.apk";
+
+/// `application.id` and `application.icon_name` set on the Pulse client before
+/// a playback stream is opened. `SetClientName` does not set
+/// `application.process.binary`; that key exists on the stream only while an
+/// app is playing.
+pub const DEFAULT_APP_ID: &str = "dev.linuxapk";
+pub const DEFAULT_APP_ICON: &str = "android";
+
+/// Pulse application properties for the mixer. `Some` is the playing app
+/// (`application.name` is the label; the other three are the desktop id).
+/// `None` writes the name, icon and id the Pulse client was opened with.
+/// `application.process.binary` is empty then: the open does not set it, and
+/// PipeWire drops a property a `Replace` sets to empty. An empty string on
+/// `application.name` would blank the mixer, so that key gets the default.
+pub fn playback_app_props(app: Option<&PlaybackApp>) -> Vec<(&'static str, &str)> {
+    match app {
+        Some(app) => vec![
+            ("application.name", &app.name),
+            ("application.icon_name", &app.icon_name),
+            ("application.id", &app.id),
+            ("application.process.binary", &app.binary),
+        ],
+        None => vec![
+            ("application.name", DEFAULT_APP_NAME),
+            ("application.icon_name", DEFAULT_APP_ICON),
+            ("application.id", DEFAULT_APP_ID),
+            ("application.process.binary", ""),
+        ],
+    }
+}
 
 /// Moves PCM between a shared ring and the desktop, in either direction.
 pub trait StreamIo: Send {
@@ -323,7 +341,7 @@ mod tests {
             id: "dev.linuxapk.org.example.player".into(),
             binary: "dev.linuxapk.org.example.player".into(),
         };
-        let props = playback_app_props(&app);
+        let props = playback_app_props(Some(&app));
         assert_eq!(props[0], ("application.name", "Example Player"));
         assert_eq!(
             props[1],
@@ -333,5 +351,19 @@ mod tests {
         assert_eq!(props[3].0, "application.process.binary");
         assert_eq!(props[2].1, props[1].1);
         assert_eq!(props[3].1, props[1].1);
+        // None writes the values the stream was opened with. An empty string
+        // would blank the mixer name; Replace does not drop the key.
+        let restored = playback_app_props(None);
+        assert_eq!(
+            restored,
+            vec![
+                ("application.name", DEFAULT_APP_NAME),
+                ("application.icon_name", DEFAULT_APP_ICON),
+                ("application.id", DEFAULT_APP_ID),
+                // Empty asks PipeWire to drop the key the open never set.
+                ("application.process.binary", ""),
+            ]
+        );
+        assert_ne!(restored[0].1, "");
     }
 }
