@@ -29,13 +29,14 @@ FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.linuxapk.Manager list
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml) attaches
 a single-file bundle to a GitHub Release. There is no Flatpak repository: a
 Flathub listing is the plan for automatic updates, and until then a newer bundle
-is installed by hand. A push to `main` builds `<app>-snapshot.flatpak` (a newer
-push cancels the one in progress) and replaces the asset on one floating
-prerelease named `snapshot`, force-moving that tag to the commit. The release
-notes say which commit it is, when it was built, and the install command. A
-pushed `v*` tag builds `<app>-stable.flatpak` and attaches it to that tag's
-release, created with generated notes when it does not exist.
-`workflow_dispatch` defaults to a dry run and uploads nothing.
+is installed by hand. A successful CI run of a push to `main` builds
+`<app>-snapshot.flatpak` from that commit's saved stage (a newer push cancels
+the one in progress) and replaces the asset on one floating prerelease named
+`snapshot`, force-moving that tag to the commit. The release notes say which
+commit it is, when it was built, and the install command. A pushed `v*` tag
+builds `<app>-stable.flatpak` and attaches it to that tag's release, created
+with generated notes when it does not exist. `workflow_dispatch` defaults to a
+dry run and uploads nothing.
 
 The bundle is
 `flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`,
@@ -43,8 +44,8 @@ so the GNOME runtime installs from Flathub. It has no update repo. A snapshot's
 version is `0.0.<git rev-list --count HEAD>`, with the short SHA in the commit
 subject; the package job checks out the full history so that count is the commit
 count. A tag's version is the tag, without the leading `v`. The app id comes
-from the manifest. The workflow reuses the CI stage cache (`mise run build` only
-on a miss).
+from the manifest. A snapshot restores the stage CI saved for that commit and
+fails if it is missing. A tag or a manual run builds on a cache miss.
 
 Install a downloaded bundle. It needs the Flathub remote for the runtime:
 

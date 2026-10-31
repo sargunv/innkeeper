@@ -45,10 +45,11 @@ python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
 Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
 workflow to test CI changes: dispatch runs the nightly corpus.
 
-`Release` runs on a push to main, a pushed `v*` tag and `workflow_dispatch`. A
-push to main builds `<app>-snapshot.flatpak` and replaces the floating
-`snapshot` prerelease; a newer push cancels the one in progress. A tag builds
-`<app>-stable.flatpak` and attaches it to that tag's release. There is no
+`Release` runs after a successful CI push to main, on a pushed `v*` tag and on
+`workflow_dispatch`. The snapshot packages the commit CI tested, from that
+commit's stage cache, and replaces the floating `snapshot` prerelease; a newer
+push cancels the one in progress. A failed CI run publishes nothing. A tag
+builds `<app>-stable.flatpak` and attaches it to that tag's release. There is no
 Flatpak repository and no signing. A dry run publishes nothing. Details:
 [packaging/flatpak](../../packaging/flatpak/README.md#release).
 

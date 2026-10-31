@@ -1,8 +1,14 @@
 name: Release
 
 on:
-  push:
+  # After CI succeeds on a push to main. Packaging that commit here, instead
+  # of building alongside CI, avoids a second full build and a snapshot of a
+  # commit CI rejected. The workflow file on main is what runs.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
+  push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -17,9 +23,9 @@ permissions:
 
 concurrency:
   group:
-    ${{ github.ref == 'refs/heads/main' && 'snapshot' || format('release-{0}',
-    github.ref) }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+    ${{ github.event_name == 'workflow_run' && 'snapshot' ||
+    format('release-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
 
 env:
   CARGO_BUILD_JOBS: 4
@@ -35,6 +41,9 @@ env:
 
 jobs:
   build:
+    # A snapshot packages the stage CI already saved. A tag or a manual run
+    # has no such run, so it builds.
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     outputs:
@@ -85,12 +94,32 @@ jobs:
 
   package:
     needs: build
+    # A skipped build is the snapshot path. A failed CI run, or a CI run that
+    # was not a push, does not publish.
+    if: |
+      !cancelled() &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
         with:
+          # workflow_run's github.sha is main's tip, not the commit CI tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+      - name: Stage input tree
+        id: inputs
+        run: |
+          # Same digest as CI's build job, so this restores the stage it saved.
+          digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
+            supervisor/broker android image tools/build tools/container \
+            packaging/flatpak Cargo.toml Cargo.lock \
+            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \
+            .github/workflows/ci.yml .github/actions tools/ci/setup.sh | sha256sum)
+          echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -98,7 +127,7 @@ jobs:
             out/test/probes
           key:
             stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
-            needs.build.outputs.stage }}
+            steps.inputs.outputs.stage }}
           fail-on-cache-miss: true
       - uses: ./.github/actions/setup
         with:
@@ -111,15 +140,16 @@ jobs:
           packaging/flatpak/release.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'
       - name: Publish the snapshot bundle
         if:
-          github.ref == 'refs/heads/main' && (github.event_name !=
-          'workflow_dispatch' || !inputs.dry_run)
+          github.event_name == 'workflow_run' || (github.event_name ==
+          'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+          !inputs.dry_run)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bundle=$(echo out/release/*-snapshot.flatpak)
           name=${bundle##*/}
           built=$(date -u +%Y-%m-%dT%H:%MZ)
-          notes="Snapshot of ${GITHUB_SHA}, built ${built}."
+          notes="Snapshot of $(git rev-parse HEAD), built ${built}."
           notes="${notes}"$'\n\n```sh\n'"flatpak install --user ./${name}"$'\n```\n\n'
           notes="${notes}A newer snapshot is a reinstall of the new file."
           # One floating release. Move the tag onto this commit, then replace
