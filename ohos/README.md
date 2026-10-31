@@ -4,8 +4,11 @@ An OpenHarmony userspace as a second guest, on the same supervisor as Android
 (feasibility and milestones: #191). The pinned image
 ([image/ohos](../image/ohos/README.md)) boots in a test Flatpak sandbox on the
 host kernel: OH's init starts its services, samgr comes up and OH's core system
-abilities register with it. There is no display, input or app install yet, and
-nothing here is part of the Android session, `mise run build` or the stage.
+abilities register with it. render_service composes OH's screen through our
+display HDI ([vendor/display](vendor/display/README.md)), and with the bridge it
+shows in a desktop window. Apps don't start yet (no app sandbox), and there is
+no input or app install. Nothing here is part of the Android session,
+`mise run build` or the stage.
 
 | File                      | What                                                          |
 | ------------------------- | ------------------------------------------------------------- |
@@ -14,6 +17,7 @@ nothing here is part of the Android session, `mise run build` or the stage.
 | `sandbox.sh`              | inside the sandbox: OH's root, then pivot-exec runs OH's init |
 | `run.py`                  | outside: a memory-capped dev sandbox, the boot log, probes    |
 | `sys_prod/etc/init/*.cfg` | our init services, on OH's product partition                  |
+| `vendor/display/`         | our composer and buffer VDIs, in place of the image's         |
 | `tests/boot.sh`           | `mise run ohos:test`'s check, run inside OH                   |
 
 `mise run build` first (the stage's pivot-exec and debugfs), then
@@ -25,17 +29,39 @@ look around, write a script for OH's `/system/bin/sh` and pass it with
 `ohos.permission.DUMP`, once `bootevent.samgr.ready` is set, and its output
 comes back (`hidumper -ls`, `hilog -x`, `ps -A`).
 
+## Display
+
+```sh
+LINUXAPK_INSTANCE=ohos tests/nested.sh ohos/run.py --display --timeout 60
+```
+
+`--display` also starts the bridge in the sandbox, so screen 0 opens as one
+720x1280 window (log: `ohos-bridge.log`). Run it on a nested desktop
+([docs/development.md](../docs/development.md#a-nested-isolated-desktop)), never
+on your own.
+
+- **GPU.** Only the first render node opens (the broker's DRM policy): the
+  image's Mesa otherwise opens the host's card node, and its composer would
+  drive the host display's KMS. That Mesa ships iris, crocus, nouveau,
+  virtio_gpu and llvmpipe but no radeonsi, and CI has no GPU, so render_service
+  draws with llvmpipe (`LIBGL_ALWAYS_SOFTWARE`). A GPU needs a Mesa built for
+  OH's musl (#191's milestone 8).
+- **Ashmem.** The HDI's command queues, like most OH shared memory, are ashmem,
+  which the broker emulates with memfds
+  ([supervisor/README.md](../supervisor/README.md#openharmony)).
+
 ## How it boots
 
 The same path as Android's Flatpak mode
 ([docs/session.md](../docs/session.md#flatpak-mode)): a root of symlinks in the
 sandbox's own `/`, then pivot-exec and the broker, then init.
 
-- **Root.** `/system` and `/vendor` are the extracted partitions; `/sys_prod` is
-  our layer. OH's product partition is empty in the image but on init's cfg path
-  and the musl linker's search path, so our files go there and the image is
-  never changed. The sandbox keeps its `/usr`, `/bin` and `/etc` for the glibc
-  side; `/etc` gains OH's other entries and `/lib` gains the musl loader.
+- **Root.** `/system` is the extracted partition, `/vendor` its symlinks with
+  our VDIs in place of the image's, and `/sys_prod` is our layer. OH's product
+  partition is empty in the image but on init's cfg path and the musl linker's
+  search path, so our files go there and the image is never changed. The sandbox
+  keeps its `/usr`, `/bin` and `/etc` for the glibc side; `/etc` gains OH's
+  other entries and `/lib` gains the musl loader.
 - **Init.** `/system/bin/init --second-stage`: the image's first stage only
   mounts block devices and switches root. The shim makes `getpid()` 1 in init
   (it refuses to run otherwise), makes mounts and namespace calls no-ops
@@ -50,4 +76,6 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
 Known gaps, visible in the logs and not fatal: no SELinux policy (the image
 ships none), `mksandbox` can't `pivot_root`, ueventd's coldboot can't write the
 read-only host sysfs, there are no cgroups or `/dev/memcg`, and hilogd reads
-part of init's `/dev/kmsg`.
+part of init's `/dev/kmsg`. Fatal for apps: appspawn puts each app in a mount
+namespace (`unshare`, bind mounts, `pivot_root`), which Flatpak refuses, so no
+app process starts.

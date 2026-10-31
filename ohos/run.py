@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Boot the OpenHarmony image in a private, memory-capped Flatpak sandbox.
 
-  ohos/run.py [--timeout S] [--until REGEX] [--probe SCRIPT]
+  ohos/run.py [--timeout S] [--until REGEX] [--probe SCRIPT] [--display]
 
 The sandbox is the dev runner's (tools/dev/run.py): the stage at /app, the
 same permissions, the same named-instance scratch dirs, and the same
@@ -9,6 +9,10 @@ MemoryHigh/MemoryMax on its scope. ohos/sandbox.sh builds OH's root there and
 runs its init under the supervisor. Init's log (/dev/kmsg) goes to
 <scratch>/ohos-kmsg.log. The run ends at --timeout, or once a log line
 matches --until (exit 0); a timeout with --until unmatched exits 1.
+
+--display also runs the bridge, so OH's display shows in a desktop window
+(log: <scratch>/ohos-bridge.log). It opens on $WAYLAND_DISPLAY: use a nested
+desktop (tests/nested.sh), never the user's own.
 
 --probe runs SCRIPT with OH's /system/bin/sh as root inside the session once
 samgr is ready (ohos/sys_prod/etc/init/linuxapk_probe.cfg), prints its
@@ -40,7 +44,7 @@ def pin_name():
     return tomllib.load(f)["name"]
 
 
-def argv(gate, instance_fd, img, data, log):
+def argv(gate, instance_fd, img, data, log, bridge):
   manifest = (TOP / "packaging/flatpak/dev.linuxapk.Manager.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   a = ["flatpak", "run", "--user", "--no-documents-portal"]
@@ -59,6 +63,7 @@ def argv(gate, instance_fd, img, data, log):
     str(gate),
     "env",
     f"LINUXAPK_OHOS_KMSG={log}",
+    *([f"LINUXAPK_OHOS_BRIDGE={bridge}"] if bridge else []),
     *(
       f"{k}={v}" for k, v in os.environ.items() if k == "LINUXAPK_BROKER_DEBUG"
     ),
@@ -78,6 +83,7 @@ def main():
   ap.add_argument("--until")
   ap.add_argument("--probe", type=Path)
   ap.add_argument("--keep-data", action="store_true")
+  ap.add_argument("--display", action="store_true")
   o = ap.parse_args()
   img = IMAGES / pin_name() / "img"
   if not (img / "system/system/bin/init").exists():
@@ -95,6 +101,9 @@ def main():
     (probe / "probe.sh").write_bytes(o.probe.read_bytes())
   log = dev.SCRATCH / "ohos-kmsg.log"
   log.write_bytes(b"")
+  bridge = dev.SCRATCH / "ohos-bridge.log" if o.display else None
+  if bridge:
+    bridge.write_bytes(b"")
   gate = dev.SCRATCH / f"capped-{os.getpid()}"
   gate.unlink(missing_ok=True)
   dev.available()
@@ -102,7 +111,7 @@ def main():
   rfd, wfd = os.pipe()
   with (dev.SCRATCH / "ohos-run.log").open("wb") as out:
     child = subprocess.Popen(
-      argv(gate, wfd, img, data, log),
+      argv(gate, wfd, img, data, log, bridge),
       env=dev.ENV,
       stdin=subprocess.DEVNULL,
       stdout=out,

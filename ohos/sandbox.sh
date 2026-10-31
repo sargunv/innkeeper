@@ -7,9 +7,12 @@
 #
 # <image-dir> holds the pinned image's partitions (image/ohos/fetch.sh):
 # system/ is system.img's root (system-as-root), vendor/ is vendor.img.
-# <layer-dir> is ohos:build's output: bin/linuxapk-broker and sys_prod/, our
+# <layer-dir> is ohos:build's output: bin/linuxapk-broker; sys_prod/, our
 # files on OH's own product partition (empty in the image, but on init's cfg
-# path and the linker's search path), so the image is never changed.
+# path and the linker's search path); and vendor/, our VDIs, which take the
+# place of the image's in /vendor. The image is never changed.
+# With LINUXAPK_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
+# display shows in a desktop window.
 # The sandbox's / is a writable tmpfs, so OH's root is built from symlinks
 # beside the runtime's /usr, as the Android session does
 # (host/launcher/src/flatpak.rs).
@@ -22,7 +25,26 @@ img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage} pivot=${4:?$usage}
 }
 
 ln -sfn "$img/system/system" /system
-ln -sfn "$img/vendor" /vendor
+# overlay <dir> <image-dir> <layer-dir>: <dir> gets the image's entries as
+# symlinks, with the layer's files in their place (and its directories
+# overlaid the same way).
+overlay() {
+  local dir=$1 from=$2 over=$3 e n
+  mkdir -p "$dir"
+  for e in "$from"/*; do
+    n=${e##*/}
+    [[ -e $over/$n ]] || ln -s "$e" "$dir/$n"
+  done
+  for e in "$over"/*; do
+    n=${e##*/}
+    if [[ -d $e && -d $from/$n ]]; then
+      overlay "$dir/$n" "$from/$n" "$e"
+    else
+      ln -s "$e" "$dir/$n"
+    fi
+  done
+}
+overlay /vendor "$img/vendor" "$layer/vendor"
 ln -sfn "$layer/sys_prod" /sys_prod
 mkdir -p "$data"
 ln -sfn "$data" /data
@@ -68,14 +90,32 @@ for n in binder hwbinder vndbinder access_token_id; do
   : >"/dev/$n"
   chmod 666 "/dev/$n"
 done
+# DRM: only the first render node opens (the broker's policy; /dev/null if
+# there is none), never a card node, whose KMS is the host's display. The
+# image's Mesa has no radeonsi, and CI has no GPU: render_service draws with
+# llvmpipe either way.
+render=$(compgen -G '/dev/dri/renderD*' | head -n 1 || true)
+# The bridge, for the composer's window (ohos/vendor/display).
+if [[ -n ${LINUXAPK_OHOS_BRIDGE:-} ]]; then
+  run=$XDG_RUNTIME_DIR/linuxapk-ohos
+  mkdir -p "$run/bridge" "$data/../ohos-bridge"
+  /app/libexec/linuxapk/linuxapk-bridge --run-dir "$run" \
+    --state-dir "$data/../ohos-bridge" --test-session \
+    >>"$LINUXAPK_OHOS_BRIDGE" 2>&1 &
+  mkdir -p /dev/socket
+  ln -sfn "$run/bridge" /dev/socket/linuxapk
+fi
 
 exec env -i \
   PATH=/system/bin:/vendor/bin \
   LINUXAPK_GUEST=ohos \
+  LIBGL_ALWAYS_SOFTWARE=1 \
+  LINUXAPK_RENDER_NODE="${render:-/dev/null}" \
   LINUXAPK_BROKER="$layer/bin/linuxapk-broker" \
   LD_PRELOAD=/sys_prod/lib64/liblinuxapk_ohos_shim.so \
   LINUXAPK_ROOT_MAP="$img/system/system=/system
 $img/vendor=/vendor
+$layer/vendor=/vendor
 $layer/sys_prod=/sys_prod
 $data=/data" \
   ${LINUXAPK_BROKER_DEBUG:+LINUXAPK_BROKER_DEBUG="$LINUXAPK_BROKER_DEBUG"} \

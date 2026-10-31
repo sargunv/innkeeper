@@ -8,7 +8,9 @@ them with fds, and match replies by tag while skipping events.
 
 A static library in the NDK superbuild (`linuxapk_bridge_client`), linked by
 Android's composer (`BridgePresenter`, display service), the Health HAL (host
-state service) and `libtinyalsav2` (audio service); it installs nothing. API:
+state service) and `libtinyalsav2` (audio service); it installs nothing. It uses
+only POSIX, so OpenHarmony's composer compiles `bridge_client.c` into its musl
+library ([ohos/vendor/display](../../ohos/vendor/display/README.md)). API:
 `include/linuxapk/bridge_client.h` for framing, `include/linuxapk/audio.h` for
 PCM streams. `audio.c` owns the shared audio connection, open/close/standby,
 ring reads/writes and presentation timing, with no tinyalsa types.
