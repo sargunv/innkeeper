@@ -8,7 +8,11 @@ grants go through the session's `Session1` D-Bus API.
 `innkeeper --help` lists the commands; this covers what it doesn't say.
 
 - Every command starts the session if needed; the first start downloads the
-  Android image, with progress on stderr.
+  profile's image, with progress on stderr.
+- `profile create --system ohos NAME` makes an OpenHarmony profile
+  ([ohos](../../ohos/README.md)). It refuses the app commands (`install`, `run`,
+  `open`, `list`, `uninstall`, `app`) and the Android-only settings (adb, idle
+  timeout, mirroring, desktop following).
 - `run` with a URI sends `VIEW` + `BROWSABLE` restricted to the package, so only
   activities that accept browser links get it; `content:` and `intent:` URIs are
   refused. A path or `file:` URI is instead opened read-only and its fd handed

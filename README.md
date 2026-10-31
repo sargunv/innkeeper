@@ -1,8 +1,9 @@
 # Innkeeper
 
-Run Android apps on Linux. Each app gets its own Wayland window and follows the
-desktop's dark mode, notifications, file pickers, clipboard and media controls.
-There's no VM, no visible Android device, and no root, ever.
+Run Android and OpenHarmony apps on Linux. Each Android app gets its own Wayland
+window and follows the desktop's dark mode, notifications, file pickers,
+clipboard and media controls. There's no VM, no visible Android device, and no
+root, ever.
 
 Innkeeper runs a real Android 17 userspace in a rootless, on-demand session
 inside its Flatpak sandbox. The Android image is Google's own AOSP build from
@@ -46,6 +47,11 @@ Android starts when an app needs it and stops a couple of minutes after its last
 window closes. Profiles keep separate sets of apps and data, and a profile can
 show a whole phone or tablet screen instead of one window per app: see
 Innkeeper's Profiles page and each profile's settings.
+
+A profile can run OpenHarmony instead, chosen when it is made
+(`innkeeper profile create --system ohos harmony`). It is experimental: its
+built-in apps show in one phone window, with no desktop input or app install yet
+([ohos](ohos/README.md)).
 
 Apps share one uid and are not isolated from each other, just as native desktop
 apps aren't ([security](docs/security.md#app-isolation)).

@@ -16,9 +16,10 @@ cheaper tier before removing it from e2e, keeping every bug regression.
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
-- `mise run test:e2e -- ohos`: boots OpenHarmony ([ohos](../ohos/README.md)),
-  fetching its image first, until SceneBoard is ready. It is its own session
-  with no desktop window, so it runs alone.
+- `mise run test:e2e -- ohos`: makes a fresh OpenHarmony profile
+  ([ohos](../ohos/README.md)), fetching its image first, and starts it on the
+  private desktop until SceneBoard is ready and its window shows; it also runs
+  selftest. It is a profile of its own (`<profile>-ohos`), so it runs alone.
 
 The runner owns a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
