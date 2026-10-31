@@ -32,11 +32,11 @@ Flathub listing is the plan for automatic updates, and until then a newer bundle
 is installed by hand. A successful CI run of a push to `main` builds
 `<app>-snapshot.flatpak` from that commit's saved stage (a newer push cancels
 the one in progress) and replaces the asset on one floating prerelease named
-`snapshot`, force-moving that tag to the commit. The release notes say which
-commit it is, when it was built, and the install command. A pushed `v*` tag
-builds `<app>-stable.flatpak` and attaches it to that tag's release, created
-with generated notes when it does not exist. `workflow_dispatch` defaults to a
-dry run and uploads nothing.
+`snapshot`, deleting any other asset there, and force-moves that tag to the
+commit. The release notes say which commit it is, when it was built, and the
+install command. A pushed `v*` tag builds `<app>-stable.flatpak` and attaches it
+to that tag's release, created with generated notes when it does not exist.
+`workflow_dispatch` defaults to a dry run and uploads nothing.
 
 The bundle is
 `flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`,

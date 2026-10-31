@@ -2,7 +2,7 @@ name: Innkeeper runner
 description: Toolchains and prerequisites for hosted Linux runners
 inputs:
   mode:
-    description: docs, lint, build, unit, e2e or nightly
+    description: docs, lint, build, unit, e2e, nightly or package
     default: nightly
 runs:
   using: composite
@@ -48,7 +48,11 @@ runs:
         path: ~/Android/Sdk
         key: ${{ steps.sdk.outputs.cache-primary-key }}
     - uses: actions/cache@v4
-      if: inputs.mode != 'e2e' && inputs.mode != 'docs'
+      # Packaging restores a stage and builds a bundle. It does not compile, and
+      # the bundle fills out/ with more files than hashFiles can walk.
+      if:
+        inputs.mode != 'e2e' && inputs.mode != 'docs' && inputs.mode !=
+        'package'
       with:
         path: |
           ~/.cargo/registry

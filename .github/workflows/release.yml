@@ -73,7 +73,7 @@ jobs:
           restore-only: true
       - uses: ./.github/actions/setup
         with:
-          mode: nightly
+          mode: package
       - name: Build the bundle
         env:
           INNKEEPER_RELEASE_VERSION:
@@ -95,7 +95,7 @@ jobs:
           notes="${notes}"$'\n\n```sh\n'"flatpak install --user ./${name}"$'\n```\n\n'
           notes="${notes}A newer snapshot is a reinstall of the new file."
           # One floating release. Move the tag onto this commit, then replace
-          # the asset, so snapshot builds do not pile up.
+          # the asset and drop any other (a renamed app id leaves the old bundle).
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/tags/snapshot"
           if gh release view snapshot >/dev/null 2>&1; then
@@ -104,6 +104,12 @@ jobs:
             gh release create snapshot --prerelease --title snapshot --notes "$notes"
           fi
           gh release upload snapshot "$bundle" --clobber
+          # --clobber only replaces an asset with the same name.
+          gh release view snapshot --json assets --jq '.assets[].name' |
+            while IFS= read -r asset; do
+              [[ -n $asset && $asset != "$name" ]] || continue
+              gh release delete-asset snapshot "$asset" --yes
+            done
       - name: Publish the stable bundle
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
         env:

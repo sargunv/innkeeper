@@ -14,11 +14,11 @@ fi
 if [[ $mode == build ]]; then
   sudo apt-get install -y --no-install-recommends podman uidmap passt
 fi
-if [[ $mode == build || $mode == unit || $mode == e2e || $mode == nightly ]]; then
+if [[ $mode == build || $mode == unit || $mode == e2e || $mode == nightly || $mode == package ]]; then
   # The build container, supervisor unit tests and Flatpak need unprivileged mount namespaces.
   sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 fi
-if [[ $mode == unit || $mode == e2e || $mode == nightly ]]; then
+if [[ $mode == unit || $mode == e2e || $mode == nightly || $mode == package ]]; then
   # Gralloc's host unit tests also exercise real dma-buf allocations.
   if [[ ! -e /dev/udmabuf ]]; then
     sudo modprobe udmabuf
@@ -26,7 +26,7 @@ if [[ $mode == unit || $mode == e2e || $mode == nightly ]]; then
   sudo chmod 666 /dev/udmabuf
   test -r /dev/udmabuf && test -w /dev/udmabuf
 fi
-[[ $mode == e2e || $mode == nightly ]] || exit 0
+[[ $mode == e2e || $mode == nightly || $mode == package ]] || exit 0
 sudo apt-get install -y --no-install-recommends \
   podman uidmap passt flatpak fuse3 cpio dbus-user-session gnome-shell mutter \
   xdg-desktop-portal xdg-desktop-portal-gtk \
