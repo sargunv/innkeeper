@@ -34,8 +34,6 @@ pub struct Inner {
     /// "empty", "list", or "preparing" while the image downloads.
     stack: gtk::Stack,
     preparing: Preparing,
-    /// The one-time single-uid notice.
-    banner: adw::Banner,
     apps: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
     installed: RefCell<Vec<DesktopApp>>,
@@ -222,11 +220,6 @@ impl Window {
         stack.add_named(&list, Some("list"));
         stack.add_named(&preparing.page, Some("preparing"));
 
-        let banner = adw::Banner::builder()
-            .button_label("_Learn More")
-            .use_markup(false)
-            .build();
-
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
         section.append(Some("P_rofiles"), Some("win.profiles"));
@@ -257,7 +250,6 @@ impl Window {
         );
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
-        main.add_top_bar(&banner);
         main.set_content(Some(&stack));
         let main_page = adw::NavigationPage::builder()
             .title("Innkeeper")
@@ -300,7 +292,6 @@ impl Window {
             nav,
             stack,
             preparing,
-            banner,
             apps,
             rows: RefCell::default(),
             installed: RefCell::default(),
@@ -327,15 +318,6 @@ impl Window {
         }
         let w2 = w.clone();
         w.preparing.retry.connect_clicked(move |_| w2.prepare());
-        let w2 = w.clone();
-        w.banner.connect_button_clicked(move |b| {
-            b.set_revealed(false);
-            gtk::UriLauncher::new(ops::SINGLE_UID_DOCS).launch(
-                Some(&w2.win),
-                gio::Cancellable::NONE,
-                |_| {},
-            );
-        });
 
         let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
         let r = reveal.clone();
@@ -797,7 +779,6 @@ impl Window {
         self.session_proxy.replace(None);
         self.last_status.set(None);
         self.open_apps.borrow_mut().clear();
-        self.banner.set_revealed(false);
         self.watch_session();
         self.refresh();
         Ok(())
@@ -835,11 +816,6 @@ impl Window {
             w.show_apps(apps);
             if booted && !was_booted {
                 w.refresh();
-            }
-            let notice = worker::run_quiet(move || ops::single_uid_notice(booted)).await;
-            if let Some(n) = notice {
-                w.banner.set_title(n);
-                w.banner.set_revealed(true);
             }
         });
     }

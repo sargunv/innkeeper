@@ -54,7 +54,7 @@ processes. Binder, PackageManager and AppOps still see the right virtual uids,
 but that is policy enforced by Android's own processes, not by the kernel.
 
 - This matches one desktop user running several native apps, which is the threat
-  model. The CLI and manager show a one-time notice.
+  model. The README and the manager's Preferences say so.
 - Host supplementary groups are unmapped in the sandbox; `selftest` checks that
   no host group is mapped.
 - **Accepted:** the bridge sees every Android process as the user, so its uid

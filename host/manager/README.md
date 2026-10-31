@@ -21,9 +21,7 @@ screenshots, use the nested desktop in
   With" offers the manager; `mise run package -- --install` installs it for a
   checkout's stage. It is single-instance: opening another APK adds an install
   page to the running window.
-- **First run** prepares the Android image ("Preparing Android"). The first
-  session shows a one-time banner that apps aren't isolated from each other
-  (shared with the CLI's notice).
+- **First run** prepares the Android image ("Preparing Android").
 - **The list** comes from the profile's desktop entries, so it shows without
   booting Android, and a directory monitor follows CLI changes. At startup it
   repairs stale entries as `innkeeper list` does. A row shows a spinner while
@@ -54,8 +52,8 @@ answers, then every value is read again; an error offers a fresh read.
 
 `src/preferences.rs` (Ctrl+,): following the desktop's appearance,
 language/region and clock (each on by default), idle shutdown and app-menu
-mirroring. It also keeps the single-uid notice and opens Android Settings in its
-own window.
+mirroring. It also says that apps aren't isolated from each other and opens
+Android Settings in its own window.
 
 - Preferences live in `$XDG_CONFIG_HOME/innkeeper-<profile>/preferences.toml`
   and are read without starting Android. A running session takes changes through
