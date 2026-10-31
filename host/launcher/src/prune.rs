@@ -57,10 +57,9 @@ fn unused(path: &Path) -> Result<Option<File>> {
     }
 }
 
-/// Also honor sessions started by launchers predating leases. A stale config
-/// is harmless; an answering socket with an unreadable config aborts pruning.
 /// The image a running session's `session.conf` names. Only that table is
 /// read: the session may run another Innkeeper build, whose config differs.
+/// An answering socket with an unreadable config aborts pruning.
 fn running_image(conf: &Path) -> Result<Image> {
     #[derive(serde::Deserialize)]
     struct Running {

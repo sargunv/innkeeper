@@ -111,8 +111,8 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
 ///  - `proc/`: stand-ins for /proc files: cmdline and bootconfig carry our
 ///    `androidboot.*` values; init insists on raising ASLR entropy (fatal if
 ///    it can't), so it gets a writable mmap_rnd_bits (the host's setting
-///    applies regardless). Flatpak mode adds the BPF sysctls netbpfload sets
-///    read by the broker.
+///    applies regardless); the BPF sysctls netbpfload sets, read by the
+///    broker.
 ///  - `config.gz`: a kernel config for code that wants /proc/config.gz
 ///    (supervisor/shim).
 pub fn innkeeper_dir(cfg: &Config, l: &Path) -> Result<()> {

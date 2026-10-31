@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::paths::Paths;
-use crate::{control, exec, flatpak, image, layer, selftest, session, sys};
+use crate::{control, flatpak, image, layer, selftest, session, sys};
 
 const USAGE: &str = "\
 Innkeeper session launcher: boots the pinned Android image (image/pin.toml)
@@ -76,8 +76,8 @@ Debugging:
 /// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)
 /// for binder's injected fds, openat2 (5.6).
 const KERNEL_FLOOR: (u32, u32) = (5, 14);
-/// Flatpak mode's: unprivileged PSI triggers (6.5), without which lmkd exits
-/// and every ActivityManager write to it stalls 3 s.
+/// Unprivileged PSI triggers (6.5), without which lmkd exits and every
+/// ActivityManager write to it stalls 3 s.
 const FLATPAK_KERNEL_FLOOR: (u32, u32) = (6, 5);
 
 pub fn main() {
@@ -160,9 +160,12 @@ fn run(args: &[OsString]) -> Result<i32> {
                 bail!("usage: exec CMD...");
             }
             let argv: Vec<&OsStr> = rest.iter().map(OsString::as_os_str).collect();
-            exec::run(&paths, &argv)
+            control::exec(&paths.control(), &argv)
         }
-        "shell" => exec::run(&paths, &[OsStr::new("/system/bin/sh"), OsStr::new("-l")]),
+        "shell" => control::exec(
+            &paths.control(),
+            &[OsStr::new("/system/bin/sh"), OsStr::new("-l")],
+        ),
         "selftest" => {
             if crate::status(&paths).pid.is_none() {
                 bail!("not running");
@@ -221,8 +224,8 @@ fn wayland_socket() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `start`, and `_serve` (`serve`): Flatpak mode's session in a sandbox of
-/// its own, which `start` spawns.
+/// `start`, and `_serve` (`serve`): the session in a sandbox of its own,
+/// which `start` spawns.
 fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     let trace = session::BootTrace::new();
     let (mut follow, mut headless) = (false, false);

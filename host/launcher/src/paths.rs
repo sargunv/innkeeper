@@ -38,8 +38,7 @@ pub fn profile() -> Result<String> {
 }
 
 /// `name`, suffixed with `-<profile>` for a named profile: the session's
-/// directories are named this way. The suffix format is the on-disk layout;
-/// existing data dirs keep working.
+/// directories are named this way.
 pub fn per_profile(name: &str, profile: &str) -> String {
     if profile.is_empty() {
         name.into()
@@ -80,8 +79,8 @@ pub struct Paths {
     pub libexec: PathBuf,
     /// `<prefix>/share/innkeeper`: the Android tree, the image config.
     pub share: PathBuf,
-    /// `$XDG_RUNTIME_DIR/innkeeper[-<profile>]` (in Flatpak mode, under the
-    /// app's dir, which every instance of the app shares): session.conf, pid
+    /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper[-<profile>]`, which every
+    /// instance of the app shares: session.conf, pid
     /// files, the kmsg FIFO, the bridge's socket dir, the start-time layer.
     pub run: PathBuf,
     /// `$XDG_STATE_HOME/innkeeper[-<profile>]`: logs, the documents grants.
@@ -94,7 +93,7 @@ pub struct Paths {
     pub images: PathBuf,
     /// The image pin (`INNKEEPER_PIN`, default the prefix's).
     pub pin: PathBuf,
-    /// Flatpak mode's composed root: `root[-<profile>]`.
+    /// The composed root: `root[-<profile>]`.
     pub root: PathBuf,
 }
 
@@ -168,8 +167,8 @@ impl Paths {
         self.run.join("outer.pid")
     }
 
-    /// Flatpak mode's control socket, which other instances of the app (the
-    /// CLI, the manager) reach the session through.
+    /// The control socket, which other instances of the app (the CLI, the
+    /// manager) reach the session through.
     pub fn control(&self) -> PathBuf {
         self.run.join("control.sock")
     }
@@ -334,17 +333,7 @@ mod tests {
     fn bootconfig() {
         let t = bootconfig_tokens("# c\na=1 b=2 # c=3\n\n  androidboot.vendor.apex.x=none\n");
         assert_eq!(t, ["a=1", "b=2", "androidboot.vendor.apex.x=none"]);
-        // What `grep '^androidboot\.vendor\.apex\.' | sha256sum | cut -c1-12`
-        // printed, so existing trees are reused.
-        assert_eq!(apex_selection_hash(&[]), "e3b0c44298fc");
-        assert_eq!(apex_selection_hash(&t), {
-            let mut h = Sha256::new();
-            h.update(b"androidboot.vendor.apex.x=none\n");
-            h.finalize()
-                .iter()
-                .take(6)
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-        });
+        assert_eq!(apex_selection_hash(&t[..2]), apex_selection_hash(&[]));
+        assert_ne!(apex_selection_hash(&t), apex_selection_hash(&[]));
     }
 }

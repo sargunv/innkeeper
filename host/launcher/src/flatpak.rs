@@ -1,5 +1,5 @@
-//! Flatpak mode (docs/session.md, "Flatpak mode"): the session runs in
-//! Innkeeper's own sandbox, which allows no namespaces, mounts or systemd
+//! The session (docs/session.md, "Flatpak mode") runs in Innkeeper's own
+//! sandbox, which allows no namespaces, mounts or systemd
 //! units, but whose `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!
 //! - The root is composed on disk: per partition, hardlinks to the (read-only)
@@ -10,8 +10,7 @@
 //!   shows the Android paths behind the links (supervisor/broker/src/flat.rs).
 //! - init is the broker's child (execed from pivot-exec), and the session
 //!   lives as long as the process that started it, which serves the control
-//!   socket
-//!   ([`crate::control`]).
+//!   socket ([`crate::control`]).
 
 use std::env;
 use std::ffi::OsString;
@@ -483,7 +482,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     control::serve(
         &p.control(),
         control::Served {
-            status: format!("running: host pid {init}\n"),
+            status: crate::Status { pid: Some(init) }.text(),
             exec_lock: Some(p.exec_lock()),
             stop: Box::new(move || teardown(&paths)),
         },
@@ -511,8 +510,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
 /// Spawn (`flatpak-spawn` without `--host`: a new instance of this app with
 /// its permissions, not an escape), so it outlives the caller's sandbox.
 /// Returns once it is up.
-pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Result<()> {
-    let p = cfg_paths;
+pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
     let mut c = Command::new("flatpak-spawn");
     c.arg("/usr/bin/env");
     for (k, v) in env::vars_os() {
@@ -552,11 +550,9 @@ pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Res
             // sandbox alive meanwhile); SIGKILL isn't forwarded to it.
             let _ = child.kill();
             let _ = child.wait();
-            let pid = s
-                .lines()
-                .next()
-                .and_then(|l| l.strip_prefix("running: host pid "))
-                .unwrap_or("?");
+            let pid = crate::Status::parse(&s)
+                .pid
+                .map_or("?".into(), |p| p.to_string());
             println!(
                 "session started in a sandbox of its own: Android init = pid {pid} there; log: {}",
                 p.kmsg_log().display()

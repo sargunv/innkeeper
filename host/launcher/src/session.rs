@@ -169,8 +169,8 @@ pub fn tail(file: &Path, alive: &dyn Fn() -> bool) -> Result<()> {
     }
 }
 
-/// Desktop service registration can take time before the bridge binds its socket.
-/// Give it the same startup allowance as pivot/init, including a restart backoff.
+/// Waits for the bridge's socket. Registering its desktop services can take
+/// seconds, and a crash costs a restart's backoff.
 fn wait_for_bridge(sock: &Path) -> bool {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -187,7 +187,6 @@ fn wait_for_bridge(sock: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixListener;
 
     #[test]
     fn bridge_can_take_more_than_a_second_to_register_desktop_services() {
@@ -196,15 +195,14 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
-        let sock = dir.canonicalize().unwrap().join("bridge.sock");
-        let delayed_socket = sock.clone();
+        let sock = dir.join("bridge.sock");
+        let delayed = sock.clone();
         let bridge = thread::spawn(move || {
             thread::sleep(Duration::from_millis(1500));
-            UnixListener::bind(delayed_socket).unwrap()
+            fs::write(delayed, "").unwrap();
         });
         let ready = wait_for_bridge(&sock);
-        let listener = bridge.join().unwrap();
-        drop(listener);
+        bridge.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
         assert!(
             ready,

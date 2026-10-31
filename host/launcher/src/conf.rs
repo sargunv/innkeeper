@@ -20,8 +20,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_node: Option<PathBuf>,
     /// The Vulkan HAL matched to render_node at start (radv, anv or lvp).
-    // Older configs are read only for their image and sandbox paths.
-    #[serde(default)]
     pub vulkan_driver: String,
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,7 +49,7 @@ impl Config {
             crate::graphics::select_node(
                 Path::new("/sys/class/drm"),
                 Path::new("/dev/dri"),
-                &std::fs::read_to_string(paths.share.join("anv-pci-ids")).unwrap_or_default(),
+                &fs::read_to_string(paths.share.join("anv-pci-ids")).unwrap_or_default(),
             )
         };
         let (render_node, vulkan_driver) = selection
@@ -161,39 +159,5 @@ impl Config {
                 e.insert(v.into(), d);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn older_session_configs_still_expose_their_image() {
-        // Pruning reads configs from answering sessions started before an update.
-        let legacy = r#"
-headless = false
-bridge_args = []
-bridge_env = {}
-[paths]
-profile = "old"
-libexec = "/app/libexec/innkeeper"
-share = "/app/share/innkeeper"
-run = "/runtime/innkeeper-old"
-state = "/state"
-data_home = "/data-home"
-data = "/data"
-images = "/images"
-pin = "/pin"
-root = "/root"
-[image]
-name = "ci-old"
-dir = "/images/ci-old"
-img = "/images/ci-old/img"
-apexdir = "/images/ci-old/apex-selected"
-derived = "/images/ci-old/derived"
-"#;
-        let cfg: Config = toml::from_str(legacy).unwrap();
-        assert_eq!(cfg.image.dir, Path::new("/images/ci-old"));
     }
 }

@@ -3,13 +3,7 @@
 //! so the relay (a static binary, android/system/exec) hands the command to
 //! its server under init, which runs it there.
 
-use std::ffi::OsStr;
 use std::fs;
-
-use anyhow::Result;
-
-use crate::control;
-use crate::paths::Paths;
 
 pub const RELAY: &str = "/system/bin/innkeeper-exec";
 
@@ -37,9 +31,4 @@ pub fn android_env() -> Vec<(String, String)> {
     env.push(("HOME".into(), "/data/local/tmp".into()));
     env.push(("TMPDIR".into(), "/data/local/tmp".into()));
     env
-}
-
-/// Runs argv in the session; returns its exit code.
-pub fn run(paths: &Paths, argv: &[&OsStr]) -> Result<i32> {
-    control::exec(&paths.control(), argv)
 }
