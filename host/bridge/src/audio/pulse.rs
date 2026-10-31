@@ -370,7 +370,7 @@ impl PulseStream {
             moved = true;
         }
         let since = *self.stats.since.get_or_insert_with(Instant::now);
-        if crate::log::verbose() && since.elapsed() >= Duration::from_secs(5) {
+        if crate::log::debug() && since.elapsed() >= Duration::from_secs(5) {
             let s = &self.stats;
             let n = s.samples.max(1);
             crate::debug!(

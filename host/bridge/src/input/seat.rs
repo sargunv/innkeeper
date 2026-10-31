@@ -468,9 +468,11 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                     WEnum::Value(K::Repeated) => KeyLine::Repeat,
                     _ => KeyLine::Release,
                 };
-                if crate::bench::enabled() {
-                    crate::bench::input(&format!("key {time} {key} {}", state as u8));
-                }
+                crate::log::trace(format_args!(
+                    "input ns={} key {time} {key} {}",
+                    crate::log::now(),
+                    state as u8
+                ));
                 if key == 1 && state == KeyLine::Press {
                     st.seat.capture.cancel();
                 }

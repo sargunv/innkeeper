@@ -108,7 +108,7 @@ pub struct ClipboardHub {
 
 impl ClipboardHub {
     /// Uses data control when available, otherwise the display connection.
-    pub fn start() -> Result<Arc<ClipboardHub>> {
+    pub fn start(cache: &std::path::Path) -> Result<Arc<ClipboardHub>> {
         let conn = Connection::connect_to_env().context("connecting to the host compositor")?;
         let (globals, queue) = registry_queue_init::<State>(&conn)?;
         let qh = queue.handle();
@@ -123,7 +123,7 @@ impl ClipboardHub {
             cmd: manager.as_ref().map(|_| (Mutex::new(tx), wake_w)),
             fallback: Mutex::new(Vec::new()),
             offered: Mutex::new(None),
-            cache: files::cache_dir()?,
+            cache: files::fresh_cache(cache)?,
             subs: Subscribers::default(),
             current: Mutex::new(None),
             epoch: AtomicU64::new(0),

@@ -57,17 +57,18 @@ Environment:
                            wakeup for its next alarm (default 120; 0: never;
                            headless sessions never unless it is set)
   INNKEEPER_PROFILE         the profile to run (required; `innkeeper` and the
-                           manager set it). Every profile's session is a test
-                           session: it isolates clipboard, portals, links,
-                           notifications, media players, AT-SPI and location
-                           from the desktop.
+                           manager set it)
 Tests only:
+  INNKEEPER_TEST=1          a test session: clipboard, portals, links,
+                           notifications, media players, AT-SPI and location
+                           stay off the desktop
   INNKEEPER_DATA            Android's /data (default
                            $XDG_DATA_HOME/innkeeper/data-<profile>)
   INNKEEPER_IMAGES          the image cache
 Debugging:
-  INNKEEPER_BRIDGE_VERBOSE=1  per-stream stats in bridge.log
-  INNKEEPER_BROKER_DEBUG=1    broker tracing in session.log
+  INNKEEPER_BRIDGE_DEBUG=1  debug lines and the frame and input trace in
+                           bridge.log
+  INNKEEPER_BROKER_DEBUG=1  broker tracing in session.log
 ";
 
 /// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)

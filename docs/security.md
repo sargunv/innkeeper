@@ -147,8 +147,8 @@ available (KWin), or the display connection while an Innkeeper window has focus
 ## Test sessions
 
 `INNKEEPER_TEST=1`, which every test harness sets and the dev runner defaults to
-off a nested desktop (`INNKEEPER_TEST=0` opts out), selects the bridge's
-`--test-session` mode, persisted in `session.conf`. It leaves the user's desktop
+off a nested desktop (`INNKEEPER_TEST=0` opts out), reaches the bridge through
+the session's environment, which a wakeup keeps. It leaves the user's desktop
 alone, including when tests use a private bus: links, notifications and MPRIS
 players are logged only, AT-SPI and location are off, and apps installed inside
 Android get no desktop entries. Clipboard sync is disabled in both directions;

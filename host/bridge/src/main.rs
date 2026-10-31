@@ -1,22 +1,23 @@
-//! `innkeeper-bridge --run-dir DIR --state-dir DIR [--test-session]
-//!                  [--sink NAME] [-v]`
+//! `innkeeper-bridge`, started by the launcher for the profile in
+//! `INNKEEPER_PROFILE`; it takes no arguments.
 //!
-//! Listens on `<run-dir>/bridge/bridge.sock` (the launcher binds
-//! `<run-dir>/bridge` into the Android session), keeps MPRIS artwork in
-//! `<run-dir>/art` and writes the system app's activity reports to
-//! `<run-dir>/lifecycle` for the launcher. Document grants persist in
-//! `<state-dir>/documents.grants`.
+//! Listens on `<run>/bridge/bridge.sock` (the launcher binds `<run>/bridge`
+//! into the Android session), keeps MPRIS artwork in `<run>/art` and writes
+//! the system app's activity reports to `<run>/lifecycle` for the launcher.
+//! Document grants persist in `<state>/documents.grants`. `<run>` and
+//! `<state>` are the profile's [`innkeeper_core::paths`] dirs.
 //!
-//! - `--test-session` (also `INNKEEPER_TEST=1`): isolates the clipboard,
-//!   portals, OpenURI, notifications, MPRIS, AT-SPI and location from the
-//!   desktop, and gives apps installed inside Android no desktop entries.
-//! - `--sink`: the PipeWire sink for audio (default: the desktop's default).
-//! - `-v`: per-stream statistics.
+//! - `INNKEEPER_TEST=1`: a test session, isolated from the desktop's
+//!   clipboard, portals, OpenURI, notifications, MPRIS, AT-SPI and location;
+//!   apps installed inside Android get no desktop entries.
+//! - `INNKEEPER_AUDIO_SINK`, `INNKEEPER_AUDIO_SOURCE`: the PipeWire sink and
+//!   capture source (default: the desktop's).
+//! - `INNKEEPER_BRIDGE_DEBUG=1`: debug logging and the frame and input trace
+//!   ([`innkeeper_bridge::log`]).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use std::sync::atomic::AtomicUsize;
 
 use innkeeper_bridge::audio::{AudioService, Backend, Limits};
@@ -28,33 +29,19 @@ use innkeeper_bridge::ipc::transport;
 use innkeeper_bridge::system::{Shared, SystemService};
 
 fn main() -> Result<()> {
-    let mut run_dir: Option<PathBuf> = None;
-    let mut state_dir: Option<PathBuf> = None;
-    let mut sink = None;
-    let mut test_session = std::env::var("INNKEEPER_TEST").is_ok_and(|v| v == "1");
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--run-dir" => run_dir = Some(args.next().context("--run-dir needs a path")?.into()),
-            "--state-dir" => {
-                state_dir = Some(args.next().context("--state-dir needs a path")?.into())
-            }
-            "--sink" => sink = Some(args.next().context("--sink needs a name")?),
-            "--test-session" => test_session = true,
-            "-v" | "--verbose" => innkeeper_bridge::log::set_verbose(true),
-            _ => bail!("unknown argument {a:?} (see the source header for usage)"),
-        }
+    if std::env::args().len() > 1 {
+        anyhow::bail!("innkeeper-bridge takes no arguments (see the source header)");
     }
-    let desktop = !test_session;
-    let run_dir = run_dir.context("--run-dir is required")?;
-    let profile = innkeeper_core::paths::profile()?;
-    let state_dir = state_dir.context("--state-dir is required")?;
+    let env = |v: &str| std::env::var(v).ok().filter(|v| !v.is_empty());
+    let desktop = env("INNKEEPER_TEST").as_deref() != Some("1");
+    let paths = innkeeper_core::paths::Prefix::locate()?.session_paths()?;
+    let (run_dir, state_dir, profile) = (paths.run, paths.state, paths.profile);
     let socket = run_dir.join("bridge/bridge.sock");
     // A report from before a restart is stale; the system app sends a new one.
     let _ = std::fs::remove_file(run_dir.join("lifecycle"));
     let backend = Backend::Pulse {
-        sink,
-        source: std::env::var("INNKEEPER_AUDIO_SOURCE").ok(),
+        sink: env("INNKEEPER_AUDIO_SINK"),
+        source: env("INNKEEPER_AUDIO_SOURCE"),
     };
     innkeeper_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();

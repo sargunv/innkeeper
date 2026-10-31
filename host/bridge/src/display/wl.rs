@@ -628,11 +628,11 @@ impl State {
                     &self.qh,
                     sctk::compositor::FrameCallbackData(surface.clone()),
                 );
-                if crate::bench::enabled()
+                if crate::log::debug()
                     && let Some(p) = &self.presentation
                 {
-                    let stamp = crate::bench::now();
-                    crate::bench::trace(format_args!("probe ns={stamp} window={}", w.id));
+                    let stamp = crate::log::now();
+                    crate::log::trace(format_args!("probe ns={stamp} window={}", w.id));
                     p.feedback(
                         surface,
                         &self.qh,
@@ -984,7 +984,7 @@ impl State {
         {
             f.draw();
         }
-        let stamp = crate::bench::now();
+        let stamp = crate::log::now();
         if let Some(p) = &self.presentation {
             p.feedback(
                 &surface,
@@ -997,7 +997,7 @@ impl State {
                 },
             );
         }
-        if crate::bench::enabled() {
+        if crate::log::debug() {
             let mut pixel = [0u8; 4];
             let color = Some(&b.source).and_then(|fd| {
                 use std::os::fd::AsRawFd;
@@ -1029,7 +1029,7 @@ impl State {
                 }
                 Some(u32::from_le_bytes(pixel) & 0xffffff)
             });
-            crate::bench::trace(format_args!(
+            crate::log::trace(format_args!(
                 "commit ns={stamp} window={id} color={}",
                 color.map_or(-1, i64::from)
             ));
@@ -1629,7 +1629,7 @@ pub fn run(
         cursor_surface: None,
         quit: false,
     };
-    crate::bench::trace(format_args!(
+    crate::log::trace(format_args!(
         "capabilities presentation={}",
         u8::from(st.presentation.is_some())
     ));

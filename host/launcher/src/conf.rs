@@ -27,14 +27,10 @@ pub struct Config {
     /// ([`crate::lifecycle`]).
     #[serde(default)]
     pub idle_grace: u64,
-    /// The environment a wakeup starts the session again with.
-    #[serde(default)]
-    pub start_env: BTreeMap<String, String>,
     /// `INNKEEPER_BROKER_DEBUG`, passed to the broker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_debug: Option<String>,
-    /// The desktop bridge's arguments and environment.
-    pub bridge_args: Vec<String>,
+    /// The desktop bridge's environment over this process's.
     pub bridge_env: BTreeMap<String, String>,
     pub paths: Paths,
     pub image: Image,
@@ -54,23 +50,19 @@ impl Config {
         let (render_node, vulkan_driver) = selection
             .map(|(node, driver)| (Some(node), driver.to_string()))
             .unwrap_or((None, "lvp".to_string()));
-        let mut c = Config {
+        Config {
             headless,
             render_node,
             vulkan_driver,
-            wayland,
             idle_grace: crate::lifecycle::grace_secs(headless),
-            start_env: crate::lifecycle::start_env(),
             broker_debug: env::var("INNKEEPER_BROKER_DEBUG")
                 .ok()
                 .filter(|v| !v.is_empty()),
-            bridge_args: vec![],
-            bridge_env: BTreeMap::new(),
+            bridge_env: bridge_env(wayland.as_deref()),
+            wayland,
             paths,
             image,
-        };
-        c.bridge_setup(env::var("INNKEEPER_TEST").is_ok_and(|v| v == "1"));
-        c
+        }
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -87,113 +79,34 @@ impl Config {
     pub fn run_layer(&self) -> PathBuf {
         self.paths.run.join("layer")
     }
-
-    /// The desktop bridge's arguments and environment
-    /// (host/bridge/README.md). It runs outside Android, as the user, and its
-    /// socket dir is Android's `/dev/socket/innkeeper`.
-    fn bridge_setup(&mut self, test: bool) {
-        let p = &self.paths;
-        let a = &mut self.bridge_args;
-        for (k, v) in [("--run-dir", &p.run), ("--state-dir", &p.state)] {
-            a.push(k.into());
-            a.push(v.to_string_lossy().into_owned());
-        }
-        if let Some(sink) = env::var("INNKEEPER_AUDIO_SINK")
-            .ok()
-            .filter(|v| !v.is_empty())
-        {
-            a.push("--sink".into());
-            a.push(sink);
-        }
-        if env::var("INNKEEPER_BRIDGE_VERBOSE").is_ok_and(|v| v == "1") {
-            a.push("-v".into());
-        }
-        let bus = env::var("DBUS_SESSION_BUS_ADDRESS")
-            .ok()
-            .filter(|v| !v.is_empty());
-        if test {
-            // Persist isolation in session.conf, including across wakeups.
-            a.push("--test-session".into());
-        }
-        // The display service and the clipboard use the host compositor; the
-        // system service the caller's session bus; desktop entries for apps
-        // installed inside Android go to the caller's XDG_DATA_HOME.
-        let e = &mut self.bridge_env;
-        e.insert(
-            "WAYLAND_DISPLAY".into(),
-            self.wayland
-                .as_ref()
-                .map(|w| w.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
-        if let Some(b) = bus {
-            e.insert("DBUS_SESSION_BUS_ADDRESS".into(), b);
-        }
-        // The host state service reads UPower on the caller's system bus,
-        // and the settings service reads the desktop's locale (plasma-localerc
-        // on KDE).
-        for v in [
-            "XDG_DATA_HOME",
-            "XDG_CONFIG_HOME",
-            "XDG_CURRENT_DESKTOP",
-            "DBUS_SYSTEM_BUS_ADDRESS",
-            "INNKEEPER_GAMEPAD_TEST_DIR",
-            "INNKEEPER_BENCH",
-            "INNKEEPER_AUDIO_SOURCE",
-        ] {
-            if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
-                e.insert(v.into(), d);
-            }
-        }
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::profile::ProfileName;
-
-    fn config(profile: &str) -> Config {
-        let dir = PathBuf::from("/nonexistent");
-        Config {
-            headless: true,
-            render_node: None,
-            vulkan_driver: "lvp".into(),
-            wayland: None,
-            idle_grace: 0,
-            start_env: BTreeMap::new(),
-            broker_debug: None,
-            bridge_args: vec![],
-            bridge_env: BTreeMap::new(),
-            paths: Paths {
-                profile: ProfileName::new(profile).unwrap(),
-                libexec: dir.clone(),
-                share: dir.clone(),
-                run: dir.clone(),
-                state: dir.clone(),
-                data_home: dir.clone(),
-                data: dir.clone(),
-                images: dir.clone(),
-                pin: dir.clone(),
-                root: dir.clone(),
-            },
-            image: Image {
-                name: String::new(),
-                dir: dir.clone(),
-                img: dir.clone(),
-                apexdir: dir.clone(),
-                derived: dir,
-            },
+/// The desktop bridge's environment (host/bridge/src/main.rs) over the
+/// session's own, which carries `INNKEEPER_*`. It runs outside Android, as
+/// the user, and its socket dir is Android's `/dev/socket/innkeeper`. The
+/// display service and the clipboard use the host compositor; the system
+/// service the caller's session bus; the host state service UPower on the
+/// system bus; desktop entries for apps installed inside Android go to the
+/// caller's XDG_DATA_HOME; the settings service reads the desktop's locale
+/// (plasma-localerc on KDE).
+fn bridge_env(wayland: Option<&Path>) -> BTreeMap<String, String> {
+    let mut e = BTreeMap::new();
+    e.insert(
+        "WAYLAND_DISPLAY".into(),
+        wayland
+            .map(|w| w.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
+    for v in [
+        "DBUS_SESSION_BUS_ADDRESS",
+        "DBUS_SYSTEM_BUS_ADDRESS",
+        "XDG_DATA_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CURRENT_DESKTOP",
+    ] {
+        if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
+            e.insert(v.into(), d);
         }
     }
-
-    #[test]
-    fn only_the_test_switch_isolates_the_bridge() {
-        let mut c = config("default");
-        c.bridge_setup(false);
-        assert!(!c.bridge_args.iter().any(|a| a == "--test-session"));
-        let mut c = config("default");
-        c.bridge_setup(true);
-        assert!(c.bridge_args.iter().any(|a| a == "--test-session"));
-    }
+    e
 }

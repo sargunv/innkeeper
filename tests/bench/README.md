@@ -49,22 +49,22 @@ not recorded in source documentation.
 ## Measurements
 
 - **Input:** SPACE on the private Wayland seat toggles a solid red/blue probe.
-  Ten presses are serialized by actual frame feedback. `INNKEEPER_BENCH=1`
-  enables bridge timestamps at input dispatch and immediately before surface
-  commit, a centre-pixel read from that dma-buf, and `wp_presentation` feedback.
-  The parser matches changed colours to their commit ids and presentation ids;
-  painting the old colour cannot count. Callback-only visibility commits can
-  supersede content feedback while retaining the same pixels. Bench mode
-  observes their presentation too; the parser attributes it to the content on
-  that window and counts only its earliest presentation. A discard alone never
-  counts as presentation. It subtracts presentation timestamps only when the
-  compositor advertises `CLOCK_MONOTONIC`, shared with Android's
-  `System.nanoTime`. Raw feedback includes refresh and presentation flags. The
-  bridge trace stops after 20,000 records. Reading one pixel and logging add
-  overhead; use the same instrumentation for every comparison. Compositor
-  presentation is a scanout estimate. Physical input-to-photon requires a
-  photodiode or a high-speed camera and a visible colour transition. A virtual
-  desktop cannot measure photons.
+  Ten presses are serialized by actual frame feedback.
+  `INNKEEPER_BRIDGE_DEBUG=1` enables bridge timestamps at input dispatch and
+  immediately before surface commit, a centre-pixel read from that dma-buf, and
+  `wp_presentation` feedback. The parser matches changed colours to their commit
+  ids and presentation ids; painting the old colour cannot count. Callback-only
+  visibility commits can supersede content feedback while retaining the same
+  pixels. Bench mode observes their presentation too; the parser attributes it
+  to the content on that window and counts only its earliest presentation. A
+  discard alone never counts as presentation. It subtracts presentation
+  timestamps only when the compositor advertises `CLOCK_MONOTONIC`, shared with
+  Android's `System.nanoTime`. Raw feedback includes refresh and presentation
+  flags. The bridge trace stops after 20,000 records. Reading one pixel and
+  logging add overhead; use the same instrumentation for every comparison.
+  Compositor presentation is a scanout estimate. Physical input-to-photon
+  requires a photodiode or a high-speed camera and a visible colour transition.
+  A virtual desktop cannot measure photons.
 - **Frame:** the probe animates a text list (`scroll`) and 200 moving sprites
   (`game`) for `--seconds` each (default 5, maximum 60). This is a repeatable
   game-like workload, not a commercial game score. Report commit and
