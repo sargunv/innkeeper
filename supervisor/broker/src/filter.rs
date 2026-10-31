@@ -58,6 +58,11 @@ pub fn install(harness: bool) -> std::io::Result<i32> {
     let mut f = vec![insn(0x20, 4), insn(0x15, 0xc000003e), insn(0x06, ALLOW)];
     f[1].jt = 1; // Other architectures retain the kernel's handling.
     rule(&mut f, SYS_openat, &[]);
+    // OpenHarmony: musl opens with open(2), which the broker serves as
+    // openat.
+    if crate::guest() == crate::Guest::Ohos {
+        rule(&mut f, SYS_open, &[]);
+    }
     if !harness {
         rule(&mut f, SYS_inotify_add_watch, &[]);
     }
