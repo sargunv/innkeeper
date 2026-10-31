@@ -46,17 +46,18 @@ fn test_timers() -> bool {
 
 /// Seconds of idleness before the session stops; 0: never. Headless
 /// sessions (tests) never stop by themselves, and test timers stop after a
-/// second; otherwise it is the Idle timeout preference, read each time so a
-/// change applies live.
-fn grace_secs(headless: bool) -> u64 {
+/// second; otherwise it is the profile's idle timeout, unless Keep Running,
+/// read each time so a change applies live.
+fn grace_secs(headless: bool, paths: &Paths) -> u64 {
     if headless {
         0
     } else if test_timers() {
         1
     } else {
-        crate::preferences::Preferences::load()
+        let keep = crate::preferences::Preferences::load().is_ok_and(|p| p.keep_running);
+        crate::profile::Settings::load(&paths.data)
             .unwrap_or_default()
-            .idle_seconds()
+            .idle_seconds(keep)
     }
 }
 
@@ -186,7 +187,7 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
         let mut asked_background = false;
         loop {
             thread::sleep(poll());
-            let seconds = grace_secs(headless);
+            let seconds = grace_secs(headless, &paths);
             let grace = Duration::from_secs(seconds);
             let why = busy(&paths);
             // In Flatpak, running with no window is the Background portal's

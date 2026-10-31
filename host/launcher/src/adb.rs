@@ -1,5 +1,5 @@
 //! adb into a profile: Android's own adbd on a loopback TCP port of the
-//! profile's ([`crate::profile::Settings::debug_bridge_port`]), with adb
+//! profile's ([`crate::profile::Settings::adb_port`]), with adb
 //! authentication on (`ro.adb.secure=1`). The user's adb key
 //! (`~/.android/adbkey.pub`, which `adb` creates on its first start) is
 //! authorized in the profile's data, so a local `adb` connects without a
@@ -69,10 +69,10 @@ pub fn listen_addrs(port: u16) -> String {
 /// adbd on its port when the profile has adb on.
 pub fn props(settings: &Settings) -> String {
     let mut s = String::from("ro.adb.secure=1\n");
-    if settings.debug_bridge && settings.debug_bridge_port != 0 {
+    if settings.adb && settings.adb_port != 0 {
         s += &format!(
             "service.adb.listen_addrs={}\nvendor.innkeeper.adb=1\n",
-            listen_addrs(settings.debug_bridge_port)
+            listen_addrs(settings.adb_port)
         );
     } else {
         s += "vendor.innkeeper.adb=0\n";
@@ -84,7 +84,7 @@ pub fn props(settings: &Settings) -> String {
 /// authorizing the user's key if it is on.
 pub fn prepare(paths: &Paths) -> Result<String> {
     let mut settings = Settings::load(&paths.data)?;
-    if settings.debug_bridge {
+    if settings.adb {
         if settings.assign_port(&paths.data_home, &paths.data)? {
             settings.save(&paths.data)?;
         }
@@ -128,8 +128,8 @@ mod tests {
     fn props_follow_the_setting() {
         let mut s = Settings::default();
         assert_eq!(props(&s), "ro.adb.secure=1\nvendor.innkeeper.adb=0\n");
-        s.debug_bridge = true;
-        s.debug_bridge_port = 5557;
+        s.adb = true;
+        s.adb_port = 5557;
         let p = props(&s);
         assert!(p.starts_with("ro.adb.secure=1\n"));
         assert!(p.contains("service.adb.listen_addrs=tcp:localhost:5557\n"));

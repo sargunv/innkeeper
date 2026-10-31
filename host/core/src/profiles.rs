@@ -5,9 +5,11 @@
 
 use std::fs;
 
-use anyhow::{Result, bail};
+use std::time::Duration;
+
+use anyhow::{Context, Result, bail};
 use innkeeper_session::profile;
-pub use innkeeper_session::profile::{FIRST, Mode, Settings, Size, check_name};
+pub use innkeeper_session::profile::{Display, FIRST, Settings, check_name};
 
 use crate::launcher::Session;
 use crate::paths::Prefix;
@@ -91,14 +93,44 @@ pub fn settings(name: &str) -> Result<Settings> {
     Settings::load(&paths(name)?.data)
 }
 
-/// Sets profile `name`'s mode and screen preset, for its next start.
-pub fn set_mode(name: &str, mode: Option<Mode>, size: Option<Size>) -> Result<Settings> {
+/// The settings of this process's own profile (`INNKEEPER_PROFILE`), as its
+/// bridge reads them.
+pub fn own() -> Result<Settings> {
+    Settings::load(&Prefix::locate()?.session_paths()?.data)
+}
+
+/// Changes profile `name`'s settings with `change` and saves them. A running
+/// profile's bridge applies the live ones at once; the display applies at the
+/// next start.
+pub fn update(name: &str, change: impl FnOnce(&mut Settings)) -> Result<Settings> {
     let data = paths(name)?.data;
     let mut s = Settings::load(&data)?;
-    s.mode = mode.unwrap_or(s.mode);
-    s.size = size.unwrap_or(s.size);
+    change(&mut s);
     s.save(&data)?;
+    reload(name)?;
     Ok(s)
+}
+
+/// Has profile `name`'s bridge, if it runs, apply its saved settings.
+fn reload(name: &str) -> Result<()> {
+    let connection = zbus::blocking::connection::Builder::session()?
+        .method_timeout(Duration::from_secs(5))
+        .build()?;
+    let bus_name = crate::app_settings::bus_name(&crate::paths::ProfileName::new(name)?);
+    let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
+    if !bus.name_has_owner(bus_name.as_str().try_into()?)? {
+        return Ok(());
+    }
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        bus_name.as_str(),
+        crate::app_settings::PATH,
+        crate::app_settings::INTERFACE,
+    )?;
+    let _: () = proxy
+        .call("ReloadSettings", &())
+        .context("saved, but the running profile did not apply it")?;
+    Ok(())
 }
 
 /// Creates profile `name` with `settings`. Android sets up its data at the

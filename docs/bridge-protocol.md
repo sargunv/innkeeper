@@ -219,9 +219,9 @@ The CLI's `innkeeper app info|clear-cache|clear-data|stop|set` call `App`; for
 example
 `innkeeper app set org.example.app --escape-back on --permission android.permission.CAMERA=off`.
 
-`ReloadPreferences()` applies the profile's preferences file, which the caller
-has just written (`innkeeper-core` writes it whether or not a session runs): the
-bridge broadcasts the filtered desktop settings and picks up `mirror_apps`. An
+`ReloadSettings()` applies the profile's settings file, which the caller has
+just written (`innkeeper-core` writes it whether or not a session runs): the
+bridge broadcasts the filtered desktop settings and picks up `mirror-apps`. An
 unreadable or invalid file fails with `Failed`.
 
 `Import(h fd, s name) → t grant` makes a read-only documents grant for the

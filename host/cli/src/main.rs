@@ -119,24 +119,78 @@ enum ProfileCmd {
     /// Delete a stopped profile, with its apps and their data.
     Delete { name: String },
     /// Start a profile (default: the one in use) and wait for Android.
-    Start { name: Option<String> },
+    Start {
+        #[arg(conflicts_with = "all")]
+        name: Option<String>,
+        /// Every profile (Keep Running's login command).
+        #[arg(long)]
+        all: bool,
+    },
     /// Stop a profile (default: the one in use).
     Stop { name: Option<String> },
     /// Change a profile's settings (default: the one in use).
-    Set {
-        name: Option<String>,
-        /// adb on loopback TCP, for Android Studio, Gradle and adb; applies
-        /// at once.
-        #[arg(long, value_parser = ["on", "off"])]
-        adb: Option<String>,
-        /// Apps in windows of their own, or the whole device in one window;
-        /// applies at the next start.
-        #[arg(long, value_parser = ["windowed", "phone"])]
-        mode: Option<String>,
-        /// The phone's screen.
-        #[arg(long, value_parser = ["small-phone", "medium-phone", "medium-tablet"])]
-        size: Option<String>,
-    },
+    Set(SetArgs),
+}
+
+#[derive(clap::Args)]
+struct SetArgs {
+    name: Option<String>,
+    /// Apps in windows of their own, or the whole device in one window the
+    /// size of a preset; applies at the next start.
+    #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
+    display: Option<String>,
+    /// adb on loopback TCP, for Android Studio, Gradle and adb.
+    #[arg(long, value_parser = ["on", "off"])]
+    adb: Option<String>,
+    /// Minutes with nothing to do before the profile stops (1 to 120).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=120))]
+    idle_minutes: Option<u32>,
+    /// Never stop when idle, and start at login; for every profile.
+    #[arg(long, value_parser = ["on", "off"])]
+    keep_running: Option<String>,
+    /// Add apps installed inside Android to the app menu.
+    #[arg(long, value_parser = ["on", "off"])]
+    mirror_apps: Option<String>,
+    /// Follow the desktop's dark mode.
+    #[arg(long, value_parser = ["on", "off"])]
+    follow_dark: Option<String>,
+    /// Follow the desktop's accent colour.
+    #[arg(long, value_parser = ["on", "off"])]
+    follow_accent: Option<String>,
+    /// Follow the desktop's languages and regional formats.
+    #[arg(long, value_parser = ["on", "off"])]
+    follow_locale: Option<String>,
+    /// Follow the desktop's 12- or 24-hour clock.
+    #[arg(long, value_parser = ["on", "off"])]
+    follow_clock: Option<String>,
+}
+
+impl SetArgs {
+    /// The profile settings to change, if any, applied to `s`.
+    fn apply(&self, s: &mut profiles::Settings) -> bool {
+        let on = |v: &Option<String>| v.as_deref().map(|v| v == "on");
+        let mut changed = false;
+        let mut set = |field: &mut bool, v: Option<bool>| {
+            if let Some(v) = v {
+                *field = v;
+                changed = true;
+            }
+        };
+        set(&mut s.mirror_apps, on(&self.mirror_apps));
+        set(&mut s.follow_dark, on(&self.follow_dark));
+        set(&mut s.follow_accent, on(&self.follow_accent));
+        set(&mut s.follow_locale, on(&self.follow_locale));
+        set(&mut s.follow_clock, on(&self.follow_clock));
+        if let Some(d) = self.display.as_deref().and_then(profiles::Display::parse) {
+            s.display = d;
+            changed = true;
+        }
+        if let Some(m) = self.idle_minutes {
+            s.idle_minutes = m;
+            changed = true;
+        }
+        changed
+    }
 }
 
 /// Progress and warnings on stderr.
@@ -447,16 +501,13 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                     " "
                 };
                 let state = if p.running { "running" } else { "stopped" };
-                let mode = match p.settings.mode {
-                    profiles::Mode::Windowed => "windowed".to_string(),
-                    profiles::Mode::Phone => format!("phone {}", p.settings.size.name()),
-                };
-                let adb = if p.settings.debug_bridge {
+                let display = p.settings.display.name();
+                let adb = if p.settings.adb {
                     format!("adb {}", innkeeper_core::adb::serial(&p.settings))
                 } else {
                     String::new()
                 };
-                println!("{mark} {:<16} {state:<8} {mode:<20} {adb}", p.name);
+                println!("{mark} {:<16} {state:<8} {display:<14} {adb}", p.name);
             }
         }
         ProfileCmd::Create { name: n } => {
@@ -478,50 +529,61 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
             profiles::delete(&n)?;
             println!("deleted profile {n}");
         }
-        ProfileCmd::Start { name: n } => {
-            profiles::start(&name(n)?, &|m| eprintln!("innkeeper: {m}"))?;
+        ProfileCmd::Start { name: n, all } => {
+            let report = |m: &str| eprintln!("innkeeper: {m}");
+            if all {
+                // One that fails doesn't keep the others from starting.
+                let mut failed = None;
+                for p in profiles::list()? {
+                    if let Err(e) = profiles::start(&p.name, &report) {
+                        eprintln!("innkeeper: profile {}: {e:#}", p.name);
+                        failed = Some(e);
+                    }
+                }
+                if let Some(e) = failed {
+                    return Err(e);
+                }
+            } else {
+                profiles::start(&name(n)?, &report)?;
+            }
         }
         ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
-        ProfileCmd::Set {
-            name: n,
-            adb,
-            mode,
-            size,
-        } => {
-            let n = name(n)?;
-            ensure!(
-                adb.is_some() || mode.is_some() || size.is_some(),
-                "nothing to change (see --help)"
+        ProfileCmd::Set(args) => set(name(args.name.clone())?, &args)?,
+    }
+    Ok(())
+}
+
+/// `profile set`.
+fn set(name: String, args: &SetArgs) -> Result<()> {
+    let mut probe = profiles::Settings::default();
+    let profile_change = args.apply(&mut probe);
+    ensure!(
+        profile_change || args.adb.is_some() || args.keep_running.is_some(),
+        "nothing to change (see --help)"
+    );
+    if profile_change {
+        let s = profiles::update(&name, |s| {
+            args.apply(s);
+        })?;
+        if args.display.is_some() {
+            println!("display: {}, at the next start", s.display.name());
+        }
+    }
+    if let Some(on) = &args.keep_running {
+        innkeeper_core::preferences::save(innkeeper_core::preferences::Preferences {
+            keep_running: on == "on",
+        })?;
+    }
+    if let Some(on) = &args.adb {
+        let s = innkeeper_core::adb::set(&name, on == "on", &stderr)?;
+        if s.adb {
+            println!(
+                "adb on: {} ({})",
+                innkeeper_core::adb::serial(&s),
+                innkeeper_core::adb::address(&s)
             );
-            if mode.is_some() || size.is_some() {
-                let mode = mode.map(|m| match m.as_str() {
-                    "phone" => profiles::Mode::Phone,
-                    _ => profiles::Mode::Windowed,
-                });
-                let size = size.as_deref().and_then(profiles::Size::parse);
-                let s = profiles::set_mode(&n, mode, size)?;
-                println!(
-                    "mode: {} ({}), at the next start",
-                    if s.mode == profiles::Mode::Phone {
-                        "phone"
-                    } else {
-                        "windowed"
-                    },
-                    s.size.name()
-                );
-            }
-            if let Some(on) = adb {
-                let s = innkeeper_core::adb::set(&n, on == "on", &stderr)?;
-                if s.debug_bridge {
-                    println!(
-                        "adb on: {} ({})",
-                        innkeeper_core::adb::serial(&s),
-                        innkeeper_core::adb::address(&s)
-                    );
-                } else {
-                    println!("adb off");
-                }
-            }
+        } else {
+            println!("adb off");
         }
     }
     Ok(())
@@ -639,6 +701,48 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn profile_set_covers_every_setting() {
+        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse(
+            "profile set work --display small-phone --idle-minutes 30 --follow-dark off \
+             --mirror-apps on",
+        ) else {
+            panic!("profile set did not parse");
+        };
+        assert_eq!(a.name.as_deref(), Some("work"));
+        let mut s = profiles::Settings {
+            mirror_apps: false,
+            ..Default::default()
+        };
+        assert!(a.apply(&mut s));
+        assert_eq!(s.display, profiles::Display::SmallPhone);
+        assert_eq!(s.idle_minutes, 30);
+        assert!(!s.follow_dark && s.follow_accent && s.mirror_apps);
+        // Global and live-applied ones aren't profile file changes.
+        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --keep-running on --adb on")
+        else {
+            panic!("profile set did not parse");
+        };
+        assert!(!a.apply(&mut profiles::Settings::default()));
+        for bad in [
+            "profile set --idle-minutes 0",
+            "profile set --idle-minutes 121",
+            "profile set --display phone",
+            "profile set --mode phone",
+            "profile set --follow-dark maybe",
+            "profile start work --all",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        assert!(matches!(
+            parse("profile start --all"),
+            Ok(Cmd::Profile(ProfileCmd::Start {
+                all: true,
+                name: None
+            }))
+        ));
     }
 
     #[test]

@@ -4,23 +4,19 @@
 //! every path of its own ([`crate::paths`]). None is special: the first is
 //! made on demand as [`FIRST`], and can be renamed or deleted like any other.
 //!
-//! A profile's settings live in its data directory, beside Android's own data
-//! and the data version record (docs/session.md), so they move, back up and
-//! go with the data. Nothing here is specific to Android: the OpenHarmony
-//! guest can keep its profiles the same way.
+//! A profile's settings live in one file in its data directory, beside
+//! Android's own data and the data version record (docs/session.md), so they
+//! move, back up and go with the data. Nothing here is specific to Android:
+//! the OpenHarmony guest can keep its profiles the same way.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 /// The settings file in a profile's data directory.
 const FILE: &str = ".innkeeper-profile.toml";
-
-/// The settings format this build reads and writes. A newer one is refused
-/// rather than rewritten without the settings it doesn't know.
-pub const VERSION: u32 = 1;
 
 /// The name of the profile made when something needs one and there is none.
 pub const FIRST: &str = "default";
@@ -138,88 +134,98 @@ pub fn pick<'a>(profiles: &'a [ProfileName], chosen: Option<&str>) -> Option<&'a
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
-    pub version: u32,
-    /// The guest's debug bridge (Android's adb), on loopback TCP. Off by
-    /// default; it applies live.
-    pub debug_bridge: bool,
-    /// The bridge's port on 127.0.0.1, the profile's own once it has been on
-    /// (0: none yet; any port may be set). It stays, so tools keep finding
-    /// the profile there.
-    pub debug_bridge_port: u16,
-    /// How the guest shows: its apps in windows of their own, or one
-    /// device-shaped window. Applies at the next start.
-    pub mode: Mode,
-    /// The device's screen in [`Mode::Phone`].
-    pub size: Size,
+    /// How the guest shows. Applies at the next start.
+    pub display: Display,
+    /// Android's adb on loopback TCP. Off by default; it applies live.
+    pub adb: bool,
+    /// adb's port on 127.0.0.1, the profile's own once it has been on (0:
+    /// none yet; any port may be set). It stays, so tools keep finding the
+    /// profile there.
+    pub adb_port: u16,
+    /// Minutes with nothing to do before the session stops, 1 to 120
+    /// (unless Keep Running, [`crate::preferences`]). Applies live.
+    pub idle_minutes: u32,
+    /// Apps installed inside Android get app-menu entries. Applies live.
+    pub mirror_apps: bool,
+    /// Android follows the desktop's dark mode, accent colour, languages and
+    /// formats, and clock. Applies live.
+    pub follow_dark: bool,
+    pub follow_accent: bool,
+    pub follow_locale: bool,
+    pub follow_clock: bool,
 }
 
-/// How a profile shows on the desktop.
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            display: Display::Windowed,
+            adb: false,
+            adb_port: 0,
+            idle_minutes: 2,
+            mirror_apps: true,
+            follow_dark: true,
+            follow_accent: true,
+            follow_locale: true,
+            follow_clock: true,
+        }
+    }
+}
+
+/// How a profile shows on the desktop: each app task in a window of its own,
+/// or the whole device, its launcher and system bars, in one window the size
+/// of a device preset (Android Studio's virtual devices of the same names).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Mode {
-    /// Each app task in a window of its own.
+pub enum Display {
     #[default]
     Windowed,
-    /// The whole device, its launcher and system bars, in one window.
-    Phone,
-}
-
-/// A device screen preset: Android Studio's virtual devices of the same names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Size {
     SmallPhone,
-    #[default]
     MediumPhone,
     MediumTablet,
 }
 
-impl Size {
-    pub const ALL: [Size; 3] = [Size::SmallPhone, Size::MediumPhone, Size::MediumTablet];
+impl Display {
+    pub const ALL: [Display; 4] = [
+        Display::Windowed,
+        Display::SmallPhone,
+        Display::MediumPhone,
+        Display::MediumTablet,
+    ];
 
-    /// Width and height in pixels, in its natural orientation, and density.
-    pub fn screen(self) -> (u32, u32, u32) {
+    /// The device window's width and height in pixels, in its natural
+    /// orientation, and density; None when windowed.
+    pub fn screen(self) -> Option<(u32, u32, u32)> {
         match self {
-            Size::SmallPhone => (720, 1280, 320),
-            Size::MediumPhone => (1080, 2400, 420),
-            Size::MediumTablet => (2560, 1600, 320),
+            Display::Windowed => None,
+            Display::SmallPhone => Some((720, 1280, 320)),
+            Display::MediumPhone => Some((1080, 2400, 420)),
+            Display::MediumTablet => Some((2560, 1600, 320)),
         }
     }
 
     /// Its name in settings and on the command line.
     pub fn name(self) -> &'static str {
         match self {
-            Size::SmallPhone => "small-phone",
-            Size::MediumPhone => "medium-phone",
-            Size::MediumTablet => "medium-tablet",
+            Display::Windowed => "windowed",
+            Display::SmallPhone => "small-phone",
+            Display::MediumPhone => "medium-phone",
+            Display::MediumTablet => "medium-tablet",
         }
     }
 
-    pub fn parse(name: &str) -> Option<Size> {
+    pub fn parse(name: &str) -> Option<Display> {
         Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
-    /// Whether Android lays it out as a large screen (600 dp or more on
-    /// its short side), with a taskbar.
+    /// Whether Android lays the device out as a large screen (600 dp or more
+    /// on its short side), with a taskbar.
     pub fn large(self) -> bool {
-        let (w, h, dpi) = self.screen();
-        w.min(h) * 160 / dpi >= 600
+        self.screen()
+            .is_some_and(|(w, h, dpi)| w.min(h) * 160 / dpi >= 600)
     }
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            version: VERSION,
-            debug_bridge: false,
-            debug_bridge_port: 0,
-            mode: Mode::Windowed,
-            size: Size::MediumPhone,
-        }
-    }
-}
-
-/// Where debug bridge ports come from: the Android Emulator's adb ports, the
+/// Where adb ports come from: the Android Emulator's adb ports, the
 /// odd ones from 5555 to 5585, each with its console port one below. An adb
 /// server looks for devices there, so it finds a profile as
 /// `emulator-<port - 1>` with no `adb connect`, and so do Android Studio and
@@ -258,29 +264,33 @@ impl Settings {
     }
 
     pub fn parse(text: &str) -> Result<Self> {
-        // The version first: a newer file may have settings this build
-        // doesn't know.
-        let table: toml::Table = toml::from_str(text)?;
-        let version = match table.get("version") {
-            None => VERSION,
-            Some(v) => v
-                .as_integer()
-                .and_then(|v| u32::try_from(v).ok())
-                .context("version is not a number")?,
-        };
-        if version > VERSION {
-            bail!("made by a newer Innkeeper (version {version}; this one reads {VERSION})");
-        }
-        let mut s: Self = toml::from_str(text)?;
-        s.version = VERSION;
+        let s: Self = toml::from_str(text)?;
+        s.validate()?;
         Ok(s)
     }
 
-    /// Gives the debug bridge of the profile with data directory `data` a port
-    /// of its own, if it has none: one no other profile under `data_home` has
-    /// and nothing listens on. Returns whether it changed.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=120).contains(&self.idle_minutes),
+            "the idle timeout is 1 to 120 minutes"
+        );
+        Ok(())
+    }
+
+    /// Seconds with nothing to do before the session stops; 0: never.
+    pub fn idle_seconds(&self, keep_running: bool) -> u64 {
+        if keep_running {
+            0
+        } else {
+            u64::from(self.idle_minutes) * 60
+        }
+    }
+
+    /// Gives adb of the profile with data directory `data` a port of its
+    /// own, if it has none: one no other profile under `data_home` has and
+    /// nothing listens on. Returns whether it changed.
     pub fn assign_port(&mut self, data_home: &Path, data: &Path) -> Result<bool> {
-        if self.debug_bridge_port != 0 {
+        if self.adb_port != 0 {
             return Ok(false);
         }
         let taken: Vec<u16> = list(data_home)
@@ -288,28 +298,22 @@ impl Settings {
             .map(|n| data_home.join(crate::paths::per_profile("data", n)))
             .filter(|d| d != data)
             .filter_map(|d| Self::load(&d).ok())
-            .map(|s| s.debug_bridge_port)
+            .map(|s| s.adb_port)
             .collect();
-        self.debug_bridge_port =
-            pick_port(&taken, port_free).context("no free debug bridge port")?;
+        self.adb_port = pick_port(&taken, port_free).context("no free adb port")?;
         Ok(true)
     }
 
     /// Saves the settings into data directory `data`, creating it for a new
     /// profile.
     pub fn save(&self, data: &Path) -> Result<()> {
+        self.validate()?;
         fs::create_dir_all(data).with_context(|| format!("create {}", data.display()))?;
         let path = settings_path(data);
         let temp = path.with_extension("tmp");
         fs::write(&temp, toml::to_string(self)?)?;
         fs::rename(&temp, &path).with_context(|| format!("save {}", path.display()))
     }
-}
-
-/// Profile `name`'s desktop preferences directory.
-fn config_dir(name: &ProfileName) -> PathBuf {
-    crate::paths::xdg_home("XDG_CONFIG_HOME", ".config")
-        .join(crate::paths::per_profile("innkeeper", name))
 }
 
 fn ensure_stopped(paths: &crate::Paths) -> Result<()> {
@@ -321,18 +325,14 @@ fn ensure_stopped(paths: &crate::Paths) -> Result<()> {
     Ok(())
 }
 
-/// Renames profile `from.profile` to `to.profile`: its data, settings, logs
-/// and desktop preferences move; its composed root, a cache, is dropped. It
+/// Renames profile `from.profile` to `to.profile`: its data, settings and
+/// logs move; its composed root, a cache, is dropped. It
 /// must be stopped.
 pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
     ensure_stopped(from)?;
     ensure!(from.data.is_dir(), "no profile {}", from.profile);
     ensure!(!to.data.exists(), "profile {} exists already", to.profile);
-    for (a, b) in [
-        (&from.data, &to.data),
-        (&from.state, &to.state),
-        (&config_dir(&from.profile), &config_dir(&to.profile)),
-    ] {
+    for (a, b) in [(&from.data, &to.data), (&from.state, &to.state)] {
         if a.exists() {
             crate::sandbox::remove_tree(b)?;
             fs::rename(a, b).with_context(|| format!("move {} to {}", a.display(), b.display()))?;
@@ -343,16 +343,10 @@ pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
 }
 
 /// Deletes profile `paths.profile`'s files: its data, settings, composed
-/// root, logs, runtime files and desktop preferences. It must be stopped.
+/// root, logs and runtime files. It must be stopped.
 pub fn delete(paths: &crate::Paths) -> Result<()> {
     ensure_stopped(paths)?;
-    for dir in [
-        &paths.data,
-        &paths.root,
-        &paths.state,
-        &paths.run,
-        &config_dir(&paths.profile),
-    ] {
+    for dir in [&paths.data, &paths.root, &paths.state, &paths.run] {
         crate::sandbox::remove_tree(dir)?;
     }
     Ok(())
@@ -415,47 +409,47 @@ mod tests {
     }
 
     #[test]
-    fn settings_default_round_trip_and_versions() {
+    fn settings_default_round_trip_and_bounds() {
         let d = dir("settings");
-        // No file: today's behaviour.
         assert_eq!(Settings::load(&d).unwrap(), Settings::default());
         let data = d.join("data-new");
-        Settings::default().save(&data).unwrap();
-        assert_eq!(Settings::load(&data).unwrap(), Settings::default());
-        assert!(
-            fs::read_to_string(settings_path(&data))
-                .unwrap()
-                .contains("version = 1")
-        );
-        // No version: the first one.
+        let mut s = Settings {
+            display: Display::SmallPhone,
+            follow_accent: false,
+            idle_minutes: 7,
+            ..Settings::default()
+        };
+        s.save(&data).unwrap();
+        assert_eq!(Settings::load(&data).unwrap(), s);
+        assert_eq!(s.idle_seconds(false), 420);
+        assert_eq!(s.idle_seconds(true), 0);
+        s.idle_minutes = 0;
+        assert!(s.save(&data).is_err());
         assert_eq!(Settings::parse("").unwrap(), Settings::default());
-        assert!(
-            Settings::parse("version = 2\nnew-thing = 1\n")
-                .unwrap_err()
-                .to_string()
-                .contains("newer")
-        );
-        assert!(Settings::parse("version = \"one\"").is_err());
-        assert!(Settings::parse("version = 1\ntypo = true\n").is_err());
-        let s = Settings::parse("debug-bridge = true\ndebug-bridge-port = 16501\n").unwrap();
-        assert!(s.debug_bridge && s.debug_bridge_port == 16501);
-        assert!(!Settings::default().debug_bridge);
-        let s = Settings::parse("mode = \"phone\"\nsize = \"small-phone\"\n").unwrap();
-        assert_eq!((s.mode, s.size), (Mode::Phone, Size::SmallPhone));
-        assert_eq!(Settings::default().mode, Mode::Windowed);
-        assert!(Settings::parse("mode = \"tv\"").is_err());
-        fs::write(settings_path(&data), "version = [").unwrap();
+        let s =
+            Settings::parse("adb = true\nadb-port = 16501\ndisplay = \"medium-tablet\"\n").unwrap();
+        assert!(s.adb && s.adb_port == 16501 && s.display == Display::MediumTablet);
+        for bad in [
+            "typo = true",
+            "display = \"tv\"",
+            "idle-minutes = 121",
+            "follow-dark = \"yes\"",
+        ] {
+            assert!(Settings::parse(bad).is_err(), "{bad}");
+        }
+        fs::write(settings_path(&data), "display = [").unwrap();
         assert!(Settings::load(&data).is_err());
     }
 
     #[test]
-    fn size_presets() {
-        for s in Size::ALL {
-            assert_eq!(Size::parse(s.name()), Some(s));
+    fn display_presets() {
+        for s in Display::ALL {
+            assert_eq!(Display::parse(s.name()), Some(s));
         }
-        assert_eq!(Size::parse("huge"), None);
-        assert!(!Size::SmallPhone.large() && !Size::MediumPhone.large());
-        assert!(Size::MediumTablet.large());
+        assert_eq!(Display::parse("huge"), None);
+        assert_eq!(Display::Windowed.screen(), None);
+        assert!(!Display::SmallPhone.large() && !Display::MediumPhone.large());
+        assert!(Display::MediumTablet.large() && !Display::Windowed.large());
     }
 
     #[test]
@@ -473,7 +467,7 @@ mod tests {
         let d = dir("ports");
         let other = d.join("data-other");
         Settings {
-            debug_bridge_port: 5555,
+            adb_port: 5555,
             ..Settings::default()
         }
         .save(&other)
@@ -482,16 +476,16 @@ mod tests {
         // a free pair.
         let mut s = Settings::default();
         assert!(s.assign_port(&d, &d.join("data-new")).unwrap());
-        assert!(s.debug_bridge_port != 5555 && ports().any(|p| p == s.debug_bridge_port));
+        assert!(s.adb_port != 5555 && ports().any(|p| p == s.adb_port));
         let mut again = Settings::load(&other).unwrap();
         assert!(!again.assign_port(&d, &other).unwrap());
-        assert_eq!(again.debug_bridge_port, 5555);
+        assert_eq!(again.adb_port, 5555);
         let mut explicit = Settings {
-            debug_bridge_port: 16500,
+            adb_port: 16500,
             ..Settings::default()
         };
         assert!(!explicit.assign_port(&d, &d.join("data-x")).unwrap());
-        assert_eq!(explicit.debug_bridge_port, 16500);
+        assert_eq!(explicit.adb_port, 16500);
     }
 
     #[test]

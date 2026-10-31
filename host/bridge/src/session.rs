@@ -195,10 +195,10 @@ impl SessionApi {
     #[zbus(signal)]
     async fn changed(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
 
-    /// Applies the profile's preferences file, which the caller has just
+    /// Applies the profile's settings file, which the caller has just
     /// written.
-    fn reload_preferences(&self) -> zbus::fdo::Result<()> {
-        let prefs = innkeeper_core::preferences::Preferences::load()
+    fn reload_settings(&self) -> zbus::fdo::Result<()> {
+        let prefs = innkeeper_core::profiles::own()
             .map_err(|e| zbus::fdo::Error::Failed(format!("{e:#}")))?;
         let mirrored = self
             .apps

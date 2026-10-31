@@ -92,11 +92,11 @@ adb -s emulator-5556 install app.apk
 
 - Each profile gets an adb port as the Android Emulator does: the first odd port
   from 5555 to 5585 whose pair (the console port, one below) nothing uses and no
-  other profile has, kept in its settings (`debug-bridge-port`, which may also
-  be set to any port). An adb server looks for devices there, so it lists the
-  profile as `emulator-<port - 1>` with no `adb connect`, and so do Android
-  Studio and Gradle. Use that serial: AGP 9.4.1's `connectedAndroidTest` fails
-  for `host:port` serials even when every test passes.
+  other profile has, kept in its settings (`adb-port`, which may also be set to
+  any port). An adb server looks for devices there, so it lists the profile as
+  `emulator-<port - 1>` with no `adb connect`, and so do Android Studio and
+  Gradle. Use that serial: AGP 9.4.1's `connectedAndroidTest` fails for
+  `host:port` serials even when every test passes.
 - A running adb server finds a profile started after it once told, as the
   emulator tells it: `innkeeper adb` starts the profile if needed and announces
   it to the server (`ANDROID_ADB_SERVER_PORT`, default 5037), with no `adb` in
@@ -108,9 +108,10 @@ adb -s emulator-5556 install app.apk
   other key is refused (`unauthorized`).
 
 Run instrumented tests that take screenshots (`UiAutomation.takeScreenshot`,
-screenshot-diff libraries) in phone mode (`innkeeper profile set --mode phone`).
-In windowed mode each app window is its own virtual display, so a capture of the
-default display does not show the app.
+screenshot-diff libraries) in phone mode
+(`innkeeper profile set --display medium-phone`). In windowed mode each app
+window is its own virtual display, so a capture of the default display does not
+show the app.
 
 ## Android logs
 

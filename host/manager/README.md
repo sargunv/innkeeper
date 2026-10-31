@@ -48,24 +48,28 @@ bridge's session D-Bus API
 Clearing data and uninstalling ask first. Controls stay disabled until Android
 answers, then every value is read again; an error offers a fresh read.
 
-## Preferences
+## Profile Settings
 
-`src/preferences.rs` (Ctrl+,): following the desktop's appearance,
-language/region and clock (each on by default), idle shutdown and app-menu
-mirroring. It also says that apps aren't isolated from each other and opens
-Android Settings in its own window.
+`src/preferences.rs` (Ctrl+,): the shown profile's settings, read without
+starting Android: its Display, windowed or a phone preset for its next start
+([phone mode](../../docs/display.md#phone-mode)); following the desktop's
+appearance, language/region and clock (each on by default); its idle timeout;
+app-menu mirroring; and an adb switch that applies at once
+([development.md](../../docs/development.md#adb-into-a-profile)). It also says
+that apps aren't isolated from each other and opens Android Settings in its own
+window.
 
-- Preferences live in `$XDG_CONFIG_HOME/innkeeper-<profile>/preferences.toml`
-  and are read without starting Android. A running session takes changes through
-  `Session1`; otherwise they apply at the next start. Desktop following,
-  mirroring and the idle timeout change live.
+- Settings live in the profile's one settings file
+  ([session.md](../../docs/session.md#profiles)). A running profile takes
+  changes through `Session1`'s `ReloadSettings`: desktop following, mirroring
+  and the idle timeout change live, the display at the next start.
 - Turning off desktop following keeps Android's current value and leaves later
   changes in Android Settings alone. Turning off mirroring keeps existing
   launchers; turning it back on adds apps installed meanwhile.
 - When idle, Android stops after 2 minutes by default (1 to 120). **Keep
-  Running** disables idle shutdown and requests login startup through the
-  Background portal; if the portal denies it, the setting stays off. The portal
-  keeps one login command, so the profile that last turned it on starts.
+  Running** is every profile's: no profile stops when idle, and the Background
+  portal's one login command starts them all. If the portal denies it, the
+  setting stays off.
 
 ## Profiles
 
@@ -73,7 +77,4 @@ Android Settings in its own window.
 start and stop. The window shows one profile's apps, named under its title;
 **Show Apps** switches to another and remembers it for the CLI. Opening the
 manager with no profile creates `default`. Deleting asks first and removes the
-profile's apps, data, settings and app-menu entries. Each profile also has a
-Display row, windowed or a phone preset for its next start
-([phone mode](../../docs/display.md#phone-mode)), and an adb switch that applies
-at once ([development.md](../../docs/development.md#adb-into-a-profile)).
+profile's apps, data, settings and app-menu entries.
