@@ -5,17 +5,12 @@
 #
 # usage: sandbox.sh <image-dir> <layer-dir> <data-dir> <pivot-exec>
 #
-# <image-dir> holds the pinned image's partitions (image/ohos/fetch.sh):
-# system/ is system.img's root (system-as-root), vendor/ is vendor.img.
-# <layer-dir> is ohos:build's output: bin/innkeeper-brk; sys_prod/, our
-# files on OH's own product partition (empty in the image, but on init's cfg
-# path and the linker's search path); and vendor/, our VDIs, which take the
-# place of the image's in /vendor. The image is never changed.
+# <image-dir> is image/ohos/fetch.sh's img/, <layer-dir> ohos:build's output.
 # With INNKEEPER_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
 # display shows in a desktop window.
 # The sandbox's / is a writable tmpfs, so OH's root is built from symlinks
 # beside the runtime's /usr, as the Android session does
-# (host/launcher/src/flatpak.rs).
+# (host/launcher/src/flatpak.rs). The image is never changed.
 set -euo pipefail
 usage="usage: sandbox.sh <image-dir> <layer-dir> <data-dir> <pivot-exec>"
 img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage} pivot=${4:?$usage}
@@ -45,10 +40,9 @@ overlay() {
   done
 }
 overlay /vendor "$img/vendor" "$layer/vendor"
-# The display, and so the desktop window: the composer's panel
-# (ohos/vendor/display) and DMS's density, which DMS takes from its config's
-# <dpi> alone, never from the panel's size. At 320 dpi a 720x1280 panel is
-# 360x640 vp: a phone, in layouts and in the window.
+# The composer's panel (ohos/vendor/display) and DMS's density, which DMS
+# takes from its config's <dpi> alone. At 320 dpi a 720x1280 panel is
+# 360x640 vp: a phone.
 display=720x1280@320
 dms=etc/window/resources
 for d in etc etc/window $dms; do
@@ -108,11 +102,8 @@ for n in binder hwbinder vndbinder access_token_id; do
   chmod 666 "/dev/$n"
 done
 # DRM: only the first render node opens (the broker's policy; /dev/null if
-# there is none), never a card node, whose KMS is the host's display. The
-# image's Mesa has no radeonsi, and CI has no GPU: render_service draws with
-# llvmpipe either way.
+# there is none), never a card node, whose KMS is the host's display.
 render=$(compgen -G '/dev/dri/renderD*' | head -n 1 || true)
-# The bridge, for the composer's window (ohos/vendor/display).
 if [[ -n ${INNKEEPER_OHOS_BRIDGE:-} ]]; then
   run=$XDG_RUNTIME_DIR/innkeeper-ohos
   mkdir -p "$run/bridge" "$data/../ohos-bridge"

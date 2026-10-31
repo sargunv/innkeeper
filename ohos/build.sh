@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ohos:build: the OpenHarmony session's layer in out/build/ohos/layer, kept
+# ohos:build: the OpenHarmony guest's layer in out/build/ohos/layer, kept
 # out of out/stage and the Android build:
-#   bin/innkeeper-brk      the broker, static musl (OH's root has no bionic)
-#   sys_prod/             our files on OH's product partition (ohos/sandbox.sh)
-#   vendor/               our VDIs, in place of the image's (ohos/vendor)
+#   bin/innkeeper-brk  the broker, static musl (OH's root has no Bionic)
+#   sys_prod/          our files on OH's product partition (ohos/sandbox.sh)
+#   vendor/            our VDIs, in place of the image's (ohos/vendor)
 set -euo pipefail
 top=$(cd "$(dirname "$0")/.." && pwd)
 cd "$top"

@@ -1,10 +1,6 @@
-# The OpenHarmony image the OH session boots (ohos/): Oniro's x86_64
-# emulator build of OpenHarmony 7.0-Release, from its public GitHub release.
-# image/ohos/fetch.sh downloads it at setup; we never redistribute it. Only
-# system.img and vendor.img are used: the guest kernel, ramdisk and updater
-# are discarded (#191). See image/ohos/README.md.
+# The OpenHarmony image the OH guest boots; see README.md.
 
-# Image name: the directory under out/ohos/images/.
+# The directory under out/ohos/images/.
 name = "oniro-7.0"
 # const.product.software.version in /system/etc/param/ohos.para.
 version = "OpenHarmony 7.0.0.39"
