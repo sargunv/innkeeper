@@ -48,6 +48,8 @@ overlay /vendor "$img/vendor" "$layer/vendor"
 ln -sfn "$layer/sys_prod" /sys_prod
 mkdir -p "$data"
 ln -sfn "$data" /data
+# Each app's own /data/storage, which the shim keeps open in app processes.
+ln -sfn /proc/self/fd/990 "$data/storage"
 # The image's other top-level entries where the sandbox has none: /chipset
 # and the empty mount points. The sandbox keeps its /bin, /etc, /lib64 and
 # /usr for the glibc side.

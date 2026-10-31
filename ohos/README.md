@@ -6,14 +6,15 @@ An OpenHarmony userspace as a second guest, on the same supervisor as Android
 host kernel: OH's init starts its services, samgr comes up and OH's core system
 abilities register with it. render_service composes OH's screen through our
 display HDI ([vendor/display](vendor/display/README.md)), and with the bridge it
-shows in a desktop window. Apps don't start yet (no app sandbox), and there is
-no input or app install. Nothing here is part of the Android session,
+shows in a desktop window. Apps spawn and run their ArkTS code, but SceneBoard,
+OH's window manager, doesn't start yet, so no app has a window; there is no
+input or app install. Nothing here is part of the Android session,
 `mise run build` or the stage.
 
 | File                      | What                                                          |
 | ------------------------- | ------------------------------------------------------------- |
 | `build.sh`                | `mise run ohos:build`: the layer in `out/build/ohos/layer`    |
-| `shim/ohos_shim.c`        | `liblinuxapk_ohos_shim.so`, preloaded into OH's init          |
+| `shim/ohos_shim.c`        | `liblinuxapk_ohos_shim.so`, preloaded into all of OH          |
 | `sandbox.sh`              | inside the sandbox: OH's root, then pivot-exec runs OH's init |
 | `run.py`                  | outside: a memory-capped dev sandbox, the boot log, probes    |
 | `sys_prod/etc/init/*.cfg` | our init services, on OH's product partition                  |
@@ -67,6 +68,13 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   (it refuses to run otherwise), makes mounts and namespace calls no-ops
   (Flatpak's seccomp filter refuses them before ours sees them) and priority
   raises best-effort.
+- **Apps.** appspawn gives each app a mount namespace: bind mounts into
+  `/mnt/sandbox/<user>/<bundle>`, then `pivot_root` there, and apps find their
+  own files only at those paths (`/data/storage/el1/bundle` is the app's code).
+  In appspawn and the other spawners the shim makes those binds symlinks at
+  their mount points, and `pivot_root` keeps the sandbox's `/data/storage` open
+  on a fixed fd; the session's `/data/storage` links to `/proc/self/fd/<fd>`, so
+  each app process sees its own. The rest of an app's root is the session's.
 - **Broker.** The same broker, built static for musl (OH's root has no Bionic),
   with `LINUXAPK_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
   `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's
@@ -76,6 +84,6 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
 Known gaps, visible in the logs and not fatal: no SELinux policy (the image
 ships none), `mksandbox` can't `pivot_root`, ueventd's coldboot can't write the
 read-only host sysfs, there are no cgroups or `/dev/memcg`, and hilogd reads
-part of init's `/dev/kmsg`. Fatal for apps: appspawn puts each app in a mount
-namespace (`unshare`, bind mounts, `pivot_root`), which Flatpak refuses, so no
-app process starts.
+part of init's `/dev/kmsg`. SceneBoard doesn't start: BMS's home-ability queries
+match nothing (it logs the legacy launcher as disabled in SceneBoard mode), so
+UI abilities have no window manager.
