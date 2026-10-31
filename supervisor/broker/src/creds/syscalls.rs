@@ -327,7 +327,7 @@ impl Vid {
             }
             _ => return Answer::Errno(libc::ENOSYS),
         };
-        match table::apply(&c, &op, caps(tid, &c)) {
+        match table::apply(&c, &op, caps(&c)) {
             Err(e) => Answer::Errno(e),
             Ok((new, ret)) => {
                 if new != c
@@ -533,22 +533,12 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
     if r == 0 { Ok(()) } else { Err(errno()) }
 }
 
-/// CAP_SETUID/CAP_SETGID: virtual root has both, since no process in the
-/// sandbox has real capabilities; anyone else, the thread's real effective
-/// ones.
-fn caps(tid: i32, c: &Creds) -> table::Caps {
-    if c.euid == 0 {
-        return table::Caps {
-            setgid: true,
-            setuid: true,
-        };
-    }
-    let eff = status_field(tid, "CapEff:")
-        .and_then(|v| u64::from_str_radix(&v, 16).ok())
-        .unwrap_or(0);
+/// CAP_SETUID/CAP_SETGID: virtual root has both. Every other uid has neither:
+/// a sandboxed `CapEff` is always 0, so there is no set to read.
+fn caps(c: &Creds) -> table::Caps {
     table::Caps {
-        setgid: eff & (1 << 6) != 0,
-        setuid: eff & (1 << 7) != 0,
+        setgid: c.euid == 0,
+        setuid: c.euid == 0,
     }
 }
 
