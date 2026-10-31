@@ -1,23 +1,6 @@
-//! Innkeeper desktop bridge: a host-side daemon that clients in the Android
-//! session reach over a `SOCK_SEQPACKET` socket. Services plug in through
-//! `ipc::server::Registry`. See `docs/bridge-protocol.md` and `host/bridge/README.md`.
-//!
-//! - `ipc`: framing, transport, HELLO, the server and blobs
-//! - `audio` (id 1): the audio service (PipeWire output)
-//! - `display` (id 2): the composer's displays in host windows
-//! - `system` (id 3): desktop settings, notifications, the clipboard, web
-//!   links and media sessions, for the Innkeeper System app
-//! - `documents` (id 4): host files the user picks in the FileChooser portal
-//! - `apps` (id 5): desktop entries for apps installed inside Android
-//! - `input` (id 6): window requests, the host seat and input methods, for
-//!   the Innkeeper System app
-//! - `a11y` (id 7): Android apps' accessibility trees on AT-SPI, for the
-//!   Innkeeper System app
-//! - `hoststate` (id 8): battery, power saver, network and location, for the
-//!   Health HAL and the Innkeeper System app
-//! - `session`: the `dev.sargunv.Innkeeper.Session1` D-Bus API for desktop
-//!   clients, relayed to the system app over the apps channel
-//! - `log`: stderr logging and the debug trace (`INNKEEPER_BRIDGE_DEBUG=1`)
+//! The Innkeeper desktop bridge: services Android clients reach over
+//! `bridge.sock`. The services and their ids are in `host/bridge/README.md`;
+//! the protocol is `docs/bridge-protocol.md`.
 
 pub mod a11y;
 pub mod apps;

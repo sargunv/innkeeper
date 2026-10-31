@@ -682,6 +682,8 @@ class WindowManagerFeature(
     }
   }
 
+  // A hidden window's display group sleeps, which stops its activity; each window owns its group,
+  // so this can't sleep another window or display 0. The display and tasks stay registered.
   private fun setVisible(w: AppWindow, shown: Boolean) {
     val visible = w.visibility.update(shown) ?: return
     val now = SystemClock.uptimeMillis()
