@@ -49,7 +49,7 @@ memory capped as locally.
   every source, build script, workflow and toolchain input. An exact hit
   restores the stage and probes APK and skips the build job's setup and build;
   tests still run.
-- **Cargo, ccache, Gradle:** keyed by OS/architecture, job and
+- **Cargo, sccache, Gradle:** keyed by OS/architecture, job and
   dependency/toolchain pins, with prefix restores; each tool checks its own
   inputs. Mesa/LLVM and the image tools keep their own input hashes. Cold
   Mesa/LLVM builds fit in the 120-minute build timeout. The package job does not
