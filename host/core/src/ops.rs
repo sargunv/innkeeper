@@ -3,7 +3,6 @@
 //! thread; progress and warnings go to a [`Report`] callback.
 
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -458,32 +457,10 @@ pub fn refresh_entries() -> usize {
     xdg::refresh_entries(&Dirs::from_env())
 }
 
-/// Shown once after the first session starts.
-pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
-    inside Flatpak they all run as your user, as desktop apps do.";
-pub const SINGLE_UID_DOCS: &str =
-    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#app-isolation";
-
-/// [`SINGLE_UID_NOTICE`] if the session is running and the
-/// notice hasn't been shown yet. It counts as shown from now on (a stamp in
-/// [`paths::notices_dir`]).
-pub fn single_uid_notice(running: bool) -> Option<&'static str> {
-    notice_once(&paths::notices_dir(), running)
-}
-
-fn notice_once(dir: &Path, running: bool) -> Option<&'static str> {
-    if !running {
-        return None;
-    }
-    fs::create_dir_all(dir).ok()?;
-    // Whoever creates the stamp shows the notice.
-    fs::File::create_new(dir.join("single-uid")).ok()?;
-    Some(SINGLE_UID_NOTICE)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn compatibility_uses_image_abis() {
@@ -534,17 +511,5 @@ mod tests {
         assert_eq!(version_name(" 2.7.50-r-2024 "), "2.7.50-r-2024");
         assert_eq!(version_name("1.0\u{202E}"), "");
         assert_eq!(version_name(&"9".repeat(100)).chars().count(), 64);
-    }
-
-    #[test]
-    fn single_uid_notice_shows_once() {
-        let dir = crate::test_dir("single-uid-notice");
-        let notices = dir.join("notices");
-        assert_eq!(notice_once(&notices, true), Some(SINGLE_UID_NOTICE));
-        assert_eq!(notice_once(&notices, true), None);
-        assert!(notices.join("single-uid").is_file());
-        assert_eq!(notice_once(&dir.join("other"), false), None);
-        assert_eq!(notice_once(&dir.join("none"), false), None);
-        fs::remove_dir_all(&dir).unwrap();
     }
 }

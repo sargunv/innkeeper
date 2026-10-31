@@ -580,12 +580,6 @@ fn main() -> ExitCode {
             .and_then(|n| innkeeper_core::adb::connect(&n, &stderr))
             .map(|serial| println!("connected: adb -s {serial} shell")),
     };
-    if let Some(n) = Session::find()
-        .ok()
-        .and_then(|s| ops::single_uid_notice(s.running()))
-    {
-        eprintln!("innkeeper: note: {n} See {}", ops::SINGLE_UID_DOCS);
-    }
     match res {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

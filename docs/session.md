@@ -148,7 +148,7 @@ stateDiagram-v2
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `root-<profile>/` (the composed root), `addons/` |
 | `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                              |
-| `$XDG_STATE_HOME/innkeeper/`                         | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                                      |
+| `$XDG_STATE_HOME/innkeeper/`                         | `profile`, the one in use (shared by every profile)                                                                                                                                      |
 | `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                             |
 
 `INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile

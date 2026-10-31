@@ -91,12 +91,6 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
     }
 }
 
-/// Where one-time notices remember they were shown:
-/// `$XDG_STATE_HOME/innkeeper/notices` (shared by every profile).
-pub fn notices_dir() -> PathBuf {
-    xdg_home("XDG_STATE_HOME", ".local/state").join("innkeeper/notices")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

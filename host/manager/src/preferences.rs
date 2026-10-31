@@ -12,6 +12,9 @@ use crate::{
     worker,
 };
 
+const ISOLATION_DOCS: &str =
+    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#app-isolation";
+
 struct Page {
     window: WeakWindow,
     content: gtk::Box,
@@ -205,8 +208,28 @@ impl Page {
         page.add(&apps);
         let privacy = adw::PreferencesGroup::builder()
             .title("App Isolation")
-            .description(innkeeper_core::ops::SINGLE_UID_NOTICE)
+            .description(
+                "Android apps are not isolated from each other: they all run as your user, \
+                 as desktop apps do.",
+            )
             .build();
+        let docs = adw::ActionRow::builder()
+            .title("Learn More")
+            .activatable(true)
+            .build();
+        docs.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
+        let w = self.window.upgrade().map(|w| w.downgrade());
+        docs.connect_activated(move |_| {
+            gtk::UriLauncher::new(ISOLATION_DOCS).launch(
+                w.as_ref()
+                    .and_then(|w| w.upgrade())
+                    .map(|w| w.win.clone())
+                    .as_ref(),
+                gtk::gio::Cancellable::NONE,
+                |_| {},
+            );
+        });
+        privacy.add(&docs);
         page.add(&privacy);
         self.content.append(&page);
     }
