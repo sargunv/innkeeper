@@ -162,7 +162,7 @@ env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='compat') 
 run = "tests/compat/run.sh"
 
 [tasks."ohos:test"]
-description = "Boot the pinned OpenHarmony image in a test sandbox until samgr is ready; needs mise run build"
+description = "Boot the pinned OpenHarmony image in a test sandbox until its core system abilities register; needs mise run build"
 depends = ["ohos:build"]
 env = { LINUXAPK_INSTANCE = "{{ env.LINUXAPK_INSTANCE | default(value='ohos') }}" }
 run = """

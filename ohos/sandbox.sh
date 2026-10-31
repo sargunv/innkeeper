@@ -63,8 +63,8 @@ mkfifo -m 666 /dev/kmsg
   head -c 64M
   cat >/dev/null
 } <>/dev/kmsg >>"${LINUXAPK_OHOS_KMSG:-/dev/null}" &
-# The binder nodes the broker serves.
-for n in binder hwbinder vndbinder; do
+# The binder nodes and the access-token node, which the broker serves.
+for n in binder hwbinder vndbinder access_token_id; do
   : >"/dev/$n"
   chmod 666 "/dev/$n"
 done
