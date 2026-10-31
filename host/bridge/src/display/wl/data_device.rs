@@ -39,7 +39,8 @@ impl Clipboard {
         shared: &Shared,
         ev: &EventLoop<State>,
     ) -> Result<Option<Self>> {
-        // Gate before binding anything: #72 disables reads and writes together.
+        // Gate before binding anything: a session without the hub neither reads
+        // nor writes the desktop clipboard.
         let Some(hub) = shared.clipboard().cloned() else {
             return Ok(None);
         };

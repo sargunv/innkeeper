@@ -16,17 +16,16 @@ cap and `stop` ends it) and restarts it if it exits; clients reconnect.
 | a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                                                                              | `src/a11y/`      |
 | hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                                             | `src/hoststate/` |
 
-- **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
-  the profile's XDG runtime and state dirs (socket, MPRIS artwork, document
-  grants, log), `--allow-uid` and `--system-app-dir` set who may connect, and
-  `--test-session` (also `INNKEEPER_TEST=1`) makes a test session
+- **Usage:** the header of `src/main.rs`. `--test-session` (also
+  `INNKEEPER_TEST=1`) makes a test session
   ([docs/security.md](../../docs/security.md#test-sessions)).
-- **Environment:** `INNKEEPER_AUDIO_SINK` (one PipeWire sink),
-  `INNKEEPER_AUDIO_SOURCE` (capture source, default: desktop default),
-  `INNKEEPER_BRIDGE_VERBOSE=1` (per-stream stats), and the caller's
-  `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`,
-  `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's `plasma-localerc`), which
-  the launcher passes on.
+- **Environment:** the launcher translates its own `INNKEEPER_AUDIO_SINK` and
+  `INNKEEPER_BRIDGE_VERBOSE` into `--sink` and `-v`, and passes on
+  `INNKEEPER_AUDIO_SOURCE` (capture source, default: the desktop's),
+  `INNKEEPER_BENCH=1` (benchmark trace), `WAYLAND_DISPLAY`,
+  `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`, `XDG_DATA_HOME`
+  (mirrored desktop entries), `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's
+  `plasma-localerc`).
 - **Conventions:** a client can never block the bridge (events never wait, long
   work runs on service threads), decoders have focused protocol boundary tests,
   and shared memory the bridge hands out is sealed and never read back.
@@ -34,15 +33,15 @@ cap and `stop` ends it) and restarts it if it exits; clients reconnect.
 Protocol: [docs/bridge-protocol.md](../../docs/bridge-protocol.md); each
 service's messages are its `proto.rs` module doc. Tests:
 `cargo test -p innkeeper-bridge` (protocol, ring, a live server with hostile
-clients); `examples/{tone,window,system,hoststate}.rs` drive a running bridge
+clients). `examples/{tone,window,system,hoststate}.rs` drive a running bridge
 the way the Android clients do.
 
 ## Known limits
 
 Clipboard text and images sync through `ext_data_control_v1` where offered.
 GNOME has no data control, so it uses the display connection's `wl_data_device`
-and keyboard-enter serial: sync works only while a Innkeeper window has focus,
-as with Waydroid. A host copy arrives when a Innkeeper window regains focus; an
+and keyboard-enter serial: sync works only while an Innkeeper window has focus,
+as with Waydroid. A host copy arrives when an Innkeeper window regains focus; an
 Android copy made without focus is offered on the next keyboard enter.
 
 File copies support up to 16 regular files per selection, preserving each name,

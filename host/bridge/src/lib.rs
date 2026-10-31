@@ -16,10 +16,12 @@
 //! - `hoststate` (id 8): battery, power saver, network and location, for the
 //!   Health HAL and the Innkeeper System app
 //! - `log`: stderr logging
+//! - `bench`: the opt-in benchmark trace (`INNKEEPER_BENCH=1`)
 
 pub mod a11y;
 pub mod apps;
 pub mod audio;
+pub mod bench;
 pub mod display;
 pub mod documents;
 pub mod hoststate;
@@ -39,5 +41,3 @@ fn test_dir(name: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&d).unwrap();
     d
 }
-
-pub mod bench;

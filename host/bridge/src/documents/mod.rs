@@ -468,26 +468,22 @@ pub struct DocumentsService {
     store: Arc<Store>,
     events: Events,
     label: String,
-    policy: crate::system::Policy,
+    /// False in a test session: picks cancel without asking the portal.
+    desktop: bool,
 }
 
 impl DocumentsService {
-    pub fn new(
-        store: Arc<Store>,
-        peer: &Peer,
-        events: Events,
-        policy: crate::system::Policy,
-    ) -> DocumentsService {
+    pub fn new(store: Arc<Store>, peer: &Peer, events: Events, desktop: bool) -> DocumentsService {
         DocumentsService {
             store,
             events,
             label: peer.label.clone(),
-            policy,
+            desktop,
         }
     }
 
     fn pick(&mut self, p: Pick) -> Reply {
-        if !self.policy.portals {
+        if !self.desktop {
             crate::info!("documents: {}: pick cancelled (test session)", self.label);
             let _ = self.events.try_send(
                 proto::ty::PICK_DONE,
@@ -710,7 +706,7 @@ mod tests {
             store.clone(),
             &Peer::test(),
             Events::new(Arc::new(server)),
-            crate::system::Policy::for_session(true),
+            false,
         );
         for mode in [
             PickMode::Open,

@@ -11,7 +11,7 @@
 //!
 //! A denial (`Response` 1) holds for the bridge's lifetime: later starts get
 //! `DENIED` at once, so Android's apps see location as off for the session
-//! while Android's own permission stays granted (#19).
+//! while Android's own permission stays granted.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

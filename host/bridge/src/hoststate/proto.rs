@@ -18,11 +18,10 @@
 //! | `0x4804` | LOCATION        | `f64 latitude`, `f64 longitude`, `f64 altitude` (NaN unknown), `f32 accuracy` (m), `f32 speed` (m/s), `f32 bearing` (degrees), all three -1 unknown, `u64 time` (ms since the epoch) |
 //! | `0x4805` | LOCATION_STATUS | `u8 status` (1 running, 2 denied, 3 disabled on the desktop, 4 unavailable), `u8 0`, `u16 0`                                                  |
 //!
-//! Location follows the portal-consent rule of #19: the bridge asks the
-//! desktop only on `LOCATION_START`, which the system app sends once an app
-//! that Android allowed asks for a location; a denial (status 2) or location
-//! turned off on the desktop (3) stays for the bridge's lifetime and is never
-//! retried through another backend.
+//! The bridge asks the desktop for location only on `LOCATION_START`, which
+//! the system app sends once an app that Android allowed asks for a location;
+//! a denial (status 2) or location turned off on the desktop (3) stays for the
+//! bridge's lifetime and is never retried through another backend.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 

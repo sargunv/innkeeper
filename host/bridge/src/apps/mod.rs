@@ -215,14 +215,12 @@ impl Config {
     }
 
     /// The existing entry for `pkg`: (ours, its version), or None.
-    fn existing(&self, pkg: &str) -> Option<(bool, Option<String>)> {
+    fn existing(&self, pkg: &str) -> Option<(bool, String)> {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
         let ours = desktop::read_key(&text, "X-Innkeeper-Origin").as_deref() == Some("android")
             && xdg::exec_profile(&exec) == self.profile;
-        // Rebuild pre-action mirrored entries once, even when the APK is unchanged.
-        let version = desktop::read_key(&text, "X-Innkeeper-NewWindow")
-            .map(|_| desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default());
+        let version = desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default();
         Some((ours, version))
     }
 
@@ -233,7 +231,7 @@ impl Config {
         match self.existing(pkg) {
             None => have::MISSING,
             Some((false, _)) => have::NOT_OURS,
-            Some((true, Some(v))) if v == version => have::CURRENT,
+            Some((true, v)) if v == version => have::CURRENT,
             Some((true, _)) => have::MISSING,
         }
     }
@@ -538,9 +536,6 @@ mod tests {
         );
         assert_eq!(cfg.have("org.ex.a", "1"), have::CURRENT);
         assert_eq!(cfg.have("org.ex.a", "2"), have::MISSING);
-        let old = text.replace("X-Innkeeper-NewWindow=true\n", "");
-        std::fs::write(cfg.dirs.app_desktop("org.ex.a"), old).unwrap();
-        assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
         let no_version = text.replace("X-Innkeeper-Version=1\n", "");
         std::fs::write(cfg.dirs.app_desktop("org.ex.a"), no_version).unwrap();
         assert_eq!(cfg.have("org.ex.a", ""), have::CURRENT);
