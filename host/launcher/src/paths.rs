@@ -201,7 +201,8 @@ impl Paths {
         self.share.join("android")
     }
 
-    /// Addon layers over the partitions, one dir each (e.g. microG).
+    /// Addon layers over the partitions, one dir each (test:bionic's test
+    /// vendor binaries).
     pub fn addons(&self) -> PathBuf {
         self.data_home.join("addons")
     }
@@ -213,12 +214,6 @@ impl Paths {
                 d.flatten()
                     .map(|e| e.path())
                     .filter(|p| p.is_dir())
-                    .filter(|p| {
-                        p.file_name().is_none_or(|n| n != "microg")
-                            || crate::preferences::Preferences::load()
-                                .map(|s| s.microg)
-                                .unwrap_or(true)
-                    })
                     .collect()
             })
             .unwrap_or_default();

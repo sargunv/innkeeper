@@ -15,8 +15,8 @@ import dev.sargunv.innkeeper.system.integration.HostStateFeature
 /**
  * Android's network location provider: system_server binds the highest `serviceVersion` among
  * services for `com.android.location.service.v3.NetworkLocationProvider` (the image enables the
- * overlay, `config_enableNetworkLocationOverlay`). Ours is version 0, so microG's provider wins
- * when the microG addon is installed. The fixes come from [HostLocation].
+ * overlay, `config_enableNetworkLocationOverlay`). Ours is version 0, so any other provider wins.
+ * The fixes come from [HostLocation].
  */
 class HostLocationService : Service() {
   private var provider: Provider? = null

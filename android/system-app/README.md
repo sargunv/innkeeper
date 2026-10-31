@@ -63,11 +63,11 @@ battery goes to the Health HAL,
 [android/vendor/health](../vendor/health/README.md)):
 
 - **Location:** `HostLocationService` is Android's network location provider
-  (`serviceVersion` 0, so microG's provider wins when the microG addon is
-  installed), and a `gps` test provider gets the same fixes, since the session
-  has no GNSS HAL; FusedLocation combines them. Android's requests start and
-  stop one desktop session, at the most precise accuracy asked for. A refusal on
-  the desktop turns both providers off for the session.
+  (`serviceVersion` 0, so any other installed provider wins), and a `gps` test
+  provider gets the same fixes, since the session has no GNSS HAL; FusedLocation
+  combines them. Android's requests start and stop one desktop session, at the
+  most precise accuracy asked for. A refusal on the desktop turns both providers
+  off for the session.
 - **Power saver:** the desktop's power-saver profile is Android's battery saver
   (`setPowerSaveModeEnabled`), applied at each connect and change.
 - **Metered:** applied only in Flatpak mode, to `net/HostNetworkFeature.kt`'s

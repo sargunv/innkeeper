@@ -80,7 +80,7 @@ The composed root combines these layers; nothing in the image cache is modified.
 ```mermaid
 flowchart TB
   rt["start-time layer: $XDG_RUNTIME_DIR/innkeeper/layer<br/>vendor build.prop, APEX files for this image"]
-  add["addons: $XDG_DATA_HOME/innkeeper/addons/*<br/>e.g. microG"]
+  add["addons: $XDG_DATA_HOME/innkeeper/addons/*<br/>test:bionic's test vendor files"]
   stage["stage: out/stage/share/innkeeper/android<br/>overlay, HALs, drivers, system app"]
   derived["image-derived: images/&lt;build&gt;/derived/{common,single}<br/>permission fixes for fs_config owners"]
   img["image: images/&lt;build&gt;/img, apex-&lt;hash&gt;"]

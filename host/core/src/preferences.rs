@@ -19,13 +19,6 @@ pub fn decode(json: &str) -> Result<Preferences> {
     Ok(p)
 }
 
-/// The addon is optional and prepared separately from the application build.
-pub fn microg_available() -> bool {
-    crate::paths::xdg_home("XDG_DATA_HOME", ".local/share")
-        .join("innkeeper/addons/microg/system_ext/priv-app/GmsCore/GmsCore.apk")
-        .is_file()
-}
-
 /// Set the Background portal's login command. Never create an autostart file.
 fn autostart(enabled: bool) -> Result<()> {
     let connection = zbus::blocking::Connection::session()?;

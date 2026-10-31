@@ -15,7 +15,6 @@ image.
 | [system](system/README.md)                   | `/system/bin/{innkeeper-exec,iptables,…}`, rc                                        | init (exec relay), netd (no-op firewall)                         |
 | [system-app](system-app/README.md)           | `/system_ext/priv-app/InnkeeperSystem`, `/system_ext/etc/permissions`                | system_server, as a persistent privileged app                    |
 | [overlay](overlay/README.md)                 | rc, XML and blank files in every partition                                           | init, system_server, PackageManager                              |
-| [microg](microg/README.md)                   | the addons layer, `$XDG_DATA_HOME/innkeeper/addons/microg`                           | PackageManager (optional, `mise run microg`)                     |
 
 Props for `/vendor/build.prop` go to the stage's `share/innkeeper/props.d/`; the
 launcher merges them at start.

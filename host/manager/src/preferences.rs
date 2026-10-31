@@ -17,7 +17,6 @@ struct Page {
     content: gtk::Box,
     prefs: RefCell<Preferences>,
     busy: Cell<bool>,
-    addon: Cell<bool>,
 }
 
 pub fn page(window: &Window) -> adw::NavigationPage {
@@ -34,7 +33,6 @@ pub fn page(window: &Window) -> adw::NavigationPage {
         content,
         prefs: RefCell::new(Preferences::default()),
         busy: Cell::new(false),
-        addon: Cell::new(false),
     });
     page.connect_showing(move |_| state.load());
     page
@@ -44,14 +42,9 @@ impl Page {
     fn load(self: &Rc<Self>) {
         let s = self.clone();
         glib::spawn_future_local(async move {
-            let result = worker::run_quiet(|| {
-                Ok::<_, anyhow::Error>((Preferences::load()?, preferences::microg_available()))
-            })
-            .await;
-            match result {
-                Ok((p, addon)) => {
+            match worker::run_quiet(Preferences::load).await {
+                Ok(p) => {
                     s.prefs.replace(p);
-                    s.addon.set(addon);
                     s.show();
                 }
                 Err(e) => {
@@ -67,10 +60,8 @@ impl Page {
         if self.busy.replace(true) {
             return;
         }
-        let old = self.prefs.borrow().clone();
         change(&mut self.prefs.borrow_mut());
         let next = self.prefs.borrow().clone();
-        let restart = next.microg != old.microg;
         self.content.set_sensitive(false);
         let s = self.clone();
         glib::spawn_future_local(async move {
@@ -82,8 +73,6 @@ impl Page {
                     w.show_error(Op::Preferences, None, &e);
                 }
                 s.load();
-            } else if restart && let Some(w) = s.window.upgrade() {
-                _ = w.say("microG will change the next time Android starts");
             }
         });
     }
@@ -200,21 +189,6 @@ impl Page {
             .title("Android Integration")
             .build();
         self.switch(&apps, "Mirror Apps to the App Menu", "Add launchers for apps installed inside Android. Existing launchers are kept when turned off.", p.mirror_apps, |p,v| p.mirror_apps = v);
-        let microg = self.switch(
-            &apps,
-            "microG",
-            if self.addon.get() {
-                "Use the installed microG addon · Requires an Android restart"
-            } else {
-                "The optional microG addon is not installed"
-            },
-            p.microg && self.addon.get(),
-            |p, v| p.microg = v,
-        );
-        microg.set_sensitive(self.addon.get());
-        let caveat = adw::ActionRow::builder().title("microG Compatibility")
-            .subtitle("Google Play Services client libraries remain unsupported, including Firebase push, Google sign-in, Maps API and licensing. Innkeeper does not support signature spoofing.").build();
-        apps.add(&caveat);
         let settings = adw::ActionRow::builder()
             .title("Android Settings…")
             .subtitle("Open Android Settings in its own window")

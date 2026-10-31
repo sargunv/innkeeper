@@ -45,7 +45,7 @@ after `mise run build`) and builds nothing. Its files:
   $XDG_STATE_HOME/innkeeper-<profile>/   logs (session, kmsg, bridge) and the
     documents service's grants
   $XDG_DATA_HOME/innkeeper/              images/, data-<profile>/ (Android's
-    /data), addons/ (layers over the partitions, e.g. microG),
+    /data), addons/ (test layers over the partitions),
     root-<profile>/ (the composed root)
 
 Environment:
