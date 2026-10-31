@@ -60,13 +60,12 @@ flowchart LR
   runs it on a nested KWin with private PipeWire/Pulse (no hardware monitors), a
   private bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them
   after.
-- `packaging/flatpak/build.sh` builds the Flatpak from the committed tree and
-  installs it into `FLATPAK_USER_DIR`; use a private one under `out/`
-  ([packaging/flatpak](../packaging/flatpak/README.md)).
-- `mise run install-dev` builds and installs the committed Flatpak in the user
-  installation, adding the manager to the app menu as an APK handler. Do this
-  only for a checkout you mean to use as your Innkeeper; then
-  `flatpak run dev.sargunv.Innkeeper install app.apk` uses it.
+- `mise run package` builds the Flatpak bundle from the committed tree into
+  `out/release/` ([packaging/flatpak](../packaging/flatpak/README.md)).
+  `mise run package -- --install` also installs it into `FLATPAK_USER_DIR`
+  (default: the user installation, adding the manager to the app menu as an APK
+  handler). Install into the user installation only for a checkout you mean to
+  use as your Innkeeper; use a private `FLATPAK_USER_DIR` under `out/` to test.
 - Use `INNKEEPER_PROFILE=<name>` for anything experimental: it is a separate
   session with its own `/data`, logs and sandbox. Add `INNKEEPER_TEST=1` to keep
   it off the real desktop ([security.md](security.md#test-sessions)).

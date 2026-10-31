@@ -18,9 +18,9 @@ screenshots, use the nested desktop in
 ## Main window
 
 - **APK handler:** the desktop entry declares the APK and bundle types, so "Open
-  With" offers the manager; `mise run install-dev` installs it for a checkout's
-  stage. It is single-instance: opening another APK adds an install page to the
-  running window.
+  With" offers the manager; `mise run package -- --install` installs it for a
+  checkout's stage. It is single-instance: opening another APK adds an install
+  page to the running window.
 - **First run** prepares the Android image ("Preparing Android"). The first
   session shows a one-time banner that apps aren't isolated from each other
   (shared with the CLI's notice).
