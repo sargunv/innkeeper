@@ -13,7 +13,8 @@ runs:
       id: inputs
       shell: bash
       run: |
-        # Include paths, symlinks and executable modes as well as contents.
+        # Every build input's tree (paths, symlinks, modes and contents): an
+        # exact hit restores the stage and probes and skips setup and build.
         digest=$(git ls-tree -r HEAD -- host supervisor/shim \
           supervisor/broker android image tools/build tools/container \
           packaging/flatpak Cargo.toml Cargo.lock \

@@ -130,6 +130,8 @@ wireplumber >"$N/wireplumber.log" 2>&1 &
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
 gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
+# CI's GPU-less runners: headless GNOME Shell with surfaceless llvmpipe needs
+# no DRM node and, unlike KWin's virtual backend, offers linux-dmabuf v3.
 if [ "$INNKEEPER_TEST_COMPOSITOR" = mutter ]; then
   echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
   exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 3200x1080 \\

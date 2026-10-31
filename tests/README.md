@@ -1,9 +1,7 @@
 # Tests
 
-Unit and low-level tests carry branches, edge cases and error handling; e2e
-keeps one common-path scenario per user-visible feature. Move variants down
-before removing them from e2e, preserving every bug regression at the cheapest
-level.
+What each tier tests is in [AGENTS.md](../AGENTS.md); move a variant down to a
+cheaper tier before removing it from e2e, keeping every bug regression.
 
 - `mise run test`: Rust, Kotlin protocol/input, HAL host tests, supervisor,
   image scripts and harness units. No Android session or APK corpus needed.
@@ -18,12 +16,10 @@ level.
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
-The runner owns a private desktop: D-Bus, runtime, HOME and XDG dirs, PipeWire
-and Pulse servers without hardware monitors, a null audio sink and fake portals
-and notifications
-([nested desktop rules](../docs/development.md#a-nested-isolated-desktop)). It
-stops and resets its profile on exit, also on failure. Check `free -g` first;
-sessions are memory capped.
+The runner owns a private desktop
+([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
+portals and notifications, and stops and resets its profile on exit, also on
+failure.
 
 Local e2e has a 55 s deadline plus at most 4 s cleanup, and groups wait for
 observations, never fixed delays. Audio runs after the window checks, since

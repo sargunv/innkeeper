@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the pinned OpenHarmony image, verify it, and extract system.img
-# and vendor.img into <images>/<name>/img/ (image/ohos/README.md).
+# and vendor.img into <images>/<name>/img/ (ohos/README.md#image).
 #
 # usage: fetch.sh <pin.toml> <images> <fs-extract.sh>
 set -euo pipefail

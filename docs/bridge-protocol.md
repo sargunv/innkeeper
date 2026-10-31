@@ -6,11 +6,11 @@ into Android as `/dev/socket/innkeeper/bridge.sock`. This file is the
 cross-language spec; each service's messages are in the module doc of its Rust
 `proto.rs`.
 
-| Implementation | Where                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------- |
-| Rust (server)  | [host/bridge/src/ipc](../host/bridge/src/ipc): `wire.rs`, `transport.rs`, `proto.rs`, `server.rs` |
-| C (client)     | [guest/bridge-client](../guest/bridge-client/README.md), for the composers, audio and health      |
-| Kotlin         | `Wire.kt` and `BridgeConnection.kt` in [android/system-app](../android/system-app/README.md)      |
+| Implementation | Where                                                                                                                |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Rust (server)  | [host/bridge/src/ipc](../host/bridge/src/ipc): `wire.rs`, `transport.rs`, `proto.rs`, `server.rs`                    |
+| C (client)     | [guest/bridge-client](../guest/bridge-client/include/innkeeper/bridge_client.h), for the composers, audio and health |
+| Kotlin         | `Wire.kt` and `BridgeConnection.kt` in [android/system-app](../android/system-app/README.md)                         |
 
 `host/bridge/src/ipc/wire-fixtures.txt` and
 `host/bridge/src/a11y/snapshot-fixture.txt` hold encodings that the Rust and

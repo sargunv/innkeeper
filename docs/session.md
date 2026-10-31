@@ -85,11 +85,12 @@ flowchart TB
   rt --> add --> stage --> derived --> img
 ```
 
-The topmost layer wins. `/apex` combines the start-time layer, the derived
-layer's `apex/` and the flattened APEX tree. The extracted image lost its
-`fs_config` owners: the derived layer adds read and exec bits to partition
-files, and records the owners Android verifies (clatd) in the
-`user.innkeeper.owner` xattr.
+The topmost layer wins. Props for `/vendor/build.prop` come from the stage's
+`share/innkeeper/props.d/`, which the launcher merges into the start-time layer.
+`/apex` combines the start-time layer, the derived layer's `apex/` and the
+flattened APEX tree. The extracted image lost its `fs_config` owners: the
+derived layer adds read and exec bits to partition files, and records the owners
+Android verifies (clatd) in the `user.innkeeper.owner` xattr.
 
 Every Android process runs as the host user. The supervisor supplies virtual
 Android credentials ([supervisor](../supervisor/README.md)); apps are not
@@ -197,33 +198,12 @@ version is refused. The error names the data directory, both versions and
 recovery choices. Data with no record is adopted on its next start; back it up
 first if its history is uncertain.
 
-An image rollback does **not** roll back `/data`. Before upgrading, stop the
-profile and back up its **entire** data directory, including the hidden version
-record, app databases, package-manager state, keys and shared storage. Keep the
-backup outside the image cache, whose old images may be pruned. For a normal
-Flatpak installation, from a host terminal:
-
-```sh
-flatpak run --env=INNKEEPER_PROFILE=default --command=/app/libexec/innkeeper/innkeeper-session dev.sargunv.Innkeeper stop
-# The default Flatpak XDG_DATA_HOME and the first profile; adjust for another.
-data_dir="$HOME/.var/app/dev.sargunv.Innkeeper/data/innkeeper/data-default"
-backup_dir="$HOME/innkeeper-data-backup-$(date +%Y%m%d-%H%M%S)"
-cp -a --reflink=auto "$data_dir" "$backup_dir"
-```
-
-Keep the matching older Innkeeper/image version available if you need to
-restore. To recover, stop the profile, move its current data directory aside,
-and copy the complete pre-upgrade backup back to the original path with
-`cp -a --reflink=auto`. Then start the matching framework. Alternatively, use
-the recorded framework or a newer one with the current data. Moving the data
-directory aside without restoring a backup starts fresh, without the old apps or
-files. Do not delete or edit just the version record to bypass a refusal: it
-cannot undo Android's migrations.
-
-Supply the profile's name in `INNKEEPER_PROFILE` on stop/start and use
-`data-<profile>`; `INNKEEPER_DATA` overrides that location. Development sessions
-use `out/dev/flatpak/<profile>/android-data` by default. Never copy or restore
-data while that profile is running.
+An image rollback does not roll back `/data`, so the README tells users to back
+up a profile's whole data directory before upgrading. Restoring that backup with
+the matching older framework is the only way back; editing or deleting the
+version record cannot undo Android's migrations. `INNKEEPER_DATA` overrides the
+data location; development sessions use
+`out/dev/flatpak/<profile>/android-data`.
 
 ## Host safety
 

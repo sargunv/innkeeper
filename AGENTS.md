@@ -96,6 +96,5 @@ what each directory is and where it runs.
 - Never commit media. A visual change needs screenshots on its own PR:
   `gh issue comment <pr> --attach <file>#<alt>`, linked from the description.
   README images go on the README media issue (#1) the same way.
-  `tools/dev/window-shot.sh` captures just the Innkeeper window.
 - Plans and open work are GitHub issues, not docs. Docs say what is true now and
   why; code comments say what the code can't.
