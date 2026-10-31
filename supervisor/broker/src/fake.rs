@@ -147,6 +147,8 @@ pub struct FakeUserspace {
     pub timer: Option<u64>,
     /// Decides whether each fallible operation fails (never, if unset).
     pub fault: Option<Box<dyn FnMut(Fault) -> bool>>,
+    /// OpenHarmony: each process's (token, first token).
+    pub tokens: HashMap<ProcId, (u64, u64)>,
 }
 
 impl FakeUserspace {
@@ -366,6 +368,9 @@ impl FakeUserspace {
 }
 
 impl Userspace for FakeUserspace {
+    fn access_token(&mut self, proc: ProcId, _tid: u32) -> (u64, u64) {
+        self.tokens.get(&proc).copied().unwrap_or_default()
+    }
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>> {
         if !self.procs.contains_key(&proc) || self.fails(Fault::CopyFromUser) {
             return None;

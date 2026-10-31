@@ -144,13 +144,17 @@ unmount.
 
 `LINUXAPK_GUEST=ohos` ([ohos/](../ohos/README.md)) keeps everything above and
 adds what OpenHarmony's userspace expects of its kernel. Android sessions never
-set it, and their filter is unchanged.
+set it, and their filter and driver are unchanged.
 
 - **musl.** The broker is also built static for `x86_64-unknown-linux-musl`
   (`mise run ohos:build`), since OH's root has no Bionic. musl opens with
   `open(2)`, so the filter also traps it and the broker serves it as
   `openat(AT_FDCWD, ...)`. `/etc/passwd` and `/etc/group` get `/system/etc`'s:
   musl resolves service users there, and Flatpak binds its own over both.
+- **Binder.** OH's kernel adds `BINDER_FEATURE_SET` (access tokens and sender
+  info), `BINDER_GET_ACCESS_TOKEN` and `BINDER_GET_SENDER_INFO`. A transaction
+  carries its sender's token and first token, and the reading thread keeps them,
+  with the sender's pid for synchronous calls, until its next read.
 
 ## Tests
 

@@ -88,7 +88,12 @@ struct Setup {
 impl Setup {
     /// Two processes, without a context manager.
     fn bare() -> Setup {
-        let mut b = BinderDriver::new();
+        Self::bare_on(crate::Guest::Android)
+    }
+
+    /// [`Setup::bare`] on `guest`'s driver.
+    fn bare_on(guest: crate::Guest) -> Setup {
+        let mut b = BinderDriver::with_guest(guest);
         let mut us = FakeUserspace::default();
         let server = b.open(1000, 1000, 0, false);
         let client = b.open(1001, 10001, 0, false);
@@ -135,7 +140,11 @@ impl Setup {
 /// The server's thread 2 is a looper (joinThreadPool); the client's thread 1
 /// is a plain caller.
 fn setup() -> Setup {
-    let mut s = Setup::bare();
+    setup_on(crate::Guest::Android)
+}
+
+fn setup_on(guest: crate::Guest) -> Setup {
+    let mut s = Setup::bare_on(guest);
     let c = s.ioctl(s.server, 2, BINDER_SET_CONTEXT_MGR, 0);
     assert_eq!(s.us.outcome(c).errno, 0);
     s.write(s.server, 2, &Bc::default().cmd(BC_ENTER_LOOPER).done());
@@ -289,6 +298,87 @@ fn sync_call_and_reply_routing() {
     assert!(
         find(&s.stream(rc), BR_REPLY).is_some(),
         "client gets BR_REPLY"
+    );
+}
+
+#[test]
+fn ohos_ioctls_are_only_openharmonys() {
+    let mut s = Setup::bare();
+    for cmd in [
+        BINDER_FEATURE_SET,
+        BINDER_GET_ACCESS_TOKEN,
+        BINDER_GET_SENDER_INFO,
+    ] {
+        let c = s.ioctl(s.server, 1, cmd, 0x8100_0000);
+        assert_eq!(s.us.outcome(c).errno, libc::EINVAL, "{cmd:#x} on Android");
+    }
+    let mut s = Setup::bare_on(crate::Guest::Ohos);
+    let c = s.ioctl(s.server, 1, BINDER_FEATURE_SET, 0x8100_0000);
+    assert_eq!(s.us.outcome(c).errno, 0);
+    let features: u64 = read_pod(&s.us.peek(s.server, 0x8100_0000, 8), 0).unwrap();
+    assert_eq!(features, OHOS_FEATURES);
+}
+
+#[test]
+fn ohos_readers_get_the_senders_tokens() {
+    let mut s = setup_on(crate::Guest::Ohos);
+    let (server, client) = (s.server, s.client);
+    s.us.tokens.insert(s.client, (0x2800_0001, 0x2800_0002));
+    s.us.tokens.insert(s.server, (0x2000_0003, 0));
+    let sender_info = |s: &mut Setup, proc: ProcId, tid: u32| -> BinderSenderInfo {
+        let c = s.ioctl(proc, tid, BINDER_GET_SENDER_INFO, 0x8100_0000);
+        assert_eq!(s.us.outcome(c).errno, 0);
+        let mem = s.us.peek(proc, 0x8100_0000, size_of::<BinderSenderInfo>());
+        let info: BinderSenderInfo = read_pod(&mem, 0).unwrap();
+        let c = s.ioctl(proc, tid, BINDER_GET_ACCESS_TOKEN, 0x8100_0000);
+        assert_eq!(s.us.outcome(c).errno, 0);
+        let mem = s.us.peek(proc, 0x8100_0000, size_of::<AccessToken>());
+        assert_eq!(read_pod::<AccessToken>(&mem, 0).unwrap(), info.tokens);
+        info
+    };
+    let token = |sender_tokenid, first_tokenid| AccessToken {
+        sender_tokenid,
+        first_tokenid,
+        reserved: [0; 2],
+    };
+    let mut td = BinderTransactionData::default();
+    td.code = 42;
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
+    let info = sender_info(&mut s, server, 2);
+    assert_eq!(info.tokens, token(0x2800_0001, 0x2800_0002));
+    assert_eq!(info.sender_pid_nr, 1001, "the client's pid");
+    // The caller reads the reply's: the server's tokens, and no pid.
+    let rc = s.wr(s.client, 1, &[], 256);
+    let rtd = BinderTransactionData::default();
+    s.wr(
+        s.server,
+        2,
+        &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
+        256,
+    );
+    assert!(find(&s.stream(rc), BR_REPLY).is_some());
+    let info = sender_info(&mut s, client, 1);
+    assert_eq!(
+        (info.tokens, info.sender_pid_nr),
+        (token(0x2000_0003, 0), 0)
+    );
+    // A oneway call carries tokens, not a pid.
+    td.flags = TF_ONE_WAY;
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
+    let info = sender_info(&mut s, server, 2);
+    assert_eq!(
+        (info.tokens, info.sender_pid_nr),
+        (token(0x2800_0001, 0x2800_0002), 0)
     );
 }
 

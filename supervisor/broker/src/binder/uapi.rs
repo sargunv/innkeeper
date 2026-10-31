@@ -324,3 +324,34 @@ pub(crate) fn pod_bytes<T: Copy>(v: &T) -> &[u8] {
 pub(crate) fn align_up(v: usize, a: usize) -> usize {
     (v + a - 1) & !(a - 1)
 }
+
+// ---- OpenHarmony's extensions -------------------------------------------
+// OpenHarmony's kernel adds these to the same driver (drivers/android/
+// binder.c in kernel_linux_6.6; communication_ipc's sys_binder.h). The
+// driver serves them only for that guest (`BinderDriver::with_guest`).
+
+/// `BINDER_FEATURE_SET`'s answer, as OH's kernel builds it with
+/// CONFIG_ACCESS_TOKENID and CONFIG_BINDER_SENDER_INFO.
+pub const OHOS_FEATURES: u64 = 1 << 0 | 1 << 2;
+
+/// A transaction's access tokens: the sending task's token and first token
+/// (`current->token`, `current->ftoken`) when it sent.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccessToken {
+    pub sender_tokenid: u64,
+    pub first_tokenid: u64,
+    pub reserved: [u64; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BinderSenderInfo {
+    pub tokens: AccessToken,
+    /// The sending process's pid, 0 for oneway calls and replies.
+    pub sender_pid_nr: u64,
+}
+
+pub const BINDER_FEATURE_SET: u32 = iowr(b'b', 30, size_of::<u64>());
+pub const BINDER_GET_ACCESS_TOKEN: u32 = iowr(b'b', 31, size_of::<AccessToken>());
+pub const BINDER_GET_SENDER_INFO: u32 = iowr(b'b', 32, size_of::<BinderSenderInfo>());
