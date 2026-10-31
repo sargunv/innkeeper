@@ -26,68 +26,82 @@ FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.linuxapk.Manager list
 
 ## Release
 
-A pushed `v*` tag runs
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml). It
-reuses the CI stage cache (`mise run build` only on a miss), then
-`packaging/flatpak/release.sh` exports an OSTree repo and a single-file bundle.
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes
+two channels into one OSTree repo. A push to `main` exports the Flatpak branch
+`snapshot` (the channel to install; a newer push cancels the one in progress). A
+pushed `v*` tag exports the branch `stable`. It reuses the CI stage cache
+(`mise run build` only on a miss), then `packaging/flatpak/release.sh` exports.
 The app id comes from the manifest, the remote name from the id's last
 component, and the Pages path from the repository name (`origin`'s last path
 segment, `github.event.repository.name` in CI), so a rename moves all three.
 
 The workflow publishes two ways:
 
-- **A bundle** (`<app>.flatpak`,
-  `flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`)
-  attached to the GitHub Release for the tag. The workflow creates that release
-  with generated notes when it does not exist. The GNOME runtime comes from
-  Flathub.
+- **A bundle** (`<app>-snapshot.flatpak` or `<app>-stable.flatpak`), built with
+  `flatpak build-bundle --repo-url=https://code.sargunv.dev/<repository>/repo`
+  and `--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`. A file
+  install records the Pages repo, so `flatpak update` follows the channel. The
+  GNOME runtime comes from Flathub. A snapshot replaces the asset on one
+  floating prerelease named `snapshot`, and the workflow force-moves the
+  `snapshot` tag to that commit; the release notes say which commit it is and
+  when it was built. A `v*` tag gets its own release, created with generated
+  notes when it does not exist.
 - **A static OSTree repo on GitHub Pages**, at
-  `https://code.sargunv.dev/<repository>/`. Each release commits into the
-  `gh-pages` branch (`flatpak build-export` into the restored repo, then
-  `flatpak build-update-repo --generate-static-deltas --prune`) and pushes it.
-  Pages deploys from that branch, so the OSTree history persists across
-  releases; `actions/deploy-pages` would replace the site and drop it. The
-  branch also carries `<remote>.flatpakrepo`, `<app>.flatpakref` and
-  `index.html`.
+  `https://code.sargunv.dev/<repository>/`. Each publish commits into the
+  restored repo (`flatpak build-export` on `snapshot` or `stable`, then
+  `flatpak build-update-repo --generate-static-deltas --prune`) and pushes the
+  `gh-pages` branch. Pages deploys from that branch, so both channels' history
+  persists; `actions/deploy-pages` would replace the site and drop it. The
+  branch also carries `<remote>.flatpakrepo`, one `.flatpakref` per branch
+  (`<app>-snapshot.flatpakref`, `<app>.flatpakref`) and `index.html`.
+
+A snapshot's version is `0.0.<git rev-list --count HEAD>`, with the short SHA in
+the commit subject. The package job checks out the full history so that count is
+the commit count. A tag's version is the tag, without the leading `v`.
 
 Signing uses `FLATPAK_GPG_PRIVATE_KEY` (ASCII-armored, no passphrase) and
 `FLATPAK_GPG_KEY_ID` from the **`release` environment**, not repository secrets.
-The environment allows deployments from `v*` tags and `main`. The workflow
-exports the public key from the private key and embeds it (base64) in the
-`.flatpakrepo` and `.flatpakref`. A publish with either secret missing fails
-before export. `workflow_dispatch` defaults to a dry run: it builds and uploads
-nothing, skips the environment, and does not sign.
+The environment allows deployments from `main` and `v*` tags, and both publish
+jobs declare it. The workflow exports the public key from the private key and
+embeds it (base64) in the `.flatpakrepo` and `.flatpakref`. A publish with
+either secret missing fails before export. `workflow_dispatch` defaults to a dry
+run: it builds the snapshot channel and uploads nothing, skips the environment,
+and does not sign.
 
 Once, in the repository settings, set Pages to deploy from the `gh-pages` branch
-(root) and the custom domain `code.sargunv.dev`. The first tag creates the
+(root) and the custom domain `code.sargunv.dev`. The first publish creates the
 branch.
 
-Users add the remote once and take later tags with `flatpak update`:
+Users add the remote once and take later builds with `flatpak update`:
 
 ```sh
 flatpak remote-add --if-not-exists <remote> https://code.sargunv.dev/<repository>/<remote>.flatpakrepo
-flatpak install <remote> <app>
+flatpak install <remote> <app>//snapshot
+flatpak install <remote> <app>//stable
 ```
 
-Or install the bundle from the GitHub Release. It needs the Flathub remote for
-the runtime:
+Or install a bundle. It needs the Flathub remote for the runtime, and updates
+from the Pages repo:
 
 ```sh
-flatpak install ./<app>.flatpak
+flatpak install ./<app>-snapshot.flatpak
 ```
 
 `<app>` is the manifest `id`, `<remote>` its last component in lower case, and
 `<repository>` the GitHub repository name.
 
-The same export, unsigned and unpublished, for a local check:
+The same export, unsigned and unpublished, for a local check. It defaults to the
+snapshot channel; pass `stable` and `LINUXAPK_RELEASE_VERSION` for the other:
 
 ```sh
 mise run package:release
+LINUXAPK_RELEASE_VERSION=0.1.0 packaging/flatpak/release.sh stable
 ```
 
-That writes `out/release/repo`, `out/release/<app>.flatpak` and
-`out/release/publish/`. Set both signing variables to sign a local export; the
-key is never written to the repository.
+That writes `out/release/repo`, `out/release/<app>-<channel>.flatpak` and
+`out/release/publish/`. A second channel's run keeps the first branch in the
+repo. Set both signing variables to sign a local export; the key is never
+written to the repository.
 
 The session runs inside the sandbox
 ([Flatpak mode](../../docs/session.md#flatpak-mode)): `start` in a sandbox of

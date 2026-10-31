@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Export a release of the Linux.apk Flatpak: an OSTree repo and a single-file
-# bundle, both under out/release/. Publishing (GitHub Release, Pages) is the
-# workflow's job; this script only builds.
+# Export one channel of the Linux.apk Flatpak into out/release/. Publishing
+# (GitHub Release, Pages) is the workflow's job; this script only builds.
 #
-#   packaging/flatpak/release.sh
+#   packaging/flatpak/release.sh [snapshot|stable]
+#
+# snapshot (the default, and what a push to main publishes) exports the
+# Flatpak branch snapshot. stable (a v* tag) exports the branch stable. Both
+# commit into the same OSTree repo, so a restored gh-pages repo keeps the
+# other channel. A second local run of the other channel keeps the first.
 #
 # Needs `mise run build` already done (the workflow and package:release do
 # that). The desktop side is still built by flatpak-builder from
 # `git archive HEAD`, so uncommitted changes are refused, as in build.sh.
 #
-# out/release/repo is the OSTree repo. A previous repo restored there (the
-# gh-pages history, in CI) is committed into, so updates stay in one history.
-# out/release/publish/ is what a static host serves: the repo, a .flatpakrepo,
-# a .flatpakref and index.html. out/release/<app>.flatpak is the bundle.
+# out/release/repo is the OSTree repo. out/release/publish/ is what a static
+# host serves: the repo, a .flatpakrepo, one .flatpakref per branch present
+# and index.html. out/release/<app>-<branch>.flatpak is this run's bundle,
+# built with --repo-url so a file install updates from the Pages repo.
 #
 # FLATPAK_GPG_PRIVATE_KEY (ASCII-armored) and FLATPAK_GPG_KEY_ID sign the
 # commit and the repo summary. Both absent: the repo is unsigned and the
@@ -52,9 +56,27 @@ repo_name=${repo_name##*:}
 }
 # Project Pages on the account's custom domain: /<repository>/.
 pages_url=https://code.sargunv.dev/$repo_name
-branch=$(git symbolic-ref --quiet --short HEAD || true)
-version=${LINUXAPK_RELEASE_VERSION:-${branch#v}}
-[[ $version != "$branch" && -n $version ]] || version=$(git describe --tags --always)
+channel=${1:-snapshot}
+[[ $channel == snapshot || $channel == stable ]] || {
+  echo "release.sh: channel must be snapshot or stable, not $channel" >&2
+  exit 1
+}
+git_branch=$(git symbolic-ref --quiet --short HEAD || true)
+short=$(git rev-parse --short=7 HEAD)
+count=$(git rev-list --count HEAD)
+if [[ $channel == stable ]]; then
+  version=${LINUXAPK_RELEASE_VERSION:-${git_branch#v}}
+  [[ $version != "$git_branch" && -n $version ]] || version=$(git describe --tags --exact-match 2>/dev/null || true)
+  [[ -n $version ]] || {
+    echo "release.sh: a stable export needs a version tag (or LINUXAPK_RELEASE_VERSION)" >&2
+    exit 1
+  }
+  version=${version#v}
+  subject="Release $version"
+else
+  version=0.0.$count
+  subject="snapshot $short"
+fi
 
 if ! git diff --quiet HEAD --; then
   echo "release.sh: uncommitted changes; the Flatpak is built from HEAD" >&2
@@ -124,14 +146,13 @@ builder=(
   --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse
   --state-dir="$out/state"
 )
-# stable matches the .flatpakref. flatpak-builder's own export uses master.
-if ((${#gpg_args[@]})); then
-  FLATPAK_USER_DIR=$tools "${builder[@]}" "$out/build" "$manifest"
-  flatpak build-export "${gpg_args[@]}" --update-appstream "$rel/repo" "$out/build" stable
-else
-  FLATPAK_USER_DIR=$tools "${builder[@]}" --repo="$rel/repo" \
-    --default-branch=stable "$out/build" "$manifest"
-fi
+# The host's flatpak build-export names the branch. The builder's own export
+# would commit master, so a signed and an unsigned run both finish in the
+# sandbox and export here. The subject carries the version: a tag's version,
+# or 0.0.<commit count> and the short SHA for a snapshot.
+FLATPAK_USER_DIR=$tools "${builder[@]}" "$out/build" "$manifest"
+flatpak build-export "${gpg_args[@]}" --subject="$version" --body="$subject" \
+  "$rel/repo" "$out/build" "$channel"
 
 if [[ -s ${rel}/gpg/public.asc ]]; then
   gpg_b64=$(base64 -w0 "$rel/gpg/public.asc")
@@ -155,29 +176,42 @@ else
   printf 'GPGKey=\nNoGpgVerify=true\n' >>"$rel/publish/$remote.flatpakrepo"
 fi
 
-cat >"$rel/publish/$id.flatpakref" <<EOF
+# One ref per branch the repo actually has, so a second channel's export keeps
+# the first channel's ref.
+ref_for() {
+  local b=$1 file
+  if [[ $b == stable ]]; then file=$id.flatpakref; else file=$id-$b.flatpakref; fi
+  cat >"$rel/publish/$file" <<EOF
 [Flatpak Ref]
 Name=$id
 Title=Linux.apk
-Branch=stable
+Branch=$b
 Url=$pages_url/repo
 RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
 IsRuntime=false
 SuggestRemoteName=$remote
 EOF
-if [[ -n $gpg_lines ]]; then
-  printf '%s\n' "$gpg_lines" >>"$rel/publish/$id.flatpakref"
-fi
+  if [[ -n $gpg_lines ]]; then
+    printf '%s\n' "$gpg_lines" >>"$rel/publish/$file"
+  fi
+}
+for present in snapshot stable; do
+  [[ -f $rel/repo/refs/heads/app/$id/x86_64/$present ]] && ref_for "$present"
+done
 
 # The runtime is not in this repo; a bundle install fetches it from Flathub.
+# --repo-url records this repo, so `flatpak update` follows the channel.
 flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
-  "$rel/repo" "$rel/$id.flatpak" "$id" stable
+  --repo-url="$pages_url/repo" \
+  "$rel/repo" "$rel/$id-$channel.flatpak" "$id" "$channel"
 
 flatpak build-update-repo --generate-static-deltas --prune "${gpg_args[@]}" "$rel/repo"
 
 # Static hosting: the OSTree repo plus the files a browser and flatpak open.
+rm -rf "$rel/publish/repo"
 cp -a "$rel/repo" "$rel/publish/repo"
-cat >"$rel/publish/index.html" <<EOF
+{
+  cat <<EOF
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -185,20 +219,38 @@ cat >"$rel/publish/index.html" <<EOF
 <title>Linux.apk</title>
 </head>
 <body>
-<h1>Linux.apk $version</h1>
-<p>Add the repository once. Later releases arrive with <code>flatpak update</code>.</p>
-<pre><code>flatpak remote-add --if-not-exists $remote $pages_url/$remote.flatpakrepo
-flatpak install $remote $id</code></pre>
-<p>Or install <a href="$id.flatpakref">$id.flatpakref</a> directly.</p>
-<p>A single-file bundle, <code>$id.flatpak</code>, is attached to
-<a href="https://github.com/sargunv/$repo_name/releases/tag/v$version">the GitHub release</a>.
-It needs the Flathub remote for the $runtime//$runtime_version runtime:</p>
-<pre><code>flatpak install ./$id.flatpak</code></pre>
-</body>
-</html>
+<h1>Linux.apk</h1>
+<p>Add the repository once. Later builds of a channel arrive with <code>flatpak update</code>.</p>
+<pre><code>flatpak remote-add --if-not-exists $remote $pages_url/$remote.flatpakrepo</code></pre>
 EOF
+  if [[ -f $rel/repo/refs/heads/app/$id/x86_64/snapshot ]]; then
+    cat <<EOF
+<h2>Snapshot</h2>
+<p>The current build of main. This is the channel to install.</p>
+<pre><code>flatpak install $remote $id//snapshot</code></pre>
+<p>Or <a href="$id-snapshot.flatpakref">$id-snapshot.flatpakref</a>.
+The single-file bundle <code>$id-snapshot.flatpak</code> is on the
+<a href="https://github.com/sargunv/$repo_name/releases/tag/snapshot">snapshot release</a>
+and updates from this repository. It needs the Flathub remote for the
+$runtime//$runtime_version runtime:</p>
+<pre><code>flatpak install ./$id-snapshot.flatpak</code></pre>
+EOF
+  fi
+  if [[ -f $rel/repo/refs/heads/app/$id/x86_64/stable ]]; then
+    cat <<EOF
+<h2>Stable</h2>
+<p>Tagged releases.</p>
+<pre><code>flatpak install $remote $id//stable</code></pre>
+<p>Or <a href="$id.flatpakref">$id.flatpakref</a>. Each tag's bundle is attached to
+<a href="https://github.com/sargunv/$repo_name/releases">its GitHub release</a>
+and updates from this repository:</p>
+<pre><code>flatpak install ./$id-stable.flatpak</code></pre>
+EOF
+  fi
+  printf '</body>\n</html>\n'
+} >"$rel/publish/index.html"
 
-echo "release.sh: $id ($remote) at $pages_url"
+echo "release.sh: $id ($remote) $channel $version ($subject) at $pages_url"
 echo "release.sh: repo $rel/repo"
-echo "release.sh: bundle $rel/$id.flatpak"
+echo "release.sh: bundle $rel/$id-$channel.flatpak"
 echo "release.sh: publish $rel/publish"

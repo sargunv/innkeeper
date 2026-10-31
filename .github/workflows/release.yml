@@ -2,6 +2,7 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -10,13 +11,16 @@ on:
         type: boolean
         default: true
 
-# contents: write creates the GitHub Release and pushes gh-pages.
+# contents: write creates the GitHub Release, moves the snapshot tag and
+# pushes gh-pages.
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group:
+    ${{ github.ref == 'refs/heads/main' && 'snapshot' || format('release-{0}',
+    github.ref) }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 env:
   CARGO_BUILD_JOBS: 4
@@ -42,7 +46,7 @@ jobs:
         id: inputs
         shell: bash
         run: |
-          # Same digest as CI's build job, so a tag reuses that job's stage.
+          # Same digest as CI's build job, so a push reuses that job's stage.
           digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
             supervisor/broker android image tools/build tools/container \
             packaging/flatpak Cargo.toml Cargo.lock \
@@ -83,7 +87,8 @@ jobs:
   package:
     needs: build
     # A dry run builds without the release environment, so it never sees the
-    # signing key. A tag, or a manual run that opts into publishing, does.
+    # signing key. A push to main, a v* tag, or a manual run that opts into
+    # publishing, does. The environment allows main and v* tags.
     environment:
       ${{ (github.event_name == 'push' || inputs.dry_run == false) && 'release'
       || '' }}
@@ -109,11 +114,12 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         run: |
           # gh-pages is the repo's history: each release commits into it, so
-          # `flatpak update` sees one continuous repository. Pages deploys
-          # from this branch (source: Deploy from a branch), which keeps the
-          # OSTree objects a static host must serve. actions/deploy-pages
-          # would replace the site each run and drop that history unless the
-          # repo were rebuilt from a side store; the branch is that store.
+          # `flatpak update` sees one continuous repository with both
+          # channels. Pages deploys from this branch (source: Deploy from a
+          # branch), which keeps the OSTree objects a static host must serve.
+          # actions/deploy-pages would replace the site each run and drop
+          # that history unless the repo were rebuilt from a side store; the
+          # branch is that store.
           mkdir -p out/release
           if git fetch origin gh-pages && git cat-file -e origin/gh-pages:repo 2>/dev/null; then
             git archive origin/gh-pages repo | tar -x -C out/release
@@ -132,13 +138,13 @@ jobs:
         env:
           FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
           FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
-          LINUXAPK_RELEASE_VERSION: ${{ github.ref_name }}
+          LINUXAPK_RELEASE_VERSION:
+            ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           if [[ '${{ github.event_name }}' == workflow_dispatch && '${{ inputs.dry_run }}' == true ]]; then
             unset FLATPAK_GPG_PRIVATE_KEY FLATPAK_GPG_KEY_ID
-            export LINUXAPK_RELEASE_VERSION=dry-run
           fi
-          packaging/flatpak/release.sh
+          packaging/flatpak/release.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'
       - name: Publish the OSTree repo to gh-pages
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         run: |
@@ -162,12 +168,30 @@ jobs:
           git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the bundle to the GitHub Release
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+      - name: Publish the snapshot bundle
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bundle=$(echo out/release/*.flatpak)
+          bundle=$(echo out/release/*-snapshot.flatpak)
+          built=$(date -u +%Y-%m-%dT%H:%MZ)
+          notes=$(printf 'Snapshot of %s, built %s.\n' "$GITHUB_SHA" "$built")
+          # One floating release. Move the tag onto this commit, then replace
+          # the asset, so snapshot builds do not pile up.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/tags/snapshot"
+          if gh release view snapshot >/dev/null 2>&1; then
+            gh release edit snapshot --prerelease --title snapshot --notes "$notes"
+          else
+            gh release create snapshot --prerelease --title snapshot --notes "$notes"
+          fi
+          gh release upload snapshot "$bundle" --clobber
+      - name: Publish the stable bundle
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bundle=$(echo out/release/*-stable.flatpak)
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
           fi
