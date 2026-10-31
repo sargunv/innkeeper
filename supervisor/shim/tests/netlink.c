@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <stdio.h>
 
-#include "../shim/netlink.h"
+#include "../netlink.h"
 
 static void check(int protocol, int allocated) {
   int a = socket(AF_NETLINK, SOCK_DGRAM, protocol);

@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 #define EXPORT
-#include "../shim/selinux-file.h"
+#include "../selinux-file.h"
 
 int main(int argc, char** argv) {
   assert(argc == 2);

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../shim/fuse.h"
+#include "../fuse.h"
 
 static int mount_volume(void) {
   int fd = fuse_open();

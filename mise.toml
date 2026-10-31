@@ -133,7 +133,7 @@ cargo test -q --workspace
 cmake --preset host-tests >/dev/null
 cmake --build --preset host-tests
 ctest --preset host-tests
-for t in supervisor/tests/*.sh image/tests/*.sh; do echo "== $t"; "$t"; done
+for t in image/tests/*.sh; do echo "== $t"; "$t"; done
 python3 -B -m unittest discover -s tools/ci/tests
 python3 -B -m unittest discover -s tests/e2e -p 'test_*.py'
 """
