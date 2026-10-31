@@ -100,7 +100,8 @@ Without `-d` or `-t`, `logcat` streams until interrupted (`-T 100` streams too);
 the timeout bounds a stalled reader.
 
 - The `kernel` buffer is empty: logd can't read the host's `/proc/kmsg`. Init's
-  `/dev/kmsg` writes go to the launcher instead (`session -- log`).
+  `/dev/kmsg` writes go to the launcher instead (`innkeeper profile log`, or
+  `mise run session -- log`).
 - There is no tracefs. libcutils turns atrace off when `trace_marker` fails to
   open, and `image/vendor.prop` silences the resulting per-process
   `cutils-trace` error (`log.tag.cutils-trace=S`).

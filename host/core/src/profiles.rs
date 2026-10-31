@@ -153,6 +153,17 @@ pub fn start(name: &str, status: &dyn Fn(&str)) -> Result<()> {
     Session::of_profile(name)?.ensure(status)
 }
 
+/// Deletes profile `name`'s Android data, keeping its settings: Android
+/// starts over at the next start. It must be stopped.
+pub fn reset(name: &str) -> Result<()> {
+    Session::of_profile(name)?.reset()
+}
+
+/// Prints profile `name`'s Android kernel log, following it with `follow`.
+pub fn log(name: &str, follow: bool) -> Result<()> {
+    Session::of_profile(name)?.log(follow)
+}
+
 /// Stops profile `name`, if it runs.
 pub fn stop(name: &str) -> Result<()> {
     Session::of_profile(name)?.stop()

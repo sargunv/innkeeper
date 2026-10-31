@@ -125,6 +125,15 @@ enum ProfileCmd {
     },
     /// Stop the profile.
     Stop,
+    /// Delete the profile's apps and Android data, keeping its settings
+    /// (stop it first).
+    Reset,
+    /// Print Android's kernel log for the profile.
+    Log {
+        /// Keep printing as it grows.
+        #[arg(short, long)]
+        follow: bool,
+    },
     /// Change the profile's settings.
     Set(SetArgs),
 }
@@ -511,6 +520,12 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
             }
         }
         ProfileCmd::Stop => profiles::stop(&profiles::existing(name)?)?,
+        ProfileCmd::Reset => {
+            let p = profiles::existing(name)?;
+            profiles::reset(&p)?;
+            println!("reset profile {p}; Android starts over at its next start");
+        }
+        ProfileCmd::Log { follow } => profiles::log(&profiles::existing(name)?, follow)?,
         ProfileCmd::Set(args) => set(&profiles::existing(name)?, &args)?,
     }
     Ok(())
@@ -692,6 +707,14 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+        assert!(matches!(
+            parse("profile log -f"),
+            Ok(Cmd::Profile(ProfileCmd::Log { follow: true }))
+        ));
+        assert!(matches!(
+            parse("profile reset"),
+            Ok(Cmd::Profile(ProfileCmd::Reset))
+        ));
         assert!(matches!(
             parse("profile start --all"),
             Ok(Cmd::Profile(ProfileCmd::Start { all: true }))

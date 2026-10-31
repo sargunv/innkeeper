@@ -171,6 +171,35 @@ impl Session {
         Ok(())
     }
 
+    /// Deletes the profile's Android data, keeping its settings; it must be
+    /// stopped.
+    pub fn reset(&self) -> Result<()> {
+        let o = proc::run(
+            self.command().arg("reset"),
+            Stdio::null(),
+            Duration::from_secs(300),
+        )?;
+        if !o.ok() {
+            bail!("reset failed: {}", o.stderr.trim());
+        }
+        Ok(())
+    }
+
+    /// Prints Android's kernel log (`/dev/kmsg`) to stdout, following it
+    /// with `follow` until interrupted.
+    pub fn log(&self, follow: bool) -> Result<()> {
+        let mut c = self.command();
+        c.arg("log");
+        if follow {
+            c.arg("-f");
+        }
+        let st = c.stdin(Stdio::null()).status()?;
+        if !st.success() {
+            bail!("log: {st}");
+        }
+        Ok(())
+    }
+
     /// Running and boot state, for status displays.
     pub fn status(&self) -> Status {
         let Some(s) = self.state() else {
@@ -273,7 +302,7 @@ impl Session {
         {
             if !self.running() {
                 return Err(anyhow::anyhow!(
-                    "the session stopped while booting (see `innkeeper-session log`)"
+                    "the session stopped while booting (see `innkeeper profile log`)"
                 )
                 .context(crate::ErrorKind::SessionStartFailed));
             }
