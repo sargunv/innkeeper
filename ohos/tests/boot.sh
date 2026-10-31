@@ -2,7 +2,8 @@
 # Runs inside the OpenHarmony session with OH's own sh (ohos/run.py --probe),
 # once samgr is ready: OH's core system abilities register with samgr and
 # hidumper (itself a system ability samgr starts on demand) lists them, then
-# render_service has the display, then SceneBoard has loaded its desktop.
+# render_service has the display, then SceneBoard has loaded its desktop at
+# the composer's density.
 want="SystemAbilityManager AccessTokenManagerService BundleMgr AbilityManagerService RenderService"
 i=0
 while [ $i -lt 150 ]; do
@@ -41,9 +42,17 @@ fi
 # starts once user 100 is active; it sets this once its desktop has loaded.
 i=0
 while [ $i -lt 200 ]; do
-  /system/bin/param get bootevent.launcher.ready | grep -q true && exit 0
+  /system/bin/param get bootevent.launcher.ready | grep -q true && break
   i=$((i + 1))
   sleep 0.2
 done
-echo "SceneBoard not ready: $(/system/bin/pidof com.ohos.sceneboard || echo not running)"
+if [ $i -eq 200 ]; then
+  echo "SceneBoard not ready: $(/system/bin/pidof com.ohos.sceneboard || echo not running)"
+  exit 1
+fi
+# DMS lays the screen out at the composer's dpi (ohos/sandbox.sh).
+dpi=$(/system/bin/param get persist.window.screen.dpi)
+dpi=${dpi%% *}
+[ "$dpi" = "${LINUXAPK_OHOS_DISPLAY#*@}" ] && exit 0
+echo "DMS at $dpi dpi, the composer at ${LINUXAPK_OHOS_DISPLAY#*@}"
 exit 1

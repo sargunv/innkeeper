@@ -10,6 +10,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -25,8 +27,7 @@
 namespace {
 
 constexpr uint32_t kDisplay = 0;
-constexpr uint32_t kWidth = 720, kHeight = 1280;
-constexpr uint32_t kDpi = 320, kRefresh = 60;
+constexpr uint32_t kRefresh = 60;
 constexpr int64_t kPeriodNs = 1'000'000'000 / kRefresh;
 constexpr const char* kAppId = "dev.linuxapk.ohos";
 constexpr const char* kTitle = "OpenHarmony";
@@ -35,6 +36,20 @@ constexpr const char* kTitle = "OpenHarmony";
 constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205, kDisplayWindow = 0x0208;
 constexpr uint16_t kEvRelease = 0x4201;
+
+// The panel, and so the window: LINUXAPK_OHOS_DISPLAY,
+// <width>x<height>@<dpi> (ohos/sandbox.sh, which gives DMS the same dpi).
+struct Mode {
+  uint32_t width = 720, height = 1280, dpi = 320;
+};
+
+Mode mode() {
+  Mode m;
+  unsigned w, h, d;
+  const char* s = getenv("LINUXAPK_OHOS_DISPLAY");
+  if (s && sscanf(s, "%ux%u@%u", &w, &h, &d) == 3 && w && h && d) m = {w, h, d};
+  return m;
+}
 
 constexpr uint32_t fourcc(char a, char b, char c, char d) {
   return uint32_t(a) | uint32_t(b) << 8 | uint32_t(c) << 16 | uint32_t(d) << 24;
@@ -150,7 +165,8 @@ void* bridgeLoop(void*) {
     if (sock < 0) continue;
     lxb_msg m;
     lxb_msg_init(&m, kDisplayWindow, 1);
-    const uint32_t fields[] = {kDisplay, kWidth, kHeight, kDpi};
+    const Mode d = mode();
+    const uint32_t fields[] = {kDisplay, d.width, d.height, d.dpi};
     for (uint32_t v : fields) lxb_put_u32(&m, v);
     lxb_put_name(&m, kAppId);
     lxb_put_name(&m, kTitle);
@@ -312,7 +328,8 @@ EXPORT int32_t RegHotPlugCallback(HotPlugCallback cb, void* data) {
     g.hotplugData = data;
     startThreads();
   }
-  LOGI("display %u: %ux%u at %u dpi", kDisplay, kWidth, kHeight, kDpi);
+  const Mode d = mode();
+  LOGI("display %u: %ux%u at %u dpi", kDisplay, d.width, d.height, d.dpi);
   if (cb) cb(kDisplay, true, data);
   return HDF_SUCCESS;
 }
@@ -321,8 +338,9 @@ EXPORT int32_t GetDisplayCapability(uint32_t devId, DisplayCapability& info) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   setString(info.name, "linuxapk");
   info.type = DISP_INTF_BUILT_IN;
-  info.phyWidth = kWidth * 254 / (kDpi * 10);
-  info.phyHeight = kHeight * 254 / (kDpi * 10);
+  const Mode d = mode();
+  info.phyWidth = d.width * 254 / (d.dpi * 10);
+  info.phyHeight = d.height * 254 / (d.dpi * 10);
   info.supportLayers = kMaxLayers;
   info.virtualDispCount = 0;
   info.supportWriteBack = false;
@@ -333,8 +351,11 @@ EXPORT int32_t GetDisplayCapability(uint32_t devId, DisplayCapability& info) {
 EXPORT int32_t
 GetDisplaySupportedModes(uint32_t devId, lxvec<DisplayModeInfo>& modes) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
-  const DisplayModeInfo mode = {int32_t(kWidth), int32_t(kHeight), kRefresh, 0};
-  assign(modes, &mode, 1);
+  const Mode d = mode();
+  const DisplayModeInfo info = {
+    int32_t(d.width), int32_t(d.height), kRefresh, 0
+  };
+  assign(modes, &info, 1);
   return HDF_SUCCESS;
 }
 

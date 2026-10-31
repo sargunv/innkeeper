@@ -13,10 +13,11 @@ dumb buffers on `/dev/dri/card0`), installed in `/vendor/lib64` by
 | `hdi.h`        | OH's ABI types (BufferHandle, DisplayCapability, ...) |                                               |
 | `log.h`        | hilog through `libhilog.so`'s C API                   |                                               |
 
-- **Composer.** One display, 0: a 720x1280 phone panel at 320 dpi and 60 Hz,
-  reported as a built-in panel so it is OH's main screen. Every layer is
-  composed by render_service (`COMPOSITION_CLIENT`); each committed client
-  target goes to the bridge's display service
+- **Composer.** One display, 0, at 60 Hz: by default a 720x1280 phone panel at
+  320 dpi (`LINUXAPK_OHOS_DISPLAY`, `<width>x<height>@<dpi>`, which
+  `ohos/sandbox.sh` also gives DMS), reported as a built-in panel so it is OH's
+  main screen. Every layer is composed by render_service (`COMPOSITION_CLIENT`);
+  each committed client target goes to the bridge's display service
   ([docs/bridge-protocol.md](../../../docs/bridge-protocol.md)) as a LINEAR
   dma-buf, shown opaque. `DISPLAY_WINDOW` gives the display a desktop window of
   its own. Commit waits (up to two frames) for the compositor to release every
