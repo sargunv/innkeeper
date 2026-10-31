@@ -137,7 +137,8 @@ jobs:
             !**/android-data*/**
           retention-days: 7
 
-  # OpenHarmony's boot: its own session and image, beside Android's e2e.
+  # An OpenHarmony profile's boot: its own session and image, beside Android's
+  # e2e.
   e2e-ohos:
     needs: build
     runs-on: ubuntu-26.04
@@ -164,19 +165,20 @@ jobs:
       - uses: actions/cache/restore@v4
         id: image
         with:
-          path: out/ohos/images
+          path: out/ci/images/ohos
           key:
-            ohos-image-v1-${{ runner.os }}-${{ runner.arch }}-${{
+            ohos-image-v2-${{ runner.os }}-${{ runner.arch }}-${{
             hashFiles('image/ohos/pin.toml', 'image/ohos/fetch.sh',
             'image/fs-extract.sh', 'image/tools/**') }}
       - name: Fetch the OpenHarmony image
         run:
-          image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images
+          out/stage/libexec/innkeeper/image/ohos/fetch.sh
+          out/stage/share/innkeeper/image/ohos/pin.toml "$INNKEEPER_IMAGES/ohos"
           out/stage/libexec/innkeeper/image/fs-extract.sh
       - uses: actions/cache/save@v4
         if: steps.image.outputs.cache-hit != 'true'
         with:
-          path: out/ohos/images
+          path: out/ci/images/ohos
           key: ${{ steps.image.outputs.cache-primary-key }}
       - name: Boot OpenHarmony until SceneBoard is ready
         run: mise run test:e2e -- ohos
@@ -189,8 +191,10 @@ jobs:
           name: ohos-logs
           overwrite: true
           path: |
-            out/test/e2e/ci/
-            out/dev/flatpak/ci/*.log
+            out/test/e2e/ci-ohos/
+            out/test/nested/ci-ohos/**/*.log
+            out/dev/flatpak/ci-ohos/*.log
+            !out/test/nested/**/data/**
           retention-days: 7
 
   # The single required gate: a skipped or failed job must not pass.

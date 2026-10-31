@@ -1,5 +1,6 @@
 //! The main window: installed apps, the session's status, drag and drop, the
-//! navigation to the install page, and the first run's image download.
+//! navigation to the install page, and the first run's image download. An
+//! OpenHarmony profile shows only its session: it can't install apps yet.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -11,8 +12,10 @@ use gtk::{gdk, gio, glib};
 use innkeeper_core::desktop::{MANAGER_ID, PREFIX};
 use innkeeper_core::launcher::{Session, Status};
 use innkeeper_core::ops::{self, Event};
+use innkeeper_core::profiles;
 use innkeeper_core::xdg::{DesktopApp, Dirs};
 use innkeeper_profile::profile::ProfileName;
+use innkeeper_profile::profile::System;
 
 use crate::errors::{self, Op};
 use crate::{install, worker};
@@ -31,6 +34,11 @@ impl WeakWindow {
 pub struct Inner {
     /// The profile whose apps and session show.
     profile: RefCell<ProfileName>,
+    /// Its system, once read.
+    system: Cell<System>,
+    /// The empty state, and its button to install an APK.
+    empty: adw::StatusPage,
+    open_button: gtk::Button,
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
@@ -105,14 +113,15 @@ impl std::ops::Deref for Window {
     }
 }
 
-/// The "Android" row: state, memory, start/stop. The window has one in the
-/// empty state and one above the app list.
+/// The "Android" (or "OpenHarmony") row: state, start/stop. The window has
+/// one in the empty state and one above the app list.
 struct SessionRow {
     group: adw::PreferencesGroup,
     row: adw::ActionRow,
     dot: gtk::Box,
     button: gtk::Button,
     spinner: adw::Spinner,
+    system: Cell<System>,
 }
 
 impl SessionRow {
@@ -141,7 +150,13 @@ impl SessionRow {
             dot,
             button,
             spinner,
+            system: Cell::new(System::Android),
         }
+    }
+
+    fn set_system(&self, system: System) {
+        self.system.set(system);
+        self.row.set_title(system.title());
     }
 
     fn show(&self, st: Option<Status>, busy: Option<&str>) {
@@ -163,8 +178,10 @@ impl SessionRow {
                 self.button.set_sensitive(false);
             }
             Some(s) if !s.running => {
-                self.row
-                    .set_subtitle("Stopped · Starts by itself when you open an app");
+                self.row.set_subtitle(match self.system.get() {
+                    System::Android => "Stopped · Starts by itself when you open an app",
+                    System::Ohos => "Stopped",
+                });
                 self.button.set_label("Start");
             }
             Some(s) => {
@@ -285,6 +302,9 @@ impl Window {
             .build();
 
         let w = Window(Rc::new(Inner {
+            system: Cell::new(System::Android),
+            empty,
+            open_button: open_btn,
             win,
             toasts,
             nav,
@@ -427,6 +447,10 @@ impl Window {
             self.preparing.opened.borrow_mut().push(file.clone());
             return;
         }
+        if let Err(e) = self.system.get().need_android("Installing apps") {
+            self.show_error(Op::Install, None, &e);
+            return;
+        }
         match file.path() {
             Some(p) => {
                 let page = install::page(self, p);
@@ -476,21 +500,67 @@ impl Window {
         *self.monitor.borrow_mut() = Some(m);
     }
 
-    /// Reloads the app list (desktop entries, plus the session's own list if
-    /// it is running).
+    /// Reloads the profile's system and app list (desktop entries, plus the
+    /// session's own list if it is running).
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
-            match worker::run_quiet(move || {
-                ops::installed_apps(&p, ops::android_packages(&p).as_deref())
+            match worker::run_quiet(move || -> anyhow::Result<_> {
+                let system = profiles::settings(&p)?.system;
+                if system != System::Android {
+                    return Ok((system, vec![]));
+                }
+                let apps = ops::installed_apps(&p, ops::android_packages(&p).as_deref())?;
+                Ok((system, apps))
             })
             .await
             {
-                Ok(apps) => w.show_apps(apps),
+                Ok((system, apps)) => {
+                    w.set_system(system);
+                    w.show_apps(apps);
+                }
                 Err(e) => eprintln!("innkeeper-manager: {e:#}"),
             }
         });
+    }
+
+    /// Shows what the profile's system has: an OpenHarmony profile installs
+    /// no apps.
+    fn set_system(&self, system: System) {
+        self.system.set(system);
+        let android = system == System::Android;
+        for s in &self.sessions {
+            s.set_system(system);
+        }
+        self.open_button.set_visible(android);
+        if let Some(a) = self
+            .win
+            .lookup_action("open")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            a.set_enabled(android);
+        }
+        if android {
+            self.empty.set_title("No Android Apps");
+            self.empty
+                .set_description(Some("Drag an APK here or open one to install it"));
+        } else {
+            self.empty.set_title(system.title());
+            self.empty.set_description(Some(
+                "Its built-in apps show in one phone window while it runs. \
+                 Installing apps isn’t available yet.",
+            ));
+        }
+        let name = system.title();
+        self.preparing.page.set_title(&format!("Preparing {name}"));
+        self.preparing.page.set_description(Some(&format!(
+            "Downloading {name} ({}). This happens only once.",
+            match system {
+                System::Android => "about 1.2 GB",
+                System::Ohos => "about 1 GB",
+            }
+        )));
     }
 
     fn show_apps(&self, apps: Vec<DesktopApp>) {
@@ -671,10 +741,13 @@ impl Window {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
-            let ready =
-                worker::run_quiet(move || Session::of_profile(&p).map(|s| s.image_ready())).await;
+            let ready = worker::run_quiet(move || {
+                Session::of_profile(&p).map(|s| (s.system(), s.image_ready()))
+            })
+            .await;
             // No launcher: the session row says so.
-            if ready.is_ok_and(|r| !r) {
+            if let Ok((system, false)) = ready {
+                w.set_system(system);
                 w.prepare();
             }
         });
@@ -815,6 +888,9 @@ impl Window {
             }
             let (booted, packages) = state.unwrap_or_default();
             *w.open_apps.borrow_mut() = packages.into_iter().collect();
+            // Only Android's system app reports a completed boot; starting
+            // from here waits for OpenHarmony's.
+            let booted = booted || running && w.system.get() != System::Android;
             let st = Status { running, booted };
             let was_booted = w.last_status.replace(Some(st)).is_some_and(|s| s.booted);
             if !w.session_busy.get() {

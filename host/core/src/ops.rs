@@ -30,8 +30,10 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// Profile `profile`'s running session, after starting it if needed.
+/// Profile `profile`'s running session, after starting it if needed. Apps
+/// are Android's: an OpenHarmony profile has no app install yet.
 fn session(profile: &ProfileName, report: Report) -> Result<Session> {
+    crate::profiles::need_android(profile, "managing apps")?;
     let s = Session::of_profile(profile)?;
     s.ensure(&|m| report(Event::Status(m.to_string())))?;
     Ok(s)

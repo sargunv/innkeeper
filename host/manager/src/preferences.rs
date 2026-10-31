@@ -1,5 +1,6 @@
 //! The Profile Settings page: the shown profile's settings, and Keep Running,
-//! which every profile shares. Reads and writes run off the GTK thread.
+//! which every profile shares. An OpenHarmony profile has only its display:
+//! the rest is Android's. Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -8,7 +9,7 @@ use gtk::glib;
 use innkeeper_core::preferences;
 use innkeeper_core::profiles;
 use innkeeper_profile::preferences::Preferences;
-use innkeeper_profile::profile::{Display, Settings};
+use innkeeper_profile::profile::{Display, Settings, System};
 
 use crate::{
     errors::Op,
@@ -178,6 +179,19 @@ impl Page {
         let display = adw::PreferencesGroup::new();
         display.add(&self.display_row(&p));
         page.add(&display);
+        if p.system == System::Ohos {
+            page.add(
+                &adw::PreferencesGroup::builder()
+                    .title("OpenHarmony")
+                    .description(
+                        "This profile runs OpenHarmony’s built-in apps in one phone window. \
+                         Installing apps and desktop input aren’t available yet.",
+                    )
+                    .build(),
+            );
+            self.content.append(&page);
+            return;
+        }
 
         let desktop = adw::PreferencesGroup::builder().title("Follow the Desktop")
             .description("Changes apply live. Turn a setting off to choose it in Android Settings; its current value is kept.").build();
@@ -260,23 +274,27 @@ impl Page {
         self.content.append(&page);
     }
 
-    /// Windowed or a device window; for the next start.
+    /// Windowed or a device window, of those the profile's system has; for
+    /// the next start.
     fn display_row(self: &Rc<Self>, p: &Settings) -> adw::ComboRow {
-        let model = gtk::StringList::new(&DISPLAYS.map(|c| c.1));
-        let current = DISPLAYS.iter().position(|c| c.0 == p.display).unwrap_or(0);
+        let choices: Vec<_> = DISPLAYS
+            .into_iter()
+            .filter(|c| p.system.displays().contains(&c.0))
+            .collect();
+        let model = gtk::StringList::new(&choices.iter().map(|c| c.1).collect::<Vec<_>>());
+        let current = choices.iter().position(|c| c.0 == p.display).unwrap_or(0);
         let row = adw::ComboRow::builder()
             .title("Display")
             .subtitle(format!(
                 "{} · Applies the next time it starts",
-                DISPLAYS[current].2
+                choices[current].2
             ))
             .model(&model)
             .selected(current as u32)
             .build();
         let s = Rc::downgrade(self);
         row.connect_selected_notify(move |r| {
-            if let (Some(s), Some(&(d, _, _))) = (s.upgrade(), DISPLAYS.get(r.selected() as usize))
-            {
+            if let (Some(s), Some(&(d, _, _))) = (s.upgrade(), choices.get(r.selected() as usize)) {
                 s.save(|p| p.display = d);
             }
         });
