@@ -104,10 +104,11 @@ done
 # is none), never a card node, whose KMS is the host's display.
 render=$(compgen -G '/dev/dri/renderD*' | head -n 1 || true)
 if [[ -n ${INNKEEPER_OHOS_BRIDGE:-} ]]; then
-  run=$XDG_RUNTIME_DIR/innkeeper-ohos
-  mkdir -p "$run/bridge" "$data/../ohos-bridge"
-  /app/libexec/innkeeper/innkeeper-bridge --run-dir "$run" \
-    --state-dir "$data/../ohos-bridge" --test-session \
+  # A test session of profile `ohos`, whose run dir the bridge finds as the
+  # launcher's would be (host/launcher/src/paths.rs).
+  run=$XDG_RUNTIME_DIR/app/$FLATPAK_ID/innkeeper-ohos
+  mkdir -p "$run/bridge" "${XDG_STATE_HOME:-$HOME/.local/state}/innkeeper-ohos"
+  INNKEEPER_PROFILE=ohos INNKEEPER_TEST=1 /app/libexec/innkeeper/innkeeper-bridge \
     >>"$INNKEEPER_OHOS_BRIDGE" 2>&1 &
   mkdir -p /dev/socket
   ln -sfn "$run/bridge" /dev/socket/innkeeper

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail, ensure};
 use innkeeper_bench::{
     binder, default_max_load, field, frames, input, launched_display, number, presented, score,
+    trace,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -98,12 +99,16 @@ fn launch(mode: &str) -> Result<()> {
     ])?;
     wait(|| log().contains(&format!("BENCH ready mode={mode}")), 20)
 }
-fn bridge() -> String {
+fn bridge_log() -> String {
     let profile = std::env::var("INNKEEPER_PROFILE").unwrap();
     read(
         PathBuf::from(std::env::var("XDG_STATE_HOME").unwrap())
             .join(format!("innkeeper-{profile}/bridge.log")),
     )
+}
+/// The bridge's trace events.
+fn bridge() -> String {
+    trace(&bridge_log())
 }
 fn keeper() -> Result<std::process::Child> {
     Ok(Command::new("tools/dev/session.sh")
@@ -128,7 +133,7 @@ impl Drop for Cleanup {
             self.out.join("sf.txt"),
             android(&["dumpsys", "SurfaceFlinger"]).unwrap_or_default(),
         );
-        let _ = fs::write(self.out.join("bridge-log.txt"), bridge());
+        let _ = fs::write(self.out.join("bridge-log.txt"), bridge_log());
         let _ = fs::write(
             self.out.join("android-errors.txt"),
             android(&[
@@ -176,10 +181,7 @@ fn traces(out: &Path, mode: &str, seconds: u64) -> Result<Value> {
     Ok(result)
 }
 fn solid_frame(trace: &str) -> Option<(u64, u64)> {
-    let line = trace
-        .lines()
-        .rev()
-        .find(|l| l.starts_with("BENCH commit "))?;
+    let line = trace.lines().rev().find(|l| l.starts_with("commit "))?;
     let color = number(line, "color")?;
     [255, 16711680]
         .contains(&color)
@@ -420,7 +422,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 wait(
                     || {
                         let b = bridge();
-                        b.contains("BENCH capabilities presentation=0") || presented(&b, frame)
+                        b.contains("capabilities presentation=0") || presented(&b, frame)
                     },
                     5,
                 )?;
@@ -689,7 +691,7 @@ fn main() -> Result<()> {
         .arg(std::env::current_exe()?)
         .args(&args)
         .env("INNKEEPER_PROFILE", &id)
-        .env("INNKEEPER_BENCH", "1")
+        .env("INNKEEPER_BRIDGE_DEBUG", "1")
         .env("INNKEEPER_BENCH_INSIDE", "1")
         .env("INNKEEPER_BENCH_OUT", &out)
         .env("INNKEEPER_AUDIO_SINK", format!("innkeeper_bench_{id}"))

@@ -301,10 +301,10 @@ impl Service for DisplayService {
                 // An acquire fence, if any, is ignored: the composer only
                 // sends frames it has finished writing.
                 drop(fds);
-                if crate::bench::enabled() {
-                    crate::bench::trace(format_args!(
+                if crate::log::debug() {
+                    crate::log::trace(format_args!(
                         "receive ns={} buffer={buffer}",
-                        crate::bench::now()
+                        crate::log::now()
                     ));
                 }
                 self.send(Cmd::Frame {

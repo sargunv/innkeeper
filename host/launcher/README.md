@@ -19,24 +19,24 @@ session in a sandbox of its own.
 | `profile.rs`, `preferences.rs`      | profile names and settings; the preferences the launcher and desktop clients share     |
 | `image.rs`, `prune.rs`, `layer.rs`  | preparing and collecting the image cache; the start-time layer, cmdline and bootconfig |
 | `flatpak.rs`, `control.rs`          | the composed root, the sandbox's `/`, the session's lifetime and its control socket    |
-| `root.rs`, `init.rs`, `session.rs`  | partitions, binder nodes, `/innkeeper`, the broker, the kmsg reader and the bridge     |
+| `root.rs`, `init.rs`, `session.rs`  | partitions, binder nodes, `/innkeeper`, pivot-exec, the kmsg reader and the bridge     |
 | `graphics.rs`, `phone.rs`, `adb.rs` | the render node and Vulkan driver, phone mode, adb on a loopback port                  |
 | `exec.rs`, `selftest.rs`            | `exec` (control socket, then the exec relay) and the host-safety probes                |
 | `lifecycle.rs`                      | stopping when idle, and the wakeup for the next alarm                                  |
 | `sys.rs`                            | syscall wrappers                                                                       |
 
-| Variable                                             | For                                                             |
-| ---------------------------------------------------- | --------------------------------------------------------------- |
-| `INNKEEPER_PROFILE`                                  | the profile to run (required)                                   |
-| `INNKEEPER_TEST=1`                                   | tests: a test session, isolated from desktop integration        |
-| `INNKEEPER_AUDIO_SOURCE`                             | users: Pulse/PipeWire capture source (default: desktop default) |
-| `INNKEEPER_AUDIO_SINK`                               | users: one PipeWire sink for the session's audio                |
-| `INNKEEPER_IDLE_GRACE`                               | users: seconds idle before the session stops (0: never)         |
-| `INNKEEPER_VULKAN=lvp`                               | debugging: software Vulkan (lavapipe) instead of a render node  |
-| `--headless`                                         | tests: no windows                                               |
-| `INNKEEPER_TEST_TIMERS`                              | tests: short idle polling and alarm wake lead                   |
-| `INNKEEPER_DATA`, `INNKEEPER_IMAGES`                 | tests: Android's `/data`, the image cache                       |
-| `INNKEEPER_BRIDGE_VERBOSE`, `INNKEEPER_BROKER_DEBUG` | debugging: bridge stream stats; broker tracing                  |
+| Variable                                           | For                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------- |
+| `INNKEEPER_PROFILE`                                | the profile to run (required)                                   |
+| `INNKEEPER_TEST=1`                                 | tests: a test session, isolated from desktop integration        |
+| `INNKEEPER_AUDIO_SOURCE`                           | users: Pulse/PipeWire capture source (default: desktop default) |
+| `INNKEEPER_AUDIO_SINK`                             | users: one PipeWire sink for the session's audio                |
+| `INNKEEPER_IDLE_GRACE`                             | users: seconds idle before the session stops (0: never)         |
+| `INNKEEPER_VULKAN=lvp`                             | debugging: software Vulkan (lavapipe) instead of a render node  |
+| `--headless`                                       | tests: no windows                                               |
+| `INNKEEPER_TEST_TIMERS`                            | tests: short idle polling and alarm wake lead                   |
+| `INNKEEPER_DATA`, `INNKEEPER_IMAGES`               | tests: Android's `/data`, the image cache                       |
+| `INNKEEPER_BRIDGE_DEBUG`, `INNKEEPER_BROKER_DEBUG` | debugging: bridge debug lines and trace; broker tracing         |
 
 Tests: `cargo test -p innkeeper-session` (in `mise run test`), and
 `mise run test:e2e -- boot`, which runs `selftest` in a fresh named profile.

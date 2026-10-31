@@ -13,7 +13,6 @@
 //!   serving `status` and `stop` on the control socket, and starts the
 //!   session again at that time.
 
-use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -234,29 +233,6 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
             }
         }
     });
-}
-
-/// What a woken session starts with of `start`'s environment: what shapes
-/// the session (the desktop's sockets, the XDG dirs, Innkeeper's own knobs).
-const START_ENV: &[&str] = &[
-    "WAYLAND_DISPLAY",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "HOME",
-    "PATH",
-    "XDG_RUNTIME_DIR",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_CACHE_HOME",
-    "XDG_STATE_HOME",
-    "XDG_CONFIG_DIRS",
-    "XDG_DATA_DIRS",
-    "XDG_CURRENT_DESKTOP",
-];
-
-pub fn start_env() -> BTreeMap<String, String> {
-    std::env::vars()
-        .filter(|(k, _)| k.starts_with("INNKEEPER_") || START_ENV.contains(&k.as_str()))
-        .collect()
 }
 
 /// `secs` since the epoch as a systemd calendar event in UTC.

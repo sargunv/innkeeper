@@ -32,13 +32,13 @@ impl Dispatch2<wp_presentation_feedback::WpPresentationFeedback, State> for Prob
             } => {
                 let ns = ((u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo)) * 1_000_000_000
                     + u64::from(tv_nsec);
-                crate::bench::trace(format_args!(
+                crate::log::trace(format_args!(
                     "probe_present frame={} window={} ns={ns} refresh_ns={refresh} flags={flags:?}",
                     self.stamp, self.window
                 ));
             }
             wp_presentation_feedback::Event::Discarded => {
-                crate::bench::trace(format_args!(
+                crate::log::trace(format_args!(
                     "probe_discard frame={} window={}",
                     self.stamp, self.window
                 ));
@@ -217,7 +217,7 @@ impl Clock {
 
 impl State {
     fn send_timing(&self, sample: Sample) {
-        crate::bench::trace(format_args!(
+        crate::log::trace(format_args!(
             "timing ns={} period_ns={}",
             sample.ns, sample.period
         ));
@@ -242,12 +242,12 @@ impl State {
                 Some((output.id().protocol_id(), period))
             })
             .collect();
-        crate::bench::trace(format_args!("outputs window={window} outputs={outputs:?}"));
+        crate::log::trace(format_args!("outputs window={window} outputs={outputs:?}"));
         if let Some(sample) = self.presentation_clock.window(
             window,
             &outputs,
             self.seat.keyboard_focus,
-            crate::bench::now(),
+            crate::log::now(),
         ) {
             self.send_timing(sample);
         }
@@ -265,7 +265,7 @@ impl Dispatch2<Presentation, State> for Unit {
     ) {
         if let wp_presentation::Event::ClockId { clk_id } = event {
             state.presentation_clock.monotonic = clk_id == libc::CLOCK_MONOTONIC as u32;
-            crate::bench::trace(format_args!("clock id={clk_id}"));
+            crate::log::trace(format_args!("clock id={clk_id}"));
         }
     }
 }
@@ -310,13 +310,13 @@ impl Dispatch2<wp_presentation_feedback::WpPresentationFeedback, State> for Fram
                 ) {
                     state.send_timing(sample);
                 }
-                crate::bench::trace(format_args!(
+                crate::log::trace(format_args!(
                     "present frame={} window={} ns={ns} refresh_ns={refresh} flags={flags:?}",
                     self.stamp, self.window
                 ));
             }
             wp_presentation_feedback::Event::Discarded => {
-                crate::bench::trace(format_args!(
+                crate::log::trace(format_args!(
                     "discard frame={} window={}",
                     self.stamp, self.window
                 ));

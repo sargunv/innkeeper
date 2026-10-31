@@ -16,13 +16,12 @@ cap and `stop` ends it) and restarts it if it exits; clients reconnect.
 | a11y      | AT-SPI through AccessKit (`accesskit_unix`), one adapter per window                                                                                                              | `src/a11y/`      |
 | hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                                             | `src/hoststate/` |
 
-- **Usage:** the header of `src/main.rs`. `--test-session` (also
-  `INNKEEPER_TEST=1`) makes a test session
-  ([docs/security.md](../../docs/security.md#test-sessions)).
-- **Environment:** the launcher translates its own `INNKEEPER_AUDIO_SINK` and
-  `INNKEEPER_BRIDGE_VERBOSE` into `--sink` and `-v`, and passes on
-  `INNKEEPER_AUDIO_SOURCE` (capture source, default: the desktop's),
-  `INNKEEPER_BENCH=1` (benchmark trace), `WAYLAND_DISPLAY`,
+- **Usage:** the header of `src/main.rs`: it takes no arguments, finds its
+  profile's paths from `INNKEEPER_PROFILE` through `innkeeper-core`, and reads
+  `INNKEEPER_TEST=1` (a test session,
+  [docs/security.md](../../docs/security.md#test-sessions)),
+  `INNKEEPER_AUDIO_SINK`/`_SOURCE` and `INNKEEPER_BRIDGE_DEBUG=1` from the
+  session's environment. The launcher adds `WAYLAND_DISPLAY`,
   `DBUS_SESSION_BUS_ADDRESS`, `DBUS_SYSTEM_BUS_ADDRESS`, `XDG_DATA_HOME`
   (mirrored desktop entries), `XDG_CURRENT_DESKTOP` and `XDG_CONFIG_HOME` (KDE's
   `plasma-localerc`).

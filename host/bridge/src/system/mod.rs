@@ -48,6 +48,9 @@ pub struct Shared {
     /// `<run-dir>/lifecycle`, and the client whose report it holds.
     lifecycle: PathBuf,
     lifecycle_owner: std::sync::Mutex<Option<u64>>,
+    /// `$XDG_CACHE_HOME/innkeeper-<profile>/clipboard`: files copied in
+    /// Android, served to the desktop.
+    clipboard_cache: PathBuf,
     /// False in a test session: no desktop effects at all, including reads of
     /// the clipboard and user-facing portals.
     desktop: bool,
@@ -87,6 +90,8 @@ impl Shared {
             handoffs: handoff::Handoffs::new(input, profile),
             lifecycle: run_dir.join("lifecycle"),
             lifecycle_owner: Default::default(),
+            clipboard_cache: innkeeper_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
+                .join(format!("innkeeper-{profile}/clipboard")),
             desktop,
             dbus: OnceLock::new(),
             settings: OnceLock::new(),
@@ -185,7 +190,7 @@ impl Shared {
         }
         self.clipboard
             .get_or_init(|| {
-                ClipboardHub::start()
+                ClipboardHub::start(&self.clipboard_cache)
                     .map_err(|e| crate::warn!("clipboard: unavailable: {e:#}"))
                     .ok()
             })

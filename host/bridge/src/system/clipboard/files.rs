@@ -80,19 +80,13 @@ impl ClipFiles {
     }
 }
 
-pub fn cache_dir() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .context("no cache directory")?;
-    let profile = std::env::var("INNKEEPER_PROFILE").unwrap_or_else(|_| "main".into());
-    let dir = base.join(format!("innkeeper-{profile}/clipboard"));
-    // Previous process's selections are no longer being served.
+/// `dir`, emptied: an earlier process's selections are no longer served.
+pub fn fresh_cache(dir: &std::path::Path) -> Result<PathBuf> {
     if dir.exists() {
-        std::fs::remove_dir_all(&dir)?;
+        std::fs::remove_dir_all(dir)?;
     }
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir)
+    std::fs::create_dir_all(dir)?;
+    Ok(dir.to_path_buf())
 }
 
 /// Deleted when the source is replaced/cancelled. Never reuse a pathname: a

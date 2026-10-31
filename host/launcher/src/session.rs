@@ -96,17 +96,12 @@ pub static ENDING: AtomicBool = AtomicBool::new(false);
 pub fn start_bridge(cfg: &Config) -> Result<()> {
     let p = &cfg.paths;
     let bridge = p.libexec.join("innkeeper-bridge");
-    let (args, env, log) = (
-        cfg.bridge_args.clone(),
-        cfg.bridge_env.clone(),
-        p.bridge_log(),
-    );
+    let (env, log) = (cfg.bridge_env.clone(), p.bridge_log());
     thread::spawn(move || {
         loop {
             let st = (|| -> Result<String> {
                 let out = append(&log)?;
                 let st = Command::new(&bridge)
-                    .args(&args)
                     .envs(&env)
                     .stdin(Stdio::null())
                     .stdout(out.try_clone()?)
