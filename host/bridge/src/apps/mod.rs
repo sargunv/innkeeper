@@ -15,8 +15,8 @@
 //!
 //! Entries this service writes say `X-LinuxApk-Origin=android`. An entry
 //! written by `linuxapk install` (which has more metadata, such as URL
-//! schemes) is never replaced; an entry for another session instance is never
-//! touched; an uninstall inside Android removes this instance's entry,
+//! schemes) is never replaced; an entry for another session profile is never
+//! touched; an uninstall inside Android removes this profile's entry,
 //! whoever wrote it. Without `--mirror-apps` (only the main session passes
 //! it) every request succeeds and does nothing, so test sessions don't fill
 //! the user's app menu.
@@ -82,7 +82,7 @@ pub mod have {
     /// No entry, or ours for another version: send ADDED.
     pub const MISSING: u8 = 0;
     pub const CURRENT: u8 = 1;
-    /// Someone else's entry (`linuxapk install`, another instance), or
+    /// Someone else's entry (`linuxapk install`, another profile), or
     /// mirroring is off: leave it.
     pub const NOT_OURS: u8 = 2;
 }
@@ -182,23 +182,23 @@ pub fn parse_icons(b: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, i32> {
 
 /// Settings shared by every connection.
 pub struct Config {
-    /// Off: every request is a no-op (other instances' sessions, tests).
+    /// Off: every request is a no-op (other profiles' sessions, tests).
     pub enabled: bool,
     pub mirror_apps: AtomicBool,
     pub dirs: xdg::Dirs,
-    /// The session instance entries are made for (see `paths::instance`).
-    pub instance: String,
-    /// `Exec` prefix: `linuxapk run` (with the instance), the package and
+    /// The session profile entries are made for (see `paths::profile`).
+    pub profile: String,
+    /// `Exec` prefix: `linuxapk run` (with the profile), the package and
     /// `%U` are appended.
     pub run: Vec<String>,
 }
 
 impl Config {
     pub fn from_env(enabled: bool) -> Config {
-        let instance = paths::instance().unwrap_or_default();
+        let profile = paths::profile().unwrap_or_default();
         let mut run = ops::cli_command().unwrap_or_else(|e| {
             crate::warn!("apps: {e:#}; desktop entries will run `linuxapk` from PATH");
-            paths::command(&["linuxapk".into()], &instance)
+            paths::command(&["linuxapk".into()], &profile)
         });
         run.push("run".into());
         Config {
@@ -209,7 +209,7 @@ impl Config {
                     .unwrap_or(true),
             ),
             dirs: xdg::Dirs::from_env(),
-            instance,
+            profile,
             run,
         }
     }
@@ -219,7 +219,7 @@ impl Config {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
         let ours = desktop::read_key(&text, "X-LinuxApk-Origin").as_deref() == Some("android")
-            && xdg::exec_instance(&exec) == self.instance;
+            && xdg::exec_profile(&exec) == self.profile;
         // Rebuild pre-action mirrored entries once, even when the APK is unchanged.
         let version = desktop::read_key(&text, "X-LinuxApk-NewWindow")
             .map(|_| desktop::read_key(&text, "X-LinuxApk-Version").unwrap_or_default());
@@ -321,13 +321,13 @@ impl AppsService {
         if !self.cfg.enabled {
             return Reply::ok();
         }
-        // The app is gone from this instance: drop its entry, whoever wrote
-        // it, unless it belongs to another instance.
+        // The app is gone from this profile: drop its entry, whoever wrote
+        // it, unless it belongs to another profile.
         let Some(text) = std::fs::read_to_string(self.cfg.dirs.app_desktop(pkg)).ok() else {
             return Reply::ok();
         };
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
-        if xdg::exec_instance(&exec) != self.cfg.instance {
+        if xdg::exec_profile(&exec) != self.cfg.profile {
             return Reply::ok();
         }
         xdg::remove_app(&self.cfg.dirs, pkg);
@@ -500,7 +500,7 @@ mod tests {
                 cache: tmp.join("cache"),
                 portal: None,
             },
-            instance: "t".into(),
+            profile: "t".into(),
             run: [
                 paths::command(&["linuxapk".into()], "t"),
                 vec!["run".into()],
@@ -541,7 +541,7 @@ mod tests {
         std::fs::write(cfg.dirs.app_desktop("org.ex.a"), no_version).unwrap();
         assert_eq!(cfg.have("org.ex.a", ""), have::CURRENT);
         // An entry from `linuxapk install` is left alone, and so is another
-        // instance's.
+        // profile's.
         let cli = format!("[Desktop Entry]\nName=B\nExec={}\n", exec("org.ex.b"));
         std::fs::write(cfg.dirs.app_desktop("org.ex.b"), cli).unwrap();
         assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);

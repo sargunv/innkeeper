@@ -17,7 +17,7 @@ starts it inside the session's systemd unit (so it shares the memory cap and
 | hoststate | UPower, the PowerProfileMonitor, NetworkMonitor and Location portals                                                                                                             | `src/hoststate/` |
 
 - **Usage** is the header of `src/main.rs`: `--run-dir` and `--state-dir` are
-  the instance's XDG runtime and state dirs (socket, MPRIS artwork, document
+  the profile's XDG runtime and state dirs (socket, MPRIS artwork, document
   grants, log), `--allow-uid` and `--system-app-dir` set who may connect, and
   `--test-session` (also `LINUXAPK_TEST=1`) makes a test session
   ([docs/security.md](../../docs/security.md#test-sessions)).
@@ -50,7 +50,7 @@ MIME type and bytes. Each file is capped at 16 MiB minus 1024 bytes; the
 complete selection, including metadata, must fit in 16 MiB. Oversized selections
 and selections containing directories are rejected in full; directories are not
 traversed or archived. Android `content://` clips become temporary copies in the
-instance's cache, offered as `text/uri-list` and `x-special/gnome-copied-files`,
+profile's cache, offered as `text/uri-list` and `x-special/gnome-copied-files`,
 plus a FileTransfer portal key when available. The cache copy is removed when
 replaced and at the next bridge start. Host copies use the portal grant when
 offered; a plain URI list works for files already accessible to the Flatpak.

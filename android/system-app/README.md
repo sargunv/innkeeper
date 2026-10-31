@@ -97,7 +97,7 @@ Known limits:
   An https App Link sign-in redirect then stays in the desktop browser and
   cannot return to the Android app; Linux.apk does not own desktop https links.
 - Shares are capped at three attachments, 64 MiB each, and 32 KiB of text.
-  Opened files and email attachments are retained in the instance cache until
+  Opened files and email attachments are retained in the profile cache until
   session shutdown, up to 256 MiB per session; saved copies are removed
   immediately. Shutdown cleans the cache; a later bridge reaps crash leftovers.
 - Copy is offered only for text: Android content URIs cannot be pasted into a

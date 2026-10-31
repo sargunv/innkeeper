@@ -38,7 +38,7 @@ else:
   owner = dbus.service.BusName(name, bus, do_not_queue=True)
   result = Result(bus, path)
   root = Path(__file__).resolve().parents[2]
-  scratch = root / "out/test/e2e" / os.environ["LINUXAPK_INSTANCE"]
+  scratch = root / "out/test/e2e" / os.environ["LINUXAPK_PROFILE"]
   scratch.mkdir(parents=True, exist_ok=True)
   script = scratch / "visibility.js"
   script.write_text(

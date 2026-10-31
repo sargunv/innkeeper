@@ -58,7 +58,7 @@ without building the Flatpak:
   portal spawns, alarm wakeups included, start the stage's files too, and the
   snapshot's `linuxapk` and `linuxapk-manager` forward to the stage for menu
   entries. Rerun `dev-init.sh` to test a Flatpak update.
-- HOME and the XDG dirs are scratch dirs under `out/dev/flatpak/<instance>`; the
+- HOME and the XDG dirs are scratch dirs under `out/dev/flatpak/<profile>`; the
   image cache is the user's.
 - The driver holds the sandbox at a gate until it has set `MemoryHigh=6G` and
   `MemoryMax=8G` on its scope from the host, and a host-side watcher caps the

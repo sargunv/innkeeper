@@ -4,12 +4,12 @@ set -Eeuo pipefail
 trap 'echo "nested: command failed (status=$?) at line $LINENO: $BASH_COMMAND" >&2' ERR
 repo=$(cd "$(dirname "$0")/.." && pwd)
 export LINUXAPK_IMAGES=${LINUXAPK_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/images}
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-nested}
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-nested}
 export LINUXAPK_TEST_COMPOSITOR=${LINUXAPK_TEST_COMPOSITOR:-kwin}
-N=$repo/out/test/nested/$LINUXAPK_INSTANCE
+N=$repo/out/test/nested/$LINUXAPK_PROFILE
 host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" lapk-XXXXXX)
-unit=linuxapk-nested-$LINUXAPK_INSTANCE
+unit=linuxapk-nested-$LINUXAPK_PROFILE
 phase=bootstrap
 private_bus=""
 cleanup() {
@@ -29,9 +29,9 @@ cleanup() {
   fi
   # A deadline can interrupt the runner before its trap reaches session stop.
   # Flatpak's scope is outside this desktop's service; reap that test scope too.
-  if [[ ${LINUXAPK_E2E:-} == 1 && -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
+  if [[ ${LINUXAPK_E2E:-} == 1 && -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
     local cg
-    cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup")
+    cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup")
     DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
       systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi

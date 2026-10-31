@@ -3,8 +3,8 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 session=$repo/tools/dev/session.sh
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-bionic}
-root=$repo/out/test/bionic/$LINUXAPK_INSTANCE
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-bionic}
+root=$repo/out/test/bionic/$LINUXAPK_PROFILE
 export LINUXAPK_DATA=${LINUXAPK_DATA:-$root/data}
 mkdir -p "$root"
 envs=() vendor=() testdir=""

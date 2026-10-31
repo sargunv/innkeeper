@@ -40,7 +40,7 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 - `background` keeps the session up while an allowed app is installed
   ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
-- With `LINUXAPK_INSTANCE` set, entries bake it into their `Exec`, so a test's
+- With `LINUXAPK_PROFILE` set, entries bake it into their `Exec`, so a test's
   entries keep using its session.
 
 Tests: `cargo test -p linuxapk` and the shared core tests in `mise run test`

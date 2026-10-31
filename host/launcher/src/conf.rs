@@ -122,7 +122,7 @@ impl Config {
         let bus = env::var("DBUS_SESSION_BUS_ADDRESS")
             .ok()
             .filter(|v| !v.is_empty());
-        if !p.instance.is_empty() || env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1") {
+        if !p.profile.is_empty() || env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1") {
             // Persist isolation in session.conf, including across wakeups.
             a.push("--test-session".into());
         } else {
@@ -173,7 +173,7 @@ headless = false
 bridge_args = []
 bridge_env = {}
 [paths]
-instance = "old"
+profile = "old"
 libexec = "/app/libexec/linuxapk"
 share = "/app/share/linuxapk"
 run = "/runtime/linuxapk-old"

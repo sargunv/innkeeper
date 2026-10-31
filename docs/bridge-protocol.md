@@ -1,7 +1,7 @@
 # Bridge protocol
 
 `linuxapk-bridge` serves Android-side clients over one socket,
-`$XDG_RUNTIME_DIR/linuxapk[-<instance>]/bridge/bridge.sock`, bound into Android
+`$XDG_RUNTIME_DIR/linuxapk[-<profile>]/bridge/bridge.sock`, bound into Android
 as `/dev/socket/linuxapk/bridge.sock`. This file is the cross-language spec;
 each service's messages are in the module doc of its Rust `proto.rs`.
 
@@ -106,7 +106,7 @@ is allowed.
 The reply acknowledges scheduling, not completion of a desktop dialog. The
 bridge logs portal cancellation/failure. Four operations may wait for portals;
 the existing five-per-ten-second rate limit also applies. Content is capped at
-64 MiB per file and copied to real files under the instance's cache directory.
+64 MiB per file and copied to real files under the profile's cache directory.
 OpenURI OpenFile uses `ask` for the desktop chooser; SaveFile writes only to the
 portal-selected destination; Email uses `attachment_fds`. Opened files and
 attachments stay until session shutdown (256 MiB retained cap); save copies are
@@ -160,8 +160,8 @@ ignore reply bytes they don't know. A new major version means a new HELLO.
 ## Desktop session API (version 1)
 
 The bridge owns `dev.linuxapk.Manager.Session` on the desktop session bus,
-inside the Flatpak app-id namespace. A named instance owns
-`dev.linuxapk.Manager.Session.i_<instance>` (hyphens become underscores). The
+inside the Flatpak app-id namespace. A named profile owns
+`dev.linuxapk.Manager.Session.p_<profile>` (hyphens become underscores). The
 object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
 and CLI calls use this interface for per-app management; they do not run
 commands inside Android. Starting a stopped session still uses the launcher.
@@ -223,16 +223,15 @@ CLI examples: `linuxapk app org.example.app`,
 `linuxapk app org.example.app escape-back --setting on`, and
 `linuxapk app org.example.app permission --permission android.permission.CAMERA --setting off`.
 
-`GetPreferences() → s json` reads the instance's persisted Linux.apk
-preferences. `SetPreferences(s json)` validates and atomically replaces them,
-then broadcasts the filtered desktop settings. The JSON object (at most 4096
-bytes) has boolean fields `follow_dark`, `follow_accent`, `follow_locale`,
-`follow_clock`, `keep_running`, `mirror_apps`, `microg`, and integer
-`idle_minutes` (1–120). Missing fields take their defaults: all following,
-mirroring and the installed microG addon on, keep-running off, timeout 2
-minutes. Unknown fields or invalid values fail with `InvalidArgs`. Persistence
-failures return `Failed`. The manager can also save these preferences while the
-session is stopped.
+`GetPreferences() → s json` reads the profile's persisted Linux.apk preferences.
+`SetPreferences(s json)` validates and atomically replaces them, then broadcasts
+the filtered desktop settings. The JSON object (at most 4096 bytes) has boolean
+fields `follow_dark`, `follow_accent`, `follow_locale`, `follow_clock`,
+`keep_running`, `mirror_apps`, `microg`, and integer `idle_minutes` (1–120).
+Missing fields take their defaults: all following, mirroring and the installed
+microG addon on, keep-running off, timeout 2 minutes. Unknown fields or invalid
+values fail with `InvalidArgs`. Persistence failures return `Failed`. The
+manager can also save these preferences while the session is stopped.
 
 The desktop client obtains Background portal permission before enabling
 `keep_running`, setting `autostart` with the session launcher's `start` command;

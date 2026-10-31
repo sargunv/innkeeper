@@ -1,6 +1,6 @@
 # The session
 
-A session is one rootless Android instance inside Linux.apk's Flatpak sandbox,
+A session is one rootless Android userspace inside Linux.apk's Flatpak sandbox,
 with the bridge and Android's real `init`. `linuxapk-session`
 ([host/launcher](../host/launcher/README.md)) starts it on demand; it stops
 itself when nothing needs it ([Lifecycle](#lifecycle)). `start` prepares the
@@ -41,7 +41,7 @@ signal, init's exit) the launcher stops and then kills everything it started,
 and, as the sandbox's main process, everything else in it: Android processes
 orphaned by a dying init would otherwise keep the sandbox alive.
 
-The launcher composes `$XDG_DATA_HOME/linuxapk/root[-<instance>]` from hardlinks
+The launcher composes `$XDG_DATA_HOME/linuxapk/root[-<profile>]` from hardlinks
 to the read-only image cache (reflink copies across filesystems) and copies of
 the layers, all read-only. `.compose-key` invalidates it when the image, stage
 or addons change. At each start the start-time layer is copied over it. Symlinks
@@ -147,15 +147,15 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                      | Contents                                                                                                                                                                |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/linuxapk/`               | `images/<build>/{img,apex-<hash>,derived}` (shared by every instance), `data[-<instance>]/` (Android's `/data`), `addons/`, `root[-<instance>]/`                        |
-| `$XDG_STATE_HOME/linuxapk[-<instance>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
-| `$XDG_STATE_HOME/linuxapk/notices/`      | one-time notices already shown (shared by every instance)                                                                                                               |
-| `$XDG_RUNTIME_DIR/linuxapk[-<instance>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
+| Dir                                     | Contents                                                                                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/linuxapk/`              | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data[-<profile>]/` (Android's `/data`), `addons/`, `root[-<profile>]/`                           |
+| `$XDG_STATE_HOME/linuxapk[-<profile>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
+| `$XDG_STATE_HOME/linuxapk/notices/`     | one-time notices already shown (shared by every profile)                                                                                                                |
+| `$XDG_RUNTIME_DIR/linuxapk[-<profile>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
 
-`LINUXAPK_INSTANCE` names an independent session for tests; its suffix goes on
-every per-instance path.
+`LINUXAPK_PROFILE` names an independent session for tests; its suffix goes on
+every per-profile path.
 
 ## Image upgrades and data recovery
 
@@ -176,21 +176,21 @@ recovery choices. Data from before this policy has no recorded history and is
 adopted on its next start; back it up first if its history is uncertain.
 
 An image rollback does **not** roll back `/data`. Before upgrading, stop the
-instance and back up its **entire** data directory, including the hidden version
+profile and back up its **entire** data directory, including the hidden version
 record, app databases, package-manager state, keys and shared storage. Keep the
 backup outside the image cache, whose old images may be pruned. For a normal
 Flatpak installation, from a host terminal:
 
 ```sh
 flatpak run --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager stop
-# Default Flatpak XDG_DATA_HOME; adjust for a named instance or custom path.
+# Default Flatpak XDG_DATA_HOME; adjust for a named profile or custom path.
 data_dir="$HOME/.var/app/dev.linuxapk.Manager/data/linuxapk/data"
 backup_dir="$HOME/linuxapk-data-backup-$(date +%Y%m%d-%H%M%S)"
 cp -a --reflink=auto "$data_dir" "$backup_dir"
 ```
 
 Keep the matching older Linux.apk/image version available if you need to
-restore. To recover, stop the instance, move its current data directory aside,
+restore. To recover, stop the profile, move its current data directory aside,
 and copy the complete pre-upgrade backup back to the original path with
 `cp -a --reflink=auto`. Then start the matching framework. Alternatively, use
 the recorded framework or a newer one with the current data. Moving the data
@@ -199,10 +199,10 @@ files. Do not delete or edit just the version record to bypass a refusal: it
 cannot undo Android's migrations. A launcher release predating this policy
 cannot enforce this check, so restore the matching backup before using it.
 
-For a named instance, supply the same `LINUXAPK_INSTANCE` on stop/start and use
-`data-<instance>`; `LINUXAPK_DATA` overrides that location. Development sessions
-use `out/dev/flatpak/<instance>/android-data` by default. Never copy or restore
-data while that instance is running.
+For a named profile, supply the same `LINUXAPK_PROFILE` on stop/start and use
+`data-<profile>`; `LINUXAPK_DATA` overrides that location. Development sessions
+use `out/dev/flatpak/<profile>/android-data` by default. Never copy or restore
+data while that profile is running.
 
 ## Host safety
 

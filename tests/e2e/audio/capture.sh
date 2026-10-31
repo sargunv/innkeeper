@@ -2,20 +2,20 @@
 # Manual 30 s capture proof on a private virtual source; not part of the e2e gate.
 set -Eeuo pipefail
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-capture-proof-$(date +%s%N)}
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-capture-proof-$(date +%s%N)}
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
   exec systemd-run --user --scope --quiet -p MemoryMax=1G -p TasksMax=1024 \
     "$repo/tests/nested.sh" "$0" "$@"
 fi
 cd "$repo"
 S=$repo/tools/dev/session.sh
-O=$repo/out/test/audio/$LINUXAPK_INSTANCE
+O=$repo/out/test/audio/$LINUXAPK_PROFILE
 [[ ! -e $O ]] || {
-  echo "capture proof instance already exists: $LINUXAPK_INSTANCE" >&2
+  echo "capture proof profile already exists: $LINUXAPK_PROFILE" >&2
   exit 1
 }
 mkdir -p "$O"
-export LINUXAPK_AUDIO_SINK=linuxapk_capture_$LINUXAPK_INSTANCE
+export LINUXAPK_AUDIO_SINK=linuxapk_capture_$LINUXAPK_PROFILE
 export LINUXAPK_AUDIO_SOURCE=$LINUXAPK_AUDIO_SINK.monitor
 module=$(pactl load-module module-null-sink sink_name="$LINUXAPK_AUDIO_SINK" rate=48000 channels=2)
 keeper='' player='' monitor=''

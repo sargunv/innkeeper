@@ -42,7 +42,7 @@ own; `cargo test -p linuxapk-core` tests it.
   [the CLI](../cli/README.md)). Per-app host Open With entries remain deferred
   ([#71](https://github.com/sargunv/linux.apk/issues/71)).
 - **Paths** (`paths.rs`): the prefix relative to the running executable and the
-  XDG dirs; the session's own paths and the `LINUXAPK_INSTANCE` parser come from
+  XDG dirs; the session's own paths and the `LINUXAPK_PROFILE` parser come from
   the launcher's library ([host/launcher](../launcher/README.md)).
 - **Session** (`launcher.rs`): starts the session on demand and waits for boot.
   Whether it runs (for the one-time single-uid notice,

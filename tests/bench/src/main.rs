@@ -99,10 +99,10 @@ fn launch(mode: &str) -> Result<()> {
     wait(|| log().contains(&format!("BENCH ready mode={mode}")), 20)
 }
 fn bridge() -> String {
-    let instance = std::env::var("LINUXAPK_INSTANCE").unwrap();
+    let profile = std::env::var("LINUXAPK_PROFILE").unwrap();
     read(
         PathBuf::from(std::env::var("XDG_STATE_HOME").unwrap())
-            .join(format!("linuxapk-{instance}/bridge.log")),
+            .join(format!("linuxapk-{profile}/bridge.log")),
     )
 }
 fn keeper() -> Result<std::process::Child> {
@@ -340,7 +340,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         logger: None,
         sink: None,
     };
-    let sink = format!("linuxapk_bench_{}", std::env::var("LINUXAPK_INSTANCE")?);
+    let sink = format!("linuxapk_bench_{}", std::env::var("LINUXAPK_PROFILE")?);
     cleanup.sink = Some(command(
         "pactl",
         &[
@@ -536,7 +536,7 @@ fn main() -> Result<()> {
     let name = args.first().map(String::as_str).unwrap_or("help");
     if !["input", "frame", "audio", "gpu", "memory", "binder"].contains(&name) {
         println!(
-            "mise run bench -- input|frame|audio|gpu|memory|binder [--noisy] [--seconds N] [--max-load N]\nFresh named instance, private desktop and data. Outputs: out/bench/<instance>/result.json and summary.txt. --noisy marks proof runs unsuitable for comparison."
+            "mise run bench -- input|frame|audio|gpu|memory|binder [--noisy] [--seconds N] [--max-load N]\nFresh named profile, private desktop and data. Outputs: out/bench/<profile>/result.json and summary.txt. --noisy marks proof runs unsuitable for comparison."
         );
         return Ok(());
     }
@@ -578,10 +578,10 @@ fn main() -> Result<()> {
                 .push(json!("other linuxapk sessions present after measurement"));
         }
         r["context_after"] = after;
-        let instance = std::env::var("LINUXAPK_INSTANCE")?;
+        let profile = std::env::var("LINUXAPK_PROFILE")?;
         let compositor_info = read(
             Path::new("out/test/nested")
-                .join(instance)
+                .join(profile)
                 .join("kwin-support.txt"),
         );
         fs::write(out.join("compositor.txt"), &compositor_info)?;
@@ -657,7 +657,7 @@ fn main() -> Result<()> {
         );
     }
     print!("{}", command("free", &["-g"])?);
-    let id = std::env::var("LINUXAPK_INSTANCE").unwrap_or_else(|_| {
+    let id = std::env::var("LINUXAPK_PROFILE").unwrap_or_else(|_| {
         format!(
             "bench-{name}-{}",
             SystemTime::now()
@@ -671,24 +671,24 @@ fn main() -> Result<()> {
             && id
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
-        "instance must be named bench-<name>"
+        "profile must be named bench-<name>"
     );
     let out = std::env::current_dir()?.join("out/bench").join(&id);
     ensure!(
         !out.exists() && !Path::new("out/dev/flatpak").join(&id).exists(),
-        "benchmark instance must be fresh"
+        "benchmark profile must be fresh"
     );
     fs::create_dir_all(&out)?;
     fs::write(
         out.join("result.json"),
         serde_json::to_string_pretty(
-            &json!({"schema":1,"benchmark":name,"instance":id,"status":"starting","context_before":before,"warnings":warnings,"noisy":noisy,"valid_for_comparison":false,"max_load":max_load}),
+            &json!({"schema":1,"benchmark":name,"profile":id,"status":"starting","context_before":before,"warnings":warnings,"noisy":noisy,"valid_for_comparison":false,"max_load":max_load}),
         )?,
     )?;
     let status = Command::new("tests/nested.sh")
         .arg(std::env::current_exe()?)
         .args(&args)
-        .env("LINUXAPK_INSTANCE", &id)
+        .env("LINUXAPK_PROFILE", &id)
         .env("LINUXAPK_BENCH", "1")
         .env("LINUXAPK_BENCH_INSIDE", "1")
         .env("LINUXAPK_BENCH_OUT", &out)

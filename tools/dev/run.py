@@ -23,17 +23,17 @@ ENV["PATH"] = os.pathsep.join(
   for p in ENV.get("PATH", "/usr/bin:/bin").split(os.pathsep)
   if not p.endswith("/mise/shims")
 )
-INSTANCE = ENV.get("LINUXAPK_INSTANCE", "dev")
-if not re.fullmatch(r"[a-z0-9-]+", INSTANCE):
-  sys.exit("dev runner requires a named LINUXAPK_INSTANCE")
-ENV["LINUXAPK_INSTANCE"] = INSTANCE
+PROFILE = ENV.get("LINUXAPK_PROFILE", "dev")
+if not re.fullmatch(r"[a-z0-9-]+", PROFILE):
+  sys.exit("dev runner requires a named LINUXAPK_PROFILE")
+ENV["LINUXAPK_PROFILE"] = PROFILE
 ENV.setdefault(
   "LINUXAPK_IMAGES", str(Path.home() / ".local/share/linuxapk/images")
 )
 ENV.setdefault(
-  "LINUXAPK_DATA", str(BASE / "flatpak" / INSTANCE / "android-data")
+  "LINUXAPK_DATA", str(BASE / "flatpak" / PROFILE / "android-data")
 )
-SCRATCH = BASE / "flatpak" / INSTANCE
+SCRATCH = BASE / "flatpak" / PROFILE
 SCRATCH.mkdir(parents=True, exist_ok=True)
 XDG = ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
 # Entries, Flatpak state and notices never go to the real XDG dirs: only ones
@@ -149,7 +149,7 @@ def command(program, args, gate=None, instance_fd=None):
 
 def connect():
   runtime = ENV.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-  path = Path(runtime) / "app" / APP / f"linuxapk-{INSTANCE}/control.sock"
+  path = Path(runtime) / "app" / APP / f"linuxapk-{PROFILE}/control.sock"
   sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
   sock.settimeout(120)
   try:
@@ -346,7 +346,7 @@ def serve(args):
 
 def supervise(action, args=()):
   # Python's monitor is capped too; Flatpak moves its app to a separate scope.
-  restore = [f"LINUXAPK_INSTANCE={INSTANCE}"]
+  restore = [f"LINUXAPK_PROFILE={PROFILE}"]
   for key in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
     if key in os.environ:
       restore.append(f"{key}={os.environ[key]}")
@@ -436,7 +436,7 @@ def main():
     print(
       json.dumps(
         {
-          "state": str(Path(ENV["XDG_STATE_HOME"]) / f"linuxapk-{INSTANCE}"),
+          "state": str(Path(ENV["XDG_STATE_HOME"]) / f"linuxapk-{PROFILE}"),
           "data_home": ENV["XDG_DATA_HOME"],
         }
       )

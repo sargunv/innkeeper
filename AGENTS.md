@@ -39,9 +39,9 @@ runs), then [docs/architecture.md](docs/architecture.md).
   wholesale. Android shares the host's network, as any `--share=network` app
   does ([docs/security.md](docs/security.md#flatpak-mode)).
   `linuxapk-session selftest` must pass (`mise run test:e2e -- boot`).
-- **Test sessions are named.** Use `LINUXAPK_INSTANCE=<name>` with a fresh data
+- **Test sessions are named.** Use `LINUXAPK_PROFILE=<name>` with a fresh data
   dir for anything you run, and stop it when done. Don't start, restart or reset
-  the user's main session (no instance name), and don't install host integration
+  the user's main session (no profile name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
 - **Test what you touched, in under a minute.** Keep only tests of observable
   behaviour we own. Unit and low-level tests cover branches, edge cases and

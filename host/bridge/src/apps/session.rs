@@ -157,7 +157,7 @@ impl Relay {
         let relay = self.clone();
         input.watch_windows(move || relay.changed());
         let bus = zbus::blocking::connection::Builder::session()?
-            .name(app_settings::bus_name(&linuxapk_core::paths::instance()?))?
+            .name(app_settings::bus_name(&linuxapk_core::paths::profile()?))?
             .serve_at(
                 app_settings::PATH,
                 SessionApi {

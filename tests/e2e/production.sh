@@ -4,8 +4,8 @@
 # stay on its test bridge; only new connections use this temporary sidecar.
 # shellcheck disable=SC2154 # repo and desktop_log come from run.sh.
 : "${repo:?}" "${desktop_log:?}"
-socket=$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/bridge/bridge.sock
-unit=linuxapk-production-$LINUXAPK_INSTANCE
+socket=$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_PROFILE/bridge/bridge.sock
+unit=linuxapk-production-$LINUXAPK_PROFILE
 host_runtime=/run/user/$(id -u)
 production=$T/production
 mkdir -p "$production"
@@ -26,8 +26,8 @@ s am force-stop dev.linuxapk.probes
 mv "$socket" "$socket.test"
 trap restore_test_bridge EXIT
 host_command systemd-run --user --quiet --collect --unit "$unit" -p MemoryMax=512M \
-  -p "BindsTo=linuxapk-nested-$LINUXAPK_INSTANCE.service" \
-  -p "After=linuxapk-nested-$LINUXAPK_INSTANCE.service" \
+  -p "BindsTo=linuxapk-nested-$LINUXAPK_PROFILE.service" \
+  -p "After=linuxapk-nested-$LINUXAPK_PROFILE.service" \
   -p "StandardOutput=append:$production/bridge.log" -p StandardError=inherit -- \
   env -u DISPLAY -u WAYLAND_DISPLAY -u LINUXAPK_TEST \
   HOME="$HOME" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
@@ -35,10 +35,10 @@ host_command systemd-run --user --quiet --collect --unit "$unit" -p MemoryMax=51
   XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" \
   DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   DBUS_SYSTEM_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-  LINUXAPK_INSTANCE="$LINUXAPK_INSTANCE" \
+  LINUXAPK_PROFILE="$LINUXAPK_PROFILE" \
   "$repo/out/stage/libexec/linuxapk/linuxapk-bridge" \
   --run-dir "$(dirname "$(dirname "$socket")")" --state-dir "$production" \
-  --system-app-dir "${LINUXAPK_DATA:-$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/android-data}/data/dev.linuxapk.system" \
+  --system-app-dir "${LINUXAPK_DATA:-$repo/out/dev/flatpak/$LINUXAPK_PROFILE/android-data}/data/dev.linuxapk.system" \
   --sink "$LINUXAPK_AUDIO_SINK" \
   >"$production/start.txt" 2>&1
 until_ok test -S "$socket"
