@@ -16,7 +16,21 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 
-/** The real evdev path, after the host-layout/shortcut translator made its decisions. */
+/**
+ * The real evdev path, after the host-layout/shortcut translator made its decisions.
+ *
+ * Modifiers and every ordinary mouse event go through the broker's evdev devices, because Android
+ * 17's `KeyboardInputMapper::updateMetaStateIfNeeded` updates InputReader's global meta state only
+ * for real devices and `CursorInputMapper::sync` reads it, so a modifier held during a drag reaches
+ * the mouse; injected keys never update it. Ordinary keys stay on the injection stream with
+ * explicit meta state, so typing doesn't depend on how the two streams interleave. Each window's
+ * mouse is associated with its display by unique id (Android 17's display-association,
+ * mouse-scaling and cursor-position test APIs) and never reassigned, so in-flight records keep
+ * their destination; records wait in host order until the association exists. The broker sends a
+ * batch only after EventHub read the last one, so epoll can't reorder modifiers and motion.
+ * Relative motion can't leave a window, so leaving ends the stream with `SYN_DROPPED` +
+ * `SYN_REPORT`, which makes InputReader reset the device and emit HOVER_EXIT.
+ */
 class VirtualInput(
   private val context: Context,
   private val connection: BridgeConnection,

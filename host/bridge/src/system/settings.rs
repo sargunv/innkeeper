@@ -6,6 +6,10 @@
 //!
 //! One watcher thread per bridge. Each change is sent as a full `SETTINGS`
 //! event to every subscribed system-app connection.
+//!
+//! A setting the profile opts out of keeps Android's current value: its field
+//! is unspecified (dark and clock 0, locale strings empty), and `has_accent`
+//! is 2 (0 means the desktop has no accent, 1 carries RGB).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

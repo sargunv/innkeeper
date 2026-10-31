@@ -16,9 +16,13 @@
 //! | `0x0309` | HANDOFF | `u32 window`, `u8 action` (1 URI, 2 open, 3 save, 4 email), `u8 files` (0..3), `u8 ask`, `u8 0`, `u32 len` ≤ 64 KiB; metadata fd then content fds | accepted for asynchronous portal operation; `-EBUSY` over 4 pending, `-EAGAIN` over 5 per 10 s |
 //! | `0x030a` | PLAYBACK_APP | name package (empty: nothing playing), name label | labels Android's mixed playback stream in the desktop mixer ([`PlaybackApp`]) |
 //!
-//! HANDOFF metadata: `u32 version` (1), text (≤32 KiB), subject (≤4 KiB),
-//! then one display name (≤255 B) per content fd, each a `u32` length and UTF-8.
-//! URI has no content fds. Open/save without files writes text as a `.txt` file;
+//! HANDOFF carries every portal operation that hands something from Android
+//! to the desktop. Its metadata: `u32 version` (1), text (≤32 KiB), subject
+//! (≤4 KiB), then one display name (≤255 B, no `/`, not `.` or `..`) per
+//! content fd, each a `u32` length and UTF-8. URI has no content fds and
+//! refuses `file:`, `content:`, `intent:`, `javascript:` and `data:`. The
+//! reply means scheduled, not done: the bridge logs a portal's cancellation
+//! or failure. Open/save without files writes text as a `.txt` file;
 //! email without files uses text as the body. Each content file is ≤64 MiB.
 //! Opened files/attachments stay in the profile cache until session shutdown,
 //! capped at 256 MiB retained. Save copies are removed after writing.
@@ -34,10 +38,11 @@
 //! [`super::mpris::Media`] document theirs, and the system app's encoders
 //! (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is `u32 len` +
 //! UTF-8; images are `u16 width, u16 height` + raw RGBA8 rows, so nothing
-//! Android sends reaches a host image decoder. Clip kind 3 is a single file:
-//! blob text name (1..255 bytes, no slash), blob text MIME (1..255 bytes),
-//! u32 size and raw file bytes (at most 16 MiB minus 1024); total at most
-//! 16 MiB. Clipboard text is raw UTF-8, without a length prefix.
+//! Android sends reaches a host image decoder. Clip kind 3 is `u32 count`
+//! (1..16) files, each a text name (1..255 bytes, no slash), a text MIME
+//! (1..255 bytes), then `u32 size` and raw bytes (at most 16 MiB minus 1024);
+//! 16 MiB in all, with no trailing bytes. Clipboard text is raw UTF-8, without
+//! a length prefix.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
