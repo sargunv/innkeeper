@@ -45,6 +45,21 @@ overlay() {
   done
 }
 overlay /vendor "$img/vendor" "$layer/vendor"
+# The display, and so the desktop window: the composer's panel
+# (ohos/vendor/display) and DMS's density, which DMS takes from its config's
+# <dpi> alone, never from the panel's size. At 320 dpi a 720x1280 panel is
+# 360x640 vp: a phone, in layouts and in the window.
+display=720x1280@320
+dms=etc/window/resources
+for d in etc etc/window $dms; do
+  [[ -L /vendor/$d ]] || continue
+  rm /vendor/"$d"
+  mkdir /vendor/"$d"
+  for e in "$img/vendor/$d"/*; do ln -s "$e" "/vendor/$d/${e##*/}"; done
+done
+rm -f /vendor/$dms/display_manager_config.xml
+sed "s|<dpi>[0-9]*</dpi>|<dpi>${display#*@}</dpi>|" \
+  "$img/vendor/$dms/display_manager_config.xml" >/vendor/$dms/display_manager_config.xml
 ln -sfn "$layer/sys_prod" /sys_prod
 mkdir -p "$data"
 ln -sfn "$data" /data
@@ -112,6 +127,7 @@ exec env -i \
   PATH=/system/bin:/vendor/bin \
   LINUXAPK_GUEST=ohos \
   LIBGL_ALWAYS_SOFTWARE=1 \
+  LINUXAPK_OHOS_DISPLAY="$display" \
   LINUXAPK_RENDER_NODE="${render:-/dev/null}" \
   LINUXAPK_BROKER="$layer/bin/linuxapk-broker" \
   LD_PRELOAD=/sys_prod/lib64/liblinuxapk_ohos_shim.so \

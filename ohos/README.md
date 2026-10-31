@@ -45,8 +45,14 @@ on your own.
 SceneBoard shows the lock screen about 30 s after samgr. Until desktop input
 lands, OH's own injector drives it from a probe:
 `uinput -T -m 360 1150 360 300 300` swipes it open to the home screen, and
-`uinput -T -c 120 146` taps Settings there.
+`uinput -T -c 90 200` taps Settings there.
 
+- **Display.** `sandbox.sh` defines the panel once (`display=720x1280@320`): the
+  composer reports that mode, and DMS gets the same dpi in its config's `<dpi>`,
+  the only place it takes density from (the image's says 160, which made the
+  screen 720 vp wide: tablet layouts, tiny icons). At 320 dpi it is 360x640 vp,
+  phone-class (`const.product.devicetype` is already `default`, a phone),
+  matching the window's size on the desktop.
 - **GPU.** Only the first render node opens (the broker's DRM policy): the
   image's Mesa otherwise opens the host's card node, and its composer would
   drive the host display's KMS. That Mesa ships iris, crocus, nouveau,
