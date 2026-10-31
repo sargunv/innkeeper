@@ -17,7 +17,7 @@
 //!
 //! ```mermaid
 //! sequenceDiagram
-//!   participant C as libtinyalsav2 (HAL)
+//!   participant C as audio_bridge (HAL)
 //!   participant R as ring memfd
 //!   participant B as bridge stream thread
 //!   participant P as PipeWire (pulse)

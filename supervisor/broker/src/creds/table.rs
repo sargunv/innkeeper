@@ -66,8 +66,10 @@ pub enum SetId {
     Groups(Vec<u32>),
 }
 
-/// The caller's relevant capabilities (its real, effective set: capset works
-/// natively in the session, so dropped capabilities stay dropped).
+/// CAP_SETUID and CAP_SETGID for a credential syscall. Virtual root has both;
+/// every other uid has neither. `capset` is answered without changing the
+/// kernel's set, and a sandboxed `CapEff` is always 0, so there is nothing
+/// else to read.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Caps {
     pub setuid: bool,

@@ -1,6 +1,6 @@
 //! Audio service messages (id 1, types 0x0100..=0x01ff). The client is
-//! `libtinyalsav2` in the AIDL audio HAL (`android/vendor/audio`); framing
-//! and HELLO are in `docs/bridge-protocol.md`.
+//! `android/vendor/audio`'s module (`audio_bridge`); framing and HELLO are
+//! in `docs/bridge-protocol.md`.
 //!
 //! | Type     | Request      | Body                                                                                                                                               | Reply                                                                                                                                          |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -9,7 +9,6 @@
 //! | `0x0102` | CLOSE        | `u32 stream`                                                                                                                                       |                                                                                                                                                |
 //! | `0x0103` | STANDBY      | `u32 stream`                                                                                                                                       | Once the ring drains and PipeWire underruns, the stream is corked so the sink can suspend                                                     |
 //! | `0x0104` | SET_VOLUME   | `u32 stream`, `f32 left`, `f32 right` (each 0–1)                                                                                                   |                                                                                                                                                |
-//! | `0x0105` | SET_MASTER   | `f32 volume` (0–1), `u8 muted` (0/1): every stream of the connection, current and future                                                           |                                                                                                                                                |
 //! | `0x0106` | SET_METADATA | `u32 stream`, `u32 usage` (Android `audio_usage_t`), label (empty: derived from usage)                                                             | Sets the PipeWire `media.name` and `media.role`                                                                                                |
 //!
 //! Limits: 8 streams and 8 MiB of rings per connection; 32 streams and 32
@@ -28,7 +27,6 @@ pub mod ty {
     pub const CLOSE: u16 = 0x0102;
     pub const STANDBY: u16 = 0x0103;
     pub const SET_VOLUME: u16 = 0x0104;
-    pub const SET_MASTER: u16 = 0x0105;
     pub const SET_METADATA: u16 = 0x0106;
 }
 
@@ -94,10 +92,6 @@ pub enum Request {
         left: f32,
         right: f32,
     },
-    SetMaster {
-        volume: f32,
-        muted: bool,
-    },
     SetMetadata {
         stream: u32,
         usage: u32,
@@ -147,10 +141,6 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
             stream: r.u32()?,
             left: r.unit_f32()?,
             right: r.unit_f32()?,
-        },
-        ty::SET_MASTER => Request::SetMaster {
-            volume: r.unit_f32()?,
-            muted: r.bool()?,
         },
         ty::SET_METADATA => Request::SetMetadata {
             stream: r.u32()?,
@@ -202,11 +192,6 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         } => {
             let mut w = Writer::message(ty::SET_VOLUME, tag);
             w.u32(*stream).f32(*left).f32(*right);
-            w
-        }
-        Request::SetMaster { volume, muted } => {
-            let mut w = Writer::message(ty::SET_MASTER, tag);
-            w.f32(*volume).u8(*muted as u8);
             w
         }
         Request::SetMetadata {
@@ -295,10 +280,6 @@ mod tests {
                 left: 0.5,
                 right: 1.0,
             },
-            Request::SetMaster {
-                volume: 0.25,
-                muted: true,
-            },
             Request::SetMetadata {
                 stream: 1,
                 usage: 14,
@@ -343,16 +324,6 @@ mod tests {
                     stream: 0,
                     left: f32::NAN,
                     right: 0.0
-                }
-            ))
-            .is_err()
-        );
-        assert!(
-            roundtrip(&encode(
-                1,
-                &Request::SetMaster {
-                    volume: 1.5,
-                    muted: false
                 }
             ))
             .is_err()

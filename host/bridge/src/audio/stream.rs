@@ -21,7 +21,6 @@ use super::ring::{Ring, STATE_DEAD, STATE_PLAYING};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ctl {
     Volume(f32, f32),
-    Master(f32, bool),
     Standby,
     Metadata(u32, String),
     /// The app on Android's mixed playback stream, or `None` to restore the

@@ -268,15 +268,6 @@ fn stream_through_ring() {
         0
     );
     assert_eq!(
-        c.call(&Request::SetMaster {
-            volume: 1.0,
-            muted: true
-        })
-        .unwrap()
-        .0,
-        0
-    );
-    assert_eq!(
         c.call(&Request::SetMetadata {
             stream: r.stream,
             usage: 14,
