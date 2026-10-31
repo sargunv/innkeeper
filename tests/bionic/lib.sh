@@ -14,15 +14,15 @@
   repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
   stage=$repo/out/stage
   scratch=$repo/out/test/bionic
-  pivot_exec=$stage/libexec/linuxapk/pivot-exec
-  broker=$stage/share/linuxapk/android/system/bin/linuxapk-broker
-  stage_vendor=$stage/share/linuxapk/android/vendor
+  pivot_exec=$stage/libexec/innkeeper/pivot-exec
+  broker=$stage/share/innkeeper/android/system/bin/innkeeper-brk
+  stage_vendor=$stage/share/innkeeper/android/vendor
   props_shim=$repo/out/build/android/tests/bionic/libprops_shim.so
 }
 
 # Check that the build is staged and the image prepared, and set img and apex
 # to the image's partitions and flattened APEXes (the paths
-# `linuxapk-session image` prints).
+# `innkeeper-session image` prints).
 img="" apex=""
 bionic_prepare() {
   local f k v
@@ -37,7 +37,7 @@ bionic_prepare() {
       img) img=$v ;;
       apex) apex=$v ;;
     esac
-  done < <("$stage/libexec/linuxapk/linuxapk-session" image)
+  done < <("$stage/libexec/innkeeper/innkeeper-session" image)
   [[ -d $img/system/system && -f $apex/apex-info-list.xml ]] || {
     echo "image not prepared at $img (run \`mise run session -- prepare\`)" >&2
     return 1
@@ -133,7 +133,7 @@ bionic_broker_nodes() {
 bionic_env() {
   local v
   for v in $(compgen -e); do unset "$v"; done
-  export LINUXAPK_BIONIC_HARNESS=1 PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
+  export INNKEEPER_BIONIC_HARNESS=1 PATH=/system/bin:/vendor/bin ANDROID_ROOT=/system ANDROID_DATA=/data \
     ANDROID_ART_ROOT=/apex/com.android.art ANDROID_I18N_ROOT=/apex/com.android.i18n \
     ANDROID_TZDATA_ROOT=/apex/com.android.tzdata TMPDIR=/data/local/tmp
 }

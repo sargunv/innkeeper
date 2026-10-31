@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 // Host presentation phase in CLOCK_MONOTONIC. Extrapolate between feedback
 // samples. Silence on a static visible window preserves its clock; only
@@ -44,4 +44,4 @@ class HostClock {
   int64_t mPeriod = kDefaultPeriod;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

@@ -11,7 +11,7 @@ use anyhow::Result;
 use crate::control;
 use crate::paths::Paths;
 
-pub const RELAY: &str = "/system/bin/linuxapk-exec";
+pub const RELAY: &str = "/system/bin/innkeeper-exec";
 
 /// Android's environment for a command: init.environ.rc's and the derived
 /// classpath's `export NAME VALUE` lines, read from the session's root (this

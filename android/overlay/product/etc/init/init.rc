@@ -1,1 +1,1 @@
-# linuxapk: disabled cuttlefish-only service; see android/overlay/README.md (tombstone_transmit sends tombstones to the host over vsock)
+# innkeeper: disabled cuttlefish-only service; see android/overlay/README.md (tombstone_transmit sends tombstones to the host over vsock)

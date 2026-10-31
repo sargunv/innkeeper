@@ -1,4 +1,4 @@
-# linuxapk: the image's file plus LD_PRELOAD of the session shim (see
+# innkeeper: the image's file plus LD_PRELOAD of the session shim (see
 # android/vendor/audio/README.md). The HAL's stream worker threads call
 # setpriority(ANDROID_PRIORITY_AUDIO) and fail the stream open on EACCES (no
 # CAP_SYS_NICE over the initial namespace), which blocks audioserver and with
@@ -8,7 +8,7 @@
 
 
 service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     class hal
     user audioserver
     # media gid needed for /dev/fm (radio) and for /data/misc/media (tee)
@@ -21,7 +21,7 @@ service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.ha
     onrestart restart audioserver
 
 service vendor.audio-effect-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.effect.service-aidl.example
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     class hal
     user audioserver
     # media gid needed for /dev/fm (radio) and for /data/misc/media (tee)

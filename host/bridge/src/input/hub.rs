@@ -295,10 +295,15 @@ impl Hub {
             .insert(r.window, (conn, display));
         let prefix = format!(
             "{}.",
-            linuxapk_core::desktop::flatpak_app_id().unwrap_or_else(|| "dev.linuxapk".into())
+            innkeeper_core::desktop::flatpak_app_id()
+                .unwrap_or_else(|| "dev.sargunv.innkeeper".into())
         );
-        if let Some(pkg) = r.app_id.strip_prefix(&prefix) {
-            self.packages.lock().unwrap().insert(r.window, pkg.into());
+        // Android's id uses a lowercase `innkeeper`; the Flatpak id capitalizes it.
+        if r.app_id.len() > prefix.len() && r.app_id[..prefix.len()].eq_ignore_ascii_case(&prefix) {
+            self.packages
+                .lock()
+                .unwrap()
+                .insert(r.window, r.app_id[prefix.len()..].into());
         }
         self.windows_changed();
         crate::info!("input: window {} shows display {display}", r.window);
@@ -384,7 +389,7 @@ mod tests {
             dpi: 160,
             min_width: 0,
             min_height: 0,
-            app_id: "dev.linuxapk.test".into(),
+            app_id: "dev.sargunv.innkeeper.test".into(),
             title: "Test".into(),
             token: String::new(),
         }

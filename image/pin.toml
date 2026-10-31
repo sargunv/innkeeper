@@ -1,9 +1,9 @@
-# The Android image Linux.apk boots by default: an AOSP build from Android's
+# The Android image Innkeeper boots by default: an AOSP build from Android's
 # public CI (ci.android.com). Users download it from Google at setup
 # (image/fetch.sh); we never redistribute it. See image/README.md, which
 # also explains how to bump this pin.
 
-# Image name: the directory under ~/.local/share/linuxapk/images/.
+# Image name: the directory under ~/.local/share/innkeeper/images/.
 name = "ci-16644040"
 branch = "aosp-android-latest-release"
 build_id = "16644040"

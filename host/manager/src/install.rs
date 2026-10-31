@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
-use linuxapk_core::desktop::MANAGER_ID;
-use linuxapk_core::launcher;
-use linuxapk_core::ops::{self, Event, Package};
+use innkeeper_core::desktop::MANAGER_ID;
+use innkeeper_core::launcher;
+use innkeeper_core::ops::{self, Event, Package};
 
 use crate::errors::{self, Op};
 use crate::permissions;
@@ -73,7 +73,7 @@ pub fn page(w: &Window, file: PathBuf) -> adw::NavigationPage {
             }
             Err(e) => {
                 let h = errors::humane(Op::Read, None, &e);
-                eprintln!("linuxapk-manager: {}", h.details);
+                eprintln!("innkeeper-manager: {}", h.details);
                 let err = adw::StatusPage::builder()
                     .icon_name("dialog-error-symbolic")
                     .title(&h.heading)
@@ -301,7 +301,7 @@ fn details(
                 move |rep| ops::install(&p2, rep),
                 move |e| match e {
                     Event::Status(m) => pl2.set_text(&status_text(&m)),
-                    Event::Warning(m) => eprintln!("linuxapk-manager: {m}"),
+                    Event::Warning(m) => eprintln!("innkeeper-manager: {m}"),
                 },
             )
             .await;

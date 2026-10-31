@@ -1,13 +1,13 @@
 # image
 
-The one Android image Linux.apk boots: an unmodified AOSP build from Android's
+The one Android image Innkeeper boots: an unmodified AOSP build from Android's
 public CI ([pin.toml](pin.toml): `aosp_cf_x86_64_only_phone-userdebug`, Android
 17, test-keys), downloaded from Google on the user's machine and never
 redistributed or committed. `mise run build:data` stages the config to
-`share/linuxapk/image/` and the scripts to `libexec/linuxapk/image/`;
+`share/innkeeper/image/` and the scripts to `libexec/innkeeper/image/`;
 `mise run build:image-tools` builds the static `simg2img`, `lpunpack`,
 `fsck.erofs` and `debugfs` (`tools/build.sh`, in the build container), so setup
-needs neither podman nor distro packages. `linuxapk-session prepare` (or the
+needs neither podman nor distro packages. `innkeeper-session prepare` (or the
 first `start`) runs the pipeline.
 
 ```mermaid
@@ -17,7 +17,7 @@ flowchart LR
   flatten --> derive["derive.sh<br/>common and single layers"]
 ```
 
-Cache, shared by every profile, in `$XDG_DATA_HOME/linuxapk/images/<name>/`:
+Cache, shared by every profile, in `$XDG_DATA_HOME/innkeeper/images/<name>/`:
 `dl/` (resumable downloads; the zip goes once extracted), `img/` (the
 partitions), `apex-<hash>/` (one flattened tree per vendor APEX selection, never
 rewritten under a running session), `derived/` (the layers
@@ -58,7 +58,7 @@ regenerated while another session uses that build; stop those sessions first.
    new build id.
 4. Prove it: `mise run test:e2e -- boot`, `mise run test:e2e` and
    `mise run test:compat` with no regressions, then regenerate the
-   [Compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility).
+   [Compatibility wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility).
 
 ## Licensing
 

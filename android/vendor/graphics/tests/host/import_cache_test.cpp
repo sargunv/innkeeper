@@ -3,7 +3,7 @@
 
 #include "ImportCache.h"
 
-using linuxapk::hwc::ImportCache;
+using innkeeper::hwc::ImportCache;
 struct Image {
   int& alive;
   explicit Image(int& alive) : alive(alive) { ++alive; }

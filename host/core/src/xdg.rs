@@ -31,14 +31,14 @@ pub struct Dirs {
 
 /// The `Key=value` an app's record carries when the user declined its
 /// app-menu entry, so repairs don't ask again (an install does).
-const DECLINED: &str = "X-LinuxApk-Menu";
+const DECLINED: &str = "X-Innkeeper-Menu";
 
 impl Dirs {
     pub fn from_env() -> Self {
         Self {
             data: xdg_home("XDG_DATA_HOME", ".local/share"),
             config: xdg_home("XDG_CONFIG_HOME", ".config"),
-            cache: xdg_home("XDG_CACHE_HOME", ".cache").join("linuxapk"),
+            cache: xdg_home("XDG_CACHE_HOME", ".cache").join("innkeeper"),
             portal: desktop::flatpak_app_id(),
         }
     }
@@ -89,8 +89,8 @@ fn tool(name: &str, args: &[&std::ffi::OsStr]) {
         Duration::from_secs(60),
     ) {
         Ok(o) if o.ok() => {}
-        Ok(o) => eprintln!("linuxapk: {name}: {}", o.stderr.trim()),
-        Err(e) => eprintln!("linuxapk: {name}: {e}"),
+        Ok(o) => eprintln!("innkeeper: {name}: {}", o.stderr.trim()),
+        Err(e) => eprintln!("innkeeper: {name}: {e}"),
     }
 }
 
@@ -264,7 +264,7 @@ pub fn remove_app(d: &Dirs, pkg: &str) -> bool {
         && let Ok(Some(_)) = dynlauncher::get(&id)
         && let Err(e) = dynlauncher::uninstall(&id)
     {
-        eprintln!("linuxapk: {e:#}");
+        eprintln!("innkeeper: {e:#}");
     }
     let had_entry = fs::remove_file(d.app_desktop(pkg)).is_ok();
     let icons = remove_icons(d, &format!("{PREFIX}{pkg}"));
@@ -289,12 +289,12 @@ pub fn launch_look(
 ) -> Option<(String, Option<desktop::Splash>, Option<PathBuf>)> {
     let t = fs::read_to_string(d.app_desktop(pkg)).ok()?;
     let name = desktop::read_key(&t, "Name")?;
-    let splash = desktop::read_key(&t, "X-LinuxApk-Splash")
-        .and_then(|c| desktop::Splash::parse(&c, &desktop::read_key(&t, "X-LinuxApk-Window")?));
+    let splash = desktop::read_key(&t, "X-Innkeeper-Splash")
+        .and_then(|c| desktop::Splash::parse(&c, &desktop::read_key(&t, "X-Innkeeper-Window")?));
     Some((name, splash, largest_icon(d, &format!("{PREFIX}{pkg}"))))
 }
 
-/// An app installed by Linux.apk, as its desktop entry describes it.
+/// An app installed by Innkeeper, as its desktop entry describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopApp {
     pub package: String,
@@ -314,7 +314,7 @@ pub fn exec_profile(exec: &str) -> String {
         .to_string()
 }
 
-/// The largest hicolor PNG for `id` (`dev.linuxapk.<pkg>`).
+/// The largest hicolor PNG for `id` (`dev.sargunv.innkeeper.<pkg>`).
 pub fn largest_icon(d: &Dirs, id: &str) -> Option<PathBuf> {
     HICOLOR_SIZES
         .iter()
@@ -323,7 +323,7 @@ pub fn largest_icon(d: &Dirs, id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Our app entries: (package, path, text) for every `dev.linuxapk.<pkg>`
+/// Our app entries: (package, path, text) for every `dev.sargunv.innkeeper.<pkg>`
 /// desktop file that says it is `pkg`'s.
 fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
     let Ok(rd) = fs::read_dir(d.applications()) else {
@@ -335,19 +335,19 @@ fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
             let pkg = name.strip_prefix(PREFIX)?.strip_suffix(".desktop")?;
             crate::validate::package(pkg).ok()?;
             let text = fs::read_to_string(e.path()).ok()?;
-            (desktop::read_key(&text, "X-LinuxApk-Package").as_deref() == Some(pkg))
+            (desktop::read_key(&text, "X-Innkeeper-Package").as_deref() == Some(pkg))
                 .then(|| (pkg.to_string(), e.path(), text))
         })
         .collect()
 }
 
-/// Apps with a Linux.apk desktop entry (any profile), sorted by name.
+/// Apps with a Innkeeper desktop entry (any profile), sorted by name.
 pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     let mut v: Vec<DesktopApp> = app_entries(d)
         .into_iter()
         .map(|(pkg, _, t)| DesktopApp {
             name: desktop::read_key(&t, "Name").unwrap_or_else(|| pkg.clone()),
-            version: desktop::read_key(&t, "X-LinuxApk-Version"),
+            version: desktop::read_key(&t, "X-Innkeeper-Version"),
             profile: exec_profile(&desktop::read_key(&t, "Exec").unwrap_or_default()),
             icon: largest_icon(d, &format!("{PREFIX}{pkg}")),
             package: pkg,
@@ -358,24 +358,24 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 }
 
 /// Repairs our app entries. The `Exec` of one that can no longer run is
-/// pointed at `linuxapk` (this installation's command line, keeping its
-/// profile): its program is gone (Linux.apk moved or was
-/// reinstalled elsewhere), it sets variables an older Linux.apk used
-/// (`LINUXAPK_SESSION`), or, inside the Flatpak, it runs anything but
-/// `linuxapk`. Inside the Flatpak, a record whose app-menu entry is missing or
+/// pointed at `innkeeper` (this installation's command line, keeping its
+/// profile): its program is gone (Innkeeper moved or was
+/// reinstalled elsewhere), it sets variables an older Innkeeper used
+/// (`INNKEEPER_SESSION`), or, inside the Flatpak, it runs anything but
+/// `innkeeper`. Inside the Flatpak, a record whose app-menu entry is missing or
 /// runs another command is offered to the portal again, unless the user
 /// declined it. Returns how many were rewritten.
-pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
-    rewrite_entries(d, linuxapk, None)
+pub fn refresh_entries(d: &Dirs, innkeeper: &[String]) -> usize {
+    rewrite_entries(d, innkeeper, None)
 }
 
 /// Points the entries of profile `from`'s apps at profile `to` (renamed),
 /// as [`refresh_entries`] writes them. Returns how many were rewritten.
-pub fn move_entries(d: &Dirs, linuxapk: &[String], from: &str, to: &str) -> usize {
-    rewrite_entries(d, linuxapk, Some((from, to)))
+pub fn move_entries(d: &Dirs, innkeeper: &[String], from: &str, to: &str) -> usize {
+    rewrite_entries(d, innkeeper, Some((from, to)))
 }
 
-fn rewrite_entries(d: &Dirs, linuxapk: &[String], rename: Option<(&str, &str)>) -> usize {
+fn rewrite_entries(d: &Dirs, innkeeper: &[String], rename: Option<(&str, &str)>) -> usize {
     let mut n = 0;
     for (pkg, path, mut text) in app_entries(d) {
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
@@ -384,13 +384,13 @@ fn rewrite_entries(d: &Dirs, linuxapk: &[String], rename: Option<(&str, &str)>) 
         let missing = inv
             .program
             .is_some_and(|p| Path::new(p).is_absolute() && !Path::new(p).exists());
-        let elsewhere = d.portal.is_some() && inv.program != linuxapk.first().map(String::as_str);
+        let elsewhere = d.portal.is_some() && inv.program != innkeeper.first().map(String::as_str);
         let (renamed, profile) = match rename {
             Some((from, to)) if inv.profile == from => (true, to),
             _ => (false, inv.profile),
         };
         if missing || elsewhere || renamed || inv.foreign_env || inv.program.is_none() {
-            let mut run = paths::command(linuxapk, profile);
+            let mut run = paths::command(innkeeper, profile);
             run.extend(["run".into(), pkg.clone()]);
             let Some(mut new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
@@ -408,14 +408,14 @@ fn rewrite_entries(d: &Dirs, linuxapk: &[String], rename: Option<(&str, &str)>) 
             }
             match write_atomic(&path, new.as_bytes()) {
                 Ok(()) => n += 1,
-                Err(e) => eprintln!("linuxapk: {e:#}"),
+                Err(e) => eprintln!("innkeeper: {e:#}"),
             }
             text = new;
         }
         if d.portal.is_some()
             && let Err(e) = add_to_menu(d, &pkg, &text, true)
         {
-            eprintln!("linuxapk: {pkg}: app menu: {e:#}");
+            eprintln!("innkeeper: {pkg}: app menu: {e:#}");
         }
     }
     if n > 0 {
@@ -430,25 +430,25 @@ mod tests {
 
     #[test]
     fn portal_keeps_only_the_main_launcher() {
-        let entry = "[Desktop Entry]\nName=App\nExec=linuxapk run a.b %U\nActions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=linuxapk run --new-window a.b\n";
+        let entry = "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\nActions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=innkeeper run --new-window a.b\n";
         let record = menu_record(entry, true);
         // The repair path reads exactly this key before requesting installation again.
         assert_eq!(
             desktop::read_key(&record, DECLINED).as_deref(),
             Some("declined")
         );
-        assert!(record.ends_with("Exec=linuxapk run --new-window a.b\n"));
+        assert!(record.ends_with("Exec=innkeeper run --new-window a.b\n"));
         assert_eq!(menu_record(&record, false), entry);
         let portal = portal_entry(entry);
         assert_eq!(
             portal,
-            "[Desktop Entry]\nName=App\nExec=linuxapk run a.b %U\n\n"
+            "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\n\n"
         );
     }
 
     #[test]
     fn profile_of_exec() {
-        for (program, profile) in [("/x/linuxapk", "gui"), ("/a b/linuxapk", "")] {
+        for (program, profile) in [("/x/innkeeper", "gui"), ("/a b/innkeeper", "")] {
             let mut run = paths::command(&[program.into()], profile);
             run.extend(["run".into(), "a.b".into()]);
             let exec = desktop::exec_line(&run, Some("%U")).unwrap();
@@ -469,7 +469,7 @@ mod tests {
             package: "org.example.app".into(),
             name: "Example".into(),
             names: vec![],
-            run: vec!["/x/linuxapk".into(), "run".into()],
+            run: vec!["/x/innkeeper".into(), "run".into()],
             icon: None,
             version: String::new(),
             categories: vec!["Utility".into()],
@@ -488,10 +488,19 @@ mod tests {
         else {
             panic!("not a file");
         };
-        assert!(p.ends_with("applications/dev.linuxapk.org.example.app.desktop"));
-        assert!(d.icon_path(48, "dev.linuxapk.org.example.app").is_file());
-        assert!(!d.icon_path(64, "dev.linuxapk.org.example.app").exists());
-        assert_eq!(e.icon.as_deref(), Some("dev.linuxapk.org.example.app"));
+        assert!(p.ends_with("applications/dev.sargunv.innkeeper.org.example.app.desktop"));
+        assert!(
+            d.icon_path(48, "dev.sargunv.innkeeper.org.example.app")
+                .is_file()
+        );
+        assert!(
+            !d.icon_path(64, "dev.sargunv.innkeeper.org.example.app")
+                .exists()
+        );
+        assert_eq!(
+            e.icon.as_deref(),
+            Some("dev.sargunv.innkeeper.org.example.app")
+        );
         assert_eq!(app_label(&d, "org.example.app").as_deref(), Some("Example"));
         let apps = desktop_apps(&d);
         assert_eq!(apps.len(), 1);
@@ -499,11 +508,17 @@ mod tests {
         assert_eq!(apps[0].profile, "");
         assert_eq!(
             apps[0].icon.as_deref(),
-            Some(d.icon_path(48, "dev.linuxapk.org.example.app").as_path())
+            Some(
+                d.icon_path(48, "dev.sargunv.innkeeper.org.example.app")
+                    .as_path()
+            )
         );
         // Reinstall replaces; remove cleans up.
         install_app(&d, &mut e, &[]).unwrap();
-        assert!(!d.icon_path(48, "dev.linuxapk.org.example.app").exists());
+        assert!(
+            !d.icon_path(48, "dev.sargunv.innkeeper.org.example.app")
+                .exists()
+        );
         assert_eq!(e.icon.as_deref(), Some("android-package-archive"));
         assert!(remove_app(&d, "org.example.app"));
         assert!(!p.exists());
@@ -520,13 +535,13 @@ mod tests {
             cache: root.join("cache"),
             portal: None,
         };
-        let binary = root.join("linuxapk");
+        let binary = root.join("innkeeper");
         fs::write(&binary, "").unwrap();
         let cli = vec![binary.to_string_lossy().into_owned()];
         let entry = |pkg: &str, exec: &str| {
             let p = d.app_desktop(pkg);
             let text =
-                format!("[Desktop Entry]\nName={pkg}\nExec={exec}\nX-LinuxApk-Package={pkg}\n");
+                format!("[Desktop Entry]\nName={pkg}\nExec={exec}\nX-Innkeeper-Package={pkg}\n");
             write_atomic(&p, text.as_bytes()).unwrap();
             p
         };
@@ -536,16 +551,16 @@ mod tests {
             run.extend(["run".into(), pkg.into()]);
             Some(desktop::exec_line(&run, Some("%U")).unwrap())
         };
-        let mut old = paths::command(&["/gone/linuxapk".into()], "cli");
-        old.insert(1, "LINUXAPK_SESSION=/gone/session".into());
+        let mut old = paths::command(&["/gone/innkeeper".into()], "cli");
+        old.insert(1, "INNKEEPER_SESSION=/gone/session".into());
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
-        let moved = entry("org.ex.moved", "/gone/linuxapk run org.ex.moved %U");
+        let moved = entry("org.ex.moved", "/gone/innkeeper run org.ex.moved %U");
         let mut moved_text = fs::read_to_string(&moved).unwrap();
-        moved_text.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=/gone/linuxapk run --new-window org.ex.moved\n");
+        moved_text.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=/gone/innkeeper run --new-window org.ex.moved\n");
         fs::write(&moved, moved_text).unwrap();
         let fine = entry("org.ex.fine", &want("org.ex.fine", "").unwrap());
-        let on_path = entry("org.ex.path", "linuxapk run org.ex.path %U");
+        let on_path = entry("org.ex.path", "innkeeper run org.ex.path %U");
 
         assert_eq!(refresh_entries(&d, &cli), 2);
         assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
@@ -559,7 +574,7 @@ mod tests {
         assert_eq!(exec_of(&fine), want("org.ex.fine", ""));
         assert_eq!(
             exec_of(&on_path).as_deref(),
-            Some("linuxapk run org.ex.path %U")
+            Some("innkeeper run org.ex.path %U")
         );
         assert_eq!(refresh_entries(&d, &cli), 0);
         fs::remove_dir_all(&root).unwrap();

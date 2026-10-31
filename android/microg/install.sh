@@ -2,14 +2,14 @@
 # Fetch microG (GmsCore, GsfProxy, FakeStore) from microG's own F-Droid repo,
 # verify it, and install it as privileged system apps into the microg addon,
 # a layer the session stacks over the partitions
-# ($XDG_DATA_HOME/linuxapk/addons/microg/system_ext; see android/microg/README.md):
+# ($XDG_DATA_HOME/innkeeper/addons/microg/system_ext; see android/microg/README.md):
 #   priv-app/GmsCore/GmsCore.apk (+ lib/x86_64/, extracted)
 #   priv-app/GsfProxy/GsfProxy.apk
 #   priv-app/FakeStore/FakeStore.apk
 #   etc/permissions/privapp-permissions-microg.xml
 #   etc/default-permissions/default-permissions-microg.xml
 #   etc/sysconfig/microg.xml
-# Downloads go in $XDG_CACHE_HOME/linuxapk/microg. Restart the session
+# Downloads go in $XDG_CACHE_HOME/innkeeper/microg. Restart the session
 # afterwards.
 #
 #   android/microg/install.sh            # latest stable release
@@ -25,8 +25,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 bt=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS
 url=https://microg.org/fdroid/repo
 key=9bd06727e62796c0130eb6dab39b73157451582cbd138e86c468acc395d14165
-dl=${XDG_CACHE_HOME:-$HOME/.cache}/linuxapk/microg
-addon=${XDG_DATA_HOME:-$HOME/.local/share}/linuxapk/addons/microg
+dl=${XDG_CACHE_HOME:-$HOME/.cache}/innkeeper/microg
+addon=${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/addons/microg
 dst=$addon/system_ext
 # package  priv-app name
 apps=(

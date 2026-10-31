@@ -21,7 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "linuxapk/gralloc_handle.h"
+#include "innkeeper/gralloc_handle.h"
 
 using namespace aidl::android::hardware::graphics::composer3;
 using namespace aidl::android::hardware::graphics::allocator;
@@ -229,7 +229,7 @@ int main() {
   if (ar.buffers.size() != 2) return 1;
   auto fill = [&](const NativeHandle& h, uint32_t phase) {
     int fd = h.fds[0].get();
-    linuxapk::BufferHandle bh;
+    innkeeper::BufferHandle bh;
     memcpy(&bh.magic, h.ints.data(), h.ints.size() * sizeof(int));
     uint8_t* p = (uint8_t*)mmap(
       nullptr, bh.totalSize.get(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0
@@ -338,7 +338,7 @@ int main() {
   res = present(2, false, true);
   CHECK(countErrors(res) == 1);
 
-  // Dump check (set vendor.linuxapk.hwc.dump.dir for the composer).
+  // Dump check (set vendor.innkeeper.hwc.dump.dir for the composer).
   if (const char* dir = getenv("EXPECT_DUMP")) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     struct stat st;

@@ -15,6 +15,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "linuxapk-system"
+rootProject.name = "innkeeper-system"
 
 include(":protocol", ":hidden-api", ":inject", ":app", ":probes", ":wm-overlay")

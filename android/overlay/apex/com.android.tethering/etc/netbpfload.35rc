@@ -1,10 +1,10 @@
-# linuxapk: replaces the APEX's netbpfload.35rc. The real netbpfload runs, and
+# innkeeper: replaces the APEX's netbpfload.35rc. The real netbpfload runs, and
 # its bpf() calls are served by the session's userspace emulator
 # (supervisor/pivot-exec/bpfemu.c): maps get created and pinned under /sys/fs/bpf,
-# program loads and attaches are no-ops. linuxapk-bpfload gives it a private
+# program loads and attaches are no-ops. innkeeper-bpfload gives it a private
 # mount namespace with writable stand-ins for the BPF sysctls it insists on
 # setting (absent or read-only in a user namespace). No reboot on failure.
-service bpfloader /system/bin/linuxapk-bpfload
+service bpfloader /system/bin/innkeeper-bpfload
     disabled
     namespace mnt
     group root graphics network_stack net_admin net_bw_acct net_bw_stats net_raw system

@@ -247,7 +247,7 @@ impl NotifyHub {
             actions.extend([key.clone(), a.label.clone()]);
             keys.push(key);
         }
-        let entry = linuxapk_core::desktop::app_id(&note.package);
+        let entry = innkeeper_core::desktop::app_id(&note.package);
         let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
         hints.insert("desktop-entry", Value::from(entry.as_str()));
         hints.insert("x-kde-display-appname", Value::from(note.app_name.as_str()));
@@ -409,7 +409,7 @@ impl NotifyHub {
                 };
                 let text = crate::ipc::wire::truncate(&text, MAX_REPLY);
                 crate::info!("notify: {host} ({}): reply, {} bytes", r.id, text.len());
-                match blob::create("linuxapk-reply", text.as_bytes()) {
+                match blob::create("innkeeper-reply", text.as_bytes()) {
                     Ok(fd) => {
                         let body =
                             notify_event(r.id, notify_event::REPLY, idx as u8, text.len() as u32);

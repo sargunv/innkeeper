@@ -9,15 +9,17 @@ use anyhow::{Result, bail};
 use crate::validate::is_forbidden_char;
 
 /// Desktop-file ID and icon name prefix; `StartupWMClass` uses it too.
-pub const PREFIX: &str = "dev.linuxapk.";
-/// The manager app (`linuxapk-manager`): its application ID, desktop-file ID and
-/// icon name. One segment after the prefix, so no Android package (which
-/// has at least two) can collide with it.
-pub const MANAGER_ID: &str = "dev.linuxapk.Manager";
+/// The manager's own id is `dev.sargunv.Innkeeper` (capital I), so it does not
+/// share this prefix and a directory watch of app entries ignores it.
+pub const PREFIX: &str = "dev.sargunv.innkeeper.";
+/// The manager app (`innkeeper-manager`): its application ID, desktop-file ID and
+/// icon name. The capital I keeps it off [`PREFIX`], so no Android package can
+/// collide with it.
+pub const MANAGER_ID: &str = "dev.sargunv.Innkeeper";
 /// The manager's icon (also used where an app has no icon of its own).
-pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.linuxapk.Manager.svg");
+pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.sargunv.Innkeeper.svg");
 
-/// Linux.apk's Flatpak app id when it runs inside its Flatpak (where app-menu
+/// Innkeeper's Flatpak app id when it runs inside its Flatpak (where app-menu
 /// entries go through the DynamicLauncher portal), else None.
 pub fn flatpak_app_id() -> Option<String> {
     std::path::Path::new("/.flatpak-info")
@@ -27,7 +29,7 @@ pub fn flatpak_app_id() -> Option<String> {
 
 /// The id desktops match an app's windows (`app_id`, `StartupWMClass`),
 /// notifications and MPRIS players to its menu entry by:
-/// `dev.linuxapk.<pkg>`, or inside the Flatpak `<app id>.<pkg>`, the id the
+/// `dev.sargunv.innkeeper.<pkg>`, or inside the Flatpak `<app id>.<pkg>`, the id the
 /// portal gives the entry and the only prefix a compositor lets a sandboxed
 /// client's windows claim.
 pub fn app_id(pkg: &str) -> String {
@@ -37,12 +39,20 @@ pub fn app_id(pkg: &str) -> String {
     }
 }
 
-/// [`app_id`] for an id Android sent (`dev.linuxapk.<pkg>`, the system
+/// [`app_id`] for an id Android sent (`dev.sargunv.innkeeper.<pkg>`, the system
 /// app's window ids); anything else is kept.
+///
+/// The Android prefix and the Flatpak app id differ only by the case of
+/// `innkeeper` (`dev.sargunv.innkeeper.` versus `dev.sargunv.Innkeeper.`). A
+/// case-sensitive strip would miss the guest id and prefix it again.
 pub fn desktop_app_id(android: &str) -> String {
-    match android.strip_prefix(PREFIX) {
-        Some(pkg) if !pkg.is_empty() => app_id(pkg),
-        _ => android.to_string(),
+    match android
+        .get(PREFIX.len()..)
+        .filter(|_| android.len() > PREFIX.len())
+        .filter(|_| android[..PREFIX.len()].eq_ignore_ascii_case(PREFIX))
+    {
+        Some(pkg) => app_id(pkg),
+        None => android.to_string(),
     }
 }
 
@@ -153,10 +163,10 @@ pub struct AppEntry {
     pub name: String,
     /// (desktop locale, label), e.g. ("pt_BR", "Calculadora").
     pub names: Vec<(String, String)>,
-    /// Command prefix; `<package>` and `%U` are appended (`linuxapk run`).
+    /// Command prefix; `<package>` and `%U` are appended (`innkeeper run`).
     pub run: Vec<String>,
     pub icon: Option<String>,
-    /// `versionName`, recorded as `X-LinuxApk-Version` (omitted if empty).
+    /// `versionName`, recorded as `X-Innkeeper-Version` (omitted if empty).
     pub version: String,
     pub categories: Vec<String>,
     /// Custom URI schemes, declared as `x-scheme-handler/<scheme>`.
@@ -164,11 +174,11 @@ pub struct AppEntry {
     /// Hosts of the app's verified-style `http(s)` deep links. Metadata only:
     /// `http`/`https` are never declared for an app.
     pub web_hosts: Vec<String>,
-    /// Who wrote the entry, as `X-LinuxApk-Origin` (`android`: the bridge, for
-    /// an app installed inside Android). None: `linuxapk install`.
+    /// Who wrote the entry, as `X-Innkeeper-Origin` (`android`: the bridge, for
+    /// an app installed inside Android). None: `innkeeper install`.
     pub origin: Option<String>,
-    /// What its launch splash looks like, as `X-LinuxApk-Splash` and
-    /// `X-LinuxApk-Window`.
+    /// What its launch splash looks like, as `X-Innkeeper-Splash` and
+    /// `X-Innkeeper-Window`.
     pub splash: Option<Splash>,
     /// The launcher activity accepts Android MULTIPLE_TASK.
     pub new_window: bool,
@@ -184,7 +194,7 @@ pub struct Splash {
 }
 
 impl Splash {
-    /// From an entry's `X-LinuxApk-Splash=#rrggbb` and `X-LinuxApk-Window=WxH`.
+    /// From an entry's `X-Innkeeper-Splash=#rrggbb` and `X-Innkeeper-Window=WxH`.
     pub fn parse(color: &str, window: &str) -> Option<Splash> {
         let color = u32::from_str_radix(color.strip_prefix('#')?, 16)
             .ok()
@@ -242,21 +252,21 @@ impl AppEntry {
             writeln!(s, "MimeType={}", list(&mimes)?)?;
         }
         s.push_str("Keywords=Android;\n");
-        writeln!(s, "X-LinuxApk-Package={}", escape_value(&self.package)?)?;
+        writeln!(s, "X-Innkeeper-Package={}", escape_value(&self.package)?)?;
         if !self.version.is_empty() {
-            writeln!(s, "X-LinuxApk-Version={}", escape_value(&self.version)?)?;
+            writeln!(s, "X-Innkeeper-Version={}", escape_value(&self.version)?)?;
         }
         if !self.web_hosts.is_empty() {
-            writeln!(s, "X-LinuxApk-Web-Hosts={}", list(&self.web_hosts)?)?;
+            writeln!(s, "X-Innkeeper-Web-Hosts={}", list(&self.web_hosts)?)?;
         }
         if let Some(o) = &self.origin {
-            writeln!(s, "X-LinuxApk-Origin={}", escape_value(o)?)?;
+            writeln!(s, "X-Innkeeper-Origin={}", escape_value(o)?)?;
         }
         if let Some(sp) = &self.splash {
-            writeln!(s, "X-LinuxApk-Splash=#{:06x}", sp.color & 0xff_ffff)?;
-            writeln!(s, "X-LinuxApk-Window={}x{}", sp.width, sp.height)?;
+            writeln!(s, "X-Innkeeper-Splash=#{:06x}", sp.color & 0xff_ffff)?;
+            writeln!(s, "X-Innkeeper-Window={}x{}", sp.width, sp.height)?;
         }
-        writeln!(s, "X-LinuxApk-NewWindow={}", self.new_window)?;
+        writeln!(s, "X-Innkeeper-NewWindow={}", self.new_window)?;
         if self.new_window {
             s.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\n");
             let mut run = self.run.clone();
@@ -268,7 +278,7 @@ impl AppEntry {
 }
 
 /// The package formats the manager opens: plain APKs, and the bundle formats
-/// its MIME definitions (`share/mime/packages/dev.linuxapk.Manager.xml`) add.
+/// its MIME definitions (`share/mime/packages/dev.sargunv.Innkeeper.xml`) add.
 pub const PACKAGE_MIME_TYPES: &[&str] = &[
     "application/vnd.android.package-archive",
     "application/x-android-apks",
@@ -369,6 +379,21 @@ pub fn replace_group_key(text: &str, group: &str, key: &str, value: &str) -> Opt
 mod tests {
     use super::*;
 
+    #[test]
+    fn android_window_ids_match_the_flatpak_prefix_ignoring_case() {
+        let guest = "dev.sargunv.innkeeper.org.example";
+        assert_eq!(desktop_app_id(guest), app_id("org.example"));
+        assert_eq!(
+            desktop_app_id("dev.sargunv.Innkeeper.org.example"),
+            app_id("org.example")
+        );
+        assert_eq!(desktop_app_id("org.example"), "org.example");
+        assert_eq!(
+            desktop_app_id("dev.sargunv.innkeeper."),
+            "dev.sargunv.innkeeper."
+        );
+    }
+
     fn entry() -> AppEntry {
         AppEntry {
             package: "org.wikipedia".into(),
@@ -377,8 +402,8 @@ mod tests {
                 ("de".into(), "Wikipedia DE".into()),
                 ("pt_BR".into(), "Wikipédia".into()),
             ],
-            run: vec!["/opt/linux apk/bin/linuxapk".into(), "run".into()],
-            icon: Some("dev.linuxapk.org.wikipedia".into()),
+            run: vec!["/opt/linux apk/bin/innkeeper".into(), "run".into()],
+            icon: Some("dev.sargunv.innkeeper.org.wikipedia".into()),
             version: "2.7.50".into(),
             categories: vec!["Utility".into()],
             schemes: vec!["wikipedia".into()],
@@ -400,18 +425,18 @@ mod tests {
             s,
             "[Desktop Entry]\nType=Application\nVersion=1.5\nName=Wikipedia\n\
              Name[de]=Wikipedia DE\nName[pt_BR]=Wikipédia\nComment=Android app (org.wikipedia)\n\
-             Icon=dev.linuxapk.org.wikipedia\n\
-             Exec=\"/opt/linux apk/bin/linuxapk\" run org.wikipedia %U\nTerminal=false\n\
-             StartupNotify=true\nStartupWMClass=dev.linuxapk.org.wikipedia\nCategories=Utility;\n\
+             Icon=dev.sargunv.innkeeper.org.wikipedia\n\
+             Exec=\"/opt/linux apk/bin/innkeeper\" run org.wikipedia %U\nTerminal=false\n\
+             StartupNotify=true\nStartupWMClass=dev.sargunv.innkeeper.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
-             X-LinuxApk-Package=org.wikipedia\nX-LinuxApk-Version=2.7.50\n\
-             X-LinuxApk-Web-Hosts=*.wikipedia.org;\nX-LinuxApk-Splash=#f8f9fa\n\
-             X-LinuxApk-Window=1280x800\nX-LinuxApk-NewWindow=false\n"
+             X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Version=2.7.50\n\
+             X-Innkeeper-Web-Hosts=*.wikipedia.org;\nX-Innkeeper-Splash=#f8f9fa\n\
+             X-Innkeeper-Window=1280x800\nX-Innkeeper-NewWindow=false\n"
         );
         assert_eq!(
             Splash::parse(
-                &read_key(&s, "X-LinuxApk-Splash").unwrap(),
-                &read_key(&s, "X-LinuxApk-Window").unwrap()
+                &read_key(&s, "X-Innkeeper-Splash").unwrap(),
+                &read_key(&s, "X-Innkeeper-Window").unwrap()
             ),
             entry().splash
         );
@@ -428,13 +453,13 @@ mod tests {
         e.new_window = true;
         e.run = vec![
             "env".into(),
-            "LINUXAPK_PROFILE=test".into(),
-            "/opt/linux apk/bin/linuxapk".into(),
+            "INNKEEPER_PROFILE=test".into(),
+            "/opt/linux apk/bin/innkeeper".into(),
             "run".into(),
         ];
         let text = e.render().unwrap();
         assert!(text.contains("Actions=NewWindow;\n"));
-        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env LINUXAPK_PROFILE=test \"/opt/linux apk/bin/linuxapk\" run --new-window org.wikipedia\n"));
+        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env INNKEEPER_PROFILE=test \"/opt/linux apk/bin/innkeeper\" run --new-window org.wikipedia\n"));
     }
 
     #[test]
@@ -444,7 +469,7 @@ mod tests {
         e.web_hosts.clear();
         let s = e.render().unwrap();
         assert!(!s.contains("MimeType="));
-        assert!(!s.contains("X-LinuxApk-Web-Hosts"));
+        assert!(!s.contains("X-Innkeeper-Web-Hosts"));
     }
 
     #[test]
@@ -474,8 +499,8 @@ mod tests {
     #[test]
     fn exec_quoting() {
         assert_eq!(
-            quote_exec_arg("/usr/bin/linuxapk").unwrap(),
-            "/usr/bin/linuxapk"
+            quote_exec_arg("/usr/bin/innkeeper").unwrap(),
+            "/usr/bin/innkeeper"
         );
         assert_eq!(quote_exec_arg("/a b/x").unwrap(), "\"/a b/x\"");
         assert_eq!(quote_exec_arg("50%").unwrap(), "50%%");
@@ -491,7 +516,7 @@ mod tests {
     #[test]
     fn exec_round_trip() {
         let args: Vec<String> = [
-            "/opt/linux apk/bin/linuxapk",
+            "/opt/linux apk/bin/innkeeper",
             "a\\b",
             "50%",
             "$HOME",
@@ -525,7 +550,7 @@ mod tests {
         let s = entry().render().unwrap();
         assert_eq!(read_key(&s, "Name").as_deref(), Some("Wikipedia"));
         assert_eq!(
-            read_key(&s, "X-LinuxApk-Package").as_deref(),
+            read_key(&s, "X-Innkeeper-Package").as_deref(),
             Some("org.wikipedia")
         );
         assert_eq!(read_key("[Other]\nName=x\n", "Name"), None);

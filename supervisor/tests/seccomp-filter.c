@@ -19,7 +19,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern int linuxapk_filter_install(int harness);
+extern int innkeeper_filter_install(int harness);
 
 struct probe {
   const char* name;
@@ -65,7 +65,7 @@ static struct probe probes[] = {
 // Prints one line per probe: "<name> <0|1>" (1 = notified).
 static int run(int harness) {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-  int lfd = linuxapk_filter_install(harness);
+  int lfd = innkeeper_filter_install(harness);
   if (lfd < 0) return perror("filter"), 1;
   static struct stat st;
   for (int i = 0; i < NPROBES; i++)

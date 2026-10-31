@@ -1,5 +1,5 @@
 //! The launch splash (docs/display.md, "Launch feedback"): while a cold
-//! session boots, `linuxapk run` shows a toplevel of its own at once, in the
+//! session boots, `innkeeper run` shows a toplevel of its own at once, in the
 //! app's splash colour and window size with its icon, under the app's own
 //! app id. It takes focus with the desktop launch's `XDG_ACTIVATION_TOKEN`
 //! (which completes the startup notification), then asks for a fresh token
@@ -100,7 +100,7 @@ impl Splash {
             .name("splash".into())
             .spawn(move || {
                 if let Err(e) = run(conn, look, token, closed, tx) {
-                    eprintln!("linuxapk: launch splash: {e:#}");
+                    eprintln!("innkeeper: launch splash: {e:#}");
                 }
             })
             .ok()?;
@@ -265,7 +265,7 @@ impl WindowHandler for State {
             self.size = (w.get(), h.get());
         }
         if let Err(e) = self.draw() {
-            eprintln!("linuxapk: launch splash: {e:#}");
+            eprintln!("innkeeper: launch splash: {e:#}");
             self.quit = true;
             return;
         }
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn paints_colour_and_icon() {
         let look = Look {
-            app_id: "dev.linuxapk.x".into(),
+            app_id: "dev.sargunv.innkeeper.x".into(),
             title: "X".into(),
             color: 0x102030,
             width: 30,

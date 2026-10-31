@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("LINUXAPK_BENCH").is_ok_and(|v| v == "1"))
+    *ENABLED.get_or_init(|| std::env::var("INNKEEPER_BENCH").is_ok_and(|v| v == "1"))
 }
 
 pub fn now() -> u64 {

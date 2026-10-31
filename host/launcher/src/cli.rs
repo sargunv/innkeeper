@@ -1,4 +1,4 @@
-//! `linuxapk-session`'s commands.
+//! `innkeeper-session`'s commands.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -14,23 +14,23 @@ use crate::paths::Paths;
 use crate::{control, exec, flatpak, image, layer, selftest, session, sys};
 
 const USAGE: &str = "\
-Linux.apk session launcher: boots the pinned Android image (image/pin.toml)
-inside Linux.apk's Flatpak sandbox (docs/session.md).
+Innkeeper session launcher: boots the pinned Android image (image/pin.toml)
+inside Innkeeper's Flatpak sandbox (docs/session.md).
 
-  linuxapk-session start [-f]    boot (in the background unless -f),
+  innkeeper-session start [-f]    boot (in the background unless -f),
                                  preparing the image first if needed. Each
                                  app gets its own host Wayland window
     --headless                   (tests only) open no windows
-  linuxapk-session prepare       fetch, extract, flatten and derive the image
+  innkeeper-session prepare       fetch, extract, flatten and derive the image
                                  without booting
-  linuxapk-session image         print the selected image and its paths
-  linuxapk-session stop          kill the session and clean up
-  linuxapk-session status        running or stopped
-  linuxapk-session reset         delete Android's /data (session stopped)
-  linuxapk-session log [-f]      Android init's kernel log (/dev/kmsg)
-  linuxapk-session exec CMD...   run CMD inside the live session as root
-  linuxapk-session shell         interactive /system/bin/sh inside
-  linuxapk-session selftest      host-safety probes against the live session
+  innkeeper-session image         print the selected image and its paths
+  innkeeper-session stop          kill the session and clean up
+  innkeeper-session status        running or stopped
+  innkeeper-session reset         delete Android's /data (session stopped)
+  innkeeper-session log [-f]      Android init's kernel log (/dev/kmsg)
+  innkeeper-session exec CMD...   run CMD inside the live session as root
+  innkeeper-session shell         interactive /system/bin/sh inside
+  innkeeper-session selftest      host-safety probes against the live session
 
 Every Android process runs as the host user; the supervisor virtualizes Android uids.
 
@@ -38,37 +38,37 @@ In Flatpak, start -f runs the session in this sandbox, for as long as it
 runs; plain start runs it in a sandbox of its own (the Flatpak portal's
 Spawn), which the other commands reach through a control socket.
 
-It runs from an installed prefix (libexec/linuxapk; in a checkout, out/stage
+It runs from an installed prefix (libexec/innkeeper; in a checkout, out/stage
 after `mise run build`) and builds nothing. Its files:
-  $XDG_RUNTIME_DIR/linuxapk[-<profile>]/  session.conf, pid files, the kmsg
+  $XDG_RUNTIME_DIR/innkeeper[-<profile>]/  session.conf, pid files, the kmsg
     FIFO, the bridge's socket, the start-time layer over the image (in
     Flatpak, under $XDG_RUNTIME_DIR/app/<app id>/)
-  $XDG_STATE_HOME/linuxapk[-<profile>]/   logs (session, kmsg, bridge) and
+  $XDG_STATE_HOME/innkeeper[-<profile>]/   logs (session, kmsg, bridge) and
     the documents service's grants
-  $XDG_DATA_HOME/linuxapk/                 images/, data[-<profile>]/
+  $XDG_DATA_HOME/innkeeper/                 images/, data[-<profile>]/
     (Android's /data), addons/ (layers over the partitions, e.g. microG),
     root[-<profile>]/ (the composed root)
 
 Environment:
-  LINUXAPK_AUDIO_SINK      PipeWire sink for the session's audio (default:
+  INNKEEPER_AUDIO_SINK      PipeWire sink for the session's audio (default:
                            the desktop's default output)
-  LINUXAPK_IDLE_GRACE      seconds without windows, foreground services,
+  INNKEEPER_IDLE_GRACE      seconds without windows, foreground services,
                            background-allowed apps, a near alarm or a running
                            exec before the session stops itself, leaving a
                            wakeup for its next alarm (default 120; 0: never;
                            headless sessions never unless it is set)
 Tests only:
-  LINUXAPK_PROFILE         run an independent, named session (default: the
+  INNKEEPER_PROFILE         run an independent, named session (default: the
                            main one). Named sessions are test sessions: they
                            isolate clipboard, portals, links, notifications,
                            media players, AT-SPI and location from the desktop.
-  LINUXAPK_TEST=1         apply the same isolation to an unnamed session
-  LINUXAPK_DATA            Android's /data (default
-                           $XDG_DATA_HOME/linuxapk/data[-<profile>])
-  LINUXAPK_IMAGES, LINUXAPK_PIN  the image cache and the pin
+  INNKEEPER_TEST=1         apply the same isolation to an unnamed session
+  INNKEEPER_DATA            Android's /data (default
+                           $XDG_DATA_HOME/innkeeper/data[-<profile>])
+  INNKEEPER_IMAGES, INNKEEPER_PIN  the image cache and the pin
 Debugging:
-  LINUXAPK_BRIDGE_VERBOSE=1  per-stream stats in bridge.log
-  LINUXAPK_BROKER_DEBUG=1    broker tracing, and single-mode syscall counters
+  INNKEEPER_BRIDGE_VERBOSE=1  per-stream stats in bridge.log
+  INNKEEPER_BROKER_DEBUG=1    broker tracing, and single-mode syscall counters
                              every 10 s, in session.log; another value is a
                              log file path inside the session root
 ";
@@ -85,7 +85,7 @@ pub fn main() {
     match run(&args) {
         Ok(code) => exit(code),
         Err(e) => {
-            eprintln!("linuxapk-session: {e:#}");
+            eprintln!("innkeeper-session: {e:#}");
             exit(1);
         }
     }
@@ -105,7 +105,7 @@ fn run(args: &[OsString]) -> Result<i32> {
     }
     if cmd != "image" && !Path::new("/.flatpak-info").exists() {
         bail!(
-            "run linuxapk-session inside the Linux.apk Flatpak (in a checkout, use `mise run session`)"
+            "run innkeeper-session inside the Innkeeper Flatpak (in a checkout, use `mise run session`)"
         );
     }
     let paths = Paths::of_this_exe()?;
@@ -191,7 +191,7 @@ fn check_kernel() -> Result<()> {
     }
     if v < FLATPAK_KERNEL_FLOOR {
         eprintln!(
-            "linuxapk-session: Linux {rel} has no unprivileged PSI triggers ({}.{}+): \
+            "innkeeper-session: Linux {rel} has no unprivileged PSI triggers ({}.{}+): \
              Android's low-memory killer won't run, and app starts stall",
             FLATPAK_KERNEL_FLOOR.0, FLATPAK_KERNEL_FLOOR.1
         );

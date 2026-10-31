@@ -12,12 +12,12 @@ use sha2::{Digest, Sha256};
 use crate::sys;
 
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
-const APP_ID: &str = "dev.linuxapk.Manager";
+const APP_ID: &str = "dev.sargunv.Innkeeper";
 
 /// The profile [`select`]ed in this process, if any.
 static SELECTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// Selects profile `name` for this process, over `LINUXAPK_PROFILE` (the
+/// Selects profile `name` for this process, over `INNKEEPER_PROFILE` (the
 /// manager switches profiles so). Launchers it runs get it in their
 /// environment.
 pub fn select(name: &str) -> Result<()> {
@@ -27,13 +27,13 @@ pub fn select(name: &str) -> Result<()> {
 }
 
 /// The profile this process works with: the one [`select`]ed, else
-/// `LINUXAPK_PROFILE`, which must name one.
+/// `INNKEEPER_PROFILE`, which must name one.
 pub fn profile() -> Result<String> {
     if let Some(s) = SELECTED.lock().unwrap().clone() {
         return Ok(s);
     }
-    let name = env::var("LINUXAPK_PROFILE").unwrap_or_default();
-    crate::profile::check_name(&name).context("LINUXAPK_PROFILE")?;
+    let name = env::var("INNKEEPER_PROFILE").unwrap_or_default();
+    crate::profile::check_name(&name).context("INNKEEPER_PROFILE")?;
     Ok(name)
 }
 
@@ -59,9 +59,9 @@ pub fn xdg_home(var: &str, default: &str) -> PathBuf {
         })
 }
 
-/// `$XDG_DATA_HOME/linuxapk`: the profiles' data, the image cache, addons.
+/// `$XDG_DATA_HOME/innkeeper`: the profiles' data, the image cache, addons.
 pub fn data_home() -> PathBuf {
-    xdg_home("XDG_DATA_HOME", ".local/share").join("linuxapk")
+    xdg_home("XDG_DATA_HOME", ".local/share").join("innkeeper")
 }
 
 /// `$var` as a path, if set and not empty.
@@ -76,23 +76,23 @@ fn env_path(var: &str) -> Option<PathBuf> {
 pub struct Paths {
     /// Empty for the main session. Serialized as `profile` in session.conf.
     pub profile: String,
-    /// `<prefix>/libexec/linuxapk`: pivot-exec, the bridge, the image scripts.
+    /// `<prefix>/libexec/innkeeper`: pivot-exec, the bridge, the image scripts.
     pub libexec: PathBuf,
-    /// `<prefix>/share/linuxapk`: the Android tree, the image config.
+    /// `<prefix>/share/innkeeper`: the Android tree, the image config.
     pub share: PathBuf,
-    /// `$XDG_RUNTIME_DIR/linuxapk[-<profile>]` (in Flatpak mode, under the
+    /// `$XDG_RUNTIME_DIR/innkeeper[-<profile>]` (in Flatpak mode, under the
     /// app's dir, which every instance of the app shares): session.conf, pid
     /// files, the kmsg FIFO, the bridge's socket dir, the start-time layer.
     pub run: PathBuf,
-    /// `$XDG_STATE_HOME/linuxapk[-<profile>]`: logs, the documents grants.
+    /// `$XDG_STATE_HOME/innkeeper[-<profile>]`: logs, the documents grants.
     pub state: PathBuf,
-    /// `$XDG_DATA_HOME/linuxapk`.
+    /// `$XDG_DATA_HOME/innkeeper`.
     pub data_home: PathBuf,
-    /// Android's `/data` (`LINUXAPK_DATA`, default `data[-<profile>]`).
+    /// Android's `/data` (`INNKEEPER_DATA`, default `data[-<profile>]`).
     pub data: PathBuf,
-    /// The image cache (`LINUXAPK_IMAGES`, default `images`).
+    /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
-    /// The image pin (`LINUXAPK_PIN`, default the prefix's).
+    /// The image pin (`INNKEEPER_PIN`, default the prefix's).
     pub pin: PathBuf,
     /// Flatpak mode's composed root: `root[-<profile>]`.
     pub root: PathBuf,
@@ -106,7 +106,7 @@ impl Paths {
 
     /// The paths of profile `name` for the prefix at `prefix`.
     pub fn for_profile(prefix: &Path, name: &str) -> Result<Self> {
-        let share = prefix.join("share/linuxapk");
+        let share = prefix.join("share/innkeeper");
         if !share.join("manifest.tsv").is_file() {
             bail!(
                 "no staged build at {} (run `mise run build`)",
@@ -115,9 +115,9 @@ impl Paths {
         }
         crate::profile::check_name(name)?;
         let profile = name.to_string();
-        // LINUXAPK_DATA is the environment's own profile's.
+        // INNKEEPER_DATA is the environment's own profile's.
         let data_env =
-            env_path("LINUXAPK_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));
+            env_path("INNKEEPER_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));
         let sfx = |n: &str| per_profile(n, &profile);
         let runtime = env_path("XDG_RUNTIME_DIR")
             .unwrap_or_else(|| format!("/run/user/{}", sys::uid()).into());
@@ -125,15 +125,15 @@ impl Paths {
         let run = runtime
             .join("app")
             .join(env::var("FLATPAK_ID").unwrap_or_else(|_| APP_ID.into()))
-            .join(sfx("linuxapk"));
+            .join(sfx("innkeeper"));
         let data_home = data_home();
         Ok(Paths {
-            libexec: prefix.join("libexec/linuxapk"),
+            libexec: prefix.join("libexec/innkeeper"),
             run,
-            state: xdg_home("XDG_STATE_HOME", ".local/state").join(sfx("linuxapk")),
+            state: xdg_home("XDG_STATE_HOME", ".local/state").join(sfx("innkeeper")),
             data: data_env.unwrap_or_else(|| data_home.join(sfx("data"))),
-            images: env_path("LINUXAPK_IMAGES").unwrap_or_else(|| data_home.join("images")),
-            pin: env_path("LINUXAPK_PIN").unwrap_or_else(|| share.join("image/pin.toml")),
+            images: env_path("INNKEEPER_IMAGES").unwrap_or_else(|| data_home.join("images")),
+            pin: env_path("INNKEEPER_PIN").unwrap_or_else(|| share.join("image/pin.toml")),
             root: data_home.join(sfx("root")),
             data_home,
             share,
@@ -142,7 +142,7 @@ impl Paths {
     }
 
     /// The paths of the prefix this executable is installed in
-    /// (`<prefix>/libexec/linuxapk/linuxapk-session`).
+    /// (`<prefix>/libexec/innkeeper/innkeeper-session`).
     pub fn of_this_exe() -> Result<Self> {
         let exe = env::current_exe()
             .and_then(|p| p.canonicalize())
@@ -150,7 +150,7 @@ impl Paths {
         let prefix = exe
             .ancestors()
             .nth(3)
-            .context("the launcher is not in <prefix>/libexec/linuxapk")?;
+            .context("the launcher is not in <prefix>/libexec/innkeeper")?;
         Self::new(prefix)
     }
 

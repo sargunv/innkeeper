@@ -1,4 +1,4 @@
-//! adb into a profile ([`linuxapk_session::adb`]): turning it on and off,
+//! adb into a profile ([`innkeeper_session::adb`]): turning it on and off,
 //! live if the profile runs, and connecting the user's adb server to it.
 //! The server is reached over its own protocol on loopback (Android shares
 //! the host's network), so no `adb` binary is needed in the sandbox.
@@ -8,8 +8,8 @@ use std::net::{Ipv4Addr, TcpStream};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
-use linuxapk_session::adb;
-use linuxapk_session::profile::Settings;
+use innkeeper_session::adb;
+use innkeeper_session::profile::Settings;
 
 use crate::launcher::Session;
 use crate::ops::{Event, Report};
@@ -23,7 +23,7 @@ pub fn serial(settings: &Settings) -> String {
 /// `emulator-<port - 1>` for an emulator port, as adb names a device there;
 /// `127.0.0.1:<port>` for another one set explicitly.
 fn serial_of(port: u16) -> String {
-    if linuxapk_session::profile::ports().any(|p| p == port) {
+    if innkeeper_session::profile::ports().any(|p| p == port) {
         format!("emulator-{}", port - 1)
     } else {
         format!("127.0.0.1:{port}")
@@ -63,7 +63,11 @@ fn apply(session: &Session, s: &Settings) -> Result<()> {
     }
     session.exec_ok(
         15,
-        &["setprop", "vendor.linuxapk.adb", if on { "1" } else { "0" }],
+        &[
+            "setprop",
+            "vendor.innkeeper.adb",
+            if on { "1" } else { "0" },
+        ],
     )?;
     Ok(())
 }
@@ -97,7 +101,7 @@ pub fn connect(name: &str, report: Report) -> Result<String> {
     let mut s = Settings::load(&paths.data)?;
     ensure!(
         s.debug_bridge,
-        "adb is off for profile {name}; turn it on with `linuxapk profile set {name} --adb on`"
+        "adb is off for profile {name}; turn it on with `innkeeper profile set {name} --adb on`"
     );
     if s.assign_port(&paths.data_home, &paths.data)? {
         s.save(&paths.data)?;

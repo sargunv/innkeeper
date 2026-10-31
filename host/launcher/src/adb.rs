@@ -71,11 +71,11 @@ pub fn props(settings: &Settings) -> String {
     let mut s = String::from("ro.adb.secure=1\n");
     if settings.debug_bridge && settings.debug_bridge_port != 0 {
         s += &format!(
-            "service.adb.listen_addrs={}\nvendor.linuxapk.adb=1\n",
+            "service.adb.listen_addrs={}\nvendor.innkeeper.adb=1\n",
             listen_addrs(settings.debug_bridge_port)
         );
     } else {
-        s += "vendor.linuxapk.adb=0\n";
+        s += "vendor.innkeeper.adb=0\n";
     }
     s
 }
@@ -127,12 +127,12 @@ mod tests {
     #[test]
     fn props_follow_the_setting() {
         let mut s = Settings::default();
-        assert_eq!(props(&s), "ro.adb.secure=1\nvendor.linuxapk.adb=0\n");
+        assert_eq!(props(&s), "ro.adb.secure=1\nvendor.innkeeper.adb=0\n");
         s.debug_bridge = true;
         s.debug_bridge_port = 5557;
         let p = props(&s);
         assert!(p.starts_with("ro.adb.secure=1\n"));
         assert!(p.contains("service.adb.listen_addrs=tcp:localhost:5557\n"));
-        assert!(p.contains("vendor.linuxapk.adb=1\n"));
+        assert!(p.contains("vendor.innkeeper.adb=1\n"));
     }
 }

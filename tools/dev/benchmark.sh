@@ -2,12 +2,12 @@
 # Same-stage runtime comparison, with real app frame stats on isolated KWin.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-benchmark}
-if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@"; fi
+export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-benchmark}
+if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@"; fi
 S=$repo/tools/dev/session.sh
-T=$repo/out/test/benchmark/$LINUXAPK_PROFILE
+T=$repo/out/test/benchmark/$INNKEEPER_PROFILE
 mkdir -p "$T"
-cp "$repo/out/stage/share/linuxapk/manifest.tsv" "$T/manifest.tsv"
+cp "$repo/out/stage/share/innkeeper/manifest.tsv" "$T/manifest.tsv"
 # shellcheck disable=SC2329 # invoked by EXIT
 cleanup() {
   "$S" stop >/dev/null 2>&1 || true
@@ -41,7 +41,7 @@ for pkg in com.darkempire78.opencalculator org.wikipedia org.nsh07.pomodoro; do
   size=$(stat -c %s "$apk")
   "$S" exec cmd package install -r -g -S "$size" <"$apk"
   act=$("$S" exec cmd package resolve-activity --brief "$pkg" | tail -1 | tr -d '\r')
-  launch=$("$S" exec am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a dev.linuxapk.LAUNCH --es package "$pkg" --es component "$act")
+  launch=$("$S" exec am broadcast -n dev.sargunv.innkeeper.system/.wm.ControlReceiver -a dev.sargunv.innkeeper.LAUNCH --es package "$pkg" --es component "$act")
   display=$(sed -n 's/.*launched display=\([0-9]*\).*/\1/p' <<<"$launch")
   [[ -n $display ]] || {
     echo "FAIL no window: $launch"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <cmath>
 #include <vector>
 
@@ -11,10 +11,10 @@
 #include "FrameDumper.h"
 
 #include "Properties.h"
-#include "linuxapk/layout.h"
-#include "linuxapk/log.h"
+#include "innkeeper/layout.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 namespace {
 
 uint8_t halfToU8(uint16_t h) {
@@ -140,7 +140,7 @@ bool writePng(const std::string& path, const FrameView& f) {
 }
 
 std::string FrameDumper::dirFromProperty() {
-  return getProperty("vendor.linuxapk.hwc.dump.dir");
+  return getProperty("vendor.innkeeper.hwc.dump.dir");
 }
 
 void FrameDumper::reloadFromProperty(int64_t nowNs) {
@@ -183,4 +183,4 @@ bool FrameDumper::dump(const std::string& prefix, const FrameView& f) {
   return true;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

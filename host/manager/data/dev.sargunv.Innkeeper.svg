@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="back-chin" gradientUnits="userSpaceOnUse" x1="40" x2="112" y1="0" y2="0">
+      <stop offset="0" stop-color="#241f31"/><stop offset="0.05" stop-color="#5e5c64"/><stop offset="0.1" stop-color="#3d3846"/>
+      <stop offset="0.9" stop-color="#3d3846"/><stop offset="0.95" stop-color="#5e5c64"/><stop offset="1" stop-color="#241f31"/>
+    </linearGradient><linearGradient id="chin" gradientUnits="userSpaceOnUse" x1="16" x2="88" y1="0" y2="0">
+      <stop offset="0" stop-color="#241f31"/><stop offset="0.05" stop-color="#5e5c64"/><stop offset="0.1" stop-color="#3d3846"/>
+      <stop offset="0.9" stop-color="#3d3846"/><stop offset="0.95" stop-color="#5e5c64"/><stop offset="1" stop-color="#241f31"/>
+    </linearGradient>
+  </defs>
+  <g id="back-phone-window">
+      <rect id="back-body-chin" x="40" y="16" width="72" height="88" rx="12" fill="url(#back-chin)"/>
+      <rect id="back-body-face" x="40" y="8" width="72" height="88" rx="12" fill="#5e5c64"/>
+      <rect id="back-screen" x="48" y="16" width="56" height="72" rx="4" fill="#9141ac"/>
+      <path id="back-headerbar" fill="#c0bfbc" d="M52 16h48a4 4 0 0 1 4 4v12H48V20a4 4 0 0 1 4-4z"/>
+      <circle id="back-close-button" cx="92" cy="24" r="4" fill="#77767b"/>
+      
+    </g>
+    <g id="phone-window">
+      <rect id="body-chin" x="16" y="32" width="72" height="88" rx="12" fill="url(#chin)"/>
+      <rect id="body-face" x="16" y="24" width="72" height="88" rx="12" fill="#3d3846"/>
+      <rect id="screen" x="24" y="32" width="56" height="72" rx="4" fill="#3584e4"/>
+      <path id="headerbar" fill="#deddda" d="M28 32h48a4 4 0 0 1 4 4v12H24V36a4 4 0 0 1 4-4z"/>
+      <circle id="close-button" cx="68" cy="40" r="4" fill="#77767b"/>
+      <g id="app-grid">
+        <rect x="32" y="56" width="16" height="16" rx="4" fill="#ffffff"/><rect x="56" y="56" width="16" height="16" rx="4" fill="#ffffff"/>
+        <rect x="32" y="80" width="16" height="16" rx="4" fill="#99c1f1"/><rect x="56" y="80" width="16" height="16" rx="4" fill="#99c1f1"/>
+      </g>
+    </g>
+</svg>

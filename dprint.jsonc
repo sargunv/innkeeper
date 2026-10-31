@@ -36,9 +36,9 @@
         "command": "shfmt -i 2 -ci --filename {{file_path}}",
         "exts": ["sh"],
         "fileNames": [
-          "linuxapk-apexd",
-          "linuxapk-bpfload",
-          "linuxapk-iptables",
+          "innkeeper-apexd",
+          "innkeeper-bpfload",
+          "innkeeper-iptables",
         ],
       },
     ],

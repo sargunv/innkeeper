@@ -1291,6 +1291,111 @@ dependencies = [
 ]
 
 [[package]]
+name = "innkeeper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "innkeeper-bridge",
+ "innkeeper-core",
+ "png",
+ "rustix",
+ "serde_json",
+ "smithay-client-toolkit",
+]
+
+[[package]]
+name = "innkeeper-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
+name = "innkeeper-bridge"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+ "accesskit_unix",
+ "anyhow",
+ "calloop",
+ "innkeeper-broker",
+ "innkeeper-core",
+ "libc",
+ "mime_guess",
+ "png",
+ "pulseaudio",
+ "rustix",
+ "sctk-adwaita",
+ "signal-hook",
+ "smithay-client-toolkit",
+ "url",
+ "wayland-client",
+ "wayland-protocols",
+ "xkbcommon-dl",
+ "zbus",
+]
+
+[[package]]
+name = "innkeeper-broker"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "innkeeper-compat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "innkeeper-core",
+ "png",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
+name = "innkeeper-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "innkeeper-session",
+ "resvg",
+ "serde",
+ "serde_json",
+ "zbus",
+ "zip",
+]
+
+[[package]]
+name = "innkeeper-manager"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "gtk4",
+ "innkeeper-core",
+ "libadwaita",
+]
+
+[[package]]
+name = "innkeeper-session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "libc",
+ "serde",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1376,111 +1481,6 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
-
-[[package]]
-name = "linuxapk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "linuxapk-bridge",
- "linuxapk-core",
- "png",
- "rustix",
- "serde_json",
- "smithay-client-toolkit",
-]
-
-[[package]]
-name = "linuxapk-bench"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
-]
-
-[[package]]
-name = "linuxapk-bridge"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_consumer",
- "accesskit_unix",
- "anyhow",
- "calloop",
- "libc",
- "linuxapk-broker",
- "linuxapk-core",
- "mime_guess",
- "png",
- "pulseaudio",
- "rustix",
- "sctk-adwaita",
- "signal-hook",
- "smithay-client-toolkit",
- "url",
- "wayland-client",
- "wayland-protocols",
- "xkbcommon-dl",
- "zbus",
-]
-
-[[package]]
-name = "linuxapk-broker"
-version = "0.1.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "linuxapk-compat"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "linuxapk-core",
- "png",
- "serde",
- "serde_json",
- "sha2",
- "toml",
-]
-
-[[package]]
-name = "linuxapk-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "linuxapk-session",
- "resvg",
- "serde",
- "serde_json",
- "zbus",
- "zip",
-]
-
-[[package]]
-name = "linuxapk-manager"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "gtk4",
- "libadwaita",
- "linuxapk-core",
-]
-
-[[package]]
-name = "linuxapk-session"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "flate2",
- "libc",
- "serde",
- "sha2",
- "toml",
-]
 
 [[package]]
 name = "litemap"

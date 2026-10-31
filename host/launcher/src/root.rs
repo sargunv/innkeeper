@@ -1,5 +1,5 @@
 //! Android's root: the partitions, the image's
-//! top-level entries, the binder nodes and `/linuxapk`.
+//! top-level entries, the binder nodes and `/innkeeper`.
 
 use std::fs;
 use std::io::Write;
@@ -103,11 +103,11 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `/linuxapk/`: what the session fakes for Android, read by the shim, the
+/// `/innkeeper/`: what the session fakes for Android, read by the shim, the
 /// broker, pivot-exec and our init scripts.
 ///  - `apexd-mounts`: what apexd would see in /proc/mounts had it mounted
 ///    each APEX itself (erofs file-backed: `<file> /apex/<name>@<version>`),
-///    for /system/bin/linuxapk-apexd.
+///    for /system/bin/innkeeper-apexd.
 ///  - `proc/`: stand-ins for /proc files: cmdline and bootconfig carry our
 ///    `androidboot.*` values; init insists on raising ASLR entropy (fatal if
 ///    it can't), so it gets a writable mmap_rnd_bits (the host's setting
@@ -115,7 +115,7 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
 ///    read by the broker.
 ///  - `config.gz`: a kernel config for code that wants /proc/config.gz
 ///    (supervisor/shim).
-pub fn linuxapk_dir(cfg: &Config, l: &Path) -> Result<()> {
+pub fn innkeeper_dir(cfg: &Config, l: &Path) -> Result<()> {
     let proc = l.join("proc");
     fs::create_dir_all(proc.join("sys/vm"))?;
     let info = cfg.image.apexdir.join("apex-info-list.xml");

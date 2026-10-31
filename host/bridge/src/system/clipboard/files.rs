@@ -85,8 +85,8 @@ pub fn cache_dir() -> Result<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .context("no cache directory")?;
-    let profile = std::env::var("LINUXAPK_PROFILE").unwrap_or_else(|_| "main".into());
-    let dir = base.join(format!("linuxapk-{profile}/clipboard"));
+    let profile = std::env::var("INNKEEPER_PROFILE").unwrap_or_else(|_| "main".into());
+    let dir = base.join(format!("innkeeper-{profile}/clipboard"));
     // Previous process's selections are no longer being served.
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;

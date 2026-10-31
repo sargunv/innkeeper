@@ -17,7 +17,7 @@ pub const KEEPS: &[&str] = &["system_ext/priv-app/Launcher3QuickStep"];
 /// The properties a boot of `settings` gets.
 pub fn props(settings: &Settings) -> String {
     match settings.mode {
-        Mode::Windowed => "vendor.linuxapk.mode=windowed\nvendor.linuxapk.nav=gestural\n".into(),
+        Mode::Windowed => "vendor.innkeeper.mode=windowed\nvendor.innkeeper.nav=gestural\n".into(),
         Mode::Phone => {
             let (w, h, dpi) = settings.size.screen();
             // A large screen has a taskbar, which crash-loops in three-button
@@ -28,8 +28,8 @@ pub fn props(settings: &Settings) -> String {
                 "threebutton"
             };
             format!(
-                "vendor.linuxapk.mode=phone\nvendor.linuxapk.hwc.primary={w}x{h}\n\
-                 ro.sf.lcd_density={dpi}\nvendor.linuxapk.nav={nav}\n"
+                "vendor.innkeeper.mode=phone\nvendor.innkeeper.hwc.primary={w}x{h}\n\
+                 ro.sf.lcd_density={dpi}\nvendor.innkeeper.nav={nav}\n"
             )
         }
     }
@@ -50,16 +50,16 @@ mod tests {
         let mut s = Settings::default();
         assert_eq!(
             props(&s),
-            "vendor.linuxapk.mode=windowed\nvendor.linuxapk.nav=gestural\n"
+            "vendor.innkeeper.mode=windowed\nvendor.innkeeper.nav=gestural\n"
         );
         s.mode = Mode::Phone;
         let p = props(&s);
-        assert!(p.contains("vendor.linuxapk.hwc.primary=1080x2400\n"));
+        assert!(p.contains("vendor.innkeeper.hwc.primary=1080x2400\n"));
         assert!(p.contains("ro.sf.lcd_density=420\n"));
-        assert!(p.contains("vendor.linuxapk.nav=threebutton\n"));
+        assert!(p.contains("vendor.innkeeper.nav=threebutton\n"));
         s.size = Size::MediumTablet;
         let p = props(&s);
-        assert!(p.contains("vendor.linuxapk.hwc.primary=2560x1600\n"));
-        assert!(p.contains("vendor.linuxapk.nav=gestural\n"));
+        assert!(p.contains("vendor.innkeeper.hwc.primary=2560x1600\n"));
+        assert!(p.contains("vendor.innkeeper.nav=gestural\n"));
     }
 }

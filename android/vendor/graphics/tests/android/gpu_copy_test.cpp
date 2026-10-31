@@ -11,10 +11,10 @@
 #include "../../allocator/gpu_buffer.h"
 #include "Buffer.h"
 #include "GpuCopy.h"
-#include "linuxapk/buffer_alloc.h"
+#include "innkeeper/buffer_alloc.h"
 
-using namespace linuxapk;
-using namespace linuxapk::hwc;
+using namespace innkeeper;
+using namespace innkeeper::hwc;
 #define CHECK(x)                              \
   do {                                        \
     if (!(x)) {                               \

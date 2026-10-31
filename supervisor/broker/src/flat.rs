@@ -22,10 +22,10 @@
 //!    The broker runs these itself, so a path through `/proc/self`, directly
 //!    or by a symlink (OpenHarmony's per-app `/data/storage`), names the
 //!    caller's.
-//!  * `openat` of a `/proc` file the session fakes (`/linuxapk/proc/<path>`,
+//!  * `openat` of a `/proc` file the session fakes (`/innkeeper/proc/<path>`,
 //!    which bind mounts covered otherwise) gets a memfd copy of it, and
 //!    apexd's `/proc/mounts` lists the pre-mounted APEXes
-//!    (`/linuxapk/apexd-mounts`, as `linuxapk-apexd` does with a bind mount).
+//!    (`/innkeeper/apexd-mounts`, as `innkeeper-apexd` does with a bind mount).
 //!  * OpenHarmony only: `openat` of `/etc/passwd` and `/etc/group` gets the
 //!    image's (`/system/etc`, its `/etc`): musl resolves service users by
 //!    name there, and the sandbox binds its own read-only over both.
@@ -156,17 +156,17 @@ fn drm_path_allowed(path: &std::path::Path, selected: &std::path::Path) -> bool 
 /// Flatpak mode: init isn't pid 1, but its property service treats a peer
 /// that isn't pid 1 as a client (and init's own setprop from its restorecon
 /// thread as a new restorecon request, forever). Show init as pid 1 to
-/// SO_PEERCRED; pivot-exec passes its pid in `LINUXAPK_INIT_PID`.
+/// SO_PEERCRED; pivot-exec passes its pid in `INNKEEPER_INIT_PID`.
 pub(crate) fn init_as_pid1(pid: i32) -> i32 {
     static INIT: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
-    let init = INIT.get_or_init(|| std::env::var("LINUXAPK_INIT_PID").ok()?.parse().ok());
+    let init = INIT.get_or_init(|| std::env::var("INNKEEPER_INIT_PID").ok()?.parse().ok());
     if *init == Some(pid) { 1 } else { pid }
 }
 
 /// In Flatpak mode, the Android path a symlink (O_PATH fd) that stands in
 /// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
-    if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
+    if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
         return None;
     }
     let mut buf = [0u8; 256];
@@ -187,7 +187,7 @@ pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
 pub(crate) fn root_ids(st: &mut libc::stat) {
     static IDS: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
     let ids = IDS.get_or_init(|| {
-        (std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
+        (std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() != Ok("1"))
             .then(|| unsafe { (libc::getuid(), libc::getgid()) })
     });
     if let Some((u, g)) = *ids {
@@ -201,13 +201,13 @@ pub(crate) fn root_ids(st: &mut libc::stat) {
 }
 
 impl Flat {
-    /// From `LINUXAPK_ROOT_MAP` (lines of
+    /// From `INNKEEPER_ROOT_MAP` (lines of
     /// `<host dir>=<Android path>`), or None in the bootless developer harness.
     pub(crate) fn from_env(listener: RawFd, resp_sz: usize) -> Option<Flat> {
-        if std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() == Ok("1") {
+        if std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() == Ok("1") {
             return None;
         }
-        let spec = std::env::var("LINUXAPK_ROOT_MAP").unwrap_or_default();
+        let spec = std::env::var("INNKEEPER_ROOT_MAP").unwrap_or_default();
         let mut map: Vec<(Vec<u8>, Vec<u8>)> = spec
             .lines()
             .filter_map(|l| l.rsplit_once('='))
@@ -223,7 +223,7 @@ impl Flat {
         Some(Flat {
             listener,
             resp_sz,
-            render_node: std::env::var_os("LINUXAPK_RENDER_NODE").map(Into::into),
+            render_node: std::env::var_os("INNKEEPER_RENDER_NODE").map(Into::into),
             map,
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
@@ -542,7 +542,7 @@ impl Flat {
         {
             let (Ok(mut m), Ok(apex)) = (
                 std::fs::read(format!("/proc/{tid}/mounts")),
-                std::fs::read("/linuxapk/apexd-mounts"),
+                std::fs::read("/innkeeper/apexd-mounts"),
             ) else {
                 return false;
             };
@@ -553,7 +553,7 @@ impl Flat {
             if rest.is_empty() || rest.split(|&c| c == b'/').any(|c| c.is_empty()) {
                 return false;
             }
-            let mut fake = b"/linuxapk/proc/".to_vec();
+            let mut fake = b"/innkeeper/proc/".to_vec();
             fake.extend_from_slice(rest);
             match std::fs::read(OsStr::from_bytes(&fake)) {
                 Ok(b) => b,
@@ -663,7 +663,7 @@ mod tests {
     use super::*;
 
     fn flat(map: &str) -> Flat {
-        unsafe { std::env::set_var("LINUXAPK_ROOT_MAP", map) };
+        unsafe { std::env::set_var("INNKEEPER_ROOT_MAP", map) };
         Flat::from_env(-1, 0).unwrap()
     }
 
@@ -711,7 +711,7 @@ mod tests {
         let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
         // OpenHarmony's /data/storage -> /proc/self/fd/990: the kernel would
         // follow the link in the broker.
-        let dir = std::env::temp_dir().join(format!("linuxapk-flat-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("innkeeper-flat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let link = dir.join("storage");
         let _ = std::fs::remove_file(&link);

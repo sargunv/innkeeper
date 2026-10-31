@@ -39,7 +39,7 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 fn token(kind: &str) -> String {
     format!(
-        "linuxapk_{kind}_{}_{}",
+        "innkeeper_{kind}_{}_{}",
         std::process::id(),
         NEXT_TOKEN.fetch_add(1, Ordering::Relaxed)
     )

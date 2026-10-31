@@ -15,7 +15,7 @@ matches --until (exit 0); a timeout with --until unmatched exits 1.
 desktop (tests/nested.sh), never the user's own.
 
 --probe runs SCRIPT with OH's /system/bin/sh as root inside the session once
-samgr is ready (ohos/sys_prod/etc/init/linuxapk_probe.cfg), prints its
+samgr is ready (ohos/sys_prod/etc/init/innkeeper_probe.cfg), prints its
 output, and exits with its status.
 """
 
@@ -30,10 +30,10 @@ import time
 TOP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOP / "tools/dev"))
 sys.dont_write_bytecode = True
-os.environ.setdefault("LINUXAPK_PROFILE", "ohos")
+os.environ.setdefault("INNKEEPER_PROFILE", "ohos")
 import run as dev  # noqa: E402
 
-IMAGES = Path(os.environ.get("LINUXAPK_OHOS_IMAGES", TOP / "out/ohos/images"))
+IMAGES = Path(os.environ.get("INNKEEPER_OHOS_IMAGES", TOP / "out/ohos/images"))
 LAYER = TOP / "out/build/ohos/layer"
 
 
@@ -45,7 +45,7 @@ def pin_name():
 
 
 def argv(gate, instance_fd, img, data, log, bridge):
-  manifest = (TOP / "packaging/flatpak/dev.linuxapk.Manager.yml").read_text()
+  manifest = (TOP / "packaging/flatpak/dev.sargunv.Innkeeper.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   a = ["flatpak", "run", "--user", "--no-documents-portal"]
   a.append(f"--app-path={dev.STAGE}")
@@ -62,17 +62,17 @@ def argv(gate, instance_fd, img, data, log, bridge):
     "sh",
     str(gate),
     "env",
-    f"LINUXAPK_OHOS_KMSG={log}",
-    *([f"LINUXAPK_OHOS_BRIDGE={bridge}"] if bridge else []),
+    f"INNKEEPER_OHOS_KMSG={log}",
+    *([f"INNKEEPER_OHOS_BRIDGE={bridge}"] if bridge else []),
     *(
-      f"{k}={v}" for k, v in os.environ.items() if k == "LINUXAPK_BROKER_DEBUG"
+      f"{k}={v}" for k, v in os.environ.items() if k == "INNKEEPER_BROKER_DEBUG"
     ),
     "bash",
     str(TOP / "ohos/sandbox.sh"),
     str(img),
     str(LAYER),
     str(data),
-    "/app/libexec/linuxapk/pivot-exec",
+    "/app/libexec/innkeeper/pivot-exec",
   ]
   return a
 
@@ -88,12 +88,12 @@ def main():
   img = IMAGES / pin_name() / "img"
   if not (img / "system/system/bin/init").exists():
     sys.exit(f"no image at {img}; run image/ohos/fetch.sh first")
-  if not (LAYER / "bin/linuxapk-broker").exists():
+  if not (LAYER / "bin/innkeeper-brk").exists():
     sys.exit(f"no {LAYER}; run mise run ohos:build first")
   data = dev.SCRATCH / "ohos-data"
   if not o.keep_data:
     subprocess.run(["rm", "-rf", str(data)], check=True)
-  probe = data / "linuxapk"
+  probe = data / "innkeeper"
   probe.mkdir(parents=True, exist_ok=True)
   for f in ("probe.sh", "probe.out", "probe.done"):
     (probe / f).unlink(missing_ok=True)

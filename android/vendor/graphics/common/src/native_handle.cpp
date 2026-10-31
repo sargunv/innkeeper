@@ -4,9 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "linuxapk/native_handle.h"
+#include "innkeeper/native_handle.h"
 
-namespace linuxapk {
+namespace innkeeper {
 
 native_handle_t* nativeHandleCreate(int numFds, int numInts) {
   if (
@@ -52,4 +52,4 @@ void nativeHandleClose(const native_handle_t* h) {
 
 void nativeHandleDelete(native_handle_t* h) { free(h); }
 
-}  // namespace linuxapk
+}  // namespace innkeeper

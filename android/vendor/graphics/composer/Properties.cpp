@@ -5,7 +5,7 @@
 #include <sys/system_properties.h>
 #endif
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 std::string getProperty(const char* name, const std::string& def) {
 #if defined(__ANDROID__)
@@ -15,4 +15,4 @@ std::string getProperty(const char* name, const std::string& def) {
   return def;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

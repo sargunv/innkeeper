@@ -16,8 +16,8 @@
   } while (0)
 
 int main() {
-  using linuxapk::audio::Queue;
-  using namespace linuxapk::audio::input;
+  using innkeeper::audio::Queue;
+  using namespace innkeeper::audio::input;
   CHECK(validBufferSize(480));
   CHECK(!validBufferSize(479) && !validBufferSize(48001));
   CHECK(validBurst(960, 2, 960));

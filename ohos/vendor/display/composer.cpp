@@ -18,10 +18,10 @@
 #include <unistd.h>
 
 #include "hdi.h"
-#include "linuxapk/bridge_client.h"
+#include "innkeeper/bridge_client.h"
 #include "log.h"
 
-#define LOG_TAG "linuxapk-composer"
+#define LOG_TAG "innkeeper-composer"
 #define EXPORT extern "C" __attribute__((visibility("default")))
 
 namespace {
@@ -29,7 +29,7 @@ namespace {
 constexpr uint32_t kDisplay = 0;
 constexpr uint32_t kRefresh = 60;
 constexpr int64_t kPeriodNs = 1'000'000'000 / kRefresh;
-constexpr const char* kAppId = "dev.linuxapk.ohos";
+constexpr const char* kAppId = "dev.sargunv.innkeeper.ohos";
 constexpr const char* kTitle = "OpenHarmony";
 
 // Bridge display service (host/bridge/src/display/proto.rs).
@@ -37,7 +37,7 @@ constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205, kDisplayWindow = 0x0208;
 constexpr uint16_t kEvRelease = 0x4201;
 
-// The panel, and so the window: LINUXAPK_OHOS_DISPLAY,
+// The panel, and so the window: INNKEEPER_OHOS_DISPLAY,
 // <width>x<height>@<dpi> (ohos/sandbox.sh, which gives DMS the same dpi).
 struct Mode {
   uint32_t width = 720, height = 1280, dpi = 320;
@@ -46,7 +46,7 @@ struct Mode {
 Mode mode() {
   Mode m;
   unsigned w, h, d;
-  const char* s = getenv("LINUXAPK_OHOS_DISPLAY");
+  const char* s = getenv("INNKEEPER_OHOS_DISPLAY");
   if (s && sscanf(s, "%ux%u@%u", &w, &h, &d) == 3 && w && h && d) m = {w, h, d};
   return m;
 }
@@ -336,7 +336,7 @@ EXPORT int32_t RegHotPlugCallback(HotPlugCallback cb, void* data) {
 
 EXPORT int32_t GetDisplayCapability(uint32_t devId, DisplayCapability& info) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
-  setString(info.name, "linuxapk");
+  setString(info.name, "innkeeper");
   info.type = DISP_INTF_BUILT_IN;
   const Mode d = mode();
   info.phyWidth = d.width * 254 / (d.dpi * 10);

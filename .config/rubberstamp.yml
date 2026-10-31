@@ -3,13 +3,13 @@
 # longer meaning is given here.
 version: 1
 context: |
-  Linux.apk runs Android apps on desktop Linux as native windows: a real AOSP 17
+  Innkeeper runs Android apps on desktop Linux as native windows: a real AOSP 17
   userspace (Google's prebuilt AOSP CI image) in a rootless namespace session,
   with userspace binder (a seccomp supervisor and broker), our own vendor HALs
   (graphics, Vulkan, audio), a privileged Kotlin system app inside Android, and
   a Rust host bridge for Wayland windows, PipeWire audio and desktop
-  integration. Users install APKs through a GTK manager app or the `linuxapk`
-  CLI. Linux.apk itself ships as a Flatpak, and nothing needs sudo. The threat
+  integration. Users install APKs through a GTK manager app or the `innkeeper`
+  CLI. Innkeeper itself ships as a Flatpak, and nothing needs sudo. The threat
   model is desktop parity: Android apps may do what a native desktop app can.
   Code is laid out by where it runs: `host/`, `supervisor/`, `image/`,
   `android/`, `tests/`, `tools/`.

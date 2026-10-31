@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // On-device gralloc test. Needs servicemanager and our allocator running.
-//  1. IAllocator over binder + mapper.linuxapk.so via dlopen (what libui does).
+//  1. IAllocator over binder + mapper.innkeeper.so via dlopen (what libui
+//  does).
 //  2. The public AHardwareBuffer API, i.e. libnativewindow -> libui Gralloc5 ->
 //     our allocator, with the mapper found through the VINTF manifest.
 #include <string>
@@ -19,8 +20,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "linuxapk/gralloc_handle.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/gralloc_handle.h"
+#include "innkeeper/native_handle.h"
 
 using namespace aidl::android::hardware::graphics::allocator;
 using namespace android::hardware::graphics::mapper;
@@ -65,7 +66,7 @@ static bool isUdmabuf(int fd) {
 
 static native_handle_t* fromAidl(const NativeHandle& h) {
   native_handle_t* nh =
-    linuxapk::nativeHandleCreate(int(h.fds.size()), int(h.ints.size()));
+    innkeeper::nativeHandleCreate(int(h.fds.size()), int(h.ints.size()));
   for (size_t i = 0; i < h.fds.size(); i++) nh->data[i] = dup(h.fds[i].get());
   memcpy(&nh->data[h.fds.size()], h.ints.data(), h.ints.size() * sizeof(int));
   return nh;
@@ -100,7 +101,7 @@ static void testAidl(const char* mapperPath) {
   alloc->getIMapperLibrarySuffix(&suffix);
   printf("IAllocator V%d, mapper suffix '%s'\n", ver, suffix.c_str());
   CHECK(ver == 3);
-  CHECK(suffix == "linuxapk");
+  CHECK(suffix == "innkeeper");
 
   void* so = dlopen(mapperPath, RTLD_NOW | RTLD_LOCAL);
   if (!so) {
@@ -181,7 +182,7 @@ static void testAidl(const char* mapperPath) {
     );
     gMapper->v5.freeBuffer(h);
     gMapper->v5.freeBuffer(h2);
-    linuxapk::nativeHandleCloseAndDelete(raw);
+    innkeeper::nativeHandleCloseAndDelete(raw);
   }
   // Errors are ServiceSpecific AllocationError codes.
   AllocationResult r;
@@ -268,7 +269,7 @@ static void testAHardwareBuffer() {
 int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
   ABinderProcess_startThreadPool();
-  testAidl(argc > 1 ? argv[1] : "/vendor/lib64/hw/mapper.linuxapk.so");
+  testAidl(argc > 1 ? argv[1] : "/vendor/lib64/hw/mapper.innkeeper.so");
   testAHardwareBuffer();
   printf("%d checks, %d failures\n", gChecks, gFail);
   return gFail ? 1 : 0;

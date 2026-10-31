@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 // Per-display GPU imports. Reserve both ends of a blit together so importing
 // its destination cannot destroy the source. Destruction happens with GL bound.
 template <typename T>
@@ -38,4 +38,4 @@ class ImportCache {
   static constexpr size_t kLimit = 8;
   std::map<uint64_t, std::unique_ptr<T>> mImages;
 };
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

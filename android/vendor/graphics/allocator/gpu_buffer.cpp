@@ -8,9 +8,9 @@
 
 #include "gpu_buffer.h"
 
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk {
+namespace innkeeper {
 namespace {
 constexpr auto kUsage =
   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -233,4 +233,4 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
   );
   return {fd, actual.drmFormatModifier};
 }
-}  // namespace linuxapk
+}  // namespace innkeeper

@@ -60,7 +60,7 @@ fn unused(path: &Path) -> Result<Option<File>> {
 /// Also honor sessions started by launchers predating leases. A stale config
 /// is harmless; an answering socket with an unreadable config aborts pruning.
 /// The image a running session's `session.conf` names. Only that table is
-/// read: the session may run another Linux.apk build, whose config differs.
+/// read: the session may run another Innkeeper build, whose config differs.
 fn running_image(conf: &Path) -> Result<Image> {
     #[derive(serde::Deserialize)]
     struct Running {
@@ -86,7 +86,7 @@ fn running_images(paths: &Paths) -> Result<Vec<Image>> {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name != "linuxapk" && !name.starts_with("linuxapk-") {
+        if name != "innkeeper" && !name.starts_with("innkeeper-") {
             continue;
         }
         let run = entry.path();
@@ -132,7 +132,7 @@ fn remove(path: &Path) -> Result<()> {
     let bytes = freed_bytes(path)?;
     crate::flatpak::remove_tree(path)?;
     eprintln!(
-        "linuxapk-session: pruned {} (freed {bytes} bytes)",
+        "innkeeper-session: pruned {} (freed {bytes} bytes)",
         path.display()
     );
     Ok(())
@@ -248,7 +248,7 @@ mod tests {
             profile: "prune-test".into(),
             libexec: base.join("libexec"),
             share: base.join("share"),
-            run: base.join("runtime/linuxapk-prune-test"),
+            run: base.join("runtime/innkeeper-prune-test"),
             state: base.join("state"),
             data_home: base.clone(),
             data: base.join("data"),

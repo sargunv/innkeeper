@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // ABI-compatible stand-in for AOSP's <cutils/native_handle.h> (types only).
 // Vendor code may not link libcutils; the helpers live in
-// linuxapk/native_handle.h.
+// innkeeper/native_handle.h.
 #pragma once
 
 #include <stdalign.h>

@@ -8,7 +8,7 @@
 #
 # Per app: framework = the UI framework or engine the APK is built with, for
 # the Compatibility wiki (identified by hand from its libs and assets, see
-# https://github.com/sargunv/linux.apk/wiki/Compatibility and
+# https://github.com/sargunv/innkeeper/wiki/Compatibility and
 # tests/compat/README.md; the harness doesn't check it).
 #
 # Per app, optional:
@@ -26,7 +26,7 @@
 #                                       the script started (links compat only logs)
 #                       "audio:"       non-silent PCM on the private session sink
 #                       "gesture:<pinch|pan|doubletap> X Y"  multi-touch via
-#                                       Linux.apk System's input bridge
+#                                       Innkeeper System's input bridge
 #                       "shot:<name>"   screenshot, must not be blank
 #                       "changed:<name>" ditto, and must differ from the last
 #                                       shot (did the gesture do anything?)
@@ -416,7 +416,7 @@ script = [
   "sh:dumpsys input_method | grep -q 'mSelectedImeId=dev.patrickgold.florisboard'",
   "sh:ime reset",
 ]
-manual = "The default IME is the Linux.apk Keyboard, which draws nothing; with FlorisBoard selected (per-app windows use the local IME policy), type into an app: does the IME show in the window, and do host keys still work?"
+manual = "The default IME is the Innkeeper Keyboard, which draws nothing; with FlorisBoard selected (per-app windows use the local IME policy), type into an app: does the IME show in the window, and do host keys still work?"
 
 [[app]]
 package = "com.celzero.bravedns"

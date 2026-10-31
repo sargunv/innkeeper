@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.sargunv.Innkeeper</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Innkeeper</name>
+  <summary>Run Android and OpenHarmony apps on Linux</summary>
+  <description>
+    <p>
+      Innkeeper runs Android and OpenHarmony apps on Linux: each app gets its own window,
+      app-menu entry and icon, with sound, clipboard, notifications and file
+      access through the desktop. Android itself runs rootless, in a sandboxed
+      session of its own.
+    </p>
+    <p>Open an APK file to install it, then launch the app from the app menu.</p>
+  </description>
+  <launchable type="desktop-id">dev.sargunv.Innkeeper.desktop</launchable>
+  <provides>
+    <binary>innkeeper</binary>
+    <binary>innkeeper-manager</binary>
+    <mediatype>application/vnd.android.package-archive</mediatype>
+  </provides>
+  <url type="homepage">https://github.com/sargunv/innkeeper</url>
+  <developer id="dev.sargunv.innkeeper">
+    <name>Sargun Vohra</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+</component>

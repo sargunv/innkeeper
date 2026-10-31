@@ -2,6 +2,6 @@
     <hal format="aidl">
         <name>android.hardware.audio.core</name>
         <version>4</version>
-        <fqname>IModule/linuxapk</fqname>
+        <fqname>IModule/innkeeper</fqname>
     </hal>
 </manifest>

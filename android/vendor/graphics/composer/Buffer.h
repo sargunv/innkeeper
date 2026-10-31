@@ -9,9 +9,9 @@
 #include <cutils/native_handle.h>
 
 #include "Common.h"
-#include "linuxapk/gralloc_handle.h"
+#include "innkeeper/gralloc_handle.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 class BufferRef {
  public:
@@ -46,4 +46,4 @@ class BufferSlots {
   std::vector<BufferPtr> mSlots;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

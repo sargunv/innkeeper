@@ -30,7 +30,7 @@ pub enum Ctl {
 }
 
 /// What the desktop mixer shows for a playback stream. `icon_name` is the
-/// desktop entry id (`dev.linuxapk.<package>`, or the Flatpak form), the same
+/// desktop entry id (`dev.sargunv.innkeeper.<package>`, or the Flatpak form), the same
 /// name the app's `.desktop` file uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaybackApp {
@@ -42,13 +42,13 @@ pub struct PlaybackApp {
 
 /// The application name a playback stream is opened with, restored when no
 /// app is playing.
-pub const DEFAULT_APP_NAME: &str = "Linux.apk";
+pub const DEFAULT_APP_NAME: &str = "Innkeeper";
 
 /// `application.id` and `application.icon_name` set on the Pulse client before
 /// a playback stream is opened. `SetClientName` does not set
 /// `application.process.binary`; that key exists on the stream only while an
 /// app is playing.
-pub const DEFAULT_APP_ID: &str = "dev.linuxapk";
+pub const DEFAULT_APP_ID: &str = "dev.sargunv.innkeeper";
 pub const DEFAULT_APP_ICON: &str = "android";
 
 /// Pulse application properties for the mixer. `Some` is the playing app
@@ -340,15 +340,18 @@ mod tests {
     fn playback_app_properties() {
         let app = PlaybackApp {
             name: "Example Player".into(),
-            icon_name: "dev.linuxapk.org.example.player".into(),
-            id: "dev.linuxapk.org.example.player".into(),
-            binary: "dev.linuxapk.org.example.player".into(),
+            icon_name: "dev.sargunv.innkeeper.org.example.player".into(),
+            id: "dev.sargunv.innkeeper.org.example.player".into(),
+            binary: "dev.sargunv.innkeeper.org.example.player".into(),
         };
         let props = playback_app_props(Some(&app));
         assert_eq!(props[0], ("application.name", "Example Player"));
         assert_eq!(
             props[1],
-            ("application.icon_name", "dev.linuxapk.org.example.player")
+            (
+                "application.icon_name",
+                "dev.sargunv.innkeeper.org.example.player"
+            )
         );
         assert_eq!(props[2].0, "application.id");
         assert_eq!(props[3].0, "application.process.binary");

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <resources>
-  <string name="app_name">Linux.apk System</string>
+  <string name="app_name">Innkeeper System</string>
   <string name="open_with_title">Open or share with Android app…</string>
   <string name="open_with_empty">No installed Android app can open or share these files (%1$s).</string>
   <string name="open_with_failed">Could not hand off these files: %1$s</string>
   <string name="open_with_open">Open</string>
   <string name="open_with_share">Share</string>
-  <string name="ime_name">Linux.apk Keyboard</string>
+  <string name="ime_name">Innkeeper Keyboard</string>
   <string name="browser_name">Desktop browser</string>
   <string name="a11y_name">Desktop assistive technologies</string>
-  <string name="a11y_description">Shows Android apps to the desktop\'s screen reader and other assistive technologies. Linux.apk turns it on only while one is running.</string>
+  <string name="a11y_description">Shows Android apps to the desktop\'s screen reader and other assistive technologies. Innkeeper turns it on only while one is running.</string>
 </resources>

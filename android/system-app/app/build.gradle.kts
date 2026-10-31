@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// "Linux.apk System": the privileged system app. `:app:install` installs the
+// "Innkeeper System": the privileged system app. `:app:install` installs the
 // platform-signed release APK (the root project's signRelease) into
 // out/build/system-app/install, the module's tree of the stage prefix.
 plugins { id("com.android.application") }
@@ -8,12 +8,12 @@ val sdk = extra["compileSdk"] as Int
 val buildTools = extra["buildTools"] as String
 
 android {
-  namespace = "dev.linuxapk.system"
+  namespace = "dev.sargunv.innkeeper.system"
   compileSdk = sdk
   buildToolsVersion = File(buildTools).name
 
   defaultConfig {
-    applicationId = "dev.linuxapk.system"
+    applicationId = "dev.sargunv.innkeeper.system"
     minSdk = sdk
     targetSdk = sdk
     versionCode = 1
@@ -44,14 +44,14 @@ dependencies {
 tasks.register<Sync>("install") {
   description = "Signs the release APK and installs it into out/build/system-app/install."
   into(layout.buildDirectory.dir("../install"))
-  val systemExt = "share/linuxapk/android/system_ext"
+  val systemExt = "share/innkeeper/android/system_ext"
   from(tasks.named("signRelease")) {
-    into("$systemExt/priv-app/LinuxApkSystem")
-    rename { "LinuxApkSystem.apk" }
+    into("$systemExt/priv-app/InnkeeperSystem")
+    rename { "InnkeeperSystem.apk" }
   }
   from(project(":wm-overlay").tasks.named("signRelease")) {
     into("$systemExt/overlay")
-    rename { "LinuxApkWindowPolicy.apk" }
+    rename { "InnkeeperWindowPolicy.apk" }
   }
   from(rootDir.resolve("etc/permissions")) { into("$systemExt/etc/permissions") }
 }

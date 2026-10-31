@@ -1,4 +1,4 @@
-// The bridge's audio service. See linuxapk/audio.h.
+// The bridge's audio service. See innkeeper/audio.h.
 
 #include <errno.h>
 #include <poll.h>
@@ -9,17 +9,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "linuxapk/audio.h"
+#include "innkeeper/audio.h"
 
-#include "linuxapk/bridge_client.h"
+#include "innkeeper/bridge_client.h"
 #ifdef __ANDROID__
 #include <android/log.h>
 #define ALOGI(...) \
-  __android_log_print(ANDROID_LOG_INFO, "linuxapk-audio", __VA_ARGS__)
+  __android_log_print(ANDROID_LOG_INFO, "innkeeper-audio", __VA_ARGS__)
 #define ALOGW(...) \
-  __android_log_print(ANDROID_LOG_WARN, "linuxapk-audio", __VA_ARGS__)
+  __android_log_print(ANDROID_LOG_WARN, "innkeeper-audio", __VA_ARGS__)
 #define ALOGE(...) \
-  __android_log_print(ANDROID_LOG_ERROR, "linuxapk-audio", __VA_ARGS__)
+  __android_log_print(ANDROID_LOG_ERROR, "innkeeper-audio", __VA_ARGS__)
 #else
 #define ALOGI(...) ((void)0)
 #define ALOGW(...) ((void)0)

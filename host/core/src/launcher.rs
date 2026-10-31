@@ -1,10 +1,10 @@
-//! Driving the Android session through `linuxapk-session` (the prefix's, or
+//! Driving the Android session through `innkeeper-session` (the prefix's, or
 //! any launcher for test harnesses). Its state (running, memory,
 //! the image) comes from the launcher's library, or, for a launcher outside a
 //! prefix (the dev driver, tools/dev/session.sh), from its `status`, `cgroup`
 //! and `image`; starting, stopping and commands go through the launcher
 //! itself. Commands run inside the session
-//! as argv through `linuxapk-session exec`, which hands them to the exec
+//! as argv through `innkeeper-session exec`, which hands them to the exec
 //! relay as argv: no string is ever interpreted by a shell, host or Android.
 
 use std::fs::File;
@@ -15,7 +15,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use linuxapk_session::Paths;
+use innkeeper_session::Paths;
 
 use crate::paths::Prefix;
 use crate::proc;
@@ -59,7 +59,7 @@ impl Session {
 
     /// The session of profile `name` of this program's prefix.
     pub fn of_profile(name: &str) -> Result<Self> {
-        linuxapk_session::profile::check_name(name)?;
+        innkeeper_session::profile::check_name(name)?;
         Ok(Self {
             profile: Some(name.into()),
             ..Self::find()?
@@ -70,7 +70,7 @@ impl Session {
     fn command(&self) -> Command {
         let mut c = Command::new(&self.launcher);
         if let Some(p) = self.profile.clone().or(crate::paths::profile().ok()) {
-            c.env("LINUXAPK_PROFILE", p);
+            c.env("INNKEEPER_PROFILE", p);
         }
         c
     }
@@ -84,10 +84,10 @@ impl Session {
         }
     }
 
-    fn state(&self) -> Option<linuxapk_session::Status> {
+    fn state(&self) -> Option<innkeeper_session::Status> {
         match self.paths() {
-            Some(paths) => Some(linuxapk_session::status(&paths)),
-            None => Some(linuxapk_session::Status::parse(&self.query("status")?)),
+            Some(paths) => Some(innkeeper_session::status(&paths)),
+            None => Some(innkeeper_session::Status::parse(&self.query("status")?)),
         }
     }
 
@@ -297,7 +297,7 @@ impl Session {
         {
             if !self.running() {
                 return Err(anyhow::anyhow!(
-                    "the session stopped while booting (see `linuxapk-session log`)"
+                    "the session stopped while booting (see `innkeeper-session log`)"
                 )
                 .context(crate::ErrorKind::SessionStartFailed));
             }
@@ -359,9 +359,9 @@ case "$*" in
       3) echo RUNNING_UNLOCKING ;;
       *) touch unlocked; echo RUNNING_UNLOCKED ;;
     esac ;;
-  'exec cmd package resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER dev.linuxapk.proof')
+  'exec cmd package resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER dev.sargunv.innkeeper.proof')
     echo resolve >>lookups
-    if test -f unlocked; then echo dev.linuxapk.proof/.MainActivity
+    if test -f unlocked; then echo dev.sargunv.innkeeper.proof/.MainActivity
     else echo 'No activity found'; fi ;;
   *) exit 1 ;;
 esac
@@ -372,8 +372,8 @@ esac
         let session = Session::at(launcher);
         session.ensure(&|_| {}).unwrap();
         assert_eq!(
-            crate::android::launcher_component(&session, "dev.linuxapk.proof").unwrap(),
-            "dev.linuxapk.proof/.MainActivity"
+            crate::android::launcher_component(&session, "dev.sargunv.innkeeper.proof").unwrap(),
+            "dev.sargunv.innkeeper.proof/.MainActivity"
         );
         assert_eq!(
             std::fs::read_to_string(dir.join("lookups")).unwrap(),

@@ -1,5 +1,5 @@
-//! Linux.apk host library: everything the `linuxapk` CLI and the
-//! `linuxapk-manager` app share. [`ops`] holds the user-level operations
+//! Innkeeper host library: everything the `innkeeper` CLI and the
+//! `innkeeper-manager` app share. [`ops`] holds the user-level operations
 //! (inspect, install, uninstall, run, list); the other modules are their
 //! building blocks. See host/core/README.md.
 

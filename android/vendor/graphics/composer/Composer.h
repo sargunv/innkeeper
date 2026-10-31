@@ -7,7 +7,7 @@
 
 #include <aidl/android/hardware/graphics/composer3/BnComposer.h>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 class ComposerClient;
 
@@ -31,4 +31,4 @@ class Composer
   bool mClientAlive = false;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

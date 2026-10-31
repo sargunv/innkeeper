@@ -2,7 +2,7 @@
 # build:image-tools: the tools that unpack the image at setup, built static from
 # pinned upstream sources in the build container (tools/container/run.sh), so
 # preparing an image needs nothing from the host or a container. Into
-# out/build/image-tools/install/libexec/linuxapk:
+# out/build/image-tools/install/libexec/innkeeper:
 #   simg2img, lpunpack  super.img (sparse) to partition images (android-tools)
 #   fsck.erofs          extracts the erofs partitions (erofs-utils, static lz4)
 #   debugfs             extracts the ext4 APEX payloads (e2fsprogs)
@@ -38,7 +38,7 @@ if [[ ! -e /run/.containerenv ]]; then
 fi
 
 src=$work/src deps=$work/deps build=$work/build
-bin=$work/install/libexec/linuxapk
+bin=$work/install/libexec/innkeeper
 rm -rf "$work/install" "$build" "$deps"
 mkdir -p "$src" "$build" "$deps" "$bin"
 

@@ -1,4 +1,4 @@
-name: Linux.apk runner
+name: Innkeeper runner
 description: Toolchains and prerequisites for hosted Linux runners
 inputs:
   mode:
@@ -12,7 +12,7 @@ runs:
       shell: bash
       run: tools/ci/setup.sh
       env:
-        LINUXAPK_CI_MODE: ${{ inputs.mode }}
+        INNKEEPER_CI_MODE: ${{ inputs.mode }}
     - uses: jdx/mise-action@v5
       with:
         cache: true

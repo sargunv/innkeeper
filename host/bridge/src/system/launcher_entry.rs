@@ -95,7 +95,7 @@ impl LauncherEntry {
         ]);
         let uri = format!(
             "application://{}.desktop",
-            linuxapk_core::desktop::app_id(package)
+            innkeeper_core::desktop::app_id(package)
         );
         if let Err(e) = conn.emit_signal(
             None::<&str>,

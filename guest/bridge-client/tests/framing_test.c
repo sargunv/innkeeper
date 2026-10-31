@@ -9,7 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "linuxapk/bridge_client.h"
+#include "innkeeper/bridge_client.h"
 
 #define CHECK(cond)                                              \
   do {                                                           \

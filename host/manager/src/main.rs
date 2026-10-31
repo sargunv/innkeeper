@@ -1,6 +1,6 @@
-//! `linuxapk-manager`: the Linux.apk manager. Install Android apps by drag and
+//! `innkeeper-manager`: the Innkeeper manager. Install Android apps by drag and
 //! drop or from the file manager, open and remove them, and watch the
-//! session. A GTK 4 / libadwaita front end over `linuxapk-core`; see
+//! session. A GTK 4 / libadwaita front end over `innkeeper-core`; see
 //! host/manager/README.md.
 
 mod app;
@@ -17,8 +17,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use linuxapk_core::desktop::{MANAGER_ICON_SVG, MANAGER_ID};
-use linuxapk_core::xdg::Dirs;
+use innkeeper_core::desktop::{MANAGER_ICON_SVG, MANAGER_ID};
+use innkeeper_core::xdg::Dirs;
 
 use crate::window::Window;
 
@@ -63,11 +63,11 @@ fn main() -> glib::ExitCode {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
         // The profile last chosen, or a first one: an ordinary profile.
-        match linuxapk_core::profiles::resolve(true) {
+        match innkeeper_core::profiles::resolve(true) {
             Ok(p) => {
-                let _ = linuxapk_core::paths::select(&p);
+                let _ = innkeeper_core::paths::select(&p);
             }
-            Err(e) => eprintln!("linuxapk-manager: {e:#}"),
+            Err(e) => eprintln!("innkeeper-manager: {e:#}"),
         }
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.open", &["<Control>o"]);
@@ -112,13 +112,13 @@ fn main() -> glib::ExitCode {
 
 fn about_dialog(w: &Window) {
     adw::AboutDialog::builder()
-        .application_name("Linux.apk")
+        .application_name("Innkeeper")
         .application_icon(MANAGER_ID)
-        .developer_name("Linux.apk contributors")
+        .developer_name("Innkeeper contributors")
         .version(env!("CARGO_PKG_VERSION"))
-        .comments("Android apps on the Linux desktop, each in a window of its own")
-        .website("https://github.com/sargunv/linux.apk")
-        .issue_url("https://github.com/sargunv/linux.apk/issues")
+        .comments("Run Android and OpenHarmony apps on Linux")
+        .website("https://github.com/sargunv/innkeeper")
+        .issue_url("https://github.com/sargunv/innkeeper/issues")
         .license_type(gtk::License::Agpl30)
         .build()
         .present(Some(&w.win));

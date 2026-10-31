@@ -3,7 +3,7 @@
 ## Threat model: desktop parity
 
 An Android app may do what a native desktop app running as the user can do.
-Linux.apk adds no protection that costs complexity, hacks or performance beyond
+Innkeeper adds no protection that costs complexity, hacks or performance beyond
 that.
 
 - **Kept:** isolation that comes from the Flatpak sandbox, and simple bounds and
@@ -19,7 +19,7 @@ that.
 flowchart LR
   apps["Android apps"] -->|"Android permissions, binder"| sys["system_server, HALs"]
   apps -. "trapped syscalls" .-> broker["broker<br/>(host user's power)"]
-  sys -->|"bridge.sock, per-service uid policy"| bridge["linuxapk-bridge<br/>(the user)"]
+  sys -->|"bridge.sock, per-service uid policy"| bridge["innkeeper-bridge<br/>(the user)"]
   bridge -->|"portals, D-Bus, Wayland"| desk["desktop"]
   root["Android root = host user"] -->|"Flatpak sandbox"| host["host files the user owns"]
 ```
@@ -39,7 +39,7 @@ flowchart LR
 
 ## The bridge socket
 
-- The socket directory is linked into Android as `/dev/socket/linuxapk`,
+- The socket directory is linked into Android as `/dev/socket/innkeeper`,
   `root:audio 0750`; the system app gets the `audio` group through its
   `HOST_BRIDGE` permission.
 - `SO_PEERCRED` is checked against the host user.
@@ -92,7 +92,7 @@ The Flatpak's grants are `--device=dri`, `--device=input`, `--share=network`,
 the bridge follows), the system bus's `org.freedesktop.UPower` (the desktop
 baseline has no battery portal), and `org.freedesktop.Notifications` (the
 Notification portal can't update notifications in place or show progress). MPRIS
-players own names under `org.mpris.MediaPlayer2.dev.linuxapk.Manager`, which
+players own names under `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper`, which
 Flatpak grants every app for its own id. `--device=input` lets the bridge open
 controllers the user can already access through uaccess ACLs, including rumble
 writes; it also lets every Android app read host input devices, keyboards and
@@ -100,7 +100,7 @@ mice included. This is accepted under desktop parity, as for game Flatpaks with
 the same grant. The grant requires Flatpak 1.15.6 or newer; Debian 13 ships
 1.16. Links and files go through the same portals as outside, and clipboard sync
 uses data control where available (KWin), or the display connection while a
-Linux.apk window has focus (GNOME). App-menu entries go through the
+Innkeeper window has focus (GNOME). App-menu entries go through the
 DynamicLauncher portal, so the user confirms each one.
 
 ## Desktop exposure
@@ -111,7 +111,7 @@ DynamicLauncher portal, so the user confirms each one.
   portal, through opaque grants and `openat2(RESOLVE_BENEATH)`; the bridge is
   the only side that sees host paths.
 - **Clipboard:** text, images and bounded file selections sync through
-  `ext_data_control_v1`, or `wl_data_device` while a Linux.apk window has focus.
+  `ext_data_control_v1`, or `wl_data_device` while a Innkeeper window has focus.
   File-manager copies use FileTransfer portal grants; plain file URIs can read
   only paths the Flatpak already has. Android file clips use private cache
   copies and read-only content URIs. Sensitive clips carry the password-manager
@@ -146,7 +146,7 @@ DynamicLauncher portal, so the user confirms each one.
 
 ## Test sessions
 
-A named `LINUXAPK_PROFILE` or `LINUXAPK_TEST=1` selects the bridge's
+A named `INNKEEPER_PROFILE` or `INNKEEPER_TEST=1` selects the bridge's
 `--test-session` mode, persisted in `session.conf`. It leaves the user's desktop
 alone, including when tests use a private bus: links, notifications and MPRIS
 players are logged only, AT-SPI and location are off, and apps installed inside

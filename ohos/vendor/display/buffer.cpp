@@ -17,7 +17,7 @@
 #include "hdi.h"
 #include "log.h"
 
-#define LOG_TAG "linuxapk-buffer"
+#define LOG_TAG "innkeeper-buffer"
 
 namespace {
 

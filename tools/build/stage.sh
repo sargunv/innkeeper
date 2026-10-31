@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Merge every module's install tree (out/build/<module>/install) into
 # out/stage, the installable prefix, and write its manifest,
-# share/linuxapk/manifest.tsv: one "path<TAB>module<TAB>sha256" line per file
+# share/innkeeper/manifest.tsv: one "path<TAB>module<TAB>sha256" line per file
 # (a symlink's sha256 is of its target). Fails if a module declared in
 # tools/build/artifacts.toml lacks an artifact, or if two modules write one
 # path that [overrides] doesn't settle.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 stage=out/stage
-manifest=share/linuxapk/manifest.tsv
+manifest=share/innkeeper/manifest.tsv
 
 # "module<TAB>name<TAB>task", "artifact<TAB>module<TAB>path" and
 # "override<TAB>path<TAB>module" lines.

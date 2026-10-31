@@ -1,17 +1,19 @@
 [package]
-name = "linuxapk-broker"
+name = "innkeeper-broker"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Linux.apk broker: Android's binder driver reimplemented in userspace, served through the session's seccomp user notifications"
+description = "Innkeeper broker: Android's binder driver reimplemented in userspace, served through the session's seccomp user notifications"
 
 [dependencies]
 libc = "0.2"
 
 # The dynamic bionic binary pivot-exec becomes to serve the session's seccomp
-# listener. build:supervisor installs it as /system/bin/linuxapk-broker.
+# listener. build:supervisor installs it as /system/bin/innkeeper-brk.
+# TASK_COMM_LEN is 16 (15 characters plus NUL). The binary name is the
+# process name tests match in /proc/pid/comm, so it stays within that.
 [[bin]]
-name = "linuxapk-broker"
+name = "innkeeper-brk"
 path = "src/main.rs"
 
 # C syscall probes exercise the real Rust boundary through this test-only ABI.

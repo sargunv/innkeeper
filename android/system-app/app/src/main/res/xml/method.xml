@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Linux.apk Keyboard (ime/HostImeService.kt): the host keyboard and input
+<!-- Innkeeper Keyboard (ime/HostImeService.kt): the host keyboard and input
      methods; no on-screen keyboard and no settings. -->
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
   android:supportsSwitchingToNextInputMethod="false">

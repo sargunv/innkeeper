@@ -6,4 +6,4 @@ target_compile_options(pivot-exec PRIVATE -Wall -Werror)
 target_link_options(pivot-exec PRIVATE -static)
 install(
   TARGETS pivot-exec
-  RUNTIME DESTINATION libexec/linuxapk COMPONENT supervisor)
+  RUNTIME DESTINATION libexec/innkeeper COMPONENT supervisor)

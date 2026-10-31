@@ -9,7 +9,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=$here/../../out/test/supervisor/bpfemu
 rm -rf "$out"
 mkdir -p "$out/outside"
-cargo build -q -p linuxapk-broker --example supervisor-probes
+cargo build -q -p innkeeper-broker --example supervisor-probes
 cc -O1 -Wall -Werror -o "$out/t" "$here/bpfemu.c" "$here/../../out/cargo/debug/examples/libsupervisor_probes.a" -lpthread -ldl -lm
 # shellcheck disable=SC2016 # expanded by the inner shell
 unshare -Urm sh -c 'mount -t tmpfs bpf /sys/fs/bpf && exec "$1" "$2"' sh "$out/t" "$out/outside"

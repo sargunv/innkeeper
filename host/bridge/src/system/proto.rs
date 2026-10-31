@@ -1,5 +1,5 @@
 //! System service messages (id 3, types 0x0300..=0x03ff, events
-//! 0x4300..=0x43ff). The client is the Linux.apk System app
+//! 0x4300..=0x43ff). The client is the Innkeeper System app
 //! (`BridgeConnection` plus its integration features): it sends `START`,
 //! then gets events. Anything that can exceed one message travels as a
 //! sealed memfd blob ([`crate::ipc::blob`]); the messages carry its length.

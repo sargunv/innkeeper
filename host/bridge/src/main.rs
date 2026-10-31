@@ -1,4 +1,4 @@
-//! `linuxapk-bridge --run-dir DIR --state-dir DIR [--allow-uid UID]...
+//! `innkeeper-bridge --run-dir DIR --state-dir DIR [--allow-uid UID]...
 //!                  [--system-app-dir DIR] [--mirror-apps] [--test-session] [--sink NAME] [-v]`
 //!
 //! Listens on `<run-dir>/bridge/bridge.sock` for clients from the Android
@@ -7,7 +7,7 @@
 //! to `<run-dir>/lifecycle` for the launcher. Only the given host uids may connect (default:
 //! our own uid). Audio plays to the desktop's default PipeWire sink, or
 //! `--sink NAME`.
-//! `--system-app-dir DIR` (the Linux.apk System app's data directory, as
+//! `--system-app-dir DIR` (the Innkeeper System app's data directory, as
 //! seen from the host) admits the uid that owns DIR to the system, documents
 //! and apps services, and to the input and a11y services, which nobody else
 //! may use.
@@ -15,7 +15,7 @@
 //! installed inside Android (`$XDG_DATA_HOME`). The documents service's
 //! grants (host files the user picked) persist in
 //! `<state-dir>/documents.grants`.
-//! `--test-session` (also `LINUXAPK_TEST=1`) isolates clipboard, portals,
+//! `--test-session` (also `INNKEEPER_TEST=1`) isolates clipboard, portals,
 //! OpenURI, notifications, MPRIS, AT-SPI and location from the desktop.
 //! `-v` logs per-stream statistics.
 
@@ -25,13 +25,13 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use std::sync::atomic::AtomicUsize;
 
-use linuxapk_bridge::audio::{AudioService, Backend, Limits};
-use linuxapk_bridge::display::{DisplayService, Limits as DisplayLimits};
-use linuxapk_bridge::input::{Hub, InputService};
-use linuxapk_bridge::ipc::proto::service;
-use linuxapk_bridge::ipc::server::{self, Config, Registry, UidCheck};
-use linuxapk_bridge::ipc::transport;
-use linuxapk_bridge::system::{Shared, SystemService};
+use innkeeper_bridge::audio::{AudioService, Backend, Limits};
+use innkeeper_bridge::display::{DisplayService, Limits as DisplayLimits};
+use innkeeper_bridge::input::{Hub, InputService};
+use innkeeper_bridge::ipc::proto::service;
+use innkeeper_bridge::ipc::server::{self, Config, Registry, UidCheck};
+use innkeeper_bridge::ipc::transport;
+use innkeeper_bridge::system::{Shared, SystemService};
 
 fn main() -> Result<()> {
     let mut run_dir: Option<PathBuf> = None;
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     let mut sink = None;
     let mut system_app_dir: Option<PathBuf> = None;
     let mut mirror_apps = false;
-    let mut test_session = std::env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1");
+    let mut test_session = std::env::var("INNKEEPER_TEST").is_ok_and(|v| v == "1");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -60,11 +60,11 @@ fn main() -> Result<()> {
             "--system-app-dir" => {
                 system_app_dir = Some(args.next().context("--system-app-dir needs a path")?.into())
             }
-            "-v" | "--verbose" => linuxapk_bridge::log::set_verbose(true),
+            "-v" | "--verbose" => innkeeper_bridge::log::set_verbose(true),
             _ => bail!("unknown argument {a:?} (see the source header for usage)"),
         }
     }
-    let policy = linuxapk_bridge::system::Policy::for_session(test_session);
+    let policy = innkeeper_bridge::system::Policy::for_session(test_session);
     let mirror_apps = mirror_apps && !test_session;
     let run_dir = run_dir.context("--run-dir is required")?;
     let state_dir = state_dir.context("--state-dir is required")?;
@@ -76,18 +76,18 @@ fn main() -> Result<()> {
     }
     let backend = Backend::Pulse {
         sink,
-        source: std::env::var("LINUXAPK_AUDIO_SOURCE").ok(),
+        source: std::env::var("INNKEEPER_AUDIO_SOURCE").ok(),
     };
-    linuxapk_bridge::info!("audio: {backend:?}");
+    innkeeper_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));
     // The composer's displays in host windows (needs $WAYLAND_DISPLAY), and
     // the system app's side of them: window requests, the seat, the IME.
     let hub = Hub::new();
-    *hub.evdev.lock().unwrap() = Some(linuxapk_bridge::input::evdev::Evdev::new(
+    *hub.evdev.lock().unwrap() = Some(innkeeper_bridge::input::evdev::Evdev::new(
         run_dir.join("bridge/evdev.sock"),
     )?);
-    linuxapk_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"), test_session);
+    innkeeper_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"), test_session);
     // Not in the socket directory, which is shared with Android.
     let shared = Shared::with_input(&run_dir, policy, hub.clone());
     // The system app names the playing app; each audio connection applies
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
         .name("signals".into())
         .spawn(move || {
             if let Some(sig) = signals.forever().next() {
-                linuxapk_bridge::info!("signal {sig}: shutting down");
+                innkeeper_bridge::info!("signal {sig}: shutting down");
                 for_signals.shutdown();
                 std::process::exit(0);
             }
@@ -144,11 +144,11 @@ fn main() -> Result<()> {
     // Android apps' accessibility trees on AT-SPI, while the desktop's
     // assistive technologies are on (never in a test session on the user's
     // own bus).
-    let a11y = linuxapk_bridge::a11y::Shared::new(policy.presence);
+    let a11y = innkeeper_bridge::a11y::Shared::new(policy.presence);
     let focus = a11y.clone();
     a11y_hub.watch_focus(Box::new(move |w| focus.keyboard_focus(w)));
     services.register(service::A11Y, "a11y", move |peer, events| {
-        Ok(Box::new(linuxapk_bridge::a11y::A11yService::new(
+        Ok(Box::new(innkeeper_bridge::a11y::A11yService::new(
             a11y.clone(),
             peer,
             events,
@@ -156,39 +156,34 @@ fn main() -> Result<()> {
     });
     // The host's battery, power saver, network and location. Location asks
     // the user, so a test session on the real desktop gets none.
-    let host_state = linuxapk_bridge::hoststate::HostState::new(policy.portals);
+    let host_state = innkeeper_bridge::hoststate::HostState::new(policy.portals);
     services.register(service::HOSTSTATE, "hoststate", move |peer, events| {
-        Ok(Box::new(linuxapk_bridge::hoststate::HostStateService::new(
-            host_state.clone(),
-            peer,
-            events,
-        )))
+        Ok(Box::new(
+            innkeeper_bridge::hoststate::HostStateService::new(host_state.clone(), peer, events),
+        ))
     });
     // Host files the user picks for Android.
-    let store = linuxapk_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
+    let store = innkeeper_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     services.register(service::DOCUMENTS, "documents", move |peer, events| {
-        Ok(Box::new(linuxapk_bridge::documents::DocumentsService::new(
-            store.clone(),
-            peer,
-            events,
-            policy,
-        )))
+        Ok(Box::new(
+            innkeeper_bridge::documents::DocumentsService::new(store.clone(), peer, events, policy),
+        ))
     });
     // Apps installed inside Android get desktop entries; only with
     // --mirror-apps (the main session).
-    let session_api = linuxapk_bridge::apps::session::Relay::default();
-    let apps = Arc::new(linuxapk_bridge::apps::Config::from_env(mirror_apps));
+    let session_api = innkeeper_bridge::apps::session::Relay::default();
+    let apps = Arc::new(innkeeper_bridge::apps::Config::from_env(mirror_apps));
     let _session_bus = match session_api.serve(for_preferences, apps.clone(), session_hub) {
         Ok(bus) => Some(bus),
         Err(e) => {
-            linuxapk_bridge::warn!("session D-Bus: {e:#}");
+            innkeeper_bridge::warn!("session D-Bus: {e:#}");
             None
         }
     };
-    linuxapk_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
+    innkeeper_bridge::info!("apps: mirroring {}", if mirror_apps { "on" } else { "off" });
     services.register(service::APPS, "apps", move |peer, events| {
         Ok(Box::new(
-            linuxapk_bridge::apps::AppsService::new(apps.clone(), peer)
+            innkeeper_bridge::apps::AppsService::new(apps.clone(), peer)
                 .with_session(session_api.clone(), events),
         ))
     });
@@ -219,7 +214,7 @@ fn main() -> Result<()> {
         services,
     };
     let listener = transport::listen(&socket)?;
-    linuxapk_bridge::info!(
+    innkeeper_bridge::info!(
         "listening on {} (uids {:?}, services {:?})",
         socket.display(),
         cfg.allow_uids,

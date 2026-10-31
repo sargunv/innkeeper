@@ -3,9 +3,9 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 session=$repo/tools/dev/session.sh
-export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-bionic}
-root=$repo/out/test/bionic/$LINUXAPK_PROFILE
-export LINUXAPK_DATA=${LINUXAPK_DATA:-$root/data}
+export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-bionic}
+root=$repo/out/test/bionic/$INNKEEPER_PROFILE
+export INNKEEPER_DATA=${INNKEEPER_DATA:-$root/data}
 mkdir -p "$root"
 envs=() vendor=() testdir=""
 while (($#)); do
@@ -34,7 +34,7 @@ done
   exit 2
 }
 data_home=$("$session" paths | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["data_home"])')
-addon=$data_home/linuxapk/addons/bionic
+addon=$data_home/innkeeper/addons/bionic
 cleanup() {
   "$session" stop >/dev/null 2>&1 || true
   "$session" reset >/dev/null 2>&1 || true
@@ -46,9 +46,9 @@ cleanup
 mkdir -p "$addon/vendor"
 for ((i = ${#vendor[@]} - 1; i >= 0; i--)); do cp -a "${vendor[i]}/." "$addon/vendor/"; done
 for e in "${envs[@]}"; do
-  if [[ $e == LINUXAPK_PROPS=* ]]; then
+  if [[ $e == INNKEEPER_PROPS=* ]]; then
     install -D -m 644 "$repo/out/build/android/tests/bionic/libprops_shim.so" \
-      "$addon/vendor/lib64/liblinuxapk_test_props.so"
+      "$addon/vendor/lib64/libinnkeeper_test_props.so"
     break
   fi
 done
@@ -75,7 +75,7 @@ fi
 # The live property service replaces props-shim in the no-init host harness.
 args=()
 for e in "${envs[@]}"; do
-  if [[ $e == LINUXAPK_PROPS=* ]]; then
+  if [[ $e == INNKEEPER_PROPS=* ]]; then
     IFS=';' read -ra props <<<"${e#*=}"
     for p in "${props[@]}"; do
       if [[ $p != ro.* ]]; then "$session" exec setprop "${p%%=*}" "${p#*=}"; fi
@@ -85,7 +85,7 @@ for e in "${envs[@]}"; do
     # vendor or platform linker namespace. Host mode uses the same shim.
     args+=("$e")
     if [[ $1 == /vendor/* || $1 == /odm/* ]]; then
-      args+=(LD_PRELOAD=/vendor/lib64/liblinuxapk_test_props.so)
+      args+=(LD_PRELOAD=/vendor/lib64/libinnkeeper_test_props.so)
     else
       shim=$repo/out/build/android/tests/bionic/libprops_shim.so
       "$session" exec mkdir -p /data/nativetest64
@@ -96,9 +96,9 @@ for e in "${envs[@]}"; do
     args+=("$e")
   fi
 done
-"$session" exec mkdir -p /data/vendor/linuxapk/frames
+"$session" exec mkdir -p /data/vendor/innkeeper/frames
 rc=0
 timeout "${TIMEOUT:-300}" "$session" exec env "${args[@]}" "$@" || rc=$?
 mkdir -p "$root/frames"
-"$session" exec tar -cf - -C /data/vendor/linuxapk/frames . | tar -xf - -C "$root/frames"
+"$session" exec tar -cf - -C /data/vendor/innkeeper/frames . | tar -xf - -C "$root/frames"
 exit "$rc"

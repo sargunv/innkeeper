@@ -4,7 +4,7 @@
  * laid out as  fds: [dmabuf]  ints: [MOCK_MAGIC, width, height, stride_bytes,
  * fourcc].
  *
- * Built as mapper.lapktest.so for the vulkan tests only; never installed. The
+ * Built as mapper.inkptest.so for the vulkan tests only; never installed. The
  * metadata encoding here is what a real IMapper v5 must produce (see
  * hardware/interfaces/graphics/mapper/stable-c/implutils/.../IMapperMetadataTypes.h).
  */
@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define MOCK_MAGIC 0x4c41504b /* 'LAPK' */
+#define MOCK_MAGIC 0x504b4e49 /* "INKP" */
 
 typedef struct native_handle {
   int version, numFds, numInts;

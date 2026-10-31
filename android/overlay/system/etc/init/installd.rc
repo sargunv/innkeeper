@@ -2,12 +2,12 @@
 service installd /system/bin/installd
     class main
     user root
-    # linuxapk: labels the directories it creates (setfscreatecon), which
+    # innkeeper: labels the directories it creates (setfscreatecon), which
     # fails against the host SELinux without the shim.
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     # Single-uid mode only: stat reports the owners chown recorded (the shim,
     # supervisor/README.md). No effect otherwise.
-    setenv LINUXAPK_VSTAT 1
+    setenv INNKEEPER_VSTAT 1
     capabilities CHOWN DAC_OVERRIDE DAC_READ_SEARCH FOWNER FSETID KILL SETGID SETUID SYS_ADMIN
 
 on early-boot

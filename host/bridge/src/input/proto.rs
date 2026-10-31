@@ -1,5 +1,5 @@
 //! Input service messages (id 6, types 0x0600..=0x06ff, events
-//! 0x4600..=0x46ff). The client is the Linux.apk System app: its window
+//! 0x4600..=0x46ff). The client is the Innkeeper System app: its window
 //! manager asks for windows, its injector gets the seat, and its IME drives
 //! the host's input methods. Only the system app's uid may open the service.
 //!
@@ -463,7 +463,7 @@ mod tests {
             dpi,
             min_width: 240,
             min_height: 0,
-            app_id: "dev.linuxapk.org.wikipedia".into(),
+            app_id: "dev.sargunv.innkeeper.org.wikipedia".into(),
             title: "Wikipedia".into(),
             token: "kwin-12".into(),
         }

@@ -1,8 +1,8 @@
 # Display and windows
 
 Each Android app task gets its own Wayland window: titled with the app's label,
-`app_id` `dev.linuxapk.<package>` (inside the Flatpak
-`dev.linuxapk.Manager.<package>`; the `StartupWMClass` of its desktop entry),
+`app_id` `dev.sargunv.innkeeper.<package>` (inside the Flatpak
+`dev.sargunv.Innkeeper.<package>`; the `StartupWMClass` of its desktop entry),
 resized with the app, closed with its task. Android's default display 0 has no
 window; it keeps running headless with the system app’s empty HomeActivity as
 HOME. A profile in [phone mode](#phone-mode) shows display 0 instead.
@@ -140,7 +140,7 @@ not constrain the host pointer.
   package's `app_id`. Before moving a new task off its caller's display, the
   bridge requests an `xdg_activation_v1` token from the caller's surface and
   uses it when the new window first maps. A desktop launch restores the
-  package's most recent task. `linuxapk run --new-window <package>` and the
+  package's most recent task. `innkeeper run --new-window <package>` and the
   desktop entry's **New Window** action request `NEW_TASK | MULTIPLE_TASK` on a
   fresh display. Entries advertise it only for launcher activities whose launch
   and document modes permit multiple tasks; singleton or document-never
@@ -206,7 +206,7 @@ another activity's request. Signatures and behavior were checked against
 `Activity.requestFullscreenMode` is a separate, currently unsupported request:
 Android rejects it before dispatch because each app task already fills its
 Android virtual display. It does not control desktop fullscreen; that remains a
-user choice ([#77](https://github.com/sargunv/linux.apk/issues/77)).
+user choice ([#77](https://github.com/sargunv/innkeeper/issues/77)).
 
 ### Hidden windows
 
@@ -276,7 +276,7 @@ set means hidden or unmapped. Window LIST reports these as `hostOutputs=id@Hz`.
 
 Android 17's VirtualDisplayConfig.setRequestedRefreshRate is a creation-time
 setting: VirtualDisplayAdapter keeps mRequestedRefreshRate final and
-IDisplayManager has no live setter. Linux.apk leaves the requested rate at zero
+IDisplayManager has no live setter. Innkeeper leaves the requested rate at zero
 so SurfaceFlinger follows the primary display; it never recreates an app's
 VirtualDisplay to change the rate. Per-window host output-rate reporting is
 separate from that immutable Android configuration. Pacing follows the host
@@ -296,7 +296,7 @@ scale fallback when the global is absent.
 ```mermaid
 sequenceDiagram
   participant D as desktop launcher
-  participant C as linuxapk run
+  participant C as innkeeper run
   participant WL as host compositor
   participant WM as window manager
   participant BR as bridge
@@ -311,13 +311,13 @@ sequenceDiagram
   C->>WL: destroy the splash
 ```
 
-- **The splash.** `linuxapk run` on a stopped session maps a toplevel of its own
-  at once (`host/cli/src/splash.rs`), with the app's app id and title, filled
-  with its splash colour, its icon in the middle, at the size its window will
-  open at. `linuxapk install` records the colour and size in the desktop entry
-  (`X-LinuxApk-Splash`, `X-LinuxApk-Window`): the launcher activity theme's
-  `windowSplashScreenBackground`, else its window background colour, else
-  `colorBackground`, and [its window size](#window-size). It asks for
+- **The splash.** `innkeeper run` on a stopped session maps a toplevel of its
+  own at once (`host/cli/src/splash.rs`), with the app's app id and title,
+  filled with its splash colour, its icon in the middle, at the size its window
+  will open at. `innkeeper install` records the colour and size in the desktop
+  entry (`X-Innkeeper-Splash`, `X-Innkeeper-Window`): the launcher activity
+  theme's `windowSplashScreenBackground`, else its window background colour,
+  else `colorBackground`, and [its window size](#window-size). It asks for
   server-side decorations only, so on GNOME it has no frame.
 - **Activation.** The splash uses the desktop's `XDG_ACTIVATION_TOKEN`, which
   ends the launch's startup feedback, and once focused asks for a token of its
@@ -343,10 +343,11 @@ sequenceDiagram
 
 ## Phone mode
 
-A profile's `mode = "phone"` (`linuxapk profile set --mode phone`, the manager's
-Display row) shows the whole device in one window, for developing apps: display
-0, with SystemUI's status and navigation bars and the image's Launcher3, where
-apps start instead of in windows of their own. It applies at the next start.
+A profile's `mode = "phone"` (`innkeeper profile set --mode phone`, the
+manager's Display row) shows the whole device in one window, for developing
+apps: display 0, with SystemUI's status and navigation bars and the image's
+Launcher3, where apps start instead of in windows of their own. It applies at
+the next start.
 
 **Why display 0.** It is where Android already runs SystemUI, the launcher,
 recents, the keyguard, rotation and system dialogs, as on a phone. A new
@@ -356,8 +357,8 @@ the composer: display 0's mode is fixed at boot, so a preset applies at the next
 start, and its frames are SurfaceFlinger's own client targets rather than an
 ImageReader's.
 
-- **Size.** linuxapk-session sets display 0's mode from the preset
-  (`vendor.linuxapk.hwc.primary`, `ro.sf.lcd_density`): small phone 720 × 1280
+- **Size.** innkeeper-session sets display 0's mode from the preset
+  (`vendor.innkeeper.hwc.primary`, `ro.sf.lcd_density`): small phone 720 × 1280
   at 320 dpi, medium phone 1080 × 2400 at 420 dpi, medium tablet 2560 × 1600 at
   320 dpi, as Android Studio's devices of those names. Apps keep their data
   across presets and modes.
@@ -367,7 +368,7 @@ ImageReader's.
   window manager asks for its window, so the composer offers it again every half
   second until the request (`WINDOW_REQUEST` for display 0) claims it.
 - **Window manager.** In phone mode it asks for display 0's window, starts
-  launches there (`linuxapk run`, notifications, `am start` alike), never moves
+  launches there (`innkeeper run`, notifications, `am start` alike), never moves
   display 0's tasks to windows of their own, and disables its empty HOME so the
   launcher is home. Closing the window powers the profile off, as closing an
   emulator does.
@@ -440,7 +441,7 @@ release. They do not describe host presentation.
 ## Control interface
 
 The host launches and lists windows with the window manager's
-`dev.linuxapk.LAUNCH`, `LIST` and `CLOSE` broadcasts, and sets the background
-setting ([session](session.md#lifecycle)) with `BACKGROUND`, run as root inside
-the session; `wm/ControlReceiver.kt` documents the arguments and replies, and
-`linuxapk-core`'s `android` module is the one caller.
+`dev.sargunv.innkeeper.LAUNCH`, `LIST` and `CLOSE` broadcasts, and sets the
+background setting ([session](session.md#lifecycle)) with `BACKGROUND`, run as
+root inside the session; `wm/ControlReceiver.kt` documents the arguments and
+replies, and `innkeeper-core`'s `android` module is the one caller.

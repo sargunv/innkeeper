@@ -1,5 +1,5 @@
 # Extra androidboot.* values for the AOSP CI cuttlefish image (ci-<build>);
-# linuxapk-session adds them to the bootconfig, so they become ro.boot.*.
+# innkeeper-session adds them to the bootconfig, so they become ro.boot.*.
 #
 # Vendor APEX selection, the mechanism cuttlefish's launcher uses: apexd
 # activates only the file named by ro.boot.vendor.apex.<apex name>, and "none"

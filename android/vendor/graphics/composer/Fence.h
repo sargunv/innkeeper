@@ -5,7 +5,7 @@
 
 #include <unistd.h>
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 // Minimal owning fd (libbase's unique_fd is not available to us).
 class UniqueFd {
@@ -37,4 +37,4 @@ bool waitFence(int fd, int timeoutMs);
 // Duplicates an fd (F_DUPFD_CLOEXEC); -1 stays -1.
 int dupFd(int fd);
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

@@ -21,16 +21,16 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "linuxapk/buffer_alloc.h"
-#include "linuxapk/gralloc_handle.h"
-#include "linuxapk/layout.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/buffer_alloc.h"
+#include "innkeeper/gralloc_handle.h"
+#include "innkeeper/layout.h"
+#include "innkeeper/native_handle.h"
 
-using namespace linuxapk;
+using namespace innkeeper;
 using namespace ::android::hardware::graphics::mapper;
 using ::aidl::android::hardware::graphics::common::PlaneLayoutComponentType;
 
-void linuxapk_host_assert(
+void innkeeper_host_assert(
   const char* file, int line, const char* msg
 ) noexcept {
   fprintf(stderr, "%s:%d: %s\n", file, line, msg);
@@ -599,7 +599,7 @@ static void testGpuLayout() {
 }
 
 int main(int argc, char** argv) {
-  const char* lib = argc > 1 ? argv[1] : "./mapper.linuxapk.so";
+  const char* lib = argc > 1 ? argv[1] : "./mapper.innkeeper.so";
   void* so = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
   if (!so) {
     fprintf(stderr, "dlopen %s: %s\n", lib, dlerror());
@@ -615,8 +615,8 @@ int main(int argc, char** argv) {
   CHECK_EQ(load(&gMapper), AIMAPPER_ERROR_NONE);
   CHECK_EQ(gMapper->version, AIMAPPER_VERSION_5);
 
-  if (getenv("LINUXAPK_UDMABUF")) {
-    // Run with LINUXAPK_UDMABUF=/nonexistent: CPU buffers fall back to
+  if (getenv("INNKEEPER_UDMABUF")) {
+    // Run with INNKEEPER_UDMABUF=/nonexistent: CPU buffers fall back to
     // memfd, GPU/composer buffers are refused.
     printf("no-udmabuf mode\n");
     native_handle_t* nh = nullptr;

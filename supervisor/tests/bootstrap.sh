@@ -6,12 +6,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 out=$repo/out/test/supervisor/bootstrap
 mkdir -p "$out"
-cargo build -q -p linuxapk-broker --bin linuxapk-broker
+cargo build -q -p innkeeper-broker --bin innkeeper-brk
 cc -O1 -Wall -Werror -o "$out/pivot-exec" "$repo/supervisor/pivot-exec/pivot-exec.c"
-export LINUXAPK_BROKER=$repo/out/cargo/debug/linuxapk-broker
+export INNKEEPER_BROKER=$repo/out/cargo/debug/innkeeper-brk
 # shellcheck disable=SC2016 # expanded by the filtered child
 if timeout 5 setpriv --no-new-privs "$out/pivot-exec" / /bin/sh -c '
-  test "$(cat /proc/$PPID/comm)" = linuxapk-broker || exit 99
+  test "$(cat /proc/$PPID/comm)" = innkeeper-brk || exit 99
   exit 42
 '; then
   result=0

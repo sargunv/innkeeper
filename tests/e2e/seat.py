@@ -3,16 +3,16 @@
 
 import os, socket, struct, sys
 
-if os.environ.get("LINUXAPK_TEST_COMPOSITOR") == "mutter":
+if os.environ.get("INNKEEPER_TEST_COMPOSITOR") == "mutter":
   from gi.repository import Gio, GLib
 
   bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
   actions = sys.stdin if sys.argv[1:] == ["--stdin"] else sys.argv[1:]
   for action in actions:
     bus.call_sync(
-      "dev.linuxapk.TestDesktop",
-      "/dev/linuxapk/TestDesktop",
-      "dev.linuxapk.TestDesktop",
+      "dev.sargunv.Innkeeper.TestDesktop",
+      "/dev/sargunv/Innkeeper/TestDesktop",
+      "dev.sargunv.Innkeeper.TestDesktop",
       "Input",
       GLib.Variant("(s)", (action.strip(),)),
       None,
@@ -108,7 +108,7 @@ send(
   + string("org_kde_kwin_fake_input")
   + struct.pack("<II", min(version, 4), fi),
 )
-send(fi, 0, string("linuxapk test") + string("pointer test"))
+send(fi, 0, string("innkeeper test") + string("pointer test"))
 roundtrip()
 actions = (
   (line.strip() for line in sys.stdin)

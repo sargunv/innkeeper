@@ -1,7 +1,7 @@
 # Input
 
 The host seat reaches Android through the bridge's input service, which only the
-Linux.apk System app may open. The bridge turns `wl_pointer`, `wl_keyboard`,
+Innkeeper System app may open. The bridge turns `wl_pointer`, `wl_keyboard`,
 `wl_touch`, touchpad gestures (`zwp_pointer_gestures_v1`) and tablets
 (`zwp_tablet_v2`) into protocol v2 lines
 ([input/proto.rs](../host/bridge/src/input/proto.rs) lists every line); the
@@ -26,15 +26,15 @@ flowchart LR
 
 ## Virtual devices
 
-The broker creates `linuxapk-event0` (Linux.apk Keyboard),
-`linuxapk-event<display + 1>` (Linux.apk Mouse <display>) and one
-`linuxapk-event<controller id>` per host gamepad. Discovery files live in the
-sandbox's writable tmpfs `/dev/linuxapk-input`. The broker redirects Android's
+The broker creates `innkeeper-event0` (Innkeeper Keyboard),
+`innkeeper-event<display + 1>` (Innkeeper Mouse <display>) and one
+`innkeeper-event<controller id>` per host gamepad. Discovery files live in the
+sandbox's writable tmpfs `/dev/innkeeper-input`. The broker redirects Android's
 `openat("/dev/input")` and `inotify_add_watch("/dev/input")` to that directory,
 so EventHub discovers only our devices. Its resulting
-`/dev/input/linuxapk-event*` opens are served by the broker. Host `eventN` nodes
-keep their names and remain directly readable under the accepted input grant;
-the virtual names never collide with them. Trapped `openat` returns a
+`/dev/input/innkeeper-event*` opens are served by the broker. Host `eventN`
+nodes keep their names and remain directly readable under the accepted input
+grant; the virtual names never collide with them. Trapped `openat` returns a
 broker-owned socket endpoint; `EVIOCG*` answers identify an alphabetic keyboard
 and relative mouse, expose capabilities and held-key state, and accept LED
 writes. The bridge writes Linux `input_event` records through `evdev.sock`
@@ -165,7 +165,7 @@ The mapping follows what InputReader produces for real devices
 - **Window shortcuts.** Ctrl+W and Ctrl+Q close the window, as its close button
   does, and Alt+Left sends BACK to it; none of them reaches the app. Web
   browsers (apps that open any https link) keep Ctrl+W, which closes a tab. F11
-  toggles fullscreen in the bridge. `persist.linuxapk.input.window_shortcuts=0`
+  toggles fullscreen in the bridge. `persist.innkeeper.input.window_shortcuts=0`
   turns Ctrl+W, Ctrl+Q and Alt+Left off.
 - **Escape stays Escape.** Android 17 already closes dialogs and popups on it;
   mapping it to BACK would break apps that use Escape. The title-bar ‹ button,
@@ -191,7 +191,7 @@ flowchart LR
   key["wl_keyboard key<br/>(evdev code)"] --> xkb["bridge: xkb state + compose"]
   xkb -->|"key t code 1 sym text|compose"| kb["Keyboard.kt"]
   kb -->|"keycode from the keysym<br/>(letters, digits, punctuation)"| inj["injected KeyEvent"]
-  kb -->|"text Virtual.kcm would get wrong"| ime["Linux.apk Keyboard<br/>commitText"]
+  kb -->|"text Virtual.kcm would get wrong"| ime["Innkeeper Keyboard<br/>commitText"]
   inj --> ime
   ime -->|"other keys, unchanged"| app["app"]
 ```
@@ -206,7 +206,7 @@ flowchart LR
 - **Text.** Injected keys type through `Virtual.kcm`, which is US. When the
   host's text for a press differs from what `Virtual.kcm` gives its keycode and
   meta state (é, Shift+& on AZERTY, ö, AltGr characters, composed characters),
-  the key down carries that text, and the Linux.apk Keyboard, which sees every
+  the key down carries that text, and the Innkeeper Keyboard, which sees every
   key before the app, commits it instead of passing the key on. Dead keys and
   the Compose key's steps type nothing. Ctrl and Meta chords are never text, and
   neither is an Alt chord whose text is the key's own.
@@ -217,7 +217,7 @@ flowchart LR
 
 ## Text input
 
-"Linux.apk Keyboard" (`ime/HostImeService.kt`) connects Android text fields to
+"Innkeeper Keyboard" (`ime/HostImeService.kt`) connects Android text fields to
 the host's input methods through the bridge's `zwp_text_input_v3`; its pure
 logic is `TextInputSession.kt` in `:protocol`.
 
@@ -303,7 +303,7 @@ or loses Android focus; it cannot trap the host pointer again in that interval.
 - `:protocol` unit tests (in `mise run test`): the line parser, keymap and
   translator, with a model of AOSP's InputVerifier run over every test plus
   random streams; `KeyboardTest` covers layouts, text, compose and the
-  shortcuts. `cargo test -p linuxapk-bridge` resolves keys under keymaps
+  shortcuts. `cargo test -p innkeeper-bridge` resolves keys under keymaps
   compiled from RMLVO names (`fr`, `de`, `us` with `compose:ralt`).
 - `mise run test:e2e -- input` opens the probes APK's `InputProbeActivity` in
   its own mapped desktop window, injects a short pointer/keyboard stream through

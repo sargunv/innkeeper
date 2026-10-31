@@ -1,4 +1,4 @@
-//! OpenHarmony's access tokens (`LINUXAPK_GUEST=ohos`): the identity OH's
+//! OpenHarmony's access tokens (`INNKEEPER_GUEST=ohos`): the identity OH's
 //! kernel keeps beside the uid, a token and a first token per task
 //! (`current->token`, `current->ftoken`). Init and appspawn set them before
 //! exec through `/dev/access_token_id`; processes read their own back there,

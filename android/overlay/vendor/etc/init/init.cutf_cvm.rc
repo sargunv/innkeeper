@@ -1,3 +1,3 @@
-# linuxapk: replaced by init.linuxapk.rc (androidboot.hardware=linuxapk); cuttlefish's
+# innkeeper: replaced by init.innkeeper.rc (androidboot.hardware=innkeeper); cuttlefish's
 # device rc loads VM kernel modules, mounts its fstab, proxies adb over vsock and
 # starts its Wi-Fi/modem setup. See android/overlay/README.md.

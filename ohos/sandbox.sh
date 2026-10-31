@@ -7,11 +7,11 @@
 #
 # <image-dir> holds the pinned image's partitions (image/ohos/fetch.sh):
 # system/ is system.img's root (system-as-root), vendor/ is vendor.img.
-# <layer-dir> is ohos:build's output: bin/linuxapk-broker; sys_prod/, our
+# <layer-dir> is ohos:build's output: bin/innkeeper-brk; sys_prod/, our
 # files on OH's own product partition (empty in the image, but on init's cfg
 # path and the linker's search path); and vendor/, our VDIs, which take the
 # place of the image's in /vendor. The image is never changed.
-# With LINUXAPK_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
+# With INNKEEPER_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
 # display shows in a desktop window.
 # The sandbox's / is a writable tmpfs, so OH's root is built from symlinks
 # beside the runtime's /usr, as the Android session does
@@ -101,7 +101,7 @@ mkfifo -m 666 /dev/kmsg
 {
   head -c 64M
   cat >/dev/null
-} <>/dev/kmsg >>"${LINUXAPK_OHOS_KMSG:-/dev/null}" &
+} <>/dev/kmsg >>"${INNKEEPER_OHOS_KMSG:-/dev/null}" &
 # The binder nodes and the access-token node, which the broker serves.
 for n in binder hwbinder vndbinder access_token_id; do
   : >"/dev/$n"
@@ -113,28 +113,28 @@ done
 # llvmpipe either way.
 render=$(compgen -G '/dev/dri/renderD*' | head -n 1 || true)
 # The bridge, for the composer's window (ohos/vendor/display).
-if [[ -n ${LINUXAPK_OHOS_BRIDGE:-} ]]; then
-  run=$XDG_RUNTIME_DIR/linuxapk-ohos
+if [[ -n ${INNKEEPER_OHOS_BRIDGE:-} ]]; then
+  run=$XDG_RUNTIME_DIR/innkeeper-ohos
   mkdir -p "$run/bridge" "$data/../ohos-bridge"
-  /app/libexec/linuxapk/linuxapk-bridge --run-dir "$run" \
+  /app/libexec/innkeeper/innkeeper-bridge --run-dir "$run" \
     --state-dir "$data/../ohos-bridge" --test-session \
-    >>"$LINUXAPK_OHOS_BRIDGE" 2>&1 &
+    >>"$INNKEEPER_OHOS_BRIDGE" 2>&1 &
   mkdir -p /dev/socket
-  ln -sfn "$run/bridge" /dev/socket/linuxapk
+  ln -sfn "$run/bridge" /dev/socket/innkeeper
 fi
 
 exec env -i \
   PATH=/system/bin:/vendor/bin \
-  LINUXAPK_GUEST=ohos \
+  INNKEEPER_GUEST=ohos \
   LIBGL_ALWAYS_SOFTWARE=1 \
-  LINUXAPK_OHOS_DISPLAY="$display" \
-  LINUXAPK_RENDER_NODE="${render:-/dev/null}" \
-  LINUXAPK_BROKER="$layer/bin/linuxapk-broker" \
-  LD_PRELOAD=/sys_prod/lib64/liblinuxapk_ohos_shim.so \
-  LINUXAPK_ROOT_MAP="$img/system/system=/system
+  INNKEEPER_OHOS_DISPLAY="$display" \
+  INNKEEPER_RENDER_NODE="${render:-/dev/null}" \
+  INNKEEPER_BROKER="$layer/bin/innkeeper-brk" \
+  LD_PRELOAD=/sys_prod/lib64/libinnkeeper_ohos_shim.so \
+  INNKEEPER_ROOT_MAP="$img/system/system=/system
 $img/vendor=/vendor
 $layer/vendor=/vendor
 $layer/sys_prod=/sys_prod
 $data=/data" \
-  ${LINUXAPK_BROKER_DEBUG:+LINUXAPK_BROKER_DEBUG="$LINUXAPK_BROKER_DEBUG"} \
+  ${INNKEEPER_BROKER_DEBUG:+INNKEEPER_BROKER_DEBUG="$INNKEEPER_BROKER_DEBUG"} \
   "$pivot" / /system/bin/init --second-stage 0

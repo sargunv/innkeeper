@@ -32,7 +32,7 @@ pub fn pick_with_activation(
     p: &Pick,
     activation: &str,
 ) -> Result<Vec<PathBuf>, i32> {
-    let token = format!("linuxapk{}", TOKEN.fetch_add(1, Ordering::Relaxed));
+    let token = format!("innkeeper{}", TOKEN.fetch_add(1, Ordering::Relaxed));
     let sender = conn
         .unique_name()
         .map(|n| n.trim_start_matches(':').replace('.', "_"))

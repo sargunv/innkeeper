@@ -1,5 +1,5 @@
 //! Host state service messages (id 8, types 0x0801..=0x08ff, events
-//! 0x4801..=0x48ff). Clients: the Health HAL (battery) and the Linux.apk
+//! 0x4801..=0x48ff). Clients: the Health HAL (battery) and the Innkeeper
 //! System app (power saver, network, location). A client sends `START` with
 //! the state it wants; the current value of each follows as an event, and
 //! every change after that.

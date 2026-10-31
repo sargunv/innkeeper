@@ -17,7 +17,7 @@
     }                                                                  \
     int n = real(path, context);                                       \
     if (n >= 0 || (errno != ENODATA && errno != EOPNOTSUPP)) return n; \
-    static const char label[] = "u:object_r:linuxapk_exec:s0";         \
+    static const char label[] = "u:object_r:innkeeper_exec:s0";        \
     *context = strdup(label);                                          \
     return *context ? sizeof(label) : -1;                              \
   }

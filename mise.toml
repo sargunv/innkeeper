@@ -30,7 +30,7 @@ depends = ["build:*"]
 run = "tools/build/stage.sh"
 
 [tasks."build:host"]
-description = "linuxapk, linuxapk-manager, linuxapk-bridge, linuxapk-session, the manager's desktop data"
+description = "innkeeper, innkeeper-manager, innkeeper-bridge, innkeeper-session, the manager's desktop data"
 run = "tools/build/host.sh"
 
 # The NDK superbuild (CMakeLists.txt) that the modules below install from.
@@ -48,10 +48,10 @@ depends = ["ndk"]
 run = """
 set -euo pipefail
 tools/build/install-component.sh supervisor
-cargo build -q --release --target x86_64-linux-android -p linuxapk-broker --bin linuxapk-broker
+cargo build -q --release --target x86_64-linux-android -p innkeeper-broker --bin innkeeper-brk
 install -D -m 755 -s --strip-program="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-  out/cargo/x86_64-linux-android/release/linuxapk-broker \
-  out/build/supervisor/install/share/linuxapk/android/system/bin/linuxapk-broker
+  out/cargo/x86_64-linux-android/release/innkeeper-brk \
+  out/build/supervisor/install/share/innkeeper/android/system/bin/innkeeper-brk
 """
 
 [tasks."build:graphics"]
@@ -79,13 +79,13 @@ depends = ["ndk"]
 run = """
 set -euo pipefail
 tools/build/install-component.sh system
-d=out/build/system/install/share/linuxapk/android/system/bin
-install -m 755 android/system/iptables/linuxapk-iptables "$d/"
+d=out/build/system/install/share/innkeeper/android/system/bin
+install -m 755 android/system/iptables/innkeeper-iptables "$d/"
 for f in iptables iptables-restore ip6tables ip6tables-restore; do cp -P "android/system/iptables/$f" "$d/"; done
 """
 
 [tasks."build:system-app"]
-description = "LinuxApkSystem.apk, platform-signed; LinuxApkProbes.apk for the tests (out/test/probes)"
+description = "InnkeeperSystem.apk, platform-signed; InnkeeperProbes.apk for the tests (out/test/probes)"
 dir = "android/system-app"
 run = "./gradlew --console=plain -q -Pkotlin.project.persistent.dir={{config_root}}/out/build/system-app/kotlin :app:install :probes:install"
 
@@ -98,11 +98,11 @@ description = "The overlay (android/overlay) and the image's config and scripts"
 run = """
 set -euo pipefail
 rm -rf out/build/overlay/install out/build/image/install
-mkdir -p out/build/overlay/install/share/linuxapk/android
-cp -a android/overlay/. out/build/overlay/install/share/linuxapk/android/
+mkdir -p out/build/overlay/install/share/innkeeper/android
+cp -a android/overlay/. out/build/overlay/install/share/innkeeper/android/
 i=out/build/image/install
-install -D -m 644 -t $i/share/linuxapk/image image/pin.toml image/bootconfig image/vendor.prop image/fork-bases.sha256
-install -D -m 755 -t $i/libexec/linuxapk/image image/*.sh
+install -D -m 644 -t $i/share/innkeeper/image image/pin.toml image/bootconfig image/vendor.prop image/fork-bases.sha256
+install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 """
 
 [tasks."ohos:build"]
@@ -146,14 +146,14 @@ python3 -B -m unittest discover -s tests/e2e -p 'test_*.py'
 """
 
 [tasks."test:bionic"]
-description = "Android binaries in the Flatpak session (LINUXAPK_BIONIC_HARNESS=1: bootless HAL harness)"
+description = "Android binaries in the Flatpak session (INNKEEPER_BIONIC_HARNESS=1: bootless HAL harness)"
 run = """
 set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gralloc_test
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gpu_copy_test
-tests/bionic/run.sh -v "$v" -e LINUXAPK_PROPS=vendor.linuxapk.hwc.dump.dir=/data/vendor/linuxapk/frames \
-  -e EXPECT_DUMP=/data/vendor/linuxapk/frames -- /vendor/bin/hwc_test
+tests/bionic/run.sh -v "$v" -e INNKEEPER_PROPS=vendor.innkeeper.hwc.dump.dir=/data/vendor/innkeeper/frames \
+  -e EXPECT_DUMP=/data/vendor/innkeeper/frames -- /vendor/bin/hwc_test
 android/vendor/vulkan/tests/run.sh
 android/vendor/audio/tests/abi.sh
 """
@@ -166,16 +166,16 @@ run = "tests/e2e/run.sh"
 description = "Manual app troubleshooting (-- --only PKG); full corpus only in nightly CI, never a gate"
 # A named profile (default compat), so a test session: links are only logged,
 # and notifications and media players stay off the real desktop.
-env = { LINUXAPK_PROFILE = "{{ env.LINUXAPK_PROFILE | default(value='compat') }}" }
+env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
 
 [tasks."ohos:test"]
 description = "Boot the pinned OpenHarmony image in a test sandbox until its core system abilities register; needs mise run build"
 depends = ["ohos:build"]
-env = { LINUXAPK_PROFILE = "{{ env.LINUXAPK_PROFILE | default(value='ohos') }}" }
+env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='ohos') }}" }
 run = """
 set -euo pipefail
-image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/linuxapk/image/fs-extract.sh
+image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/innkeeper/image/fs-extract.sh
 ohos/run.py --timeout 90 --probe ohos/tests/boot.sh
 """
 

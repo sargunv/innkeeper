@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace linuxapk::audio {
+namespace innkeeper::audio {
 inline constexpr uint32_t kRate = 48000;
 inline constexpr uint32_t kChannels = 2;
 inline constexpr uint32_t kFrameBytes = kChannels * sizeof(int16_t);
@@ -20,4 +20,4 @@ inline uint64_t presentedFrames(uint64_t written, uint64_t queued) {
 inline int32_t latencyMs(uint64_t queued) {
   return (queued * 1000 + kRate - 1) / kRate;
 }
-}  // namespace linuxapk::audio
+}  // namespace innkeeper::audio

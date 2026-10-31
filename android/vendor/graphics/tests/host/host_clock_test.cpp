@@ -2,7 +2,7 @@
 #include <cstdlib>
 
 #include "HostClock.h"
-using linuxapk::hwc::HostClock;
+using innkeeper::hwc::HostClock;
 #define CHECK(x)            \
   do {                      \
     if (!(x)) std::abort(); \

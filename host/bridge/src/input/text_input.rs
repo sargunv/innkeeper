@@ -1,4 +1,4 @@
-//! `zwp_text_input_v3` for the Linux.apk IME (`docs/input.md`).
+//! `zwp_text_input_v3` for the Innkeeper IME (`docs/input.md`).
 //!
 //! One text input per seat. It follows the keyboard focus: the compositor
 //! sends `enter`/`leave` for our windows' surfaces. The IME's state arrives

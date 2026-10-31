@@ -1,4 +1,4 @@
-//! linuxapk-broker: Android's binder driver, reimplemented in userspace, plus
+//! innkeeper-broker: Android's binder driver, reimplemented in userspace, plus
 //! the virtual credentials of single-uid sessions.
 //!
 //!   * [`binder`]: the driver's state machine (`drivers/android/binder.c`) and
@@ -14,8 +14,8 @@
 //!   * `flat`: what Flatpak mode's missing mounts did (Android paths for
 //!     /proc magic links, faked /proc files).
 //!
-//! `LINUXAPK_GUEST` selects the guest's extensions ([`guest`]).
-//! `LINUXAPK_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
+//! `INNKEEPER_GUEST` selects the guest's extensions ([`guest`]).
+//! `INNKEEPER_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
 //! `supervisor/README.md`.
 
 pub mod ashmem;
@@ -42,16 +42,16 @@ pub enum Guest {
     Ohos,
 }
 
-/// From `LINUXAPK_GUEST` (`ohos`, or anything else for Android), read once.
+/// From `INNKEEPER_GUEST` (`ohos`, or anything else for Android), read once.
 pub fn guest() -> Guest {
     static GUEST: std::sync::OnceLock<Guest> = std::sync::OnceLock::new();
-    *GUEST.get_or_init(|| match std::env::var("LINUXAPK_GUEST").as_deref() {
+    *GUEST.get_or_init(|| match std::env::var("INNKEEPER_GUEST").as_deref() {
         Ok("ohos") => Guest::Ohos,
         _ => Guest::Android,
     })
 }
 
-/// Verbose tracing (LINUXAPK_BROKER_DEBUG).
+/// Verbose tracing (INNKEEPER_BROKER_DEBUG).
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 
 /// Bounded trace sink: stderr, or a file that is rotated (to `<path>.1`) every
@@ -68,11 +68,11 @@ static LOG: Mutex<LogSink> = Mutex::new(LogSink {
 });
 const LOG_ROTATE: u64 = 64 << 20;
 
-/// Configure tracing from LINUXAPK_BROKER_DEBUG: unset, empty or "0" = off,
+/// Configure tracing from INNKEEPER_BROKER_DEBUG: unset, empty or "0" = off,
 /// "1" = stderr, anything else = a log file path. Tracing covers every binder
 /// call and, in single-uid mode, a line of syscall counters every 10 s.
 pub fn init_log() {
-    let Some(v) = std::env::var_os("LINUXAPK_BROKER_DEBUG") else {
+    let Some(v) = std::env::var_os("INNKEEPER_BROKER_DEBUG") else {
         return;
     };
     let v = v.to_string_lossy().into_owned();

@@ -13,7 +13,7 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<!-- Linux.apk: IModule/linuxapk supplies speaker playback and the default mic.
+<!-- Innkeeper: IModule/innkeeper supplies speaker playback and the default mic.
      The image's primary module retains its tinyalsa microphone and telephony.
      MMAP and offload remain absent because the image serves silent stubs. -->
 <module name="primary" halVersion="3.0">

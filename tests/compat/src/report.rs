@@ -94,9 +94,9 @@ pub fn write_markdown(
      by the compat harness (`mise run test:compat`): install, launch, a \
      non-blank first frame, then a tap, a scroll and Back without a crash or \
      ANR, plus an optional per-app script. Failures are triaged in \
-     [tests/compat](https://github.com/sargunv/linux.apk/tree/main/tests/compat). \
+     [tests/compat](https://github.com/sargunv/innkeeper/tree/main/tests/compat). \
      Nightly results are published on the \
-     [wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility). \
+     [wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility). \
      Start is the time to the first \
      frame on a fresh install; memory is the app's total PSS after the \
      interactions.\n\n",

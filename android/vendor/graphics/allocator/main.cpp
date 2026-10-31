@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // android.hardware.graphics.allocator.IAllocator/default (AIDL V3).
 // GPU-only RGB targets are driver-allocated; CPU buffers use udmabuf.
-#define LOG_TAG "linuxapk-allocator"
+#define LOG_TAG "innkeeper-allocator"
 
 #include <cerrno>
 #include <cstring>
@@ -15,10 +15,10 @@
 #include <unistd.h>
 
 #include "gpu_buffer.h"
-#include "linuxapk/buffer_alloc.h"
-#include "linuxapk/gralloc_handle.h"
-#include "linuxapk/log.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/buffer_alloc.h"
+#include "innkeeper/gralloc_handle.h"
+#include "innkeeper/log.h"
+#include "innkeeper/native_handle.h"
 
 using aidl::android::hardware::common::NativeHandle;
 using aidl::android::hardware::graphics::allocator::AllocationError;
@@ -26,7 +26,7 @@ using aidl::android::hardware::graphics::allocator::AllocationResult;
 using aidl::android::hardware::graphics::allocator::BnAllocator;
 using aidl::android::hardware::graphics::allocator::BufferDescriptorInfo;
 
-namespace linuxapk {
+namespace innkeeper {
 namespace {
 
 ndk::ScopedAStatus error(AllocationError e) {
@@ -128,7 +128,7 @@ class Allocator : public BnAllocator {
   }
 
   ndk::ScopedAStatus getIMapperLibrarySuffix(std::string* out) override {
-    *out = "linuxapk";
+    *out = "innkeeper";
     return ndk::ScopedAStatus::ok();
   }
 
@@ -147,7 +147,7 @@ class Allocator : public BnAllocator {
 };
 
 }  // namespace
-}  // namespace linuxapk
+}  // namespace innkeeper
 
 // Started as root (see the .rc): open /dev/udmabuf, then become
 // system:graphics. In the rootless session only uid 0 (the host user) can open
@@ -155,7 +155,7 @@ class Allocator : public BnAllocator {
 static void dropPrivileges() {
   constexpr uid_t kSystem = 1000;
   constexpr gid_t kGraphics = 1003;
-  if (!linuxapk::openUdmabufDevice()) {
+  if (!innkeeper::openUdmabufDevice()) {
     LOGW("no /dev/udmabuf: only CPU-only buffers can be allocated");
   }
   if (getuid() != 0) return;
@@ -172,9 +172,9 @@ int main() {
   dropPrivileges();
   ABinderProcess_setThreadPoolMaxThreadCount(4);
   ABinderProcess_startThreadPool();
-  auto allocator = ndk::SharedRefBase::make<linuxapk::Allocator>();
+  auto allocator = ndk::SharedRefBase::make<innkeeper::Allocator>();
   const std::string instance =
-    std::string(linuxapk::Allocator::descriptor) + "/default";
+    std::string(innkeeper::Allocator::descriptor) + "/default";
   binder_status_t st =
     AServiceManager_addService(allocator->asBinder().get(), instance.c_str());
   if (st != STATUS_OK) {
@@ -182,8 +182,8 @@ int main() {
     return 1;
   }
   LOGI(
-    "registered %s (V%d, mapper suffix linuxapk)", instance.c_str(),
-    linuxapk::Allocator::version
+    "registered %s (V%d, mapper suffix innkeeper)", instance.c_str(),
+    innkeeper::Allocator::version
   );
   ABinderProcess_joinThreadPool();
   return 1;

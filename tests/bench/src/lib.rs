@@ -296,7 +296,7 @@ BENCH probe_present frame=2300000 window=4 ns=3000000\n";
     #[test]
     fn binder_output_not_shell_timing() {
         let r = binder(
-            "I LinuxApkBench: BENCH binder_sample workers=8 ns=1000,3000\nI LinuxApkBench: BENCH binder workers=8 count=2 elapsed_ns=10000",
+            "I InnkeeperBench: BENCH binder_sample workers=8 ns=1000,3000\nI InnkeeperBench: BENCH binder workers=8 count=2 elapsed_ns=10000",
         );
         assert_eq!(r[0]["txn_per_s"], 200000.0);
         assert_eq!(r[0]["roundtrip"]["mean_ms"], 0.002);

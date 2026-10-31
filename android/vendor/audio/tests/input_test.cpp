@@ -5,7 +5,7 @@
 
 #include "StreamInBridge.h"
 
-using namespace linuxapk::audio;
+using namespace innkeeper::audio;
 #define CHECK(c)                                      \
   do {                                                \
     if (!(c)) {                                       \

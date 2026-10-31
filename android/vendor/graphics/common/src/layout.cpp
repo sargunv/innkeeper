@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include <numeric>
 
-#include "linuxapk/layout.h"
+#include "innkeeper/layout.h"
 
-namespace linuxapk {
+namespace innkeeper {
 namespace {
 
 using namespace comp;
@@ -235,4 +235,4 @@ bool computeLayout(
   return true;
 }
 
-}  // namespace linuxapk
+}  // namespace innkeeper

@@ -1,10 +1,10 @@
-//! Linux.apk preferences. Reads and writes run off the GTK thread.
+//! Innkeeper preferences. Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linuxapk_core::preferences::{self, Preferences};
+use innkeeper_core::preferences::{self, Preferences};
 
 use crate::{
     errors::Op,
@@ -213,7 +213,7 @@ impl Page {
         );
         microg.set_sensitive(self.addon.get());
         let caveat = adw::ActionRow::builder().title("microG Compatibility")
-            .subtitle("Google Play Services client libraries remain unsupported, including Firebase push, Google sign-in, Maps API and licensing. Linux.apk does not support signature spoofing.").build();
+            .subtitle("Google Play Services client libraries remain unsupported, including Firebase push, Google sign-in, Maps API and licensing. Innkeeper does not support signature spoofing.").build();
         apps.add(&caveat);
         let settings = adw::ActionRow::builder()
             .title("Android Settings…")
@@ -231,7 +231,7 @@ impl Page {
         page.add(&apps);
         let privacy = adw::PreferencesGroup::builder()
             .title("App Isolation")
-            .description(linuxapk_core::ops::SINGLE_UID_NOTICE)
+            .description(innkeeper_core::ops::SINGLE_UID_NOTICE)
             .build();
         page.add(&privacy);
         self.content.append(&page);

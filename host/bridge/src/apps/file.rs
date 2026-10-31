@@ -39,7 +39,7 @@ pub fn grant(socket: &Path, file: &File, name: &str) -> Result<u64> {
         major: proto::MAJOR,
         minor: proto::MINOR,
         service: proto::service::DOCUMENTS,
-        name: "linuxapk Open With".into(),
+        name: "innkeeper Open With".into(),
     };
     transport::send(&sock, &hello.encode(1), &[])?;
     reply(&sock, 1)?;

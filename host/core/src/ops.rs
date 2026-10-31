@@ -32,19 +32,19 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// The command line desktop entries run `linuxapk` with: this
+/// The command line desktop entries run `innkeeper` with: this
 /// installation's ([`Prefix::cli`]), for this session profile. Inside the
-/// Flatpak it is plain `linuxapk`, which the DynamicLauncher portal runs as
-/// `flatpak run --command=linuxapk`.
+/// Flatpak it is plain `innkeeper`, which the DynamicLauncher portal runs as
+/// `flatpak run --command=innkeeper`.
 pub fn cli_command() -> Result<Vec<String>> {
-    Ok(paths::command(&linuxapk()?, &paths::profile()?))
+    Ok(paths::command(&innkeeper()?, &paths::profile()?))
 }
 
-/// The `linuxapk` desktop entries run: this installation's, or the Flatpak's
+/// The `innkeeper` desktop entries run: this installation's, or the Flatpak's
 /// command.
-pub(crate) fn linuxapk() -> Result<Vec<String>> {
+pub(crate) fn innkeeper() -> Result<Vec<String>> {
     if Dirs::from_env().portal.is_some() {
-        return Ok(vec!["linuxapk".into()]);
+        return Ok(vec!["innkeeper".into()]);
     }
     Ok(Prefix::locate()?.cli())
 }
@@ -461,18 +461,18 @@ pub fn android_packages() -> Option<Vec<String>> {
 }
 
 /// Repairs app entries (see [`xdg::refresh_entries`]): those that can no
-/// longer run point at this installation's `linuxapk`, and inside the
+/// longer run point at this installation's `innkeeper`, and inside the
 /// Flatpak missing app-menu entries are offered again. Returns how many
 /// entries were rewritten.
 pub fn refresh_entries() -> usize {
-    linuxapk().map_or(0, |l| xdg::refresh_entries(&Dirs::from_env(), &l))
+    innkeeper().map_or(0, |l| xdg::refresh_entries(&Dirs::from_env(), &l))
 }
 
 /// Shown once after the first session starts.
 pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
     inside Flatpak they all run as your user, as desktop apps do.";
 pub const SINGLE_UID_DOCS: &str =
-    "https://github.com/sargunv/linux.apk/blob/main/docs/security.md#single-uid-mode";
+    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#single-uid-mode";
 
 /// [`SINGLE_UID_NOTICE`] if the session is running and the
 /// notice hasn't been shown yet. It counts as shown from now on (a stamp in

@@ -8,7 +8,7 @@
 #                unusable by its real owner.
 #   single       apex/: the same files for single mode (supervisor/README.md),
 #                owned by us, with the Android owner in the
-#                user.linuxapk.owner xattr that the shim reports.
+#                user.innkeeper.owner xattr that the shim reports.
 #
 # usage: derive.sh common|single <img-dir> <apex-dir> <out-dir>
 set -euo pipefail
@@ -60,7 +60,7 @@ case $layer in
       read -r rel mode uid gid <<<"$e"
       [[ -e $out/apex/$rel ]] || continue
       chmod "$mode" "$out/apex/$rel"
-      python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.linuxapk.owner", sys.argv[2].encode())' \
+      python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.innkeeper.owner", sys.argv[2].encode())' \
         "$out/apex/$rel" "$uid:$gid"
     done
     ;;

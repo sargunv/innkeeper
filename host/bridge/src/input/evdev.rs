@@ -1,7 +1,7 @@
 //! Translation stays in the system app (host layout, shortcuts, gestures).
 //! Eligible translated events return here to the broker's session-local evdev
 //! endpoints; this bridge is the only writer of input_event records.
-use linuxapk_broker::input::event;
+use innkeeper_broker::input::event;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 

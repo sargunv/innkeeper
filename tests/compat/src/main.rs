@@ -1,4 +1,4 @@
-//! Linux.apk compat harness. See tests/compat/README.md.
+//! Innkeeper compat harness. See tests/compat/README.md.
 //!
 //!   mise run test:compat -- [run] [--window] [--only PKG,...] [--accept]
 //!   mise run test:compat -- fetch
@@ -70,7 +70,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Android commands run through `linuxapk-session exec` inherit our
+/// Android commands run through `innkeeper-session exec` inherit our
 /// niceness, and Android threads that set their priority back to 0 then fail:
 /// uiautomator dies at once with "SecurityException: Cannot set priority to
 /// 0" ("Killed"). zsh runs background jobs at nice 5 (BG_NICE). So a niced
@@ -85,7 +85,7 @@ fn run_at_nice_zero() -> Result<()> {
         .and_then(|(_, f)| f.split_whitespace().nth(16))
         .context("read /proc/self/stat")?
         .parse()?;
-    if nice <= 0 || env::var_os("LINUXAPK_RENICED").is_some() {
+    if nice <= 0 || env::var_os("INNKEEPER_RENICED").is_some() {
         return Ok(());
     }
     eprintln!("compat: running at nice {nice}; restarting at nice 0");
@@ -94,7 +94,7 @@ fn run_at_nice_zero() -> Result<()> {
         .args(["-p", "Nice=0", "--same-dir"]);
     for (k, v) in env::vars_os() {
         let name = k.to_string_lossy();
-        if name.starts_with("LINUXAPK_")
+        if name.starts_with("INNKEEPER_")
             || name.starts_with("XDG_")
             || [
                 "WAYLAND_DISPLAY",
@@ -112,7 +112,7 @@ fn run_at_nice_zero() -> Result<()> {
             c.arg(set);
         }
     }
-    c.arg("--setenv=LINUXAPK_RENICED=1")
+    c.arg("--setenv=INNKEEPER_RENICED=1")
         .arg("--")
         .arg(env::current_exe()?)
         .args(env::args_os().skip(1));
@@ -153,8 +153,8 @@ fn real_main() -> Result<ExitCode> {
     }
     let out = repo
         .join("out/test/compat")
-        .join(linuxapk_core::paths::profile()?);
-    let apk_dir = env::var_os("LINUXAPK_CORPUS")
+        .join(innkeeper_core::paths::profile()?);
+    let apk_dir = env::var_os("INNKEEPER_CORPUS")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| repo.join("out/test/compat/corpus"));
     let mut apks = vec![];
@@ -171,7 +171,7 @@ fn real_main() -> Result<ExitCode> {
             launcher.display()
         );
     }
-    let probes = repo.join("out/test/probes/LinuxApkProbes.apk");
+    let probes = repo.join("out/test/probes/InnkeeperProbes.apk");
     if !probes.is_file() {
         bail!(
             "no probes APK at {} (run `mise run build`)",

@@ -1,10 +1,11 @@
-# linuxapk-manager
+# innkeeper-manager
 
-The Linux.apk app (`dev.linuxapk.Manager`, GTK 4 and libadwaita): open or drop
+The Innkeeper app (`dev.sargunv.Innkeeper`, GTK 4 and libadwaita): open or drop
 an APK, see what it is and which permissions it wants, install it, then open or
-remove it from a list. `bin/linuxapk-manager` plus its desktop data in `data/`
+remove it from a list. `bin/innkeeper-manager` plus its desktop data in `data/`
 (entry, metainfo, icon and the `.apks`/`.xapk`/`.apkm` MIME types), built by
-`mise run build:host`.
+`mise run build:host`. `data/icons/dev.sargunv.Innkeeper.source.svg` is the
+editable App Icon Preview source for the shipped icon.
 
 - **APK handler.** The shipped `.desktop` declares the APK and bundle types, so
   "Open With" offers the manager; `mise run install-dev` installs it for a
@@ -15,13 +16,13 @@ remove it from a list. `bin/linuxapk-manager` plus its desktop data in `data/`
   other (shared with the CLI's notice).
 - **The list** comes from this profile's desktop entries, so it shows without
   booting Android, and a directory monitor follows CLI changes. At startup it
-  repairs stale entries as `linuxapk list` does.
+  repairs stale entries as `innkeeper list` does.
 - Every core call runs on a worker thread (`worker.rs`); the UI thread never
   blocks on reading APKs, the session or the package manager.
 
 Start reading at `src/window.rs` (list, session, drag and drop) and
 `src/install.rs` (the confirmation page). Tests:
-`cargo test -p linuxapk-manager` (error texts, permission names, progress
+`cargo test -p innkeeper-manager` (error texts, permission names, progress
 texts). For screenshots, use the nested desktop in
 [docs/development.md](../../docs/development.md).
 
@@ -61,7 +62,7 @@ uses the separately installed addon described in
 the addon and takes effect at the next Android start. Play Services client
 libraries remain unsupported.
 
-Preferences live in `$XDG_CONFIG_HOME/linuxapk-<profile>/preferences.toml`. The
+Preferences live in `$XDG_CONFIG_HOME/innkeeper-<profile>/preferences.toml`. The
 page reads them without starting Android. A running session accepts updates
 through `Session1`; otherwise they are saved for the next start. Desktop
 following, mirroring and the idle timeout change live.

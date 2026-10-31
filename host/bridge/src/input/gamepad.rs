@@ -2,7 +2,7 @@
 //! codes are already a standard layout; normalize the common stick/trigger
 //! axis arrangements to Android Generic.kl. No injected gamepad events exist.
 use super::evdev::Evdev;
-use linuxapk_broker::input::{
+use innkeeper_broker::input::{
     EVENT_SIZE,
     gamepad::{BUTTONS, FIRST},
 };
@@ -390,7 +390,7 @@ fn wait_for_input(polls: &mut [libc::pollfd], next_scan: Instant) {
 
 pub fn start(broker: PathBuf, test_session: bool) {
     let fake = test_session
-        .then(|| std::env::var_os("LINUXAPK_GAMEPAD_TEST_DIR"))
+        .then(|| std::env::var_os("INNKEEPER_GAMEPAD_TEST_DIR"))
         .flatten();
     let synthetic = fake.is_some();
     let dir = fake

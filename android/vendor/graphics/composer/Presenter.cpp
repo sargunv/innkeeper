@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -11,9 +11,9 @@
 #include "Display.h"
 #include "FrameDumper.h"
 #include "Properties.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 namespace {
 std::unique_ptr<HeadlessPresenter> makeHeadless() {
@@ -25,7 +25,7 @@ std::unique_ptr<HeadlessPresenter> makeHeadless() {
 
 void startPresenterBackend() {
   const std::string backend =
-    getProperty("vendor.linuxapk.hwc.backend", "headless");
+    getProperty("vendor.innkeeper.hwc.backend", "headless");
   if (backend == "bridge") {
     startBridge();
   } else if (backend != "headless") {
@@ -34,7 +34,7 @@ void startPresenterBackend() {
 }
 
 std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config) {
-  if (bridgeStarted() && getProperty("vendor.linuxapk.mode", "") == "phone")
+  if (bridgeStarted() && getProperty("vendor.innkeeper.mode", "") == "phone")
     return createBridgePrimaryPresenter(
       uint32_t(config.width), uint32_t(config.height), makeHeadless()
     );
@@ -44,7 +44,7 @@ std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config) {
 DisplayConfig primaryConfig() {
   DisplayConfig config;
   int w = 0, h = 0;
-  const std::string size = getProperty("vendor.linuxapk.hwc.primary", "");
+  const std::string size = getProperty("vendor.innkeeper.hwc.primary", "");
   if (
     sscanf(size.c_str(), "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 &&
     h <= 8192
@@ -67,4 +67,4 @@ std::unique_ptr<Presenter> createVirtualPresenter(
   return makeHeadless();
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

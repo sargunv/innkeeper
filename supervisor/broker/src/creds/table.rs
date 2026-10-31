@@ -303,8 +303,8 @@ pub fn may_access(
     bits & want == want
 }
 
-/// The virtual owner recorded for a file (`user.linuxapk.owner`, "uid:gid").
-pub const OWNER_XATTR: &str = "user.linuxapk.owner";
+/// The virtual owner recorded for a file (`user.innkeeper.owner`, "uid:gid").
+pub const OWNER_XATTR: &str = "user.innkeeper.owner";
 
 pub fn parse_owner(v: &[u8]) -> Option<(u32, u32)> {
     let s = std::str::from_utf8(v).ok()?;

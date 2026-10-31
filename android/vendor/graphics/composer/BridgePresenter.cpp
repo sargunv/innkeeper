@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <algorithm>
 #include <atomic>
 #include <initializer_list>
@@ -20,12 +20,12 @@
 #include "GpuCopy.h"
 #include "Properties.h"
 #include "VsyncThread.h"
-#include "linuxapk/bridge_client.h"
-#include "linuxapk/buffer_alloc.h"
-#include "linuxapk/layout.h"
-#include "linuxapk/log.h"
+#include "innkeeper/bridge_client.h"
+#include "innkeeper/buffer_alloc.h"
+#include "innkeeper/layout.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 namespace {
 
@@ -364,7 +364,7 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
     return;
   int fd = -1;
   if (!pixels.empty()) {
-    fd = memfd_create("linuxapk-cursor", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    fd = memfd_create("innkeeper-cursor", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0) return;
     if (
       write(fd, pixels.data(), pixels.size()) != ssize_t(pixels.size()) ||
@@ -392,7 +392,7 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
 }
 
 void BridgeDisplay::present(const FrameInput& frame) {
-  const bool bench = getProperty("vendor.linuxapk.hwc.bench") == "1";
+  const bool bench = getProperty("vendor.innkeeper.hwc.bench") == "1";
   timespec cpuStart{};
   if (bench) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
   const int64_t begin = bench ? nowNs() : 0;
@@ -621,4 +621,4 @@ std::unique_ptr<Presenter> createBridgeVirtualPresenter(
   return std::make_unique<BridgeVirtualPresenter>(d, std::move(secondary));
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

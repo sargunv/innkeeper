@@ -1,7 +1,7 @@
 # compat
 
 A manual app-troubleshooting harness and nightly CI corpus, never a PR or agent
-loop gate: crate `linuxapk-compat`, run with
+loop gate: crate `innkeeper-compat`, run with
 `mise run test:compat -- --only <package>` (usage in the header of
 `src/main.rs`). It installs each app of [corpus.toml](corpus.toml) (pinned
 F-Droid APKs, fetched to `out/test/compat/corpus` and never committed) into a
@@ -9,7 +9,7 @@ session, and records JSON and Markdown under `out/test/compat/<profile>/`.
 `fresh-results.json` contains the current observations, including harness
 errors; `results.json` keeps baseline entries for apps not run or hit by a
 harness error. Nightly CI publishes the
-[compatibility wiki](https://github.com/sargunv/linux.apk/wiki/Compatibility).
+[compatibility wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility).
 
 Per app (`src/app.rs`): `pm install`, launch through the window manager, watch 8
 s (15 s for games) for crashes, ANRs and death, check window focus, take a
@@ -19,8 +19,8 @@ the log for known failure signatures (MediaCodec, WebView, GL/EGL/Vulkan errors,
 Play services). The last UI dump is saved as `ui.xml` for script failures. Logs
 and screenshots go to `out/test/compat/<profile>/<pkg>/`.
 
-Compat audio goes to a private null sink, `linuxapk_compat_<profile>` (override
-with `LINUXAPK_AUDIO_SINK`). The `audio:` script step records up to three
+Compat audio goes to a private null sink, `innkeeper_compat_<profile>` (override
+with `INNKEEPER_AUDIO_SINK`). The `audio:` script step records up to three
 seconds of its monitor and asserts non-silent PCM above -60 dBFS; `audio.raw`
 and `audio.txt` keep the capture and level analysis. Run it while the app's
 background music is playing, before taps or sound effects. A session started
@@ -37,7 +37,7 @@ available for a run.
   never block PRs. Only `--accept` updates the committed baseline. `-- report`
   renders `results.json` to `out/test/compat/COMPATIBILITY.md` without running
   apps.
-- **Session:** the named profile `LINUXAPK_PROFILE` (default `compat`) if it is
+- **Session:** the named profile `INNKEEPER_PROFILE` (default `compat`) if it is
   running, or else one it starts (headless unless `--window`) and stops at the
   end. Only a session it starts gets its start time and idle memory measured: it
   boots, restarts to time a cold start, and idles 90 s. A named profile is a
@@ -55,7 +55,7 @@ available for a run.
   partly works. A `--window` run gets a nested desktop of its own
   (`tests/nested.sh`).
 
-Wiki publishing requires the Actions secret `LINUXAPK_WIKI_TOKEN`: a classic
+Wiki publishing requires the Actions secret `INNKEEPER_WIKI_TOKEN`: a classic
 personal access token with `public_repo` scope from an account with write access
 to this public repository. `GITHUB_TOKEN` cannot push the separate wiki Git
 repository. Without the secret, CI skips publishing and retains the artifact;

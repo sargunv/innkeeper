@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use zbus::zvariant::{OwnedValue, Value};
 
-pub use linuxapk_session::preferences::Preferences;
+pub use innkeeper_session::preferences::Preferences;
 
 pub fn encode(prefs: &Preferences) -> Result<String> {
     prefs.validate()?;
@@ -22,7 +22,7 @@ pub fn decode(json: &str) -> Result<Preferences> {
 /// The addon is optional and prepared separately from the application build.
 pub fn microg_available() -> bool {
     crate::paths::xdg_home("XDG_DATA_HOME", ".local/share")
-        .join("linuxapk/addons/microg/system_ext/priv-app/GmsCore/GmsCore.apk")
+        .join("innkeeper/addons/microg/system_ext/priv-app/GmsCore/GmsCore.apk")
         .is_file()
 }
 

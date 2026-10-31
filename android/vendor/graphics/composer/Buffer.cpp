@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <string.h>
 #include <sys/mman.h>
 
 #include "Buffer.h"
 
 #include "Fence.h"
-#include "linuxapk/log.h"
-#include "linuxapk/native_handle.h"
+#include "innkeeper/log.h"
+#include "innkeeper/native_handle.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 BufferRef::~BufferRef() {
   if (mMap) munmap(mMap, mMapSize);
@@ -79,4 +79,4 @@ Error BufferSlots::update(const c3::Buffer& buffer, BufferPtr* out) {
   return Error::None;
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

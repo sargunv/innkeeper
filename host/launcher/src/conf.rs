@@ -33,7 +33,7 @@ pub struct Config {
     /// The environment a wakeup starts the session again with.
     #[serde(default)]
     pub start_env: BTreeMap<String, String>,
-    /// `LINUXAPK_BROKER_DEBUG`, passed to the broker.
+    /// `INNKEEPER_BROKER_DEBUG`, passed to the broker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_debug: Option<String>,
     /// The desktop bridge's arguments and environment.
@@ -45,7 +45,7 @@ pub struct Config {
 
 impl Config {
     pub fn new(paths: Paths, image: Image, headless: bool, wayland: Option<PathBuf>) -> Self {
-        let selection = if env::var("LINUXAPK_VULKAN").as_deref() == Ok("lvp") {
+        let selection = if env::var("INNKEEPER_VULKAN").as_deref() == Ok("lvp") {
             None
         } else {
             crate::graphics::select_node(
@@ -64,7 +64,7 @@ impl Config {
             wayland,
             idle_grace: crate::lifecycle::grace_secs(headless),
             start_env: crate::lifecycle::start_env(),
-            broker_debug: env::var("LINUXAPK_BROKER_DEBUG")
+            broker_debug: env::var("INNKEEPER_BROKER_DEBUG")
                 .ok()
                 .filter(|v| !v.is_empty()),
             bridge_args: vec![],
@@ -93,7 +93,7 @@ impl Config {
 
     /// The desktop bridge's arguments and environment
     /// (host/bridge/README.md). It runs outside Android, as the user. Its
-    /// socket dir is Android's `/dev/socket/linuxapk`, and it only accepts
+    /// socket dir is Android's `/dev/socket/innkeeper`, and it only accepts
     /// Android root, system and audioserver (SO_PEERCRED, as host ids), plus
     /// the system app's uid (the owner of its data dir).
     fn bridge_setup(&mut self) {
@@ -102,27 +102,30 @@ impl Config {
         for (k, v) in [
             ("--run-dir", p.run.clone()),
             ("--state-dir", p.state.clone()),
-            ("--system-app-dir", p.data.join("data/dev.linuxapk.system")),
+            (
+                "--system-app-dir",
+                p.data.join("data/dev.sargunv.innkeeper.system"),
+            ),
         ] {
             a.push(k.into());
             a.push(v.to_string_lossy().into_owned());
         }
         a.push("--allow-uid".into());
         a.push(sys::uid().to_string());
-        if let Some(sink) = env::var("LINUXAPK_AUDIO_SINK")
+        if let Some(sink) = env::var("INNKEEPER_AUDIO_SINK")
             .ok()
             .filter(|v| !v.is_empty())
         {
             a.push("--sink".into());
             a.push(sink);
         }
-        if env::var("LINUXAPK_BRIDGE_VERBOSE").is_ok_and(|v| v == "1") {
+        if env::var("INNKEEPER_BRIDGE_VERBOSE").is_ok_and(|v| v == "1") {
             a.push("-v".into());
         }
         let bus = env::var("DBUS_SESSION_BUS_ADDRESS")
             .ok()
             .filter(|v| !v.is_empty());
-        if !p.profile.is_empty() || env::var("LINUXAPK_TEST").is_ok_and(|v| v == "1") {
+        if !p.profile.is_empty() || env::var("INNKEEPER_TEST").is_ok_and(|v| v == "1") {
             // Persist isolation in session.conf, including across wakeups.
             a.push("--test-session".into());
         } else {
@@ -150,9 +153,9 @@ impl Config {
             "XDG_CONFIG_HOME",
             "XDG_CURRENT_DESKTOP",
             "DBUS_SYSTEM_BUS_ADDRESS",
-            "LINUXAPK_GAMEPAD_TEST_DIR",
-            "LINUXAPK_BENCH",
-            "LINUXAPK_AUDIO_SOURCE",
+            "INNKEEPER_GAMEPAD_TEST_DIR",
+            "INNKEEPER_BENCH",
+            "INNKEEPER_AUDIO_SOURCE",
         ] {
             if let Some(d) = env::var(v).ok().filter(|v| !v.is_empty()) {
                 e.insert(v.into(), d);
@@ -174,9 +177,9 @@ bridge_args = []
 bridge_env = {}
 [paths]
 profile = "old"
-libexec = "/app/libexec/linuxapk"
-share = "/app/share/linuxapk"
-run = "/runtime/linuxapk-old"
+libexec = "/app/libexec/innkeeper"
+share = "/app/share/innkeeper"
+run = "/runtime/innkeeper-old"
 state = "/state"
 data_home = "/data-home"
 data = "/data"

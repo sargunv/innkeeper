@@ -74,11 +74,11 @@ on early-init
     # Mount bootstrap linker configuration as current
     mount none /linkerconfig/bootstrap /linkerconfig bind rec
 
-    # linuxapk: the host kernel has no ashmem, and libcutils only picks memfd
+    # innkeeper: the host kernel has no ashmem, and libcutils only picks memfd
     # on its own when SELinux reports the memfd_class capability.
     setprop sys.use_memfd true
 
-    # linuxapk: no ueventd. There are no real devices to populate /dev with,
+    # innkeeper: no ueventd. There are no real devices to populate /dev with,
     # and uevent netlink sockets are unavailable in a user namespace.
     # start ueventd
     setprop ro.cold_boot_done true
@@ -95,12 +95,12 @@ on early-init
     # Run apexd-bootstrap so that APEXes that provide critical libraries
     # become available. Note that this is executed as exec_start to ensure that
     # the libraries are available to the processes started after this statement.
-    # linuxapk: APEXes are pre-flattened by image/flatten-apex.sh and staged
-    # at /linuxapk/apex by the session launcher; apexd cannot mount loop/dm
+    # innkeeper: APEXes are pre-flattened by image/flatten-apex.sh and staged
+    # at /innkeeper/apex by the session launcher; apexd cannot mount loop/dm
     # devices in a user namespace. (Assumes a single mount namespace, which
     # init picks because /metadata/apex is empty on every boot.)
     # exec_start apexd-bootstrap
-    mount none /linuxapk/apex /apex bind rec
+    mount none /innkeeper/apex /apex bind rec
     perform_apex_config
 
     # These must already exist by the time boringssl_self_test32 / boringssl_self_test64 run.
@@ -240,7 +240,7 @@ on init
     chmod 0770 /config/sdcardfs
     chown system package_info /config/sdcardfs
 
-    # linuxapk: binder isn't mounted here. The userspace broker serves
+    # innkeeper: binder isn't mounted here. The userspace broker serves
     # /dev/{binder,hwbinder,vndbinder} by path (the launcher creates the nodes).
 
     # Mount fusectl
@@ -749,7 +749,7 @@ on post-fs-data
     mkdir /data/apex/images 0755 root system
     mkdir /data/app-staging 0751 system system encryption=DeleteIfNecessary
     mkdir /data/apex/ota_reserved 0700 root system encryption=Require
-    # linuxapk: no apexd (see early-init); APEXes are already active.
+    # innkeeper: no apexd (see early-init); APEXes are already active.
     # setprop apexd.status ""
     # restart apexd
     setprop apexd.status activated
@@ -1267,7 +1267,7 @@ import /system/etc/init/init-perfetto.rc
 
 ## Daemon processes to be run by init.
 ##
-# linuxapk: ueventd can't open a uevent netlink socket in a user namespace
+# innkeeper: ueventd can't open a uevent netlink socket in a user namespace
 # and there are no device nodes for it to manage; it would crash-loop and
 # (being critical) reboot the session. Keep the name for "start ueventd"
 # callers (e.g. shutdown) but run nothing.

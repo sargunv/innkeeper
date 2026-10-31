@@ -22,7 +22,7 @@ import time
 def check(path):
   text = Path(path).read_text()
   devices = re.findall(
-    r"Device (-?\d+): Linux\.apk Gamepad [^\n]+\n(.*?)(?=\n  Device |\Z)",
+    r"Device (-?\d+): Innkeeper Gamepad [^\n]+\n(.*?)(?=\n  Device |\Z)",
     text,
     re.S,
   )

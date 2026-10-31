@@ -1,6 +1,6 @@
 # Architecture
 
-Linux.apk runs a near-stock AOSP userspace (ART, system_server, SurfaceFlinger)
+Innkeeper runs a near-stock AOSP userspace (ART, system_server, SurfaceFlinger)
 as ordinary host processes in a rootless, on-demand session. Our code sits at
 Android's stable boundaries, so routine work never needs an AOSP build.
 
@@ -9,19 +9,19 @@ Android's stable boundaries, so routine work never needs an AOSP build.
 ```mermaid
 flowchart LR
   subgraph desk["Desktop (glibc, runs as the user)"]
-    cli["linuxapk / linuxapk-manager"]
-    launcher["linuxapk-session"]
-    bridge["linuxapk-bridge"]
+    cli["innkeeper / innkeeper-manager"]
+    launcher["innkeeper-session"]
+    bridge["innkeeper-bridge"]
     host["Wayland, PipeWire, portals, D-Bus"]
   end
   subgraph sup["Supervisor (Flatpak sandbox, host-user privileges)"]
     pivot["pivot-exec"]
-    broker["linuxapk-broker"]
+    broker["innkeeper-brk"]
   end
   subgraph droid["Android (Flatpak sandbox)"]
     init["init, servicemanager, system_server, zygote, apps"]
     hal["vendor HALs: composer, gralloc, Vulkan, audio, health"]
-    sysapp["Linux.apk System app"]
+    sysapp["Innkeeper System app"]
   end
   cli -->|"start, exec"| launcher
   launcher -->|"Flatpak sandbox, composed root"| pivot
@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 - **Desktop.** The CLI and manager install and launch apps through
-  `linuxapk-core`; the launcher assembles and starts the session; the bridge is
+  `innkeeper-core`; the launcher assembles and starts the session; the bridge is
   the only process that talks to the desktop.
 - **Supervisor.** One seccomp filter on Android's init traps what the sandbox
   can't do (binder, eBPF, single-uid credentials). The Rust broker defines the
@@ -85,7 +85,7 @@ network ([session.md](session.md)).
 
 ## Packaging scope
 
-- Linux.apk ships as a Flatpak. Per-app Flatpaks are an optional extra, never a
+- Innkeeper ships as a Flatpak. Per-app Flatpaks are an optional extra, never a
   design constraint.
 - Installing anything never needs `sudo`: no RPM/deb/AUR packages, SELinux
   modules, AppArmor profiles or kernel modules.
@@ -117,13 +117,13 @@ image a project has shipped.
 
 | Project                                                                                                                                                                                       | Android userspace                                                              | Host boundary and display                                                                                                            |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Linux.apk                                                                                                                                                                                     | Unmodified Google AOSP 17 CI image, with our composed layers                   | Flatpak, single uid, userspace binder; trusted virtual displays feed a desktop bridge                                                |
+| Innkeeper                                                                                                                                                                                     | Unmodified Google AOSP 17 CI image, with our composed layers                   | Flatpak, single uid, userspace binder; trusted virtual displays feed a desktop bridge                                                |
 | [Lepton](https://gitlab.steamos.cloud/frame-public/lepton/-/tree/150aba0a65daba7ff512f0d25cebf529bb9eb79e)                                                                                    | Custom Android 11 and AOSP 14 build recipes, with framework and Bionic patches | Rootless Podman, single uid, kernel binder; Waydroid-derived graphics and Steam Frame VR integration, normally one game per instance |
 | [Waydroid](https://github.com/waydroid/waydroid/tree/db7294c4c2bd43157bab94cf8a3015e22d9f1ad8)                                                                                                | Custom LineageOS 20 / Android 13 system and vendor images                      | Root-managed LXC and kernel binder; Android's Wayland HWC supports full UI and multiwindow modes                                     |
 | [Anbox](https://github.com/anbox/anbox/tree/ddf4c57ebbe3a2e46099087570898ab5c1e1f279) (archived)                                                                                              | Custom AOSP 7.1.1                                                              | Root-managed LXC, normally with uid mapping; emulator-derived GLES transport and task layers mapped to desktop windows               |
 | [Halium](https://github.com/Halium/android/tree/43557014beee01f284ca0e70635b210d847f0f1c) / [libhybris](https://github.com/libhybris/libhybris/tree/7079712a42ea2754adf747e70c6cc75764c8596e) | Device-specific Android hardware adaptation; libhybris has no image of its own | Linux distributions reuse Android vendor drivers and services; this does not supply an Android app runtime                           |
 
-Rootless execution and per-app windows are not unique to Linux.apk. Lepton also
+Rootless execution and per-app windows are not unique to Innkeeper. Lepton also
 uses virtual Android identities over one kernel uid, but implements them by
 patching Bionic and binder libraries. Our seccomp supervisor keeps those changes
 outside the image and needs neither kernel binder nor nested user namespaces.

@@ -104,7 +104,7 @@ pub fn desktop_locale(tag: &str) -> Option<String> {
     })
 }
 
-/// A URI handed to `linuxapk run` (from `%U`, so possibly from a web page):
+/// A URI handed to `innkeeper run` (from `%U`, so possibly from a web page):
 /// must have a scheme, no forbidden characters, and not be a local file (the
 /// session can't see host files).
 pub fn launch_uri(u: &str) -> Result<&str> {

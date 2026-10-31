@@ -38,7 +38,7 @@ export function init() {
 export async function run() {
   Main.overview.hide();
   control = Gio.DBusExportedObject.wrapJSObject(
-    `<node><interface name="dev.linuxapk.TestDesktop">
+    `<node><interface name="dev.sargunv.Innkeeper.TestDesktop">
       <method name="Input"><arg type="s" direction="in"/></method>
       <method name="Visibility"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Screenshot"><arg type="s" direction="in"/></method>
@@ -61,7 +61,7 @@ export async function run() {
           invocation.return_value(null);
         } catch (error) {
           invocation.return_dbus_error(
-            "dev.linuxapk.Screenshot",
+            "dev.sargunv.innkeeper.Screenshot",
             String(error),
           );
         }
@@ -107,7 +107,9 @@ export async function run() {
           const window = actor.meta_window;
           if (
             (!visible && !actor.mapped) ||
-            !String(window.get_wm_class()).includes("dev.linuxapk.probes")
+            !String(window.get_wm_class()).includes(
+              "dev.sargunv.innkeeper.probes",
+            )
           )
             continue;
           matched = true;
@@ -125,7 +127,11 @@ export async function run() {
         for (const actor of global.get_window_actors()) {
           if (!actor.mapped) continue;
           const window = actor.meta_window;
-          if (!String(window.get_wm_class()).includes("dev.linuxapk.probes"))
+          if (
+            !String(window.get_wm_class()).includes(
+              "dev.sargunv.innkeeper.probes",
+            )
+          )
             continue;
           window.unminimize();
           window.move_frame(false, 300, 100);
@@ -138,10 +144,10 @@ export async function run() {
       },
     },
   );
-  control.export(Gio.DBus.session, "/dev/linuxapk/TestDesktop");
+  control.export(Gio.DBus.session, "/dev/sargunv/Innkeeper/TestDesktop");
   Gio.bus_own_name_on_connection(
     Gio.DBus.session,
-    "dev.linuxapk.TestDesktop",
+    "dev.sargunv.Innkeeper.TestDesktop",
     Gio.BusNameOwnerFlags.NONE,
     null,
     null,

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::time::Duration;
 
-use linuxapk_bridge::ipc::server::Events;
-use linuxapk_bridge::system::notify::{Note, NotifyHub, flags};
+use innkeeper_bridge::ipc::server::Events;
+use innkeeper_bridge::system::notify::{Note, NotifyHub, flags};
 use zbus::blocking::{MessageIterator, connection::Builder};
 use zbus::zvariant::OwnedValue;
 
@@ -138,7 +138,7 @@ fn launcher_updates_and_host_dnd() {
     .unwrap();
     let events = Events::new(Arc::new(sock));
     let mut note = Note {
-        package: "dev.linuxapk.probes".into(),
+        package: "dev.sargunv.innkeeper.probes".into(),
         app_name: "Probe".into(),
         title: "Download".into(),
         body: "42%".into(),
@@ -157,7 +157,7 @@ fn launcher_updates_and_host_dnd() {
             uri,
             format!(
                 "application://{}.desktop",
-                linuxapk_core::desktop::app_id(&note.package)
+                innkeeper_core::desktop::app_id(&note.package)
             )
         );
         assert_eq!(f64::try_from(&props["progress"]).unwrap(), progress);
@@ -208,8 +208,8 @@ fn launcher_updates_and_host_dnd() {
         tv_nsec: 0,
     };
     assert_eq!(rustix::event::poll(&mut poll, Some(&timeout)).unwrap(), 1);
-    let mut packet = [0; linuxapk_bridge::ipc::wire::MAX_MSG + 1];
-    linuxapk_bridge::ipc::transport::recv(&peer, &mut packet)
+    let mut packet = [0; innkeeper_bridge::ipc::wire::MAX_MSG + 1];
+    innkeeper_bridge::ipc::transport::recv(&peer, &mut packet)
         .unwrap()
         .unwrap();
     assert!(hub.contains(1, 1));

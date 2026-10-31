@@ -17,9 +17,9 @@ image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   build. They are never shipped. Intel ray tracing is disabled.
 - **Driver choice:** the launcher scans every `/sys/class/drm/renderD*` and
   selects the first amdgpu node (RADV), then an i915 node supported by ANV, else
-  lavapipe. The build generates `share/linuxapk/anv-pci-ids` from the pinned
+  lavapipe. The build generates `share/innkeeper/anv-pci-ids` from the pinned
   Mesa device info, PCI table and ANV generation limits; older and unknown Intel
-  IDs keep the software fallback. `LINUXAPK_VULKAN=lvp` forces software
+  IDs keep the software fallback. `INNKEEPER_VULKAN=lvp` forces software
   rendering. The choice is saved in session.conf: the broker permits Android to
   open only that DRM device, so Mesa and the composer's ANGLE use the same GPU.
   Gralloc uses driver-allocated tiled RGB render targets (dedicated allocations
@@ -52,4 +52,4 @@ compute, udmabuf import, ANB images, deferred binds), `swapchain_test`,
 imports them) on lavapipe plus the hardware driver selected by a normal launcher
 session. On hybrids this tests only the selected GPU, since the broker permits
 only its node. Each invocation uses a fresh named Android session; the optional
-`LINUXAPK_BIONIC_HARNESS=1` runner runs without booting Android.
+`INNKEEPER_BIONIC_HARNESS=1` runner runs without booting Android.

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Innkeeper: hardware the session doesn't have, although the image's
+     handheld_core_hardware.xml declares it. Without a Bluetooth HAL (cf.bt is
+     disabled), com.android.bluetooth aborts in a loop (HidlHci: hci_ == nullptr)
+     whenever the feature is present. -->
+<permissions>
+    <unavailable-feature name="android.hardware.bluetooth" />
+    <unavailable-feature name="android.hardware.bluetooth_le" />
+</permissions>

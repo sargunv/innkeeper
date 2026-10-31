@@ -18,7 +18,7 @@
 #include "Presenter.h"
 #include "VsyncThread.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 // The defaults are display 0's: it has no window, so its size only matters
 // to what SurfaceFlinger and the framework derive from it.
@@ -94,4 +94,4 @@ class Display {
   c3::PowerMode mPower = c3::PowerMode::OFF;
 };
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

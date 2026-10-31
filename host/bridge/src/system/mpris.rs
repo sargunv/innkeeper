@@ -4,7 +4,7 @@
 //! The system app sends a media blob per active `MediaSession` (keyed by its
 //! own nonzero player id) whenever its metadata or state changes. Each player
 //! is its own session-bus connection owning
-//! `org.mpris.MediaPlayer2.dev.linuxapk.Manager.<package, _ for .>` (plus
+//! `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper.<package, _ for .>` (plus
 //! `.instance<N>` if the package has two), serving `/org/mpris/MediaPlayer2`. MPRIS calls come
 //! back as `MEDIA_CMD` events. Artwork arrives as RGBA and is written as our
 //! own PNG encoding to a private directory (`mpris:artUrl` must be a URL).
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use linuxapk_core::desktop::MANAGER_ID;
+use innkeeper_core::desktop::MANAGER_ID;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
@@ -217,7 +217,7 @@ impl Root {
     }
     #[zbus(property)]
     fn desktop_entry(&self) -> String {
-        linuxapk_core::desktop::app_id(&self.st.lock().unwrap().media.package)
+        innkeeper_core::desktop::app_id(&self.st.lock().unwrap().media.package)
     }
     #[zbus(property)]
     fn supported_uri_schemes(&self) -> Vec<String> {
@@ -372,7 +372,7 @@ impl Player {
 }
 
 fn track_path(n: u64) -> String {
-    format!("/dev/linuxapk/track/{n}")
+    format!("/dev/sargunv/Innkeeper/track/{n}")
 }
 
 struct Handle {

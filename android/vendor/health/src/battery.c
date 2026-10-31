@@ -19,7 +19,7 @@ enum {
   CAP_FULL = 5
 };
 
-const struct lapk_battery LAPK_BATTERY_AC_ONLY = {
+const struct innkeeper_battery INNKEEPER_BATTERY_AC_ONLY = {
   .present = false,
   .state = 0,
   .ac = true,
@@ -31,8 +31,8 @@ static uint32_t u32le(const uint8_t* p) {
          (uint32_t)p[3] << 24;
 }
 
-int lapk_battery_decode(
-  const uint8_t* b, size_t len, struct lapk_battery* out
+int innkeeper_battery_decode(
+  const uint8_t* b, size_t len, struct innkeeper_battery* out
 ) {
   if (len != 12 || b[0] > 1 || b[1] > 6 || b[2] > 1 || b[3] > 100)
     return -EINVAL;
@@ -45,9 +45,11 @@ int lapk_battery_decode(
   return 0;
 }
 
-void lapk_health_from(const struct lapk_battery* b, struct lapk_health* h) {
+void innkeeper_health_from(
+  const struct innkeeper_battery* b, struct innkeeper_health* h
+) {
   if (!b->present) {
-    *h = (struct lapk_health){
+    *h = (struct innkeeper_health){
       .ac_online = true,
       .battery_present = false,
       .status = ST_FULL,
@@ -93,7 +95,7 @@ void lapk_health_from(const struct lapk_battery* b, struct lapk_health* h) {
     cap = CAP_LOW;
   else
     cap = CAP_CRITICAL;
-  *h = (struct lapk_health){
+  *h = (struct innkeeper_health){
     .ac_online = ac,
     .battery_present = true,
     .status = status,

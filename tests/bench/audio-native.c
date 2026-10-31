@@ -78,10 +78,10 @@ int main(int argc, char** argv) {
   snprintf(monitor, sizeof(monitor), "%s.monitor", argv[1]);
   buffer_attr attr = {UINT32_MAX, 1920, 0, 480, 960};
   capture = simple_new(
-    NULL, "linuxapk-bench", 2, monitor, "capture", &spec, NULL, &attr, NULL
+    NULL, "innkeeper-bench", 2, monitor, "capture", &spec, NULL, &attr, NULL
   );
   pa_simple* playback = simple_new(
-    NULL, "linuxapk-bench", 1, argv[1], "playback", &spec, NULL, &attr, NULL
+    NULL, "innkeeper-bench", 1, argv[1], "playback", &spec, NULL, &attr, NULL
   );
   if (!capture || !playback) return 4;
   uint32_t state = 1;

@@ -1,4 +1,4 @@
-// tinyalsa PCM API for Linux.apk: one virtual card ("Linux.apk", card 0,
+// tinyalsa PCM API for Innkeeper: one virtual card ("Innkeeper", card 0,
 // device 0) whose playback and capture use shared rings in the host bridge
 // (guest/bridge-client/audio.c).
 //
@@ -30,8 +30,8 @@
 #include <tinyalsa/pcm.h>
 #include <unistd.h>
 
-#include "linuxapk/audio.h"
-#include "linuxapk/bridge_client.h"
+#include "innkeeper/audio.h"
+#include "innkeeper/bridge_client.h"
 #include "log.h"
 
 #define API __attribute__((visibility("default")))
@@ -170,7 +170,7 @@ API struct pcm* pcm_open(
   p->s.data_fd = p->s.space_fd = -1;
   if (card != 0 || device != 0) {
     set_error(
-      p, "no device %u on card %u (Linux.apk has card 0 device 0)", device, card
+      p, "no device %u on card %u (Innkeeper has card 0 device 0)", device, card
     );
     return p;
   }
@@ -712,7 +712,7 @@ API int pcm_params_to_string(
   if (!p || !string || size == 0) return 0;
   return snprintf(
     string, size,
-    "Linux.apk: formats S16_LE FLOAT_LE, channels %u-%u, rate %u-%u, period "
+    "Innkeeper: formats S16_LE FLOAT_LE, channels %u-%u, rate %u-%u, period "
     "%u-%u x %u-%u\n",
     pcm_params_get_min(p, PCM_PARAM_CHANNELS),
     pcm_params_get_max(p, PCM_PARAM_CHANNELS),

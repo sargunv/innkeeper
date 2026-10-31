@@ -144,11 +144,11 @@ impl SettingsHub {
 fn filtered(settings: Settings) -> Settings {
     filter(
         settings,
-        &linuxapk_core::preferences::Preferences::load().unwrap_or_default(),
+        &innkeeper_core::preferences::Preferences::load().unwrap_or_default(),
     )
 }
 
-fn filter(mut settings: Settings, p: &linuxapk_core::preferences::Preferences) -> Settings {
+fn filter(mut settings: Settings, p: &innkeeper_core::preferences::Preferences) -> Settings {
     if !p.follow_dark {
         settings.color_scheme = 0;
     }
@@ -428,9 +428,9 @@ mod tests {
             contrast: 1,
             ..Settings::default()
         };
-        let p = linuxapk_core::preferences::Preferences::default();
+        let p = innkeeper_core::preferences::Preferences::default();
         assert_eq!(filter(settings.clone(), &p), settings);
-        let off = linuxapk_core::preferences::Preferences {
+        let off = innkeeper_core::preferences::Preferences {
             follow_dark: false,
             follow_accent: false,
             follow_clock: false,

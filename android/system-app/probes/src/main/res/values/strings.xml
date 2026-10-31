@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <resources>
-  <string name="app_name">Linux.apk probes</string>
-  <string name="input_probe_name">Linux.apk input probe</string>
-  <string name="text_probe_name">Linux.apk text probe</string>
-  <string name="window_probe_name">Linux.apk window probe</string>
-  <string name="teardown_probe_name">Linux.apk teardown probe</string>
+  <string name="app_name">Innkeeper probes</string>
+  <string name="input_probe_name">Innkeeper input probe</string>
+  <string name="text_probe_name">Innkeeper text probe</string>
+  <string name="window_probe_name">Innkeeper window probe</string>
+  <string name="teardown_probe_name">Innkeeper teardown probe</string>
 </resources>

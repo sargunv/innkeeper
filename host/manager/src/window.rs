@@ -8,10 +8,10 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linuxapk_core::desktop::{MANAGER_ID, PREFIX};
-use linuxapk_core::launcher::{Session, Status};
-use linuxapk_core::ops::{self, Event};
-use linuxapk_core::xdg::{DesktopApp, Dirs};
+use innkeeper_core::desktop::{MANAGER_ID, PREFIX};
+use innkeeper_core::launcher::{Session, Status};
+use innkeeper_core::ops::{self, Event};
+use innkeeper_core::xdg::{DesktopApp, Dirs};
 
 use crate::errors::{self, Op};
 use crate::{install, worker};
@@ -235,11 +235,11 @@ impl Window {
         let section = gio::Menu::new();
         section.append(Some("P_rofiles"), Some("win.profiles"));
         section.append(Some("_Preferences"), Some("win.preferences"));
-        section.append(Some("_About Linux.apk"), Some("app.about"));
+        section.append(Some("_About Innkeeper"), Some("app.about"));
         menu.append_section(None, &section);
         let title = adw::WindowTitle::new(
-            "Linux.apk",
-            &linuxapk_core::paths::profile().unwrap_or_default(),
+            "Innkeeper",
+            &innkeeper_core::paths::profile().unwrap_or_default(),
         );
         let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_start(
@@ -262,7 +262,7 @@ impl Window {
         main.add_top_bar(&banner);
         main.set_content(Some(&stack));
         let main_page = adw::NavigationPage::builder()
-            .title("Linux.apk")
+            .title("Innkeeper")
             .tag("main")
             .child(&main)
             .build();
@@ -287,7 +287,7 @@ impl Window {
 
         let win = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Linux.apk")
+            .title("Innkeeper")
             .icon_name(MANAGER_ID)
             .default_width(640)
             .default_height(720)
@@ -409,7 +409,7 @@ impl Window {
 
     pub fn show_error(&self, op: Op, name: Option<&str>, err: &anyhow::Error) {
         let h = errors::humane(op, name, err);
-        eprintln!("linuxapk-manager: {}", h.details);
+        eprintln!("innkeeper-manager: {}", h.details);
         let d = adw::AlertDialog::new(Some(&h.heading), Some(&h.body));
         d.add_response("close", "_Close");
         d.set_default_response(Some("close"));
@@ -421,7 +421,7 @@ impl Window {
     fn choose_file(&self) {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some("Android apps"));
-        for m in linuxapk_core::desktop::PACKAGE_MIME_TYPES {
+        for m in innkeeper_core::desktop::PACKAGE_MIME_TYPES {
             filter.add_mime_type(m);
         }
         for p in ["*.apk", "*.apks", "*.xapk", "*.apkm"] {
@@ -591,7 +591,7 @@ impl Window {
             None::<&gio::AppInfo>,
             &[],
         )
-        .and_then(|t| linuxapk_core::validate::activation_token(&t).map(str::to_string));
+        .and_then(|t| innkeeper_core::validate::activation_token(&t).map(str::to_string));
         let opts = ops::LaunchOptions {
             token,
             wait: false,
@@ -742,8 +742,8 @@ impl Window {
     fn watch_session(&self) {
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let name = linuxapk_core::app_settings::bus_name(
-                &linuxapk_core::paths::profile().unwrap_or_default(),
+            let name = innkeeper_core::app_settings::bus_name(
+                &innkeeper_core::paths::profile().unwrap_or_default(),
             );
             let proxy = gio::DBusProxy::for_bus_future(
                 gio::BusType::Session,
@@ -751,8 +751,8 @@ impl Window {
                     | gio::DBusProxyFlags::DO_NOT_LOAD_PROPERTIES,
                 None,
                 &name,
-                linuxapk_core::app_settings::PATH,
-                linuxapk_core::app_settings::INTERFACE,
+                innkeeper_core::app_settings::PATH,
+                innkeeper_core::app_settings::INTERFACE,
             )
             .await;
             let Some(w) = weak.upgrade() else {
@@ -789,8 +789,8 @@ impl Window {
     /// Shows profile `name`'s apps and session from now on, and makes it the
     /// one used when none is named.
     pub fn switch_profile(&self, name: &str) -> anyhow::Result<()> {
-        linuxapk_core::paths::select(name)?;
-        linuxapk_core::profiles::choose(name)?;
+        innkeeper_core::paths::select(name)?;
+        innkeeper_core::profiles::choose(name)?;
         self.title.set_subtitle(name);
         self.session_proxy.replace(None);
         self.last_status.set(None);

@@ -1,7 +1,7 @@
 # The session
 
-A session is one rootless Android userspace inside Linux.apk's Flatpak sandbox,
-with the bridge and Android's real `init`. `linuxapk-session`
+A session is one rootless Android userspace inside Innkeeper's Flatpak sandbox,
+with the bridge and Android's real `init`. `innkeeper-session`
 ([host/launcher](../host/launcher/README.md)) starts it on demand; it stops
 itself when nothing needs it ([Lifecycle](#lifecycle)). `start` prepares the
 pinned image and writes `session.conf` with the paths, image and bridge setup.
@@ -18,14 +18,14 @@ are writable tmpfs dirs of its own, so Android's root is built from symlinks.
 
 ```mermaid
 sequenceDiagram
-  participant C as linuxapk-session start (CLI or manager's sandbox)
+  participant C as innkeeper-session start (CLI or manager's sandbox)
   participant S as _serve (a sandbox of its own)
   participant P as pivot-exec
   participant I as Android init
   C->>C: prepare the image (its files read-only)
   C->>S: flatpak-spawn: the portal's Spawn, a new instance of the app
   S->>S: compose the root (cached), the start-time layer, links in /
-  S->>S: start linuxapk-bridge, listen on control.sock
+  S->>S: start innkeeper-bridge, listen on control.sock
   S->>P: NEWROOT /
   P->>I: fork init under the seccomp filter (no namespaces)
   Note over P: exec broker in the same process (init's parent)
@@ -41,14 +41,14 @@ signal, init's exit) the launcher stops and then kills everything it started,
 and, as the sandbox's main process, everything else in it: Android processes
 orphaned by a dying init would otherwise keep the sandbox alive.
 
-The launcher composes `$XDG_DATA_HOME/linuxapk/root-<profile>` from hardlinks to
-the read-only image cache (reflink copies across filesystems) and copies of the
-layers, all read-only. `.compose-key` invalidates it when the image, stage or
-addons change. At each start the start-time layer is copied over it. Symlinks in
-`/` expose `/system`, `/apex` and `/data`; `/etc` keeps the sandbox's files and
-gains Android's others.
+The launcher composes `$XDG_DATA_HOME/innkeeper/root-<profile>` from hardlinks
+to the read-only image cache (reflink copies across filesystems) and copies of
+the layers, all read-only. `.compose-key` invalidates it when the image, stage
+or addons change. At each start the start-time layer is copied over it. Symlinks
+in `/` expose `/system`, `/apex` and `/data`; `/etc` keeps the sandbox's files
+and gains Android's others.
 
-The broker injects memfds for `/linuxapk/proc/<path>` on `openat`, rewrites
+The broker injects memfds for `/innkeeper/proc/<path>` on `openat`, rewrites
 `readlink` and `getcwd` to Android paths, and shows the user's files as root's.
 The shim treats refused mounts and namespace calls as done. Capabilities are
 virtual; `/sys/fs/cgroup` is a plain directory, so there is no cgroup freezer.
@@ -80,9 +80,9 @@ The composed root combines these layers; nothing in the image cache is modified.
 
 ```mermaid
 flowchart TB
-  rt["start-time layer: $XDG_RUNTIME_DIR/linuxapk/layer<br/>vendor build.prop, APEX files for this image"]
-  add["addons: $XDG_DATA_HOME/linuxapk/addons/*<br/>e.g. microG"]
-  stage["stage: out/stage/share/linuxapk/android<br/>overlay, HALs, drivers, system app"]
+  rt["start-time layer: $XDG_RUNTIME_DIR/innkeeper/layer<br/>vendor build.prop, APEX files for this image"]
+  add["addons: $XDG_DATA_HOME/innkeeper/addons/*<br/>e.g. microG"]
+  stage["stage: out/stage/share/innkeeper/android<br/>overlay, HALs, drivers, system app"]
   derived["image-derived: images/&lt;build&gt;/derived/{common,single}<br/>permission fixes for fs_config owners"]
   img["image: images/&lt;build&gt;/img, apex-&lt;hash&gt;"]
   rt --> add --> stage --> derived --> img
@@ -91,7 +91,7 @@ flowchart TB
 The topmost layer wins. `/apex` combines the start-time layer, the `single`
 derived layer and the flattened APEX tree. The extracted image lost its
 `fs_config` owners: `common` adds read and exec bits, and `single` records
-verified owners in the `user.linuxapk.owner` xattr.
+verified owners in the `user.innkeeper.owner` xattr.
 
 Every Android process runs as the host user. The supervisor supplies virtual
 Android credentials ([supervisor](../supervisor/README.md)); apps are not
@@ -105,7 +105,7 @@ last window, and comes back for the next alarm.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Busy: start (linuxapk run, the manager, a wakeup)
+  [*] --> Busy: start (innkeeper run, the manager, a wakeup)
   Busy --> Idle: no windows, foreground services, background apps, exec or near alarm
   Idle --> Busy: any of them again
   Idle --> Stopped: grace period over
@@ -120,7 +120,7 @@ stateDiagram-v2
   launcher checks it every 5 s. No report yet (booting, the system app
   restarting) counts as busy, and so do a running `exec` (it holds `exec.lock`
   shared) and an alarm less than 3 minutes away or ago.
-- **Grace period.** `LINUXAPK_IDLE_GRACE` seconds of idleness (default 120; 0:
+- **Grace period.** `INNKEEPER_IDLE_GRACE` seconds of idleness (default 120; 0:
   never) before the launcher stops the session as `stop` does. Headless sessions
   (tests) never stop by themselves unless it is set. Apps not allowed in the
   background stop with it, as if force-stopped: their jobs and syncs wait for
@@ -129,7 +129,7 @@ stateDiagram-v2
   closes; its session stays an MPRIS player, and its notification shows on the
   desktop, resident, only while it has no window. Clicking that notification or
   MPRIS `Raise` opens the window again.
-- **Background apps.** `linuxapk background PKG on` lets an app run with no
+- **Background apps.** `innkeeper background PKG on` lets an app run with no
   window open (off by default; the setting lives in the system app). While one
   is installed the session doesn't stop, and the desktop shows a resident
   "Running in the background" notification naming them.
@@ -147,28 +147,29 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                   | Contents                                                                                                                                                                |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/linuxapk/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/`    |
-| `$XDG_STATE_HOME/linuxapk-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
-| `$XDG_STATE_HOME/linuxapk/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                     |
-| `$XDG_RUNTIME_DIR/linuxapk-<profile>` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
+| Dir                                    | Contents                                                                                                                                                                |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/innkeeper/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/`    |
+| `$XDG_STATE_HOME/innkeeper-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
+| `$XDG_STATE_HOME/innkeeper/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                     |
+| `$XDG_RUNTIME_DIR/innkeeper-<profile>` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
 
-`LINUXAPK_PROFILE` names the profile; its suffix goes on every per-profile path.
+`INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile
+path.
 
 ## Profiles
 
 A profile is a separate Android setup with its own apps, data and settings; a
 session is a running profile, and profiles run side by side. Profiles are listed
 from their `data-<name>` directories, and created, used, renamed, deleted,
-started and stopped with `linuxapk profile` or the manager's Profiles page
+started and stopped with `innkeeper profile` or the manager's Profiles page
 (`host/core/src/profiles.rs`). None is special. A command names its profile
-(`--profile`, `LINUXAPK_PROFILE`, an app entry's `Exec`), or uses the one last
+(`--profile`, `INNKEEPER_PROFILE`, an app entry's `Exec`), or uses the one last
 chosen (`profile use`, the manager's Show Apps), else the first by name.
 Installing or opening something with no profile at all creates `default`, an
 ordinary profile. Tests use named profiles with fresh data dirs.
 
-A profile's settings are `.linuxapk-profile.toml` in its data dir, beside the
+A profile's settings are `.innkeeper-profile.toml` in its data dir, beside the
 data version record, so they move and back up with its data
 (`host/launcher/src/profile.rs`). The file carries a format `version`; a newer
 one is refused rather than rewritten. A missing file or setting means its
@@ -181,7 +182,7 @@ the same way.
 ## Image upgrades and data recovery
 
 `prepare` only prepares the read-only image cache. On `start`, the launcher
-checks `/data/.linuxapk-data-version` before changing anything in `/data`. The
+checks `/data/.innkeeper-data-version` before changing anything in `/data`. The
 record identifies frameworks by Android SDK level, then numeric AOSP CI build
 ID, read from the system image's `build.prop`; renaming a pin does not change
 its version. Equal versions and upgrades reuse the existing data. Non-numeric
@@ -203,14 +204,14 @@ backup outside the image cache, whose old images may be pruned. For a normal
 Flatpak installation, from a host terminal:
 
 ```sh
-flatpak run --env=LINUXAPK_PROFILE=default --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager stop
+flatpak run --env=INNKEEPER_PROFILE=default --command=/app/libexec/innkeeper/innkeeper-session dev.sargunv.Innkeeper stop
 # The default Flatpak XDG_DATA_HOME and the first profile; adjust for another.
-data_dir="$HOME/.var/app/dev.linuxapk.Manager/data/linuxapk/data-default"
-backup_dir="$HOME/linuxapk-data-backup-$(date +%Y%m%d-%H%M%S)"
+data_dir="$HOME/.var/app/dev.sargunv.Innkeeper/data/innkeeper/data-default"
+backup_dir="$HOME/innkeeper-data-backup-$(date +%Y%m%d-%H%M%S)"
 cp -a --reflink=auto "$data_dir" "$backup_dir"
 ```
 
-Keep the matching older Linux.apk/image version available if you need to
+Keep the matching older Innkeeper/image version available if you need to
 restore. To recover, stop the profile, move its current data directory aside,
 and copy the complete pre-upgrade backup back to the original path with
 `cp -a --reflink=auto`. Then start the matching framework. Alternatively, use
@@ -220,8 +221,8 @@ files. Do not delete or edit just the version record to bypass a refusal: it
 cannot undo Android's migrations. A launcher release predating this policy
 cannot enforce this check, so restore the matching backup before using it.
 
-Supply the profile's name in `LINUXAPK_PROFILE` on stop/start and use
-`data-<profile>`; `LINUXAPK_DATA` overrides that location. Development sessions
+Supply the profile's name in `INNKEEPER_PROFILE` on stop/start and use
+`data-<profile>`; `INNKEEPER_DATA` overrides that location. Development sessions
 use `out/dev/flatpak/<profile>/android-data` by default. Never copy or restore
 data while that profile is running.
 

@@ -1,6 +1,6 @@
 //! Where things are: the install prefix this program runs from, the session
 //! profile it works with (parsed by the launcher library, the only reader of
-//! `LINUXAPK_PROFILE`), and the XDG base directories.
+//! `INNKEEPER_PROFILE`), and the XDG base directories.
 
 use std::env;
 use std::path::PathBuf;
@@ -8,16 +8,16 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 /// The session launcher, relative to the prefix.
-const LAUNCHER: &str = "libexec/linuxapk/linuxapk-session";
+const LAUNCHER: &str = "libexec/innkeeper/innkeeper-session";
 
-/// An installed Linux.apk: `/app` in the Flatpak,
+/// An installed Innkeeper: `/app` in the Flatpak,
 /// `out/stage` in a checkout.
 pub struct Prefix(PathBuf);
 
 impl Prefix {
     /// The prefix this program is installed in: the nearest ancestor of its
     /// executable that holds the launcher (so it works from `bin/` and from
-    /// `libexec/linuxapk/`).
+    /// `libexec/innkeeper/`).
     pub fn locate() -> Result<Prefix> {
         let exe = env::current_exe()
             .and_then(|p| p.canonicalize())
@@ -28,7 +28,7 @@ impl Prefix {
             .map(|d| Prefix(d.to_path_buf()))
             .with_context(|| {
                 format!(
-                    "linuxapk-session not found: {} isn't in an installed Linux.apk \
+                    "innkeeper-session not found: {} isn't in an installed Innkeeper \
                      (in a checkout, run `mise run build` and use out/stage)",
                     exe.display()
                 )
@@ -41,13 +41,13 @@ impl Prefix {
     }
 
     /// Runtime paths shared by the CLI and its session.
-    pub fn session_paths(&self) -> Result<linuxapk_session::Paths> {
-        linuxapk_session::Paths::new(&self.0)
+    pub fn session_paths(&self) -> Result<innkeeper_session::Paths> {
+        innkeeper_session::Paths::new(&self.0)
     }
 
     /// Runtime paths of profile `name`.
-    pub fn profile_paths(&self, name: &str) -> Result<linuxapk_session::Paths> {
-        linuxapk_session::Paths::for_profile(&self.0, name)
+    pub fn profile_paths(&self, name: &str) -> Result<innkeeper_session::Paths> {
+        innkeeper_session::Paths::for_profile(&self.0, name)
     }
 
     /// A program in `bin/`.
@@ -57,33 +57,33 @@ impl Prefix {
 
     /// The command that runs this installation's CLI.
     pub fn cli(&self) -> Vec<String> {
-        vec![self.bin("linuxapk").to_string_lossy().into_owned()]
+        vec![self.bin("innkeeper").to_string_lossy().into_owned()]
     }
 }
 
-/// The profile this process works with ([`linuxapk_session::paths::select`]
-/// or `LINUXAPK_PROFILE`), else an error.
-pub use linuxapk_session::paths::{profile, select};
+/// The profile this process works with ([`innkeeper_session::paths::select`]
+/// or `INNKEEPER_PROFILE`), else an error.
+pub use innkeeper_session::paths::{profile, select};
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
 /// `$HOME`.
-pub use linuxapk_session::paths::xdg_home;
+pub use innkeeper_session::paths::xdg_home;
 
 /// `name`, suffixed with `-<profile>` for a named profile: the session's
 /// XDG directories are named this way.
 fn per_profile(name: &str) -> Result<String> {
-    Ok(linuxapk_session::paths::per_profile(name, &profile()?))
+    Ok(innkeeper_session::paths::per_profile(name, &profile()?))
 }
 
 /// The argv that runs `program` (a command line, such as [`Prefix::cli`])
-/// against session `profile`: prefixed with `env LINUXAPK_PROFILE=<profile>`
+/// against session `profile`: prefixed with `env INNKEEPER_PROFILE=<profile>`
 /// for a named profile, so a desktop entry reaches the session it was made
 /// for.
 pub fn command(program: &[String], profile: &str) -> Vec<String> {
     let mut v = vec![];
     if !profile.is_empty() {
         v.push("env".into());
-        v.push(format!("LINUXAPK_PROFILE={profile}"));
+        v.push(format!("INNKEEPER_PROFILE={profile}"));
     }
     v.extend_from_slice(program);
     v
@@ -96,7 +96,7 @@ pub struct Invocation<'a> {
     pub profile: &'a str,
     /// The program, the first word after the environment.
     pub program: Option<&'a str>,
-    /// It sets variables [`command`] doesn't (an older Linux.apk's entry).
+    /// It sets variables [`command`] doesn't (an older Innkeeper's entry).
     pub foreign_env: bool,
 }
 
@@ -109,23 +109,23 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
     Invocation {
         profile: env
             .iter()
-            .find_map(|w| w.strip_prefix("LINUXAPK_PROFILE="))
+            .find_map(|w| w.strip_prefix("INNKEEPER_PROFILE="))
             .unwrap_or_default(),
         program: argv.get(env_len).map(String::as_str),
-        foreign_env: env.iter().any(|w| !w.starts_with("LINUXAPK_PROFILE=")),
+        foreign_env: env.iter().any(|w| !w.starts_with("INNKEEPER_PROFILE=")),
     }
 }
 
 /// The session's state directory (logs, the documents service's grants):
-/// `$XDG_STATE_HOME/linuxapk[-<profile>]`.
+/// `$XDG_STATE_HOME/innkeeper[-<profile>]`.
 pub fn state_dir() -> Result<PathBuf> {
-    Ok(xdg_home("XDG_STATE_HOME", ".local/state").join(per_profile("linuxapk")?))
+    Ok(xdg_home("XDG_STATE_HOME", ".local/state").join(per_profile("innkeeper")?))
 }
 
 /// Where one-time notices remember they were shown:
-/// `$XDG_STATE_HOME/linuxapk/notices` (shared by every profile).
+/// `$XDG_STATE_HOME/innkeeper/notices` (shared by every profile).
 pub fn notices_dir() -> PathBuf {
-    xdg_home("XDG_STATE_HOME", ".local/state").join("linuxapk/notices")
+    xdg_home("XDG_STATE_HOME", ".local/state").join("innkeeper/notices")
 }
 
 #[cfg(test)]
@@ -138,23 +138,23 @@ mod tests {
 
     #[test]
     fn commands_read_back() {
-        let named = command(&argv("/x/linuxapk"), "cli");
-        assert_eq!(named.join(" "), "env LINUXAPK_PROFILE=cli /x/linuxapk");
+        let named = command(&argv("/x/innkeeper"), "cli");
+        assert_eq!(named.join(" "), "env INNKEEPER_PROFILE=cli /x/innkeeper");
         let i = invocation(&named);
-        assert_eq!((i.profile, i.program), ("cli", Some("/x/linuxapk")));
+        assert_eq!((i.profile, i.program), ("cli", Some("/x/innkeeper")));
         assert!(!i.foreign_env);
-        let main = command(&argv("/x/linuxapk"), "");
+        let main = command(&argv("/x/innkeeper"), "");
         assert_eq!(invocation(&main).profile, "");
-        let old = argv("env LINUXAPK_SESSION=/s LINUXAPK_PROFILE=cli linuxapk run a.b");
+        let old = argv("env INNKEEPER_SESSION=/s INNKEEPER_PROFILE=cli innkeeper run a.b");
         let old = invocation(&old);
-        assert_eq!((old.profile, old.program), ("cli", Some("linuxapk")));
+        assert_eq!((old.profile, old.program), ("cli", Some("innkeeper")));
         assert!(old.foreign_env);
         // Only the environment `env` sets counts.
-        let args = argv("linuxapk run LINUXAPK_PROFILE=x");
+        let args = argv("innkeeper run INNKEEPER_PROFILE=x");
         let i = invocation(&args);
         assert_eq!(
             (i.profile, i.program, i.foreign_env),
-            ("", Some("linuxapk"), false)
+            ("", Some("innkeeper"), false)
         );
     }
 }

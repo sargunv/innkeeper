@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// LinuxApkProbes.apk (dev.linuxapk.probes): diagnostic activities and the input
+// InnkeeperProbes.apk (dev.sargunv.innkeeper.probes): diagnostic activities and the input
 // harness for the end-to-end and compat tests. Platform-signed like the system
 // app, but never staged: `:probes:install` puts it in out/test/probes, and the
 // tests install it into their session.
@@ -9,12 +9,12 @@ val sdk = extra["compileSdk"] as Int
 val buildTools = extra["buildTools"] as String
 
 android {
-  namespace = "dev.linuxapk.probes"
+  namespace = "dev.sargunv.innkeeper.probes"
   compileSdk = sdk
   buildToolsVersion = File(buildTools).name
 
   defaultConfig {
-    applicationId = "dev.linuxapk.probes"
+    applicationId = "dev.sargunv.innkeeper.probes"
     minSdk = sdk
     targetSdk = sdk
     versionCode = 1
@@ -41,5 +41,5 @@ dependencies { implementation(project(":inject")) }
 tasks.register<Sync>("install") {
   description = "Signs the release APK and installs it into out/test/probes."
   into(rootDir.resolve("../../out/test/probes"))
-  from(tasks.named("signRelease")) { rename { "LinuxApkProbes.apk" } }
+  from(tasks.named("signRelease")) { rename { "InnkeeperProbes.apk" } }
 }

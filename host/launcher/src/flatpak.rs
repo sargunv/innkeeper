@@ -1,5 +1,5 @@
 //! Flatpak mode (docs/session.md, "Flatpak mode"): the session runs in
-//! Linux.apk's own sandbox, which allows no namespaces, mounts or systemd
+//! Innkeeper's own sandbox, which allows no namespaces, mounts or systemd
 //! units, but whose `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!
 //! - The root is composed on disk: per partition, hardlinks to the (read-only)
@@ -205,10 +205,10 @@ fn apply_run_layer(cfg: &Config) -> Result<()> {
         fs::set_permissions(&dst, fs::Permissions::from_mode(m & !0o222 & 0o7777))?;
         Ok(())
     })?;
-    let l = r.join("linuxapk");
+    let l = r.join("innkeeper");
     remove_tree(&l)?;
     fs::create_dir_all(&l)?;
-    root::linuxapk_dir(cfg, &l)?;
+    root::innkeeper_dir(cfg, &l)?;
     symlink("/apex", l.join("apex"))?;
     Ok(())
 }
@@ -229,7 +229,7 @@ fn link(target: &Path, link: &Path) -> Result<()> {
 fn sandbox_root(cfg: &Config) -> Result<()> {
     let r = &cfg.paths.root;
     let slash = Path::new("/");
-    for p in PARTITIONS.iter().chain(&["apex", "linuxapk"]) {
+    for p in PARTITIONS.iter().chain(&["apex", "innkeeper"]) {
         if r.join(p).exists() {
             link(&r.join(p), &slash.join(p))?;
         }
@@ -283,7 +283,7 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     let run = &cfg.paths.run;
     fs::set_permissions(run.join("bridge"), fs::Permissions::from_mode(0o700))?;
     fs::create_dir_all(dev.join("socket"))?;
-    link(&run.join("bridge"), &dev.join("socket/linuxapk"))?;
+    link(&run.join("bridge"), &dev.join("socket/innkeeper"))?;
     link(&run.join("kmsg"), &dev.join("kmsg"))?;
     // The bpf() emulator's pins (supervisor/broker/src/bpf.rs).
     fs::create_dir_all("/sys/fs/bpf")?;
@@ -306,7 +306,7 @@ fn teardown(p: &Paths) {
     // The bridge is killed with Android, so its signal handler cannot reap
     // files kept alive for desktop readers. End their lifetime here.
     let cache = crate::paths::xdg_home("XDG_CACHE_HOME", ".cache")
-        .join(crate::paths::per_profile("linuxapk", &p.profile))
+        .join(crate::paths::per_profile("innkeeper", &p.profile))
         .join("handoff");
     let _ = fs::remove_dir_all(cache);
     if sys::ppid() == 1 {
@@ -399,7 +399,7 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     Ok(())
 }
 
-/// Asks the Background portal to let Linux.apk run with no window open
+/// Asks the Background portal to let Innkeeper run with no window open
 /// (media, alarms, background work), so the desktop doesn't stop it. Best
 /// effort, without waiting for the answer: `gdbus` is in the Flatpak runtime.
 pub fn request_background(p: &Paths) {
@@ -433,7 +433,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     trace.mark(p, "root composed");
     apply_run_layer(cfg).context("add the start-time layer")?;
     trace.mark(p, "start-time layer applied");
-    crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("linuxapk"))?;
+    crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("innkeeper"))?;
     trace.mark(p, "data version recorded");
     sandbox_root(cfg).context("set up the sandbox's /")?;
     trace.mark(p, "sandbox root ready");
@@ -449,7 +449,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         p.data.display(),
         p.data.join("media").display()
     );
-    let mut cmd = init::command(cfg, Path::new("/"), &[("LINUXAPK_ROOT_MAP", root_map)]);
+    let mut cmd = init::command(cfg, Path::new("/"), &[("INNKEEPER_ROOT_MAP", root_map)]);
     // pivot-exec becomes the broker, init's parent and subreaper; it dies
     // with this thread.
     unsafe {
@@ -517,7 +517,7 @@ pub fn spawn(cfg_paths: &crate::paths::Paths, exe: &Path, headless: bool) -> Res
     c.arg("/usr/bin/env");
     for (k, v) in env::vars_os() {
         let name = k.to_string_lossy();
-        if name.starts_with("LINUXAPK_")
+        if name.starts_with("INNKEEPER_")
             || [
                 "XDG_DATA_HOME",
                 "XDG_CONFIG_HOME",

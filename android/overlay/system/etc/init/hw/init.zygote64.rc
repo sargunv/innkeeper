@@ -1,9 +1,9 @@
 service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
     class main
     priority -20
-    # linuxapk: zygote calls selinux_android_setcon() for system_server and
-    # apps, which needs the shim (see supervisor/shim/linuxapk_shim.c).
-    setenv LD_PRELOAD /system/lib64/liblinuxapk_shim.so
+    # innkeeper: zygote calls selinux_android_setcon() for system_server and
+    # apps, which needs the shim (see supervisor/shim/innkeeper_shim.c).
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     user root
     group root readproc reserved_disk
     socket zygote stream 660 root system

@@ -95,7 +95,7 @@ pub enum Cmd {
         buffer: u32,
         damage: [i32; 4],
     },
-    /// A request from the Linux.apk IME.
+    /// A request from the Innkeeper IME.
     TextInput(ime::Req),
     PointerCapture(bool),
     WindowPolicy(WindowPolicy),

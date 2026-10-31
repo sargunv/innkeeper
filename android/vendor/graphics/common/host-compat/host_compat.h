@@ -5,10 +5,10 @@
 // binder headers' calls valid.
 #pragma once
 #ifdef __cplusplus
-extern "C" void linuxapk_host_assert(const char*, const char*, int) noexcept
+extern "C" void innkeeper_host_assert(const char*, const char*, int) noexcept
   __attribute__((noreturn));  // shape of glibc's __assert declaration
-[[noreturn]] void linuxapk_host_assert(
+[[noreturn]] void innkeeper_host_assert(
   const char* file, int line, const char* msg
 ) noexcept;
-#define __assert(a, b, c) linuxapk_host_assert(a, b, c)
+#define __assert(a, b, c) innkeeper_host_assert(a, b, c)
 #endif

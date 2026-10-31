@@ -53,6 +53,6 @@ fi
 # DMS lays the screen out at the composer's dpi (ohos/sandbox.sh).
 dpi=$(/system/bin/param get persist.window.screen.dpi)
 dpi=${dpi%% *}
-[ "$dpi" = "${LINUXAPK_OHOS_DISPLAY#*@}" ] && exit 0
-echo "DMS at $dpi dpi, the composer at ${LINUXAPK_OHOS_DISPLAY#*@}"
+[ "$dpi" = "${INNKEEPER_OHOS_DISPLAY#*@}" ] && exit 0
+echo "DMS at $dpi dpi, the composer at ${INNKEEPER_OHOS_DISPLAY#*@}"
 exit 1

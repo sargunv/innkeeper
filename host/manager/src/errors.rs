@@ -1,4 +1,4 @@
-//! Turns `linuxapk-core` errors into messages for people: a heading, a
+//! Turns `innkeeper-core` errors into messages for people: a heading, a
 //! sentence or two, and the original text as details.
 
 /// What the user was doing.
@@ -27,7 +27,7 @@ pub struct Humane {
 /// `name` is the app's name where one is known.
 pub fn humane(op: Op, name: Option<&str>, err: &anyhow::Error) -> Humane {
     let details = format!("{err:#}");
-    let (heading, body) = classify(op, name, err.downcast_ref::<linuxapk_core::ErrorKind>());
+    let (heading, body) = classify(op, name, err.downcast_ref::<innkeeper_core::ErrorKind>());
     Humane {
         heading,
         body,
@@ -38,13 +38,13 @@ pub fn humane(op: Op, name: Option<&str>, err: &anyhow::Error) -> Humane {
 fn classify(
     op: Op,
     name: Option<&str>,
-    kind: Option<&linuxapk_core::ErrorKind>,
+    kind: Option<&innkeeper_core::ErrorKind>,
 ) -> (String, String) {
-    use linuxapk_core::ErrorKind::*;
+    use innkeeper_core::ErrorKind::*;
     let app = name.unwrap_or("the app");
     let pair = |h: &str, b: &str| (h.to_string(), b.to_string());
     match kind {
-        Some(AaptMissing) => pair("Linux.apk Isn’t Set Up", "The APK reader is missing. Reinstall Linux.apk and try again."),
+        Some(AaptMissing) => pair("Innkeeper Isn’t Set Up", "The APK reader is missing. Reinstall Innkeeper and try again."),
         Some(NotAnApk) => pair("Not a Readable Android App", "This file couldn’t be read as an APK or APK bundle. It may be incomplete or corrupt; try downloading it again."),
         Some(UnsupportedBundle) => pair("Unsupported Bundle", "This bundle doesn’t contain exactly one installable app. Encrypted bundles aren’t supported."),
         Some(WrongAbi) => pair("Not Built for This Computer", "This app’s native code doesn’t support this computer’s processor."),
@@ -55,7 +55,7 @@ fn classify(
         Some(InstallFailed(code)) => match code.as_str() {
             "INSTALL_FAILED_UPDATE_INCOMPATIBLE" => ("A Different Version Is Installed".into(), format!("The installed copy of {app} was signed by someone else. Uninstall it first to install this one.")),
             "INSTALL_FAILED_VERSION_DOWNGRADE" => ("A Newer Version Is Installed".into(), format!("This is an older version of {app} than the one already installed.")),
-            "INSTALL_FAILED_OLDER_SDK" => pair("Needs a Newer Android", "This app requires a newer version of Android than Linux.apk runs."),
+            "INSTALL_FAILED_OLDER_SDK" => pair("Needs a Newer Android", "This app requires a newer version of Android than Innkeeper runs."),
             "INSTALL_FAILED_INSUFFICIENT_STORAGE" => pair("Not Enough Space", "There isn’t enough free disk space to install this app."),
             "INSTALL_FAILED_NO_MATCHING_ABIS" | "INSTALL_FAILED_CPU_ABI_INCOMPATIBLE" => pair("Not Built for This Computer", "This app’s native code doesn’t support this computer’s processor."),
             _ => pair("Android Refused the App", "Android couldn’t install this app. Check the details below for its reason."),
@@ -88,12 +88,12 @@ fn cap(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linuxapk_core::ErrorKind;
+    use innkeeper_core::ErrorKind;
 
     #[test]
     fn typed_context_selects_copy_independent_of_diagnostics() {
         for (kind, heading) in [
-            (ErrorKind::AaptMissing, "Linux.apk Isn’t Set Up"),
+            (ErrorKind::AaptMissing, "Innkeeper Isn’t Set Up"),
             (ErrorKind::NotAnApk, "Not a Readable Android App"),
             (ErrorKind::UnsupportedBundle, "Unsupported Bundle"),
             (ErrorKind::WrongAbi, "Not Built for This Computer"),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#define LOG_TAG "linuxapk-hwc"
+#define LOG_TAG "innkeeper-hwc"
 #include <pthread.h>
 #include <sched.h>
 
@@ -8,9 +8,9 @@
 #include "Common.h"
 #include "HostClock.h"
 #include "Properties.h"
-#include "linuxapk/log.h"
+#include "innkeeper/log.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 namespace {
 std::mutex gClockMutex;
@@ -63,7 +63,7 @@ void VsyncThread::loop() {
     const int64_t now = nowNs();
     int64_t period = mPeriodNs.load();
     if (
-      mDisplayId == 0 && getProperty("vendor.linuxapk.hwc.host_clock") != "0"
+      mDisplayId == 0 && getProperty("vendor.innkeeper.hwc.host_clock") != "0"
     ) {
       std::lock_guard clockLock(gClockMutex);
       next = gClock.next(now, mLastVsyncNs.load());
@@ -91,7 +91,7 @@ void VsyncThread::loop() {
           mDisplayId, ::aidl::android::hardware::graphics::common::
                         DisplayHotplugEvent::CONNECTED
         );
-      if (mEnabled && getProperty("vendor.linuxapk.hwc.bench") == "1")
+      if (mEnabled && getProperty("vendor.innkeeper.hwc.bench") == "1")
         LOGI(
           "BENCH vsync display=%lld ns=%lld period_ns=%lld",
           (long long)mDisplayId, (long long)next, (long long)period
@@ -104,4 +104,4 @@ void VsyncThread::loop() {
   }
 }
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

@@ -10,8 +10,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern int linuxapk_filter_install(int harness);
-extern void linuxapk_broker_start(int listener, int pins);
+extern int innkeeper_filter_install(int harness);
+extern void innkeeper_broker_start(int listener, int pins);
 
 int main(void) {
   int sp[2];
@@ -22,7 +22,7 @@ int main(void) {
     alarm(5);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) _exit(1);
     // Only openat/binder ioctls need trapping for this host-side probe.
-    int listener = linuxapk_filter_install(1);
+    int listener = innkeeper_filter_install(1);
     if (listener < 0) _exit(1);
     char control[CMSG_SPACE(sizeof(int))] = {0};
     char byte = 0;
@@ -43,7 +43,7 @@ int main(void) {
     const char* nodes[] = {
       "/dev/dri/renderD128", "/dev/dri/renderD129", "/dev/binder"
     };
-    const char* selected = getenv("LINUXAPK_RENDER_NODE");
+    const char* selected = getenv("INNKEEPER_RENDER_NODE");
     for (unsigned i = 0; i < sizeof(nodes) / sizeof(nodes[0]); i++) {
       int fd = open(nodes[i], O_RDWR | O_CLOEXEC);
       int allowed = i == 2 || strcmp(nodes[i], selected) == 0;
@@ -71,7 +71,7 @@ int main(void) {
   if (recvmsg(sp[0], &msg, 0) != 1 || !CMSG_FIRSTHDR(&msg)) return 1;
   int listener;
   memcpy(&listener, CMSG_DATA(CMSG_FIRSTHDR(&msg)), sizeof(listener));
-  linuxapk_broker_start(listener, -1);
+  innkeeper_broker_start(listener, -1);
   int status;
   if (waitpid(child, &status, 0) != child) return 1;
   return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 1;

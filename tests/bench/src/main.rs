@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
-use linuxapk_bench::{
+use innkeeper_bench::{
     binder, default_max_load, field, frames, input, launched_display, number, presented, score,
 };
 use serde_json::{Value, json};
@@ -58,10 +58,10 @@ fn context() -> Value {
             let pid = e.file_name().to_string_lossy().parse::<u32>().ok()?;
             let cmd = fs::read(e.path().join("cmdline")).ok()?;
             let first = String::from_utf8_lossy(cmd.split(|b| *b == 0).next()?);
-            first.ends_with("/linuxapk-broker").then_some(pid)
+            first.ends_with("/innkeeper-brk").then_some(pid)
         })
         .collect();
-    json!({"git_sha":command("git",&["rev-parse","HEAD"]).unwrap_or_default().trim(),"git_dirty":!command("git",&["status","--porcelain"]).unwrap_or_default().is_empty(),"cpu":cpu,"logical_cpus":std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),"loadavg":read("/proc/loadavg").trim(),"governors":governors,"kernel":command("uname",&["-sr"]).unwrap_or_default().trim(),"host_desktop":std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),"compositor":std::env::var("LINUXAPK_TEST_COMPOSITOR").unwrap_or("kwin".into()),"other_session_broker_pids":sessions,"memory":read("/proc/meminfo").lines().take(3).collect::<Vec<_>>()})
+    json!({"git_sha":command("git",&["rev-parse","HEAD"]).unwrap_or_default().trim(),"git_dirty":!command("git",&["status","--porcelain"]).unwrap_or_default().is_empty(),"cpu":cpu,"logical_cpus":std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),"loadavg":read("/proc/loadavg").trim(),"governors":governors,"kernel":command("uname",&["-sr"]).unwrap_or_default().trim(),"host_desktop":std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),"compositor":std::env::var("INNKEEPER_TEST_COMPOSITOR").unwrap_or("kwin".into()),"other_session_broker_pids":sessions,"memory":read("/proc/meminfo").lines().take(3).collect::<Vec<_>>()})
 }
 fn load(context: &Value) -> f64 {
     context["loadavg"]
@@ -81,17 +81,17 @@ fn wait(mut f: impl FnMut() -> bool, seconds: u64) -> Result<()> {
     Ok(())
 }
 fn log() -> String {
-    read(PathBuf::from(std::env::var("LINUXAPK_BENCH_OUT").unwrap()).join("probe-log.txt"))
+    read(PathBuf::from(std::env::var("INNKEEPER_BENCH_OUT").unwrap()).join("probe-log.txt"))
 }
 
 fn launch(mode: &str) -> Result<()> {
-    android(&["am", "force-stop", "dev.linuxapk.probes"])?;
+    android(&["am", "force-stop", "dev.sargunv.innkeeper.probes"])?;
     android(&[
         "am",
         "start",
         "-W",
         "-n",
-        "dev.linuxapk.probes/.BenchProbe",
+        "dev.sargunv.innkeeper.probes/.BenchProbe",
         "--es",
         "mode",
         mode,
@@ -99,10 +99,10 @@ fn launch(mode: &str) -> Result<()> {
     wait(|| log().contains(&format!("BENCH ready mode={mode}")), 20)
 }
 fn bridge() -> String {
-    let profile = std::env::var("LINUXAPK_PROFILE").unwrap();
+    let profile = std::env::var("INNKEEPER_PROFILE").unwrap();
     read(
         PathBuf::from(std::env::var("XDG_STATE_HOME").unwrap())
-            .join(format!("linuxapk-{profile}/bridge.log")),
+            .join(format!("innkeeper-{profile}/bridge.log")),
     )
 }
 fn keeper() -> Result<std::process::Child> {
@@ -137,7 +137,7 @@ impl Drop for Cleanup {
                 "-t",
                 "1000",
                 "-s",
-                "LinuxApkBench:I",
+                "InnkeeperBench:I",
                 "AndroidRuntime:E",
                 "ActivityTaskManager:I",
                 "SurfaceFlinger:V",
@@ -234,8 +234,8 @@ fn memory(seconds: u64) -> Result<Value> {
     )
 }
 fn gpu(out: &Path) -> Result<Value> {
-    let mut result = json!({"android":{"status":"unavailable","reason":"set LINUXAPK_GLMARK2_APK to an upstream-built glmark2 APK; see tests/bench/README.md"},"host":{"status":"unavailable","reason":"set LINUXAPK_GLMARK2_HOST to the native Wayland glmark2 executable"}});
-    if let Ok(path) = std::env::var("LINUXAPK_GLMARK2_HOST") {
+    let mut result = json!({"android":{"status":"unavailable","reason":"set INNKEEPER_GLMARK2_APK to an upstream-built glmark2 APK; see tests/bench/README.md"},"host":{"status":"unavailable","reason":"set INNKEEPER_GLMARK2_HOST to the native Wayland glmark2 executable"}});
+    if let Ok(path) = std::env::var("INNKEEPER_GLMARK2_HOST") {
         let text = command(
             &path,
             &[
@@ -250,7 +250,7 @@ fn gpu(out: &Path) -> Result<Value> {
         fs::write(out.join("glmark2-host.txt"), &text)?;
         result["host"] = json!({"status":"collected","score":score(&text).context("glmark2 completed without a score; inspect raw log")?});
     }
-    if let Ok(path) = std::env::var("LINUXAPK_GLMARK2_APK") {
+    if let Ok(path) = std::env::var("INNKEEPER_GLMARK2_APK") {
         install(Path::new(&path))?;
         // Upstream kills its benchmark process in onPause(). Starting on display 0
         // lets our window manager's display move kill it before EGL initializes.
@@ -258,9 +258,9 @@ fn gpu(out: &Path) -> Result<Value> {
             "am",
             "broadcast",
             "-n",
-            "dev.linuxapk.system/.wm.ControlReceiver",
+            "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
             "-a",
-            "dev.linuxapk.LAUNCH",
+            "dev.sargunv.innkeeper.LAUNCH",
             "--es",
             "package",
             "org.linaro.glmark2",
@@ -340,7 +340,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         logger: None,
         sink: None,
     };
-    let sink = format!("linuxapk_bench_{}", std::env::var("LINUXAPK_PROFILE")?);
+    let sink = format!("innkeeper_bench_{}", std::env::var("INNKEEPER_PROFILE")?);
     cleanup.sink = Some(command(
         "pactl",
         &[
@@ -358,7 +358,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         30,
     )?;
     session(&["selftest"])?;
-    android(&["setprop", "vendor.linuxapk.hwc.bench", "1"])?;
+    android(&["setprop", "vendor.innkeeper.hwc.bench", "1"])?;
     cleanup.logger = Some(
         Command::new("timeout")
             .args([
@@ -372,15 +372,15 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 "-v",
                 "raw",
                 "-s",
-                "LinuxApkBench:I",
-                "linuxapk-hwc:I",
+                "InnkeeperBench:I",
+                "innkeeper-hwc:I",
                 "AndroidRuntime:E",
             ])
             .stdout(fs::File::create(out.join("probe-log.txt"))?)
             .stderr(fs::File::create(out.join("probe-log-errors.txt"))?)
             .spawn()?,
     );
-    install(Path::new("out/test/probes/LinuxApkProbes.apk"))?;
+    install(Path::new("out/test/probes/InnkeeperProbes.apk"))?;
     for setting in [
         "window_animation_scale",
         "transition_animation_scale",
@@ -444,9 +444,9 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 "am",
                 "broadcast",
                 "-a",
-                "dev.linuxapk.BENCH_BEGIN",
+                "dev.sargunv.innkeeper.BENCH_BEGIN",
                 "-p",
-                "dev.linuxapk.probes",
+                "dev.sargunv.innkeeper.probes",
             ])?;
             wait(|| log().contains("BENCH binder workers=8 "), 30)
                 .context("waiting for eight-worker binder result")?;
@@ -477,9 +477,9 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 "am",
                 "broadcast",
                 "-a",
-                "dev.linuxapk.BENCH_BEGIN",
+                "dev.sargunv.innkeeper.BENCH_BEGIN",
                 "-p",
-                "dev.linuxapk.probes",
+                "dev.sargunv.innkeeper.probes",
             ])?;
             wait(|| log().contains("BENCH audio "), 15)?;
             let text = log();
@@ -500,12 +500,12 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
             let idle = memory(seconds)?;
             launch("input")?;
             Ok(
-                json!({"idle":idle,"one_app":memory(seconds)?,"app":"dev.linuxapk.probes/.BenchProbe mode=input"}),
+                json!({"idle":idle,"one_app":memory(seconds)?,"app":"dev.sargunv.innkeeper.probes/.BenchProbe mode=input"}),
             )
         }
         _ => bail!("unknown benchmark"),
     };
-    if result.is_ok() && std::env::var("LINUXAPK_BENCH_SCREENSHOT").is_ok_and(|v| v == "1") {
+    if result.is_ok() && std::env::var("INNKEEPER_BENCH_SCREENSHOT").is_ok_and(|v| v == "1") {
         command(
             "tools/dev/window-shot.sh",
             &[out.join("probe.png").to_str().unwrap(), "Benchmark probe"],
@@ -513,7 +513,13 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
     }
     fs::write(
         out.join("gfxinfo.txt"),
-        android(&["dumpsys", "gfxinfo", "dev.linuxapk.probes", "framestats"]).unwrap_or_default(),
+        android(&[
+            "dumpsys",
+            "gfxinfo",
+            "dev.sargunv.innkeeper.probes",
+            "framestats",
+        ])
+        .unwrap_or_default(),
     )?;
     result
 }
@@ -557,8 +563,8 @@ fn main() -> Result<()> {
         "max load must be positive"
     );
     let noisy = args.iter().any(|a| a == "--noisy");
-    if std::env::var("LINUXAPK_BENCH_INSIDE").is_ok() {
-        let out = PathBuf::from(std::env::var("LINUXAPK_BENCH_OUT")?);
+    if std::env::var("INNKEEPER_BENCH_INSIDE").is_ok() {
+        let out = PathBuf::from(std::env::var("INNKEEPER_BENCH_OUT")?);
         let mut r: Value = serde_json::from_str(&read(out.join("result.json")))?;
         let collected = collect(name, &out, seconds);
         let after = context();
@@ -575,10 +581,10 @@ fn main() -> Result<()> {
             r["warnings"]
                 .as_array_mut()
                 .unwrap()
-                .push(json!("other linuxapk sessions present after measurement"));
+                .push(json!("other innkeeper sessions present after measurement"));
         }
         r["context_after"] = after;
-        let profile = std::env::var("LINUXAPK_PROFILE")?;
+        let profile = std::env::var("INNKEEPER_PROFILE")?;
         let compositor_info = read(
             Path::new("out/test/nested")
                 .join(profile)
@@ -647,7 +653,7 @@ fn main() -> Result<()> {
         .as_array()
         .is_some_and(|a| !a.is_empty())
     {
-        warnings.push("other linuxapk sessions are running");
+        warnings.push("other innkeeper sessions are running");
     }
     if !warnings.is_empty() {
         eprintln!("*** BENCHMARK WARNING: {} ***", warnings.join("; "));
@@ -657,7 +663,7 @@ fn main() -> Result<()> {
         );
     }
     print!("{}", command("free", &["-g"])?);
-    let id = std::env::var("LINUXAPK_PROFILE").unwrap_or_else(|_| {
+    let id = std::env::var("INNKEEPER_PROFILE").unwrap_or_else(|_| {
         format!(
             "bench-{name}-{}",
             SystemTime::now()
@@ -688,17 +694,17 @@ fn main() -> Result<()> {
     let status = Command::new("tests/nested.sh")
         .arg(std::env::current_exe()?)
         .args(&args)
-        .env("LINUXAPK_PROFILE", &id)
-        .env("LINUXAPK_BENCH", "1")
-        .env("LINUXAPK_BENCH_INSIDE", "1")
-        .env("LINUXAPK_BENCH_OUT", &out)
-        .env("LINUXAPK_AUDIO_SINK", format!("linuxapk_bench_{id}"))
+        .env("INNKEEPER_PROFILE", &id)
+        .env("INNKEEPER_BENCH", "1")
+        .env("INNKEEPER_BENCH_INSIDE", "1")
+        .env("INNKEEPER_BENCH_OUT", &out)
+        .env("INNKEEPER_AUDIO_SINK", format!("innkeeper_bench_{id}"))
         .env(
-            "LINUXAPK_AUDIO_SOURCE",
-            format!("linuxapk_bench_{id}.monitor"),
+            "INNKEEPER_AUDIO_SOURCE",
+            format!("innkeeper_bench_{id}.monitor"),
         )
         .env(
-            "LINUXAPK_DATA",
+            "INNKEEPER_DATA",
             std::env::current_dir()?
                 .join("out/dev/flatpak")
                 .join(&id)

@@ -36,7 +36,9 @@ if(NOT ANDROID)
   set_tests_properties(audio_queue PROPERTIES TIMEOUT 5)
   add_executable(pcm_capture_test tests/capture_test.c tinyalsa/pcm.c)
   target_include_directories(pcm_capture_test PRIVATE third_party/aosp/include)
-  target_link_libraries(pcm_capture_test PRIVATE linuxapk_bridge_client pthread)
+  target_link_libraries(
+    pcm_capture_test
+    PRIVATE innkeeper_bridge_client pthread)
   target_compile_options(
     pcm_capture_test
     PRIVATE -Wall -Wextra -Werror -UNDEBUG)
@@ -55,9 +57,9 @@ target_link_options(
   PRIVATE
     -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tinyalsa/exports.map
     -Wl,-z,defs)
-target_link_libraries(tinyalsav2 PRIVATE linuxapk_bridge_client log)
+target_link_libraries(tinyalsav2 PRIVATE innkeeper_bridge_client log)
 
-set(HAL_APEX ${LINUXAPK_ANDROID}/apex/com.android.hardware.audio)
+set(HAL_APEX ${INNKEEPER_ANDROID}/apex/com.android.hardware.audio)
 install(
   TARGETS tinyalsav2
   LIBRARY DESTINATION ${HAL_APEX}/lib64 COMPONENT audio)
@@ -68,9 +70,12 @@ install(
   COMPONENT audio)
 install(
   FILES etc/primary_audio_policy_configuration.xml
-  DESTINATION ${LINUXAPK_ANDROID}/vendor/etc
+  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc
   COMPONENT audio)
-install(FILES etc/audio.prop DESTINATION share/linuxapk/props.d COMPONENT audio)
+install(
+  FILES etc/audio.prop
+  DESTINATION share/innkeeper/props.d
+  COMPONENT audio)
 
 if(ANDROID)
   file(GLOB_RECURSE AUDIO_AIDL_SRCS ${AUDIO_AIDL}/src/*.cpp)
@@ -103,6 +108,6 @@ if(ANDROID)
   install(FILES etc/audio-bridge.rc DESTINATION ${HAL_APEX}/etc COMPONENT audio)
   install(
     FILES etc/audio-bridge.xml
-    DESTINATION ${LINUXAPK_ANDROID}/vendor/etc/vintf/manifest
+    DESTINATION ${INNKEEPER_ANDROID}/vendor/etc/vintf/manifest
     COMPONENT audio)
 endif()

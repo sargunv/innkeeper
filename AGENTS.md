@@ -1,9 +1,9 @@
-# Linux.apk
+# Innkeeper
 
-Android apps on desktop Linux: a real AOSP 17 userspace in a Flatpak session,
-with our own vendor HALs, a seccomp supervisor and a desktop bridge. Start with
-[README.md](README.md) (the module table says what each dir is and where it
-runs), then [docs/architecture.md](docs/architecture.md).
+Run Android and OpenHarmony apps on Linux: a real AOSP 17 userspace in a Flatpak
+session, with our own vendor HALs, a seccomp supervisor and a desktop bridge.
+Start with [README.md](README.md) (the module table says what each dir is and
+where it runs), then [docs/architecture.md](docs/architecture.md).
 
 ## Commands
 
@@ -38,8 +38,8 @@ runs), then [docs/architecture.md](docs/architecture.md).
   and locks host sysfs and never binds host `/run/user`, `$HOME` or `/dev`
   wholesale. Android shares the host's network, as any `--share=network` app
   does ([docs/security.md](docs/security.md#flatpak-mode)).
-  `linuxapk-session selftest` must pass (`mise run test:e2e -- boot`).
-- **Test sessions are named.** Use `LINUXAPK_PROFILE=<name>` with a fresh data
+  `innkeeper-session selftest` must pass (`mise run test:e2e -- boot`).
+- **Test sessions are named.** Use `INNKEEPER_PROFILE=<name>` with a fresh data
   dir for anything you run, and stop it when done. Don't start, restart or reset
   the user's main session (no profile name), and don't install host integration
   (`mise run install-dev`, desktop entries, MIME handlers) unless the user asks.
@@ -96,6 +96,6 @@ runs), then [docs/architecture.md](docs/architecture.md).
 - Never commit media. A visual change needs screenshots on its own PR:
   `gh issue comment <pr> --attach <file>#<alt>`, linked from the description.
   README images go on the README media issue (#1) the same way.
-  `tools/dev/window-shot.sh` captures just the Linux.apk window.
+  `tools/dev/window-shot.sh` captures just the Innkeeper window.
 - Plans and open work are GitHub issues, not docs. Docs say what is true now and
   why; code comments say what the code can't.

@@ -22,8 +22,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern int linuxapk_filter_install(int harness);
-extern void linuxapk_broker_start(int listener, int pins);
+extern int innkeeper_filter_install(int harness);
+extern void innkeeper_broker_start(int listener, int pins);
 
 static int fails;
 #define CHECK(cond, ...)           \
@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
   setrlimit(RLIMIT_NOFILE, &rl);
   // As pivot-exec does before Android runs.
   int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
-  setenv("LINUXAPK_BIONIC_HARNESS", "1", 1);
+  setenv("INNKEEPER_BIONIC_HARNESS", "1", 1);
   int sp[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sp))
     return perror("socketpair"), 1;
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
   if (c == 0) {
     alarm(20);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) return 1;
-    int lfd = linuxapk_filter_install(1);
+    int lfd = innkeeper_filter_install(1);
     if (lfd < 0) return perror("filter"), 1;
     char ctl[CMSG_SPACE(sizeof(int))] = {0};
     char b = 0;
@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
     return fprintf(stderr, "no listener\n"), 1;
   int listener;
   memcpy(&listener, CMSG_DATA(CMSG_FIRSTHDR(&mh)), sizeof(int));
-  linuxapk_broker_start(listener, pins);
+  innkeeper_broker_start(listener, pins);
   // A hung or crashed supervisor fails the test (SIGALRM, SIGSEGV).
   alarm(30);
   int st;

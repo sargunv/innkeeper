@@ -11,7 +11,7 @@
 //!  * `chown` family: unmapped ids would fail with EINVAL, so the call is
 //!    emulated: the file is resolved in the caller's root, a no-op
 //!    `fchownat(-1, -1)` keeps the kernel's checks (EROFS, ENOENT, ...), and
-//!    the virtual owner goes into the `user.linuxapk.owner` xattr. This runs
+//!    the virtual owner goes into the `user.innkeeper.owner` xattr. This runs
 //!    on worker threads: a path on a FUSE mount could otherwise block the
 //!    broker on a FUSE daemon that is waiting for binder.
 //!  * `getsockopt(SO_PEERCRED)`: the peer's virtual euid/egid and its pid in
@@ -60,7 +60,7 @@ pub(crate) enum Answer {
     Continue,
 }
 
-/// Counters, logged every 10 s when tracing is on (`LINUXAPK_BROKER_DEBUG`).
+/// Counters, logged every 10 s when tracing is on (`INNKEEPER_BROKER_DEBUG`).
 #[derive(Default)]
 struct Stats {
     getid: AtomicU64,
@@ -706,7 +706,7 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
 /// both.
 fn caps(tid: i32, c: &Creds) -> table::Caps {
     static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *FLAT.get_or_init(|| std::env::var("LINUXAPK_BIONIC_HARNESS").as_deref() != Ok("1"))
+    if *FLAT.get_or_init(|| std::env::var("INNKEEPER_BIONIC_HARNESS").as_deref() != Ok("1"))
         && c.euid == 0
     {
         return table::Caps {

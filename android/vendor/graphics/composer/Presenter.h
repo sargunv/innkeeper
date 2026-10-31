@@ -16,7 +16,7 @@
 #include "Common.h"
 #include "Fence.h"
 
-namespace linuxapk::hwc {
+namespace innkeeper::hwc {
 
 struct ClientTargetState {
   BufferPtr buffer;
@@ -69,18 +69,18 @@ class HeadlessPresenter : public Presenter {
   std::string mPrefix;
 };
 
-// The presenters' backend, from vendor.linuxapk.hwc.backend, read once at
+// The presenters' backend, from vendor.innkeeper.hwc.backend, read once at
 // startup: "bridge" shows virtual displays in host windows through the
 // bridge's display service; "headless" (the default) shows none.
 void startPresenterBackend();
 struct DisplayConfig;
 // Display 0 has no window: apps show in windows of the virtual displays that
-// the window manager (the Linux.apk System app) creates. In phone mode it is
+// the window manager (the Innkeeper System app) creates. In phone mode it is
 // the device's screen, in the window the window manager asks for it.
 std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config);
 
 // Display 0's mode: 1280x800 at 160 dpi, or in phone mode the device's
-// screen (vendor.linuxapk.hwc.primary, WxH, and ro.sf.lcd_density).
+// screen (vendor.innkeeper.hwc.primary, WxH, and ro.sf.lcd_density).
 DisplayConfig primaryConfig();
 // A HWC-backed virtual display (ComposerClient::createVirtualDisplay): a
 // window if the backend is "bridge" and the bridge has one for it.
@@ -88,4 +88,4 @@ std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 );
 
-}  // namespace linuxapk::hwc
+}  // namespace innkeeper::hwc

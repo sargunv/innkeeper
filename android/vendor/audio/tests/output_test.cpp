@@ -13,7 +13,7 @@
   } while (0)
 
 int main() {
-  using namespace linuxapk::audio;
+  using namespace innkeeper::audio;
   // The HAL must allow a 5 ms burst, which can engage AudioFlinger's FastMixer.
   CHECK(validBufferSize(240));
   CHECK(!validBufferSize(239));
