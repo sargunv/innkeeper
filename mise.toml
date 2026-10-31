@@ -143,7 +143,7 @@ ohos/run.py --timeout 90 --probe ohos/tests/boot.sh
 """
 
 [tasks.bench]
-description = "Manual measurement harness (-- input frame audio gpu memory binder); never a test gate"
+description = "Manual input and frame latency measurements (-- input|frame); never a test gate"
 run = "tests/bench/run.sh"
 
 # ---- run ---------------------------------------------------------------------

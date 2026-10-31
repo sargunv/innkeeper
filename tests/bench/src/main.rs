@@ -1,8 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
-use innkeeper_bench::{
-    binder, default_max_load, field, frames, input, launched_display, number, presented, score,
-    trace,
-};
+use innkeeper_bench::{default_max_load, frames, input, number, presented, trace};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -125,7 +122,6 @@ struct Cleanup {
     out: PathBuf,
     keeper: Option<std::process::Child>,
     logger: Option<std::process::Child>,
-    sink: Option<String>,
 }
 impl Drop for Cleanup {
     fn drop(&mut self) {
@@ -161,9 +157,6 @@ impl Drop for Cleanup {
             let _ = k.kill();
             let _ = k.wait();
         }
-        if let Some(s) = &self.sink {
-            let _ = command("pactl", &["unload-module", s.trim()]);
-        }
     }
 }
 fn traces(out: &Path, mode: &str, seconds: u64) -> Result<Value> {
@@ -187,133 +180,6 @@ fn solid_frame(trace: &str) -> Option<(u64, u64)> {
         .contains(&color)
         .then_some((number(line, "ns")?, color))
 }
-fn cpu_usage(cg: &Path) -> Result<u64> {
-    read(cg.join("cpu.stat"))
-        .lines()
-        .find_map(|l| l.strip_prefix("usage_usec ")?.parse().ok())
-        .context("missing cgroup CPU counter")
-}
-fn processes(cg: &Path, result: &mut Vec<Value>) {
-    for pid in read(cg.join("cgroup.procs")).lines() {
-        let root = PathBuf::from(format!("/proc/{pid}"));
-        let rollup = read(root.join("smaps_rollup"));
-        let pss = rollup.lines().find_map(|l| {
-            l.strip_prefix("Pss:")?
-                .split_whitespace()
-                .next()?
-                .parse::<u64>()
-                .ok()
-        });
-        result.push(json!({"pid":pid,"name":read(root.join("comm")).trim(),"pss_kib":pss}));
-    }
-    if let Ok(entries) = fs::read_dir(cg) {
-        for e in entries.flatten() {
-            if e.path().is_dir() {
-                processes(&e.path(), result);
-            }
-        }
-    }
-}
-fn memory(seconds: u64) -> Result<Value> {
-    let cg = PathBuf::from(session(&["cgroup"])?.trim());
-    let before = cpu_usage(&cg)?;
-    let at = Instant::now();
-    sleep(Duration::from_secs(seconds));
-    let elapsed = at.elapsed().as_secs_f64();
-    let after = cpu_usage(&cg)?;
-    ensure!(
-        after >= before,
-        "cgroup CPU counter reset during collection"
-    );
-    let charged = read(cg.join("memory.current"))
-        .trim()
-        .parse::<u64>()
-        .context("missing cgroup memory counter")?;
-    let mut procs = vec![];
-    processes(&cg, &mut procs);
-    Ok(
-        json!({"seconds":elapsed,"cpu_percent_one_core":(after.saturating_sub(before)) as f64 / (elapsed*1e4),"cgroup_memory_bytes":charged,"processes":procs,"pss_note":"null means procfs denied smaps; cgroup memory includes cache, PSS apportions shared pages"}),
-    )
-}
-fn gpu(out: &Path) -> Result<Value> {
-    let mut result = json!({"android":{"status":"unavailable","reason":"set INNKEEPER_GLMARK2_APK to an upstream-built glmark2 APK; see tests/bench/README.md"},"host":{"status":"unavailable","reason":"set INNKEEPER_GLMARK2_HOST to the native Wayland glmark2 executable"}});
-    if let Ok(path) = std::env::var("INNKEEPER_GLMARK2_HOST") {
-        let text = command(
-            &path,
-            &[
-                "--benchmark",
-                "build:duration=2",
-                "--benchmark",
-                "texture:duration=2",
-                "--size",
-                "1280x800",
-            ],
-        )?;
-        fs::write(out.join("glmark2-host.txt"), &text)?;
-        result["host"] = json!({"status":"collected","score":score(&text).context("glmark2 completed without a score; inspect raw log")?});
-    }
-    if let Ok(path) = std::env::var("INNKEEPER_GLMARK2_APK") {
-        install(Path::new(&path))?;
-        // Upstream kills its benchmark process in onPause(). Starting on display 0
-        // lets our window manager's display move kill it before EGL initializes.
-        let launched = android(&[
-            "am",
-            "broadcast",
-            "-n",
-            "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
-            "-a",
-            "dev.sargunv.innkeeper.LAUNCH",
-            "--es",
-            "package",
-            "org.linaro.glmark2",
-            "--ei",
-            "width",
-            "1280",
-            "--ei",
-            "height",
-            "800",
-            "--ez",
-            "wait",
-            "true",
-        ])?;
-        fs::write(out.join("glmark2-launch.txt"), &launched)?;
-        let display = launched_display(&launched)
-            .context("glmark2 launcher window did not become visible; inspect glmark2-launch.txt")?
-            .to_string();
-        android(&[
-            "am",
-            "start",
-            "-W",
-            "--display",
-            &display,
-            "-n",
-            "org.linaro.glmark2/.Glmark2Activity",
-            "--es",
-            "args",
-            "--benchmark build:duration=2 --benchmark texture:duration=2 --size 1280x800",
-        ])?;
-        let mut text = String::new();
-        let completed = wait(
-            || {
-                text = android(&["cat", "/data/data/org.linaro.glmark2/files/last_run.log"])
-                    .unwrap_or_default();
-                score(&text).is_some()
-            },
-            180,
-        );
-        fs::write(out.join("glmark2-android.txt"), &text)?;
-        fs::write(
-            out.join("glmark2-logcat.txt"),
-            android(&["logcat", "-d", "-t", "2000"]).unwrap_or_else(|e| format!("{e:#}")),
-        )?;
-        completed.context(
-            "waiting for glmark2 score; inspect glmark2-android.txt and glmark2-logcat.txt",
-        )?;
-        result["android"] = json!({"status":"collected","score":score(&text).context("glmark2 completed without a score; inspect raw log")?});
-    }
-    Ok(result)
-}
-
 fn install(apk: &Path) -> Result<()> {
     let file = fs::File::open(apk)?;
     let size = file.metadata()?.len().to_string();
@@ -340,19 +206,7 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         out: out.to_owned(),
         keeper: None,
         logger: None,
-        sink: None,
     };
-    let sink = format!("innkeeper_bench_{}", std::env::var("INNKEEPER_PROFILE")?);
-    cleanup.sink = Some(command(
-        "pactl",
-        &[
-            "load-module",
-            "module-null-sink",
-            &format!("sink_name={sink}"),
-            "rate=48000",
-            "channels=2",
-        ],
-    )?);
     session(&["start"])?;
     cleanup.keeper = Some(keeper()?);
     wait(
@@ -439,72 +293,6 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
         "frame" => {
             Ok(json!({"scroll":traces(out,"scroll",seconds)?,"game":traces(out,"game",seconds)?}))
         }
-        "binder" => {
-            launch("binder")?;
-            wait(|| solid_frame(&bridge()).is_some(), 10)?;
-            android(&[
-                "am",
-                "broadcast",
-                "-a",
-                "dev.sargunv.innkeeper.BENCH_BEGIN",
-                "-p",
-                "dev.sargunv.innkeeper.probes",
-            ])?;
-            wait(|| log().contains("BENCH binder workers=8 "), 30)
-                .context("waiting for eight-worker binder result")?;
-            let text = log();
-            fs::write(out.join("binder.txt"), &text)?;
-            let r = binder(&text);
-            ensure!(
-                r.as_array().is_some_and(
-                    |r| r.len() == 2 && r.iter().all(|v| v["samples_complete"] == true)
-                ),
-                "incomplete binder samples"
-            );
-            Ok(r)
-        }
-        "audio" => {
-            android(&[
-                "cmd",
-                "media_session",
-                "volume",
-                "--stream",
-                "3",
-                "--set",
-                "15",
-            ])?;
-            launch("audio")?;
-            wait(|| solid_frame(&bridge()).is_some(), 10)?;
-            android(&[
-                "am",
-                "broadcast",
-                "-a",
-                "dev.sargunv.innkeeper.BENCH_BEGIN",
-                "-p",
-                "dev.sargunv.innkeeper.probes",
-            ])?;
-            wait(|| log().contains("BENCH audio "), 15)?;
-            let text = log();
-            fs::write(out.join("audio.txt"), &text)?;
-            let line = text
-                .lines()
-                .find(|l| l.contains("BENCH audio "))
-                .context("missing audio observation")?;
-            let latency = field(line, "output_ns")
-                .and_then(|v| v.parse::<i64>().ok())
-                .filter(|v| *v >= 0);
-            Ok(
-                json!({"android_output_timestamp_ms":latency.map(|v|v as f64/1e6),"method":"AudioTrack timestamp extrapolated to first submitted sample; private PipeWire null sink, no physical DAC", "roundtrip":{"status":if number(line,"roundtrip_ns").is_some() {"collected"} else {"unavailable"},"upper_bound_ms":number(line,"roundtrip_ns").map(|v|v as f64/1e6),"method":"matched 127-sample marker at AudioRecord read-return; includes capture buffering; silent capture yields unavailable, see README"},"capture_peak":number(line,"capture_peak"),"native_pipewire":native_audio(out,&sink)?}),
-            )
-        }
-        "gpu" => gpu(out),
-        "memory" => {
-            let idle = memory(seconds)?;
-            launch("input")?;
-            Ok(
-                json!({"idle":idle,"one_app":memory(seconds)?,"app":"dev.sargunv.innkeeper.probes/.BenchProbe mode=input"}),
-            )
-        }
         _ => bail!("unknown benchmark"),
     };
     fs::write(
@@ -519,26 +307,12 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
     )?;
     result
 }
-fn native_audio(out: &Path, sink: &str) -> Result<Value> {
-    let binary = out.join("audio-native");
-    let status = Command::new("cc")
-        .args(["tests/bench/audio-native.c", "-O2", "-o"])
-        .arg(&binary)
-        .args(["-ldl", "-pthread"])
-        .status()?;
-    ensure!(status.success(), "building native audio baseline failed");
-    let text = command(binary.to_str().unwrap(), &[sink])?;
-    fs::write(out.join("audio-native.txt"), &text)?;
-    Ok(
-        json!({"method":"libpulse-simple on PipeWire, private sink monitor, software output/capture round trip", "observation":serde_json::from_str::<Value>(&text)?}),
-    )
-}
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let name = args.first().map(String::as_str).unwrap_or("help");
-    if !["input", "frame", "audio", "gpu", "memory", "binder"].contains(&name) {
+    if !["input", "frame"].contains(&name) {
         println!(
-            "mise run bench -- input|frame|audio|gpu|memory|binder [--noisy] [--seconds N] [--max-load N]\nFresh named profile, private desktop and data. Outputs: out/bench/<profile>/result.json and summary.txt. --noisy marks proof runs unsuitable for comparison."
+            "mise run bench -- input|frame [--noisy] [--seconds N] [--max-load N]\nFresh named profile, private desktop and data. Outputs: out/bench/<profile>/result.json and summary.txt. --noisy marks proof runs unsuitable for comparison."
         );
         return Ok(());
     }
@@ -598,22 +372,6 @@ fn main() -> Result<()> {
             }
         }
         r["noisy"] = json!(noisy || !r["warnings"].as_array().unwrap().is_empty());
-        r["measurement_complete"] = json!(match name {
-            "input" => r["measurement"]["input_to_presentation"]["n"] == 10,
-            "frame" => ["scroll", "game"]
-                .iter()
-                .all(|mode| !r["measurement"][mode]["presentation_intervals"].is_null()),
-            "audio" =>
-                !r["measurement"]["android_output_timestamp_ms"].is_null()
-                    && r["measurement"]["roundtrip"]["status"] == "collected",
-            "gpu" => ["android", "host"]
-                .iter()
-                .all(|side| r["measurement"][side]["score"].is_number()),
-            _ => r["status"] == "collected",
-        });
-        r["valid_for_comparison"] = json!(
-            r["status"] == "collected" && r["noisy"] == false && r["measurement_complete"] == true
-        );
         fs::write(out.join("result.json"), serde_json::to_string_pretty(&r)?)?;
         let summary = format!(
             "Benchmark: {name}\nStatus: {}\nNOISY / proof only: {}\nContext: {}\nWarnings: {}\nMeasurement: {}\nError: {}\nResult: {}\n",
@@ -684,7 +442,7 @@ fn main() -> Result<()> {
     fs::write(
         out.join("result.json"),
         serde_json::to_string_pretty(
-            &json!({"schema":1,"benchmark":name,"profile":id,"status":"starting","context_before":before,"warnings":warnings,"noisy":noisy,"valid_for_comparison":false,"max_load":max_load}),
+            &json!({"benchmark":name,"profile":id,"status":"starting","context_before":before,"warnings":warnings,"noisy":noisy,"max_load":max_load}),
         )?,
     )?;
     let status = Command::new("tests/nested.sh")
@@ -694,11 +452,6 @@ fn main() -> Result<()> {
         .env("INNKEEPER_BRIDGE_DEBUG", "1")
         .env("INNKEEPER_BENCH_INSIDE", "1")
         .env("INNKEEPER_BENCH_OUT", &out)
-        .env("INNKEEPER_AUDIO_SINK", format!("innkeeper_bench_{id}"))
-        .env(
-            "INNKEEPER_AUDIO_SOURCE",
-            format!("innkeeper_bench_{id}.monitor"),
-        )
         .env(
             "INNKEEPER_DATA",
             std::env::current_dir()?

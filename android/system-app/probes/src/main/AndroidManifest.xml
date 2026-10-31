@@ -29,7 +29,6 @@
     <activity android:name=".WideColorProbe" android:exported="true" android:label="Wide colour probe" />
     <activity android:name=".WideColorProbe$Hdr" android:exported="true" android:label="HDR probe" />
     <activity android:name=".BenchProbe" android:exported="true" android:label="Benchmark probe" />
-    <service android:name=".BenchService" android:process=":bench" android:exported="false" />
 
     <activity android:name=".TaskWindowProbe" android:exported="true" />
 

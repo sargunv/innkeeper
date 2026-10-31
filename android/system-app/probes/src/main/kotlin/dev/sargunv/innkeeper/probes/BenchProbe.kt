@@ -2,13 +2,10 @@
 package dev.sargunv.innkeeper.probes
 
 import android.app.Activity
-import android.app.Service
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.ServiceConnection
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -18,20 +15,15 @@ import android.media.AudioRecord
 import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.os.Binder
 import android.os.Bundle
-import android.os.IBinder
-import android.os.Parcel
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
-import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-/** Manual benchmarks; e2e also reuses the audio marker to prove capture. */
+/** Manual input and frame benchmarks; e2e reuses the audio marker to prove capture. */
 class BenchProbe : Activity() {
-  private var connection: ServiceConnection? = null
   private var started = false
   private val control =
     object : BroadcastReceiver() {
@@ -66,15 +58,11 @@ class BenchProbe : Activity() {
     // the activity off display 0 cannot create duplicate measurement workers.
     if (started) return
     started = true
-    when (intent.getStringExtra("mode")) {
-      "binder" -> binder()
-      "audio" -> thread(name = "bench-audio") { audio() }
-    }
+    if (intent.getStringExtra("mode") == "audio") thread(name = "bench-audio") { audio() }
   }
 
   override fun onDestroy() {
     unregisterReceiver(control)
-    connection?.let { unbindService(it) }
     super.onDestroy()
   }
 
@@ -133,71 +121,6 @@ class BenchProbe : Activity() {
       frame++
       if (mode == "scroll" || mode == "game") postInvalidateOnAnimation()
     }
-  }
-
-  private fun binder() {
-    val c =
-      object : ServiceConnection {
-        override fun onServiceDisconnected(name: ComponentName) {}
-
-        override fun onServiceConnected(name: ComponentName, remote: IBinder) {
-          thread(name = "bench-binder") {
-            try {
-              check(remote !is Binder) { "benchmark requires a remote process" }
-              for (workers in listOf(1, 8)) {
-                val start = CountDownLatch(1)
-                val done = CountDownLatch(workers)
-                val samples = Array(workers) { LongArray(500) }
-                val failures = java.util.concurrent.atomic.AtomicInteger()
-                for (w in 0 until workers) thread(name = "binder-$w") {
-                  start.await()
-                  try {
-                    repeat(500) { i ->
-                      val data = Parcel.obtain()
-                      val reply = Parcel.obtain()
-                      try {
-                        data.writeInt(i)
-                        val at = System.nanoTime()
-                        check(remote.transact(IBinder.FIRST_CALL_TRANSACTION, data, reply, 0))
-                        check(reply.readInt() == i)
-                        samples[w][i] = System.nanoTime() - at
-                      } finally {
-                        data.recycle()
-                        reply.recycle()
-                      }
-                    }
-                  } catch (e: Exception) {
-                    failures.incrementAndGet()
-                    Log.e("InnkeeperBench", "binder", e)
-                  } finally {
-                    done.countDown()
-                  }
-                }
-                val at = System.nanoTime()
-                start.countDown()
-                done.await()
-                val elapsed = System.nanoTime() - at
-                check(failures.get() == 0)
-                // Keep each log line below logcat's payload limit.
-                for (w in samples.indices) for (chunk in samples[w].toList().chunked(100)) {
-                  Log.i(
-                    "InnkeeperBench",
-                    "BENCH binder_sample workers=$workers ns=${chunk.joinToString(",")}",
-                  )
-                }
-                Log.i(
-                  "InnkeeperBench",
-                  "BENCH binder workers=$workers count=${workers * 500} elapsed_ns=$elapsed",
-                )
-              }
-            } catch (e: Exception) {
-              Log.e("InnkeeperBench", "BENCH error binder", e)
-            }
-          }
-        }
-      }
-    connection = c
-    check(bindService(Intent(this, BenchService::class.java), c, Context.BIND_AUTO_CREATE))
   }
 
   private fun audio() {
@@ -281,18 +204,4 @@ class BenchProbe : Activity() {
       record.release()
     }
   }
-}
-
-class BenchService : Service() {
-  private val echo =
-    object : Binder() {
-      override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-        if (code != IBinder.FIRST_CALL_TRANSACTION)
-          return super.onTransact(code, data, reply, flags)
-        reply!!.writeInt(data.readInt())
-        return true
-      }
-    }
-
-  override fun onBind(intent: Intent): IBinder = echo
 }
