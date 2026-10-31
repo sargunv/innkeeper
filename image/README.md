@@ -14,17 +14,17 @@ first `start`) runs the pipeline.
 flowchart LR
   fetch["fetch.sh<br/>download, size + sha256 check"] --> extract["extract.sh<br/>super.img → partitions"]
   extract --> flatten["flatten-apex.sh<br/>APEXes → dirs, per bootconfig"]
-  flatten --> derive["derive.sh<br/>common and single layers"]
+  flatten --> derive["derive.sh<br/>the derived layer"]
 ```
 
 Cache, shared by every profile, in `$XDG_DATA_HOME/innkeeper/images/<name>/`:
 `dl/` (resumable downloads; the zip goes once extracted), `img/` (the
 partitions), `apex-<hash>/` (one flattened tree per vendor APEX selection, never
-rewritten under a running session), `derived/` (the layers
+rewritten under a running session), `derived/` (the layer
 [docs/session.md](../docs/session.md#overlay-stack) stacks above the image).
 About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
 
-A successful `prepare` prunes stale builds (with their derived layers) and
+A successful `prepare` prunes stale builds (with their derived layer) and
 unselected `apex-<hash>` trees, logging what it frees. The current pin and every
 running session hold leases on their build and APEX tree, and a cache-wide lock
 in `images/.locks/` serializes preparation and pruning across profiles. Pruning
@@ -41,8 +41,8 @@ it first.
 ## Bumping the pin
 
 1. Pick a build on ci.android.com (branch `aosp-android-latest-release`, the
-   target above) and record the zip's and `sbom/sbom.spdx.json`'s size and
-   sha256 in `pin.toml` with the new `name`, `build_id` and `fingerprint`.
+   target above) and record the img zip's `url`, `size` and `sha256` in
+   `pin.toml` with the new `name` and `fingerprint`.
 2. `mise run session -- prepare`, then list `img/vendor/apex` and add a
    selection to `bootconfig` for every new multi-install or VM-only APEX.
 3. `prepare` checks the upstream SHA-256 bases in
