@@ -1,7 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The audio_bridge AIDL module and libtinyalsav2.so, both installed into the
-# AIDL audio HAL's APEX overlay (README.md).
+# The audio_bridge AIDL module, installed into the AIDL audio HAL's APEX
+# overlay (README.md).
 set(CMAKE_C_STANDARD 17)
+# The bridge's audio service and pcm.h's blocking device over it.
+add_library(innkeeper_audio_client STATIC stream/audio.c stream/pcm.c)
+set_target_properties(
+  innkeeper_audio_client
+  PROPERTIES C_VISIBILITY_PRESET hidden POSITION_INDEPENDENT_CODE ON)
+target_include_directories(innkeeper_audio_client PUBLIC stream)
+target_compile_options(innkeeper_audio_client PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(innkeeper_audio_client PUBLIC innkeeper_bridge_client)
+if(ANDROID)
+  target_link_libraries(innkeeper_audio_client PUBLIC log)
+endif()
 set(AUDIO_AIDL ${CMAKE_CURRENT_BINARY_DIR}/aidl)
 innkeeper_gen_aidl(
   ${AUDIO_AIDL}
@@ -31,35 +42,22 @@ if(NOT ANDROID)
   target_link_libraries(audio_queue_test PRIVATE pthread)
   add_test(NAME audio_queue COMMAND audio_queue_test)
   set_tests_properties(audio_queue PROPERTIES TIMEOUT 5)
-  add_executable(pcm_capture_test tests/capture_test.c tinyalsa/pcm.c)
-  target_include_directories(pcm_capture_test PRIVATE ${AOSP}/include)
-  target_link_libraries(
-    pcm_capture_test
-    PRIVATE innkeeper_bridge_client pthread)
+  add_executable(pcm_capture_test tests/capture_test.c)
+  target_link_libraries(pcm_capture_test PRIVATE innkeeper_audio_client pthread)
   target_compile_options(
     pcm_capture_test
     PRIVATE -Wall -Wextra -Werror -UNDEBUG)
   add_test(NAME pcm_capture COMMAND pcm_capture_test)
+  add_executable(audio_client_test tests/audio_client_test.c)
+  target_link_libraries(
+    audio_client_test
+    PRIVATE innkeeper_audio_client pthread)
+  target_compile_options(audio_client_test PRIVATE -UNDEBUG)
+  add_test(NAME audio_client COMMAND audio_client_test)
   return()
 endif()
 
-add_library(
-  tinyalsav2
-  SHARED tinyalsa/pcm.c tinyalsa/mixer.c tinyalsa/internal.c)
-set_target_properties(tinyalsav2 PROPERTIES C_VISIBILITY_PRESET hidden)
-target_include_directories(tinyalsav2 PRIVATE ${AOSP}/include)
-target_compile_options(tinyalsav2 PRIVATE -Wall -Wextra -Werror)
-target_link_options(
-  tinyalsav2
-  PRIVATE
-    -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tinyalsa/exports.map
-    -Wl,-z,defs)
-target_link_libraries(tinyalsav2 PRIVATE innkeeper_bridge_client log)
-
 set(HAL_APEX ${INNKEEPER_ANDROID}/apex/com.android.hardware.audio)
-install(
-  TARGETS tinyalsav2
-  LIBRARY DESTINATION ${HAL_APEX}/lib64 COMPONENT audio)
 install(
   FILES
   etc/apex/com.android.hardware.audio/etc/android.hardware.audio.service-aidl.example.rc
@@ -84,11 +82,10 @@ target_link_libraries(audio_aidl PUBLIC binder_ndk_stub log)
 add_executable(audio_bridge stream/Module.cpp stream/StreamBridge.cpp
                stream/StreamInBridge.cpp)
 target_compile_features(audio_bridge PRIVATE cxx_std_20)
-target_include_directories(audio_bridge PRIVATE ${AOSP}/include)
-target_link_libraries(audio_bridge PRIVATE audio_aidl tinyalsav2)
+target_link_libraries(audio_bridge PRIVATE audio_aidl innkeeper_audio_client)
 add_executable(audio_input_test tests/input_test.cpp stream/StreamInBridge.cpp)
 target_compile_features(audio_input_test PRIVATE cxx_std_20)
-target_include_directories(audio_input_test PRIVATE stream ${AOSP}/include)
+target_include_directories(audio_input_test PRIVATE stream)
 target_link_libraries(audio_input_test PRIVATE audio_aidl)
 set_target_properties(
   audio_input_test

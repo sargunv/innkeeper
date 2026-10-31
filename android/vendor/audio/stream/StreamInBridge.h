@@ -29,7 +29,7 @@ class StreamInBridge : public core::IStreamCommonDelegator {
   std::atomic<bool> closed_{false};
   std::mutex closeMutex_;
   std::thread worker_;
-  pcm* pcm_ = nullptr;
+  bridge_pcm* pcm_ = nullptr;
   uint64_t read_ = 0;
   Descriptor::State state_ = Descriptor::State::STANDBY;
 };

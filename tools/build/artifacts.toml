@@ -65,9 +65,8 @@ artifacts = [
 
 [module.audio]
 task = "build:audio"
-runs = "in Android, loaded by the AIDL audio HAL"
+runs = "in Android, in the AIDL audio HAL's APEX"
 artifacts = [
-  "share/innkeeper/android/apex/com.android.hardware.audio/lib64/libtinyalsav2.so",
   "share/innkeeper/android/apex/com.android.hardware.audio/bin/hw/audio_bridge",
   "share/innkeeper/android/apex/com.android.hardware.audio/etc/audio-bridge.rc",
   "share/innkeeper/android/vendor/etc/vintf/manifest/audio-bridge.xml",

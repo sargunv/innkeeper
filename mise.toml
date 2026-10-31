@@ -69,7 +69,7 @@ description = "Mesa RADV, ANV and lavapipe (build container; skipped when its in
 run = "android/vendor/vulkan/build.sh"
 
 [tasks."build:audio"]
-description = "libtinyalsav2 for the audio HAL's APEX, the policy XML and audio.prop"
+description = "The audio module (IModule/innkeeper) for the audio HAL's APEX, the policy XML and audio.prop"
 depends = ["ndk"]
 run = "tools/build/install-component.sh audio"
 
@@ -154,7 +154,6 @@ tests/bionic/run.sh -v "$v" -- /vendor/bin/gralloc_test
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gpu_copy_test
 tests/bionic/run.sh -v "$v" -- /vendor/bin/hwc_test
 android/vendor/vulkan/tests/run.sh
-android/vendor/audio/tests/abi.sh
 """
 
 [tasks."test:e2e"]

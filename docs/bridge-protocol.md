@@ -68,7 +68,7 @@ sequenceDiagram
 
 | Id  | Service   | Types / events      | Clients (Android side)                  | Spec                                                                 |
 | --- | --------- | ------------------- | --------------------------------------- | -------------------------------------------------------------------- |
-| 1   | audio     | `0x01xx`            | `libtinyalsav2` in the audio HAL        | [audio/proto.rs](../host/bridge/src/audio/proto.rs), `audio/ring.rs` |
+| 1   | audio     | `0x01xx`            | the audio HAL's `audio_bridge`          | [audio/proto.rs](../host/bridge/src/audio/proto.rs), `audio/ring.rs` |
 | 2   | display   | `0x02xx` / `0x42xx` | the composers (Android, OpenHarmony)    | [display/proto.rs](../host/bridge/src/display/proto.rs)              |
 | 3   | system    | `0x03xx` / `0x43xx` | the system app (integration)            | [system/proto.rs](../host/bridge/src/system/proto.rs)                |
 | 4   | documents | `0x04xx` / `0x44xx` | the system app (picker, provider)       | [documents/proto.rs](../host/bridge/src/documents/proto.rs)          |

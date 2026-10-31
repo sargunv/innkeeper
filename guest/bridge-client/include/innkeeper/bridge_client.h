@@ -4,7 +4,7 @@
 // proto}.rs. It connects and says HELLO, builds messages, sends and
 // receives packets with fds, and matches replies to requests by tag. Each
 // caller owns its socket and its service's messages (the composer's display
-// presenter, tinyalsa's audio streams).
+// presenter, the audio HAL's streams).
 #pragma once
 
 #include <stdbool.h>
