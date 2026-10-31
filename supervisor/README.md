@@ -140,6 +140,18 @@ Canonicalization keeps the public path, while cross-process `/proc` reads keep
 the lower path so vold does not kill MediaProvider's recovery database on
 unmount.
 
+## OpenHarmony
+
+`LINUXAPK_GUEST=ohos` (the OpenHarmony guest, #191) keeps everything above and
+adds what OpenHarmony's userspace expects of its kernel. Android sessions never
+set it, and their filter is unchanged.
+
+- **musl.** The broker also builds static for `x86_64-unknown-linux-musl`, since
+  OH's root has no Bionic. musl opens with `open(2)`, so the filter also traps
+  it and the broker serves it as `openat(AT_FDCWD, ...)`. `/etc/passwd` and
+  `/etc/group` get `/system/etc`'s: musl resolves service users there, and
+  Flatpak binds its own over both.
+
 ## Tests
 
 - `cargo test -p linuxapk-broker` (binder transactions, failure delivery,

@@ -12,6 +12,7 @@
 //!   * `flat`: what Flatpak mode's missing mounts did (Android paths for
 //!     /proc magic links, faked /proc files).
 //!
+//! `LINUXAPK_GUEST` selects the guest's extensions ([`guest`]).
 //! `LINUXAPK_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
 //! `supervisor/README.md`.
 
@@ -27,6 +28,24 @@ pub mod notify;
 use std::io::Write;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The guest userspace the session runs. Android's behaviour is the default;
+/// OpenHarmony (`ohos/`) adds its kernel extensions on top of the same
+/// emulation, and nothing else changes for Android.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Guest {
+    Android,
+    Ohos,
+}
+
+/// From `LINUXAPK_GUEST` (`ohos`, or anything else for Android), read once.
+pub fn guest() -> Guest {
+    static GUEST: std::sync::OnceLock<Guest> = std::sync::OnceLock::new();
+    *GUEST.get_or_init(|| match std::env::var("LINUXAPK_GUEST").as_deref() {
+        Ok("ohos") => Guest::Ohos,
+        _ => Guest::Android,
+    })
+}
 
 /// Verbose tracing (LINUXAPK_BROKER_DEBUG).
 pub static DEBUG: AtomicBool = AtomicBool::new(false);

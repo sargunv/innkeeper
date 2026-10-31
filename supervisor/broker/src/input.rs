@@ -289,7 +289,7 @@ fn receive(socket: &UnixDatagram, bytes: &mut [u8]) -> std::io::Result<(usize, O
     msg.msg_iov = &mut iov;
     msg.msg_iovlen = 1;
     msg.msg_control = control.as_mut_ptr().cast();
-    msg.msg_controllen = std::mem::size_of_val(&control);
+    msg.msg_controllen = std::mem::size_of_val(&control) as _;
     let n = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut msg, libc::MSG_CMSG_CLOEXEC) };
     if n < 0 {
         return Err(std::io::Error::last_os_error());
@@ -299,7 +299,8 @@ fn receive(socket: &UnixDatagram, bytes: &mut [u8]) -> std::io::Result<(usize, O
         let mut c = libc::CMSG_FIRSTHDR(&msg);
         while !c.is_null() {
             if (*c).cmsg_level == libc::SOL_SOCKET && (*c).cmsg_type == libc::SCM_RIGHTS {
-                let count = ((*c).cmsg_len - libc::CMSG_LEN(0) as usize) / size_of::<i32>();
+                let count =
+                    ((*c).cmsg_len as usize - libc::CMSG_LEN(0) as usize) / size_of::<i32>();
                 for i in 0..count {
                     let received = OwnedFd::from_raw_fd(std::ptr::read_unaligned(
                         libc::CMSG_DATA(c).cast::<i32>().add(i),

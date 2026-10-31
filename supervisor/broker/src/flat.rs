@@ -23,6 +23,9 @@
 //!    which bind mounts covered otherwise) gets a memfd copy of it, and
 //!    apexd's `/proc/mounts` lists the pre-mounted APEXes
 //!    (`/linuxapk/apexd-mounts`, as `linuxapk-apexd` does with a bind mount).
+//!  * OpenHarmony only: `openat` of `/etc/passwd` and `/etc/group` gets the
+//!    image's (`/system/etc`, its `/etc`): musl resolves service users by
+//!    name there, and the sandbox binds its own read-only over both.
 
 use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -489,6 +492,18 @@ impl Flat {
             self.reply(req.id, 0, libc::EACCES);
             return true;
         }
+        if crate::guest() == crate::Guest::Ohos
+            && prefix.as_deref().is_some_and(|p| p.starts_with(b"/etc/"))
+            && let Some(name) = read_path(tid, a[1]).as_deref().and_then(ohos_etc)
+        {
+            return match std::fs::read(format!("/system/etc/{name}")) {
+                Ok(body) => {
+                    self.inject(req, &body);
+                    true
+                }
+                Err(_) => false,
+            };
+        }
         match prefix {
             Some(b) if b"/proc/".starts_with(&b) || b == b"/proc/" => {}
             _ => return false,
@@ -556,6 +571,15 @@ impl Flat {
                 &add as *const _,
             )
         };
+    }
+}
+
+/// The OpenHarmony `/etc` files the broker serves from `/system/etc`.
+fn ohos_etc(path: &[u8]) -> Option<&'static str> {
+    match path {
+        b"/etc/passwd" => Some("passwd"),
+        b"/etc/group" => Some("group"),
+        _ => None,
     }
 }
 

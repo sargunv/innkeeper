@@ -631,7 +631,8 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
             eprintln!("broker: NOTIF_RECV: {e}");
             return;
         }
-        let req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
+        let mut req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
+        as_openat(&mut req);
         let nr = req.data.nr as i64;
         if let Some(input) = &input
             && input.serve(&req)
@@ -676,6 +677,17 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
             continue;
         }
         sup.lock().unwrap().dispatch(req);
+    }
+}
+
+/// musl (OpenHarmony) opens with `open(2)`, which the filter traps only for
+/// that guest: serve it as the `openat(AT_FDCWD, ...)` it is. The answer goes
+/// by notification id, so a continued request still runs the caller's open.
+fn as_openat(req: &mut SeccompNotif) {
+    if req.data.nr as i64 == libc::SYS_open {
+        let a = req.data.args;
+        req.data.nr = libc::SYS_openat as i32;
+        req.data.args = [libc::AT_FDCWD as u64, a[0], a[1], a[2], 0, 0];
     }
 }
 
