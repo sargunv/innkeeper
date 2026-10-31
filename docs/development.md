@@ -68,8 +68,9 @@ flowchart LR
   only for a checkout you mean to use as your Innkeeper; then
   `flatpak run dev.sargunv.Innkeeper install app.apk` uses it.
 - Use `INNKEEPER_PROFILE=<name>` for anything experimental: it is a separate
-  session with its own `/data`, logs and sandbox. Add `INNKEEPER_TEST=1` to keep
-  it off the real desktop ([security.md](security.md#test-sessions)).
+  session with its own `/data`, logs and sandbox. Off a nested desktop the dev
+  runner defaults to a test session (`INNKEEPER_TEST=0` opts out)
+  ([security.md](security.md#test-sessions)).
 
 ## Test
 

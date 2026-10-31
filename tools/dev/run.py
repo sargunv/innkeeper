@@ -27,6 +27,13 @@ PROFILE = ENV.get("INNKEEPER_PROFILE", "dev")
 if not re.fullmatch(r"[a-z0-9-]+", PROFILE):
   sys.exit("dev runner requires a named INNKEEPER_PROFILE")
 ENV["INNKEEPER_PROFILE"] = PROFILE
+# The dev runner shares the user's real session bus, so isolate it unless a
+# nested desktop set a private XDG_RUNTIME_DIR. INNKEEPER_TEST=0 opts out.
+if (
+  ENV.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+  == f"/run/user/{os.getuid()}"
+):
+  ENV.setdefault("INNKEEPER_TEST", "1")
 ENV.setdefault(
   "INNKEEPER_IMAGES", str(Path.home() / ".local/share/innkeeper/images")
 )
