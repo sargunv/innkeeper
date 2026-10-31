@@ -7,7 +7,7 @@ grants go through the session's `Session1` D-Bus API.
 
 ```sh
 innkeeper install App.apk             # also .apks, .xapk, .apkm
-innkeeper open [FILE...]              # choose an Android app; no files opens the manager
+innkeeper open FILE...                # open documents with an Android app you pick
 innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 innkeeper uninstall org.wikipedia [--keep-data]
 innkeeper list                        # user apps, and which may run in the background
@@ -40,10 +40,9 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
   app…**. **Open** lists VIEW handlers; **Share** lists SEND targets for one
   file and SEND_MULTIPLE targets for several, and the same activity must accept
   every file's MIME type. Targets are queried each time, so installs and
-  removals show at once. APKs and bundles go to the installer instead.
-  Innkeeper's desktop entry accepts common document, text and media types, and
-  Flatpak forwards its `%F` through the document portal. No file-type defaults
-  are changed.
+  removals show at once. APKs and bundles are refused: `install` takes them. The
+  desktop opens those with the manager; Innkeeper's desktop entry claims no
+  document types, so it never becomes their default handler.
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).
