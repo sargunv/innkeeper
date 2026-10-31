@@ -1321,8 +1321,8 @@ dependencies = [
  "accesskit_unix",
  "anyhow",
  "calloop",
- "innkeeper-broker",
  "innkeeper-core",
+ "innkeeper-evdev-proto",
  "innkeeper-profile",
  "libc",
  "mime_guess",
@@ -1344,6 +1344,7 @@ dependencies = [
 name = "innkeeper-broker"
 version = "0.1.0"
 dependencies = [
+ "innkeeper-evdev-proto",
  "libc",
 ]
 
@@ -1374,6 +1375,10 @@ dependencies = [
  "zbus",
  "zip",
 ]
+
+[[package]]
+name = "innkeeper-evdev-proto"
+version = "0.1.0"
 
 [[package]]
 name = "innkeeper-manager"

@@ -7,6 +7,7 @@ members = [
   "host/manager",
   "host/profile",
   "supervisor/broker",
+  "supervisor/evdev-proto",
   "tests/compat",
   "tests/bench",
 ]

@@ -1,7 +1,7 @@
 //! Translation stays in the system app (host layout, shortcuts, gestures).
 //! Eligible translated events return here to the broker's session-local evdev
 //! endpoints; this bridge is the only writer of input_event records.
-use innkeeper_broker::input::event;
+use innkeeper_evdev_proto::{Message, event};
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 
@@ -20,18 +20,23 @@ impl Evdev {
         micros: i64,
         events: &[(u16, u16, i32)],
     ) -> std::io::Result<()> {
-        let mut b = device.to_le_bytes().to_vec();
+        let mut records =
+            Vec::with_capacity((events.len() + 1) * innkeeper_evdev_proto::EVENT_SIZE);
         for &(ty, code, value) in events {
-            b.extend_from_slice(&event(micros, ty, code, value));
+            records.extend_from_slice(&event(micros, ty, code, value));
         }
-        b.extend_from_slice(&event(micros, 0, 0, 0));
-        self.packet(&b)
+        records.extend_from_slice(&event(micros, 0, 0, 0));
+        self.packet(
+            &Message::Events {
+                device,
+                records: &records,
+            }
+            .encode(),
+        )
     }
 
     pub fn device(&self, device: u32, enabled: bool) -> std::io::Result<()> {
-        let mut b = device.to_le_bytes().to_vec();
-        b.push(u8::from(enabled));
-        self.packet(&b)
+        self.packet(&Message::Device { device, enabled }.encode())
     }
 
     pub fn gamepad(
@@ -42,9 +47,12 @@ impl Evdev {
         synthetic: bool,
     ) -> std::io::Result<()> {
         use std::os::fd::AsRawFd;
-        let mut b = device.to_le_bytes().to_vec();
-        b.extend_from_slice(&[if synthetic { 3 } else { 2 }, 0]);
-        b.extend_from_slice(identity.as_bytes());
+        let mut b = Message::Gamepad {
+            device,
+            identity,
+            synthetic,
+        }
+        .encode();
         // Connect once for sendmsg's ancillary fd; normal records still use
         // send_to on the same destination.
         self.socket.connect(&self.path)?;

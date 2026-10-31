@@ -6,6 +6,7 @@ publish = false
 description = "Innkeeper broker: serves the session's seccomp user notifications, binder included"
 
 [dependencies]
+innkeeper-evdev-proto = { path = "../evdev-proto" }
 libc = "0.2"
 
 # Installed as libexec/innkeeper/innkeeper-brk, static musl for both guests. Tests match the name in
