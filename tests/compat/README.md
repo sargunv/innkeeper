@@ -8,8 +8,7 @@ F-Droid APKs, fetched to `out/test/compat/corpus` and never committed) into a
 session, and records JSON and Markdown under `out/test/compat/<profile>/`.
 `fresh-results.json` contains the current observations, including harness
 errors; `results.json` keeps baseline entries for apps not run or hit by a
-harness error. Nightly CI publishes the
-[compatibility wiki](https://github.com/sargunv/innkeeper/wiki/Compatibility).
+harness error. Nightly CI keeps both in its `compatibility` artifact.
 
 Per app (`src/app.rs`): `pm install`, launch through the window manager, watch 8
 s (15 s for games) for crashes, ANRs and death, check window focus, take a
@@ -54,11 +53,3 @@ available for a run.
 - **Flatpak**: there is no TUN device, so Rethink's VPN check fails and it
   partly works. A `--window` run gets a nested desktop of its own
   (`tests/nested.sh`).
-
-Wiki publishing requires the Actions secret `INNKEEPER_WIKI_TOKEN`: a classic
-personal access token with `public_repo` scope from an account with write access
-to this public repository. `GITHUB_TOKEN` cannot push the separate wiki Git
-repository. Without the secret, CI skips publishing and retains the artifact;
-publishing errors do not change the compatibility result. Test the renderer
-without a session or APKs with
-`python3 -B -m unittest discover -s tools/ci/tests`.

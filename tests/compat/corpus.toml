@@ -7,8 +7,7 @@
 # (`native` lists the ABIs the APK ships).
 #
 # Per app: framework = the UI framework or engine the APK is built with, for
-# the Compatibility wiki (identified by hand from its libs and assets, see
-# https://github.com/sargunv/innkeeper/wiki/Compatibility and
+# the compatibility report (identified by hand from its libs and assets, see
 # tests/compat/README.md; the harness doesn't check it).
 #
 # Per app, optional:
