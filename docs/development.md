@@ -6,10 +6,10 @@ mise provides Rust (with the `x86_64-linux-android` target), Java, CMake, Ninja,
 dprint, shellcheck, shfmt, hk and jactionlint (`mise install`). The rest comes
 from the host; none of it needs root.
 
-| For               | What                                                                                                                                                                                                       |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| building          | Android SDK at `$ANDROID_HOME` (default `~/Android/Sdk`) with NDK `30.0.16248370`, build-tools `37.0.0` and `platforms;android-37.0`; podman; clang; GTK 4 (4.18+) and libadwaita (1.7+) development files |
-| running a session | Flatpak, a Wayland desktop, GPU access (`/dev/udmabuf`) and audio; development sessions also use `systemd --user` and Python 3.11+                                                                         |
+| For               | What                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| building          | Android SDK at `$ANDROID_HOME` (default `~/Android/Sdk`) with the NDK, build-tools and platform [toolchain.env](../tools/build/toolchain.env) pins; podman; clang; GTK 4 (4.18+) and libadwaita (1.7+) development files |
+| running a session | Flatpak, a Wayland desktop, GPU access (`/dev/udmabuf`) and audio; development sessions also use `systemd --user` and Python 3.11+                                                                                       |
 
 ## Build
 
@@ -37,17 +37,24 @@ flowchart LR
 - **One NDK superbuild**, the root `CMakeLists.txt` (presets `android` and
   `host-tests`), builds every Android-side C/C++ artifact; ninja rebuilds only
   what changed.
-- **One build container**, [tools/container](../tools/README.md), for Mesa and
-  the static image tools. Every run is capped (`--memory`, `--pids-limit`);
-  those builds are skipped while their inputs hash to the same stamp, and it
-  runs at nice 10.
+- **One build container**, `tools/container/` (`Containerfile`, and `run.sh`,
+  which tags the image by the Containerfile's hash and always caps the run at
+  nice 10), for Mesa and the static image tools. Those builds are skipped while
+  their inputs hash to the same stamp.
 - **One compiler cache**: every C/C++ compile, in the container or not, goes
   through sccache into `~/.cache/innkeeper/sccache`, which every checkout and
   worktree shares. [tools/build/sccache.sh](../tools/build/sccache.sh) keys it
   on paths relative to the checkout and keeps each depfile local, so a new
   worktree's first build reuses its siblings' objects and Ninja still tracks its
   own headers.
+- **AOSP interfaces.** `android/vendor/third_party/aosp` holds every frozen AIDL
+  snapshot the HALs implement and the AOSP headers they build against, copied
+  from one AOSP tag by `android/vendor/tools/sync-aosp.sh`. At configure time
+  `android/vendor/tools/gen-aidl.sh` generates each HAL's NDK backend with the
+  build-tools' `aidl`.
+- **Gradle** builds the system app; the wrapper is checked in.
 - `mise run clean` removes build output and keeps test results.
+- `tools/build/` also holds `host.sh` (`build:host`).
 
 ## Run
 
@@ -60,9 +67,10 @@ flowchart LR
 - `tools/dev/innkeeper.sh install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)) in the same Flatpak, with
   `--profile $INNKEEPER_PROFILE` added. It needs a desktop of its own:
-  `INNKEEPER_PROFILE=cli tests/nested.sh tools/dev/innkeeper.sh list` runs it on
-  a nested KWin with private PipeWire/Pulse (no hardware monitors), a private
-  bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them after.
+  `INNKEEPER_PROFILE=cli tests/nested.sh tools/dev/innkeeper.sh list`
+  ([a nested desktop](#a-nested-isolated-desktop)).
+- `tools/dev/footprint.sh`: PSS and RSS of every process in a running session,
+  to see what an idle session holds.
 - `mise run package` builds the Flatpak bundle from the committed tree into
   `out/release/` ([packaging/flatpak](../packaging/flatpak/README.md)).
   `mise run package -- --install` also installs it into `FLATPAK_USER_DIR`
@@ -77,48 +85,15 @@ flowchart LR
 ## Test
 
 Test tiers and their mise tasks are in [tests/README.md](../tests/README.md).
-`mise run check` (hk and dprint) is the pre-commit gate; `mise run fix` formats.
-
-## adb into a profile
-
-A profile can serve adb on loopback TCP, for Android Studio, Gradle and the
-`adb` command line. It is off by default; turn it on per profile, at once if the
-profile runs:
-
-```sh
-innkeeper profile set --adb on      # adb on: emulator-5556 (127.0.0.1:5557)
-adb -s emulator-5556 install app.apk
-```
-
-- Each profile gets an adb port as the Android Emulator does: the first odd port
-  from 5555 to 5585 whose pair (the console port, one below) nothing uses and no
-  other profile has, kept in its settings (`adb-port`, which may be set to
-  another of those ports). An adb server looks for devices there when it starts,
-  so it lists the profile as `emulator-<port - 1>` with no `adb connect`, and so
-  do Android Studio and Gradle. Use that serial: AGP 9.4.1's
-  `connectedAndroidTest` fails for `host:port` serials even when every test
-  passes.
-- A running adb server is told about the profile as the emulator tells it, when
-  adb is turned on and whenever a profile with adb on starts (once adbd
-  listens), over the server's protocol (`ANDROID_ADB_SERVER_PORT`, default
-  5037), with no `adb` in the Flatpak.
-- adb authentication stays on. The user's `~/.android/adbkey.pub` is authorized
-  in the profile's data when adb is turned on and at each start;
-  `adb start-server` creates the key if there is none. Any other key is refused
-  (`unauthorized`).
-
-Run instrumented tests that take screenshots (`UiAutomation.takeScreenshot`,
-screenshot-diff libraries) in phone mode
-(`innkeeper profile set --display medium-phone`). In windowed mode each app
-window is its own virtual display, so a capture of the default display does not
-show the app.
+`mise run check` runs every hk linter (dprint, shellcheck, clippy, jactionlint),
+as the pre-commit hook does on staged files; `mise run fix` fixes what it can.
 
 ## Android logs
 
 Take a bounded snapshot inside a named session:
 
 ```sh
-INNKEEPER_PROFILE=debug mise run session -- exec timeout 10 logcat -b all -d -t 100
+INNKEEPER_PROFILE=debug mise run session -- exec timeout 10 logcat -d -t 100
 ```
 
 Without `-d` or `-t`, `logcat` streams until interrupted (`-T 100` streams too);
@@ -132,50 +107,19 @@ the timeout bounds a stalled reader.
 
 ## A nested, isolated desktop
 
-Features that open windows, portals or notifications are tested in a nested
-compositor that is fully isolated from the user's desktop: a private D-Bus
-session, a private `XDG_RUNTIME_DIR` and XDG dirs under `out/`, `DISPLAY` unset,
-and `WAYLAND_DISPLAY` set to the nested socket before the bus starts, so
-whatever the bus activates (portals, kded) inherits it.
+`tests/nested.sh CMD...` runs a command on a disposable KWin (or headless Mutter
+with `INNKEEPER_TEST_COMPOSITOR=mutter`) with a private D-Bus, runtime dir, HOME
+and XDG dirs under `out/test/nested/<profile>/`, private PipeWire/Pulse with a
+null sink and no hardware monitors, and removes them after. Use it for anything
+that opens windows, portals or notifications. It serves
+`dev.sargunv.Innkeeper.TestDesktop` (input, window visibility and position,
+screenshots): `tests/e2e/kwin.py` on KWin, `tests/e2e/mutter.js` on GNOME Shell.
 
-```sh
-N=$PWD/out/nested
-mkdir -p $N/{home,config,data,cache,state}
-# A short runtime dir: a socket path must fit in 108 bytes, which a deep
-# checkout's out/ can exceed (KWin then dumps core). Remove it when done.
-RT=$(mktemp -d -p "$XDG_RUNTIME_DIR" inkp-XXXXXX)
-printf '#!/bin/sh\necho "$DBUS_SESSION_BUS_ADDRESS" >%s/bus\nexec sleep infinity\n' $N >$N/hold.sh
-chmod +x $N/hold.sh   # the session's command: publishes the nested bus, then waits
-E=(-u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS HOME=$N/home XDG_RUNTIME_DIR=$RT
-   XDG_CONFIG_HOME=$N/config XDG_DATA_HOME=$N/data XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
-   XDG_CURRENT_DESKTOP=KDE)
-systemd-run --user --unit inkp-nested-kwin -p MemoryMax=3G -- env "${E[@]}" WAYLAND_DISPLAY=inkp-nested \
-  dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket inkp-nested \
-  --width 1920 --height 1080 --exit-with-session $N/hold.sh
-WAYLAND_DISPLAY=$RT/inkp-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
-  INNKEEPER_PROFILE=nested mise run session -- start
-# innkeeper writes desktop entries under XDG_DATA_HOME for every profile, so
-# point it at $N while keeping the session's image and /data:
-D=(XDG_DATA_HOME=$N/data XDG_CONFIG_HOME=$N/config INNKEEPER_PROFILE=nested
-   INNKEEPER_IMAGES=$HOME/.local/share/innkeeper/images
-   INNKEEPER_DATA=$HOME/.local/share/innkeeper/data-nested)
-env "${D[@]}" out/stage/bin/innkeeper install some.apk
-```
-
-- Check `/proc/<pid>/environ` of every process on the nested bus (private
-  `HOME`, nested `WAYLAND_DISPLAY`) before testing. Never start plasmashell,
-  kded, akonadi or kdeconnect against the real dirs, and stop every unit you
-  started when done.
-- `tests/nested.sh` serves `dev.sargunv.Innkeeper.TestDesktop` (input, window
-  visibility and position, screenshots) on both compositors: `tests/e2e/kwin.py`
-  on KWin, `tests/e2e/mutter.js` on GNOME Shell. KWin's
-  `org_kde_kwin_fake_input` and `org.kde.KWin.ScreenShot2` are offered only to a
-  client whose resolved executable (e.g. `/usr/bin/python3.14`, not the symlink)
-  is the `Exec` of a `.desktop` file in `$N/data/applications` that names them
-  in `X-KDE-Wayland-Interfaces` and `X-KDE-DBUS-Restricted-Interfaces`.
+- KWin offers `org_kde_kwin_fake_input` and `org.kde.KWin.ScreenShot2` only to a
+  client whose resolved executable is the `Exec` of a desktop file naming them
+  in `X-KDE-Wayland-Interfaces` and `X-KDE-DBUS-Restricted-Interfaces`;
+  `nested.sh` writes one for `/usr/bin/python3`.
 - Inside Android, plain `screencap` shows only the launcher: each app window is
   its own virtual display, named `innkeeper:<package>`. Capture one with
   `screencap -d <id> -p <file>`, taking the id from
   `dumpsys SurfaceFlinger --display-id`, as tests/compat does.
-- A fake `x-scheme-handler/https` handler in `$N/data/applications` logs what
-  OpenURI opens, and a null sink (`INNKEEPER_AUDIO_SINK`) keeps media silent.

@@ -22,7 +22,6 @@ Cache, shared by every profile, in `$XDG_DATA_HOME/innkeeper/images/<name>/`:
 partitions), `apex-<hash>/` (one flattened tree per vendor APEX selection, never
 rewritten under a running session), `derived/` (the layer
 [docs/session.md](../docs/session.md#overlay-stack) stacks above the image).
-About 1.2 GB downloaded, 2.4 GB extracted, 0.75 GB per APEX tree.
 
 A successful `prepare` prunes stale builds (with their derived layer) and
 unselected `apex-<hash>` trees, logging what it frees. The current pin and every
@@ -56,19 +55,6 @@ it first.
    rerun `prepare`. Rename the blanked APEX APKs to the new build id.
 4. Prove it: `mise run test:e2e` passes, and a few corpus apps still work
    (`mise run test:compat -- --only <package>,...`).
-
-## Licensing
-
-The SBOM (SPDX 2.3) for build 16644040 lists Apache-2.0 for most installed
-files, then MIT/ISC, SIL OFL fonts, BSD, LGPL-2.1 and a few GPL-2.0 tools. Flags
-for packaging:
-
-- `libdng_sdk.so` is under Adobe's DNG SDK license (permissive, not OSI), and
-  `libultrahdr` and the JPEG codecs carry an Adobe gain-map notice; both ship in
-  every AOSP build.
-- The Android SDK license appears only on build-time inputs (AndroidX jars
-  compiled into Launcher3 and SystemUI), not on any installed file.
-- The kernel and dtb (GPL-2.0) are in `boot.img`, which we never extract.
 
 Tests: launcher unit tests cover pin selection and pruning.
 `tests/fork-drift.sh` (in `mise run test`) checks the fork-base check against a

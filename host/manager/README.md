@@ -56,9 +56,8 @@ starting Android: its Display, windowed or a phone preset for its next start
 ([phone mode](../../docs/display.md#phone-mode)); following the desktop's
 appearance, language/region and clock (each on by default); its idle timeout;
 app-menu mirroring; and an adb switch that applies at once
-([development.md](../../docs/development.md#adb-into-a-profile)). It also says
-that apps aren't isolated from each other and opens Android Settings in its own
-window.
+([README](../../README.md#for-android-developers)). It also says that apps
+aren't isolated from each other and opens Android Settings in its own window.
 
 - Settings live in the profile's one settings file
   ([session.md](../../docs/session.md#profiles)). A running profile takes

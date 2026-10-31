@@ -5,30 +5,10 @@ run from a shell or from the `Exec` of the desktop entries it writes. Shared
 operations are in [innkeeper-core](../core/README.md); app settings and file
 grants go through the session's `Session1` D-Bus API.
 
-```sh
-innkeeper install App.apk             # also .apks, .xapk, .apkm; the session mirrors it to the app menu
-innkeeper open FILE...                # open documents with an Android app you pick
-innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
-innkeeper uninstall org.wikipedia [--keep-data]
-innkeeper list                        # user apps, and which may run in the background
-innkeeper app info org.wikipedia [--json]     # storage, settings, runtime permissions
-innkeeper app clear-cache|clear-data|stop org.wikipedia
-innkeeper app set org.wikipedia [--background on|off] [--escape-back on|off]
-              [--permission android.permission.CAMERA=on|off]...
-innkeeper profile list                # profiles and whether they run
-innkeeper profile create|delete NAME  # delete removes its apps, data and settings
-innkeeper profile rename OLD NEW
-innkeeper [--profile NAME] profile start|stop
-innkeeper profile start --all         # every profile (Keep Running's login command)
-innkeeper profile set --adb on|off    # adb on a loopback port, live; your adb server lists it
-innkeeper profile set --display windowed|small-phone|medium-phone|medium-tablet
-innkeeper profile set --idle-minutes 10 --mirror-apps off --follow-dark off ...
-innkeeper profile set --keep-running on       # every profile: never idle, start at login
-innkeeper --profile NAME install App.apk      # any command, on another profile
-```
+`innkeeper --help` lists the commands; this covers what it doesn't say.
 
 - Every command starts the session if needed; the first start downloads the
-  Android image (about 1.2 GB), with progress on stderr.
+  Android image, with progress on stderr.
 - `run` with a URI sends `VIEW` + `BROWSABLE` restricted to the package, so only
   activities that accept browser links get it; `content:` and `intent:` URIs are
   refused. A path or `file:` URI is instead opened read-only and its fd handed
@@ -49,11 +29,9 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
 - `app set --background on` keeps the session up while that app is installed
   ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
-- A profile is a separate Android with its own apps, data and settings
-  ([session](../../docs/session.md#profiles)). `--profile NAME` selects one;
-  without it, commands work with `default`, created the first time. Desktop
-  entries run `innkeeper --profile NAME run PKG`, so an app's entry keeps using
-  its profile.
+- `--profile NAME` selects a profile; without it, commands work with `default`,
+  created the first time ([session](../../docs/session.md#profiles)). App
+  entries run `innkeeper --profile NAME run PKG`, so they keep their profile.
 - The supported desktops have no standard hook for sharing text from the host,
   so the desktop entry accepts files only.
 

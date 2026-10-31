@@ -5,8 +5,8 @@
 //   exec`)
 //
 // Binder is served through the seccomp filter the broker installs on init,
-// which only init's descendants inherit. `innkeeper-session
-// exec` joins the session's namespaces, so its processes have no filter and
+// which only init's descendants inherit. `innkeeper-session exec` runs its
+// command in the session's sandbox but outside that filter, so it would have
 // no binder (am, pm, cmd, dumpsys, service ...). The client instead hands its
 // argv, environment, working directory and stdio fds (SCM_RIGHTS) to this
 // server, which init started; the server forks the command with those fds,
@@ -14,8 +14,8 @@
 // goes away. This is what adbd does for `adb shell`.
 //
 // Built static with the NDK (build:ndk). The socket lives on the
-// session's private /dev, mode 0600 root, so only root inside the session can
-// use it, and it grants nothing joining the namespaces doesn't already give.
+// session's /dev, mode 0600 root, so only root inside the session can use it,
+// and it grants nothing the sandbox doesn't already give.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>

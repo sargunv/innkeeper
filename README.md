@@ -38,23 +38,42 @@ Open an APK with **Innkeeper**: it shows what the app is and which permissions
 it wants, installs it, and adds it to your app menu. Each app then opens in its
 own window. The first use downloads the Android image (about 1.2 GB).
 
-The same works from a terminal:
-
-```sh
-flatpak run dev.sargunv.Innkeeper install App.apk   # also .apks, .xapk, .apkm
-flatpak run dev.sargunv.Innkeeper run org.wikipedia
-flatpak run dev.sargunv.Innkeeper list
-flatpak run dev.sargunv.Innkeeper uninstall org.wikipedia
-```
+The same works from a terminal, for example
+`flatpak run dev.sargunv.Innkeeper install App.apk`; `--help` lists every
+command.
 
 Android starts when an app needs it and stops a couple of minutes after its last
 window closes. Profiles keep separate sets of apps and data, and a profile can
-show a whole phone or tablet screen instead of one window per app: see the
-Profiles page in Innkeeper, or
-`flatpak run dev.sargunv.Innkeeper profile --help`.
+show a whole phone or tablet screen instead of one window per app: see
+Innkeeper's Profiles page and each profile's settings.
 
 Apps share one uid and are not isolated from each other, just as native desktop
 apps aren't ([security](docs/security.md#app-isolation)).
+
+Upgrading Innkeeper can upgrade Android, and Android migrates its data in ways
+an older version can't read. Before upgrading, stop the profile and copy its
+whole data directory, such as
+`~/.var/app/dev.sargunv.Innkeeper/data/innkeeper/data-default`, somewhere safe
+(`cp -a`). To go back, restore that copy with the older Innkeeper.
+
+## For Android developers
+
+Turn on adb in a profile's settings in Innkeeper. The profile then listens on a
+loopback port, as the Android Emulator does, so `adb devices`, Android Studio
+and Gradle list it as `emulator-<port>` with no `adb connect`; use that serial
+(Gradle's `connectedAndroidTest` fails for `host:port` serials). Only your
+`~/.android/adbkey.pub` is authorized. Run instrumented tests that take
+screenshots in a phone or tablet profile: in windowed mode each app window is
+its own display, so a capture of the default display doesn't show the app.
+
+## How is this different from Waydroid?
+
+Waydroid runs a custom LineageOS image in a root-managed LXC container with the
+kernel's binder, and gives apps separate uids. Innkeeper needs no root, kernel
+module or custom image: it runs Google's unmodified AOSP build inside its
+Flatpak sandbox, emulating binder in userspace, at the cost of isolation between
+Android apps. Each app gets a desktop window of its own, integrated with the
+desktop's portals, notifications and media controls.
 
 ## Status
 
