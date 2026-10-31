@@ -1,4 +1,4 @@
-//! Single-uid mode's virtual credentials: the pure model and the syscalls
+//! Virtual credentials for Android's uids: the pure model and the syscalls
 //! that the broker answers with it.
 
 mod syscalls;

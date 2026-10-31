@@ -3,7 +3,7 @@
 # operations on ring buffers, oversized LPM prefixes, FIFO and symlinked pins,
 # and unbounded object creation (see bpfemu.c for the cases). Runs in a
 # private user and mount namespace with a tmpfs on /sys/fs/bpf, as the
-# session has. Builds into out/test/supervisor/bpfemu.
+# session has.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=$here/../../out/test/supervisor/bpfemu

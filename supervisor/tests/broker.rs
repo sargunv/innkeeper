@@ -1,4 +1,4 @@
-//! Test-only C ABI for the existing Linux syscall probes. No policy lives here.
+//! C ABI for the syscall probes in supervisor/tests. No policy lives here.
 use std::os::fd::{FromRawFd, OwnedFd};
 
 #[unsafe(no_mangle)]

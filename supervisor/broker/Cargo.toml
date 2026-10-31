@@ -3,15 +3,13 @@ name = "innkeeper-broker"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Innkeeper broker: Android's binder driver reimplemented in userspace, served through the session's seccomp user notifications"
+description = "Innkeeper broker: serves the session's seccomp user notifications, binder included"
 
 [dependencies]
 libc = "0.2"
 
-# The dynamic bionic binary pivot-exec becomes to serve the session's seccomp
-# listener. build:supervisor installs it as /system/bin/innkeeper-brk.
-# TASK_COMM_LEN is 16 (15 characters plus NUL). The binary name is the
-# process name tests match in /proc/pid/comm, so it stays within that.
+# Installed as /system/bin/innkeeper-brk. Tests match the name in
+# /proc/<pid>/comm, so it stays within TASK_COMM_LEN (15 characters).
 [[bin]]
 name = "innkeeper-brk"
 path = "src/main.rs"

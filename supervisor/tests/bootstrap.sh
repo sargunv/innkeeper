@@ -23,7 +23,7 @@ fi
   exit 1
 }
 echo 'ok   pivot-exec becomes the parent broker and preserves init exit status'
-# A signal exit has the same result as the old bootstrap reaper.
+# Init killed by a signal exits with 128 + the signal.
 if timeout 5 setpriv --no-new-privs "$out/pivot-exec" / /bin/sh -c 'kill -TERM $$'; then
   result=0
 else
