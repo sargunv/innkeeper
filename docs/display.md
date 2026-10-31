@@ -186,10 +186,9 @@ Alt+F3 on KWin). Escape releases pointer capture; it does not exit fullscreen.
 
 Fullscreen is a user control. App immersive mode (hidden Android system bars)
 never changes the host window, including for games. Each app already fills its
-own Android virtual display, with no system decorations. Requested orientation
-still reshapes floating windows, and Ctrl+R swaps their shape. The per-window
-policy function defers shape requests while fullscreen, maximized or tiled; a
-later compositor configure wins.
+own Android virtual display, with no system decorations. Shape requests
+([Window size](#window-size)) wait while a window is fullscreen, maximized or
+tiled.
 
 The system app registers `IDisplayWindowInsetsController` on its own displays.
 Android 17 reports the focused component and **requested** visible inset types
@@ -203,10 +202,9 @@ and activity metadata for the same reason: SDK display listeners don't report
 another activity's request. Signatures and behavior were checked against
 `android-17.0.0_r1` and the pinned Android 17 image; the image is not patched.
 
-`Activity.requestFullscreenMode` is a separate, currently unsupported request:
-Android rejects it before dispatch because each app task already fills its
-Android virtual display. It does not control desktop fullscreen; that remains a
-user choice ([#77](https://github.com/sargunv/innkeeper/issues/77)).
+`Activity.requestFullscreenMode` is unsupported: Android rejects it before
+dispatch because each app task already fills its virtual display. Desktop
+fullscreen stays the user's choice.
 
 ### Hidden windows
 
@@ -226,12 +224,11 @@ The window manager sleeps the existing VirtualDisplay's own power group through
 Android 17's platform `IPowerManager.goToSleepWithDisplayId` API. Android stops
 the activity; restore wakes the same group with `wakeUpWithDisplayId`. Each
 window already owns a display group, so these requests cannot sleep another
-window or the session's primary display. The display and tasks stay registered,
-including the separate closing-display hold described above. The bridge replaces
-the last Android buffer with a host-owned snapshot on hide and returns
-subsequent frames. Wayland releases the old dma-bufs, allowing FrameSink to
-close the retained ImageReader images through their normal lease release path
-without reusing pixels that the compositor is still reading.
+window or the session's primary display. The display and tasks stay registered.
+The bridge replaces the last Android buffer with a host-owned snapshot on hide
+and returns subsequent frames. Wayland releases the old dma-bufs, allowing
+FrameSink to close the retained ImageReader images through their normal lease
+release path without reusing pixels that the compositor is still reading.
 
 ### Keeping the desktop awake
 
@@ -240,8 +237,7 @@ through IPowerManager.addScreenTimeoutPolicyListener. WMS translates
 FLAG_KEEP_SCREEN_ON into a display-specific screen wake lock; the policy also
 includes SCREEN_BRIGHT, SCREEN_DIM and FULL wake locks. The hidden platform
 listener is needed because the SDK cannot observe other applications' aggregate
-screen wake locks. It is compile-only against the pinned Android 17 signature;
-no framework patch or polling is involved.
+screen wake locks. It is compiled against the pinned Android 17 signature.
 
 A visible window with that policy owns a zwp_idle_inhibitor_v1. Clearing the
 request, hiding the window or closing it destroys the inhibitor. Restoring a
@@ -256,7 +252,7 @@ Both baseline desktops advertise idle-inhibit v1:
 and
 [Plasma 6.3](https://github.com/KDE/kwin/blob/v6.3.0/src/wayland/idleinhibit_v1.cpp).
 The global is optional: if absent, windows and Android lifecycle keep working
-and desktop idle inhibition is unavailable. This path uses no portal service.
+and desktop idle inhibition is unavailable.
 
 ### Moving between outputs
 
@@ -278,18 +274,12 @@ Android 17's VirtualDisplayConfig.setRequestedRefreshRate is a creation-time
 setting: VirtualDisplayAdapter keeps mRequestedRefreshRate final and
 IDisplayManager has no live setter. Innkeeper leaves the requested rate at zero
 so SurfaceFlinger follows the primary display; it never recreates an app's
-VirtualDisplay to change the rate. Per-window host output-rate reporting is
-separate from that immutable Android configuration. Pacing follows the host
-through primary display 0.
+VirtualDisplay to change the rate. Pacing follows the host through primary
+display 0.
 
-`State::visible_outputs(window)` is the shared bridge boundary for output
-reporting and presentation pacing. It returns SCTK's complete output membership
-for a mapped visible window, and an empty set while hidden or after teardown.
-Lifecycle, surface enter/leave and output-mode events drive observations; no
-additional poll, heartbeat or membership tracker is needed. Fractional density
-uses that same surface's compositor-supplied preferred scale. Fractional-scale
-v1 is available on the baseline GNOME 48 and Plasma 6.3 stacks, with integer
-scale fallback when the global is absent.
+Output reporting and presentation pacing share `State::visible_outputs`, driven
+by lifecycle, surface enter/leave and output-mode events, with no polling.
+Fractional-scale v1 is available on the baseline GNOME 48 and Plasma 6.3.
 
 ### Launch feedback
 

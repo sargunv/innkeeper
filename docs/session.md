@@ -61,8 +61,7 @@ host metering. Netd's routes, firewall rules and socket marks are accepted and
 ignored. lmkd's PSI windows are widened to the unprivileged 2 s; `start` warns
 below Linux 6.5 (the supervisor requires 5.14).
 
-Init still believes it is pid 1 where it matters: the broker shows it as pid 1
-to `SO_PEERCRED`.
+The broker shows init as pid 1 to `SO_PEERCRED`.
 
 **No memory cap.** Flatpak puts each instance in a scope of its own, and a
 sandbox can create no units or cgroups, so the session can't cap itself. Android
@@ -95,8 +94,7 @@ verified owners in the `user.innkeeper.owner` xattr.
 
 Every Android process runs as the host user. The supervisor supplies virtual
 Android credentials ([supervisor](../supervisor/README.md)); apps are not
-isolated from each other ([security.md](security.md#single-uid-mode)). The CLI
-and manager show a one-time notice.
+isolated from each other ([security.md](security.md#single-uid-mode)).
 
 ## Lifecycle
 
@@ -175,9 +173,7 @@ data version record, so they move and back up with its data
 one is refused rather than rewritten. A missing file or setting means its
 default. Deleting a profile removes its data, settings, composed root, logs,
 runtime files, desktop preferences and app-menu entries; renaming moves them,
-and the composed root is recomposed. Either needs the profile stopped. Nothing
-in the model is Android-specific, so the OpenHarmony guest can keep its profiles
-the same way.
+and the composed root is recomposed. Either needs the profile stopped.
 
 ## Image upgrades and data recovery
 
@@ -194,8 +190,8 @@ successful version through an interrupted first boot. Start the same image or a
 newer one to retry; Android performs its usual startup recovery. Because even a
 failed boot may have migrated data, a framework older than either recorded
 version is refused. The error names the data directory, both versions and
-recovery choices. Data from before this policy has no recorded history and is
-adopted on its next start; back it up first if its history is uncertain.
+recovery choices. Data with no record is adopted on its next start; back it up
+first if its history is uncertain.
 
 An image rollback does **not** roll back `/data`. Before upgrading, stop the
 profile and back up its **entire** data directory, including the hidden version
@@ -218,8 +214,7 @@ and copy the complete pre-upgrade backup back to the original path with
 the recorded framework or a newer one with the current data. Moving the data
 directory aside without restoring a backup starts fresh, without the old apps or
 files. Do not delete or edit just the version record to bypass a refusal: it
-cannot undo Android's migrations. A launcher release predating this policy
-cannot enforce this check, so restore the matching backup before using it.
+cannot undo Android's migrations.
 
 Supply the profile's name in `INNKEEPER_PROFILE` on stop/start and use
 `data-<profile>`; `INNKEEPER_DATA` overrides that location. Development sessions

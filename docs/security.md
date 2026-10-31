@@ -69,39 +69,43 @@ but that is policy enforced by Android's own processes, not by the kernel.
 ## Flatpak mode
 
 The Flatpak sandbox is the boundary, as for any Flatpak app
-([session.md](session.md#flatpak-mode)). Android has no network namespace of its
-own there: it uses the host's network, as a native app with `--share=network`
-does, and netd's routing and firewall rules are accepted and ignored, so per-app
-network restrictions don't apply and there are no per-app traffic statistics:
-data-usage and firewall apps can't function (#42). There is no TUN device, so
-`VpnService` apps can't start a VPN (#56). Both are accepted, not planned. Only
-single-uid mode exists, and there are no cgroups: a session has no memory cap of
-its own. `selftest` checks the sandbox's grants and what it shows Android.
-Development and test sessions are capped externally by the host driver; the app
-receives no systemd permission.
+([session.md](session.md#flatpak-mode)). `selftest` checks the sandbox's grants
+and what it shows Android.
 
-With `--device=input`, every Android app can read the host's input devices,
-including keyboards and mice, just as a native Flatpak with that grant could.
-This exposure is accepted under desktop parity for controller support. EventHub
-scans the broker's private discovery directory to avoid duplicate keyboard,
-mouse and controller routes; that routing is not an access boundary.
+- **Network.** Android has no network namespace of its own: it uses the host's
+  network, as a native app with `--share=network` does. netd's routing and
+  firewall rules are accepted and ignored, so per-app network restrictions and
+  traffic statistics don't exist, and data-usage and firewall apps can't work.
+  There is no TUN device, so `VpnService` apps can't start a VPN. Both are
+  accepted.
+- **No cgroups.** Only single-uid mode exists, and a session has no memory cap
+  of its own. Development and test sessions are capped from the host; the app
+  gets no systemd permission.
+- **Input devices.** `--device=input` lets the bridge open controllers the user
+  can already access through uaccess ACLs, including rumble writes. It also lets
+  every Android app read the host's input devices, keyboards and mice included,
+  as any Flatpak with that grant could; this is accepted for controller support.
+  EventHub scans the broker's private discovery directory so keyboard, mouse and
+  controller routes aren't duplicated; that routing is not an access boundary.
+  The grant needs Flatpak 1.15.6 or newer; Debian 13 ships 1.16.
 
 The Flatpak's grants are `--device=dri`, `--device=input`, `--share=network`,
-`--share=ipc`, `--socket=wayland`, `--socket=pulseaudio` and talking to
-`org.a11y.Bus` (the baseline AT-SPI proxy hides the `org.a11y.Status` properties
-the bridge follows), the system bus's `org.freedesktop.UPower` (the desktop
-baseline has no battery portal), and `org.freedesktop.Notifications` (the
-Notification portal can't update notifications in place or show progress). MPRIS
-players own names under `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper`, which
-Flatpak grants every app for its own id. `--device=input` lets the bridge open
-controllers the user can already access through uaccess ACLs, including rumble
-writes; it also lets every Android app read host input devices, keyboards and
-mice included. This is accepted under desktop parity, as for game Flatpaks with
-the same grant. The grant requires Flatpak 1.15.6 or newer; Debian 13 ships
-1.16. Links and files go through the same portals as outside, and clipboard sync
-uses data control where available (KWin), or the display connection while a
-Innkeeper window has focus (GNOME). App-menu entries go through the
-DynamicLauncher portal, so the user confirms each one.
+`--share=ipc`, `--socket=wayland`, `--socket=pulseaudio`, read-only
+`~/.android/adbkey.pub` (for [adb](#desktop-exposure)), and these bus names, for
+what the baseline portals and proxies lack:
+
+- `org.a11y.Bus`: the baseline AT-SPI proxy hides the `org.a11y.Status`
+  properties the bridge follows.
+- the system bus's `org.freedesktop.UPower`: there is no battery portal.
+- `org.freedesktop.Notifications`: the Notification portal can't update
+  notifications in place or show progress.
+
+MPRIS players own names under `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper`,
+which Flatpak grants every app for its own id. Links and files go through the
+same portals as outside, and app-menu entries through the DynamicLauncher
+portal, so the user confirms each one. Clipboard sync uses data control where
+available (KWin), or the display connection while an Innkeeper window has focus
+(GNOME).
 
 ## Desktop exposure
 
@@ -111,9 +115,9 @@ DynamicLauncher portal, so the user confirms each one.
   portal, through opaque grants and `openat2(RESOLVE_BENEATH)`; the bridge is
   the only side that sees host paths.
 - **Clipboard:** text, images and bounded file selections sync through
-  `ext_data_control_v1`, or `wl_data_device` while a Innkeeper window has focus.
-  File-manager copies use FileTransfer portal grants; plain file URIs can read
-  only paths the Flatpak already has. Android file clips use private cache
+  `ext_data_control_v1`, or `wl_data_device` while an Innkeeper window has
+  focus. File-manager copies use FileTransfer portal grants; plain file URIs can
+  read only paths the Flatpak already has. Android file clips use private cache
   copies and read-only content URIs. Sensitive clips carry the password-manager
   hint. Test sessions disable both backends.
 - **Notifications and MPRIS:** labels and images from apps; images are raw RGBA,

@@ -78,9 +78,9 @@ interval while a batch is outstanding.
 Relative evdev motion cannot express leaving a desktop window, so the system app
 ends the native stream with `SYN_DROPPED` followed by `SYN_REPORT`. InputReader
 resets the device and InputDispatcher emits HOVER_EXIT under the mouse device
-ID. Touchpad gestures, touch and pen keep their existing injection stream. Both
-evdev socket hops apply bounded kernel backpressure and retry; a queued release
-is never discarded for EAGAIN.
+ID. Touchpad gestures, touch and pen stay on the injection stream. Both evdev
+socket hops apply bounded kernel backpressure and retry; a queued release is
+never discarded for EAGAIN.
 
 ## Controllers and rumble
 
@@ -253,10 +253,8 @@ The signal is the public `InputManager.InputDeviceListener` callback and
 `CursorInputMapper::configureOnPointerCapture` switches mice between
 `SOURCE_MOUSE` and `SOURCE_MOUSE_RELATIVE` and bumps their generation. Capture
 is global in InputReader; the bridge routes it to the window with both keyboard
-and content-pointer focus. This was checked against `android-17.0.0_r1` and the
-pinned Android 17 image. No private capture listener, polling, cursor-visibility
-heuristic or image patch is needed. An app hiding its cursor alone never locks
-the host pointer.
+and content-pointer focus. Checked against `android-17.0.0_r1` and the pinned
+image. An app hiding its cursor alone never locks the host pointer.
 
 Android release, host focus loss and window destruction destroy the lock. Escape
 also destroys it before the key reaches Android, even if the app ignores the
@@ -281,18 +279,15 @@ or loses Android focus; it cannot trap the host pointer again in that interval.
   ends. On GNOME, Shell applies its own DND policy to our host notifications:
   ordinary banners are suppressed, but critical call/alarm notifications can
   bypass DND. GNOME 48's portal does not export `show-banners`, so the bridge
-  cannot suppress that exception without additional settings access (#79). The
-  Android interruption filter is unchanged.
+  cannot suppress that exception. The Android interruption filter is unchanged.
 - Android 17 assigns every ordinarily injected key device ID −1, even if the
   caller sets a real device ID. The virtual keyboard still enumerates and makes
   `Configuration.keyboard` QWERTY. Ordinary keys use injection to preserve
   ordering, host layouts and compose; modifiers arrive from the real keyboard.
 - Injected keys use `Virtual.kcm`. Apps that read `KeyEvent.getUnicodeChar()`
   outside a text field (games, terminals' key handlers) see US characters for
-  non-US keys. A KCM matching the host layout remains separate work (#3).
-- Window shortcuts are on or off for every app except browsers' Ctrl+W, until
-  per-app settings exist (#24).
-- Pointer capture is not forwarded to Wayland pointer constraints (#4).
+  non-US keys.
+- Window shortcuts are on or off for every app at once, except browsers' Ctrl+W.
 - Views that accept only `SOURCE_TOUCHSCREEN` ignore the touchpad's fake
   fingers, as on stock Android with a touchpad.
 - Compositors keep most three- and four-finger swipes for themselves, and tablet
