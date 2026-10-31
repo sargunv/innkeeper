@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build:vulkan: the vendor Vulkan drivers (Mesa RADV, ANV and lavapipe) for Android
+# build:vulkan: the vendor Vulkan drivers (Mesa RADV, ANV and lavapipe) and Zink GLES for Android
 # x86_64, cross-built with the NDK pin in the build container
 # (tools/container/run.sh), into out/build/vulkan/install:
 #   share/linuxapk/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
@@ -237,6 +237,44 @@ build_lvp() {
   install_driver "$b/src/gallium/targets/lavapipe/libvulkan_lvp.so" lvp
 }
 
+# An optional GLES implementation on the same Vulkan HAL as ANGLE. Mesa's
+# Android EGL platform uses u_gralloc, including our stable IMapper v5 backend.
+build_zink() {
+  local b=$build/mesa-zink
+  # shellcheck disable=SC2046 # reconf prints zero or one flag
+  meson setup $(reconf "$b") "$b" "$src/mesa" "${cross[@]}" \
+    --prefix=/vendor --libdir=lib64 \
+    -Dbuildtype=release -Db_ndebug=true \
+    -Dplatforms=android -Dplatform-sdk-version="$API" \
+    -Dandroid-stub=true -Dandroid-libbacktrace=disabled -Dandroid-strict=false \
+    -Dvulkan-drivers= -Dgallium-drivers=zink -Dllvm=disabled \
+    -Degl=enabled -Dgbm=disabled -Dglx=disabled -Dopengl=true \
+    -Dgles1=enabled -Dgles2=enabled -Degl-lib-suffix=_zink -Dgles-lib-suffix=_zink \
+    -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
+    -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
+    -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
+    -Dvideo-codecs= -Dspirv-tools=disabled
+  meson compile -C "$b" -j "$JOBS"
+  install -d "$vendor/lib64/egl"
+  "$ndk_bin/llvm-objcopy" --strip-unneeded \
+    "$b/src/gallium/targets/dri/libgallium_dri.so" "$vendor/lib64/libgallium_dri.so"
+  patchelf --remove-rpath "$vendor/lib64/libgallium_dri.so"
+  check_elf "$vendor/lib64/libgallium_dri.so" library
+  local api so
+  for api in EGL GLESv1_CM GLESv2; do
+    if [[ $api == EGL ]]; then
+      so=$b/src/egl/lib${api}_zink.so
+    elif [[ $api == GLESv1_CM ]]; then
+      so=$b/src/mesa/glapi/es1api/lib${api}_zink.so
+    else
+      so=$b/src/mesa/glapi/es2api/lib${api}_zink.so
+    fi
+    "$ndk_bin/llvm-objcopy" --strip-unneeded "$so" "$vendor/lib64/egl/lib${api}_zink.so"
+    patchelf --set-soname "lib${api}_zink.so" --remove-rpath "$vendor/lib64/egl/lib${api}_zink.so"
+    check_elf "$vendor/lib64/egl/lib${api}_zink.so" library
+  done
+}
+
 # install_driver <built .so> <name>: install as /vendor/lib64/hw/vulkan.<name>.so.
 install_driver() {
   local so=$1 name=$2 dst=$build/vulkan.$2.so
@@ -265,11 +303,11 @@ check_elf() {
   # A HAL module should export HMI and nothing else (no static LLVM/libc++).
   local exports
   exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u)
-  if [[ $exports != HMI ]]; then
+  if [[ ${2:-hal} == hal && $exports != HMI ]]; then
     echo "check_elf: $f exports $(echo "$exports" | wc -l) symbols, expected only HMI" >&2
     bad=1
   fi
-  echo "check_elf: $(basename "$f") NEEDED: ${needed//$'\n'/ }; exports: $(echo "$exports" | cut -c1-80)"
+  echo "check_elf: $(basename "$f") NEEDED: ${needed//$'\n'/ }; exports: $(echo "${exports//$'\n'/ }" | cut -c1-80)"
   return $bad
 }
 
@@ -302,5 +340,6 @@ build_test() {
 
 build_hardware
 build_lvp
+build_zink
 install_etc
 build_test

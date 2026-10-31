@@ -6,7 +6,20 @@ by `mise run build:vulkan` (`build.sh`, in the build container; skipped while
 its inputs hash to `out/build/vulkan/.stamp`; the first LLVM build takes about
 15 minutes). They install as `/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so` and
 libvulkan loads one into every process that uses Vulkan. GLES comes from the
-image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
+image's ANGLE on top (`ro.hardware.egl=angle`, selected by the launcher).
+
+The same build also ships Mesa's **Zink** as an optional vendor EGL/GLES
+implementation over that Vulkan driver. Start a new session with
+`LINUXAPK_GLES=zink` to compare it with ANGLE on the same stage;
+`LINUXAPK_GLES=angle` (or unset) keeps ANGLE. The launcher saves the choice in
+`session.conf` and writes `ro.hardware.egl` at boot, plus
+`mesa.loader.driver.override=zink` for Zink. This is a session-wide choice,
+including SurfaceFlinger and the composer; stop the session before switching.
+Zink installs `libEGL_zink.so`, `libGLESv1_CM_zink.so` and `libGLESv2_zink.so`
+under `/vendor/lib64/egl`, with their shared Mesa implementation in
+`/vendor/lib64/libgallium_dri.so`. Their dependencies are checked against the
+same LL-NDK/vendor allowlist; the existing Mesa gralloc patch supplies IMapper
+v5 metadata without linking Android's private libui.
 
 - **One self-contained `.so` per driver.** libdrm, zlib, LLVM (lavapipe only;
   RADV uses ACO; ANV uses its own compiler) and libc++ are linked statically;
@@ -21,11 +34,11 @@ image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   Mesa device info, PCI table and ANV generation limits; older and unknown Intel
   IDs keep the software fallback. `LINUXAPK_VULKAN=lvp` forces software
   rendering. The choice is saved in session.conf: the broker permits Android to
-  open only that DRM device, so Mesa and the composer's ANGLE use the same GPU.
-  Gralloc uses driver-allocated tiled RGB render targets where the driver can
-  export them without a dedicated allocation (ANV, not RADV), keeping udmabuf
-  for CPU-accessed buffers. Flatpak's existing DRM grant to the desktop bridge
-  stays the same.
+  open only that DRM device, so Mesa and the GLES implementation use the same
+  GPU. Gralloc uses driver-allocated tiled RGB render targets where the driver
+  can export them without a dedicated allocation (ANV, not RADV), keeping
+  udmabuf for CPU-accessed buffers. Flatpak's existing DRM grant to the desktop
+  bridge stays the same.
 - **Features:** the launcher writes Vulkan permission XMLs into the runtime
   layer alongside `ro.hardware.vulkan`: Vulkan 1.3, compute level 0, and
   hardware level 1 for RADV/ANV or 0 for lavapipe.
