@@ -162,7 +162,7 @@ description = "Observable app behaviour on an isolated desktop (-- [boot input a
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
-description = "Manual app troubleshooting (-- --only PKG); full corpus only in nightly CI, never a gate"
+description = "Manual app troubleshooting (-- --only PKG), never a gate"
 env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
 
