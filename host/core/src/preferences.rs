@@ -43,13 +43,14 @@ fn autostart(enabled: bool) -> Result<()> {
         "org.freedesktop.portal.Request",
     )?;
     let mut responses = request.receive_signal("Response")?;
-    let command = vec![
-        crate::paths::Prefix::locate()?
+    let mut command = crate::paths::command(
+        &[crate::paths::Prefix::locate()?
             .launcher()
             .to_string_lossy()
-            .into_owned(),
-        "start".into(),
-    ];
+            .into_owned()],
+        &crate::paths::profile()?,
+    );
+    command.push("start".into());
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert("handle_token", Value::from(token.as_str()));
     options.insert(
@@ -96,19 +97,13 @@ pub fn save(prefs: Preferences) -> Result<()> {
     prefs.validate()?;
     let old = Preferences::load()?;
     let login_changed = prefs.keep_running != old.keep_running;
-    if login_changed {
-        ensure!(
-            crate::paths::profile()?.is_empty(),
-            "Start at login is only available for the main session"
-        );
-        if let Err(e) = autostart(prefs.keep_running) {
-            // A partial grant must not leave login startup enabled while the
-            // saved preference still says to stop when idle.
-            if prefs.keep_running {
-                let _ = autostart(false);
-            }
-            return Err(e);
+    if login_changed && let Err(e) = autostart(prefs.keep_running) {
+        // A partial grant must not leave login startup enabled while the
+        // saved preference still says to stop when idle.
+        if prefs.keep_running {
+            let _ = autostart(false);
         }
+        return Err(e);
     }
     let result = (|| {
         let connection = zbus::blocking::connection::Builder::session()?

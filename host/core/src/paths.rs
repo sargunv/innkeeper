@@ -45,6 +45,11 @@ impl Prefix {
         linuxapk_session::Paths::new(&self.0)
     }
 
+    /// Runtime paths of profile `name`.
+    pub fn profile_paths(&self, name: &str) -> Result<linuxapk_session::Paths> {
+        linuxapk_session::Paths::for_profile(&self.0, name)
+    }
+
     /// A program in `bin/`.
     pub fn bin(&self, name: &str) -> PathBuf {
         self.0.join("bin").join(name)
@@ -56,9 +61,9 @@ impl Prefix {
     }
 }
 
-/// `LINUXAPK_PROFILE` if it is a valid profile name, else an error. Empty
-/// for the main session.
-pub use linuxapk_session::paths::profile;
+/// The profile this process works with ([`linuxapk_session::paths::select`]
+/// or `LINUXAPK_PROFILE`), else an error.
+pub use linuxapk_session::paths::{profile, select};
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
 /// `$HOME`.

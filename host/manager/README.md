@@ -41,16 +41,24 @@ window. Turning off desktop following keeps Android's current value; subsequent
 changes in Android Settings are left alone. Turning off mirroring keeps existing
 launchers; turning it back on catches up apps installed while it was off.
 
+The main menu's Profiles page (`src/profiles.rs`) lists every profile with
+whether it runs, and creates, renames, deletes, starts and stops them. The
+window shows one profile's apps, named under its title; **Show Apps** switches
+to another and remembers it for the CLI. Opening the manager with no profile
+creates `default`, an ordinary profile. Deleting asks for confirmation and
+removes the profile's apps, data, settings and app-menu entries.
+
 When idle, Android stops after 2 minutes by default (adjustable from 1 to 120).
 Keep Running instead disables idle shutdown and requests login startup through
-the Background portal; a denied request leaves the setting unchanged. Login
-startup is only available for the main profile. microG uses the separately
-installed addon described in [its README](../../android/microg/README.md); the
-switch is unavailable without the addon and takes effect at the next Android
-start. Play Services client libraries remain unsupported.
+the Background portal; a denied request leaves the setting unchanged. The portal
+keeps one login command, so the profile that last turned it on starts. microG
+uses the separately installed addon described in
+[its README](../../android/microg/README.md); the switch is unavailable without
+the addon and takes effect at the next Android start. Play Services client
+libraries remain unsupported.
 
-Preferences live in `$XDG_CONFIG_HOME/linuxapk[-<profile>]/preferences.toml`.
-The page reads them without starting Android. A running session accepts updates
+Preferences live in `$XDG_CONFIG_HOME/linuxapk-<profile>/preferences.toml`. The
+page reads them without starting Android. A running session accepts updates
 through `Session1`; otherwise they are saved for the next start. Desktop
 following, mirroring and the idle timeout change live.
 

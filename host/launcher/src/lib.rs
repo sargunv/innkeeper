@@ -14,6 +14,7 @@ mod layer;
 pub mod lifecycle;
 pub mod paths;
 pub mod preferences;
+pub mod profile;
 mod prune;
 mod root;
 mod selftest;

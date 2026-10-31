@@ -12,6 +12,7 @@ use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
 use linuxapk_core::launcher::Session;
 use linuxapk_core::ops::{self, Event, LaunchOptions};
+use linuxapk_core::profiles::{self, Settings};
 use linuxapk_core::{desktop, validate, xdg};
 use rustix::fs::{FileType, OFlags};
 
@@ -25,6 +26,9 @@ use splash::Splash;
     about = "Android apps on the Linux desktop (Linux.apk)"
 )]
 struct Cli {
+    /// The profile to work with (`default`, or a name from `profile list`).
+    #[arg(long, global = true, value_name = "NAME")]
+    profile: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -69,6 +73,28 @@ enum Cmd {
         #[arg(value_parser = ["on", "off"])]
         setting: Option<String>,
     },
+    /// Manage profiles: separate Android setups, each with its own apps,
+    /// data and settings.
+    #[command(subcommand)]
+    Profile(ProfileCmd),
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// List the profiles and whether they are running.
+    List,
+    /// Create a profile.
+    Create { name: String },
+    /// Use a profile when none is named (the manager's Show Apps does too).
+    Use { name: String },
+    /// Rename a stopped profile; its app-menu entries follow.
+    Rename { from: String, to: String },
+    /// Delete a stopped profile, with its apps and their data.
+    Delete { name: String },
+    /// Start a profile (default: the one in use) and wait for Android.
+    Start { name: Option<String> },
+    /// Stop a profile (default: the one in use).
+    Stop { name: Option<String> },
 }
 
 /// Progress and warnings on stderr.
@@ -296,6 +322,70 @@ fn list() -> Result<()> {
     Ok(())
 }
 
+fn profile(cmd: ProfileCmd) -> Result<()> {
+    let name = |n: Option<String>| match n {
+        Some(n) => profiles::check_name(&n).map(|()| n),
+        None => profiles::resolve(false),
+    };
+    match cmd {
+        ProfileCmd::List => {
+            let current = profiles::resolve(false).ok();
+            for p in profiles::list()? {
+                let mark = if Some(&p.name) == current.as_ref() {
+                    "*"
+                } else {
+                    " "
+                };
+                let state = if p.running { "running" } else { "stopped" };
+                println!("{mark} {:<16} {state}", p.name);
+            }
+        }
+        ProfileCmd::Create { name: n } => {
+            profiles::create(&n, &Settings::default())?;
+            println!("created profile {n}");
+        }
+        ProfileCmd::Use { name: n } => {
+            ensure!(
+                profiles::list()?.iter().any(|p| p.name == n),
+                "no profile {n}"
+            );
+            profiles::choose(&n)?;
+        }
+        ProfileCmd::Rename { from, to } => {
+            profiles::rename(&from, &to)?;
+            println!("renamed profile {from} to {to}");
+        }
+        ProfileCmd::Delete { name: n } => {
+            profiles::delete(&n)?;
+            println!("deleted profile {n}");
+        }
+        ProfileCmd::Start { name: n } => {
+            profiles::start(&name(n)?, &|m| eprintln!("linuxapk: {m}"))?;
+        }
+        ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
+    }
+    Ok(())
+}
+
+/// The profile a command works with: `--profile`, `LINUXAPK_PROFILE`, the
+/// one in use, or, for a command that needs one, a first one made now.
+fn select_profile(named: Option<&str>, create: bool) -> Result<()> {
+    let p = match named {
+        Some(p) => {
+            profiles::check_name(p)?;
+            p.to_string()
+        }
+        None => match profiles::resolve(create) {
+            Ok(p) => p,
+            Err(_) if !create => return Ok(()),
+            Err(e) => return Err(e),
+        },
+    };
+    // SAFETY: no other threads yet.
+    unsafe { std::env::set_var("LINUXAPK_PROFILE", p) };
+    Ok(())
+}
+
 fn main() -> ExitCode {
     // A desktop launch's token is ours to use once; nothing we start
     // inherits it.
@@ -308,6 +398,12 @@ fn main() -> ExitCode {
         std::env::remove_var("DESKTOP_STARTUP_ID");
     }
     let cli = Cli::parse();
+    // Profile commands name theirs; the others need one.
+    let create = !matches!(cli.cmd, Cmd::Profile(_));
+    if let Err(e) = select_profile(cli.profile.as_deref(), create) {
+        eprintln!("linuxapk: {e:#}");
+        return ExitCode::FAILURE;
+    }
     let res = match cli.cmd {
         Cmd::Open { files } => open(&files, token),
         Cmd::Install { file } => install(&file),
@@ -343,6 +439,7 @@ fn main() -> ExitCode {
                 background(package.as_deref(), setting.as_deref())
             }
         }
+        Cmd::Profile(cmd) => profile(cmd),
     };
     if let Some(n) = Session::find()
         .ok()
