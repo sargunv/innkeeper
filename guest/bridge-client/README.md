@@ -1,13 +1,14 @@
 # bridge-client
 
-The C client of the [bridge protocol](../../../docs/bridge-protocol.md) for code
-inside Android, the mirror of `host/bridge/src/ipc/{wire,transport,proto}.rs`:
-connect to `/dev/socket/linuxapk/bridge.sock`, say HELLO, build messages, send
-and receive them with fds, and match replies by tag while skipping events.
+The C client of the [bridge protocol](../../docs/bridge-protocol.md) for code
+inside a guest, Android or OpenHarmony, the mirror of
+`host/bridge/src/ipc/{wire,transport,proto}.rs`: connect to
+`/dev/socket/linuxapk/bridge.sock`, say HELLO, build messages, send and receive
+them with fds, and match replies by tag while skipping events.
 
-A static library in the NDK superbuild (`linuxapk_bridge_client`), linked by the
-composer's `BridgePresenter` (display service), the Health HAL (host state
-service) and `libtinyalsav2` (audio service); it installs nothing. API:
+A static library in the NDK superbuild (`linuxapk_bridge_client`), linked by
+Android's composer (`BridgePresenter`, display service), the Health HAL (host
+state service) and `libtinyalsav2` (audio service); it installs nothing. API:
 `include/linuxapk/bridge_client.h` for framing, `include/linuxapk/audio.h` for
 PCM streams. `audio.c` owns the shared audio connection, open/close/standby,
 ring reads/writes and presentation timing, with no tinyalsa types.

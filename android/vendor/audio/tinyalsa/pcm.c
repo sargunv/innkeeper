@@ -1,6 +1,6 @@
 // tinyalsa PCM API for Linux.apk: one virtual card ("Linux.apk", card 0,
 // device 0) whose playback and capture use shared rings in the host bridge
-// (bridge-client/audio.c).
+// (guest/bridge-client/audio.c).
 //
 // This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
 // HAL plays to the desktop without changes. See ../README.md.
