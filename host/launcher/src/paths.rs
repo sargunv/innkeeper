@@ -74,8 +74,8 @@ pub struct Paths {
     /// `<prefix>/share/innkeeper`: the Android tree, the image config.
     pub share: PathBuf,
     /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>`, which every
-    /// instance of the app shares: session.conf, pid
-    /// files, the kmsg FIFO, the bridge's socket dir, the start-time layer.
+    /// instance of the app shares: session.conf, the control socket, the
+    /// kmsg FIFO, the bridge's socket dir, the start-time layer.
     pub run: PathBuf,
     /// `$XDG_STATE_HOME/innkeeper-<profile>`: logs, the documents grants.
     pub state: PathBuf,
@@ -85,7 +85,7 @@ pub struct Paths {
     pub data: PathBuf,
     /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
-    /// The image pin (`INNKEEPER_PIN`, default the prefix's).
+    /// The prefix's image pin.
     pub pin: PathBuf,
     /// The composed root: `root-<profile>`.
     pub root: PathBuf,
@@ -125,7 +125,7 @@ impl Paths {
             state: xdg_home("XDG_STATE_HOME", ".local/state").join(sfx("innkeeper")),
             data: data_env.unwrap_or_else(|| data_home.join(sfx("data"))),
             images: env_path("INNKEEPER_IMAGES").unwrap_or_else(|| data_home.join("images")),
-            pin: env_path("INNKEEPER_PIN").unwrap_or_else(|| share.join("image/pin.toml")),
+            pin: share.join("image/pin.toml"),
             root: data_home.join(sfx("root")),
             data_home,
             share,
@@ -148,16 +148,6 @@ impl Paths {
 
     pub fn conf(&self) -> PathBuf {
         self.run.join("session.conf")
-    }
-
-    /// Android init's pid.
-    pub fn pid_file(&self) -> PathBuf {
-        self.run.join("pid")
-    }
-
-    /// The process init is a child of: pivot-exec, which execs the broker.
-    pub fn outer_pid_file(&self) -> PathBuf {
-        self.run.join("outer.pid")
     }
 
     /// The control socket, which other instances of the app (the CLI, the

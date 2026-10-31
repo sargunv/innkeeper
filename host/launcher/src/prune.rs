@@ -86,7 +86,7 @@ fn running_images(paths: &Paths) -> Result<Vec<Image>> {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name != "innkeeper" && !name.starts_with("innkeeper-") {
+        if !name.starts_with("innkeeper-") {
             continue;
         }
         let run = entry.path();

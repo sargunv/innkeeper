@@ -295,8 +295,8 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Ends the session: kills everything it started and removes its socket and
-/// pid files. When this process is the sandbox's main one (its parent is the
+/// Ends the session: kills everything it started and removes its socket.
+/// When this process is the sandbox's main one (its parent is the
 /// sandbox's pid 1), that is everything else in the sandbox: Android
 /// processes orphaned by a dying init would otherwise keep it alive.
 fn teardown(p: &Paths) {
@@ -312,7 +312,6 @@ fn teardown(p: &Paths) {
         unsafe { libc::kill(-1, libc::SIGKILL) };
     }
     let _ = fs::remove_file(p.control());
-    session::remove_pids(p);
 }
 
 /// How a session that ended by itself went idle: `Some(wakeup)` once idle.
@@ -476,7 +475,6 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     let Some(init) = init else {
         bail!("init did not start (see {})", p.session_log().display());
     };
-    session::write_pids(p, outer, init)?;
     trace.mark(p, "init found");
     let paths = p.clone();
     control::serve(

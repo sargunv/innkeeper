@@ -1,5 +1,4 @@
-//! What runs beside Android: the kmsg log reader and the desktop bridge, plus
-//! the session's pid files.
+//! What runs beside Android: the kmsg log reader and the desktop bridge.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -55,17 +54,6 @@ impl BootTrace {
             ),
         );
     }
-}
-
-pub fn write_pids(paths: &Paths, outer: i32, init: i32) -> Result<()> {
-    fs::write(paths.outer_pid_file(), format!("{outer}\n"))?;
-    fs::write(paths.pid_file(), format!("{init}\n"))?;
-    Ok(())
-}
-
-pub fn remove_pids(paths: &Paths) {
-    let _ = fs::remove_file(paths.pid_file());
-    let _ = fs::remove_file(paths.outer_pid_file());
 }
 
 /// Empties the runtime dir and the logs, and makes the kmsg FIFO and the
@@ -137,7 +125,7 @@ pub fn start_bridge(cfg: &Config) -> Result<()> {
         }
     });
     let sock = p.run.join("bridge/bridge.sock");
-    if wait_for_bridge(&sock) {
+    if wait_for_bridge(&sock, BRIDGE_DEADLINE) {
         return Ok(());
     }
     bail!(
@@ -169,10 +157,13 @@ pub fn tail(file: &Path, alive: &dyn Fn() -> bool) -> Result<()> {
     }
 }
 
-/// Waits for the bridge's socket. Registering its desktop services can take
-/// seconds, and a crash costs a restart's backoff.
-fn wait_for_bridge(sock: &Path) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(15);
+/// How long the bridge may take to bind its socket. Registering its desktop
+/// services can take seconds, and a crash costs a restart's backoff.
+const BRIDGE_DEADLINE: Duration = Duration::from_secs(15);
+
+/// Waits up to `limit` for the bridge's socket.
+fn wait_for_bridge(sock: &Path, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
     loop {
         if sock.exists() {
             return true;
@@ -189,24 +180,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bridge_can_take_more_than_a_second_to_register_desktop_services() {
+    fn waits_for_the_bridge_socket_until_the_deadline() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../out/test/bridge-ready-{}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("bridge.sock");
+        assert!(!wait_for_bridge(&sock, Duration::from_millis(50)));
         let delayed = sock.clone();
         let bridge = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(1500));
+            thread::sleep(Duration::from_millis(50));
             fs::write(delayed, "").unwrap();
         });
-        let ready = wait_for_bridge(&sock);
+        let ready = wait_for_bridge(&sock, BRIDGE_DEADLINE);
         bridge.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
-        assert!(
-            ready,
-            "a slow bridge was rejected before binding its socket"
-        );
+        assert!(ready, "the bridge was rejected before binding its socket");
     }
 }
