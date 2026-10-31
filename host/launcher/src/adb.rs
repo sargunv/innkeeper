@@ -3,13 +3,18 @@
 //! authentication on (`ro.adb.secure=1`). The user's adb key
 //! (`~/.android/adbkey.pub`, which `adb` creates on its first start) is
 //! authorized in the profile's data, so a local `adb` connects without a
-//! prompt and other users of the host can't.
+//! prompt and other users of the host can't. The user's adb server is told
+//! about the profile as the emulator tells it, over the server's own protocol
+//! on loopback (Android shares the host's network): no `adb` binary is needed
+//! in the sandbox.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::Paths;
 use crate::profile::Settings;
@@ -104,6 +109,103 @@ pub fn prepare(paths: &Paths) -> Result<String> {
     Ok(props(&settings))
 }
 
+/// The serial adb knows the profile on `port` by: `emulator-<port - 1>`.
+pub fn serial(port: u16) -> String {
+    format!("emulator-{}", port - 1)
+}
+
+/// The user's adb server port (`ANDROID_ADB_SERVER_PORT`, default 5037).
+pub fn server_port() -> u16 {
+    std::env::var("ANDROID_ADB_SERVER_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(5037)
+}
+
+/// Once adbd listens on `port` (within `wait`), has the adb server on
+/// `server` list it, as the emulator does when it starts after the server.
+/// A server started later finds it by itself.
+pub fn announce_when_listening(server: u16, port: u16, wait: Duration) -> Result<()> {
+    let deadline = Instant::now() + wait;
+    let addr = (Ipv4Addr::LOCALHOST, port).into();
+    while TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+        if Instant::now() >= deadline {
+            bail!("adbd isn't listening on port {port}");
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    announce(server, port)
+}
+
+/// Tells the adb server on `server` about adbd on emulator port `port` and
+/// waits for it to list the device.
+fn announce(server: u16, port: u16) -> Result<()> {
+    // No reply: the server connects in the background.
+    let request = format!("host:emulator:{port}");
+    TcpStream::connect_timeout(
+        &(Ipv4Addr::LOCALHOST, server).into(),
+        Duration::from_secs(2),
+    )
+    .context("no adb server is running")?
+    .write_all(format!("{:04x}{request}", request.len()).as_bytes())?;
+    let serial = serial(port);
+    for _ in 0..30 {
+        let devices = server_request(server, "host:devices")?;
+        if devices
+            .lines()
+            .any(|l| l.split('\t').next() == Some(serial.as_str()))
+        {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    bail!("the adb server didn't list {serial}")
+}
+
+/// One request to an adb server: a hex length and the request, answered by
+/// OKAY or FAIL and a hex-length message.
+fn server_request(port: u16, request: &str) -> Result<String> {
+    let mut sock =
+        TcpStream::connect_timeout(&(Ipv4Addr::LOCALHOST, port).into(), Duration::from_secs(2))?;
+    sock.set_read_timeout(Some(Duration::from_secs(30)))?;
+    sock.write_all(format!("{:04x}{request}", request.len()).as_bytes())?;
+    let mut status = [0; 4];
+    sock.read_exact(&mut status)?;
+    let mut len = [0; 4];
+    sock.read_exact(&mut len)?;
+    let len = usize::from_str_radix(std::str::from_utf8(&len)?, 16).context("adb server reply")?;
+    let mut msg = vec![0; len.min(4096)];
+    sock.read_exact(&mut msg)?;
+    let msg = String::from_utf8_lossy(&msg).into_owned();
+    match &status {
+        b"OKAY" => Ok(msg),
+        b"FAIL" => bail!("adb: {msg}"),
+        _ => bail!("not an adb server on port {port}"),
+    }
+}
+
+/// After a start: tells the user's adb server about a profile with adb on, in
+/// the background, once adbd listens.
+pub fn announce_at_start(paths: &Paths) {
+    let Ok(s) = Settings::load(&paths.data) else {
+        return;
+    };
+    if !s.adb || s.adb_port == 0 {
+        return;
+    }
+    let paths = paths.clone();
+    std::thread::spawn(move || {
+        let r = announce_when_listening(server_port(), s.adb_port, Duration::from_secs(180));
+        crate::session::log(
+            &paths,
+            &match r {
+                Ok(()) => format!("adb: the adb server lists {}", serial(s.adb_port)),
+                Err(e) => format!("adb: {e:#}"),
+            },
+        );
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +224,69 @@ mod tests {
             fs::read_to_string(keys_file(&d)).unwrap(),
             format!("QUJD android\nQkNE other\n{key}\n")
         );
+    }
+
+    /// An adb server answering one request per connection with `replies`;
+    /// returns its port and the requests it got.
+    fn server(replies: Vec<&'static [u8]>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        use std::net::TcpListener;
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
+        let t = std::thread::spawn(move || {
+            let mut requests = vec![];
+            for reply in replies {
+                let (mut c, _) = l.accept().unwrap();
+                let mut len = [0; 4];
+                c.read_exact(&mut len).unwrap();
+                let n = usize::from_str_radix(std::str::from_utf8(&len).unwrap(), 16).unwrap();
+                let mut req = vec![0; n];
+                c.read_exact(&mut req).unwrap();
+                c.write_all(reply).unwrap();
+                requests.push(String::from_utf8(req).unwrap());
+            }
+            requests
+        });
+        (port, t)
+    }
+
+    #[test]
+    fn announces_once_adbd_listens_then_waits_for_the_device() {
+        let adbd = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = adbd.local_addr().unwrap().port();
+        let listed = format!("emulator-{}\tdevice\n", port - 1);
+        let reply: &'static [u8] = Box::leak(
+            format!("OKAY{:04x}{listed}", listed.len())
+                .into_bytes()
+                .into_boxed_slice(),
+        );
+        let (server, t) = server(vec![b"", b"OKAY0000", reply]);
+        announce_when_listening(server, port, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            t.join().unwrap(),
+            [
+                format!("host:emulator:{port}"),
+                "host:devices".into(),
+                "host:devices".into()
+            ]
+        );
+        drop(adbd);
+        // Nothing listening: it gives up at the deadline.
+        assert!(announce_when_listening(server, port, Duration::from_millis(300)).is_err());
+    }
+
+    #[test]
+    fn talks_the_adb_server_protocol() {
+        let (port, t) = server(vec![b"OKAY0004abcd"]);
+        assert_eq!(server_request(port, "host:devices").unwrap(), "abcd");
+        assert_eq!(t.join().unwrap(), ["host:devices"]);
+        let (port, _t) = server(vec![b"FAIL0004nope"]);
+        assert_eq!(
+            server_request(port, "x").unwrap_err().to_string(),
+            "adb: nope"
+        );
+        let (port, _t) = server(vec![b"HTTP/1.1 400"]);
+        assert!(server_request(port, "x").is_err());
+        assert_eq!(serial(5557), "emulator-5556");
     }
 
     #[test]

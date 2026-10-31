@@ -59,9 +59,6 @@ enum Cmd {
     /// List installed (user) apps, with whether each may run in the
     /// background.
     List,
-    /// Connect your adb to the profile (starting it if needed); adb must be
-    /// on for it (`profile set --adb on`).
-    Adb,
     /// Manage profiles: separate Android setups, each with its own apps,
     /// data and settings.
     #[command(subcommand)]
@@ -588,8 +585,6 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let res = (|| match cli.cmd {
         Cmd::Profile(cmd) => profile(&cli.profile, cmd),
-        Cmd::Adb => innkeeper_core::adb::connect(&profiles::existing(&cli.profile)?, &stderr)
-            .map(|serial| println!("connected: adb -s {serial} shell")),
         cmd => {
             let p = profiles::existing(&cli.profile)?;
             match cmd {
@@ -603,7 +598,7 @@ fn main() -> ExitCode {
                 } => run(&p, &package, &files_or_uri, token, None, new_window),
                 Cmd::List => list(&p),
                 Cmd::App(cmd) => app(&p, cmd),
-                Cmd::Profile(_) | Cmd::Adb => unreachable!("handled above"),
+                Cmd::Profile(_) => unreachable!("handled above"),
             }
         }
     })();
@@ -711,6 +706,7 @@ mod tests {
             "profile start work",
             "profile set work --adb on",
             "profile use work",
+            "adb",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }

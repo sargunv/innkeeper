@@ -124,9 +124,9 @@ pub struct Settings {
     pub display: Display,
     /// Android's adb on loopback TCP. Off by default; it applies live.
     pub adb: bool,
-    /// adb's port on 127.0.0.1, the profile's own once it has been on (0:
-    /// none yet; any port may be set). It stays, so tools keep finding the
-    /// profile there.
+    /// adb's port on 127.0.0.1, one of the emulator's ([`ports`]), the
+    /// profile's own once it has been on (0: none yet). It stays, so tools
+    /// keep finding the profile there.
     pub adb_port: u16,
     /// Minutes with nothing to do before the session stops, 1 to 120
     /// (unless Keep Running, [`crate::preferences`]). Applies live.
@@ -259,6 +259,10 @@ impl Settings {
         ensure!(
             (1..=120).contains(&self.idle_minutes),
             "the idle timeout is 1 to 120 minutes"
+        );
+        ensure!(
+            self.adb_port == 0 || ports().any(|p| p == self.adb_port),
+            "adb-port is an odd port from 5555 to 5585"
         );
         Ok(())
     }
@@ -400,13 +404,15 @@ mod tests {
         assert!(s.save(&data).is_err());
         assert_eq!(Settings::parse("").unwrap(), Settings::default());
         let s =
-            Settings::parse("adb = true\nadb-port = 16501\ndisplay = \"medium-tablet\"\n").unwrap();
-        assert!(s.adb && s.adb_port == 16501 && s.display == Display::MediumTablet);
+            Settings::parse("adb = true\nadb-port = 5561\ndisplay = \"medium-tablet\"\n").unwrap();
+        assert!(s.adb && s.adb_port == 5561 && s.display == Display::MediumTablet);
         for bad in [
             "typo = true",
             "display = \"tv\"",
             "idle-minutes = 121",
             "follow-dark = \"yes\"",
+            "adb-port = 5556",
+            "adb-port = 16500",
         ] {
             assert!(Settings::parse(bad).is_err(), "{bad}");
         }
@@ -445,8 +451,8 @@ mod tests {
         }
         .save(&other)
         .unwrap();
-        // A profile keeps its own port, an explicit one too; a new one gets
-        // a free pair.
+        // A profile keeps its own port, a set one too; a new one gets a free
+        // pair.
         let mut s = Settings::default();
         assert!(s.assign_port(&d, &d.join("data-new")).unwrap());
         assert!(s.adb_port != 5555 && ports().any(|p| p == s.adb_port));
@@ -454,11 +460,11 @@ mod tests {
         assert!(!again.assign_port(&d, &other).unwrap());
         assert_eq!(again.adb_port, 5555);
         let mut explicit = Settings {
-            adb_port: 16500,
+            adb_port: 5585,
             ..Settings::default()
         };
         assert!(!explicit.assign_port(&d, &d.join("data-x")).unwrap());
-        assert_eq!(explicit.adb_port, 16500);
+        assert_eq!(explicit.adb_port, 5585);
     }
 
     #[test]
