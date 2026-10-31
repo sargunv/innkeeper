@@ -64,7 +64,7 @@ Environment:
 Tests only:
   INNKEEPER_DATA            Android's /data (default
                            $XDG_DATA_HOME/innkeeper/data-<profile>)
-  INNKEEPER_IMAGES, INNKEEPER_PIN  the image cache and the pin
+  INNKEEPER_IMAGES          the image cache
 Debugging:
   INNKEEPER_BRIDGE_VERBOSE=1  per-stream stats in bridge.log
   INNKEEPER_BROKER_DEBUG=1    broker tracing, and single-mode syscall counters
@@ -133,7 +133,6 @@ fn run(args: &[OsString]) -> Result<i32> {
         }
         "stop" => {
             control::stop(&paths.control())?;
-            session::remove_pids(&paths);
             println!("session stopped");
             Ok(0)
         }

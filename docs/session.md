@@ -145,12 +145,12 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                    | Contents                                                                                                                                                                |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/innkeeper/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/`    |
-| `$XDG_STATE_HOME/innkeeper-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
-| `$XDG_STATE_HOME/innkeeper/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                     |
-| `$XDG_RUNTIME_DIR/innkeeper-<profile>` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
+| Dir                                    | Contents                                                                                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/innkeeper/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/` |
+| `$XDG_STATE_HOME/innkeeper-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                          |
+| `$XDG_STATE_HOME/innkeeper/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                  |
+| `$XDG_RUNTIME_DIR/innkeeper-<profile>` | `session.conf`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock`         |
 
 `INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile
 path.
