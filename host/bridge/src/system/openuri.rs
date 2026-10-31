@@ -1,14 +1,10 @@
-//! Opening links from Android through the OpenURI
-//! portal. Absolute external URIs in
-//! plain ASCII get through, at most [`MAX_URI`] bytes and [`RATE`] per
-//! window per connection; every one is logged.
+//! The checks on what Android hands the desktop (HANDOFF, [`super::handoff`]):
+//! a URI must be an absolute external one in plain ASCII, at most
+//! [`MAX_URI`] bytes, and a connection gets at most [`RATE`] handoffs per
+//! [`RATE_WINDOW`].
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-
-use zbus::zvariant::Value;
-
-use crate::ipc::wire::errno::*;
 
 pub const MAX_URI: usize = 8192;
 /// At most this many opens per connection in any [`RATE_WINDOW`].
@@ -82,45 +78,6 @@ impl RateLimit {
         self.0.push_back(now);
         true
     }
-}
-
-/// Opens a validated URL. Errors are reply statuses.
-pub fn open(dbus: Option<&zbus::blocking::Connection>, url: &str, who: &str) -> Result<(), i32> {
-    open_with_activation(dbus, url, who, "")
-}
-
-pub fn open_with_activation(
-    dbus: Option<&zbus::blocking::Connection>,
-    url: &str,
-    who: &str,
-    activation: &str,
-) -> Result<(), i32> {
-    if let Err(why) = validate(url) {
-        crate::warn!(
-            "openuri: {who}: refused ({why}): {:?}",
-            crate::ipc::wire::truncate(url, 200)
-        );
-        return Err(-EINVAL);
-    }
-    crate::info!("openuri: {who}: {}", crate::ipc::wire::truncate(url, 512));
-    let conn = dbus.ok_or(-ENOSYS)?;
-    let mut opts: HashMap<&str, Value<'_>> = HashMap::new();
-    if !activation.is_empty() {
-        opts.insert("activation_token", Value::from(activation));
-    }
-    let r: zbus::Result<zbus::zvariant::OwnedObjectPath> = conn
-        .call_method(
-            Some("org.freedesktop.portal.Desktop"),
-            "/org/freedesktop/portal/desktop",
-            Some("org.freedesktop.portal.OpenURI"),
-            "OpenURI",
-            &("", url, opts),
-        )
-        .and_then(|m| m.body().deserialize());
-    r.map(|_| ()).map_err(|e| {
-        crate::warn!("openuri: portal: {e}");
-        -EIO
-    })
 }
 
 #[cfg(test)]

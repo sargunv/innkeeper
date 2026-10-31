@@ -6,11 +6,10 @@
 //!
 //! | Type     | Request      | Body (fd)                                                                       | Reply                                                                                          |
 //! | -------- | ------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-//! | `0x0301` | START        | `u32 features` (1 settings, 2 clipboard, 4 notifications, 8 media, 16 links)    | `u32` features served; the current settings and host clipboard follow as events                |
+//! | `0x0301` | START        |                                                                                 | `u8 notifications` (1: the desktop shows them); the current settings and host clipboard follow as events |
 //! | `0x0302` | NOTIFY       | `u32 id` (≠ 0), `u32 len` ≤ 1 MiB (fd: notification blob)                       | `-EBUSY` over 64 per connection, `-EIO` if the server refused; posting an id again replaces it |
 //! | `0x0303` | NOTIFY_CLOSE | `u32 id`                                                                        |                                                                                                |
 //! | `0x0304` | CLIP_SET     | `u8 kind` (1 text, 2 image, 3 file), `u8 sensitive`, `u16 0`, `u32 len` ≤ 1/16 MiB (fd) | `-ENOSYS` when clipboard disabled                                                                 |
-//! | `0x0305` | OPEN_URI     | `u32 len` ≤ 8192 (fd: the URL)                                                  | `-EINVAL` if not an external URI, `-EAGAIN` over 5 per 10 s                                            |
 //! | `0x0306` | MEDIA        | `u32 player` (≠ 0), `u32 len` ≤ 2 MiB (fd: media blob)                          | `-EBUSY` over 8 players per connection                                                         |
 //! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
 //! | `0x0308` | LIFECYCLE    | `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len` ≤ 16 KiB (fd if len > 0: background apps) | the session's activity, for idle shutdown ([`Lifecycle`])                              |
@@ -47,7 +46,6 @@ pub mod ty {
     pub const NOTIFY: u16 = 0x0302;
     pub const NOTIFY_CLOSE: u16 = 0x0303;
     pub const CLIP_SET: u16 = 0x0304;
-    pub const OPEN_URI: u16 = 0x0305;
     pub const MEDIA: u16 = 0x0306;
     pub const MEDIA_CLOSE: u16 = 0x0307;
     pub const LIFECYCLE: u16 = 0x0308;
@@ -62,23 +60,12 @@ pub mod ev {
     pub const MEDIA_CMD: u16 = 0x4304;
 }
 
-/// `START` feature bits: what the client wants events for.
-pub mod feature {
-    pub const SETTINGS: u32 = 1 << 0;
-    pub const CLIPBOARD: u32 = 1 << 1;
-    pub const NOTIFICATIONS: u32 = 1 << 2;
-    pub const MEDIA: u32 = 1 << 3;
-    pub const OPEN_URI: u32 = 1 << 4;
-    pub const ALL: u32 = SETTINGS | CLIPBOARD | NOTIFICATIONS | MEDIA | OPEN_URI;
-}
-
 /// Caps on blob lengths, per message.
 pub mod limits {
     pub const NOTIFY_BLOB: u32 = 1 << 20;
     pub const CLIP_TEXT: u32 = 1 << 20;
     pub const CLIP_IMAGE: u32 = 16 << 20;
     pub const CLIP_FILE: u32 = 16 << 20;
-    pub const URI: u32 = 8192;
     pub const MEDIA_BLOB: u32 = 2 << 20;
     /// LIFECYCLE's blob, and the background-allowed apps in it.
     pub const LIFECYCLE_BLOB: u32 = 16 << 10;
@@ -152,8 +139,8 @@ pub fn background_apps(blob: &[u8]) -> Result<Vec<(String, String)>, DecodeError
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    /// `u32 features`. Reply: `u32 features` the bridge can serve.
-    Start { features: u32 },
+    /// Reply: `u8 notifications`, whether NOTIFY reaches the desktop.
+    Start,
     /// `u32 id` (nonzero), `u32 len`; fd: notification blob. Posting an id
     /// again updates that notification.
     Notify { id: u32, len: u32 },
@@ -165,8 +152,6 @@ pub enum Request {
         sensitive: bool,
         len: u32,
     },
-    /// `u32 len`; fd: the URL (UTF-8).
-    OpenUri { len: u32 },
     /// `u32 player` (nonzero), `u32 len`; fd: media blob.
     Media { player: u32, len: u32 },
     /// `u32 player`.
@@ -213,7 +198,6 @@ impl Request {
             self,
             Request::Notify { .. }
                 | Request::ClipSet { .. }
-                | Request::OpenUri { .. }
                 | Request::Media { .. }
                 | Request::Handoff { .. }
         ) || matches!(self, Request::Lifecycle(l) if l.len > 0)
@@ -259,7 +243,7 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 len: limited(nonzero(r.u32()?, "len")?, 64 << 10, "len")?,
             }
         }
-        ty::START => Request::Start { features: r.u32()? },
+        ty::START => Request::Start,
         ty::NOTIFY => Request::Notify {
             id: nonzero(r.u32()?, "id")?,
             len: limited(r.u32()?, limits::NOTIFY_BLOB, "len")?,
@@ -279,9 +263,6 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 len: limited(r.u32()?, kind.max_len(), "len")?,
             }
         }
-        ty::OPEN_URI => Request::OpenUri {
-            len: limited(nonzero(r.u32()?, "len")?, limits::URI, "len")?,
-        },
         ty::MEDIA => Request::Media {
             player: nonzero(r.u32()?, "player")?,
             len: limited(r.u32()?, limits::MEDIA_BLOB, "len")?,
@@ -334,11 +315,7 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             w.u32(l.windows).u32(l.services).u64(l.wakeup_ms).u32(l.len);
             w
         }
-        Request::Start { features } => {
-            let mut w = Writer::message(ty::START, tag);
-            w.u32(features);
-            w
-        }
+        Request::Start => Writer::message(ty::START, tag),
         Request::Notify { id, len } => {
             let mut w = Writer::message(ty::NOTIFY, tag);
             w.u32(id).u32(len);
@@ -356,11 +333,6 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         } => {
             let mut w = Writer::message(ty::CLIP_SET, tag);
             w.u8(kind as u8).u8(sensitive as u8).u16(0).u32(len);
-            w
-        }
-        Request::OpenUri { len } => {
-            let mut w = Writer::message(ty::OPEN_URI, tag);
-            w.u32(len);
             w
         }
         Request::Media { player, len } => {
@@ -526,9 +498,7 @@ mod tests {
     #[test]
     fn examples() {
         let reqs = [
-            Request::Start {
-                features: feature::ALL,
-            },
+            Request::Start,
             Request::Notify { id: 3, len: 900 },
             Request::NotifyClose { id: 3 },
             Request::ClipSet {
@@ -541,7 +511,6 @@ mod tests {
                 sensitive: false,
                 len: limits::CLIP_FILE,
             },
-            Request::OpenUri { len: 20 },
             Request::Handoff {
                 window: 12,
                 action: 4,
@@ -573,12 +542,10 @@ mod tests {
         for (t, body) in [
             (ty::NOTIFY, &[0u8, 0, 0, 0, 1, 0, 0, 0][..]), // id 0
             (ty::NOTIFY, &[1, 0, 0, 0, 0, 0, 0x20, 0]),    // over the cap
-            (ty::OPEN_URI, &[0, 0, 0, 0]),
-            (ty::OPEN_URI, &[0x01, 0x20, 0, 0]), // 8193
             (ty::CLIP_SET, &[4, 0, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 2, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 0, 1, 0, 1, 0, 0, 0]),
-            (ty::START, &[0, 0, 0, 0, 0]),
+            (ty::START, &[0]),
             // A package name with a slash.
             (ty::PLAYBACK_APP, &[3, 0, b'a', b'/', b'b', 0, 0]),
             // A label with a control character.
