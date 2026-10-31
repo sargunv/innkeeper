@@ -156,11 +156,12 @@ impl Relay {
         apps: Arc<crate::apps::Config>,
         documents: Arc<crate::documents::Store>,
         input: Arc<crate::input::Hub>,
+        profile: &innkeeper_core::paths::ProfileName,
     ) -> anyhow::Result<zbus::blocking::Connection> {
         let relay = self.clone();
         input.watch_windows(move || relay.changed());
         let bus = zbus::blocking::connection::Builder::session()?
-            .name(app_settings::bus_name(&innkeeper_core::paths::profile()?))?
+            .name(app_settings::bus_name(profile))?
             .serve_at(
                 app_settings::PATH,
                 SessionApi {

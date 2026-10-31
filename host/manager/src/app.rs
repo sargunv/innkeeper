@@ -58,9 +58,15 @@ impl Page {
             );
         }
         let state = self.clone();
+        let Some(profile) = self.window.upgrade().map(|w| w.profile()) else {
+            return;
+        };
         glib::spawn_future_local(async move {
-            let result =
-                worker::run(move |report| app_settings::request(command, report), |_| {}).await;
+            let result = worker::run(
+                move |report| app_settings::request(&profile, command, report),
+                |_| {},
+            )
+            .await;
             state.busy.set(false);
             state.content.set_sensitive(true);
             match result {

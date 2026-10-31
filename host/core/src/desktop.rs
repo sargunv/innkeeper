@@ -156,8 +156,9 @@ pub struct AppEntry {
     pub name: String,
     /// (desktop locale, label), e.g. ("pt_BR", "Calculadora").
     pub names: Vec<(String, String)>,
-    /// Command prefix; `<package>` and `%U` are appended (`innkeeper run`).
-    pub run: Vec<String>,
+    /// The profile it runs in: `Exec` is `innkeeper --profile <profile> run
+    /// <package> %U`, and `X-Innkeeper-Profile` names it.
+    pub profile: crate::paths::ProfileName,
     pub icon: Option<String>,
     /// `versionName`, recorded as `X-Innkeeper-Version` (omitted if empty).
     pub version: String,
@@ -204,6 +205,14 @@ impl Splash {
 }
 
 impl AppEntry {
+    /// `innkeeper --profile <profile> run <opts> <package>`.
+    pub fn run(&self, opts: &[&str]) -> Vec<String> {
+        let mut args = vec!["run"];
+        args.extend_from_slice(opts);
+        args.push(&self.package);
+        crate::paths::cli(&self.profile, &args)
+    }
+
     pub fn id(&self) -> String {
         format!("{PREFIX}{}", self.package)
     }
@@ -222,9 +231,7 @@ impl AppEntry {
         if let Some(icon) = &self.icon {
             writeln!(s, "Icon={}", escape_value(icon)?)?;
         }
-        let mut run = self.run.clone();
-        run.push(self.package.clone());
-        writeln!(s, "Exec={}", exec_line(&run, Some("%U"))?)?;
+        writeln!(s, "Exec={}", exec_line(&self.run(&[]), Some("%U"))?)?;
         // The launcher then passes an activation token (XDG_ACTIVATION_TOKEN),
         // which `run` hands on to the app's window.
         s.push_str("Terminal=false\nStartupNotify=true\n");
@@ -246,6 +253,7 @@ impl AppEntry {
         }
         s.push_str("Keywords=Android;\n");
         writeln!(s, "X-Innkeeper-Package={}", escape_value(&self.package)?)?;
+        writeln!(s, "X-Innkeeper-Profile={}", self.profile)?;
         if !self.version.is_empty() {
             writeln!(s, "X-Innkeeper-Version={}", escape_value(&self.version)?)?;
         }
@@ -262,9 +270,7 @@ impl AppEntry {
         writeln!(s, "X-Innkeeper-NewWindow={}", self.new_window)?;
         if self.new_window {
             s.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\n");
-            let mut run = self.run.clone();
-            run.extend(["--new-window".into(), self.package.clone()]);
-            writeln!(s, "Exec={}", exec_line(&run, None)?)?;
+            writeln!(s, "Exec={}", exec_line(&self.run(&["--new-window"]), None)?)?;
         }
         Ok(s)
     }
@@ -395,7 +401,7 @@ mod tests {
                 ("de".into(), "Wikipedia DE".into()),
                 ("pt_BR".into(), "Wikipédia".into()),
             ],
-            run: vec!["innkeeper".into(), "run".into()],
+            profile: crate::paths::ProfileName::new("work").unwrap(),
             icon: Some("dev.sargunv.innkeeper.org.wikipedia".into()),
             version: "2.7.50".into(),
             categories: vec!["Utility".into()],
@@ -419,10 +425,10 @@ mod tests {
             "[Desktop Entry]\nType=Application\nVersion=1.5\nName=Wikipedia\n\
              Name[de]=Wikipedia DE\nName[pt_BR]=Wikipédia\nComment=Android app (org.wikipedia)\n\
              Icon=dev.sargunv.innkeeper.org.wikipedia\n\
-             Exec=innkeeper run org.wikipedia %U\nTerminal=false\n\
+             Exec=innkeeper --profile work run org.wikipedia %U\nTerminal=false\n\
              StartupNotify=true\nStartupWMClass=dev.sargunv.Innkeeper.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
-             X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Version=2.7.50\n\
+             X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Profile=work\nX-Innkeeper-Version=2.7.50\n\
              X-Innkeeper-Web-Hosts=*.wikipedia.org;\nX-Innkeeper-Splash=#f8f9fa\n\
              X-Innkeeper-Window=1280x800\nX-Innkeeper-NewWindow=false\n"
         );
@@ -444,15 +450,9 @@ mod tests {
         let mut e = entry();
         assert!(!e.render().unwrap().contains("Desktop Action"));
         e.new_window = true;
-        e.run = vec![
-            "env".into(),
-            "INNKEEPER_PROFILE=test".into(),
-            "innkeeper".into(),
-            "run".into(),
-        ];
         let text = e.render().unwrap();
         assert!(text.contains("Actions=NewWindow;\n"));
-        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env INNKEEPER_PROFILE=test innkeeper run --new-window org.wikipedia\n"));
+        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=innkeeper --profile work run --new-window org.wikipedia\n"));
     }
 
     #[test]

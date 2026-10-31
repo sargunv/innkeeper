@@ -58,11 +58,11 @@ flowchart LR
   with less than 10 GiB available
   ([packaging/flatpak](../packaging/flatpak/README.md#development)).
 - `tools/dev/innkeeper.sh install app.apk`, `run`, `uninstall`, `list`
-  ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of
-  its own: `INNKEEPER_PROFILE=cli tests/nested.sh tools/dev/innkeeper.sh list`
-  runs it on a nested KWin with private PipeWire/Pulse (no hardware monitors), a
-  private bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them
-  after.
+  ([host/cli](../host/cli/README.md)) in the same Flatpak, with
+  `--profile $INNKEEPER_PROFILE` added. It needs a desktop of its own:
+  `INNKEEPER_PROFILE=cli tests/nested.sh tools/dev/innkeeper.sh list` runs it on
+  a nested KWin with private PipeWire/Pulse (no hardware monitors), a private
+  bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them after.
 - `mise run package` builds the Flatpak bundle from the committed tree into
   `out/release/` ([packaging/flatpak](../packaging/flatpak/README.md)).
   `mise run package -- --install` also installs it into `FLATPAK_USER_DIR`

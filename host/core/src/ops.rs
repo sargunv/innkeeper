@@ -13,7 +13,7 @@ use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
 use crate::desktop::{self, AppEntry};
 use crate::launcher::Session;
-use crate::paths;
+use crate::paths::ProfileName;
 use crate::xdg::{self, DesktopApp, Dirs};
 use crate::{ErrorKind, validate};
 
@@ -31,22 +31,16 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// The command line desktop entries run `innkeeper` with, for this session
-/// profile ([`xdg::INNKEEPER`]).
-pub fn cli_command() -> Result<Vec<String>> {
-    Ok(paths::command(&[xdg::INNKEEPER.into()], &paths::profile()?))
-}
-
-/// The running session, after starting it if needed.
-fn session(report: Report) -> Result<Session> {
-    let s = Session::find()?;
+/// Profile `profile`'s running session, after starting it if needed.
+fn session(profile: &ProfileName, report: Report) -> Result<Session> {
+    let s = Session::of_profile(profile)?;
     s.ensure(&|m| report(Event::Status(m.to_string())))?;
     Ok(s)
 }
 
-/// Starts the session if it isn't running, and waits for it to boot.
-pub fn ensure_session(report: Report) -> Result<()> {
-    session(report).map(drop)
+/// Starts profile `profile` if it isn't running, and waits for it to boot.
+pub fn ensure_session(profile: &ProfileName, report: Report) -> Result<()> {
+    session(profile, report).map(drop)
 }
 
 /// An APK or bundle, read and checked but not installed yet: what an install
@@ -183,10 +177,10 @@ pub struct Installed {
 
 /// Installs an inspected package into the session (starting it if needed)
 /// and adds it to the app menu.
-pub fn install(p: &Package, report: Report) -> Result<Installed> {
+pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<Installed> {
     let dirs = Dirs::from_env();
     let pkg = p.package.clone();
-    let s = session(report)?;
+    let s = session(profile, report)?;
     let abis: Vec<String> = s
         .getprop("ro.product.cpu.abilist")
         .split(',')
@@ -267,13 +261,11 @@ pub fn install(p: &Package, report: Report) -> Result<Installed> {
         .filter_map(|(tag, l)| Some((validate::desktop_locale(tag)?, validate::label(l)?)))
         .filter(|(loc, l)| *l != name && seen.insert(loc.clone()))
         .collect();
-    let mut run = cli_command()?;
-    run.push("run".into());
     let mut entry = AppEntry {
         package: pkg.clone(),
         name: name.clone(),
         names,
-        run,
+        profile: profile.clone(),
         icon: None,
         version: p.version.clone(),
         categories: desktop::categories_for(base.app_category.or(info.category), base.is_game),
@@ -344,9 +336,14 @@ pub struct Uninstalled {
 
 /// Uninstalls a user app (system apps are refused) and removes its desktop
 /// entry and icons.
-pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstalled> {
+pub fn uninstall(
+    profile: &ProfileName,
+    pkg: &str,
+    keep_data: bool,
+    report: Report,
+) -> Result<Uninstalled> {
     let pkg = validate::package(pkg)?;
-    let s = session(report)?;
+    let s = session(profile, report)?;
     let from_android = android::user_packages(&s)?.iter().any(|p| p == pkg);
     if from_android {
         android::uninstall(&s, pkg, keep_data)?;
@@ -362,14 +359,20 @@ pub fn uninstall(pkg: &str, keep_data: bool, report: Report) -> Result<Uninstall
 /// An empty URI is none: the DynamicLauncher portal quotes `%U` in the
 /// entries it writes (`'%U'`), which launchers expand to an empty argument.
 /// Returns the window manager's reply.
-pub fn run(pkg: &str, uri: Option<&str>, opts: &LaunchOptions, report: Report) -> Result<String> {
+pub fn run(
+    profile: &ProfileName,
+    pkg: &str,
+    uri: Option<&str>,
+    opts: &LaunchOptions,
+    report: Report,
+) -> Result<String> {
     let pkg = validate::package(pkg)?;
     let uri = uri
         .filter(|u| !u.is_empty())
         .map(validate::launch_uri)
         .transpose()?;
     let launch = || -> Result<String> {
-        let s = session(report)?;
+        let s = session(profile, report)?;
         let l = match uri {
             Some(u) => Launch::View {
                 package: pkg.into(),
@@ -383,7 +386,7 @@ pub fn run(pkg: &str, uri: Option<&str>, opts: &LaunchOptions, report: Report) -
     };
     match launch() {
         // The session stopped for idleness just as this came: once more.
-        Err(_) if !Session::find()?.running() => launch(),
+        Err(_) if !Session::of_profile(profile)?.running() => launch(),
         r => r,
     }
 }
@@ -399,8 +402,8 @@ pub struct ListedApp {
 }
 
 /// The session's user apps.
-pub fn list(report: Report) -> Result<Vec<ListedApp>> {
-    let s = session(report)?;
+pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
+    let s = session(profile, report)?;
     let d = Dirs::from_env();
     let background = s
         .paths()
@@ -416,11 +419,13 @@ pub fn list(report: Report) -> Result<Vec<ListedApp>> {
         .collect())
 }
 
-/// Apps installed for this session profile, from their desktop entries (no
-/// session needed). If `android` is given (the session's user packages),
-/// apps installed without an entry are added too.
-pub fn installed_apps(android: Option<&[String]>) -> Result<Vec<DesktopApp>> {
-    let profile = paths::profile()?;
+/// Profile `profile`'s apps, from their desktop entries (no session
+/// needed). If `android` is given (the session's user packages), apps
+/// installed without an entry are added too.
+pub fn installed_apps(
+    profile: &ProfileName,
+    android: Option<&[String]>,
+) -> Result<Vec<DesktopApp>> {
     let mut v: Vec<DesktopApp> = xdg::desktop_apps(&Dirs::from_env())
         .into_iter()
         .filter(|a| a.profile.as_deref() == Some(profile.as_str()))
@@ -441,10 +446,10 @@ pub fn installed_apps(android: Option<&[String]>) -> Result<Vec<DesktopApp>> {
     Ok(v)
 }
 
-/// The session's user packages, if it is running and booted (doesn't start
-/// it).
-pub fn android_packages() -> Option<Vec<String>> {
-    let s = Session::find().ok()?;
+/// Profile `profile`'s user packages, if it is running and booted (doesn't
+/// start it).
+pub fn android_packages(profile: &ProfileName) -> Option<Vec<String>> {
+    let s = Session::of_profile(profile).ok()?;
     if !s.running() || !s.booted() {
         return None;
     }

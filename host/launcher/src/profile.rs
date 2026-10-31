@@ -1,7 +1,7 @@
 //! Profiles: separate Android setups, each with its own apps, data and
 //! settings, that can run side by side. A running profile is a session. Each
-//! is named, by `INNKEEPER_PROFILE` or [`crate::paths::select`], and suffixes
-//! every path of its own ([`crate::paths`]). None is special: the first is
+//! is named (the launcher's by `INNKEEPER_PROFILE`), and suffixes every path
+//! of its own ([`crate::paths`]). None is special: the first is
 //! made on demand as [`FIRST`], and can be renamed or deleted like any other.
 //!
 //! A profile's settings live in one file in its data directory, beside
@@ -114,20 +114,6 @@ pub fn list(data_home: &Path) -> Vec<ProfileName> {
         .unwrap_or_default();
     v.sort();
     v
-}
-
-/// Where the profile last chosen is remembered (shared by every profile).
-pub fn chosen_file() -> PathBuf {
-    crate::paths::xdg_home("XDG_STATE_HOME", ".local/state").join("innkeeper/profile")
-}
-
-/// The profile to use when none is named, of `profiles`: the one last
-/// chosen, else the first.
-pub fn pick<'a>(profiles: &'a [ProfileName], chosen: Option<&str>) -> Option<&'a ProfileName> {
-    profiles
-        .iter()
-        .find(|p| Some(p.as_str()) == chosen)
-        .or(profiles.first())
 }
 
 /// A profile's settings; a missing key takes its default.
@@ -374,19 +360,6 @@ mod tests {
         for bad in ["", "Work", "a_b", "-a", "a-", "a/b", "..", &"a".repeat(33)] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
-    }
-
-    #[test]
-    fn picks_the_profile_last_chosen_else_the_first() {
-        let v = |s: &[&str]| {
-            s.iter()
-                .map(|s| ProfileName::new(s).unwrap())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(pick(&[], Some("a")), None);
-        assert_eq!(pick(&v(&["a", "b"]), Some("b")).unwrap(), "b");
-        assert_eq!(pick(&v(&["a", "b"]), Some("gone")).unwrap(), "a");
-        assert_eq!(pick(&v(&["a", "b"]), None).unwrap(), "a");
     }
 
     #[test]

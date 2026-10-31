@@ -294,11 +294,12 @@ fn details(
             progress_label.clone(),
             p.clone(),
         );
+        let profile = w.profile();
         glib::spawn_future_local(async move {
             let p2 = p.clone();
             let pl2 = pl.clone();
             let r = worker::run(
-                move |rep| ops::install(&p2, rep),
+                move |rep| ops::install(&profile, &p2, rep),
                 move |e| match e {
                     Event::Status(m) => pl2.set_text(&status_text(&m)),
                     Event::Warning(m) => eprintln!("innkeeper-manager: {m}"),

@@ -1,6 +1,7 @@
-//! Where things are: the install prefix this program runs from, the session
-//! profile it works with (parsed by the launcher library, the only reader of
-//! `INNKEEPER_PROFILE`), and the XDG base directories.
+//! Where things are: the install prefix this program runs from, profiles'
+//! runtime paths, and the XDG base directories. Profiles are always named by
+//! the caller; only programs the launcher starts read their own from
+//! `INNKEEPER_PROFILE` ([`Prefix::session_paths`]).
 
 use std::env;
 use std::path::PathBuf;
@@ -39,7 +40,8 @@ impl Prefix {
         self.0.join(LAUNCHER)
     }
 
-    /// Runtime paths shared by the CLI and its session.
+    /// The runtime paths of the profile in `INNKEEPER_PROFILE`: for programs
+    /// the launcher starts, such as the bridge.
     pub fn session_paths(&self) -> Result<innkeeper_session::Paths> {
         innkeeper_session::Paths::new(&self.0)
     }
@@ -50,64 +52,20 @@ impl Prefix {
     }
 }
 
-/// The profile this process works with ([`innkeeper_session::paths::select`]
-/// or `INNKEEPER_PROFILE`), else an error.
-pub use innkeeper_session::paths::{profile, select};
 pub use innkeeper_session::profile::ProfileName;
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
 /// `$HOME`.
 pub use innkeeper_session::paths::xdg_home;
 
-/// The argv that runs `program` (a command line, such as `innkeeper`)
-/// against session `profile`: prefixed with `env INNKEEPER_PROFILE=<profile>`,
-/// so a desktop entry reaches the session it was made for.
-pub fn command(program: &[String], profile: &ProfileName) -> Vec<String> {
-    let mut v = vec!["env".into(), format!("INNKEEPER_PROFILE={profile}")];
-    v.extend_from_slice(program);
+/// The argv that runs the CLI ([`crate::xdg::INNKEEPER`]) against profile
+/// `profile` with `args`: `innkeeper --profile <profile> <args>`.
+pub fn cli(profile: &ProfileName, args: &[&str]) -> Vec<String> {
+    let mut v = vec![
+        crate::xdg::INNKEEPER.to_string(),
+        "--profile".into(),
+        profile.to_string(),
+    ];
+    v.extend(args.iter().map(|a| a.to_string()));
     v
-}
-
-/// A [`command`] argv read back (from a desktop entry's `Exec`).
-#[derive(Debug, PartialEq, Eq)]
-pub struct Invocation<'a> {
-    /// The profile it runs against, if it names one.
-    pub profile: Option<&'a str>,
-    /// The program, the first word after the environment.
-    pub program: Option<&'a str>,
-}
-
-pub fn invocation(argv: &[String]) -> Invocation<'_> {
-    let env_len = match argv.first().map(String::as_str) {
-        Some("env") => 1 + argv[1..].iter().take_while(|w| w.contains('=')).count(),
-        _ => 0,
-    };
-    let env = argv.get(1..env_len).unwrap_or_default();
-    Invocation {
-        profile: env
-            .iter()
-            .find_map(|w| w.strip_prefix("INNKEEPER_PROFILE=")),
-        program: argv.get(env_len).map(String::as_str),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn argv(s: &str) -> Vec<String> {
-        s.split_whitespace().map(str::to_string).collect()
-    }
-
-    #[test]
-    fn commands_read_back() {
-        let named = command(&argv("/x/innkeeper"), &ProfileName::new("cli").unwrap());
-        assert_eq!(named.join(" "), "env INNKEEPER_PROFILE=cli /x/innkeeper");
-        let i = invocation(&named);
-        assert_eq!((i.profile, i.program), (Some("cli"), Some("/x/innkeeper")));
-        // Only the environment `env` sets counts.
-        let args = argv("innkeeper run INNKEEPER_PROFILE=x");
-        let i = invocation(&args);
-        assert_eq!((i.profile, i.program), (None, Some("innkeeper")));
-    }
 }

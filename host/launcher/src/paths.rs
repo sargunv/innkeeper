@@ -15,23 +15,9 @@ use crate::sys;
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.sargunv.Innkeeper";
 
-/// The profile [`select`]ed in this process, if any.
-static SELECTED: std::sync::Mutex<Option<ProfileName>> = std::sync::Mutex::new(None);
-
-/// Selects profile `name` for this process, over `INNKEEPER_PROFILE` (the
-/// manager switches profiles so). Launchers it runs get it in their
-/// environment.
-pub fn select(name: &str) -> Result<()> {
-    *SELECTED.lock().unwrap() = Some(ProfileName::new(name)?);
-    Ok(())
-}
-
-/// The profile this process works with: the one [`select`]ed, else
-/// `INNKEEPER_PROFILE`, which must name one.
+/// The profile in `INNKEEPER_PROFILE`, which must name one: the launcher's
+/// and the programs it starts. Front ends name profiles explicitly.
 pub fn profile() -> Result<ProfileName> {
-    if let Some(s) = SELECTED.lock().unwrap().clone() {
-        return Ok(s);
-    }
     ProfileName::new(&env::var("INNKEEPER_PROFILE").unwrap_or_default())
         .context("INNKEEPER_PROFILE")
 }

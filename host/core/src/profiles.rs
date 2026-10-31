@@ -3,8 +3,6 @@
 //! started and stopped, and the one to use when none is named. Each works on
 //! the named profile, whatever this process's is.
 
-use std::fs;
-
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -30,8 +28,10 @@ fn paths(name: &str) -> Result<innkeeper_session::Paths> {
 /// The profiles' names.
 fn names() -> Vec<crate::paths::ProfileName> {
     let mut v = profile::list(&innkeeper_session::paths::data_home());
-    // One whose data lives elsewhere (`INNKEEPER_DATA`) is still one.
-    if let Ok(p) = crate::paths::profile()
+    // A test profile whose data lives elsewhere (`INNKEEPER_DATA`, with its
+    // `INNKEEPER_PROFILE`) is still one.
+    if let Ok(p) = innkeeper_session::paths::profile()
+        && std::env::var_os("INNKEEPER_DATA").is_some()
         && !v.contains(&p)
     {
         v.push(p);
@@ -55,37 +55,17 @@ pub fn list() -> Result<Vec<Profile>> {
         .collect()
 }
 
-/// The profile to use when none is named (`--profile`, `INNKEEPER_PROFILE`):
-/// the one last [`choose`]n, else the first. With none, `create` makes
-/// [`FIRST`].
-pub fn resolve(create: bool) -> Result<String> {
-    match crate::paths::profile() {
-        Ok(p) => Ok(p.into()),
-        Err(_) => fallback(create),
+/// Profile `name`, which must exist; [`FIRST`] is created if it doesn't,
+/// so a first command works with no setup.
+pub fn existing(name: &str) -> Result<crate::paths::ProfileName> {
+    let p = crate::paths::ProfileName::new(name)?;
+    if !paths(&p)?.data.exists() {
+        if name != FIRST {
+            bail!("no profile {name} (`innkeeper profile create {name}` makes it)");
+        }
+        create(FIRST, &Settings::default())?;
     }
-}
-
-/// [`resolve`], whatever this process's profile is.
-pub fn fallback(create: bool) -> Result<String> {
-    let names = profile::list(&innkeeper_session::paths::data_home());
-    let chosen = fs::read_to_string(profile::chosen_file()).ok();
-    if let Some(p) = profile::pick(&names, chosen.as_deref().map(str::trim)) {
-        return Ok(p.to_string());
-    }
-    if !create {
-        bail!("there are no profiles yet");
-    }
-    self::create(FIRST, &Settings::default())?;
-    Ok(FIRST.into())
-}
-
-/// Makes `name` the profile used when none is named.
-pub fn choose(name: &str) -> Result<()> {
-    check_name(name)?;
-    let file = profile::chosen_file();
-    fs::create_dir_all(file.parent().unwrap())?;
-    fs::write(file, format!("{name}\n"))?;
-    Ok(())
+    Ok(p)
 }
 
 /// Profile `name`'s settings.
@@ -148,9 +128,6 @@ pub fn create(name: &str, settings: &Settings) -> Result<()> {
 pub fn rename(from: &str, to: &str) -> Result<()> {
     profile::rename(&paths(from)?, &paths(to)?)?;
     xdg::move_entries(&Dirs::from_env(), from, to);
-    if chosen().as_deref() == Some(from) {
-        choose(to)?;
-    }
     Ok(())
 }
 
@@ -168,16 +145,7 @@ pub fn delete(name: &str) -> Result<()> {
             xdg::remove_app(&d, &app.package);
         }
     }
-    if chosen().as_deref() == Some(name) {
-        let _ = fs::remove_file(profile::chosen_file());
-    }
     Ok(())
-}
-
-fn chosen() -> Option<String> {
-    fs::read_to_string(profile::chosen_file())
-        .ok()
-        .map(|s| s.trim().to_string())
 }
 
 /// Starts profile `name` (with windows) and waits for it to boot.

@@ -133,9 +133,12 @@ fn real_main() -> Result<ExitCode> {
     if apps.is_empty() {
         bail!("no apps selected");
     }
-    let out = repo
-        .join("out/test/compat")
-        .join(innkeeper_core::paths::profile()?.as_str());
+    let out = repo.join("out/test/compat").join(
+        innkeeper_core::paths::ProfileName::new(
+            &std::env::var("INNKEEPER_PROFILE").unwrap_or_default(),
+        )?
+        .as_str(),
+    );
     let apk_dir = repo.join("out/test/compat/corpus");
     let mut apks = vec![];
     for a in &apps {

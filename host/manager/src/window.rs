@@ -11,6 +11,7 @@ use gtk::{gdk, gio, glib};
 use innkeeper_core::desktop::{MANAGER_ID, PREFIX};
 use innkeeper_core::launcher::{Session, Status};
 use innkeeper_core::ops::{self, Event};
+use innkeeper_core::paths::ProfileName;
 use innkeeper_core::xdg::{DesktopApp, Dirs};
 
 use crate::errors::{self, Op};
@@ -28,6 +29,8 @@ impl WeakWindow {
 }
 
 pub struct Inner {
+    /// The profile whose apps and session show.
+    profile: RefCell<ProfileName>,
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
@@ -179,7 +182,7 @@ impl SessionRow {
 }
 
 impl Window {
-    pub fn new(app: &adw::Application) -> Self {
+    pub fn new(app: &adw::Application, profile: ProfileName) -> Self {
         let sessions = [SessionRow::new(), SessionRow::new()];
 
         // Empty state.
@@ -226,12 +229,7 @@ impl Window {
         section.append(Some("Profile _Settings"), Some("win.preferences"));
         section.append(Some("_About Innkeeper"), Some("app.about"));
         menu.append_section(None, &section);
-        let title = adw::WindowTitle::new(
-            "Innkeeper",
-            innkeeper_core::paths::profile()
-                .as_deref()
-                .unwrap_or_default(),
-        );
+        let title = adw::WindowTitle::new("Innkeeper", &profile);
         let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_start(
             &gtk::Button::builder()
@@ -305,6 +303,7 @@ impl Window {
             last_status: Cell::new(None),
             monitor: RefCell::default(),
             refresh_pending: Cell::new(false),
+            profile: RefCell::new(profile),
         }));
 
         let open = gio::SimpleAction::new("open", None);
@@ -486,8 +485,11 @@ impl Window {
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
-            match worker::run_quiet(|| ops::installed_apps(ops::android_packages().as_deref()))
-                .await
+            let p = w.profile();
+            match worker::run_quiet(move || {
+                ops::installed_apps(&p, ops::android_packages(&p).as_deref())
+            })
+            .await
             {
                 Ok(apps) => w.show_apps(apps),
                 Err(e) => eprintln!("innkeeper-manager: {e:#}"),
@@ -582,10 +584,10 @@ impl Window {
         };
         let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
         glib::spawn_future_local(async move {
-            let p = pkg.clone();
+            let (p, profile) = (pkg.clone(), w.profile());
             let (progress, progress_pkg) = (w.clone(), pkg.clone());
             let r = worker::run(
-                move |rep| ops::run(&p, None, &opts, rep),
+                move |rep| ops::run(&profile, &p, None, &opts, rep),
                 move |e| {
                     if let Event::Status(text) = e {
                         progress.app_progress(&progress_pkg, &install::status_text(&text));
@@ -634,10 +636,10 @@ impl Window {
             if !w.begin_app(&a.package, "Uninstalling…") {
                 return;
             }
-            let pkg = a.package.clone();
+            let (pkg, profile) = (a.package.clone(), w.profile());
             let (progress, progress_pkg) = (w.clone(), pkg.clone());
             let r = worker::run(
-                move |rep| ops::uninstall(&pkg, keep_data, rep),
+                move |rep| ops::uninstall(&profile, &pkg, keep_data, rep),
                 move |e| {
                     if let Event::Status(text) = e {
                         progress.app_progress(&progress_pkg, &install::status_text(&text));
@@ -671,7 +673,9 @@ impl Window {
     fn prepare_if_needed(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let ready = worker::run_quiet(|| Session::find().map(|s| s.image_ready())).await;
+            let p = w.profile();
+            let ready =
+                worker::run_quiet(move || Session::of_profile(&p).map(|s| s.image_ready())).await;
             // No launcher: the session row says so.
             if ready.is_ok_and(|r| !r) {
                 w.prepare();
@@ -687,7 +691,8 @@ impl Window {
         self.stack.set_visible_child_name("preparing");
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let r = worker::run_quiet(|| Session::find()?.prepare()).await;
+            let p = w.profile();
+            let r = worker::run_quiet(move || Session::of_profile(&p)?.prepare()).await;
             let p = &w.preparing;
             p.spinner.set_visible(false);
             match r {
@@ -725,7 +730,7 @@ impl Window {
     fn watch_session(&self) {
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let Ok(profile) = innkeeper_core::paths::profile() else {
+            let Some(profile) = weak.upgrade().map(|w| w.profile()) else {
                 return;
             };
             let name = innkeeper_core::app_settings::bus_name(&profile);
@@ -770,12 +775,18 @@ impl Window {
         });
     }
 
-    /// Shows profile `name`'s apps and session from now on, and makes it the
-    /// one used when none is named.
+    /// The profile whose apps and session show.
+    pub fn profile(&self) -> ProfileName {
+        self.profile.borrow().clone()
+    }
+
+    /// Shows profile `name`'s apps and session from now on, and the next
+    /// time the manager opens.
     pub fn switch_profile(&self, name: &str) -> anyhow::Result<()> {
-        innkeeper_core::paths::select(name)?;
-        innkeeper_core::profiles::choose(name)?;
-        self.title.set_subtitle(name);
+        let name = ProfileName::new(name)?;
+        crate::remember_profile(&name);
+        self.title.set_subtitle(&name);
+        self.profile.replace(name);
         self.session_proxy.replace(None);
         self.last_status.set(None);
         self.open_apps.borrow_mut().clear();
@@ -834,9 +845,10 @@ impl Window {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let w2 = w.clone();
+            let p = w.profile();
             let r = worker::run(
                 move |rep| {
-                    let s = Session::find()?;
+                    let s = Session::of_profile(&p)?;
                     if running {
                         s.stop()
                     } else {

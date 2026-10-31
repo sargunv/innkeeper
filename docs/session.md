@@ -149,23 +149,23 @@ stateDiagram-v2
 | `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and `.innkeeper-profile.toml`, the profile's settings), `root-<profile>/` (the composed root), `addons/` |
 | `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                         |
 | `$XDG_CONFIG_HOME/innkeeper/`                        | `preferences.toml`: Keep Running, shared by every profile                                                                                                                                                           |
-| `$XDG_STATE_HOME/innkeeper/`                         | `profile`, the one in use (shared by every profile)                                                                                                                                                                 |
+| `$XDG_STATE_HOME/innkeeper/`                         | `manager-profile`, the profile the manager showed last                                                                                                                                                              |
 | `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                        |
 
-`INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile
-path.
+A profile's name goes on every per-profile path.
 
 ## Profiles
 
 A profile is a separate Android setup with its own apps, data and settings; a
 session is a running profile, and profiles run side by side. Profiles are listed
-from their `data-<name>` directories, and created, used, renamed, deleted,
-started and stopped with `innkeeper profile` or the manager's Profiles page
-(`host/core/src/profiles.rs`). None is special. A command names its profile
-(`--profile`, `INNKEEPER_PROFILE`, an app entry's `Exec`), or uses the one last
-chosen (`profile use`, the manager's Show Apps), else the first by name.
-Installing or opening something with no profile at all creates `default`, an
-ordinary profile. Tests use named profiles with fresh data dirs.
+from their `data-<name>` directories, and created, renamed, deleted, started and
+stopped with `innkeeper profile` or the manager's Profiles page
+(`host/core/src/profiles.rs`). None is special. `--profile NAME` is the only way
+to name one: the CLI works with `default` without it, creating it the first
+time; an app entry runs `innkeeper --profile NAME run PKG` and records
+`X-Innkeeper-Profile`; the manager shows the profile it showed last. Core takes
+the profile from its caller; only the launcher and the programs it starts read
+`INNKEEPER_PROFILE`. Tests use named profiles with fresh data dirs.
 
 A profile's settings are one file, `.innkeeper-profile.toml` in its data dir,
 beside the data version record, so they move and back up with its data

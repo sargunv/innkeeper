@@ -52,9 +52,7 @@ const DISPLAYS: [(Display, &str, &str); 4] = [
 ];
 
 pub fn page(window: &Window) -> adw::NavigationPage {
-    let profile = innkeeper_core::paths::profile()
-        .map(String::from)
-        .unwrap_or_default();
+    let profile = window.profile().to_string();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
