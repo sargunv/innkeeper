@@ -25,7 +25,7 @@
 
 namespace innkeeper {
 
-constexpr uint32_t kHandleMagic = 0x4b50414c;  // "LAPK"
+constexpr uint32_t kHandleMagic = 0x504b4e49;  // "INKP"
 constexpr uint32_t kHandleVersion = 2;
 constexpr uint32_t kFlagDmabuf = 1u << 0;
 constexpr uint32_t kFlagTiled = 1u << 1;

@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define MOCK_MAGIC 0x4c41504b /* 'LAPK' */
+#define MOCK_MAGIC 0x504b4e49 /* "INKP" */
 
 typedef struct native_handle {
   int version, numFds, numInts;

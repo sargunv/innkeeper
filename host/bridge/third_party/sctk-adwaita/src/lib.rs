@@ -2,7 +2,7 @@
 //! Upstream commit: 1bddc2264a71ae3897903ec8a7d7b13b834ff1b1.
 //! Copyright Bartłomiej Maryńczak and contributors; MIT license in ../LICENSE.
 //!
-//! Linux.apk changes for upstream sync: buttons.rs adds and draws Back and Fullscreen;
+//! Innkeeper changes for upstream sync: buttons.rs adds and draws Back and Fullscreen;
 //! pointer.rs tracks completed custom button clicks; on_frame_click returns them alongside
 //! SCTK window actions. Header metrics, symbolic controls, states and shadows match
 //! Adwaita; fullscreen reveal animates the header without altering its title.
@@ -71,7 +71,7 @@ use wl_typed::WlTyped;
 /// XXX this is not result, so `must_use` when needed.
 type SkiaResult = Option<()>;
 
-/// A header action, including Linux.apk's Android Back button.
+/// A header action, including Innkeeper's Android Back button.
 #[derive(Debug)]
 pub enum Action {
     Back,

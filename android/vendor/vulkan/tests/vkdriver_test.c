@@ -650,7 +650,7 @@ static int test_anb(bool hal) {
     mh->numFds = 1;
     mh->numInts = 5;
     mh->data[0] = dmabuf;
-    mh->data[1] = 0x4c41504b;
+    mh->data[1] = 0x504b4e49; /* "INKP", mock_mapper.c MOCK_MAGIC */
     mh->data[2] = width;
     mh->data[3] = height;
     mh->data[4] = stride;
