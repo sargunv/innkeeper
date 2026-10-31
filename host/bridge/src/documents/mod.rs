@@ -134,7 +134,8 @@ impl Store {
         self.save(&g);
     }
 
-    /// Import only the supplied regular file; no host path reaches Android.
+    /// Imports `fd`, which must be a regular file, as a read-only grant
+    /// (Session1 `Import`); no host path reaches Android.
     pub fn import_file(&self, fd: OwnedFd, name: String) -> Result<u64, i32> {
         let st = rustix::fs::fstat(&fd).map_err(errno)?;
         if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
@@ -607,33 +608,19 @@ fn meta_reply(m: &Meta) -> Reply {
 }
 
 impl Service for DocumentsService {
-    fn handle(&mut self, t: u16, body: &[u8], mut fds: Vec<OwnedFd>) -> Reply {
+    fn handle(&mut self, t: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply {
         let req = match proto::decode(t, body) {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),
         };
-        if fds.len() != usize::from(matches!(req, Request::Import { .. })) {
+        if !fds.is_empty() {
             return Reply::err(-EPROTO);
-        }
-        if let Request::Import { name } = req {
-            return match self
-                .store
-                .import_file(fds.pop().expect("checked above"), name)
-            {
-                Ok(id) => {
-                    let mut w = Writer::default();
-                    w.u64(id);
-                    Reply::with_body(w.into_vec())
-                }
-                Err(e) => Reply::err(e),
-            };
         }
         if let Some(r) = self.store.file_request(&req) {
             return r;
         }
         let grant_of = |id: u64| self.store.get(id).ok_or(-ENOENT);
         let r = match req {
-            Request::Import { .. } => unreachable!("handled above"),
             Request::Pick(p) => return self.pick(p),
             Request::Forget { grant } => {
                 self.store.forget(grant);

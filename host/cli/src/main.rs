@@ -232,13 +232,12 @@ fn run(
         if args.iter().all(|s| s.is_empty()) {
             return ops::run(pkg, None, &opts, &stderr);
         }
-        let paths = innkeeper_core::paths::Prefix::locate()?.session_paths()?;
         let mut reply = String::new();
         let mut chooser_grants = Vec::new();
         for arg in args.iter().filter(|s| !s.is_empty()) {
             let path = if arg.starts_with("file:") {
                 Some(
-                    innkeeper_bridge::documents::portal::file_path(arg)
+                    innkeeper_core::uri::file_path(arg)
                         .ok_or_else(|| anyhow::anyhow!("invalid file URI"))?,
                 )
             } else if !arg.contains(":") || Path::new(arg).exists() {
@@ -253,11 +252,7 @@ fn run(
                         .file_name()
                         .and_then(|n| n.to_str())
                         .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
-                    let grant = innkeeper_bridge::apps::file::grant(
-                        &paths.run.join("bridge/bridge.sock"),
-                        &file,
-                        name,
-                    )?;
+                    let grant = innkeeper_core::app_settings::import(&file, name)?;
                     if file_component.is_some() {
                         chooser_grants.push(grant);
                         continue;

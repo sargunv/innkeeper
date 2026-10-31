@@ -1,4 +1,6 @@
-//! Desktop session API relayed over the system app's existing apps channel.
+//! The desktop session API, `dev.sargunv.Innkeeper.Session1`
+//! (docs/bridge-protocol.md), for the manager and the CLI. App operations
+//! are relayed over the system app's apps channel.
 use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex, mpsc};
@@ -151,7 +153,8 @@ impl Relay {
     pub fn serve(
         &self,
         shared: Arc<crate::system::Shared>,
-        apps: Arc<super::Config>,
+        apps: Arc<crate::apps::Config>,
+        documents: Arc<crate::documents::Store>,
         input: Arc<crate::input::Hub>,
     ) -> anyhow::Result<zbus::blocking::Connection> {
         let relay = self.clone();
@@ -165,7 +168,7 @@ impl Relay {
                     input,
                     shared,
                     apps,
-                    preferences: Mutex::new(()),
+                    documents,
                 },
             )?
             .build()?;
@@ -178,8 +181,8 @@ struct SessionApi {
     input: Arc<crate::input::Hub>,
     relay: Relay,
     shared: Arc<crate::system::Shared>,
-    apps: Arc<super::Config>,
-    preferences: Mutex<()>,
+    apps: Arc<crate::apps::Config>,
+    documents: Arc<crate::documents::Store>,
 }
 
 #[zbus::interface(name = "dev.sargunv.Innkeeper.Session1")]
@@ -192,30 +195,33 @@ impl SessionApi {
     #[zbus(signal)]
     async fn changed(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
 
-    fn get_preferences(&self) -> zbus::fdo::Result<String> {
-        let _guard = self.preferences.lock().unwrap();
-        innkeeper_core::preferences::Preferences::load()
-            .and_then(|p| innkeeper_core::preferences::encode(&p))
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
-    }
-
-    fn set_preferences(&self, json: &str) -> zbus::fdo::Result<()> {
-        let _guard = self.preferences.lock().unwrap();
-        let prefs = innkeeper_core::preferences::decode(json)
-            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
-        let old = innkeeper_core::preferences::Preferences::load()
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
-        prefs
-            .save()
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
-        self.apps
+    /// Applies the profile's preferences file, which the caller has just
+    /// written.
+    fn reload_preferences(&self) -> zbus::fdo::Result<()> {
+        let prefs = innkeeper_core::preferences::Preferences::load()
+            .map_err(|e| zbus::fdo::Error::Failed(format!("{e:#}")))?;
+        let mirrored = self
+            .apps
             .mirror_apps
-            .store(prefs.mirror_apps, std::sync::atomic::Ordering::Relaxed);
+            .swap(prefs.mirror_apps, std::sync::atomic::Ordering::Relaxed);
         self.shared.refresh_preferences();
-        if !old.mirror_apps && prefs.mirror_apps {
+        if !mirrored && prefs.mirror_apps {
             self.relay.rescan();
         }
         Ok(())
+    }
+
+    /// A read-only documents grant for the regular file `fd`, named `name`,
+    /// for a launch to pass to an app.
+    fn import(&self, fd: zbus::zvariant::OwnedFd, name: &str) -> zbus::fdo::Result<u64> {
+        if !crate::documents::proto::valid_name(name) {
+            return Err(zbus::fdo::Error::InvalidArgs("invalid file name".into()));
+        }
+        self.documents
+            .import_file(fd.into(), name.into())
+            .map_err(|e| {
+                zbus::fdo::Error::InvalidArgs(std::io::Error::from_raw_os_error(-e).to_string())
+            })
     }
 
     /// Version 1: JSON AppInfo response; error text on failed Android operations.

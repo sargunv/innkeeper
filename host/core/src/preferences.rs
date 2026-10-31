@@ -1,4 +1,5 @@
-//! Desktop preferences, saved without booting Android; live changes use Session1.
+//! Desktop preferences: saved to the profile's file, then applied live by a
+//! running session's bridge (Session1 `ReloadPreferences`).
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -6,18 +7,6 @@ use anyhow::{Context, Result, ensure};
 use zbus::zvariant::{OwnedValue, Value};
 
 pub use innkeeper_session::preferences::Preferences;
-
-pub fn encode(prefs: &Preferences) -> Result<String> {
-    prefs.validate()?;
-    Ok(serde_json::to_string(prefs)?)
-}
-
-pub fn decode(json: &str) -> Result<Preferences> {
-    ensure!(json.len() <= 4096, "Preferences too large");
-    let p: Preferences = serde_json::from_str(json)?;
-    p.validate()?;
-    Ok(p)
-}
 
 /// Set the Background portal's login command. Never create an autostart file.
 fn autostart(enabled: bool) -> Result<()> {
@@ -98,47 +87,33 @@ pub fn save(prefs: Preferences) -> Result<()> {
         }
         return Err(e);
     }
-    let result = (|| {
-        let connection = zbus::blocking::connection::Builder::session()?
-            .method_timeout(Duration::from_secs(5))
-            .build()?;
-        let name = crate::app_settings::bus_name(&crate::paths::profile()?);
-        let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
-        if bus.name_has_owner(name.as_str().try_into()?)? {
-            let proxy = zbus::blocking::Proxy::new(
-                &connection,
-                name.as_str(),
-                crate::app_settings::PATH,
-                crate::app_settings::INTERFACE,
-            )?;
-            let _: () = proxy.call("SetPreferences", &(encode(&prefs)?,))?;
-            Ok(())
-        } else {
-            prefs.save()
+    if let Err(e) = prefs.save() {
+        if login_changed {
+            let _ = autostart(old.keep_running);
         }
-    })();
-    if result.is_err() && login_changed {
-        let _ = autostart(old.keep_running);
+        return Err(e);
     }
-    result
+    reload()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preferences_json_and_bounds() {
-        let p = Preferences {
-            follow_dark: false,
-            idle_minutes: 13,
-            ..Preferences::default()
-        };
-        let json = encode(&p).unwrap();
-        assert_eq!(decode(&json).unwrap(), p);
-        assert!(decode(r#"{"idle_minutes":0}"#).is_err());
-        assert!(decode(r#"{"follow_dark":"yes"}"#).is_err());
-        assert!(decode(r#"{"unknown":true}"#).is_err());
-        assert!(decode(&" ".repeat(4097)).is_err());
+/// Has a running session's bridge apply the saved preferences.
+fn reload() -> Result<()> {
+    let connection = zbus::blocking::connection::Builder::session()?
+        .method_timeout(Duration::from_secs(5))
+        .build()?;
+    let name = crate::app_settings::bus_name(&crate::paths::profile()?);
+    let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
+    if !bus.name_has_owner(name.as_str().try_into()?)? {
+        return Ok(());
     }
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        name.as_str(),
+        crate::app_settings::PATH,
+        crate::app_settings::INTERFACE,
+    )?;
+    let _: () = proxy
+        .call("ReloadPreferences", &())
+        .context("Saved, but the running session did not apply it")?;
+    Ok(())
 }

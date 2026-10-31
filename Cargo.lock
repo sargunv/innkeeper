@@ -1296,7 +1296,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "innkeeper-bridge",
  "innkeeper-core",
  "png",
  "rustix",

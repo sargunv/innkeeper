@@ -308,10 +308,12 @@ if (
       }
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
-      # One live preference round trip, through the same Session1 API as GTK.
+      # One live preference change, saved and applied as the manager does.
+      prefs=$XDG_CONFIG_HOME/innkeeper-$INNKEEPER_PROFILE/preferences.toml
+      mkdir -p "${prefs%/*}" && printf 'follow_accent = false\n' >"$prefs"
       dest=dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}
       gdbus call --session --dest "$dest" --object-path /dev/sargunv/Innkeeper/Session \
-        --method dev.sargunv.Innkeeper.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
+        --method dev.sargunv.Innkeeper.Session1.ReloadPreferences >/dev/null
       until_ok log_has InnkeeperSettings 'desktop settings: .*followAccent=false'
       echo 'ok   preference applied live over Session1'
       wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null

@@ -1,7 +1,7 @@
 //! Version 1 of the session's per-app API. All Android work goes through the
 //! bridge and the privileged system app, never the session's exec socket.
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -121,16 +121,25 @@ impl Response {
     }
 }
 
-/// Starts Android if needed, then calls the bridge over the desktop bus.
-pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> {
-    command.validate()?;
-    crate::ops::ensure_session(report)?;
+/// The running session's Session1 object.
+fn proxy() -> Result<zbus::blocking::Proxy<'static>> {
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(25))
         .build()?;
     let name = bus_name(&crate::paths::profile()?);
-    let proxy = zbus::blocking::Proxy::new(&connection, name.as_str(), PATH, INTERFACE)?;
-    let json: String = proxy.call(
+    Ok(zbus::blocking::Proxy::new_owned(
+        connection,
+        name,
+        PATH.to_string(),
+        INTERFACE.to_string(),
+    )?)
+}
+
+/// Starts Android if needed, then calls the bridge over the desktop bus.
+pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> {
+    command.validate()?;
+    crate::ops::ensure_session(report)?;
+    let json: String = proxy()?.call(
         "App",
         &(
             &command.package,
@@ -144,6 +153,16 @@ pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> 
     response
         .info
         .ok_or_else(|| anyhow::anyhow!("missing app information"))
+}
+
+/// A read-only grant on the running session's bridge for `file` (only its
+/// fd reaches the bridge, never its path), shown to Android as `name`.
+pub fn import(file: &std::fs::File, name: &str) -> Result<u64> {
+    use std::os::fd::AsFd;
+    let fd = zbus::zvariant::Fd::from(file.as_fd());
+    proxy()?
+        .call("Import", &(fd, name))
+        .context("import the file into the session")
 }
 
 #[cfg(test)]

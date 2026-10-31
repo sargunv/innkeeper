@@ -30,10 +30,10 @@ cap and `stop` ends it) and restarts it if it exits; clients reconnect.
   and shared memory the bridge hands out is sealed and never read back.
 
 Protocol: [docs/bridge-protocol.md](../../docs/bridge-protocol.md); each
-service's messages are its `proto.rs` module doc. Tests:
+service's messages are its `proto.rs` module doc, and `src/session.rs` serves
+the `Session1` D-Bus API for the manager and the CLI. Tests:
 `cargo test -p innkeeper-bridge` (protocol, ring, a live server with hostile
-clients). `examples/{tone,window,system,hoststate}.rs` drive a running bridge
-the way the Android clients do.
+clients).
 
 ## Known limits
 
