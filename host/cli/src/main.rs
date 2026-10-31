@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use innkeeper_core::android::{self, Launch};
 use innkeeper_core::launcher::Session;
@@ -33,8 +33,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Open files with an Android app, or show the manager with no files.
-    Open { files: Vec<PathBuf> },
+    /// Open documents with an Android app you pick.
+    Open {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
     /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
     Install { file: PathBuf },
     /// Launch an app, optionally opening files or a URI in it.
@@ -205,42 +208,51 @@ fn install(profile: &ProfileName, file: &Path) -> Result<()> {
 }
 
 /// The static desktop entry handles both APK installation and file VIEW.
+/// The package formats `install` takes, which `open` refuses.
+const PACKAGE_EXTENSIONS: [&str; 4] = ["apk", "apks", "xapk", "apkm"];
+
+/// Opens documents with an Android app the user picks: each is granted to
+/// the session, then the system app's chooser shows.
 fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Result<()> {
-    let (packages, documents): (Vec<_>, Vec<_>) = files.iter().partition(|p| {
-        p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
-            ["apk", "apks", "xapk", "apkm"]
-                .iter()
-                .any(|x| e.eq_ignore_ascii_case(x))
-        })
-    });
-    if files.is_empty() || !packages.is_empty() {
-        let mut manager = std::process::Command::new(
-            std::env::current_exe()?.with_file_name("innkeeper-manager"),
+    if let Some(p) = files.iter().find(|p| {
+        p.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| PACKAGE_EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
+    }) {
+        bail!(
+            "{} is an app; install it with `innkeeper install`",
+            p.display()
         );
-        manager
-            .arg("--profile")
-            .arg(profile.as_str())
-            .args(packages);
-        if let Some(t) = &token {
-            manager.env("XDG_ACTIVATION_TOKEN", t);
-        }
-        manager.spawn()?;
     }
-    if !documents.is_empty() {
-        let args = documents
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        run(
-            profile,
-            "dev.sargunv.innkeeper.system",
-            &args,
+    ops::ensure_session(profile, &stderr)?;
+    let grants = files
+        .iter()
+        .map(|p| grant(profile, p))
+        .collect::<Result<Vec<_>>>()?;
+    android::launch(
+        &Session::of_profile(profile)?,
+        &Launch::File {
+            package: "dev.sargunv.innkeeper.system".into(),
+            grants,
+            component: Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity".into()),
+        },
+        &LaunchOptions {
             token,
-            Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity"),
-            false,
-        )?;
-    }
-    Ok(())
+            wait: false,
+            new_window: false,
+        },
+    )
+    .map(drop)
+}
+
+/// A read-only grant of the file at `path` on profile `profile`'s session.
+fn grant(profile: &ProfileName, path: &Path) -> Result<u64> {
+    let file = open_input(path)?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
+    innkeeper_core::app_settings::import(profile, &file, name)
 }
 
 fn uninstall(profile: &ProfileName, pkg: &str, keep_data: bool) -> Result<()> {
@@ -266,7 +278,6 @@ fn run(
     pkg: &str,
     args: &[String],
     token: Option<String>,
-    file_component: Option<&str>,
     new_window: bool,
 ) -> Result<()> {
     ensure!(
@@ -312,7 +323,6 @@ fn run(
             return ops::run(profile, pkg, None, &opts, &stderr);
         }
         let mut reply = String::new();
-        let mut chooser_grants = Vec::new();
         for arg in args.iter().filter(|s| !s.is_empty()) {
             let path = if arg.starts_with("file:") {
                 Some(
@@ -325,40 +335,17 @@ fn run(
                 None
             };
             reply = match path {
-                Some(path) => {
-                    let file = open_input(&path)?;
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .ok_or_else(|| anyhow::anyhow!("file needs a UTF-8 name"))?;
-                    let grant = innkeeper_core::app_settings::import(profile, &file, name)?;
-                    if file_component.is_some() {
-                        chooser_grants.push(grant);
-                        continue;
-                    }
-                    android::launch(
-                        &session,
-                        &Launch::File {
-                            package: pkg.into(),
-                            grants: vec![grant],
-                            component: None,
-                        },
-                        &opts,
-                    )?
-                }
+                Some(path) => android::launch(
+                    &session,
+                    &Launch::File {
+                        package: pkg.into(),
+                        grants: vec![grant(profile, &path)?],
+                        component: None,
+                    },
+                    &opts,
+                )?,
                 None => ops::run(profile, pkg, Some(arg), &opts, &stderr)?,
             };
-        }
-        if !chooser_grants.is_empty() {
-            reply = android::launch(
-                &session,
-                &Launch::File {
-                    package: pkg.into(),
-                    grants: chooser_grants,
-                    component: file_component.map(str::to_string),
-                },
-                &opts,
-            )?;
         }
         Ok(reply)
     })();
@@ -595,7 +582,7 @@ fn main() -> ExitCode {
                     package,
                     files_or_uri,
                     new_window,
-                } => run(&p, &package, &files_or_uri, token, None, new_window),
+                } => run(&p, &package, &files_or_uri, token, new_window),
                 Cmd::List => list(&p),
                 Cmd::App(cmd) => app(&p, cmd),
                 Cmd::Profile(_) => unreachable!("handled above"),
@@ -707,6 +694,7 @@ mod tests {
             "profile set work --adb on",
             "profile use work",
             "adb",
+            "open",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
@@ -714,6 +702,17 @@ mod tests {
             parse("profile start --all"),
             Ok(Cmd::Profile(ProfileCmd::Start { all: true }))
         ));
+    }
+
+    #[test]
+    fn open_refuses_apps_before_starting_anything() {
+        let p = ProfileName::new("unit-test").unwrap();
+        let e = open(
+            &p,
+            &[PathBuf::from("/x/a.txt"), PathBuf::from("/x/b.APKM")],
+            None,
+        );
+        assert!(e.unwrap_err().to_string().contains("innkeeper install"));
     }
 
     #[test]

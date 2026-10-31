@@ -17,10 +17,11 @@ screenshots, use the nested desktop in
 
 ## Main window
 
-- **APK handler:** the desktop entry declares the APK and bundle types, so "Open
-  With" offers the manager; `mise run package -- --install` installs it for a
-  checkout's stage. It is single-instance: opening another APK adds an install
-  page to the running window.
+- **APK handler:** the desktop entry runs `innkeeper-manager %F` and declares
+  only the APK and bundle types, so "Open With" offers the manager for those;
+  `mise run package -- --install` installs it for a checkout's stage. It is
+  single-instance: opening another APK adds an install page to the running
+  window.
 - **First run** prepares the Android image ("Preparing Android").
 - **The list** comes from the profile's desktop entries, so it shows without
   booting Android, and a directory monitor follows CLI changes. At startup it
