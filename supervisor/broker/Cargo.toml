@@ -14,8 +14,9 @@ libc = "0.2"
 name = "innkeeper-brk"
 path = "src/main.rs"
 
-# C syscall probes exercise the real Rust boundary through this test-only ABI.
-[[example]]
-name = "supervisor-probes"
-path = "../tests/broker.rs"
-crate-type = ["staticlib"]
+# The real filter and broker against real processes (tests/probes). Its own
+# main: each probe needs a fresh single-threaded process to fork from.
+[[test]]
+name = "probes"
+path = "tests/probes/main.rs"
+harness = false

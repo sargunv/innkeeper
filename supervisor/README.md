@@ -169,12 +169,13 @@ set it, and their filter and driver are unchanged.
 
 ## Tests
 
-`mise run test` runs `cargo test -p innkeeper-broker` (binder transactions,
-failure delivery, freezing, credentials) and every `tests/*.sh`: C probes that
-drive the real filter and broker (`seccomp-filter` checks exactly which syscalls
-notify, `bpfemu` the emulator's bounds, `binder-restarts` interrupted ioctls,
-`drm-node` the render-node policy, `bootstrap` the broker starting init), and
-unit checks of the shim's headers.
+`mise run test` runs `cargo test -p innkeeper-broker`: unit tests (binder
+transactions, failure delivery, freezing, credentials) and
+`broker/tests/probes`, which drive the real filter and broker with real
+processes (which syscalls the filter traps, the bpf emulator, interrupted binder
+ioctls, the render-node policy, the broker starting init).
+`ctest --preset host-tests` runs `shim/tests`, unit checks of the shim's
+headers.
 
 - `mise run test:e2e -- boot` boots and runs `selftest`.
 - `mise run ohos:test` boots OpenHarmony until its system abilities register.

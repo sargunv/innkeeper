@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../shim/oom.h"
+#include "../oom.h"
 
 int main(void) {
   for (int floor = 0; floor <= 1000; ++floor) {
