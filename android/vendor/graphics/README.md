@@ -1,9 +1,9 @@
 # graphics
 
-The display HALs, built out of tree with the NDK by `mise run build:graphics`
-(the NDK superbuild) and staged under `share/innkeeper/android/vendor/`. init
-starts the two services from `etc/init`; the mapper is loaded into every process
-that touches gralloc buffers.
+The display HALs, built out of tree with the NDK by `mise run build:ndk` (the
+NDK superbuild) and staged under `share/innkeeper/android/vendor/`. init starts
+the two services from `etc/init`; the mapper is loaded into every process that
+touches gralloc buffers.
 
 | Piece     | Interface                                                           | Installed as                                                   |
 | --------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |

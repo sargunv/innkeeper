@@ -52,11 +52,11 @@ only built-in input.
   changes (remote submix) are best effort in the rootless session; our service
   doesn't need that.
 
-`mise run build:audio` builds and stages both services' artifacts. Host unit
-tests cover output buffer sizes, position and latency arithmetic, usage
-priority, FMQ wrapping and wakeups, paced capture without a bridge, and the
-audio client's capture underruns, partial reads and bridge death. The audio
-group of `mise run test:e2e` plays a 440 Hz tone into a private null sink and
-checks its frequency, then detects a known marker through AudioRecord from that
-sink's monitor. `mise run bench -- audio` measures app-visible output latency
-and capture round trip.
+`mise run build:ndk` builds and stages both services' artifacts. Host unit tests
+cover output buffer sizes, position and latency arithmetic, usage priority, FMQ
+wrapping and wakeups, paced capture without a bridge, and the audio client's
+capture underruns, partial reads and bridge death. The audio group of
+`mise run test:e2e` plays a 440 Hz tone into a private null sink and checks its
+frequency, then detects a known marker through AudioRecord from that sink's
+monitor. `mise run bench -- audio` measures app-visible output latency and
+capture round trip.

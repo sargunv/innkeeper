@@ -6,11 +6,10 @@ if(ANDROID)
   target_link_options(innkeeper-exec PRIVATE -static)
   install(
     TARGETS innkeeper-exec
-    RUNTIME DESTINATION ${INNKEEPER_ANDROID}/system/bin COMPONENT system)
+    RUNTIME DESTINATION ${INNKEEPER_ANDROID}/system/bin)
   install(
     FILES innkeeper-exec.rc
-    DESTINATION ${INNKEEPER_ANDROID}/system/etc/init
-    COMPONENT system)
+    DESTINATION ${INNKEEPER_ANDROID}/system/etc/init)
 else()
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_executable(exec-relay-test tests/relay.c)

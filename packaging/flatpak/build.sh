@@ -61,12 +61,12 @@ mkdir -p "$out/src"
 git archive HEAD | tar -x -C "$out/src"
 cargo vendor -q --locked --manifest-path "$out/src/Cargo.toml" "$out/vendor" >/dev/null
 
-# The Android side: every staged file the host modules didn't write, with
+# The Android side: every staged file the host module didn't write, with
 # their rows of the stage manifest (the innkeeper module adds its own).
 stage=out/stage
 m=share/innkeeper/manifest.tsv
 mkdir -p "$out/prebuilt/share/innkeeper"
-awk -F'\t' '$2 != "host" && $2 != "launcher"' "$stage/$m" >"$out/prebuilt/$m"
+awk -F'\t' '$2 != "host"' "$stage/$m" >"$out/prebuilt/$m"
 cut -f1 "$out/prebuilt/$m" | (cd "$stage" && cpio -pdm --quiet "$out/prebuilt")
 
 # Builder runs from its own installation: Flatpak hides that installation

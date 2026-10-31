@@ -14,19 +14,15 @@ from the host; none of it needs root.
 ## Build
 
 `mise run build` runs every `build:<module>` task, each into its own
-`out/build/<module>/install` tree (paths relative to the prefix), then `stage`
-merges them into `out/stage` and writes `share/innkeeper/manifest.tsv` (path,
-module, sha256 per file). Stage fails if a module misses an artifact declared in
-[tools/build/artifacts.toml](../tools/build/artifacts.toml) or two modules write
-the same path. Nothing at runtime builds anything.
+`out/build/<module>/install` tree (paths relative to the prefix), then
+[tools/build/stage.sh](../tools/build/stage.sh) copies them into `out/stage` and
+writes `share/innkeeper/manifest.tsv` (path, module, sha256 per file). It fails
+if two modules write the same path. Nothing at runtime builds anything.
 
 ```mermaid
 flowchart LR
   host["build:host<br/>cargo (glibc)"] --> stage
-  ndk["ndk<br/>CMake superbuild"] --> sup["build:supervisor<br/>+ cargo (bionic broker)"] --> stage
-  ndk --> gfx["build:graphics"] --> stage
-  ndk --> aud["build:audio"] --> stage
-  ndk --> sys["build:system"] --> stage
+  ndk["build:ndk<br/>CMake superbuild<br/>+ cargo (bionic broker)"] --> stage
   vk["build:vulkan<br/>Mesa (container)"] --> stage
   it["build:image-tools<br/>(container)"] --> stage
   app["build:system-app<br/>Gradle"] --> stage
@@ -39,8 +35,8 @@ flowchart LR
   container builds get it with `--env-file`, and Gradle reads it from the
   environment.
 - **One NDK superbuild**, the root `CMakeLists.txt` (presets `android` and
-  `host-tests`), builds every Android-side C/C++ artifact; each module installs
-  its CMake component.
+  `host-tests`), builds every Android-side C/C++ artifact; ninja rebuilds only
+  what changed.
 - **One build container**, [tools/container](../tools/README.md), for Mesa and
   the static image tools. Every run is capped (`--memory`, `--pids-limit`);
   those builds are skipped while their inputs hash to the same stamp, and it

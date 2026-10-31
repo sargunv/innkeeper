@@ -61,16 +61,11 @@ set(HAL_APEX ${INNKEEPER_ANDROID}/apex/com.android.hardware.audio)
 install(
   FILES
   etc/apex/com.android.hardware.audio/etc/android.hardware.audio.service-aidl.example.rc
-  DESTINATION ${HAL_APEX}/etc
-  COMPONENT audio)
+  DESTINATION ${HAL_APEX}/etc)
 install(
   FILES etc/primary_audio_policy_configuration.xml
-  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc
-  COMPONENT audio)
-install(
-  FILES etc/audio.prop
-  DESTINATION share/innkeeper/props.d
-  COMPONENT audio)
+  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc)
+install(FILES etc/audio.prop DESTINATION share/innkeeper/props.d)
 
 file(GLOB_RECURSE AUDIO_AIDL_SRCS ${AUDIO_AIDL}/src/*.cpp)
 add_library(audio_aidl STATIC ${AUDIO_AIDL_SRCS})
@@ -90,11 +85,8 @@ target_link_libraries(audio_input_test PRIVATE audio_aidl)
 set_target_properties(
   audio_input_test
   PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-bin)
-install(
-  TARGETS audio_bridge
-  RUNTIME DESTINATION ${HAL_APEX}/bin/hw COMPONENT audio)
-install(FILES etc/audio-bridge.rc DESTINATION ${HAL_APEX}/etc COMPONENT audio)
+install(TARGETS audio_bridge RUNTIME DESTINATION ${HAL_APEX}/bin/hw)
+install(FILES etc/audio-bridge.rc DESTINATION ${HAL_APEX}/etc)
 install(
   FILES etc/audio-bridge.xml
-  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc/vintf/manifest
-  COMPONENT audio)
+  DESTINATION ${INNKEEPER_ANDROID}/vendor/etc/vintf/manifest)

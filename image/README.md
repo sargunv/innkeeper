@@ -52,9 +52,8 @@ it first.
    listed in [android/overlay/README.md](../android/overlay/README.md), then
    update the hashes from the **image copies**, never the edited overlays.
    System paths resolve under `img/system/system/`; APEX paths under the
-   selected `apex-<hash>/`. Stage the updated hashes with `mise run build:data`
-   and `mise run stage`, then rerun `prepare`. Rename the blanked APEX APKs to
-   the new build id.
+   selected `apex-<hash>/`. Stage the updated hashes with `mise run build`, then
+   rerun `prepare`. Rename the blanked APEX APKs to the new build id.
 4. Prove it: `mise run test:e2e` passes, and a few corpus apps still work
    (`mise run test:compat -- --only <package>,...`).
 

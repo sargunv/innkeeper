@@ -3,12 +3,10 @@
 Build and dev tooling; never shipped.
 
 - **`build/`**: `toolchain.env` (the one NDK, API, build-tools and compileSdk
-  pin, loaded by mise, the container and Gradle), `artifacts.toml` (each
-  module's build task, where its artifacts run, and the artifacts the stage
-  requires), `stage.sh` (merges `out/build/*/install` into `out/stage` and
-  writes `share/innkeeper/manifest.tsv`), `host.sh` (`build:host`),
-  `install-component.sh` (installs one module of the NDK superbuild) and
-  `sccache.sh` (runs a build against the compiler cache every checkout shares).
+  pin, loaded by mise, the container and Gradle), `stage.sh` (copies
+  `out/build/*/install` into `out/stage` and writes
+  `share/innkeeper/manifest.tsv`), `host.sh` (`build:host`) and `sccache.sh`
+  (runs a build against the compiler cache every checkout shares).
 - **`container/`**: the one Fedora build container (`Containerfile`) and
   `run.sh`, which tags the image by the Containerfile's hash, mounts `$HOME` for
   the NDK and the compiler cache, and always caps the run (`--memory`,

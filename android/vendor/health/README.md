@@ -1,7 +1,7 @@
 # health
 
 The Health HAL, `android.hardware.health.IHealth/default` (AIDL V5), built out
-of tree with the NDK by `mise run build:health` and staged as
+of tree with the NDK by `mise run build:ndk` and staged as
 `/vendor/bin/hw/android.hardware.health-service.innkeeper` with its init rc and
 VINTF fragment. It replaces cuttlefish's (which fakes a charging battery; its
 APEX is dropped in [image/bootconfig](../../../image/bootconfig)), so
