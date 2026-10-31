@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -57,7 +58,7 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
-// --- connection (g_lock held) ---------------------------------------------
+// ---- connection (g_lock held) ----
 
 static void request(struct lxb_msg* m, uint16_t type) {
   lxb_msg_init(m, type, ++g_tag);
@@ -107,7 +108,7 @@ static int connect_locked(void) {
   return 0;
 }
 
-// --- streams ---------------------------------------------------------------
+// ---- streams ----
 
 static _Atomic uint64_t* hdr64(const struct lxb_stream* s, size_t off) {
   return (_Atomic uint64_t*)(s->map + off);

@@ -1,10 +1,7 @@
 // The bridge's audio service (host/bridge/src/audio/proto.rs): one
 // shared connection per process, and PCM rings for playback and capture.
-//
-// Kept free of tinyalsa types so an AIDL StreamBridge can reuse it as is.
 #pragma once
 
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
