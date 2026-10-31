@@ -1,5 +1,6 @@
-//! Version 1 of the session's per-app API. All Android work goes through the
-//! bridge and the privileged system app, never the session's exec socket.
+//! The session's `Session1` D-Bus API, as clients call it: per-app settings
+//! and window operations. Both go through the bridge to the privileged system
+//! app, never the session's exec socket.
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -121,10 +122,95 @@ impl Response {
     }
 }
 
+/// A window operation the bridge relays to the system app as JSON
+/// (`WindowCommands.kt`).
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "action", rename_all = "kebab-case")]
+pub enum WindowCommand {
+    Launch {
+        package: String,
+        /// Empty: the launcher activity.
+        component: String,
+        /// Empty: none.
+        uri: String,
+        /// Documents grants, 16 hex digits each.
+        grants: Vec<String>,
+        token: String,
+        wait: bool,
+        new_window: bool,
+        /// The window's size in dp; 0: the app's own.
+        width: u32,
+        height: u32,
+    },
+    Windows,
+    Close {
+        /// Negative: the window of `package`.
+        display: i32,
+        package: String,
+    },
+}
+
+impl WindowCommand {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            WindowCommand::Launch {
+                package,
+                component,
+                uri,
+                token,
+                width,
+                height,
+                ..
+            } => {
+                crate::validate::package(package)?;
+                ensure!(component.len() <= 512 && uri.len() <= 8192, "too long");
+                ensure!(
+                    token.is_empty() || crate::validate::activation_token(token).is_some(),
+                    "invalid activation token"
+                );
+                ensure!(*width <= 16384 && *height <= 16384, "window too large");
+            }
+            WindowCommand::Windows => {}
+            WindowCommand::Close { display, package } => {
+                if *display < 0 {
+                    crate::validate::package(package)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        self.validate()?;
+        Ok(serde_json::to_vec(self)?)
+    }
+}
+
+/// The system app's answer to a [`WindowCommand`].
+#[derive(Debug, Deserialize)]
+pub struct WindowResponse {
+    pub error: String,
+    pub reply: Option<String>,
+}
+
+impl WindowResponse {
+    /// The reply, or the error the system app reported.
+    pub fn decode(bytes: &[u8]) -> Result<String> {
+        ensure!(bytes.len() <= MAX_JSON, "window response too large");
+        let r: Self = serde_json::from_slice(bytes)?;
+        ensure!(
+            r.error.is_empty(),
+            "{}",
+            crate::validate::truncate(&r.error, 1024)
+        );
+        r.reply.context("empty window response")
+    }
+}
+
 /// Profile `profile`'s running session's Session1 object.
 fn proxy(profile: &crate::paths::ProfileName) -> Result<zbus::blocking::Proxy<'static>> {
     let connection = zbus::blocking::connection::Builder::session()?
-        .method_timeout(Duration::from_secs(25))
+        .method_timeout(Duration::from_secs(45))
         .build()?;
     let name = bus_name(profile);
     Ok(zbus::blocking::Proxy::new_owned(
@@ -157,6 +243,79 @@ pub fn request(
     response
         .info
         .ok_or_else(|| anyhow::anyhow!("missing app information"))
+}
+
+/// Session1 `Launch`'s arguments for `l` and `o`: package, component, URI,
+/// grants, token, wait, new window.
+type LaunchArgs<'a> = (
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a [u64],
+    &'a str,
+    bool,
+    bool,
+    u32,
+    u32,
+);
+
+fn launch_args<'a>(
+    l: &'a crate::android::Launch,
+    o: &'a crate::android::LaunchOptions,
+) -> LaunchArgs<'a> {
+    use crate::android::Launch;
+    let (package, component, uri, grants) = match l {
+        Launch::Main { component } => (
+            component
+                .split_once('/')
+                .map_or(component.as_str(), |c| c.0),
+            component.as_str(),
+            "",
+            &[][..],
+        ),
+        Launch::View { package, uri } => (package.as_str(), "", uri.as_str(), &[][..]),
+        Launch::File {
+            package,
+            grants,
+            component,
+        } => (
+            package.as_str(),
+            component.as_deref().unwrap_or_default(),
+            "",
+            grants.as_slice(),
+        ),
+    };
+    let token = o.token.as_deref().unwrap_or_default();
+    let (width, height) = o.size.unwrap_or_default();
+    (
+        package,
+        component,
+        uri,
+        grants,
+        token,
+        o.wait,
+        o.new_window,
+        width,
+        height,
+    )
+}
+
+/// Opens `l` in a window through profile `profile`'s session (one window
+/// per app). Returns the window manager's reply (`launched display=N ...` or
+/// `focused ...`).
+pub fn launch(
+    profile: &crate::paths::ProfileName,
+    l: &crate::android::Launch,
+    o: &crate::android::LaunchOptions,
+) -> Result<String> {
+    proxy(profile)?
+        .call("Launch", &launch_args(l, o))
+        .context("launch failed")
+}
+
+/// Profile `profile`'s windows, one line each (`display=N package=P ...`).
+pub fn windows(profile: &crate::paths::ProfileName) -> Result<Vec<String>> {
+    Ok(proxy(profile)?.call("Windows", &())?)
 }
 
 /// A read-only grant on the running session's bridge for `file` (only its
@@ -206,6 +365,90 @@ mod tests {
             );
         }
         assert!(Response::decode(br#"{"error":"","info":null}"#).is_err());
+        use crate::android::{Launch, LaunchOptions};
+        let main = Launch::Main {
+            component: "org.wikipedia/.main.MainActivity".into(),
+        };
+        let defaults = LaunchOptions::default();
+        let (pkg, component, uri, grants, token, wait, new_window, ..) =
+            launch_args(&main, &defaults);
+        assert_eq!(
+            (pkg, component, uri, grants, token, wait, new_window),
+            (
+                "org.wikipedia",
+                "org.wikipedia/.main.MainActivity",
+                "",
+                &[][..],
+                "",
+                false,
+                false
+            )
+        );
+        let chooser = Launch::File {
+            package: "dev.sargunv.innkeeper.system".into(),
+            grants: vec![0xabc, 0xdef],
+            component: Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity".into()),
+        };
+        let opts = LaunchOptions {
+            token: Some("kwin-3".into()),
+            wait: true,
+            new_window: true,
+            size: Some((1280, 800)),
+        };
+        let (_, component, _, grants, token, wait, new_window, w, h) = launch_args(&chooser, &opts);
+        assert_eq!((w, h), (1280, 800));
+        assert_eq!(
+            component,
+            "dev.sargunv.innkeeper.system/.documents.OpenWithActivity"
+        );
+        assert_eq!(grants, [0xabc, 0xdef]);
+        assert_eq!((token, wait, new_window), ("kwin-3", true, true));
+        let launch = WindowCommand::Launch {
+            package: "a.b".into(),
+            component: "a.b/.Main".into(),
+            uri: String::new(),
+            grants: vec![format!("{:016x}", 7u64)],
+            token: String::new(),
+            wait: true,
+            new_window: false,
+            width: 0,
+            height: 0,
+        };
+        assert_eq!(
+            String::from_utf8(launch.encode().unwrap()).unwrap(),
+            r#"{"action":"launch","package":"a.b","component":"a.b/.Main","uri":"","grants":["0000000000000007"],"token":"","wait":true,"new_window":false,"width":0,"height":0}"#
+        );
+        assert_eq!(
+            String::from_utf8(
+                WindowCommand::Close {
+                    display: -1,
+                    package: "a.b".into()
+                }
+                .encode()
+                .unwrap()
+            )
+            .unwrap(),
+            r#"{"action":"close","display":-1,"package":"a.b"}"#
+        );
+        assert!(
+            WindowCommand::Close {
+                display: -1,
+                package: "../x".into()
+            }
+            .encode()
+            .is_err()
+        );
+        assert_eq!(
+            WindowResponse::decode(br#"{"error":"","reply":"closed display=3 package=a.b"}"#)
+                .unwrap(),
+            "closed display=3 package=a.b"
+        );
+        assert_eq!(
+            WindowResponse::decode(br#"{"error":"no such window","reply":null}"#)
+                .unwrap_err()
+                .to_string(),
+            "no such window"
+        );
         assert!(Response::decode(&vec![b' '; MAX_JSON + 1]).is_err());
         assert_eq!(
             bus_name(&crate::paths::ProfileName::new("page-test").unwrap()),

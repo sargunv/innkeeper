@@ -20,9 +20,8 @@ import android.widget.TextView
  * system-bar and IME insets and its size, over a card with 24 dp elevation on a light background,
  * so a screenshot shows whether elevation shadows render.
  *
- * `am broadcast -n dev.sargunv.innkeeper.system/.wm.ControlReceiver -a dev.sargunv.innkeeper.LAUNCH
- * --es package dev.sargunv.innkeeper.probes --es component
- * dev.sargunv.innkeeper.probes/.WindowProbeActivity`
+ * `innkeeper run dev.sargunv.innkeeper.probes` opens the probes' launcher; e2e launches this
+ * activity through the session API's `Launch` with its component.
  */
 class WindowProbeActivity : Activity() {
   private lateinit var text: TextView

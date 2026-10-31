@@ -56,6 +56,13 @@ impl Session {
         })
     }
 
+    /// The profile the harness runs (`INNKEEPER_PROFILE`).
+    pub fn profile(&self) -> anyhow::Result<innkeeper_core::paths::ProfileName> {
+        innkeeper_core::paths::ProfileName::new(
+            &std::env::var("INNKEEPER_PROFILE").unwrap_or_default(),
+        )
+    }
+
     /// Runs `cmd` inside the session as root, killed after `secs`.
     pub fn run(&self, secs: u64, cmd: &[&str]) -> Output {
         match self.exec(secs, cmd) {

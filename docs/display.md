@@ -425,8 +425,8 @@ release. They do not describe host presentation.
 
 ## Control interface
 
-The host launches and lists windows with the window manager's
-`dev.sargunv.innkeeper.LAUNCH`, `LIST` and `CLOSE` broadcasts, and sets the
-background setting ([session](session.md#lifecycle)) with `BACKGROUND`, run as
-root inside the session; `wm/ControlReceiver.kt` documents the arguments and
-replies, and `innkeeper-core`'s `android` module is the one caller.
+Desktop clients launch, list and close windows through the session's `Session1`
+D-Bus API (`Launch`, `Windows`, `Close`;
+[bridge-protocol](bridge-protocol.md#desktop-session-api-version-1)), which the
+bridge relays to the system app; `wm/WindowCommands.kt` documents the operations
+and replies. Nothing drives the window manager over the session's exec socket.

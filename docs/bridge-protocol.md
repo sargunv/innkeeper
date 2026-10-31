@@ -200,14 +200,33 @@ and restrictions; failures return to the caller. Only installed user apps can be
 changed. Cache/data clearing waits for Android's package-data callback; clear
 data deletes the target's accounts, files and settings.
 
-The system app's **apps** connection receives event `0x4501`:
-`u64 request_id, u32 length`, plus one sealed JSON memfd. The command is
-`{"package":"…","action":"…","permission":"…","enabled":false}`. It answers with
-request `0x0504`, the same envelope and one sealed response memfd. No trailing
-envelope bytes or extra fds are accepted. Both JSON payloads are capped at 64
-KiB. Up to eight requests may wait; the system app serializes operations on its
-apps worker. A reconnect cancels pending requests and stale responses are
-ignored.
+`Launch(s package, s component, s uri, at grants, s token, b wait, b new_window, u width, u height) → s reply`
+opens `package` in a window of its own (its launcher activity, or `component`;
+with `uri`, or documents `grants` from `Import`, to view; empty strings and
+zeros mean none), or focuses its window. `token` is the desktop's activation
+token for the window; `new_window` asks for a separate task; `width` and
+`height` size the window in dp. With `wait` it answers once a new window shows
+its first frame (at most 25 s; `shown=no` is appended if it didn't). The reply
+is the window manager's one line, `launched display=N package=P size=WxH ...` or
+`focused ...`. `Windows() → as` lists the windows, one `display=N package=P ...`
+line each. `Close(i display, s package) → s` closes window `display`, or, when
+it is negative, `package`'s, finishing its tasks. Failures return `Failed` with
+the system app's message.
+
+The bridge relays `App`, `Launch`, `Windows` and `Close` to the system app's
+**apps** connection as event `0x4501`: `u64 request_id, u32 length`, plus one
+sealed JSON memfd. App commands are
+`{"package":"…","action":"…","permission":"…","enabled":false}`; window commands
+are
+`{"action":"launch","package":…,"component":…,"uri":…,"grants":["<16 hex>"],"token":…,"wait":…,"new_window":…,"width":…,"height":…}`,
+`{"action":"windows"}` and `{"action":"close","display":…,"package":…}`. The
+system app answers with request `0x0504`, the same envelope and one sealed
+response memfd: the app response above, or `{"error":"","reply":"…"}` for a
+window command. No trailing envelope bytes or extra fds are accepted. Both JSON
+payloads are capped at 64 KiB. Up to eight requests may wait, each at most 40 s;
+the system app serializes app operations on its apps worker and runs window
+commands on threads of their own. A reconnect cancels pending requests and stale
+responses are ignored.
 
 Escape-as-Back is stored per package in the system app's device-protected
 preferences, default off. Input resolves the `innkeeper:<package>` display on

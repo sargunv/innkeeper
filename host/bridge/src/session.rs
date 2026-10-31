@@ -90,9 +90,9 @@ impl Relay {
         }
     }
 
-    fn call(&self, command: Command) -> Answer {
-        let bytes = command.encode().map_err(|e| e.to_string())?;
-        let fd = blob::create("app-command", &bytes).map_err(|e| e.to_string())?;
+    /// Relays JSON `bytes` to the system app and returns its JSON answer.
+    fn call(&self, bytes: &[u8]) -> Answer {
+        let fd = blob::create("app-command", bytes).map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::sync_channel(1);
         let id;
         {
@@ -114,7 +114,8 @@ impl Relay {
                 .map_err(|e| e.to_string())?;
             state.pending.insert(id, tx);
         }
-        let result = rx.recv_timeout(Duration::from_secs(20));
+        // A launch may wait 25 s for its window's first frame.
+        let result = rx.recv_timeout(Duration::from_secs(40));
         self.0.lock().unwrap().pending.remove(&id);
         result.map_err(|_| {
             "System app disconnected or operation timed out; refresh before retrying".to_string()
@@ -130,7 +131,8 @@ impl Relay {
             return Err(-22);
         }
         let bytes = blob::read(&fds[0], len, app_settings::MAX_JSON)?;
-        Response::decode(&bytes).map_err(|_| -22)?;
+        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
+            .map_err(|_| -22)?;
         let json = String::from_utf8(bytes).map_err(|_| -22)?;
         let mut state = self.0.lock().unwrap();
         if state
@@ -186,6 +188,17 @@ struct SessionApi {
     documents: Arc<crate::documents::Store>,
 }
 
+impl SessionApi {
+    fn window(&self, w: app_settings::WindowCommand) -> zbus::fdo::Result<String> {
+        let bytes = w
+            .encode()
+            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        let json = self.relay.call(&bytes).map_err(zbus::fdo::Error::Failed)?;
+        app_settings::WindowResponse::decode(json.as_bytes())
+            .map_err(|e| zbus::fdo::Error::Failed(format!("{e:#}")))
+    }
+}
+
 #[zbus::interface(name = "dev.sargunv.Innkeeper.Session1")]
 impl SessionApi {
     /// Booted only after the system app observes sys.boot_completed=1.
@@ -239,10 +252,60 @@ impl SessionApi {
             permission: permission.into(),
             enabled,
         };
-        command
-            .validate()
+        let bytes = command
+            .encode()
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
-        self.relay.call(command).map_err(zbus::fdo::Error::Failed)
+        let json = self.relay.call(&bytes).map_err(zbus::fdo::Error::Failed)?;
+        Response::decode(json.as_bytes())
+            .map_err(|e| zbus::fdo::Error::Failed(format!("bad answer: {e}")))?;
+        Ok(json)
+    }
+
+    /// Opens `package` in a window of its own (its launcher activity, or
+    /// `component`; with `uri` or document `grants` to view), or focuses its
+    /// window. With `wait`, answers once a new window shows its first frame.
+    /// Returns the window manager's reply, `launched display=N ...` or
+    /// `focused ...`.
+    #[allow(clippy::too_many_arguments)]
+    fn launch(
+        &self,
+        package: &str,
+        component: &str,
+        uri: &str,
+        grants: Vec<u64>,
+        token: &str,
+        wait: bool,
+        new_window: bool,
+        width: u32,
+        height: u32,
+    ) -> zbus::fdo::Result<String> {
+        let w = app_settings::WindowCommand::Launch {
+            package: package.into(),
+            component: component.into(),
+            uri: uri.into(),
+            grants: grants.iter().map(|g| format!("{g:016x}")).collect(),
+            token: token.into(),
+            wait,
+            new_window,
+            width,
+            height,
+        };
+        self.window(w)
+    }
+
+    /// The windows, one line each: `display=N package=P ...`.
+    fn windows(&self) -> zbus::fdo::Result<Vec<String>> {
+        let reply = self.window(app_settings::WindowCommand::Windows)?;
+        Ok(reply.lines().map(str::to_string).collect())
+    }
+
+    /// Closes window `display` (or, if negative, `package`'s), finishing its
+    /// tasks.
+    fn close(&self, display: i32, package: &str) -> zbus::fdo::Result<String> {
+        self.window(app_settings::WindowCommand::Close {
+            display,
+            package: package.into(),
+        })
     }
 }
 

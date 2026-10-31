@@ -381,7 +381,7 @@ pub fn run(
                 component: android::launcher_component(&s, pkg)?,
             },
         };
-        android::launch(&s, &l, opts)
+        crate::app_settings::launch(profile, &l, opts)
     };
     match launch() {
         // The session stopped for idleness just as this came: once more.

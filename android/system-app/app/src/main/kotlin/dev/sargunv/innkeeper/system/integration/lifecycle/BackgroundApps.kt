@@ -5,8 +5,8 @@ import android.content.Context
 
 /**
  * The apps the user lets run in the background (off by default): while one is installed, the
- * session doesn't stop when idle, and the desktop shows an indicator. Set through the control
- * receiver's `dev.sargunv.innkeeper.BACKGROUND` (`innkeeper background`). Any thread.
+ * session doesn't stop when idle, and the desktop shows an indicator. Set through the session API's
+ * `background` app action (`innkeeper app set PKG --background on`). Any thread.
  */
 class BackgroundApps(private val context: Context) {
   private val prefs by lazy {
