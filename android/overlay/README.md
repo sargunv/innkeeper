@@ -56,7 +56,7 @@ before refreshing hashes when the pin moves
 ## Removed for idle memory
 
 Apps the boot broadcasts start, which then stay resident, for features a desktop
-session doesn't have (#28). Each is blanked like the files above;
+session doesn't have. Each is blanked like the files above;
 `tools/dev/footprint.sh` shows what a session holds.
 
 | File                                                                                                          | Why                                                                                   |

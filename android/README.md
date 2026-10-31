@@ -12,7 +12,7 @@ image.
 | [vendor/health](vendor/health/README.md)     | `/vendor/bin/hw`, `/vendor/etc/{init,vintf}`                                         | init (`IHealth/default`, the host's battery)                     |
 | [vendor/vulkan](vendor/vulkan/README.md)     | `/vendor/lib64/hw/vulkan.{radv,lvp}.so`, `/vendor/etc/permissions`                   | libvulkan in apps, SurfaceFlinger and ANGLE                      |
 | [vendor/audio](vendor/audio/README.md)       | `/apex/com.android.hardware.audio/lib64/libtinyalsav2.so`, `/vendor/etc`             | the AIDL audio HAL                                               |
-| [system](system/README.md)                   | `/system/bin/innkeeper-exec`, rc                                                     | init (exec relay)                                                |
+| [system](system/README.md)                   | `/system/bin/{innkeeper-exec,iptables,…}`, rc                                        | init (exec relay), netd (no-op firewall)                         |
 | [system-app](system-app/README.md)           | `/system_ext/priv-app/InnkeeperSystem`, `/system_ext/etc/permissions`                | system_server, as a persistent privileged app                    |
 | [overlay](overlay/README.md)                 | rc, XML and blank files in every partition                                           | init, system_server, PackageManager                              |
 | [microg](microg/README.md)                   | the addons layer, `$XDG_DATA_HOME/innkeeper/addons/microg`                           | PackageManager (optional, `mise run microg`)                     |
