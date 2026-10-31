@@ -265,7 +265,28 @@ sys.exit(1)
       /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)
-      s cmd media_session volume --stream 3 --set 15 >/dev/null
+      # The desktop mixer is the only volume control: a stream-volume request
+      # must not move STREAM_MUSIC off the maximum index dumpsys reports.
+      s cmd media_session volume --stream 3 --set 1 >/dev/null || true
+      audio_dump=$(s dumpsys audio)
+      grep -q 'mUseFixedVolume=true' <<<"$audio_dump"
+      /usr/bin/python3 -c '
+import re, sys
+dump = sys.argv[1]
+block = re.search(r"- STREAM_MUSIC:\n(.*?)(?=\n- STREAM_|\Z)", dump, re.S)
+body = block.group(1) if block else ""
+max_index = re.search(r"Max: (\d+)", body)
+current = re.search(r"Current: (.+)", body)
+if (
+    not max_index
+    or not current
+    or not re.search(rf": {max_index[1]}(,|$)", current[1])
+):
+    print("FAIL fixed volume: STREAM_MUSIC is not at its max index", file=sys.stderr)
+    print(block.group(0) if block else "STREAM_MUSIC missing", file=sys.stderr)
+    sys.exit(1)
+' "$audio_dump"
+      echo 'ok   stream volume stays at maximum; the desktop mixer is the control'
       parec -d "$LINUXAPK_AUDIO_SINK.monitor" --format=s16le --rate=48000 --channels=2 --raw >"$T/audio.raw" &
       recorder=$!
       trap 'kill "$recorder" 2>/dev/null || true; wait "$recorder" 2>/dev/null || true' EXIT
