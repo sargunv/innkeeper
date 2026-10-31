@@ -11,7 +11,7 @@ image.
 | [vendor/graphics](vendor/graphics/README.md) | `/vendor/bin/hw`, `/vendor/lib64/hw/mapper.innkeeper.so`, `/vendor/etc/{init,vintf}` | init (allocator, composer); every process using gralloc (mapper) |
 | [vendor/health](vendor/health/README.md)     | `/vendor/bin/hw`, `/vendor/etc/{init,vintf}`                                         | init (`IHealth/default`, the host's battery)                     |
 | [vendor/vulkan](vendor/vulkan/README.md)     | `/vendor/lib64/hw/vulkan.{radv,lvp}.so`, `/vendor/etc/permissions`                   | libvulkan in apps, SurfaceFlinger and ANGLE                      |
-| [vendor/audio](vendor/audio/README.md)       | `/apex/com.android.hardware.audio/lib64/libtinyalsav2.so`, `/vendor/etc`             | the AIDL audio HAL                                               |
+| [vendor/audio](vendor/audio/README.md)       | `/apex/com.android.hardware.audio/bin/hw/audio_bridge`, `/vendor/etc`                | init (`IModule/innkeeper`), audioserver                          |
 | [system](system/README.md)                   | `/system/bin/{innkeeper-exec,iptables,…}`, rc                                        | init (exec relay), netd (no-op firewall)                         |
 | [system-app](system-app/README.md)           | `/system_ext/priv-app/InnkeeperSystem`, `/system_ext/etc/permissions`                | system_server, as a persistent privileged app                    |
 | [overlay](overlay/README.md)                 | rc, XML and blank files in every partition                                           | init, system_server, PackageManager                              |

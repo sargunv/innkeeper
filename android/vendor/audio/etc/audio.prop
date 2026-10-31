@@ -1,9 +1,5 @@
 # Audio properties, staged as share/innkeeper/props.d/audio.prop and merged into
 # /vendor/build.prop by innkeeper-session at start. See android/vendor/audio/README.md.
 
-# The AIDL HAL's alsa_utils splits its PCM buffer into this many periods
-# (default 4). Our card is fed by the bridge's ring, so 2 is enough.
-ro.hardware.audio.tinyalsa.period_count=2
-
 # With a 5 ms FastMixer burst, a 10 ms normal period keeps its pipe smaller.
 persist.audio.normal_playback_period_ms=10

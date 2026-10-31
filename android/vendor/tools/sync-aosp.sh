@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Refresh android/vendor/third_party/aosp from an AOSP checkout (default
-# ~/aosp/a17): the frozen AIDL API snapshots the HALs implement, the binder NDK,
-# IMapper and tinyalsa headers, and the binder NDK's symbol map. Read-only use
+# ~/aosp/a17): the frozen AIDL API snapshots the HALs implement, the binder NDK
+# and IMapper headers, and the binder NDK's symbol map. Read-only use
 # of the tree.
 set -euo pipefail
 AOSP=${AOSP:-$HOME/aosp/a17}
@@ -10,7 +10,7 @@ dst=$vendor/third_party/aosp
 hi=$AOSP/hardware/interfaces
 media=$AOSP/system/hardware/interfaces/media/aidl_api
 rm -rf "$dst"
-mkdir -p "$dst/aidl" "$dst/include/tinyalsa"
+mkdir -p "$dst/aidl" "$dst/include"
 
 # package  version  its aidl_api dir
 aidl_pkgs=(
@@ -44,17 +44,10 @@ cp "$mp/include/android/hardware/graphics/mapper/IMapper.h" "$dst/include/androi
 cp "$mp/implutils/include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h" \
   "$dst/include/android/hardware/graphics/mapper/utils/"
 
-ta=$AOSP/external/tinyalsa_new
-for h in asoundlib.h attributes.h interval.h limits.h mixer.h pcm.h version.h; do
-  cp "$ta/include/tinyalsa/$h" "$dst/include/tinyalsa/"
-done
-cp "$ta/NOTICE" "$dst/NOTICE.tinyalsa"
-
 cat >"$dst/SOURCE" <<S
 Copied from AOSP $(cd "$AOSP" && grep -o 'revision="[^"]*"' .repo/manifests/default.xml 2>/dev/null | head -1 || echo refs/tags/android-17.0.0_r1)
-by android/vendor/tools/sync-aosp.sh: aidl and include/android (Apache-2.0; see
-the license headers in each file), include/tinyalsa (external/tinyalsa_new,
-BSD-3-Clause, see NOTICE.tinyalsa).
+by android/vendor/tools/sync-aosp.sh. Apache-2.0; see the license headers in
+each file.
 S
 find "$dst" -name Android.bp -delete
 echo "synced into $dst"

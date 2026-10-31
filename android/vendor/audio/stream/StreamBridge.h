@@ -7,11 +7,11 @@
 #include <aidl/android/hardware/audio/core/BnStreamCommon.h>
 #include <aidl/android/hardware/audio/core/BnStreamOut.h>
 #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
-#include <tinyalsa/pcm.h>
 
 #include "Defaults.h"
 #include "Queue.h"
 #include "Usage.h"
+#include "pcm.h"
 
 namespace innkeeper::audio {
 namespace core = aidl::android::hardware::audio::core;
@@ -43,11 +43,11 @@ class StreamBridge : public core::IStreamCommonDelegator {
   std::atomic<bool> closed_{false};
   std::mutex closeMutex_;
   std::thread worker_;
-  pcm* pcm_ = nullptr;
+  bridge_pcm* pcm_ = nullptr;
   uint64_t written_ = 0;
   Descriptor::State state_ = Descriptor::State::STANDBY;
   // Usage to forward once the bridge stream exists. Written by
-  // updateMetadata, read by the worker under closeMutex_. pcm_set_usage
+  // updateMetadata, read by the worker under closeMutex_. bridge_pcm_set_usage
   // drops a repeat, including across a reconnect.
   std::optional<int32_t> pendingUsage_;
 };

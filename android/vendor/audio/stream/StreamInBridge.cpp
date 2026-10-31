@@ -36,20 +36,14 @@ ndk::ScopedAStatus StreamInBridge::close() {
 }
 bool StreamInBridge::open() {
   if (pcm_) return true;
-  pcm_config config{};
-  config.channels = channels_;
-  config.rate = input::kRate;
-  config.period_size = input::kPeriodFrames;
-  config.period_count = input::kPeriods;
-  config.format = PCM_FORMAT_S16_LE;
-  pcm_ = pcm_open(0, 0, PCM_IN, &config);
-  if (pcm_is_ready(pcm_)) return true;
-  stop();
-  return false;
+  pcm_ = bridge_pcm_open(
+    true, input::kRate, channels_, input::kPeriodFrames, input::kPeriods
+  );
+  return pcm_ != nullptr;
 }
 void StreamInBridge::stop() {
   if (pcm_) {
-    pcm_close(pcm_);
+    bridge_pcm_close(pcm_);
     pcm_ = nullptr;
   }
 }
@@ -81,9 +75,9 @@ void StreamInBridge::run() {
           break;
         }
         // Read directly into the FMQ transfer. There is no second pipe or
-        // uptime pacer: tinyalsa blocks on the bridge's capture clock, and
+        // uptime pacer: bridge_pcm blocks on the bridge's capture clock, and
         // supplies paced silence when the bridge/source is unavailable.
-        int status = pcm_read(pcm_, samples.data(), bytes);
+        int status = bridge_pcm_read(pcm_, samples.data(), bytes);
         if (muted_->load())
           std::fill(samples.begin(), samples.begin() + bytes, 0);
         if (status < 0 || !data_.write(samples.data(), bytes)) {

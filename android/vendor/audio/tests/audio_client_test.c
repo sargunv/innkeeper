@@ -10,7 +10,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "innkeeper/audio.h"
+#include "audio.h"
 
 struct fixture {
   struct lxb_stream s;

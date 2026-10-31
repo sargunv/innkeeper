@@ -8,10 +8,6 @@
 
 #include "Output.h"
 
-// Declared in tinyalsa/pcm.c. Not part of the image's tinyalsa header: it
-// reports this playback stream's Android audio_usage_t to the bridge.
-extern "C" void pcm_set_usage(struct pcm* pcm, unsigned int usage);
-
 namespace innkeeper::audio {
 StreamBridge::StreamBridge(size_t frames)
     : IStreamCommonDelegator(
@@ -38,7 +34,7 @@ ndk::ScopedAStatus StreamBridge::close() {
 }
 void StreamBridge::publishUsage() {
   if (pcm_ && pendingUsage_) {
-    pcm_set_usage(pcm_, static_cast<unsigned>(*pendingUsage_));
+    bridge_pcm_set_usage(pcm_, static_cast<uint32_t>(*pendingUsage_));
   }
 }
 void StreamBridge::noteUsage(std::optional<int32_t> usage) {
@@ -49,31 +45,22 @@ void StreamBridge::noteUsage(std::optional<int32_t> usage) {
 }
 bool StreamBridge::open() {
   if (pcm_) return true;
-  pcm_config config{};
-  config.channels = kChannels;
-  config.rate = kRate;
-  config.period_size = kPeriodFrames;
-  config.period_count = kPeriods;
-  config.format = PCM_FORMAT_S16_LE;
-  pcm_ = pcm_open(0, 0, PCM_OUT, &config);
-  if (!pcm_is_ready(pcm_)) {
-    stop();
-    return false;
-  }
+  pcm_ = bridge_pcm_open(false, kRate, kChannels, kPeriodFrames, kPeriods);
+  if (!pcm_) return false;
   // Caller holds closeMutex_. A usage can arrive before the ring exists.
   publishUsage();
   return true;
 }
 void StreamBridge::stop() {
   if (pcm_) {
-    pcm_close(pcm_);
+    bridge_pcm_close(pcm_);
     pcm_ = nullptr;
   }
 }
 void StreamBridge::position(Descriptor::Reply* reply) {
   timespec now{};
   clock_gettime(CLOCK_MONOTONIC, &now);
-  uint64_t queued = pcm_ ? std::max(0L, pcm_get_delay(pcm_)) : 0;
+  uint64_t queued = pcm_ ? std::max(0L, bridge_pcm_delay(pcm_)) : 0;
   reply->observable.frames = presentedFrames(written_, queued);
   reply->observable.timeNs = now.tv_sec * 1000000000LL + now.tv_nsec;
   reply->latencyMs = latencyMs(queued);
@@ -87,7 +74,7 @@ ndk::ScopedAStatus StreamOut::updateMetadata(
   for (const auto& track : metadata.tracks) {
     usages.push_back(static_cast<int32_t>(track.usage));
   }
-  // Empty track list: leave the last label in place. pcm_set_usage skips
+  // Empty track list: leave the last label in place. bridge_pcm_set_usage skips
   // a repeated usage once the bridge stream exists.
   stream_->noteUsage(selectUsage(usages.data(), usages.size()));
   return ndk::ScopedAStatus::ok();
@@ -116,7 +103,7 @@ void StreamBridge::run() {
         auto bytes = command.get<Tag::burst>();
         bool opened = false;
         {
-          // Don't hold this across pcm_write: it blocks on the ring, and
+          // Don't hold this across bridge_pcm_write: it blocks on the ring, and
           // updateMetadata needs the lock to publish a usage change.
           std::lock_guard lock(closeMutex_);
           opened = open();
@@ -129,7 +116,7 @@ void StreamBridge::run() {
           reply.status = -EINVAL;
           break;
         }
-        int status = pcm_write(pcm_, samples.data(), bytes);
+        int status = bridge_pcm_write(pcm_, samples.data(), bytes);
         if (status < 0) {
           reply.status = status;
           break;
@@ -140,7 +127,7 @@ void StreamBridge::run() {
         break;
       }
       case Tag::drain:
-        if (pcm_) pcm_drain(pcm_);
+        if (pcm_) bridge_pcm_drain(pcm_);
         state_ = Descriptor::State::IDLE;
         break;
       case Tag::standby:
@@ -148,7 +135,7 @@ void StreamBridge::run() {
         state_ = Descriptor::State::STANDBY;
         break;
       case Tag::pause:
-        if (pcm_) pcm_stop(pcm_);
+        if (pcm_) bridge_pcm_stop(pcm_);
         state_ = Descriptor::State::PAUSED;
         break;
       case Tag::flush:

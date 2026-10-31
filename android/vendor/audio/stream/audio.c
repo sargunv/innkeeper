@@ -1,4 +1,4 @@
-// The bridge's audio service. See innkeeper/audio.h.
+// The bridge's audio service. See audio.h.
 
 #include <errno.h>
 #include <poll.h>
@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "innkeeper/audio.h"
+#include "audio.h"
 
 #include "innkeeper/bridge_client.h"
 #ifdef __ANDROID__
@@ -32,7 +32,6 @@
 #define T_OPEN_INPUT 0x0107
 #define T_CLOSE 0x0102
 #define T_STANDBY 0x0103
-#define T_SET_MASTER 0x0105
 #define T_SET_METADATA 0x0106
 
 #define RING_MAGIC 0x5241584cu
@@ -49,8 +48,6 @@
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_sock = -1;
 static uint32_t g_tag;
-static float g_master_vol = 1.0f;
-static int g_master_mute;
 
 static int64_t now_ns(void) {
   struct timespec ts;
@@ -85,18 +82,10 @@ static int call_status_locked(const struct lxb_msg* m) {
   return st;
 }
 
-static int set_master_locked(void) {
-  struct lxb_msg m;
-  request(&m, T_SET_MASTER);
-  lxb_put_f32(&m, g_master_vol);
-  lxb_put_u8(&m, (uint8_t)(g_master_mute != 0));
-  return call_status_locked(&m);
-}
-
 static int connect_locked(void) {
   if (g_sock >= 0) return 0;
   char name[64];
-  snprintf(name, sizeof(name), "tinyalsa pid %d", getpid());
+  snprintf(name, sizeof(name), "audio HAL pid %d", getpid());
   int s = lxb_connect(LXB_SERVICE_AUDIO, name);
   if (s < 0) {
     ALOGW("bridge: connect %s: %s", LXB_SOCKET_PATH, strerror(-s));
@@ -104,7 +93,6 @@ static int connect_locked(void) {
   }
   g_sock = s;
   ALOGI("bridge: connected");
-  if (g_master_vol != 1.0f || g_master_mute) set_master_locked();
   return 0;
 }
 
@@ -243,17 +231,6 @@ int lxb_set_metadata(struct lxb_stream* s, uint32_t usage, const char* label) {
     lxb_put_name(&m, label);
     st = call_status_locked(&m);
   }
-  pthread_mutex_unlock(&g_lock);
-  return st;
-}
-
-int lxb_set_master(float volume, int muted) {
-  if (!(volume >= 0.0f)) volume = 0.0f;  // also catches NaN
-  if (volume > 1.0f) volume = 1.0f;
-  pthread_mutex_lock(&g_lock);
-  g_master_vol = volume;
-  g_master_mute = muted != 0;
-  int st = g_sock >= 0 ? set_master_locked() : -ENOTCONN;
   pthread_mutex_unlock(&g_lock);
   return st;
 }

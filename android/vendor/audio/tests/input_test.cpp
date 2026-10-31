@@ -14,24 +14,21 @@ using namespace innkeeper::audio;
     }                                                 \
   } while (0)
 
-struct pcm {
+struct bridge_pcm {
   int generation;
 };
 static int opens = 0, closes = 0;
-extern "C" pcm* pcm_open(
-  unsigned card, unsigned device, unsigned flags, const pcm_config* config
+extern "C" bridge_pcm* bridge_pcm_open(
+  bool input, uint32_t rate, uint32_t, uint32_t period_frames, uint32_t
 ) {
-  CHECK(card == 0 && device == 0 && flags == PCM_IN);
-  CHECK(config->rate == 48000 && config->period_size == 480);
-  return new pcm{++opens};
+  CHECK(input && rate == 48000 && period_frames == 480);
+  return new bridge_pcm{++opens};
 }
-extern "C" int pcm_is_ready(const pcm* p) { return p != nullptr; }
-extern "C" int pcm_close(pcm* p) {
+extern "C" void bridge_pcm_close(bridge_pcm* p) {
   ++closes;
   delete p;
-  return 0;
 }
-extern "C" int pcm_read(pcm* p, void* data, unsigned bytes) {
+extern "C" int bridge_pcm_read(bridge_pcm* p, void* data, uint32_t bytes) {
   auto* samples = static_cast<int16_t*>(data);
   std::fill(samples, samples + bytes / 2, 100 + p->generation);
   return 0;
