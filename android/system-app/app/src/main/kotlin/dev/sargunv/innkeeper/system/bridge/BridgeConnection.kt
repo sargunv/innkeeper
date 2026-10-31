@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * One connection to a host bridge service (docs/bridge-protocol.md): HELLO for [service], then
  * requests from any thread, each answered by a reply that may carry fds, and events for [listener]
- * on the reader thread. Reconnects with backoff while running.
+ * on the reader thread. Reconnects with backoff.
  *
  * [latencySensitive]: the reader thread runs at display priority (host input).
  */
@@ -47,7 +47,6 @@ class BridgeConnection(
     fun closeFds() = fds.forEach(Blob::close)
   }
 
-  @Volatile private var running = false
   @Volatile private var socket: LocalSocket? = null
   @Volatile
   var connected = false
@@ -61,18 +60,7 @@ class BridgeConnection(
 
   fun start() {
     check(thread == null)
-    running = true
     thread = Thread(::run, "innkeeper-bridge-$service").apply { start() }
-  }
-
-  fun stop() {
-    running = false
-    try {
-      socket?.shutdownInput()
-    } catch (_: IOException) {}
-    thread?.interrupt()
-    thread?.join(2000)
-    thread = null
   }
 
   /**
@@ -170,7 +158,7 @@ class BridgeConnection(
     if (latencySensitive) raisePriority()
     var backoff = MIN_BACKOFF_MS
     var lastError: String? = null
-    while (running) {
+    while (true) {
       val s = LocalSocket(LocalSocket.SOCKET_SEQPACKET)
       try {
         s.connect(LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM))
@@ -180,7 +168,7 @@ class BridgeConnection(
         lastError = null
       } catch (e: IOException) {
         val msg = e.message ?: e.toString()
-        if (running && msg != lastError) Log.i(TAG, "bridge service $service: $msg (retrying)")
+        if (msg != lastError) Log.i(TAG, "bridge service $service: $msg (retrying)")
         lastError = msg
       } catch (e: Exception) {
         Log.e(TAG, "bridge service $service failed", e)
@@ -197,7 +185,6 @@ class BridgeConnection(
           listener.onDisconnected()
         }
       }
-      if (!running) break
       try {
         Thread.sleep(backoff)
       } catch (_: InterruptedException) {}
@@ -209,7 +196,7 @@ class BridgeConnection(
     val buf = ByteArray(Wire.MAX_MSG + 1)
     write(s, Wire.hello(HELLO_TAG, service, name), emptyArray())
     val input = s.inputStream
-    while (running) {
+    while (true) {
       val n = input.read(buf)
       if (n <= 0) return
       var fds: Array<FileDescriptor> = s.ancillaryFileDescriptors ?: emptyArray()

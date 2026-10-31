@@ -76,8 +76,6 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     connection.start()
   }
 
-  override fun stop() = connection.stop()
-
   fun addListener(l: Listener) {
     listeners += l
   }

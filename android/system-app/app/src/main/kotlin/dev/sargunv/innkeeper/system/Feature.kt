@@ -5,8 +5,9 @@ package dev.sargunv.innkeeper.system
 interface Feature {
   val name: String
 
-  /** Starts the feature's own threads; must not block. */
+  /**
+   * Starts the feature's own threads; must not block. Features run for the life of the persistent
+   * process, so there is no stop.
+   */
   fun start()
-
-  fun stop()
 }

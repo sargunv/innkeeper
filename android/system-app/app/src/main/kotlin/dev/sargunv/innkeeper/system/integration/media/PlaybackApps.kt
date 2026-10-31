@@ -39,13 +39,6 @@ class PlaybackApps(private val context: Context, private val feature: Integratio
     registered = true
   }
 
-  fun stop() {
-    if (!registered) return
-    audio.unregisterAudioPlaybackCallback(callback)
-    feature.handler.removeCallbacks(flush)
-    registered = false
-  }
-
   fun onConnected() {
     connected = true
     sent = null

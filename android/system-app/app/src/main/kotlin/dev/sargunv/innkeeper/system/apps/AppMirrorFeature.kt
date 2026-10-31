@@ -105,13 +105,6 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
     channel.start()
   }
 
-  override fun stop() {
-    channel.stop()
-    context.unregisterReceiver(receiver)
-    context.unregisterReceiver(bootReceiver)
-    thread.quitSafely()
-  }
-
   private fun onConnected() {
     handler.post {
       // Replay after a late process start or reconnect; channel presence alone precedes boot.

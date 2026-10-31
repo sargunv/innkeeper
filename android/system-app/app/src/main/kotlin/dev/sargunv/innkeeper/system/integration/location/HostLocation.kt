@@ -102,14 +102,6 @@ class HostLocation(private val context: Context, private val feature: HostStateF
     }
   }
 
-  fun stop() {
-    if (gps) {
-      try {
-        lm.removeTestProvider(LocationManager.GPS_PROVIDER)
-      } catch (_: Exception) {}
-    }
-  }
-
   /**
    * The gps provider, a test provider fed with the same fixes. Test providers need the mock
    * location app op, which this platform-signed app grants itself.

@@ -198,13 +198,6 @@ class WindowManagerFeature(
     handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
   }
 
-  override fun stop() {
-    atm.unregisterTaskStackListener(taskListener)
-    onWm { windows.values.toList().forEach { close(it, finishTasks = false) } }
-    thread.quitSafely()
-    frames.quitSafely()
-  }
-
   // ---- control API (ControlReceiver) ---------------------------------------
 
   data class LaunchRequest(

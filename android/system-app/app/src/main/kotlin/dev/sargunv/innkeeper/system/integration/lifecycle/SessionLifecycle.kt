@@ -67,11 +67,6 @@ class SessionLifecycle(
     feature.handler.postDelayed(poll, POLL_MS)
   }
 
-  fun stop() {
-    context.unregisterReceiver(receiver)
-    feature.handler.removeCallbacks(poll)
-  }
-
   /** The bridge has no report of ours yet. */
   fun onConnected() {
     sent = null

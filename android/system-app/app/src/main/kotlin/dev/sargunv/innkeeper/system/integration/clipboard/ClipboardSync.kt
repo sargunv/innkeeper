@@ -46,10 +46,6 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
     main.post { cm.addPrimaryClipChangedListener(listener) }
   }
 
-  fun stop() {
-    main.post { cm.removePrimaryClipChangedListener(listener) }
-  }
-
   private fun onAndroidClip() {
     val clip =
       try {
