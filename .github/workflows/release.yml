@@ -75,11 +75,8 @@ jobs:
         with:
           mode: package
       - name: Build the bundle
-        env:
-          INNKEEPER_RELEASE_VERSION:
-            ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          packaging/flatpak/release.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'
+          packaging/flatpak/build.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'
       - name: Publish the snapshot bundle
         if:
           github.event_name == 'workflow_run' || (github.event_name ==

@@ -43,8 +43,8 @@ what each directory is and where it runs.
   a fresh data dir, and stop it when done. The dev runner defaults to a test
   session off a nested desktop; `INNKEEPER_TEST=0` opts out. Don't start,
   restart or reset the user's own profiles (such as `default`), and don't
-  install host integration (`mise run install-dev`, desktop entries, MIME
-  handlers) unless the user asks.
+  install host integration (`mise run package -- --install`, desktop entries,
+  MIME handlers) unless the user asks.
 - **Test what you touched, in under a minute.** Keep only tests of observable
   behaviour we own. Unit and low-level tests cover branches, edge cases and
   error handling; e2e keeps one common-path scenario per user-visible feature,

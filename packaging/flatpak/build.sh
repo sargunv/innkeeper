@@ -1,34 +1,59 @@
 #!/usr/bin/env bash
-# Builds the Innkeeper Flatpak from the committed tree and installs it.
+# Build the Innkeeper Flatpak bundle from the committed tree into
+# out/release/<app>-<channel>.flatpak, and optionally install it.
 #
-#   packaging/flatpak/build.sh
+#   packaging/flatpak/build.sh [snapshot|stable] [--install]
+#
+# snapshot (the default) versions the bundle 0.0.<git rev-list --count HEAD>;
+# stable versions it from the v* tag on HEAD. There is no OSTree repo and no
+# signing: a user installs the file, and a newer file is a reinstall. The GNOME
+# runtime comes from Flathub. --install reinstalls the bundle into
+# FLATPAK_USER_DIR (default: the user installation).
 #
 # What runs on the desktop is built by flatpak-builder inside the GNOME SDK
-# from `git archive HEAD`. What runs inside Android (bionic and static
-# binaries, the overlay, the system app, the image scripts) comes from
-# `mise run build`, which needs the NDK and the build container; none of it
-# links the runtime. Both come from HEAD: uncommitted changes are refused.
-#
-# FLATPAK_USER_DIR is the installation it installs into, and must be set:
-# use a private one for tests. org.flatpak.Builder runs from
-# INNKEEPER_FLATPAK_TOOLS (default out/flatpak/tools), another installation,
-# since Flatpak hides the installation an app runs from inside its sandbox.
-# Both get Flathub as a remote; the Builder, the SDK and its Rust extension
-# come from there.
+# from `git archive HEAD`. What runs inside Android comes from out/stage
+# (`mise run build`), which needs the NDK and the build container; none of it
+# links the runtime. Uncommitted changes are refused.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 out=$top/out/flatpak
-id=dev.sargunv.Innkeeper
-: "${FLATPAK_USER_DIR:?set FLATPAK_USER_DIR to the installation to install into}"
-tools=${INNKEEPER_FLATPAK_TOOLS:-$out/tools}
+rel=$top/out/release
+manifest=$here/dev.sargunv.Innkeeper.yml
 cd "$top"
+
+channel=snapshot install=false
+for arg in "$@"; do
+  case $arg in
+    snapshot | stable) channel=$arg ;;
+    --install) install=true ;;
+    *)
+      echo "build.sh: usage: build.sh [snapshot|stable] [--install]" >&2
+      exit 2
+      ;;
+  esac
+done
+id=$(sed -n 's/^id: //p' "$manifest")
+if [[ $channel == stable ]]; then
+  version=$(git describe --tags --exact-match --match 'v*' 2>/dev/null) || {
+    echo "build.sh: a stable bundle needs a v* tag on HEAD" >&2
+    exit 1
+  }
+  version=${version#v}
+  subject="Release $version"
+else
+  version=0.0.$(git rev-list --count HEAD)
+  subject="snapshot $(git rev-parse --short=7 HEAD)"
+fi
 
 if ! git diff --quiet HEAD --; then
   echo "build.sh: uncommitted changes; the Flatpak is built from HEAD" >&2
   exit 1
 fi
-mise run build
+[[ -f out/stage/share/innkeeper/manifest.tsv ]] || {
+  echo "build.sh: run mise run build first" >&2
+  exit 1
+}
 
 # The desktop side's sources: a clean tree, and the crates it locks.
 rm -rf "$out/src" "$out/vendor" "$out/prebuilt"
@@ -44,20 +69,33 @@ mkdir -p "$out/prebuilt/share/innkeeper"
 awk -F'\t' '$2 != "host" && $2 != "launcher"' "$stage/$m" >"$out/prebuilt/$m"
 cut -f1 "$out/prebuilt/$m" | (cd "$stage" && cpio -pdm --quiet "$out/prebuilt")
 
-target=$FLATPAK_USER_DIR
+# Builder runs from its own installation: Flatpak hides that installation
+# inside the sandbox, so the SDK it builds against lives in another one.
+tools=$out/tools sdk=$out/sdk
 flathub=https://dl.flathub.org/repo/flathub.flatpakrepo
-for d in "$tools" "$target"; do
+for d in "$tools" "$sdk"; do
   FLATPAK_USER_DIR=$d flatpak remote-add --user --if-not-exists flathub "$flathub"
 done
 FLATPAK_USER_DIR=$tools flatpak install --user -y --noninteractive --or-update \
   flathub org.flatpak.Builder
-FLATPAK_USER_DIR=$tools flatpak run --user --env=FLATPAK_USER_DIR="$target" \
+
+# A scratch repo, only so build-bundle has a commit to pack.
+rm -rf "$rel"
+mkdir -p "$rel/repo"
+FLATPAK_USER_DIR=$tools flatpak run --user --env=FLATPAK_USER_DIR="$sdk" \
   --command=flatpak-builder org.flatpak.Builder \
   --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
-  --state-dir="$out/state" --repo="$out/repo" "$out/build" "$here/$id.yml"
-flatpak remote-add --user --if-not-exists --no-gpg-verify innkeeper-local "$out/repo"
-if flatpak info --user "$id" >/dev/null 2>&1; then
-  flatpak update --user -y --noninteractive "$id"
-else
-  flatpak install --user -y --noninteractive innkeeper-local "$id"
+  --state-dir="$out/state" "$out/build" "$manifest"
+flatpak build-export --subject="$version" --body="$subject" \
+  "$rel/repo" "$out/build" "$channel"
+# The runtime is not in the bundle; an install fetches it from Flathub.
+# No --repo-url: a newer bundle is installed again, not updated from a repo.
+bundle=$rel/$id-$channel.flatpak
+flatpak build-bundle --runtime-repo="$flathub" "$rel/repo" "$bundle" "$id" "$channel"
+rm -rf "$rel/repo"
+echo "build.sh: $bundle ($id $channel $version, $subject)"
+
+if $install; then
+  flatpak remote-add --user --if-not-exists flathub "$flathub"
+  flatpak install --user -y --noninteractive --reinstall "$bundle"
 fi

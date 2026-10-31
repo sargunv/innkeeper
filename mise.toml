@@ -109,17 +109,10 @@ install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 description = "The OpenHarmony session's broker (static musl) and init shim, in out/build/ohos; not in build or the stage"
 run = "ohos/build.sh"
 
-[tasks."package:flatpak"]
-description = "Build the stage and install the Flatpak into FLATPAK_USER_DIR"
+[tasks.package]
+description = "Build the stage and the Flatpak bundle in out/release/ (-- [stable] [--install])"
+depends = ["build"]
 run = "packaging/flatpak/build.sh"
-
-[tasks."package:release"]
-description = "Build the stage and export a snapshot Flatpak bundle into out/release/"
-run = """
-set -euo pipefail
-mise run build
-packaging/flatpak/release.sh snapshot
-"""
 
 [tasks.stage]
 description = "Merge the module install trees into out/stage (and write its manifest)"
@@ -185,10 +178,6 @@ run = "tests/bench/run.sh"
 [tasks.session]
 description = "The staged session launcher (mise run session -- start|stop|status|...)"
 run = "tools/dev/session.sh"
-
-[tasks.install-dev]
-description = "Build and install the Flatpak into the user installation"
-run = 'FLATPAK_USER_DIR="${FLATPAK_USER_DIR:-$HOME/.local/share/flatpak}" packaging/flatpak/build.sh'
 
 # ---- lint --------------------------------------------------------------------
 

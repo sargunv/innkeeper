@@ -7,11 +7,14 @@ chooser) and `innkeeper` its command, so
 Android image; the session fetches one on first use.
 
 ```sh
-FLATPAK_USER_DIR=$PWD/out/flatpak/user packaging/flatpak/build.sh
+FLATPAK_USER_DIR=$PWD/out/flatpak/user mise run package -- --install
 FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.sargunv.Innkeeper list
 ```
 
-`build.sh` builds from the committed tree (it refuses uncommitted changes):
+`mise run package` runs `mise run build`, then `build.sh` packs
+`out/release/<app>-<channel>.flatpak` from the committed tree (it refuses
+uncommitted changes); `--install` reinstalls that bundle into
+`FLATPAK_USER_DIR`, the user installation by default:
 
 - **The desktop side** (CLI, manager, bridge, launcher) is built by
   flatpak-builder on the `org.gnome.Platform` runtime from `git archive HEAD`
@@ -19,10 +22,10 @@ FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.sargunv.Innkeeper list
 - **The Android side** (bionic and static binaries, the overlay, the system app,
   the image tools) comes from `mise run build`, which needs the NDK and the
   build container; none of it links the runtime.
-- flatpak-builder runs as `org.flatpak.Builder` from a second private
-  installation (`out/flatpak/tools`). Both installations get Flathub as a
-  remote, and the result is installed or updated from a local repo
-  (`out/flatpak/repo`).
+- flatpak-builder runs as `org.flatpak.Builder` from a private installation
+  (`out/flatpak/tools`) and builds against an SDK in another
+  (`out/flatpak/sdk`), since Flatpak hides the installation an app runs from
+  inside its sandbox.
 
 ## Release
 
@@ -61,15 +64,8 @@ flatpak install --user --reinstall ./<app>-snapshot.flatpak
 
 `<app>` is the manifest `id`.
 
-The same bundle, unpublished, for a local check. It defaults to the snapshot
-channel; pass `stable` and `INNKEEPER_RELEASE_VERSION` for the other:
-
-```sh
-mise run package:release
-INNKEEPER_RELEASE_VERSION=0.1.0 packaging/flatpak/release.sh stable
-```
-
-That writes `out/release/<app>-<channel>.flatpak`.
+`mise run package` builds the same bundle, unpublished, on the snapshot channel;
+`mise run package -- stable` needs a `v*` tag on HEAD.
 
 The session runs inside the sandbox
 ([Flatpak mode](../../docs/session.md#flatpak-mode)): `start` in a sandbox of
