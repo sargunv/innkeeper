@@ -16,7 +16,8 @@ use std::thread::JoinHandle;
 use anyhow::{Context, Result};
 use calloop::channel::Sender;
 
-use crate::input::Hub;
+use crate::input::proto::WindowRequest;
+use crate::input::{Hub, PendingWindow};
 use crate::ipc::server::{Events, Peer, Reply, Service};
 use crate::ipc::wire::{Writer, errno::*};
 use proto::Request;
@@ -112,6 +113,27 @@ impl DisplayService {
         let Some(pending) = self.hub.claim(width, height) else {
             return Reply::err(-ENOENT);
         };
+        self.show(display, pending)
+    }
+
+    /// A display with a window of its own (DISPLAY_WINDOW).
+    fn add_window(&mut self, display: u32, request: WindowRequest) -> Reply {
+        if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
+            return Reply::err(-EBUSY);
+        }
+        let window = self.hub.own_window();
+        self.show(
+            display,
+            PendingWindow {
+                request: WindowRequest { window, ..request },
+                color: 0,
+                icon: None,
+            },
+        )
+    }
+
+    /// Opens `pending`'s window for `display`.
+    fn show(&mut self, display: u32, pending: PendingWindow) -> Reply {
         let req = pending.request.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         if self.cmd.send(Cmd::Create(pending, tx)).is_err() {
@@ -208,6 +230,27 @@ impl Service for DisplayService {
                 height,
             } => self.add_display(display, width, height),
             Request::DisplayRemove { display } => self.remove_display(display),
+            Request::DisplayWindow {
+                display,
+                width,
+                height,
+                dpi,
+                app_id,
+                title,
+            } => self.add_window(
+                display,
+                WindowRequest {
+                    window: 0,
+                    width,
+                    height,
+                    dpi,
+                    min_width: 0,
+                    min_height: 0,
+                    app_id,
+                    title,
+                    token: String::new(),
+                },
+            ),
             Request::BufferAdd(b) => {
                 let Some(&window) = self.displays.get(&b.display) else {
                     return Reply::err(-ENOENT);

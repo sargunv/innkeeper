@@ -13,6 +13,12 @@
 //! | `0x0204` | BUFFER_REMOVE  | `u32 buffer`                                                                                                                                                                         |                                                                                             |
 //! | `0x0205` | FRAME          | `u32 display`, `u32 buffer`, `i32 x, y, w, h` damage (zero: everything); optional fd: acquire fence (ignored)                                                                       | The buffer is the composer's again at RELEASE; one the window can't show yet is released at once |
 //!
+//! DISPLAY_WINDOW (0x0208): u32 display, u32 width, u32 height (pixels),
+//! u32 dpi, name app_id, name title. Like DISPLAY_ADD, but the display gets
+//! a new window of its own instead of one the window manager asked for on the
+//! input service: for a guest with no window manager there (OpenHarmony's
+//! composer). Replies `u32 window`; the window's input goes nowhere yet.
+//!
 //! IMAGE_RELEASE (0x0207): u32 display, u64 presentation token: release a
 //! leased ImageReader image after HWC observes RELEASE. Forwarded to that window on the input service.
 //!
@@ -38,6 +44,7 @@ pub mod ty {
     pub const FRAME: u16 = 0x0205;
     pub const CURSOR: u16 = 0x0206;
     pub const IMAGE_RELEASE: u16 = 0x0207;
+    pub const DISPLAY_WINDOW: u16 = 0x0208;
 
     /// Events (bridge to composer, tag 0).
     pub const RELEASE: u16 = 0x4201;
@@ -114,6 +121,14 @@ pub enum Request {
     DisplayRemove {
         display: u32,
     },
+    DisplayWindow {
+        display: u32,
+        width: u32,
+        height: u32,
+        dpi: u32,
+        app_id: String,
+        title: String,
+    },
     /// Carries one fd: the dma-buf.
     BufferAdd(BufferSpec),
     BufferRemove {
@@ -152,6 +167,14 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             height: dim(&mut r, "height")?,
         },
         ty::DISPLAY_REMOVE => Request::DisplayRemove { display: r.u32()? },
+        ty::DISPLAY_WINDOW => Request::DisplayWindow {
+            display: r.u32()?,
+            width: dim(&mut r, "width")?,
+            height: dim(&mut r, "height")?,
+            dpi: r.u32_in(1..=crate::input::proto::limits::MAX_DPI, "dpi")?,
+            app_id: r.name()?,
+            title: r.name()?,
+        },
         ty::BUFFER_ADD => {
             let b = BufferSpec {
                 buffer: r.u32()?,
@@ -212,6 +235,22 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::DisplayRemove { display } => {
             w = Writer::message(ty::DISPLAY_REMOVE, tag);
             w.u32(*display);
+        }
+        Request::DisplayWindow {
+            display,
+            width,
+            height,
+            dpi,
+            app_id,
+            title,
+        } => {
+            w = Writer::message(ty::DISPLAY_WINDOW, tag);
+            w.u32(*display)
+                .u32(*width)
+                .u32(*height)
+                .u32(*dpi)
+                .name(app_id)
+                .name(title);
         }
         Request::BufferAdd(b) => {
             w = Writer::message(ty::BUFFER_ADD, tag);
@@ -286,6 +325,14 @@ mod tests {
                 height: 1360,
             },
             Request::DisplayRemove { display: 3 },
+            Request::DisplayWindow {
+                display: 0,
+                width: 720,
+                height: 1280,
+                dpi: 320,
+                app_id: "dev.linuxapk.ohos".into(),
+                title: "OpenHarmony".into(),
+            },
             buffer(5120),
             Request::BufferRemove { buffer: 7 },
             Request::ImageRelease {

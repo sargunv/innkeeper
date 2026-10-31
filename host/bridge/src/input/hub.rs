@@ -21,6 +21,8 @@ use crate::ipc::wire::errno::*;
 
 /// How long a request waits for its display.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// Where the bridge's own window ids start (DISPLAY_WINDOW).
+const OWN_WINDOWS: u32 = 1 << 31;
 
 /// Told where the seat's keyboard focus is: a window, or none of ours.
 pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
@@ -60,6 +62,9 @@ struct State {
     /// Display connections: their Wayland threads.
     displays: HashMap<u64, Sender<Cmd>>,
     next_display: u64,
+    /// Windows the bridge names itself (DISPLAY_WINDOW), above any Android
+    /// display id.
+    next_own: u32,
 }
 
 impl Hub {
@@ -251,6 +256,13 @@ impl Hub {
         for w in gone {
             self.unmapped(w);
         }
+    }
+
+    /// A new window id for a display that brings its own window.
+    pub fn own_window(&self) -> u32 {
+        let mut s = self.state.lock().unwrap();
+        s.next_own = s.next_own.max(OWN_WINDOWS) + 1;
+        s.next_own
     }
 
     /// The request a new HWC display of this size answers, if any.
@@ -453,5 +465,15 @@ mod tests {
         hub.mapped(conn, 2, &r.request);
         hub.remove_display_connection(conn);
         hub.request(request(5, 1280)).unwrap();
+    }
+
+    #[test]
+    fn own_windows_never_take_an_android_display_id() {
+        let hub = Hub::new();
+        let (a, b) = (hub.own_window(), hub.own_window());
+        assert!(a > OWN_WINDOWS && b > a);
+        // Nothing queued claims them, and Android's requests still match.
+        hub.request(request(5, 1280)).unwrap();
+        assert_eq!(hub.claim(1280, 800).unwrap().request.window, 5);
     }
 }
