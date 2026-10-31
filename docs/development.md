@@ -65,7 +65,8 @@ flowchart LR
   ([packaging/flatpak](../packaging/flatpak/README.md)).
 - `mise run install-dev` builds and installs the committed Flatpak in the user
   installation, adding the manager to the app menu as an APK handler. Do this
-  only for a checkout you mean to use as your Innkeeper.
+  only for a checkout you mean to use as your Innkeeper; then
+  `flatpak run dev.sargunv.Innkeeper install app.apk` uses it.
 - Use `INNKEEPER_PROFILE=<name>` for anything experimental: it is a separate
   session with its own `/data`, logs and sandbox, and stays off the real desktop
   ([security.md](security.md#test-sessions)).
@@ -110,38 +111,20 @@ default display does not show the app.
 
 ## Android logs
 
-Use a bounded snapshot inside a named session:
+Take a bounded snapshot inside a named session:
 
 ```sh
 INNKEEPER_PROFILE=debug mise run session -- exec timeout 10 logcat -b all -d -t 100
 ```
 
-`logcat -b all` streams until interrupted; waiting for it to exit is expected.
-`-b` selects buffers, `-d` dumps and exits, and `-t 100` also implies `-d`
-(unlike `-T 100`, which keeps streaming). The timeout bounds a stalled reader.
-In the #49 investigation, each buffer (`main`, `system`, `crash`, `events`,
-`radio`, `stats`, `security`, `kernel`) and the combined dump returned within
-one second in a fresh session. No buffer deadlock was reproduced.
+Without `-d` or `-t`, `logcat` streams until interrupted (`-T 100` streams too);
+the timeout bounds a stalled reader.
 
-The `kernel` buffer is empty: logd cannot read the host's `/proc/kmsg`, and the
-supervisor does not emulate that stream. Android init's `/dev/kmsg` writes go to
-the launcher's FIFO reader instead (`session -- log`). Empty `kernel` and
-`security` buffers do not hold a dump open; `security` also requires Android's
-device-owner logging configuration.
-
-There is no tracefs. libcutils turns off atrace after failing to open
-`trace_marker`; `image/vendor.prop` silences the resulting per-process
-`cutils-trace: Error opening trace file` through `log.tag.cutils-trace=S`. This
-leaves tracing unavailable and avoids exposing host tracefs or pretending that
-trace markers were recorded.
-
-OpenTTD 14.1.rev128's `Setting the swap interval is not supported` is expected
-from its bundled `libsdl-1.2.so`. Its
-[`SDL_GL_SetSwapInterval`](https://github.com/pelya/commandergenius/blob/sdl_android/project/jni/sdl-1.2/src/video/android/SDL_video.c)
-reports this when the video driver has no `GL_SetSwapInterval` callback, before
-calling EGL. This reports an unavailable SDL setting rather than an ANGLE
-`eglSwapInterval` failure. Changing the bundled SDL belongs upstream, so we
-leave that app diagnostic visible.
+- The `kernel` buffer is empty: logd can't read the host's `/proc/kmsg`. Init's
+  `/dev/kmsg` writes go to the launcher instead (`session -- log`).
+- There is no tracefs. libcutils turns atrace off when `trace_marker` fails to
+  open, and `image/vendor.prop` silences the resulting per-process
+  `cutils-trace` error (`log.tag.cutils-trace=S`).
 
 ## A nested, isolated desktop
 

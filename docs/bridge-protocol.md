@@ -92,22 +92,21 @@ empty; the bridge then shows the package. Android mixes every app into that one
 stream, so this is a label for the newest app that is currently playing, not a
 separate stream per app.
 
-System request `0x0309` (HANDOFF) adds portal operations without changing the
-existing `0x0305` OPEN_URI layout. Body: `u32 window`, `u8 action` (1 URI, 2
-open file, 3 save file, 4 compose email), `u8 files` (0–3), `u8 ask` (boolean),
-`u8 0`, `u32 metadata_len` (1–65536). Fds: a sealed metadata memfd, followed by
-exactly `files` readable regular-file fds. Metadata is `u32 version` (1), text
-(≤32 KiB), subject (≤4 KiB), and one filename (≤255 bytes) per content fd;
-strings are `u32 length` plus UTF-8. Filenames cannot contain `/` or be
-`.`/`..`. URI operations require zero files and validate external schemes,
-rejecting `file:`, `content:`, `intent:`, `javascript:` and `data:`. `mailto:`
-is allowed.
+System request `0x0309` (HANDOFF) carries the portal operations beyond `0x0305`
+OPEN_URI. Body: `u32 window`, `u8 action` (1 URI, 2 open file, 3 save file, 4
+compose email), `u8 files` (0–3), `u8 ask` (boolean), `u8 0`, `u32 metadata_len`
+(1–65536). Fds: a sealed metadata memfd, followed by exactly `files` readable
+regular-file fds. Metadata is `u32 version` (1), text (≤32 KiB), subject (≤4
+KiB), and one filename (≤255 bytes) per content fd; strings are `u32 length`
+plus UTF-8. Filenames cannot contain `/` or be `.`/`..`. URI operations require
+zero files and validate external schemes, rejecting `file:`, `content:`,
+`intent:`, `javascript:` and `data:`. `mailto:` is allowed.
 
 The reply acknowledges scheduling, not completion of a desktop dialog. The
 bridge logs portal cancellation/failure. Four operations may wait for portals;
-the existing five-per-ten-second rate limit also applies. Content is capped at
-64 MiB per file and copied to real files under the profile's cache directory.
-OpenURI OpenFile uses `ask` for the desktop chooser; SaveFile writes only to the
+the five-per-ten-second rate limit also applies. Content is capped at 64 MiB per
+file and copied to real files under the profile's cache directory. OpenURI
+OpenFile uses `ask` for the desktop chooser; SaveFile writes only to the
 portal-selected destination; Email uses `attachment_fds`. Opened files and
 attachments stay until session shutdown (256 MiB retained cap); save copies are
 removed after completion. Crash leftovers are reaped at the next handoff.
@@ -115,8 +114,7 @@ removed after completion. Crash leftovers are reaped at the next handoff.
 The bridge obtains a fresh xdg-activation token from the source Wayland
 connection and supplies it to the portal; xdg-foreign supplies the parent.
 Text-only open/save creates a `.txt` file; text-only email creates a draft body.
-Text Copy uses the existing clipboard protocol. The reverse direction is tracked
-separately in [#66](https://github.com/sargunv/innkeeper/issues/66).
+Text Copy uses the clipboard protocol.
 
 ## Clipboard blobs
 
@@ -129,8 +127,7 @@ name (1–255 bytes, no path separators), `u32 MIME length` plus MIME (1–255
 bytes), then `u32 byte count` and raw bytes (at most 16 MiB minus 1024). No
 trailing bytes are accepted. The system app exposes incoming bytes through a
 read-only `content://dev.sargunv.innkeeper.system.clipboard.files/…` URI per
-item and lets ClipboardService grant the pasting app access. No new request
-types are used.
+item and lets ClipboardService grant the pasting app access.
 
 ## Versioning
 
@@ -175,7 +172,7 @@ channel connecting alone does not mean Android has completed booting.
 `Changed()` invalidates this snapshot on boot completion, apps channel
 connect/disconnect or window map/unmap. Consumers watch name ownership as well,
 clearing state when the bridge exits, subscribe before reading, and read again
-on each signal. No periodic status command is needed.
+on each signal.
 
 The system app sends apps request `0x0505` (BOOT_COMPLETED, empty body, no fds)
 after receiving Android's boot-completed broadcast and checking the property. It
@@ -202,7 +199,7 @@ and restrictions; failures return to the caller. Only installed user apps can be
 changed. Cache/data clearing waits for Android's package-data callback; clear
 data deletes the target's accounts, files and settings.
 
-The system app's existing **apps** connection receives event `0x4501`:
+The system app's **apps** connection receives event `0x4501`:
 `u64 request_id, u32 length`, plus one sealed JSON memfd. The command is
 `{"package":"…","action":"…","permission":"…","enabled":false}`. It answers with
 request `0x0504`, the same envelope and one sealed response memfd. No trailing
@@ -215,9 +212,8 @@ app's uid.
 Escape-as-Back is stored per package in the system app's device-protected
 preferences, default off. Input resolves the `innkeeper:<package>` display on
 each new key press. Changes apply to existing windows immediately, while a held
-key retains its original code through release. The global
-`persist.innkeeper.input.escape_back` property is no longer read. Background
-uses the existing lifecycle allow-list and prompts a fresh activity report.
+key retains its original code through release. Background uses the lifecycle
+allow-list and prompts a fresh activity report.
 
 CLI examples: `innkeeper app org.example.app`,
 `innkeeper app org.example.app clear-cache`,
@@ -244,6 +240,5 @@ no fds). Disabling it leaves existing launchers in place.
 
 In `SETTINGS`, `has_accent=2` means leave Android's accent untouched (opted
 out), `0` means the desktop has no accent, and `1` carries RGB. Other opted-out
-values use their existing unspecified representation (dark/clock 0, locale
-strings empty). This preserves Android's current values across opt-outs and
-restarts.
+values use their unspecified representation (dark/clock 0, locale strings
+empty), so Android keeps its current values across opt-outs and restarts.
