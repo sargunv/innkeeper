@@ -85,12 +85,44 @@ pub fn pick<'a>(profiles: &'a [String], chosen: Option<&str>) -> Option<&'a Stri
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
     pub version: u32,
+    /// The guest's debug bridge (Android's adb), on loopback TCP. Off by
+    /// default; it applies live.
+    pub debug_bridge: bool,
+    /// The bridge's port on 127.0.0.1, the profile's own once it has been on
+    /// (0: none yet; any port may be set). It stays, so tools keep finding
+    /// the profile there.
+    pub debug_bridge_port: u16,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { version: VERSION }
+        Self {
+            version: VERSION,
+            debug_bridge: false,
+            debug_bridge_port: 0,
+        }
     }
+}
+
+/// Where debug bridge ports come from: the Android Emulator's adb ports, the
+/// odd ones from 5555 to 5585, each with its console port one below. An adb
+/// server looks for devices there, so it finds a profile as
+/// `emulator-<port - 1>` with no `adb connect`, and so do Android Studio and
+/// Gradle (whose test engine fails for `host:port` serials).
+pub fn ports() -> impl Iterator<Item = u16> {
+    (5555..=5585).step_by(2)
+}
+
+/// The first adb port in [`ports`] that no other profile has (`taken`) and
+/// whose pair `free` accepts (a running emulator holds both), as the
+/// emulator picks its own.
+pub fn pick_port(taken: &[u16], free: impl Fn(u16) -> bool) -> Option<u16> {
+    ports().find(|p| !taken.contains(p) && free(*p) && free(*p - 1))
+}
+
+/// Whether nothing listens on 127.0.0.1:`port`.
+pub fn port_free(port: u16) -> bool {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
 }
 
 /// The settings file of the profile whose data directory is `data`.
@@ -127,6 +159,25 @@ impl Settings {
         let mut s: Self = toml::from_str(text)?;
         s.version = VERSION;
         Ok(s)
+    }
+
+    /// Gives the debug bridge of the profile with data directory `data` a port
+    /// of its own, if it has none: one no other profile under `data_home` has
+    /// and nothing listens on. Returns whether it changed.
+    pub fn assign_port(&mut self, data_home: &Path, data: &Path) -> Result<bool> {
+        if self.debug_bridge_port != 0 {
+            return Ok(false);
+        }
+        let taken: Vec<u16> = list(data_home)
+            .iter()
+            .map(|n| data_home.join(crate::paths::per_profile("data", n)))
+            .filter(|d| d != data)
+            .filter_map(|d| Self::load(&d).ok())
+            .map(|s| s.debug_bridge_port)
+            .collect();
+        self.debug_bridge_port =
+            pick_port(&taken, port_free).context("no free debug bridge port")?;
+        Ok(true)
     }
 
     /// Saves the settings into data directory `data`, creating it for a new
@@ -267,8 +318,47 @@ mod tests {
         );
         assert!(Settings::parse("version = \"one\"").is_err());
         assert!(Settings::parse("version = 1\ntypo = true\n").is_err());
+        let s = Settings::parse("debug-bridge = true\ndebug-bridge-port = 16501\n").unwrap();
+        assert!(s.debug_bridge && s.debug_bridge_port == 16501);
+        assert!(!Settings::default().debug_bridge);
         fs::write(settings_path(&data), "version = [").unwrap();
         assert!(Settings::load(&data).is_err());
+    }
+
+    #[test]
+    fn ports_are_the_emulators_and_skip_busy_pairs_and_other_profiles() {
+        let all_free = |_| true;
+        assert_eq!(pick_port(&[], all_free), Some(5555));
+        // A running emulator holds 5554 and 5555; one holding only its
+        // console port still blocks the pair.
+        let emulator = |p: u16| p != 5554 && p != 5555;
+        assert_eq!(pick_port(&[], emulator), Some(5557));
+        assert_eq!(pick_port(&[], |p| p != 5554), Some(5557));
+        assert_eq!(pick_port(&[5557], emulator), Some(5559));
+        assert_eq!(pick_port(&ports().collect::<Vec<_>>(), all_free), None);
+        assert_eq!(ports().count(), 16);
+        let d = dir("ports");
+        let other = d.join("data-other");
+        Settings {
+            debug_bridge_port: 5555,
+            ..Settings::default()
+        }
+        .save(&other)
+        .unwrap();
+        // A profile keeps its own port, an explicit one too; a new one gets
+        // a free pair.
+        let mut s = Settings::default();
+        assert!(s.assign_port(&d, &d.join("data-new")).unwrap());
+        assert!(s.debug_bridge_port != 5555 && ports().any(|p| p == s.debug_bridge_port));
+        let mut again = Settings::load(&other).unwrap();
+        assert!(!again.assign_port(&d, &other).unwrap());
+        assert_eq!(again.debug_bridge_port, 5555);
+        let mut explicit = Settings {
+            debug_bridge_port: 16500,
+            ..Settings::default()
+        };
+        assert!(!explicit.assign_port(&d, &d.join("data-x")).unwrap());
+        assert_eq!(explicit.debug_bridge_port, 16500);
     }
 
     #[test]

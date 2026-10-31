@@ -16,6 +16,8 @@ linuxapk profile list                # profiles and whether they run
 linuxapk profile create|use|delete NAME  # delete removes its apps, data and settings
 linuxapk profile rename OLD NEW
 linuxapk profile start|stop [NAME]
+linuxapk profile set [NAME] --adb on|off     # adb on a loopback port, live
+linuxapk adb                         # have your adb list the profile (emulator-<port - 1>)
 linuxapk --profile NAME install App.apk      # any command, on another profile
 ```
 

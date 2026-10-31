@@ -73,6 +73,9 @@ enum Cmd {
         #[arg(value_parser = ["on", "off"])]
         setting: Option<String>,
     },
+    /// Connect your adb to the profile (starting it if needed); adb must be
+    /// on for it (`profile set --adb on`).
+    Adb,
     /// Manage profiles: separate Android setups, each with its own apps,
     /// data and settings.
     #[command(subcommand)]
@@ -95,6 +98,14 @@ enum ProfileCmd {
     Start { name: Option<String> },
     /// Stop a profile (default: the one in use).
     Stop { name: Option<String> },
+    /// Change a profile's settings (default: the one in use).
+    Set {
+        name: Option<String>,
+        /// adb on loopback TCP, for Android Studio, Gradle and adb; applies
+        /// at once.
+        #[arg(long, value_parser = ["on", "off"])]
+        adb: Option<String>,
+    },
 }
 
 /// Progress and warnings on stderr.
@@ -337,7 +348,12 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                     " "
                 };
                 let state = if p.running { "running" } else { "stopped" };
-                println!("{mark} {:<16} {state}", p.name);
+                let adb = if p.settings.debug_bridge {
+                    format!("adb {}", linuxapk_core::adb::serial(&p.settings))
+                } else {
+                    String::new()
+                };
+                println!("{mark} {:<16} {state:<8} {adb}", p.name);
             }
         }
         ProfileCmd::Create { name: n } => {
@@ -363,6 +379,22 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
             profiles::start(&name(n)?, &|m| eprintln!("linuxapk: {m}"))?;
         }
         ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
+        ProfileCmd::Set { name: n, adb } => {
+            let n = name(n)?;
+            ensure!(adb.is_some(), "nothing to change (see --help)");
+            if let Some(on) = adb {
+                let s = linuxapk_core::adb::set(&n, on == "on", &stderr)?;
+                if s.debug_bridge {
+                    println!(
+                        "adb on: {} ({})",
+                        linuxapk_core::adb::serial(&s),
+                        linuxapk_core::adb::address(&s)
+                    );
+                } else {
+                    println!("adb off");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -440,6 +472,9 @@ fn main() -> ExitCode {
             }
         }
         Cmd::Profile(cmd) => profile(cmd),
+        Cmd::Adb => profiles::resolve(false)
+            .and_then(|n| linuxapk_core::adb::connect(&n, &stderr))
+            .map(|serial| println!("connected: adb -s {serial} shell")),
     };
     if let Some(n) = Session::find()
         .ok()

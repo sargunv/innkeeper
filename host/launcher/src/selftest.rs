@@ -156,7 +156,8 @@ fn flatpak_info(r: &mut Report) {
         "no access to org.freedesktop.Flatpak (flatpak-spawn --host)",
         "the sandbox may talk to org.freedesktop.Flatpak",
     );
-    // What it shows: the home dir holds only the app's own dir, and /dev no
+    // What it shows: the home dir holds only the app's own dir and the
+    // user's adb public key (read-only, for adb into a profile), and /dev no
     // block devices. Input access is an accepted desktop-parity grant.
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -167,6 +168,7 @@ fn flatpak_info(r: &mut Report) {
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n != ".var")
+        .filter(|n| n != ".android" || !only_adb_key(&home.join(n)))
         .collect();
     r.check(
         seen.is_empty(),
@@ -198,4 +200,15 @@ pub fn run(cfg: &Config, exe: &Path) -> Result<bool> {
     print!("{}", r.0);
     let _ = fs::write(p.run.join("selftest.txt"), &r.0);
     Ok(!r.0.lines().any(|l| l.starts_with("FAIL")) && r.0.lines().any(|l| l.starts_with("ok")))
+}
+
+/// Whether `dir` shows nothing but the adb public key.
+fn only_adb_key(dir: &std::path::Path) -> bool {
+    let names: Vec<_> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    names.iter().all(|n| n == "adbkey.pub")
 }

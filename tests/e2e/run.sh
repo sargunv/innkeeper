@@ -102,6 +102,36 @@ if [[ ${1:-} == --group ]]; then
       cat "$T/ancestry.txt"
       echo 'ok   Android init is a child of the broker'
       "$S" selftest
+      # adb: off and authenticated by default; on, a loopback port the user's
+      # key reaches, through a private adb server with a throwaway key.
+      [[ $(s getprop init.svc.adbd) != running && $(s getprop ro.adb.secure) == 1 ]]
+      adb=$ANDROID_HOME/platform-tools/adb
+      # The key pair stays in the test's dir; the session sees the public half
+      # where it looks for the user's, in the dev sandbox's home.
+      rm -rf "$T/adbhome" && mkdir -p "$T/adbhome/.android"
+      "$adb" keygen "$T/adbhome/.android/adbkey" >/dev/null 2>&1
+      keys=$repo/out/dev/flatpak/$LINUXAPK_PROFILE/home/.android
+      mkdir -p "$keys"
+      cp "$T/adbhome/.android/adbkey.pub" "$keys/"
+      "$repo/tools/dev/linuxapk.sh" profile set --adb on >"$T/adb-on.txt" 2>&1
+      serial=$(grep -o '127\.0\.0\.1:[0-9]*' "$T/adb-on.txt")
+      port=${serial#*:}
+      # shellcheck disable=SC2329 # invoked through until_ok
+      listening() { ss -ltnH "sport = :$port" >"$T/adb-listen.txt" && [[ -s $T/adb-listen.txt ]]; }
+      until_ok listening
+      if grep -v "127.0.0.1:$port" "$T/adb-listen.txt"; then
+        echo "FAIL adb listens beyond loopback" >&2
+        exit 1
+      fi
+      # adb reads its key from $HOME/.android.
+      A=(env HOME="$T/adbhome" "$adb" -P 15990)
+      "${A[@]}" connect "$serial" >/dev/null
+      # shellcheck disable=SC2329 # invoked through until_ok
+      adb_shell() { [[ $("${A[@]}" -s "$serial" shell echo ok 2>/dev/null) == ok ]]; }
+      until_ok adb_shell
+      "${A[@]}" kill-server
+      "$repo/tools/dev/linuxapk.sh" profile set --adb off >/dev/null 2>&1
+      echo "ok   adb is off by default; on, a loopback port the user's key reaches"
       driver=$(s getprop ro.hardware.vulkan)
       feature=android.hardware.vulkan.level=1
       # pm omits =0 when printing a version-zero feature.

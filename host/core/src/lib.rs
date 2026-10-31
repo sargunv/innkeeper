@@ -3,6 +3,7 @@
 //! (inspect, install, uninstall, run, list); the other modules are their
 //! building blocks. See host/core/README.md.
 
+pub mod adb;
 pub mod android;
 pub mod apk;
 pub mod app_settings;

@@ -241,6 +241,44 @@ impl Page {
             }
         });
         row.add_row(&rename);
+        row.add_row(&self.adb_row(p, idle));
+        row
+    }
+
+    fn adb_row(self: &Rc<Self>, p: &Profile, idle: bool) -> adw::SwitchRow {
+        let on = p.settings.debug_bridge;
+        let row = adw::SwitchRow::builder()
+            .title("adb")
+            .subtitle(if on {
+                format!(
+                    "On · <tt>{}</tt> in adb and Android Studio",
+                    linuxapk_core::adb::serial(&p.settings)
+                )
+            } else {
+                "For Android Studio, Gradle and adb on this computer".into()
+            })
+            .use_markup(true)
+            .active(on)
+            .sensitive(idle)
+            .build();
+        let (s, name) = (Rc::downgrade(self), p.name.clone());
+        row.connect_active_notify(move |r| {
+            let Some(s) = s.upgrade() else {
+                return;
+            };
+            let (n, on) = (name.clone(), r.is_active());
+            s.work(
+                &name,
+                move || {
+                    linuxapk_core::adb::set(&n, on, &linuxapk_core::ops::quiet)?;
+                    match linuxapk_core::adb::missing_key().filter(|_| on) {
+                        Some(why) => Err(anyhow::anyhow!("adb is on, but {why}")),
+                        None => Ok(()),
+                    }
+                },
+                None,
+            );
+        });
         row
     }
 

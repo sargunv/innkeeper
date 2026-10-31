@@ -75,6 +75,34 @@ flowchart LR
 Test tiers and their mise tasks are in [tests/README.md](../tests/README.md).
 `mise run check` (hk and dprint) is the pre-commit gate; `mise run fix` formats.
 
+## adb into a profile
+
+A profile can serve adb on loopback TCP, for Android Studio, Gradle and the
+`adb` command line. It is off by default; turn it on per profile, at once if the
+profile runs:
+
+```sh
+linuxapk profile set --adb on      # adb on: emulator-5556 (127.0.0.1:5557)
+adb -s emulator-5556 install app.apk
+```
+
+- Each profile gets an adb port as the Android Emulator does: the first odd port
+  from 5555 to 5585 whose pair (the console port, one below) nothing uses and no
+  other profile has, kept in its settings (`debug-bridge-port`, which may also
+  be set to any port). An adb server looks for devices there, so it lists the
+  profile as `emulator-<port - 1>` with no `adb connect`, and so do Android
+  Studio and Gradle. Use that serial: AGP 9.4.1's `connectedAndroidTest` fails
+  for `host:port` serials even when every test passes.
+- A running adb server finds a profile started after it once told, as the
+  emulator tells it: `linuxapk adb` starts the profile if needed and announces
+  it to the server (`ANDROID_ADB_SERVER_PORT`, default 5037), with no `adb` in
+  the Flatpak. Restarting the server (`adb kill-server; adb devices`) finds it
+  too.
+- adb authentication stays on. The user's `~/.android/adbkey.pub` is authorized
+  in the profile's data when adb is turned on, at each start and by
+  `linuxapk adb`; `adb start-server` creates the key if there is none. Any other
+  key is refused (`unauthorized`).
+
 ## Android logs
 
 Use a bounded snapshot inside a named session:

@@ -130,6 +130,13 @@ DynamicLauncher portal, so the user confirms each one.
 - **Host state:** the battery (UPower), the power saver (the PowerProfileMonitor
   portal) and the network's metering (the NetworkMonitor portal) are read-only
   state any desktop app can read; every Android app sees them.
+- **adb** is off per profile until the user turns it on. Then the image's adbd
+  listens on a loopback port of the profile's own, with adb authentication on
+  (`ro.adb.secure=1`): only keys in the profile's `/data/misc/adb/adb_keys` get
+  in, where the user's `~/.android/adbkey.pub` is added, so other users of the
+  host can't connect. The Flatpak reads only that public key, read-only. The
+  image would otherwise start adbd at every boot on port 5555 without
+  authentication; the overlay keeps it from starting (`usbd.rc`, `init.usb.rc`).
 - **Location** has two consents. Android's runtime permission comes first: the
   bridge asks the Location portal only once an app Android allowed asks for a
   location, through one portal session for all of Android. If the user says no

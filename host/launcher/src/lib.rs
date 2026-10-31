@@ -2,6 +2,7 @@
 //! and what host/core reads of a session without running it: its paths, its
 //! status and its cgroup. docs/session.md describes the session.
 
+pub mod adb;
 pub mod cli;
 mod conf;
 mod control;
