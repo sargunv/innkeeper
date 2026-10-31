@@ -6,9 +6,9 @@ import dev.sargunv.innkeeper.system.bridge.Wire
 import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 
 /**
- * Hands http(s) links to the bridge, which opens them in the host browser through the OpenURI
- * portal (host/bridge/src/system/openuri.rs). The URL is sent percent-encoded ASCII; the bridge
- * checks it again.
+ * Hands http(s) links to the bridge as a HANDOFF URI (host/bridge/src/system/handoff.rs), which
+ * opens them in the host browser through the OpenURI portal. The URL is sent percent-encoded ASCII;
+ * the bridge checks it again.
  */
 class UrlOpener(private val feature: IntegrationFeature) {
   /** Returns false if [url] isn't http(s) or the bridge isn't there. */
@@ -17,14 +17,16 @@ class UrlOpener(private val feature: IntegrationFeature) {
     val lower = ascii.lowercase()
     if (!lower.startsWith("http://") && !lower.startsWith("https://")) return false
     if (ascii.length > MAX) return false
-    val b = ascii.toByteArray(Charsets.US_ASCII)
+    // HANDOFF metadata: version 1, the URI as text, no subject, no files.
+    val metadata = Wire.Writer().u32(1).text(ascii, MAX).text("", 0).bytes()
     Log.i(TAG, "opening on the desktop: ${ascii.take(200)}")
     return feature.connection.send(
-      Wire.OPEN_URI,
-      b,
+      Wire.HANDOFF,
+      metadata,
       onReply = { if (!it.ok) Log.w(TAG, "the bridge refused to open the link: ${it.status}") },
     ) {
-      u32(b.size)
+      // Window 0: no parent; action 1 (URI), no files, don't ask.
+      u32(0).u8(1).u8(0).u8(0).u8(0).u32(metadata.size)
     }
   }
 

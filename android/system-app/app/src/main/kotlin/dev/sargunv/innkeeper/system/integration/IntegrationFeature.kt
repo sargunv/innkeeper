@@ -84,7 +84,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
   // first. START can take a while: the bridge starts each desktop service it needs.
   override fun onConnected() {
     handler.post { settings.reset() }
-    connection.send(Wire.START, onReply = ::onStarted) { u32(FEATURES) }
+    connection.send(Wire.START, onReply = ::onStarted)
   }
 
   private fun onStarted(r: BridgeConnection.Reply) {
@@ -92,10 +92,10 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
       Log.w(TAG, "the system service refused START: ${r.status}")
       return
     }
-    val have = if (r.body.remaining() >= 4) r.body.int else 0
-    Log.i(TAG, "started (features 0x${have.toString(16)})")
+    val notifies = r.body.remaining() >= 1 && r.body.get().toInt() != 0
+    Log.i(TAG, "started (notifications $notifies)")
     handler.post {
-      if (have and Wire.F_NOTIFICATIONS != 0) notifications.onConnected()
+      if (notifies) notifications.onConnected()
       media.onConnected()
       playback.onConnected()
       lifecycle.onConnected()
@@ -150,8 +150,6 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
 
   companion object {
     const val TAG = "InnkeeperInteg"
-    private const val FEATURES =
-      Wire.F_SETTINGS or Wire.F_CLIPBOARD or Wire.F_NOTIFICATIONS or Wire.F_MEDIA or Wire.F_OPEN_URI
 
     /** The running feature, for the components Android starts (listener, activities). */
     @Volatile var instance: IntegrationFeature? = null

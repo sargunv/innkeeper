@@ -93,15 +93,16 @@ empty; the bridge then shows the package. Android mixes every app into that one
 stream, so this is a label for the newest app that is currently playing, not a
 separate stream per app.
 
-System request `0x0309` (HANDOFF) carries the portal operations beyond `0x0305`
-OPEN_URI. Body: `u32 window`, `u8 action` (1 URI, 2 open file, 3 save file, 4
-compose email), `u8 files` (0–3), `u8 ask` (boolean), `u8 0`, `u32 metadata_len`
-(1–65536). Fds: a sealed metadata memfd, followed by exactly `files` readable
-regular-file fds. Metadata is `u32 version` (1), text (≤32 KiB), subject (≤4
-KiB), and one filename (≤255 bytes) per content fd; strings are `u32 length`
-plus UTF-8. Filenames cannot contain `/` or be `.`/`..`. URI operations require
-zero files and validate external schemes, rejecting `file:`, `content:`,
-`intent:`, `javascript:` and `data:`. `mailto:` is allowed.
+System request `0x0309` (HANDOFF) carries every portal operation that hands
+something from Android to the desktop, including web links. Body: `u32 window`,
+`u8 action` (1 URI, 2 open file, 3 save file, 4 compose email), `u8 files`
+(0–3), `u8 ask` (boolean), `u8 0`, `u32 metadata_len` (1–65536). Fds: a sealed
+metadata memfd, followed by exactly `files` readable regular-file fds. Metadata
+is `u32 version` (1), text (≤32 KiB), subject (≤4 KiB), and one filename (≤255
+bytes) per content fd; strings are `u32 length` plus UTF-8. Filenames cannot
+contain `/` or be `.`/`..`. URI operations require zero files and validate
+external schemes, rejecting `file:`, `content:`, `intent:`, `javascript:` and
+`data:`. `mailto:` is allowed.
 
 The reply acknowledges scheduling, not completion of a desktop dialog. The
 bridge logs portal cancellation/failure. Four operations may wait for portals;

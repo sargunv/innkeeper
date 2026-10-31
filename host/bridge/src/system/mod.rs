@@ -37,7 +37,7 @@ use clipboard::{Clip, ClipboardHub, Content};
 use mpris::{Media, MprisHub};
 use notify::{Note, NotifyHub};
 use openuri::RateLimit;
-use proto::{ClipKind, Lifecycle, PlaybackApp, Request, feature};
+use proto::{ClipKind, Lifecycle, PlaybackApp, Request};
 use settings::SettingsHub;
 
 /// Bridge-wide state, created once in `main.rs`; each part starts the first
@@ -238,7 +238,7 @@ pub struct SystemService {
     client: u64,
     settings_sub: Option<u64>,
     clip_sub: Option<u64>,
-    uri_rate: RateLimit,
+    handoff_rate: RateLimit,
 }
 
 impl SystemService {
@@ -255,35 +255,26 @@ impl SystemService {
             client,
             settings_sub: None,
             clip_sub: None,
-            uri_rate: RateLimit::default(),
+            handoff_rate: RateLimit::default(),
         }
     }
 
-    fn start(&mut self, want: u32) -> Reply {
-        let mut have = feature::OPEN_URI | feature::MEDIA;
-        if want & feature::SETTINGS != 0 && self.settings_sub.is_none() {
+    fn start(&mut self) -> Reply {
+        if self.settings_sub.is_none() {
             self.settings_sub = Some(self.shared.settings().subscribe(self.events.clone()));
         }
-        have |= feature::SETTINGS;
-        if want & feature::NOTIFICATIONS != 0
-            && (!self.shared.desktop || self.shared.notify().is_some())
+        if let Some(c) = self.shared.clipboard()
+            && self.clip_sub.is_none()
         {
-            have |= feature::NOTIFICATIONS;
+            self.clip_sub = Some(c.subscribe(self.events.clone()));
         }
-        if want & feature::CLIPBOARD != 0
-            && let Some(c) = self.shared.clipboard()
-        {
-            if self.clip_sub.is_none() {
-                self.clip_sub = Some(c.subscribe(self.events.clone()));
-            }
-            have |= feature::CLIPBOARD;
-        }
+        let notifications = !self.shared.desktop || self.shared.notify().is_some();
         crate::info!(
-            "system: {}: started (wants {want:#x}, has {have:#x})",
+            "system: {}: started (notifications {notifications})",
             self.label
         );
         let mut w = crate::ipc::wire::Writer::default();
-        w.u32(have & want);
+        w.u8(notifications as u8);
         Reply::with_body(w.into_vec())
     }
 
@@ -362,38 +353,6 @@ impl SystemService {
                 crate::warn!("clipboard: {e:#}");
                 Reply::err(-EIO)
             }
-        }
-    }
-
-    fn open_uri(&mut self, len: u32, fd: &OwnedFd) -> Reply {
-        let b = match blob::read(fd, len, proto::limits::URI as usize) {
-            Ok(b) => b,
-            Err(e) => return Reply::err(e),
-        };
-        let Ok(url) = String::from_utf8(b) else {
-            return Reply::err(-EINVAL);
-        };
-        if !self.uri_rate.allow(Instant::now()) {
-            crate::warn!("openuri: {}: rate limited", self.label);
-            return Reply::err(-EAGAIN);
-        }
-        if !self.shared.desktop {
-            if let Err(why) = openuri::validate(&url) {
-                crate::warn!("openuri: {}: refused ({why})", self.label);
-                return Reply::err(-EINVAL);
-            }
-            // The compat runner looks for this line (bridge.log).
-            crate::info!(
-                "openuri: {}: not opened (test session): {}",
-                self.label,
-                crate::ipc::wire::truncate(&url, 512)
-            );
-            return Reply::ok();
-        }
-        let token = self.shared.handoffs.activation_token(0);
-        match openuri::open_with_activation(self.shared.dbus(), &url, &self.label, &token) {
-            Ok(()) => Reply::ok(),
-            Err(e) => Reply::err(e),
         }
     }
 
@@ -516,7 +475,7 @@ impl Service for SystemService {
             if action == 1 && openuri::validate(&payload.text).is_err() {
                 return Reply::err(-EINVAL);
             }
-            if !self.uri_rate.allow(Instant::now()) {
+            if !self.handoff_rate.allow(Instant::now()) {
                 return Reply::err(-EAGAIN);
             }
             if !self.shared.desktop {
@@ -552,7 +511,7 @@ impl Service for SystemService {
         let fd = || fd.as_ref().expect("checked above");
         match req {
             Request::Handoff { .. } => unreachable!("handled above"),
-            Request::Start { features } => self.start(features),
+            Request::Start => self.start(),
             Request::Notify { id, len } => self.notify(id, len, fd()),
             Request::NotifyClose { id } => {
                 if let Some(h) = self.shared.notify() {
@@ -565,7 +524,6 @@ impl Service for SystemService {
                 sensitive,
                 len,
             } => self.clip_set(kind, sensitive, len, fd()),
-            Request::OpenUri { len } => self.open_uri(len, fd()),
             Request::Media { player, len } => self.media(player, len, fd()),
             Request::MediaClose { player } => {
                 if self.shared.desktop {

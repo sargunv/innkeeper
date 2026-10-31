@@ -27,7 +27,6 @@ object Wire {
   const val NOTIFY = 0x0302
   const val NOTIFY_CLOSE = 0x0303
   const val CLIP_SET = 0x0304
-  const val OPEN_URI = 0x0305
   const val MEDIA = 0x0306
   const val MEDIA_CLOSE = 0x0307
   const val LIFECYCLE = 0x0308
@@ -39,13 +38,6 @@ object Wire {
   const val EV_NOTIFY = 0x4302
   const val EV_CLIP = 0x4303
   const val EV_MEDIA_CMD = 0x4304
-
-  // START features.
-  const val F_SETTINGS = 1
-  const val F_CLIPBOARD = 2
-  const val F_NOTIFICATIONS = 4
-  const val F_MEDIA = 8
-  const val F_OPEN_URI = 16
 
   // Host state service (host/bridge/src/hoststate/proto.rs).
   const val HS_START = 0x0801

@@ -333,8 +333,8 @@ if (
       s am start -n dev.sargunv.innkeeper.probes/.HandoffProbe --es action view >/dev/null
       until_ok file_has "$desktop_log" '^openfile: shared\.odt$'
       wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
-      s am start -a android.intent.action.VIEW -d mailto:production-e2e@example.com >/dev/null
-      until_ok file_has "$desktop_log" '^openuri: mailto:production-e2e@example.com$'
+      s am start -a android.intent.action.VIEW -d https://example.com/innkeeper-e2e >/dev/null
+      until_ok file_has "$desktop_log" '^openuri: https://example.com/innkeeper-e2e$'
       s am start -n dev.sargunv.innkeeper.probes/.NotificationProbe >/dev/null
       until_ok file_has "$desktop_log" '^notification: Ada Lovelace *: Are we still on for the demo at 3\?'
       # No window is needed to exercise the picker result on Android's default display.
