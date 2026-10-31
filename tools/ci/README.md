@@ -30,9 +30,9 @@ after each run.
 
 `Release` runs after a successful CI push to main, on a pushed `v*` tag and on
 `workflow_dispatch`. A snapshot packages the commit CI tested from that commit's
-stage cache and replaces the floating `snapshot` prerelease; a newer push
-cancels one in progress. A tag attaches `<app>-stable.flatpak` to its release. A
-dry run publishes nothing. Details:
+stage cache and replaces the floating `snapshot` prerelease, deleting any other
+asset on it; a newer push cancels one in progress. A tag attaches
+`<app>-stable.flatpak` to its release. A dry run publishes nothing. Details:
 [packaging/flatpak](../../packaging/flatpak/README.md#release).
 
 ## Runners
@@ -67,7 +67,9 @@ runner; the local default is 25 GiB, and the 8 GiB hard cap is unchanged.
 - **Cargo, ccache, Gradle:** keyed by OS/architecture, job mode and
   dependency/toolchain pins, with prefix restores; each tool checks its own
   inputs. Mesa/LLVM and the image tools keep their own input hashes. Cold
-  Mesa/LLVM builds fit in the 120-minute build timeout.
+  Mesa/LLVM builds fit in the 120-minute build timeout. The package job does not
+  compile, so it skips these caches: its bundle fills `out/` with more files
+  than the compile key's `hashFiles` can walk.
 - **Image:** the prepared Android image, keyed by its pin, preparation scripts,
   image tools, container and launcher preparation code. Archives drop xattrs, so
   preparation always recreates the small CLAT layer that carries Android
