@@ -4,7 +4,8 @@
 # credential syscalls, SO_PEERCRED, lstat-shaped newfstatat and W_OK access
 # checks in single-uid mode (supervisor/README.md); readlink, getcwd, fstat,
 # mkdir, chmod, SO_MARK, capget, capset and the capability prctls in
-# Flatpak mode; open(2) and access-token ioctls for an OpenHarmony guest only;
+# Flatpak mode; open(2), access-token and ashmem ioctls for an OpenHarmony
+# guest only;
 # and nothing hot besides.
 # Builds into out/test/supervisor/seccomp-filter.
 set -euo pipefail
@@ -27,5 +28,5 @@ check "bootless harness" 1 "bpf,openat,ioctl binder"
 single="bpf,openat,ioctl binder,getuid,getgroups,setresuid,setgroups,fchownat,getsockopt SO_PEERCRED,lstat,access W_OK"
 flat="fstat,readlinkat,getcwd,setsockopt SO_MARK,capget,capset,mkdirat,fchmodat,prctl PR_CAPBSET_DROP"
 check "flatpak" 0 "$single,$flat"
-check "flatpak, OpenHarmony" 0 "bpf,openat,ioctl binder,open,ioctl access token,${single#bpf,openat,ioctl binder,},$flat" LINUXAPK_GUEST=ohos
+check "flatpak, OpenHarmony" 0 "bpf,openat,ioctl binder,open,ioctl access token,ioctl ashmem,${single#bpf,openat,ioctl binder,},$flat" LINUXAPK_GUEST=ohos
 exit $fail

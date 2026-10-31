@@ -343,6 +343,14 @@ impl Flat {
         if st.st_gid == self.gid {
             st.st_gid = 0;
         }
+        // OpenHarmony's c_utils takes /dev/ashmem only as a character device.
+        if crate::guest() == crate::Guest::Ohos
+            && std::fs::read_link(OsStr::from_bytes(link.as_bytes()))
+                .is_ok_and(|l| crate::ashmem::is_region(l.as_os_str().as_bytes()))
+        {
+            st.st_mode = libc::S_IFCHR | 0o666;
+            st.st_rdev = crate::ashmem::RDEV;
+        }
         let b = unsafe {
             std::slice::from_raw_parts(
                 &st as *const libc::stat as *const u8,
@@ -493,6 +501,16 @@ impl Flat {
             return true;
         }
         if crate::guest() == crate::Guest::Ohos
+            && prefix.as_deref().is_some_and(|p| p.starts_with(b"/dev/"))
+            && read_path(tid, a[1]).as_deref() == Some(crate::ashmem::NODE)
+        {
+            match crate::ashmem::create() {
+                Ok(region) => self.inject_fd(req, region.as_raw_fd()),
+                Err(_) => self.reply(req.id, 0, libc::ENOMEM),
+            }
+            return true;
+        }
+        if crate::guest() == crate::Guest::Ohos
             && prefix.as_deref().is_some_and(|p| p.starts_with(b"/etc/"))
             && let Some(name) = read_path(tid, a[1]).as_deref().and_then(ohos_etc)
         {
@@ -557,10 +575,15 @@ impl Flat {
         {
             return self.reply(req.id, 0, libc::EIO);
         }
+        self.inject_fd(req, fd.as_raw_fd());
+    }
+
+    /// Complete `req` (an openat) with a copy of `fd`.
+    fn inject_fd(&self, req: &SeccompNotif, fd: RawFd) {
         let add = SeccompNotifAddfd {
             id: req.id,
             flags: SECCOMP_ADDFD_FLAG_SEND,
-            srcfd: fd.as_raw_fd() as u32,
+            srcfd: fd as u32,
             newfd: 0,
             newfd_flags: (req.data.args[2] as u32) & libc::O_CLOEXEC as u32,
         };

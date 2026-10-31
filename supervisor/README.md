@@ -162,6 +162,13 @@ set it, and their filter and driver are unchanged.
   the access-token service checks. Records are keyed by pid and start time, so a
   reused pid starts from its parent's. Newer kernels' SPM entries and reference
   counts are absent (`ENOTTY`), as on a kernel built without them.
+- **Ashmem** (`src/ashmem.rs`). OH's c_utils and everything on it (IPC parcels,
+  the display HDI's command queues) need `/dev/ashmem`. Each open gets a fresh
+  sealable memfd named `ashmem`, which Flatpak mode's fstat shows as a character
+  device (c_utils checks), and the broker serves ashmem's ioctls on it: the size
+  is the memfd's, a mask without `PROT_WRITE` is `F_SEAL_FUTURE_WRITE`, and
+  pinning and purging do nothing (memfd pages are never purged). The state lives
+  in the memfd, so a region passed to another process answers the same there.
 
 ## Tests
 

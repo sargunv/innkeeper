@@ -706,7 +706,8 @@ fn is_binder_syscall(nr: i64, args: &[u64; 6]) -> bool {
         || (nr == libc::SYS_ioctl
             && (is_binder_ioctl(args[1] as u32)
                 || (crate::guest() == crate::Guest::Ohos
-                    && crate::ohos::is_token_ioctl(args[1] as u32))))
+                    && (crate::ohos::is_token_ioctl(args[1] as u32)
+                        || crate::ashmem::is_ashmem_ioctl(args[1] as u32)))))
 }
 
 /// Only binder devices take the binder lock. Other device opens still need
@@ -954,6 +955,9 @@ impl Supervisor {
         if crate::guest() == crate::Guest::Ohos && crate::ohos::is_token_ioctl(cmd) {
             return self.token_ioctl(req);
         }
+        if crate::guest() == crate::Guest::Ohos && crate::ashmem::is_ashmem_ioctl(cmd) {
+            return self.ashmem_ioctl(req);
+        }
         let procid = match self
             .tgid(req.pid as i32)
             .and_then(|pid| self.fd_index.get(&(pid, fd)))
@@ -1000,6 +1004,34 @@ impl Supervisor {
             &mut Mem(mem.raw(), arg),
         );
         dlog!("token pid={pid} cmd={cmd:#x} {r:?}");
+        let (val, errno) = r.map_or_else(|e| (0, -e), |v| (v, 0));
+        send_resp(self.us.listener, self.us.resp_sz, req.id, val, errno, false);
+    }
+
+    /// An ashmem ioctl on one of the broker's regions ([`crate::ashmem`]);
+    /// other type-0x77 ioctls go through.
+    fn ashmem_ioctl(&mut self, req: SeccompNotif) {
+        let tid = req.pid as i32;
+        let [fd, cmd, arg, ..] = req.data.args;
+        let link = format!("/proc/{tid}/fd/{fd}");
+        if !std::fs::read_link(&link).is_ok_and(|p| {
+            crate::ashmem::is_region(std::os::unix::ffi::OsStrExt::as_bytes(p.as_os_str()))
+        }) {
+            return self.respond(req.id, 0, true);
+        }
+        let (Ok(region), Some(mem)) = (
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&link),
+            open_mem(tid),
+        ) else {
+            return self.respond(req.id, libc::EBADF, false);
+        };
+        let r = crate::ashmem::ioctl(&region, cmd as u32, arg, &mut |b| {
+            mem_write(mem.raw(), arg, b)
+        });
+        dlog!("ashmem tid={tid} cmd={cmd:#x} {r:?}");
         let (val, errno) = r.map_or_else(|e| (0, -e), |v| (v, 0));
         send_resp(self.us.listener, self.us.resp_sz, req.id, val, errno, false);
     }
