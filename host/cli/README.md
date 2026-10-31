@@ -3,7 +3,7 @@
 The scriptable user surface: `bin/innkeeper`, built by `mise run build:host`,
 run from a shell or from the `Exec` of the desktop entries it writes. Shared
 operations are in [innkeeper-core](../core/README.md); file grants use the
-bridge IPC client.
+bridge's IPC client.
 
 ```sh
 innkeeper install App.apk             # also .apks, .xapk, .apkm
@@ -11,6 +11,7 @@ innkeeper open [FILE...]              # choose an Android app; no files opens th
 innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 innkeeper uninstall org.wikipedia [--keep-data]
 innkeeper list                        # user apps; repairs stale desktop entries first
+innkeeper app org.wikipedia [ACTION]  # per-app info and settings, as JSON
 innkeeper background [PKG on|off]     # may PKG run with no window open (lists them)
 innkeeper profile list                # profiles and whether they run
 innkeeper profile create|use|delete NAME  # delete removes its apps, data and settings
@@ -23,25 +24,22 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
 ```
 
 - Every command starts the session if needed; the first start downloads the
-  Android image (about 1.2 GB) with progress on stderr.
+  Android image (about 1.2 GB), with progress on stderr.
 - `run` with a URI sends `VIEW` + `BROWSABLE` restricted to the package, so only
   activities that accept browser links get it; `content:` and `intent:` URIs are
-  refused. Paths and `file:` URIs instead import a read-only file fd into the
-  session's documents service. Android gets an opaque `content://` URI, MIME
-  type and `FLAG_GRANT_READ_URI_PERMISSION`, restricted to that package. These
-  grants last until the session stops; they expose no host directories. Files
-  must already be accessible to the CLI's Flatpak sandbox.
-- The static Innkeeper desktop entry accepts common document, text and media
-  types. Flatpak exports its `%F` as `--file-forwarding … @@ %F @@`, granting
-  those files through the document portal. `open` uses the same read-only grants
-  as `run`, then shows **Open or share with Android app…**. **Open** lists VIEW
-  handlers; **Share** lists SEND targets for one file and SEND_MULTIPLE targets
-  for a batch. The same activity must accept every file's MIME type. Share
-  delivers EXTRA_STREAM and ClipData with FLAG_GRANT_READ_URI_PERMISSION; grants
-  last until session shutdown. Targets are queried each time the chooser opens,
-  so installs and removals appear immediately. If none match, it says so. APKs
-  and bundles open in the installer instead. No file-type defaults are changed;
-  per-app host Open With entries remain deferred.
+  refused. A path or `file:` URI is instead opened read-only and its fd handed
+  to the session's documents service: Android gets an opaque `content://` URI,
+  the MIME type and `FLAG_GRANT_READ_URI_PERMISSION`, for that package only,
+  until the session stops. No host directory is exposed, and the file must
+  already be accessible to the CLI's Flatpak sandbox.
+- `open` grants files the same way, then shows **Open or share with Android
+  app…**. **Open** lists VIEW handlers; **Share** lists SEND targets for one
+  file and SEND_MULTIPLE targets for several, and the same activity must accept
+  every file's MIME type. Targets are queried each time, so installs and
+  removals show at once. APKs and bundles go to the installer instead.
+  Innkeeper's desktop entry accepts common document, text and media types, and
+  Flatpak forwards its `%F` through the document portal. No file-type defaults
+  are changed.
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).
@@ -50,13 +48,10 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
 - A profile is a separate Android with its own apps, data and settings
   ([session](../../docs/session.md#profiles)). `--profile NAME` or
-  `INNKEEPER_PROFILE` selects it, else the one in use (`profile use`); the first
-  command that needs one creates `default`. Entries bake it into their `Exec`,
-  so an app's entry keeps using its profile.
+  `INNKEEPER_PROFILE` selects one, else the one in use (`profile use`); the
+  first command that needs one creates `default`. Desktop entries name their
+  profile in `Exec`, so an app's entry keeps using it.
+- The supported desktops have no standard hook for sharing text from the host,
+  so the desktop entry accepts files only.
 
-Tests: `cargo test -p innkeeper` and the shared core tests in `mise run test`
-cover command results, metadata, validation and desktop entries.
-
-Host text sharing has no standard desktop hook on the supported desktops (Debian
-13 baseline, xdg-desktop-portal 1.20). This is an upstream limit: the host entry
-accepts files; it does not register a text-sharing service.
+Tests: `cargo test -p innkeeper`, plus core's tests in `mise run test`.
