@@ -124,11 +124,13 @@ builder=(
   --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse
   --state-dir="$out/state"
 )
+# stable matches the .flatpakref. flatpak-builder's own export uses master.
 if ((${#gpg_args[@]})); then
   FLATPAK_USER_DIR=$tools "${builder[@]}" "$out/build" "$manifest"
-  flatpak build-export "${gpg_args[@]}" --update-appstream "$rel/repo" "$out/build"
+  flatpak build-export "${gpg_args[@]}" --update-appstream "$rel/repo" "$out/build" stable
 else
-  FLATPAK_USER_DIR=$tools "${builder[@]}" --repo="$rel/repo" "$out/build" "$manifest"
+  FLATPAK_USER_DIR=$tools "${builder[@]}" --repo="$rel/repo" \
+    --default-branch=stable "$out/build" "$manifest"
 fi
 
 if [[ -s ${rel}/gpg/public.asc ]]; then
@@ -169,7 +171,7 @@ fi
 
 # The runtime is not in this repo; a bundle install fetches it from Flathub.
 flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
-  "$rel/repo" "$rel/$id.flatpak" "$id"
+  "$rel/repo" "$rel/$id.flatpak" "$id" stable
 
 flatpak build-update-repo --generate-static-deltas --prune "${gpg_args[@]}" "$rel/repo"
 
