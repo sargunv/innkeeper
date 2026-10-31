@@ -137,9 +137,65 @@ jobs:
             !**/android-data*/**
           retention-days: 7
 
+  # OpenHarmony's boot: its own session and image, beside Android's e2e.
+  e2e-ohos:
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          mode: runtime
+      - uses: ./.github/actions/restore-stage
+      - name: Runtime input tree
+        id: runtime
+        run: |
+          flatpak=$(git ls-tree -r HEAD -- packaging/flatpak/dev-init.sh \
+            packaging/flatpak/dev.sargunv.Innkeeper.yml tools/dev/run.py | sha256sum)
+          echo "flatpak=${flatpak%% *}" >>"$GITHUB_OUTPUT"
+      # The e2e job saves it.
+      - uses: actions/cache/restore@v4
+        with:
+          path: out/flatpak/user
+          key:
+            flatpak-v1-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.runtime.outputs.flatpak }}
+      - uses: actions/cache/restore@v4
+        id: image
+        with:
+          path: out/ohos/images
+          key:
+            ohos-image-v1-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('image/ohos/pin.toml', 'image/ohos/fetch.sh',
+            'image/fs-extract.sh', 'image/tools/**') }}
+      - name: Fetch the OpenHarmony image
+        run:
+          image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images
+          out/stage/libexec/innkeeper/image/fs-extract.sh
+      - uses: actions/cache/save@v4
+        if: steps.image.outputs.cache-hit != 'true'
+        with:
+          path: out/ohos/images
+          key: ${{ steps.image.outputs.cache-primary-key }}
+      - name: Boot OpenHarmony until SceneBoard is ready
+        run: mise run test:e2e -- ohos
+        env:
+          INNKEEPER_E2E_DEADLINE: 180
+      - name: Test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ohos-logs
+          overwrite: true
+          path: |
+            out/test/e2e/ci/
+            out/dev/flatpak/ci/*.log
+          retention-days: 7
+
   # The single required gate: a skipped or failed job must not pass.
   checks:
-    needs: [lint, build, unit, e2e]
+    needs: [lint, build, unit, e2e, e2e-ohos]
     if: always()
     runs-on: ubuntu-26.04
     steps:

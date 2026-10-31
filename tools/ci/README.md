@@ -1,11 +1,12 @@
 # GitHub Actions
 
 `CI` runs on pull requests and pushes to main: lint and one release build, then
-unit tests and e2e in parallel on separate runners from that build's `stage`
-artifact (release tarball, test probes and `manifest.tsv`; tarballs keep modes
-and symlinks). The `checks` job is the single required gate: it fails unless
-every job succeeded, so a failed dependency cannot turn into a green skip.
-Inspect a run with `gh run view <run-id>`.
+unit tests, e2e and OpenHarmony's boot (`test:e2e -- ohos`) in parallel on
+separate runners from that build's `stage` artifact (release tarball, test
+probes and `manifest.tsv`; tarballs keep modes and symlinks). The `checks` job
+is the single required gate: it fails unless every job succeeded, so a failed
+dependency cannot turn into a green skip. Inspect a run with
+`gh run view <run-id>`.
 
 `Release` publishes the Flatpak bundles
 ([packaging/flatpak](../../packaging/flatpak/README.md#release)).

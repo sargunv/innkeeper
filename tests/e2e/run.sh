@@ -414,9 +414,30 @@ fi
 
 groups=("$@")
 ((${#groups[@]})) || groups=(boot input audio desktop lifecycle)
+# OpenHarmony is its own session, without a desktop window: it runs alone.
+if [[ ${groups[*]} == ohos ]]; then
+  "$repo/image/ohos/fetch.sh" "$repo/image/ohos/pin.toml" "$repo/out/ohos/images" \
+    "$repo/out/stage/libexec/innkeeper/image/fs-extract.sh" >/dev/null
+  mkdir -p "$T"
+  : >"$T/timings.log"
+  echo "e2e: deadline=${deadline}s"
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_boot() {
+    timeout --kill-after=4 "$deadline" "$repo/ohos/run.py" --timeout "$deadline" \
+      --probe "$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1
+  }
+  if ! timed ohos ohos_boot; then
+    tail -n 60 "$T/ohos.txt" >&2
+    echo "e2e: FAIL (ohos); init's log: $repo/out/dev/flatpak/$INNKEEPER_PROFILE/ohos-kmsg.log"
+    exit 1
+  fi
+  echo 'ok   OpenHarmony registers its core system abilities, shows screen 0 and starts SceneBoard'
+  echo 'e2e: PASS'
+  exit
+fi
 for group in "${groups[@]}"; do
   case $group in boot | input | audio | desktop | lifecycle) ;; *)
-    echo "unknown e2e group: $group" >&2
+    echo "unknown e2e group: $group (ohos runs alone)" >&2
     exit 2
     ;;
   esac

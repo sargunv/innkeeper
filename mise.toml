@@ -31,7 +31,9 @@ RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
 
 # ---- build -------------------------------------------------------------------
 # Each build:<module> fills out/build/<module>/install/, a tree of paths
-# relative to the stage prefix; `build` merges them into out/stage.
+# relative to the stage prefix; `build` merges them into out/stage. Shared:
+# host, broker, image-tools. Android: ndk, vulkan, system-app, data.
+# OpenHarmony: ohos.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"
@@ -89,8 +91,8 @@ install -D -m 644 -t $i/share/innkeeper/image image/pin.toml image/bootconfig im
 install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 """
 
-[tasks."ohos:build"]
-description = "The OpenHarmony session's broker (static musl) and init shim, in out/build/ohos; not in build or the stage"
+[tasks."build:ohos"]
+description = "OpenHarmony's layer: its shim, display VDIs and init cfgs"
 run = "ohos/build.sh"
 
 [tasks.package]
@@ -130,23 +132,13 @@ android/vendor/vulkan/tests/run.sh
 """
 
 [tasks."test:e2e"]
-description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle]); whole run <60 s"
+description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle] | ohos); whole run <60 s"
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]
 description = "Manual app troubleshooting (-- --only PKG), never a gate"
 env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='compat') }}" }
 run = "tests/compat/run.sh"
-
-[tasks."ohos:test"]
-description = "Boot the pinned OpenHarmony image in a test sandbox until its core system abilities register; needs mise run build"
-depends = ["ohos:build"]
-env = { INNKEEPER_PROFILE = "{{ env.INNKEEPER_PROFILE | default(value='ohos') }}" }
-run = """
-set -euo pipefail
-image/ohos/fetch.sh image/ohos/pin.toml out/ohos/images out/stage/libexec/innkeeper/image/fs-extract.sh
-ohos/run.py --timeout 90 --probe ohos/tests/boot.sh
-"""
 
 [tasks.bench]
 description = "Manual input and frame latency measurements (-- input|frame); never a test gate"

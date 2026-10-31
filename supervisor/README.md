@@ -179,7 +179,7 @@ ioctls, the render-node policy, the broker starting init).
 headers.
 
 - `mise run test:e2e -- boot` boots and runs `selftest`.
-- `mise run ohos:test` boots OpenHarmony until its system abilities register.
+- `mise run test:e2e -- ohos` boots OpenHarmony until SceneBoard is ready.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).

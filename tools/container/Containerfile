@@ -1,5 +1,6 @@
 # The build container: tools for cross-compiling Mesa, libdrm, LLVM and
-# Android, and for the static image tools (image/tools/build.sh).
+# Android, for the static image tools (image/tools/build.sh), and musl's
+# headers for OpenHarmony's VDIs (ohos/build.sh).
 # The NDK comes from the host (tools/container/run.sh mounts $HOME), pinned in
 # tools/build/toolchain.env.
 FROM registry.fedoraproject.org/fedora:44
@@ -16,4 +17,5 @@ RUN dnf -y \
       glslang bison flex gcc gcc-c++ diffutils curl tar xz bzip2 \
       autoconf automake libtool glibc-static libstdc++-static zlib-ng-compat-static \
       protobuf-devel brotli-devel lz4-devel pcre2-devel libusb1-devel libzstd-devel \
+      musl-devel \
     && dnf clean all

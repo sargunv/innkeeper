@@ -16,7 +16,7 @@ runs:
         # Every build input's tree (paths, symlinks, modes and contents): an
         # exact hit restores the stage and probes and skips setup and build.
         digest=$(git ls-tree -r HEAD -- host supervisor/shim \
-          supervisor/broker android image tools/build tools/container \
+          supervisor/broker android ohos guest image tools/build tools/container \
           packaging/flatpak Cargo.toml Cargo.lock \
           .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \
           .github/workflows/ci.yml .github/actions tools/ci/setup.sh | sha256sum)
