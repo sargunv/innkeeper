@@ -191,10 +191,6 @@ run = "tools/dev/session.sh"
 description = "Build and install the Flatpak into the user installation"
 run = 'FLATPAK_USER_DIR="${FLATPAK_USER_DIR:-$HOME/.local/share/flatpak}" packaging/flatpak/build.sh'
 
-[tasks.microg]
-description = "Install microG as an addon layer (-- --beta | --remove)"
-run = "android/microg/install.sh"
-
 # ---- lint --------------------------------------------------------------------
 
 [tasks.check]

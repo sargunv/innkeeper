@@ -53,9 +53,9 @@ answers, then every value is read again; an error offers a fresh read.
 ## Preferences
 
 `src/preferences.rs` (Ctrl+,): following the desktop's appearance,
-language/region and clock (each on by default), idle shutdown, app-menu
-mirroring and the optional microG addon. It also keeps the single-uid notice and
-opens Android Settings in its own window.
+language/region and clock (each on by default), idle shutdown and app-menu
+mirroring. It also keeps the single-uid notice and opens Android Settings in its
+own window.
 
 - Preferences live in `$XDG_CONFIG_HOME/innkeeper-<profile>/preferences.toml`
   and are read without starting Android. A running session takes changes through
@@ -68,10 +68,6 @@ opens Android Settings in its own window.
   Running** disables idle shutdown and requests login startup through the
   Background portal; if the portal denies it, the setting stays off. The portal
   keeps one login command, so the profile that last turned it on starts.
-- microG uses the separately installed addon
-  ([its README](../../android/microg/README.md)); the switch is unavailable
-  without it and applies at the next Android start. Play Services client
-  libraries are unsupported.
 
 ## Profiles
 

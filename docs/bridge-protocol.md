@@ -224,19 +224,18 @@ CLI examples: `innkeeper app org.example.app`,
 `SetPreferences(s json)` validates and atomically replaces them, then broadcasts
 the filtered desktop settings. The JSON object (at most 4096 bytes) has boolean
 fields `follow_dark`, `follow_accent`, `follow_locale`, `follow_clock`,
-`keep_running`, `mirror_apps`, `microg`, and integer `idle_minutes` (1–120).
-Missing fields take their defaults: all following, mirroring and the installed
-microG addon on, keep-running off, timeout 2 minutes. Unknown fields or invalid
-values fail with `InvalidArgs`. Persistence failures return `Failed`. The
-manager can also save these preferences while the session is stopped.
+`keep_running`, `mirror_apps`, and integer `idle_minutes` (1–120). Missing
+fields take their defaults: all following and mirroring on, keep-running off,
+timeout 2 minutes. Unknown fields or invalid values fail with `InvalidArgs`.
+Persistence failures return `Failed`. The manager can also save these
+preferences while the session is stopped.
 
 The desktop client obtains Background portal permission before enabling
 `keep_running`, setting `autostart` with the session launcher's `start` command;
 it removes autostart when switching back to an idle timeout. No autostart file
-is written directly. The launcher re-reads the timeout while running, and only
-includes the microG addon on the next start if enabled. Enabling mirroring asks
-the system app to rescan launchable user apps with event `0x4502` (empty body,
-no fds). Disabling it leaves existing launchers in place.
+is written directly. The launcher re-reads the timeout while running. Enabling
+mirroring asks the system app to rescan launchable user apps with event `0x4502`
+(empty body, no fds). Disabling it leaves existing launchers in place.
 
 In `SETTINGS`, `has_accent=2` means leave Android's accent untouched (opted
 out), `0` means the desktop has no accent, and `1` carries RGB. Other opted-out

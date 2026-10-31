@@ -75,7 +75,6 @@ module stages.
 | [android/system](../android/system/README.md)                   | `innkeeper-exec`                                      | Android `/system`                                             | `exec/innkeeper-exec.c`         |
 | [android/system-app](../android/system-app/README.md)           | `InnkeeperSystem.apk`                                 | Android, as a privileged app                                  | `app/.../InnkeeperSystemApp.kt` |
 | [android/overlay](../android/overlay/README.md)                 | config files over the image's partitions              | Android                                                       | its README                      |
-| [android/microg](../android/microg/README.md)                   | optional microG addon                                 | Android                                                       | `install.sh`                    |
 | [tests](../tests/README.md)                                     | test harnesses and suites                             | desktop, never shipped                                        | its README                      |
 | [packaging/flatpak](../packaging/flatpak/README.md)             | the Flatpak, `dev.sargunv.Innkeeper`                  | build time                                                    | `build.sh`                      |
 | [tools](../tools/README.md)                                     | build container, staging, dev scripts                 | build time                                                    | `build/artifacts.toml`          |

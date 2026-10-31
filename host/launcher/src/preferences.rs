@@ -14,7 +14,6 @@ pub struct Preferences {
     pub keep_running: bool,
     pub idle_minutes: u32,
     pub mirror_apps: bool,
-    pub microg: bool,
 }
 
 impl Default for Preferences {
@@ -27,7 +26,6 @@ impl Default for Preferences {
             keep_running: false,
             idle_minutes: 2,
             mirror_apps: true,
-            microg: true,
         }
     }
 }
@@ -103,7 +101,6 @@ mod tests {
         assert_eq!(p.idle_seconds(), 120);
         p.keep_running = true;
         p.follow_accent = false;
-        p.microg = false;
         p.idle_minutes = 7;
         p.write(&path).unwrap();
         assert_eq!(Preferences::read(&path).unwrap(), p);

@@ -291,7 +291,7 @@
     </service>
 
     <!-- The desktop's location as Android's network provider (integration/location/). Version 0:
-         microG's provider, when installed, outranks it. -->
+         any other provider outranks it. -->
     <service
       android:name=".integration.location.HostLocationService"
       android:directBootAware="true"
