@@ -119,11 +119,11 @@ stateDiagram-v2
   launcher checks it every 5 s. No report yet (booting, the system app
   restarting) counts as busy, and so do a running `exec` (it holds `exec.lock`
   shared) and an alarm less than 3 minutes away or ago.
-- **Grace period.** `INNKEEPER_IDLE_GRACE` seconds of idleness (default 120; 0:
-  never) before the launcher stops the session as `stop` does. Headless sessions
-  (tests) never stop by themselves unless it is set. Apps not allowed in the
-  background stop with it, as if force-stopped: their jobs and syncs wait for
-  the next start.
+- **Idle timeout.** The profile's Idle timeout preference (default 2 minutes;
+  Keep Running: never) before the launcher stops the session as `stop` does; a
+  change applies to a running session. Headless sessions (tests) never stop by
+  themselves. Apps not allowed in the background stop with it, as if
+  force-stopped: their jobs and syncs wait for the next start.
 - **Foreground services** keep it up. A media app keeps playing after its window
   closes; its session stays an MPRIS player, and its notification shows on the
   desktop, resident, only while it has no window. Clicking that notification or
