@@ -8,7 +8,7 @@ from pathlib import Path
 import dbus
 
 name = "dev.linuxapk.Manager.Session.i_" + os.environ[
-  "LINUXAPK_INSTANCE"
+  "LINUXAPK_PROFILE"
 ].replace("-", "_")
 proxy = dbus.Interface(
   dbus.SessionBus().get_object(name, "/dev/linuxapk/Session"),
@@ -37,7 +37,7 @@ if not str(data) or data == Path("."):
   data = (
     Path(__file__).resolve().parents[2]
     / "out/dev/flatpak"
-    / os.environ["LINUXAPK_INSTANCE"]
+    / os.environ["LINUXAPK_PROFILE"]
     / "android-data"
   )
 cache = data / "data" / package / "cache/session-api-probe"

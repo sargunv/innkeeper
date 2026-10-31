@@ -300,17 +300,17 @@ pub struct DesktopApp {
     pub package: String,
     pub name: String,
     pub version: Option<String>,
-    /// The session instance the entry runs in (baked into its `Exec`), empty
+    /// The session profile the entry runs in (baked into its `Exec`), empty
     /// for the main session.
-    pub instance: String,
+    pub profile: String,
     /// The largest icon file, if any.
     pub icon: Option<PathBuf>,
 }
 
-/// The session instance an entry's `Exec` runs against.
-pub fn exec_instance(exec: &str) -> String {
+/// The session profile an entry's `Exec` runs against.
+pub fn exec_profile(exec: &str) -> String {
     paths::invocation(&desktop::exec_args(exec))
-        .instance
+        .profile
         .to_string()
 }
 
@@ -341,14 +341,14 @@ fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
         .collect()
 }
 
-/// Apps with a Linux.apk desktop entry (any instance), sorted by name.
+/// Apps with a Linux.apk desktop entry (any profile), sorted by name.
 pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     let mut v: Vec<DesktopApp> = app_entries(d)
         .into_iter()
         .map(|(pkg, _, t)| DesktopApp {
             name: desktop::read_key(&t, "Name").unwrap_or_else(|| pkg.clone()),
             version: desktop::read_key(&t, "X-LinuxApk-Version"),
-            instance: exec_instance(&desktop::read_key(&t, "Exec").unwrap_or_default()),
+            profile: exec_profile(&desktop::read_key(&t, "Exec").unwrap_or_default()),
             icon: largest_icon(d, &format!("{PREFIX}{pkg}")),
             package: pkg,
         })
@@ -359,7 +359,7 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 
 /// Repairs our app entries. The `Exec` of one that can no longer run is
 /// pointed at `linuxapk` (this installation's command line, keeping its
-/// instance): its program is gone (Linux.apk moved or was
+/// profile): its program is gone (Linux.apk moved or was
 /// reinstalled elsewhere), it sets variables an older Linux.apk used
 /// (`LINUXAPK_SESSION`), or, inside the Flatpak, it runs anything but
 /// `linuxapk`. Inside the Flatpak, a record whose app-menu entry is missing or
@@ -376,7 +376,7 @@ pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
             .is_some_and(|p| Path::new(p).is_absolute() && !Path::new(p).exists());
         let elsewhere = d.portal.is_some() && inv.program != linuxapk.first().map(String::as_str);
         if missing || elsewhere || inv.foreign_env || inv.program.is_none() {
-            let mut run = paths::command(linuxapk, inv.instance);
+            let mut run = paths::command(linuxapk, inv.profile);
             run.extend(["run".into(), pkg.clone()]);
             let Some(mut new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
@@ -433,12 +433,12 @@ mod tests {
     }
 
     #[test]
-    fn instance_of_exec() {
-        for (program, instance) in [("/x/linuxapk", "gui"), ("/a b/linuxapk", "")] {
-            let mut run = paths::command(&[program.into()], instance);
+    fn profile_of_exec() {
+        for (program, profile) in [("/x/linuxapk", "gui"), ("/a b/linuxapk", "")] {
+            let mut run = paths::command(&[program.into()], profile);
             run.extend(["run".into(), "a.b".into()]);
             let exec = desktop::exec_line(&run, Some("%U")).unwrap();
-            assert_eq!(exec_instance(&exec), instance);
+            assert_eq!(exec_profile(&exec), profile);
         }
     }
 
@@ -482,7 +482,7 @@ mod tests {
         let apps = desktop_apps(&d);
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].package, "org.example.app");
-        assert_eq!(apps[0].instance, "");
+        assert_eq!(apps[0].profile, "");
         assert_eq!(
             apps[0].icon.as_deref(),
             Some(d.icon_path(48, "dev.linuxapk.org.example.app").as_path())
@@ -517,8 +517,8 @@ mod tests {
             p
         };
         let exec_of = |p: &Path| desktop::read_key(&fs::read_to_string(p).unwrap(), "Exec");
-        let want = |pkg: &str, instance: &str| {
-            let mut run = paths::command(&cli, instance);
+        let want = |pkg: &str, profile: &str| {
+            let mut run = paths::command(&cli, profile);
             run.extend(["run".into(), pkg.into()]);
             Some(desktop::exec_line(&run, Some("%U")).unwrap())
         };
@@ -535,7 +535,7 @@ mod tests {
 
         assert_eq!(refresh_entries(&d, &cli), 2);
         assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
-        assert_eq!(exec_instance(&exec_of(&old).unwrap()), "cli");
+        assert_eq!(exec_profile(&exec_of(&old).unwrap()), "cli");
         assert_eq!(exec_of(&moved), want("org.ex.moved", ""));
         let moved_text = fs::read_to_string(&moved).unwrap();
         assert!(moved_text.contains(&format!(

@@ -45,7 +45,7 @@ pub fn wake_lead() -> Duration {
 // Short real idle/alarm round trips, only in explicitly named test sessions.
 fn test_timers() -> bool {
     std::env::var("LINUXAPK_TEST_TIMERS").is_ok_and(|v| v == "1")
-        && std::env::var("LINUXAPK_INSTANCE").is_ok_and(|v| !v.is_empty())
+        && std::env::var("LINUXAPK_PROFILE").is_ok_and(|v| !v.is_empty())
 }
 
 /// The grace period for a new session, in seconds; 0: it never stops by

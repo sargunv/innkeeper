@@ -449,7 +449,7 @@ impl Window {
         }
     }
 
-    /// The installed app for `pkg` in this instance, if any.
+    /// The installed app for `pkg` in this profile, if any.
     pub fn installed(&self, pkg: &str) -> Option<DesktopApp> {
         self.installed
             .borrow()
@@ -727,7 +727,7 @@ impl Window {
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
             let name = linuxapk_core::app_settings::bus_name(
-                &linuxapk_core::paths::instance().unwrap_or_default(),
+                &linuxapk_core::paths::profile().unwrap_or_default(),
             );
             let proxy = gio::DBusProxy::for_bus_future(
                 gio::BusType::Session,

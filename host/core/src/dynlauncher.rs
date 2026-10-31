@@ -182,12 +182,12 @@ mod tests {
             ["linuxapk", "run", "a.b", "%U"]
         );
         let named = "flatpak run --branch=master --command=env 'dev.linuxapk.Manager' \
-                     LINUXAPK_INSTANCE=gui linuxapk run \"a b\" %U";
+                     LINUXAPK_PROFILE=gui linuxapk run \"a b\" %U";
         assert_eq!(
             app_command(named, "dev.linuxapk.Manager").unwrap(),
             [
                 "env",
-                "LINUXAPK_INSTANCE=gui",
+                "LINUXAPK_PROFILE=gui",
                 "linuxapk",
                 "run",
                 "a b",

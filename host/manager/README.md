@@ -13,7 +13,7 @@ remove it from a list. `bin/linuxapk-manager` plus its desktop data in `data/`
 - **First run** prepares the Android image ("Preparing Android"), and the first
   single-uid session shows a one-time banner that apps aren't isolated from each
   other (shared with the CLI's notice).
-- **The list** comes from this instance's desktop entries, so it shows without
+- **The list** comes from this profile's desktop entries, so it shows without
   booting Android, and a directory monitor follows CLI changes. At startup it
   repairs stale entries as `linuxapk list` does.
 - Every core call runs on a worker thread (`worker.rs`); the UI thread never
@@ -44,12 +44,12 @@ launchers; turning it back on catches up apps installed while it was off.
 When idle, Android stops after 2 minutes by default (adjustable from 1 to 120).
 Keep Running instead disables idle shutdown and requests login startup through
 the Background portal; a denied request leaves the setting unchanged. Login
-startup is only available for the main instance. microG uses the separately
+startup is only available for the main profile. microG uses the separately
 installed addon described in [its README](../../android/microg/README.md); the
 switch is unavailable without the addon and takes effect at the next Android
 start. Play Services client libraries remain unsupported.
 
-Preferences live in `$XDG_CONFIG_HOME/linuxapk[-<instance>]/preferences.toml`.
+Preferences live in `$XDG_CONFIG_HOME/linuxapk[-<profile>]/preferences.toml`.
 The page reads them without starting Android. A running session accepts updates
 through `Session1`; otherwise they are saved for the next start. Desktop
 following, mirroring and the idle timeout change live.

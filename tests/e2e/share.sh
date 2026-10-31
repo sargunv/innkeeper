@@ -2,7 +2,7 @@
 # Runs only inside the grouped runner's fresh, isolated desktop and Android session.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-T=$repo/out/test/e2e/$LINUXAPK_INSTANCE
+T=$repo/out/test/e2e/$LINUXAPK_PROFILE
 S=$repo/tools/dev/session.sh
 s() { "$S" exec "$@"; }
 wm() { s am broadcast -n dev.linuxapk.system/.wm.ControlReceiver -a "dev.linuxapk.$1" "${@:2}"; }

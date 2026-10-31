@@ -17,7 +17,7 @@ flowchart LR
   flatten --> derive["derive.sh<br/>common and single layers"]
 ```
 
-Cache, shared by every instance, in `$XDG_DATA_HOME/linuxapk/images/<name>/`:
+Cache, shared by every profile, in `$XDG_DATA_HOME/linuxapk/images/<name>/`:
 `dl/` (resumable downloads; the zip goes once extracted), `img/` (the
 partitions), `apex-<hash>/` (one flattened tree per vendor APEX selection, never
 rewritten under a running session), `derived/` (the layers
@@ -28,9 +28,9 @@ After successful preparation, stale build directories (including their derived
 layers) and unselected `apex-<hash>` trees are pruned, with paths and allocated
 bytes released logged to stderr. The current pin and running sessions keep
 leases on their build and APEX tree; a cache-wide prepare lock serializes
-preparation and collection across instances, even with private runtime dirs.
-Lock files under `images/.locks/` stay in place. Symlinks, unknown directories
-and incomplete APEX extractions are left alone. Changed derived layers cannot be
+preparation and collection across profiles, even with private runtime dirs. Lock
+files under `images/.locks/` stay in place. Symlinks, unknown directories and
+incomplete APEX extractions are left alone. Changed derived layers cannot be
 regenerated while another session uses that build; stop those sessions first.
 
 - **apexd and flatten-apex.sh must agree.** [bootconfig](bootconfig) selects

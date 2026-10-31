@@ -4,7 +4,7 @@
   ohos/run.py [--timeout S] [--until REGEX] [--probe SCRIPT] [--display]
 
 The sandbox is the dev runner's (tools/dev/run.py): the stage at /app, the
-same permissions, the same named-instance scratch dirs, and the same
+same permissions, the same named-profile scratch dirs, and the same
 MemoryHigh/MemoryMax on its scope. ohos/sandbox.sh builds OH's root there and
 runs its init under the supervisor. Init's log (/dev/kmsg) goes to
 <scratch>/ohos-kmsg.log. The run ends at --timeout, or once a log line
@@ -30,7 +30,7 @@ import time
 TOP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOP / "tools/dev"))
 sys.dont_write_bytecode = True
-os.environ.setdefault("LINUXAPK_INSTANCE", "ohos")
+os.environ.setdefault("LINUXAPK_PROFILE", "ohos")
 import run as dev  # noqa: E402
 
 IMAGES = Path(os.environ.get("LINUXAPK_OHOS_IMAGES", TOP / "out/ohos/images"))

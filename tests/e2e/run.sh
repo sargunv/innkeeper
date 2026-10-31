@@ -11,12 +11,12 @@ report_error() {
 trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-e2e}
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-e2e}
 export LINUXAPK_E2E=1
 S=$repo/tools/dev/session.sh
-T=$repo/out/test/e2e/$LINUXAPK_INSTANCE
-desktop_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/desktop.log
-bridge_log=$repo/out/test/nested/$LINUXAPK_INSTANCE/state/linuxapk-$LINUXAPK_INSTANCE/bridge.log
+T=$repo/out/test/e2e/$LINUXAPK_PROFILE
+desktop_log=$repo/out/test/nested/$LINUXAPK_PROFILE/desktop.log
+bridge_log=$repo/out/test/nested/$LINUXAPK_PROFILE/state/linuxapk-$LINUXAPK_PROFILE/bridge.log
 apk=$repo/out/test/probes/LinuxApkProbes.apk
 # GitHub's software-rendered desktop is slower than local development.
 deadline=55
@@ -78,8 +78,8 @@ stop_session() {
   "$S" stop >/dev/null
   # The dev supervisor publishes its exit after the sandbox closes. Wait for
   # it before a restart, so its old completion cannot fail the new start.
-  if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
-    until_setup test -f "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/ended"
+  if [[ -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
+    until_setup test -f "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/ended"
   fi
 }
 
@@ -112,7 +112,7 @@ if [[ ${1:-} == --group ]]; then
       # Session1 reports the same completed boot as the launcher's property check.
       # shellcheck disable=SC2329 # invoked through until_ok
       session_booted() {
-        gdbus call --session --dest "dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}" \
+        gdbus call --session --dest "dev.linuxapk.Manager.Session.i_${LINUXAPK_PROFILE//-/_}" \
           --object-path /dev/linuxapk/Session --method dev.linuxapk.Session1.State >"$T/session-state.txt" &&
           file_has "$T/session-state.txt" '^\(true,'
       }
@@ -319,7 +319,7 @@ if (
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
       # One live preference round trip, through the same Session1 API as GTK.
-      dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_INSTANCE//-/_}
+      dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_PROFILE//-/_}
       gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
         --method dev.linuxapk.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
       until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=false'
@@ -436,7 +436,7 @@ if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then
 fi
 mkdir -p "$T"
 : >"$T/timings.log"
-export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_INSTANCE
+export LINUXAPK_IDLE_GRACE=1 LINUXAPK_TEST_TIMERS=1 LINUXAPK_AUDIO_SINK=linuxapk_$LINUXAPK_PROFILE
 export LINUXAPK_AUDIO_SOURCE=$LINUXAPK_AUDIO_SINK.monitor
 keeper=""
 events=""
@@ -447,8 +447,8 @@ cleanup() {
   local result=$?
   if [[ -n $setup_lock ]]; then exec {setup_lock}>&-; fi
   if ((result != 0)); then
-    for log in "$desktop_log" "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/runner.log" \
-      "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/supervisor.log"; do
+    for log in "$desktop_log" "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/runner.log" \
+      "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/supervisor.log"; do
       if [[ -f $log ]]; then
         echo "e2e: last 60 lines of $log:" >&2
         tail -n 60 "$log" >&2
@@ -475,7 +475,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
-export LINUXAPK_GAMEPAD_TEST_DIR=$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/gp
+export LINUXAPK_GAMEPAD_TEST_DIR=$repo/out/dev/flatpak/$LINUXAPK_PROFILE/gp
 /usr/bin/python3 "$here/gamepads.py" serve "$LINUXAPK_GAMEPAD_TEST_DIR" &
 gamepads=$!
 until_ok test -f "$LINUXAPK_GAMEPAD_TEST_DIR/ready"
@@ -488,7 +488,7 @@ timed setup-desktop until_setup file_has "$desktop_log" ready
 timed setup-start "$S" start
 # The exec service is not ready immediately after start. Hold its existing
 # busy lock from the host until a booted Android can run the keeper instead.
-exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_INSTANCE/exec.lock"
+exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.linuxapk.Manager/linuxapk-$LINUXAPK_PROFILE/exec.lock"
 flock --shared "$setup_lock"
 timed setup-boot until_setup booted
 # BOOT_COMPLETED can precede CE app-data preparation on the software runner.
@@ -530,9 +530,9 @@ run_group() {
     tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I LinuxApkHandoff:V >"$T/$1-activities.txt" 2>&1 || true
     timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
-    if [[ -f $repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
+    if [[ -f $repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
       local cg stat
-      cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup")
+      cg=$(cat "$repo/out/dev/flatpak/$LINUXAPK_PROFILE/cgroup")
       for stat in memory.events memory.peak memory.max; do
         if [[ -r $cg/$stat ]]; then
           printf '%s\n' "$stat"

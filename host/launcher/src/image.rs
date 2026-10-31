@@ -206,7 +206,7 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
     make_read_only(&image.img, &image.img.join("system/system/build.prop"))?;
     let info = image.apexdir.join("apex-info-list.xml");
     if !info.is_file() {
-        let sfx = crate::paths::per_instance("", &paths.instance);
+        let sfx = crate::paths::per_profile("", &paths.profile);
         let tmp = image.apexdir.with_file_name(format!(
             "{}.tmp{sfx}",
             image.apexdir.file_name().unwrap().to_string_lossy()
@@ -217,7 +217,7 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
             .arg(paths.share.join("image/bootconfig"))
             .arg(&tmp))?;
         make_read_only(&tmp, &tmp.join("apex-info-list.xml"))?;
-        // Another instance may have won the race: fine.
+        // Another profile may have won the race: fine.
         if fs::rename(&tmp, &image.apexdir).is_err() {
             let _ = fs::remove_dir_all(&tmp);
         }

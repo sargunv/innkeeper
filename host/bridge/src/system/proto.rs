@@ -21,7 +21,7 @@
 //! then one display name (≤255 B) per content fd, each a `u32` length and UTF-8.
 //! URI has no content fds. Open/save without files writes text as a `.txt` file;
 //! email without files uses text as the body. Each content file is ≤64 MiB.
-//! Opened files/attachments stay in the instance cache until session shutdown,
+//! Opened files/attachments stay in the profile cache until session shutdown,
 //! capped at 256 MiB retained. Save copies are removed after writing.
 //!
 //! | Event    | Message      | Body (fd)                                                                                                                                                                                                |

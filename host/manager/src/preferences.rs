@@ -50,7 +50,7 @@ impl Page {
                 Ok::<_, anyhow::Error>((
                     Preferences::load()?,
                     preferences::microg_available(),
-                    linuxapk_core::paths::instance()?.is_empty(),
+                    linuxapk_core::paths::profile()?.is_empty(),
                 ))
             })
             .await;

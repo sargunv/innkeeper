@@ -28,7 +28,7 @@ import org.json.JSONObject
  *
  * Only launchable, non-system apps are mirrored. On every connection the current set is checked
  * (HAVE), so installs made while the bridge was away are caught up; the bridge skips entries that
- * `linuxapk install` or another session instance wrote.
+ * `linuxapk install` or another session profile wrote.
  */
 class AppMirrorFeature(private val context: Context, private val settings: AppSettings) : Feature {
   override val name = "apps"

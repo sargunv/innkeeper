@@ -1,7 +1,7 @@
 //! Flatpak mode's control socket. Each `flatpak run` is a sandbox of its own,
 //! with its own pid namespace and `/`, so the CLI or the manager can't enter
 //! the session's sandbox. The session's launcher listens on
-//! `$XDG_RUNTIME_DIR/app/<app id>/linuxapk[-<instance>]/control.sock`, which
+//! `$XDG_RUNTIME_DIR/app/<app id>/linuxapk[-<profile>]/control.sock`, which
 //! every instance of the app shares, and serves `status`, `stop` and `exec`.
 //!
 //! One SOCK_SEQPACKET message per request: NUL-separated words (the command,

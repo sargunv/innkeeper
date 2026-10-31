@@ -7,7 +7,7 @@
 //!
 //! - Portal grants expose only what the user picked. CLI imports hold just the
 //!   supplied file fd, read-only, until session exit or FORGET. Portal grants persist (the provider's URIs outlive the session)
-//!   in the instance's state directory, and FORGET drops one.
+//!   in the profile's state directory, and FORGET drops one.
 //! - A file grant opens only that file. A folder grant opens paths beneath it
 //!   through `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` from the
 //!   folder's fd, so `..`, absolute symlinks and `/proc` links can't leave

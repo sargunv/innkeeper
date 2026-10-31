@@ -98,7 +98,7 @@ pub fn save(prefs: Preferences) -> Result<()> {
     let login_changed = prefs.keep_running != old.keep_running;
     if login_changed {
         ensure!(
-            crate::paths::instance()?.is_empty(),
+            crate::paths::profile()?.is_empty(),
             "Start at login is only available for the main session"
         );
         if let Err(e) = autostart(prefs.keep_running) {
@@ -114,7 +114,7 @@ pub fn save(prefs: Preferences) -> Result<()> {
         let connection = zbus::blocking::connection::Builder::session()?
             .method_timeout(Duration::from_secs(5))
             .build()?;
-        let name = crate::app_settings::bus_name(&crate::paths::instance()?);
+        let name = crate::app_settings::bus_name(&crate::paths::profile()?);
         let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
         if bus.name_has_owner(name.as_str().try_into()?)? {
             let proxy = zbus::blocking::Proxy::new(

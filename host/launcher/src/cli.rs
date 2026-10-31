@@ -40,14 +40,14 @@ Spawn), which the other commands reach through a control socket.
 
 It runs from an installed prefix (libexec/linuxapk; in a checkout, out/stage
 after `mise run build`) and builds nothing. Its files:
-  $XDG_RUNTIME_DIR/linuxapk[-<instance>]/  session.conf, pid files, the kmsg
+  $XDG_RUNTIME_DIR/linuxapk[-<profile>]/  session.conf, pid files, the kmsg
     FIFO, the bridge's socket, the start-time layer over the image (in
     Flatpak, under $XDG_RUNTIME_DIR/app/<app id>/)
-  $XDG_STATE_HOME/linuxapk[-<instance>]/   logs (session, kmsg, bridge) and
+  $XDG_STATE_HOME/linuxapk[-<profile>]/   logs (session, kmsg, bridge) and
     the documents service's grants
-  $XDG_DATA_HOME/linuxapk/                 images/, data[-<instance>]/
+  $XDG_DATA_HOME/linuxapk/                 images/, data[-<profile>]/
     (Android's /data), addons/ (layers over the partitions, e.g. microG),
-    root[-<instance>]/ (the composed root)
+    root[-<profile>]/ (the composed root)
 
 Environment:
   LINUXAPK_AUDIO_SINK      PipeWire sink for the session's audio (default:
@@ -58,13 +58,13 @@ Environment:
                            wakeup for its next alarm (default 120; 0: never;
                            headless sessions never unless it is set)
 Tests only:
-  LINUXAPK_INSTANCE        run an independent, named session (default: the
+  LINUXAPK_PROFILE         run an independent, named session (default: the
                            main one). Named sessions are test sessions: they
                            isolate clipboard, portals, links, notifications,
                            media players, AT-SPI and location from the desktop.
   LINUXAPK_TEST=1         apply the same isolation to an unnamed session
   LINUXAPK_DATA            Android's /data (default
-                           $XDG_DATA_HOME/linuxapk/data[-<instance>])
+                           $XDG_DATA_HOME/linuxapk/data[-<profile>])
   LINUXAPK_IMAGES, LINUXAPK_PIN  the image cache and the pin
 Debugging:
   LINUXAPK_BRIDGE_VERBOSE=1  per-stream stats in bridge.log

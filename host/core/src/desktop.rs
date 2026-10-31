@@ -422,19 +422,19 @@ mod tests {
     }
 
     #[test]
-    fn new_window_action_keeps_the_launcher_command_and_instance() {
+    fn new_window_action_keeps_the_launcher_command_and_profile() {
         let mut e = entry();
         assert!(!e.render().unwrap().contains("Desktop Action"));
         e.new_window = true;
         e.run = vec![
             "env".into(),
-            "LINUXAPK_INSTANCE=test".into(),
+            "LINUXAPK_PROFILE=test".into(),
             "/opt/linux apk/bin/linuxapk".into(),
             "run".into(),
         ];
         let text = e.render().unwrap();
         assert!(text.contains("Actions=NewWindow;\n"));
-        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env LINUXAPK_INSTANCE=test \"/opt/linux apk/bin/linuxapk\" run --new-window org.wikipedia\n"));
+        assert!(text.ends_with("[Desktop Action NewWindow]\nName=New Window\nExec=env LINUXAPK_PROFILE=test \"/opt/linux apk/bin/linuxapk\" run --new-window org.wikipedia\n"));
     }
 
     #[test]

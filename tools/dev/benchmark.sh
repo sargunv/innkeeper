@@ -2,10 +2,10 @@
 # Same-stage runtime comparison, with real app frame stats on isolated KWin.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-benchmark}
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-benchmark}
 if [[ ${LINUXAPK_NESTED:-} != 1 ]]; then exec "$repo/tests/nested.sh" "$0" "$@"; fi
 S=$repo/tools/dev/session.sh
-T=$repo/out/test/benchmark/$LINUXAPK_INSTANCE
+T=$repo/out/test/benchmark/$LINUXAPK_PROFILE
 mkdir -p "$T"
 cp "$repo/out/stage/share/linuxapk/manifest.tsv" "$T/manifest.tsv"
 # shellcheck disable=SC2329 # invoked by EXIT

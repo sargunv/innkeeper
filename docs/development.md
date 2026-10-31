@@ -51,12 +51,12 @@ flowchart LR
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare` runs
   the staged launcher ([host/launcher](../host/launcher/README.md)) in a private
   Flatpak, capped from the host, with scratch HOME and XDG dirs under
-  `out/dev/flatpak/<instance>` (default instance `dev`); it waits while less
-  than 25 GiB is available
+  `out/dev/flatpak/<profile>` (default profile `dev`); it waits while less than
+  25 GiB is available
   ([packaging/flatpak](../packaging/flatpak/README.md#development)).
 - `tools/dev/linuxapk.sh install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of
-  its own: `LINUXAPK_INSTANCE=cli tests/nested.sh tools/dev/linuxapk.sh list`
+  its own: `LINUXAPK_PROFILE=cli tests/nested.sh tools/dev/linuxapk.sh list`
   runs it on a nested KWin with private PipeWire/Pulse (no hardware monitors), a
   private bus, AT-SPI bus, runtime dir and HOME/XDG dirs, and removes them
   after.
@@ -66,7 +66,7 @@ flowchart LR
 - `mise run install-dev` builds and installs the committed Flatpak in the user
   installation, adding the manager to the app menu as an APK handler. Do this
   only for a checkout you mean to use as your Linux.apk.
-- Use `LINUXAPK_INSTANCE=<name>` for anything experimental: it is a separate
+- Use `LINUXAPK_PROFILE=<name>` for anything experimental: it is a separate
   session with its own `/data`, logs and sandbox, and stays off the real desktop
   ([security.md](security.md#test-sessions)).
 
@@ -80,7 +80,7 @@ Test tiers and their mise tasks are in [tests/README.md](../tests/README.md).
 Use a bounded snapshot inside a named session:
 
 ```sh
-LINUXAPK_INSTANCE=debug mise run session -- exec timeout 10 logcat -b all -d -t 100
+LINUXAPK_PROFILE=debug mise run session -- exec timeout 10 logcat -b all -d -t 100
 ```
 
 `logcat -b all` streams until interrupted; waiting for it to exit is expected.
@@ -133,10 +133,10 @@ systemd-run --user --unit linuxapk-nested-kwin -p MemoryMax=3G -- env "${E[@]}" 
   dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket lapk-nested \
   --width 1920 --height 1080 --exit-with-session $N/hold.sh
 WAYLAND_DISPLAY=$RT/lapk-nested DBUS_SESSION_BUS_ADDRESS=$(cat $N/bus) \
-  LINUXAPK_INSTANCE=nested mise run session -- start
-# linuxapk writes desktop entries under XDG_DATA_HOME for every instance, so
+  LINUXAPK_PROFILE=nested mise run session -- start
+# linuxapk writes desktop entries under XDG_DATA_HOME for every profile, so
 # point it at $N while keeping the session's image and /data:
-D=(XDG_DATA_HOME=$N/data XDG_CONFIG_HOME=$N/config LINUXAPK_INSTANCE=nested
+D=(XDG_DATA_HOME=$N/data XDG_CONFIG_HOME=$N/config LINUXAPK_PROFILE=nested
    LINUXAPK_IMAGES=$HOME/.local/share/linuxapk/images
    LINUXAPK_DATA=$HOME/.local/share/linuxapk/data-nested)
 env "${D[@]}" out/stage/bin/linuxapk install some.apk

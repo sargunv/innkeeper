@@ -217,7 +217,7 @@ mod tests {
         let base = base.canonicalize()?;
         let images = base.join("images");
         let paths = Paths {
-            instance: "prune-test".into(),
+            profile: "prune-test".into(),
             libexec: base.join("libexec"),
             share: base.join("share"),
             run: base.join("runtime/linuxapk-prune-test"),

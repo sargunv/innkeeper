@@ -42,7 +42,7 @@ pub struct Status {
 }
 
 impl Session {
-    /// The session of this program's prefix and instance.
+    /// The session of this program's prefix and profile.
     pub fn find() -> Result<Self> {
         Ok(Self::at(Prefix::locate()?.launcher()))
     }

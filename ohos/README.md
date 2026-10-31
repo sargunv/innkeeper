@@ -22,7 +22,7 @@ input or app install. Nothing here is part of the Android session,
 | `tests/boot.sh`           | `mise run ohos:test`'s check, run inside OH                   |
 
 `mise run build` first (the stage's pivot-exec and debugfs), then
-`mise run ohos:test`: it fetches the image if needed and boots it as instance
+`mise run ohos:test`: it fetches the image if needed and boots it as profile
 `ohos` (scratch in `out/dev/flatpak/ohos/`, data wiped at each run). Init's log
 is `ohos-kmsg.log` there; once hilogd runs, services log to hilog instead. To
 look around, write a script for OH's `/system/bin/sh` and pass it with
@@ -33,7 +33,7 @@ comes back (`hidumper -ls`, `hilog -x`, `ps -A`).
 ## Display
 
 ```sh
-LINUXAPK_INSTANCE=ohos tests/nested.sh ohos/run.py --display --timeout 60
+LINUXAPK_PROFILE=ohos tests/nested.sh ohos/run.py --display --timeout 60
 ```
 
 `--display` also starts the bridge in the sandbox, so screen 0 opens as one

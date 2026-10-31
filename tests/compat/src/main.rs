@@ -6,7 +6,7 @@
 //!
 //! `run` fetches the corpus, makes sure a session is up (starting a headless
 //! one if needed, and stopping it at the end), runs every app, writes
-//! out/test/compat/<instance>/. `--accept` also records the results in
+//! out/test/compat/<profile>/. `--accept` also records the results in
 //! tests/compat/results.json. `report` renders the baseline under out/.
 
 mod app;
@@ -153,7 +153,7 @@ fn real_main() -> Result<ExitCode> {
     }
     let out = repo
         .join("out/test/compat")
-        .join(linuxapk_core::paths::instance()?);
+        .join(linuxapk_core::paths::profile()?);
     let apk_dir = env::var_os("LINUXAPK_CORPUS")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| repo.join("out/test/compat/corpus"));
@@ -211,7 +211,7 @@ fn real_main() -> Result<ExitCode> {
                 }
             }
             // The session restarted or died under us (something else stopped
-            // the instance, or a host-side crash): not the app's fault, so retry
+            // the profile, or a host-side crash): not the app's fault, so retry
             // once on a fresh session.
             if pid.is_none() || s.pid() != pid || !s.booted() {
                 r.result = Status::Error;

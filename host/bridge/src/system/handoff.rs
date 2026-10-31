@@ -1,5 +1,5 @@
 //! Android → desktop handoffs. Metadata is a sealed blob; content fds are
-//! copied to real, size-capped files in the instance cache (portals cannot
+//! copied to real, size-capped files in the profile cache (portals cannot
 //! export memfds). Opened files and email attachments stay until session
 //! shutdown so a launched app can read them after the portal responds.
 
@@ -79,11 +79,11 @@ pub struct Handoffs {
 
 impl Handoffs {
     pub fn new(input: Arc<crate::input::Hub>) -> Arc<Self> {
-        let instance = linuxapk_core::paths::instance().unwrap_or_default();
-        let name = if instance.is_empty() {
+        let profile = linuxapk_core::paths::profile().unwrap_or_default();
+        let name = if profile.is_empty() {
             "linuxapk".into()
         } else {
-            format!("linuxapk-{instance}")
+            format!("linuxapk-{profile}")
         };
         let root = linuxapk_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
             .join(name)
@@ -120,7 +120,7 @@ impl Handoffs {
 
     fn stage(&self, p: &Payload, fds: Vec<OwnedFd>) -> Result<Stage, i32> {
         self.initialized.get_or_init(|| {
-            // One bridge owns an instance; reap copies after a previous crash.
+            // One bridge owns a profile; reap copies after a previous crash.
             let _ = std::fs::remove_dir_all(&self.root);
         });
         for fd in &fds {

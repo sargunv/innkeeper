@@ -33,11 +33,11 @@ pub type Report<'a> = &'a dyn Fn(Event);
 pub fn quiet(_: Event) {}
 
 /// The command line desktop entries run `linuxapk` with: this
-/// installation's ([`Prefix::cli`]), for this session instance. Inside the
+/// installation's ([`Prefix::cli`]), for this session profile. Inside the
 /// Flatpak it is plain `linuxapk`, which the DynamicLauncher portal runs as
 /// `flatpak run --command=linuxapk`.
 pub fn cli_command() -> Result<Vec<String>> {
-    Ok(paths::command(&linuxapk()?, &paths::instance()?))
+    Ok(paths::command(&linuxapk()?, &paths::profile()?))
 }
 
 /// The `linuxapk` desktop entries run: this installation's, or the Flatpak's
@@ -425,14 +425,14 @@ pub fn list(report: Report) -> Result<Vec<(String, Option<String>)>> {
         .collect())
 }
 
-/// Apps installed for this session instance, from their desktop entries (no
+/// Apps installed for this session profile, from their desktop entries (no
 /// session needed). If `android` is given (the session's user packages),
 /// apps installed without an entry are added too.
 pub fn installed_apps(android: Option<&[String]>) -> Vec<DesktopApp> {
-    let inst = paths::instance().unwrap_or_default();
+    let profile = paths::profile().unwrap_or_default();
     let mut v: Vec<DesktopApp> = xdg::desktop_apps(&Dirs::from_env())
         .into_iter()
-        .filter(|a| a.instance == inst)
+        .filter(|a| a.profile == profile)
         .collect();
     if let Some(pkgs) = android {
         for p in pkgs {
@@ -441,7 +441,7 @@ pub fn installed_apps(android: Option<&[String]>) -> Vec<DesktopApp> {
                     package: p.clone(),
                     name: p.clone(),
                     version: None,
-                    instance: inst.clone(),
+                    profile: profile.clone(),
                     icon: None,
                 });
             }

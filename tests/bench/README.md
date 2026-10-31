@@ -8,10 +8,10 @@ and prepare the image as for development. Native audio needs the compiler and
 the runtime `libpulse-simple.so.0`, with no development headers or root
 installation.
 
-Each invocation creates a fresh `bench-<name>-<time>` instance and Android data
+Each invocation creates a fresh `bench-<name>-<time>` profile and Android data
 directory, runs the existing isolated nested desktop, applies the development
 session's memory caps and safety selftest, then stops its session and desktop.
-An explicit `LINUXAPK_INSTANCE=bench-...` must be unused. Android
+An explicit `LINUXAPK_PROFILE=bench-...` must be unused. Android
 window/transition/animator scales are disabled only in this disposable data
 directory to exclude launch transitions. The runner, desktop and Android session
 are capped separately. No main session or host integration is changed. The
@@ -38,7 +38,7 @@ mise run bench -- memory --noisy --seconds 2
 mise run bench -- binder --noisy
 ```
 
-Artifacts stay in `out/bench/<instance>/`: `result.json` (schema version 1),
+Artifacts stay in `out/bench/<profile>/`: `result.json` (schema version 1),
 `summary.txt`, and bounded raw traces. Failed collections retain an error and
 return nonzero. Null statistics mean no observation, never zero latency. GPU
 components and audio round trips can be explicitly unavailable. Nothing is

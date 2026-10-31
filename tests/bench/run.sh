@@ -9,25 +9,25 @@ case ${1:-} in
     exit 0
     ;;
 esac
-export LINUXAPK_INSTANCE=${LINUXAPK_INSTANCE:-bench-$1-$(date +%s%N)}
-[[ $LINUXAPK_INSTANCE =~ ^bench-[a-z0-9-]+$ ]] || {
-  echo 'expected fresh bench-* instance' >&2
+export LINUXAPK_PROFILE=${LINUXAPK_PROFILE:-bench-$1-$(date +%s%N)}
+[[ $LINUXAPK_PROFILE =~ ^bench-[a-z0-9-]+$ ]] || {
+  echo 'expected fresh bench-* profile' >&2
   exit 1
 }
-# Refuse before installing traps: an existing instance belongs to someone else.
-[[ ! -e out/bench/$LINUXAPK_INSTANCE && ! -e out/dev/flatpak/$LINUXAPK_INSTANCE ]] || {
-  echo 'benchmark instance must be fresh' >&2
+# Refuse before installing traps: an existing profile belongs to someone else.
+[[ ! -e out/bench/$LINUXAPK_PROFILE && ! -e out/dev/flatpak/$LINUXAPK_PROFILE ]] || {
+  echo 'benchmark profile must be fresh' >&2
   exit 1
 }
-unit=linuxapk-bench-run-$LINUXAPK_INSTANCE
+unit=linuxapk-bench-run-$LINUXAPK_PROFILE
 cleanup() {
   local result=$? cg
   trap - EXIT
-  if [[ -f out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup ]]; then
-    cg=$(cat "out/dev/flatpak/$LINUXAPK_INSTANCE/cgroup")
+  if [[ -f out/dev/flatpak/$LINUXAPK_PROFILE/cgroup ]]; then
+    cg=$(cat "out/dev/flatpak/$LINUXAPK_PROFILE/cgroup")
     systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
-  systemctl --user stop "linuxapk-nested-$LINUXAPK_INSTANCE" 2>/dev/null || true
+  systemctl --user stop "linuxapk-nested-$LINUXAPK_PROFILE" 2>/dev/null || true
   systemctl --user stop "$unit.scope" 2>/dev/null || true
   exit "$result"
 }

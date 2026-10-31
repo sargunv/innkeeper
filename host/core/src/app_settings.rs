@@ -9,12 +9,13 @@ pub const INTERFACE: &str = "dev.linuxapk.Session1";
 pub const PATH: &str = "/dev/linuxapk/Session";
 pub const MAX_JSON: usize = 64 * 1024;
 
-pub fn bus_name(instance: &str) -> String {
+pub fn bus_name(profile: &str) -> String {
     let base = "dev.linuxapk.Manager.Session";
-    if instance.is_empty() {
+    // `.i_<name>` is the session bus name. Hyphens become underscores.
+    if profile.is_empty() {
         base.into()
     } else {
-        format!("{base}.i_{}", instance.replace('-', "_"))
+        format!("{base}.i_{}", profile.replace('-', "_"))
     }
 }
 
@@ -129,7 +130,7 @@ pub fn request(command: Command, report: crate::ops::Report) -> Result<AppInfo> 
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(25))
         .build()?;
-    let name = bus_name(&crate::paths::instance()?);
+    let name = bus_name(&crate::paths::profile()?);
     let proxy = zbus::blocking::Proxy::new(&connection, name.as_str(), PATH, INTERFACE)?;
     let json: String = proxy.call(
         "App",

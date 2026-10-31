@@ -14,13 +14,13 @@ level.
 
   ```sh
   mise run build
-  LINUXAPK_INSTANCE=prepare-tests mise run session -- prepare
-  LINUXAPK_INSTANCE=e2e-local mise run test:e2e
+  LINUXAPK_PROFILE=prepare-tests mise run session -- prepare
+  LINUXAPK_PROFILE=e2e-local mise run test:e2e
   ```
 
 The runner owns private D-Bus/runtime/HOME/XDG dirs, private PipeWire/Pulse
 servers without hardware monitors, a null audio sink and fake
-portals/notifications. It stops and resets its instance on exit, including on
+portals/notifications. It stops and resets its profile on exit, including on
 failure. Never use the main session or the user's desktop for tests. Check
 `free -g` first; sessions are memory capped. See the
 [nested desktop rules](../docs/development.md#a-nested-isolated-desktop).
@@ -33,10 +33,10 @@ preparation. CI uses headless Mutter/llvmpipe with
 `LINUXAPK_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1` and a 180 s deadline
 (`LINUXAPK_E2E_DEADLINE`, honored only with `GITHUB_ACTIONS=true`). Observation
 and group limits scale with that deadline. Logs, captures and phase timings land
-in `out/test/e2e/<instance>/`; desktop logs are in
-`out/test/nested/<instance>/`. CI uploads these in `checks-logs`. Android log
-captures are bounded. `desktop` uses a capped bridge sidecar on the same private
-desktop to check real policy without opening host apps or dialogs.
+in `out/test/e2e/<profile>/`; desktop logs are in `out/test/nested/<profile>/`.
+CI uploads these in `checks-logs`. Android log captures are bounded. `desktop`
+uses a capped bridge sidecar on the same private desktop to check real policy
+without opening host apps or dialogs.
 
 - `mise run test:bionic`: manual Android-side HAL diagnostics.
 - `mise run test:compat -- --only <package>`: manual app troubleshooting; see
@@ -44,12 +44,12 @@ desktop to check real policy without opening host apps or dialogs.
   Never trigger, run or wait for it during development or PR work.
 
 For sustained capture proof, build and stage, then run
-`tests/e2e/audio/capture.sh` with a fresh `LINUXAPK_INSTANCE`. It records 32 s
+`tests/e2e/audio/capture.sh` with a fresh `LINUXAPK_PROFILE`. It records 32 s
 from a private 440 Hz source through AudioRecord and checks 30 s after initial
 warmup, and checks a simultaneous native monitor recording as a control. Each
 100 ms window must contain the tone; crossing intervals and a sample recurrence
 detect gaps, dropped samples and transients. This manual check is separate from
-the e2e gate. PCM and JSON results stay under `out/test/audio/<instance>/`; the
+the e2e gate. PCM and JSON results stay under `out/test/audio/<profile>/`; the
 harness stops its session and virtual source. It first runs the Android-side
 input FMQ test with a fake PCM, covering mono/stereo, pause/flush standby and a
 fresh PCM on restart, mute, invalid bursts and close. Build that test with

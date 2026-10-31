@@ -1,6 +1,6 @@
 //! Where things are: the install prefix this program runs from, the session
-//! instance it works with (parsed by the launcher library, the only reader of
-//! `LINUXAPK_INSTANCE`), and the XDG base directories.
+//! profile it works with (parsed by the launcher library, the only reader of
+//! `LINUXAPK_PROFILE`), and the XDG base directories.
 
 use std::env;
 use std::path::PathBuf;
@@ -56,29 +56,29 @@ impl Prefix {
     }
 }
 
-/// `LINUXAPK_INSTANCE` if it is a valid instance name, else an error. Empty
+/// `LINUXAPK_PROFILE` if it is a valid profile name, else an error. Empty
 /// for the main session.
-pub use linuxapk_session::paths::instance;
+pub use linuxapk_session::paths::profile;
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
 /// `$HOME`.
 pub use linuxapk_session::paths::xdg_home;
 
-/// `name`, suffixed with `-<instance>` for a named instance: the session's
+/// `name`, suffixed with `-<profile>` for a named profile: the session's
 /// XDG directories are named this way.
-fn per_instance(name: &str) -> Result<String> {
-    Ok(linuxapk_session::paths::per_instance(name, &instance()?))
+fn per_profile(name: &str) -> Result<String> {
+    Ok(linuxapk_session::paths::per_profile(name, &profile()?))
 }
 
 /// The argv that runs `program` (a command line, such as [`Prefix::cli`])
-/// against session `instance`: prefixed with `env LINUXAPK_INSTANCE=<instance>`
-/// for a named instance, so a desktop entry reaches the session it was made
+/// against session `profile`: prefixed with `env LINUXAPK_PROFILE=<profile>`
+/// for a named profile, so a desktop entry reaches the session it was made
 /// for.
-pub fn command(program: &[String], instance: &str) -> Vec<String> {
+pub fn command(program: &[String], profile: &str) -> Vec<String> {
     let mut v = vec![];
-    if !instance.is_empty() {
+    if !profile.is_empty() {
         v.push("env".into());
-        v.push(format!("LINUXAPK_INSTANCE={instance}"));
+        v.push(format!("LINUXAPK_PROFILE={profile}"));
     }
     v.extend_from_slice(program);
     v
@@ -87,8 +87,8 @@ pub fn command(program: &[String], instance: &str) -> Vec<String> {
 /// A [`command`] argv read back (from a desktop entry's `Exec`).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Invocation<'a> {
-    /// The instance it runs against, empty for the main session.
-    pub instance: &'a str,
+    /// The profile it runs against, empty for the main session.
+    pub profile: &'a str,
     /// The program, the first word after the environment.
     pub program: Option<&'a str>,
     /// It sets variables [`command`] doesn't (an older Linux.apk's entry).
@@ -102,23 +102,23 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
     };
     let env = argv.get(1..env_len).unwrap_or_default();
     Invocation {
-        instance: env
+        profile: env
             .iter()
-            .find_map(|w| w.strip_prefix("LINUXAPK_INSTANCE="))
+            .find_map(|w| w.strip_prefix("LINUXAPK_PROFILE="))
             .unwrap_or_default(),
         program: argv.get(env_len).map(String::as_str),
-        foreign_env: env.iter().any(|w| !w.starts_with("LINUXAPK_INSTANCE=")),
+        foreign_env: env.iter().any(|w| !w.starts_with("LINUXAPK_PROFILE=")),
     }
 }
 
 /// The session's state directory (logs, the documents service's grants):
-/// `$XDG_STATE_HOME/linuxapk[-<instance>]`.
+/// `$XDG_STATE_HOME/linuxapk[-<profile>]`.
 pub fn state_dir() -> Result<PathBuf> {
-    Ok(xdg_home("XDG_STATE_HOME", ".local/state").join(per_instance("linuxapk")?))
+    Ok(xdg_home("XDG_STATE_HOME", ".local/state").join(per_profile("linuxapk")?))
 }
 
 /// Where one-time notices remember they were shown:
-/// `$XDG_STATE_HOME/linuxapk/notices` (shared by every instance).
+/// `$XDG_STATE_HOME/linuxapk/notices` (shared by every profile).
 pub fn notices_dir() -> PathBuf {
     xdg_home("XDG_STATE_HOME", ".local/state").join("linuxapk/notices")
 }
@@ -134,21 +134,21 @@ mod tests {
     #[test]
     fn commands_read_back() {
         let named = command(&argv("/x/linuxapk"), "cli");
-        assert_eq!(named.join(" "), "env LINUXAPK_INSTANCE=cli /x/linuxapk");
+        assert_eq!(named.join(" "), "env LINUXAPK_PROFILE=cli /x/linuxapk");
         let i = invocation(&named);
-        assert_eq!((i.instance, i.program), ("cli", Some("/x/linuxapk")));
+        assert_eq!((i.profile, i.program), ("cli", Some("/x/linuxapk")));
         assert!(!i.foreign_env);
         let main = command(&argv("/x/linuxapk"), "");
-        assert_eq!(invocation(&main).instance, "");
-        let old = argv("env LINUXAPK_SESSION=/s LINUXAPK_INSTANCE=cli linuxapk run a.b");
+        assert_eq!(invocation(&main).profile, "");
+        let old = argv("env LINUXAPK_SESSION=/s LINUXAPK_PROFILE=cli linuxapk run a.b");
         let old = invocation(&old);
-        assert_eq!((old.instance, old.program), ("cli", Some("linuxapk")));
+        assert_eq!((old.profile, old.program), ("cli", Some("linuxapk")));
         assert!(old.foreign_env);
         // Only the environment `env` sets counts.
-        let args = argv("linuxapk run LINUXAPK_INSTANCE=x");
+        let args = argv("linuxapk run LINUXAPK_PROFILE=x");
         let i = invocation(&args);
         assert_eq!(
-            (i.instance, i.program, i.foreign_env),
+            (i.profile, i.program, i.foreign_env),
             ("", Some("linuxapk"), false)
         );
     }

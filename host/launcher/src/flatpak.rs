@@ -295,7 +295,7 @@ fn teardown(p: &Paths) {
     // The bridge is killed with Android, so its signal handler cannot reap
     // files kept alive for desktop readers. End their lifetime here.
     let cache = crate::paths::xdg_home("XDG_CACHE_HOME", ".cache")
-        .join(crate::paths::per_instance("linuxapk", &p.instance))
+        .join(crate::paths::per_profile("linuxapk", &p.profile))
         .join("handoff");
     let _ = fs::remove_dir_all(cache);
     if sys::ppid() == 1 {

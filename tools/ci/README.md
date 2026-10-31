@@ -106,6 +106,6 @@ and flattened APEXes stay cached. The private Flatpak cache hashes the
 development driver, bootstrap script and Flatpak manifest; its registered
 development deployment always runs the current artifact through
 `--app-path=out/stage`, with permissions read from the current manifest. Neither
-Android session data nor a running instance is cached. No Android image or
+Android session data nor a running profile is cached. No Android image or
 third-party APK is uploaded as a workflow artifact. Cold Mesa/LLVM builds still
 have a 120-minute build timeout.

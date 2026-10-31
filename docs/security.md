@@ -139,7 +139,7 @@ DynamicLauncher portal, so the user confirms each one.
 
 ## Test sessions
 
-A named `LINUXAPK_INSTANCE` or `LINUXAPK_TEST=1` selects the bridge's
+A named `LINUXAPK_PROFILE` or `LINUXAPK_TEST=1` selects the bridge's
 `--test-session` mode, persisted in `session.conf`. It leaves the user's desktop
 alone, including when tests use a private bus: links, notifications and MPRIS
 players are logged only, AT-SPI and location are off, and apps installed inside

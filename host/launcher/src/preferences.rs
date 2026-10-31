@@ -34,9 +34,9 @@ impl Default for Preferences {
 
 pub fn path() -> Result<PathBuf> {
     Ok(crate::paths::xdg_home("XDG_CONFIG_HOME", ".config")
-        .join(crate::paths::per_instance(
+        .join(crate::paths::per_profile(
             "linuxapk",
-            &crate::paths::instance()?,
+            &crate::paths::profile()?,
         ))
         .join("preferences.toml"))
 }
