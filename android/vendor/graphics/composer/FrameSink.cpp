@@ -22,8 +22,7 @@ Java_dev_linuxapk_system_wm_FrameSink_presentationToken(
     getHandle && buffer ? linuxapk::asBufferHandle(getHandle(buffer)) : nullptr;
   if (!handle) return 0;
   void* p = mmap(
-    nullptr, linuxapk::kPageSize, PROT_READ, MAP_SHARED, handle->fd,
-    off_t(handle->metadataOffset.get())
+    nullptr, linuxapk::kPageSize, PROT_READ, MAP_SHARED, handle->metadataFd, 0
   );
   if (p == MAP_FAILED) return 0;
   auto* md = static_cast<const linuxapk::SharedMetadata*>(p);

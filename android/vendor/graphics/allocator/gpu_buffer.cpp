@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Allocate RGB render targets through the selected Vulkan driver. The driver
-// chooses the tile layout; dma-buf export keeps our one-fd native handle.
+// chooses the tile layout and exports the allocation as the handle's pixel fd.
 #include <vector>
 
 #include <unistd.h>
@@ -115,8 +115,7 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
   vkGetPhysicalDeviceFormatProperties2(ctx.physical, fmt, &properties);
   std::vector<uint64_t> modifiers;
   for (const auto& mod : supported) {
-    // Compression may need auxiliary planes and dedicated allocations. Our
-    // handle has one RGB plane and an appended CPU metadata page.
+    // Compression may need auxiliary planes; our handle has one RGB plane.
     if (
       mod.drmFormatModifier && mod.drmFormatModifierPlaneCount == 1 &&
       (mod.drmFormatModifierTilingFeatures &
@@ -161,14 +160,7 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2, .image = image
   };
   vkGetImageMemoryRequirements2(ctx.device, &getRequirements, &requirements);
-  if (dedicated.requiresDedicatedAllocation) {
-    vkDestroyImage(ctx.device, image, nullptr);
-    return {};
-  }
   const auto& memory = requirements.memoryRequirements;
-  const uint64_t pixelBytes = alignUp(memory.size, kPageSize);
-  const uint64_t total =
-    pixelBytes + kPageSize + alignUp(req.reservedSize, kPageSize);
   uint32_t type = ctx.memory.memoryTypeCount;
   for (uint32_t i = 0; i < ctx.memory.memoryTypeCount; i++)
     if (
@@ -183,14 +175,19 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
       break;
     }
   VkDeviceMemory allocation = VK_NULL_HANDLE;
+  // RADV requires a dedicated allocation for shareable tiled images.
+  const VkMemoryDedicatedAllocateInfo dedicatedInfo{
+    .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .image = image
+  };
   const VkExportMemoryAllocateInfo exportInfo{
     .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+    .pNext = dedicated.requiresDedicatedAllocation ? &dedicatedInfo : nullptr,
     .handleTypes = kHandle
   };
   const VkMemoryAllocateInfo allocInfo{
     .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
     .pNext = &exportInfo,
-    .allocationSize = total,
+    .allocationSize = memory.size,
     .memoryTypeIndex = type
   };
   int fd = -1;
@@ -226,13 +223,13 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
   l.planes[0].stride = uint32_t(plane.rowPitch);
   l.planes[0].size = plane.size;
   l.stridePixels = uint32_t(plane.rowPitch) / bpp;
-  l.layerSize = pixelBytes;
-  l.pixelBytes = pixelBytes;
+  l.layerSize = memory.size;
+  l.pixelBytes = memory.size;
   *layout = l;
   LOGD(
     "GPU buffer %.*s modifier=0x%llx pitch=%u size=%llu", int(req.name.size()),
     req.name.data(), (unsigned long long)actual.drmFormatModifier,
-    l.planes[0].stride, (unsigned long long)total
+    l.planes[0].stride, (unsigned long long)memory.size
   );
   return {fd, actual.drmFormatModifier};
 }
