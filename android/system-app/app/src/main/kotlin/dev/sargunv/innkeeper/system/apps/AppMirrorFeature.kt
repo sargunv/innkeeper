@@ -14,7 +14,6 @@ import android.util.Log
 import dev.sargunv.innkeeper.system.Feature
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
-import dev.sargunv.innkeeper.system.wm.LaunchPolicy
 import java.io.ByteArrayOutputStream
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
@@ -170,15 +169,6 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
           name(label)
           i32(ai.category)
           u8(if (ai.category == ApplicationInfo.CATEGORY_GAME) 1 else 0)
-          val launcher = AppIcons.launcherActivity(pm, pkg)
-          u8(
-            if (
-              launcher != null &&
-                LaunchPolicy.multipleTasks(launcher.launchMode, launcher.documentLaunchMode)
-            )
-              1
-            else 0,
-          )
           u32(icons.size)
         }
       r?.closeFds()

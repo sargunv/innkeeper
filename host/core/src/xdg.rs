@@ -178,7 +178,7 @@ pub fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu
         .unwrap_or_else(|| MANAGER_ICON_SVG.as_bytes().to_vec());
     // The portal sets Name and Icon from its dialog; the record's own keys
     // (DECLINED) stay out.
-    let entry: String = portal_entry(text)
+    let entry: String = text
         .lines()
         .filter(|l| !l.starts_with("Icon=") && !l.starts_with(&format!("{DECLINED}=")))
         .map(|l| format!("{l}\n"))
@@ -194,7 +194,6 @@ pub fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu
     })
 }
 
-// The decline belongs to Desktop Entry, even when action groups follow it.
 fn menu_record(text: &str, declined: bool) -> String {
     let mut record = String::new();
     for line in text
@@ -208,16 +207,6 @@ fn menu_record(text: &str, declined: bool) -> String {
         }
     }
     record
-}
-
-// DynamicLauncher 1.20 accepts exactly one group. Keep the native action in
-// our record, but omit it from portal installs so the app launcher still works.
-fn portal_entry(text: &str) -> String {
-    text.lines()
-        .take_while(|line| !line.starts_with('[') || *line == "[Desktop Entry]")
-        .filter(|line| !line.starts_with("Actions="))
-        .map(|line| format!("{line}\n"))
-        .collect()
 }
 
 /// Removes an app's desktop entry and icons. Returns whether anything existed.
@@ -330,25 +319,14 @@ fn rewrite_entries(d: &Dirs, rename: Option<(&str, &str)>) -> usize {
             && desktop::read_key(&text, "X-Innkeeper-Profile").as_deref() == Some(from)
             && let Ok(to) = paths::ProfileName::new(to)
         {
-            let run = |opts: &[&str]| {
-                let mut args = vec!["run"];
-                args.extend_from_slice(opts);
-                args.push(&pkg);
-                paths::cli(&to, &args)
-            };
-            let Some(mut new) = desktop::exec_line(&run(&[]), Some("%U"))
+            let run = paths::cli(&to, &["run", &pkg]);
+            let Some(new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
                 .and_then(|line| desktop::replace_key(&text, "Exec", &line))
                 .and_then(|t| desktop::replace_key(&t, "X-Innkeeper-Profile", &to))
             else {
                 continue;
             };
-            if let Ok(line) = desktop::exec_line(&run(&["--new-window"]), None)
-                && let Some(updated) =
-                    desktop::replace_group_key(&new, "Desktop Action NewWindow", "Exec", &line)
-            {
-                new = updated;
-            }
             match write_atomic(&path, new.as_bytes()) {
                 Ok(()) => n += 1,
                 Err(e) => eprintln!("innkeeper: {e:#}"),
@@ -367,21 +345,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn portal_keeps_only_the_main_launcher() {
-        let entry = "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\nActions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=innkeeper run --new-window a.b\n";
+    fn declines_are_recorded_in_the_record() {
+        let entry = "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\n";
         let record = menu_record(entry, true);
         // The repair path reads exactly this key before requesting installation again.
         assert_eq!(
             desktop::read_key(&record, DECLINED).as_deref(),
             Some("declined")
         );
-        assert!(record.ends_with("Exec=innkeeper run --new-window a.b\n"));
         assert_eq!(menu_record(&record, false), entry);
-        let portal = portal_entry(entry);
-        assert_eq!(
-            portal,
-            "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\n\n"
-        );
     }
 
     #[test]
@@ -405,7 +377,6 @@ mod tests {
             web_hosts: vec![],
             origin: None,
             splash: None,
-            new_window: false,
         };
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());
@@ -475,7 +446,6 @@ mod tests {
             web_hosts: vec![],
             origin: None,
             splash: None,
-            new_window: true,
         };
         install_app(&d, &mut entry("org.ex.a", "p"), &[]).unwrap();
         install_app(&d, &mut entry("org.ex.b", "other"), &[]).unwrap();
@@ -486,9 +456,6 @@ mod tests {
         let mut want = entry("org.ex.a", "q");
         want.icon = Some("android-package-archive".into());
         assert_eq!(text("org.ex.a"), want.render().unwrap());
-        assert!(
-            text("org.ex.a").contains("Exec=innkeeper --profile q run --new-window org.ex.a\n")
-        );
         assert_eq!(text("org.ex.b"), before_b);
         assert_eq!(
             desktop_apps(&d)

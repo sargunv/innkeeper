@@ -286,7 +286,6 @@ pub struct AppInfo {
     /// (size, PNG bytes)
     pub icons: Vec<(u32, Vec<u8>)>,
     pub mime_types: Vec<String>,
-    pub new_window: bool,
 }
 
 pub fn parse_helper_output(out: &str) -> AppInfo {
@@ -295,8 +294,6 @@ pub fn parse_helper_output(out: &str) -> AppInfo {
     for l in out.lines() {
         if let Some(v) = l.strip_prefix("label ") {
             info.label = v.to_string();
-        } else if let Some(v) = l.strip_prefix("new-window ") {
-            info.new_window = v == "true";
         } else if let Some(v) = l.strip_prefix("mime ") {
             info.mime_types.push(v.to_string());
         } else if let Some(v) = l.strip_prefix("category ") {
@@ -445,13 +442,12 @@ mod tests {
     fn helper_output() {
         let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
         let i = parse_helper_output(&format!(
-            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nnew-window true\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
+            "component org.x/.Main\nlabel Calc\ncategory -1\nsplash ff202124\nwindow 412 915\nicon 48 {png}\nicon 64 notbase64!\nicon 128 aGVsbG8=\n"
         ));
         assert_eq!(i.label, "Calc");
         assert_eq!(i.category, Some(-1));
         assert_eq!(i.splash, Some(0x202124));
         assert_eq!(i.window, Some((412, 915)));
-        assert!(i.new_window);
         assert_eq!(i.icons.len(), 1);
         assert_eq!(i.icons[0].0, 48);
     }
