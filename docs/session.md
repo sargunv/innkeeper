@@ -128,10 +128,10 @@ stateDiagram-v2
   closes; its session stays an MPRIS player, and its notification shows on the
   desktop, resident, only while it has no window. Clicking that notification or
   MPRIS `Raise` opens the window again.
-- **Background apps.** `innkeeper background PKG on` lets an app run with no
-  window open (off by default; the setting lives in the system app). While one
-  is installed the session doesn't stop, and the desktop shows a resident
-  "Running in the background" notification naming them.
+- **Background apps.** `innkeeper app set PKG --background on` lets an app run
+  with no window open (off by default; the setting lives in the system app).
+  While one is installed the session doesn't stop, and the desktop shows a
+  resident "Running in the background" notification naming them.
 - **Wakeups.** Android forgets alarms when it stops, and apps set them again
   from `BOOT_COMPLETED`, so the launcher starts the session a minute before the
   next alarm clock (`AlarmManager.getNextAlarmClock`, which clock apps use).

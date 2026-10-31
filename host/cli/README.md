@@ -2,17 +2,19 @@
 
 The scriptable user surface: `bin/innkeeper`, built by `mise run build:host`,
 run from a shell or from the `Exec` of the desktop entries it writes. Shared
-operations are in [innkeeper-core](../core/README.md); file grants use the
-bridge's IPC client.
+operations are in [innkeeper-core](../core/README.md); app settings and file
+grants go through the session's `Session1` D-Bus API.
 
 ```sh
 innkeeper install App.apk             # also .apks, .xapk, .apkm
 innkeeper open [FILE...]              # choose an Android app; no files opens the manager
 innkeeper run org.wikipedia [FILE...|URI]     # a window of its own, or focus the one it has
 innkeeper uninstall org.wikipedia [--keep-data]
-innkeeper list                        # user apps; repairs stale desktop entries first
-innkeeper app org.wikipedia [ACTION]  # per-app info and settings, as JSON
-innkeeper background [PKG on|off]     # may PKG run with no window open (lists them)
+innkeeper list                        # user apps, and which may run in the background
+innkeeper app info org.wikipedia [--json]     # storage, settings, runtime permissions
+innkeeper app clear-cache|clear-data|stop org.wikipedia
+innkeeper app set org.wikipedia [--background on|off] [--escape-back on|off]
+              [--permission android.permission.CAMERA=on|off]...
 innkeeper profile list                # profiles and whether they run
 innkeeper profile create|use|delete NAME  # delete removes its apps, data and settings
 innkeeper profile rename OLD NEW
@@ -43,7 +45,7 @@ innkeeper --profile NAME install App.apk      # any command, on another profile
 - `run` on a stopped session shows a splash window at once (`src/splash.rs`) and
   passes the desktop's `XDG_ACTIVATION_TOKEN` on to the app's window
   ([display](../../docs/display.md#launch-feedback)).
-- `background` keeps the session up while an allowed app is installed
+- `app set --background on` keeps the session up while that app is installed
   ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
 - A profile is a separate Android with its own apps, data and settings

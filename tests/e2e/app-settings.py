@@ -1,53 +1,48 @@
 #!/usr/bin/python3
-"""One session API check in the input group: cache and runtime permission."""
+"""One app-settings check in the input group, through `innkeeper app`: cache
+and a runtime permission."""
 
 import json
 import os
 from pathlib import Path
+import subprocess
 
-import dbus
-
-name = "dev.sargunv.Innkeeper.Session.p_" + os.environ[
-  "INNKEEPER_PROFILE"
-].replace("-", "_")
-proxy = dbus.Interface(
-  dbus.SessionBus().get_object(name, "/dev/sargunv/Innkeeper/Session"),
-  "dev.sargunv.Innkeeper.Session1",
-)
+TOP = Path(__file__).resolve().parents[2]
 package = "dev.sargunv.innkeeper.probes"
+permission = "android.permission.POST_NOTIFICATIONS"
 
 
-def call(action, permission="", enabled=False):
-  response = json.loads(
-    proxy.App(package, action, permission, enabled, timeout=22)
-  )
-  assert not response["error"], response
-  return response["info"]
+def innkeeper(*args):
+  return subprocess.run(
+    [str(TOP / "tools/dev/innkeeper.sh"), "app", *args],
+    check=True,
+    capture_output=True,
+    text=True,
+    timeout=30,
+  ).stdout
 
 
-def granted(info):
+def granted():
+  info = json.loads(innkeeper("info", package, "--json"))
   return next(
     p["granted"] for p in info["permissions"] if p["name"] == permission
   )
 
 
-permission = "android.permission.POST_NOTIFICATIONS"
 data = Path(os.environ.get("INNKEEPER_DATA", ""))
 if not str(data) or data == Path("."):
   data = (
-    Path(__file__).resolve().parents[2]
-    / "out/dev/flatpak"
-    / os.environ["INNKEEPER_PROFILE"]
-    / "android-data"
+    TOP / "out/dev/flatpak" / os.environ["INNKEEPER_PROFILE"] / "android-data"
   )
 cache = data / "data" / package / "cache/session-api-probe"
 files = data / "data" / package / "files/session-api-probe"
-assert not granted(call("permission", permission, False))
-call("clear-cache")
+innkeeper("set", package, "--permission", f"{permission}=off")
+assert not granted()
+innkeeper("clear-cache", package)
 assert not cache.exists(), "clear-cache left the probe's temporary file"
 assert files.read_text() == "persistent", "clear-cache removed app data"
 # The fresh install grants this; restore it for the notification scenario.
-call("permission", permission, True)
+innkeeper("set", package, "--permission", f"{permission}=on")
 print(
-  "ok   session D-Bus clears cache, preserves data and toggles a runtime permission"
+  "ok   innkeeper app clears cache, preserves data and toggles a runtime permission"
 )

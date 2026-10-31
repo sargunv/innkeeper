@@ -215,10 +215,9 @@ each new key press. Changes apply to existing windows immediately, while a held
 key retains its original code through release. Background uses the lifecycle
 allow-list and prompts a fresh activity report.
 
-CLI examples: `innkeeper app org.example.app`,
-`innkeeper app org.example.app clear-cache`,
-`innkeeper app org.example.app escape-back --setting on`, and
-`innkeeper app org.example.app permission --permission android.permission.CAMERA --setting off`.
+The CLI's `innkeeper app info|clear-cache|clear-data|stop|set` call `App`; for
+example
+`innkeeper app set org.example.app --escape-back on --permission android.permission.CAMERA=off`.
 
 `ReloadPreferences()` applies the profile's preferences file, which the caller
 has just written (`innkeeper-core` writes it whether or not a session runs): the
