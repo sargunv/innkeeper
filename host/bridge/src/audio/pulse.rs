@@ -21,7 +21,7 @@ use pulseaudio::protocol::{self, Command, Prop, Props};
 
 use super::proto::{SampleFormat, StreamConfig};
 use super::ring::{Ring, STATE_IDLE, STATE_PLAYING};
-use super::stream::{Ctl, StreamIo, monotonic_ns, usage_name_role};
+use super::stream::{Ctl, StreamIo, monotonic_ns, playback_app_props, usage_name_role};
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Largest control frame we accept from the server.
@@ -123,9 +123,14 @@ impl PulseStream {
         p.version = protocol::MAX_VERSION.min(auth.version);
 
         let mut props = Props::new();
-        props.set(Prop::ApplicationName, c"Linux.apk");
-        props.set(Prop::ApplicationId, c"dev.linuxapk");
-        props.set(Prop::ApplicationIconName, c"android");
+        // The client defaults. A later Ctl::App(None) writes these back; the
+        // empty process.binary in that set is only for clearing a stream key.
+        for (key, value) in playback_app_props(None) {
+            if value.is_empty() {
+                continue;
+            }
+            set_app_prop(&mut props, key, value)?;
+        }
         let seq = p.send(&Command::SetClientName(props))?;
         let _: protocol::SetClientNameReply = p.wait_reply(seq)?;
 
@@ -392,6 +397,17 @@ impl PulseStream {
         Ok(moved)
     }
 
+    fn replace_props(&mut self, props: Props) -> Result<()> {
+        self.send(&Command::UpdatePlaybackStreamProplist(
+            protocol::UpdatePropsParams {
+                index: self.channel,
+                mode: protocol::props::PropsUpdateMode::Replace,
+                props,
+            },
+        ))?;
+        Ok(())
+    }
+
     fn apply_volume(&mut self) -> Result<()> {
         let (mv, mute) = self.master;
         let mut cv = protocol::ChannelVolume::empty();
@@ -505,17 +521,30 @@ impl StreamIo for PulseStream {
                 };
                 props.set(Prop::MediaName, CString::new(label)?);
                 props.set(Prop::MediaRole, CString::new(role)?);
-                self.send(&Command::UpdatePlaybackStreamProplist(
-                    protocol::UpdatePropsParams {
-                        index: self.channel,
-                        mode: protocol::props::PropsUpdateMode::Replace,
-                        props,
-                    },
-                ))?;
+                self.replace_props(props)?;
+            }
+            Ctl::App(app) => {
+                let mut props = Props::new();
+                for (key, value) in playback_app_props(app.as_ref()) {
+                    set_app_prop(&mut props, key, value)?;
+                }
+                self.replace_props(props)?;
             }
         }
         Ok(())
     }
+}
+
+fn set_app_prop(props: &mut Props, key: &str, value: &str) -> Result<()> {
+    let value = CString::new(value)?;
+    match key {
+        "application.name" => props.set(Prop::ApplicationName, value),
+        "application.icon_name" => props.set(Prop::ApplicationIconName, value),
+        "application.id" => props.set(Prop::ApplicationId, value),
+        "application.process.binary" => props.set(Prop::ApplicationProcessBinary, value),
+        _ => bail!("unknown application property {key}"),
+    }
+    Ok(())
 }
 
 /// Pulse must resample/remix to the requested PCM ABI, never silently change it.

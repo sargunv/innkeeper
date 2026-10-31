@@ -80,6 +80,18 @@ Who may open which service: [security.md](security.md#the-bridge-socket).
 
 ## Android → desktop handoff
 
+System request `0x030a` (PLAYBACK_APP) names the app on Android's one mixed
+playback stream, so the desktop mixer (GNOME Settings, pavucontrol, Plasma's
+volume applet) shows that app instead of a generic Linux.apk entry. Body: a
+package name, then the app's label, each a protocol name (`u16` length plus
+UTF-8, at most 96 bytes, no control characters). An empty package means nothing
+is playing, and the bridge writes the name, icon and id the stream was opened
+with (`Linux.apk`, `android`, `dev.linuxapk`) back onto it, and clears
+`application.process.binary`, which the open does not set. The label may be
+empty; the bridge then shows the package. Android mixes every app into that one
+stream, so this is a label for the newest app that is currently playing, not a
+separate stream per app.
+
 System request `0x0309` (HANDOFF) adds portal operations without changing the
 existing `0x0305` OPEN_URI layout. Body: `u32 window`, `u8 action` (1 URI, 2
 open file, 3 save file, 4 compose email), `u8 files` (0–3), `u8 ask` (boolean),

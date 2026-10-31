@@ -24,6 +24,54 @@ pub enum Ctl {
     Master(f32, bool),
     Standby,
     Metadata(u32, String),
+    /// The app on Android's mixed playback stream, or `None` to restore the
+    /// stream's default application name.
+    App(Option<PlaybackApp>),
+}
+
+/// What the desktop mixer shows for a playback stream. `icon_name` is the
+/// desktop entry id (`dev.linuxapk.<package>`, or the Flatpak form), the same
+/// name the app's `.desktop` file uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackApp {
+    pub name: String,
+    pub icon_name: String,
+    pub id: String,
+    pub binary: String,
+}
+
+/// The application name a playback stream is opened with, restored when no
+/// app is playing.
+pub const DEFAULT_APP_NAME: &str = "Linux.apk";
+
+/// `application.id` and `application.icon_name` set on the Pulse client before
+/// a playback stream is opened. `SetClientName` does not set
+/// `application.process.binary`; that key exists on the stream only while an
+/// app is playing.
+pub const DEFAULT_APP_ID: &str = "dev.linuxapk";
+pub const DEFAULT_APP_ICON: &str = "android";
+
+/// Pulse application properties for the mixer. `Some` is the playing app
+/// (`application.name` is the label; the other three are the desktop id).
+/// `None` writes the name, icon and id the Pulse client was opened with.
+/// `application.process.binary` is empty then: the open does not set it, and
+/// PipeWire drops a property a `Replace` sets to empty. An empty string on
+/// `application.name` would blank the mixer, so that key gets the default.
+pub fn playback_app_props(app: Option<&PlaybackApp>) -> Vec<(&'static str, &str)> {
+    match app {
+        Some(app) => vec![
+            ("application.name", &app.name),
+            ("application.icon_name", &app.icon_name),
+            ("application.id", &app.id),
+            ("application.process.binary", &app.binary),
+        ],
+        None => vec![
+            ("application.name", DEFAULT_APP_NAME),
+            ("application.icon_name", DEFAULT_APP_ICON),
+            ("application.id", DEFAULT_APP_ID),
+            ("application.process.binary", ""),
+        ],
+    }
 }
 
 /// Moves PCM between a shared ring and the desktop, in either direction.
@@ -128,13 +176,36 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
+    /// A copy of the control channel. Dropping it does not stop the stream,
+    /// so a caller can send without holding the connection's stream map.
+    pub fn sender(&self) -> StreamSender {
+        StreamSender {
+            tx: self.tx.clone(),
+            wake: self.wake.clone(),
+        }
+    }
+
+    pub fn send(&self, c: Ctl) {
+        self.sender().send(c);
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.join.as_ref().is_none_or(|j| j.is_finished())
+    }
+}
+
+/// Control messages only. Unlike [`StreamHandle`], dropping this leaves the
+/// stream thread running.
+pub struct StreamSender {
+    tx: Sender<Ctl>,
+    wake: Arc<OwnedFd>,
+}
+
+impl StreamSender {
     pub fn send(&self, c: Ctl) {
         if self.tx.send(c).is_ok() {
             let _ = rustix::io::write(&*self.wake, &1u64.to_ne_bytes());
         }
-    }
-    pub fn is_finished(&self) -> bool {
-        self.join.as_ref().is_none_or(|j| j.is_finished())
     }
 }
 
@@ -260,5 +331,39 @@ mod tests {
     fn drain_never_waits() {
         let fd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC).unwrap();
         drain(&fd);
+    }
+
+    #[test]
+    fn playback_app_properties() {
+        let app = PlaybackApp {
+            name: "Example Player".into(),
+            icon_name: "dev.linuxapk.org.example.player".into(),
+            id: "dev.linuxapk.org.example.player".into(),
+            binary: "dev.linuxapk.org.example.player".into(),
+        };
+        let props = playback_app_props(Some(&app));
+        assert_eq!(props[0], ("application.name", "Example Player"));
+        assert_eq!(
+            props[1],
+            ("application.icon_name", "dev.linuxapk.org.example.player")
+        );
+        assert_eq!(props[2].0, "application.id");
+        assert_eq!(props[3].0, "application.process.binary");
+        assert_eq!(props[2].1, props[1].1);
+        assert_eq!(props[3].1, props[1].1);
+        // None writes the values the stream was opened with. An empty string
+        // would blank the mixer name; Replace does not drop the key.
+        let restored = playback_app_props(None);
+        assert_eq!(
+            restored,
+            vec![
+                ("application.name", DEFAULT_APP_NAME),
+                ("application.icon_name", DEFAULT_APP_ICON),
+                ("application.id", DEFAULT_APP_ID),
+                // Empty asks PipeWire to drop the key the open never set.
+                ("application.process.binary", ""),
+            ]
+        );
+        assert_ne!(restored[0].1, "");
     }
 }

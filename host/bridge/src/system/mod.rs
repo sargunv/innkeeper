@@ -28,6 +28,7 @@ pub mod openuri;
 pub mod proto;
 pub mod settings;
 
+use std::collections::HashMap;
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -40,7 +41,7 @@ use clipboard::{Clip, ClipboardHub, Content};
 use mpris::{Media, MprisHub};
 use notify::{Note, NotifyHub};
 use openuri::RateLimit;
-use proto::{ClipKind, Lifecycle, Request, feature};
+use proto::{ClipKind, Lifecycle, PlaybackApp, Request, feature};
 use settings::SettingsHub;
 
 /// What a session may do on the desktop. All desktop effects share one
@@ -85,6 +86,16 @@ pub struct Shared {
     clipboard: OnceLock<Option<Arc<ClipboardHub>>>,
     mpris: OnceLock<Arc<MprisHub>>,
     next_client: std::sync::atomic::AtomicU64,
+    /// Audio connections whose playback streams take the playing app's name.
+    /// An entry's weak pointers go stale when that connection closes.
+    playback: std::sync::Mutex<Vec<PlaybackSlot>>,
+}
+
+/// One audio connection. `app` is what a stream opened afterwards is labelled
+/// with; `streams` receives the label for streams already open.
+struct PlaybackSlot {
+    app: Arc<std::sync::Mutex<Option<crate::audio::stream::PlaybackApp>>>,
+    streams: std::sync::Weak<std::sync::Mutex<HashMap<u32, crate::audio::stream::StreamHandle>>>,
 }
 
 impl Shared {
@@ -115,7 +126,41 @@ impl Shared {
             clipboard: OnceLock::new(),
             mpris: OnceLock::new(),
             next_client: Default::default(),
+            playback: std::sync::Mutex::new(Vec::new()),
         })
+    }
+
+    /// An audio connection that should carry the playing app's name. The
+    /// returned app is what a stream it opens afterwards is labelled with.
+    pub fn register_playback(
+        &self,
+        streams: &Arc<std::sync::Mutex<HashMap<u32, crate::audio::stream::StreamHandle>>>,
+    ) -> Arc<std::sync::Mutex<Option<crate::audio::stream::PlaybackApp>>> {
+        let app = Arc::new(std::sync::Mutex::new(None));
+        self.playback.lock().unwrap().push(PlaybackSlot {
+            app: app.clone(),
+            streams: Arc::downgrade(streams),
+        });
+        app
+    }
+
+    fn set_playback_app(&self, app: Option<crate::audio::stream::PlaybackApp>) {
+        let mut slots = self.playback.lock().unwrap();
+        slots.retain(|s| s.streams.strong_count() > 0);
+        // Copy the handles out before sending: a send waits on the stream
+        // thread, and that must not happen while the connection's stream map
+        // (which OPEN takes) is locked.
+        let mut send = Vec::new();
+        for slot in slots.iter() {
+            *slot.app.lock().unwrap() = app.clone();
+            if let Some(streams) = slot.streams.upgrade() {
+                send.extend(streams.lock().unwrap().values().map(|s| s.sender()));
+            }
+        }
+        drop(slots);
+        for stream in &send {
+            stream.send(crate::audio::stream::Ctl::App(app.clone()));
+        }
     }
 
     /// Takes down what outlives a connection on the desktop: notifications
@@ -555,6 +600,10 @@ impl Service for SystemService {
                 }
                 Reply::ok()
             }
+            Request::PlaybackApp(app) => {
+                self.shared.set_playback_app(mixer_app(&app));
+                Reply::ok()
+            }
             Request::Lifecycle(l) => {
                 let apps = if l.len == 0 {
                     Ok(vec![])
@@ -595,6 +644,27 @@ impl Drop for SystemService {
     }
 }
 
+/// The mixer label for a PLAYBACK_APP. An empty package restores the name,
+/// icon and id the stream was opened with. The icon is the desktop entry id,
+/// the same one `linuxapk-core`'s entries use.
+fn mixer_app(app: &PlaybackApp) -> Option<crate::audio::stream::PlaybackApp> {
+    if app.package.is_empty() {
+        return None;
+    }
+    let id = linuxapk_core::desktop::app_id(&app.package);
+    let name = if app.label.is_empty() {
+        app.package.clone()
+    } else {
+        app.label.clone()
+    };
+    Some(crate::audio::stream::PlaybackApp {
+        name,
+        icon_name: id.clone(),
+        id: id.clone(),
+        binary: id,
+    })
+}
+
 /// An Android package name: `[A-Za-z0-9_.]`, 1 to 255 bytes. These end up in
 /// D-Bus names and file names, so nothing else gets through.
 pub fn valid_package(p: &str) -> bool {
@@ -619,6 +689,26 @@ mod tests {
             );
         }
         assert_eq!(Policy::default(), Policy::for_session(false));
+    }
+
+    #[test]
+    fn playback_app_uses_the_desktop_icon_id() {
+        let named = mixer_app(&PlaybackApp {
+            package: "org.example.player".into(),
+            label: "Example Player".into(),
+        })
+        .unwrap();
+        assert_eq!(named.name, "Example Player");
+        assert_eq!(named.icon_name, "dev.linuxapk.org.example.player");
+        assert_eq!(named.id, named.icon_name);
+        assert_eq!(named.binary, named.icon_name);
+        let bare = mixer_app(&PlaybackApp {
+            package: "org.example.player".into(),
+            label: String::new(),
+        })
+        .unwrap();
+        assert_eq!(bare.name, "org.example.player");
+        assert!(mixer_app(&PlaybackApp::default()).is_none());
     }
 
     #[test]

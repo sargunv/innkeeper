@@ -14,6 +14,7 @@ import dev.linuxapk.system.integration.browser.UrlOpener
 import dev.linuxapk.system.integration.clipboard.ClipboardSync
 import dev.linuxapk.system.integration.lifecycle.SessionLifecycle
 import dev.linuxapk.system.integration.media.MediaSync
+import dev.linuxapk.system.integration.media.PlaybackApps
 import dev.linuxapk.system.integration.notifications.Notifications
 import dev.linuxapk.system.integration.settings.DesktopSettings
 import dev.linuxapk.system.integration.settings.HostSettings
@@ -40,6 +41,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
   val notifications = Notifications(context, this, wm)
   val clipboard = ClipboardSync(context, this)
   val media = MediaSync(context, this)
+  val playback = PlaybackApps(context, this)
   val urls = UrlOpener(this)
   val lifecycle = SessionLifecycle(context, this, wm)
 
@@ -50,6 +52,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     notifications.start()
     clipboard.start()
     media.start()
+    playback.start()
     lifecycle.start()
     // A media notification shows on the desktop only while its app has no window.
     wm?.addChangeListener {
@@ -82,6 +85,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     context.unregisterReceiver(packages)
     connection.stop()
     lifecycle.stop()
+    playback.stop()
     media.stop()
     clipboard.stop()
     instance = null
@@ -105,6 +109,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     handler.post {
       if (have and Wire.F_NOTIFICATIONS != 0) notifications.onConnected()
       media.onConnected()
+      playback.onConnected()
       lifecycle.onConnected()
     }
   }
@@ -113,6 +118,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     handler.post {
       notifications.onDisconnected()
       media.onDisconnected()
+      playback.onDisconnected()
     }
   }
 

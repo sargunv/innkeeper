@@ -15,6 +15,7 @@
 //! | `0x0307` | MEDIA_CLOSE  | `u32 player`                                                                    |                                                                                                |
 //! | `0x0308` | LIFECYCLE    | `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len` ≤ 16 KiB (fd if len > 0: background apps) | the session's activity, for idle shutdown ([`Lifecycle`])                              |
 //! | `0x0309` | HANDOFF | `u32 window`, `u8 action` (1 URI, 2 open, 3 save, 4 email), `u8 files` (0..3), `u8 ask`, `u8 0`, `u32 len` ≤ 64 KiB; metadata fd then content fds | accepted for asynchronous portal operation; `-EBUSY` over 4 pending, `-EAGAIN` over 5 per 10 s |
+//! | `0x030a` | PLAYBACK_APP | name package (empty: nothing playing), name label | labels Android's mixed playback stream in the desktop mixer ([`PlaybackApp`]) |
 //!
 //! HANDOFF metadata: `u32 version` (1), text (≤32 KiB), subject (≤4 KiB),
 //! then one display name (≤255 B) per content fd, each a `u32` length and UTF-8.
@@ -51,6 +52,7 @@ pub mod ty {
     pub const MEDIA_CLOSE: u16 = 0x0307;
     pub const LIFECYCLE: u16 = 0x0308;
     pub const HANDOFF: u16 = 0x0309;
+    pub const PLAYBACK_APP: u16 = 0x030a;
 }
 
 pub mod ev {
@@ -180,6 +182,21 @@ pub enum Request {
         ask: bool,
         len: u32,
     },
+    /// The app on Android's mixed playback stream. An empty package means
+    /// nothing is playing, and the mixer goes back to the default name.
+    PlaybackApp(PlaybackApp),
+}
+
+/// What the desktop mixer shows for Android's one playback stream. Android
+/// mixes every app into that stream, so this is the most recently started
+/// app that is playing, not a per-app stream.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaybackApp {
+    /// Android package, or empty when nothing is playing.
+    pub package: String,
+    /// The app's label. Empty when nothing is playing; the bridge then
+    /// uses the package.
+    pub label: String,
 }
 
 impl Request {
@@ -278,6 +295,16 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             wakeup_ms: r.u64()?,
             len: limited(r.u32()?, limits::LIFECYCLE_BLOB, "len")?,
         }),
+        ty::PLAYBACK_APP => {
+            let package = r.name()?;
+            if !package.is_empty() && !super::valid_package(&package) {
+                return Err(DecodeError::Invalid("package"));
+            }
+            Request::PlaybackApp(PlaybackApp {
+                package,
+                label: r.name()?,
+            })
+        }
         t => return Err(DecodeError::UnknownType(t)),
     };
     r.end()?;
@@ -344,6 +371,11 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::MediaClose { player } => {
             let mut w = Writer::message(ty::MEDIA_CLOSE, tag);
             w.u32(player);
+            w
+        }
+        Request::PlaybackApp(ref app) => {
+            let mut w = Writer::message(ty::PLAYBACK_APP, tag);
+            w.name(&app.package).name(&app.label);
             w
         }
     };
@@ -529,6 +561,11 @@ mod tests {
                 wakeup_ms: 1_793_222_130_000,
                 len: 20,
             }),
+            Request::PlaybackApp(PlaybackApp {
+                package: "org.example.player".into(),
+                label: "Example Player".into(),
+            }),
+            Request::PlaybackApp(PlaybackApp::default()),
         ];
         for r in reqs {
             assert_eq!(roundtrip(&encode(1, &r)), Ok(r));
@@ -542,6 +579,10 @@ mod tests {
             (ty::CLIP_SET, &[1, 2, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 0, 1, 0, 1, 0, 0, 0]),
             (ty::START, &[0, 0, 0, 0, 0]),
+            // A package name with a slash.
+            (ty::PLAYBACK_APP, &[3, 0, b'a', b'/', b'b', 0, 0]),
+            // A label with a control character.
+            (ty::PLAYBACK_APP, &[3, 0, b'a', b'.', b'b', 1, 0, 0x01]),
             // A blob over 16 KiB.
             (
                 ty::LIFECYCLE,
