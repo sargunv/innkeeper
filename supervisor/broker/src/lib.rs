@@ -18,6 +18,7 @@
 //! `LINUXAPK_BROKER_DEBUG` turns on tracing (see [`init_log`]). See
 //! `supervisor/README.md`.
 
+pub mod ashmem;
 pub mod binder;
 mod bpf;
 mod creds;
