@@ -150,6 +150,12 @@ pub trait Userspace {
     /// Call [`BinderDriver::expire`] once [`Userspace::now_ms`] reaches
     /// `at_ms` (or later; an early call is harmless).
     fn arm_timer(&mut self, at_ms: u64);
+    /// OpenHarmony: the access tokens thread `tid` of `proc` sends with
+    /// (its task's token and first token).
+    fn access_token(&mut self, proc: ProcId, tid: u32) -> (u64, u64) {
+        let _ = (proc, tid);
+        (0, 0)
+    }
 }
 
 // Looper state flags (kernel BINDER_LOOPER_STATE_*).
@@ -242,6 +248,9 @@ struct Thread {
     reply_error: u32,
     wait: Wait,
     ee: BinderExtendedError,
+    /// OpenHarmony: the tokens and sender pid of the last transaction or
+    /// reply this thread read (`thread->tokens`, `thread->sender_pid_nr`).
+    sender: BinderSenderInfo,
 }
 
 /// A thread's wait in a blocking ioctl (see the module docs).
@@ -415,6 +424,8 @@ struct Txn {
     code: u32,
     flags: u32,
     sender_euid: u32,
+    /// OpenHarmony: the sender's (token, first token).
+    tokens: (u64, u64),
     /// The process whose `outstanding_txns` counts it: its target, from
     /// being queued until it is freed or its reader thread exits.
     outstanding: Option<ProcId>,
@@ -460,6 +471,8 @@ pub struct BinderDriver {
     /// Frozen processes whose last outstanding transaction went away: a
     /// freeze may be waiting for that.
     drained: BTreeSet<ProcId>,
+    /// Serve OpenHarmony's ioctls and record its tokens.
+    ohos: bool,
 }
 
 impl Default for BinderDriver {
@@ -477,6 +490,12 @@ fn ctx_new() -> Context {
 
 impl BinderDriver {
     pub fn new() -> Self {
+        Self::with_guest(crate::Guest::Android)
+    }
+
+    /// The driver as `guest`'s kernel has it: Android's, or Android's plus
+    /// OpenHarmony's extensions.
+    pub fn with_guest(guest: crate::Guest) -> Self {
         BinderDriver {
             contexts: [ctx_new(), ctx_new(), ctx_new()],
             procs: HashMap::new(),
@@ -490,6 +509,7 @@ impl BinderDriver {
             woken: VecDeque::new(),
             poll_dirty: BTreeSet::new(),
             drained: BTreeSet::new(),
+            ohos: guest == crate::Guest::Ohos,
         }
     }
 
@@ -1076,6 +1096,15 @@ impl BinderDriver {
                 },
                 None => libc::EFAULT,
             },
+            BINDER_FEATURE_SET if self.ohos => put(us, proc, arg, &OHOS_FEATURES),
+            BINDER_GET_ACCESS_TOKEN if self.ohos => {
+                let tokens = self.thread_mut(proc, tid).sender.tokens;
+                put(us, proc, arg, &tokens)
+            }
+            BINDER_GET_SENDER_INFO if self.ohos => {
+                let sender = self.thread_mut(proc, tid).sender;
+                put(us, proc, arg, &sender)
+            }
             _ => libc::EINVAL,
         }
     }
@@ -1636,6 +1665,11 @@ impl BinderDriver {
                 code: td.code,
                 flags: td.flags,
                 sender_euid: self.procs[&proc].euid,
+                tokens: if self.ohos {
+                    us.access_token(proc, tid)
+                } else {
+                    (0, 0)
+                },
                 outstanding: None,
             },
         );
@@ -3229,7 +3263,7 @@ impl BinderDriver {
             self.free_txn(txid);
             return TxnRead::Dropped;
         };
-        let (code, flags, euid, from) = (t.code, t.flags, t.sender_euid, t.from);
+        let (code, flags, euid, from, tokens) = (t.code, t.flags, t.sender_euid, t.from, t.tokens);
         let fixups = self.buffers[&key].fd_fixups.clone();
         let mut installed = 0;
         let mut failure = None;
@@ -3312,6 +3346,17 @@ impl BinderDriver {
             );
         } else {
             write_pod(&mut out, &td);
+        }
+        if self.ohos {
+            let sender_pid_nr = td.sender_pid as u64;
+            self.thread_mut(proc, tid).sender = BinderSenderInfo {
+                tokens: AccessToken {
+                    sender_tokenid: tokens.0,
+                    first_tokenid: tokens.1,
+                    reserved: [0; 2],
+                },
+                sender_pid_nr,
+            };
         }
         tlog!("read proc={proc} tid={tid} txn={txid} cmd={cmd:#x} code={code:#x}");
         TxnRead::Rendered(out)

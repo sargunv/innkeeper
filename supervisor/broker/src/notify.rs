@@ -599,7 +599,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
     let flat = crate::flat::Workers::new(listener, resp_sz);
     let input = crate::input::Input::new(listener, resp_sz);
     let sup = Arc::new(Mutex::new(Supervisor {
-        broker: BinderDriver::new(),
+        broker: BinderDriver::with_guest(crate::guest()),
         us: SeccompUserspace {
             listener,
             resp_sz,
