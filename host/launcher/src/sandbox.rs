@@ -469,6 +469,7 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         bail!("init did not start (see {})", p.session_log().display());
     };
     trace.mark(p, "init found");
+    crate::adb::announce_at_start(p);
     let paths = p.clone();
     control::serve(
         &p.control(),
@@ -508,6 +509,8 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
         let name = k.to_string_lossy();
         if name.starts_with("INNKEEPER_")
             || [
+                // The adb server a profile with adb on is announced to.
+                "ANDROID_ADB_SERVER_PORT",
                 "XDG_DATA_HOME",
                 "XDG_CONFIG_HOME",
                 "XDG_CACHE_HOME",

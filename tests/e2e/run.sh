@@ -99,8 +99,8 @@ if [[ ${1:-} == --group ]]; then
       cat "$T/ancestry.txt"
       echo 'ok   Android init is a child of the broker'
       "$S" selftest
-      # adb: off and authenticated by default; on, a loopback port the user's
-      # key reaches, through a private adb server with a throwaway key.
+      # adb: off and authenticated by default; on, a loopback port a private
+      # adb server is told about and a throwaway user key reaches.
       [[ $(s getprop init.svc.adbd) != running && $(s getprop ro.adb.secure) == 1 ]]
       adb=$ANDROID_HOME/platform-tools/adb
       # The key pair stays in the test's dir; the session sees the public half
@@ -110,9 +110,12 @@ if [[ ${1:-} == --group ]]; then
       keys=$repo/out/dev/flatpak/$INNKEEPER_PROFILE/home/.android
       mkdir -p "$keys"
       cp "$T/adbhome/.android/adbkey.pub" "$keys/"
+      # A private adb server, which turning adb on tells about the profile.
+      A=(env HOME="$T/adbhome" "$adb" -P "$ANDROID_ADB_SERVER_PORT")
+      "${A[@]}" start-server >/dev/null 2>&1
       "$repo/tools/dev/innkeeper.sh" profile set --adb on >"$T/adb-on.txt" 2>&1
-      serial=$(grep -o '127\.0\.0\.1:[0-9]*' "$T/adb-on.txt")
-      port=${serial#*:}
+      serial=$(grep -o 'emulator-[0-9]*' "$T/adb-on.txt")
+      port=$((${serial#emulator-} + 1))
       # shellcheck disable=SC2329 # invoked through until_ok
       listening() { ss -ltnH "sport = :$port" >"$T/adb-listen.txt" && [[ -s $T/adb-listen.txt ]]; }
       until_ok listening
@@ -120,15 +123,12 @@ if [[ ${1:-} == --group ]]; then
         echo "FAIL adb listens beyond loopback" >&2
         exit 1
       fi
-      # adb reads its key from $HOME/.android.
-      A=(env HOME="$T/adbhome" "$adb" -P 15990)
-      "${A[@]}" connect "$serial" >/dev/null
       # shellcheck disable=SC2329 # invoked through until_ok
       adb_shell() { [[ $("${A[@]}" -s "$serial" shell echo ok 2>/dev/null) == ok ]]; }
       until_ok adb_shell
       "${A[@]}" kill-server
       "$repo/tools/dev/innkeeper.sh" profile set --adb off >/dev/null 2>&1
-      echo "ok   adb is off by default; on, a loopback port the user's key reaches"
+      echo "ok   adb is off by default; on, the adb server lists it and the user's key reaches it"
       driver=$(s getprop ro.hardware.vulkan)
       feature=android.hardware.vulkan.level=1
       # pm omits =0 when printing a version-zero feature.
@@ -437,6 +437,8 @@ fi
 mkdir -p "$T"
 : >"$T/timings.log"
 export INNKEEPER_TEST_TIMERS=1 INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
+# Announcing adb goes to a private server, never the user's on 5037.
+export ANDROID_ADB_SERVER_PORT=15990
 export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
 keeper=""
 events=""

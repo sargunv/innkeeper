@@ -141,6 +141,7 @@ def command(program, args):
         "XDG_CURRENT_DESKTOP",
         "DBUS_SYSTEM_BUS_ADDRESS",
         "WAYLAND_DEBUG",
+        "ANDROID_ADB_SERVER_PORT",
       )
     ):
       inner_env.append(f"{k}={v}")

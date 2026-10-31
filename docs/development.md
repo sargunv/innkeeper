@@ -92,20 +92,20 @@ adb -s emulator-5556 install app.apk
 
 - Each profile gets an adb port as the Android Emulator does: the first odd port
   from 5555 to 5585 whose pair (the console port, one below) nothing uses and no
-  other profile has, kept in its settings (`adb-port`, which may also be set to
-  any port). An adb server looks for devices there, so it lists the profile as
-  `emulator-<port - 1>` with no `adb connect`, and so do Android Studio and
-  Gradle. Use that serial: AGP 9.4.1's `connectedAndroidTest` fails for
-  `host:port` serials even when every test passes.
-- A running adb server finds a profile started after it once told, as the
-  emulator tells it: `innkeeper adb` starts the profile if needed and announces
-  it to the server (`ANDROID_ADB_SERVER_PORT`, default 5037), with no `adb` in
-  the Flatpak. Restarting the server (`adb kill-server; adb devices`) finds it
-  too.
+  other profile has, kept in its settings (`adb-port`, which may be set to
+  another of those ports). An adb server looks for devices there when it starts,
+  so it lists the profile as `emulator-<port - 1>` with no `adb connect`, and so
+  do Android Studio and Gradle. Use that serial: AGP 9.4.1's
+  `connectedAndroidTest` fails for `host:port` serials even when every test
+  passes.
+- A running adb server is told about the profile as the emulator tells it, when
+  adb is turned on and whenever a profile with adb on starts (once adbd
+  listens), over the server's protocol (`ANDROID_ADB_SERVER_PORT`, default
+  5037), with no `adb` in the Flatpak.
 - adb authentication stays on. The user's `~/.android/adbkey.pub` is authorized
-  in the profile's data when adb is turned on, at each start and by
-  `innkeeper adb`; `adb start-server` creates the key if there is none. Any
-  other key is refused (`unauthorized`).
+  in the profile's data when adb is turned on and at each start;
+  `adb start-server` creates the key if there is none. Any other key is refused
+  (`unauthorized`).
 
 Run instrumented tests that take screenshots (`UiAutomation.takeScreenshot`,
 screenshot-diff libraries) in phone mode
