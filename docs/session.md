@@ -117,9 +117,9 @@ stateDiagram-v2
   launcher checks it every 5 s. No report yet (booting, the system app
   restarting) counts as busy, and so do a running `exec` (it holds `exec.lock`
   shared) and an alarm less than 3 minutes away or ago.
-- **Idle timeout.** The profile's Idle timeout preference (default 2 minutes;
-  Keep Running: never) before the launcher stops the session as `stop` does; a
-  change applies to a running session. Headless sessions (tests) never stop by
+- **Idle timeout.** The profile's `idle-minutes` setting (default 2; Keep
+  Running: never) before the launcher stops the session as `stop` does; a change
+  applies to a running session. Headless sessions (tests) never stop by
   themselves. Apps not allowed in the background stop with it, as if
   force-stopped: their jobs and syncs wait for the next start.
 - **Foreground services** keep it up. A media app keeps playing after its window
@@ -144,12 +144,13 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                                  | Contents                                                                                                                                                                                 |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `root-<profile>/` (the composed root), `addons/` |
-| `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                              |
-| `$XDG_STATE_HOME/innkeeper/`                         | `profile`, the one in use (shared by every profile)                                                                                                                                      |
-| `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                             |
+| Dir                                                  | Contents                                                                                                                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and `.innkeeper-profile.toml`, the profile's settings), `root-<profile>/` (the composed root), `addons/` |
+| `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                         |
+| `$XDG_CONFIG_HOME/innkeeper/`                        | `preferences.toml`: Keep Running, shared by every profile                                                                                                                                                           |
+| `$XDG_STATE_HOME/innkeeper/`                         | `profile`, the one in use (shared by every profile)                                                                                                                                                                 |
+| `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                        |
 
 `INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile
 path.
@@ -166,12 +167,16 @@ chosen (`profile use`, the manager's Show Apps), else the first by name.
 Installing or opening something with no profile at all creates `default`, an
 ordinary profile. Tests use named profiles with fresh data dirs.
 
-A profile's settings are `.innkeeper-profile.toml` in its data dir, beside the
-data version record, so they move and back up with its data
-(`host/launcher/src/profile.rs`). The file carries a format `version`; a newer
-one is refused rather than rewritten. A missing file or setting means its
-default. Deleting a profile removes its data, settings, composed root, logs,
-runtime files, desktop preferences and app-menu entries; renaming moves them,
+A profile's settings are one file, `.innkeeper-profile.toml` in its data dir,
+beside the data version record, so they move and back up with its data
+(`host/launcher/src/profile.rs`): its display, adb and port, idle timeout, app
+mirroring and desktop following. A missing file or setting means its default; an
+unknown setting is an error. `innkeeper profile set` and the manager's Profile
+Settings page change them, and a running profile applies the live ones at once.
+Keep Running is Innkeeper's own preference, shared by every profile
+(`$XDG_CONFIG_HOME/innkeeper/preferences.toml`): no profile stops when idle, and
+every profile starts at login. Deleting a profile removes its data, settings,
+composed root, logs, runtime files and app-menu entries; renaming moves them,
 and the composed root is recomposed. Either needs the profile stopped.
 
 ## Image upgrades and data recovery

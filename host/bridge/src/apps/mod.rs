@@ -197,7 +197,7 @@ impl Config {
         Config {
             enabled,
             mirror_apps: AtomicBool::new(
-                innkeeper_core::preferences::Preferences::load()
+                innkeeper_core::profiles::own()
                     .map(|p| p.mirror_apps)
                     .unwrap_or(true),
             ),

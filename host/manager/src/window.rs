@@ -223,7 +223,7 @@ impl Window {
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
         section.append(Some("P_rofiles"), Some("win.profiles"));
-        section.append(Some("_Preferences"), Some("win.preferences"));
+        section.append(Some("Profile _Settings"), Some("win.preferences"));
         section.append(Some("_About Innkeeper"), Some("app.about"));
         menu.append_section(None, &section);
         let title = adw::WindowTitle::new(

@@ -333,11 +333,11 @@ sequenceDiagram
 
 ## Phone mode
 
-A profile's `mode = "phone"` (`innkeeper profile set --mode phone`, the
-manager's Display row) shows the whole device in one window, for developing
-apps: display 0, with SystemUI's status and navigation bars and the image's
-Launcher3, where apps start instead of in windows of their own. It applies at
-the next start.
+A profile's phone display (`innkeeper profile set --display medium-phone`, or
+`small-phone` or `medium-tablet`; the manager's Display row) shows the whole
+device in one window, for developing apps: display 0, with SystemUI's status and
+navigation bars and the image's Launcher3, where apps start instead of in
+windows of their own. It applies at the next start.
 
 **Why display 0.** It is where Android already runs SystemUI, the launcher,
 recents, the keyguard, rotation and system dialogs, as on a phone. A new

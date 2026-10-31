@@ -1,7 +1,7 @@
-//! Desktop preferences: saved to the profile's file, then applied live by a
-//! running session's bridge (Session1 `ReloadPreferences`).
+//! Innkeeper's own preferences, shared by every profile
+//! ([`innkeeper_session::preferences`]): Keep Running, with the Background
+//! portal's login command. Running sessions read them as they poll.
 use std::collections::HashMap;
-use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use zbus::zvariant::{OwnedValue, Value};
@@ -25,14 +25,10 @@ fn autostart(enabled: bool) -> Result<()> {
         "org.freedesktop.portal.Request",
     )?;
     let mut responses = request.receive_signal("Response")?;
-    let mut command = crate::paths::command(
-        &[crate::paths::Prefix::locate()?
-            .launcher()
-            .to_string_lossy()
-            .into_owned()],
-        &crate::paths::profile()?,
-    );
-    command.push("start".into());
+    // Every profile, as Keep Running is every profile's.
+    let command: Vec<String> = [crate::xdg::INNKEEPER, "profile", "start", "--all"]
+        .map(String::from)
+        .into();
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert("handle_token", Value::from(token.as_str()));
     options.insert(
@@ -76,7 +72,6 @@ fn autostart(enabled: bool) -> Result<()> {
 }
 
 pub fn save(prefs: Preferences) -> Result<()> {
-    prefs.validate()?;
     let old = Preferences::load()?;
     let login_changed = prefs.keep_running != old.keep_running;
     if login_changed && let Err(e) = autostart(prefs.keep_running) {
@@ -93,27 +88,5 @@ pub fn save(prefs: Preferences) -> Result<()> {
         }
         return Err(e);
     }
-    reload()
-}
-
-/// Has a running session's bridge apply the saved preferences.
-fn reload() -> Result<()> {
-    let connection = zbus::blocking::connection::Builder::session()?
-        .method_timeout(Duration::from_secs(5))
-        .build()?;
-    let name = crate::app_settings::bus_name(&crate::paths::profile()?);
-    let bus = zbus::blocking::fdo::DBusProxy::new(&connection)?;
-    if !bus.name_has_owner(name.as_str().try_into()?)? {
-        return Ok(());
-    }
-    let proxy = zbus::blocking::Proxy::new(
-        &connection,
-        name.as_str(),
-        crate::app_settings::PATH,
-        crate::app_settings::INTERFACE,
-    )?;
-    let _: () = proxy
-        .call("ReloadPreferences", &())
-        .context("Saved, but the running session did not apply it")?;
     Ok(())
 }

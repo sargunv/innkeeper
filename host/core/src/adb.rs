@@ -17,7 +17,7 @@ use crate::paths::Prefix;
 
 /// The address adb knows profile `settings` by.
 pub fn serial(settings: &Settings) -> String {
-    serial_of(settings.debug_bridge_port)
+    serial_of(settings.adb_port)
 }
 
 /// `emulator-<port - 1>` for an emulator port, as adb names a device there;
@@ -32,7 +32,7 @@ fn serial_of(port: u16) -> String {
 
 /// Where adbd listens.
 pub fn address(settings: &Settings) -> String {
-    format!("127.0.0.1:{}", settings.debug_bridge_port)
+    format!("127.0.0.1:{}", settings.adb_port)
 }
 
 /// Turns adb on or off for profile `name`, at once if it runs. Turning it on
@@ -40,7 +40,7 @@ pub fn address(settings: &Settings) -> String {
 pub fn set(name: &str, on: bool, report: Report) -> Result<Settings> {
     let paths = Prefix::locate()?.profile_paths(name)?;
     let mut s = Settings::load(&paths.data)?;
-    s.debug_bridge = on;
+    s.adb = on;
     if on {
         s.assign_port(&paths.data_home, &paths.data)?;
         authorize(&paths.data, report)?;
@@ -56,9 +56,9 @@ pub fn set(name: &str, on: bool, report: Report) -> Result<Settings> {
 
 /// Starts or stops adbd in running `session` as `s` says.
 fn apply(session: &Session, s: &Settings) -> Result<()> {
-    let on = s.debug_bridge;
+    let on = s.adb;
     if on {
-        let addrs = adb::listen_addrs(s.debug_bridge_port);
+        let addrs = adb::listen_addrs(s.adb_port);
         session.exec_ok(15, &["setprop", "service.adb.listen_addrs", &addrs])?;
     }
     session.exec_ok(
@@ -100,7 +100,7 @@ pub fn connect(name: &str, report: Report) -> Result<String> {
     let paths = Prefix::locate()?.profile_paths(name)?;
     let mut s = Settings::load(&paths.data)?;
     ensure!(
-        s.debug_bridge,
+        s.adb,
         "adb is off for profile {name}; turn it on with `innkeeper profile set {name} --adb on`"
     );
     if s.assign_port(&paths.data_home, &paths.data)? {
@@ -112,7 +112,7 @@ pub fn connect(name: &str, report: Report) -> Result<String> {
     // Also when it started while adb was being turned on.
     apply(&session, &s)?;
     let (serial, address) = (serial(&s), address(&s));
-    announce(server_port(), s.debug_bridge_port, &serial).with_context(|| {
+    announce(server_port(), s.adb_port, &serial).with_context(|| {
         format!("no adb server took it; `adb devices` starts one, or run `adb connect {address}`")
     })?;
     Ok(serial)

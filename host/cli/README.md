@@ -20,7 +20,9 @@ innkeeper profile create|use|delete NAME  # delete removes its apps, data and se
 innkeeper profile rename OLD NEW
 innkeeper profile start|stop [NAME]
 innkeeper profile set [NAME] --adb on|off     # adb on a loopback port, live
-innkeeper profile set [NAME] --mode phone --size medium-phone  # one device window, next start
+innkeeper profile set [NAME] --display windowed|small-phone|medium-phone|medium-tablet
+innkeeper profile set [NAME] --idle-minutes 10 --mirror-apps off --follow-dark off ...
+innkeeper profile set --keep-running on       # every profile: never idle, start at login
 innkeeper adb                         # have your adb list the profile (emulator-<port - 1>)
 innkeeper --profile NAME install App.apk      # any command, on another profile
 ```

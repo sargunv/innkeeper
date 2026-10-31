@@ -104,7 +104,7 @@ fn compose_key(cfg: &Config) -> Result<String> {
     h.update(cfg.image.apexdir.as_os_str().as_encoded_bytes());
     h.update(fs::read(cfg.image.derived_source()).unwrap_or_default());
     h.update(fs::read(cfg.paths.share.join("manifest.tsv"))?);
-    h.update(format!("{:?}", crate::phone::mode(&cfg.paths.data)?));
+    h.update(format!("{:?}", crate::phone::display(&cfg.paths.data)?));
     for a in cfg.paths.addon_layers() {
         h.update(a.as_os_str().as_encoded_bytes());
         let mut files = vec![];
@@ -164,7 +164,7 @@ fn compose(cfg: &Config) -> Result<()> {
             }
         }
     }
-    if crate::phone::mode(&cfg.paths.data)? == crate::profile::Mode::Phone {
+    if crate::phone::display(&cfg.paths.data)? != crate::profile::Display::Windowed {
         for keep in crate::phone::KEEPS {
             let (part, rest) = keep.split_once('/').unwrap_or((keep, ""));
             let src = root::image_partition(&cfg.image.img, part).join(rest);

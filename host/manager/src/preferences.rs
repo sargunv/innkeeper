@@ -1,10 +1,12 @@
-//! Innkeeper preferences. Reads and writes run off the GTK thread.
+//! The Profile Settings page: the shown profile's settings, and Keep Running,
+//! which every profile shares. Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
 use innkeeper_core::preferences::{self, Preferences};
+use innkeeper_core::profiles::{self, Display, Settings};
 
 use crate::{
     errors::Op,
@@ -18,23 +20,57 @@ const ISOLATION_DOCS: &str =
 struct Page {
     window: WeakWindow,
     content: gtk::Box,
-    prefs: RefCell<Preferences>,
+    /// The profile whose settings show.
+    profile: String,
+    settings: RefCell<Settings>,
+    keep_running: Cell<bool>,
     busy: Cell<bool>,
 }
 
+/// The display choices, with their descriptions.
+const DISPLAYS: [(Display, &str, &str); 4] = [
+    (
+        Display::Windowed,
+        "Windowed",
+        "Each app in a window of its own",
+    ),
+    (
+        Display::SmallPhone,
+        "Small Phone",
+        "One device window, 720 × 1280",
+    ),
+    (
+        Display::MediumPhone,
+        "Medium Phone",
+        "One device window, 1080 × 2400",
+    ),
+    (
+        Display::MediumTablet,
+        "Medium Tablet",
+        "One device window, 2560 × 1600",
+    ),
+];
+
 pub fn page(window: &Window) -> adw::NavigationPage {
+    let profile = innkeeper_core::paths::profile()
+        .map(String::from)
+        .unwrap_or_default();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
+    let header = adw::HeaderBar::new();
+    header.set_title_widget(Some(&adw::WindowTitle::new("Profile Settings", &profile)));
+    toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&content));
     let page = adw::NavigationPage::builder()
-        .title("Preferences")
+        .title("Profile Settings")
         .child(&toolbar)
         .build();
     let state = Rc::new(Page {
         window: window.downgrade(),
         content,
-        prefs: RefCell::new(Preferences::default()),
+        profile,
+        settings: RefCell::new(Settings::default()),
+        keep_running: Cell::new(false),
         busy: Cell::new(false),
     });
     page.connect_showing(move |_| state.load());
@@ -44,39 +80,67 @@ pub fn page(window: &Window) -> adw::NavigationPage {
 impl Page {
     fn load(self: &Rc<Self>) {
         let s = self.clone();
+        let name = self.profile.clone();
         glib::spawn_future_local(async move {
-            match worker::run_quiet(Preferences::load).await {
-                Ok(p) => {
-                    s.prefs.replace(p);
+            let r = worker::run_quiet(move || {
+                Ok::<_, anyhow::Error>((profiles::settings(&name)?, Preferences::load()?))
+            })
+            .await;
+            match r {
+                Ok((settings, prefs)) => {
+                    s.settings.replace(settings);
+                    s.keep_running.set(prefs.keep_running);
                     s.show();
                 }
-                Err(e) => {
-                    if let Some(w) = s.window.upgrade() {
-                        w.show_error(Op::Preferences, None, &e);
-                    }
-                }
+                Err(e) => s.error(&e),
             }
         });
     }
 
-    fn save(self: &Rc<Self>, change: impl FnOnce(&mut Preferences)) {
+    fn error(&self, e: &anyhow::Error) {
+        if let Some(w) = self.window.upgrade() {
+            w.show_error(Op::Preferences, None, e);
+        }
+    }
+
+    /// Runs `f` off the GTK thread with the page insensitive; reloads after
+    /// a failure, or always with `reload`.
+    fn work(
+        self: &Rc<Self>,
+        reload: bool,
+        f: impl FnOnce() -> anyhow::Result<()> + Send + 'static,
+    ) {
         if self.busy.replace(true) {
             return;
         }
-        change(&mut self.prefs.borrow_mut());
-        let next = self.prefs.borrow().clone();
         self.content.set_sensitive(false);
         let s = self.clone();
         glib::spawn_future_local(async move {
-            let result = worker::run_quiet(move || preferences::save(next)).await;
+            let result = worker::run_quiet(f).await;
             s.busy.set(false);
             s.content.set_sensitive(true);
-            if let Err(e) = result {
-                if let Some(w) = s.window.upgrade() {
-                    w.show_error(Op::Preferences, None, &e);
-                }
+            if let Err(e) = &result {
+                s.error(e);
+            }
+            if reload || result.is_err() {
                 s.load();
             }
+        });
+    }
+
+    fn save(self: &Rc<Self>, change: impl FnOnce(&mut Settings)) {
+        change(&mut self.settings.borrow_mut());
+        let (name, next) = (self.profile.clone(), self.settings.borrow().clone());
+        self.work(false, move || {
+            // adb has its own path (it applies live and needs a key).
+            profiles::update(&name, |s| {
+                *s = Settings {
+                    adb: s.adb,
+                    adb_port: s.adb_port,
+                    ..next
+                }
+            })
+            .map(drop)
         });
     }
 
@@ -86,7 +150,7 @@ impl Page {
         title: &str,
         subtitle: &str,
         active: bool,
-        set: fn(&mut Preferences, bool),
+        set: fn(&mut Settings, bool),
     ) -> adw::SwitchRow {
         let row = adw::SwitchRow::builder()
             .title(title)
@@ -107,9 +171,14 @@ impl Page {
         while let Some(child) = self.content.first_child() {
             self.content.remove(&child);
         }
-        let p = self.prefs.borrow().clone();
+        let p = self.settings.borrow().clone();
         let page = adw::PreferencesPage::new();
         page.set_vexpand(true);
+
+        let display = adw::PreferencesGroup::new();
+        display.add(&self.display_row(&p));
+        page.add(&display);
+
         let desktop = adw::PreferencesGroup::builder().title("Follow the Desktop")
             .description("Changes apply live. Turn a setting off to choose it in Android Settings; its current value is kept.").build();
         self.switch(
@@ -142,56 +211,13 @@ impl Page {
         );
         page.add(&desktop);
 
-        let lifecycle = adw::PreferencesGroup::builder().title("When No Android Apps Are Open")
-            .description("Foreground services, alarms and apps allowed to run in the background still keep Android available.").build();
-        let stop = gtk::CheckButton::builder()
-            .active(!p.keep_running)
-            .valign(gtk::Align::Center)
-            .build();
-        let keep = gtk::CheckButton::builder()
-            .group(&stop)
-            .active(p.keep_running)
-            .valign(gtk::Align::Center)
-            .build();
-        let row = adw::ActionRow::builder()
-            .title("Stop After")
-            .subtitle("Minutes without activity")
-            .activatable_widget(&stop)
-            .build();
-        row.add_prefix(&stop);
-        let minutes = gtk::SpinButton::with_range(1.0, 120.0, 1.0);
-        minutes.set_value(f64::from(p.idle_minutes));
-        minutes.set_valign(gtk::Align::Center);
-        minutes.set_sensitive(!p.keep_running);
-        row.add_suffix(&minutes);
-        lifecycle.add(&row);
-        let row = adw::ActionRow::builder()
-            .title("Keep Running (Starts at Login)")
-            .subtitle("Requires desktop permission · about 540 MB while idle")
-            .activatable_widget(&keep)
-            .build();
-        row.add_prefix(&keep);
-        lifecycle.add(&row);
-        let s = Rc::downgrade(self);
-        let spin = minutes.clone();
-        keep.connect_toggled(move |r| {
-            spin.set_sensitive(!r.is_active());
-            if let Some(s) = s.upgrade() {
-                s.save(|p| p.keep_running = r.is_active());
-            }
-        });
-        let s = Rc::downgrade(self);
-        minutes.connect_value_changed(move |r| {
-            if let Some(s) = s.upgrade() {
-                s.save(|p| p.idle_minutes = r.value_as_int() as u32);
-            }
-        });
-        page.add(&lifecycle);
+        page.add(&self.lifecycle_group(&p));
 
         let apps = adw::PreferencesGroup::builder()
             .title("Android Integration")
             .build();
         self.switch(&apps, "Mirror Apps to the App Menu", "Add launchers for apps installed inside Android. Existing launchers are kept when turned off.", p.mirror_apps, |p,v| p.mirror_apps = v);
+        apps.add(&self.adb_row(&p));
         let settings = adw::ActionRow::builder()
             .title("Android Settings…")
             .subtitle("Open Android Settings in its own window")
@@ -232,5 +258,113 @@ impl Page {
         privacy.add(&docs);
         page.add(&privacy);
         self.content.append(&page);
+    }
+
+    /// Windowed or a device window; for the next start.
+    fn display_row(self: &Rc<Self>, p: &Settings) -> adw::ComboRow {
+        let model = gtk::StringList::new(&DISPLAYS.map(|c| c.1));
+        let current = DISPLAYS.iter().position(|c| c.0 == p.display).unwrap_or(0);
+        let row = adw::ComboRow::builder()
+            .title("Display")
+            .subtitle(format!(
+                "{} · Applies the next time it starts",
+                DISPLAYS[current].2
+            ))
+            .model(&model)
+            .selected(current as u32)
+            .build();
+        let s = Rc::downgrade(self);
+        row.connect_selected_notify(move |r| {
+            if let (Some(s), Some(&(d, _, _))) = (s.upgrade(), DISPLAYS.get(r.selected() as usize))
+            {
+                s.save(|p| p.display = d);
+            }
+        });
+        row
+    }
+
+    fn lifecycle_group(self: &Rc<Self>, p: &Settings) -> adw::PreferencesGroup {
+        let keep_running = self.keep_running.get();
+        let group = adw::PreferencesGroup::builder().title("When No Android Apps Are Open")
+            .description("Foreground services, alarms and apps allowed to run in the background still keep Android available.").build();
+        let stop = gtk::CheckButton::builder()
+            .active(!keep_running)
+            .valign(gtk::Align::Center)
+            .build();
+        let keep = gtk::CheckButton::builder()
+            .group(&stop)
+            .active(keep_running)
+            .valign(gtk::Align::Center)
+            .build();
+        let row = adw::ActionRow::builder()
+            .title("Stop After")
+            .subtitle("Minutes without activity")
+            .activatable_widget(&stop)
+            .build();
+        row.add_prefix(&stop);
+        let minutes = gtk::SpinButton::with_range(1.0, 120.0, 1.0);
+        minutes.set_value(f64::from(p.idle_minutes));
+        minutes.set_valign(gtk::Align::Center);
+        minutes.set_sensitive(!keep_running);
+        row.add_suffix(&minutes);
+        group.add(&row);
+        let row = adw::ActionRow::builder()
+            .title("Keep Running (Starts at Login)")
+            .subtitle("Every profile · Requires desktop permission · about 540 MB each while idle")
+            .activatable_widget(&keep)
+            .build();
+        row.add_prefix(&keep);
+        group.add(&row);
+        let s = Rc::downgrade(self);
+        let spin = minutes.clone();
+        keep.connect_toggled(move |r| {
+            spin.set_sensitive(!r.is_active());
+            if let Some(s) = s.upgrade() {
+                let on = r.is_active();
+                s.keep_running.set(on);
+                s.work(false, move || {
+                    preferences::save(Preferences { keep_running: on })
+                });
+            }
+        });
+        let s = Rc::downgrade(self);
+        minutes.connect_value_changed(move |r| {
+            if let Some(s) = s.upgrade() {
+                s.save(|p| p.idle_minutes = r.value_as_int() as u32);
+            }
+        });
+        group
+    }
+
+    fn adb_row(self: &Rc<Self>, p: &Settings) -> adw::SwitchRow {
+        let row = adw::SwitchRow::builder()
+            .title("adb")
+            .subtitle(if p.adb {
+                format!(
+                    "On · <tt>{}</tt> in adb and Android Studio",
+                    innkeeper_core::adb::serial(p)
+                )
+            } else {
+                "For Android Studio, Gradle and adb on this computer".into()
+            })
+            .use_markup(true)
+            .active(p.adb)
+            .build();
+        let s = Rc::downgrade(self);
+        row.connect_active_notify(move |r| {
+            let Some(s) = s.upgrade() else {
+                return;
+            };
+            let (n, on) = (s.profile.clone(), r.is_active());
+            // Reloaded after, so the subtitle shows the port it got.
+            s.work(true, move || {
+                innkeeper_core::adb::set(&n, on, &innkeeper_core::ops::quiet)?;
+                match innkeeper_core::adb::missing_key().filter(|_| on) {
+                    Some(why) => Err(anyhow::anyhow!("adb is on, but {why}")),
+                    None => Ok(()),
+                }
+            });
+        });
+        row
     }
 }
