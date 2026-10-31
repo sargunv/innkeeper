@@ -47,6 +47,16 @@ ENV["FLATPAK_USER_DIR"] = str(INSTALL)
 ENV["HOME"] = str(SCRATCH / "home")
 Path(ENV["HOME"]).mkdir(parents=True, exist_ok=True)
 HOST_BUS = f"unix:path=/run/user/{os.getuid()}/bus"
+# Every scope Flatpak makes for the app gets these limits, including the ones
+# the portal starts for alarm wakeups: systemd applies a unit-name-prefix
+# drop-in to each new app-flatpak-dev.sargunv.Innkeeper-<n>.scope.
+DROPIN = Path(
+  f"/run/user/{os.getuid()}/systemd/user/app-flatpak-{APP}-.scope.d/50-innkeeper-dev-memory.conf"
+)
+MEMORY = "[Scope]\nMemoryHigh=6G\nMemoryMax=8G\n"
+MEMORY_MAX = str(8 << 30)
+# Room for one capped session plus the desktop.
+MIN_AVAILABLE_GIB = 10
 SYSTEMD_ENV = dict(
   os.environ,
   DBUS_SESSION_BUS_ADDRESS=HOST_BUS,
@@ -73,7 +83,7 @@ def bootstrap():
   )
 
 
-def command(program, args, gate=None, instance_fd=None):
+def command(program, args):
   argv = [
     "flatpak",
     "run",
@@ -128,22 +138,7 @@ def command(program, args, gate=None, instance_fd=None):
     if program == "innkeeper"
     else str(STAGE / "libexec/innkeeper/innkeeper-session")
   )
-  if gate:
-    argv += [
-      "--command=sh",
-      f"--instance-id-fd={instance_fd}",
-      APP,
-      "-c",
-      'while ! test -f "$1"; do sleep 0.05; done; shift; exec "$@"',
-      "sh",
-      str(gate),
-      "env",
-      *inner_env,
-      target,
-      *args,
-    ]
-  else:
-    argv += ["--command=env", APP, *inner_env, target, *args]
+  argv += ["--command=env", APP, *inner_env, target, *args]
   return argv
 
 
@@ -195,9 +190,9 @@ def control(args):
     text = sock.recv(4096).decode()
     # Sandbox pids repeat on reboot. Use the host scope's process as the
     # harness's session identity so compat detects a replaced sandbox.
-    if text.startswith("running:"):
+    cg = session_cgroup()
+    if text.startswith("running:") and cg:
       try:
-        cg = Path((SCRATCH / "cgroup").read_text())
         pid = (cg / "cgroup.procs").read_text().split()[0]
         text = re.sub(r"host pid \d+", f"host pid {pid}", text)
       except (OSError, IndexError):
@@ -207,72 +202,32 @@ def control(args):
 
 
 def available():
-  minimum = int(ENV.get("INNKEEPER_MIN_AVAILABLE_GIB", "25"))
-  subprocess.run(["free", "-g"], check=True)
-  while True:
-    fields = Path("/proc/meminfo").read_text().splitlines()
-    kib = int(
-      next(l for l in fields if l.startswith("MemAvailable:")).split()[1]
+  info = Path("/proc/meminfo").read_text().splitlines()
+  kib = int(next(l for l in info if l.startswith("MemAvailable:")).split()[1])
+  if kib < MIN_AVAILABLE_GIB << 20:
+    sys.exit(
+      f"dev runner: {kib >> 20} GiB available, a session needs"
+      f" {MIN_AVAILABLE_GIB}; stop another session first"
     )
-    if kib >= minimum * 1024 * 1024:
-      return
-    print(
-      f"dev runner: less than {minimum} GiB available; waiting five minutes",
-      file=sys.stderr,
-      flush=True,
-    )
-    time.sleep(300)
 
 
-def scope(instance, record=True):
-  o = run(
-    ["flatpak", "ps", "--columns=instance,pid"],
-    capture_output=True,
-    text=True,
-    check=True,
+def cap():
+  """Install the memory drop-in. systemd finds a new drop-in only on reload."""
+  if DROPIN.is_file() and DROPIN.read_text() == MEMORY:
+    return
+  DROPIN.parent.mkdir(parents=True, exist_ok=True)
+  DROPIN.write_text(MEMORY)
+  subprocess.run(
+    ["systemctl", "--user", "daemon-reload"], env=SYSTEMD_ENV, check=True
   )
-  for line in o.stdout.splitlines():
-    cols = line.split()
-    if len(cols) >= 2 and cols[0] == instance and cols[1] != "0":
-      try:
-        cg = (
-          Path(f"/proc/{cols[1]}/cgroup").read_text().strip().split("::", 1)[1]
-        )
-      except OSError:
-        continue
-      unit = next(
-        (
-          p
-          for p in cg.split("/")
-          if p.startswith("app-flatpak-") and p.endswith(".scope")
-        ),
-        None,
-      )
-      if unit is None:
-        return False
-      subprocess.run(
-        [
-          "systemctl",
-          "--user",
-          "set-property",
-          "--runtime",
-          unit,
-          "MemoryHigh=6G",
-          "MemoryMax=8G",
-        ],
-        env=SYSTEMD_ENV,
-        check=True,
-      )
-      if record:
-        (SCRATCH / "cgroup").write_text("/sys/fs/cgroup" + cg)
-      return True
-  return False
 
 
-def watch_scopes(capped):
-  """An alarm's replacement sandbox is created by the Flatpak portal."""
+def session_cgroup():
+  """The cgroup of this profile's session sandbox, wherever it was started:
+  by `start`, by the CLI through the portal, or by an alarm wakeup. A portal
+  session wins over a `start -f` sandbox left waiting for the alarm."""
+  found = []
   runtime = Path(ENV.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-  found = False
   for info in runtime.glob(".flatpak/*/info"):
     try:
       cfg = configparser.ConfigParser(interpolation=None)
@@ -284,126 +239,26 @@ def watch_scopes(capped):
         continue
       pid = (info.parent / "pid").read_text().strip()
       argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+      # `start -f` from start(), or the launcher's `_serve` for a session
+      # the portal spawned.
       if b"_serve" not in argv and not (b"start" in argv and b"-f" in argv):
         continue
-      found = True
-      if info.parent.name not in capped:
-        try:
-          if scope(info.parent.name):
-            capped.add(info.parent.name)
-        except subprocess.CalledProcessError:
-          # A test replacement must not remain alive with no memory bound.
-          run(["flatpak", "kill", info.parent.name], check=False)
-          raise
-    except (OSError, configparser.Error, ProcessLookupError):
+      cg = Path(f"/proc/{pid}/cgroup").read_text().strip().split("::", 1)[1]
+      found.append((b"_serve" not in argv, Path("/sys/fs/cgroup" + cg)))
+    except (OSError, IndexError, configparser.Error):
       continue
-  return found
+  return min(found)[1] if found else None
 
 
-def serve(args):
-  ended = SCRATCH / "ended"
-  gate = SCRATCH / "capped"
-  gate.unlink(missing_ok=True)
-  rfd, wfd = os.pipe()
-  child = None
-  try:
-    with (SCRATCH / "runner.log").open("ab") as log:
-      child = subprocess.Popen(
-        command("session", ["start", "-f", *args], gate, wfd),
-        env=ENV,
-        stdin=subprocess.DEVNULL,
-        stdout=log,
-        stderr=log,
-        pass_fds=(wfd,),
-      )
-    os.close(wfd)
-    with os.fdopen(rfd) as pipe:
-      instance = pipe.readline().strip()
-    if not instance:
-      raise RuntimeError(
-        "Flatpak did not publish an instance id (see runner.log)"
-      )
-    for _ in range(100):
-      if scope(instance):
-        break
-      time.sleep(0.05)
-    else:
-      raise RuntimeError("Flatpak scope not found; refusing to run uncapped")
-    gate.touch()
-    capped = {instance}
-    gone = 0
-    while gone < 10:
-      found = watch_scopes(capped)
-      gone = 0 if child.poll() is None or found else gone + 1
-      time.sleep(0.1)
-  finally:
-    if child is not None and child.poll() is None:
-      child.terminate()
-      child.wait()
-    gate.unlink(missing_ok=True)
-    ended.touch()
-
-
-def supervise(action, args=()):
-  # Python's monitor is capped too; Flatpak moves its app to a separate scope.
-  restore = [f"INNKEEPER_PROFILE={PROFILE}"]
-  for key in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
-    if key in os.environ:
-      restore.append(f"{key}={os.environ[key]}")
-  with (SCRATCH / "supervisor.log").open("ab") as log:
-    subprocess.Popen(
-      [
-        "systemd-run",
-        "--user",
-        "--scope",
-        "--quiet",
-        "-p",
-        "MemoryMax=256M",
-        "env",
-        *restore,
-        sys.executable,
-        str(Path(__file__).resolve()),
-        action,
-        *args,
-      ],
-      env=SYSTEMD_ENV,
-      stdin=subprocess.DEVNULL,
-      stdout=log,
-      stderr=log,
-      start_new_session=True,
-    )
-
-
-def run_capped(program, args):
-  if program == "innkeeper":
-    if not running():
-      available()
-    supervise("_watch")
-  gate = SCRATCH / f"capped-{os.getpid()}"
-  gate.unlink(missing_ok=True)
-  rfd, wfd = os.pipe()
-  child = subprocess.Popen(
-    command(program, args, gate, wfd), env=ENV, pass_fds=(wfd,)
+def capped(cg):
+  """Whether the scope of cgroup cg has the drop-in's MemoryMax."""
+  o = subprocess.run(
+    ["systemctl", "--user", "show", "-P", "MemoryMax", cg.name],
+    env=SYSTEMD_ENV,
+    capture_output=True,
+    text=True,
   )
-  os.close(wfd)
-  try:
-    with os.fdopen(rfd) as pipe:
-      instance = pipe.readline().strip()
-    for _ in range(100):
-      if scope(instance, record=False):
-        break
-      time.sleep(0.05)
-    else:
-      raise RuntimeError(
-        "Flatpak command scope not found; refusing to run uncapped"
-      )
-    gate.touch()
-    return child.wait()
-  finally:
-    if child.poll() is None:
-      child.terminate()
-      child.wait()
-    gate.unlink(missing_ok=True)
+  return o.stdout.strip() == MEMORY_MAX
 
 
 def start(args):
@@ -413,17 +268,43 @@ def start(args):
     if running():
       return 0
     available()
-    (SCRATCH / "ended").unlink(missing_ok=True)
-    supervise("_serve", args)
+    cap()
+    # flatpak run's client gets a scope of its own, so the session outlives
+    # the caller's unit (a terminal, a test desktop). Flatpak moves the
+    # sandbox itself to its app scope.
+    restore = [
+      f"{k}={ENV[k]}"
+      for k in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+      if k in ENV
+    ]
+    with (SCRATCH / "runner.log").open("ab") as log:
+      child = subprocess.Popen(
+        ["systemd-run", "--user", "--scope", "--quiet", "--collect"]
+        + ["-p", "MemoryMax=256M", "env", *restore]
+        + command("session", ["start", "-f", *args]),
+        env=dict(
+          ENV,
+          **{
+            k: SYSTEMD_ENV[k]
+            for k in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+          },
+        ),
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
+        start_new_session=True,
+      )
     for _ in range(600):
       if running():
+        cg = session_cgroup()
+        if cg is None or not capped(cg):
+          control(["stop"])
+          sys.exit(f"dev runner: session scope {cg} is not memory capped")
         return 0
-      if (SCRATCH / "ended").exists():
-        sys.exit(f"session failed; see {SCRATCH}/runner.log and supervisor.log")
+      if child.poll() is not None:
+        sys.exit(f"session failed; see {SCRATCH}/runner.log")
       time.sleep(0.1)
-    sys.exit(
-      f"session did not start; see {SCRATCH}/runner.log and supervisor.log"
-    )
+    sys.exit(f"session did not start; see {SCRATCH}/runner.log")
 
 
 def main():
@@ -445,6 +326,12 @@ def main():
   if program == "session" and args[:1] == ["wait"]:
     available()
     return 0
+  if program == "session" and args[:1] == ["cgroup"]:
+    cg = session_cgroup()
+    if cg is None:
+      return 1
+    print(cg)
+    return 0
   if program == "session" and args[:1] in (
     ["status"],
     ["stop"],
@@ -459,38 +346,18 @@ def main():
       [str(STAGE / "libexec/innkeeper/innkeeper-session"), *args]
     ).returncode
   bootstrap()
-  if args[:1] == ["_watch"]:
-    with (SCRATCH / "watch.lock").open("w") as lock:
-      try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-      except BlockingIOError:
-        return 0
-      capped = set()
-      gone = 0
-      while gone < 100:
-        # A first CLI install may spend minutes preparing the image before
-        # it spawns Android. Its gated-command marker lives until it exits.
-        caller_active = any(
-          Path(f"/proc/{p.name.removeprefix('capped-')}").exists()
-          for p in SCRATCH.glob("capped-*")
-        )
-        gone = 0 if watch_scopes(capped) or caller_active else gone + 1
-        time.sleep(0.1)
-    return 0
-  if args[:1] == ["_serve"]:
-    serve(args[1:])
-    return 0
   if program == "session" and args[:1] == ["start"]:
     return start([a for a in args[1:] if a != "-f"])
-  if program == "session" and args[:1] == ["cgroup"]:
-    print((SCRATCH / "cgroup").read_text())
-    return 0
   if program == "innkeeper":
     if ENV.get("DBUS_SESSION_BUS_ADDRESS", HOST_BUS) == HOST_BUS:
       sys.exit(
         "CLI integration tests require tests/nested.sh (a private desktop bus)"
       )
-  return run_capped(program, args)
+  if program == "innkeeper" and not running():
+    available()
+  # The CLI and other commands can start the session through the portal.
+  cap()
+  return run(command(program, args)).returncode
 
 
 if __name__ == "__main__":

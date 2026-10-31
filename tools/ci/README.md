@@ -55,8 +55,7 @@ virtual KWin.
 
 The test tasks run the stage through the development Flatpak driver
 (`tools/dev/run.py`) on a `tests/nested.sh` desktop, so sessions are named and
-memory capped as locally. CI sets `INNKEEPER_MIN_AVAILABLE_GIB=10` for the 16 GB
-runner; the local default is 25 GiB, and the 8 GiB hard cap is unchanged.
+memory capped as locally.
 
 ## Caches
 

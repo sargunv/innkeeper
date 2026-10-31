@@ -51,8 +51,8 @@ flowchart LR
 - `mise run session -- start|stop|status|log|exec|shell|selftest|prepare` runs
   the staged launcher ([host/launcher](../host/launcher/README.md)) in a private
   Flatpak, capped from the host, with scratch HOME and XDG dirs under
-  `out/dev/flatpak/<profile>` (default profile `dev`); it waits while less than
-  25 GiB is available
+  `out/dev/flatpak/<profile>` (default profile `dev`); a start fails at once
+  with less than 10 GiB available
   ([packaging/flatpak](../packaging/flatpak/README.md#development)).
 - `tools/dev/innkeeper.sh install app.apk`, `run`, `uninstall`, `list`
   ([host/cli](../host/cli/README.md)) in the same Flatpak. It needs a desktop of

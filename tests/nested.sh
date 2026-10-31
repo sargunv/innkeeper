@@ -29,9 +29,8 @@ cleanup() {
   fi
   # A deadline can interrupt the runner before its trap reaches session stop.
   # Flatpak's scope is outside this desktop's service; reap that test scope too.
-  if [[ ${INNKEEPER_E2E:-} == 1 && -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
-    local cg
-    cg=$(cat "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup")
+  local cg
+  if [[ ${INNKEEPER_E2E:-} == 1 ]] && cg=$("$repo/tools/dev/session.sh" cgroup 2>/dev/null); then
     DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
       systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi

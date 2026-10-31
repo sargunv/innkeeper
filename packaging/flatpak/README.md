@@ -107,9 +107,13 @@ without building the Flatpak:
   entries. Rerun `dev-init.sh` to test a Flatpak update.
 - HOME and the XDG dirs are scratch dirs under `out/dev/flatpak/<profile>`; the
   image cache is the user's.
-- The driver holds the sandbox at a gate until it has set `MemoryHigh=6G` and
-  `MemoryMax=8G` on its scope from the host, and a host-side watcher caps the
-  sandboxes alarm wakeups start. The app gets no systemd access for it.
+- A runtime systemd drop-in,
+  `$XDG_RUNTIME_DIR/systemd/user/app-flatpak-dev.sargunv.Innkeeper-.scope.d/`,
+  sets `MemoryHigh=6G` and `MemoryMax=8G` on every scope Flatpak creates for the
+  app, the portal's alarm wakeups included; the driver checks the session's
+  scope got it. It applies to the installed app too, until the next reboot. A
+  start fails at once with less than 10 GiB available. The app gets no systemd
+  access for it.
 - `status`, `stop` and `exec` talk to the session's control socket from the
   host, with no Flatpak per command.
 - Stop a session before rebuilding the stage it runs.
