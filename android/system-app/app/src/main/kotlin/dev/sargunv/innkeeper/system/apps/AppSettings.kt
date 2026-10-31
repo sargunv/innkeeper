@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package dev.sargunv.innkeeper.system.apps
 
-import android.app.ActivityManager
+import android.app.IActivityManager
 import android.app.usage.StorageStatsManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.IPackageDataObserver
+import android.content.pm.IPackageManager
 import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
 import android.os.Process
+import android.os.ServiceManager
 import android.os.storage.StorageManager
+import android.permission.IPermissionManager
 import dev.sargunv.innkeeper.system.input.PackageInputSettings
 import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 import java.util.concurrent.CompletableFuture
@@ -21,6 +24,16 @@ import org.json.JSONObject
 class AppSettings(private val context: Context) {
   private val pm = context.packageManager
   private val user = Process.myUserHandle()
+  private val userId = Process.myUid() / PER_USER_RANGE
+  private val packages by lazy {
+    IPackageManager.Stub.asInterface(ServiceManager.getService("package"))
+  }
+  private val activities by lazy {
+    IActivityManager.Stub.asInterface(ServiceManager.getService("activity"))
+  }
+  private val permissionService by lazy {
+    IPermissionManager.Stub.asInterface(ServiceManager.getService("permissionmgr"))
+  }
   private val prefs =
     context
       .createDeviceProtectedStorageContext()
@@ -53,28 +66,10 @@ class AppSettings(private val context: Context) {
           lifecycle.poke()
         }
         "force-stop" -> forceStop(pkg)
-        "clear-cache" ->
-          observe { observer ->
-            pm.javaClass
-              .getMethod(
-                "deleteApplicationCacheFiles",
-                String::class.java,
-                IPackageDataObserver::class.java,
-              )
-              .invoke(pm, pkg, observer)
-          }
+        "clear-cache" -> observe { observer -> packages.deleteApplicationCacheFiles(pkg, observer) }
         "clear-data" ->
           observe { observer ->
-            val am = context.getSystemService(ActivityManager::class.java)
-            check(
-              am.javaClass
-                .getMethod(
-                  "clearApplicationUserData",
-                  String::class.java,
-                  IPackageDataObserver::class.java,
-                )
-                .invoke(am, pkg, observer) == true,
-            ) {
+            check(activities.clearApplicationUserData(pkg, false, observer, userId)) {
               "Clear data was refused"
             }
           }
@@ -84,14 +79,11 @@ class AppSettings(private val context: Context) {
           require(row != null && row.getBoolean("editable")) {
             "Permission is not a changeable runtime permission"
           }
-          pm.javaClass
-            .getMethod(
-              if (enabled) "grantRuntimePermission" else "revokeRuntimePermission",
-              String::class.java,
-              String::class.java,
-              android.os.UserHandle::class.java,
-            )
-            .invoke(pm, pkg, permission, user)
+          if (enabled) {
+            permissionService.grantRuntimePermission(pkg, permission, DEFAULT_DEVICE, userId)
+          } else {
+            permissionService.revokeRuntimePermission(pkg, permission, DEFAULT_DEVICE, userId, null)
+          }
         }
         else -> error("Unknown app action")
       }
@@ -105,8 +97,7 @@ class AppSettings(private val context: Context) {
   }
 
   private fun forceStop(pkg: String) {
-    val am = context.getSystemService(ActivityManager::class.java)
-    am.javaClass.getMethod("forceStopPackage", String::class.java).invoke(am, pkg)
+    activities.forceStopPackage(pkg, userId)
   }
 
   private fun observe(start: (IPackageDataObserver) -> Unit) {
@@ -131,15 +122,7 @@ class AppSettings(private val context: Context) {
           return@mapNotNull null
         }
       if (definition.protection != PermissionInfo.PROTECTION_DANGEROUS) return@mapNotNull null
-      val flags =
-        pm.javaClass
-          .getMethod(
-            "getPermissionFlags",
-            String::class.java,
-            String::class.java,
-            android.os.UserHandle::class.java,
-          )
-          .invoke(pm, permission, pkg, user) as Int
+      val flags = permissionService.getPermissionFlags(pkg, permission, DEFAULT_DEVICE, userId)
       val fixed = ((1 shl 4) or (1 shl 2)) // PackageManager: SYSTEM_FIXED | POLICY_FIXED (hidden)
       JSONObject()
         .put("name", permission)
@@ -163,5 +146,12 @@ class AppSettings(private val context: Context) {
         IntegrationFeature.instance?.lifecycle?.background?.allowed()?.contains(pkg) == true,
       )
       .put("permissions", JSONArray(permissions(pkg)))
+  }
+
+  private companion object {
+    /** UserHandle.PER_USER_RANGE (hidden). */
+    const val PER_USER_RANGE = 100_000
+    /** VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT (hidden): the device itself. */
+    const val DEFAULT_DEVICE = "default:0"
   }
 }

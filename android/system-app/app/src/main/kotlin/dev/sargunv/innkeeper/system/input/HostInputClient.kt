@@ -7,13 +7,13 @@ import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.SystemClock
+import android.os.SystemProperties
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import dev.sargunv.innkeeper.system.Feature
 import dev.sargunv.innkeeper.system.InnkeeperSystemApp
-import dev.sargunv.innkeeper.system.SystemProps
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 import dev.sargunv.innkeeper.system.bridge.Wire
@@ -326,7 +326,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
       TranslatorConfig(
         scrollPixelsPerUnit = Injector.scrollPixelsPerUnit(),
         keyChars = KeyChars(kcm::get),
-        windowShortcuts = SystemProps.getBoolean("persist.innkeeper.input.window_shortcuts", true),
+        windowShortcuts =
+          SystemProperties.getBoolean("persist.innkeeper.input.window_shortcuts", true),
       ),
       SystemClock::uptimeMillis,
       keepsCtrlW = ::isBrowserDisplay,

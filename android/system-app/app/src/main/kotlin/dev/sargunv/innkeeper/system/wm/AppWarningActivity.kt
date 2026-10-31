@@ -8,8 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Resources
-import android.os.Build
 import android.os.Bundle
+import android.os.SystemProperties
 import android.util.Log
 
 /**
@@ -55,13 +55,9 @@ class AppWarningActivity : Activity() {
       return if (id != 0) res.getString(id) else default
     }
 
-    // Build.VERSION.MIN_SUPPORTED_TARGET_SDK_INT is hidden.
+    // Build.VERSION.MIN_SUPPORTED_TARGET_SDK_INT (hidden) reads this property.
     private val minSupportedTargetSdk: Int by lazy {
-      try {
-        Build.VERSION::class.java.getField("MIN_SUPPORTED_TARGET_SDK_INT").getInt(null)
-      } catch (e: ReflectiveOperationException) {
-        28
-      }
+      SystemProperties.getInt("ro.build.version.min_supported_target_sdk", 0)
     }
 
     /** Starts the warning on [display] if [pkg] targets an SDK the platform warns about. */

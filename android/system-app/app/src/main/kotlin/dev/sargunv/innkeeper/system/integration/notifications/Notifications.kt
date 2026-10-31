@@ -2,6 +2,7 @@
 package dev.sargunv.innkeeper.system.integration.notifications
 
 import android.app.ActivityOptions
+import android.app.INotificationManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,6 +15,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.os.ServiceManager
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -60,14 +62,8 @@ class Notifications(
     val nm = context.getSystemService(NotificationManager::class.java)
     try {
       if (!nm.isNotificationListenerAccessGranted(component)) {
-        NotificationManager::class
-          .java
-          .getMethod(
-            "setNotificationListenerAccessGranted",
-            ComponentName::class.java,
-            Boolean::class.javaPrimitiveType,
-          )
-          .invoke(nm, component, true)
+        INotificationManager.Stub.asInterface(ServiceManager.getService("notification"))
+          .setNotificationListenerAccessGranted(component, true, true)
         Log.i(TAG, "notification listener access granted")
       }
     } catch (e: Exception) {

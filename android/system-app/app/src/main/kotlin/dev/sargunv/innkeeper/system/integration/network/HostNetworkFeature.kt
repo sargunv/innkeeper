@@ -118,9 +118,7 @@ class HostNetworkFeature(private val context: Context) : Feature {
   }
 
   private fun linkProperties(dns: List<InetAddress>): LinkProperties {
-    val props = LinkProperties()
-    LinkProperties::class.java.getMethod("setDnsServers", Collection::class.java).invoke(props, dns)
-    return props
+    return LinkProperties().apply { setDnsServers(dns) }
   }
 
   /** What a wired default network offers (NetworkCapabilities.Builder is a system API). */
