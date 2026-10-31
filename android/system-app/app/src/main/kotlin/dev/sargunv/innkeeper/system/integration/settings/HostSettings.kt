@@ -10,6 +10,7 @@ import android.icu.util.ULocale
 import android.os.LocaleList
 import android.provider.Settings
 import android.util.Log
+import com.android.internal.app.LocalePicker
 import dev.sargunv.innkeeper.system.bridge.Wire
 import java.nio.ByteBuffer
 import java.util.Locale
@@ -216,10 +217,7 @@ class HostSettings(private val context: Context) {
       Log.w(TAG, "locale preferences: $e")
     }
     if (list.toLanguageTags() == LocaleList.getDefault().toLanguageTags()) return
-    // com.android.internal.app.LocalePicker.updateLocales (CHANGE_CONFIGURATION).
-    Class.forName("com.android.internal.app.LocalePicker")
-      .getMethod("updateLocales", LocaleList::class.java)
-      .invoke(null, list)
+    LocalePicker.updateLocales(list) // CHANGE_CONFIGURATION
     Log.i(TAG, "locales -> ${list.toLanguageTags()}")
   }
 

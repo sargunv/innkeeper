@@ -39,11 +39,6 @@ class A11yFeature(private val context: Context) : Feature, BridgeConnection.List
     bridge.start()
   }
 
-  override fun stop() {
-    bridge.stop()
-    setActive(false)
-  }
-
   override fun onConnected() {
     val r = bridge.call(A11yWire.START) ?: return
     try {

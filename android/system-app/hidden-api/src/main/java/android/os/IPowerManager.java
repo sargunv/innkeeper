@@ -6,6 +6,7 @@ public interface IPowerManager extends IInterface {
   void addScreenTimeoutPolicyListener(int displayId, IScreenTimeoutPolicyListener listener) throws RemoteException;
   void removeScreenTimeoutPolicyListener(int displayId, IScreenTimeoutPolicyListener listener) throws RemoteException;
   void shutdown(boolean confirm, String reason, boolean wait) throws RemoteException;
+  boolean setPowerSaveModeEnabled(boolean mode) throws RemoteException;
   void goToSleepWithDisplayId(int displayId, long time, int reason, int flags) throws RemoteException;
   void wakeUpWithDisplayId(long time, int reason, String details, String packageName, int displayId)
       throws RemoteException;

@@ -41,8 +41,6 @@ class ImeFeature(private val context: Context) : Feature {
     }
   }
 
-  override fun stop() {}
-
   companion object {
     const val TAG = HostImeService.TAG
     private const val STOCK_PREFIX = "com.android.inputmethod.latin/"

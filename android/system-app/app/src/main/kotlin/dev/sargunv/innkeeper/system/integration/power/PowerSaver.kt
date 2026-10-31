@@ -2,7 +2,9 @@
 package dev.sargunv.innkeeper.system.integration.power
 
 import android.content.Context
+import android.os.IPowerManager
 import android.os.PowerManager
+import android.os.ServiceManager
 import android.util.Log
 
 /**
@@ -12,6 +14,7 @@ import android.util.Log
  */
 class PowerSaver(context: Context) {
   private val pm = context.getSystemService(PowerManager::class.java)
+  private val power by lazy { IPowerManager.Stub.asInterface(ServiceManager.getService("power")) }
   private var last: Boolean? = null
 
   fun reset() {
@@ -23,12 +26,8 @@ class PowerSaver(context: Context) {
     last = on
     if (pm.isPowerSaveMode == on) return
     try {
-      // PowerManager.setPowerSaveModeEnabled, a system API (DEVICE_POWER).
-      val ok =
-        PowerManager::class
-          .java
-          .getMethod("setPowerSaveModeEnabled", Boolean::class.javaPrimitiveType)
-          .invoke(pm, on) as Boolean
+      // DEVICE_POWER.
+      val ok = power.setPowerSaveModeEnabled(on)
       Log.i(TAG, "battery saver -> $on${if (ok) "" else " (refused)"}")
     } catch (e: Exception) {
       Log.w(TAG, "battery saver: $e")

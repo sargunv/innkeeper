@@ -76,7 +76,7 @@
   <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" />
   <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
   <uses-permission android:name="android.permission.DEVICE_POWER" />
-  <!-- Flatpak mode: the host's network as Android's (net/HostNetworkFeature.kt). -->
+  <!-- Flatpak mode: the host's network as Android's (integration/network/HostNetworkFeature.kt). -->
   <uses-permission android:name="android.permission.NETWORK_FACTORY" />
 
   <!-- Who may drive the window manager's ControlReceiver; root (the host side, through

@@ -51,7 +51,6 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     instance = this
     notifications.start()
     clipboard.start()
-    media.start()
     playback.start()
     lifecycle.start()
     // A media notification shows on the desktop only while its app has no window.
@@ -80,17 +79,6 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
         }
       }
     }
-
-  override fun stop() {
-    context.unregisterReceiver(packages)
-    connection.stop()
-    lifecycle.stop()
-    playback.stop()
-    media.stop()
-    clipboard.stop()
-    instance = null
-    thread.quitSafely()
-  }
 
   // The settings and the host clipboard come as events while START is handled, so the reset goes
   // first. START can take a while: the bridge starts each desktop service it needs.

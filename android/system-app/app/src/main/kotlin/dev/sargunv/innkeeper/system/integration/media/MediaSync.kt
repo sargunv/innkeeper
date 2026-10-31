@@ -56,13 +56,6 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
     update(list.orEmpty())
   }
 
-  fun start() {}
-
-  fun stop() {
-    if (listening) msm.removeOnActiveSessionsChangedListener(sessionsListener)
-    listening = false
-  }
-
   /** The notification listener is enabled: we may now watch other apps' sessions. */
   fun onListenerConnected() {
     feature.handler.post {

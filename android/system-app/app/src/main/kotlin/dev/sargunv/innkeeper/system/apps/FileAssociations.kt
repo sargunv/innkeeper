@@ -2,21 +2,21 @@
 package dev.sargunv.innkeeper.system.apps
 
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.IPackageManager
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.ServiceManager
 
 /** Exported VIEW filters that can receive the content URIs supplied by the desktop. */
 object FileAssociations {
   fun mimeTypes(pm: PackageManager, pkg: String): List<String> {
     // @SystemApi: queryIntentActivities deduplicates activities, returning only one filter
     // per activity. Enumerate candidates first, then resolve each type to check visibility.
-    @Suppress("UNCHECKED_CAST")
     val filters =
-      PackageManager::class
-        .java
-        .getMethod("getAllIntentFilters", String::class.java)
-        .invoke(pm, pkg) as List<IntentFilter>
+      IPackageManager.Stub.asInterface(ServiceManager.getService("package"))
+        .getAllIntentFilters(pkg)
+        .list
+        .orEmpty()
     val types =
       fileMimeTypes(
         filters

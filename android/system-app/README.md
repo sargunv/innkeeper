@@ -70,8 +70,8 @@ battery goes to the Health HAL,
   off for the session.
 - **Power saver:** the desktop's power-saver profile is Android's battery saver
   (`setPowerSaveModeEnabled`), applied at each connect and change.
-- **Metered:** applied only in Flatpak mode, to `net/HostNetworkFeature.kt`'s
-  network agent.
+- **Metered:** applied only in Flatpak mode, to
+  `integration/network/HostNetworkFeature.kt`'s network agent.
 
 Known limits: `gps` fixes carry `isMock`, which a few apps reject; a GNSS AIDL
 HAL would remove that.

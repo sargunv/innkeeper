@@ -5,9 +5,11 @@ import android.content.Context
 import android.graphics.Point
 import android.graphics.PointF
 import android.hardware.display.DisplayManager
+import android.hardware.input.IInputManager
 import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.ServiceManager
 import android.os.SystemClock
 import android.view.Display
 import android.view.InputDevice
@@ -23,14 +25,7 @@ class VirtualInput(
   private val dm = context.getSystemService(DisplayManager::class.java)
   private val thread = HandlerThread("InnkeeperEvdev").apply { start() }
   private val handler = Handler(thread.looper)
-  private val association =
-    im.javaClass.getMethod("addUniqueIdAssociationByPort", String::class.java, String::class.java)
-  private val scaling =
-    im.javaClass.getMethod(
-      "setMouseScalingEnabled",
-      Boolean::class.javaPrimitiveType,
-      Int::class.javaPrimitiveType,
-    )
+  private val inputService = IInputManager.Stub.asInterface(ServiceManager.getService("input"))
   private val position = im.javaClass.getMethod("getCursorPosition", Int::class.javaPrimitiveType)
   private val displayId = InputDevice::class.java.getMethod("getAssociatedDisplayId")
   private var capture: Boolean? = null
@@ -144,9 +139,8 @@ class VirtualInput(
       val mouse =
         mice.getOrPut(id) {
           Mouse(id).also {
-            scaling.invoke(im, false, id)
-            association.invoke(
-              im,
+            inputService.setMouseScalingEnabled(false, id)
+            inputService.addUniqueIdAssociationByPort(
               it.port,
               Display::class.java.getMethod("getUniqueId").invoke(display) as String,
             )
@@ -168,9 +162,7 @@ class VirtualInput(
     }
     mice.remove(id)?.let { mouse ->
       removals.add(mouse.device)
-      im.javaClass
-        .getMethod("removeUniqueIdAssociationByPort", String::class.java)
-        .invoke(im, mouse.port)
+      inputService.removeUniqueIdAssociationByPort(mouse.port)
     }
     flushRemovals()
     drain()

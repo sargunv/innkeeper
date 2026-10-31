@@ -32,11 +32,6 @@ class AlarmTickFeature(context: Context) : Feature {
     schedule()
   }
 
-  override fun stop() {
-    alarms.cancel(tick)
-    thread.quitSafely()
-  }
-
   private fun schedule() {
     // 30 s, plus a 30 s window (AlarmManager's minimum for us is 75% of the delay).
     alarms.setWindow(

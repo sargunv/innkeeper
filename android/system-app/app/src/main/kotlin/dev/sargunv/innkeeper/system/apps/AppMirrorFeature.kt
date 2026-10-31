@@ -9,9 +9,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemProperties
 import android.util.Log
 import dev.sargunv.innkeeper.system.Feature
-import dev.sargunv.innkeeper.system.SystemProps
 import dev.sargunv.innkeeper.system.bridge.Blob
 import dev.sargunv.innkeeper.system.bridge.BridgeConnection
 import dev.sargunv.innkeeper.system.wm.LaunchPolicy
@@ -105,13 +105,6 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
     channel.start()
   }
 
-  override fun stop() {
-    channel.stop()
-    context.unregisterReceiver(receiver)
-    context.unregisterReceiver(bootReceiver)
-    thread.quitSafely()
-  }
-
   private fun onConnected() {
     handler.post {
       // Replay after a late process start or reconnect; channel presence alone precedes boot.
@@ -129,7 +122,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
   }
 
   private fun reportBootCompleted() {
-    if (SystemProps.get("sys.boot_completed") == "1") channel.send(BOOT_COMPLETED)
+    if (SystemProperties.get("sys.boot_completed") == "1") channel.send(BOOT_COMPLETED)
   }
 
   private fun app(pkg: String): ApplicationInfo? {

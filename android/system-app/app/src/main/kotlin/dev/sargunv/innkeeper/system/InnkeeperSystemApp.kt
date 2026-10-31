@@ -11,7 +11,7 @@ import dev.sargunv.innkeeper.system.ime.ImeFeature
 import dev.sargunv.innkeeper.system.input.HostInputClient
 import dev.sargunv.innkeeper.system.integration.HostStateFeature
 import dev.sargunv.innkeeper.system.integration.IntegrationFeature
-import dev.sargunv.innkeeper.system.net.HostNetworkFeature
+import dev.sargunv.innkeeper.system.integration.network.HostNetworkFeature
 import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
 
 /**
@@ -42,6 +42,7 @@ class InnkeeperSystemApp : Application() {
     super.onCreate()
     Log.i(TAG, "starting")
     val wm = WindowManagerFeature(this, input)
+    val network = HostNetworkFeature(this)
     for (f in
       listOf(
         input,
@@ -49,8 +50,8 @@ class InnkeeperSystemApp : Application() {
         ImeFeature(this),
         IntegrationFeature(this, wm),
         AppMirrorFeature(this, appSettings),
-        HostNetworkFeature(this),
-        HostStateFeature(this),
+        network,
+        HostStateFeature(this, network),
         a11y,
         AlarmTickFeature(this),
       )) {

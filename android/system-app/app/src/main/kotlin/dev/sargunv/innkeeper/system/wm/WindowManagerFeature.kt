@@ -19,12 +19,12 @@ import android.os.HandlerThread
 import android.os.IPowerManager
 import android.os.ServiceManager
 import android.os.SystemClock
+import android.os.SystemProperties
 import android.provider.Settings
 import android.util.Log
 import android.view.WindowInsets
 import android.view.WindowManagerGlobal
 import dev.sargunv.innkeeper.system.Feature
-import dev.sargunv.innkeeper.system.SystemProps
 import dev.sargunv.innkeeper.system.apps.AppIcons
 import dev.sargunv.innkeeper.system.bridge.Wire
 import dev.sargunv.innkeeper.system.input.HostEvent
@@ -77,7 +77,7 @@ class WindowManagerFeature(
    * Phone mode (innkeeper-session's vendor.innkeeper.mode): display 0, with SystemUI and the
    * launcher, in one window; apps start there instead of in windows of their own.
    */
-  private val phone = SystemProps.get("vendor.innkeeper.mode") == "phone"
+  private val phone = SystemProperties.get("vendor.innkeeper.mode") == "phone"
   /** Phone mode: the bridge shows display 0's window. */
   private var phoneMapped = false
   /** Phone mode: display 0's rotation, as its window shows it. */
@@ -185,7 +185,7 @@ class WindowManagerFeature(
     atm.registerTaskStackListener(taskListener)
     // AppWarnings shows these on the default display, which has no window; AppWarningActivity
     // shows the same warning in the app's own window instead.
-    SystemProps.set("debug.wm.disable_deprecated_target_sdk_dialog", "true")
+    runCatching { SystemProperties.set("debug.wm.disable_deprecated_target_sdk_dialog", "true") }
     // Our empty HOME is for windowed profiles; a phone's is its launcher.
     context.packageManager.setComponentEnabledSetting(
       ComponentName(context, HomeActivity::class.java),
@@ -196,13 +196,6 @@ class WindowManagerFeature(
     Log.i(TAG, "window manager started${if (phone) " (phone)" else ""}")
     if (phone) dm.registerDisplayListener(phoneDisplays, handler)
     handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
-  }
-
-  override fun stop() {
-    atm.unregisterTaskStackListener(taskListener)
-    onWm { windows.values.toList().forEach { close(it, finishTasks = false) } }
-    thread.quitSafely()
-    frames.quitSafely()
   }
 
   // ---- control API (ControlReceiver) ---------------------------------------
@@ -276,7 +269,7 @@ class WindowManagerFeature(
       DEFAULT_DISPLAY,
       mode.physicalWidth,
       mode.physicalHeight,
-      SystemProps.getInt("ro.sf.lcd_density", BASE_DPI),
+      SystemProperties.getInt("ro.sf.lcd_density", BASE_DPI),
       0,
       0,
       APP_ID_PREFIX + PHONE_PACKAGE,
@@ -304,7 +297,7 @@ class WindowManagerFeature(
         PHONE_TITLE,
         mode.physicalWidth,
         mode.physicalHeight,
-        SystemProps.getInt("ro.sf.lcd_density", BASE_DPI),
+        SystemProperties.getInt("ro.sf.lcd_density", BASE_DPI),
         tasks.map { it.taskId },
         true,
         emptyMap(),
