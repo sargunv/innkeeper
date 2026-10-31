@@ -9,14 +9,12 @@ pub const INTERFACE: &str = "dev.sargunv.Innkeeper.Session1";
 pub const PATH: &str = "/dev/sargunv/Innkeeper/Session";
 pub const MAX_JSON: usize = 64 * 1024;
 
-pub fn bus_name(profile: &str) -> String {
-    let base = "dev.sargunv.Innkeeper.Session";
-    // `.p_<name>` is the session bus name. Hyphens become underscores.
-    if profile.is_empty() {
-        base.into()
-    } else {
-        format!("{base}.p_{}", profile.replace('-', "_"))
-    }
+/// The session's bus name: `.p_<name>`, with hyphens as underscores.
+pub fn bus_name(profile: &crate::paths::ProfileName) -> String {
+    format!(
+        "dev.sargunv.Innkeeper.Session.p_{}",
+        profile.replace('-', "_")
+    )
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,9 +180,8 @@ mod tests {
         }
         assert!(Response::decode(br#"{"error":"","info":null}"#).is_err());
         assert!(Response::decode(&vec![b' '; MAX_JSON + 1]).is_err());
-        assert_eq!(bus_name(""), "dev.sargunv.Innkeeper.Session");
         assert_eq!(
-            bus_name("page-test"),
+            bus_name(&crate::paths::ProfileName::new("page-test").unwrap()),
             "dev.sargunv.Innkeeper.Session.p_page_test"
         );
     }

@@ -153,7 +153,7 @@ fn real_main() -> Result<ExitCode> {
     }
     let out = repo
         .join("out/test/compat")
-        .join(innkeeper_core::paths::profile()?);
+        .join(innkeeper_core::paths::profile()?.as_str());
     let apk_dir = env::var_os("INNKEEPER_CORPUS")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| repo.join("out/test/compat/corpus"));

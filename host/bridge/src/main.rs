@@ -47,6 +47,7 @@ fn main() -> Result<()> {
     }
     let desktop = !test_session;
     let run_dir = run_dir.context("--run-dir is required")?;
+    let profile = innkeeper_core::paths::profile()?;
     let state_dir = state_dir.context("--state-dir is required")?;
     let socket = run_dir.join("bridge/bridge.sock");
     // A report from before a restart is stale; the system app sends a new one.
@@ -66,7 +67,7 @@ fn main() -> Result<()> {
     )?);
     innkeeper_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"));
     // Not in the socket directory, which is shared with Android.
-    let shared = Shared::new(&run_dir, desktop, hub.clone());
+    let shared = Shared::new(&run_dir, desktop, hub.clone(), &profile);
     // The system app names the playing app; each audio connection applies
     // that name to the playback streams it has open and the next one it opens.
     let audio_shared = shared.clone();
@@ -154,7 +155,10 @@ fn main() -> Result<()> {
     // Apps installed inside Android get desktop entries, except in a test
     // session.
     let session_api = innkeeper_bridge::apps::session::Relay::default();
-    let apps = Arc::new(innkeeper_bridge::apps::Config::from_env(desktop));
+    let apps = Arc::new(innkeeper_bridge::apps::Config::from_env(
+        desktop,
+        profile.clone(),
+    ));
     let _session_bus = match session_api.serve(for_preferences, apps.clone(), session_hub) {
         Ok(bus) => Some(bus),
         Err(e) => {

@@ -9,42 +9,36 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::profile::ProfileName;
 use crate::sys;
 
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.sargunv.Innkeeper";
 
 /// The profile [`select`]ed in this process, if any.
-static SELECTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static SELECTED: std::sync::Mutex<Option<ProfileName>> = std::sync::Mutex::new(None);
 
 /// Selects profile `name` for this process, over `INNKEEPER_PROFILE` (the
 /// manager switches profiles so). Launchers it runs get it in their
 /// environment.
 pub fn select(name: &str) -> Result<()> {
-    crate::profile::check_name(name)?;
-    *SELECTED.lock().unwrap() = Some(name.into());
+    *SELECTED.lock().unwrap() = Some(ProfileName::new(name)?);
     Ok(())
 }
 
 /// The profile this process works with: the one [`select`]ed, else
 /// `INNKEEPER_PROFILE`, which must name one.
-pub fn profile() -> Result<String> {
+pub fn profile() -> Result<ProfileName> {
     if let Some(s) = SELECTED.lock().unwrap().clone() {
         return Ok(s);
     }
-    let name = env::var("INNKEEPER_PROFILE").unwrap_or_default();
-    crate::profile::check_name(&name).context("INNKEEPER_PROFILE")?;
-    Ok(name)
+    ProfileName::new(&env::var("INNKEEPER_PROFILE").unwrap_or_default())
+        .context("INNKEEPER_PROFILE")
 }
 
-/// `name`, suffixed with `-<profile>` for a named profile: the session's
-/// directories are named this way.
-pub fn per_profile(name: &str, profile: &str) -> String {
-    if profile.is_empty() {
-        name.into()
-    } else {
-        format!("{name}-{profile}")
-    }
+/// `name-<profile>`: the session's directories are named this way.
+pub fn per_profile(name: &str, profile: &ProfileName) -> String {
+    format!("{name}-{profile}")
 }
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
@@ -73,27 +67,27 @@ fn env_path(var: &str) -> Option<PathBuf> {
 /// A session's paths. Every per-profile one carries the profile suffix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paths {
-    /// Empty for the main session. Serialized as `profile` in session.conf.
-    pub profile: String,
+    /// Serialized as `profile` in session.conf.
+    pub profile: ProfileName,
     /// `<prefix>/libexec/innkeeper`: pivot-exec, the bridge, the image scripts.
     pub libexec: PathBuf,
     /// `<prefix>/share/innkeeper`: the Android tree, the image config.
     pub share: PathBuf,
-    /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper[-<profile>]`, which every
+    /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>`, which every
     /// instance of the app shares: session.conf, pid
     /// files, the kmsg FIFO, the bridge's socket dir, the start-time layer.
     pub run: PathBuf,
-    /// `$XDG_STATE_HOME/innkeeper[-<profile>]`: logs, the documents grants.
+    /// `$XDG_STATE_HOME/innkeeper-<profile>`: logs, the documents grants.
     pub state: PathBuf,
     /// `$XDG_DATA_HOME/innkeeper`.
     pub data_home: PathBuf,
-    /// Android's `/data` (`INNKEEPER_DATA`, default `data[-<profile>]`).
+    /// Android's `/data` (`INNKEEPER_DATA`, default `data-<profile>`).
     pub data: PathBuf,
     /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
     /// The image pin (`INNKEEPER_PIN`, default the prefix's).
     pub pin: PathBuf,
-    /// The composed root: `root[-<profile>]`.
+    /// The composed root: `root-<profile>`.
     pub root: PathBuf,
 }
 
@@ -112,8 +106,7 @@ impl Paths {
                 prefix.display()
             );
         }
-        crate::profile::check_name(name)?;
-        let profile = name.to_string();
+        let profile = ProfileName::new(name)?;
         // INNKEEPER_DATA is the environment's own profile's.
         let data_env =
             env_path("INNKEEPER_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));

@@ -151,6 +151,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile::ProfileName;
 
     fn config(profile: &str) -> Config {
         let dir = PathBuf::from("/nonexistent");
@@ -165,7 +166,7 @@ mod tests {
             bridge_args: vec![],
             bridge_env: BTreeMap::new(),
             paths: Paths {
-                profile: profile.into(),
+                profile: ProfileName::new(profile).unwrap(),
                 libexec: dir.clone(),
                 share: dir.clone(),
                 run: dir.clone(),

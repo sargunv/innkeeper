@@ -53,21 +53,17 @@ impl Prefix {
 /// The profile this process works with ([`innkeeper_session::paths::select`]
 /// or `INNKEEPER_PROFILE`), else an error.
 pub use innkeeper_session::paths::{profile, select};
+pub use innkeeper_session::profile::ProfileName;
 
 /// An XDG base directory: `$var` if it is absolute, else `default` under
 /// `$HOME`.
 pub use innkeeper_session::paths::xdg_home;
 
 /// The argv that runs `program` (a command line, such as `innkeeper`)
-/// against session `profile`: prefixed with `env INNKEEPER_PROFILE=<profile>`
-/// for a named profile, so a desktop entry reaches the session it was made
-/// for.
-pub fn command(program: &[String], profile: &str) -> Vec<String> {
-    let mut v = vec![];
-    if !profile.is_empty() {
-        v.push("env".into());
-        v.push(format!("INNKEEPER_PROFILE={profile}"));
-    }
+/// against session `profile`: prefixed with `env INNKEEPER_PROFILE=<profile>`,
+/// so a desktop entry reaches the session it was made for.
+pub fn command(program: &[String], profile: &ProfileName) -> Vec<String> {
+    let mut v = vec!["env".into(), format!("INNKEEPER_PROFILE={profile}")];
     v.extend_from_slice(program);
     v
 }
@@ -75,8 +71,8 @@ pub fn command(program: &[String], profile: &str) -> Vec<String> {
 /// A [`command`] argv read back (from a desktop entry's `Exec`).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Invocation<'a> {
-    /// The profile it runs against, empty for the main session.
-    pub profile: &'a str,
+    /// The profile it runs against, if it names one.
+    pub profile: Option<&'a str>,
     /// The program, the first word after the environment.
     pub program: Option<&'a str>,
 }
@@ -90,8 +86,7 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
     Invocation {
         profile: env
             .iter()
-            .find_map(|w| w.strip_prefix("INNKEEPER_PROFILE="))
-            .unwrap_or_default(),
+            .find_map(|w| w.strip_prefix("INNKEEPER_PROFILE=")),
         program: argv.get(env_len).map(String::as_str),
     }
 }
@@ -112,15 +107,13 @@ mod tests {
 
     #[test]
     fn commands_read_back() {
-        let named = command(&argv("/x/innkeeper"), "cli");
+        let named = command(&argv("/x/innkeeper"), &ProfileName::new("cli").unwrap());
         assert_eq!(named.join(" "), "env INNKEEPER_PROFILE=cli /x/innkeeper");
         let i = invocation(&named);
-        assert_eq!((i.profile, i.program), ("cli", Some("/x/innkeeper")));
-        let main = command(&argv("/x/innkeeper"), "");
-        assert_eq!(invocation(&main).profile, "");
+        assert_eq!((i.profile, i.program), (Some("cli"), Some("/x/innkeeper")));
         // Only the environment `env` sets counts.
         let args = argv("innkeeper run INNKEEPER_PROFILE=x");
         let i = invocation(&args);
-        assert_eq!((i.profile, i.program), ("", Some("innkeeper")));
+        assert_eq!((i.profile, i.program), (None, Some("innkeeper")));
     }
 }

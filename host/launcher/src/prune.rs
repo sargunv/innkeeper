@@ -245,7 +245,7 @@ mod tests {
         let base = base.canonicalize()?;
         let images = base.join("images");
         let paths = Paths {
-            profile: "prune-test".into(),
+            profile: crate::profile::ProfileName::new("prune-test").unwrap(),
             libexec: base.join("libexec"),
             share: base.join("share"),
             run: base.join("runtime/innkeeper-prune-test"),

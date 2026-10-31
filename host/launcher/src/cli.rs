@@ -63,7 +63,7 @@ Environment:
                            from the desktop.
 Tests only:
   INNKEEPER_DATA            Android's /data (default
-                           $XDG_DATA_HOME/innkeeper/data[-<profile>])
+                           $XDG_DATA_HOME/innkeeper/data-<profile>)
   INNKEEPER_IMAGES, INNKEEPER_PIN  the image cache and the pin
 Debugging:
   INNKEEPER_BRIDGE_VERBOSE=1  per-stream stats in bridge.log

@@ -235,7 +235,9 @@ impl Window {
         menu.append_section(None, &section);
         let title = adw::WindowTitle::new(
             "Innkeeper",
-            &innkeeper_core::paths::profile().unwrap_or_default(),
+            innkeeper_core::paths::profile()
+                .as_deref()
+                .unwrap_or_default(),
         );
         let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_start(
@@ -502,9 +504,12 @@ impl Window {
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let apps =
-                worker::run_quiet(|| ops::installed_apps(ops::android_packages().as_deref())).await;
-            w.show_apps(apps);
+            match worker::run_quiet(|| ops::installed_apps(ops::android_packages().as_deref()))
+                .await
+            {
+                Ok(apps) => w.show_apps(apps),
+                Err(e) => eprintln!("innkeeper-manager: {e:#}"),
+            }
         });
     }
 
@@ -738,9 +743,10 @@ impl Window {
     fn watch_session(&self) {
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
-            let name = innkeeper_core::app_settings::bus_name(
-                &innkeeper_core::paths::profile().unwrap_or_default(),
-            );
+            let Ok(profile) = innkeeper_core::paths::profile() else {
+                return;
+            };
+            let name = innkeeper_core::app_settings::bus_name(&profile);
             let proxy = gio::DBusProxy::for_bus_future(
                 gio::BusType::Session,
                 gio::DBusProxyFlags::DO_NOT_AUTO_START

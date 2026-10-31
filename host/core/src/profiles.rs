@@ -26,7 +26,7 @@ fn paths(name: &str) -> Result<innkeeper_session::Paths> {
 }
 
 /// The profiles' names.
-fn names() -> Vec<String> {
+fn names() -> Vec<crate::paths::ProfileName> {
     let mut v = profile::list(&innkeeper_session::paths::data_home());
     // One whose data lives elsewhere (`INNKEEPER_DATA`) is still one.
     if let Ok(p) = crate::paths::profile()
@@ -47,7 +47,7 @@ pub fn list() -> Result<Vec<Profile>> {
             Ok(Profile {
                 running: innkeeper_session::status(&p).pid.is_some(),
                 settings: Settings::load(&p.data).unwrap_or_default(),
-                name,
+                name: name.into(),
             })
         })
         .collect()
@@ -58,7 +58,7 @@ pub fn list() -> Result<Vec<Profile>> {
 /// [`FIRST`].
 pub fn resolve(create: bool) -> Result<String> {
     match crate::paths::profile() {
-        Ok(p) => Ok(p),
+        Ok(p) => Ok(p.into()),
         Err(_) => fallback(create),
     }
 }
@@ -68,7 +68,7 @@ pub fn fallback(create: bool) -> Result<String> {
     let names = profile::list(&innkeeper_session::paths::data_home());
     let chosen = fs::read_to_string(profile::chosen_file()).ok();
     if let Some(p) = profile::pick(&names, chosen.as_deref().map(str::trim)) {
-        return Ok(p.clone());
+        return Ok(p.to_string());
     }
     if !create {
         bail!("there are no profiles yet");
@@ -132,7 +132,7 @@ pub fn delete(name: &str) -> Result<()> {
     profile::delete(&p)?;
     let d = Dirs::from_env();
     for app in xdg::desktop_apps(&d) {
-        if app.profile == name {
+        if app.profile.as_deref() == Some(name) {
             xdg::remove_app(&d, &app.package);
         }
     }

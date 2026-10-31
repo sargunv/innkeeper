@@ -22,7 +22,7 @@ use crate::proc;
 pub struct Session {
     launcher: PathBuf,
     /// The profile it runs, if not the environment's.
-    profile: Option<String>,
+    profile: Option<crate::paths::ProfileName>,
 }
 
 /// Lines of session stderr worth keeping (the session's linker warns there).
@@ -56,9 +56,8 @@ impl Session {
 
     /// The session of profile `name` of this program's prefix.
     pub fn of_profile(name: &str) -> Result<Self> {
-        innkeeper_session::profile::check_name(name)?;
         Ok(Self {
-            profile: Some(name.into()),
+            profile: Some(crate::paths::ProfileName::new(name)?),
             ..Self::find()?
         })
     }
@@ -67,7 +66,7 @@ impl Session {
     fn command(&self) -> Command {
         let mut c = Command::new(&self.launcher);
         if let Some(p) = self.profile.clone().or(crate::paths::profile().ok()) {
-            c.env("INNKEEPER_PROFILE", p);
+            c.env("INNKEEPER_PROFILE", p.as_str());
         }
         c
     }
