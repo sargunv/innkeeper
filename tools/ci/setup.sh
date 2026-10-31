@@ -12,7 +12,7 @@ sudo apt-get update -qq
 case $mode in
   build)
     sudo apt-get install -y --no-install-recommends \
-      clang ccache pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev \
+      clang pkg-config libgtk-4-dev libadwaita-1-dev libpulse-dev libxkbcommon-dev \
       podman uidmap passt
     {
       echo "CARGO_BUILD_JOBS=4"
@@ -21,10 +21,11 @@ case $mode in
       echo "CARGO_PROFILE_TEST_DEBUG=0"
       echo "CARGO_INCREMENTAL=0"
       echo "CMAKE_BUILD_PARALLEL_LEVEL=4"
-      echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
-      echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
-      echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
-      echo "CCACHE_MAXSIZE=500M"
+      # sccache comes from mise and the CMake presets; git worktree list in
+      # tools/build/sccache.sh makes the workspace its one base dir.
+      echo "SCCACHE_CACHE_SIZE=500M"
+      # out/cargo is cached whole; wrapping rustc would copy it into the cap.
+      echo "RUSTC_WRAPPER="
     } >>"$GITHUB_ENV"
     ;;
   runtime) ;;

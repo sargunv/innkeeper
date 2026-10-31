@@ -50,14 +50,14 @@ runs:
           ~/.cargo/registry
           ~/.cargo/git
           out/cargo
-          ~/.cache/ccache
+          ~/.cache/innkeeper/sccache
         key:
-          compile-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{
+          compile-v3-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{
           hashFiles('mise.lock', 'Cargo.lock', 'tools/build/toolchain.env')
           }}-${{ hashFiles('**/*.rs', '**/Cargo.toml', '.cargo/**', '**/*.c',
           '**/*.cpp', '**/*.h', '**/CMakeLists.txt', 'CMakePresets.json') }}
         restore-keys: |
-          compile-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('mise.lock', 'Cargo.lock', 'tools/build/toolchain.env') }}-
+          compile-v3-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('mise.lock', 'Cargo.lock', 'tools/build/toolchain.env') }}-
     - uses: actions/cache@v4
       if: inputs.mode == 'build'
       with:

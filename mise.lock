@@ -95,3 +95,13 @@ specifiers = ["1.99.1"]
 components = "clippy,rustfmt"
 profile = "minimal"
 targets = "x86_64-linux-android,x86_64-unknown-linux-musl"
+
+[[tools.sccache]]
+version = "0.19.0"
+backend = "aqua:mozilla/sccache"
+specifiers = ["0.19.0"]
+
+[tools.sccache."platforms.linux-x64"]
+checksum = "sha256:aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd"
+url = "https://github.com/mozilla/sccache/releases/download/v0.19.0/sccache-v0.19.0-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/mozilla/sccache/releases/assets/671951070"

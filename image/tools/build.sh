@@ -53,6 +53,8 @@ for s in "${sources[@]}"; do
   rm "$tarball"
 done
 
+# sccache (tools/build/sccache.sh) wraps the compilers of every build below.
+export CC="sccache gcc" CXX="sccache g++"
 make -C "$src/lz4-1.10.0/lib" -j"$JOBS" -s install PREFIX="$deps" BUILD_SHARED=no
 
 (cd "$src/erofs-utils-1.9.4" && { [[ -x configure ]] || ./autogen.sh >/dev/null; })
@@ -72,7 +74,8 @@ mkdir -p "$build/e2fsprogs"
   make -j"$JOBS" -s libs >/dev/null && make -j"$JOBS" -s -C debugfs debugfs >/dev/null)
 install -m 755 -s "$build/e2fsprogs/debugfs/debugfs" "$bin/"
 
-cmake -S "$src/android-tools-37.0.0p1" -B "$build/android-tools" -G Ninja \
+env -u CC -u CXX cmake -S "$src/android-tools-37.0.0p1" -B "$build/android-tools" -G Ninja \
+  -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
   -DCMAKE_BUILD_TYPE=Release -DANDROID_TOOLS_USE_BUNDLED_FMT=ON \
   -DCMAKE_EXE_LINKER_FLAGS=-static >/dev/null
 ninja -C "$build/android-tools" -j "$JOBS" simg2img lpunpack >/dev/null
