@@ -91,7 +91,7 @@ kernel's errors and side effects) and records the owner as
 - the broker's emulated `lstat` and `faccessat(W_OK)` for `/data`, the BPF pins,
   `/metadata` and clatd (a file without a record inherits its closest recorded
   ancestor's owner, so ART sees an app's APK as not writable by it);
-- the shim's `stat` family in installd (`INNKEEPER_VSTAT=1` in its rc);
+- the shim's `stat` family in installd;
 - `image/derive.sh single`, which writes the same xattr on image files whose
   owner Android verifies.
 
@@ -106,28 +106,30 @@ into no-ops. It also makes priority and rlimit changes best-effort, treats
 vold's refused quota-project ioctl as success, skips POSIX ACL xattrs, and
 serves the staged `/proc/config.gz`.
 
+Services that need the shim preload it from their override stanzas in
+[innkeeper-services.rc](../android/overlay/system_ext/etc/init/innkeeper-services.rc),
+which also set `INNKEEPER_SHIM_ROLE` to the service's name for the workarounds
+below that only one service gets. Init isn't pid 1 in the sandbox, so pivot-exec
+gives it the role `init`.
+
 The Flatpak sandbox's own seccomp filter refuses some calls before ours sees
 them, so the shim covers them where it is loaded: `mount`, `umount`, `unshare`,
 `setns` and namespaced `clone` succeed as no-ops; `socket(AF_KEY)` (which the
 connectivity stack only opens and closes) gets an eventfd; netd's refused
-rtnetlink requests read as done (`INNKEEPER_NETLINK_ACCEPT`); vold's uevent
-socket binds to a kernel-chosen port (concurrent sessions share the host's
-network, so their pid-numbered ports collide); and lmkd's PSI trigger windows
-are widened to 2 s (`INNKEEPER_PSI_WINDOW`). Init isn't pid 1 in the sandbox, so
-pivot-exec marks it with `INNKEEPER_SHIM_INIT`.
+rtnetlink requests read as done; vold's uevent socket binds to a kernel-chosen
+port (concurrent sessions share the host's network, so their pid-numbered ports
+collide); and lmkd's PSI trigger windows are widened to 2 s.
 
-lmkd also opts into `INNKEEPER_OOM_ADJ`: its writes to
-`/proc/<pid>/oom_score_adj` map Android's -1000…1000 range into the inherited
-session score…1000 (with a minimum floor of 0). The kernel lets an unprivileged
-process lower a score back to that floor, so a cached app returning to the
-foreground regains its relative protection. lmkd keeps the original Android
-scores for its own kill policy.
+lmkd's writes to `/proc/<pid>/oom_score_adj` map Android's -1000…1000 range into
+the inherited session score…1000 (with a minimum floor of 0). The kernel lets an
+unprivileged process lower a score back to that floor, so a cached app returning
+to the foreground regains its relative protection. lmkd keeps the original
+Android scores for its own kill policy.
 
 Android 17 mounts every visible emulated volume through FUSE, but Flatpak has no
-`/dev/fuse` and cannot mount filesystems. For vold only
-(`INNKEEPER_EMULATED_STORAGE=1`), `shim/fuse.h` provides a socket with the
-stable FUSE INIT request so MediaProvider starts its storage session. The
-launcher links `/storage/emulated`, `/mnt/user/0/emulated` and
+`/dev/fuse` and cannot mount filesystems. For vold only, `shim/fuse.h` provides
+a socket with the stable FUSE INIT request so MediaProvider starts its storage
+session. The launcher links `/storage/emulated`, `/mnt/user/0/emulated` and
 `/mnt/pass_through/0/emulated` to `/data/media`. All file access uses that same
 filesystem, with no FUSE cache or filesystem requests. MediaProvider receives
 the mounted-volume notification, scans the volume and serves MediaStore; apps

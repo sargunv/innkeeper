@@ -13,18 +13,19 @@ are guarded by the upstream base hashes in
 [image/fork-bases.sha256](../../image/fork-bases.sha256): `prepare` fails and
 prints image-to-overlay diffs if the image's copies change. Port those changes
 before refreshing hashes when the pin moves
-([image/README.md](../../image/README.md#bumping-the-pin)).
+([image/README.md](../../image/README.md#bumping-the-pin)). Services are not
+forked: `system_ext/etc/init/innkeeper-services.rc` replaces the definitions of
+servicemanager, vold, installd, netd, netd1shot, zygote and lmkd with `override`
+stanzas (the shim and its role, a no-op netd self test); `fork-bases.sha256`
+guards their source files too.
 
-| File                                                | Why                                                                                                                                            |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system/etc/init/hw/init.rc`                        | no ueventd (`ro.cold_boot_done` set directly), `sys.use_memfd` (no ashmem), the flattened `/apex` bind instead of apexd-bootstrap, no binderfs |
-| `system/etc/init/hw/init.zygote64.rc`               | preloads the shim (`selinux_android_setcon`)                                                                                                   |
-| `system/etc/init/{servicemanager,vold,installd}.rc` | preload the shim (SELinux status and labels); installd also sets `INNKEEPER_VSTAT`                                                             |
-| `system/etc/init/apexd.rc`                          | runs `innkeeper-apexd`, which shows apexd the pre-mounted APEXes                                                                               |
-| `system/etc/init/netd.rc`                           | `netd1shot` is a no-op; netd runs once instead of crash-looping, and preloads the shim (Flatpak mode's refused rtnetlink requests)             |
-| `system/etc/init/hw/init.usb.rc`                    | adbd never starts from the USB configuration; `init.innkeeper.rc` starts it for a profile with adb on                                          |
-| `system/etc/cgroups.json`                           | cgroup2 only: the session has no v1 hierarchies                                                                                                |
-| `apex/com.android.tethering/etc/netbpfload.35rc`    | runs netbpfload through `innkeeper-bpfload` against the emulated `bpf()`                                                                       |
+| File                                             | Why                                                                                                                                            |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system/etc/init/hw/init.rc`                     | no ueventd (`ro.cold_boot_done` set directly), `sys.use_memfd` (no ashmem), the flattened `/apex` bind instead of apexd-bootstrap, no binderfs |
+| `system/etc/init/apexd.rc`                       | runs `innkeeper-apexd`, which shows apexd the pre-mounted APEXes; a fork, as an override can't redeclare its `interface`                       |
+| `system/etc/init/hw/init.usb.rc`                 | adbd never starts from the USB configuration; `init.innkeeper.rc` starts it for a profile with adb on                                          |
+| `system/etc/cgroups.json`                        | cgroup2 only: the session has no v1 hierarchies                                                                                                |
+| `apex/com.android.tethering/etc/netbpfload.35rc` | runs netbpfload through `innkeeper-bpfload` against the emulated `bpf()`                                                                       |
 
 ## Added files
 
@@ -35,7 +36,7 @@ before refreshing hashes when the pin moves
 | `system/bin/innkeeper-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                                      |
 | `product/overlay/config/config.xml`                         | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar                   |
 | `vendor/etc/permissions/innkeeper-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop                            |
-| `system_ext/etc/init/innkeeper-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service                    |
+| `system_ext/etc/init/innkeeper-services.rc`                 | override stanzas for the services above                                                            |
 
 ## Blanked files
 

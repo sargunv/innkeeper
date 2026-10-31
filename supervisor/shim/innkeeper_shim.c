@@ -38,6 +38,8 @@
 
 #define EXPORT __attribute__((visibility("default")))
 
+#include "role.h"
+
 // In a Flatpak session, not the bootless developer harness, which runs with
 // real credentials and mounts.
 static int flatpak_state = -1;
@@ -213,12 +215,12 @@ EXPORT int prlimit(
 // them fail to link. init's forked children still run the shim between fork
 // and exec, which is where init needs it. Services that need it themselves
 // get "setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so" in their rc.
-// In a Flatpak session init isn't pid 1; pivot-exec marks it with
-// INNKEEPER_SHIM_INIT instead.
+// In a Flatpak session init isn't pid 1; pivot-exec gives it the role "init"
+// instead.
 __attribute__((constructor)) static void innkeeper_shim_init(void) {
-  if (syscall(SYS_getpid) == 1 || getenv("INNKEEPER_SHIM_INIT")) {
+  if (syscall(SYS_getpid) == 1 || shim_role("init")) {
     unsetenv("LD_PRELOAD");
-    unsetenv("INNKEEPER_SHIM_INIT");
+    unsetenv("INNKEEPER_SHIM_ROLE");
   }
 }
 
@@ -278,7 +280,7 @@ EXPORT int unshare(int flags) {
 EXPORT int setns(int fd, int nstype) {
   return refused_ok(syscall(SYS_setns, fd, nstype));
 }
-// netd (its rc sets INNKEEPER_NETLINK_ACCEPT=1): the session
+// netd (role "netd"): the session
 // shares the host's network namespace, where netd may change nothing. The
 // kernel answers its rtnetlink requests (rules, routes, addresses) with
 // EPERM, and netd won't start without its routing rules: report them done.
@@ -288,10 +290,7 @@ EXPORT int setns(int fd, int nstype) {
 static int netlink_accept_state = -1;
 static void netlink_accept(int fd, void* buf, long n) {
   if (n <= 0 || !flatpak()) return;
-  if (netlink_accept_state < 0) {
-    const char* e = getenv("INNKEEPER_NETLINK_ACCEPT");
-    netlink_accept_state = e && !strcmp(e, "1");
-  }
+  if (netlink_accept_state < 0) netlink_accept_state = shim_role("netd");
   if (!netlink_accept_state) return;
   int domain;
   socklen_t l = sizeof(domain);
@@ -345,7 +344,7 @@ EXPORT ssize_t __recvfrom_chk(
   return recvfrom(fd, buf, len, flags, addr, alen);
 }
 
-// lmkd (its rc sets INNKEEPER_PSI_WINDOW=1): the kernel takes
+// lmkd (role "lmkd"): the kernel takes
 // PSI triggers with a window under 2 s (lmkd asks for 1 s) only from a
 // process with CAP_SYS_RESOURCE, which the sandbox never has. Widen the
 // window to 2 s; lmkd still polls the same memory pressure.
@@ -353,10 +352,7 @@ static int psi_window_state = -1;
 static long psi_write(int fd, const void* buf, size_t n) {
   char kind[8], link[64], path[32], out[64];
   unsigned stall, window;
-  if (psi_window_state < 0) {
-    const char* e = getenv("INNKEEPER_PSI_WINDOW");
-    psi_window_state = e && !strcmp(e, "1") && flatpak();
-  }
+  if (psi_window_state < 0) psi_window_state = shim_role("lmkd") && flatpak();
   if (
     !psi_window_state || n < 8 || n > 48 ||
     (memcmp(buf, "some ", 5) && memcmp(buf, "full ", 5))
@@ -377,14 +373,13 @@ static long psi_write(int fd, const void* buf, size_t n) {
 
 #include "oom.h"
 
-// Only lmkd opts in. Keep its Android scores for its own kill policy, but
+// lmkd only. Keep its Android scores for its own kill policy, but
 // write kernel scores that it can lower again when an app becomes foreground.
 static long oom_write(int fd, const void* buf, size_t n) {
   static int floor = -2;
   if (floor == -2) {
     floor = -1;
-    const char* e = getenv("INNKEEPER_OOM_ADJ");
-    if (e && !strcmp(e, "1") && flatpak()) {
+    if (shim_role("lmkd") && flatpak()) {
       int f =
         syscall(SYS_openat, AT_FDCWD, "/proc/self/oom_score_adj", O_RDONLY);
       if (f >= 0) {
@@ -517,18 +512,15 @@ EXPORT int ioctl(int fd, int request, ...) {
 // the app directories it prepares (fs_prepare_dir_strict, the cache dirs, the
 // fts walks of fixupAppData and clearAppCache) and treats a mismatch as a
 // failure, which makes PackageManager wipe and recreate the app's data on
-// every boot. Report the recorded owner. Only processes whose rc sets
-// INNKEEPER_VSTAT=1 (installd) pay for the extra getxattrat per stat. Not
+// every boot. Report the recorded owner. Only installd (role "installd")
+// pays for the extra getxattrat per stat. Not
 // zygote: its children include sandboxed processes (WebView renderers) whose
 // own seccomp policy kills them for a syscall it doesn't allow. Bionic's own
 // callers (fts) reach these wrappers through the PLT too.
 
 static int vstat_state = -1;
 static int vstat_on(void) {
-  if (vstat_state < 0) {
-    const char* e = getenv("INNKEEPER_VSTAT");
-    vstat_state = e && !strcmp(e, "1") && flatpak();
-  }
+  if (vstat_state < 0) vstat_state = shim_role("installd") && flatpak();
   return vstat_state;
 }
 

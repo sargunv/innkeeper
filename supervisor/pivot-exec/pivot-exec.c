@@ -131,7 +131,7 @@ static int child_main(void* arg) {
   } else {
     // The shim's cue that this process is init (it isn't pid 1 here): init
     // keeps the shim, its services don't inherit it.
-    setenv("INNKEEPER_SHIM_INIT", "1", 1);
+    setenv("INNKEEPER_SHIM_ROLE", "init", 1);
   }
 
   fcntl(sync_sock[0], F_SETFD, 0);

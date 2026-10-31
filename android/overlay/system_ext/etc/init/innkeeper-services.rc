@@ -1,0 +1,123 @@
+# innkeeper: the image's definitions of the services that need our shim,
+# replaced whole ("override"; init reads /system_ext after /system). Each
+# preloads the shim and names its INNKEEPER_SHIM_ROLE, which picks the
+# service-specific workarounds in supervisor/shim/innkeeper_shim.c. Copied from
+# the files image/fork-bases.sha256 guards; port their changes on a pin bump.
+
+# system/etc/init/servicemanager.rc: CHECKs selinux_status_open().
+service servicemanager /system/bin/servicemanager
+    class core animation
+    user system
+    group system readproc
+    critical
+    file /dev/kmsg w
+    onrestart setprop servicemanager.ready false
+    onrestart restart --only-if-running apexd
+    onrestart restart audioserver
+    onrestart restart gatekeeperd
+    onrestart class_restart --only-enabled main
+    onrestart class_restart --only-enabled hal
+    onrestart class_restart --only-enabled early_hal
+    task_profiles ProcessCapacityHigh
+    shutdown critical
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    override
+
+# system/etc/init/vold.rc: labels the directories it creates (setfscreatecon),
+# and mounts the emulated storage through the shim's FUSE handshake.
+service vold /system/bin/vold \
+        --blkid_context=u:r:blkid:s0 --blkid_untrusted_context=u:r:blkid_untrusted:s0 \
+        --fsck_context=u:r:fsck:s0 --fsck_untrusted_context=u:r:fsck_untrusted:s0
+    class core
+    ioprio be 2
+    task_profiles ProcessCapacityHigh
+    shutdown critical
+    group root reserved_disk
+    user root
+    reboot_on_failure reboot,vold-failed
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    setenv INNKEEPER_SHIM_ROLE vold
+    override
+
+# system/etc/init/installd.rc: labels the directories it creates, and its stat
+# reports the owners chown recorded (supervisor/README.md).
+service installd /system/bin/installd
+    class main
+    user root
+    capabilities CHOWN DAC_OVERRIDE DAC_READ_SEARCH FOWNER FSETID KILL SETGID SETUID SYS_ADMIN
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    setenv INNKEEPER_SHIM_ROLE installd
+    override
+
+# system/etc/init/netd.rc: netd can't load its eBPF maps in the sandbox, so its
+# boot self test always fails and would reboot the session: make it a no-op.
+service netd1shot /system/bin/true
+    disabled # only started once bpf programs are loaded
+    class main
+    user root
+    oneshot
+    override
+
+# netd shares the host's network, where its routing rules are refused; the
+# shim reports them done. Without its eBPF programs netd aborts: run it once
+# instead of crash-looping, and don't restart zygote with it.
+service netd /system/bin/netd
+    disabled # only started once bpf programs are loaded
+    class main
+    capabilities CHOWN DAC_OVERRIDE DAC_READ_SEARCH FOWNER IPC_LOCK KILL NET_ADMIN NET_BIND_SERVICE NET_RAW SETUID SETGID
+    user root
+    group root net_admin
+    # apparently some older kernels do not honour CAP_IPC_LOCK for eBPF map allocation
+    rlimit memlock 1073741824 1073741824
+    # sockets are only needed for the 'real' netd
+    socket dnsproxyd stream 0660 root inet
+    socket mdns stream 0660 root system
+    socket fwmarkd stream 0660 root inet
+    # netd is not updatable, but depends on libs provided by tethering apex.
+    # Mark it as updatable so init won't start it until all APEX packages are ready.
+    updatable
+    oneshot
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    setenv INNKEEPER_SHIM_ROLE netd
+    override
+
+# system/etc/init/hw/init.zygote64.rc: zygote calls selinux_android_setcon()
+# for system_server and apps.
+service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
+    class main
+    priority -20
+    user root
+    group root readproc reserved_disk
+    socket zygote stream 660 root system
+    socket usap_pool_primary stream 660 root system
+    onrestart exec_background - system system -- /system/bin/vdc volume abort_fuse
+    onrestart write /sys/power/state on
+    # NOTE: If the wakelock name here is changed, then also
+    # update it in SystemSuspend.cpp
+    onrestart write /sys/power/wake_lock zygote_kwl
+    onrestart restart audioserver
+    onrestart restart cameraserver
+    onrestart restart media
+    onrestart restart --only-if-running media.tuner
+    onrestart restart netd
+    onrestart restart wificond
+    task_profiles ProcessCapacityHigh MaxPerformance
+    critical window=${zygote.critical_window.minute:-off} target=zygote-fatal
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    override
+
+# system/etc/init/lmkd.rc: lmkd's 1 s PSI windows need a capability the
+# sandbox lacks, so the shim widens them to 2 s; and it maps oom_score_adj into
+# the unprivileged range, so foreground promotion can lower a cached app's
+# kernel score again.
+service lmkd /system/bin/lmkd
+    class core
+    user lmkd
+    group lmkd system readproc
+    capabilities DAC_OVERRIDE KILL IPC_LOCK SYS_NICE SYS_RESOURCE
+    critical
+    socket lmkd seqpacket+passcred 0660 system system
+    task_profiles ServiceCapacityLow
+    setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
+    setenv INNKEEPER_SHIM_ROLE lmkd
+    override
