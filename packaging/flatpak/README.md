@@ -4,7 +4,7 @@ The Innkeeper Flatpak, `dev.sargunv.Innkeeper`: the manager is its app (its
 desktop entry opens APKs in the installer and documents in an Android app
 chooser) and `innkeeper` its command, so
 `flatpak run dev.sargunv.Innkeeper install App.apk` is the CLI. It ships no
-Android image; the session fetches that at first use, on first use.
+Android image; the session fetches one on first use.
 
 ```sh
 FLATPAK_USER_DIR=$PWD/out/flatpak/user packaging/flatpak/build.sh
