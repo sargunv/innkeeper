@@ -406,8 +406,7 @@ keeps LINEAR while rendering prefers tiled memory.
 The window sink requests CPU-read access because the bridge reads its pixels for
 hidden-window snapshots and fallback. These exported buffers remain LINEAR;
 tiled app buffers and SurfaceFlinger targets are imported by the Android GPU
-compositor. Headless PNG dumps copy tiled targets through the GPU into a
-CPU-readable buffer before encoding.
+compositor.
 
 The bridge imports the sink's actual DRM fourcc and LINEAR modifier, including
 RGBA FP16 and 10-bit targets, only when that pair is advertised in linux-dmabuf

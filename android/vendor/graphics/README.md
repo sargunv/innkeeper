@@ -27,13 +27,12 @@ that touches gralloc buffers.
   virtual displays. Content layers are CLIENT; CURSOR layers go to the Wayland
   cursor. `vendor.innkeeper.hwc.backend` picks the presenter (`Presenter.cpp`):
   `bridge` (the session default) sends virtual displays to the bridge's display
-  service, `headless` shows nothing. `vendor.innkeeper.hwc.dump.dir` writes PNG
-  frame dumps.
+  service, `headless` shows nothing.
 - **Vsync:** display 0 supplies Android's scheduling clock. It follows the
   refresh and `wp_presentation` phase of a visible mapped window's output,
   keeping that phase while the window is static, and falls back to a 60 Hz timer
-  without one; `vendor.innkeeper.hwc.host_clock=0` forces the timer. The rc sets
-  app and SF work durations to 4 ms each, to fit a 120 Hz frame.
+  without one. The rc sets app and SF work durations to 4 ms each, to fit a 120
+  Hz frame.
 - **LL-NDK only.** `third_party/aosp` holds the frozen AIDL snapshots and binder
   NDK and IMapper headers (`tools/sync-aosp.sh`); `tools/gen-aidl.sh` generates
   the NDK backend with the build-tools' `aidl`, and `tools/gen-stub.py` turns
@@ -42,8 +41,8 @@ that touches gralloc buffers.
   in our allocator, without a GBM/minigbm allocator or another gralloc HAL.
 
 Tests: `tests/host` runs in `mise run test` (layouts, every format, the mapper
-through `dlopen`, metadata across imports and `fork`, the frame dumper);
-`tests/android` (`gralloc_test`, `hwc_test`) runs in `mise run test:bionic`
-against the image's servicemanager and libui without booting. Start reading at
+through `dlopen`, metadata across imports and `fork`); `tests/android`
+(`gralloc_test`, `hwc_test`) runs in `mise run test:bionic` against the image's
+servicemanager and libui without booting. Start reading at
 `common/src/layout.cpp`, `composer/Display.cpp` and
 `composer/BridgePresenter.cpp`.

@@ -152,8 +152,7 @@ set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gralloc_test
 tests/bionic/run.sh -v "$v" -- /vendor/bin/gpu_copy_test
-tests/bionic/run.sh -v "$v" -e INNKEEPER_PROPS=vendor.innkeeper.hwc.dump.dir=/data/vendor/innkeeper/frames \
-  -e EXPECT_DUMP=/data/vendor/innkeeper/frames -- /vendor/bin/hwc_test
+tests/bionic/run.sh -v "$v" -- /vendor/bin/hwc_test
 android/vendor/vulkan/tests/run.sh
 android/vendor/audio/tests/abi.sh
 """

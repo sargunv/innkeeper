@@ -62,9 +62,7 @@ void VsyncThread::loop() {
   while (!mStop) {
     const int64_t now = nowNs();
     int64_t period = mPeriodNs.load();
-    if (
-      mDisplayId == 0 && getProperty("vendor.innkeeper.hwc.host_clock") != "0"
-    ) {
+    if (mDisplayId == 0) {
       std::lock_guard clockLock(gClockMutex);
       next = gClock.next(now, mLastVsyncNs.load());
       period = gClock.period(now);

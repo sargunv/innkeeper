@@ -13,25 +13,21 @@
 
 namespace innkeeper::hwc {
 
-class HeadlessPresenter;
-
 // Connects to the bridge (/dev/socket/innkeeper/bridge.sock) in the
 // background, and again whenever the connection drops: displays wait while it
 // is unreachable or restarting.
 void startBridge();
 bool bridgeStarted();
 
-// A virtual display, shown if the bridge has a window for it. `secondary`
-// gets every frame too (frame dumps).
+// A virtual display, shown if the bridge has a window for it.
 std::unique_ptr<Presenter> createBridgeVirtualPresenter(
-  int64_t hwcDisplayId, uint32_t width, uint32_t height,
-  std::unique_ptr<HeadlessPresenter> secondary
+  int64_t hwcDisplayId, uint32_t width, uint32_t height
 );
 
 // Phone mode's display 0 (vendor.innkeeper.mode=phone), shown in the window
 // the window manager asks for it.
 std::unique_ptr<Presenter> createBridgePrimaryPresenter(
-  uint32_t width, uint32_t height, std::unique_ptr<HeadlessPresenter> secondary
+  uint32_t width, uint32_t height
 );
 
 }  // namespace innkeeper::hwc
