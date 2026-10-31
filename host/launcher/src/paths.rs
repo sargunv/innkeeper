@@ -69,7 +69,7 @@ fn env_path(var: &str) -> Option<PathBuf> {
 pub struct Paths {
     /// Serialized as `profile` in session.conf.
     pub profile: ProfileName,
-    /// `<prefix>/libexec/innkeeper`: pivot-exec, the bridge, the image scripts.
+    /// `<prefix>/libexec/innkeeper`: the bridge, the image scripts.
     pub libexec: PathBuf,
     /// `<prefix>/share/innkeeper`: the Android tree, the image config.
     pub share: PathBuf,

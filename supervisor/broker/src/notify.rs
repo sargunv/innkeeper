@@ -580,9 +580,11 @@ impl Userspace for SeccompUserspace {
 // ---- the serve loop ----------------------------------------------------
 
 /// Receive and serve every notification on the session's single listener.
-/// `pins` is the bpffs directory opened before Android can mount over it.
-pub fn serve(listener: RawFd, pins: Option<OwnedFd>) {
+/// `pins` is the bpffs directory opened before Android can mount over it;
+/// `init` is Android init's pid.
+pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
     crate::init_log();
+    crate::fs::INIT.store(init, Ordering::Relaxed);
     let mut sizes = SeccompNotifSizes::default();
     let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
     if r != 0 {

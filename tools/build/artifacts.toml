@@ -27,9 +27,8 @@ artifacts = ["libexec/innkeeper/innkeeper-session"]
 
 [module.supervisor]
 task = "build:supervisor"
-runs = "pivot-exec and the broker beside Android in the Flatpak sandbox; the shim in Android processes"
+runs = "the broker beside Android in the Flatpak sandbox; the shim in Android processes"
 artifacts = [
-  "libexec/innkeeper/pivot-exec",
   "share/innkeeper/android/system/bin/innkeeper-brk",
   "share/innkeeper/android/system/lib64/libinnkeeper_shim.so",
 ]

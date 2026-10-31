@@ -28,7 +28,6 @@ function(innkeeper_gen_aidl out)
 endfunction()
 
 if(ANDROID)
-  add_subdirectory(supervisor/pivot-exec)
   add_subdirectory(supervisor/shim)
   # Test-only binaries; never installed.
   add_subdirectory(tests/bionic)

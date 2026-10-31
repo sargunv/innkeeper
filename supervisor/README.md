@@ -3,13 +3,12 @@
 The syscall boundary between the host kernel and Android. One seccomp filter,
 installed on Android's init and inherited by every Android process, turns what
 an unprivileged namespace can't do into user notifications.
-`mise run build:supervisor` builds all three artifacts.
+`mise run build:supervisor` builds both artifacts.
 
-| Dir          | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
-| ------------ | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
-| `pivot-exec` | `libexec/innkeeper/pivot-exec` (static C)                        | starts init under the filter, then becomes the broker    | `pivot-exec.c`                |
-| `broker`     | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | pivot-exec's process: Android's parent                   | `src/notify.rs`, `src/bpf.rs` |
-| `shim`       | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so`      | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
+| Dir      | Artifact (stage path)                                            | Runs                                                     | Start reading                 |
+| -------- | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------- |
+| `broker` | `share/innkeeper/android/system/bin/innkeeper-brk` (bionic Rust) | started by the launcher: init's parent                   | `src/notify.rs`, `src/bpf.rs` |
+| `shim`   | `share/innkeeper/android/system/lib64/libinnkeeper_shim.so`      | LD_PRELOADed into init and the services whose rc sets it | `innkeeper_shim.c`            |
 
 ## What is trapped, and who serves it
 
@@ -22,13 +21,13 @@ an unprivileged namespace can't do into user notifications.
 | `capget`, `capset`, the capability `prctl`s, `setsockopt(SO_MARK)`                                                                            | broker (`bpf`)  | no capabilities in the sandbox; the host's network                     |
 | `openat` and `inotify_add_watch` of `/dev/input`, `ioctl` type `'E'`                                                                          | broker (input)  | session-local evdev devices the bridge feeds, never the host's         |
 
-pivot-exec is static C because it runs before Android's linker exists, and
-defines no syscall policy. Its child execs `innkeeper-brk --init`, which
-installs the filter (`src/filter.rs`), hands the listener back and execs init.
-pivot-exec then execs the broker in its own process, which serves every
-notification, reaps orphans as the subreaper and exits with init's status. It
-stays an ancestor of every Android process, so process-memory access works with
-Yama's default `ptrace_scope=1` without capabilities or a sysctl override.
+The launcher runs `innkeeper-brk --preload <shim> /system/bin/init ...` in the
+composed root. Its forked child installs the filter (`src/filter.rs`), hands the
+listener back and execs init with the shim preloaded (the broker never loads
+it). The broker serves every notification, reaps orphans as the subreaper and
+exits with init's status. It stays an ancestor of every Android process, so
+process-memory access works with Yama's default `ptrace_scope=1` without
+capabilities or a sysctl override.
 
 Filesystem notifications (`fs`) run on four workers so a slow lookup (including
 `fstat` through a caller's fd) cannot block the binder receive thread. Each BPF
@@ -106,7 +105,7 @@ serves the staged `/proc/config.gz`.
 Services that need the shim preload it from their override stanzas in
 [innkeeper-services.rc](../android/overlay/system_ext/etc/init/innkeeper-services.rc),
 which also set `INNKEEPER_SHIM_ROLE` to the service's name for the workarounds
-below that only one service gets. Init isn't pid 1 in the sandbox, so pivot-exec
+below that only one service gets. Init isn't pid 1 in the sandbox, so the broker
 gives it the role `init`.
 
 The Flatpak sandbox's own seccomp filter refuses some calls before ours sees
@@ -173,8 +172,8 @@ set it, and their filter and driver are unchanged.
 failure delivery, freezing, credentials) and every `tests/*.sh`: C probes that
 drive the real filter and broker (`seccomp-filter` checks exactly which syscalls
 notify, `bpfemu` the emulator's bounds, `binder-restarts` interrupted ioctls,
-`drm-node` the render-node policy, `bootstrap` pivot-exec), and unit checks of
-the shim's headers.
+`drm-node` the render-node policy, `bootstrap` the broker starting init), and
+unit checks of the shim's headers.
 
 - `mise run test:e2e -- boot` boots and runs `selftest`.
 - `mise run ohos:test` boots OpenHarmony until its system abilities register.

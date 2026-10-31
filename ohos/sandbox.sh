@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Inside the Flatpak sandbox: make its `/` OpenHarmony's root, then run OH's
-# init under the supervisor (pivot-exec, then the broker). Started by
-# ohos/run.py; never run it on the host.
+# init under the broker. Started by ohos/run.py; never run it on the host.
 #
-# usage: sandbox.sh <image-dir> <layer-dir> <data-dir> <pivot-exec>
+# usage: sandbox.sh <image-dir> <layer-dir> <data-dir>
 #
 # <image-dir> is image/ohos/fetch.sh's img/, <layer-dir> ohos:build's output.
 # With INNKEEPER_OHOS_BRIDGE=<log> set, the bridge runs beside OH and the
@@ -12,8 +11,8 @@
 # beside the runtime's /usr, as the Android session does
 # (host/launcher/src/flatpak.rs). The image is never changed.
 set -euo pipefail
-usage="usage: sandbox.sh <image-dir> <layer-dir> <data-dir> <pivot-exec>"
-img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage} pivot=${4:?$usage}
+usage="usage: sandbox.sh <image-dir> <layer-dir> <data-dir>"
+img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage}
 [[ -f /.flatpak-info ]] || {
   echo 'sandbox.sh: not in a Flatpak sandbox' >&2
   exit 1
@@ -114,18 +113,18 @@ if [[ -n ${INNKEEPER_OHOS_BRIDGE:-} ]]; then
   ln -sfn "$run/bridge" /dev/socket/innkeeper
 fi
 
+cd /
 exec env -i \
   PATH=/system/bin:/vendor/bin \
   INNKEEPER_GUEST=ohos \
   LIBGL_ALWAYS_SOFTWARE=1 \
   INNKEEPER_OHOS_DISPLAY="$display" \
   INNKEEPER_RENDER_NODE="${render:-/dev/null}" \
-  INNKEEPER_BROKER="$layer/bin/innkeeper-brk" \
-  LD_PRELOAD=/sys_prod/lib64/libinnkeeper_ohos_shim.so \
   INNKEEPER_ROOT_MAP="$img/system/system=/system
 $img/vendor=/vendor
 $layer/vendor=/vendor
 $layer/sys_prod=/sys_prod
 $data=/data" \
   ${INNKEEPER_BROKER_DEBUG:+INNKEEPER_BROKER_DEBUG="$INNKEEPER_BROKER_DEBUG"} \
-  "$pivot" / /system/bin/init --second-stage 0
+  "$layer/bin/innkeeper-brk" --preload /sys_prod/lib64/libinnkeeper_ohos_shim.so \
+  /system/bin/init --second-stage 0

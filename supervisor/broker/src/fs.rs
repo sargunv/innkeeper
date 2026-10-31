@@ -156,12 +156,15 @@ fn drm_path_allowed(path: &std::path::Path, selected: &std::path::Path) -> bool 
 /// Init isn't pid 1, but its property service treats a peer
 /// that isn't pid 1 as a client (and init's own setprop from its restorecon
 /// thread as a new restorecon request, forever). Show init as pid 1 to
-/// SO_PEERCRED; pivot-exec passes its pid in `INNKEEPER_INIT_PID`.
+/// SO_PEERCRED ([`crate::notify::serve`] records its pid).
 pub(crate) fn init_as_pid1(pid: i32) -> i32 {
-    static INIT: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
-    let init = INIT.get_or_init(|| std::env::var("INNKEEPER_INIT_PID").ok()?.parse().ok());
-    if *init == Some(pid) { 1 } else { pid }
+    if pid == INIT.load(std::sync::atomic::Ordering::Relaxed) {
+        1
+    } else {
+        pid
+    }
 }
+pub(crate) static INIT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// The Android path a symlink (O_PATH fd) that stands in
 /// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).

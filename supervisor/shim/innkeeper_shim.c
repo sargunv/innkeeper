@@ -204,7 +204,7 @@ EXPORT int prlimit(
 // them fail to link. init's forked children still run the shim between fork
 // and exec, which is where init needs it. Services that need it themselves
 // get "setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so" in their rc.
-// In a Flatpak session init isn't pid 1; pivot-exec gives it the role "init"
+// In a Flatpak session init isn't pid 1; the broker gives it the role "init"
 // instead.
 __attribute__((constructor)) static void innkeeper_shim_init(void) {
   if (syscall(SYS_getpid) == 1 || shim_role("init")) {

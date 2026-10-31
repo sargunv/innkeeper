@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
   getrlimit(RLIMIT_NOFILE, &rl);
   rl.rlim_cur = rl.rlim_max;
   setrlimit(RLIMIT_NOFILE, &rl);
-  // As pivot-exec does before Android runs.
+  // As the broker does before Android runs.
   int pins = open("/sys/fs/bpf", O_PATH | O_DIRECTORY | O_CLOEXEC);
   int sp[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sp))

@@ -3,7 +3,7 @@
 # process in it, largest PSS first, then the session cgroup's totals.
 #   tools/dev/footprint.sh [-n N]    (only the N largest processes)
 # Android's processes are read from inside the session, since
-# the host user can't read them; the outer ones (bridge, pasta, pivot-exec,
+# the host user can't read them; the outer ones (bridge, pasta,
 # the broker) from the host.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)

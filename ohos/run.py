@@ -67,7 +67,6 @@ def argv(instance_fd, img, data, log, bridge):
     str(img),
     str(LAYER),
     str(data),
-    "/app/libexec/innkeeper/pivot-exec",
   ]
   return a
 
