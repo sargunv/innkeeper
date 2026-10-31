@@ -49,6 +49,9 @@ class StreamIn : public core::IStreamInDelegator {
     *out = stream_;
     return ndk::ScopedAStatus::ok();
   }
+  // Capture has no usage to report. The bridge drops SET_METADATA on record
+  // streams (PulseOut::control returns before applying Ctl::Metadata), so
+  // this stays a no-op.
   ndk::ScopedAStatus updateMetadata(
     const aidl::android::hardware::audio::common::SinkMetadata&
   ) override {

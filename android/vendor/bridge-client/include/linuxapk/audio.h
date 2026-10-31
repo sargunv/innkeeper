@@ -51,6 +51,9 @@ uint64_t lxb_available(const struct lxb_stream* s);
 int lxb_standby(struct lxb_stream* s);
 // Applies to every stream of this process, including later ones.
 int lxb_set_master(float volume, int muted);
+// SET_METADATA: Android audio_usage_t plus an optional label. An empty label
+// lets the bridge derive media.name from the usage. Returns 0, or -errno.
+int lxb_set_metadata(struct lxb_stream* s, uint32_t usage, const char* label);
 
 // Writes up to `frames` frames. Blocks while the ring is full, up to
 // `timeout_ms` in total. Returns frames written (possibly fewer on timeout),

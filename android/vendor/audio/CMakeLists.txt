@@ -20,6 +20,10 @@ if(NOT ANDROID)
   target_include_directories(audio_output_test PRIVATE stream)
   target_compile_features(audio_output_test PRIVATE cxx_std_20)
   add_test(NAME audio_output COMMAND audio_output_test)
+  add_executable(audio_usage_test tests/usage_test.cpp)
+  target_include_directories(audio_usage_test PRIVATE stream)
+  target_compile_features(audio_usage_test PRIVATE cxx_std_20)
+  add_test(NAME audio_usage COMMAND audio_usage_test)
   add_executable(audio_queue_test tests/queue_test.cpp)
   target_include_directories(
     audio_queue_test

@@ -32,6 +32,7 @@
 #define T_CLOSE 0x0102
 #define T_STANDBY 0x0103
 #define T_SET_MASTER 0x0105
+#define T_SET_METADATA 0x0106
 
 #define RING_MAGIC 0x5241584cu
 #define OFF_WRITE_POS 64
@@ -227,6 +228,22 @@ int lxb_standby(struct lxb_stream* s) {
     return r;
   }
   return s->map ? stream_call(T_STANDBY, s->id) : -ENOTCONN;
+}
+
+int lxb_set_metadata(struct lxb_stream* s, uint32_t usage, const char* label) {
+  if (!s->map) return -ENOTCONN;
+  pthread_mutex_lock(&g_lock);
+  int st = -ENOTCONN;
+  if (g_sock >= 0) {
+    struct lxb_msg m;
+    request(&m, T_SET_METADATA);
+    lxb_put_u32(&m, s->id);
+    lxb_put_u32(&m, usage);
+    lxb_put_name(&m, label);
+    st = call_status_locked(&m);
+  }
+  pthread_mutex_unlock(&g_lock);
+  return st;
 }
 
 int lxb_set_master(float volume, int muted) {

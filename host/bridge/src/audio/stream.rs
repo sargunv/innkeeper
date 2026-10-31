@@ -42,6 +42,9 @@ pub fn monotonic_ns() -> u64 {
 }
 
 /// Desktop name and PulseAudio `media.role` for an Android `audio_usage_t`.
+///
+/// The playback HAL reports the highest-priority active usage. An empty
+/// label uses this name. Record streams ignore the request.
 pub fn usage_name_role(usage: u32) -> (&'static str, &'static str) {
     match usage {
         1 => ("Media", "music"),

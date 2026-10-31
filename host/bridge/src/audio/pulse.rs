@@ -496,6 +496,8 @@ impl StreamIo for PulseStream {
                 }
             }
             Ctl::Metadata(usage, label) => {
+                // Record streams have no playback proplist to update. Capture
+                // metadata is dropped above, with the other playback controls.
                 let (name, role) = usage_name_role(usage);
                 let mut props = Props::new();
                 let label = if label.is_empty() {

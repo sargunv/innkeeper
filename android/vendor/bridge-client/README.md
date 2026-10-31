@@ -15,3 +15,5 @@ ring reads/writes and presentation timing, with no tinyalsa types.
 checks the encoding against the protocol and fd passing over a socket pair.
 
 `tests/audio_test.c` checks capture underruns, partial reads and bridge death.
+`lxb_set_metadata` sends `SET_METADATA` (stream, Android `audio_usage_t`, label)
+so the desktop mixer can name a playback stream by what is playing.

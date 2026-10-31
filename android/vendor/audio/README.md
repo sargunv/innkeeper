@@ -16,6 +16,12 @@ removes its speaker, MMAP and offload ports; MMAP and offload were silent stubs.
   also skips transfers when uptime pacing falls behind. Smaller rings alone
   cannot change that contract. Our module offers a 240-frame / 5 ms burst and
   the `FAST` flag, so AudioFlinger can use FastMixer.
+- **Mixer names.** `StreamOut::updateMetadata` reports the highest-priority
+  usage among the active tracks (voice call, then game, media, assistant,
+  navigation, notification or alarm, system sounds, unknown). An empty label
+  lets the bridge derive `media.name` and `media.role`. The request goes out
+  only when that usage changes; an empty track list sends nothing. Capture stays
+  unnamed: the bridge ignores `SET_METADATA` on record streams.
 - **Pacing and timestamps.** `StreamBridge` reuses our PCM backend's blocking
   writes and presentation estimate. Ring space follows PipeWire's audio clock;
   there is no second uptime pacer and no deliberate skipped transfer.
