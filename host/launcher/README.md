@@ -15,9 +15,11 @@ Subcommands: `start [-f] [--headless]`, `stop`, `status` (prints
 `exec CMD...`, `shell`, `selftest`. `reset` keeps the profile's settings file.
 The internal `_serve` command owns the session in a sandbox of its own.
 
-`src/cli.rs` is the place to start; each module's header says what it owns.
-`--help` lists the environment variables, and `INNKEEPER_VULKAN=lvp` runs
-software Vulkan (lavapipe) instead of a render node, for debugging.
+`src/cli.rs` is the place to start; each module's header says what it owns. A
+profile's `system` setting picks the guest: an OpenHarmony profile's image, root
+and init come from `src/ohos.rs`, and everything else is shared. `--help` lists
+the environment variables, and `INNKEEPER_VULKAN=lvp` runs software Vulkan
+(lavapipe) instead of a render node, for debugging.
 
 Tests: `cargo test -p innkeeper-session` (in `mise run test`), and
 `mise run test:e2e -- boot`, which runs `selftest` in a fresh named profile.

@@ -12,6 +12,7 @@ mod image;
 mod init;
 mod layer;
 mod lifecycle;
+mod ohos;
 mod phone;
 mod prune;
 mod root;

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::profile::ProfileName;
+use crate::profile::{ProfileName, System};
 
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.sargunv.Innkeeper";
@@ -56,7 +56,7 @@ pub struct Paths {
     pub profile: ProfileName,
     /// `<prefix>/libexec/innkeeper`: the bridge, the image scripts.
     pub libexec: PathBuf,
-    /// `<prefix>/share/innkeeper`: the Android tree, the image config.
+    /// `<prefix>/share/innkeeper`: the guests' trees, the image config.
     pub share: PathBuf,
     /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>`, which every
     /// instance of the app shares: session.conf, the control socket, the
@@ -66,11 +66,11 @@ pub struct Paths {
     pub state: PathBuf,
     /// `$XDG_DATA_HOME/innkeeper`.
     pub data_home: PathBuf,
-    /// Android's `/data` (`INNKEEPER_DATA`, default `data-<profile>`).
+    /// The guest's `/data` (`INNKEEPER_DATA`, default `data-<profile>`).
     pub data: PathBuf,
     /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
-    /// The prefix's image pin.
+    /// The prefix's Android image pin.
     pub pin: PathBuf,
     /// The composed root: `root-<profile>`.
     pub root: PathBuf,
@@ -169,6 +169,11 @@ impl Paths {
         self.share.join("android")
     }
 
+    /// The staged OpenHarmony layer (`sys_prod`, our VDIs over `vendor`).
+    pub fn ohos(&self) -> PathBuf {
+        self.share.join("ohos")
+    }
+
     /// Addon layers over the partitions, one dir each (test:bionic's test
     /// vendor binaries).
     pub fn addons(&self) -> PathBuf {
@@ -196,11 +201,28 @@ impl Paths {
         Ok(bootconfig_tokens(&text))
     }
 
-    /// The pinned image and where its files go.
+    /// The pinned image of `system` and where its files go.
+    pub fn image_of(&self, system: System) -> Result<Image> {
+        match system {
+            System::Android => self.image(),
+            System::Ohos => {
+                let pin = self.share.join("image/ohos/pin.toml");
+                let name = read_pin_name(&pin)?;
+                let dir = self.images.join("ohos").join(&name);
+                Ok(Image {
+                    img: dir.join("img"),
+                    apexdir: dir.join("apex"),
+                    derived: dir.join("derived"),
+                    dir,
+                    name,
+                })
+            }
+        }
+    }
+
+    /// The pinned Android image and where its files go.
     pub fn image(&self) -> Result<Image> {
-        let pin = fs::read_to_string(&self.pin).unwrap_or_default();
-        let name =
-            pin_name(&pin).with_context(|| format!("no image name in {}", self.pin.display()))?;
+        let name = read_pin_name(&self.pin)?;
         let dir = self.images.join(&name);
         Ok(Image {
             img: dir.join("img"),
@@ -215,10 +237,11 @@ impl Paths {
     }
 }
 
-/// The pinned AOSP CI build's files: its extracted partitions (`img`), its
-/// flattened APEXes (`apexdir`, one per vendor APEX selection, shared by
-/// every profile and never rewritten under a running session) and the
-/// layer derived from them (image/README.md).
+/// A pinned image's files: its extracted partitions (`img`) and, for
+/// Android's AOSP CI build, its flattened APEXes (`apexdir`, one per vendor
+/// APEX selection, shared by every profile and never rewritten under a
+/// running session) and the layer derived from them (image/README.md).
+/// OpenHarmony's image has neither of those two; they stay unused there.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
     pub name: String,
@@ -234,6 +257,12 @@ impl Image {
     pub fn derived_source(&self) -> PathBuf {
         self.derived.join(".source")
     }
+}
+
+/// The name in the pin at `path`.
+fn read_pin_name(path: &Path) -> Result<String> {
+    let pin = fs::read_to_string(path).unwrap_or_default();
+    pin_name(&pin).with_context(|| format!("no image name in {}", path.display()))
 }
 
 /// The pin's top-level name: the keys before any `[table]` header.

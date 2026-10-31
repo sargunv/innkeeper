@@ -32,6 +32,7 @@ use sha2::{Digest, Sha256};
 use crate::conf::Config;
 use crate::image::walk_files;
 use crate::paths::Paths;
+use crate::profile::System;
 use crate::root::{self, LAYERED, PARTITIONS};
 use crate::session::{self, append};
 use crate::{control, init, lifecycle, sys};
@@ -49,7 +50,7 @@ fn cp(args: &[&std::ffi::OsStr]) -> Result<()> {
 
 /// A layer's files over the composed tree. `--remove-destination` unlinks a
 /// hardlinked file before replacing it, so the image cache is never written.
-fn over(layer: &Path, dst: &Path) -> Result<()> {
+pub(crate) fn over(layer: &Path, dst: &Path) -> Result<()> {
     if !layer.is_dir() {
         return Ok(());
     }
@@ -68,7 +69,7 @@ fn over(layer: &Path, dst: &Path) -> Result<()> {
 
 /// Read-only files, as on read-only mounts: ART refuses to load a dex file
 /// its process could write.
-fn files_read_only(dir: &Path) -> Result<()> {
+pub(crate) fn files_read_only(dir: &Path) -> Result<()> {
     walk_files(dir, &mut |p, m| {
         if m & 0o222 != 0 {
             fs::set_permissions(p, fs::Permissions::from_mode(m & !0o222 & 0o7777))?;
@@ -106,6 +107,27 @@ fn compose_key(cfg: &Config) -> Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Copies a tree of the image cache into the root dir `root` as hardlinks,
+/// or as reflink copies where they can't cross mounts (the dev driver grants
+/// the image cache and the root separately); `probe` is a file of the cache.
+pub(crate) fn tree_linker(
+    probe: &Path,
+    root: &Path,
+) -> impl Fn(&Path, &Path) -> Result<()> + use<> {
+    let test = root.join(".link");
+    let tree: &'static [&'static str] = if fs::hard_link(probe, &test).is_ok() {
+        &["-al"]
+    } else {
+        &["-a", "--reflink=auto"]
+    };
+    let _ = fs::remove_file(&test);
+    move |src: &Path, dst: &Path| {
+        let mut args: Vec<&std::ffi::OsStr> = tree.iter().map(|a| a.as_ref()).collect();
+        args.extend([src.as_os_str(), dst.as_os_str()]);
+        cp(&args)
+    }
+}
+
 /// Composes the partitions and `/apex` under the root dir, unless the last
 /// composition had the same inputs.
 fn compose(cfg: &Config) -> Result<()> {
@@ -117,17 +139,7 @@ fn compose(cfg: &Config) -> Result<()> {
     }
     remove_tree(r)?;
     fs::create_dir_all(r)?;
-    // Hardlinks to the image cache, or reflink copies where they can't cross
-    // mounts (the dev driver grants the image cache and the root separately).
-    let probe = r.join(".link");
-    let tree: &[&std::ffi::OsStr] =
-        if fs::hard_link(cfg.image.apexdir.join("apex-info-list.xml"), &probe).is_ok() {
-            &["-al".as_ref()]
-        } else {
-            &["-a".as_ref(), "--reflink=auto".as_ref()]
-        };
-    let _ = fs::remove_file(&probe);
-    let link = |src: &Path, dst: &Path| cp(&[tree, &[src.as_os_str(), dst.as_os_str()]].concat());
+    let link = tree_linker(&cfg.image.apexdir.join("apex-info-list.xml"), r);
     let p = &cfg.paths;
     let addons = p.addon_layers();
     // Each partition's stack, bottom first; the start-time layer goes on at each start.
@@ -189,7 +201,7 @@ fn apply_run_layer(cfg: &Config) -> Result<()> {
 }
 
 /// A symlink `link` -> `target`, replacing whatever is at `link`.
-fn link(target: &Path, link: &Path) -> Result<()> {
+pub(crate) fn link(target: &Path, link: &Path) -> Result<()> {
     if let Ok(m) = link.symlink_metadata() {
         if m.is_dir() {
             fs::remove_dir(link).with_context(|| format!("replace {}", link.display()))?;
@@ -253,13 +265,8 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
             root::copy_file(&e.path(), &to)?;
         }
     }
-    let dev = Path::new("/dev");
-    root::binder_nodes(dev)?;
-    let run = &cfg.paths.run;
-    fs::set_permissions(run.join("bridge"), fs::Permissions::from_mode(0o700))?;
-    fs::create_dir_all(dev.join("socket"))?;
-    link(&run.join("bridge"), &dev.join("socket/innkeeper"))?;
-    link(&run.join("kmsg"), &dev.join("kmsg"))?;
+    root::binder_nodes(Path::new("/dev"))?;
+    dev_sockets(cfg)?;
     // The bpf() emulator's pins (supervisor/broker/src/bpf.rs).
     fs::create_dir_all("/sys/fs/bpf")?;
     fs::set_permissions("/sys/fs/bpf", fs::Permissions::from_mode(0o1777))?;
@@ -269,6 +276,16 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     fs::create_dir_all("/sys/fs/cgroup/system")?;
     fs::create_dir_all("/sys/fs/cgroup/apps")?;
     Ok(())
+}
+
+/// The guest's `/dev/socket/innkeeper` (the bridge's socket dir) and
+/// `/dev/kmsg` (the FIFO into kmsg.log).
+pub(crate) fn dev_sockets(cfg: &Config) -> Result<()> {
+    let (dev, run) = (Path::new("/dev"), &cfg.paths.run);
+    fs::set_permissions(run.join("bridge"), fs::Permissions::from_mode(0o700))?;
+    fs::create_dir_all(dev.join("socket"))?;
+    link(&run.join("bridge"), &dev.join("socket/innkeeper"))?;
+    link(&run.join("kmsg"), &dev.join("kmsg"))
 }
 
 /// Ends the session: kills everything it started and removes its socket.
@@ -300,7 +317,7 @@ type Idle = Arc<Mutex<Option<Option<u64>>>>;
 pub fn run(
     cfg: &Config,
     follow: bool,
-    image_lease: crate::prune::Lease,
+    image_lease: Option<crate::prune::Lease>,
     trace: &session::BootTrace,
 ) -> Result<()> {
     let sigs = sys::block_signals(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]);
@@ -337,7 +354,7 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
         &sock,
         control::Served {
             status: format!("stopped\nwakeup={at_ms}\n"),
-            exec_lock: None,
+            exec: None,
             stop: Box::new(move || {
                 let _ = fs::remove_file(&gone);
                 std::process::exit(0);
@@ -403,26 +420,37 @@ pub fn request_background(p: &Paths) {
 
 fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTrace) -> Result<()> {
     let p = &cfg.paths;
-    compose(cfg).context("compose the root")?;
-    trace.mark(p, "root composed");
-    apply_run_layer(cfg).context("add the start-time layer")?;
-    trace.mark(p, "start-time layer applied");
-    crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("innkeeper"))?;
-    trace.mark(p, "data version recorded");
-    sandbox_root(cfg).context("set up the sandbox's /")?;
+    let root_map = match cfg.system {
+        System::Android => {
+            compose(cfg).context("compose the root")?;
+            trace.mark(p, "root composed");
+            apply_run_layer(cfg).context("add the start-time layer")?;
+            trace.mark(p, "start-time layer applied");
+            crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("innkeeper"))?;
+            trace.mark(p, "data version recorded");
+            sandbox_root(cfg).context("set up the sandbox's /")?;
+            // realpath (via /proc/self/fd) must retain the public volume
+            // path: MediaProvider treats canonical /data/media paths as
+            // internal storage.
+            format!(
+                "{}=/\n{}=/data\n{}=/storage/emulated",
+                p.root.display(),
+                p.data.display(),
+                p.data.join("media").display()
+            )
+        }
+        System::Ohos => {
+            crate::ohos::compose(cfg).context("compose the root")?;
+            trace.mark(p, "root composed");
+            crate::ohos::sandbox_root(cfg).context("set up the sandbox's /")?;
+            format!("{}=/\n{}=/data", p.root.display(), p.data.display())
+        }
+    };
     trace.mark(p, "sandbox root ready");
     session::start_kmsg_reader(p)?;
     session::start_bridge(cfg)?;
     trace.mark(p, "bridge ready");
     let log = append(&p.session_log())?;
-    // realpath (via /proc/self/fd) must retain the public volume path:
-    // MediaProvider treats canonical /data/media paths as internal storage.
-    let root_map = format!(
-        "{}=/\n{}=/data\n{}=/storage/emulated",
-        p.root.display(),
-        p.data.display(),
-        p.data.join("media").display()
-    );
     let mut cmd = init::command(cfg, &[("INNKEEPER_ROOT_MAP", root_map)]);
     // The broker, init's parent and subreaper, dies with this thread.
     unsafe {
@@ -451,13 +479,18 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         bail!("init did not start (see {})", p.session_log().display());
     };
     trace.mark(p, "init found");
-    crate::adb::announce_at_start(p);
+    if cfg.system == System::Android {
+        crate::adb::announce_at_start(p);
+    }
     let paths = p.clone();
     control::serve(
         &p.control(),
         control::Served {
             status: crate::Status { pid: Some(init) }.text(),
-            exec_lock: Some(p.exec_lock()),
+            exec: Some(control::Exec {
+                lock: p.exec_lock(),
+                system: cfg.system,
+            }),
             stop: Box::new(move || teardown(&paths)),
         },
     )?;
@@ -468,8 +501,9 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         teardown(&paths);
     });
     println!(
-        "session started ({}, in Flatpak): Android init = pid {init}; log: {}",
+        "session started ({}, in Flatpak): {} init = pid {init}; log: {}",
         cfg.image.name,
+        cfg.system.title(),
         p.kmsg_log().display()
     );
     if follow {
@@ -530,7 +564,7 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
                 .pid
                 .map_or("?".into(), |p| p.to_string());
             println!(
-                "session started in a sandbox of its own: Android init = pid {pid} there; log: {}",
+                "session started in a sandbox of its own: init = pid {pid} there; log: {}",
                 p.kmsg_log().display()
             );
             let _ = std::io::stdout().flush();

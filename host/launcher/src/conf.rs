@@ -10,9 +10,13 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::paths::{Image, Paths};
+use crate::profile::System;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// The guest system, from the profile's settings.
+    #[serde(default)]
+    pub system: System,
     /// No windows (tests): the composer's headless backend.
     pub headless: bool,
     /// The only DRM render node Android may open; None selects lavapipe.
@@ -33,7 +37,13 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(paths: Paths, image: Image, headless: bool, wayland: Option<PathBuf>) -> Self {
+    pub fn new(
+        system: System,
+        paths: Paths,
+        image: Image,
+        headless: bool,
+        wayland: Option<PathBuf>,
+    ) -> Self {
         let selection = if env::var("INNKEEPER_VULKAN").as_deref() == Ok("lvp") {
             None
         } else {
@@ -47,6 +57,7 @@ impl Config {
             .map(|(node, driver)| (Some(node), driver.to_string()))
             .unwrap_or((None, "lvp".to_string()));
         Config {
+            system,
             headless,
             render_node,
             vulkan_driver,

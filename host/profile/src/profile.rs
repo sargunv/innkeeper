@@ -1,13 +1,13 @@
-//! Profiles: separate Android setups, each with its own apps, data and
-//! settings, that can run side by side. A running profile is a session. Each
+//! Profiles: separate guest systems (Android or OpenHarmony, chosen when the
+//! profile is made), each with its own apps, data and settings, that can run
+//! side by side. A running profile is a session. Each
 //! is named (the launcher's by `INNKEEPER_PROFILE`), and suffixes every path
 //! of its own ([`crate::paths`]). None is special: the first is
 //! made on demand as [`FIRST`], and can be renamed or deleted like any other.
 //!
-//! A profile's settings live in one file in its data directory, beside
-//! Android's own data and the data version record (docs/session.md), so they
-//! move, back up and go with the data. Nothing here is specific to Android:
-//! the OpenHarmony guest can keep its profiles the same way.
+//! A profile's settings live in one file in its data directory, beside the
+//! guest's own data (and Android's data version record, docs/session.md), so
+//! they move, back up and go with the data.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -116,10 +116,66 @@ pub fn list(data_home: &Path) -> Vec<ProfileName> {
     v
 }
 
+/// The guest system a profile runs, chosen when it is made: its data is that
+/// system's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum System {
+    #[default]
+    Android,
+    Ohos,
+}
+
+impl System {
+    pub const ALL: [System; 2] = [System::Android, System::Ohos];
+
+    /// Its name in settings and on the command line.
+    pub fn name(self) -> &'static str {
+        match self {
+            System::Android => "android",
+            System::Ohos => "ohos",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<System> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// Its name for people.
+    pub fn title(self) -> &'static str {
+        match self {
+            System::Android => "Android",
+            System::Ohos => "OpenHarmony",
+        }
+    }
+
+    /// The displays it can show as. OpenHarmony composes every window into
+    /// one screen (ohos/README.md, "One window, not one per app"), so it is a
+    /// phone; a tablet's landscape layout is untested there.
+    pub fn displays(self) -> &'static [Display] {
+        match self {
+            System::Android => &Display::ALL,
+            System::Ohos => &[Display::SmallPhone, Display::MediumPhone],
+        }
+    }
+
+    /// Fails unless an Android profile: `what` is Android's alone.
+    pub fn need_android(self, what: &str) -> Result<()> {
+        ensure!(
+            self == System::Android,
+            "{what} is for Android profiles, and this one runs {}",
+            self.title()
+        );
+        Ok(())
+    }
+}
+
 /// A profile's settings; a missing key takes its default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
+    /// The guest system. Fixed when the profile is made.
+    pub system: System,
     /// How the guest shows. Applies at the next start.
     pub display: Display,
     /// Android's adb on loopback TCP. Off by default; it applies live.
@@ -144,6 +200,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            system: System::Android,
             display: Display::Windowed,
             adb: false,
             adb_port: 0,
@@ -238,6 +295,16 @@ pub fn settings_path(data: &Path) -> PathBuf {
 }
 
 impl Settings {
+    /// A new profile's settings for `system`: the defaults, and a phone
+    /// where the system can't show apps in windows of their own.
+    pub fn new(system: System) -> Self {
+        Self {
+            system,
+            display: system.displays()[0],
+            ..Self::default()
+        }
+    }
+
     /// The settings in data directory `data`; the defaults if it has none.
     pub fn load(data: &Path) -> Result<Self> {
         let path = settings_path(data);
@@ -264,6 +331,21 @@ impl Settings {
             self.adb_port == 0 || ports().any(|p| p == self.adb_port),
             "adb-port is an odd port from 5555 to 5585"
         );
+        ensure!(
+            self.system.displays().contains(&self.display),
+            "{} shows as {}, not {}",
+            self.system.title(),
+            self.system
+                .displays()
+                .iter()
+                .map(|d| d.name())
+                .collect::<Vec<_>>()
+                .join(" or "),
+            self.display.name()
+        );
+        if self.adb {
+            self.system.need_android("adb")?;
+        }
         Ok(())
     }
 
@@ -438,6 +520,33 @@ mod tests {
         }
         fs::write(settings_path(&data), "display = [").unwrap();
         assert!(Settings::load(&data).is_err());
+    }
+
+    #[test]
+    fn openharmony_profiles_are_phones_without_adb() {
+        let s = Settings::new(System::Ohos);
+        assert_eq!((s.system, s.display), (System::Ohos, Display::SmallPhone));
+        s.validate().unwrap();
+        assert_eq!(Settings::new(System::Android), Settings::default());
+        let s = Settings::parse("system = \"ohos\"\ndisplay = \"medium-phone\"\n").unwrap();
+        assert_eq!(s.display, Display::MediumPhone);
+        for bad in [
+            "system = \"ohos\"",
+            "system = \"ohos\"\ndisplay = \"medium-tablet\"",
+            "system = \"ohos\"\ndisplay = \"small-phone\"\nadb = true",
+            "system = \"harmony\"",
+        ] {
+            assert!(Settings::parse(bad).is_err(), "{bad}");
+        }
+        let e = Settings::parse("system = \"ohos\"")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("small-phone or medium-phone"), "{e}");
+        assert!(System::Ohos.need_android("adb").is_err());
+        System::Android.need_android("adb").unwrap();
+        for s in System::ALL {
+            assert_eq!(System::parse(s.name()), Some(s));
+        }
     }
 
     #[test]
