@@ -416,11 +416,11 @@ pub fn list(report: Report) -> Result<Vec<(String, Option<String>)>> {
 /// Apps installed for this session profile, from their desktop entries (no
 /// session needed). If `android` is given (the session's user packages),
 /// apps installed without an entry are added too.
-pub fn installed_apps(android: Option<&[String]>) -> Vec<DesktopApp> {
-    let profile = paths::profile().unwrap_or_default();
+pub fn installed_apps(android: Option<&[String]>) -> Result<Vec<DesktopApp>> {
+    let profile = paths::profile()?;
     let mut v: Vec<DesktopApp> = xdg::desktop_apps(&Dirs::from_env())
         .into_iter()
-        .filter(|a| a.profile == profile)
+        .filter(|a| a.profile.as_deref() == Some(profile.as_str()))
         .collect();
     if let Some(pkgs) = android {
         for p in pkgs {
@@ -429,13 +429,13 @@ pub fn installed_apps(android: Option<&[String]>) -> Vec<DesktopApp> {
                     package: p.clone(),
                     name: p.clone(),
                     version: None,
-                    profile: profile.clone(),
+                    profile: Some(profile.to_string()),
                     icon: None,
                 });
             }
         }
     }
-    v
+    Ok(v)
 }
 
 /// The session's user packages, if it is running and booted (doesn't start

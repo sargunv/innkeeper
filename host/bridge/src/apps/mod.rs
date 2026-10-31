@@ -185,16 +185,15 @@ pub struct Config {
     pub enabled: bool,
     pub mirror_apps: AtomicBool,
     pub dirs: xdg::Dirs,
-    /// The session profile entries are made for (see `paths::profile`).
-    pub profile: String,
+    /// The session profile entries are made for.
+    pub profile: paths::ProfileName,
     /// `Exec` prefix: `innkeeper run` (with the profile), the package and
     /// `%U` are appended.
     pub run: Vec<String>,
 }
 
 impl Config {
-    pub fn from_env(enabled: bool) -> Config {
-        let profile = paths::profile().unwrap_or_default();
+    pub fn from_env(enabled: bool, profile: paths::ProfileName) -> Config {
         let mut run = paths::command(&[xdg::INNKEEPER.into()], &profile);
         run.push("run".into());
         Config {
@@ -215,7 +214,7 @@ impl Config {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
         let ours = desktop::read_key(&text, "X-Innkeeper-Origin").as_deref() == Some("android")
-            && xdg::exec_profile(&exec) == self.profile;
+            && xdg::exec_profile(&exec).as_deref() == Some(self.profile.as_str());
         let version = desktop::read_key(&text, "X-Innkeeper-Version").unwrap_or_default();
         Some((ours, version))
     }
@@ -319,7 +318,7 @@ impl AppsService {
             return Reply::ok();
         };
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
-        if xdg::exec_profile(&exec) != self.cfg.profile {
+        if xdg::exec_profile(&exec).as_deref() != Some(self.cfg.profile.as_str()) {
             return Reply::ok();
         }
         xdg::remove_app(&self.cfg.dirs, pkg);
@@ -492,9 +491,12 @@ mod tests {
                 cache: tmp.join("cache"),
                 portal: None,
             },
-            profile: "t".into(),
+            profile: paths::ProfileName::new("t").unwrap(),
             run: [
-                paths::command(&["innkeeper".into()], "t"),
+                paths::command(
+                    &["innkeeper".into()],
+                    &paths::ProfileName::new("t").unwrap(),
+                ),
                 vec!["run".into()],
             ]
             .concat(),

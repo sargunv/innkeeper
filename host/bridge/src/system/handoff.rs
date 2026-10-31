@@ -78,15 +78,12 @@ pub struct Handoffs {
 }
 
 impl Handoffs {
-    pub fn new(input: Arc<crate::input::Hub>) -> Arc<Self> {
-        let profile = innkeeper_core::paths::profile().unwrap_or_default();
-        let name = if profile.is_empty() {
-            "innkeeper".into()
-        } else {
-            format!("innkeeper-{profile}")
-        };
+    pub fn new(
+        input: Arc<crate::input::Hub>,
+        profile: &innkeeper_core::paths::ProfileName,
+    ) -> Arc<Self> {
         let root = innkeeper_core::paths::xdg_home("XDG_CACHE_HOME", ".cache")
-            .join(name)
+            .join(format!("innkeeper-{profile}"))
             .join("handoff");
         Arc::new(Self {
             root,

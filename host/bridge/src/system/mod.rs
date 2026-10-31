@@ -77,13 +77,14 @@ impl Shared {
         run_dir: &std::path::Path,
         desktop: bool,
         input: Arc<crate::input::Hub>,
+        profile: &innkeeper_core::paths::ProfileName,
     ) -> Arc<Shared> {
         if !desktop {
             crate::info!("system: test session (log-only sinks)");
         }
         Arc::new(Shared {
             art_dir: run_dir.join("art"),
-            handoffs: handoff::Handoffs::new(input),
+            handoffs: handoff::Handoffs::new(input, profile),
             lifecycle: run_dir.join("lifecycle"),
             lifecycle_owner: Default::default(),
             desktop,
@@ -669,7 +670,12 @@ mod tests {
     #[test]
     fn test_session_does_not_start_desktop_hubs() {
         let dir = crate::test_dir("system-test-policy");
-        let shared = Shared::new(&dir, false, crate::input::Hub::new());
+        let shared = Shared::new(
+            &dir,
+            false,
+            crate::input::Hub::new(),
+            &innkeeper_core::paths::ProfileName::new("t").unwrap(),
+        );
         // Gating the hub itself prevents both clipboard publication and subscriptions,
         // and even a NOTIFY_CLOSE must not connect to the real notification server.
         assert!(shared.clipboard().is_none());

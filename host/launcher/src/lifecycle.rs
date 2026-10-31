@@ -46,7 +46,6 @@ pub fn wake_lead() -> Duration {
 /// Short idle polling and alarm lead, for tests.
 fn test_timers() -> bool {
     std::env::var("INNKEEPER_TEST_TIMERS").is_ok_and(|v| v == "1")
-        && std::env::var("INNKEEPER_PROFILE").is_ok_and(|v| !v.is_empty())
 }
 
 /// The grace period for a new session, in seconds; 0: it never stops by

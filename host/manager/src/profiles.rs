@@ -21,7 +21,8 @@ struct Page {
     group: adw::PreferencesGroup,
     rows: RefCell<Vec<gtk::Widget>>,
     /// The profile this window shows the apps of.
-    current: RefCell<String>,
+    /// The profile this window shows, if any.
+    current: RefCell<Option<String>>,
     /// A profile being started, stopped or deleted from here.
     busy: RefCell<Option<String>>,
     /// Profiles whose settings show.
@@ -105,7 +106,7 @@ impl Page {
             match worker::run_quiet(|| {
                 Ok::<_, anyhow::Error>((
                     profiles::list()?,
-                    innkeeper_core::paths::profile().unwrap_or_default(),
+                    innkeeper_core::paths::profile().ok().map(String::from),
                 ))
             })
             .await
@@ -134,7 +135,7 @@ impl Page {
     }
 
     fn row(self: &Rc<Self>, p: &Profile, busy: Option<&str>) -> adw::ExpanderRow {
-        let current = p.name == *self.current.borrow();
+        let current = self.current.borrow().as_deref() == Some(p.name.as_str());
         let mut subtitle = if busy == Some(&p.name) {
             "Working…".to_string()
         } else if p.running {
@@ -354,7 +355,7 @@ impl Page {
         if let Err(e) = profiles::check_name(to) {
             return self.error(&e);
         }
-        let current = *self.current.borrow() == from;
+        let current = self.current.borrow().as_deref() == Some(from);
         let (f, t) = (from.to_string(), to.to_string());
         let (s, to) = (self.clone(), to.to_string());
         self.work_then(
@@ -484,7 +485,7 @@ impl Page {
                 return;
             }
             let n = name.clone();
-            let current = *s.current.borrow() == name;
+            let current = s.current.borrow().as_deref() == Some(name.as_str());
             let s2 = s.clone();
             let busy = name.clone();
             s.work_then(

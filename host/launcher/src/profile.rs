@@ -46,17 +46,72 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// A profile's name, checked by [`check_name`]: never empty, so every
+/// per-profile path, bus name and desktop entry carries one.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ProfileName(String);
+
+impl ProfileName {
+    pub fn new(name: &str) -> Result<Self> {
+        check_name(name)?;
+        Ok(Self(name.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ProfileName {
+    type Error = anyhow::Error;
+    fn try_from(name: String) -> Result<Self> {
+        check_name(&name)?;
+        Ok(Self(name))
+    }
+}
+
+impl From<ProfileName> for String {
+    fn from(p: ProfileName) -> String {
+        p.0
+    }
+}
+
+impl PartialEq<str> for ProfileName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for ProfileName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::ops::Deref for ProfileName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ProfileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// The profiles under `data_home` (`$XDG_DATA_HOME/innkeeper`): its
 /// `data-<name>` directories, by name.
-pub fn list(data_home: &Path) -> Vec<String> {
-    let mut v: Vec<String> = fs::read_dir(data_home)
+pub fn list(data_home: &Path) -> Vec<ProfileName> {
+    let mut v: Vec<ProfileName> = fs::read_dir(data_home)
         .map(|d| {
             d.flatten()
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .filter_map(|e| {
                     let n = e.file_name().into_string().ok()?;
-                    let name = n.strip_prefix("data-")?.to_string();
-                    check_name(&name).is_ok().then_some(name)
+                    ProfileName::new(n.strip_prefix("data-")?).ok()
                 })
                 .collect()
         })
@@ -72,7 +127,7 @@ pub fn chosen_file() -> PathBuf {
 
 /// The profile to use when none is named, of `profiles`: the one last
 /// chosen, else the first.
-pub fn pick<'a>(profiles: &'a [String], chosen: Option<&str>) -> Option<&'a String> {
+pub fn pick<'a>(profiles: &'a [ProfileName], chosen: Option<&str>) -> Option<&'a ProfileName> {
     profiles
         .iter()
         .find(|p| Some(p.as_str()) == chosen)
@@ -252,7 +307,7 @@ impl Settings {
 }
 
 /// Profile `name`'s desktop preferences directory.
-fn config_dir(name: &str) -> PathBuf {
+fn config_dir(name: &ProfileName) -> PathBuf {
     crate::paths::xdg_home("XDG_CONFIG_HOME", ".config")
         .join(crate::paths::per_profile("innkeeper", name))
 }
@@ -329,7 +384,11 @@ mod tests {
 
     #[test]
     fn picks_the_profile_last_chosen_else_the_first() {
-        let v = |s: &[&str]| s.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let v = |s: &[&str]| {
+            s.iter()
+                .map(|s| ProfileName::new(s).unwrap())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(pick(&[], Some("a")), None);
         assert_eq!(pick(&v(&["a", "b"]), Some("b")).unwrap(), "b");
         assert_eq!(pick(&v(&["a", "b"]), Some("gone")).unwrap(), "a");
@@ -439,7 +498,7 @@ mod tests {
     fn rename_moves_and_delete_removes_a_stopped_profiles_files() {
         let d = dir("delete");
         let p = |name: &str| crate::Paths {
-            profile: name.into(),
+            profile: ProfileName::new(name).unwrap(),
             libexec: d.join("libexec"),
             share: d.join("share"),
             run: d.join(format!("run-{name}")),

@@ -1,9 +1,10 @@
 # Bridge protocol
 
 `innkeeper-bridge` serves Android-side clients over one socket,
-`$XDG_RUNTIME_DIR/innkeeper[-<profile>]/bridge/bridge.sock`, bound into Android
-as `/dev/socket/innkeeper/bridge.sock`. This file is the cross-language spec;
-each service's messages are in the module doc of its Rust `proto.rs`.
+`$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/bridge/bridge.sock`, bound
+into Android as `/dev/socket/innkeeper/bridge.sock`. This file is the
+cross-language spec; each service's messages are in the module doc of its Rust
+`proto.rs`.
 
 | Implementation | Where                                                                                             |
 | -------------- | ------------------------------------------------------------------------------------------------- |

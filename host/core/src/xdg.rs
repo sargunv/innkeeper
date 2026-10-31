@@ -257,18 +257,18 @@ pub struct DesktopApp {
     pub package: String,
     pub name: String,
     pub version: Option<String>,
-    /// The session profile the entry runs in (baked into its `Exec`), empty
-    /// for the main session.
-    pub profile: String,
+    /// The session profile the entry runs in (baked into its `Exec`), if it
+    /// names one.
+    pub profile: Option<String>,
     /// The largest icon file, if any.
     pub icon: Option<PathBuf>,
 }
 
 /// The session profile an entry's `Exec` runs against.
-pub fn exec_profile(exec: &str) -> String {
+pub fn exec_profile(exec: &str) -> Option<String> {
     paths::invocation(&desktop::exec_args(exec))
         .profile
-        .to_string()
+        .map(str::to_string)
 }
 
 /// The largest hicolor PNG for `id` (`dev.sargunv.innkeeper.<pkg>`).
@@ -340,11 +340,15 @@ fn rewrite_entries(d: &Dirs, rename: Option<(&str, &str)>) -> usize {
         let args = desktop::exec_args(&exec);
         let inv = paths::invocation(&args);
         let (renamed, profile) = match rename {
-            Some((from, to)) if inv.profile == from => (true, to),
+            Some((from, to)) if inv.profile == Some(from) => (true, Some(to)),
             _ => (false, inv.profile),
         };
+        // An entry that names no profile reaches no session: leave it.
+        let Some(profile) = profile.and_then(|p| paths::ProfileName::new(p).ok()) else {
+            continue;
+        };
         if inv.program != Some(INNKEEPER) || renamed {
-            let mut run = paths::command(&[INNKEEPER.into()], profile);
+            let mut run = paths::command(&[INNKEEPER.into()], &profile);
             run.extend(["run".into(), pkg.clone()]);
             let Some(mut new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
@@ -397,12 +401,12 @@ mod tests {
 
     #[test]
     fn profile_of_exec() {
-        for (program, profile) in [("/x/innkeeper", "gui"), ("/a b/innkeeper", "")] {
-            let mut run = paths::command(&[program.into()], profile);
-            run.extend(["run".into(), "a.b".into()]);
-            let exec = desktop::exec_line(&run, Some("%U")).unwrap();
-            assert_eq!(exec_profile(&exec), profile);
-        }
+        let gui = paths::ProfileName::new("gui").unwrap();
+        let mut run = paths::command(&["/a b/innkeeper".into()], &gui);
+        run.extend(["run".into(), "a.b".into()]);
+        let exec = desktop::exec_line(&run, Some("%U")).unwrap();
+        assert_eq!(exec_profile(&exec).as_deref(), Some("gui"));
+        assert_eq!(exec_profile("innkeeper run a.b %U"), None);
     }
 
     #[test]
@@ -454,7 +458,7 @@ mod tests {
         let apps = desktop_apps(&d);
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].package, "org.example.app");
-        assert_eq!(apps[0].profile, "");
+        assert_eq!(apps[0].profile, None);
         assert_eq!(
             apps[0].icon.as_deref(),
             Some(
@@ -494,26 +498,44 @@ mod tests {
         };
         let exec_of = |p: &Path| desktop::read_key(&fs::read_to_string(p).unwrap(), "Exec");
         let want = |pkg: &str, profile: &str| {
-            let mut run = paths::command(&cli, profile);
+            let mut run = paths::command(&cli, &paths::ProfileName::new(profile).unwrap());
             run.extend(["run".into(), pkg.into()]);
             Some(desktop::exec_line(&run, Some("%U")).unwrap())
         };
-        let mut old = paths::command(&["/gone/innkeeper".into()], "cli");
+        let mut old = paths::command(
+            &["/gone/innkeeper".into()],
+            &paths::ProfileName::new("cli").unwrap(),
+        );
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
-        let moved = entry("org.ex.moved", "/gone/innkeeper run org.ex.moved %U");
+        let moved = entry(
+            "org.ex.moved",
+            "env INNKEEPER_PROFILE=m /gone/innkeeper run org.ex.moved %U",
+        );
         let mut moved_text = fs::read_to_string(&moved).unwrap();
-        moved_text.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=/gone/innkeeper run --new-window org.ex.moved\n");
+        moved_text.push_str("Actions=NewWindow;\n\n[Desktop Action NewWindow]\nName=New Window\nExec=env INNKEEPER_PROFILE=m /gone/innkeeper run --new-window org.ex.moved\n");
         fs::write(&moved, moved_text).unwrap();
         let fine = entry("org.ex.fine", &want("org.ex.fine", "p").unwrap());
+        // An entry that names no profile reaches no session; it is left alone.
+        let on_path = entry("org.ex.path", "innkeeper run org.ex.path %U");
 
         assert_eq!(refresh_entries(&d), 2);
         assert_eq!(exec_of(&old), want("org.ex.old", "cli"));
-        assert_eq!(exec_profile(&exec_of(&old).unwrap()), "cli");
-        assert_eq!(exec_of(&moved), want("org.ex.moved", ""));
+        assert_eq!(
+            exec_profile(&exec_of(&old).unwrap()).as_deref(),
+            Some("cli")
+        );
+        assert_eq!(exec_of(&moved), want("org.ex.moved", "m"));
         let moved_text = fs::read_to_string(&moved).unwrap();
-        assert!(moved_text.contains("Exec=innkeeper run --new-window org.ex.moved\n"));
+        assert!(
+            moved_text
+                .contains("Exec=env INNKEEPER_PROFILE=m innkeeper run --new-window org.ex.moved\n")
+        );
         assert_eq!(exec_of(&fine), want("org.ex.fine", "p"));
+        assert_eq!(
+            exec_of(&on_path).as_deref(),
+            Some("innkeeper run org.ex.path %U")
+        );
         assert_eq!(refresh_entries(&d), 0);
         assert_eq!(move_entries(&d, "p", "q"), 1);
         assert_eq!(exec_of(&fine), want("org.ex.fine", "q"));
