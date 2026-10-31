@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -115,3 +116,46 @@ kill() { printf '["kill", "%s"]\\n' "$*" >>"$trace"; }
             self.assertTrue(runtime.exists())
           else:
             self.assertFalse(runtime.exists())
+
+  def test_stale_kde_service_cache_is_cleared(self):
+    profile = "nested-cache-test"
+    nested = OUTPUT / "nested" / profile
+    shutil.rmtree(nested, ignore_errors=True)
+    (nested / "cache").mkdir(parents=True)
+    stale = nested / "cache/ksycoca6_en-POSIX_stale"
+    stale.touch()
+    kept = nested / "cache/kwin"
+    kept.mkdir()
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=OUTPUT) as work:
+      work = Path(work)
+      binary = work / "bin"
+      binary.mkdir()
+      # The desktop never starts: setup ends at the compositor service.
+      for command, status in (
+        ("systemd-run", 3),
+        ("journalctl", 0),
+        ("systemctl", 0),
+        ("mountpoint", 1),
+      ):
+        (binary / command).write_text(f"#!/bin/sh\nexit {status}\n")
+        (binary / command).chmod(0o755)
+      runtime = work / "runtime"
+      runtime.mkdir()
+      result = subprocess.run(
+        [str(SOURCE), "true"],
+        env=dict(
+          os.environ,
+          PATH=f"{binary}:{os.environ['PATH']}",
+          XDG_RUNTIME_DIR=str(runtime),
+          INNKEEPER_PROFILE=profile,
+          INNKEEPER_E2E="0",
+        ),
+        capture_output=True,
+        text=True,
+        timeout=10,
+      )
+    self.assertEqual(3, result.returncode, result.stderr)
+    self.assertFalse(stale.exists())
+    self.assertTrue(kept.exists())
+    shutil.rmtree(nested)

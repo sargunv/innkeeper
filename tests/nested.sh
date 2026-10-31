@@ -61,6 +61,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$N"/{home,config,data,cache,state}
+# KDE's service cache would keep an older run's TestSeat entry, and KWin would
+# refuse its interfaces.
+rm -f "$N"/cache/ksycoca6*
 : >"$N/compositor.log"
 # KWin grants fake seat input and screenshots only to an executable whose
 # desktop file names them: tests/e2e/kwin.py. This entry lives solely on this
