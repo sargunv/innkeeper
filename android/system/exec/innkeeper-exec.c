@@ -175,8 +175,8 @@ static void serve_one(int c) {
     _exit(errno == ENOENT ? 127 : 126);
   }
   for (int i = 0; i < 3; i++) close(fds[i]);
-  // Wait for exit or disconnect together. Polling waitpid every 200 ms made
-  // short commands (including boot readiness probes) wait out the whole tick.
+  // Wait for exit or disconnect together, without a polling tick that short
+  // commands (boot readiness probes) would wait out.
   int pidfd = syscall(SYS_pidfd_open, pid, 0);
   struct pollfd watched[] = {
     {.fd = pidfd, .events = POLLIN},

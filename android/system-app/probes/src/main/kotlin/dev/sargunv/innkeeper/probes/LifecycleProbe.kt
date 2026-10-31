@@ -30,7 +30,7 @@ import kotlin.math.sin
 
 /**
  * Real alarm-clock and foreground audio APIs for the e2e audio/lifecycle groups, and a JobScheduler
- * job for reproducing job timing by hand (#54); never shipped.
+ * job for checking job timing by hand; never shipped.
  */
 class LifecycleProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
