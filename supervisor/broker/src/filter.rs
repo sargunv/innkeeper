@@ -53,14 +53,14 @@ fn rule(f: &mut Vec<Insn>, nr: i64, args: &[(u32, u32, u32)]) {
 /// Waits stay interruptible for ptrace and job control; binder restarts are
 /// made idempotent by the broker.
 #[allow(clippy::unnecessary_cast)] // RLIMIT_* is i32 on bionic, u32 on glibc.
-pub fn install() -> std::io::Result<i32> {
+pub fn install(guest: crate::Guest) -> std::io::Result<i32> {
     use libc::*;
     let mut f = vec![insn(0x20, 4), insn(0x15, 0xc000003e), insn(0x06, ALLOW)];
     f[1].jt = 1; // Other architectures retain the kernel's handling.
     rule(&mut f, SYS_openat, &[]);
     // OpenHarmony: musl opens with open(2), which the broker serves as
     // openat; its access-token device's ioctls are type 'A', ashmem's 0x77.
-    if crate::guest() == crate::Guest::Ohos {
+    if guest == crate::Guest::Ohos {
         rule(&mut f, SYS_open, &[]);
         for ty in [crate::ohos::IOCTL_TYPE, crate::ashmem::IOCTL_TYPE] {
             rule(&mut f, SYS_ioctl, &[(1, 0xff00, (ty as u32) << 8)]);

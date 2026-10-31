@@ -29,10 +29,11 @@ exits with init's status. It stays an ancestor of every Android process, so
 process-memory access works with Yama's default `ptrace_scope=1` without
 capabilities or a sysctl override.
 
-Filesystem notifications (`fs`) run on four workers so a slow lookup (including
-`fstat` through a caller's fd) cannot block the binder receive thread. Each BPF
-object retains one memfd inode; opening a pin reopens that inode with an
-independent file description, so netd's OFD map locks conflict correctly.
+Filesystem notifications (`fs`, and the credential side's `chown`, `lstat` and
+`access`) share four worker threads, so a slow lookup (including `fstat` through
+a caller's fd) cannot block the binder receive thread. Each BPF object retains
+one memfd inode; opening a pin reopens that inode with an independent file
+description, so netd's OFD map locks conflict correctly.
 
 ## Binder
 

@@ -12,7 +12,6 @@
 //!    user namespace mapping the user to Android's root, and bionic only
 //!    trusts root-owned property areas (as in a single-uid session, the
 //!    files are all the user's anyway).
-//!  * SO_PEERCRED shows init as pid 1 (see [`init_as_pid1`]).
 //!  * lstat of a symlink that stands in for a bind mount inside /data
 //!    (/data/user/0 -> /data/data) shows the directory (see [`bind_target`]).
 //!  * `mkdir` and the `chmod` family keep a directory's owner rwx: with no
@@ -35,60 +34,20 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use crate::notify::{
-    SECCOMP_ADDFD_FLAG_SEND, SeccompNotif, SeccompNotifAddfd, mem_write, notif_addfd_cmd,
-    notif_id_valid, open_mem, read_path, send_resp, status_field, vm_read,
+    Listener, SeccompNotif, mem_write, open_mem, read_path, status_field, vm_read,
 };
+use crate::{Config, Guest};
 
 pub(crate) struct Fs {
-    listener: RawFd,
-    resp_sz: usize,
+    listener: Listener,
+    guest: Guest,
     /// (host dir, Android path), longest host dir first.
     map: Vec<(Vec<u8>, Vec<u8>)>,
     /// The kernel's uid and gid for every Android process (the user's).
     uid: u32,
     gid: u32,
-    /// Set by the launcher, including an empty path for software rendering.
+    /// The one DRM node Android may open, if any.
     render_node: Option<std::path::PathBuf>,
-}
-
-/// Filesystem lookups can wait on a mount. Keep them off the binder receive
-/// thread, including fstat's traversal of /proc/<tid>/fd/<fd>.
-pub(crate) struct Workers(std::sync::mpsc::Sender<SeccompNotif>);
-
-impl Workers {
-    pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Self {
-        use std::sync::{Arc, Mutex, mpsc};
-        let fs = Arc::new(Fs::from_env(listener, resp_sz));
-        let (tx, rx) = mpsc::channel::<SeccompNotif>();
-        let rx = Arc::new(Mutex::new(rx));
-        for _ in 0..4 {
-            let fs = Arc::clone(&fs);
-            let rx = Arc::clone(&rx);
-            std::thread::spawn(move || {
-                loop {
-                    let Ok(req) = rx.lock().unwrap().recv() else {
-                        return;
-                    };
-                    // Queued notifications can have ended before we start.
-                    if !notif_id_valid(listener, req.id) {
-                        continue;
-                    }
-                    if req.data.nr as i64 == libc::SYS_openat {
-                        if !fs.openat(&req) {
-                            fs.cont(req.id);
-                        }
-                    } else {
-                        fs.serve(&req);
-                    }
-                }
-            });
-        }
-        Self(tx)
-    }
-
-    pub(crate) fn submit(&self, req: SeccompNotif) {
-        self.0.send(req).expect("fs workers stopped");
-    }
 }
 
 const SYS_FCHMODAT2: i64 = 452;
@@ -110,61 +69,48 @@ pub(crate) fn is_fs_syscall(nr: i64) -> bool {
     )
 }
 
-/// The path map, for the credential side (`creds`): Android
-/// paths of mapped host dirs (such as `/data`) as host paths, so lookups
-/// that refuse symlinks can start past them.
-pub(crate) fn to_host(p: &[u8]) -> Option<Vec<u8>> {
-    static F: std::sync::OnceLock<Fs> = std::sync::OnceLock::new();
-    let f = F.get_or_init(|| Fs::from_env(-1, 0));
-    for (host, android) in &f.map {
-        if android.as_slice() == b"/" {
-            // The composed root: "/" has a symlink to it per partition
-            // (/system, /apex...).
-            let first = p.get(1..)?.split(|&c| c == b'/').next()?;
-            let mut target = host.clone();
-            target.push(b'/');
-            target.extend_from_slice(first);
-            let mut link = b"/".to_vec();
-            link.extend_from_slice(first);
-            if first.is_empty()
-                || std::fs::read_link(OsStr::from_bytes(&link))
-                    .map_or(true, |t| t.as_os_str().as_bytes() != target.as_slice())
-            {
-                continue;
+impl Fs {
+    /// The path map, for the credential side (`creds`): Android
+    /// paths of mapped host dirs (such as `/data`) as host paths, so lookups
+    /// that refuse symlinks can start past them.
+    pub(crate) fn to_host(&self, p: &[u8]) -> Option<Vec<u8>> {
+        for (host, android) in &self.map {
+            if android.as_slice() == b"/" {
+                // The composed root: "/" has a symlink to it per partition
+                // (/system, /apex...).
+                let first = p.get(1..)?.split(|&c| c == b'/').next()?;
+                let mut target = host.clone();
+                target.push(b'/');
+                target.extend_from_slice(first);
+                let mut link = b"/".to_vec();
+                link.extend_from_slice(first);
+                if first.is_empty()
+                    || std::fs::read_link(OsStr::from_bytes(&link))
+                        .map_or(true, |t| t.as_os_str().as_bytes() != target.as_slice())
+                {
+                    continue;
+                }
+                let mut out = host.clone();
+                out.extend_from_slice(p);
+                return Some(out);
             }
-            let mut out = host.clone();
-            out.extend_from_slice(p);
-            return Some(out);
+            let Some(rest) = p.strip_prefix(android.as_slice()) else {
+                continue;
+            };
+            if rest.is_empty() || rest[0] == b'/' {
+                let mut out = host.clone();
+                out.extend_from_slice(rest);
+                return Some(out);
+            }
         }
-        let Some(rest) = p.strip_prefix(android.as_slice()) else {
-            continue;
-        };
-        if rest.is_empty() || rest[0] == b'/' {
-            let mut out = host.clone();
-            out.extend_from_slice(rest);
-            return Some(out);
-        }
+        None
     }
-    None
 }
 
 /// DRM enumeration may read directories, but only the chosen device opens.
-fn drm_path_allowed(path: &std::path::Path, selected: &std::path::Path) -> bool {
-    !path.starts_with("/dev/dri") || path == selected || path.is_dir()
+fn drm_path_allowed(path: &std::path::Path, selected: Option<&std::path::Path>) -> bool {
+    !path.starts_with("/dev/dri") || Some(path) == selected || path.is_dir()
 }
-
-/// Init isn't pid 1, but its property service treats a peer
-/// that isn't pid 1 as a client (and init's own setprop from its restorecon
-/// thread as a new restorecon request, forever). Show init as pid 1 to
-/// SO_PEERCRED ([`crate::notify::serve`] records its pid).
-pub(crate) fn init_as_pid1(pid: i32) -> i32 {
-    if pid == INIT.load(std::sync::atomic::Ordering::Relaxed) {
-        1
-    } else {
-        pid
-    }
-}
-pub(crate) static INIT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// The Android path a symlink (O_PATH fd) that stands in
 /// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
@@ -195,27 +141,12 @@ pub(crate) fn root_ids(st: &mut libc::stat) {
 }
 
 impl Fs {
-    /// From `INNKEEPER_ROOT_MAP` (lines of
-    /// `<host dir>=<Android path>`).
-    pub(crate) fn from_env(listener: RawFd, resp_sz: usize) -> Fs {
-        let spec = std::env::var("INNKEEPER_ROOT_MAP").unwrap_or_default();
-        let mut map: Vec<(Vec<u8>, Vec<u8>)> = spec
-            .lines()
-            .filter_map(|l| l.rsplit_once('='))
-            .map(|(h, a)| {
-                (
-                    h.trim_end_matches('/').as_bytes().to_vec(),
-                    a.as_bytes().to_vec(),
-                )
-            })
-            .filter(|(h, _)| !h.is_empty())
-            .collect();
-        map.sort_by_key(|(h, _)| std::cmp::Reverse(h.len()));
+    pub(crate) fn new(listener: Listener, cfg: &Config) -> Fs {
         Fs {
             listener,
-            resp_sz,
-            render_node: std::env::var_os("INNKEEPER_RENDER_NODE").map(Into::into),
-            map,
+            guest: cfg.guest,
+            map: cfg.root_map.clone(),
+            render_node: cfg.render_node.clone(),
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
         }
@@ -250,15 +181,31 @@ impl Fs {
     }
 
     fn reply(&self, id: u64, val: i64, errno: i32) {
-        send_resp(self.listener, self.resp_sz, id, val, -errno, false);
+        self.listener.reply(id, val, errno);
     }
 
     fn cont(&self, id: u64) {
-        send_resp(self.listener, self.resp_sz, id, 0, 0, true);
+        self.listener.cont(id);
     }
 
-    /// Answer readlink/readlinkat/getcwd/fstat.
+    /// Serve one of [`is_fs_syscall`]'s calls, or an `openat` that isn't of
+    /// a binder device, on a worker thread.
     pub(crate) fn serve(&self, req: &SeccompNotif) {
+        // Queued notifications can have ended before we start.
+        if !self.listener.valid(req.id) {
+            return;
+        }
+        if req.data.nr as i64 == libc::SYS_openat {
+            if !self.openat(req) {
+                self.cont(req.id);
+            }
+        } else {
+            self.serve_call(req);
+        }
+    }
+
+    /// Answer readlink/readlinkat/getcwd/fstat/mkdir/chmod.
+    fn serve_call(&self, req: &SeccompNotif) {
         let tid = req.pid as i32;
         let a = req.data.args;
         let nr = req.data.nr as i64;
@@ -307,7 +254,7 @@ impl Fs {
         let Some(mem) = open_mem(tid) else {
             return self.cont(req.id);
         };
-        if !notif_id_valid(self.listener, req.id) {
+        if !self.listener.valid(req.id) {
             return;
         }
         if !mem_write(mem.raw(), buf, &out[..n]) {
@@ -338,7 +285,7 @@ impl Fs {
             st.st_gid = 0;
         }
         // OpenHarmony's c_utils takes /dev/ashmem only as a character device.
-        if crate::guest() == crate::Guest::Ohos
+        if self.guest == Guest::Ohos
             && std::fs::read_link(OsStr::from_bytes(link.as_bytes()))
                 .is_ok_and(|l| crate::ashmem::is_region(l.as_os_str().as_bytes()))
         {
@@ -354,7 +301,7 @@ impl Fs {
         let Some(mem) = open_mem(tid) else {
             return self.cont(req.id);
         };
-        if !notif_id_valid(self.listener, req.id) {
+        if !self.listener.valid(req.id) {
             return;
         }
         if !mem_write(mem.raw(), buf, b) {
@@ -409,7 +356,7 @@ impl Fs {
             .and_then(|u| u32::from_str_radix(&u, 8).ok())
             .unwrap_or(0o022);
         let mode = (mode & 0o7777 & !umask) | 0o700;
-        if !notif_id_valid(self.listener, req.id) {
+        if !self.listener.valid(req.id) {
             return;
         }
         // The broker's own umask is 0 (main()).
@@ -452,7 +399,7 @@ impl Fs {
         if r != 0 || st.st_mode & libc::S_IFMT != libc::S_IFDIR {
             return self.cont(req.id);
         }
-        if !notif_id_valid(self.listener, req.id) {
+        if !self.listener.valid(req.id) {
             return;
         }
         let r = unsafe { libc::chmod(p.as_ptr(), (mode & 0o7777) | 0o700) };
@@ -483,18 +430,17 @@ impl Fs {
         // cannot pick a different GPU from the allocator's consumers.
         let n = (4096 - (a[1] as usize & 4095)).min(6);
         let prefix = vm_read(tid, a[1], n);
-        if let Some(selected) = &self.render_node
-            && prefix
-                .as_ref()
-                .is_some_and(|p| !p.starts_with(b"/") || p.starts_with(b"/dev/") || p.len() < 6)
+        if prefix
+            .as_ref()
+            .is_some_and(|p| !p.starts_with(b"/") || p.starts_with(b"/dev/") || p.len() < 6)
             && let Some(path) = self.target_path(tid, a[0] as i32, a[1])
             && let Ok(path) = std::fs::canonicalize(OsStr::from_bytes(path.to_bytes()))
-            && !drm_path_allowed(&path, selected)
+            && !drm_path_allowed(&path, self.render_node.as_deref())
         {
             self.reply(req.id, 0, libc::EACCES);
             return true;
         }
-        if crate::guest() == crate::Guest::Ohos
+        if self.guest == Guest::Ohos
             && prefix.as_deref().is_some_and(|p| p.starts_with(b"/dev/"))
             && read_path(tid, a[1]).as_deref() == Some(crate::ashmem::NODE)
         {
@@ -504,7 +450,7 @@ impl Fs {
             }
             return true;
         }
-        if crate::guest() == crate::Guest::Ohos
+        if self.guest == Guest::Ohos
             && prefix.as_deref().is_some_and(|p| p.starts_with(b"/etc/"))
             && let Some(name) = read_path(tid, a[1]).as_deref().and_then(ohos_etc)
         {
@@ -556,7 +502,7 @@ impl Fs {
     }
 
     /// Complete `req` (an openat) with a memfd holding `body`.
-    fn inject(&self, req: &SeccompNotif, body: &[u8]) {
+    pub(crate) fn inject(&self, req: &SeccompNotif, body: &[u8]) {
         let fd =
             unsafe { libc::syscall(libc::SYS_memfd_create, c"proc".as_ptr(), libc::MFD_CLOEXEC) };
         if fd < 0 {
@@ -574,20 +520,7 @@ impl Fs {
 
     /// Complete `req` (an openat) with a copy of `fd`.
     fn inject_fd(&self, req: &SeccompNotif, fd: RawFd) {
-        let add = SeccompNotifAddfd {
-            id: req.id,
-            flags: SECCOMP_ADDFD_FLAG_SEND,
-            srcfd: fd as u32,
-            newfd: 0,
-            newfd_flags: (req.data.args[2] as u32) & libc::O_CLOEXEC as u32,
-        };
-        unsafe {
-            libc::ioctl(
-                self.listener,
-                notif_addfd_cmd(size_of::<SeccompNotifAddfd>()) as _,
-                &add as *const _,
-            )
-        };
+        self.listener.open_with(req, fd);
     }
 }
 
@@ -654,20 +587,20 @@ mod tests {
     use super::*;
 
     fn fs(map: &str) -> Fs {
-        unsafe { std::env::set_var("INNKEEPER_ROOT_MAP", map) };
-        Fs::from_env(-1, 0)
+        Fs::new(
+            Listener::NONE,
+            &Config {
+                guest: Guest::Android,
+                root_map: crate::parse_root_map(map),
+                render_node: None,
+                init: 0,
+            },
+        )
     }
 
     #[test]
     fn chmod_path_names_the_callers_proc_fds() {
-        let f = Fs {
-            listener: -1,
-            resp_sz: 0,
-            map: Vec::new(),
-            uid: 0,
-            gid: 0,
-            render_node: None,
-        };
+        let f = fs("");
         let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
         // The syscall caller's fd namespace must survive path resolution,
         // even when the supervisor keeps a directory at the same fd number.
@@ -691,14 +624,7 @@ mod tests {
 
     #[test]
     fn paths_through_a_proc_self_link_name_the_callers() {
-        let f = Fs {
-            listener: -1,
-            resp_sz: 0,
-            map: Vec::new(),
-            uid: 0,
-            gid: 0,
-            render_node: None,
-        };
+        let f = fs("");
         let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
         // OpenHarmony's /data/storage -> /proc/self/fd/990: the kernel would
         // follow the link in the broker.

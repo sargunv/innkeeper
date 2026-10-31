@@ -100,8 +100,8 @@ for n in binder hwbinder vndbinder access_token_id; do
   : >"/dev/$n"
   chmod 666 "/dev/$n"
 done
-# DRM: only the first render node opens (the broker's policy; /dev/null if
-# there is none), never a card node, whose KMS is the host's display.
+# DRM: only the first render node opens (the broker's policy; empty if there
+# is none), never a card node, whose KMS is the host's display.
 render=$(compgen -G '/dev/dri/renderD*' | head -n 1 || true)
 if [[ -n ${INNKEEPER_OHOS_BRIDGE:-} ]]; then
   run=$XDG_RUNTIME_DIR/innkeeper-ohos
@@ -119,7 +119,7 @@ exec env -i \
   INNKEEPER_GUEST=ohos \
   LIBGL_ALWAYS_SOFTWARE=1 \
   INNKEEPER_OHOS_DISPLAY="$display" \
-  INNKEEPER_RENDER_NODE="${render:-/dev/null}" \
+  INNKEEPER_RENDER_NODE="$render" \
   INNKEEPER_ROOT_MAP="$img/system/system=/system
 $img/vendor=/vendor
 $layer/vendor=/vendor

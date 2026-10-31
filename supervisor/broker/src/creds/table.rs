@@ -275,10 +275,6 @@ impl CredTable {
     pub fn encode(id: u64) -> u64 {
         if id == 0 { RLIM_INFINITY } else { id }
     }
-
-    pub fn len(&self) -> usize {
-        self.by_id.len()
-    }
 }
 
 /// The kernel's permission-bit check (`generic_permission` without ACLs or
@@ -531,7 +527,7 @@ mod tests {
         assert_eq!(CredTable::encode(0), RLIM_INFINITY);
         // Foreign values read as root.
         assert_eq!(t.lookup(12345), &Creds::root());
-        assert_eq!(t.len(), 2);
+        assert_eq!(t.by_id.len(), 2);
     }
 
     #[test]

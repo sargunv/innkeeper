@@ -67,9 +67,7 @@ Tests only:
   INNKEEPER_IMAGES          the image cache
 Debugging:
   INNKEEPER_BRIDGE_VERBOSE=1  per-stream stats in bridge.log
-  INNKEEPER_BROKER_DEBUG=1    broker tracing, and single-mode syscall counters
-                             every 10 s, in session.log; another value is a
-                             log file path inside the session root
+  INNKEEPER_BROKER_DEBUG=1    broker tracing in session.log
 ";
 
 /// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)

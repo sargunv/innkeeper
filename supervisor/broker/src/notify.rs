@@ -29,15 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::binder::driver::{BinderDriver, Call, InstallError, ProcId, Userspace};
 use crate::binder::uapi::*;
-use crate::{DEBUG, log};
-
-macro_rules! dlog {
-    ($($a:tt)*) => {
-        if DEBUG.load(Ordering::Relaxed) {
-            log(format_args!("broker: {}", format_args!($($a)*)));
-        }
-    };
-}
+use crate::{Config, Guest, trace};
 
 // ---- seccomp uapi (x86_64) --------------------------------------------
 
@@ -51,7 +43,7 @@ fn notif_send_cmd(sz: usize) -> u32 {
 fn notif_id_valid_cmd() -> u32 {
     ioc(1, 2, size_of::<u64>())
 }
-pub(crate) fn notif_addfd_cmd(sz: usize) -> u32 {
+fn notif_addfd_cmd(sz: usize) -> u32 {
     ioc(1, 3, sz)
 }
 
@@ -113,6 +105,111 @@ const KCMP_FILE: i32 = 0;
 /// memfd is sparse, and the broker only hands out offsets inside the part the
 /// process actually mapped (libbinder: 1 MiB - 2 pages).
 const BINDER_MEMFD_SIZE: usize = 4 * 1024 * 1024;
+
+/// The session's seccomp listener and the kernel's size of a response.
+#[derive(Clone, Copy)]
+pub(crate) struct Listener {
+    fd: RawFd,
+    resp_sz: usize,
+}
+
+impl Listener {
+    fn new(fd: RawFd) -> std::io::Result<(Listener, usize)> {
+        let mut sizes = SeccompNotifSizes::default();
+        let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
+        if r != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
+        let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
+        Ok((Listener { fd, resp_sz }, notif_sz))
+    }
+
+    #[cfg(test)]
+    pub(crate) const NONE: Listener = Listener { fd: -1, resp_sz: 0 };
+
+    fn send(&self, id: u64, val: i64, errno: i32, flags: u32) -> bool {
+        let resp = SeccompNotifResp {
+            id,
+            val,
+            error: -errno.abs(),
+            flags,
+        };
+        let mut buf = vec![0u8; self.resp_sz];
+        unsafe {
+            std::ptr::write_unaligned(buf.as_mut_ptr() as *mut SeccompNotifResp, resp);
+            libc::ioctl(self.fd, notif_send_cmd(self.resp_sz) as _, buf.as_mut_ptr()) == 0
+        }
+    }
+
+    /// Answer notification `id` with `val`, or fail it with `errno` if that
+    /// is nonzero. False if it is gone (a signal ended its wait, or its task
+    /// died).
+    pub(crate) fn reply(&self, id: u64, val: i64, errno: i32) -> bool {
+        self.send(id, val, errno, 0)
+    }
+
+    /// Let the kernel run notification `id`'s syscall.
+    pub(crate) fn cont(&self, id: u64) -> bool {
+        self.send(id, 0, 0, SECCOMP_USER_NOTIF_FLAG_CONTINUE)
+    }
+
+    /// Is notification `id` still pending (its task still in the syscall)?
+    pub(crate) fn valid(&self, id: u64) -> bool {
+        unsafe { libc::ioctl(self.fd, notif_id_valid_cmd() as _, &id as *const u64) == 0 }
+    }
+
+    /// Install a copy of fd `a.srcfd` in the caller; the new fd number or
+    /// -1.
+    pub(crate) fn addfd(&self, a: &SeccompNotifAddfd) -> i32 {
+        unsafe {
+            libc::ioctl(
+                self.fd,
+                notif_addfd_cmd(size_of::<SeccompNotifAddfd>()) as _,
+                a as *const _,
+            )
+        }
+    }
+
+    /// Complete `req`, an open, with a copy of `fd`, close-on-exec as its
+    /// flags ask; the new fd number or -1.
+    pub(crate) fn open_with(&self, req: &SeccompNotif, fd: RawFd) -> i32 {
+        self.addfd(&SeccompNotifAddfd {
+            id: req.id,
+            flags: SECCOMP_ADDFD_FLAG_SEND,
+            srcfd: fd as u32,
+            newfd: 0,
+            newfd_flags: (req.data.args[2] as u32) & O_CLOEXEC,
+        })
+    }
+}
+
+/// Worker threads for notifications that can wait on the filesystem, so they
+/// never block the receive thread, which serves binder.
+pub(crate) struct Pool(mpsc::Sender<Box<dyn FnOnce() + Send>>);
+
+impl Pool {
+    fn new(threads: usize) -> Pool {
+        let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let rx = Arc::new(Mutex::new(rx));
+        for _ in 0..threads {
+            let rx = Arc::clone(&rx);
+            std::thread::spawn(move || {
+                loop {
+                    let Ok(job) = rx.lock().unwrap().recv() else {
+                        return;
+                    };
+                    job();
+                }
+            });
+        }
+        Pool(tx)
+    }
+
+    pub(crate) fn run(&self, job: impl FnOnce() + Send + 'static) {
+        self.0.send(Box::new(job)).expect("worker pool stopped");
+    }
+}
 
 // ---- per-process state -------------------------------------------------
 
@@ -233,6 +330,7 @@ impl ProcState {
 }
 
 pub struct Supervisor {
+    guest: Guest,
     broker: BinderDriver,
     us: SeccompUserspace,
     /// Virtual ids (binder's sender_euid comes from them).
@@ -393,9 +491,7 @@ fn recv_memfd(name: &str) -> Option<OwnedFd> {
 /// The Android processes the driver serves, reached through their pinned
 /// memory, their receive memfds and the seccomp listener.
 struct SeccompUserspace {
-    listener: RawFd,
-    resp_sz: usize,
-    addfd_sz: usize,
+    listener: Listener,
     procs: HashMap<ProcId, ProcState>,
     captured: HashMap<u64, OwnedFd>,
     next_token: u64,
@@ -415,18 +511,6 @@ struct Timer {
 impl Timer {
     fn now_ms(&self) -> u64 {
         self.start.elapsed().as_millis() as u64
-    }
-}
-
-impl SeccompUserspace {
-    fn addfd(&self, a: &SeccompNotifAddfd) -> i32 {
-        unsafe {
-            libc::ioctl(
-                self.listener,
-                notif_addfd_cmd(self.addfd_sz) as _,
-                a as *const _,
-            )
-        }
     }
 }
 
@@ -492,7 +576,7 @@ impl Userspace for SeccompUserspace {
     }
     fn install_fd(&mut self, _to: ProcId, call: Call, token: u64) -> Result<u32, InstallError> {
         let fd = self.captured.get(&token).ok_or(InstallError::Failed)?;
-        let r = self.addfd(&SeccompNotifAddfd {
+        let r = self.listener.addfd(&SeccompNotifAddfd {
             id: call.id,
             flags: 0,
             srcfd: fd.as_raw_fd() as u32,
@@ -511,10 +595,10 @@ impl Userspace for SeccompUserspace {
         self.captured.remove(&token);
     }
     fn answer(&mut self, call: Call, errno: i32) -> bool {
-        send_resp(self.listener, self.resp_sz, call.id, 0, -errno, false)
+        self.listener.reply(call.id, 0, errno)
     }
     fn pending(&mut self, call: Call) -> bool {
-        notif_id_valid(self.listener, call.id)
+        self.listener.valid(call.id)
     }
     fn make_pollable(&mut self, proc: ProcId, call: Call) -> bool {
         let Some(p) = self.procs.get(&proc) else {
@@ -530,7 +614,7 @@ impl Userspace for SeccompUserspace {
             return false;
         }
         let efd = unsafe { OwnedFd::from_raw_fd(efd) };
-        let r = self.addfd(&SeccompNotifAddfd {
+        let r = self.listener.addfd(&SeccompNotifAddfd {
             id: call.id,
             flags: SECCOMP_ADDFD_FLAG_SETFD,
             srcfd: efd.as_raw_fd() as u32,
@@ -538,10 +622,10 @@ impl Userspace for SeccompUserspace {
             newfd_flags: O_CLOEXEC,
         });
         if r < 0 {
-            dlog!("poll swap failed proc={proc}");
+            trace!("poll swap failed proc={proc}");
             return false;
         }
-        dlog!("poll swap proc={proc} fd={}", p.fd);
+        trace!("poll swap proc={proc} fd={}", p.fd);
         let p = self.procs.get_mut(&proc).unwrap();
         p.poll = Some(efd);
         p.poll_ready = false;
@@ -580,35 +664,32 @@ impl Userspace for SeccompUserspace {
 // ---- the serve loop ----------------------------------------------------
 
 /// Receive and serve every notification on the session's single listener.
-/// `pins` is the bpffs directory opened before Android can mount over it;
-/// `init` is Android init's pid.
-pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
-    crate::init_log();
-    crate::fs::INIT.store(init, Ordering::Relaxed);
-    let mut sizes = SeccompNotifSizes::default();
-    let r = unsafe { libc::syscall(libc::SYS_seccomp, SECCOMP_GET_NOTIF_SIZES, 0, &mut sizes) };
-    if r != 0 {
-        eprintln!("broker: SECCOMP_GET_NOTIF_SIZES failed");
-        return;
-    }
-    let notif_sz = (sizes.seccomp_notif as usize).max(size_of::<SeccompNotif>());
-    let resp_sz = (sizes.seccomp_notif_resp as usize).max(size_of::<SeccompNotifResp>());
-    let mut emulation = crate::bpf::Emulation::new(listener, resp_sz, pins);
+/// `pins` is the bpffs directory opened before the guest can mount over it.
+pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
+    let (listener, notif_sz) = match Listener::new(fd) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("broker: SECCOMP_GET_NOTIF_SIZES: {e}");
+            return;
+        }
+    };
+    let guest = cfg.guest;
+    let mut emulation = crate::bpf::Emulation::new(listener, pins);
     let (tx, rx) = mpsc::channel();
     let timer = Arc::new(Timer {
         start: std::time::Instant::now(),
         at: AtomicU64::new(u64::MAX),
     });
+    let pool = Arc::new(Pool::new(4));
+    let fs = Arc::new(crate::fs::Fs::new(listener, &cfg));
     // Virtual ids for every process (supervisor/README.md).
-    let vid = crate::creds::Vid::new(listener, resp_sz);
-    let fs = crate::fs::Workers::new(listener, resp_sz);
-    let input = crate::input::Input::new(listener, resp_sz);
+    let vid = crate::creds::Vid::new(listener, Arc::clone(&pool), Arc::clone(&fs), cfg.init);
+    let input = crate::input::Input::new(listener);
     let sup = Arc::new(Mutex::new(Supervisor {
-        broker: BinderDriver::with_guest(crate::guest()),
+        guest,
+        broker: BinderDriver::with_guest(guest),
         us: SeccompUserspace {
             listener,
-            resp_sz,
-            addfd_sz: size_of::<SeccompNotifAddfd>(),
             procs: HashMap::new(),
             captured: HashMap::new(),
             next_token: 0,
@@ -625,11 +706,15 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
         let sup = Arc::clone(&sup);
         std::thread::spawn(move || monitor(sup, rx, timer));
     }
+    let to_fs = |req: SeccompNotif| {
+        let fs = Arc::clone(&fs);
+        pool.run(move || fs.serve(&req));
+    };
     let recv_cmd = ioc(3, 0, notif_sz);
     let mut notif = vec![0u8; notif_sz];
     loop {
         notif.fill(0);
-        if unsafe { libc::ioctl(listener, recv_cmd as _, notif.as_mut_ptr()) } != 0 {
+        if unsafe { libc::ioctl(fd, recv_cmd as _, notif.as_mut_ptr()) } != 0 {
             let e = std::io::Error::last_os_error();
             if matches!(e.raw_os_error(), Some(libc::EINTR) | Some(libc::ENOENT)) {
                 continue;
@@ -646,7 +731,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
             continue;
         }
         if nr == libc::SYS_inotify_add_watch {
-            send_continue(listener, resp_sz, req.id);
+            listener.cont(req.id);
             continue;
         }
         if crate::creds::is_cred_syscall(nr, &req.data.args) {
@@ -654,10 +739,10 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
             continue;
         }
         if crate::fs::is_fs_syscall(nr) {
-            fs.submit(req);
+            to_fs(req);
             continue;
         }
-        if !is_binder_syscall(nr, &req.data.args) {
+        if !is_binder_syscall(guest, nr, &req.data.args) {
             emulation.serve(&req);
             continue;
         }
@@ -668,7 +753,7 @@ pub fn serve(listener: RawFd, pins: Option<OwnedFd>, init: i32) {
         // Every openat in the session lands here: let the ones that can't be a
         // binder device through without taking the lock.
         if nr == libc::SYS_openat && !binder_path(req.pid as i32, req.data.args[1]) {
-            fs.submit(req);
+            to_fs(req);
             continue;
         }
         sup.lock().unwrap().dispatch(req);
@@ -688,11 +773,11 @@ fn as_openat(req: &mut SeccompNotif) {
 
 /// Is this notification for [`Supervisor::dispatch`] (every `openat`, binder
 /// `ioctl`s and OpenHarmony's device `ioctl`s) rather than the BPF emulation?
-fn is_binder_syscall(nr: i64, args: &[u64; 6]) -> bool {
+fn is_binder_syscall(guest: Guest, nr: i64, args: &[u64; 6]) -> bool {
     nr == libc::SYS_openat
         || (nr == libc::SYS_ioctl
             && (is_binder_ioctl(args[1] as u32)
-                || (crate::guest() == crate::Guest::Ohos
+                || (guest == Guest::Ohos
                     && (crate::ohos::is_token_ioctl(args[1] as u32)
                         || crate::ashmem::is_ashmem_ioctl(args[1] as u32)))))
 }
@@ -707,42 +792,6 @@ fn binder_path(pid: i32, addr: u64) -> bool {
             Some(b"/dev/binder" | b"/dev/hwbinder" | b"/dev/vndbinder")
         ),
         _ => false,
-    }
-}
-
-/// Is notification `id` still pending (its task still in the syscall)?
-pub(crate) fn notif_id_valid(listener: RawFd, id: u64) -> bool {
-    unsafe { libc::ioctl(listener, notif_id_valid_cmd() as _, &id as *const u64) == 0 }
-}
-
-fn send_continue(listener: RawFd, resp_sz: usize, id: u64) {
-    send_resp(listener, resp_sz, id, 0, 0, true);
-}
-
-/// Answer notification `id` (`error` is a negative errno, or 0). False if it
-/// is gone (a signal ended its wait, or its task died).
-pub(crate) fn send_resp(
-    listener: RawFd,
-    resp_sz: usize,
-    id: u64,
-    val: i64,
-    error: i32,
-    cont: bool,
-) -> bool {
-    let resp = SeccompNotifResp {
-        id,
-        val,
-        error,
-        flags: if cont {
-            SECCOMP_USER_NOTIF_FLAG_CONTINUE
-        } else {
-            0
-        },
-    };
-    let mut buf = vec![0u8; resp_sz];
-    unsafe {
-        std::ptr::write_unaligned(buf.as_mut_ptr() as *mut SeccompNotifResp, resp);
-        libc::ioctl(listener, notif_send_cmd(resp_sz) as _, buf.as_mut_ptr()) == 0
     }
 }
 
@@ -808,7 +857,11 @@ fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>, timer: Arc<Time
 impl Supervisor {
     /// Answer a notification that isn't a binder ioctl (`errno` positive).
     fn respond(&self, id: u64, errno: i32, cont: bool) {
-        send_resp(self.us.listener, self.us.resp_sz, id, 0, -errno, cont);
+        if cont {
+            self.us.listener.cont(id);
+        } else {
+            self.us.listener.reply(id, 0, errno);
+        }
     }
 
     fn tgid(&mut self, tid: i32) -> Option<i32> {
@@ -856,7 +909,7 @@ impl Supervisor {
             self.respond(req.id, libc::EPERM, false);
             return;
         };
-        if !notif_id_valid(self.us.listener, req.id) {
+        if !self.us.listener.valid(req.id) {
             return;
         }
         // Drop any earlier binder fds of this process that are gone (exec).
@@ -900,7 +953,7 @@ impl Supervisor {
             poll_ready: false,
         };
         // ADDFD+SEND injects the memfd and completes the openat with its number.
-        let newfd = self.us.addfd(&SeccompNotifAddfd {
+        let newfd = self.us.listener.addfd(&SeccompNotifAddfd {
             id: req.id,
             flags: SECCOMP_ADDFD_FLAG_SEND,
             srcfd: ps.memfd.as_raw_fd() as u32,
@@ -914,23 +967,23 @@ impl Supervisor {
         // open.
         let euid = self.vid.creds(pid).map_or(0, |c| c.euid);
         let procid = self.broker.open(pid, euid, ctx, flags & O_NONBLOCK != 0);
-        if crate::guest() == crate::Guest::Ohos {
+        if self.guest == Guest::Ohos {
             self.us.tokens.resolve(pid, &crate::ohos::proc_stat);
         }
         ps.fd = newfd as u32;
         self.us.procs.insert(procid, ps);
         self.fd_index.insert((pid, newfd as u32), procid);
         let _ = self.watch.send(pid);
-        dlog!("open pid={pid} euid={euid} ctx={ctx} fd={newfd} proc={procid}");
+        trace!("open pid={pid} euid={euid} ctx={ctx} fd={newfd} proc={procid}");
     }
 
     fn handle_ioctl(&mut self, req: SeccompNotif) {
         let fd = req.data.args[0] as u32;
         let cmd = req.data.args[1] as u32;
-        if crate::guest() == crate::Guest::Ohos && crate::ohos::is_token_ioctl(cmd) {
+        if self.guest == Guest::Ohos && crate::ohos::is_token_ioctl(cmd) {
             return self.token_ioctl(req);
         }
-        if crate::guest() == crate::Guest::Ohos && crate::ashmem::is_ashmem_ioctl(cmd) {
+        if self.guest == Guest::Ohos && crate::ashmem::is_ashmem_ioctl(cmd) {
             return self.ashmem_ioctl(req);
         }
         let procid = match self
@@ -978,9 +1031,9 @@ impl Supervisor {
             &crate::ohos::proc_stat,
             &mut Mem(mem.raw(), arg),
         );
-        dlog!("token pid={pid} cmd={cmd:#x} {r:?}");
-        let (val, errno) = r.map_or_else(|e| (0, -e), |v| (v, 0));
-        send_resp(self.us.listener, self.us.resp_sz, req.id, val, errno, false);
+        trace!("token pid={pid} cmd={cmd:#x} {r:?}");
+        let (val, errno) = r.map_or_else(|e| (0, e), |v| (v, 0));
+        self.us.listener.reply(req.id, val, errno);
     }
 
     /// An ashmem ioctl on one of the broker's regions ([`crate::ashmem`]);
@@ -1006,9 +1059,9 @@ impl Supervisor {
         let r = crate::ashmem::ioctl(&region, cmd as u32, arg, &mut |b| {
             mem_write(mem.raw(), arg, b)
         });
-        dlog!("ashmem tid={tid} cmd={cmd:#x} {r:?}");
-        let (val, errno) = r.map_or_else(|e| (0, -e), |v| (v, 0));
-        send_resp(self.us.listener, self.us.resp_sz, req.id, val, errno, false);
+        trace!("ashmem tid={tid} cmd={cmd:#x} {r:?}");
+        let (val, errno) = r.map_or_else(|e| (0, e), |v| (v, 0));
+        self.us.listener.reply(req.id, val, errno);
     }
 
     fn release_proc(&mut self, procid: ProcId) {
@@ -1016,7 +1069,7 @@ impl Supervisor {
         if let Some(p) = self.us.procs.remove(&procid) {
             self.fd_index.remove(&(p.pid, p.fd));
         }
-        dlog!("release proc={procid}");
+        trace!("release proc={procid}");
     }
 
     fn release_pid(&mut self, pid: i32) {

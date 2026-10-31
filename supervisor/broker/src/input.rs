@@ -4,14 +4,11 @@
 pub mod gamepad;
 
 use std::collections::HashMap;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixDatagram;
 use std::sync::{Arc, Mutex};
 
-use crate::notify::{
-    SECCOMP_ADDFD_FLAG_SEND, SeccompNotif, SeccompNotifAddfd, mem_read, mem_write, notif_addfd_cmd,
-    notif_id_valid, open_mem, read_path, send_resp,
-};
+use crate::notify::{Listener, SeccompNotif, mem_read, mem_write, open_mem, read_path};
 
 pub const EVENT_SIZE: usize = 24;
 pub const KEYBOARD: u32 = 0;
@@ -116,8 +113,7 @@ struct Devices {
 }
 
 pub(crate) struct Input {
-    listener: RawFd,
-    resp_sz: usize,
+    listener: Listener,
     devices: Arc<Mutex<Devices>>,
 }
 
@@ -466,7 +462,7 @@ fn is_registration(packet: &[u8]) -> bool {
 }
 
 impl Input {
-    pub(crate) fn new(listener: RawFd, resp_sz: usize) -> Option<Self> {
+    pub(crate) fn new(listener: Listener) -> Option<Self> {
         let dir = std::path::Path::new(DIRECTORY);
         prepare_directories(std::path::Path::new("/dev")).ok()?;
         let path = "/dev/socket/innkeeper/evdev.sock";
@@ -565,11 +561,7 @@ impl Input {
         for n in 0..1 {
             std::fs::write(dir.join(format!("innkeeper-event{n}")), []).ok()?;
         }
-        Some(Self {
-            listener,
-            resp_sz,
-            devices,
-        })
+        Some(Self { listener, devices })
     }
 
     pub(crate) fn serve(&self, req: &SeccompNotif) -> bool {
@@ -604,40 +596,20 @@ impl Input {
                             }
                         }
                     };
-                    let error = if result < 0 {
-                        -std::io::Error::last_os_error()
+                    let errno = if result < 0 {
+                        std::io::Error::last_os_error()
                             .raw_os_error()
                             .unwrap_or(libc::EIO)
                     } else {
                         0
                     };
-                    send_resp(
-                        self.listener,
-                        self.resp_sz,
-                        req.id,
-                        i64::from(result.max(0)),
-                        error,
-                        false,
-                    );
+                    self.listener.reply(req.id, i64::from(result.max(0)), errno);
                     return true;
                 }
                 let Ok(dir) = std::fs::File::open(DIRECTORY) else {
                     return false;
                 };
-                let add = SeccompNotifAddfd {
-                    id: req.id,
-                    flags: SECCOMP_ADDFD_FLAG_SEND,
-                    srcfd: dir.as_raw_fd() as u32,
-                    newfd: 0,
-                    newfd_flags: req.data.args[2] as u32 & libc::O_CLOEXEC as u32,
-                };
-                unsafe {
-                    libc::ioctl(
-                        self.listener,
-                        notif_addfd_cmd(size_of::<SeccompNotifAddfd>()) as _,
-                        &add,
-                    );
-                }
+                self.listener.open_with(req, dir.as_raw_fd());
                 return true;
             }
         }
@@ -665,10 +637,10 @@ impl Input {
                 return false;
             };
             let Some(mem) = open_mem(req.pid as i32) else {
-                send_resp(self.listener, self.resp_sz, req.id, 0, -libc::EFAULT, false);
+                self.listener.reply(req.id, 0, libc::EFAULT);
                 return true;
             };
-            if !notif_id_valid(self.listener, req.id) {
+            if !self.listener.valid(req.id) {
                 return true;
             }
             drain_writes(&c, &mut state);
@@ -715,10 +687,10 @@ impl Input {
             };
             match result {
                 Ok((bytes, val)) if mem_write(mem.raw(), req.data.args[2], &bytes) => {
-                    send_resp(self.listener, self.resp_sz, req.id, val, 0, false)
+                    self.listener.reply(req.id, val, 0)
                 }
-                Ok(_) => send_resp(self.listener, self.resp_sz, req.id, 0, -libc::EFAULT, false),
-                Err(e) => send_resp(self.listener, self.resp_sz, req.id, 0, -e, false),
+                Ok(_) => self.listener.reply(req.id, 0, libc::EFAULT),
+                Err(e) => self.listener.reply(req.id, 0, e),
             };
             return true;
         } else {
@@ -734,32 +706,19 @@ impl Input {
             )
         } != 0
         {
-            send_resp(self.listener, self.resp_sz, req.id, 0, -libc::ENOMEM, false);
+            self.listener.reply(req.id, 0, libc::ENOMEM);
             return true;
         }
         let endpoint = unsafe { OwnedFd::from_raw_fd(fds[0]) };
         let peer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
-        let add = SeccompNotifAddfd {
-            id: req.id,
-            flags: SECCOMP_ADDFD_FLAG_SEND,
-            srcfd: endpoint.as_raw_fd() as u32,
-            newfd: 0,
-            newfd_flags: req.data.args[2] as u32 & libc::O_CLOEXEC as u32,
-        };
         // Serialize installation with dynamic removal, so a newly installed
         // endpoint always has live ioctl state until removal closes it.
         let mut state = self.devices.lock().unwrap();
         if !state.keys.contains_key(&device) {
-            send_resp(self.listener, self.resp_sz, req.id, 0, -libc::ENOENT, false);
+            self.listener.reply(req.id, 0, libc::ENOENT);
             return true;
         }
-        let fd = unsafe {
-            libc::ioctl(
-                self.listener,
-                notif_addfd_cmd(size_of::<SeccompNotifAddfd>()) as _,
-                &add,
-            )
-        };
+        let fd = self.listener.open_with(req, endpoint.as_raw_fd());
         if fd >= 0 {
             state.clients.push(Arc::new(Client {
                 device,
