@@ -18,8 +18,7 @@
 # ("name=value;...", set with -e). -e exports to every process.
 #
 # TIMEOUT=<s> (default 300) bounds PROG. The run is a transient systemd user
-# unit with a memory cap. The composer's frame dumps land in
-# out/test/bionic/frames.
+# unit with a memory cap.
 #
 # Host safety (AGENTS.md): besides lib.sh's root, /dev gets udmabuf and the
 # render nodes (no card*/KMS), and /sys only read-only binds of what
@@ -38,7 +37,6 @@ if [[ ${1:-} == --inner ]]; then
   shift
 else
   bionic_prepare
-  mkdir -p "$scratch/frames"
   bionic_unit innkeeper-bionictest $((timeout + 60)) -E TIMEOUT="$timeout" -- "$@"
   exit
 fi
@@ -74,9 +72,8 @@ echo '<manifest version="1.0" type="device" target-level="202604"/>' >"$base/etc
 bionic_root "$R" "${vendor[@]}" "$stage_vendor" "$base"
 bionic_broker_nodes "$R"
 cp "$here/init.sh" "$R/init.sh"
-mkdir -p "$R/data/nativetest64" "$R/data/vendor/innkeeper/frames"
+mkdir -p "$R/data/nativetest64"
 [[ -z $tests ]] || ro_bind "$tests" "$R/data/nativetest64"
-mount --bind "$scratch/frames" "$R/data/vendor/innkeeper/frames"
 cp "$broker" "$R/data/local/tmp/"
 
 for n in /dev/udmabuf /dev/dri/renderD*; do

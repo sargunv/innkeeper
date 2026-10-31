@@ -111,16 +111,13 @@ if(ANDROID)
     composer/Display.cpp
     composer/VsyncThread.cpp
     composer/Buffer.cpp
-    composer/HeadlessPresenter.cpp
     composer/Presenter.cpp
-    composer/FrameDumper.cpp
     composer/Fence.cpp
     composer/Properties.cpp)
   set_target_properties(
     composer
     PROPERTIES OUTPUT_NAME android.hardware.graphics.composer3-service.innkeeper)
   target_include_directories(composer PRIVATE ${HAL}/composer)
-  # libz is not LL-NDK: link the NDK's static copy.
   target_link_libraries(
     composer
     PRIVATE
@@ -130,8 +127,7 @@ if(ANDROID)
       EGL
       GLESv3
       nativewindow
-      dl
-      -l:libz.a)
+      dl)
 
   # On-device tests (never installed).
   add_executable(
@@ -183,10 +179,6 @@ else()
   add_test(NAME import_cache COMMAND import_cache_test)
   add_executable(gralloc_host_test tests/host/gralloc_test.cpp)
   target_link_libraries(gralloc_host_test PRIVATE innkeeper_common dl)
-  add_executable(dump_host_test tests/host/dump_test.cpp
-                 composer/FrameDumper.cpp composer/Properties.cpp)
-  target_include_directories(dump_host_test PRIVATE ${HAL}/composer)
-  target_link_libraries(dump_host_test PRIVATE innkeeper_common z)
   add_test(NAME gralloc COMMAND gralloc_host_test $<TARGET_FILE:mapper>)
   add_test(
     NAME gralloc_no_udmabuf
@@ -194,7 +186,4 @@ else()
   set_tests_properties(
     gralloc_no_udmabuf
     PROPERTIES ENVIRONMENT INNKEEPER_UDMABUF=/nonexistent)
-  add_test(
-    NAME dump
-    COMMAND dump_host_test ${CMAKE_CURRENT_BINARY_DIR}/dump-test)
 endif()

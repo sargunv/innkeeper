@@ -9,11 +9,6 @@ service vendor.hwcomposer-3-innkeeper /vendor/bin/hw/android.hardware.graphics.c
     onrestart restart surfaceflinger
     task_profiles ServiceCapacityLow
 
-# Frame dumps: setprop vendor.innkeeper.hwc.dump.dir /data/vendor/innkeeper/frames
-on post-fs-data
-    mkdir /data/vendor/innkeeper 0775 system graphics
-    mkdir /data/vendor/innkeeper/frames 0775 system graphics
-
 # HWC-backed virtual displays: SurfaceFlinger hands us each virtual display's
 # frames (createVirtualDisplay/setOutputBuffer), so the per-app windows of the
 # Innkeeper System app (docs/display.md) can show them. Set before

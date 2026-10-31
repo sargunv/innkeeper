@@ -42,23 +42,13 @@ class Presenter {
   virtual void present(const FrameInput& frame) = 0;
 };
 
-class FrameDumper;
-class GpuCopy;
-
-// No output; optional rate-limited PNG dumps of the client target.
+// No output; logs how many frames it was given.
 class HeadlessPresenter : public Presenter {
  public:
-  explicit HeadlessPresenter(std::unique_ptr<FrameDumper> dumper);
-  ~HeadlessPresenter() override;
   const char* name() const override { return "headless"; }
   void present(const FrameInput& frame) override;
 
  private:
-  struct Worker;
-  std::unique_ptr<FrameDumper> mDumper;
-  std::unique_ptr<Worker> mWorker;
-  BufferPtr mReadback;
-  std::unique_ptr<GpuCopy> mReadbackCopy;
   uint64_t mPresented = 0;
   int64_t mLastLogNs = 0;
 };

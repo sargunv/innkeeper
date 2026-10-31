@@ -307,7 +307,7 @@ or loses Android focus; it cannot trap the host pointer again in that interval.
   a seat key's injected device ID −1, native mouse hover exit on window leave,
   modifier changes during a drag and absence of duplicate modifier keys.
   Detailed translation cases stay in unit tests.
-- The IME's text commits and the repeat settings need the bridge's seat: they
-  are checked in a nested KWin with `org_kde_kwin_fake_input`
-  ([development.md](development.md#a-nested-isolated-desktop)) and the probes'
-  `TextProbeActivity`.
+- The IME's text commits and the repeat settings need the bridge's seat and a
+  text field; no automated test covers them. Check them by hand in a nested KWin
+  with `org_kde_kwin_fake_input`
+  ([development.md](development.md#a-nested-isolated-desktop)).

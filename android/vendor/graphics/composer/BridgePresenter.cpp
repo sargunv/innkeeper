@@ -497,21 +497,14 @@ void BridgeDisplay::present(const FrameInput& frame) {
 namespace {
 class BridgeVirtualPresenter : public Presenter {
  public:
-  BridgeVirtualPresenter(
-    std::shared_ptr<BridgeDisplay> display,
-    std::unique_ptr<HeadlessPresenter> secondary
-  )
-      : mDisplay(std::move(display)), mSecondary(std::move(secondary)) {}
+  explicit BridgeVirtualPresenter(std::shared_ptr<BridgeDisplay> display)
+      : mDisplay(std::move(display)) {}
   ~BridgeVirtualPresenter() override { gBridge->removeDisplay(mDisplay->id()); }
   const char* name() const override { return "bridge"; }
-  void present(const FrameInput& frame) override {
-    mSecondary->present(frame);
-    mDisplay->present(frame);
-  }
+  void present(const FrameInput& frame) override { mDisplay->present(frame); }
 
  private:
   std::shared_ptr<BridgeDisplay> mDisplay;
-  std::unique_ptr<HeadlessPresenter> mSecondary;
 };
 // Phone mode's display 0: SurfaceFlinger's own client targets, copied on the
 // GPU into buffers of ours (they go back to SurfaceFlinger at once, while the
@@ -520,12 +513,8 @@ class BridgeVirtualPresenter : public Presenter {
 // display is offered again every half second.
 class BridgePrimaryPresenter : public Presenter {
  public:
-  BridgePrimaryPresenter(
-    uint32_t width, uint32_t height,
-    std::unique_ptr<HeadlessPresenter> secondary
-  )
-      : mDisplay(std::make_shared<BridgeDisplay>(gBridge, 0, width, height)),
-        mSecondary(std::move(secondary)) {
+  BridgePrimaryPresenter(uint32_t width, uint32_t height)
+      : mDisplay(std::make_shared<BridgeDisplay>(gBridge, 0, width, height)) {
     gBridge->addDisplay(mDisplay);
     mOffers = std::thread([this] {
       pthread_setname_np(pthread_self(), "hwc-primary");
@@ -542,7 +531,6 @@ class BridgePrimaryPresenter : public Presenter {
   }
   const char* name() const override { return "bridge-primary"; }
   void present(const FrameInput& frame) override {
-    mSecondary->present(frame);
     ClientTargetState* ct = frame.clientTarget;
     if (!ct || !ct->buffer || !ct->buffer->info() || !frame.clientTargetUpdated)
       return;
@@ -584,7 +572,6 @@ class BridgePrimaryPresenter : public Presenter {
 
   static constexpr size_t kPool = kMaxPending + 1;
   std::shared_ptr<BridgeDisplay> mDisplay;
-  std::unique_ptr<HeadlessPresenter> mSecondary;
   std::unique_ptr<GpuCopy> mCopy;
   std::vector<BufferPtr> mPool;
   std::atomic<bool> mStop{false};
@@ -593,11 +580,9 @@ class BridgePrimaryPresenter : public Presenter {
 }  // namespace
 
 std::unique_ptr<Presenter> createBridgePrimaryPresenter(
-  uint32_t width, uint32_t height, std::unique_ptr<HeadlessPresenter> secondary
+  uint32_t width, uint32_t height
 ) {
-  return std::make_unique<BridgePrimaryPresenter>(
-    width, height, std::move(secondary)
-  );
+  return std::make_unique<BridgePrimaryPresenter>(width, height);
 }
 
 void startBridge() {
@@ -608,14 +593,13 @@ void startBridge() {
 bool bridgeStarted() { return gBridge != nullptr; }
 
 std::unique_ptr<Presenter> createBridgeVirtualPresenter(
-  int64_t hwcDisplayId, uint32_t width, uint32_t height,
-  std::unique_ptr<HeadlessPresenter> secondary
+  int64_t hwcDisplayId, uint32_t width, uint32_t height
 ) {
   auto d = std::make_shared<BridgeDisplay>(
     gBridge, uint32_t(hwcDisplayId), width, height
   );
   gBridge->addDisplay(d);
-  return std::make_unique<BridgeVirtualPresenter>(d, std::move(secondary));
+  return std::make_unique<BridgeVirtualPresenter>(d);
 }
 
 }  // namespace innkeeper::hwc

@@ -96,9 +96,4 @@ for e in "${envs[@]}"; do
     args+=("$e")
   fi
 done
-"$session" exec mkdir -p /data/vendor/innkeeper/frames
-rc=0
-timeout "${TIMEOUT:-300}" "$session" exec env "${args[@]}" "$@" || rc=$?
-mkdir -p "$root/frames"
-"$session" exec tar -cf - -C /data/vendor/innkeeper/frames . | tar -xf - -C "$root/frames"
-exit "$rc"
+timeout "${TIMEOUT:-300}" "$session" exec env "${args[@]}" "$@"

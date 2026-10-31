@@ -18,7 +18,6 @@
 
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "innkeeper/gralloc_handle.h"
@@ -337,19 +336,6 @@ int main() {
   }
   res = present(2, false, true);
   CHECK(countErrors(res) == 1);
-
-  // Dump check (set vendor.innkeeper.hwc.dump.dir for the composer).
-  if (const char* dir = getenv("EXPECT_DUMP")) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-    struct stat st;
-    std::string f = std::string(dir) + "/display0-latest.png";
-    bool ok = stat(f.c_str(), &st) == 0 && st.st_size > 1000;
-    printf(
-      "dump %s: %s (%lld bytes)\n", f.c_str(), ok ? "present" : "MISSING",
-      ok ? (long long)st.st_size : 0LL
-    );
-    CHECK(ok);
-  }
 
   CHECK(client->destroyLayer(D, l1).isOk());
   CHECK(

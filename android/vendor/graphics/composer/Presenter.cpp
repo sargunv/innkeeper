@@ -9,19 +9,22 @@
 
 #include "BridgePresenter.h"
 #include "Display.h"
-#include "FrameDumper.h"
 #include "Properties.h"
 #include "innkeeper/log.h"
 
 namespace innkeeper::hwc {
 
-namespace {
-std::unique_ptr<HeadlessPresenter> makeHeadless() {
-  return std::make_unique<HeadlessPresenter>(
-    std::make_unique<FrameDumper>(FrameDumper::dirFromProperty())
-  );
+void HeadlessPresenter::present(const FrameInput& frame) {
+  mPresented++;
+  const int64_t now = nowNs();
+  if (now - mLastLogNs > 60'000'000'000) {
+    LOGI(
+      "display %lld: %llu frames presented (headless)",
+      (long long)frame.displayId, (unsigned long long)mPresented
+    );
+    mLastLogNs = now;
+  }
 }
-}  // namespace
 
 void startPresenterBackend() {
   const std::string backend =
@@ -36,9 +39,9 @@ void startPresenterBackend() {
 std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config) {
   if (bridgeStarted() && getProperty("vendor.innkeeper.mode", "") == "phone")
     return createBridgePrimaryPresenter(
-      uint32_t(config.width), uint32_t(config.height), makeHeadless()
+      uint32_t(config.width), uint32_t(config.height)
     );
-  return makeHeadless();
+  return std::make_unique<HeadlessPresenter>();
 }
 
 DisplayConfig primaryConfig() {
@@ -61,10 +64,8 @@ std::unique_ptr<Presenter> createVirtualPresenter(
   int64_t displayId, uint32_t width, uint32_t height
 ) {
   if (bridgeStarted())
-    return createBridgeVirtualPresenter(
-      displayId, width, height, makeHeadless()
-    );
-  return makeHeadless();
+    return createBridgeVirtualPresenter(displayId, width, height);
+  return std::make_unique<HeadlessPresenter>();
 }
 
 }  // namespace innkeeper::hwc
