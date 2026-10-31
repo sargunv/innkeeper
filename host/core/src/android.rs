@@ -274,40 +274,6 @@ pub fn launch(s: &Session, l: &Launch, o: &LaunchOptions) -> Result<String> {
     }
 }
 
-/// Sets whether `(package, allowed)` may run in the background, through the
-/// system app's control receiver. Returns the apps allowed.
-pub fn background(s: &Session, set: Option<(&str, bool)>) -> Result<Vec<String>> {
-    let mut argv = vec![
-        "am",
-        "broadcast",
-        "--user",
-        "current",
-        "-n",
-        "dev.sargunv.innkeeper.system/.wm.ControlReceiver",
-        "-a",
-        "dev.sargunv.innkeeper.BACKGROUND",
-    ];
-    if let Some((pkg, on)) = set {
-        argv.extend(["--es", "package", pkg, "--ez", "allowed"]);
-        argv.push(if on { "true" } else { "false" });
-    }
-    match wm_reply(&s.exec(30, &argv)?.text()) {
-        Some(Ok(r)) => Ok(background_reply(&r)),
-        Some(Err(e)) => bail!("{e}"),
-        None => Err(anyhow::anyhow!("Innkeeper System did not answer").context(ErrorKind::Timeout)),
-    }
-}
-
-/// `background PKG,PKG` (or `background -`): the packages.
-fn background_reply(r: &str) -> Vec<String> {
-    r.strip_prefix("background ")
-        .unwrap_or_default()
-        .split(',')
-        .filter(|p| !p.is_empty() && *p != "-")
-        .map(str::to_string)
-        .collect()
-}
-
 /// What Android itself reports for an installed app.
 #[derive(Debug, Default)]
 pub struct AppInfo {

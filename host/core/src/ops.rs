@@ -389,26 +389,30 @@ pub fn run(pkg: &str, uri: Option<&str>, opts: &LaunchOptions, report: Report) -
     }
 }
 
-/// Sets whether `(package, allowed)` may run in the background with no
-/// window open, keeping the session up (docs/session.md, "Lifecycle").
-/// Returns the apps allowed.
-pub fn background(set: Option<(&str, bool)>, report: Report) -> Result<Vec<String>> {
-    let s = session(report)?;
-    let set = set
-        .map(|(p, on)| validate::package(p).map(|p| (p, on)))
-        .transpose()?;
-    android::background(&s, set)
+/// A user app in the session.
+pub struct ListedApp {
+    pub package: String,
+    /// The `Name` of its desktop entry.
+    pub label: Option<String>,
+    /// Whether it may run in the background; None before the system app's
+    /// first activity report.
+    pub background: Option<bool>,
 }
 
-/// User apps in the session, with the `Name` of their desktop entry.
-pub fn list(report: Report) -> Result<Vec<(String, Option<String>)>> {
+/// The session's user apps.
+pub fn list(report: Report) -> Result<Vec<ListedApp>> {
     let s = session(report)?;
     let d = Dirs::from_env();
+    let background = s
+        .paths()
+        .and_then(|p| innkeeper_session::lifecycle::Activity::read(&p))
+        .map(|a| a.background);
     Ok(android::user_packages(&s)?
         .into_iter()
-        .map(|p| {
-            let l = xdg::app_label(&d, &p);
-            (p, l)
+        .map(|package| ListedApp {
+            label: xdg::app_label(&d, &package),
+            background: background.as_ref().map(|b| b.contains(&package)),
+            package,
         })
         .collect())
 }

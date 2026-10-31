@@ -51,25 +51,13 @@ enum Cmd {
         #[arg(long)]
         keep_data: bool,
     },
-    /// Read or change an app through the session D-Bus service. Prints current settings as JSON.
-    App {
-        package: String,
-        #[arg(default_value = "info", value_parser = ["info", "clear-cache", "clear-data", "force-stop", "permission", "escape-back", "background"])]
-        action: String,
-        #[arg(long)]
-        permission: Option<String>,
-        #[arg(long, value_parser = ["on", "off"])]
-        setting: Option<String>,
-    },
-    /// List installed (user) apps.
+    /// Show or change an installed app's Android settings (starting the
+    /// profile if needed).
+    #[command(subcommand)]
+    App(AppCmd),
+    /// List installed (user) apps, with whether each may run in the
+    /// background.
     List,
-    /// Let an app run in the background with no window open (keeping the
-    /// session up), or not; with no setting, list the apps allowed.
-    Background {
-        package: Option<String>,
-        #[arg(value_parser = ["on", "off"])]
-        setting: Option<String>,
-    },
     /// Connect your adb to the profile (starting it if needed); adb must be
     /// on for it (`profile set --adb on`).
     Adb,
@@ -77,6 +65,45 @@ enum Cmd {
     /// data and settings.
     #[command(subcommand)]
     Profile(ProfileCmd),
+}
+
+#[derive(Subcommand)]
+enum AppCmd {
+    /// Storage, settings and runtime permissions.
+    Info {
+        package: String,
+        /// As JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete the app's cache.
+    ClearCache { package: String },
+    /// Delete all of the app's data: files, accounts and settings.
+    ClearData { package: String },
+    /// Force-stop the app.
+    Stop { package: String },
+    /// Change settings.
+    Set {
+        package: String,
+        /// Let it run with no window open, which keeps the profile running.
+        #[arg(long, value_parser = ["on", "off"])]
+        background: Option<String>,
+        /// Escape acts as Android's Back in its windows.
+        #[arg(long, value_parser = ["on", "off"])]
+        escape_back: Option<String>,
+        /// Grant or revoke a runtime permission (repeatable).
+        #[arg(long, value_name = "NAME=on|off", value_parser = permission_setting)]
+        permission: Vec<(String, bool)>,
+    },
+}
+
+/// `NAME=on|off`.
+fn permission_setting(s: &str) -> Result<(String, bool), String> {
+    match s.rsplit_once('=') {
+        Some((name, "on")) if !name.is_empty() => Ok((name.into(), true)),
+        Some((name, "off")) if !name.is_empty() => Ok((name.into(), false)),
+        _ => Err("expected NAME=on or NAME=off".into()),
+    }
 }
 
 #[derive(Subcommand)]
@@ -313,41 +340,94 @@ fn open_input(path: &Path) -> Result<File> {
 /// window background).
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
-fn app(
-    package: &str,
-    action: &str,
-    permission: Option<String>,
-    setting: Option<&str>,
-) -> Result<()> {
-    ensure!(
-        setting.is_some() == matches!(action, "permission" | "escape-back" | "background"),
-        "use --setting on|off for a switch"
-    );
-    let mut command = innkeeper_core::app_settings::Command::new(package, action);
-    command.permission = permission.unwrap_or_default();
-    command.enabled = setting == Some("on");
-    let info = innkeeper_core::app_settings::request(command, &stderr)?;
-    println!("{}", serde_json::to_string_pretty(&info)?);
+fn app(cmd: AppCmd) -> Result<()> {
+    use innkeeper_core::app_settings::{Command, request};
+    let switch = |package: &str, action: &str, on: bool| {
+        let mut c = Command::new(package, action);
+        c.enabled = on;
+        c
+    };
+    let commands = match cmd {
+        AppCmd::Info { package, json } => {
+            let info = request(Command::new(&package, "info"), &stderr)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                print!("{}", app_info_text(&info));
+            }
+            return Ok(());
+        }
+        AppCmd::ClearCache { package } => vec![Command::new(&package, "clear-cache")],
+        AppCmd::ClearData { package } => vec![Command::new(&package, "clear-data")],
+        AppCmd::Stop { package } => vec![Command::new(&package, "force-stop")],
+        AppCmd::Set {
+            package,
+            background,
+            escape_back,
+            permission,
+        } => {
+            let mut v = vec![];
+            if let Some(b) = background {
+                v.push(switch(&package, "background", b == "on"));
+            }
+            if let Some(e) = escape_back {
+                v.push(switch(&package, "escape-back", e == "on"));
+            }
+            for (name, on) in permission {
+                let mut c = switch(&package, "permission", on);
+                c.permission = name;
+                v.push(c);
+            }
+            ensure!(
+                !v.is_empty(),
+                "nothing to set: give --background, --escape-back or --permission"
+            );
+            v
+        }
+    };
+    for c in commands {
+        request(c, &stderr)?;
+    }
     Ok(())
 }
 
-fn background(pkg: Option<&str>, setting: Option<&str>) -> Result<()> {
-    let allowed = ops::background(pkg.zip(setting.map(|s| s == "on")), &stderr)?;
-    if allowed.is_empty() {
-        println!("no apps run in the background");
+/// `app info`'s text form.
+fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
+    let mb = |b: u64| format!("{:.1} MB", b as f64 / 1e6);
+    let on = |b: bool| if b { "on" } else { "off" };
+    let mut s = format!(
+        "app size     {}\ndata         {} (cache {})\nbackground   {}\nescape-back  {}\n",
+        mb(i.app_bytes),
+        mb(i.data_bytes),
+        mb(i.cache_bytes),
+        on(i.background),
+        on(i.escape_back),
+    );
+    if !i.permissions.is_empty() {
+        s.push_str("permissions\n");
     }
-    for p in allowed {
-        println!("{p}");
+    for p in &i.permissions {
+        s.push_str(&format!(
+            "  {}  {}{}\n",
+            p.name,
+            if p.granted { "granted" } else { "denied" },
+            if p.editable { "" } else { " (fixed)" }
+        ));
     }
-    Ok(())
+    s
 }
 
 fn list() -> Result<()> {
-    for (p, l) in ops::list(&stderr)? {
-        match l {
-            Some(l) => println!("{p}\t{}", validate::truncate(&l, 128)),
-            None => println!("{p}\t(no desktop entry)"),
-        }
+    for a in ops::list(&stderr)? {
+        let label = a.label.map_or("(no desktop entry)".into(), |l| {
+            validate::truncate(&l, 128).to_string()
+        });
+        let background = match a.background {
+            Some(true) => "background",
+            Some(false) => "-",
+            None => "?",
+        };
+        println!("{}\t{background}\t{label}", a.package);
     }
     Ok(())
 }
@@ -494,19 +574,7 @@ fn main() -> ExitCode {
             new_window,
         } => run(&package, &files_or_uri, token, None, new_window),
         Cmd::List => list(),
-        Cmd::App {
-            package,
-            action,
-            permission,
-            setting,
-        } => app(&package, &action, permission, setting.as_deref()),
-        Cmd::Background { package, setting } => {
-            if package.is_some() != setting.is_some() {
-                Err(anyhow::anyhow!("give a package and on or off, or neither"))
-            } else {
-                background(package.as_deref(), setting.as_deref())
-            }
-        }
+        Cmd::App(cmd) => app(cmd),
         Cmd::Profile(cmd) => profile(cmd),
         Cmd::Adb => profiles::resolve(false)
             .and_then(|n| innkeeper_core::adb::connect(&n, &stderr))
@@ -530,6 +598,77 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(args: &str) -> Result<Cmd, clap::Error> {
+        Cli::try_parse_from(std::iter::once("innkeeper").chain(args.split_whitespace()))
+            .map(|c| c.cmd)
+    }
+
+    #[test]
+    fn app_commands() {
+        let Ok(Cmd::App(AppCmd::Set {
+            package,
+            background,
+            escape_back,
+            permission,
+        })) = parse(
+            "app set a.b --background on --permission android.permission.CAMERA=off \
+             --permission x.Y=on",
+        )
+        else {
+            panic!("app set did not parse");
+        };
+        assert_eq!(package, "a.b");
+        assert_eq!(background.as_deref(), Some("on"));
+        assert_eq!(escape_back, None);
+        assert_eq!(
+            permission,
+            [
+                ("android.permission.CAMERA".to_string(), false),
+                ("x.Y".to_string(), true)
+            ]
+        );
+        assert!(matches!(
+            parse("app info a.b --json"),
+            Ok(Cmd::App(AppCmd::Info { json: true, .. }))
+        ));
+        assert!(matches!(
+            parse("app stop a.b"),
+            Ok(Cmd::App(AppCmd::Stop { .. }))
+        ));
+        for bad in [
+            "app set a.b --permission CAMERA",
+            "app set a.b --permission =on",
+            "app set a.b --background yes",
+            "app a.b",
+            "background a.b on",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn app_info_text_lists_permissions() {
+        let info = innkeeper_core::app_settings::AppInfo {
+            app_bytes: 2_500_000,
+            data_bytes: 1_000_000,
+            cache_bytes: 0,
+            escape_back: false,
+            background: true,
+            permissions: vec![innkeeper_core::app_settings::Permission {
+                name: "android.permission.CAMERA".into(),
+                granted: false,
+                editable: false,
+            }],
+        };
+        let t = app_info_text(&info);
+        assert!(t.contains("app size     2.5 MB\n"), "{t}");
+        assert!(t.contains("background   on\n"), "{t}");
+        assert!(
+            t.contains("  android.permission.CAMERA  denied (fixed)\n"),
+            "{t}"
+        );
+    }
 
     #[test]
     fn fifo_without_a_writer_is_rejected_without_blocking() {
