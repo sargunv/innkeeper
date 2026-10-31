@@ -14,7 +14,7 @@
 static int fuse_peer = -1;
 static const char kEmulatedMount[] = "/mnt/user/0/emulated";
 
-static int fuse_enabled(void) { return shim_role("vold") && flatpak(); }
+static int fuse_enabled(void) { return shim_role("vold"); }
 
 static int fuse_open(void) {
   if (!fuse_enabled()) return -1;
