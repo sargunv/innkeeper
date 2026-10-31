@@ -142,15 +142,15 @@ unmount.
 
 ## OpenHarmony
 
-`LINUXAPK_GUEST=ohos` (the OpenHarmony guest, #191) keeps everything above and
+`LINUXAPK_GUEST=ohos` ([ohos/](../ohos/README.md)) keeps everything above and
 adds what OpenHarmony's userspace expects of its kernel. Android sessions never
 set it, and their filter is unchanged.
 
-- **musl.** The broker also builds static for `x86_64-unknown-linux-musl`, since
-  OH's root has no Bionic. musl opens with `open(2)`, so the filter also traps
-  it and the broker serves it as `openat(AT_FDCWD, ...)`. `/etc/passwd` and
-  `/etc/group` get `/system/etc`'s: musl resolves service users there, and
-  Flatpak binds its own over both.
+- **musl.** The broker is also built static for `x86_64-unknown-linux-musl`
+  (`mise run ohos:build`), since OH's root has no Bionic. musl opens with
+  `open(2)`, so the filter also traps it and the broker serves it as
+  `openat(AT_FDCWD, ...)`. `/etc/passwd` and `/etc/group` get `/system/etc`'s:
+  musl resolves service users there, and Flatpak binds its own over both.
 
 ## Tests
 
@@ -160,6 +160,7 @@ set it, and their filter is unchanged.
   emulator's bounds and exactly which syscalls notify in each mode;
   `tests/shim-netlink.sh` the uevent port choice.
 - `mise run test:e2e -- boot` boots and runs `selftest`.
+- `mise run ohos:test` boots OpenHarmony until samgr is ready.
 
 How the supervisor fits the session: [docs/session.md](../docs/session.md); what
 it may and may not defend against: [docs/security.md](../docs/security.md).
