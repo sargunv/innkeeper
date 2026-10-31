@@ -179,7 +179,6 @@ run = "tests/bench/run.sh"
 description = "The staged session launcher (mise run session -- start|stop|status|...)"
 run = "tools/dev/session.sh"
 
-
 # ---- lint --------------------------------------------------------------------
 
 [tasks.check]
