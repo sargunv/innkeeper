@@ -90,7 +90,10 @@ void HeadlessPresenter::present(const FrameInput& frame) {
   if (mWorker && ct && ct->buffer && mDumper->shouldDump(now)) {
     BufferPtr pixels = ct->buffer;
     const BufferHandle* bh = pixels->info();
-    if (!bh || !waitFence(ct->acquireFence.get(), 1000)) return;
+    if (!bh) return;
+    // The client target is complete once its acquire fence signals.
+    if (!waitFence(ct->acquireFence.get(), 1000))
+      LOGW("client target fence did not signal; dumping anyway");
     if (bh->flags & kFlagTiled) {
       // PNG encoding is a CPU consumer. Read tiled targets through the GPU,
       // rather than interpreting their physical tile bytes as scanlines.
