@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Settings a fresh /data starts with; changes inside Android stick. -->
+<resources>
+  <!-- Desktop apps make no touch-click sounds or haptics. -->
+  <bool name="def_sound_effects_enabled">false</bool>
+  <bool name="def_haptic_feedback">false</bool>
+</resources>

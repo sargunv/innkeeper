@@ -36,8 +36,6 @@ on property:sys.boot_completed=1
     # as already confirmed.
     # (As root: "cmd settings" from uid system hits an NPE resolving the caller.)
     exec_background - root root -- /system/bin/settings put secure immersive_mode_confirmations confirmed
-    # Desktop defaults, once per /data (see the script).
-    exec_background - root root -- /system/bin/innkeeper-first-boot
     # Keep few idle processes, as a desktop does. The framework leaves trimming
     # to lmkd (1024 cached processes allowed), and lmkd only acts on memory
     # pressure, which the session's cgroup rarely sees: every process the
@@ -58,9 +56,9 @@ on property:vendor.innkeeper.adb=1
 on property:vendor.innkeeper.adb=0
     stop adbd
 
-# Navigation (vendor.innkeeper.nav, from the profile's mode): gestures, as the
-# product overlay defaults to, or in a phone-sized phone-mode window three
-# buttons a mouse can click. The choice persists in /data, so each boot sets it.
+# Navigation (vendor.innkeeper.nav, from the profile's mode): gestures, or in a
+# phone-sized phone-mode window three buttons a mouse can click. The choice
+# persists in /data, so each boot sets it.
 on property:sys.boot_completed=1 && property:vendor.innkeeper.nav=threebutton
     exec_background - root root -- /system/bin/cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.threebutton
 

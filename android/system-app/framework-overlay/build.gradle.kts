@@ -12,11 +12,11 @@ configurations
   }
 
 android {
-  namespace = "dev.sargunv.innkeeper.windowpolicy"
+  namespace = "dev.sargunv.innkeeper.overlay.framework"
   compileSdk = sdk
   buildToolsVersion = File(buildTools).name
   defaultConfig {
-    applicationId = "dev.sargunv.innkeeper.windowpolicy"
+    applicationId = "dev.sargunv.innkeeper.overlay.framework"
     minSdk = sdk
     targetSdk = sdk
     versionCode = 1

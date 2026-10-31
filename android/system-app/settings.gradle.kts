@@ -17,4 +17,12 @@ dependencyResolutionManagement {
 
 rootProject.name = "innkeeper-system"
 
-include(":protocol", ":hidden-api", ":inject", ":app", ":probes", ":wm-overlay")
+include(
+  ":protocol",
+  ":hidden-api",
+  ":inject",
+  ":app",
+  ":probes",
+  ":framework-overlay",
+  ":settings-overlay",
+)

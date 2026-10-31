@@ -32,8 +32,6 @@ before refreshing hashes when the pin moves
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `vendor/etc/init/hw/init.innkeeper.rc`                      | the device rc for `androidboot.hardware=innkeeper`, in place of cuttlefish's; adb, navigation mode |
 | `system/bin/innkeeper-apexd`, `innkeeper-bpfload`           | wrappers with private mount namespaces (see their headers)                                         |
-| `system/bin/innkeeper-first-boot`                           | desktop defaults once per `/data`: no touch sounds or haptics                                      |
-| `product/overlay/config/config.xml`                         | gesture navigation by default: three-button mode crash-loops Launcher3's taskbar                   |
 | `vendor/etc/permissions/innkeeper-unavailable-hardware.xml` | no Bluetooth: without its HAL, `com.android.bluetooth` aborts in a loop                            |
 | `system_ext/etc/init/innkeeper-lmkd.rc`                     | lmkd with the shim (Flatpak mode's PSI windows), overriding the image's service                    |
 
