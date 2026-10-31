@@ -34,7 +34,7 @@ enum {
 enum { HBM_USE_ASSIGN_SIZE = 1 << 7 };
 
 // CompositionType
-enum { COMPOSITION_CLIENT = 0, COMPOSITION_DEVICE = 1 };
+enum { COMPOSITION_CLIENT = 0 };
 // InterfaceType. render_service casts it into its own enum, which starts
 // with an UNKNOW, and takes only its MIPI (10) as a built-in panel: the main
 // screen. 10 is HDI's DISP_INTF_PANEL.
