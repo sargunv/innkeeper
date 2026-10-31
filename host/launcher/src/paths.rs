@@ -59,9 +59,7 @@ fn env_path(var: &str) -> Option<PathBuf> {
 /// A session's paths. Every per-profile one carries the profile suffix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paths {
-    /// Empty for the main session. Serialized as `instance` in session.conf:
-    /// running sessions started before the rename still answer.
-    #[serde(rename = "instance")]
+    /// Empty for the main session. Serialized as `profile` in session.conf.
     pub profile: String,
     /// `<prefix>/libexec/linuxapk`: pivot-exec, the bridge, the image scripts.
     pub libexec: PathBuf,

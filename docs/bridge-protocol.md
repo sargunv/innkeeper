@@ -161,7 +161,7 @@ ignore reply bytes they don't know. A new major version means a new HELLO.
 
 The bridge owns `dev.linuxapk.Manager.Session` on the desktop session bus,
 inside the Flatpak app-id namespace. A named profile owns
-`dev.linuxapk.Manager.Session.i_<profile>` (hyphens become underscores). The
+`dev.linuxapk.Manager.Session.p_<profile>` (hyphens become underscores). The
 object is `/dev/linuxapk/Session`, interface `dev.linuxapk.Session1`. Manager
 and CLI calls use this interface for per-app management; they do not run
 commands inside Android. Starting a stopped session still uses the launcher.

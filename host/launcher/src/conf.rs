@@ -173,7 +173,7 @@ headless = false
 bridge_args = []
 bridge_env = {}
 [paths]
-instance = "old"
+profile = "old"
 libexec = "/app/libexec/linuxapk"
 share = "/app/share/linuxapk"
 run = "/runtime/linuxapk-old"

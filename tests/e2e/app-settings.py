@@ -7,7 +7,7 @@ from pathlib import Path
 
 import dbus
 
-name = "dev.linuxapk.Manager.Session.i_" + os.environ[
+name = "dev.linuxapk.Manager.Session.p_" + os.environ[
   "LINUXAPK_PROFILE"
 ].replace("-", "_")
 proxy = dbus.Interface(

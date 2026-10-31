@@ -11,11 +11,11 @@ pub const MAX_JSON: usize = 64 * 1024;
 
 pub fn bus_name(profile: &str) -> String {
     let base = "dev.linuxapk.Manager.Session";
-    // `.i_<name>` is the session bus name. Hyphens become underscores.
+    // `.p_<name>` is the session bus name. Hyphens become underscores.
     if profile.is_empty() {
         base.into()
     } else {
-        format!("{base}.i_{}", profile.replace('-', "_"))
+        format!("{base}.p_{}", profile.replace('-', "_"))
     }
 }
 
@@ -185,7 +185,7 @@ mod tests {
         assert_eq!(bus_name(""), "dev.linuxapk.Manager.Session");
         assert_eq!(
             bus_name("page-test"),
-            "dev.linuxapk.Manager.Session.i_page_test"
+            "dev.linuxapk.Manager.Session.p_page_test"
         );
     }
 }

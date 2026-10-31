@@ -112,7 +112,7 @@ if [[ ${1:-} == --group ]]; then
       # Session1 reports the same completed boot as the launcher's property check.
       # shellcheck disable=SC2329 # invoked through until_ok
       session_booted() {
-        gdbus call --session --dest "dev.linuxapk.Manager.Session.i_${LINUXAPK_PROFILE//-/_}" \
+        gdbus call --session --dest "dev.linuxapk.Manager.Session.p_${LINUXAPK_PROFILE//-/_}" \
           --object-path /dev/linuxapk/Session --method dev.linuxapk.Session1.State >"$T/session-state.txt" &&
           file_has "$T/session-state.txt" '^\(true,'
       }
@@ -319,7 +319,7 @@ if (
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
       # One live preference round trip, through the same Session1 API as GTK.
-      dest=dev.linuxapk.Manager.Session.i_${LINUXAPK_PROFILE//-/_}
+      dest=dev.linuxapk.Manager.Session.p_${LINUXAPK_PROFILE//-/_}
       gdbus call --session --dest "$dest" --object-path /dev/linuxapk/Session \
         --method dev.linuxapk.Session1.SetPreferences '{"follow_accent":false}' >/dev/null
       until_ok log_has LinuxApkSettings 'desktop settings: .*followAccent=false'
