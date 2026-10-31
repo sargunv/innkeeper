@@ -1,17 +1,13 @@
-// tinyalsa PCM API for Innkeeper: one virtual card ("Innkeeper", card 0,
-// device 0) whose playback and capture use shared rings in the host bridge
-// (guest/bridge-client/audio.c).
+// tinyalsa PCM API backed by the host bridge's shared rings
+// (guest/bridge-client/audio.c): one virtual card ("Innkeeper", card 0,
+// device 0). It replaces the image's libtinyalsav2.so, used by our
+// StreamBridge/StreamInBridge and by the stock AIDL HAL's microphone fallback.
 //
-// This replaces the image's libtinyalsav2.so, so the AOSP default AIDL audio
-// HAL plays to the desktop without changes. See ../README.md.
-//
-// Behaviour notes:
-// - The bridge stream is opened lazily on the first read/write, so the HAL's
+// - The bridge stream opens lazily on the first read/write, so the HAL's
 //   capability probes (open/close at each rate) are free.
-// - Writes block while the ring is full: the HAL is paced by the host's
-//   audio clock. Without a bridge (not running, or it went away) writes are
-//   paced by CLOCK_MONOTONIC and the audio is dropped; we retry once a
-//   second.
+// - Writes block while the ring is full, pacing the HAL by the host's audio
+//   clock. Without a bridge, writes are paced by CLOCK_MONOTONIC and dropped,
+//   and reads return paced silence; reconnects are retried once a second.
 // - There's no device fd: pcm_get_file_descriptor() and pcm_get_poll_fd()
 //   return -1. Use pcm_wait() to wait for room.
 // - Positions (pcm_get_htimestamp, pcm_get_delay) come from the bridge's
@@ -124,7 +120,7 @@ static uint64_t buffer_frames(const struct pcm* p) {
   return (uint64_t)p->config.period_size * p->config.period_count;
 }
 
-// --- open / close --------------------------------------------------------
+// ---- open / close ----
 
 static bool fill_config(struct pcm* p, const struct pcm_config* c) {
   if (!c) {
@@ -279,7 +275,7 @@ API unsigned int pcm_bytes_to_frames(const struct pcm* p, unsigned int bytes) {
   return fb ? bytes / fb : 0;
 }
 
-// --- output ------------------------------------------------------------------
+// ---- output ----
 
 // Frames presented as of now (all rings and fallback time), never more than
 // written.
@@ -418,8 +414,7 @@ API int pcm_mmap_write(struct pcm* p, const void* data, unsigned int count) {
   return pcm_write(p, data, count);
 }
 
-// --- input (bridge capture, or paced silence)
-// --------------------------------------
+// ---- input (bridge capture, or paced silence) ----
 
 API int pcm_readi(struct pcm* p, void* data, unsigned int frames) {
   if (!pcm_is_ready(p)) return -EBADFD;
@@ -481,8 +476,7 @@ API int pcm_mmap_read(struct pcm* p, void* data, unsigned int count) {
   return pcm_read(p, data, count);
 }
 
-// --- state and position
-// --------------------------------------------------------
+// ---- state and position ----
 
 API int pcm_prepare(struct pcm* p) {
   if (!pcm_is_ready(p)) return -EBADFD;
@@ -580,8 +574,7 @@ API int pcm_wait(struct pcm* p, int timeout) {
   return r < 0 ? -errno : r;
 }
 
-// --- not supported: mmap, linking, raw ioctls
-// -------------------------------------
+// ---- not supported: mmap, linking, raw ioctls ----
 
 API int pcm_mmap_begin(
   struct pcm* p, void** areas, unsigned int* offset, unsigned int* frames
@@ -623,8 +616,7 @@ API int pcm_ioctl(struct pcm* p, int code, ...) {
   return -ENOSYS;
 }
 
-// --- capabilities
-// ----------------------------------------------------------------
+// ---- capabilities ----
 
 struct pcm_params {
   struct pcm_mask masks[3];       // ACCESS, FORMAT, SUBFORMAT
