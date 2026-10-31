@@ -1,4 +1,4 @@
-//! The session (docs/session.md, "Flatpak mode") runs in Innkeeper's own
+//! The session (docs/session.md) runs in Innkeeper's own
 //! sandbox, which allows no namespaces, mounts or systemd units, but whose
 //! `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
 //!

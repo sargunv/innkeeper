@@ -9,7 +9,7 @@
 # display shows in a desktop window.
 # The sandbox's / is a writable tmpfs, so OH's root is built from symlinks
 # beside the runtime's /usr, as the Android session does
-# (host/launcher/src/flatpak.rs). The image is never changed.
+# (host/launcher/src/sandbox.rs). The image is never changed.
 set -euo pipefail
 usage="usage: sandbox.sh <image-dir> <layer-dir> <data-dir>"
 img=${1:?$usage} layer=${2:?$usage} data=${3:?$usage}

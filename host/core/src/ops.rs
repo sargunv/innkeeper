@@ -462,7 +462,7 @@ pub fn refresh_entries() -> usize {
 pub const SINGLE_UID_NOTICE: &str = "Android apps are not isolated from each other: \
     inside Flatpak they all run as your user, as desktop apps do.";
 pub const SINGLE_UID_DOCS: &str =
-    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#single-uid-mode";
+    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#app-isolation";
 
 /// [`SINGLE_UID_NOTICE`] if the session is running and the
 /// notice hasn't been shown yet. It counts as shown from now on (a stamp in

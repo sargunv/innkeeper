@@ -18,8 +18,8 @@ session in a sandbox of its own.
 | `paths.rs`, `conf.rs`               | every path, and `session.conf`: the one config `start` writes and the others read      |
 | `profile.rs`, `preferences.rs`      | profile names and settings; the preferences the launcher and desktop clients share     |
 | `image.rs`, `prune.rs`, `layer.rs`  | preparing and collecting the image cache; the start-time layer, cmdline and bootconfig |
-| `flatpak.rs`, `control.rs`          | the composed root, the sandbox's `/`, the session's lifetime and its control socket    |
-| `root.rs`, `init.rs`, `session.rs`  | partitions, binder nodes, `/innkeeper`, pivot-exec, the kmsg reader and the bridge     |
+| `sandbox.rs`, `control.rs`          | the composed root, the sandbox's `/`, the session's lifetime and its control socket    |
+| `root.rs`, `init.rs`, `session.rs`  | partitions, binder nodes, `/innkeeper`, starting init, the kmsg reader and the bridge  |
 | `graphics.rs`, `phone.rs`, `adb.rs` | the render node and Vulkan driver, phone mode, adb on a loopback port                  |
 | `exec.rs`, `selftest.rs`            | `exec` (control socket, then the exec relay) and the host-safety probes                |
 | `lifecycle.rs`                      | stopping when idle, and the wakeup for the next alarm                                  |

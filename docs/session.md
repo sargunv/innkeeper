@@ -8,12 +8,10 @@ pinned image and writes `session.conf` with the paths, image and bridge setup.
 The launcher supplies second-stage init's root, flattened APEXes and bootconfig;
 the supervisor emulates binder, eBPF and credentials.
 
-## Flatpak mode
-
-The launcher runs the session in the app's own sandbox, which allows no mounts,
-no namespaces, no capabilities and no systemd units (its seccomp filter fails
-them with `EPERM` before ours sees them). The sandbox's `/`, `/dev` and `/sys`
-are writable tmpfs dirs of its own, so Android's root is built from symlinks.
+The session runs in the app's own sandbox, which allows no mounts, no
+namespaces, no capabilities and no systemd units (its seccomp filter fails them
+with `EPERM` before ours sees them). The sandbox's `/`, `/dev` and `/sys` are
+writable tmpfs dirs of its own, so Android's root is built from symlinks.
 [packaging/flatpak](../packaging/flatpak/README.md) builds the Flatpak.
 
 ```mermaid
@@ -79,7 +77,7 @@ The composed root combines these layers; nothing in the image cache is modified.
 
 ```mermaid
 flowchart TB
-  rt["start-time layer: $XDG_RUNTIME_DIR/innkeeper/layer<br/>vendor build.prop, APEX files for this image"]
+  rt["start-time layer: the run dir's layer/<br/>vendor build.prop, APEX files for this image"]
   add["addons: $XDG_DATA_HOME/innkeeper/addons/*<br/>test:bionic's test vendor files"]
   stage["stage: out/stage/share/innkeeper/android<br/>overlay, HALs, drivers, system app"]
   derived["image-derived: images/&lt;build&gt;/derived<br/>permission fixes for fs_config owners"]
@@ -95,7 +93,7 @@ files, and records the owners Android verifies (clatd) in the
 
 Every Android process runs as the host user. The supervisor supplies virtual
 Android credentials ([supervisor](../supervisor/README.md)); apps are not
-isolated from each other ([security.md](security.md#single-uid-mode)).
+isolated from each other ([security.md](security.md#app-isolation)).
 
 ## Lifecycle
 
@@ -146,12 +144,12 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                    | Contents                                                                                                                                                             |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/innkeeper/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/` |
-| `$XDG_STATE_HOME/innkeeper-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                          |
-| `$XDG_STATE_HOME/innkeeper/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                  |
-| `$XDG_RUNTIME_DIR/innkeeper-<profile>` | `session.conf`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock`         |
+| Dir                                                  | Contents                                                                                                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `root-<profile>/` (the composed root), `addons/` |
+| `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                              |
+| `$XDG_STATE_HOME/innkeeper/`                         | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                                      |
+| `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                             |
 
 `INNKEEPER_PROFILE` names the profile; its suffix goes on every per-profile
 path.

@@ -37,7 +37,7 @@ what each directory is and where it runs.
   boundary: every namespace running Android code masks and locks host sysfs and
   never binds host `/run/user`, `$HOME` or `/dev` wholesale. Android shares the
   host's network, as any `--share=network` app does
-  ([docs/security.md](docs/security.md#flatpak-mode)).
+  ([docs/security.md](docs/security.md#the-sandbox)).
   `innkeeper-session selftest` must pass (`mise run test:e2e -- boot`).
 - **Test sessions are named.** Run anything with `INNKEEPER_PROFILE=<name>` and
   a fresh data dir, and stop it when done. The dev runner defaults to a test

@@ -1,7 +1,7 @@
 //! The session runs in the Flatpak sandbox's own namespaces, with no mounts.
 //! Android's root is the sandbox's `/`, where
 //! `/system`, `/apex`, `/data`... are symlinks into a composed tree on disk
-//! (`host/launcher/src/flatpak.rs`). The broker covers what the mounts did:
+//! (`host/launcher/src/sandbox.rs`). The broker covers what the mounts did:
 //!
 //!  * `readlink` of `/proc` magic links (`/proc/self/fd/N`, `exe`, `cwd`) and
 //!    `getcwd` name the host path behind a symlink, which the linker and
@@ -10,8 +10,7 @@
 //!    mapped host dir are shown as their Android path.
 //!  * `fstat` of a file the user owns reports owner root: there is no
 //!    user namespace mapping the user to Android's root, and bionic only
-//!    trusts root-owned property areas (as in a single-uid session, the
-//!    files are all the user's anyway).
+//!    trusts root-owned property areas (every file is the user's anyway).
 //!  * lstat of a symlink that stands in for a bind mount inside /data
 //!    (/data/user/0 -> /data/data) shows the directory (see [`bind_target`]).
 //!  * `mkdir` and the `chmod` family keep a directory's owner rwx: with no
@@ -113,7 +112,7 @@ fn drm_path_allowed(path: &std::path::Path, selected: Option<&std::path::Path>) 
 }
 
 /// The Android path a symlink (O_PATH fd) that stands in
-/// for a bind mount inside /data points to (see host/launcher/src/flatpak.rs).
+/// for a bind mount inside /data points to (see host/launcher/src/sandbox.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
     let mut buf = [0u8; 256];
     let n = unsafe {

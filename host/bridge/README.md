@@ -2,8 +2,8 @@
 
 The desktop bridge: the only process that connects Android to the desktop.
 `libexec/innkeeper/innkeeper-bridge`, built by `mise run build:host`. The
-launcher starts it inside the session's systemd unit (so it shares the memory
-cap and `stop` ends it) and restarts it if it exits; clients reconnect.
+launcher starts it in the session's sandbox (so the session's end ends it) and
+restarts it if it exits; clients reconnect.
 
 | Service   | Desktop side                                                                                                                                                                     | Code             |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |

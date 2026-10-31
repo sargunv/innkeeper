@@ -334,12 +334,12 @@ pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
         (&config_dir(&from.profile), &config_dir(&to.profile)),
     ] {
         if a.exists() {
-            crate::flatpak::remove_tree(b)?;
+            crate::sandbox::remove_tree(b)?;
             fs::rename(a, b).with_context(|| format!("move {} to {}", a.display(), b.display()))?;
         }
     }
-    crate::flatpak::remove_tree(&from.root)?;
-    crate::flatpak::remove_tree(&from.run)
+    crate::sandbox::remove_tree(&from.root)?;
+    crate::sandbox::remove_tree(&from.run)
 }
 
 /// Deletes profile `paths.profile`'s files: its data, settings, composed
@@ -353,7 +353,7 @@ pub fn delete(paths: &crate::Paths) -> Result<()> {
         &paths.run,
         &config_dir(&paths.profile),
     ] {
-        crate::flatpak::remove_tree(dir)?;
+        crate::sandbox::remove_tree(dir)?;
     }
     Ok(())
 }

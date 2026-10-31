@@ -215,7 +215,7 @@ __attribute__((constructor)) static void innkeeper_shim_init(void) {
 
 // The sandbox's seccomp filter fails mount, umount,
 // unshare and setns with EPERM, ahead of any filter of ours. Android's root is
-// already assembled (symlinks, see host/launcher/src/flatpak.rs) and has no
+// already assembled (symlinks, see host/launcher/src/sandbox.rs) and has no
 // namespaces to make, so a refused call is treated as done: init's mounts,
 // zygote's per-app mount namespace and storage views, vold's binds.
 #include "fuse.h"
@@ -492,7 +492,7 @@ EXPORT int ioctl(int fd, int request, ...) {
   return rc;
 }
 
-// Single-uid credentials (supervisor/README.md): the kernel sees every file
+// Android credentials (supervisor/README.md): the kernel sees every file
 // as owned
 // by uid 0, and the seccomp supervisor records the owner a chown asked for in
 // the "user.innkeeper.owner" xattr ("uid:gid"). installd verifies the owners of

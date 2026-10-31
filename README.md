@@ -54,7 +54,7 @@ Profiles page in Innkeeper, or
 `flatpak run dev.sargunv.Innkeeper profile --help`.
 
 Apps share one uid and are not isolated from each other, just as native desktop
-apps aren't ([security](docs/security.md#single-uid-mode)).
+apps aren't ([security](docs/security.md#app-isolation)).
 
 ## Status
 

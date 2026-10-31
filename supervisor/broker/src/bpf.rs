@@ -234,7 +234,7 @@ impl Emulation {
             return Err(libc::ENOMEM);
         }
         let id = self.objects[kind].len() as u32 + 1;
-        let name = CString::new(format!("lxbpf-{}-{id}", KINDS[kind])).unwrap();
+        let name = CString::new(format!("innkeeper-bpf-{}-{id}", KINDS[kind])).unwrap();
         let fd = fd_result(unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) })?;
         self.objects[kind].push(Object {
             kind,
@@ -310,7 +310,7 @@ impl Emulation {
         Ok(())
     }
     fn parse(&self, name: &str) -> Option<(usize, usize)> {
-        let tail = name.strip_prefix("lxbpf-")?;
+        let tail = name.strip_prefix("innkeeper-bpf-")?;
         let (kind, id) = tail.split_once('-')?;
         let kind = KINDS.iter().position(|&k| k == kind)?;
         let id = id
@@ -498,7 +498,7 @@ impl Emulation {
                     0o600,
                 )?;
                 let o = &self.objects[k][i];
-                let text = format!("lxbpf-{}-{}\n", KINDS[o.kind], o.id);
+                let text = format!("innkeeper-bpf-{}-{}\n", KINDS[o.kind], o.id);
                 if unsafe { libc::write(fd.as_raw_fd(), text.as_ptr() as _, text.len()) }
                     != text.len() as isize
                 {
