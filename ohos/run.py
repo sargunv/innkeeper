@@ -42,7 +42,7 @@ def pin_name():
     return tomllib.load(f)["name"]
 
 
-def argv(gate, instance_fd, img, data, log, bridge):
+def argv(instance_fd, img, data, log, bridge):
   manifest = (TOP / "packaging/flatpak/dev.sargunv.Innkeeper.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   a = ["flatpak", "run", "--user", "--no-documents-portal"]
@@ -52,14 +52,9 @@ def argv(gate, instance_fd, img, data, log, bridge):
     a.append(f"--filesystem={p}:ro")
   a.append(f"--filesystem={dev.SCRATCH}")
   a += [
-    "--command=sh",
+    "--command=env",
     f"--instance-id-fd={instance_fd}",
     dev.APP,
-    "-c",
-    'while ! test -f "$1"; do sleep 0.05; done; shift; exec "$@"',
-    "sh",
-    str(gate),
-    "env",
     f"INNKEEPER_OHOS_KMSG={log}",
     *([f"INNKEEPER_OHOS_BRIDGE={bridge}"] if bridge else []),
     *(
@@ -99,14 +94,13 @@ def main():
   bridge = dev.SCRATCH / "ohos-bridge.log" if o.display else None
   if bridge:
     bridge.write_bytes(b"")
-  gate = dev.SCRATCH / f"capped-{os.getpid()}"
-  gate.unlink(missing_ok=True)
   dev.available()
+  dev.cap()
   dev.bootstrap()
   rfd, wfd = os.pipe()
   with (dev.SCRATCH / "ohos-run.log").open("wb") as out:
     child = subprocess.Popen(
-      argv(gate, wfd, img, data, log, bridge),
+      argv(wfd, img, data, log, bridge),
       env=dev.ENV,
       stdin=subprocess.DEVNULL,
       stdout=out,
@@ -118,13 +112,8 @@ def main():
   try:
     with os.fdopen(rfd) as pipe:
       instance = pipe.readline().strip()
-    for _ in range(100):
-      if instance and dev.scope(instance, record=False):
-        break
-      time.sleep(0.05)
-    else:
-      raise RuntimeError("Flatpak scope not found; refusing to run uncapped")
-    gate.touch()
+    if not instance:
+      raise RuntimeError("Flatpak did not publish an instance id")
     done = probe / "probe.done"
     end = time.monotonic() + o.timeout
     while time.monotonic() < end and child.poll() is None:
@@ -143,7 +132,6 @@ def main():
     if child.poll() is None:
       child.terminate()
     child.wait()
-    gate.unlink(missing_ok=True)
     print(f"log: {log}", file=sys.stderr)
 
 

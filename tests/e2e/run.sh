@@ -75,14 +75,7 @@ launch() {
 }
 stopped() { [[ $("$S" status) == stopped* ]]; }
 running() { "$S" status >/dev/null; }
-stop_session() {
-  "$S" stop >/dev/null
-  # The dev supervisor publishes its exit after the sandbox closes. Wait for
-  # it before a restart, so its old completion cannot fail the new start.
-  if [[ -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
-    until_ok test -f "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/ended"
-  fi
-}
+stop_session() { "$S" stop >/dev/null; }
 
 if [[ ${1:-} == --group ]]; then
   case $2 in
@@ -400,6 +393,11 @@ if (
       echo 'ok   session stopped idle with an alarm pending'
       until_ok running
       until_ok booted
+      # The portal started this sandbox, not the dev runner: the drop-in
+      # must still cap its scope.
+      cg=$("$S" cgroup)
+      [[ $(<"$cg/memory.max") == $((8 << 30)) && $(<"$cg/memory.high") == $((6 << 30)) ]]
+      echo "ok   the alarm wakeup's sandbox scope is memory capped (${cg##*/})"
       ;;
   esac
   echo "ok   $2"
@@ -524,9 +522,8 @@ run_group() {
     tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I InnkeeperHandoff:V >"$T/$1-activities.txt" 2>&1 || true
     timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
-    if [[ -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
-      local cg stat
-      cg=$(cat "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup")
+    local cg stat
+    if cg=$("$S" cgroup); then
       for stat in memory.events memory.peak memory.max; do
         if [[ -r $cg/$stat ]]; then
           printf '%s\n' "$stat"

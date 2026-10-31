@@ -23,8 +23,7 @@ unit=innkeeper-bench-run-$INNKEEPER_PROFILE
 cleanup() {
   local result=$? cg
   trap - EXIT
-  if [[ -f out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
-    cg=$(cat "out/dev/flatpak/$INNKEEPER_PROFILE/cgroup")
+  if cg=$(tools/dev/session.sh cgroup 2>/dev/null); then
     systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
   systemctl --user stop "inkp-nested-$INNKEEPER_PROFILE" 2>/dev/null || true
