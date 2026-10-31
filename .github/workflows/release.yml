@@ -7,12 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build the Flatpak without signing or publishing
+        description: Build the Flatpak bundle without publishing it
         type: boolean
         default: true
 
-# contents: write creates the GitHub Release, moves the snapshot tag and
-# pushes gh-pages.
+# contents: write creates the GitHub Release and moves the snapshot tag.
 permissions:
   contents: write
 
@@ -86,12 +85,6 @@ jobs:
 
   package:
     needs: build
-    # A dry run builds without the release environment, so it never sees the
-    # signing key. A push to main, a v* tag, or a manual run that opts into
-    # publishing, does. The environment allows main and v* tags.
-    environment:
-      ${{ (github.event_name == 'push' || inputs.dry_run == false) && 'release'
-      || '' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
@@ -110,72 +103,25 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           mode: nightly
-      - name: Restore the published OSTree repo
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
-        run: |
-          # gh-pages is the repo's history: each release commits into it, so
-          # `flatpak update` sees one continuous repository with both
-          # channels. Pages deploys from this branch (source: Deploy from a
-          # branch), which keeps the OSTree objects a static host must serve.
-          # actions/deploy-pages would replace the site each run and drop
-          # that history unless the repo were rebuilt from a side store; the
-          # branch is that store.
-          mkdir -p out/release
-          if git fetch origin gh-pages && git cat-file -e origin/gh-pages:repo 2>/dev/null; then
-            git archive origin/gh-pages repo | tar -x -C out/release
-          fi
-      - name: Require the signing key
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+      - name: Build the bundle
         env:
-          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
-          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
-        run: |
-          if [[ -z ${FLATPAK_GPG_PRIVATE_KEY:-} || -z ${FLATPAK_GPG_KEY_ID:-} ]]; then
-            echo "::error::FLATPAK_GPG_PRIVATE_KEY and FLATPAK_GPG_KEY_ID must be set in the release environment"
-            exit 1
-          fi
-      - name: Export the repo and bundle
-        env:
-          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
-          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
           LINUXAPK_RELEASE_VERSION:
             ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          if [[ '${{ github.event_name }}' == workflow_dispatch && '${{ inputs.dry_run }}' == true ]]; then
-            unset FLATPAK_GPG_PRIVATE_KEY FLATPAK_GPG_KEY_ID
-          fi
           packaging/flatpak/release.sh '${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'stable' || 'snapshot' }}'
-      - name: Publish the OSTree repo to gh-pages
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
-        run: |
-          repo=${GITHUB_REPOSITORY#*/}
-          work=out/release/gh-pages
-          rm -rf "$work"
-          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
-            git clone --branch gh-pages "https://github.com/${GITHUB_REPOSITORY}.git" "$work"
-          else
-            mkdir -p "$work"
-            git -C "$work" init -b gh-pages
-            git -C "$work" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          fi
-          find "$work" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a out/release/publish/. "$work/"
-          cd "$work"
-          git add -A
-          git -c user.name=github-actions[bot] \
-            -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
-            commit --allow-empty -m "Publish $repo ${GITHUB_REF_NAME}"
-          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the snapshot bundle
-        if: github.ref == 'refs/heads/main'
+        if:
+          github.ref == 'refs/heads/main' && (github.event_name !=
+          'workflow_dispatch' || !inputs.dry_run)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bundle=$(echo out/release/*-snapshot.flatpak)
+          name=${bundle##*/}
           built=$(date -u +%Y-%m-%dT%H:%MZ)
-          notes=$(printf 'Snapshot of %s, built %s.\n' "$GITHUB_SHA" "$built")
+          notes="Snapshot of ${GITHUB_SHA}, built ${built}."
+          notes="${notes}"$'\n\n```sh\n'"flatpak install --user ./${name}"$'\n```\n\n'
+          notes="${notes}A newer snapshot is a reinstall of the new file."
           # One floating release. Move the tag onto this commit, then replace
           # the asset, so snapshot builds do not pile up.
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \

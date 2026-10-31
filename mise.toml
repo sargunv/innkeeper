@@ -114,7 +114,7 @@ description = "Build the stage and install the Flatpak into FLATPAK_USER_DIR"
 run = "packaging/flatpak/build.sh"
 
 [tasks."package:release"]
-description = "Build the stage and export an unsigned snapshot Flatpak repo and bundle into out/release/"
+description = "Build the stage and export a snapshot Flatpak bundle into out/release/"
 run = """
 set -euo pipefail
 mise run build

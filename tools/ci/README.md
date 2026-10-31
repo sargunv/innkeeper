@@ -46,13 +46,10 @@ Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
 workflow to test CI changes: dispatch runs the nightly corpus.
 
 `Release` runs on a push to main, a pushed `v*` tag and `workflow_dispatch`. A
-push to main exports the Flatpak `snapshot` branch and replaces the floating
-`snapshot` prerelease; a newer push cancels the one in progress. A tag exports
-the `stable` branch and attaches `<app>-stable.flatpak` to that tag's release.
-Both publish through the `release` environment: they sign with that
-environment's `FLATPAK_GPG_PRIVATE_KEY` and `FLATPAK_GPG_KEY_ID` and push the
-OSTree repo, both channels in it, to `gh-pages`. A dry run skips the environment
-and publishes nothing. Details:
+push to main builds `<app>-snapshot.flatpak` and replaces the floating
+`snapshot` prerelease; a newer push cancels the one in progress. A tag builds
+`<app>-stable.flatpak` and attaches it to that tag's release. There is no
+Flatpak repository and no signing. A dry run publishes nothing. Details:
 [packaging/flatpak](../../packaging/flatpak/README.md#release).
 
 To measure incremental compilation, rerun a PR run at its pinned commit after
