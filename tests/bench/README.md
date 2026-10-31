@@ -45,10 +45,7 @@ components and audio round trips can be explicitly unavailable. Nothing is
 committed or published automatically. `INNKEEPER_BENCH_SCREENSHOT=1` optionally
 captures the probe window after collection on KWin (requires Spectacle).
 `measurement_complete: false` identifies missing components, and always prevents
-`valid_for_comparison`. Recorded measurements belong in the repository wiki
-after quiet-machine runs, not in source documentation. Issue
-[#46](https://github.com/sargunv/innkeeper/issues/46) remains open until those
-measurements are recorded.
+`valid_for_comparison`. Measurements are not recorded in source documentation.
 
 ## Measurements
 

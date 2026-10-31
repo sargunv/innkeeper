@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One runner, one private desktop/session, independently selectable bounded groups.
 set -Eeuo pipefail
-# Expected empty command substitutions need not fail their parent expression.
+# Report only top-level failures: ERR also fires inside command substitutions.
 # shellcheck disable=SC2329 # invoked by the ERR trap
 report_error() {
   if ((BASH_SUBSHELL == 0)); then
@@ -55,7 +55,6 @@ until_ok() {
     sleep 0.1
   done
 }
-until_setup() { until_ok "$@"; }
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
 user_unlocked() { [[ $(s am get-started-user-state 0 2>/dev/null) == RUNNING_UNLOCKED ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
@@ -79,7 +78,7 @@ stop_session() {
   # The dev supervisor publishes its exit after the sandbox closes. Wait for
   # it before a restart, so its old completion cannot fail the new start.
   if [[ -f $repo/out/dev/flatpak/$INNKEEPER_PROFILE/cgroup ]]; then
-    until_setup test -f "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/ended"
+    until_ok test -f "$repo/out/dev/flatpak/$INNKEEPER_PROFILE/ended"
   fi
 }
 
@@ -155,30 +154,21 @@ if [[ ${1:-} == --group ]]; then
       s cmd appops set dev.sargunv.innkeeper.probes MANAGE_EXTERNAL_STORAGE allow
       s am broadcast -n dev.sargunv.innkeeper.probes/.StorageProbe >/dev/null
       until_ok log_has InnkeeperStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
-      # A non-game probe activity, opened in a window and then closed as the
-      # storage check did before #139: it handles no configuration changes and
-      # ends its own task like the scan end did. On the software renderer the
-      # pre-fix window manager released the display with task removal still in
-      # flight, and Android 17's display-compat recovery then relaunched onto
-      # the removed display id, which crashed system_server (#50).
+      # A self-finishing activity that handles no configuration changes. If the
+      # window manager releases its display while task removal is in flight,
+      # Android 17's display-compat recovery relaunches onto the removed display
+      # and crashes system_server (#50).
       syspid=$(s pidof system_server)
       am_start() { s am start -n "dev.sargunv.innkeeper.probes/.$1" >/dev/null; }
       am_start TeardownProbe
       until_ok log_has InnkeeperTeardownProbe 'created, display='
       until_ok log_has InnkeeperTeardownProbe 'self-finishing like the storage scan end'
       until_ok log_has InnkeeperTeardownProbe 'destroyed, display='
-      # The fix schedules the release instead of releasing inline, so the risky
-      # window lives after close(): wait until the closed windows are gone from
-      # the window manager (no more probes windows) and their displays have left
-      # Android's display list (the window manager names its virtual displays
-      # "innkeeper:<package>") before comparing the pid, so a release that
-      # crashes the framework now happens before the assertion reads it.
+      # The display is released after close(), so wait until the probe's windows
+      # and its "innkeeper:<package>" displays are gone before comparing pids.
       # shellcheck disable=SC2329 # invoked through until_ok
       no_probe_windows() { ! wm LIST | grep -q 'package=dev.sargunv.innkeeper.probes .*window='; }
-      # Only a successful dump that lists displays can report "gone": on a
-      # failed or outputless dumpsys keep waiting (until_ok's timeout then
-      # fails the check) — a transient query failure must not read as a
-      # teardown it never observed.
+      # A failed or empty dumpsys must not read as "gone".
       # shellcheck disable=SC2329 # invoked through until_ok
       probe_display_gone() {
         local dump
@@ -514,23 +504,23 @@ timed setup-stop stop_session
 timed setup-reset "$S" reset
 mkdir -p "$(dirname "$bridge_log")"
 : >"$bridge_log"
-timed setup-desktop until_setup file_has "$desktop_log" ready
+timed setup-desktop until_ok file_has "$desktop_log" ready
 timed setup-start "$S" start
 # The exec service is not ready immediately after start. Hold its existing
 # busy lock from the host until a booted Android can run the keeper instead.
 exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.sargunv.Innkeeper/innkeeper-$INNKEEPER_PROFILE/exec.lock"
 flock --shared "$setup_lock"
-timed setup-boot until_setup booted
+timed setup-boot until_ok booted
 # BOOT_COMPLETED can precede CE app-data preparation on the software runner.
 # Installing during unlock can leave a successful install without its data dirs.
-timed setup-user-unlock until_setup user_unlocked
+timed setup-user-unlock until_ok user_unlocked
 : >"$T/keeper.log"
 # Do not let the keeper inherit the host lock: lifecycle must stop the session
 # after it releases its own exec lock by observing e2e-idle.
 s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' \
   {setup_lock}>&- >"$T/keeper.log" 2>&1 &
 keeper=$!
-timed setup-keeper until_setup file_has "$T/keeper.log" '^ready$'
+timed setup-keeper until_ok file_has "$T/keeper.log" '^ready$'
 exec {setup_lock}>&-
 setup_lock=""
 size=$(stat -c %s "$apk")

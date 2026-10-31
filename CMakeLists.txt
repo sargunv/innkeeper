@@ -2,9 +2,8 @@
 # Every Android-side C/C++ artifact, built with the NDK pin (preset "android"),
 # and the host unit tests of the exec relay, graphics and health HALs and
 # the bridge client (preset "host-tests"). Each module installs as COMPONENT
-# <module>,
-# at paths relative to the stage prefix (see tools/build/artifacts.toml);
-# `mise run build:<module>` installs it.
+# <module>, at paths relative to the stage prefix (see
+# tools/build/artifacts.toml); `mise run build:<module>` installs it.
 cmake_minimum_required(VERSION 3.22)
 project(innkeeper C CXX)
 

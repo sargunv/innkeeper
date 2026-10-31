@@ -18,24 +18,24 @@ level.
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
-The runner owns private D-Bus/runtime/HOME/XDG dirs, private PipeWire/Pulse
-servers without hardware monitors, a null audio sink and fake
-portals/notifications. It stops and resets its profile on exit, including on
-failure. Never use the main session or the user's desktop for tests. Check
-`free -g` first; sessions are memory capped. See the
-[nested desktop rules](../docs/development.md#a-nested-isolated-desktop).
+The runner owns a private desktop: D-Bus, runtime, HOME and XDG dirs, PipeWire
+and Pulse servers without hardware monitors, a null audio sink and fake portals
+and notifications
+([nested desktop rules](../docs/development.md#a-nested-isolated-desktop)). It
+stops and resets its profile on exit, also on failure. Check `free -g` first;
+sessions are memory capped.
 
-Local e2e has a 55 s deadline plus at most 4 s cleanup. Groups wait for
-observations; audio capture runs after window checks so AudioRecord stays
-visible. Setup observes user 0's `RUNNING_UNLOCKED` state before installing
-probes: boot completion alone can precede credential-encrypted app-data
-preparation. CI uses headless Mutter/llvmpipe with
-`INNKEEPER_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1` and a 180 s deadline
-(`INNKEEPER_E2E_DEADLINE`, honored only with `GITHUB_ACTIONS=true`). Observation
-and group limits scale with that deadline. Logs, captures and phase timings land
-in `out/test/e2e/<profile>/`; desktop logs are in `out/test/nested/<profile>/`.
-CI uploads these in `checks-logs`. Android log captures are bounded. `desktop`
-uses a capped bridge sidecar on the same private desktop to check real policy
+Local e2e has a 55 s deadline plus at most 4 s cleanup, and groups wait for
+observations, never fixed delays. Audio runs after the window checks, since
+AudioRecord needs a visible activity. Setup waits for user 0's
+`RUNNING_UNLOCKED` before installing probes: boot completion can precede
+credential-encrypted app-data preparation. CI runs headless Mutter with llvmpipe
+(`INNKEEPER_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1`) and a 180 s
+deadline (`INNKEEPER_E2E_DEADLINE`, honoured only with `GITHUB_ACTIONS=true`);
+observation and group limits scale with it. Logs, captures and phase timings
+land in `out/test/e2e/<profile>/` and desktop logs in
+`out/test/nested/<profile>/`; CI uploads both as `checks-logs`. `desktop` checks
+real desktop policy through a capped bridge sidecar on the private desktop,
 without opening host apps or dialogs.
 
 - `mise run test:bionic`: manual Android-side HAL diagnostics.
@@ -43,14 +43,10 @@ without opening host apps or dialogs.
   [compat/README.md](compat/README.md). The full corpus runs only in nightly CI.
   Never trigger, run or wait for it during development or PR work.
 
-For sustained capture proof, build and stage, then run
-`tests/e2e/audio/capture.sh` with a fresh `INNKEEPER_PROFILE`. It records 32 s
-from a private 440 Hz source through AudioRecord and checks 30 s after initial
-warmup, and checks a simultaneous native monitor recording as a control. Each
-100 ms window must contain the tone; crossing intervals and a sample recurrence
-detect gaps, dropped samples and transients. This manual check is separate from
-the e2e gate. PCM and JSON results stay under `out/test/audio/<profile>/`; the
-harness stops its session and virtual source. It first runs the Android-side
-input FMQ test with a fake PCM, covering mono/stereo, pause/flush standby and a
-fresh PCM on restart, mute, invalid bursts and close. Build that test with
-`mise run build:audio`; it never accesses audio.
+`tests/e2e/audio/capture.sh`, with a fresh `INNKEEPER_PROFILE` after a build, is
+a manual sustained-capture check outside the e2e gate. It first runs the
+Android-side input FMQ test against a fake PCM (`mise run build:audio`; no real
+audio), then records 32 s of a private 440 Hz source through AudioRecord, with a
+native monitor recording as a control, and requires the tone in every 100 ms
+window after warmup to catch gaps, dropped samples and transients. Results stay
+in `out/test/audio/<profile>/`.

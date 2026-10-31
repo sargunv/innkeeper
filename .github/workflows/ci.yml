@@ -70,47 +70,7 @@ jobs:
     timeout-minutes: 120 # Cold Mesa/LLVM builds; warm runs reuse the saved build.
     steps:
       - uses: actions/checkout@v5
-      - name: Stage input tree
-        id: inputs
-        shell: bash
-        run: |
-          # Include paths, symlinks and executable modes as well as contents.
-          digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
-            supervisor/broker android image tools/build tools/container \
-            packaging/flatpak Cargo.toml Cargo.lock \
-            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \
-            .github/workflows/ci.yml .github/actions tools/ci/setup.sh | sha256sum)
-          echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
-        id: stage
-        with:
-          path: |
-            out/stage
-            out/test/probes
-          key:
-            stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
-            steps.inputs.outputs.stage }}
-      - uses: ./.github/actions/setup
-        if: steps.stage.outputs.cache-hit != 'true'
-        with:
-          mode: build
-      - uses: ./.github/actions/build-cached
-        if: steps.stage.outputs.cache-hit != 'true'
-      - uses: actions/cache@v4
-        if: steps.stage.outputs.cache-hit != 'true'
-        with:
-          path: ~/.cache/innkeeper-dev/keys
-          key:
-            platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
-      - run: mise run build
-        if: steps.stage.outputs.cache-hit != 'true'
-      - uses: actions/cache/save@v4
-        if: steps.stage.outputs.cache-hit != 'true'
-        with:
-          path: |
-            out/stage
-            out/test/probes
-          key: ${{ steps.stage.outputs.cache-primary-key }}
+      - uses: ./.github/actions/stage
       - name: Archive the release stage and test probes
         run: |
           tar -C out/stage -czf out/stage.tar.gz .
@@ -262,39 +222,6 @@ jobs:
       - name: Full windowed compatibility corpus
         if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
         run: tools/ci/compat.sh windowed
-      - name: Render compatibility wiki page
-        id: wiki
-        if: ${{ !cancelled() && steps.headless.outcome != 'skipped' }}
-        continue-on-error: true
-        run: |
-          python3 tools/ci/compat-wiki.py --reports out/ci/reports \
-            --output out/ci/reports/Compatibility.md
-      - name: Publish compatibility to the wiki
-        if: ${{ !cancelled() && steps.wiki.outcome == 'success' }}
-        continue-on-error: true # Publishing must never mask the corpus result.
-        env:
-          GH_TOKEN: ${{ secrets.INNKEEPER_WIKI_TOKEN }}
-        run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo '::notice::Wiki publishing skipped: INNKEEPER_WIKI_TOKEN is not set. Compatibility results remain in the artifact.'
-            exit 0
-          fi
-          if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
-            clone https://github.com/sargunv/innkeeper.wiki.git out/ci/wiki; then
-            echo '::warning::Wiki clone failed; check INNKEEPER_WIKI_TOKEN and wiki initialization. See tests/README.md.'
-            exit 1
-          fi
-          cp out/ci/reports/Compatibility.md out/ci/wiki/Compatibility.md
-          cd out/ci/wiki
-          git add Compatibility.md
-          if git diff --cached --quiet; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Update nightly compatibility results'
-          if ! git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD; then
-            echo '::warning::Wiki push failed; compatibility results remain in the artifact. See tools/ci/README.md for the required credential.'
-            exit 1
-          fi
       - name: Compatibility reports and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
