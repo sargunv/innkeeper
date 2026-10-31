@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# Derive one of the layers the session stacks right above the image
-# (host/launcher/src/flatpak.rs), into <out-dir>:
-#   common       <partition>/: copies of image files with read/exec bits
-#                added. The extracted image lost its fs_config ownership:
-#                every file belongs to the invoking user (root in the
-#                session), so a file meant for e.g. "0550 logd logd" is
-#                unusable by its real owner.
-#   single       apex/: the same files for single mode (supervisor/README.md),
-#                owned by us, with the Android owner in the
-#                user.innkeeper.owner xattr that the shim reports.
+# Derive the layer the session stacks right above the image
+# (host/launcher/src/flatpak.rs) into <out-dir>. The extracted image lost its
+# fs_config ownership: every file belongs to the invoking user (root in the
+# session), so a file meant for e.g. "0550 logd logd" is unusable by its real
+# owner.
+#   <partition>/  copies of image files with read/exec bits added.
+#   apex/         the APEX files whose owner Android verifies (clatd), with
+#                 their modes and the Android owner in the user.innkeeper.owner
+#                 xattr that the broker and shim report (supervisor/README.md).
 #
-# usage: derive.sh common|single <img-dir> <apex-dir> <out-dir>
+# usage: derive.sh <img-dir> <apex-dir> <out-dir>
 set -euo pipefail
-usage="usage: derive.sh common|single <img-dir> <apex-dir> <out-dir>"
-layer=${1:?$usage} img=${2:?$usage} apex=${3:?$usage} out=${4:?$usage}
+usage="usage: derive.sh <img-dir> <apex-dir> <out-dir>"
+img=${1:?$usage} apex=${2:?$usage} out=${3:?$usage}
 
 relax() {
   local src=$2 dst=$out/$1
@@ -42,30 +41,19 @@ copy_apex_files() {
   done
 }
 
-case $layer in
-  common)
-    rm -rf "$out"
-    mkdir -p "$out"
-    relax system "$img/system/system"
-    relax vendor "$img/vendor"
-    relax system_ext "$img/system_ext"
-    relax product "$img/product"
-    relax odm "$img/odm"
-    ;;
-  single)
-    rm -rf "$out"
-    mkdir -p "$out"
-    copy_apex_files
-    for e in "${apex_fs_config[@]}"; do
-      read -r rel mode uid gid <<<"$e"
-      [[ -e $out/apex/$rel ]] || continue
-      chmod "$mode" "$out/apex/$rel"
-      python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.innkeeper.owner", sys.argv[2].encode())' \
-        "$out/apex/$rel" "$uid:$gid"
-    done
-    ;;
-  *)
-    echo "$usage" >&2
-    exit 1
-    ;;
-esac
+rm -rf "$out"
+mkdir -p "$out"
+relax system "$img/system/system"
+relax vendor "$img/vendor"
+relax system_ext "$img/system_ext"
+relax product "$img/product"
+relax odm "$img/odm"
+copy_apex_files
+# Each file's exact mode first, then its owner record.
+for e in "${apex_fs_config[@]}"; do
+  read -r rel mode uid gid <<<"$e"
+  [[ -e $out/apex/$rel ]] || continue
+  chmod "$mode" "$out/apex/$rel"
+  python3 -Ic 'import os, sys; os.setxattr(sys.argv[1], "user.innkeeper.owner", sys.argv[2].encode())' \
+    "$out/apex/$rel" "$uid:$gid"
+done

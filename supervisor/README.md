@@ -89,8 +89,8 @@ kernel's errors and side effects) and records the owner as
   `/metadata` and clatd (a file without a record inherits its closest recorded
   ancestor's owner, so ART sees an app's APK as not writable by it);
 - the shim's `stat` family in installd;
-- `image/derive.sh single`, which writes the same xattr on image files whose
-  owner Android verifies.
+- `image/derive.sh`, which writes the same xattr on image files whose owner
+  Android verifies.
 
 Not virtualized: `SCM_CREDENTIALS` (logd sees every writer as uid 0), owners of
 files created without a `chown`, and vold's `/proc` scan.

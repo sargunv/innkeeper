@@ -82,15 +82,16 @@ flowchart TB
   rt["start-time layer: $XDG_RUNTIME_DIR/innkeeper/layer<br/>vendor build.prop, APEX files for this image"]
   add["addons: $XDG_DATA_HOME/innkeeper/addons/*<br/>test:bionic's test vendor files"]
   stage["stage: out/stage/share/innkeeper/android<br/>overlay, HALs, drivers, system app"]
-  derived["image-derived: images/&lt;build&gt;/derived/{common,single}<br/>permission fixes for fs_config owners"]
+  derived["image-derived: images/&lt;build&gt;/derived<br/>permission fixes for fs_config owners"]
   img["image: images/&lt;build&gt;/img, apex-&lt;hash&gt;"]
   rt --> add --> stage --> derived --> img
 ```
 
-The topmost layer wins. `/apex` combines the start-time layer, the `single`
-derived layer and the flattened APEX tree. The extracted image lost its
-`fs_config` owners: `common` adds read and exec bits, and `single` records
-verified owners in the `user.innkeeper.owner` xattr.
+The topmost layer wins. `/apex` combines the start-time layer, the derived
+layer's `apex/` and the flattened APEX tree. The extracted image lost its
+`fs_config` owners: the derived layer adds read and exec bits to partition
+files, and records the owners Android verifies (clatd) in the
+`user.innkeeper.owner` xattr.
 
 Every Android process runs as the host user. The supervisor supplies virtual
 Android credentials ([supervisor](../supervisor/README.md)); apps are not

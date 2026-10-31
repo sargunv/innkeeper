@@ -1,27 +1,15 @@
 # The Android image Innkeeper boots by default: an AOSP build from Android's
-# public CI (ci.android.com). Users download it from Google at setup
-# (image/fetch.sh); we never redistribute it. See image/README.md, which
-# also explains how to bump this pin.
+# public CI (ci.android.com), branch aosp-android-latest-release, target
+# aosp_cf_x86_64_only_phone-userdebug. Users download it from Google at setup
+# (image/fetch.sh); we never redistribute it. See image/README.md, which also
+# explains how to bump this pin.
 
 # Image name: the directory under ~/.local/share/innkeeper/images/.
 name = "ci-16644040"
-branch = "aosp-android-latest-release"
-build_id = "16644040"
-target = "aosp_cf_x86_64_only_phone-userdebug"
 # ro.build.fingerprint of the system partition, for reference.
 fingerprint = "Android/generic_system/generic:17/CP2A.260605.016/16644040:userdebug/test-keys"
-# {build_id}, {target} and {artifact} are substituted.
-url = "https://ci.android.com/builds/submitted/{build_id}/{target}/latest/raw/{artifact}"
-
-[[artifact]]
-# Partition images: sparse super.img (system, system_ext, product, vendor,
-# odm, system_dlkm, vendor_dlkm, odm_dlkm), init_boot.img, boot.img, ...
-name = "aosp_cf_x86_64_only_phone-img-16644040.zip"
+# The partition images zip: sparse super.img (system, system_ext, product,
+# vendor, odm, system_dlkm, vendor_dlkm, odm_dlkm), init_boot.img, boot.img, ...
+url = "https://ci.android.com/builds/submitted/16644040/aosp_cf_x86_64_only_phone-userdebug/latest/raw/aosp_cf_x86_64_only_phone-img-16644040.zip"
 size = 1163636385
 sha256 = "eccdb248e171af6cb98711a6f2fbd5e5017e9c3a6e82337580181bbd4bb2c41b"
-
-[[artifact]]
-# SPDX software bill of materials (licenses of everything in the image).
-name = "sbom/sbom.spdx.json"
-size = 26142886
-sha256 = "5f282fcb77763ae00673105a90e9ad8107e66de3a8963fdbe3445f7a2f273fd9"

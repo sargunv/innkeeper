@@ -181,7 +181,7 @@ pub fn walk_files(dir: &Path, f: &mut dyn FnMut(&Path, u32) -> Result<()>) -> Re
     Ok(())
 }
 
-/// What a derived layer was made from: the APEX tree and derive.sh's hash.
+/// What the derived layer was made from: the APEX tree and derive.sh's hash.
 fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
     let script = fs::read(paths.libexec.join("image/derive.sh"))?;
     let h: String = Sha256::digest(&script)
@@ -191,8 +191,8 @@ fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
     Ok(format!("{} {h}  -", image.apexdir.display()))
 }
 
-/// Fetches, extracts and flattens the image if needed, and brings the common
-/// and single-uid derived layers up to date.
+/// Fetches, extracts and flattens the image if needed, and brings the derived
+/// layer up to date.
 pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
     let _prepare = crate::prune::prepare_lock(&paths.images)?;
     let lease = crate::prune::lease(paths, image)?;
@@ -228,26 +228,18 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
         .arg(paths.share.join("image/fork-bases.sha256"))
         .arg(paths.android()))?;
     let want = derive_source(paths, image)?;
-    fs::create_dir_all(&image.derived)?;
-    for layer in ["common", "single"] {
-        let source = image.derived.join(format!("{layer}.source"));
-        if fs::read_to_string(&source).is_ok_and(|s| s.trim_end_matches('\n') == want) {
-            continue;
-        }
+    let source = image.derived_source();
+    if !fs::read_to_string(&source).is_ok_and(|s| s.trim_end_matches('\n') == want) {
         if lease.was_in_use {
             bail!(
-                "derived image layers are in use; stop sessions using {} before preparing changed layers",
+                "the derived image layer is in use; stop sessions using {} before preparing a changed layer",
                 image.name
             );
         }
-        let _ = fs::remove_file(&source);
-        let derive = tools.join("derive.sh");
-        let out = image.derived.join(layer);
-        run(Command::new(derive)
-            .arg(layer)
+        run(Command::new(tools.join("derive.sh"))
             .arg(&image.img)
             .arg(&image.apexdir)
-            .arg(out))?;
+            .arg(&image.derived))?;
         fs::write(&source, format!("{want}\n"))?;
     }
     crate::prune::prune(paths, image)?;
