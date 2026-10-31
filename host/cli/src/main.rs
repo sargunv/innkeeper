@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
+use innkeeper_core::android::{self, Launch};
 use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
 use innkeeper_core::profiles::{self, Settings};
@@ -193,7 +194,7 @@ fn run(
     file_component: Option<&str>,
     new_window: bool,
 ) -> Result<()> {
-    anyhow::ensure!(
+    ensure!(
         !new_window || args.is_empty(),
         "--new-window opens the launcher activity; omit files and URIs"
     );
@@ -265,12 +266,12 @@ fn run(
                         chooser_grants.push(grant);
                         continue;
                     }
-                    innkeeper_core::android::launch(
+                    android::launch(
                         &session,
-                        &innkeeper_core::android::Launch::File {
+                        &Launch::File {
                             package: pkg.into(),
                             grants: vec![grant],
-                            component: file_component.map(str::to_string),
+                            component: None,
                         },
                         &opts,
                     )?
@@ -279,9 +280,9 @@ fn run(
             };
         }
         if !chooser_grants.is_empty() {
-            reply = innkeeper_core::android::launch(
+            reply = android::launch(
                 &session,
-                &innkeeper_core::android::Launch::File {
+                &Launch::File {
                     package: pkg.into(),
                     grants: chooser_grants,
                     component: file_component.map(str::to_string),
@@ -297,7 +298,8 @@ fn run(
     r.map(drop)
 }
 
-/// Reject special files without waiting for a FIFO writer before the fd is checked.
+/// Opens a regular file to grant, refusing special files without waiting for
+/// a FIFO writer.
 fn open_input(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
@@ -319,6 +321,24 @@ fn open_input(path: &Path) -> Result<File> {
 /// The splash colour of an app whose entry doesn't say (Android's light
 /// window background).
 const DEFAULT_SPLASH: u32 = 0xfafafa;
+
+fn app(
+    package: &str,
+    action: &str,
+    permission: Option<String>,
+    setting: Option<&str>,
+) -> Result<()> {
+    ensure!(
+        setting.is_some() == matches!(action, "permission" | "escape-back" | "background"),
+        "use --setting on|off for a switch"
+    );
+    let mut command = innkeeper_core::app_settings::Command::new(package, action);
+    command.permission = permission.unwrap_or_default();
+    command.enabled = setting == Some("on");
+    let info = innkeeper_core::app_settings::request(command, &stderr)?;
+    println!("{}", serde_json::to_string_pretty(&info)?);
+    Ok(())
+}
 
 fn background(pkg: Option<&str>, setting: Option<&str>) -> Result<()> {
     let allowed = ops::background(pkg.zip(setting.map(|s| s == "on")), &stderr)?;
@@ -403,12 +423,9 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                 "nothing to change (see --help)"
             );
             if mode.is_some() || size.is_some() {
-                let mode = mode.map(|m| {
-                    if m == "phone" {
-                        profiles::Mode::Phone
-                    } else {
-                        profiles::Mode::Windowed
-                    }
+                let mode = mode.map(|m| match m.as_str() {
+                    "phone" => profiles::Mode::Phone,
+                    _ => profiles::Mode::Windowed,
                 });
                 let size = size.as_deref().and_then(profiles::Size::parse);
                 let s = profiles::set_mode(&n, mode, size)?;
@@ -491,19 +508,7 @@ fn main() -> ExitCode {
             action,
             permission,
             setting,
-        } => (|| -> Result<()> {
-            ensure!(
-                setting.is_some()
-                    == matches!(action.as_str(), "permission" | "escape-back" | "background"),
-                "use --setting on|off for a switch"
-            );
-            let mut command = innkeeper_core::app_settings::Command::new(&package, &action);
-            command.permission = permission.unwrap_or_default();
-            command.enabled = setting.as_deref() == Some("on");
-            let info = innkeeper_core::app_settings::request(command, &stderr)?;
-            println!("{}", serde_json::to_string_pretty(&info)?);
-            Ok(())
-        })(),
+        } => app(&package, &action, permission, setting.as_deref()),
         Cmd::Background { package, setting } => {
             if package.is_some() != setting.is_some() {
                 Err(anyhow::anyhow!("give a package and on or off, or neither"))

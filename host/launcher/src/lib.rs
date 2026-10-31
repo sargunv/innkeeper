@@ -28,8 +28,7 @@ pub use paths::Paths;
 /// A session's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
-    /// Android init's pid (in the session's sandbox in Flatpak mode), while
-    /// it runs.
+    /// Android init's pid in the session's sandbox, while it runs.
     pub pid: Option<i32>,
 }
 

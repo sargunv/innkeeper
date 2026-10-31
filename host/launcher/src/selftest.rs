@@ -23,8 +23,8 @@ impl Report {
     }
 }
 
-/// Flatpak mode's: the sandbox is the boundary, so these check what it gives
-/// an Android process (the probe's own shell, under both seccomp filters).
+/// The sandbox is the boundary, so these check what it gives an Android
+/// process (the probe's own shell, under both seccomp filters).
 const FLATPAK_PROBES: &[(&str, &str)] = &[
     ("sysfs not writable", "echo 1 > /sys/kernel/mm/ksm/run"),
     (

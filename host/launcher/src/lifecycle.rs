@@ -9,8 +9,9 @@
 //!   as busy.
 //! - **Commands** keep it up while they run: `exec` holds a shared lock on
 //!   `<run>/exec.lock`.
-//! - **Wakeups:** the session's process stays as a waiter in its sandbox, serving `status` and `stop` on the
-//!   control socket, and starts the session again at that time.
+//! - **Wakeups:** the session's process stays as a waiter in its sandbox,
+//!   serving `status` and `stop` on the control socket, and starts the
+//!   session again at that time.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -42,7 +43,7 @@ pub fn wake_lead() -> Duration {
     Duration::from_secs(if test_timers() { 6 } else { 60 })
 }
 
-// Short real idle/alarm round trips, only in explicitly named test sessions.
+/// Short idle polling and alarm lead, for tests.
 fn test_timers() -> bool {
     std::env::var("INNKEEPER_TEST_TIMERS").is_ok_and(|v| v == "1")
         && std::env::var("INNKEEPER_PROFILE").is_ok_and(|v| !v.is_empty())

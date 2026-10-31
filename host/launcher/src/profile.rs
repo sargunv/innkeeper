@@ -79,8 +79,7 @@ pub fn pick<'a>(profiles: &'a [String], chosen: Option<&str>) -> Option<&'a Stri
         .or(profiles.first())
 }
 
-/// A profile's settings. Every default is what a profile did before it had
-/// settings, so existing data keeps working unchanged.
+/// A profile's settings; a missing key takes its default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {

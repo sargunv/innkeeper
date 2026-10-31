@@ -147,8 +147,8 @@ fn run(c: &mut Command) -> Result<()> {
 }
 
 /// Makes every file under `dir` read-only (a-w), `last` after all others, so
-/// a tree whose `last` is read-only is done. Flatpak mode's composed roots
-/// hardlink these files, so this keeps a session from writing the cache
+/// a tree whose `last` is read-only is done. Composed roots hardlink these
+/// files, so this keeps a session from writing the cache
 /// through them (and ART refuses dex files its process could write).
 fn make_read_only(dir: &Path, last: &Path) -> Result<()> {
     if fs::metadata(last).is_ok_and(|m| m.permissions().mode() & 0o222 == 0) {
@@ -181,8 +181,7 @@ pub fn walk_files(dir: &Path, f: &mut dyn FnMut(&Path, u32) -> Result<()>) -> Re
     Ok(())
 }
 
-/// What a derived layer was made from: the APEX tree and derive.sh (the
-/// format the shell launcher wrote, so existing layers stay current).
+/// What a derived layer was made from: the APEX tree and derive.sh's hash.
 fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
     let script = fs::read(paths.libexec.join("image/derive.sh"))?;
     let h: String = Sha256::digest(&script)

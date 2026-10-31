@@ -3,7 +3,7 @@ name = "innkeeper-session"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Innkeeper session launcher: boots the Android image in rootless namespaces, or inside the Flatpak sandbox"
+description = "Innkeeper session launcher: boots the Android image inside the Flatpak sandbox"
 
 [lib]
 name = "innkeeper_session"

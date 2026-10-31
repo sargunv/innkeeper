@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::conf::Config;
 use crate::paths::Paths;
-use crate::{control, exec, flatpak, image, layer, selftest, session, sys};
+use crate::{control, flatpak, image, layer, selftest, session, sys};
 
 const USAGE: &str = "\
 Innkeeper session launcher: boots the pinned Android image (image/pin.toml)
@@ -32,22 +32,21 @@ inside Innkeeper's Flatpak sandbox (docs/session.md).
   innkeeper-session shell         interactive /system/bin/sh inside
   innkeeper-session selftest      host-safety probes against the live session
 
-Every Android process runs as the host user; the supervisor virtualizes Android uids.
-
-In Flatpak, start -f runs the session in this sandbox, for as long as it
+Every Android process runs as the host user; the supervisor virtualizes
+Android uids. start -f runs the session in this sandbox, for as long as it
 runs; plain start runs it in a sandbox of its own (the Flatpak portal's
 Spawn), which the other commands reach through a control socket.
 
 It runs from an installed prefix (libexec/innkeeper; in a checkout, out/stage
 after `mise run build`) and builds nothing. Its files:
-  $XDG_RUNTIME_DIR/innkeeper[-<profile>]/  session.conf, pid files, the kmsg
-    FIFO, the bridge's socket, the start-time layer over the image (in
-    Flatpak, under $XDG_RUNTIME_DIR/app/<app id>/)
-  $XDG_STATE_HOME/innkeeper[-<profile>]/   logs (session, kmsg, bridge) and
-    the documents service's grants
-  $XDG_DATA_HOME/innkeeper/                 images/, data[-<profile>]/
-    (Android's /data), addons/ (layers over the partitions, e.g. microG),
-    root[-<profile>]/ (the composed root)
+  $XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/  session.conf, pid
+    files, the kmsg FIFO, the bridge's socket, the control socket, the
+    start-time layer over the image
+  $XDG_STATE_HOME/innkeeper-<profile>/   logs (session, kmsg, bridge) and the
+    documents service's grants
+  $XDG_DATA_HOME/innkeeper/              images/, data-<profile>/ (Android's
+    /data), addons/ (layers over the partitions, e.g. microG),
+    root-<profile>/ (the composed root)
 
 Environment:
   INNKEEPER_AUDIO_SINK      PipeWire sink for the session's audio (default:
@@ -57,12 +56,12 @@ Environment:
                            exec before the session stops itself, leaving a
                            wakeup for its next alarm (default 120; 0: never;
                            headless sessions never unless it is set)
+  INNKEEPER_PROFILE         the profile to run (required; `innkeeper` and the
+                           manager set it). Every profile's session is a test
+                           session: it isolates clipboard, portals, links,
+                           notifications, media players, AT-SPI and location
+                           from the desktop.
 Tests only:
-  INNKEEPER_PROFILE         run an independent, named session (default: the
-                           main one). Named sessions are test sessions: they
-                           isolate clipboard, portals, links, notifications,
-                           media players, AT-SPI and location from the desktop.
-  INNKEEPER_TEST=1         apply the same isolation to an unnamed session
   INNKEEPER_DATA            Android's /data (default
                            $XDG_DATA_HOME/innkeeper/data[-<profile>])
   INNKEEPER_IMAGES, INNKEEPER_PIN  the image cache and the pin
@@ -76,8 +75,8 @@ Debugging:
 /// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)
 /// for binder's injected fds, openat2 (5.6).
 const KERNEL_FLOOR: (u32, u32) = (5, 14);
-/// Flatpak mode's: unprivileged PSI triggers (6.5), without which lmkd exits
-/// and every ActivityManager write to it stalls 3 s.
+/// Unprivileged PSI triggers (6.5), without which lmkd exits and every
+/// ActivityManager write to it stalls 3 s.
 const FLATPAK_KERNEL_FLOOR: (u32, u32) = (6, 5);
 
 pub fn main() {
@@ -160,9 +159,12 @@ fn run(args: &[OsString]) -> Result<i32> {
                 bail!("usage: exec CMD...");
             }
             let argv: Vec<&OsStr> = rest.iter().map(OsString::as_os_str).collect();
-            exec::run(&paths, &argv)
+            control::exec(&paths.control(), &argv)
         }
-        "shell" => exec::run(&paths, &[OsStr::new("/system/bin/sh"), OsStr::new("-l")]),
+        "shell" => control::exec(
+            &paths.control(),
+            &[OsStr::new("/system/bin/sh"), OsStr::new("-l")],
+        ),
         "selftest" => {
             if crate::status(&paths).pid.is_none() {
                 bail!("not running");
@@ -221,8 +223,8 @@ fn wayland_socket() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `start`, and `_serve` (`serve`): Flatpak mode's session in a sandbox of
-/// its own, which `start` spawns.
+/// `start`, and `_serve` (`serve`): the session in a sandbox of its own,
+/// which `start` spawns.
 fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     let trace = session::BootTrace::new();
     let (mut follow, mut headless) = (false, false);
