@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the Flatpak without signing or publishing
+        type: boolean
+        default: true
+
+# contents: write creates the GitHub Release and pushes gh-pages.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_JOBS: 4
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 500M
+  LINUXAPK_IMAGES: ${{ github.workspace }}/out/ci/images
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    outputs:
+      stage: ${{ steps.inputs.outputs.stage }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stage input tree
+        id: inputs
+        shell: bash
+        run: |
+          # Same digest as CI's build job, so a tag reuses that job's stage.
+          digest=$(git ls-tree -r HEAD -- host supervisor/pivot-exec supervisor/shim \
+            supervisor/broker android image tools/build tools/container \
+            packaging/flatpak Cargo.toml Cargo.lock \
+            .cargo CMakeLists.txt CMakePresets.json mise.toml mise.lock \
+            .github/workflows/ci.yml .github/actions tools/ci/setup.sh | sha256sum)
+          echo "stage=${digest%% *}" >>"$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: stage
+        with:
+          path: |
+            out/stage
+            out/test/probes
+          key:
+            stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.inputs.outputs.stage }}
+      - uses: ./.github/actions/setup
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          mode: build
+      - uses: ./.github/actions/build-cached
+        if: steps.stage.outputs.cache-hit != 'true'
+      - uses: actions/cache@v4
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/linuxapk-dev/keys
+          key:
+            platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
+      - run: mise run build
+        if: steps.stage.outputs.cache-hit != 'true'
+      - uses: actions/cache/save@v4
+        if: steps.stage.outputs.cache-hit != 'true'
+        with:
+          path: |
+            out/stage
+            out/test/probes
+          key: ${{ steps.stage.outputs.cache-primary-key }}
+
+  package:
+    needs: build
+    # A dry run builds without the release environment, so it never sees the
+    # signing key. A tag, or a manual run that opts into publishing, does.
+    environment:
+      ${{ (github.event_name == 'push' || inputs.dry_run == false) && 'release'
+      || '' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            out/stage
+            out/test/probes
+          key:
+            stage-v3-${{ runner.os }}-${{ runner.arch }}-${{
+            needs.build.outputs.stage }}
+          fail-on-cache-miss: true
+      - uses: ./.github/actions/setup
+        with:
+          mode: nightly
+      - name: Restore the published OSTree repo
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: |
+          # gh-pages is the repo's history: each release commits into it, so
+          # `flatpak update` sees one continuous repository. Pages deploys
+          # from this branch (source: Deploy from a branch), which keeps the
+          # OSTree objects a static host must serve. actions/deploy-pages
+          # would replace the site each run and drop that history unless the
+          # repo were rebuilt from a side store; the branch is that store.
+          mkdir -p out/release
+          if git fetch origin gh-pages && git cat-file -e origin/gh-pages:repo 2>/dev/null; then
+            git archive origin/gh-pages repo | tar -x -C out/release
+          fi
+      - name: Require the signing key
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          if [[ -z ${FLATPAK_GPG_PRIVATE_KEY:-} || -z ${FLATPAK_GPG_KEY_ID:-} ]]; then
+            echo "::error::FLATPAK_GPG_PRIVATE_KEY and FLATPAK_GPG_KEY_ID must be set in the release environment"
+            exit 1
+          fi
+      - name: Export the repo and bundle
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+          LINUXAPK_RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          if [[ '${{ github.event_name }}' == workflow_dispatch && '${{ inputs.dry_run }}' == true ]]; then
+            unset FLATPAK_GPG_PRIVATE_KEY FLATPAK_GPG_KEY_ID
+            export LINUXAPK_RELEASE_VERSION=dry-run
+          fi
+          packaging/flatpak/release.sh
+      - name: Publish the OSTree repo to gh-pages
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: |
+          repo=${GITHUB_REPOSITORY#*/}
+          work=out/release/gh-pages
+          rm -rf "$work"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git clone --branch gh-pages "https://github.com/${GITHUB_REPOSITORY}.git" "$work"
+          else
+            mkdir -p "$work"
+            git -C "$work" init -b gh-pages
+            git -C "$work" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          find "$work" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a out/release/publish/. "$work/"
+          cd "$work"
+          git add -A
+          git -c user.name=github-actions[bot] \
+            -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit --allow-empty -m "Publish $repo ${GITHUB_REF_NAME}"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the bundle to the GitHub Release
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bundle=$(echo out/release/*.flatpak)
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$bundle" --clobber

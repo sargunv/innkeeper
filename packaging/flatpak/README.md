@@ -24,6 +24,71 @@ FLATPAK_USER_DIR=$PWD/out/flatpak/user flatpak run dev.linuxapk.Manager list
   remote, and the result is installed or updated from a local repo
   (`out/flatpak/repo`).
 
+## Release
+
+A pushed `v*` tag runs
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml). It
+reuses the CI stage cache (`mise run build` only on a miss), then
+`packaging/flatpak/release.sh` exports an OSTree repo and a single-file bundle.
+The app id comes from the manifest, the remote name from the id's last
+component, and the Pages path from the repository name (`origin`'s last path
+segment, `github.event.repository.name` in CI), so a rename moves all three.
+
+The workflow publishes two ways:
+
+- **A bundle** (`<app>.flatpak`,
+  `flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo`)
+  attached to the GitHub Release for the tag. The workflow creates that release
+  with generated notes when it does not exist. The GNOME runtime comes from
+  Flathub.
+- **A static OSTree repo on GitHub Pages**, at
+  `https://code.sargunv.dev/<repository>/`. Each release commits into the
+  `gh-pages` branch (`flatpak build-export` into the restored repo, then
+  `flatpak build-update-repo --generate-static-deltas --prune`) and pushes it.
+  Pages deploys from that branch, so the OSTree history persists across
+  releases; `actions/deploy-pages` would replace the site and drop it. The
+  branch also carries `<remote>.flatpakrepo`, `<app>.flatpakref` and
+  `index.html`.
+
+Signing uses `FLATPAK_GPG_PRIVATE_KEY` (ASCII-armored, no passphrase) and
+`FLATPAK_GPG_KEY_ID` from the **`release` environment**, not repository secrets.
+The environment allows deployments from `v*` tags and `main`. The workflow
+exports the public key from the private key and embeds it (base64) in the
+`.flatpakrepo` and `.flatpakref`. A publish with either secret missing fails
+before export. `workflow_dispatch` defaults to a dry run: it builds and uploads
+nothing, skips the environment, and does not sign.
+
+Once, in the repository settings, set Pages to deploy from the `gh-pages` branch
+(root) and the custom domain `code.sargunv.dev`. The first tag creates the
+branch.
+
+Users add the remote once and take later tags with `flatpak update`:
+
+```sh
+flatpak remote-add --if-not-exists <remote> https://code.sargunv.dev/<repository>/<remote>.flatpakrepo
+flatpak install <remote> <app>
+```
+
+Or install the bundle from the GitHub Release. It needs the Flathub remote for
+the runtime:
+
+```sh
+flatpak install ./<app>.flatpak
+```
+
+`<app>` is the manifest `id`, `<remote>` its last component in lower case, and
+`<repository>` the GitHub repository name.
+
+The same export, unsigned and unpublished, for a local check:
+
+```sh
+mise run package:release
+```
+
+That writes `out/release/repo`, `out/release/<app>.flatpak` and
+`out/release/publish/`. Set both signing variables to sign a local export; the
+key is never written to the repository.
+
 The session runs inside the sandbox
 ([Flatpak mode](../../docs/session.md#flatpak-mode)): `start` in a sandbox of
 its own through the Flatpak portal's Spawn, `start -f` in the caller's, and the

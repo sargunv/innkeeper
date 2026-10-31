@@ -45,6 +45,14 @@ python3 tools/ci/compat-wiki.py --reports out/wiki-fixture \
 Inspect a push or PR run with `gh run view <run-id>`. Do not dispatch the
 workflow to test CI changes: dispatch runs the nightly corpus.
 
+`Release` runs on a pushed `v*` tag and on `workflow_dispatch`. It restores the
+same stage cache as the build job, then exports the Flatpak. A tag, and a manual
+run with dry run off, deploys through the `release` environment: it signs with
+that environment's `FLATPAK_GPG_PRIVATE_KEY` and `FLATPAK_GPG_KEY_ID`, pushes
+the OSTree repo to `gh-pages`, and attaches `<app>.flatpak` to the tag's GitHub
+Release. A dry run skips the environment and publishes nothing. Details:
+[packaging/flatpak](../../packaging/flatpak/README.md#release).
+
 To measure incremental compilation, rerun a PR run at its pinned commit after
 removing only its exact stage cache. Keep dependency and toolchain caches. New
 PR events can include a newer merge of main and changed dependency pins, so they
