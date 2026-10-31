@@ -47,3 +47,11 @@ on property:sys.boot_completed=1
     # another OOM adjustment happens after it expires, even in an idle session.
     exec_background - root root -- /system/bin/device_config put activity_manager max_cached_processes 16
     exec_background - root root -- /system/bin/device_config put activity_manager no_kill_cached_processes_post_boot_completed_duration_millis 0
+    # A session with no window is non-interactive, so AlarmManager holds
+    # non-wakeup alarms (JobScheduler's timing-delay alarm is one) until some
+    # other wakeup, for up to an hour. A desktop on mains has no reason to
+    # wait for a screen. Deliver them when they fire, and keep the inexact
+    # window at a minute so a lone ready job is not deferred for the default
+    # ten. The deadline alarm is already a wakeup and is unchanged.
+    exec_background - root root -- /system/bin/device_config put alarm_manager delay_nonwakeup_alarms_while_screen_off false
+    exec_background - root root -- /system/bin/device_config put alarm_manager min_window 60000

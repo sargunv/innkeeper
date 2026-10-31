@@ -71,4 +71,5 @@ so check them when the pin moves; the compat run's idle-memory budget fails if
 one stops matching. Sample HALs for hardware the session lacks are dropped with
 the vendor APEX selection in [image/bootconfig](../../image/bootconfig), and
 [init.linuxapk.rc](vendor/etc/init/hw/init.linuxapk.rc) caps how many idle
-processes Android keeps.
+processes Android keeps, and delivers JobScheduler's timing-delay alarm while
+the session has no window open.
