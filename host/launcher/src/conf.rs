@@ -23,10 +23,6 @@ pub struct Config {
     /// The host compositor's socket, for the bridge's windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wayland: Option<PathBuf>,
-    /// Seconds without activity before the session stops itself; 0: never
-    /// ([`crate::lifecycle`]).
-    #[serde(default)]
-    pub idle_grace: u64,
     /// `INNKEEPER_BROKER_DEBUG`, passed to the broker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_debug: Option<String>,
@@ -54,7 +50,6 @@ impl Config {
             headless,
             render_node,
             vulkan_driver,
-            idle_grace: crate::lifecycle::grace_secs(headless),
             broker_debug: env::var("INNKEEPER_BROKER_DEBUG")
                 .ok()
                 .filter(|v| !v.is_empty()),

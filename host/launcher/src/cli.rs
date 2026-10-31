@@ -49,19 +49,14 @@ after `mise run build`) and builds nothing. Its files:
     root-<profile>/ (the composed root)
 
 Environment:
-  INNKEEPER_AUDIO_SINK      PipeWire sink for the session's audio (default:
-                           the desktop's default output)
-  INNKEEPER_IDLE_GRACE      seconds without windows, foreground services,
-                           background-allowed apps, a near alarm or a running
-                           exec before the session stops itself, leaving a
-                           wakeup for its next alarm (default 120; 0: never;
-                           headless sessions never unless it is set)
   INNKEEPER_PROFILE         the profile to run (required; `innkeeper` and the
                            manager set it)
 Tests only:
-  INNKEEPER_TEST=1          a test session: clipboard, portals, links,
-                           notifications, media players, AT-SPI and location
-                           stay off the desktop
+  INNKEEPER_TEST=1          a test session, isolated from the desktop
+  INNKEEPER_TEST_TIMERS=1   short idle polling, a 1 s idle timeout and a short
+                           wakeup lead
+  INNKEEPER_AUDIO_SINK, INNKEEPER_AUDIO_SOURCE  PipeWire sink and capture
+                           source (default: the desktop's)
   INNKEEPER_DATA            Android's /data (default
                            $XDG_DATA_HOME/innkeeper/data-<profile>)
   INNKEEPER_IMAGES          the image cache

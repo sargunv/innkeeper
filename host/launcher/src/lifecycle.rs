@@ -23,9 +23,6 @@ use crate::conf::Config;
 use crate::paths::Paths;
 use crate::session;
 
-/// The grace period of a session with windows, unless `INNKEEPER_IDLE_GRACE`
-/// says otherwise.
-pub const DEFAULT_GRACE_SECS: u64 = 120;
 /// How often activity is checked.
 fn poll() -> Duration {
     Duration::from_millis(if test_timers() { 200 } else { 5000 })
@@ -42,22 +39,24 @@ pub fn wake_lead() -> Duration {
     Duration::from_secs(if test_timers() { 6 } else { 60 })
 }
 
-/// Short idle polling and alarm lead, for tests.
+/// Short idle polling, grace and alarm lead, for tests.
 fn test_timers() -> bool {
     std::env::var("INNKEEPER_TEST_TIMERS").is_ok_and(|v| v == "1")
 }
 
-/// The grace period for a new session, in seconds; 0: it never stops by
-/// itself. Headless sessions (tests) never do unless `INNKEEPER_IDLE_GRACE`
-/// is set.
-pub fn grace_secs(headless: bool) -> u64 {
-    match std::env::var("INNKEEPER_IDLE_GRACE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-    {
-        Some(s) => s,
-        None if headless => 0,
-        None => DEFAULT_GRACE_SECS,
+/// Seconds of idleness before the session stops; 0: never. Headless
+/// sessions (tests) never stop by themselves, and test timers stop after a
+/// second; otherwise it is the Idle timeout preference, read each time so a
+/// change applies live.
+fn grace_secs(headless: bool) -> u64 {
+    if headless {
+        0
+    } else if test_timers() {
+        1
+    } else {
+        crate::preferences::Preferences::load()
+            .unwrap_or_default()
+            .idle_seconds()
     }
 }
 
@@ -177,23 +176,17 @@ fn busy(paths: &Paths) -> Option<String> {
 }
 
 /// Watches the session's activity on a thread of its own. After
-/// `cfg.idle_grace` seconds of idleness it calls `end` with the next wakeup
-/// (ms since the epoch), once. Preferences are re-read so timeout changes apply live.
+/// [`grace_secs`] of idleness it calls `end` with the next wakeup (ms since
+/// the epoch), once.
 pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
-    let fixed_grace = (cfg.headless || std::env::var_os("INNKEEPER_IDLE_GRACE").is_some())
-        .then_some(cfg.idle_grace);
-    let paths = cfg.paths.clone();
+    let (headless, paths) = (cfg.headless, cfg.paths.clone());
     thread::spawn(move || {
         let mut idle_since: Option<Instant> = None;
         let mut last = String::new();
         let mut asked_background = false;
         loop {
             thread::sleep(poll());
-            let seconds = fixed_grace.unwrap_or_else(|| {
-                crate::preferences::Preferences::load()
-                    .map(|p| p.idle_seconds())
-                    .unwrap_or(120)
-            });
+            let seconds = grace_secs(headless);
             let grace = Duration::from_secs(seconds);
             let why = busy(&paths);
             // In Flatpak, running with no window is the Background portal's
