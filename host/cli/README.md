@@ -12,6 +12,11 @@ linuxapk run org.wikipedia [FILE...|URI]     # a window of its own, or focus the
 linuxapk uninstall org.wikipedia [--keep-data]
 linuxapk list                        # user apps; repairs stale desktop entries first
 linuxapk background [PKG on|off]     # may PKG run with no window open (lists them)
+linuxapk profile list                # profiles and whether they run
+linuxapk profile create|use|delete NAME  # delete removes its apps, data and settings
+linuxapk profile rename OLD NEW
+linuxapk profile start|stop [NAME]
+linuxapk --profile NAME install App.apk      # any command, on another profile
 ```
 
 - Every command starts the session if needed; the first start downloads the
@@ -40,8 +45,11 @@ linuxapk background [PKG on|off]     # may PKG run with no window open (lists th
 - `background` keeps the session up while an allowed app is installed
   ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages; `--keep-data` keeps `/data/data/<pkg>`.
-- With `LINUXAPK_PROFILE` set, entries bake it into their `Exec`, so a test's
-  entries keep using its session.
+- A profile is a separate Android with its own apps, data and settings
+  ([session](../../docs/session.md#profiles)). `--profile NAME` or
+  `LINUXAPK_PROFILE` selects it, else the one in use (`profile use`); the first
+  command that needs one creates `default`. Entries bake it into their `Exec`,
+  so an app's entry keeps using its profile.
 
 Tests: `cargo test -p linuxapk` and the shared core tests in `mise run test`
 cover command results, metadata, validation and desktop entries.

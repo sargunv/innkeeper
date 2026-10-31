@@ -42,7 +42,7 @@ pub fn cli_command() -> Result<Vec<String>> {
 
 /// The `linuxapk` desktop entries run: this installation's, or the Flatpak's
 /// command.
-fn linuxapk() -> Result<Vec<String>> {
+pub(crate) fn linuxapk() -> Result<Vec<String>> {
     if Dirs::from_env().portal.is_some() {
         return Ok(vec!["linuxapk".into()]);
     }

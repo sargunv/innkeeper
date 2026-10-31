@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::conf::Config;
 use crate::paths::{Image, Paths};
 
 pub struct Lease {
@@ -60,6 +59,19 @@ fn unused(path: &Path) -> Result<Option<File>> {
 
 /// Also honor sessions started by launchers predating leases. A stale config
 /// is harmless; an answering socket with an unreadable config aborts pruning.
+/// The image a running session's `session.conf` names. Only that table is
+/// read: the session may run another Linux.apk build, whose config differs.
+fn running_image(conf: &Path) -> Result<Image> {
+    #[derive(serde::Deserialize)]
+    struct Running {
+        image: Image,
+    }
+    let s = fs::read_to_string(conf).with_context(|| format!("read {}", conf.display()))?;
+    Ok(toml::from_str::<Running>(&s)
+        .with_context(|| format!("parse {}", conf.display()))?
+        .image)
+}
+
 fn running_images(paths: &Paths) -> Result<Vec<Image>> {
     let mut images = vec![];
     let Some(runtime) = paths.run.parent() else {
@@ -81,7 +93,7 @@ fn running_images(paths: &Paths) -> Result<Vec<Image>> {
         if crate::control::status(&run.join("control.sock"))
             .is_some_and(|s| s.starts_with("running:"))
         {
-            images.push(Config::load(&run.join("session.conf"))?.image);
+            images.push(running_image(&run.join("session.conf"))?);
         }
     }
     Ok(images)
@@ -165,6 +177,22 @@ pub fn prune(paths: &Paths, current: &Image) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_the_image_of_a_session_from_another_build() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/test/prune-conf");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("session.conf");
+        // A config whose other fields this build doesn't know.
+        std::fs::write(
+            &conf,
+            "headless = true\n[paths]\ninstance = \"old\"\n[image]\nname = \"ci-1\"\ndir = \"/i\"\nimg = \"/i/img\"\napexdir = \"/i/apex\"\nderived = \"/i/derived\"\n",
+        )
+        .unwrap();
+        assert_eq!(super::running_image(&conf).unwrap().name, "ci-1");
+        assert!(crate::conf::Config::load(&conf).is_err());
+    }
+
     use super::*;
 
     fn image(name: &str, hash: &str) -> Image {

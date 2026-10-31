@@ -366,6 +366,16 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 /// runs another command is offered to the portal again, unless the user
 /// declined it. Returns how many were rewritten.
 pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
+    rewrite_entries(d, linuxapk, None)
+}
+
+/// Points the entries of profile `from`'s apps at profile `to` (renamed),
+/// as [`refresh_entries`] writes them. Returns how many were rewritten.
+pub fn move_entries(d: &Dirs, linuxapk: &[String], from: &str, to: &str) -> usize {
+    rewrite_entries(d, linuxapk, Some((from, to)))
+}
+
+fn rewrite_entries(d: &Dirs, linuxapk: &[String], rename: Option<(&str, &str)>) -> usize {
     let mut n = 0;
     for (pkg, path, mut text) in app_entries(d) {
         let exec = desktop::read_key(&text, "Exec").unwrap_or_default();
@@ -375,8 +385,12 @@ pub fn refresh_entries(d: &Dirs, linuxapk: &[String]) -> usize {
             .program
             .is_some_and(|p| Path::new(p).is_absolute() && !Path::new(p).exists());
         let elsewhere = d.portal.is_some() && inv.program != linuxapk.first().map(String::as_str);
-        if missing || elsewhere || inv.foreign_env || inv.program.is_none() {
-            let mut run = paths::command(linuxapk, inv.profile);
+        let (renamed, profile) = match rename {
+            Some((from, to)) if inv.profile == from => (true, to),
+            _ => (false, inv.profile),
+        };
+        if missing || elsewhere || renamed || inv.foreign_env || inv.program.is_none() {
+            let mut run = paths::command(linuxapk, profile);
             run.extend(["run".into(), pkg.clone()]);
             let Some(mut new) = desktop::exec_line(&run, Some("%U"))
                 .ok()

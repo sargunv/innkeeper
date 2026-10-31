@@ -41,12 +41,12 @@ signal, init's exit) the launcher stops and then kills everything it started,
 and, as the sandbox's main process, everything else in it: Android processes
 orphaned by a dying init would otherwise keep the sandbox alive.
 
-The launcher composes `$XDG_DATA_HOME/linuxapk/root[-<profile>]` from hardlinks
-to the read-only image cache (reflink copies across filesystems) and copies of
-the layers, all read-only. `.compose-key` invalidates it when the image, stage
-or addons change. At each start the start-time layer is copied over it. Symlinks
-in `/` expose `/system`, `/apex` and `/data`; `/etc` keeps the sandbox's files
-and gains Android's others.
+The launcher composes `$XDG_DATA_HOME/linuxapk/root-<profile>` from hardlinks to
+the read-only image cache (reflink copies across filesystems) and copies of the
+layers, all read-only. `.compose-key` invalidates it when the image, stage or
+addons change. At each start the start-time layer is copied over it. Symlinks in
+`/` expose `/system`, `/apex` and `/data`; `/etc` keeps the sandbox's files and
+gains Android's others.
 
 The broker injects memfds for `/linuxapk/proc/<path>` on `openat`, rewrites
 `readlink` and `getcwd` to Android paths, and shows the user's files as root's.
@@ -147,15 +147,36 @@ stateDiagram-v2
 
 ## Where things live
 
-| Dir                                     | Contents                                                                                                                                                                |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `$XDG_DATA_HOME/linuxapk/`              | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data[-<profile>]/` (Android's `/data`), `addons/`, `root[-<profile>]/`                           |
-| `$XDG_STATE_HOME/linuxapk[-<profile>]`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
-| `$XDG_STATE_HOME/linuxapk/notices/`     | one-time notices already shown (shared by every profile)                                                                                                                |
-| `$XDG_RUNTIME_DIR/linuxapk[-<profile>]` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
+| Dir                                   | Contents                                                                                                                                                                |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$XDG_DATA_HOME/linuxapk/`            | `images/<build>/{img,apex-<hash>,derived}` (shared by every profile), `data-<profile>/` (Android's `/data` and the profile's settings), `addons/`, `root-<profile>/`    |
+| `$XDG_STATE_HOME/linuxapk-<profile>`  | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                             |
+| `$XDG_STATE_HOME/linuxapk/`           | `notices/`, one-time notices already shown, and `profile`, the one in use (shared by every profile)                                                                     |
+| `$XDG_RUNTIME_DIR/linuxapk-<profile>` | `session.conf`, pid files, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `root/`, `lifecycle`, `exec.lock`; in Flatpak mode under `app/<app id>/`, with `control.sock` |
 
-`LINUXAPK_PROFILE` names an independent session for tests; its suffix goes on
-every per-profile path.
+`LINUXAPK_PROFILE` names the profile; its suffix goes on every per-profile path.
+
+## Profiles
+
+A profile is a separate Android setup with its own apps, data and settings; a
+session is a running profile, and profiles run side by side. Profiles are listed
+from their `data-<name>` directories, and created, used, renamed, deleted,
+started and stopped with `linuxapk profile` or the manager's Profiles page
+(`host/core/src/profiles.rs`). None is special. A command names its profile
+(`--profile`, `LINUXAPK_PROFILE`, an app entry's `Exec`), or uses the one last
+chosen (`profile use`, the manager's Show Apps), else the first by name.
+Installing or opening something with no profile at all creates `default`, an
+ordinary profile. Tests use named profiles with fresh data dirs.
+
+A profile's settings are `.linuxapk-profile.toml` in its data dir, beside the
+data version record, so they move and back up with its data
+(`host/launcher/src/profile.rs`). The file carries a format `version`; a newer
+one is refused rather than rewritten. A missing file or setting means its
+default. Deleting a profile removes its data, settings, composed root, logs,
+runtime files, desktop preferences and app-menu entries; renaming moves them,
+and the composed root is recomposed. Either needs the profile stopped. Nothing
+in the model is Android-specific, so the OpenHarmony guest can keep its profiles
+the same way.
 
 ## Image upgrades and data recovery
 
@@ -182,9 +203,9 @@ backup outside the image cache, whose old images may be pruned. For a normal
 Flatpak installation, from a host terminal:
 
 ```sh
-flatpak run --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager stop
-# Default Flatpak XDG_DATA_HOME; adjust for a named profile or custom path.
-data_dir="$HOME/.var/app/dev.linuxapk.Manager/data/linuxapk/data"
+flatpak run --env=LINUXAPK_PROFILE=default --command=/app/libexec/linuxapk/linuxapk-session dev.linuxapk.Manager stop
+# The default Flatpak XDG_DATA_HOME and the first profile; adjust for another.
+data_dir="$HOME/.var/app/dev.linuxapk.Manager/data/linuxapk/data-default"
 backup_dir="$HOME/linuxapk-data-backup-$(date +%Y%m%d-%H%M%S)"
 cp -a --reflink=auto "$data_dir" "$backup_dir"
 ```
@@ -199,7 +220,7 @@ files. Do not delete or edit just the version record to bypass a refusal: it
 cannot undo Android's migrations. A launcher release predating this policy
 cannot enforce this check, so restore the matching backup before using it.
 
-For a named profile, supply the same `LINUXAPK_PROFILE` on stop/start and use
+Supply the profile's name in `LINUXAPK_PROFILE` on stop/start and use
 `data-<profile>`; `LINUXAPK_DATA` overrides that location. Development sessions
 use `out/dev/flatpak/<profile>/android-data` by default. Never copy or restore
 data while that profile is running.

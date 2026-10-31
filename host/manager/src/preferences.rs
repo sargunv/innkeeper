@@ -18,7 +18,6 @@ struct Page {
     prefs: RefCell<Preferences>,
     busy: Cell<bool>,
     addon: Cell<bool>,
-    main: Cell<bool>,
 }
 
 pub fn page(window: &Window) -> adw::NavigationPage {
@@ -36,7 +35,6 @@ pub fn page(window: &Window) -> adw::NavigationPage {
         prefs: RefCell::new(Preferences::default()),
         busy: Cell::new(false),
         addon: Cell::new(false),
-        main: Cell::new(false),
     });
     page.connect_showing(move |_| state.load());
     page
@@ -47,18 +45,13 @@ impl Page {
         let s = self.clone();
         glib::spawn_future_local(async move {
             let result = worker::run_quiet(|| {
-                Ok::<_, anyhow::Error>((
-                    Preferences::load()?,
-                    preferences::microg_available(),
-                    linuxapk_core::paths::profile()?.is_empty(),
-                ))
+                Ok::<_, anyhow::Error>((Preferences::load()?, preferences::microg_available()))
             })
             .await;
             match result {
-                Ok((p, addon, main)) => {
+                Ok((p, addon)) => {
                     s.prefs.replace(p);
                     s.addon.set(addon);
-                    s.main.set(main);
                     s.show();
                 }
                 Err(e) => {
@@ -182,13 +175,8 @@ impl Page {
         lifecycle.add(&row);
         let row = adw::ActionRow::builder()
             .title("Keep Running (Starts at Login)")
-            .subtitle(if self.main.get() {
-                "Requires desktop permission · about 540 MB while idle"
-            } else {
-                "Start at login is available only for the main session"
-            })
+            .subtitle("Requires desktop permission · about 540 MB while idle")
             .activatable_widget(&keep)
-            .sensitive(self.main.get())
             .build();
         row.add_prefix(&keep);
         lifecycle.add(&row);

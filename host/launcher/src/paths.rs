@@ -14,16 +14,26 @@ use crate::sys;
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.linuxapk.Manager";
 
-/// `LINUXAPK_PROFILE` if it is a valid profile name, else an error. Empty
-/// for the main session.
+/// The profile [`select`]ed in this process, if any.
+static SELECTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Selects profile `name` for this process, over `LINUXAPK_PROFILE` (the
+/// manager switches profiles so). Launchers it runs get it in their
+/// environment.
+pub fn select(name: &str) -> Result<()> {
+    crate::profile::check_name(name)?;
+    *SELECTED.lock().unwrap() = Some(name.into());
+    Ok(())
+}
+
+/// The profile this process works with: the one [`select`]ed, else
+/// `LINUXAPK_PROFILE`, which must name one.
 pub fn profile() -> Result<String> {
-    let name = env::var("LINUXAPK_PROFILE").unwrap_or_default();
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        bail!("bad LINUXAPK_PROFILE");
+    if let Some(s) = SELECTED.lock().unwrap().clone() {
+        return Ok(s);
     }
+    let name = env::var("LINUXAPK_PROFILE").unwrap_or_default();
+    crate::profile::check_name(&name).context("LINUXAPK_PROFILE")?;
     Ok(name)
 }
 
@@ -47,6 +57,11 @@ pub fn xdg_home(var: &str, default: &str) -> PathBuf {
         .unwrap_or_else(|| {
             Path::new(&env::var_os("HOME").unwrap_or_else(|| "/".into())).join(default)
         })
+}
+
+/// `$XDG_DATA_HOME/linuxapk`: the profiles' data, the image cache, addons.
+pub fn data_home() -> PathBuf {
+    xdg_home("XDG_DATA_HOME", ".local/share").join("linuxapk")
 }
 
 /// `$var` as a path, if set and not empty.
@@ -86,6 +101,11 @@ pub struct Paths {
 impl Paths {
     /// The paths for the prefix at `prefix` and this process's environment.
     pub fn new(prefix: &Path) -> Result<Self> {
+        Self::for_profile(prefix, &profile()?)
+    }
+
+    /// The paths of profile `name` for the prefix at `prefix`.
+    pub fn for_profile(prefix: &Path, name: &str) -> Result<Self> {
         let share = prefix.join("share/linuxapk");
         if !share.join("manifest.tsv").is_file() {
             bail!(
@@ -93,7 +113,11 @@ impl Paths {
                 prefix.display()
             );
         }
-        let profile = profile()?;
+        crate::profile::check_name(name)?;
+        let profile = name.to_string();
+        // LINUXAPK_DATA is the environment's own profile's.
+        let data_env =
+            env_path("LINUXAPK_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));
         let sfx = |n: &str| per_profile(n, &profile);
         let runtime = env_path("XDG_RUNTIME_DIR")
             .unwrap_or_else(|| format!("/run/user/{}", sys::uid()).into());
@@ -102,12 +126,12 @@ impl Paths {
             .join("app")
             .join(env::var("FLATPAK_ID").unwrap_or_else(|_| APP_ID.into()))
             .join(sfx("linuxapk"));
-        let data_home = xdg_home("XDG_DATA_HOME", ".local/share").join("linuxapk");
+        let data_home = data_home();
         Ok(Paths {
             libexec: prefix.join("libexec/linuxapk"),
             run,
             state: xdg_home("XDG_STATE_HOME", ".local/state").join(sfx("linuxapk")),
-            data: env_path("LINUXAPK_DATA").unwrap_or_else(|| data_home.join(sfx("data"))),
+            data: data_env.unwrap_or_else(|| data_home.join(sfx("data"))),
             images: env_path("LINUXAPK_IMAGES").unwrap_or_else(|| data_home.join("images")),
             pin: env_path("LINUXAPK_PIN").unwrap_or_else(|| share.join("image/pin.toml")),
             root: data_home.join(sfx("root")),

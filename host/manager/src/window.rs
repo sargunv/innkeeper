@@ -45,6 +45,8 @@ pub struct Inner {
     busy_apps: RefCell<HashMap<String, String>>,
     open_apps: RefCell<HashSet<String>>,
     session_proxy: RefCell<Option<gio::DBusProxy>>,
+    /// The title, with the profile whose apps show.
+    title: adw::WindowTitle,
     state_read: Cell<u64>,
     last_status: Cell<Option<Status>>,
     /// Watches the desktop entries, so installs from the CLI show up.
@@ -231,10 +233,15 @@ impl Window {
 
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
+        section.append(Some("P_rofiles"), Some("win.profiles"));
         section.append(Some("_Preferences"), Some("win.preferences"));
         section.append(Some("_About Linux.apk"), Some("app.about"));
         menu.append_section(None, &section);
-        let header = adw::HeaderBar::new();
+        let title = adw::WindowTitle::new(
+            "Linux.apk",
+            &linuxapk_core::paths::profile().unwrap_or_default(),
+        );
+        let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_start(
             &gtk::Button::builder()
                 .icon_name("list-add-symbolic")
@@ -304,6 +311,7 @@ impl Window {
             busy_apps: RefCell::default(),
             open_apps: RefCell::default(),
             session_proxy: RefCell::default(),
+            title,
             state_read: Cell::new(0),
             last_status: Cell::new(None),
             monitor: RefCell::default(),
@@ -360,6 +368,14 @@ impl Window {
             }
         });
         w.win.add_action(&preferences);
+        let profiles = gio::SimpleAction::new("profiles", None);
+        let weak = w.downgrade();
+        profiles.connect_activate(move |_, _| {
+            if let Some(w) = weak.upgrade() {
+                w.nav.push(&crate::profiles::page(&w));
+            }
+        });
+        w.win.add_action(&profiles);
         w.watch_entries();
         let w2 = w.clone();
         glib::spawn_future_local(async move {
@@ -768,6 +784,21 @@ impl Window {
                 }
             }
         });
+    }
+
+    /// Shows profile `name`'s apps and session from now on, and makes it the
+    /// one used when none is named.
+    pub fn switch_profile(&self, name: &str) -> anyhow::Result<()> {
+        linuxapk_core::paths::select(name)?;
+        linuxapk_core::profiles::choose(name)?;
+        self.title.set_subtitle(name);
+        self.session_proxy.replace(None);
+        self.last_status.set(None);
+        self.open_apps.borrow_mut().clear();
+        self.banner.set_revealed(false);
+        self.watch_session();
+        self.refresh();
+        Ok(())
     }
 
     pub fn read_session(&self) {

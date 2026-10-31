@@ -22,6 +22,8 @@ use crate::proc;
 
 pub struct Session {
     launcher: PathBuf,
+    /// The profile it runs, if not the environment's.
+    profile: Option<String>,
 }
 
 /// Lines of session stderr worth keeping (the session's linker warns there).
@@ -49,13 +51,37 @@ impl Session {
 
     /// The session `launcher` runs (for harnesses outside a prefix).
     pub fn at(launcher: PathBuf) -> Self {
-        Self { launcher }
+        Self {
+            launcher,
+            profile: None,
+        }
+    }
+
+    /// The session of profile `name` of this program's prefix.
+    pub fn of_profile(name: &str) -> Result<Self> {
+        linuxapk_session::profile::check_name(name)?;
+        Ok(Self {
+            profile: Some(name.into()),
+            ..Self::find()?
+        })
+    }
+
+    /// The launcher, run for this session's profile.
+    fn command(&self) -> Command {
+        let mut c = Command::new(&self.launcher);
+        if let Some(p) = self.profile.clone().or(crate::paths::profile().ok()) {
+            c.env("LINUXAPK_PROFILE", p);
+        }
+        c
     }
 
     /// The launcher library's view of this launcher's session.
-    fn paths(&self) -> Option<Paths> {
+    pub fn paths(&self) -> Option<Paths> {
         let prefix = self.launcher.parent()?.parent()?.parent()?;
-        Paths::new(prefix).ok()
+        match &self.profile {
+            Some(p) => Paths::for_profile(prefix, p).ok(),
+            None => Paths::new(prefix).ok(),
+        }
     }
 
     fn state(&self) -> Option<linuxapk_session::Status> {
@@ -78,7 +104,7 @@ impl Session {
     /// The output of a launcher command that only reads state, if it
     /// succeeds.
     fn query(&self, command: &str) -> Option<String> {
-        let o = Command::new(&self.launcher).arg(command).output().ok()?;
+        let o = self.command().arg(command).output().ok()?;
         o.status
             .success()
             .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -94,7 +120,7 @@ impl Session {
 
     /// Runs argv inside the session as root; returns (success, stdout, stderr).
     pub fn exec_with(&self, secs: u64, argv: &[&str], stdin: Stdio) -> Result<proc::Output> {
-        let mut c = Command::new(&self.launcher);
+        let mut c = self.command();
         c.arg("exec").args(argv);
         let mut o = proc::run(&mut c, stdin, Duration::from_secs(secs))?;
         o.stderr = clean_stderr(&o.stderr);
@@ -151,7 +177,7 @@ impl Session {
     /// Stops the session (no-op if it isn't running).
     pub fn stop(&self) -> Result<()> {
         let o = proc::run(
-            Command::new(&self.launcher).arg("stop"),
+            self.command().arg("stop"),
             Stdio::null(),
             Duration::from_secs(120),
         )?;
@@ -214,7 +240,8 @@ impl Session {
     }
 
     fn run_prepare(&self) -> Result<()> {
-        let st = Command::new(&self.launcher)
+        let st = self
+            .command()
             .arg("prepare")
             .stdin(Stdio::null())
             .stdout(io::stderr())
@@ -237,7 +264,7 @@ impl Session {
                 .context(crate::ErrorKind::ImageNotPrepared)?;
         }
         status("starting the Android session");
-        let mut c = Command::new(&self.launcher);
+        let mut c = self.command();
         c.arg("start").stdin(Stdio::null()).stdout(Stdio::null());
         if headless {
             c.arg("--headless");

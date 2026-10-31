@@ -8,6 +8,7 @@ mod errors;
 mod install;
 mod permissions;
 mod preferences;
+mod profiles;
 mod window;
 mod worker;
 
@@ -61,6 +62,13 @@ fn main() -> glib::ExitCode {
             &css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+        // The profile last chosen, or a first one: an ordinary profile.
+        match linuxapk_core::profiles::resolve(true) {
+            Ok(p) => {
+                let _ = linuxapk_core::paths::select(&p);
+            }
+            Err(e) => eprintln!("linuxapk-manager: {e:#}"),
+        }
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.open", &["<Control>o"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);

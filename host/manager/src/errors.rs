@@ -11,6 +11,7 @@ pub enum Op {
     Session,
     AppSettings,
     Preferences,
+    Profiles,
     /// Downloading and unpacking the Android image.
     Prepare,
 }
@@ -62,6 +63,7 @@ fn classify(
         None => {
             let heading = match op {
                 Op::Preferences => "Couldn’t Save Preferences".to_string(),
+                Op::Profiles => "Couldn’t Change Profiles".to_string(),
                 Op::Read => "Couldn’t Read the File".to_string(),
                 Op::Install => format!("Couldn’t Install {}", cap(app)),
                 Op::Open => format!("Couldn’t Open {}", cap(app)),

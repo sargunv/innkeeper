@@ -16,6 +16,7 @@ pub mod ops;
 pub mod paths;
 pub mod preferences;
 pub mod proc;
+pub mod profiles;
 pub mod validate;
 pub mod xdg;
 
