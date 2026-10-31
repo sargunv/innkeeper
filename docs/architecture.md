@@ -37,11 +37,10 @@ flowchart LR
   `innkeeper-core`; the launcher assembles and starts the session; the bridge is
   the only process that talks to the desktop.
 - **Supervisor.** One seccomp filter on Android's init traps what the sandbox
-  can't do (binder, eBPF, single-uid credentials). The Rust broker defines the
-  filter and serves every notification, including binder, credentials, BPF and
-  session-local evdev. The static pivot-exec bootstrap establishes the root and
-  namespaces, then becomes the broker that reaps children. See
-  [supervisor/README.md](../supervisor/README.md).
+  can't do (binder, eBPF, single-uid credentials, session-local evdev). The Rust
+  broker defines the filter and serves every notification. The static pivot-exec
+  bootstrap sets up the root, then becomes the broker, which also reaps
+  children. See [supervisor/README.md](../supervisor/README.md).
 - **Android.** The pinned image plus our overlay layer, vendor HALs and the
   privileged system app. See [android/README.md](../android/README.md).
 
@@ -50,6 +49,36 @@ The channels between zones are the seccomp notification fd and one socket,
 input records to the broker's private `evdev.sock`. Nothing in Android reaches
 the desktop any other way, apart from `/dev/dri`, `/dev/udmabuf` and the host
 network ([session.md](session.md)).
+
+## Modules
+
+What each directory builds and where it runs.
+[tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
+module stages.
+
+| Dir                                                             | Artifact                                              | Runs                                                          | Start reading at                |
+| --------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------- | ------------------------------- |
+| [host/core](../host/core/README.md)                             | `innkeeper-core` (library)                            | inside the CLI, manager and bridge                            | `src/ops.rs`                    |
+| [host/cli](../host/cli/README.md)                               | `bin/innkeeper`                                       | desktop, as you                                               | `src/main.rs`                   |
+| [host/manager](../host/manager/README.md)                       | `bin/innkeeper-manager`                               | desktop, as you                                               | `src/window.rs`                 |
+| [host/bridge](../host/bridge/README.md)                         | `libexec/innkeeper/innkeeper-bridge`                  | desktop, in the session's sandbox                             | `src/main.rs`, `src/ipc/`       |
+| [host/launcher](../host/launcher/README.md)                     | `libexec/innkeeper/innkeeper-session`                 | Flatpak sandbox                                               | `src/cli.rs`                    |
+| [supervisor](../supervisor/README.md)                           | `pivot-exec`, `innkeeper-brk`, `libinnkeeper_shim.so` | sandbox; the shim inside Android                              | `broker/src/notify.rs`          |
+| [image](../image/README.md)                                     | image scripts, config and static tools                | desktop, when the image is prepared                           | `fetch.sh`, `pin.toml`          |
+| [image/ohos](../image/ohos/README.md)                           | the OpenHarmony image pin                             | desktop, for the OpenHarmony guest                            | `fetch.sh`, `pin.toml`          |
+| [guest/bridge-client](../guest/bridge-client/README.md)         | static library                                        | linked into the guests' composers, Android's audio and health | `bridge_client.c`               |
+| [ohos](../ohos/README.md)                                       | OpenHarmony guest: broker layer, init shim, runner    | test sandbox (not in the stage)                               | `sandbox.sh`, `run.py`          |
+| [android/vendor/graphics](../android/vendor/graphics/README.md) | allocator, mapper, composer                           | Android `/vendor`                                             | `composer/Display.cpp`          |
+| [android/vendor/vulkan](../android/vendor/vulkan/README.md)     | `vulkan.radv.so`, `vulkan.anv.so`, `vulkan.lvp.so`    | Android, in every Vulkan user                                 | `build.sh`, `patches/mesa/`     |
+| [android/vendor/audio](../android/vendor/audio/README.md)       | `libtinyalsav2.so`                                    | Android, in the audio HAL                                     | `tinyalsa/pcm.c`                |
+| [android/vendor/health](../android/vendor/health/README.md)     | `android.hardware.health-service.innkeeper`           | Android `/vendor`                                             | `src/battery.c`                 |
+| [android/system](../android/system/README.md)                   | `innkeeper-exec`                                      | Android `/system`                                             | `exec/innkeeper-exec.c`         |
+| [android/system-app](../android/system-app/README.md)           | `InnkeeperSystem.apk`                                 | Android, as a privileged app                                  | `app/.../InnkeeperSystemApp.kt` |
+| [android/overlay](../android/overlay/README.md)                 | config files over the image's partitions              | Android                                                       | its README                      |
+| [android/microg](../android/microg/README.md)                   | optional microG addon                                 | Android                                                       | `install.sh`                    |
+| [tests](../tests/README.md)                                     | test harnesses and suites                             | desktop, never shipped                                        | its README                      |
+| [packaging/flatpak](../packaging/flatpak/README.md)             | the Flatpak, `dev.sargunv.Innkeeper`                  | build time                                                    | `build.sh`                      |
+| [tools](../tools/README.md)                                     | build container, staging, dev scripts                 | build time                                                    | `build/artifacts.toml`          |
 
 ## Decisions
 
@@ -93,8 +122,6 @@ network ([session.md](session.md)).
   becomes `/app` in the Flatpak. Every lookup is relative to the running
   executable, and runtime state lives in the XDG dirs, so dev, test and packaged
   runs share one code path.
-  [tools/build/artifacts.toml](../tools/build/artifacts.toml) lists what each
-  module stages and where it runs.
 - Inside Flatpak there are no nested user namespaces, mounts or capabilities, so
   the session runs in the app's own sandbox in single-uid mode, with a root
   built from symlinks (Flatpak's `/` is a writable tmpfs) and the host's network
@@ -148,11 +175,9 @@ Bionic-linked libraries into Linux processes; it does not translate ARM
 instructions. We build vendor HALs and Mesa for Android and keep desktop
 libraries in the host bridge, so no OEM Android driver stack is needed.
 
-[Anbox Cloud](https://canonical.com/anbox-cloud/docs/explanation/anbox-cloud/)
-is a separate managed server stack: LXD instances, image/application updates and
-streaming, with containerized Android 14/15 and Cuttlefish-based Android 16 VM
-images. Its instance isolation and fleet management serve a different purpose
-from a local Flatpak session; they do not describe archived desktop Anbox.
+[Anbox Cloud](https://canonical.com/anbox-cloud/docs/explanation/anbox-cloud/),
+unrelated to desktop Anbox, is a managed server stack that streams containerized
+or VM Android instances; it serves fleets, not a local desktop.
 
 ## Other prior art
 
