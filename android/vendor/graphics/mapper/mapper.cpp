@@ -56,8 +56,8 @@ struct Imported {
     std::lock_guard lock(mapMutex);
     if (base) return true;
     void* p = mmap(
-      nullptr, bh->metadataOffset.get(), PROT_READ | PROT_WRITE, MAP_SHARED,
-      bh->fd, 0
+      nullptr, bh->totalSize.get(), PROT_READ | PROT_WRITE, MAP_SHARED, bh->fd,
+      0
     );
     if (p == MAP_FAILED) return false;
     base = static_cast<uint8_t*>(p);
@@ -126,13 +126,11 @@ AIMapper_Error importBuffer(
   const BufferHandle* in = asBufferHandle(handle);
   if (!in) return AIMAPPER_ERROR_BAD_BUFFER;
   const uint64_t total = in->totalSize.get();
-  const uint64_t mdEnd = in->metadataOffset.get() + kPageSize;
-  const uint64_t resEnd = in->reservedOffset.get() + in->reservedSize.get();
+  const uint64_t metadataSize =
+    kReservedOffset + alignUp(in->reservedSize.get(), kPageSize);
   if (
-    in->numPlanes == 0 || in->numPlanes > kMaxPlanes || mdEnd > total ||
-    in->metadataOffset.get() % kPageSize != 0 ||
-    in->reservedOffset.get() < mdEnd || resEnd > total ||
-    in->layerSize.get() * in->layerCount > in->metadataOffset.get()
+    in->numPlanes == 0 || in->numPlanes > kMaxPlanes ||
+    in->layerSize.get() * in->layerCount > total
   ) {
     LOGE("importBuffer: inconsistent handle");
     return AIMAPPER_ERROR_BAD_BUFFER;
@@ -145,7 +143,7 @@ AIMapper_Error importBuffer(
       return AIMAPPER_ERROR_BAD_BUFFER;
     }
   }
-  if (fdSize(in->fd) < total) {
+  if (fdSize(in->fd) < total || fdSize(in->metadataFd) < metadataSize) {
     LOGE("importBuffer: fd smaller than handle claims");
     return AIMAPPER_ERROR_BAD_BUFFER;
   }
@@ -155,10 +153,10 @@ AIMapper_Error importBuffer(
   auto b = std::make_unique<Imported>();
   b->handle = clone;
   b->bh = reinterpret_cast<const BufferHandle*>(clone);
-  b->metadataSize = size_t(total - in->metadataOffset.get());
+  b->metadataSize = size_t(metadataSize);
   void* p = mmap(
-    nullptr, b->metadataSize, PROT_READ | PROT_WRITE, MAP_SHARED, b->bh->fd,
-    off_t(in->metadataOffset.get())
+    nullptr, b->metadataSize, PROT_READ | PROT_WRITE, MAP_SHARED,
+    b->bh->metadataFd, 0
   );
   if (p == MAP_FAILED) {
     LOGE("importBuffer: metadata mmap: %s", strerror(errno));
@@ -180,7 +178,7 @@ AIMapper_Error importBuffer(
 AIMapper_Error freeBuffer(buffer_handle_t buffer) {
   auto b = registry().remove(buffer);
   if (!b) return AIMAPPER_ERROR_BAD_BUFFER;
-  if (b->base) munmap(b->base, b->bh->metadataOffset.get());
+  if (b->base) munmap(b->base, b->bh->totalSize.get());
   munmap(b->metadata, b->metadataSize);
   nativeHandleCloseAndDelete(b->handle);
   return AIMAPPER_ERROR_NONE;
@@ -551,9 +549,7 @@ AIMapper_Error getReservedRegion(
   Imported* b = registry().find(buffer);
   if (!b) return AIMAPPER_ERROR_BAD_BUFFER;
   const uint64_t size = b->bh->reservedSize.get();
-  *outRegion = size ? b->metadata + (b->bh->reservedOffset.get() -
-                                     b->bh->metadataOffset.get())
-                    : nullptr;
+  *outRegion = size ? b->metadata + kReservedOffset : nullptr;
   *outSize = size;
   return AIMAPPER_ERROR_NONE;
 }

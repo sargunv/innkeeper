@@ -15,12 +15,14 @@ that touches gralloc buffers.
   composer targets use the session's selected Vulkan driver to choose a
   single-plane tiled layout and export its allocation as a dma-buf. CPU access,
   cursor buffers, YUV and unsupported allocations keep the sealed memfd and
-  `/dev/udmabuf` path. The native handle still has one fd; its 4 KiB shared
-  metadata page carries the DRM modifier alongside dataspace and HDR metadata.
-  Compression with auxiliary planes or dedicated allocations is excluded. Pitch
-  and YUV rules are in [docs/display.md](../../../docs/display.md#buffers). Only
-  the session's root may open `/dev/udmabuf`, so the allocator opens it before
-  dropping to `system:graphics`.
+  `/dev/udmabuf` path. The native handle has two fds: the pixels, then a sealed
+  memfd whose 4 KiB shared metadata page carries the DRM modifier alongside
+  dataspace and HDR metadata, followed by any client reserved region. Keeping
+  metadata separate lets a driver's dedicated allocation hold just the pixels.
+  Compression with auxiliary planes is excluded. Pitch and YUV rules are in
+  [docs/display.md](../../../docs/display.md#buffers). Only the session's root
+  may open `/dev/udmabuf`, so the allocator opens it before dropping to
+  `system:graphics`.
 - **Composer:** one headless display 0 (1280x800) plus up to 32 HWC-backed
   virtual displays; content layers are CLIENT and CURSOR layers are exported
   separately to Wayland. `Presenter.cpp` picks the backend from

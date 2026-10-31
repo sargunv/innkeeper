@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The buffer_handle_t layout shared by our allocator, mapper and composer.
 //
-// One fd: a dma-buf from /dev/udmabuf (or a plain memfd if udmabuf is not
-// available, flagged by kFlagDmabuf being clear). GPU-only RGB targets use
-// driver-exported dma-bufs and carry their DRM modifier in metadata. The fd
-// covers:
-//   [0, pixelBytes)                      pixel data, layerCount layers
-//   [metadataOffset, +kPageSize)         SharedMetadata (mutable metadata)
-//   [reservedOffset, +reservedSize)      client reserved region (optional)
-// Planes are linear (DRM_FORMAT_MOD_LINEAR) at the offsets/strides below, so
-// GPU drivers can import fd 0 directly.
+// Two fds, as minigbm and Mesa's importers expect (planes first, metadata
+// last):
+//   fd          pixel data, [0, totalSize), layerCount layers. A dma-buf from
+//               /dev/udmabuf (or a plain memfd if udmabuf is not available,
+//               flagged by kFlagDmabuf being clear), or, for GPU-only RGB
+//               targets, the Vulkan driver's exported allocation.
+//   metadataFd  a sealed memfd:
+//                 [0, kPageSize)                SharedMetadata
+//                 [kPageSize, +reservedSize)    client reserved region
+// Keeping metadata out of the pixel fd lets a driver's dedicated allocation
+// (RADV's tiled images) be the whole pixel buffer. Planes sit at the
+// offsets/strides below with the modifier in SharedMetadata (LINEAR unless
+// kFlagTiled), so GPU drivers can import fd directly.
 #pragma once
 
 #include <cstddef>
@@ -22,7 +26,7 @@
 namespace linuxapk {
 
 constexpr uint32_t kHandleMagic = 0x4b50414c;  // "LAPK"
-constexpr uint32_t kHandleVersion = 1;
+constexpr uint32_t kHandleVersion = 2;
 constexpr uint32_t kFlagDmabuf = 1u << 0;
 constexpr uint32_t kFlagTiled = 1u << 1;
 
@@ -44,6 +48,7 @@ struct HandlePlane {
 struct BufferHandle {
   native_handle_t base;
   int fd;
+  int metadataFd;
   // ---- ints ----
   uint32_t magic;
   uint32_t version;
@@ -55,21 +60,21 @@ struct BufferHandle {
   uint32_t stridePixels;
   U64 usage;
   U64 bufferId;
-  U64 totalSize;  // size of the fd
+  U64 totalSize;  // size of the pixel fd
   U64 layerSize;
-  U64 metadataOffset;
-  U64 reservedOffset;
-  U64 reservedSize;
+  U64 reservedSize;  // as requested; metadataFd rounds it up to whole pages
   uint32_t numPlanes;
   HandlePlane planes[kMaxPlanes];
 };
 
-constexpr int kHandleNumFds = 1;
+constexpr int kHandleNumFds = 2;
+constexpr uint64_t kReservedOffset = kPageSize;  // in metadataFd
 constexpr int kHandleNumInts =
   int((sizeof(BufferHandle) - offsetof(BufferHandle, magic)) / sizeof(int));
 static_assert(offsetof(BufferHandle, fd) == sizeof(native_handle_t));
 static_assert(
-  offsetof(BufferHandle, magic) == sizeof(native_handle_t) + sizeof(int)
+  offsetof(BufferHandle, magic) ==
+  sizeof(native_handle_t) + kHandleNumFds * sizeof(int)
 );
 static_assert(sizeof(BufferHandle) % sizeof(int) == 0);
 
@@ -87,7 +92,7 @@ inline const BufferHandle* asBufferHandle(const native_handle_t* h) {
   return bh;
 }
 
-// Mutable per-buffer metadata, stored in the buffer's own memory so every
+// Mutable per-buffer metadata, stored in the buffer's metadataFd so every
 // process that imports the buffer sees the same values.
 struct SharedMetadata {
   static constexpr uint32_t kMagic = 0x4154454d;  // "META"

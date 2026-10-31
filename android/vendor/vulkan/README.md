@@ -22,10 +22,10 @@ image's ANGLE on top (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   IDs keep the software fallback. `LINUXAPK_VULKAN=lvp` forces software
   rendering. The choice is saved in session.conf: the broker permits Android to
   open only that DRM device, so Mesa and the composer's ANGLE use the same GPU.
-  Gralloc uses driver-allocated tiled RGB render targets where the driver can
-  export them without a dedicated allocation (ANV, not RADV), keeping udmabuf
-  for CPU-accessed buffers. Flatpak's existing DRM grant to the desktop bridge
-  stays the same.
+  Gralloc uses driver-allocated tiled RGB render targets (dedicated allocations
+  where the driver requires them, as RADV does), keeping udmabuf for
+  CPU-accessed buffers. Flatpak's existing DRM grant to the desktop bridge stays
+  the same.
 - **Features:** the launcher writes Vulkan permission XMLs into the runtime
   layer alongside `ro.hardware.vulkan`: Vulkan 1.3, compute level 0, and
   hardware level 1 for RADV/ANV or 0 for lavapipe.

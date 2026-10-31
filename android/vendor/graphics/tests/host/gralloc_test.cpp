@@ -204,6 +204,9 @@ static void testMapper() {
     (unsigned long long)bh->totalSize.get()
   );
   CHECK(isDmabuf(bh->fd) == !!(bh->flags & kFlagDmabuf));
+  // Pixels only; metadata and the 100-byte reserved region have their own fd.
+  CHECK_EQ(uint64_t(lseek(bh->fd, 0, SEEK_END)), bh->totalSize.get());
+  CHECK_EQ(lseek(bh->metadataFd, 0, SEEK_END), off_t(2 * kPageSize));
 
   buffer_handle_t a = nullptr, b = nullptr;
   CHECK_EQ(gMapper->v5.importBuffer(raw, &a), AIMAPPER_ERROR_NONE);
@@ -213,7 +216,7 @@ static void testMapper() {
 
   uint32_t nfds = 0, nints = 0;
   CHECK_EQ(gMapper->v5.getTransportSize(a, &nfds, &nints), AIMAPPER_ERROR_NONE);
-  CHECK_EQ(nfds, 1u);
+  CHECK_EQ(nfds, 2u);
   CHECK_EQ(int(nints), raw->numInts);
 
   // Write through one import, read through the other (same pages).
@@ -512,16 +515,9 @@ static GpuBuffer testGpuAllocation(const AllocRequest& req, Layout* layout) {
     uint64_t(layout->planes[0].stride) * alignUp(req.height, 32);
   layout->layerSize = alignUp(layout->planes[0].size, kPageSize);
   layout->pixelBytes = layout->layerSize;
+  // Exactly the image, as a driver's dedicated allocation is.
   int fd = memfd_create("gpu-layout-fixture", MFD_CLOEXEC);
-  if (
-    fd < 0 || ftruncate(
-                fd, off_t(
-                      layout->pixelBytes + kPageSize +
-                      alignUp(req.reservedSize, kPageSize)
-                    )
-              )
-  )
-    abort();
+  if (fd < 0 || ftruncate(fd, off_t(layout->pixelBytes))) abort();
   return {fd, 0x0100000000000002};
 }
 
@@ -553,6 +549,14 @@ static void testGpuLayout() {
         get<StandardMetadataType::PLANE_LAYOUTS>(imported)->at(0).strideInBytes,
         cpu ? 512 : 1024
       );
+      void* region = nullptr;
+      uint64_t size = 0;
+      CHECK_EQ(
+        gMapper->v5.getReservedRegion(imported, &region, &size),
+        AIMAPPER_ERROR_NONE
+      );
+      CHECK(region && size == 64);
+      if (region) memset(region, 0x5a, size);
       gMapper->v5.freeBuffer(imported);
     }
     nativeHandleCloseAndDelete(raw);

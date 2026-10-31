@@ -58,7 +58,7 @@ sequenceDiagram
   accepted.
 - **Buffer ownership.** The composer imports the sink's own dma-buf into
   linux-dmabuf, using its linear format, stride and offset. It writes a unique
-  presentation token to the allocation's metadata page before submitting it.
+  presentation token to the buffer's shared metadata page before submitting it.
   `FrameSink` reads that token without mapping pixels and retains the image
   until HWC observes Wayland RELEASE and forwards the token. Unsubmitted images
   close immediately. At most two host leases leave room in the three-image
@@ -346,12 +346,13 @@ sequenceDiagram
 The allocator ([android/vendor/graphics](../android/vendor/graphics/README.md))
 allocates GPU-only, single-layer RGB render/composer targets through the
 selected Vulkan driver. It exports a dma-buf with the driver's single-plane
-tiled modifier, row pitch and allocation size. The handle layout stays the same;
-its shared metadata page carries the modifier for IMapper. Auxiliary compression
-planes and dedicated-only allocations are excluded so the same fd can retain
-that metadata page. Intel GPUs render several times faster to tiled memory than
-to LINEAR; ANV exports such targets. RADV requires dedicated allocations for
-shareable tiled images, so AMD targets stay LINEAR.
+tiled modifier, row pitch and allocation size, using a dedicated allocation
+where the driver requires one (RADV does for shareable tiled images). The native
+handle's second fd is a small sealed memfd holding the shared metadata page,
+including the modifier for IMapper, and any client reserved region, so the pixel
+fd can be exactly the driver's allocation. Auxiliary compression planes are
+excluded. Tiled targets render about 1.6x faster than LINEAR on RADV and several
+times faster on Intel.
 
 CPU-accessed buffers, cursor buffers, YUV and unsupported GPU allocations use
 the sealed memfd and `/dev/udmabuf` path: LINEAR, CPU-mappable and importable by
