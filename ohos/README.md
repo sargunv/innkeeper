@@ -49,10 +49,10 @@ lands, OH's own injector drives it from a probe:
 
 - **Display.** `sandbox.sh` defines the panel once (`display=720x1280@320`): the
   composer reports that mode, and DMS gets the same dpi in its config's `<dpi>`,
-  the only place it takes density from (the image's says 160, which made the
-  screen 720 vp wide: tablet layouts, tiny icons). At 320 dpi it is 360x640 vp,
-  phone-class (`const.product.devicetype` is already `default`, a phone),
-  matching the window's size on the desktop.
+  the only place it takes density from (the image's 160 would make it a 720 vp
+  wide tablet). At 320 dpi it is 360x640 vp, a phone like
+  `const.product.devicetype` (`default`), matching the window's size on the
+  desktop.
 - **GPU.** Only the first render node opens (the broker's DRM policy): the
   image's Mesa otherwise opens the host's card node, and its composer would
   drive the host display's KMS. That Mesa ships iris, crocus, nouveau,
@@ -90,8 +90,8 @@ sandbox's own `/`, then pivot-exec and the broker, then init.
   on a fixed fd; the session's `/data/storage` links to `/proc/self/fd/<fd>`, so
   each app process sees its own. The rest of an app's root is the session's.
 - **Inodes.** BMS checks free inodes before each install, and btrfs (no fixed
-  inode table) reports none, so SceneBoard and the larger apps failed to
-  install. The shim's `statfs` reports a free inode per free block there.
+  inode table) reports none, which would refuse SceneBoard and the larger apps.
+  The shim's `statfs` reports a free inode per free block there.
 - **Broker.** The same broker, built static for musl (OH's root has no Bionic),
   with `INNKEEPER_GUEST=ohos`: it also traps `open(2)` (musl doesn't use
   `openat`), serves `/etc/passwd` and `/etc/group` from `/system/etc`, adds OH's

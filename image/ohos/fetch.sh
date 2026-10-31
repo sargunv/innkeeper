@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Download the pinned OpenHarmony image, verify it, and extract the two
-# partitions the OH session uses, unprivileged (no loop mounts):
-#   <images>/<name>/dl/   the release zip (resumable); deleted once extracted
-#   <images>/<name>/img/  system/ (system.img's root, system-as-root) and
-#                         vendor/ (vendor.img)
-# The ext4 images are unpacked with image/fs-extract.sh's static debugfs,
-# so files keep their modes, without write permission, but belong to the
-# user.
+# Download the pinned OpenHarmony image, verify it, and extract system.img
+# and vendor.img into <images>/<name>/img/ (image/ohos/README.md).
 #
 # usage: fetch.sh <pin.toml> <images> <fs-extract.sh>
 set -euo pipefail

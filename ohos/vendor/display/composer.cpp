@@ -2,10 +2,7 @@
 // libdisplay_composer_vdi_impl.z.so: OpenHarmony's composer VDI, the C
 // functions the image's composer_host looks up by name
 // (drivers_interface display/composer/common/include/
-// display_vdi_adapter_interface.h). One display, 0, a phone-sized panel shown
-// in one desktop window through the bridge's display service. Every layer is
-// composed by render_service (CLIENT); each committed client target goes to
-// the bridge as a dma-buf. A timer supplies vsync.
+// display_vdi_adapter_interface.h).
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -95,8 +92,6 @@ struct Imported {
 struct State {
   pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
   pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
-  HotPlugCallback hotplug = nullptr;
-  void* hotplugData = nullptr;
   VBlankCallback vblank = nullptr;
   void* vblankData = nullptr;
   bool vsync = false;
@@ -120,9 +115,8 @@ int64_t nowNs() {
   return int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
 }
 
-timespec deadline(int64_t fromNow) {
-  const int64_t t = nowNs() + fromNow;
-  return {time_t(t / 1'000'000'000), long(t % 1'000'000'000)};
+timespec at(int64_t ns) {
+  return {time_t(ns / 1'000'000'000), long(ns % 1'000'000'000)};
 }
 
 template <typename T>
@@ -156,7 +150,8 @@ void forgetImports() {
   pthread_cond_broadcast(&g.changed);
 }
 
-// Connects, asks for the window, then handles RELEASE until the bridge goes.
+// Reconnects for the life of the process: without a bridge the display is
+// headless.
 void* bridgeLoop(void*) {
   lxb_backoff backoff{};
   for (;;) {
@@ -210,7 +205,7 @@ void* bridgeLoop(void*) {
 }
 
 bool waitIdle(Imported* b, int64_t ns) {
-  const timespec until = deadline(ns);
+  const timespec until = at(nowNs() + ns);
   while (b->busy && b->id) {
     if (pthread_cond_timedwait(&g.changed, &g.mu, &until) == ETIMEDOUT) break;
   }
@@ -260,7 +255,7 @@ void present(const Target& c) {
     }
   }
   // render_service may draw into a target as soon as Commit returns, so the
-  // compositor must be done with it: at most a frame's wait.
+  // compositor must be done with it.
   if (!waitIdle(b, 2 * kPeriodNs)) return;
   lxb_msg m = message(kFrame);
   const uint32_t fields[] = {kDisplay, b->id, 0, 0, 0, 0};
@@ -284,10 +279,8 @@ void* vsyncLoop(void*) {
     pthread_mutex_unlock(&g.mu);
     const int64_t now = nowNs();
     next = next + kPeriodNs > now ? next + kPeriodNs : now + kPeriodNs;
-    const timespec at = {
-      time_t(next / 1'000'000'000), long(next % 1'000'000'000)
-    };
-    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &at, nullptr) ==
+    const timespec wake = at(next);
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr) ==
            EINTR) {
     }
     cb(++sequence, uint64_t(next), data);
@@ -324,8 +317,6 @@ Layer* layer(uint32_t devId, uint32_t id) {
 EXPORT int32_t RegHotPlugCallback(HotPlugCallback cb, void* data) {
   {
     Lock l;
-    g.hotplug = cb;
-    g.hotplugData = data;
     startThreads();
   }
   const Mode d = mode();

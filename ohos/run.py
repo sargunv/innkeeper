@@ -1,14 +1,13 @@
 #!/usr/bin/python3
 """Boot the OpenHarmony image in a private, memory-capped Flatpak sandbox.
 
-  ohos/run.py [--timeout S] [--until REGEX] [--probe SCRIPT] [--display]
+  ohos/run.py [--timeout S] [--probe SCRIPT] [--display]
 
 The sandbox is the dev runner's (tools/dev/run.py): the stage at /app, the
 same permissions, the same named-profile scratch dirs, and the same
 MemoryHigh/MemoryMax on its scope. ohos/sandbox.sh builds OH's root there and
 runs its init under the supervisor. Init's log (/dev/kmsg) goes to
-<scratch>/ohos-kmsg.log. The run ends at --timeout, or once a log line
-matches --until (exit 0); a timeout with --until unmatched exits 1.
+<scratch>/ohos-kmsg.log. Without --probe the run ends at --timeout (exit 0).
 
 --display also runs the bridge, so OH's display shows in a desktop window
 (log: <scratch>/ohos-bridge.log). It opens on $WAYLAND_DISPLAY: use a nested
@@ -26,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 
 TOP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOP / "tools/dev"))
@@ -33,13 +33,11 @@ sys.dont_write_bytecode = True
 os.environ.setdefault("INNKEEPER_PROFILE", "ohos")
 import run as dev  # noqa: E402
 
-IMAGES = Path(os.environ.get("INNKEEPER_OHOS_IMAGES", TOP / "out/ohos/images"))
+IMAGES = TOP / "out/ohos/images"
 LAYER = TOP / "out/build/ohos/layer"
 
 
 def pin_name():
-  import tomllib
-
   with (TOP / "image/ohos/pin.toml").open("rb") as f:
     return tomllib.load(f)["name"]
 
@@ -65,7 +63,9 @@ def argv(gate, instance_fd, img, data, log, bridge):
     f"INNKEEPER_OHOS_KMSG={log}",
     *([f"INNKEEPER_OHOS_BRIDGE={bridge}"] if bridge else []),
     *(
-      f"{k}={v}" for k, v in os.environ.items() if k == "INNKEEPER_BROKER_DEBUG"
+      [f"INNKEEPER_BROKER_DEBUG={os.environ['INNKEEPER_BROKER_DEBUG']}"]
+      if "INNKEEPER_BROKER_DEBUG" in os.environ
+      else []
     ),
     "bash",
     str(TOP / "ohos/sandbox.sh"),
@@ -80,9 +80,7 @@ def argv(gate, instance_fd, img, data, log, bridge):
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("--timeout", type=float, default=60)
-  ap.add_argument("--until")
   ap.add_argument("--probe", type=Path)
-  ap.add_argument("--keep-data", action="store_true")
   ap.add_argument("--display", action="store_true")
   o = ap.parse_args()
   img = IMAGES / pin_name() / "img"
@@ -91,12 +89,9 @@ def main():
   if not (LAYER / "bin/innkeeper-brk").exists():
     sys.exit(f"no {LAYER}; run mise run ohos:build first")
   data = dev.SCRATCH / "ohos-data"
-  if not o.keep_data:
-    subprocess.run(["rm", "-rf", str(data)], check=True)
+  subprocess.run(["rm", "-rf", str(data)], check=True)
   probe = data / "innkeeper"
-  probe.mkdir(parents=True, exist_ok=True)
-  for f in ("probe.sh", "probe.out", "probe.done"):
-    (probe / f).unlink(missing_ok=True)
+  probe.mkdir(parents=True)
   if o.probe:
     (probe / "probe.sh").write_bytes(o.probe.read_bytes())
   log = dev.SCRATCH / "ohos-kmsg.log"
@@ -130,12 +125,9 @@ def main():
     else:
       raise RuntimeError("Flatpak scope not found; refusing to run uncapped")
     gate.touch()
-    pattern = re.compile(o.until) if o.until else None
+    done = probe / "probe.done"
     end = time.monotonic() + o.timeout
     while time.monotonic() < end and child.poll() is None:
-      if pattern and pattern.search(log.read_text(errors="replace")):
-        return 0
-      done = probe / "probe.done"
       if o.probe and done.exists() and done.read_text().strip():
         sys.stdout.write((probe / "probe.out").read_text(errors="replace"))
         return int(done.read_text())
@@ -144,7 +136,7 @@ def main():
       print(f"sandbox exited: {child.returncode}", file=sys.stderr)
     elif o.probe:
       print("probe did not finish", file=sys.stderr)
-    return 1 if pattern or o.probe else 0
+    return 1 if o.probe else 0
   finally:
     if instance:
       dev.run(["flatpak", "kill", instance], check=False)
