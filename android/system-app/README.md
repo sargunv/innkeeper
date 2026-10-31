@@ -18,6 +18,7 @@ restarts it if it dies.
 | `apps/`                                 | apps           | desktop entries for apps installed inside Android; `IconDump` for the host              |
 | `net/`                                  | none           | Flatpak mode: the host's network as Android's default network                           |
 | `a11y/`                                 | a11y           | an accessibility service, on while the desktop's is, that sends app windows to AT-SPI   |
+| `alarms/`                               | none           | a minute tick that delivers due inexact alarms, so ready jobs run on time               |
 
 Gradle modules:
 

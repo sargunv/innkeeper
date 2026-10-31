@@ -4,6 +4,7 @@ package dev.linuxapk.system
 import android.app.Application
 import android.util.Log
 import dev.linuxapk.system.a11y.A11yFeature
+import dev.linuxapk.system.alarms.AlarmTickFeature
 import dev.linuxapk.system.apps.AppMirrorFeature
 import dev.linuxapk.system.apps.AppSettings
 import dev.linuxapk.system.ime.ImeFeature
@@ -19,7 +20,7 @@ import dev.linuxapk.system.wm.WindowManagerFeature
  * is a [Feature]: host input, then the window manager and the IME, which share its connection to
  * the bridge's input service, then desktop integration (settings, notifications, clipboard, links,
  * media), the app mirror, in Flatpak mode the host network, the host's state (power saver,
- * metering, location), and accessibility.
+ * metering, location), accessibility, and a tick that delivers due inexact alarms.
  */
 class LinuxApkSystemApp : Application() {
   private val features = mutableListOf<Feature>()
@@ -51,6 +52,7 @@ class LinuxApkSystemApp : Application() {
         HostNetworkFeature(this),
         HostStateFeature(this),
         a11y,
+        AlarmTickFeature(this),
       )) {
       try {
         f.start()
