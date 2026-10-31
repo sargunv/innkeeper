@@ -10,8 +10,7 @@ use anyhow::{Context, Result};
 /// The session launcher, relative to the prefix.
 const LAUNCHER: &str = "libexec/innkeeper/innkeeper-session";
 
-/// An installed Innkeeper: `/app` in the Flatpak,
-/// `out/stage` in a checkout.
+/// An installed Innkeeper: `/app` in the Flatpak, `out/stage` in a checkout.
 pub struct Prefix(PathBuf);
 
 impl Prefix {
@@ -69,12 +68,6 @@ pub use innkeeper_session::paths::{profile, select};
 /// `$HOME`.
 pub use innkeeper_session::paths::xdg_home;
 
-/// `name`, suffixed with `-<profile>` for a named profile: the session's
-/// XDG directories are named this way.
-fn per_profile(name: &str) -> Result<String> {
-    Ok(innkeeper_session::paths::per_profile(name, &profile()?))
-}
-
 /// The argv that runs `program` (a command line, such as [`Prefix::cli`])
 /// against session `profile`: prefixed with `env INNKEEPER_PROFILE=<profile>`
 /// for a named profile, so a desktop entry reaches the session it was made
@@ -96,8 +89,6 @@ pub struct Invocation<'a> {
     pub profile: &'a str,
     /// The program, the first word after the environment.
     pub program: Option<&'a str>,
-    /// It sets variables [`command`] doesn't (an older Innkeeper's entry).
-    pub foreign_env: bool,
 }
 
 pub fn invocation(argv: &[String]) -> Invocation<'_> {
@@ -112,14 +103,7 @@ pub fn invocation(argv: &[String]) -> Invocation<'_> {
             .find_map(|w| w.strip_prefix("INNKEEPER_PROFILE="))
             .unwrap_or_default(),
         program: argv.get(env_len).map(String::as_str),
-        foreign_env: env.iter().any(|w| !w.starts_with("INNKEEPER_PROFILE=")),
     }
-}
-
-/// The session's state directory (logs, the documents service's grants):
-/// `$XDG_STATE_HOME/innkeeper[-<profile>]`.
-pub fn state_dir() -> Result<PathBuf> {
-    Ok(xdg_home("XDG_STATE_HOME", ".local/state").join(per_profile("innkeeper")?))
 }
 
 /// Where one-time notices remember they were shown:
@@ -142,19 +126,11 @@ mod tests {
         assert_eq!(named.join(" "), "env INNKEEPER_PROFILE=cli /x/innkeeper");
         let i = invocation(&named);
         assert_eq!((i.profile, i.program), ("cli", Some("/x/innkeeper")));
-        assert!(!i.foreign_env);
         let main = command(&argv("/x/innkeeper"), "");
         assert_eq!(invocation(&main).profile, "");
-        let old = argv("env INNKEEPER_SESSION=/s INNKEEPER_PROFILE=cli innkeeper run a.b");
-        let old = invocation(&old);
-        assert_eq!((old.profile, old.program), ("cli", Some("innkeeper")));
-        assert!(old.foreign_env);
         // Only the environment `env` sets counts.
         let args = argv("innkeeper run INNKEEPER_PROFILE=x");
         let i = invocation(&args);
-        assert_eq!(
-            (i.profile, i.program, i.foreign_env),
-            ("", Some("innkeeper"), false)
-        );
+        assert_eq!((i.profile, i.program), ("", Some("innkeeper")));
     }
 }

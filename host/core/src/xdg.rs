@@ -357,12 +357,10 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     v
 }
 
-/// Repairs our app entries. The `Exec` of one that can no longer run is
-/// pointed at `innkeeper` (this installation's command line, keeping its
-/// profile): its program is gone (Innkeeper moved or was
-/// reinstalled elsewhere), it sets variables an older Innkeeper used
-/// (`INNKEEPER_SESSION`), or, inside the Flatpak, it runs anything but
-/// `innkeeper`. Inside the Flatpak, a record whose app-menu entry is missing or
+/// Repairs our app entries. The `Exec` of one that can't run is pointed at
+/// `innkeeper` (this installation's command line, keeping its profile): its
+/// program is gone (Innkeeper moved or was reinstalled elsewhere), or, inside
+/// the Flatpak, it runs anything but `innkeeper`. Inside the Flatpak, a record whose app-menu entry is missing or
 /// runs another command is offered to the portal again, unless the user
 /// declined it. Returns how many were rewritten.
 pub fn refresh_entries(d: &Dirs, innkeeper: &[String]) -> usize {
@@ -389,7 +387,7 @@ fn rewrite_entries(d: &Dirs, innkeeper: &[String], rename: Option<(&str, &str)>)
             Some((from, to)) if inv.profile == from => (true, to),
             _ => (false, inv.profile),
         };
-        if missing || elsewhere || renamed || inv.foreign_env || inv.program.is_none() {
+        if missing || elsewhere || renamed || inv.program.is_none() {
             let mut run = paths::command(innkeeper, profile);
             run.extend(["run".into(), pkg.clone()]);
             let Some(mut new) = desktop::exec_line(&run, Some("%U"))
@@ -552,7 +550,6 @@ mod tests {
             Some(desktop::exec_line(&run, Some("%U")).unwrap())
         };
         let mut old = paths::command(&["/gone/innkeeper".into()], "cli");
-        old.insert(1, "INNKEEPER_SESSION=/gone/session".into());
         old.extend(["run".into(), "org.ex.old".into()]);
         let old = entry("org.ex.old", &desktop::exec_line(&old, Some("%U")).unwrap());
         let moved = entry("org.ex.moved", "/gone/innkeeper run org.ex.moved %U");
