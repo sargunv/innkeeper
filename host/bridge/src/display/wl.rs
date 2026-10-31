@@ -99,6 +99,8 @@ pub enum Cmd {
     TextInput(ime::Req),
     PointerCapture(bool),
     WindowPolicy(WindowPolicy),
+    /// WINDOW_ROTATION: window, quarter turns.
+    Rotation(u32, u32),
     KeepAwake {
         window: u32,
         requested: bool,
@@ -130,6 +132,9 @@ struct Buf {
 struct Win {
     id: u32,
     window: Window,
+    /// Android's rotation of the display's content in its buffer, in quarter
+    /// turns (WINDOW_ROTATION): shown turned back by the buffer transform.
+    rotation: u32,
     viewport: Option<WpViewport>,
     fractional: Option<WpFractionalScaleV1>,
     /// xdg-foreign export, for portal dialogs parented to the window.
@@ -333,10 +338,13 @@ impl State {
     /// Surface-local logical -> the shown frame's pixels.
     pub(crate) fn to_display(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
         match self.windows.get(&id) {
-            Some(w) if w.width > 0 && w.height > 0 && w.shown_size.0 > 0 => (
-                x * w.shown_size.0 as f64 / w.width as f64,
-                y * w.shown_size.1 as f64 / w.height as f64,
-            ),
+            Some(w) if w.width > 0 && w.height > 0 && w.shown_size.0 > 0 => {
+                let (sw, sh) = turned(w.shown_size, w.rotation);
+                (
+                    x * sw as f64 / w.width as f64,
+                    y * sh as f64 / w.height as f64,
+                )
+            }
             _ => (x, y),
         }
     }
@@ -382,6 +390,28 @@ impl State {
         }
         w.window.commit();
         self.send_configure(id);
+    }
+
+    /// Shows the window's frames turned back by `rotation` quarter turns
+    /// (Android's rotation of a display whose buffer keeps its natural
+    /// orientation), and gives it the turned shape.
+    fn rotation(&mut self, id: u32, rotation: u32) {
+        let Some(w) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if w.rotation == rotation {
+            return;
+        }
+        let swap = w.rotation % 2 != rotation % 2;
+        w.rotation = rotation;
+        w.window
+            .wl_surface()
+            .set_buffer_transform(buffer_transform(rotation));
+        if swap {
+            self.swap_shape(id);
+        } else {
+            w.window.commit();
+        }
     }
 
     fn window_policy(&mut self, p: WindowPolicy) {
@@ -736,6 +766,7 @@ impl State {
             Win {
                 id: s.window,
                 window,
+                rotation: 0,
                 viewport,
                 fractional,
                 exported,
@@ -1150,6 +1181,7 @@ impl State {
                 self.update_capture();
             }
             Cmd::WindowPolicy(p) => self.window_policy(p),
+            Cmd::Rotation(id, rotation) => self.rotation(id, rotation),
             Cmd::KeepAwake { window, requested } => {
                 if let Some(w) = self.windows.get_mut(&window) {
                     w.inhibit.requested = requested;
@@ -1533,6 +1565,24 @@ pub(super) fn foreign_handles(window: u32) -> Option<String> {
         .cloned()
 }
 
+/// A frame's sides as shown, turned by `rotation` quarter turns.
+fn turned((w, h): (u32, u32), rotation: u32) -> (u32, u32) {
+    if rotation % 2 == 1 { (h, w) } else { (w, h) }
+}
+
+/// The buffer transform that shows a frame Android rotated by `rotation`
+/// quarter turns (Surface.ROTATION_*) upright.
+fn buffer_transform(rotation: u32) -> wl_output::Transform {
+    // Android turns content counterclockwise; Wayland names the turn that
+    // undoes it.
+    match rotation % 4 {
+        1 => wl_output::Transform::_270,
+        2 => wl_output::Transform::_180,
+        3 => wl_output::Transform::_90,
+        _ => wl_output::Transform::Normal,
+    }
+}
+
 /// Runs the Wayland side until [`Cmd::Quit`] or the compositor goes away.
 pub fn run(
     conn: Connection,
@@ -1648,4 +1698,19 @@ pub fn run(
         st.destroy(id);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quarter_turns_swap_the_shown_sides() {
+        assert_eq!(turned((1080, 2400), 0), (1080, 2400));
+        assert_eq!(turned((1080, 2400), 1), (2400, 1080));
+        assert_eq!(turned((1080, 2400), 2), (1080, 2400));
+        assert_eq!(turned((1080, 2400), 3), (2400, 1080));
+        assert_eq!(buffer_transform(1), wl_output::Transform::_270);
+        assert_eq!(buffer_transform(4), wl_output::Transform::Normal);
+    }
 }

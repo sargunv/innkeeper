@@ -14,6 +14,7 @@ mod init;
 mod layer;
 pub mod lifecycle;
 pub mod paths;
+mod phone;
 pub mod preferences;
 pub mod profile;
 mod prune;

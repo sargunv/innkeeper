@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use linuxapk_core::profiles::{self, Profile, Settings};
+use linuxapk_core::profiles::{self, Mode, Profile, Settings, Size};
 
 use crate::{
     errors::Op,
@@ -241,7 +241,72 @@ impl Page {
             }
         });
         row.add_row(&rename);
+        row.add_row(&self.mode_row(p, idle));
         row.add_row(&self.adb_row(p, idle));
+        row
+    }
+
+    /// Windowed or phone, with the phone's screen; for the next start.
+    fn mode_row(self: &Rc<Self>, p: &Profile, idle: bool) -> adw::ComboRow {
+        let choices = [
+            (
+                "Windowed",
+                "Each app in a window of its own",
+                Mode::Windowed,
+                None,
+            ),
+            (
+                "Small Phone",
+                "One device window, 720 × 1280",
+                Mode::Phone,
+                Some(Size::SmallPhone),
+            ),
+            (
+                "Medium Phone",
+                "One device window, 1080 × 2400",
+                Mode::Phone,
+                Some(Size::MediumPhone),
+            ),
+            (
+                "Medium Tablet",
+                "One device window, 2560 × 1600",
+                Mode::Phone,
+                Some(Size::MediumTablet),
+            ),
+        ];
+        let model = gtk::StringList::new(&choices.map(|c| c.0));
+        let current = choices
+            .iter()
+            .position(|c| {
+                c.2 == p.settings.mode && (c.2 == Mode::Windowed || c.3 == Some(p.settings.size))
+            })
+            .unwrap_or(0);
+        let row = adw::ComboRow::builder()
+            .title("Display")
+            .subtitle(if p.running {
+                format!("{} · Applies the next time it starts", choices[current].1)
+            } else {
+                choices[current].1.to_string()
+            })
+            .model(&model)
+            .selected(current as u32)
+            .sensitive(idle)
+            .build();
+        let (s, name) = (Rc::downgrade(self), p.name.clone());
+        row.connect_selected_notify(move |r| {
+            let Some(s) = s.upgrade() else {
+                return;
+            };
+            let Some(&(_, _, mode, size)) = choices.get(r.selected() as usize) else {
+                return;
+            };
+            let n = name.clone();
+            s.work(
+                &name,
+                move || profiles::set_mode(&n, Some(mode), size).map(drop),
+                None,
+            );
+        });
         row
     }
 

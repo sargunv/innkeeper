@@ -47,7 +47,9 @@ window shows one profile's apps, named under its title; **Show Apps** switches
 to another and remembers it for the CLI. Opening the manager with no profile
 creates `default`, an ordinary profile. Deleting asks for confirmation and
 removes the profile's apps, data, settings and app-menu entries. Each profile
-also has an adb switch, which applies at once
+also has a Display row, windowed or a phone preset for its next start
+([phone mode](../../docs/display.md#phone-mode)), and an adb switch, which
+applies at once
 ([development.md](../../docs/development.md#adb-into-a-profile)).
 
 When idle, Android stops after 2 minutes by default (adjustable from 1 to 120).

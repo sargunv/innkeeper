@@ -196,6 +196,15 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
+    /// Turns this display's toplevel to Android's rotation of its content.
+    pub fn window_rotation(&self, window: u32, rotation: u32) -> Result<(), i32> {
+        let s = self.state.lock().unwrap();
+        let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
+        s.displays[conn]
+            .send(Cmd::Rotation(window, rotation))
+            .map_err(|_| -EIO)
+    }
+
     pub fn keep_awake(&self, window: u32, requested: bool) -> Result<(), i32> {
         let s = self.state.lock().unwrap();
         let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;

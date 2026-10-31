@@ -107,6 +107,7 @@ fn compose_key(cfg: &Config) -> Result<String> {
         h.update(fs::read(cfg.image.derived.join(format!("{l}.source"))).unwrap_or_default());
     }
     h.update(fs::read(cfg.paths.share.join("manifest.tsv"))?);
+    h.update(format!("{:?}", crate::phone::mode(&cfg.paths.data)?));
     for a in cfg.paths.addon_layers() {
         h.update(a.as_os_str().as_encoded_bytes());
         let mut files = vec![];
@@ -167,6 +168,16 @@ fn compose(cfg: &Config) -> Result<()> {
             layers.extend(addons.iter().map(|a| a.join(part)));
             for l in layers {
                 over(&l, &dst)?;
+            }
+        }
+    }
+    if crate::phone::mode(&cfg.paths.data)? == crate::profile::Mode::Phone {
+        for keep in crate::phone::KEEPS {
+            let (part, rest) = keep.split_once('/').unwrap_or((keep, ""));
+            let src = root::image_partition(&cfg.image.img, part).join(rest);
+            if src.exists() {
+                remove_tree(&r.join(keep))?;
+                link(&src, &r.join(keep))?;
             }
         }
     }

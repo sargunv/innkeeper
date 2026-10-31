@@ -17,9 +17,11 @@
 
 #include "BridgePresenter.h"
 
+#include "GpuCopy.h"
 #include "Properties.h"
 #include "VsyncThread.h"
 #include "linuxapk/bridge_client.h"
+#include "linuxapk/buffer_alloc.h"
 #include "linuxapk/layout.h"
 #include "linuxapk/log.h"
 
@@ -76,6 +78,8 @@ class BridgeDisplay {
   // DISPLAY_ADD's answer: shown in `window`, or not shown (-1).
   void setWindow(int64_t window) { mWindow = window; }
   bool shown() const { return mWindow >= 0; }
+  // Whether Wayland still holds buffer `source` (takes the bridge lock).
+  bool holds(uint64_t source);
   // The bridge (re)connected without our buffers: not shown until it says
   // so again, and the next frame adds a new pool.
   void reset() {
@@ -118,6 +122,9 @@ class Bridge {
   // connect.
   void addDisplay(std::shared_ptr<BridgeDisplay> d);
   void removeDisplay(uint32_t id);
+  // Offers display `id` again if the bridge has no window for it and isn't
+  // answering an offer: a window asked for after the display was added.
+  void offerAgain(uint32_t id);
 
  private:
   void loop();
@@ -158,6 +165,15 @@ void Bridge::addDisplay(std::shared_ptr<BridgeDisplay> d) {
   // Same lock as loop()'s connect: exactly one of us adds the display.
   if (connected()) sendAdd(*d);
   mDisplays[d->id()] = std::move(d);
+}
+
+void Bridge::offerAgain(uint32_t id) {
+  std::lock_guard lock(mutex);
+  auto it = mDisplays.find(id);
+  if (!connected() || it == mDisplays.end() || it->second->shown()) return;
+  for (auto& [_, pending] : mAdds)
+    if (pending == id) return;
+  sendAdd(*it->second);
 }
 
 void Bridge::removeDisplay(uint32_t id) {
@@ -283,6 +299,12 @@ void BridgeDisplay::onRelease(uint32_t buffer, bool invalid) {
     }
     return;
   }
+}
+
+bool BridgeDisplay::holds(uint64_t source) {
+  std::lock_guard lock(b->mutex);
+  auto it = mBuffers.find(source);
+  return it != mBuffers.end() && it->second.busy;
 }
 
 void BridgeDisplay::releaseImage(uint64_t token) {
@@ -494,7 +516,92 @@ class BridgeVirtualPresenter : public Presenter {
   std::shared_ptr<BridgeDisplay> mDisplay;
   std::unique_ptr<HeadlessPresenter> mSecondary;
 };
+// Phone mode's display 0: SurfaceFlinger's own client targets, copied on the
+// GPU into buffers of ours (they go back to SurfaceFlinger at once, while the
+// bridge keeps ours until Wayland releases them). Its window is the one the
+// window manager asks for display 0, at any time after boot: until then the
+// display is offered again every half second.
+class BridgePrimaryPresenter : public Presenter {
+ public:
+  BridgePrimaryPresenter(
+    uint32_t width, uint32_t height,
+    std::unique_ptr<HeadlessPresenter> secondary
+  )
+      : mDisplay(std::make_shared<BridgeDisplay>(gBridge, 0, width, height)),
+        mSecondary(std::move(secondary)) {
+    gBridge->addDisplay(mDisplay);
+    mOffers = std::thread([this] {
+      pthread_setname_np(pthread_self(), "hwc-primary");
+      while (!mStop.load()) {
+        usleep(500'000);
+        gBridge->offerAgain(0);
+      }
+    });
+  }
+  ~BridgePrimaryPresenter() override {
+    mStop = true;
+    mOffers.join();
+    gBridge->removeDisplay(0);
+  }
+  const char* name() const override { return "bridge-primary"; }
+  void present(const FrameInput& frame) override {
+    mSecondary->present(frame);
+    ClientTargetState* ct = frame.clientTarget;
+    if (!ct || !ct->buffer || !ct->buffer->info() || !frame.clientTargetUpdated)
+      return;
+    const BufferHandle* bh = ct->buffer->info();
+    BufferPtr target = freeBuffer(*bh);
+    if (!target) return;
+    if (!waitFence(ct->acquireFence.get(), 1000)) return;
+    if (!mCopy) mCopy = std::make_unique<GpuCopy>();
+    if (!mCopy->copy(*ct->buffer, *target)) return;
+    ClientTargetState copied{target, UniqueFd()};
+    mDisplay->present({frame.displayId, &copied, target, frame.cursor, true});
+  }
+
+ private:
+  // A pool buffer Wayland doesn't hold, (re)allocated at the target's size.
+  BufferPtr freeBuffer(const BufferHandle& like) {
+    const auto* first = mPool.empty() ? nullptr : mPool[0]->info();
+    if (
+      first && (first->width != like.width || first->height != like.height ||
+                first->resolvedFormat != like.resolvedFormat)
+    )
+      mPool.clear();
+    for (auto& b : mPool)
+      if (!mDisplay->holds(b->info()->bufferId.get())) return b;
+    if (mPool.size() >= kPool) return nullptr;
+    native_handle_t* handle = nullptr;
+    if (
+      allocateBuffer(
+        {"phone-screen", like.width, like.height, 1, like.resolvedFormat,
+         usage::CPU_READ_MASK | usage::GPU_RENDER_TARGET | usage::GPU_TEXTURE,
+         0},
+        &handle
+      ) != AllocStatus::Ok
+    )
+      return nullptr;
+    mPool.push_back(std::make_shared<BufferRef>(handle));
+    return mPool.back();
+  }
+
+  static constexpr size_t kPool = kMaxPending + 1;
+  std::shared_ptr<BridgeDisplay> mDisplay;
+  std::unique_ptr<HeadlessPresenter> mSecondary;
+  std::unique_ptr<GpuCopy> mCopy;
+  std::vector<BufferPtr> mPool;
+  std::atomic<bool> mStop{false};
+  std::thread mOffers;
+};
 }  // namespace
+
+std::unique_ptr<Presenter> createBridgePrimaryPresenter(
+  uint32_t width, uint32_t height, std::unique_ptr<HeadlessPresenter> secondary
+) {
+  return std::make_unique<BridgePrimaryPresenter>(
+    width, height, std::move(secondary)
+  );
+}
 
 void startBridge() {
   gBridge = new Bridge();

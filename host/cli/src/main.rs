@@ -105,6 +105,13 @@ enum ProfileCmd {
         /// at once.
         #[arg(long, value_parser = ["on", "off"])]
         adb: Option<String>,
+        /// Apps in windows of their own, or the whole device in one window;
+        /// applies at the next start.
+        #[arg(long, value_parser = ["windowed", "phone"])]
+        mode: Option<String>,
+        /// The phone's screen.
+        #[arg(long, value_parser = ["small-phone", "medium-phone", "medium-tablet"])]
+        size: Option<String>,
     },
 }
 
@@ -348,12 +355,16 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
                     " "
                 };
                 let state = if p.running { "running" } else { "stopped" };
+                let mode = match p.settings.mode {
+                    profiles::Mode::Windowed => "windowed".to_string(),
+                    profiles::Mode::Phone => format!("phone {}", p.settings.size.name()),
+                };
                 let adb = if p.settings.debug_bridge {
                     format!("adb {}", linuxapk_core::adb::serial(&p.settings))
                 } else {
                     String::new()
                 };
-                println!("{mark} {:<16} {state:<8} {adb}", p.name);
+                println!("{mark} {:<16} {state:<8} {mode:<20} {adb}", p.name);
             }
         }
         ProfileCmd::Create { name: n } => {
@@ -379,9 +390,37 @@ fn profile(cmd: ProfileCmd) -> Result<()> {
             profiles::start(&name(n)?, &|m| eprintln!("linuxapk: {m}"))?;
         }
         ProfileCmd::Stop { name: n } => profiles::stop(&name(n)?)?,
-        ProfileCmd::Set { name: n, adb } => {
+        ProfileCmd::Set {
+            name: n,
+            adb,
+            mode,
+            size,
+        } => {
             let n = name(n)?;
-            ensure!(adb.is_some(), "nothing to change (see --help)");
+            ensure!(
+                adb.is_some() || mode.is_some() || size.is_some(),
+                "nothing to change (see --help)"
+            );
+            if mode.is_some() || size.is_some() {
+                let mode = mode.map(|m| {
+                    if m == "phone" {
+                        profiles::Mode::Phone
+                    } else {
+                        profiles::Mode::Windowed
+                    }
+                });
+                let size = size.as_deref().and_then(profiles::Size::parse);
+                let s = profiles::set_mode(&n, mode, size)?;
+                println!(
+                    "mode: {} ({}), at the next start",
+                    if s.mode == profiles::Mode::Phone {
+                        "phone"
+                    } else {
+                        "windowed"
+                    },
+                    s.size.name()
+                );
+            }
             if let Some(on) = adb {
                 let s = linuxapk_core::adb::set(&n, on == "on", &stderr)?;
                 if s.debug_bridge {

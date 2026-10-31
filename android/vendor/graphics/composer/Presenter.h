@@ -73,9 +73,15 @@ class HeadlessPresenter : public Presenter {
 // startup: "bridge" shows virtual displays in host windows through the
 // bridge's display service; "headless" (the default) shows none.
 void startPresenterBackend();
-// Display 0 never has a window: apps show in windows of the virtual
-// displays that the window manager (the Linux.apk System app) creates.
-std::unique_ptr<Presenter> createPrimaryPresenter();
+struct DisplayConfig;
+// Display 0 has no window: apps show in windows of the virtual displays that
+// the window manager (the Linux.apk System app) creates. In phone mode it is
+// the device's screen, in the window the window manager asks for it.
+std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config);
+
+// Display 0's mode: 1280x800 at 160 dpi, or in phone mode the device's
+// screen (vendor.linuxapk.hwc.primary, WxH, and ro.sf.lcd_density).
+DisplayConfig primaryConfig();
 // A HWC-backed virtual display (ComposerClient::createVirtualDisplay): a
 // window if the backend is "bridge" and the bridge has one for it.
 std::unique_ptr<Presenter> createVirtualPresenter(

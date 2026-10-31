@@ -92,6 +92,65 @@ pub struct Settings {
     /// (0: none yet; any port may be set). It stays, so tools keep finding
     /// the profile there.
     pub debug_bridge_port: u16,
+    /// How the guest shows: its apps in windows of their own, or one
+    /// device-shaped window. Applies at the next start.
+    pub mode: Mode,
+    /// The device's screen in [`Mode::Phone`].
+    pub size: Size,
+}
+
+/// How a profile shows on the desktop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    /// Each app task in a window of its own.
+    #[default]
+    Windowed,
+    /// The whole device, its launcher and system bars, in one window.
+    Phone,
+}
+
+/// A device screen preset: Android Studio's virtual devices of the same names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Size {
+    SmallPhone,
+    #[default]
+    MediumPhone,
+    MediumTablet,
+}
+
+impl Size {
+    pub const ALL: [Size; 3] = [Size::SmallPhone, Size::MediumPhone, Size::MediumTablet];
+
+    /// Width and height in pixels, in its natural orientation, and density.
+    pub fn screen(self) -> (u32, u32, u32) {
+        match self {
+            Size::SmallPhone => (720, 1280, 320),
+            Size::MediumPhone => (1080, 2400, 420),
+            Size::MediumTablet => (2560, 1600, 320),
+        }
+    }
+
+    /// Its name in settings and on the command line.
+    pub fn name(self) -> &'static str {
+        match self {
+            Size::SmallPhone => "small-phone",
+            Size::MediumPhone => "medium-phone",
+            Size::MediumTablet => "medium-tablet",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Size> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// Whether Android lays it out as a large screen (600 dp or more on
+    /// its short side), with a taskbar.
+    pub fn large(self) -> bool {
+        let (w, h, dpi) = self.screen();
+        w.min(h) * 160 / dpi >= 600
+    }
 }
 
 impl Default for Settings {
@@ -100,6 +159,8 @@ impl Default for Settings {
             version: VERSION,
             debug_bridge: false,
             debug_bridge_port: 0,
+            mode: Mode::Windowed,
+            size: Size::MediumPhone,
         }
     }
 }
@@ -321,8 +382,22 @@ mod tests {
         let s = Settings::parse("debug-bridge = true\ndebug-bridge-port = 16501\n").unwrap();
         assert!(s.debug_bridge && s.debug_bridge_port == 16501);
         assert!(!Settings::default().debug_bridge);
+        let s = Settings::parse("mode = \"phone\"\nsize = \"small-phone\"\n").unwrap();
+        assert_eq!((s.mode, s.size), (Mode::Phone, Size::SmallPhone));
+        assert_eq!(Settings::default().mode, Mode::Windowed);
+        assert!(Settings::parse("mode = \"tv\"").is_err());
         fs::write(settings_path(&data), "version = [").unwrap();
         assert!(Settings::load(&data).is_err());
+    }
+
+    #[test]
+    fn size_presets() {
+        for s in Size::ALL {
+            assert_eq!(Size::parse(s.name()), Some(s));
+        }
+        assert_eq!(Size::parse("huge"), None);
+        assert!(!Size::SmallPhone.large() && !Size::MediumPhone.large());
+        assert!(Size::MediumTablet.large());
     }
 
     #[test]
