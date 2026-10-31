@@ -44,10 +44,9 @@ bitmap icon, then the generic one. Android renders the installed icon.
 
 `src/app.rs`: storage use, clear cache or data, runtime permission switches,
 Escape as Back, Run in Background, force stop and uninstall, through the
-bridge's session D-Bus API
-([protocol](../../docs/bridge-protocol.md#desktop-session-api-version-1)).
-Clearing data and uninstalling ask first. Controls stay disabled until Android
-answers, then every value is read again; an error offers a fresh read.
+bridge's session D-Bus API ([session.rs](../bridge/src/session.rs)). Clearing
+data and uninstalling ask first. Controls stay disabled until Android answers,
+then every value is read again; an error offers a fresh read.
 
 ## Profile Settings
 

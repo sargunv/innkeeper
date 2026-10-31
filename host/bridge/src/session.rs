@@ -1,6 +1,62 @@
-//! The desktop session API, `dev.sargunv.Innkeeper.Session1`
-//! (docs/bridge-protocol.md), for the manager and the CLI. App operations
-//! are relayed over the system app's apps channel.
+//! The desktop session API, version 1, for the manager and the CLI: they
+//! manage apps through it and never run commands inside Android. Starting a
+//! stopped session still goes through the launcher.
+//!
+//! The bridge owns `dev.sargunv.Innkeeper.Session.p_<profile>` (hyphens become
+//! underscores) on the session bus, inside the Flatpak app-id namespace;
+//! object `/dev/sargunv/Innkeeper/Session`, interface
+//! `dev.sargunv.Innkeeper.Session1`.
+//!
+//! - `State() → (b booted, as open_packages)`, a snapshot that doesn't start
+//!   Android. `booted` means the system app saw `sys.boot_completed=1` on the
+//!   current apps connection (it sends `BOOT_COMPLETED` on each connect), not
+//!   just that the channel connected; `open_packages` are the packages with
+//!   mapped windows. `Changed()` invalidates it on boot, apps-channel connect
+//!   or disconnect, and window map or unmap. Clients watch name ownership too,
+//!   subscribe before reading, and read again on each signal.
+//! - `App(s package, s action, s permission, b enabled) → s response`. Actions:
+//!   `info`, `clear-cache`, `clear-data`, `force-stop`, `permission`,
+//!   `escape-back`, `background`; only `permission` takes a permission name,
+//!   and only the last three take `enabled=true`. Bad arguments fail with
+//!   `InvalidArgs`; a disconnect, a full queue or the 20 s timeout fails with
+//!   `Failed` (after a timeout Android may still have done it, so refresh).
+//!   The response is JSON (≤ 64 KiB), `{"error":"", "info":{…}}` or
+//!   `{"error":"message", "info":null}`; `info` has `app_bytes`, `data_bytes`
+//!   (cache included), `cache_bytes`, `escape_back`, `background` and
+//!   `permissions` (`name`, `granted`, `editable`; requested dangerous ones
+//!   only). Only installed user apps change, and Android enforces grant rules.
+//! - `Launch(s package, s component, s uri, at grants, s token, b wait,
+//!   b new_window, u width, u height) → s reply` opens `package` in a window of
+//!   its own (its launcher activity, or `component`; with `uri`, or `Import`
+//!   grants, to view; empty strings and zeros mean none), or focuses its
+//!   window. `token` is the desktop's activation token, `new_window` asks for a
+//!   separate task, `width` and `height` size the window in dp. With `wait` it
+//!   answers once a new window shows its first frame (at most 25 s; `shown=no`
+//!   is appended if not). The reply is the window manager's line,
+//!   `launched display=N package=P size=WxH ...` or `focused ...`.
+//! - `Windows() → as`, one `display=N package=P ...` line per window, and
+//!   `Close(i display, s package) → s`, which closes window `display`, or
+//!   `package`'s when it is negative. Failures are `Failed` with the system
+//!   app's message.
+//! - `ReloadSettings()` applies the profile's settings file, which the caller
+//!   just wrote: settings are broadcast again and `mirror-apps` is picked up. An unreadable or invalid file fails with `Failed`.
+//! - `Import(h fd, s name) → t grant` makes a read-only documents grant for a
+//!   regular file, shown to Android as `name` (no `/`), so a launch can pass
+//!   it to an app. Only the fd reaches the bridge, never a host path.
+//!
+//! `App`, `Launch`, `Windows` and `Close` are relayed on the apps channel:
+//! [`COMMAND`] events carry `u64 request_id, u32 length` and a sealed JSON
+//! memfd (app commands `{"package","action","permission","enabled"}`, window
+//! commands `{"action":"launch"|"windows"|"close", …}` with the call's
+//! arguments, grants as 16 hex digits); the system app answers with a
+//! [`RESULT`] request in the same envelope, the app response or
+//! `{"error":"","reply":"…"}`. No trailing bytes or extra fds; both payloads
+//! ≤ 64 KiB; up to eight requests wait, each at most 40 s, and a reconnect
+//! cancels them. `wm/WindowCommands.kt` documents the window operations.
+//! Turning mirroring on sends event `0x4502` (empty), and the system app
+//! reports its launchable user apps again. Escape-as-Back lives in the system
+//! app's preferences per package (default off) and applies to existing
+//! windows at the next key press.
 use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex, mpsc};
