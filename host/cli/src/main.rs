@@ -427,9 +427,36 @@ fn ohos_app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
             }
             return Ok(());
         }
-        AppCmd::Set { .. } => return profiles::need_android(profile, "app settings"),
+        AppCmd::Set {
+            package,
+            background,
+            escape_back,
+            permission,
+        } => {
+            let on = ohos_background(
+                background.as_deref(),
+                escape_back.is_some(),
+                !permission.is_empty(),
+            )?;
+            return innkeeper_core::app_settings::set_background(profile, &package, on, &stderr);
+        }
     };
     ops::bundle_action(profile, &package, action, &stderr)
+}
+
+/// The background setting of `app set` on an OpenHarmony profile, which has
+/// no Escape or permission settings.
+fn ohos_background(background: Option<&str>, escape_back: bool, permissions: bool) -> Result<bool> {
+    if escape_back {
+        System::Ohos.need_android("Escape as Back")?;
+    }
+    if permissions {
+        System::Ohos.need_android("Changing permissions")?;
+    }
+    match background {
+        Some(b) => Ok(b == "on"),
+        None => bail!("app set needs --background on an OpenHarmony profile"),
+    }
 }
 
 fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
@@ -500,10 +527,14 @@ fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
 }
 
 /// Formats `app info` output for an OpenHarmony bundle as text. OpenHarmony
-/// has no background or Escape settings.
+/// has no Escape setting, and the background setting is unknown until
+/// Innkeeper System's first activity report.
 fn bundle_info_text(i: &innkeeper_core::ohos::BundleInfo) -> String {
     let mut s = format!("version      {} ({})\n", i.version_name, i.version_code);
     s.push_str(&sizes_text(i.app_bytes, i.data_bytes, i.cache_bytes));
+    if let Some(b) = i.background {
+        s.push_str(&format!("background   {}\n", if b { "on" } else { "off" }));
+    }
     s.push_str(&permissions_text(&i.permissions));
     s
 }
@@ -893,18 +924,40 @@ mod tests {
                     editable: false,
                 },
             ],
+            background: Some(true),
         };
         assert_eq!(
             bundle_info_text(&info),
             "version      1.0.2 (1000002)\n\
              app size     1.3 MB\n\
              data         2.1 MB (cache 0.0 MB)\n\
+             background   on\n\
              permissions\n  \
              ohos.permission.CAMERA  denied\n  \
              ohos.permission.INTERNET  granted (fixed)\n"
         );
         let bare = innkeeper_core::ohos::BundleInfo::default();
         assert!(!bundle_info_text(&bare).contains("permissions"));
+        assert!(!bundle_info_text(&bare).contains("background"));
+    }
+
+    #[test]
+    fn ohos_app_set_changes_only_the_background_setting() {
+        assert!(ohos_background(Some("on"), false, false).unwrap());
+        assert!(!ohos_background(Some("off"), false, false).unwrap());
+        let e = ohos_background(Some("on"), true, false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.starts_with("Escape as Back needs an Android profile"),
+            "{e}"
+        );
+        let e = ohos_background(None, false, true).unwrap_err().to_string();
+        assert!(
+            e.starts_with("Changing permissions needs an Android profile"),
+            "{e}"
+        );
+        assert!(ohos_background(None, false, false).is_err());
     }
 
     #[test]

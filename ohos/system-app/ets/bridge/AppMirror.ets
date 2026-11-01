@@ -28,11 +28,14 @@ function close(reply: Reply): void {
 // image and get no entry.
 export class AppMirror {
   private apps: number;
+  private onRemoved: () => void;
   // Requests go one at a time, in the order of the bundle events.
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(apps: number) {
+  // `onRemoved` runs after each removal.
+  constructor(apps: number, onRemoved: () => void) {
     this.apps = apps;
+    this.onRemoved = onRemoved;
   }
 
   // Follows installs, updates and removals.
@@ -48,6 +51,7 @@ export class AppMirror {
       bundleMonitor.on('remove', (info: bundleMonitor.BundleChangedInfo) => {
         if (info.userId === USER) {
           this.enqueue(() => this.removed(info.bundleName));
+          this.onRemoved();
         }
       });
     } catch (e) {

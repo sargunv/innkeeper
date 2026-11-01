@@ -200,6 +200,9 @@ pub struct BundleInfo {
     /// `user_grant` permission is editable in Settings, and a
     /// `system_grant` permission isn't.
     pub permissions: Vec<Permission>,
+    /// Whether the app may run in the background. It is None until Innkeeper
+    /// System's first activity report.
+    pub background: Option<bool>,
 }
 
 /// OH's first user, the one an Innkeeper profile runs.

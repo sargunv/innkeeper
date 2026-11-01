@@ -16,14 +16,15 @@ doesn't say.
   starts the bundle's launcher ability, `list` shows the bundles that the user
   installed, and `uninstall` refuses preinstalled bundles. `app stop`,
   `app clear-cache` and `app clear-data` use `aa force-stop` and `bm clean`.
-  `app info` shows the bundle's version, its sizes and its permissions. The
-  sizes come from `du` over the bundle's code and its el1 and el2 data
-  directories for user 100. A `system_grant` permission shows as fixed. `run`
-  with a URI opens it as a browser link, as on Android. Such a profile refuses
-  `open`, files in `run`, `app set`, and the settings that OpenHarmony lacks
-  (adb and following the desktop's accent color). `profile list` shows each
-  OpenHarmony profile's UDID, which a debug signing profile names in its
-  `device-ids`.
+  `app info` shows the bundle's version, its sizes, its background setting and
+  its permissions. The sizes come from `du` over the bundle's code and its el1
+  and el2 data directories for user 100. A `system_grant` permission shows as
+  fixed. `app set --background` works as on Android, and `list` shows the
+  setting. `run` with a URI opens it as a browser link, as on Android. Such a
+  profile refuses `open`, files in `run`, the other `app set` settings, and the
+  settings that OpenHarmony lacks (adb and following the desktop's accent
+  color). `profile list` shows each OpenHarmony profile's UDID, which a debug
+  signing profile names in its `device-ids`.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. On OpenHarmony
   `aa start` sends a want with the action `ohos.want.action.viewData` and the
