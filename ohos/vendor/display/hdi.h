@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The parts of OpenHarmony's display HDI that our VDIs exchange with the
-// image's services, laid out as OH 7.0 builds them: drivers_peripheral's
-// base/buffer_handle.h and drivers_interface's display IDL types
-// (DisplayComposerType.idl, DisplayBufferType.idl). OH's C++ runtime is libc++
-// with the std::__h namespace; the few std::string and std::vector fields
-// here are only written in place (lxvec, lxstr), never through libc++
-// headers, so this builds without OH's SDK.
+// image's services, laid out as OH 7.0 builds them. They come from
+// drivers_peripheral's base/buffer_handle.h and drivers_interface's display
+// IDL types (DisplayComposerType.idl, DisplayBufferType.idl). OH's C++ runtime
+// is libc++ with the std::__h namespace. The VDIs write the few std::string
+// and std::vector fields here in place (lxvec, lxstr) instead of through
+// libc++ headers, so this builds without OH's SDK.
 #pragma once
 
 #include <stddef.h>
@@ -16,7 +16,7 @@
 #define HDF_ERR_NOT_SUPPORT (-2)
 #define HDF_ERR_INVALID_PARAM (-3)
 
-// PixelFormat (DisplayComposerType.idl), the ones we allocate.
+// The PixelFormat values (DisplayComposerType.idl) that we allocate.
 enum {
   PIXEL_FMT_RGB_565 = 3,
   PIXEL_FMT_RGBX_8888 = 11,
@@ -36,8 +36,8 @@ enum { HBM_USE_ASSIGN_SIZE = 1 << 7 };
 // CompositionType
 enum { COMPOSITION_CLIENT = 0 };
 // InterfaceType. render_service casts it into its own enum, which starts
-// with an UNKNOW, and takes only its MIPI (10) as a built-in panel: the main
-// screen. 10 is HDI's DISP_INTF_PANEL.
+// with UNKNOW, and treats only that enum's MIPI value (10) as a built-in
+// panel, the main screen. In HDI, 10 is DISP_INTF_PANEL.
 enum { DISP_INTF_BUILT_IN = 10 };
 // DispPowerStatus
 enum { POWER_STATUS_ON = 0 };
@@ -76,7 +76,7 @@ struct DisplayModeInfo {
   int32_t id;
 };
 
-// A libc++ std::vector<T>: three pointers, storage from operator new.
+// A libc++ std::vector<T> is three pointers, with storage from operator new.
 template <typename T>
 struct lxvec {
   T* begin;
@@ -84,8 +84,9 @@ struct lxvec {
   T* cap;
 };
 
-// A libc++ std::string (ABI v1, little-endian): 24 bytes. A short string
-// (under 23 bytes) is stored inline: its length << 1, then the bytes and NUL.
+// A libc++ std::string (ABI v1, little-endian) takes 24 bytes. A short string,
+// under 23 bytes, is stored inline as its length << 1 followed by the bytes
+// and a NUL.
 struct lxstr {
   unsigned char raw[24];
 };

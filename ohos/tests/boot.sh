@@ -1,9 +1,9 @@
 # shellcheck shell=sh disable=SC2329 # functions run through retry
-# Runs inside an OpenHarmony profile with OH's own sh, as root with
-# ohos.permission.DUMP (`innkeeper-session exec /system/bin/sh -s <boot.sh`):
-# waits for its core system abilities, screen 0 and SceneBoard.
+# Runs inside an OpenHarmony profile under OH's sh, as root with
+# ohos.permission.DUMP (`innkeeper-session exec /system/bin/sh -s <boot.sh`),
+# and waits for the core system abilities, screen 0 and SceneBoard.
 
-# retry <tries> <command...>: every 0.2 s until it succeeds.
+# retry <tries> <command...> runs the command every 0.2 s until it succeeds.
 retry() {
   n=$1
   shift
@@ -23,7 +23,7 @@ if ! retry 300 samgr_ready; then
   exit 1
 fi
 
-# hidumper is itself a system ability samgr starts on demand.
+# hidumper is a system ability that samgr starts on demand.
 want="SystemAbilityManager AccessTokenManagerService BundleMgr AbilityManagerService RenderService"
 registered() {
   list=$(/system/bin/hidumper -ls 2>&1)
@@ -40,9 +40,9 @@ if ! retry 150 registered; then
 fi
 echo "$list"
 
-# Screen 0 comes from our composer (ohos/vendor/display), over its ashmem
-# command queue to the HDI, in the panel's mode (<width>x<height>@<dpi>, from
-# the launcher).
+# Our composer (ohos/vendor/display) provides screen 0 through its ashmem
+# command queue to the HDI. The screen has the panel mode that the launcher
+# sets, <width>x<height>@<dpi>.
 panel=$(/system/bin/param get const.innkeeper.display)
 panel=${panel%% *}
 has_screen() {
