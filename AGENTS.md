@@ -47,7 +47,8 @@ Its module table lists what each directory contains and where it runs.
   LL-NDK libraries and the libraries we ship in `/vendor/lib64`, and nothing
   else. They build with the NDK.
 - **Languages.** Use C or C++ for code in Android processes or on C ABIs, Rust
-  for standalone components, and Kotlin for the system app.
+  for standalone components, Kotlin for Android's system app, and ArkTS for
+  OpenHarmony's system app with C for its native module.
 - **Threat model: desktop parity** ([security.md](docs/security.md)). Write
   simple bounds and correctness checks. Don't add guards against malicious
   Android processes.

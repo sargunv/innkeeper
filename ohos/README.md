@@ -53,13 +53,15 @@ archive's 3.7 GB. These parts are open source under Apache 2.0.
 - The SDK's ArkTS compiler, ets-loader, compiles `ets/` into `modules.abc`.
   ets-loader is a set of rollup plugins written for hvigor's rollup fork.
   `ohos/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK) and
-  adds the few plugin-context members that the fork provides.
+  adds the few plugin-context members and the module resolution that the fork
+  provides.
 - The packing tool makes the HAP. A test signs it with `ohos/sign.sh`, which
   uses the SDK's public keys and a debug profile for the test profile's UDID, as
   a developer signs an app under test. The build copies the SDK files that
   sign.sh uses to `out/test/probes/ohos-sign`.
 
-`ohos/hap.sh` runs these steps for any app's sources.
+`ohos/hap.sh` runs these steps for both of our HAPs, the probe and
+[Innkeeper System](#innkeeper-system).
 
 To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
@@ -89,6 +91,51 @@ static against musl and started by `sys_prod/etc/init/innkeeper_exec.cfg`. Its
 native token holds the permissions of hdcd, the image's `hdc shell` daemon. With
 them, `bm` installs, lists and removes bundles, `aa` starts and stops abilities,
 and `hidumper -ls`, `hilog -x` and `ps -A` work.
+
+## Innkeeper System
+
+`ohos/system-app` is Innkeeper System, `dev.sargunv.innkeeper.system`, the
+counterpart of Android's system app. It connects OpenHarmony to the bridge and
+reports boot completion. Issue #312 tracks the features that build on it.
+
+- **App.** The app is ArkTS. Its main element is a ServiceExtensionAbility,
+  `SystemService`, so it has no window and no home-screen icon.
+- **Preinstall.** OH's bundle manager reads `etc/app/install_list.json` in each
+  config layer, and ours names `/sys_prod/app/InnkeeperSystem`. BMS installs the
+  app at a profile's first boot. `install_list_capability.json` makes the app
+  kept alive and a singleton, and allows its service extension, which BMS
+  otherwise refuses. The entry matches the app by its appId, which is the bundle
+  name and the signing key's public EC point. hap-sign-tool issues a new app
+  certificate at each signing, so a certificate fingerprint wouldn't match. AMS
+  starts a kept-alive app's main element at boot and restarts it if it dies.
+- **Signing.** `ohos/sign.sh --system` signs with the SDK's public keys and a
+  release profile at `system_basic` with `hos_system_app`. A release profile
+  names no device, so one HAP serves every profile.
+- **Native module.** ArkTS sockets have no `SOCK_SEQPACKET` and pass no fds, so
+  `native/` is a C N-API module, `libinnkeeper.so`, on
+  [guest/bridge-client](../guest/bridge-client/). It gives ArkTS `open`,
+  `onEvent`, `request`, `blob` and `waitParameter`, which
+  `oh_modules/libinnkeeper.so/index.d.ts` declares. A reader thread per
+  connection reconnects after the bridge restarts. The module builds as the VDIs
+  do and links the image's `libace_napi` and `libbegetutil`, which a system
+  app's native code may load. OH's N-API follows Node's C ABI, so the build uses
+  Node's N-API headers.
+- **Boot completion.** The app waits for `bootevent.boot.completed`, which init
+  sets after SceneBoard sets `bootevent.launcher.ready`. It then sends
+  `BOOT_COMPLETED` on the bridge's apps channel, and again on each new
+  connection. Session1's `State()` reports the session booted from then on, so
+  the manager shows an OH profile as running once its home screen is up. The CLI
+  reads the same parameter over `exec`.
+- **Build.** `mise run build:ohos-system-app` builds the HAP and stages it with
+  the two JSON files. The SDK's declarations leave out the system APIs, such as
+  ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the SDK in
+  `$OHOS_SDK_HOME/<version>-system` with the full declarations from
+  interface_sdk-js at the release's tag, processed by that repository's own
+  scripts as the SDK's build does. [system-app/sdk.env](system-app/sdk.env) pins
+  them and the N-API headers by checksum. ets-loader reports each use of a
+  system API as a warning.
+
+The connection's host tests (`native/tests`) run in `mise run test`.
 
 ## Image
 
