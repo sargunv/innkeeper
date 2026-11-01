@@ -47,10 +47,17 @@ const PHYSICAL_DPI: f64 = 160.0;
 /// at boot, as it does after a system update. Without it, the bundle manager
 /// scans them only at a profile's first boot, so a new version of the system
 /// app in our layer wouldn't reach an existing profile. The launcher writes
-/// the file when it composes the root and removes it at the next start, so
-/// only the first boot of each composition scans. init loads the value as a
-/// default, which it doesn't save with the persistent parameters.
+/// the file when it composes the root. It removes the file at a later start
+/// once a boot has completed, so a boot that dies before the scan doesn't
+/// lose it. init loads the value as a default, which it doesn't save with the
+/// persistent parameters.
 const UPGRADE_SCAN: &str = "sys_prod/etc/param/innkeeper_upgrade_scan.para";
+
+/// A directory under `/data` that init makes when boot completes
+/// (`sys_prod/etc/init/innkeeper_booted.cfg`). The bundle manager scans
+/// before boot completes, so the directory shows that the scan ran. The
+/// launcher removes it when it composes the root.
+const BOOTED: &str = "service/el1/public/innkeeper/booted";
 
 /// The screen lock service's per-user "lock screen disabled" flags, under
 /// `/data`.
@@ -208,7 +215,7 @@ pub fn compose(cfg: &Config) -> Result<()> {
     let key: String = key.finalize().iter().map(|b| format!("{b:02x}")).collect();
     let key_file = r.join(".compose-key");
     if fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
-        return upgrade_scan(r, false);
+        return upgrade_scan(r, &cfg.paths.data, false);
     }
     remove_tree(r)?;
     fs::create_dir_all(r)?;
@@ -246,20 +253,31 @@ pub fn compose(cfg: &Config) -> Result<()> {
             size.0, size.1
         ),
     )?;
-    upgrade_scan(r, true)?;
+    upgrade_scan(r, &cfg.paths.data, true)?;
     files_read_only(r)?;
     fs::write(&key_file, key)?;
     Ok(())
 }
 
 /// Arranges the bundle manager's scan of the preinstalled apps for the next
-/// boot if the root was just composed, and cancels it otherwise.
-fn upgrade_scan(root: &Path, composed: bool) -> Result<()> {
+/// boot if the root was just composed. Otherwise it cancels the scan if a boot
+/// of this root has completed since then. `data` is the profile's `/data`.
+fn upgrade_scan(root: &Path, data: &Path, composed: bool) -> Result<()> {
     let file = root.join(UPGRADE_SCAN);
+    let booted = data.join(BOOTED);
     if composed {
+        match fs::remove_dir(&booted) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(e).with_context(|| format!("remove {}", booted.display()));
+            }
+            _ => {}
+        }
         fs::create_dir_all(file.parent().expect("a relative path with a parent"))?;
         return fs::write(&file, "persist.bms.test-upgrade=true\n")
             .with_context(|| format!("write {}", file.display()));
+    }
+    if !booted.is_dir() {
+        return Ok(());
     }
     match fs::remove_file(&file) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
@@ -480,23 +498,32 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_boot_of_a_composition_scans() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+    fn the_scan_stays_arranged_until_a_boot_completes() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../out/test/upgrade-scan-{}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&root);
-        let file = root.join(UPGRADE_SCAN);
-        upgrade_scan(&root, false).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let (root, data) = (dir.join("root"), dir.join("data"));
+        let (file, booted) = (root.join(UPGRADE_SCAN), data.join(BOOTED));
+        upgrade_scan(&root, &data, false).unwrap();
         assert!(!file.exists(), "no composition, no scan");
-        upgrade_scan(&root, true).unwrap();
+        // A completed boot of the previous root left its stamp.
+        fs::create_dir_all(&booted).unwrap();
+        upgrade_scan(&root, &data, true).unwrap();
         assert_eq!(
             fs::read_to_string(&file).unwrap(),
             "persist.bms.test-upgrade=true\n"
         );
-        upgrade_scan(&root, false).unwrap();
-        assert!(!file.exists(), "the next start of the same root cancels it");
-        fs::remove_dir_all(&root).unwrap();
+        assert!(!booted.exists(), "a composition removes the stamp");
+        upgrade_scan(&root, &data, false).unwrap();
+        assert!(file.exists(), "a boot that didn't complete keeps the scan");
+        fs::create_dir_all(&booted).unwrap();
+        upgrade_scan(&root, &data, false).unwrap();
+        assert!(!file.exists(), "a completed boot cancels the scan");
+        upgrade_scan(&root, &data, false).unwrap();
+        assert!(!file.exists());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

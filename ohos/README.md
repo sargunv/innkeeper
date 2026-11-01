@@ -148,9 +148,13 @@ reports boot completion. Issue #312 tracks the features that build on it.
   parameter default for the next boot
   ([launcher](../host/launcher/src/ohos.rs)). BMS then scans the preinstalled
   apps, and it replaces a HAP whose build hash changed. The packing tool writes
-  that hash because `module.json` sets `generateBuildHash`. The launcher removes
-  the default at the following start, so later boots skip the scan, which costs
-  about 0.8 s.
+  that hash because `module.json` sets `generateBuildHash`. When boot completes,
+  init makes `/data/service/el1/public/innkeeper/booted`
+  ([innkeeper_booted.cfg](sys_prod/etc/init/innkeeper_booted.cfg)). The launcher
+  removes the default at the first start that finds this directory, so later
+  boots skip the scan, which costs about 0.8 s. A boot that dies before the scan
+  leaves the default in place for the next boot. The launcher removes the
+  directory when it composes the root.
 
 The connection's host tests (`native/tests`) run in `mise run test`.
 
