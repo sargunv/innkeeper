@@ -61,8 +61,9 @@ system abilities, screen 0 and SceneBoard come up and that selftest passes
 and a click on the nested desktop's seat then unlock the lock screen and open
 Settings. OH's input injector then scrolls Settings and goes home, and
 render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI, and the CLI
-installs and lists the probe HAP.
+([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP
+then installs, shows in `innkeeper list` and comes to the foreground with
+`innkeeper run`.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
