@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Every Android-side C/C++ artifact, built with the NDK pin (preset "android"),
-# and the host unit tests of the exec relay, graphics and health HALs, the
-# bridge client and the shim's headers (preset "host-tests"). `mise run
+# and the host unit tests of the exec relay, graphics, audio and health HALs,
+# the bridge and audio clients, OpenHarmony's audio VDI and the shim's headers
+# (preset "host-tests"). `mise run
 # build:ndk` installs it into out/build/ndk/install, at paths relative to the
 # stage prefix.
 cmake_minimum_required(VERSION 3.22)
@@ -42,3 +43,6 @@ add_subdirectory(guest/audio-client)
 add_subdirectory(android/vendor/audio)
 add_subdirectory(android/vendor/graphics)
 add_subdirectory(android/vendor/health)
+if(NOT ANDROID)
+  add_subdirectory(ohos/vendor/audio)
+endif()

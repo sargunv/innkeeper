@@ -452,7 +452,11 @@ else
   stop_session
   "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
   "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
-  trap stop_session EXIT
+  # The bridge plays into a private null sink, and the audio check records
+  # its monitor.
+  export INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
+  mod=$(pactl load-module module-null-sink sink_name="$INNKEEPER_AUDIO_SINK" rate=48000 channels=2)
+  trap 'stop_session; pactl unload-module "$mod"' EXIT
   # shellcheck disable=SC2329 # invoked through timed
   ohos_boot() {
     "$S" start >/dev/null
@@ -565,6 +569,33 @@ else
     exit 1
   fi
   echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, and its window has focus on screen'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_audio() {
+    local recorder player result=0
+    # The desktop mixer is the volume control, so OH's music volume stays at
+    # its maximum.
+    s /system/bin/cli_tool/executable/ohos-audioManager get-volume >"$T/ohos-volume.txt" || return
+    grep -q '"volume":15,"volumeType":"STREAM_MUSIC"' "$T/ohos-volume.txt" || return
+    # The tone tool plays through OH's public audio API (ohos/tests/tone.c).
+    s /system/bin/sh -c 'cat >/data/local/tmp/tone && chmod 755 /data/local/tmp/tone' \
+      <"$repo/out/test/ohos/tone" || return
+    parec -d "$INNKEEPER_AUDIO_SINK.monitor" --format=s16le --rate=48000 --channels=2 --raw \
+      --latency-msec=20 >"$T/ohos-audio.raw" &
+    recorder=$!
+    s /data/local/tmp/tone play 10000 >>"$T/ohos.txt" 2>&1 &
+    player=$!
+    # The FFT succeeds once the capture has enough non-silent tone samples.
+    until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/ohos-audio.raw" --expect 440 >>"$T/ohos.txt" || result=$?
+    kill "$player" "$recorder" 2>/dev/null || true
+    wait "$player" "$recorder" 2>/dev/null || true
+    return "$result"
+  }
+  if ! timed ohos-audio ohos_audio; then
+    cat "$T/ohos-volume.txt" >&2
+    tail -n 20 "$T/ohos.txt" >&2
+    exit 1
+  fi
+  echo "ok   OpenHarmony's music volume stays at maximum, and a tone it plays reaches the desktop's sink"
   echo 'e2e: PASS'
   exit
 fi
