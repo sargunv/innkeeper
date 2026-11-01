@@ -12,7 +12,8 @@ init starts its services, samgr comes up, and OH's core system abilities
 register with it. render_service composes OH's screen through our display HDI,
 and the bridge shows the screen in a desktop window. SceneBoard is OH's window
 manager and home screen. It starts and draws the lock screen, and built-in apps
-such as Settings run in it. There is no desktop input yet.
+such as Settings run in it. The window takes desktop pointer and touch input.
+There is no keyboard input yet.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
@@ -83,8 +84,8 @@ presets are `small-phone` (720x1280 at 320 dpi, the default) and `medium-phone`.
 OH has no windowed mode, and a tablet's landscape layout is untested. Run OH on
 a nested desktop (`tests/nested.sh`) and not on your own.
 
-SceneBoard shows the lock screen about 30 s after samgr starts. Until desktop
-input works, OH's own injector can drive it over `exec`.
+SceneBoard shows the lock screen about 30 s after samgr starts. A drag up the
+window unlocks it. OH's own injector also drives it over `exec`.
 `uinput -T -m 360 1150 360 300 300` swipes up to the home screen, and
 `uinput -T -c 90 200` taps Settings there.
 
@@ -142,6 +143,21 @@ file changes.
   OH's floating and freeform modes. A window per app would need one OH screen
   per app window, plus an OH window policy that places each app on its own
   screen. The bridge therefore shows screen 0 as one phone-frame window.
+
+## Input
+
+OH's multimodal input service (MMI) reads evdev devices through libinput, as it
+would on a kernel. The broker serves the session-local devices that Android uses
+([docs/input.md](../docs/input.md#devices)). MMI finds them in `/dev/input`, and
+the broker answers its sysfs lookups for them
+([supervisor/README.md](../supervisor/README.md#openharmony)).
+
+The window has no window manager on the input service, so the bridge writes its
+seat to the Innkeeper Touchscreen (`host/bridge/src/input/direct.rs`). A click
+is a tap, and a drag with the left button is a swipe. Oniro's emulator also
+turns its pointer into a touchscreen. MMI moves its cursor by each event's
+relative motion, which an absolute pointer doesn't report. A host touch is a
+contact on the touchscreen. Keys, the wheel and text input don't reach OH yet.
 
 ## How it boots
 

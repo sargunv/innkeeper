@@ -45,6 +45,8 @@ pub struct Hub {
     repeat: Mutex<Option<String>>,
     pub evdev: Mutex<Option<super::evdev::Evdev>>,
     pub pointer_positions: Mutex<HashMap<u32, PointerPosition>>,
+    /// The seat as the broker's devices, for the bridge's own windows.
+    direct: Mutex<super::direct::Direct>,
 }
 
 /// A queued window request and its appearance. The appearance travels with
@@ -310,6 +312,10 @@ impl Hub {
         }
         self.windows_changed();
         crate::info!("input: window {} shows display {display}", r.window);
+        if r.window > OWN_WINDOWS {
+            let out = self.direct.lock().unwrap().map(r.window, r.width, r.height);
+            self.to_evdev(out);
+        }
     }
 
     /// The window's first frame is on screen.
@@ -332,6 +338,8 @@ impl Hub {
     }
 
     fn unmapped(&self, window: u32) {
+        let out = self.direct.lock().unwrap().unmap(window);
+        self.to_evdev(out);
         self.packages.lock().unwrap().remove(&window);
         self.windows_changed();
         let body = event::window_unmapped(window);
@@ -358,8 +366,33 @@ impl Hub {
         );
     }
 
-    /// Sends one input line to every input connection.
+    /// Writes [`super::direct`]'s output to the broker.
+    fn to_evdev(&self, out: Vec<super::direct::Out>) {
+        if out.is_empty() {
+            return;
+        }
+        let evdev = self.evdev.lock().unwrap();
+        let Some(evdev) = evdev.as_ref() else {
+            return;
+        };
+        let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        let micros = now.tv_sec * 1_000_000 + now.tv_nsec / 1000;
+        for o in out {
+            let result = match o {
+                super::direct::Out::Device(device, enabled) => evdev.device(device, enabled),
+                super::direct::Out::Events(device, events) => evdev.send(device, micros, &events),
+            };
+            if let Err(e) = result {
+                crate::info!("input: evdev: {e}");
+            }
+        }
+    }
+
+    /// Sends one input line to every input connection, and the lines of the
+    /// bridge's own windows to the broker's devices.
     pub fn input(&self, line: &str) {
+        let out = self.direct.lock().unwrap().line(line);
+        self.to_evdev(out);
         self.clients
             .broadcast(ty::INPUT, &event::input(line), &[], None);
         // Keyboard focus also goes to the a11y service.
