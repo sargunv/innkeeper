@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The client side of the bridge protocol v1 (docs/bridge-protocol.md)
-// for guest code: the C mirror of host/bridge/src/ipc/{wire,transport,
-// proto}.rs. It connects and says HELLO, builds messages, sends and
-// receives packets with fds, and matches replies to requests by tag. Each
-// caller owns its socket and its service's messages (the composer's display
-// presenter, the audio HAL's streams).
+// The client side of bridge protocol v1 (docs/bridge-protocol.md) for guest
+// code, mirroring host/bridge/src/ipc/{wire,transport,proto}.rs in C. It
+// connects and sends HELLO, builds messages, sends and receives packets with
+// fds, and matches replies to requests by tag. Each caller, such as the
+// composer's display presenter or the audio HAL's streams, owns its socket
+// and its service's messages.
 #pragma once
 
 #include <stdbool.h>
@@ -33,12 +33,12 @@ enum {
   LXB_SERVICE_HOSTSTATE = 8,
 };
 
-// An outgoing message: lxb_msg_init writes the header, and the lxb_put_*
+// An outgoing message. lxb_msg_init writes the header, and the lxb_put_*
 // functions append little-endian fields to the body.
 struct lxb_msg {
   uint8_t b[LXB_MAX_MSG];
   size_t n;
-  bool overflow;  // a field didn't fit; lxb_send refuses the message
+  bool overflow;  // set when a field didn't fit, so lxb_send refuses it
 };
 
 void lxb_msg_init(struct lxb_msg* m, uint16_t type, uint32_t tag);
@@ -47,19 +47,19 @@ void lxb_put_u16(struct lxb_msg* m, uint16_t v);
 void lxb_put_u32(struct lxb_msg* m, uint32_t v);
 void lxb_put_u64(struct lxb_msg* m, uint64_t v);
 void lxb_put_f32(struct lxb_msg* m, float v);
-// u16 length, then at most LXB_MAX_NAME bytes of `s`, cut on a UTF-8
-// boundary. NULL is the empty name.
+// Appends a u16 length, then at most LXB_MAX_NAME bytes of `s`, cut on a
+// UTF-8 boundary. A NULL `s` is the empty name.
 void lxb_put_name(struct lxb_msg* m, const char* s);
 
-// An incoming packet. A reply's status is split off: `body` is what follows
-// it.
+// An incoming packet. For a reply, `status` holds the reply's status and
+// `body` holds the bytes after it.
 struct lxb_packet {
   uint16_t type;
   uint32_t tag;
   int32_t status;  // replies only: 0 or -errno
   uint8_t body[LXB_MAX_MSG];
   size_t len;
-  int fds[LXB_MAX_FDS];  // the receiver's to keep or close
+  int fds[LXB_MAX_FDS];  // owned by the receiver, which keeps or closes them
   int nfds;
 };
 
@@ -73,10 +73,10 @@ static inline uint32_t lxb_u32(const uint8_t* p) {
 
 void lxb_close_fds(struct lxb_packet* p);
 
-// Connects to the bridge and binds the connection to `service` with HELLO
-// (`name` is for the bridge's log). Returns the socket, or -errno:
-// -ECONNREFUSED if no bridge listens or it refused the HELLO, -ETIMEDOUT if
-// it didn't answer.
+// Connects to the bridge and binds the connection to `service` with HELLO.
+// The bridge logs `name`. Returns the socket or -errno. The error is -ENOENT
+// or -ECONNREFUSED if no bridge listens, -ECONNREFUSED if the bridge refused
+// the HELLO, and -ETIMEDOUT if it didn't answer.
 int lxb_connect(uint32_t service, const char* name);
 
 // Sends one message, with `fd` attached unless it is -1. A message is one
@@ -90,17 +90,17 @@ int lxb_recv(int sock, struct lxb_packet* p);
 
 // Sends a request and waits for its reply, dropping events and other
 // replies meanwhile, so no other thread may receive on `sock`. Returns 0
-// with the reply in *reply, or -errno if the connection failed (close it;
-// *reply then holds no fds).
+// with the reply in *reply, or -errno if the connection failed. After a
+// failure the caller should close `sock`, and *reply holds no fds.
 int lxb_call(int sock, const struct lxb_msg* req, struct lxb_packet* reply);
 
-// Paces reconnecting to a bridge that is missing or restarting: one attempt
-// per second. Zero-initialize it.
+// Paces reconnecting to a bridge that is missing or restarting to one
+// attempt per second. Zero-initialize it.
 struct lxb_backoff {
   int64_t next_attempt_ns;
 };
-// 0 if an attempt is due now (the next one is then due a second later), or
-// the milliseconds until it is.
+// Returns 0 if an attempt is due now and schedules the next one a second
+// later. Otherwise returns the milliseconds until the next attempt is due.
 int lxb_backoff_ms(struct lxb_backoff* b);
 
 #ifdef __cplusplus
