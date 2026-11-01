@@ -532,6 +532,36 @@ else
   fi
   echo "ok   boot ends on the home screen, and the desktop pointer opens Settings as OpenHarmony's mouse"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_wheel() {
+    local first
+    geometry || return
+    # The inspector dump gives each node's ID and its top on the panel.
+    # first_item prints the ID and top of the first item of Settings' list.
+    first_item() {
+      local w
+      w=$(s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 == "settings0" { print $4; exit }')
+      [[ -n $w ]] || return
+      s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
+        awk '/[|]-> List / { l = 1 } l && /[|]-> ListItem/ { i = 1 } i && /[|] ID: / { id = $3 }
+          i && /[|] top: / { print id, $3; exit }'
+    }
+    listed() { first=$(first_item) && [[ -n $first ]]; }
+    until_ok listed || return
+    # The item moves up, or out of the list.
+    scrolled() {
+      local now
+      now=$(first_item) || return
+      [[ ${now%% *} != "${first%% *}" ]] || (($(awk -v a="${now#* }" -v b="${first#* }" 'BEGIN { print (a < b) }')))
+    }
+    ! scrolled || return
+    { at 360 700 && echo axis:0,15; } | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok scrolled
+  }
+  if ! timed ohos-wheel ohos_wheel; then
+    exit 1
+  fi
+  echo "ok   a wheel detent scrolls Settings' list"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_render() {
     s /system/bin/sh -s "$ohos_rs" <"$repo/ohos/tests/render.sh" >>"$T/ohos.txt" 2>&1
   }

@@ -14,6 +14,9 @@
 //! learned its display, so the cursor goes through the corner again before
 //! each press that starts a click.
 //!
+//! The wheel sends REL_WHEEL in degrees, one fifteenth of a detent, together
+//! with REL_WHEEL_HI_RES. A touchpad's scroll sends degrees for its distance.
+//!
 //! The touchscreen's axes span [`touch::MAX`], and each window maps its
 //! display's pixels onto that span. Each host touch is a contact of its own.
 //! A contact stays on the window where it started, and it lifts when its
@@ -33,6 +36,10 @@ const EV_REL: u16 = 2;
 const EV_ABS: u16 = 3;
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
+const REL_HWHEEL: u16 = 6;
+const REL_WHEEL: u16 = 8;
+const REL_WHEEL_HI_RES: u16 = 11;
+const REL_HWHEEL_HI_RES: u16 = 12;
 /// BTN_LEFT to BTN_TASK, the buttons the mouse reports.
 const BUTTONS: std::ops::RangeInclusive<i64> = 0x110..=0x117;
 const BTN_TOUCH: u16 = 0x14a;
@@ -43,6 +50,13 @@ const ABS_MT_TRACKING_ID: u16 = 0x39;
 /// A motion that takes the guest's cursor past the top-left corner of any
 /// display.
 const PIN: i32 = -(1 << 15);
+/// The degrees in one wheel detent, and the REL_WHEEL_HI_RES units in one
+/// degree.
+const DETENT: f64 = 15.0;
+const HI_RES_PER_DEGREE: i32 = 8;
+/// OpenHarmony scrolls a list by 63 vp for one detent. A touchpad's scroll
+/// distance is in surface units, which are vp at the window's default size.
+const VP_PER_DETENT: f64 = 63.0;
 
 /// What [`Direct`] asks the broker for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +74,16 @@ struct Contact {
     window: u32,
 }
 
+/// The scroll in one pointer frame.
+#[derive(Default)]
+struct Scroll {
+    /// `pointer_axis_source`: 0 wheel, 1 finger, 2 continuous, 3 wheel tilt.
+    source: Option<u32>,
+    /// Vertical and horizontal, in surface units and in 120ths of a detent.
+    value: [f64; 2],
+    value120: [i32; 2],
+}
+
 #[derive(Default)]
 pub struct Direct {
     /// Each own window's display size in pixels.
@@ -70,6 +94,9 @@ pub struct Direct {
     /// moves the cursor into the corner first.
     cursor: Option<(i32, i32)>,
     buttons: Vec<u16>,
+    scroll: Scroll,
+    /// Each axis's scroll that is less than a degree and not yet sent.
+    degrees: [f64; 2],
     slots: [Option<Contact>; touch::SLOTS],
     next_tracking_id: i32,
     /// The current touch frame's records.
@@ -193,6 +220,8 @@ impl Direct {
     /// released. The guest's cursor stays where it is.
     fn leave(&mut self) -> Vec<Out> {
         self.pointer = None;
+        self.scroll = Scroll::default();
+        self.degrees = [0.0; 2];
         let records: Vec<_> = self.buttons.drain(..).map(|b| (EV_KEY, b, 0)).collect();
         if records.is_empty() {
             vec![]
@@ -229,6 +258,46 @@ impl Direct {
         }
         out.push(Out::Events(MOUSE, vec![(EV_KEY, code, state as i32)]));
         out
+    }
+
+    /// Sends the frame's scroll. A wheel's detents count in 120ths, and other
+    /// sources count in surface units.
+    fn scroll(&mut self) -> Vec<Out> {
+        let scroll = std::mem::take(&mut self.scroll);
+        if self.pointer.is_none() {
+            return vec![];
+        }
+        let wheel = matches!(scroll.source, None | Some(0 | 3));
+        let mut records = vec![];
+        // Wayland's axes point down and right. REL_WHEEL points up.
+        for (axis, (lo, hi, sign)) in [
+            (REL_WHEEL, REL_WHEEL_HI_RES, -1),
+            (REL_HWHEEL, REL_HWHEEL_HI_RES, 1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let degrees = if wheel && scroll.value120[axis] != 0 {
+                f64::from(scroll.value120[axis]) * DETENT / 120.0
+            } else if wheel {
+                scroll.value[axis]
+            } else {
+                scroll.value[axis] * DETENT / VP_PER_DETENT
+            };
+            self.degrees[axis] += degrees;
+            let whole = self.degrees[axis].trunc();
+            self.degrees[axis] -= whole;
+            let n = sign * whole as i32;
+            if n != 0 {
+                records.push((EV_REL, lo, n));
+                records.push((EV_REL, hi, n * HI_RES_PER_DEGREE));
+            }
+        }
+        if records.is_empty() {
+            vec![]
+        } else {
+            vec![Out::Events(MOUSE, records)]
+        }
     }
 
     /// Translates one seat line. Lines for other windows give nothing.
@@ -269,6 +338,23 @@ impl Direct {
                 };
             }
             "pointer_button" => return self.button(int(1), int(2)),
+            "pointer_axis_source" => {
+                self.scroll.source = int(0).map(|s| s as u32);
+                vec![]
+            }
+            "pointer_axis" => {
+                if let (Some(a @ 0..=1), Some(v)) = (int(1), num(2)) {
+                    self.scroll.value[a as usize] += v;
+                }
+                vec![]
+            }
+            "pointer_axis_value120" => {
+                if let (Some(a @ 0..=1), Some(v)) = (int(0), int(1)) {
+                    self.scroll.value120[a as usize] += v as i32;
+                }
+                vec![]
+            }
+            "pointer_frame" => return self.scroll(),
             "touch_down" => match (int(1), num(2), num(3), int(4)) {
                 (Some(id), Some(x), Some(y), Some(w))
                     if self.windows.contains_key(&(w as u32)) && self.find(id as i32).is_none() =>
@@ -594,6 +680,94 @@ mod tests {
         ] {
             assert!(d.line(line).is_empty(), "{line}");
         }
+    }
+
+    fn scroll(d: &mut Direct, lines: &[&str]) -> Vec<Vec<(u16, u16, i32)>> {
+        for l in lines {
+            assert!(d.line(l).is_empty(), "{l}");
+        }
+        mouse(d.line("pointer_frame"))
+    }
+
+    #[test]
+    fn a_wheel_detent_is_fifteen_degrees_and_fractions_add_up() {
+        let mut d = screen();
+        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
+        assert_eq!(
+            scroll(
+                &mut d,
+                &[
+                    "pointer_axis_source 0",
+                    "pointer_axis 1 0 15.000",
+                    "pointer_axis_value120 0 120"
+                ]
+            ),
+            [vec![
+                (EV_REL, REL_WHEEL, -15),
+                (EV_REL, REL_WHEEL_HI_RES, -120)
+            ]]
+        );
+        let half = [
+            "pointer_axis_source 0",
+            "pointer_axis 2 1 -7.500",
+            "pointer_axis_value120 1 -60",
+        ];
+        assert_eq!(
+            scroll(&mut d, &half),
+            [vec![
+                (EV_REL, REL_HWHEEL, -7),
+                (EV_REL, REL_HWHEEL_HI_RES, -56)
+            ]]
+        );
+        assert_eq!(
+            scroll(&mut d, &half),
+            [vec![
+                (EV_REL, REL_HWHEEL, -8),
+                (EV_REL, REL_HWHEEL_HI_RES, -64)
+            ]]
+        );
+        // A wheel without detent counts reports degrees.
+        assert_eq!(
+            scroll(&mut d, &["pointer_axis 3 0 -2.000"]),
+            [vec![(EV_REL, REL_WHEEL, 2), (EV_REL, REL_WHEEL_HI_RES, 16)]]
+        );
+    }
+
+    #[test]
+    fn touchpad_scrolling_sends_degrees_for_its_distance() {
+        let mut d = screen();
+        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
+        assert_eq!(
+            scroll(
+                &mut d,
+                &["pointer_axis_source 1", "pointer_axis 1 0 42.000"]
+            ),
+            [vec![
+                (EV_REL, REL_WHEEL, -10),
+                (EV_REL, REL_WHEEL_HI_RES, -80)
+            ]]
+        );
+        let small = ["pointer_axis_source 1", "pointer_axis 2 0 -2.100"];
+        assert!(scroll(&mut d, &small).is_empty());
+        assert_eq!(
+            scroll(&mut d, &small),
+            [vec![(EV_REL, REL_WHEEL, 1), (EV_REL, REL_WHEEL_HI_RES, 8)]]
+        );
+        assert!(
+            scroll(
+                &mut d,
+                &[
+                    "pointer_axis_source 1",
+                    "pointer_axis_stop 3 0",
+                    "pointer_axis 4 0 2.000"
+                ]
+            )
+            .is_empty()
+        );
+        // A leave drops the part of a degree that is left.
+        d.line(&format!("pointer_leave {W}"));
+        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
+        assert!(scroll(&mut d, &["pointer_axis_source 1", "pointer_axis 5 0 3.000"]).is_empty());
     }
 
     fn touches(out: Vec<Out>) -> Vec<(u16, u16, i32)> {
