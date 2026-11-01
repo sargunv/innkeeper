@@ -52,12 +52,14 @@ archive's 3.7 GB. These parts are open source under Apache 2.0.
   `module.json`.
 - The SDK's ArkTS compiler, ets-loader, compiles `ets/` into `modules.abc`.
   ets-loader is a set of rollup plugins written for hvigor's rollup fork.
-  `ohos/probe/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK)
-  and adds the few plugin-context members that the fork provides.
-- The packing tool makes the HAP. A test signs it with `ohos/probe/sign.sh`,
-  which uses the SDK's public keys and a debug profile for the test profile's
-  UDID, as a developer signs an app under test. The build copies the SDK files
-  that sign.sh uses to `out/test/probes/ohos-sign`.
+  `ohos/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK) and
+  adds the few plugin-context members that the fork provides.
+- The packing tool makes the HAP. A test signs it with `ohos/sign.sh`, which
+  uses the SDK's public keys and a debug profile for the test profile's UDID, as
+  a developer signs an app under test. The build copies the SDK files that
+  sign.sh uses to `out/test/probes/ohos-sign`.
+
+`ohos/hap.sh` runs these steps for any app's sources.
 
 To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile

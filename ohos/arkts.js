@@ -1,5 +1,5 @@
-// Compiles the probe's ArkTS into ets/modules.abc with the SDK's ets-loader,
-// which hvigor otherwise runs. build.sh sets the environment that ets-loader's
+// Compiles an app's ArkTS into ets/modules.abc with the SDK's ets-loader,
+// which hvigor otherwise runs. hap.sh sets the environment that ets-loader's
 // main.js reads (aceModuleJsonPath, aceModuleRoot, aceModuleBuild and the
 // rest).
 //
