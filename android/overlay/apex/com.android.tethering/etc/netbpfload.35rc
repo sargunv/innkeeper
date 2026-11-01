@@ -1,9 +1,10 @@
 # innkeeper: replaces the APEX's netbpfload.35rc. The real netbpfload runs, and
-# its bpf() calls are served by the session's userspace emulator
-# (supervisor/broker/src/bpf.rs): maps get created and pinned under /sys/fs/bpf,
-# program loads and attaches are no-ops. innkeeper-bpfload gives it a private
-# mount namespace with writable stand-ins for the BPF sysctls it insists on
-# setting (absent or read-only in a user namespace). No reboot on failure.
+# the session's userspace emulator (supervisor/broker/src/bpf.rs) serves its
+# bpf() calls. Maps are created and pinned under /sys/fs/bpf, and program loads
+# and attaches succeed without effect. innkeeper-bpfload gives netbpfload a
+# private mount namespace with writable stand-ins for the BPF sysctls it sets,
+# which are absent or read-only in a user namespace. A failure doesn't reboot
+# the session.
 service bpfloader /system/bin/innkeeper-bpfload
     disabled
     namespace mnt

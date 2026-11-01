@@ -78,8 +78,8 @@ on early-init
     # on its own when SELinux reports the memfd_class capability.
     setprop sys.use_memfd true
 
-    # innkeeper: no ueventd. There are no real devices to populate /dev with,
-    # and uevent netlink sockets are unavailable in a user namespace.
+    # innkeeper: ueventd doesn't run. There are no real devices to populate
+    # /dev with, and uevent netlink sockets are unavailable in a user namespace.
     # start ueventd
     setprop ro.cold_boot_done true
 
@@ -95,10 +95,11 @@ on early-init
     # Run apexd-bootstrap so that APEXes that provide critical libraries
     # become available. Note that this is executed as exec_start to ensure that
     # the libraries are available to the processes started after this statement.
-    # innkeeper: APEXes are pre-flattened by image/flatten-apex.sh and staged
-    # at /innkeeper/apex by the session launcher; apexd cannot mount loop/dm
-    # devices in a user namespace. (Assumes a single mount namespace, which
-    # init picks because /metadata/apex is empty on every boot.)
+    # innkeeper: apexd cannot mount loop or device-mapper devices in a user
+    # namespace, so image/flatten-apex.sh flattens the APEXes and the session
+    # launcher stages them at /innkeeper/apex. The bind mount assumes a single
+    # mount namespace, which init picks because /metadata/apex is empty on
+    # every boot.
     # exec_start apexd-bootstrap
     mount none /innkeeper/apex /apex bind rec
     perform_apex_config
@@ -240,8 +241,9 @@ on init
     chmod 0770 /config/sdcardfs
     chown system package_info /config/sdcardfs
 
-    # innkeeper: binder isn't mounted here. The userspace broker serves
-    # /dev/{binder,hwbinder,vndbinder} by path (the launcher creates the nodes).
+    # innkeeper: binderfs isn't mounted. The userspace broker serves
+    # /dev/{binder,hwbinder,vndbinder} by path, and the launcher creates the
+    # nodes.
 
     # Mount fusectl
     mount fusectl none /sys/fs/fuse/connections
@@ -749,7 +751,8 @@ on post-fs-data
     mkdir /data/apex/images 0755 root system
     mkdir /data/app-staging 0751 system system encryption=DeleteIfNecessary
     mkdir /data/apex/ota_reserved 0700 root system encryption=Require
-    # innkeeper: no apexd (see early-init); APEXes are already active.
+    # innkeeper: the APEXes are already active (see early-init), so apexd
+    # doesn't restart here.
     # setprop apexd.status ""
     # restart apexd
     setprop apexd.status activated
@@ -1267,10 +1270,10 @@ import /system/etc/init/init-perfetto.rc
 
 ## Daemon processes to be run by init.
 ##
-# innkeeper: ueventd can't open a uevent netlink socket in a user namespace
-# and there are no device nodes for it to manage; it would crash-loop and
-# (being critical) reboot the session. Keep the name for "start ueventd"
-# callers (e.g. shutdown) but run nothing.
+# innkeeper: ueventd can't open a uevent netlink socket in a user namespace,
+# and there are no device nodes for it to manage. It would crash-loop, and
+# because it is critical that would reboot the session. The service keeps its
+# name for "start ueventd" callers such as shutdown but runs nothing.
 service ueventd /system/bin/true
     class core
     oneshot

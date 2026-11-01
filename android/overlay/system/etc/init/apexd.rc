@@ -1,7 +1,8 @@
-# innkeeper: apexd can't mount APEXes in a user namespace (no loop/dm). The
-# session pre-mounts flattened APEXes; innkeeper-apexd shows apexd matching
-# "file-backed erofs" entries in its /proc/mounts (private mount namespace),
-# so apexservice reports every APEX as active to system_server.
+# innkeeper: apexd can't mount APEXes in a user namespace, which has no loop or
+# device-mapper devices. The session pre-mounts flattened APEXes, and
+# innkeeper-apexd gives apexd a private mount namespace whose /proc/mounts
+# lists a matching "file-backed erofs" entry for each one, so apexservice
+# reports every APEX as active to system_server.
 service apexd /system/bin/innkeeper-apexd
     namespace mnt
     interface aidl apexservice

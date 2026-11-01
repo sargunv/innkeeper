@@ -1,1 +1,1 @@
-# innkeeper: disabled cuttlefish-only service; see android/overlay/README.md (logcat -b all to a virtio console)
+# innkeeper: blanked to drop a Cuttlefish-only service that copies logcat -b all to a virtio console. See android/overlay/README.md.
