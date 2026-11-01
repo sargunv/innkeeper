@@ -62,14 +62,15 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A click
-on the nested desktop's seat then opens Settings. OH's input injector then
-scrolls Settings and goes home, and render_service must not have restarted since
-boot ([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe
-HAP, signed for the profile's UDID, then installs and shows in `innkeeper list`,
-and `innkeeper run` puts its window on screen with input focus. OH's music
-volume must be at its maximum, and a 440 Hz tone that
-[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop.
+on the nested desktop's seat then opens Settings, and MMI's cursor must be on
+the panel pixel under the seat's pointer. OH's input injector then scrolls
+Settings and goes home, and render_service must not have restarted since boot
+([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP,
+signed for the profile's UDID, then installs and shows in `innkeeper list`, and
+`innkeeper run` puts its window on screen with input focus. OH's music volume
+must be at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c)
+plays through OH's audio API must reach a private null sink on the nested
+desktop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -136,7 +137,9 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   the `<dpi>` in its config, which is the only place it takes density from. The
   image's value of 160 would make a small phone a tablet 720 vp wide. At 320 dpi
   a small phone is 360x640 vp, which matches `const.product.devicetype`
-  (`default`, a phone) and the window's size on the desktop.
+  (`default`, a phone) and the window's size on the desktop. The panel has no
+  physical size, which the mouse needs ([Input](#input)), so DMS reports its x
+  and y DPI as infinite.
 - **GPU.** The broker's DRM policy lets the guest open only the profile's
   selected render node. Without it, the image's Mesa would open the host's card
   node, and its composer would drive the host display's KMS. That Mesa ships
@@ -204,11 +207,25 @@ the broker answers its sysfs lookups for them
 ([supervisor/README.md](../supervisor/README.md#openharmony)).
 
 The window has no window manager on the input service, so the bridge writes its
-seat to the Innkeeper Touchscreen (`host/bridge/src/input/direct.rs`). A click
-is a tap, and a drag with the left button is a swipe. Oniro's emulator also
-turns its pointer into a touchscreen. MMI moves its cursor by each event's
-relative motion, which an absolute pointer doesn't report. A host touch is a
-contact on the touchscreen.
+seat to the broker's devices (`host/bridge/src/input/direct.rs`). The pointer is
+the Innkeeper Mouse, and OH draws its own cursor, with hover and the right
+button's menus. The host's cursor is hidden over the window. A host touch is a
+contact on the Innkeeper Touchscreen.
+
+MMI moves its cursor by relative motion, and it scales the motion. A display
+with a physical size gets a factor for the screen's diagonal, so our composer
+reports no physical size. MMI then takes its curve from
+`etc/multimodalinput/pointer_motion_acceleration_config.json`, which
+config_policy looks up in `sys_prod` before `system`. Our file there has a flat
+curve at every pointer speed, so one unit of motion moves the cursor one panel
+pixel. The host has already accelerated the pointer, and OH's pointer speed
+setting has no effect. The bridge sends the difference between the pixel under
+the host pointer and the pixel under OH's cursor. When the pointer enters the
+window, a large negative motion first moves OH's cursor into the top-left
+corner, where MMI stops it. MMI drops motion that comes before it has opened the
+mouse and has its display. That happens when the window appears under the
+pointer during boot, so the cursor goes through the corner again before each
+press that starts a click.
 
 Keys go to the Innkeeper Keyboard while the window has keyboard focus. They keep
 their evdev codes, and OH maps them with its own keymap, so the host's layout

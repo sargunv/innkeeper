@@ -7,7 +7,8 @@
 //!
 //! Over content the cursor is Android's cursor bitmap. The frame uses its own
 //! arrow and resize shapes through `wp_cursor_shape_v1` when the compositor
-//! has it. Android draws no pointer of its own.
+//! has it. Android draws no pointer of its own. A guest in the bridge's own
+//! window draws its cursor, so the host's cursor is hidden there.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -301,7 +302,11 @@ impl Dispatch2<wl_pointer::WlPointer, State> for Ptr {
                 st.seat.pointer_surface = Some(surface.id());
                 match f {
                     Some((id, false)) => {
-                        st.seat.set_cursor(Shape::Default);
+                        if Hub::is_own(id) {
+                            st.seat.set_android_cursor(id, None, 0, 0);
+                        } else {
+                            st.seat.set_cursor(Shape::Default);
+                        }
                         let (x, y) = st.to_display(id, surface_x, surface_y);
                         st.hub.input(&format!("pointer_enter {x:.2} {y:.2} {id}"));
                         st.restore_cursor(id);
