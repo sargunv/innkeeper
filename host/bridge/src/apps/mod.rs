@@ -18,13 +18,12 @@
 //! The bridge reads the installed APK with `innkeeper-core`'s parser to get
 //! the entry's localized names and URL schemes. Android's `/data` is the
 //! profile's data dir. An entry for another profile is left alone, and an
-//! uninstall inside Android removes this profile's entry. With app mirroring
-//! off nothing is added. In a test session every request succeeds and does
-//! nothing, so tests don't fill the user's app menu.
+//! uninstall inside Android removes this profile's entry. In a test session
+//! every request succeeds and does nothing, so tests don't fill the user's
+//! app menu.
 
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use innkeeper_core::desktop::{self, AppEntry};
 use innkeeper_core::{validate, xdg};
@@ -88,8 +87,8 @@ pub mod have {
     /// The client should send ADDED.
     pub const MISSING: u8 = 0;
     pub const CURRENT: u8 = 1;
-    /// The entry isn't this profile's, or mirroring is off. The client
-    /// should leave it alone.
+    /// The entry isn't this profile's, or this is a test session. The
+    /// client should leave it alone.
     pub const NOT_OURS: u8 = 2;
 }
 
@@ -213,7 +212,6 @@ pub fn parse_icons(b: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, i32> {
 pub struct Config {
     /// When false, as in test sessions, every request is a no-op.
     pub enabled: bool,
-    pub mirror_apps: AtomicBool,
     pub dirs: xdg::Dirs,
     /// The profile that entries are made for.
     pub profile: innkeeper_profile::profile::ProfileName,
@@ -229,11 +227,6 @@ impl Config {
     ) -> Config {
         Config {
             enabled,
-            mirror_apps: AtomicBool::new(
-                innkeeper_core::profiles::own()
-                    .map(|p| p.mirror_apps)
-                    .unwrap_or(true),
-            ),
             dirs: xdg::Dirs::from_env(),
             profile,
             data,
@@ -254,7 +247,7 @@ impl Config {
     }
 
     fn have(&self, pkg: &str, version: &str) -> u8 {
-        if !self.enabled || !self.mirror_apps.load(Ordering::Relaxed) {
+        if !self.enabled {
             return have::NOT_OURS;
         }
         match self.existing(pkg) {
@@ -631,7 +624,6 @@ mod tests {
         let tmp = crate::test_dir("apps-mirror");
         let cfg = Arc::new(Config {
             enabled: true,
-            mirror_apps: AtomicBool::new(true),
             dirs: xdg::Dirs {
                 data: tmp.join("data"),
                 config: tmp.join("config"),
@@ -676,10 +668,6 @@ mod tests {
         assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
         s.removed("org.ex.c");
         assert!(cfg.dirs.app_desktop("org.ex.c").is_file());
-        // With mirroring off, nothing is added.
-        cfg.mirror_apps.store(false, Ordering::Relaxed);
-        assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
-        cfg.mirror_apps.store(true, Ordering::Relaxed);
         // An uninstall in this profile removes this profile's entry.
         s.removed("org.ex.a");
         assert!(!cfg.dirs.app_desktop("org.ex.a").exists());

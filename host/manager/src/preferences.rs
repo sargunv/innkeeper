@@ -192,13 +192,6 @@ impl Page {
         let apps = adw::PreferencesGroup::builder()
             .title("Android Integration")
             .build();
-        self.switch(
-            &apps,
-            "Mirror Apps to the App Menu",
-            "For apps installed inside Android",
-            p.mirror_apps,
-            |p, v| p.mirror_apps = v,
-        );
         apps.add(&self.adb_row(&p));
         let settings = adw::ActionRow::builder()
             .title("Android Settings")

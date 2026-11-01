@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
   Innkeeper probes are diagnostics for the tests and docs and are not shipped. FileProbe has a
-  launcher activity to exercise app mirroring in an isolated test desktop.
+  launcher activity so an isolated test desktop can install a launchable app.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 

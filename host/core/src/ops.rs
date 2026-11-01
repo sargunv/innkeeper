@@ -167,8 +167,8 @@ fn version_name(v: &str) -> String {
 }
 
 /// Installs an inspected package into the session, starting the session if
-/// needed. When mirroring is on, the session's bridge adds the app to the app
-/// menu, as it does for any app installed inside Android.
+/// needed. The session's bridge adds the app to the app menu, as it does for
+/// any app installed inside Android. A test session adds no menu entries.
 pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()> {
     let pkg = p.package.clone();
     let s = session(profile, report)?;

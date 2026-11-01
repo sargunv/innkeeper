@@ -172,9 +172,10 @@ impl System {
     }
 }
 
-/// A profile's settings. A missing key takes its default.
+/// A profile's settings. A missing key takes its default. A key this version
+/// does not know is ignored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Settings {
     /// The guest system. Fixed when the profile is made.
     pub system: System,
@@ -190,8 +191,6 @@ pub struct Settings {
     /// The Keep Running preference ([`crate::preferences`]) overrides it.
     /// Applies live.
     pub idle_minutes: u32,
-    /// Apps installed inside Android get app-menu entries. Applies live.
-    pub mirror_apps: bool,
     /// Android follows the desktop's dark mode, accent colour, languages and
     /// formats, and clock. Applies live.
     pub follow_dark: bool,
@@ -208,7 +207,6 @@ impl Default for Settings {
             adb: false,
             adb_port: 0,
             idle_minutes: 2,
-            mirror_apps: true,
             follow_dark: true,
             follow_accent: true,
             follow_locale: true,
@@ -514,7 +512,6 @@ mod tests {
             Settings::parse("adb = true\nadb-port = 5561\ndisplay = \"medium-tablet\"\n").unwrap();
         assert!(s.adb && s.adb_port == 5561 && s.display == Display::MediumTablet);
         for bad in [
-            "typo = true",
             "display = \"tv\"",
             "idle-minutes = 121",
             "follow-dark = \"yes\"",
@@ -525,6 +522,24 @@ mod tests {
         }
         fs::write(settings_path(&data), "display = [").unwrap();
         assert!(Settings::load(&data).is_err());
+    }
+
+    #[test]
+    fn a_file_with_mirror_apps_still_loads() {
+        for text in [
+            "mirror_apps = true\n",
+            "mirror-apps = true\nidle-minutes = 4\n",
+        ] {
+            let s = Settings::parse(text).unwrap();
+            s.validate().unwrap();
+            assert!(s.follow_dark, "{text}");
+        }
+        assert_eq!(
+            Settings::parse("mirror-apps = true\nidle-minutes = 4\n")
+                .unwrap()
+                .idle_minutes,
+            4
+        );
     }
 
     #[test]

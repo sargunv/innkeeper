@@ -188,9 +188,9 @@ Tests use named profiles with fresh data directories.
 A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
 directory next to the data version record (`host/profile/src/profile.rs`). The
 settings therefore move and back up with the data. They cover the system, the
-display, adb and its port, the idle timeout, app mirroring and following the
-desktop. A missing file or setting takes its default, and an unknown setting is
-an error. OpenHarmony uses only the display setting, which is a phone preset
+display, adb and its port, the idle timeout and following the desktop. A missing
+file or setting takes its default. A setting this version does not know is
+ignored. OpenHarmony uses only the display setting, which is a phone preset
 because OpenHarmony has no windowed mode. The CLI and the manager refuse the
 other settings for OpenHarmony, along with app install and app commands.
 `innkeeper profile set` and the manager's Profile Settings page change settings.
