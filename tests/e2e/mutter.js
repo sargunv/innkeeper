@@ -44,6 +44,7 @@ export async function run() {
       <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
       <method name="Geometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
+      <method name="Layout"><arg type="s" direction="in"/></method>
     </interface></node>`,
     {
       async ScreenshotAsync([path], invocation) {
@@ -65,6 +66,38 @@ export async function run() {
             "dev.sargunv.innkeeper.Screenshot",
             String(error),
           );
+        }
+      },
+      // Makes the layout the keyboard's xkb layout, and replies once Mutter
+      // uses it.
+      async LayoutAsync([layout], invocation) {
+        const backend = global.backend;
+        let id = 0;
+        const changed = new Promise((resolve, reject) => {
+          id = backend.connect("keymap-changed", resolve);
+          GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
+            reject(new Error(`Mutter didn't load the layout ${layout}`));
+            return GLib.SOURCE_REMOVE;
+          });
+        });
+        // A failed set_keymap leaves nothing to await this promise.
+        changed.catch(() => {});
+        try {
+          // Mutter 47 added the model argument.
+          try {
+            backend.set_keymap(layout, "", "", "");
+          } catch {
+            backend.set_keymap(layout, "", "");
+          }
+          await changed;
+          invocation.return_value(null);
+        } catch (error) {
+          invocation.return_dbus_error(
+            "dev.sargunv.innkeeper.Layout",
+            String(error),
+          );
+        } finally {
+          backend.disconnect(id);
         }
       },
       Input(action) {

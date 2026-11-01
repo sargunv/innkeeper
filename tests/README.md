@@ -4,8 +4,9 @@
 from e2e, move it to a cheaper tier. Keep every bug regression test.
 
 - `mise run test` runs the Rust tests, the Kotlin protocol and input tests, the
-  HAL host tests, the supervisor tests, the image script tests and the harness
-  unit tests. It needs no Android session or APK corpus.
+  HAL host tests, the supervisor tests, the image script tests, the harness unit
+  tests and the OpenHarmony input method's tests. It needs no Android session or
+  APK corpus.
 - `mise run test:e2e -- [group...]` runs one fresh named session on an isolated
   desktop. Without arguments it runs five groups: `boot` (host safety, HOME and
   storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
@@ -26,12 +27,13 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   press reaches OpenHarmony's input service. A file written to the user's
   Download lands in the profile's data directory. The CLI installs the probe HAP
   (ohos/probe), signed for the profile's UDID, lists it and runs it, and its
-  window has focus on screen. `app info` shows the probe's version and the grant
-  state of its two permissions, and `run` with a link delivers its URI to the
-  probe. OpenHarmony's music volume must be at its maximum, and a tone it plays
-  must reach a private null sink. The probe, granted the microphone, must record
-  a tone that the host plays into that sink. This group uses its own profile,
-  `<profile>-ohos`, so it runs alone.
+  window has focus on screen. Keys typed in a French layout type "aé" into the
+  probe's text field through Innkeeper Keyboard. `app info` shows the probe's
+  version and the grant state of its two permissions, and `run` with a link
+  delivers its URI to the probe. OpenHarmony's music volume must be at its
+  maximum, and a tone it plays must reach a private null sink. The probe,
+  granted the microphone, must record a tone that the host plays into that sink.
+  This group uses its own profile, `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
