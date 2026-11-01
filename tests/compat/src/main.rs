@@ -62,16 +62,16 @@ fn main() -> ExitCode {
     }
 }
 
-/// Android commands run through `innkeeper-session exec` inherit our
-/// niceness, and Android threads that set their priority back to 0 then fail:
-/// uiautomator dies at once with "SecurityException: Cannot set priority to
-/// 0" ("Killed"). zsh runs background jobs at nice 5 (BG_NICE). So a niced
-/// harness runs itself again at nice 0 through the user manager, which can
-/// raise priority back where we can't.
+/// Android commands run through `innkeeper-session exec` inherit the
+/// harness's niceness, and Android threads that set their priority back to 0
+/// then fail. uiautomator dies at once with "SecurityException: Cannot set
+/// priority to 0" ("Killed"). zsh runs background jobs at nice 5 (BG_NICE).
+/// A niced harness therefore runs itself again at nice 0 through the user
+/// manager, which can raise priority when the harness can't.
 fn run_at_nice_zero() -> Result<()> {
     let stat = fs::read_to_string("/proc/self/stat")?;
-    // The fields after the command name (which may hold spaces), from
-    // field 3 (state) on: nice is field 19.
+    // Split the fields after the command name, which may hold spaces. They
+    // start at field 3 (state), and nice is field 19.
     let nice: i32 = stat
         .rsplit_once(')')
         .and_then(|(_, f)| f.split_whitespace().nth(16))
@@ -116,8 +116,8 @@ fn real_main() -> Result<ExitCode> {
     if o.cmd == "run" {
         run_at_nice_zero()?;
     }
-    // A dev tool: it runs against the checkout it was built in, and its staged
-    // session.
+    // This is a dev tool. It runs against the checkout it was built in and
+    // that checkout's staged session.
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let launcher = repo.join("tools/dev/session.sh");
     let corpus = corpus::load(&repo.join("tests/compat/corpus.toml"))?;
@@ -176,9 +176,10 @@ fn real_main() -> Result<ExitCode> {
             let pid = s.pid();
             let system = s.system_server_pid();
             let mut r = Run::new(&s, a, &out).run(apk);
-            // Android's own restart (SurfaceFlinger or system_server died) in
-            // the same session: the app triggered it, so it counts against the
-            // app, and the next app waits until the system is back.
+            // Android restarted within the same session because SurfaceFlinger
+            // or system_server died. The app triggered it, so it counts
+            // against the app, and the next app waits until the system is
+            // back.
             if s.pid() == pid && system.is_some() && s.system_server_pid() != system {
                 let why = s.last_fatal();
                 eprintln!("compat: Android restarted during the run: {why}");
@@ -193,9 +194,9 @@ fn real_main() -> Result<ExitCode> {
                     eprintln!("compat: {e:#}");
                 }
             }
-            // The session restarted or died under us (something else stopped
-            // the profile, or a host-side crash): not the app's fault, so retry
-            // once on a fresh session.
+            // The session restarted or died, because something else stopped
+            // the profile or the host side crashed. That isn't the app's
+            // fault, so retry once on a fresh session.
             if pid.is_none() || s.pid() != pid || !s.booted() {
                 r.result = Status::Error;
                 r.reason = "session restarted or died during the run".into();

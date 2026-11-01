@@ -1,6 +1,6 @@
-//! The live Android session the harness drives: core's launcher driver, plus
-//! what only the harness needs (output as text, Android restarts, the bridge
-//! log).
+//! The live Android session that the harness drives. It wraps core's launcher
+//! driver and adds what only the harness needs: output as text, Android
+//! restarts and the bridge log.
 
 use std::cell::Cell;
 use std::fs::{self, File};
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use innkeeper_core::launcher;
 
-/// A session it started itself is stopped again when this is dropped, so a
+/// If the harness started the session, dropping this stops it again, so a
 /// run leaves nothing running that it started.
 pub struct Session {
     core: launcher::Session,
@@ -34,8 +34,8 @@ impl Deref for Session {
     }
 }
 
-/// A command's result: whether it exited 0, and its stdout followed by its
-/// stderr (pm and am print their failures there).
+/// A command's result. It holds whether the command exited 0, and its stdout
+/// followed by its stderr, where pm and am print their failures.
 pub struct Output {
     pub ok: bool,
     pub text: String,
@@ -81,7 +81,7 @@ impl Session {
         }
     }
 
-    /// Shell snippet inside the session.
+    /// Runs a shell snippet inside the session.
     pub fn sh(&self, secs: u64, script: &str) -> Output {
         self.run(secs, &["sh", "-c", script])
     }
@@ -102,7 +102,7 @@ impl Session {
         fs::metadata(&self.bridge_log).map_or(0, |m| m.len())
     }
 
-    /// The bridge log from byte `from` on (at most its last MiB).
+    /// The bridge log from byte `from` on, capped at its last MiB.
     pub fn bridge_log(&self, from: u64) -> String {
         let Ok(mut f) = File::open(&self.bridge_log) else {
             return String::new();
@@ -133,7 +133,8 @@ impl Session {
         Ok(())
     }
 
-    /// Per-boot setup: a bigger log buffer, screen awake and unlocked.
+    /// Per-boot setup. Enlarges the log buffer, wakes the screen and unlocks
+    /// it.
     fn prepare_android(&self) {
         self.run(30, &["logcat", "-G", "16M"]);
         self.run(15, &["input", "keyevent", "WAKEUP"]);

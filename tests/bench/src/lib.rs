@@ -106,7 +106,8 @@ fn presentations(trace: &str) -> HashMap<u64, u64> {
     result
 }
 
-/// A discarded request alone cannot establish that its content was displayed.
+/// Whether `frame` was presented. A discarded request alone can't establish
+/// that its content was displayed.
 pub fn presented(trace: &str, frame: u64) -> bool {
     presentations(trace).contains_key(&frame)
 }
@@ -121,8 +122,9 @@ pub fn frames(trace: &str) -> Value {
     json!({"commit_intervals":intervals(commits.clone()), "presentation_intervals":intervals(presented), "discarded":trace.lines().filter(|l| l.starts_with("discard ") && number(l,"frame").is_some_and(|id| commits.contains(&id))).count()})
 }
 
-/// Match a SPACE press to a *changed solid colour*, then its presentation id.
-/// Repainting the old colour or presenting another buffer cannot satisfy it.
+/// Matches a SPACE press to a changed solid colour, and then to that colour's
+/// presentation id. Repainting the old colour or presenting another buffer
+/// doesn't count.
 pub fn input(trace: &str) -> Value {
     let presentations = presentations(trace);
     let monotonic = trace.lines().any(|l| l == "clock id=1");
