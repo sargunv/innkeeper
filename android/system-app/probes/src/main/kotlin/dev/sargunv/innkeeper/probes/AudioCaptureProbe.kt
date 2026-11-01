@@ -14,7 +14,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
 
-/** Manual sustained capture proof; the caller supplies a private virtual source. */
+/** Manual sustained capture proof. The caller supplies a private virtual source. */
 class AudioCaptureProbe : Activity() {
   private var started = false
 

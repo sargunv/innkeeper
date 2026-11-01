@@ -17,9 +17,9 @@ import dev.sargunv.innkeeper.system.bridge.toRgba
 import java.io.ByteArrayOutputStream
 
 /**
- * App icons for the desktop, drawn by Android itself: adaptive icons get the system mask and vector
- * drawables are rasterized by the framework. The bridge's apps service (through [AppMirrorFeature])
- * get the same pixels.
+ * App icons for the desktop, drawn by Android. Adaptive icons get the system mask, and the
+ * framework rasterizes vector drawables. The bridge's apps service (through [AppMirrorFeature])
+ * gets the same pixels.
  */
 object AppIcons {
   private const val TAG = "InnkeeperApps"
@@ -56,7 +56,7 @@ object AppIcons {
 
   private fun bitmap(icon: Drawable, size: Int): Bitmap {
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    // Adaptive icons fill their mask edge to edge; leave a small margin like desktop icon themes
+    // Adaptive icons fill their mask edge to edge, so leave a small margin like desktop icon themes
     // do. Legacy icons carry their own padding.
     val pad = if (icon is AdaptiveIconDrawable) size / 24 else 0
     icon.setBounds(pad, pad, size - pad, size - pad)

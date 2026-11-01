@@ -10,7 +10,10 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
-/** host/bridge/src/a11y/snapshot-fixture.txt, which the bridge's `wire::tests` also check. */
+/**
+ * Tests against host/bridge/src/a11y/snapshot-fixture.txt, which the bridge's `wire::tests` also
+ * check.
+ */
 class A11yWireTest {
   private fun fixtureBytes(): ByteArray =
     File(checkNotNull(System.getProperty("a11yFixture")) { "run through Gradle" })

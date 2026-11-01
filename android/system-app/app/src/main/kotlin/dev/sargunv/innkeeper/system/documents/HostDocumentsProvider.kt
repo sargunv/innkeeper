@@ -13,9 +13,9 @@ import java.io.FileNotFoundException
 
 /**
  * Host files the user picked through [PickerActivity], as documents. A document id is `<grant>`
- * (the picked file or folder) or `<grant>/<path>` (beneath a picked folder); the bridge resolves it
+ * (the picked file or folder) or `<grant>/<path>` (beneath a picked folder). The bridge resolves it
  * and refuses anything outside what the user picked. There are no roots, so nothing is browsable in
- * DocumentsUI: apps reach documents only through URIs they were granted.
+ * DocumentsUI, and apps reach documents only through URIs they were granted.
  */
 class HostDocumentsProvider : DocumentsProvider() {
   override fun onCreate(): Boolean {
@@ -118,7 +118,7 @@ class HostDocumentsProvider : DocumentsProvider() {
     val id = parse(parentDocumentId)
     val dir = mimeType == Document.MIME_TYPE_DIR
     var name = displayName.replace('/', '_')
-    // Like DocumentsUI's providers: give files the extension their type implies.
+    // Like DocumentsUI's providers, give files the extension their type implies.
     if (!dir && !name.contains('.')) {
       MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)?.let { name = "$name.$it" }
     }

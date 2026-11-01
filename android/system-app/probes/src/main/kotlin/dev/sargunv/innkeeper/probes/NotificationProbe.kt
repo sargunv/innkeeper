@@ -14,9 +14,9 @@ import android.os.Bundle
 import android.util.Log
 
 /**
- * Diagnostic: posts a notification with a click target, an action and an inline reply, the way a
+ * A diagnostic that posts a notification with a click target, an action and an inline reply, as a
  * messaging app does, so the desktop round trip can be tested without one
- * (host/bridge/src/system/notify.rs). Shows nothing.
+ * (host/bridge/src/system/notify.rs). It shows no window.
  *
  * am start -n dev.sargunv.innkeeper.probes/.NotificationProbe
  *

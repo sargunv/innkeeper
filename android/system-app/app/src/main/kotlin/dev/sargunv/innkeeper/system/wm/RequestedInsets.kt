@@ -8,7 +8,8 @@ import android.view.InsetsState
 import android.view.inputmethod.ImeTracker
 
 /**
- * Observe requests, not physical bar visibility: our displays have no system-bar surfaces.
+ * Observes requested bar visibility instead of physical bar visibility, because our displays have
+ * no system-bar surfaces.
  *
  * No public or system API observes another app's requested bar visibility, and a TaskOrganizer
  * would take task and surface ownership from WMShell. Android 17 reports the focused component and

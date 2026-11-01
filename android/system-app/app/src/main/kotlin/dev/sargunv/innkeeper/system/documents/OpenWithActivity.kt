@@ -21,7 +21,9 @@ import dev.sargunv.innkeeper.system.apps.sharedMimeType
 import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
 import kotlin.concurrent.thread
 
-/** Static Flatpak entry's chooser. The files are already read-only document grants. */
+/**
+ * The app chooser for the static Flatpak entry. The files are already read-only document grants.
+ */
 class OpenWithActivity : Activity() {
   private data class Row(
     val label: CharSequence,

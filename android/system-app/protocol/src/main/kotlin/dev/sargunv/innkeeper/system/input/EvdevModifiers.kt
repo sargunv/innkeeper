@@ -73,7 +73,7 @@ class EvdevModifiers {
       )
     private val lockKeys = listOf(KeyEvent.META_CAPS_LOCK_ON to 58, KeyEvent.META_NUM_LOCK_ON to 69)
 
-    // Only this path produces app modifier events; ordinary keys stay injected.
+    // Only this path produces app modifier events. Ordinary keys are still injected.
     fun owns(keyCode: Int): Boolean = keyCode in modifierKeys
 
     private val modifierKeys =

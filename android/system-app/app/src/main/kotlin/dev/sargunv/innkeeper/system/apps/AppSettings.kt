@@ -151,7 +151,7 @@ class AppSettings(private val context: Context) {
   private companion object {
     /** UserHandle.PER_USER_RANGE (hidden). */
     const val PER_USER_RANGE = 100_000
-    /** VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT (hidden): the device itself. */
+    /** VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT (hidden), which is the device itself. */
     const val DEFAULT_DEVICE = "default:0"
   }
 }

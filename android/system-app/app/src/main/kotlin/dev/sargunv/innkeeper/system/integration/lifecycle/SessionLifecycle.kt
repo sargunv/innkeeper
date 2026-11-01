@@ -19,8 +19,8 @@ import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
  * alarm clock, and the apps allowed to run in the background ([BackgroundApps]). The launcher stops
  * the session after a grace period with none of them, and starts it again for the alarm.
  *
- * Pokes come from window, notification, alarm and package changes; a slow poll catches the rest
- * (services that stop without a notification change). Runs on the integration thread.
+ * Pokes come from window, notification, alarm and package changes. A slow poll catches the rest,
+ * such as services that stop without a notification change. This runs on the integration thread.
  */
 class SessionLifecycle(
   private val context: Context,
@@ -73,7 +73,7 @@ class SessionLifecycle(
     poke()
   }
 
-  /** Something may have changed: report it soon (any thread). */
+  /** Reports soon because something may have changed. It may be called from any thread. */
   fun poke() {
     feature.handler.removeCallbacks(updater)
     feature.handler.postDelayed(updater, DEBOUNCE_MS)
@@ -122,8 +122,8 @@ class SessionLifecycle(
     }
 
   /**
-   * The next alarm clock (`setAlarmClock`, what clock apps use), in ms since the epoch; 0: none.
-   * Other exact alarms aren't visible through any API.
+   * The next alarm clock (`setAlarmClock`, which clock apps use) in ms since the epoch, or 0 for
+   * none. Other exact alarms aren't visible through any API.
    */
   private fun nextWakeup(): Long =
     context.getSystemService(AlarmManager::class.java).nextAlarmClock?.triggerTime ?: 0L

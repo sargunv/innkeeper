@@ -29,9 +29,9 @@ subprojects {
   extra["androidJar"] = "$androidHome/platforms/android-$compileSdk.0/android.jar"
 }
 
-// AOSP's public test-keys platform key, which signs the CI image
-// (build/make/target/product/security/platform.*): fetched once from
-// googlesource, checked by SHA-256, and cached outside the repo.
+// AOSP's public test-keys platform key signs the CI image
+// (build/make/target/product/security/platform.*). The build fetches it once
+// from googlesource, checks its SHA-256, and caches it outside the repo.
 val platformKey =
   mapOf(
     "pk8" to "1ad8ef556870edb70f69a9d3c112544c07de5162ba440d84d33f8bb0c5962875",

@@ -17,7 +17,7 @@ import java.util.Locale
 import java.util.TimeZone
 import org.json.JSONObject
 
-/** One `SETTINGS` event (host/bridge/src/system/proto.rs); 0 or empty means unknown. */
+/** One `SETTINGS` event (host/bridge/src/system/proto.rs). 0 or empty means unknown. */
 data class DesktopSettings(
   val colorScheme: Int,
   val accent: Int?,
@@ -108,7 +108,7 @@ class HostSettings(private val context: Context) {
       when (scheme) {
         1 -> UiModeManager.MODE_NIGHT_YES
         2 -> UiModeManager.MODE_NIGHT_NO
-        else -> return // no preference: leave Android's choice
+        else -> return // with no preference, leave Android's choice
       }
     val ui = context.getSystemService(UiModeManager::class.java)
     if (ui.nightMode != mode) {
@@ -119,7 +119,7 @@ class HostSettings(private val context: Context) {
 
   /**
    * The accent becomes the Material You seed. Android 17's `IThemeManager` (service "theme") is
-   * behind the `enable_theme_service` flag, off in current images; SystemUI's
+   * behind the `enable_theme_service` flag, which is off in current images. SystemUI's
    * ThemeOverlayController applies the same "preset" seed from the theme customization setting.
    */
   private fun accent(rgb: Int?, first: Boolean) {
@@ -130,7 +130,7 @@ class HostSettings(private val context: Context) {
         JSONObject()
       }
     if (rgb == null) {
-      // The desktop has no accent: go back to wallpaper colors, if we had set one.
+      // The desktop has no accent, so go back to wallpaper colors if this app set a seed.
       if (first || json.optString(OURS) != "1") return
       json.remove(PALETTE)
       json.remove(ACCENT)
@@ -186,8 +186,8 @@ class HostSettings(private val context: Context) {
   }
 
   /**
-   * The desktop's languages, with its regional formats as Android's regional preferences: the
-   * Unicode extensions Settings writes (`fw` first day of week from `LC_TIME`, `mu` temperature
+   * The desktop's languages, with its regional formats as Android's regional preferences. These are
+   * the Unicode extensions Settings writes (`fw` first day of week from `LC_TIME`, `mu` temperature
    * unit from `LC_MEASUREMENT`), on every locale and in `locale_preferences`, when they differ from
    * the language's own defaults.
    */
@@ -257,8 +257,8 @@ class HostSettings(private val context: Context) {
       }
     if (Settings.System.getString(cr, Settings.System.TIME_12_24) == value) return
     Settings.System.putString(cr, Settings.System.TIME_12_24, value)
-    // As Settings does: clocks listen for TIME_CHANGED with the preference (a protected broadcast,
-    // which persistent apps may send).
+    // As Settings does, broadcast TIME_CHANGED with the preference, which clocks listen for. It is
+    // a protected broadcast, which persistent apps may send.
     val i =
       Intent(Intent.ACTION_TIME_CHANGED)
         .addFlags(FLAG_RECEIVER_INCLUDE_BACKGROUND)
@@ -279,14 +279,16 @@ class HostSettings(private val context: Context) {
   companion object {
     const val TAG = "InnkeeperSettings"
     private const val THEME_KEY = "theme_customization_overlay_packages"
-    /** Settings.System.LOCALE_PREFERENCES (hidden): what Settings shows as regional preferences. */
+    /**
+     * Settings.System.LOCALE_PREFERENCES (hidden), which Settings shows as regional preferences.
+     */
     private const val LOCALE_PREFERENCES = "locale_preferences"
     private val DAYS = arrayOf("sun", "mon", "tue", "wed", "thu", "fri", "sat")
     private const val PALETTE = "android.theme.customization.system_palette"
     private const val ACCENT = "android.theme.customization.accent_color"
     private const val SOURCE = "android.theme.customization.color_source"
     private const val STYLE = "android.theme.customization.theme_style"
-    /** Marks a seed we set (so "no accent" only undoes our own). */
+    /** Marks a seed this app set, so that "no accent" undoes only this app's seed. */
     private const val OURS = "dev.sargunv.innkeeper.from_desktop"
     /** Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND (hidden). */
     private const val FLAG_RECEIVER_INCLUDE_BACKGROUND = 0x01000000

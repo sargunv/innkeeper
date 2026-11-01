@@ -16,8 +16,8 @@ import android.util.Log
  * The platform's "This app was built for an older version of Android" warning, shown in the app's
  * own window. The platform's AppWarnings dialog always goes to the default display, which has no
  * window, so the window manager turns it off (`debug.wm.disable_deprecated_target_sdk_dialog`) and
- * starts this activity on the app's display instead: same text, and OK hides it for good, like the
- * original's.
+ * starts this activity on the app's display instead. It shows the same text, and OK hides it
+ * permanently, as in the original.
  */
 class AppWarningActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {

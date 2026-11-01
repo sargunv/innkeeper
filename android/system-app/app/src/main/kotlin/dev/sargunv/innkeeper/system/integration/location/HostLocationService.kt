@@ -13,10 +13,10 @@ import android.util.Log
 import dev.sargunv.innkeeper.system.integration.HostStateFeature
 
 /**
- * Android's network location provider: system_server binds the highest `serviceVersion` among
- * services for `com.android.location.service.v3.NetworkLocationProvider` (the image enables the
- * overlay, `config_enableNetworkLocationOverlay`). Ours is version 0, so any other provider wins.
- * The fixes come from [HostLocation].
+ * Android's network location provider. system_server binds the highest `serviceVersion` among
+ * services for `com.android.location.service.v3.NetworkLocationProvider`, since the image enables
+ * the overlay with `config_enableNetworkLocationOverlay`. This one is version 0, so any other
+ * provider outranks it. The fixes come from [HostLocation].
  */
 class HostLocationService : Service() {
   private var provider: Provider? = null

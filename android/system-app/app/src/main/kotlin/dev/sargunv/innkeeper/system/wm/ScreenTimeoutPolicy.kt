@@ -7,7 +7,7 @@ import android.os.ServiceManager
 
 /**
  * Android 17's per-display policy includes screen wake locks and FLAG_KEEP_SCREEN_ON. The SDK can't
- * observe other apps' screen wake locks, hence this hidden listener; a visible window with the
+ * observe other apps' screen wake locks, so this uses a hidden listener. A visible window with the
  * policy holds the host's idle inhibitor.
  */
 class ScreenTimeoutPolicy(display: Int, changed: (Boolean) -> Unit) : AutoCloseable {

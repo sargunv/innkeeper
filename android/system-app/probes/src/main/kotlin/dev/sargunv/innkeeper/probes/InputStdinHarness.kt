@@ -18,11 +18,11 @@ import dev.sargunv.innkeeper.system.input.TranslatorConfig
  * CLASSPATH=<InnkeeperProbes.apk in the session> app_process / dev.sargunv.innkeeper.probes.InputStdinHarness [--dry-run]
  * ```
  *
- * `--dry-run` prints each MotionEvent/KeyEvent instead of injecting it; otherwise the caller needs
- * INJECT_EVENTS (root or shell in the session). Escape stays Escape: the system app's per-app
- * Escape setting doesn't apply here. Window shortcuts are on, and a close request is printed (there
- * is no window manager here); text keys reach the app as keys only, since committing their text is
- * the system app's IME.
+ * `--dry-run` prints each MotionEvent/KeyEvent instead of injecting it. Without it, the caller
+ * needs INJECT_EVENTS (root or shell in the session). Escape stays Escape because the system app's
+ * per-app Escape setting doesn't apply here. Window shortcuts are on, and a close request is
+ * printed because there is no window manager here. Text keys reach the app as keys only, since the
+ * system app's IME commits their text.
  */
 object InputStdinHarness {
   private const val TAG = "InnkeeperInputHarness"

@@ -105,7 +105,8 @@ class TextInputSessionTest {
     feed(s, ed, "ti_delete 7 0", "ti_commit x", "ti_done 1")
     assertEquals("a日xb", ed.text)
     assertEquals(listOf("delete 2 0", "commit 'x'"), ed.calls)
-    // The selection update after that edit is the input method's own (cause 0), later ones not.
+    // The selection update after that edit is the input method's own (cause 0), and later ones
+    // are not.
     assertEquals("ti_surrounding 5 5 0 a日xb", s.surroundingLine(ed.text, 3, 3))
     assertEquals("ti_surrounding 5 5 1 a日xb", s.surroundingLine(ed.text, 3, 3))
   }
@@ -123,7 +124,7 @@ class TextInputSessionTest {
     assertEquals(cur, f[2].toInt())
     assertEquals("1", f[3])
     assertEquals('|', decoded.toByteArray().decodeToString(cur, cur + 1)[0])
-    // A selection too big to send at all: no text, just the cursor.
+    // A selection too big to send at all sends the cursor without text.
     assertEquals("ti_surrounding 0 0 1 ", s.surroundingLine("%".repeat(400), 0, 400))
   }
 

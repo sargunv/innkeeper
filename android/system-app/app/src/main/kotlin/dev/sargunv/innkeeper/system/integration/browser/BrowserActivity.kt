@@ -15,7 +15,7 @@ import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 
 /**
  * Web links open on the desktop. Custom Tabs from apps with verified App Links use an installed
- * Android browser so their https callbacks can return to the app. Shows nothing and finishes.
+ * Android browser so their https callbacks can return to the app. It shows nothing and finishes.
  */
 class BrowserActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,7 +63,7 @@ class BrowserActivity : Activity() {
         .queryIntentActivities(
           Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/"))
             .addCategory(Intent.CATEGORY_BROWSABLE),
-          // Normal web queries only return the default browser; enumerate alternatives too.
+          // Normal web queries only return the default browser, so enumerate alternatives too.
           PackageManager.MATCH_ALL or
             PackageManager.MATCH_DEFAULT_ONLY or
             PackageManager.GET_RESOLVED_FILTER,

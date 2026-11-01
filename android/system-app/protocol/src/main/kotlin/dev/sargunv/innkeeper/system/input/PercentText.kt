@@ -4,9 +4,9 @@ package dev.sargunv.innkeeper.system.input
 import java.io.ByteArrayOutputStream
 
 /**
- * Text in protocol lines (the bridge's `input/ime.rs`): bytes up to space, DEL and `%` are `%XX`;
- * everything else, including non-ASCII UTF-8, is sent as is. The bridge refuses any other form, so
- * [encode] must match it exactly.
+ * Text in protocol lines (the bridge's `input/ime.rs`) escapes bytes up to space, DEL and `%` as
+ * `%XX` and sends everything else, including non-ASCII UTF-8, as is. The bridge refuses any other
+ * form, so [encode] must match it exactly.
  */
 object PercentText {
   private fun escaped(b: Int) = b <= 0x20 || b == 0x7f || b == '%'.code

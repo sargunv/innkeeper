@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- HostAccessibilityService: reads every window's content and acts on it for the desktop's
-     assistive technologies. No touch exploration, no key filtering, no gestures: input stays the
-     desktop's. An accessibility tool, so views marked accessibilityDataSensitive stay visible to
-     it, as they are to TalkBack. -->
+<!-- HostAccessibilityService reads every window's content and acts on it for the desktop's
+     assistive technologies. It requests no touch exploration, key filtering or gestures because
+     the desktop handles input. It is an accessibility tool, so views marked
+     accessibilityDataSensitive stay visible to it, as they are to TalkBack. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
   android:accessibilityEventTypes="typeAllMask"
   android:accessibilityFeedbackType="feedbackGeneric"

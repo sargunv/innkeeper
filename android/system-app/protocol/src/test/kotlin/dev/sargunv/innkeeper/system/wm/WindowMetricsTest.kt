@@ -25,7 +25,7 @@ class WindowMetricsTest {
       WindowMetrics(640, 480, 160),
       WindowMetrics.from(logical.first, logical.second, 1.0),
     )
-    // Independent windows retain their own scale; fractional rounding is deterministic.
+    // Independent windows retain their own scale. Fractional rounding is deterministic.
     assertEquals(WindowMetrics(801, 601, 200), WindowMetrics.from(641, 481, 1.25))
     assertEquals(WindowMetrics(1, 1, 80), WindowMetrics.from(1, 1, 0.5))
   }

@@ -15,14 +15,14 @@ import dev.sargunv.innkeeper.system.integration.HostStateFeature
 import java.nio.ByteBuffer
 
 /**
- * The desktop's location as Android's: one host source (the Location portal, through the bridge)
- * feeds the network provider ([HostLocationService]), and through a test provider the gps one;
- * Android's FusedLocation combines them as usual.
+ * Provides the desktop's location to Android. One host source, the Location portal through the
+ * bridge, feeds the network provider ([HostLocationService]) and, through a test provider, the gps
+ * provider. Android's FusedLocation combines them as usual.
  *
- * Consent (#19): Android's runtime permission is the primary consent, so the bridge asks the
- * desktop only once an app Android allowed asks for a location (a request on either provider). If
- * the user denies the desktop's dialog, both providers read as disabled for the rest of the
- * session, while the app's Android permission stays granted.
+ * For consent (#19), Android's runtime permission is the primary consent, so the bridge asks the
+ * desktop only once an app that Android allowed requests a location from either provider. If the
+ * user denies the desktop's dialog, both providers read as disabled for the rest of the session,
+ * while the app's Android permission stays granted.
  *
  * The session has no GNSS HAL, so gps is a test provider (its fixes carry `isMock`), and its
  * requests are seen through `addProviderRequestChangedListener`. A GNSS AIDL HAL would replace it.
@@ -73,7 +73,7 @@ class HostLocation(private val context: Context, private val feature: HostStateF
   /** LOCATION_START sent and not answered by a failure. */
   private var started = false
   private var startedPrecise = false
-  /** The desktop said no (or has location off): providers off for this bridge. */
+  /** The desktop said no or has location off, so the providers stay off for this bridge. */
   private var refused = false
 
   private val requests = ProviderRequest.ChangedListener { name, request ->
@@ -171,8 +171,8 @@ class HostLocation(private val context: Context, private val feature: HostStateF
 
   /**
    * Android's requests come in bursts (an app asking several providers, or re-registering), and
-   * each new desktop session can put a dialog up, so changes settle before reaching the bridge: a
-   * start after [START_DELAY_MS], a stop after [STOP_DELAY_MS].
+   * each new desktop session can put a dialog up, so changes settle before reaching the bridge. A
+   * start waits [START_DELAY_MS], and a stop waits [STOP_DELAY_MS].
    */
   private fun update() {
     feature.handler.removeCallbacks(sync)
@@ -185,7 +185,7 @@ class HostLocation(private val context: Context, private val feature: HostStateF
     val active = networkActive || gpsActive
     if (!connected || !available || refused) return
     val precise = gpsActive || networkPrecise
-    // A start again when precision rises: the bridge reopens its session at that accuracy.
+    // Start again when precision rises, so the bridge reopens its session at that accuracy.
     if (active && (!started || (precise && !startedPrecise))) {
       started = true
       startedPrecise = precise
@@ -209,7 +209,7 @@ class HostLocation(private val context: Context, private val feature: HostStateF
         setEnabled(false)
       }
       else -> {
-        // Unavailable: try again on the next request change.
+        // If it is unavailable, try again on the next request change.
         Log.i(TAG, "desktop location unavailable")
         started = false
       }
@@ -250,7 +250,7 @@ class HostLocation(private val context: Context, private val feature: HostStateF
       accuracy = if (f.accuracy >= 0f) f.accuracy else DEFAULT_ACCURACY
       if (f.speed >= 0f) speed = f.speed
       if (f.bearing >= 0f) bearing = f.bearing
-      // The fix's own time; elapsed time is now, as for any freshly delivered fix.
+      // Use the fix's own time. Elapsed time is now, as for any freshly delivered fix.
       time = if (f.timeMs > 0) f.timeMs else System.currentTimeMillis()
       elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
     }
@@ -262,7 +262,7 @@ class HostLocation(private val context: Context, private val feature: HostStateF
     private const val STATUS_DISABLED = 3
     private const val START_DELAY_MS = 300L
     private const val STOP_DELAY_MS = 3000L
-    /** Meters, for a fix without one (Location requires an accuracy). */
+    /** Accuracy in meters for a fix without one, since Location requires an accuracy. */
     private const val DEFAULT_ACCURACY = 1000f
   }
 }

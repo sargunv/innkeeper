@@ -9,7 +9,7 @@ import android.util.Log
 import android.widget.TextView
 import java.security.MessageDigest
 
-/** Host share receiver: reads the real streams, checks ClipData and refuses writes. */
+/** Host share receiver that reads the real streams, checks ClipData and refuses writes. */
 class ShareProbe : Activity() {
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)

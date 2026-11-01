@@ -19,11 +19,12 @@ import dev.sargunv.innkeeper.system.InnkeeperSystemApp
 import dev.sargunv.innkeeper.system.a11y.A11yWire.Node
 
 /**
- * Sends the bridge each app window's accessibility tree: the windows on the window's virtual
- * display under one root (node 1), as a full snapshot when the display's windows change and as
- * partial ones (the changed node and its subtree) as apps update. Events are coalesced for
- * [DEBOUNCE_MS]; walks and actions run on a thread of their own. Enabled by [A11yFeature] only
- * while the desktop's assistive technologies are on. No touch exploration: it only reads and acts.
+ * Sends the bridge each app window's accessibility tree, with the windows on the window's virtual
+ * display under one root (node 1). It sends a full snapshot when the display's windows change, and
+ * partial snapshots of the changed node and its subtree as apps update. Events are coalesced for
+ * [DEBOUNCE_MS], and walks and actions run on their own thread. [A11yFeature] enables the service
+ * only while the desktop's assistive technologies are on. It requests no touch exploration and only
+ * reads and acts.
  */
 class HostAccessibilityService : AccessibilityService() {
   private val app
@@ -32,7 +33,7 @@ class HostAccessibilityService : AccessibilityService() {
   private val thread = HandlerThread("a11y")
   private lateinit var handler: Handler
 
-  /** Per display (the window's id): its node ids and what was last sent. [thread] only. */
+  /** Per display, keyed by the window's id: its node ids and what was last sent. [thread] only. */
   private class DisplayTree(val id: Int) {
     var title = ""
     var scale = 1f
@@ -46,7 +47,7 @@ class HostAccessibilityService : AccessibilityService() {
   }
 
   private val displays = HashMap<Int, DisplayTree>()
-  // Since the last flush: windows to re-send whole, changed nodes by window, focus moves.
+  // Changes since the last flush: windows to re-send whole, changed nodes by window, focus moves.
   private var dirtyAll = false
   private val dirtyWindows = HashSet<Int>()
   private val dirtyNodes = ArrayList<AccessibilityNodeInfo>()
@@ -69,7 +70,7 @@ class HostAccessibilityService : AccessibilityService() {
 
   override fun onInterrupt() {}
 
-  /** Re-sends every window whole (the bridge restarted). */
+  /** Re-sends every window whole after the bridge restarts. */
   fun resync() {
     if (!thread.isAlive) return
     handler.post {
@@ -187,7 +188,7 @@ class HostAccessibilityService : AccessibilityService() {
     for (n in changed) {
       if (n in seen) continue
       if (n !in d.ids) {
-        // A node the bridge doesn't have yet: its parent changed too, but which one is unknown.
+        // The bridge doesn't have this node yet. Its parent changed too, but which one is unknown.
         d.needsFull = true
         queueFlush()
         return
@@ -210,7 +211,8 @@ class HostAccessibilityService : AccessibilityService() {
       A11yWire.TREE,
       blob,
       onReply = { r ->
-        // -ENOENT: a partial one before a full one (the bridge restarted or switched off).
+        // -ENOENT means a partial snapshot came before a full one, because the bridge restarted or
+        // switched off.
         if (r.status == -ENOENT) {
           handler.post {
             displays[id]?.needsFull = true
@@ -227,8 +229,8 @@ class HostAccessibilityService : AccessibilityService() {
   }
 
   /**
-   * Appends [top] and its subtree (preorder) to [out], keeping ids from [oldIds]; returns [top]'s
-   * id. [visit] sees each node.
+   * Appends [top] and its subtree (preorder) to [out], keeping ids from [oldIds], and returns
+   * [top]'s id. [visit] sees each node.
    */
   private fun walk(
     d: DisplayTree,
@@ -386,7 +388,7 @@ class HostAccessibilityService : AccessibilityService() {
         AccessibilityEvent.TYPE_VIEW_FOCUSED
     private const val RELEVANT = WINDOW_EVENTS or NODE_EVENTS
 
-    /** Standard actions: their ids and bits in the bridge's action mask. */
+    /** Standard actions, with their ids and bits in the bridge's action mask. */
     private val STANDARD: Map<Int, Int> =
       mapOf(
         AccessibilityNodeInfo.ACTION_CLICK to A11yWire.CLICK,
@@ -412,12 +414,12 @@ class HostAccessibilityService : AccessibilityService() {
         AccessibilityAction.ACTION_HIDE_TOOLTIP.id to A11yWire.HIDE_TOOLTIP,
       )
 
-    /**
-     * An app's own action: not one of the framework's, which are single bits below 2^22 (the legacy
-     * ones) or `android.R.id` values (package 0x01).
-     */
     private val ACTION_IDS: Map<Int, Int> = STANDARD.entries.associate { (k, v) -> v to k }
 
+    /**
+     * Whether [id] is an app's own action. The framework's actions are single bits below 2^22 (the
+     * legacy ones) or `android.R.id` values (package 0x01).
+     */
     private fun isCustom(id: Int) =
       !(id > 0 && id and (id - 1) == 0 && id < (1 shl 22)) && (id ushr 24) != 0x01
   }

@@ -3,7 +3,7 @@ package dev.sargunv.innkeeper.system.input
 
 /**
  * An Android input event to inject, as plain data. Field values are Android's own constants
- * (`MotionEvent.ACTION_*`, `KeyEvent.KEYCODE_*`, ...); the app turns these into real
+ * (`MotionEvent.ACTION_*`, `KeyEvent.KEYCODE_*`, ...). The app turns these into real
  * `MotionEvent`/`KeyEvent` objects. Times are `SystemClock.uptimeMillis()` milliseconds.
  */
 sealed interface OutEvent {
@@ -52,16 +52,16 @@ data class OutKey(
   override val eventTime: Long,
   override val displayId: Int = 0,
   /**
-   * For a key down: the text the Innkeeper Keyboard commits instead of the key's character, which
-   * Android's key character map would get wrong (empty: the key types nothing). Not part of the
-   * injected event.
+   * For a key down, the text the Innkeeper Keyboard commits instead of the key's character, which
+   * Android's key character map would get wrong. Empty text means the key types nothing. It is not
+   * part of the injected event.
    */
   val text: String? = null,
   /** A key down's repeat count: nonzero only for repeats the compositor sends itself. */
   val repeatCount: Int = 0,
 ) : OutEvent
 
-/** One ordered injection path for ordinary keys; modifier transitions belong to evdev. */
+/** One ordered injection path for ordinary keys. Modifier transitions go through evdev. */
 class KeyboardDelivery(private val inject: (OutKey) -> Unit) {
   fun key(event: OutKey) {
     if (!EvdevModifiers.owns(event.keyCode)) inject(event)

@@ -65,7 +65,9 @@ class PlaybackApps(private val context: Context, private val feature: Integratio
     return choice?.let { playbackPackage(it.uid, ::packagesForUid, context.packageName) }
   }
 
-  /** Sends [pkg] once it has held for [DEBOUNCE_MS], immediately when it matches what is held. */
+  /**
+   * Sends [pkg] once it has held for [DEBOUNCE_MS], or immediately when it matches what is held.
+   */
   private fun report(pkg: String?) {
     val t = now()
     if (pkg == pending && pendingAt > 0 && t - pendingAt >= DEBOUNCE_MS) {
@@ -111,8 +113,8 @@ class PlaybackApps(private val context: Context, private val feature: Integratio
 
   /**
    * `getClientUid`, `getPlayerState` and `getPlayerInterfaceId` are system APIs, so the SDK jar
-   * does not have them. A platform-signed app may call them; a config that has none (the public,
-   * anonymized copy) is skipped.
+   * does not have them. A platform-signed app may call them. A config that has none, such as the
+   * public anonymized copy, is skipped.
    */
   private fun AudioPlaybackConfiguration.client(): PlaybackClient? =
     try {

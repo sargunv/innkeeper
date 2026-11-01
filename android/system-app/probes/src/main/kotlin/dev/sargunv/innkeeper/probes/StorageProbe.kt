@@ -11,9 +11,11 @@ import android.provider.MediaStore
 import android.util.Log
 import java.io.File
 
-/** Shared storage state, app directories, and a real MediaStore scan/read. Never shipped. */
+/**
+ * Shared storage state, app directories, and a real MediaStore scan and read. It is not shipped.
+ */
 class StorageProbe : BroadcastReceiver() {
-  // No window: moving an Activity to an app display recreates it, starts another
+  // It has no window because moving an Activity to an app display recreates it, starts another
   // scan and mistakes its intentional finish for Android's display self-kill recovery.
   override fun onReceive(context: Context, intent: Intent) {
     val pending = goAsync()

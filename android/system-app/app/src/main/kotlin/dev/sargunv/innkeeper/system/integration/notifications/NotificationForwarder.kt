@@ -7,10 +7,10 @@ import android.util.Log
 import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 
 /**
- * The system app's notification listener: hands every posted and removed notification to
- * [Notifications] on the integration thread. Access is granted by the app itself at startup. Its
- * being enabled also lets [dev.sargunv.innkeeper.system.integration.media.MediaSync] see media
- * sessions.
+ * The system app's notification listener, which hands every posted and removed notification to
+ * [Notifications] on the integration thread. The app grants itself access at startup. While the
+ * listener is enabled, [dev.sargunv.innkeeper.system.integration.media.MediaSync] can also see
+ * media sessions.
  */
 class NotificationForwarder : NotificationListenerService() {
   private val feature

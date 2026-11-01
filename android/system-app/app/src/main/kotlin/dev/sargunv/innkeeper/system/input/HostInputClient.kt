@@ -22,14 +22,15 @@ import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The bridge's input service (host/bridge/src/input/proto.rs): window requests for the window
- * manager, the host seat injected as Android input events, and the host's input methods for the
- * IME. Input lines are translated and injected on the connection's reader thread; every event also
- * goes to the [Listener]s there. The host's key repeat becomes Android's repeat settings.
+ * The bridge's input service (host/bridge/src/input/proto.rs), which carries window requests for
+ * the window manager, the host seat injected as Android input events, and the host's input methods
+ * for the IME. Input lines are translated and injected on the connection's reader thread, where
+ * every event also goes to the [Listener]s. The host's key repeat becomes Android's repeat
+ * settings.
  *
  * Read at start:
- * - `persist.innkeeper.input.window_shortcuts`: Ctrl+W and Ctrl+Q close the window, Alt+Left goes
- *   back (default true). Web browsers keep Ctrl+W, which closes a tab.
+ * - `persist.innkeeper.input.window_shortcuts`: Ctrl+W and Ctrl+Q close the window, and Alt+Left
+ *   goes back (default true). Web browsers keep Ctrl+W, which closes a tab.
  */
 class HostInputClient(private val context: Context) : Feature, BridgeConnection.Listener {
   override val name = "input"
@@ -40,7 +41,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
     fun onImageReleased(display: Int, buffer: Long) {}
 
-    /** A new connection (the bridge restarted), on a thread of its own. */
+    /** A new connection after the bridge restarted, called on its own thread. */
     fun onConnected() {}
   }
 
@@ -61,7 +62,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
 
   // The text of injected key downs that the IME commits instead (OutKey.text), by down time and
   // scan code, until their key up reaches the IME. Keys for windows without an editor never reach
-  // it, so the oldest go.
+  // it, so the oldest entries are dropped.
   private val keyTexts =
     object : LinkedHashMap<Long, String>() {
       override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, String>?) =
@@ -87,8 +88,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   /**
    * Asks for a window for display [window] (its size in pixels and density, the window's minimum
    * size in dp), which the next HWC display of that size gets. [token] is the launch's
-   * `xdg_activation_v1` token, used when the window shows its first frame (empty: none). Returns
-   * once the bridge queued it.
+   * `xdg_activation_v1` token, used when the window shows its first frame, or empty for none.
+   * Returns once the bridge queued it.
    */
   fun requestWindow(
     window: Int,
@@ -169,7 +170,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   /** One `ti_*` line for the host input method. Returns false if it wasn't sent. */
   fun textInput(text: String) = connection.send(TEXT_INPUT) { line(text, MAX_TEXT_INPUT_LINE) }
 
-  /** What the IME commits for this injected key instead of its character; null: nothing to do. */
+  /** What the IME commits for this injected key instead of its character, or null for nothing. */
   fun keyText(e: KeyEvent): String? = synchronized(keyTexts) { keyTexts[keyTextId(e)] }
 
   /** The key's up reached the IME. */
@@ -233,8 +234,8 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
     }
   }
 
-  // Android's own repeat settings (InputSettings: key_repeat_timeout before the first repeat,
-  // key_repeat_delay between repeats, within its bounds); InputDispatcher repeats injected keys.
+  // Android's repeat settings (InputSettings' key_repeat_timeout before the first repeat and
+  // key_repeat_delay between repeats, within its bounds). InputDispatcher repeats injected keys.
   private fun applyRepeat(r: HostEvent.RepeatInfo) {
     if (r == repeat) return
     repeat = r
@@ -255,7 +256,7 @@ class HostInputClient(private val context: Context) : Feature, BridgeConnection.
   }
 
   // Whether the app of an app window's display (named "innkeeper:<package>" by the window manager)
-  // opens any https link: a web browser. Asked only on Ctrl+W.
+  // opens any https link, which makes it a web browser. This is asked only on Ctrl+W.
   private fun isBrowserDisplay(display: Int): Boolean {
     val name = context.getSystemService(DisplayManager::class.java).getDisplay(display)?.name
     val pkg = name?.removePrefix(DISPLAY_PREFIX)?.takeIf { it != name } ?: return false

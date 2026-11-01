@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Pure Kotlin/JVM: the bridge's wire format, the input protocol, keymap and
-// event translation. Android's constants come from the SDK's android.jar at
-// compile time only (they are inlined), so the unit tests run on a plain JVM.
+// Plain Kotlin/JVM code for the bridge's wire format, the input protocol, the
+// keymap and event translation. Android's constants come from the SDK's
+// android.jar at compile time and are inlined, so the unit tests run on a plain
+// JVM.
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins { id("org.jetbrains.kotlin.jvm") }

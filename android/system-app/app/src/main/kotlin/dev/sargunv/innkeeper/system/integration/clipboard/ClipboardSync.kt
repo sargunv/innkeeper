@@ -18,11 +18,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * The clipboard, both ways (host/bridge/src/system/clipboard.rs): Android's primary clip goes to
- * the host selection, and host selections become Android's primary clip. Text both ways, and images
- * (an Android clip with an `image/` URI; a host PNG becomes a clip URI served by
- * [ClipImageProvider]). Each side remembers what it last got from the other, so a change never
- * bounces back.
+ * Syncs the clipboard both ways (host/bridge/src/system/clipboard.rs). Android's primary clip goes
+ * to the host selection, and host selections become Android's primary clip. Text and images sync in
+ * both directions. An Android image is a clip with an `image/` URI, and a host PNG becomes a clip
+ * URI served by [ClipImageProvider]. Each side remembers what it last got from the other, so a
+ * change never bounces back.
  *
  * `ClipDescription.EXTRA_IS_SENSITIVE` maps to KDE's password-manager hint and back.
  */
@@ -228,7 +228,7 @@ class ClipboardSync(private val context: Context, private val feature: Integrati
   private fun imageKey(img: Wire.Rgba) =
     "image ${img.width}x${img.height} ${img.bytes.contentHashCode()}"
 
-  /** A host selection ([kind] text or image; [data] is the blob's content). */
+  /** A host selection. [kind] is text or image, and [data] is the blob's content. */
   fun onHostClip(kind: Int, sensitive: Boolean, data: ByteArray) {
     toHost = null
     val extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }

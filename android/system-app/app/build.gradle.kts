@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// "Innkeeper System": the privileged system app. `:app:install` installs the
-// platform-signed release APK (the root project's signRelease) into
-// out/build/system-app/install, the module's tree of the stage prefix.
+// "Innkeeper System", the privileged system app. `:app:install` installs the
+// release APK, platform-signed by the root project's signRelease, into
+// out/build/system-app/install, this module's tree under the stage prefix.
 plugins { id("com.android.application") }
 
 val sdk = extra["compileSdk"] as Int

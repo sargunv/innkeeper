@@ -8,9 +8,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The host layout, compose and window shortcuts, with the bridge's `key` lines as it sends them
- * under French (AZERTY), German (QWERTZ) and US keymaps (host/bridge/src/input/xkb.rs tests the
- * bridge's half against real keymaps).
+ * Tests the host layout, compose and window shortcuts with the bridge's `key` lines as it sends
+ * them under French (AZERTY), German (QWERTZ) and US keymaps. host/bridge/src/input/xkb.rs tests
+ * the bridge's half against real keymaps.
  */
 class KeyboardTest {
   private val closed = ArrayList<Int>()
@@ -97,58 +97,58 @@ class KeyboardTest {
 
   @Test
   fun lettersTakeTheirKeycodeFromTheLayout() {
-    // AZERTY: the Q position types 'a', the W position 'z'.
+    // On AZERTY, the Q position types 'a' and the W position types 'z'.
     val a = down("key 1 16 1 97 text a")
     assertEquals(KeyEvent.KEYCODE_A, a.keyCode)
     assertEquals(16, a.scanCode) // games keep the physical position
     assertNull(a.text) // Virtual.kcm types 'a' for KEYCODE_A
-    // QWERTZ: the Y position is 'z'.
+    // On QWERTZ, the Y position is 'z'.
     assertEquals(KeyEvent.KEYCODE_Z, down("key 2 21 1 122 text z").keyCode)
-    // Punctuation Android has a key for: German '+' is KEYCODE_PLUS.
+    // Punctuation that Android has a key for gets that keycode. German '+' is KEYCODE_PLUS.
     assertEquals(KeyEvent.KEYCODE_PLUS, down("key 3 27 1 43 text +").keyCode)
   }
 
   @Test
   fun otherKeysStayPhysical() {
-    // AZERTY's é key is KEY_2 and types é: KEYCODE_2, and the IME commits é.
+    // AZERTY's é key is KEY_2 and types é, so it sends KEYCODE_2 and the IME commits é.
     val e = down("key 1 3 1 233 text é")
     assertEquals(KeyEvent.KEYCODE_2, e.keyCode)
     assertEquals("é", e.text)
     // Cyrillic letters keep the QWERTY position, so Ctrl+C still copies.
     assertEquals(KeyEvent.KEYCODE_C, down("key 2 46 1 1747 text с").keyCode)
-    // Non-character keys never move, whatever the layout puts there.
+    // Non-character keys keep their keycode whatever the layout puts there.
     assertEquals(KeyEvent.KEYCODE_ESCAPE, down("key 3 1 1 97").keyCode)
-    // Old lines (no keymap) are physical.
+    // Old lines without a keymap use physical keycodes.
     assertEquals(KeyEvent.KEYCODE_Q, down("key 4 16 1").keyCode)
   }
 
   @Test
   fun shortcutsFollowTheLayout() {
-    // Ctrl+Z on AZERTY: the bridge sends no text for a Ctrl chord.
+    // For Ctrl+Z on AZERTY, the bridge sends no text because it is a Ctrl chord.
     feed("key 1 29 1 65507", "modifiers 4 0 0 0")
     val z = down("key 2 17 1 122")
     assertEquals(KeyEvent.KEYCODE_Z, z.keyCode)
     assertTrue(z.metaState and KeyEvent.META_CTRL_ON != 0)
     assertNull(z.text)
-    // A Ctrl chord on a key that types a non-ASCII letter is a shortcut too, never text.
+    // A Ctrl chord on a key that types a non-ASCII letter is also a shortcut and types no text.
     assertNull(down("key 3 3 1 233 text é").text)
   }
 
   @Test
   fun textVirtualKcmWouldGetWrongIsCommitted() {
-    // AZERTY Shift+& is '1': KEYCODE_1 with Shift would be '!'.
+    // AZERTY Shift+& is '1', but KEYCODE_1 with Shift would be '!'.
     feed("key 1 42 1 65505", "modifiers 1 0 0 0")
     assertEquals("1", down("key 2 2 1 38 text 1").text)
     // Shift+a is 'A' either way.
     assertNull(down("key 3 16 1 97 text A").text)
     feed("key 4 42 0", "modifiers 0 0 0 0")
-    // AZERTY ',' is KEYCODE_COMMA; unshifted they agree.
+    // AZERTY ',' is KEYCODE_COMMA, and unshifted they agree.
     assertNull(down("key 5 50 1 44 text ,").text)
   }
 
   @Test
   fun altChordsAreShortcutsButAltGrTypes() {
-    // US Alt+F: xkb types 'f', Android Alt+F types nothing: an Alt chord, not text.
+    // On US, xkb types 'f' for Alt+F, but in Android Alt+F is an Alt chord that types nothing.
     feed("key 1 56 1 65513", "modifiers 8 0 0 0")
     assertNull(down("key 2 33 1 102 text f").text)
     feed("key 3 56 0", "modifiers 0 0 0 0", "key 4 33 0")
@@ -174,7 +174,7 @@ class KeyboardTest {
   @Test
   fun ctrlWAndCtrlQCloseTheWindow() {
     feed("keyboard_enter 5", "key 1 29 1 65507", "modifiers 4 0 0 0")
-    // AZERTY's W is at the Z position: the layout decides.
+    // AZERTY's W is at the Z position, and the layout decides.
     assertTrue(feed("key 2 44 1 119").isEmpty())
     assertEquals(listOf(5), closed)
     assertTrue(feed("key 3 44 0").isEmpty())
@@ -201,7 +201,7 @@ class KeyboardTest {
     assertEquals(KeyEvent.KEYCODE_BACK, down.keyCode)
     assertEquals(KeyEvent.KEYCODE_BACK, up.keyCode)
     assertEquals(5, down.displayId)
-    // BACK, not Alt+BACK.
+    // The event is BACK without Alt.
     assertEquals(0, down.metaState and KeyEvent.META_ALT_ON)
     assertEquals(0, up.metaState and KeyEvent.META_ALT_ON)
   }
@@ -226,7 +226,7 @@ class KeyboardTest {
   @Test
   fun compositorRepeatsAreRepeatedDowns() {
     val first = down("key 1 16 1 97 text a")
-    // KWin's repeats carry the press's time; they are stamped when they come.
+    // KWin's repeats carry the press's time, so they are stamped when they arrive.
     now += 300
     val r1 = feed("key 1 16 2").single()
     now += 25
@@ -236,7 +236,7 @@ class KeyboardTest {
     assertTrue(first.eventTime < r1.eventTime && r1.eventTime + 25 == r2.eventTime)
     assertEquals(KeyEvent.KEYCODE_A, r1.keyCode)
     assertEquals(KeyEvent.ACTION_UP, feed("key 4 16 0").single().action)
-    // KWin with a host input method: the press came as a press and release, then repeats.
+    // With a host input method, KWin sends the press as a press and release, then repeats.
     val (d, u) = feed("key 5 16 2 97 text a")
     assertEquals(listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP), listOf(d.action, u.action))
     assertEquals(listOf(0, KeyEvent.KEYCODE_A), listOf(d.repeatCount, d.keyCode))

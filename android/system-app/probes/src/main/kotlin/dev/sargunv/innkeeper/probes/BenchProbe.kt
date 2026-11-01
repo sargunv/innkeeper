@@ -22,7 +22,7 @@ import android.view.View
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
-/** Manual input and frame benchmarks; e2e reuses the audio marker to prove capture. */
+/** Manual input and frame benchmarks. The e2e tests reuse the audio marker to prove capture. */
 class BenchProbe : Activity() {
   private var started = false
   private val control =

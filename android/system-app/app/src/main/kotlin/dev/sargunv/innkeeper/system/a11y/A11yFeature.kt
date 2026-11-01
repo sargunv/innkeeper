@@ -14,11 +14,11 @@ import java.io.FileDescriptor
 import java.nio.ByteBuffer
 
 /**
- * Android apps on the desktop's AT-SPI bus (host/bridge/src/a11y/). The bridge's a11y service says
- * whether an assistive technology is on (ACTIVE: the desktop's `org.a11y.Status`); only while it is
- * does this enable [HostAccessibilityService], since an enabled accessibility service changes how
- * apps behave and costs CPU. The service sends each app window's tree, and performs the actions
- * that come back.
+ * Exposes Android apps on the desktop's AT-SPI bus (host/bridge/src/a11y/). The bridge's a11y
+ * service reports whether an assistive technology is on with ACTIVE, which follows the desktop's
+ * `org.a11y.Status`. This enables [HostAccessibilityService] only while one is on, since an enabled
+ * accessibility service changes how apps behave and costs CPU. The service sends each app window's
+ * tree and performs the actions that come back.
  */
 class A11yFeature(private val context: Context) : Feature, BridgeConnection.Listener {
   override val name = "a11y"
@@ -34,7 +34,7 @@ class A11yFeature(private val context: Context) : Feature, BridgeConnection.List
   private val retry = Runnable { if (active == true && service == null) apply(true) }
 
   override fun start() {
-    // A previous process may have left it on; the bridge says whether it should be.
+    // A previous process may have left it on. The bridge says whether it should be.
     setActive(false)
     bridge.start()
   }
@@ -69,9 +69,9 @@ class A11yFeature(private val context: Context) : Feature, BridgeConnection.List
   }
 
   /**
-   * Turns the service on or off. Early in boot AccessibilityManagerService may not list it yet (and
-   * drops it from the setting if it is written then), so turning it on waits for that and is
-   * repeated until the service connects.
+   * Turns the service on or off. Early in boot, AccessibilityManagerService may not list the
+   * service yet and drops it from the setting if it is written then. So turning it on waits for the
+   * listing and repeats until the service connects.
    */
   private fun apply(on: Boolean) {
     main.removeCallbacks(retry)

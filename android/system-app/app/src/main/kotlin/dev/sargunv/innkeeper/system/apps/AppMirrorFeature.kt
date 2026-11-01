@@ -24,12 +24,12 @@ import org.json.JSONObject
 
 /**
  * Apps installed inside Android (an app store, PackageInstaller, `pm install`) get a desktop entry
- * and icons on the host, and lose them on uninstall: package events go to the bridge's apps
+ * and icons on the host, and lose them on uninstall. Package events go to the bridge's apps
  * service, which writes the entries with the same code as `innkeeper install`
  * (host/bridge/src/apps/mod.rs).
  *
  * Only launchable, non-system apps are mirrored. On every connection the current set is checked
- * (HAVE), so installs made while the bridge was away are caught up; the bridge skips entries that
+ * (HAVE), so installs made while the bridge was away are caught up. The bridge skips entries that
  * `innkeeper install` or another session profile wrote.
  */
 class AppMirrorFeature(private val context: Context, private val settings: AppSettings) : Feature {
@@ -62,7 +62,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
             channel.send(RESULT, blob = response) { u64(id).u32(response.size) }
           }
           if (command.getString("action") in WINDOW_ACTIONS) {
-            // A launch can wait for its first frame: off the apps worker.
+            // A launch can wait for its first frame, so it runs off the apps worker.
             thread(name = "innkeeper-windows") { reply(windows.execute(command)) }
           } else {
             handler.post { reply(settings.execute(command)) }
@@ -116,7 +116,8 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
 
   private fun onConnected() {
     handler.post {
-      // Replay after a late process start or reconnect; channel presence alone precedes boot.
+      // Replay BOOT_COMPLETED after a late process start or reconnect. A connected channel alone
+      // doesn't mean that boot has completed.
       reportBootCompleted()
       val launchable =
         pm
@@ -142,7 +143,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
       } catch (_: PackageManager.NameNotFoundException) {
         return null
       }
-    // Preinstalled apps (and their updates) belong to the image, not the desktop.
+    // Preinstalled apps and their updates belong to the image, so they get no desktop entry.
     if (
       ai.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
     ) {
@@ -182,7 +183,7 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
           name(label)
           i32(ai.category)
           u8(if (ai.category == ApplicationInfo.CATEGORY_GAME) 1 else 0)
-          // The launch splash: its colour (alpha 0: none) and window size.
+          // The launch splash colour (alpha 0 for none) and window size.
           u32(splash?.let { it or (0xff shl 24) } ?: 0)
           u16(window.widthDp)
           u16(window.heightDp)

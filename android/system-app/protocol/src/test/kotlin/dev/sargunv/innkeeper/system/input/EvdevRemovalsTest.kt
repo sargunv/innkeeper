@@ -11,13 +11,13 @@ class EvdevRemovalsTest {
     val attempts = ArrayList<Int>()
     removals.add(3)
     removals.add(8)
-    // A window closes during disconnection: its removal cannot be acknowledged.
+    // A window that closes during disconnection cannot have its removal acknowledged.
     removals.flush { device ->
       attempts += device
       device == 8
     }
     assertEquals(listOf(3, 8), attempts)
-    // Reconnect retries the lost request; successful removals are not repeated.
+    // Reconnect retries the lost request. Successful removals are not repeated.
     removals.flush { device ->
       attempts += device
       true
