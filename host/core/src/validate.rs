@@ -109,7 +109,9 @@ pub fn desktop_locale(tag: &str) -> Option<String> {
 
 /// Checks a URI handed to `innkeeper run`. It comes from `%U`, so it may come
 /// from a web page. It must have a scheme and no forbidden characters. It must
-/// not name a local file, because the session can't see host files.
+/// not name a local file, because the session can't see host files. It must
+/// not name another app's data (Android's `content:`, OpenHarmony's
+/// `datashare:`) or an intent.
 pub fn launch_uri(u: &str) -> Result<&str> {
     if u.len() > 8192 || u.chars().any(|c| is_forbidden_char(c) || c == ' ') {
         bail!("URI contains spaces or control characters");
@@ -126,9 +128,9 @@ pub fn launch_uri(u: &str) -> Result<&str> {
     let lower = scheme.to_ascii_lowercase();
     if matches!(
         lower.as_str(),
-        "file" | "content" | "intent" | "javascript" | "android.resource"
+        "file" | "content" | "intent" | "javascript" | "android.resource" | "datashare"
     ) {
-        bail!("{lower}: URIs can't be opened in Android apps");
+        bail!("{lower}: URIs can't be opened in apps");
     }
     Ok(u)
 }
@@ -260,6 +262,7 @@ mod tests {
         assert!(launch_uri("file:///etc/passwd").is_err());
         assert!(launch_uri("FILE:///etc/passwd").is_err());
         assert!(launch_uri("intent:#Intent;end").is_err());
+        assert!(launch_uri("datashare:///com.ohos.contactsdataability").is_err());
         assert!(launch_uri("--es x y").is_err());
         assert!(launch_uri("-n:x").is_err());
         assert!(launch_uri("https://x\n").is_err());

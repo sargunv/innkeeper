@@ -324,10 +324,10 @@ pub fn run(
     let launch = || -> Result<String> {
         let (s, system) = session(profile, report)?;
         if system == System::Ohos {
-            if uri.is_some() {
-                bail!("OpenHarmony apps can't open URIs yet");
-            }
-            return ohos::start(&s, pkg);
+            return match uri {
+                Some(u) => ohos::open_uri(&s, pkg, u),
+                None => ohos::start(&s, pkg),
+            };
         }
         let l = match uri {
             Some(u) => Launch::View {
