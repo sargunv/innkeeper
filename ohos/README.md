@@ -23,9 +23,10 @@ that. An OH profile refuses `open`, files and URIs in `run`, `app info`,
 `app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
-roots and whose profile is a release profile. A debug profile fails, because it
-needs the device's UDID and the kernel's code-signing device, and the session
-has neither.
+roots and whose profile is a release profile. Each profile has a UDID, which
+`innkeeper profile list` shows. The launcher derives it from the profile's name
+and sets it as `const.product.udid`. A debug profile still fails, because
+installd hands it to the kernel's code-signing device, and the session has none.
 
 `ohos/build.sh` (`mise run build:ohos`) builds our layer. `mise run build`
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
