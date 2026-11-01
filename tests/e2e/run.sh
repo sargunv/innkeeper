@@ -644,6 +644,12 @@ else
     until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/ohos-audio.raw" --expect 440 >>"$T/ohos.txt" || result=$?
     kill "$player" "$recorder" 2>/dev/null || true
     wait "$player" "$recorder" 2>/dev/null || true
+    # The tone keeps playing in OpenHarmony after its exec client exits, and
+    # the capture check must not hear it.
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c 'kill $(pidof tone)' 2>/dev/null || true
+    tone_stopped() { ! s /system/bin/pidof tone >/dev/null; }
+    until_ok tone_stopped || result=$?
     return "$result"
   }
   if ! timed ohos-audio ohos_audio; then
