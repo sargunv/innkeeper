@@ -23,10 +23,17 @@ use crate::profile::System;
 use crate::sandbox::{files_read_only, link, over, remove_tree, tree_linker};
 
 /// Bumped when the composition below changes.
-const COMPOSE_VERSION: &str = "ohos-1";
+const COMPOSE_VERSION: &str = "ohos-2";
 
 /// DMS's config. Its `<dpi>` is the only place DMS takes density from.
 const DMS_CONFIG: &str = "vendor/etc/window/resources/display_manager_config.xml";
+
+/// The audio policy's adapters and pipes.
+const POLICY_CONFIG: &str = "vendor/etc/audio/audio_policy_config.xml";
+
+/// The audio policy's volume levels. The policy reads the copy in
+/// `sys_prod` in place of the image's.
+const VOLUME_CONFIG: &str = "etc/audio/audio_volume_config.xml";
 
 /// Fetches and extracts the pinned image if it is missing, then prunes the
 /// cache as Android's preparation does. The returned lease keeps the image
@@ -55,6 +62,53 @@ fn dms_config(xml: &str, dpi: u32) -> String {
         return xml.into();
     };
     format!("{}<dpi>{dpi}{}", &xml[..a], &xml[b..])
+}
+
+/// Returns `audio_volume_config.xml` with each volume type's default level
+/// at its maximum. With `const.multimedia.audio.fixedvolume` the levels
+/// can't change, so OH applies no system volume and the desktop mixer is the
+/// control.
+fn volume_config(xml: &str) -> String {
+    let attr = |tag: &str, name: &str| -> Option<(usize, usize)> {
+        let key = format!(" {name}=\"");
+        let a = tag.find(&key)? + key.len();
+        Some((a, a + tag[a..].find('"')?))
+    };
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(start) = rest.find("<volume_type ") {
+        let Some(len) = rest[start..].find('>') else {
+            break;
+        };
+        let tag = &rest[start..start + len];
+        out.push_str(&rest[..start]);
+        match (attr(tag, "maxidx"), attr(tag, "defaultidx")) {
+            (Some((ma, mb)), Some((da, db))) => {
+                out.push_str(&tag[..da]);
+                out.push_str(&tag[ma..mb]);
+                out.push_str(&tag[db..]);
+            }
+            _ => out.push_str(tag),
+        }
+        rest = &rest[start + len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Returns `audio_policy_config.xml` with the primary adapter's pipes at
+/// 48 kHz, the desktop's usual rate, so neither OH nor PipeWire resamples
+/// the mix. The image's pipes run at 44.1 kHz.
+fn policy_config(xml: &str) -> String {
+    let Some(a) = xml.find("<adapter name=\"primary\"") else {
+        return xml.into();
+    };
+    let Some(len) = xml[a..].find("</adapter>") else {
+        return xml.into();
+    };
+    let b = a + len;
+    let primary = xml[a..b].replace("sampleRates=\"44100\"", "sampleRates=\"48000\"");
+    format!("{}{primary}{}", &xml[..a], &xml[b..])
 }
 
 /// Makes every directory under `dir` writable by its owner. The image's
@@ -107,6 +161,15 @@ pub fn compose(cfg: &Config) -> Result<()> {
     let xml = fs::read_to_string(&dms).with_context(|| format!("read {}", dms.display()))?;
     fs::remove_file(&dms)?;
     fs::write(&dms, dms_config(&xml, dpi))?;
+    let policy = r.join(POLICY_CONFIG);
+    let xml = fs::read_to_string(&policy).with_context(|| format!("read {}", policy.display()))?;
+    fs::remove_file(&policy)?;
+    fs::write(&policy, policy_config(&xml))?;
+    let volume = r.join("system").join(VOLUME_CONFIG);
+    let xml = fs::read_to_string(&volume).with_context(|| format!("read {}", volume.display()))?;
+    let to = r.join("sys_prod").join(VOLUME_CONFIG);
+    fs::create_dir_all(to.parent().unwrap())?;
+    fs::write(&to, volume_config(&xml))?;
     let param = r.join("vendor/etc/param");
     fs::create_dir_all(&param)?;
     fs::write(
@@ -184,5 +247,57 @@ mod tests {
             "<a>\n    <!-- dpi -->\n    <dpi>320</dpi>\n</a>\n"
         );
         assert_eq!(dms_config("<a/>", 320), "<a/>");
+    }
+
+    #[test]
+    fn primary_pipes_run_at_48_khz() {
+        let xml = concat!(
+            "<adapter name=\"primary\">\n",
+            "  <streamProp format=\"s16le\" sampleRates=\"44100\"/>\n",
+            "  <streamProp format=\"s16le\" sampleRates=\"44100\"/>\n",
+            "</adapter>\n",
+            "<adapter name=\"remote\">\n",
+            "  <streamProp format=\"s16le\" sampleRates=\"44100\"/>\n",
+            "</adapter>\n",
+        );
+        assert_eq!(
+            policy_config(xml),
+            concat!(
+                "<adapter name=\"primary\">\n",
+                "  <streamProp format=\"s16le\" sampleRates=\"48000\"/>\n",
+                "  <streamProp format=\"s16le\" sampleRates=\"48000\"/>\n",
+                "</adapter>\n",
+                "<adapter name=\"remote\">\n",
+                "  <streamProp format=\"s16le\" sampleRates=\"44100\"/>\n",
+                "</adapter>\n",
+            )
+        );
+        assert_eq!(policy_config("<adapters/>"), "<adapters/>");
+    }
+
+    #[test]
+    fn volume_defaults_to_the_maximum() {
+        let xml = concat!(
+            "<v>\n",
+            "  <volume_type type=\"MUSIC\" minidx=\"0\" maxidx=\"15\" defaultidx=\"7\">\n",
+            "    <point idx=\"0\" decibel=\"-2700\"/>\n",
+            "  </volume_type>\n",
+            "  <volume_type type=\"APP\" defaultidx=\"5\" maxidx=\"100\">\n",
+            "  <volume_type type=\"X\" maxidx=\"3\">\n",
+            "</v>\n",
+        );
+        assert_eq!(
+            volume_config(xml),
+            concat!(
+                "<v>\n",
+                "  <volume_type type=\"MUSIC\" minidx=\"0\" maxidx=\"15\" defaultidx=\"15\">\n",
+                "    <point idx=\"0\" decibel=\"-2700\"/>\n",
+                "  </volume_type>\n",
+                "  <volume_type type=\"APP\" defaultidx=\"100\" maxidx=\"100\">\n",
+                "  <volume_type type=\"X\" maxidx=\"3\">\n",
+                "</v>\n",
+            )
+        );
+        assert_eq!(volume_config("<volume_type a"), "<volume_type a");
     }
 }
