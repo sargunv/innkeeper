@@ -1,10 +1,11 @@
-# innkeeper: the image's file plus LD_PRELOAD of the session shim (see
-# android/vendor/audio/README.md). The HAL's stream worker threads call
-# setpriority(ANDROID_PRIORITY_AUDIO) and fail the stream open on EACCES (no
-# CAP_SYS_NICE over the initial namespace), which blocks audioserver and with
-# it system_server's AudioService. The shim makes priority changes
-# best-effort, as it does for init's services.
-# (/system/lib64 is in this APEX namespace's permitted paths; /vendor is not.)
+# Innkeeper: this is the image's file with the session shim added through
+# LD_PRELOAD (see android/vendor/audio/README.md). The HAL's stream worker
+# threads call setpriority(ANDROID_PRIORITY_AUDIO), which fails with EACCES
+# because the HAL has no CAP_SYS_NICE in the initial namespace. That failure
+# aborts the stream open, which blocks audioserver and system_server's
+# AudioService. The shim makes priority changes best-effort, as it does for
+# init's services. The shim loads from /system/lib64 because that directory is
+# in this APEX namespace's permitted paths and /vendor is not.
 
 
 service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example

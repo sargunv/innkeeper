@@ -74,9 +74,9 @@ void StreamInBridge::run() {
           reply.status = -ENODEV;
           break;
         }
-        // Read directly into the FMQ transfer. There is no second pipe or
-        // uptime pacer: bridge_pcm blocks on the bridge's capture clock, and
-        // supplies paced silence when the bridge/source is unavailable.
+        // Read directly into the FMQ transfer. bridge_pcm blocks on the
+        // bridge's capture clock and supplies paced silence when the bridge or
+        // source is unavailable, so no second pipe or pacer is needed.
         int status = bridge_pcm_read(pcm_, samples.data(), bytes);
         if (muted_->load())
           std::fill(samples.begin(), samples.begin() + bytes, 0);

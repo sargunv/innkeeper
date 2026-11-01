@@ -28,7 +28,7 @@ class StreamBridge : public core::IStreamCommonDelegator {
   }
 
   // Highest-priority usage among the active tracks, or nothing when the
-  // track list is empty (the last label stays).
+  // track list is empty, which keeps the last label.
   void noteUsage(std::optional<int32_t> usage);
 
  private:

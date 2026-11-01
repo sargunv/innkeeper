@@ -55,14 +55,14 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
-// ---- connection (g_lock held) ----
+// ---- connection (callers hold g_lock) ----
 
 static void request(struct lxb_msg* m, uint16_t type) {
   lxb_msg_init(m, type, ++g_tag);
 }
 
-// Sends a request and waits for its reply. Returns its status, or -errno if
-// the connection failed (and is now closed).
+// Sends a request and waits for its reply. Returns the reply's status, or
+// -errno if the connection failed, in which case the connection is closed.
 static int call_locked(const struct lxb_msg* m, struct lxb_packet* reply) {
   int r = lxb_call(g_sock, m, reply);
   if (r != 0) {
@@ -74,7 +74,7 @@ static int call_locked(const struct lxb_msg* m, struct lxb_packet* reply) {
   return reply->status;
 }
 
-// call_locked for requests whose replies carry nothing.
+// Like call_locked, for requests whose replies carry no payload.
 static int call_status_locked(const struct lxb_msg* m) {
   struct lxb_packet reply;
   int st = call_locked(m, &reply);

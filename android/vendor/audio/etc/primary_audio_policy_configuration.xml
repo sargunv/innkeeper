@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Innkeeper: the image's primary module, emptied. IModule/innkeeper is the
-     only playback and capture path; the image's ports (an ALSA microphone,
-     telephony, FM, MMAP and offload stubs) have no device here. -->
+<!-- Innkeeper: this is the image's primary module with its contents removed.
+     IModule/innkeeper handles all playback and capture. The image's ports (an
+     ALSA microphone, telephony, FM, MMAP and offload stubs) have no device
+     here. -->
 <module name="primary" halVersion="3.0">
     <attachedDevices/>
     <mixPorts/>

@@ -14,7 +14,8 @@
 
 int main() {
   using namespace innkeeper::audio;
-  // No tracks: nothing to report, so the caller sends no SET_METADATA.
+  // With no tracks there is nothing to report, so the caller sends no
+  // SET_METADATA.
   CHECK(!selectUsage(nullptr, 0));
 
   const int32_t media[] = {kUsageMedia};
