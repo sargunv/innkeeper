@@ -1,20 +1,22 @@
 # The session
 
-A session is one rootless Android userspace inside Innkeeper's Flatpak sandbox,
-with the bridge and Android's real `init`. An OpenHarmony profile's session
-takes the same path with OH's root and init
-([ohos/README.md](../ohos/README.md#how-it-boots)); this page describes
-Android's. `innkeeper-session` ([host/launcher](../host/launcher/README.md))
-starts it on demand; it stops itself when nothing needs it
-([Lifecycle](#lifecycle)). `start` prepares the pinned image and writes
-`session.conf` with the paths, image and bridge setup. The launcher supplies
-second-stage init's root, flattened APEXes and bootconfig; the supervisor
-emulates binder, eBPF and credentials.
+A session is one rootless Android userspace that runs inside Innkeeper's Flatpak
+sandbox. It contains the bridge and Android's real `init`. This page describes
+Android sessions. An OpenHarmony profile's session follows the same path with
+OpenHarmony's root and init ([ohos/README.md](../ohos/README.md#how-it-boots)).
 
-The session runs in the app's own sandbox, which allows no mounts, no
-namespaces, no capabilities and no systemd units (its seccomp filter fails them
-with `EPERM` before ours sees them). The sandbox's `/`, `/dev` and `/sys` are
-writable tmpfs dirs of its own, so Android's root is built from symlinks.
+`innkeeper-session` ([host/launcher](../host/launcher/README.md)) starts a
+session on demand, and the session stops itself when nothing needs it
+([Lifecycle](#lifecycle)). The `start` command prepares the pinned image and
+writes `session.conf`, which holds the paths, the image and the bridge setup.
+The launcher supplies the root, the flattened APEXes and the bootconfig for
+second-stage init. The supervisor emulates binder, eBPF and credentials.
+
+The session runs in the app's Flatpak sandbox. That sandbox allows no mounts,
+namespaces, capabilities or systemd units. Its seccomp filter fails those calls
+with `EPERM` before Innkeeper's filter sees them. The sandbox's `/`, `/dev` and
+`/sys` are writable tmpfs directories that belong to the sandbox, so the
+launcher builds Android's root from symlinks.
 [packaging/flatpak](../packaging/flatpak/README.md) builds the Flatpak.
 
 ```mermaid
@@ -33,50 +35,52 @@ sequenceDiagram
   C->>S: status over control.sock: up
 ```
 
-The session lives as long as the process that started it, which owns its
-sandbox: `_serve`, or `start -f` in the sandbox of whatever ran it. Other
-instances of the app (the CLI, the manager) have their own pid namespace and
-`/`, so `status`, `exec` and `stop` go through `control.sock` in the app's
-runtime dir, which every instance shares. When the session ends (`stop`, a
-signal, init's exit) the launcher stops and then kills everything it started,
-and, as the sandbox's main process, everything else in it: Android processes
-orphaned by a dying init would otherwise keep the sandbox alive.
+The session lives as long as the process that started it, because that process
+owns the sandbox. The process is `_serve`, or `start -f` running in the sandbox
+of whatever ran it. Other instances of the app, such as the CLI and the manager,
+have their own pid namespace and `/`. They run `status`, `exec` and `stop`
+through `control.sock` in the app's runtime directory, which every instance
+shares. A session ends on `stop`, on a signal or when init exits. The launcher
+then stops and kills everything it started. As the sandbox's main process, it
+also kills everything else in the sandbox, because Android processes orphaned by
+a dying init would otherwise keep the sandbox alive.
 
 The launcher composes `$XDG_DATA_HOME/innkeeper/root-<profile>` from hardlinks
-to the read-only image cache (reflink copies across filesystems) and copies of
-the layers, all read-only. `.compose-key` invalidates it when the image, stage
-or addons change. At each start the start-time layer is copied over it. Symlinks
-in `/` expose `/system`, `/apex` and `/data`; `/etc` keeps the sandbox's files
-and gains Android's others.
+to the read-only image cache and from copies of the layers. All of it is
+read-only. Across filesystems it uses reflink copies instead of hardlinks.
+`.compose-key` invalidates the composed root when the image, the stage or the
+addons change. Each start copies the start-time layer over the composed root.
+Symlinks in `/` expose `/system`, `/apex` and `/data`. `/etc` keeps the
+sandbox's files and gains Android's other files.
 
-The broker injects memfds for `/innkeeper/proc/<path>` on `openat`, rewrites
-`readlink` and `getcwd` to Android paths, and shows the user's files as root's.
-The shim treats refused mounts and namespace calls as done. Capabilities are
-virtual; `/sys/fs/cgroup` is a plain directory, so there is no cgroup freezer.
-`/data/user/0` links to `/data/data`, and `/storage/emulated` to `/data/media`:
-without FUSE, MediaStore does not index shared storage.
+The broker injects memfds for `/innkeeper/proc/<path>` on `openat`. It rewrites
+`readlink` and `getcwd` results to Android paths, and it shows the user's files
+as owned by root. The broker also shows init as pid 1 to `SO_PEERCRED`. The shim
+treats refused mounts and namespace calls as successful. Capabilities are
+virtual. `/sys/fs/cgroup` is a plain directory, so there is no cgroup freezer.
+`/data/user/0` links to `/data/data`, and `/storage/emulated` links to
+`/data/media`. There is no FUSE, so MediaStore does not index shared storage.
 
 Android uses the host's network (`--share=network`). The system app offers it as
-Android's default network, follows the sandbox's `/etc/resolv.conf`, and applies
-host metering. Netd's routes, firewall rules and socket marks are accepted and
-ignored. lmkd's PSI windows are widened to the unprivileged 2 s; `start` warns
-below Linux 6.5 (the supervisor requires 5.14).
+Android's default network, follows the sandbox's `/etc/resolv.conf` and applies
+the host's metering. Netd's routes, firewall rules and socket marks are accepted
+and ignored. lmkd's PSI windows are widened to 2 s, the minimum for unprivileged
+triggers. `start` warns on kernels older than Linux 6.5, which lack unprivileged
+PSI triggers. The supervisor requires Linux 5.14.
 
-The broker shows init as pid 1 to `SO_PEERCRED`.
+**There is no memory cap.** Flatpak puts each instance in its own scope, and a
+sandbox cannot create units or cgroups, so the session cannot cap itself.
+Android reacts to memory pressure through lmkd (PSI). Beyond that, the host's
+OOM handling applies, as it does for any Flatpak app. Asking systemd for a cap
+would let the app start any unit, which is a sandbox escape.
 
-**No memory cap.** Flatpak puts each instance in a scope of its own, and a
-sandbox can create no units or cgroups, so the session can't cap itself. Android
-reacts to memory pressure through lmkd (PSI), and beyond that the host's OOM
-handling applies, as for any Flatpak app. Talking to systemd to get a cap would
-let the app start any unit, which is a sandbox escape.
-
-Development and test sessions get the usual 6/8 GiB cap from outside: the dev
-driver sets it on their Flatpak scope from the host
-([packaging/flatpak](../packaging/flatpak/README.md#development)).
+Development and test sessions get the usual 6 GiB high and 8 GiB maximum limits
+from outside. The dev driver sets them on the session's Flatpak scope from the
+host ([packaging/flatpak](../packaging/flatpak/README.md#development)).
 
 ## Overlay stack
 
-The composed root combines these layers; nothing in the image cache is modified.
+The composed root combines these layers. Nothing in the image cache is modified.
 
 ```mermaid
 flowchart TB
@@ -88,21 +92,22 @@ flowchart TB
   rt --> add --> stage --> derived --> img
 ```
 
-The topmost layer wins. Props for `/vendor/build.prop` come from the stage's
-`share/innkeeper/props.d/`, which the launcher merges into the start-time layer.
-`/apex` combines the start-time layer, the derived layer's `apex/` and the
-flattened APEX tree. The extracted image lost its `fs_config` owners: the
-derived layer adds read and exec bits to partition files, and records the owners
-Android verifies (clatd) in the `user.innkeeper.owner` xattr.
+The topmost layer wins. The props for `/vendor/build.prop` come from the stage's
+`share/innkeeper/props.d/`, and the launcher merges them into the start-time
+layer. `/apex` combines the start-time layer, the derived layer's `apex/` and
+the flattened APEX tree. The extracted image has lost its `fs_config` owners.
+The derived layer adds read and exec bits to partition files. It also records
+the owners that Android verifies, such as clatd's, in the `user.innkeeper.owner`
+xattr.
 
 Every Android process runs as the host user. The supervisor supplies virtual
-Android credentials ([supervisor](../supervisor/README.md)); apps are not
+Android credentials ([supervisor](../supervisor/README.md)). Apps are not
 isolated from each other ([security.md](security.md#app-isolation)).
 
 ## Lifecycle
 
-A session stops itself once nothing needs it, as a desktop app quits with its
-last window, and comes back for the next alarm.
+A session stops itself when nothing needs it, as a desktop app quits when its
+last window closes. It starts again for the next alarm.
 
 ```mermaid
 stateDiagram-v2
@@ -114,37 +119,41 @@ stateDiagram-v2
   Busy --> [*]: stop
 ```
 
-- **Activity.** The system app sends the bridge's system service a `LIFECYCLE`
-  report whenever a part changes: its windows, user apps' running foreground
-  services, the next alarm clock and the background-allowed apps
-  (`integration/lifecycle/`). The bridge writes it to `<run>/lifecycle`, and the
-  launcher checks it every 5 s. No report yet (booting, the system app
-  restarting) counts as busy, and so do a running `exec` (it holds `exec.lock`
-  shared) and an alarm less than 3 minutes away or ago.
-- **Idle timeout.** The profile's `idle-minutes` setting (default 2; Keep
-  Running: never) before the launcher stops the session as `stop` does; a change
-  applies to a running session. Headless sessions (tests) never stop by
-  themselves. Apps not allowed in the background stop with it, as if
-  force-stopped: their jobs and syncs wait for the next start.
-- **Foreground services** keep it up. A media app keeps playing after its window
-  closes; its session stays an MPRIS player, and its notification shows on the
-  desktop, resident, only while it has no window. Clicking that notification or
-  MPRIS `Raise` opens the window again.
+- **Activity.** The system app sends a `LIFECYCLE` report to the bridge's system
+  service whenever one of its parts changes (`integration/lifecycle/`). The
+  report lists the windows, the user apps' running foreground services, the next
+  alarm clock and the apps allowed in the background. The bridge writes it to
+  `<run>/lifecycle`, and the launcher checks it every 5 s. The session counts as
+  busy when there is no report yet, for example while booting or while the
+  system app restarts. It also counts as busy while an `exec` runs, which holds
+  `exec.lock` shared, and when an alarm is less than 3 minutes away or ago.
+- **Idle timeout.** The profile's `idle-minutes` setting is the grace period
+  before the launcher stops an idle session, as `stop` does. The default is 2
+  minutes, and Keep Running disables it. A change applies to a running session.
+  Headless sessions, which tests use, do not stop by themselves. Apps that are
+  not allowed in the background stop with the session, as if force-stopped.
+  Their jobs and syncs wait for the next start.
+- **Foreground services** keep the session up. A media app keeps playing after
+  its window closes, and its session stays an MPRIS player. Its notification
+  shows on the desktop as resident while the app has no window. Clicking that
+  notification or calling MPRIS `Raise` opens the window again.
 - **Background apps.** `innkeeper app set PKG --background on` lets an app run
-  with no window open (off by default; the setting lives in the system app).
-  While one is installed the session doesn't stop, and the desktop shows a
-  resident "Running in the background" notification naming them.
-- **Wakeups.** Android forgets alarms when it stops, and apps set them again
-  from `BOOT_COMPLETED`, so the launcher starts the session a minute before the
-  next alarm clock (`AlarmManager.getNextAlarmClock`, which clock apps use).
-  Other exact alarms aren't visible through any API and don't wake a stopped
-  session. `start` and `stop` cancel a pending wakeup. A sandbox can't make
-  timers, and the Background portal has none, so the session's process stays in
-  its sandbox as a waiter: it serves `status` (`stopped`, `wakeup=<ms>`) and
-  `stop` on `control.sock`, and at that time runs `start`, which starts the
-  session in a new sandbox (this one's `/` holds the last boot's runtime files).
-  With no window open (a waiter, a foreground service, a background app) it asks
-  the Background portal to keep running.
+  with no window open. It is off by default, and the system app stores the
+  setting. While such an app is installed, the session does not stop. The
+  desktop shows a resident "Running in the background" notification that names
+  those apps.
+- **Wakeups.** Android forgets alarms when it stops, and apps set them again on
+  `BOOT_COMPLETED`. The launcher therefore starts the session a minute before
+  the next alarm clock (`AlarmManager.getNextAlarmClock`, which clock apps use).
+  No API exposes other exact alarms, so they do not wake a stopped session.
+  `start` and `stop` cancel a pending wakeup. A sandbox cannot create timers,
+  and the Background portal has none, so the session's process stays in its
+  sandbox as a waiter. The waiter serves `status` (`stopped`, `wakeup=<ms>`) and
+  `stop` on `control.sock`. At the wakeup time it runs `start`, which starts the
+  session in a new sandbox, because the waiter's `/` holds the last boot's
+  runtime files. When no window is open, the process asks the Background portal
+  to keep running. This covers a waiter, a foreground service and a background
+  app.
 
 ## Where things live
 
@@ -156,68 +165,77 @@ stateDiagram-v2
 | `$XDG_STATE_HOME/innkeeper/`                         | `manager-profile`, the profile the manager showed last                                                                                                                                                                               |
 | `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                                         |
 
-A profile's name goes on every per-profile path.
+Every per-profile path includes the profile's name.
 
 ## Profiles
 
 A profile is a separate Android or OpenHarmony setup with its own apps, data and
-settings; a session is a running profile, and profiles run side by side. Its
-system is chosen when it is made (`innkeeper profile create --system ohos NAME`,
-or the manager's New Profile) and never changes: the data is that system's.
-Profiles are listed from their `data-<name>` directories, and created, renamed,
-deleted, started and stopped with `innkeeper profile` or the manager's Profiles
-page (`host/core/src/profiles.rs`). None is special. `--profile NAME` is the
-only way to name one: the CLI works with `default` without it, creating it the
-first time; an app entry runs `innkeeper --profile NAME run PKG` and records
-`X-Innkeeper-Profile`; the manager shows the profile it showed last. Core takes
-the profile from its caller; only the launcher and the programs it starts read
-`INNKEEPER_PROFILE`. Tests use named profiles with fresh data dirs.
+settings. A session is a running profile, and profiles can run side by side. A
+profile's system is chosen when the profile is created, with
+`innkeeper profile create --system ohos NAME` or the manager's New Profile. The
+system cannot change later, because the data belongs to that system.
 
-A profile's settings are one file, `.innkeeper-profile.toml` in its data dir,
-beside the data version record, so they move and back up with its data
-(`host/launcher/src/profile.rs`): its system, display, adb and port, idle
-timeout, app mirroring and desktop following. A missing file or setting means
-its default; an unknown setting is an error. Only the display applies to
-OpenHarmony (a phone preset; it has no windowed mode), and the CLI and the
-manager refuse the rest there, with app install and app commands.
-`innkeeper profile set` and the manager's Profile Settings page change them, and
-a running profile applies the live ones at once. Keep Running is Innkeeper's own
-preference, shared by every profile
-(`$XDG_CONFIG_HOME/innkeeper/preferences.toml`): no profile stops when idle, and
-every profile starts at login. Deleting a profile removes its data, settings,
-composed root, logs, runtime files and app-menu entries; renaming moves them,
-and the composed root is recomposed. Either needs the profile stopped.
+Innkeeper lists profiles from their `data-<name>` directories.
+`innkeeper profile` and the manager's Profiles page create, rename, delete,
+start and stop them (`host/core/src/profiles.rs`). No profile is special. A
+command names a profile with `--profile NAME`. Without it, the CLI uses
+`default` and creates it the first time. An app entry runs
+`innkeeper --profile NAME run PKG` and records `X-Innkeeper-Profile`. The
+manager opens on the profile it showed last. Core takes the profile from its
+caller. Only the launcher and the programs it starts read `INNKEEPER_PROFILE`.
+Tests use named profiles with fresh data directories.
+
+A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
+directory next to the data version record (`host/profile/src/profile.rs`). The
+settings therefore move and back up with the data. They cover the system, the
+display, adb and its port, the idle timeout, app mirroring and following the
+desktop. A missing file or setting takes its default, and an unknown setting is
+an error. OpenHarmony uses only the display setting, which is a phone preset
+because OpenHarmony has no windowed mode. The CLI and the manager refuse the
+other settings for OpenHarmony, along with app install and app commands.
+`innkeeper profile set` and the manager's Profile Settings page change settings.
+A running profile applies the live settings at once.
+
+Keep Running is an Innkeeper preference shared by every profile
+(`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops
+when idle, and every profile starts at login.
+
+Deleting a profile removes its data, settings, composed root, logs, runtime
+files and app-menu entries. Renaming a profile moves them and recomposes the
+root. Both operations need the profile stopped.
 
 ## Image upgrades and data recovery
 
-`prepare` only prepares the read-only image cache. On `start`, the launcher
-checks `/data/.innkeeper-data-version` before changing anything in `/data`. The
-record identifies frameworks by Android SDK level, then numeric AOSP CI build
-ID, read from the system image's `build.prop`; renaming a pin does not change
-its version. Equal versions and upgrades reuse the existing data. Non-numeric
-framework versions are unsupported and fail before data is opened.
+`prepare` prepares the read-only image cache and nothing else. On `start`, the
+launcher checks `/data/.innkeeper-data-version` before it changes anything in
+`/data`. The record identifies a framework by its Android SDK level and then by
+its numeric AOSP CI build ID, both read from the system image's `build.prop`.
+Renaming a pin does not change its version. Equal versions and upgrades reuse
+the existing data. Non-numeric framework versions are unsupported and fail
+before the data is opened.
 
 The launcher durably records `started` before Android can open the data. Init
-records `booted` only after `sys.boot_completed=1`, retaining the previous
-successful version through an interrupted first boot. Start the same image or a
-newer one to retry; Android performs its usual startup recovery. Because even a
-failed boot may have migrated data, a framework older than either recorded
-version is refused. The error names the data directory, both versions and
-recovery choices. Data with no record is adopted on its next start; back it up
+records `booted` after `sys.boot_completed=1`. An interrupted first boot keeps
+the previous successful version. To retry, start the same image or a newer one,
+and Android runs its usual startup recovery. Even a failed boot may have
+migrated the data, so the launcher refuses a framework older than either
+recorded version. The error names the data directory, both versions and the
+recovery choices. Data with no record is adopted on its next start. Back it up
 first if its history is uncertain.
 
-An image rollback does not roll back `/data`, so the README tells users to back
-up a profile's whole data directory before upgrading. Restoring that backup with
-the matching older framework is the only way back; editing or deleting the
+An image rollback does not roll back `/data`. The README therefore tells users
+to back up a profile's whole data directory before upgrading. The way back is to
+restore that backup with the matching older framework. Editing or deleting the
 version record cannot undo Android's migrations. `INNKEEPER_DATA` overrides the
-data location; development sessions use
+data location. Development sessions use
 `out/dev/flatpak/<profile>/android-data`.
 
 ## Host safety
 
-The Flatpak sandbox is the boundary. `selftest` verifies its filesystem and
-device grants, no host home or block devices, no access to the host Flatpak
-service, unmapped supplementary groups, unwritable sysfs, no visible FUSE
-connections, refused mounts and sysrq, no capabilities, no new privileges, and
-both seccomp filters. `mise run test:e2e -- boot` runs it against a fresh named
+The Flatpak sandbox is the security boundary. `selftest` checks the sandbox's
+filesystem and device grants and both seccomp filters. It also checks that the
+session sees no host home, block devices or FUSE connections and cannot reach
+the host Flatpak service. Supplementary groups must be unmapped, sysfs
+unwritable, mounts and sysrq refused, and capabilities and new privileges
+absent. `mise run test:e2e -- boot` runs `selftest` against a fresh named
 session. See [security.md](security.md).

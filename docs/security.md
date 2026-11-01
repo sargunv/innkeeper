@@ -2,16 +2,17 @@
 
 ## Threat model: desktop parity
 
-An Android app may do what a native desktop app running as the user can do.
-Innkeeper adds no protection that costs complexity, hacks or performance beyond
-that.
+An Android app may do anything a native desktop app running as the user can do.
+Innkeeper adds no protection beyond that if the protection costs complexity,
+workarounds or performance.
 
-- **Kept:** isolation that comes from the Flatpak sandbox, and simple bounds and
-  correctness checks (sizes, overflow, never writing into the wrong process).
-- **Out of scope:** making host helpers robust against deliberately malicious
-  Android processes, such as session-wide denial of service or kernel-exact
-  fault semantics for malformed requests that only hurt the caller.
-- **The outer boundary** is the packaging (Flatpak), as for any desktop app.
+- **Kept:** the isolation that the Flatpak sandbox provides, and simple bounds
+  and correctness checks, such as sizes, overflow and writes into the wrong
+  process.
+- **Out of scope:** making host helpers robust against malicious Android
+  processes. This includes session-wide denial of service, and matching the
+  kernel's fault semantics for malformed requests that hurt only the caller.
+- **The outer boundary** is the Flatpak packaging, as for any desktop app.
 
 ## Trust boundaries
 
@@ -25,134 +26,148 @@ flowchart LR
 ```
 
 - **Android root is the host user.** It has the user's file access, limited by
-  the Flatpak sandbox: [session.md](session.md#host-safety) lists its grants and
-  probes, and `selftest` proves them.
-- **The supervisor** (the Rust broker) runs in the sandbox with the host user's
-  privileges and reads and writes Android processes' memory. It serves only
-  callers inside the session's seccomp filter. It keeps bounds checks and pins
-  each process's memory at binder open so writes never land in the wrong
-  process, but a process that misbehaves on purpose can stop binder for the
-  whole session; that is accepted.
+  the Flatpak sandbox. [session.md](session.md#host-safety) lists the sandbox's
+  grants and probes, and `selftest` checks them.
+- **The supervisor** is the Rust broker. It runs in the sandbox with the host
+  user's privileges and reads and writes the memory of Android processes. It
+  serves only callers inside the session's seccomp filter. It checks bounds, and
+  it pins each process's memory when the process opens binder, so that its
+  writes go to the right process. A process that misbehaves on purpose can stop
+  binder for the whole session. This is accepted.
 - **The bridge** runs as the user and talks to the desktop. Its socket is the
-  only channel out of Android ([bridge-protocol.md](bridge-protocol.md)).
+  only channel from Android to the desktop
+  ([bridge-protocol.md](bridge-protocol.md)).
 
 ## The bridge socket
 
-- The socket directory is linked into Android as `/dev/socket/innkeeper`,
-  `root:audio 0750`; the system app gets the `audio` group through its
-  `HOST_BRIDGE` permission.
-- `SO_PEERCRED` is checked against the host user, which every Android process
-  runs as.
-- One service per connection (HELLO); anything else gets `-EPROTO` and is
-  closed.
+- The socket directory is linked into Android as `/dev/socket/innkeeper`, with
+  owner `root:audio` and mode `0750`. The system app gets the `audio` group
+  through its `HOST_BRIDGE` permission.
+- The bridge checks `SO_PEERCRED` against the host user, which every Android
+  process runs as.
+- Each connection names one service in its HELLO. Any other first message gets
+  `-EPROTO`, and the bridge closes the connection.
 
 ## App isolation
 
-Every Android process is the same kernel uid, so **apps are not isolated from
-each other**: any app can read or write another app's files and signal its
-processes. Binder, PackageManager and AppOps still see the right virtual uids,
-but that is policy enforced by Android's own processes, not by the kernel.
+Every Android process runs as the same kernel uid, so **apps are not isolated
+from each other**. Any app can read or write another app's files and signal its
+processes. Binder, PackageManager and AppOps still see the correct virtual uids,
+but Android's own processes enforce that policy, and the kernel does not.
 
 - This matches one desktop user running several native apps, which is the threat
-  model. The README and the manager's Preferences say so.
-- Host supplementary groups are unmapped in the sandbox; `selftest` checks that
-  no host group is mapped.
+  model. The README and the manager's Preferences page say so.
+- Host supplementary groups are not mapped in the sandbox. `selftest` checks
+  that no host group is mapped.
 - **Accepted:** the bridge sees every Android process as the user, so its uid
-  checks admit any app to every service, including input. That matches desktop
-  parity: a native app running as the user can reach the same desktop services.
+  checks let any app use every service, including input. This matches desktop
+  parity, because a native app running as the user can reach the same desktop
+  services.
 
 ## The sandbox
 
 The Flatpak sandbox is the boundary, as for any Flatpak app
-([session.md](session.md)). `selftest` checks the sandbox's grants and what it
-shows Android.
+([session.md](session.md)). `selftest` checks the sandbox's grants and what the
+sandbox shows Android.
 
-- **Network.** Android has no network namespace of its own: it uses the host's
+- **Network.** Android has no network namespace of its own. It uses the host's
   network, as a native app with `--share=network` does. netd's routing and
-  firewall rules are accepted and ignored, so per-app network restrictions and
-  traffic statistics don't exist, and data-usage and firewall apps can't work.
-  There is no TUN device, so `VpnService` apps can't start a VPN. Both are
-  accepted.
+  firewall rules are accepted and ignored. As a result, per-app network
+  restrictions and traffic statistics don't exist, and data-usage and firewall
+  apps can't work. The sandbox has no TUN device, so `VpnService` apps can't
+  start a VPN. Both limits are accepted.
 - **No cgroups.** A session has no memory cap of its own. Development and test
-  sessions are capped from the host; the app gets no systemd permission.
-- **Input devices.** `--device=input` lets the bridge open controllers the user
-  can already access through uaccess ACLs, including rumble writes. It also lets
-  every Android app read the host's input devices, keyboards and mice included,
-  as any Flatpak with that grant could; this is accepted for controller support.
-  EventHub scans the broker's private discovery directory so keyboard, mouse and
-  controller routes aren't duplicated; that routing is not an access boundary.
-  The grant needs Flatpak 1.15.6 or newer; Debian 13 ships 1.16.
+  sessions are capped from the host. The app gets no systemd permission.
+- **Input devices.** `--device=input` lets the bridge open the controllers that
+  the user can already access through uaccess ACLs, and write rumble effects to
+  them. The grant also lets every Android app read the host's input devices,
+  including keyboards and mice, as any Flatpak app with that grant could. This
+  is accepted for controller support. EventHub scans the broker's private
+  discovery directory so that keyboard, mouse and controller input isn't
+  duplicated. That routing is not an access boundary. The grant needs Flatpak
+  1.15.6 or newer, and Debian 13 ships 1.16.
 
-The Flatpak's grants are `--device=dri`, `--device=input`, `--share=network`,
-`--share=ipc`, `--socket=wayland`, `--socket=pulseaudio`, read-only
-`~/.android/adbkey.pub` (for [adb](#desktop-exposure)), and these bus names, for
-what the baseline portals and proxies lack:
+The Flatpak has these grants: `--device=dri`, `--device=input`,
+`--share=network`, `--share=ipc`, `--socket=wayland`, `--socket=pulseaudio`, and
+read-only access to `~/.android/adbkey.pub` for [adb](#desktop-exposure). It
+also talks to these bus names, which cover what the baseline portals and proxies
+lack:
 
 - `org.a11y.Bus`: the baseline AT-SPI proxy hides the `org.a11y.Status`
-  properties the bridge follows.
-- the system bus's `org.freedesktop.UPower`: there is no battery portal.
-- `org.freedesktop.Notifications`: the Notification portal can't update
-  notifications in place or show progress.
+  properties that the bridge follows.
+- `org.freedesktop.UPower` on the system bus: there is no battery portal.
+- `org.freedesktop.Notifications`: the Notification portal can't update a
+  notification in place or show progress.
 
-MPRIS players own names under `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper`,
-which Flatpak grants every app for its own id. Links and files go through the
-same portals as outside, and app-menu entries through the DynamicLauncher
-portal, so the user confirms each one. Clipboard sync uses data control where
-available (KWin), or the display connection while an Innkeeper window has focus
-(GNOME).
+MPRIS players own names under `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper`.
+Flatpak grants every app the names under its own id. Links and files go through
+the same portals that native Flatpak apps use. App-menu entries go through the
+DynamicLauncher portal, so the user confirms each one. Clipboard sync uses the
+data control protocol where the compositor offers it (KWin). Otherwise it uses
+the display connection while an Innkeeper window has focus (GNOME).
 
 ## Desktop exposure
 
-- **Links:** only absolute `http(s)` URLs, rate-limited, through the OpenURI
-  portal.
-- **Files:** Android reaches only what the user picked in the FileChooser
-  portal, through opaque grants and `openat2(RESOLVE_BENEATH)`; the bridge is
-  the only side that sees host paths.
+- **Links:** the bridge opens only absolute `http` and `https` URLs, through the
+  OpenURI portal, with a rate limit.
+- **Files:** Android reaches only the files the user picked in the FileChooser
+  portal. It gets them through opaque grants and `openat2(RESOLVE_BENEATH)`.
+  Only the bridge sees host paths.
 - **Clipboard:** text, images and bounded file selections sync through
-  `ext_data_control_v1`, or `wl_data_device` while an Innkeeper window has
-  focus. File-manager copies use FileTransfer portal grants; plain file URIs can
-  read only paths the Flatpak already has. Android file clips use private cache
-  copies and read-only content URIs. Sensitive clips carry the password-manager
+  `ext_data_control_v1`, or through `wl_data_device` while an Innkeeper window
+  has focus. Files copied in a file manager come through FileTransfer portal
+  grants. Plain file URIs can read only paths that the Flatpak already has. On
+  the Android side, a file clip is a private cache copy that pasting apps read
+  through a read-only content URI. Sensitive clips carry the password-manager
   hint. Test sessions disable both backends.
-- **Notifications and MPRIS:** labels and images from apps; images are raw RGBA,
-  so nothing Android sends reaches a host image decoder.
+- **Notifications and MPRIS:** apps supply the labels and images. Images are raw
+  RGBA, so nothing Android sends reaches a host image decoder.
 - **Accessibility:** while the desktop's assistive technologies are on
-  (`org.a11y.Status`), the system app's accessibility service sends every app
-  window's AccessibilityNodeInfo tree to the bridge, which shows it on the
-  AT-SPI bus. Any AT-SPI client then reads the screen text of Android apps as it
-  does that of native apps, and can act on them; password fields are masked.
-  Otherwise the Android service stays off.
+  (`org.a11y.Status`), the system app's accessibility service sends the
+  AccessibilityNodeInfo tree of every app window to the bridge. The bridge
+  publishes it on the AT-SPI bus. Any AT-SPI client can then read the screen
+  text of Android apps and act on them, as it can with native apps. Password
+  fields are masked. While assistive technologies are off, the Android service
+  stays off.
 - **Desktop entries:** names, schemes and URIs from APKs are validated and
-  escaped; `http(s)`, `file`, `content` and `intent` schemes are never
+  escaped. The `http`, `https`, `file`, `content` and `intent` schemes are never
   registered.
-- **Host state:** the battery (UPower), the power saver (the PowerProfileMonitor
-  portal) and the network's metering (the NetworkMonitor portal) are read-only
-  state any desktop app can read; every Android app sees them.
-- **adb** is off per profile until the user turns it on. Then the image's adbd
-  listens on a loopback port of the profile's own, with adb authentication on
-  (`ro.adb.secure=1`): only keys in the profile's `/data/misc/adb/adb_keys` get
-  in, where the user's `~/.android/adbkey.pub` is added, so other users of the
-  host can't connect. The Flatpak reads only that public key, read-only. The
-  image would otherwise start adbd at every boot on port 5555 without
-  authentication; the overlay keeps it from starting (`usbd.rc`, `init.usb.rc`).
-- **Location** has two consents. Android's runtime permission comes first: the
-  bridge asks the Location portal only once an app Android allowed asks for a
-  location, through one portal session for all of Android. If the user says no
-  there, or location is off on the desktop, Android's location providers stay
-  off until the bridge restarts, and apps keep their Android permission. If the
+- **Host state:** every Android app can see the battery (UPower), the power
+  saver (the PowerProfileMonitor portal) and whether the network is metered (the
+  NetworkMonitor portal). Any desktop app can read this state, and Android gets
+  it read-only.
+- **adb** is off for each profile until the user turns it on. When it is on, the
+  image's adbd listens on a loopback port that belongs to the profile, with adb
+  authentication on (`ro.adb.secure=1`). Only keys in the profile's
+  `/data/misc/adb/adb_keys` can connect, and Innkeeper adds the user's
+  `~/.android/adbkey.pub` there. Other users of the host can't connect. The
+  Flatpak can read only that public key. Unchanged, the image would start adbd
+  at every boot on port 5555 without authentication. The overlay's `usbd.rc` and
+  `init.usb.rc` keep it from starting.
+- **Location** needs two consents. Android's runtime permission comes first.
+  When an app that Android allowed asks for a location, the bridge asks the
+  Location portal, through one portal session for all of Android. If the user
+  refuses there, or location is off on the desktop, Android's location providers
+  stay off until the bridge restarts. Apps keep their Android permission. If the
   portal is unavailable, Android gets no location.
 
 ## Test sessions
 
-`INNKEEPER_TEST=1`, which every test harness sets and the dev runner defaults to
-off a nested desktop (`INNKEEPER_TEST=0` opts out), reaches the bridge through
-the session's environment, which a wakeup keeps. It leaves the user's desktop
-alone, including when tests use a private bus: links, notifications and MPRIS
-players are logged only, AT-SPI and location are off, and apps installed inside
-Android get no desktop entries. Clipboard sync is disabled in both directions;
-the bridge never connects to the compositor's clipboard. A documents PICK
-immediately completes with `-ECANCELED` and no items, without opening the
-FileChooser portal. The system service does not connect to the desktop's
-Settings, PowerProfileMonitor or NetworkMonitor portals either. Battery readings
-come from the caller's system bus (`DBUS_SYSTEM_BUS_ADDRESS`), which tests point
-at mocks.
+Every test harness sets `INNKEEPER_TEST=1`. The dev runner also sets it unless
+it runs in a nested desktop, and `INNKEEPER_TEST=0` turns it off. The variable
+reaches the bridge through the session's environment, which a wakeup keeps. It
+keeps tests away from the user's desktop, including when tests use a private
+bus:
+
+- Links, notifications and MPRIS players are only logged.
+- AT-SPI and location are off.
+- Apps installed inside Android get no desktop entries.
+- Clipboard sync is off in both directions, and the bridge doesn't connect to
+  the compositor's clipboard.
+- A documents PICK completes at once with `-ECANCELED` and no items, and the
+  FileChooser portal doesn't open.
+- The system service doesn't connect to the desktop's Settings,
+  PowerProfileMonitor or NetworkMonitor portals.
+
+Battery readings come from the caller's system bus (`DBUS_SYSTEM_BUS_ADDRESS`),
+which tests point at mocks.

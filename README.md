@@ -1,15 +1,15 @@
 # Innkeeper
 
-Run Android and OpenHarmony apps on Linux. Each Android app gets its own Wayland
-window and follows the desktop's dark mode, notifications, file pickers,
-clipboard and media controls. There's no VM, no visible Android device, and no
-root, ever.
+Run Android and OpenHarmony apps on Linux. Each Android app opens in its own
+Wayland window and uses the desktop's dark mode, notifications, file pickers,
+clipboard and media controls. Innkeeper uses no virtual machine and no root
+access, and it shows no Android device screen.
 
-Innkeeper runs a real Android 17 userspace in a rootless, on-demand session
-inside its Flatpak sandbox. The Android image is Google's own AOSP build from
-Android's public CI, downloaded and checksummed on your machine. Innkeeper plugs
-in at Android's stable vendor interfaces (display, GPU, audio, input) and
-bridges them to your desktop.
+Innkeeper runs an Android 17 userspace inside its Flatpak sandbox. The session
+starts when an app needs it. The Android image is Google's AOSP build from
+Android's public CI. Innkeeper downloads it and checks its checksum on your
+machine. Innkeeper implements Android's stable vendor interfaces for display,
+GPU, audio and input, and connects them to your desktop.
 
 | Wikipedia                                                                                                                     | F-Droid                                                                                                                  |
 | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -31,65 +31,76 @@ and install it:
 flatpak install --user ./dev.sargunv.Innkeeper-snapshot.flatpak
 ```
 
-There are no automatic updates yet: install a newer file with `--reinstall`.
+Innkeeper doesn't update itself yet. To update, install a newer file with
+`--reinstall`.
 
 ## Use it
 
-Open an APK with **Innkeeper**: it shows what the app is and which permissions
-it wants, installs it, and adds it to your app menu. Each app then opens in its
-own window. The first use downloads the Android image (about 1.2 GB).
+To install an app, open its APK with **Innkeeper**. Innkeeper shows the app's
+details and the permissions it requests, installs it, and adds it to your app
+menu. Each app opens in its own window. The first use downloads the Android
+image, which is about 1.2 GB.
 
-The same works from a terminal, for example
-`flatpak run dev.sargunv.Innkeeper install App.apk`; `--help` lists every
-command.
+You can also use a terminal, for example
+`flatpak run dev.sargunv.Innkeeper install App.apk`. The `--help` option lists
+every command.
 
-Android starts when an app needs it and stops a couple of minutes after its last
-window closes. Profiles keep separate sets of apps and data, and a profile can
-show a whole phone or tablet screen instead of one window per app: see
-Innkeeper's Profiles page and each profile's settings.
+Android starts when an app needs it. It stops a couple of minutes after the last
+app window closes.
 
-A profile can run OpenHarmony instead, chosen when it is made
-(`innkeeper profile create --system ohos harmony`). It is experimental: its
-built-in apps show in one phone window, with no desktop input or app install yet
-([ohos](ohos/README.md)).
+Each profile has its own apps and data. A profile can also show a whole phone or
+tablet screen in one window. Innkeeper's Profiles page and each profile's
+settings control these options.
 
-Apps share one uid and are not isolated from each other, just as native desktop
-apps aren't ([security](docs/security.md#app-isolation)).
+A profile can run OpenHarmony instead of Android. You choose the system when you
+create the profile, for example with
+`innkeeper profile create --system ohos harmony`. OpenHarmony support is
+experimental. Its built-in apps show in one phone window, and it doesn't support
+desktop input or app installation yet ([ohos](ohos/README.md)).
 
-Upgrading Innkeeper can upgrade Android, and Android migrates its data in ways
-an older version can't read. Before upgrading, stop the profile and copy its
-whole data directory, such as
-`~/.var/app/dev.sargunv.Innkeeper/data/innkeeper/data-default`, somewhere safe
-(`cp -a`). To go back, restore that copy with the older Innkeeper.
+All apps run as one uid, so they are not isolated from each other. Native
+desktop apps aren't isolated from each other either
+([security](docs/security.md#app-isolation)).
+
+An Innkeeper upgrade can include a newer Android. The newer Android migrates the
+profile's data to a format that older versions can't read. Before you upgrade,
+stop the profile and copy its whole data directory somewhere safe with `cp -a`.
+For the default profile, the directory is
+`~/.var/app/dev.sargunv.Innkeeper/data/innkeeper/data-default`. To go back,
+restore that copy and use the older Innkeeper.
 
 ## For Android developers
 
-Turn on adb in a profile's settings in Innkeeper. The profile then listens on a
-loopback port, as the Android Emulator does, so `adb devices`, Android Studio
-and Gradle list it as `emulator-<port>` with no `adb connect`; use that serial
-(Gradle's `connectedAndroidTest` fails for `host:port` serials). Only your
-`~/.android/adbkey.pub` is authorized. Run instrumented tests that take
-screenshots in a phone or tablet profile: in windowed mode each app window is
-its own display, so a capture of the default display doesn't show the app.
+Turn on adb in a profile's settings in Innkeeper. The profile then listens for
+adb on a loopback port, as the Android Emulator does. `adb devices`, Android
+Studio and Gradle find it without `adb connect` and list it with an
+`emulator-<n>` serial. Use that serial, because Gradle's `connectedAndroidTest`
+fails with `host:port` serials. Innkeeper authorizes only the key in your
+`~/.android/adbkey.pub`.
+
+Run instrumented tests that take screenshots in a phone or tablet profile. In
+windowed mode, each app window is a separate display, so a capture of the
+default display doesn't show the app.
 
 ## How is this different from Waydroid?
 
-Waydroid runs a custom LineageOS image in a root-managed LXC container with the
-kernel's binder, and gives apps separate uids. Innkeeper needs no root, kernel
-module or custom image: it runs Google's unmodified AOSP build inside its
-Flatpak sandbox, emulating binder in userspace, at the cost of isolation between
-Android apps. Each app gets a desktop window of its own, integrated with the
-desktop's portals, notifications and media controls.
+Waydroid runs a custom LineageOS image in an LXC container that needs root. It
+uses the kernel's binder driver and gives each app a separate uid. Innkeeper
+needs no root, kernel module or custom image. It runs Google's unmodified AOSP
+build inside its Flatpak sandbox and emulates binder in userspace. As a result,
+Android apps are not isolated from each other. Each app gets its own desktop
+window, which uses the desktop's portals, notifications and media controls.
 
 ## Status
 
-**Pre-alpha.** Android boots in about 3 s warm. Apps built with Compose,
-Flutter, React Native, Capacitor and Godot work, each in its own window with
-sound. Not supported:
+Innkeeper is pre-alpha. A warm Android boot takes about 3 s. Apps built with
+Compose, Flutter, React Native, Capacitor and Godot work, each in its own window
+with sound. Innkeeper doesn't support these apps:
 
-- apps that need Play Integrity (banking and the like);
-- VPN apps (the sandbox has no TUN device) and per-app firewalls or data usage;
-- ARM-only apps, which includes most games, until ARM translation lands
+- Apps that need Play Integrity, such as banking apps.
+- VPN apps, because the sandbox has no TUN device.
+- Per-app firewalls and per-app data usage.
+- ARM-only apps, which include most games. ARM translation is planned
   ([milestones](https://github.com/sargunv/innkeeper/milestones)).
 
 ## Develop
@@ -103,9 +114,10 @@ mise run build     # everything, staged into out/stage
 mise run test      # unit tests
 ```
 
-Start with [docs/architecture.md](docs/architecture.md), which maps every
-directory, and [docs/development.md](docs/development.md) for prerequisites,
-sessions and tests. Contributor and agent rules are in [AGENTS.md](AGENTS.md).
+Read [docs/architecture.md](docs/architecture.md) first. It describes what each
+directory contains. [docs/development.md](docs/development.md) covers
+prerequisites, sessions and tests. [AGENTS.md](AGENTS.md) has the rules for
+contributors and agents.
 
 ## License
 
