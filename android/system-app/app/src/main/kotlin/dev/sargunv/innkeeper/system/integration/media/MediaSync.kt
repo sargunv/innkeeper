@@ -16,10 +16,11 @@ import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
 
 /**
- * Active media sessions as desktop MPRIS players (host/bridge/src/system/mpris.rs): each session's
- * metadata and playback state go to the bridge as `MEDIA`, and MPRIS calls (media keys, the
- * desktop's media widget) come back as transport controls. Runs on the integration thread. Needs
- * the notification listener enabled (or MEDIA_CONTENT_CONTROL) to see other apps' sessions.
+ * Exposes active media sessions as desktop MPRIS players (host/bridge/src/system/mpris.rs). Each
+ * session's metadata and playback state go to the bridge as `MEDIA`, and MPRIS calls (media keys,
+ * the desktop's media widget) come back as transport controls. This runs on the integration thread.
+ * It needs the notification listener enabled, or MEDIA_CONTENT_CONTROL, to see other apps'
+ * sessions.
  */
 class MediaSync(private val context: Context, private val feature: IntegrationFeature) {
   private inner class Player(val id: Int, val controller: MediaController) :
@@ -56,7 +57,9 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
     update(list.orEmpty())
   }
 
-  /** The notification listener is enabled: we may now watch other apps' sessions. */
+  /**
+   * Called once the notification listener is enabled, which allows watching other apps' sessions.
+   */
   fun onListenerConnected() {
     feature.handler.post {
       if (listening) return@post
@@ -154,8 +157,8 @@ class MediaSync(private val context: Context, private val feature: IntegrationFe
       md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
         ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
         ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-    // Position-only changes don't need a message: the bridge extrapolates while playing. A
-    // position that jumps (a seek) does.
+    // Position-only changes don't need a message because the bridge extrapolates while playing. A
+    // position that jumps, as in a seek, does.
     val key =
       listOf(title, artist, album, state, actions, duration, speed, art?.generationId).toString()
     val expected = p.expectedPosition()

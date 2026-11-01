@@ -1,2 +1,2 @@
-<!-- innkeeper: disabled image HAL (sensors); see vendor/etc/init/android.hardware.sensors-service-multihal.rc -->
+<!-- innkeeper: blanks the sensors HAL declaration, whose service vendor/etc/init/android.hardware.sensors-service-multihal.rc drops. -->
 <manifest version="9.0" type="device"/>

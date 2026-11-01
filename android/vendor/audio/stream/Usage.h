@@ -60,8 +60,8 @@ inline int usagePriority(int32_t usage) {
   }
 }
 
-// Highest-priority usage among the active tracks. No tracks: nothing to
-// report (the caller sends no SET_METADATA).
+// Highest-priority usage among the active tracks. With no tracks there is
+// nothing to report, and the caller sends no SET_METADATA.
 inline std::optional<int32_t> selectUsage(const int32_t* usages, size_t count) {
   if (count == 0) return std::nullopt;
   int32_t best = usages[0];

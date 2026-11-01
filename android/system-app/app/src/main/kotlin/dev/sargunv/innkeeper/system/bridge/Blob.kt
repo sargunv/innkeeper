@@ -5,7 +5,7 @@ import android.system.Os
 import android.system.OsConstants
 import java.io.FileDescriptor
 
-/** Sealed memfds: how payloads too big for a message cross the socket. */
+/** Sealed memfds, which carry payloads too big for a message across the socket. */
 object Blob {
   private const val MFD_ALLOW_SEALING = 2
   private const val F_ADD_SEALS = 1033

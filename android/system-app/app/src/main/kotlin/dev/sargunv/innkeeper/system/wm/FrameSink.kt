@@ -56,9 +56,9 @@ class FrameSink(
     // HWC clears leases when its connection resets, even if the new bridge
     // has no display mapping yet and cannot forward the release event.
     frames.retire { image -> image.hardwareBuffer!!.use { presentationToken(it) == 0L } }
-    // HWC hands at most two images to Wayland; every excess frame is
-    // released before it reaches Wayland. Wait for that release notification
-    // rather than closing an image the compositor could still be reading.
+    // HWC hands at most two images to Wayland and releases every excess frame
+    // before it reaches Wayland. Wait for that release notification instead of
+    // closing an image the compositor could still be reading.
     while (frames.hasCapacity) {
       val image = reader.acquireNextImage() ?: break
       val id = image.hardwareBuffer!!.use { presentationToken(it) }

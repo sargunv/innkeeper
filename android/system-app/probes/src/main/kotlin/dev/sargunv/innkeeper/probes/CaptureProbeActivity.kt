@@ -9,7 +9,9 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.TextView
 
-/** Click to capture, R to release, C to request again; Escape deliberately stays captured. */
+/**
+ * Click to capture, R to release, and C to request again. Escape deliberately keeps the capture.
+ */
 class CaptureProbeActivity : Activity() {
   private lateinit var probe: TextView
   private var count = 0

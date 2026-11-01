@@ -160,7 +160,7 @@ int lxb_call(int sock, const struct lxb_msg* req, struct lxb_packet* reply) {
     r = lxb_recv(sock, reply);
     if (r != 0) return r;
     if (reply->type == LXB_REPLY && reply->tag == tag) return 0;
-    lxb_close_fds(reply);  // an event
+    lxb_close_fds(reply);  // an event or another request's reply
   }
 }
 

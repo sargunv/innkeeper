@@ -73,15 +73,17 @@ class BridgeDisplay {
   void present(const FrameInput& frame);
   void releaseImage(uint64_t token);
   void cursor(const CursorState* cursor);
-  // The rest: bridge lock held.
+  // The methods below run with the bridge lock held, except holds().
   void onRelease(uint32_t buffer, bool invalid);
-  // DISPLAY_ADD's answer: shown in `window`, or not shown (-1).
+  // Records the window from the DISPLAY_ADD reply, or -1 if the display is
+  // not shown.
   void setWindow(int64_t window) { mWindow = window; }
   bool shown() const { return mWindow >= 0; }
-  // Whether Wayland still holds buffer `source` (takes the bridge lock).
+  // Whether Wayland still holds buffer `source`. Takes the bridge lock.
   bool holds(uint64_t source);
-  // The bridge (re)connected without our buffers: not shown until it says
-  // so again, and the next frame adds a new pool.
+  // Called when the bridge reconnects without this display's buffers. The
+  // display stays hidden until the bridge shows it again, and the next frame
+  // adds a new pool.
   void reset() {
     mWindow = -1;
     for (auto& [_, buf] : mBuffers) {
@@ -108,7 +110,7 @@ class BridgeDisplay {
 
 class Bridge {
  public:
-  std::mutex mutex;  // displays, their window and pool state
+  std::mutex mutex;  // guards the displays, their windows and pool state
   std::atomic<uint32_t> nextBuffer{1};
 
   bool send(const lxb_msg& m, int fd = -1);
@@ -118,12 +120,12 @@ class Bridge {
     mThread = std::thread([this] { loop(); });
   }
   bool connected() const { return mSock.load() >= 0; }
-  // Registers a display; tells the bridge now if connected, else on
-  // connect.
+  // Registers a display and tells the bridge about it now if connected, or
+  // else on connect.
   void addDisplay(std::shared_ptr<BridgeDisplay> d);
   void removeDisplay(uint32_t id);
-  // Offers display `id` again if the bridge has no window for it and isn't
-  // answering an offer: a window asked for after the display was added.
+  // Offers display `id` again if the bridge has no window for it and no offer
+  // is pending. This picks up a window requested after the display was added.
   void offerAgain(uint32_t id);
 
  private:
@@ -151,7 +153,7 @@ bool Bridge::send(const lxb_msg& m, int fd) {
   return true;
 }
 
-// Bridge lock held.
+// The caller holds the bridge lock.
 void Bridge::sendAdd(const BridgeDisplay& d) {
   const uint32_t t = tag();
   mAdds[t] = d.id();
@@ -161,7 +163,7 @@ void Bridge::sendAdd(const BridgeDisplay& d) {
 
 void Bridge::addDisplay(std::shared_ptr<BridgeDisplay> d) {
   std::lock_guard lock(mutex);
-  // Same lock as loop()'s connect: exactly one of us adds the display.
+  // loop() takes the same lock on connect, so the display is added once.
   if (connected()) sendAdd(*d);
   mDisplays[d->id()] = std::move(d);
 }
@@ -184,8 +186,9 @@ void Bridge::removeDisplay(uint32_t id) {
     gone = std::move(it->second);
     mDisplays.erase(it);
   }
-  // Even if not shown yet: the bridge may be showing it by now. It drops
-  // the display's buffers with it.
+  // Send the removal even if the display is not shown yet, because the
+  // bridge may be showing it by now. The bridge drops the display's buffers
+  // with it.
   send(message(kDisplayRemove, tag(), {id}));
 }
 
@@ -203,7 +206,7 @@ void Bridge::handle(const lxb_packet& p) {
     std::lock_guard lock(mutex);
     auto add = mAdds.find(p.tag);
     if (add == mAdds.end()) {
-      // -ENOENT: a display or buffer the bridge already dropped.
+      // -ENOENT means the bridge already dropped the display or buffer.
       if (p.status != 0 && p.status != -ENOENT)
         LOGW("bridge: request %u failed: %d", p.tag, p.status);
       return;
@@ -267,7 +270,8 @@ void Bridge::loop() {
     }
     lastError = 0;
     LOGI("bridge: display service on %s", LXB_SOCKET_PATH);
-    // The bridge has none of our displays or buffers: add them again.
+    // A new connection has none of the displays or buffers, so add them
+    // again.
     std::lock_guard lock(mutex);
     mSock = fd;
     mAdds.clear();
@@ -311,8 +315,9 @@ void BridgeDisplay::releaseImage(uint64_t token) {
   b->send(m);
 }
 
-// CURSOR is accepted by validate rather than converted to CLIENT: these
-// pixels are exclusively the Wayland cursor, never part of the window frame.
+// Validate accepts CURSOR layers instead of converting them to CLIENT,
+// because their pixels go to the Wayland cursor and are not part of the window
+// frame.
 void BridgeDisplay::cursor(const CursorState* cursor) {
   std::vector<uint8_t> pixels;
   uint32_t w = 0, h = 0;
@@ -352,8 +357,9 @@ void BridgeDisplay::cursor(const CursorState* cursor) {
       }
     }
   }
-  // Reconnect invalidation and cache publication must be one transaction:
-  // an old connection's send cannot mark the new connection's cursor known.
+  // Reconnect invalidation and cache publication happen under one lock, so a
+  // send on an old connection cannot mark the new connection's cursor as
+  // known.
   std::lock_guard lock(b->mutex);
   if (
     mCursorKnown && pixels == mCursor && x == mCursorX && y == mCursorY &&
@@ -425,9 +431,9 @@ void BridgeDisplay::present(const FrameInput& frame) {
   uint32_t id = 0;
   {
     std::lock_guard lock(b->mutex);
-    // Keep fewer Wayland frames than the ImageReader's maxImages (3). A
-    // stalled/hidden compositor cannot exhaust its producer: excess frames
-    // are released without ever being handed to Wayland.
+    // Keep fewer Wayland frames than the ImageReader's maxImages (3), so a
+    // stalled or hidden compositor cannot exhaust the producer. Excess frames
+    // are released without being handed to Wayland.
     size_t pending = 0;
     for (auto& [_, buf] : mBuffers) pending += buf.busy;
     if (!shown() || pending >= kMaxPending) {
@@ -436,8 +442,8 @@ void BridgeDisplay::present(const FrameInput& frame) {
     }
     auto it = mBuffers.find(source);
     if (it == mBuffers.end()) {
-      // Resize and slot replacement retire old imports. Busy imports stay
-      // alive until wl_buffer.release; active ImageReader queues are small.
+      // Resizes and slot replacements retire old imports. Busy imports stay
+      // alive until wl_buffer.release, and active ImageReader queues are small.
       for (auto old = mBuffers.begin(); old != mBuffers.end();) {
         if (mBuffers.size() >= 4 && !old->second.busy) {
           b->send(message(kBufferRemove, b->tag(), {old->second.id}));
@@ -452,7 +458,7 @@ void BridgeDisplay::present(const FrameInput& frame) {
         {id, mId, w, h, format, bh->planes[0].stride,
          uint32_t(bh->planes[0].offset.get())}
       );
-      lxb_put_u64(&m, 0);  // allocator's modifier: LINEAR
+      lxb_put_u64(&m, 0);  // LINEAR, the allocator's modifier
       if (!b->send(m, bh->fd)) return;
       it = mBuffers.emplace(source, BridgeBuffer{id, buffer}).first;
     }
@@ -506,11 +512,11 @@ class BridgeVirtualPresenter : public Presenter {
  private:
   std::shared_ptr<BridgeDisplay> mDisplay;
 };
-// Phone mode's display 0: SurfaceFlinger's own client targets, copied on the
-// GPU into buffers of ours (they go back to SurfaceFlinger at once, while the
-// bridge keeps ours until Wayland releases them). Its window is the one the
-// window manager asks for display 0, at any time after boot: until then the
-// display is offered again every half second.
+// Presents display 0 in phone mode. SurfaceFlinger's client targets are
+// copied on the GPU into a pool of composer buffers, so the client targets go
+// back to SurfaceFlinger at once while the bridge keeps the copies until
+// Wayland releases them. The window manager may ask for display 0's window at
+// any time after boot, so the display is offered again every half second.
 class BridgePrimaryPresenter : public Presenter {
  public:
   BridgePrimaryPresenter(uint32_t width, uint32_t height)
@@ -545,7 +551,8 @@ class BridgePrimaryPresenter : public Presenter {
   }
 
  private:
-  // A pool buffer Wayland doesn't hold, (re)allocated at the target's size.
+  // Returns a pool buffer that Wayland does not hold. The pool is reallocated
+  // when the target's size or format changes.
   BufferPtr freeBuffer(const BufferHandle& like) {
     const auto* first = mPool.empty() ? nullptr : mPool[0]->info();
     if (

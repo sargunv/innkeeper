@@ -18,7 +18,7 @@ class InputTranslatorTest {
 
   private var tr = InputTranslator(now = { now })
 
-  // Feeds protocol lines; checks every motion event against InputDispatcher's verifier rules.
+  // Feeds protocol lines and checks every motion event against InputDispatcher's verifier rules.
   private fun feed(vararg lines: String): List<OutEvent> {
     val out = ArrayList<OutEvent>()
     for (l in lines) {
@@ -130,14 +130,14 @@ class InputTranslatorTest {
   @Test
   fun wheelDetentsScrollOneUnitEach() {
     feed("pointer_motion 1 5.00 5.00", "pointer_frame")
-    // One detent towards the user (Wayland +) = scroll down = AXIS_VSCROLL -1.
+    // One detent towards the user (Wayland +) scrolls down, which is AXIS_VSCROLL -1.
     val e =
       feed("pointer_axis_value120 0 120", "pointer_axis 2 0 15.000", "pointer_frame").single()
         as OutMotion
     assertEquals(MotionEvent.ACTION_SCROLL, e.action)
     assertEquals(-1f, e.pointers[0].vscroll)
     assertEquals(0f, e.pointers[0].hscroll)
-    // Horizontal: Wayland + (right) = AXIS_HSCROLL +; hi-res half detent.
+    // Horizontally, Wayland + (right) is AXIS_HSCROLL +. This is a hi-res half detent.
     val h = feed("pointer_axis_value120 1 60", "pointer_axis 3 1 7.500", "pointer_frame")
     assertEquals(0.5f, (h.single() as OutMotion).pointers[0].hscroll)
   }
@@ -153,7 +153,7 @@ class InputTranslatorTest {
   @Test
   fun touchpadScrollIsInDisplayPixels() {
     tr = InputTranslator(TranslatorConfig(scrollPixelsPerUnit = 64f), now = { now })
-    // A window at scale 2: 16 surface px = 32 display px = half a unit.
+    // In a window at scale 2, 16 surface px are 32 display px, which is half a unit.
     feed("window 640 400 2.000 5", "pointer_enter 1.00 1.00 5", "pointer_frame")
     val e = feed("pointer_axis 2 0 16.000", "pointer_frame").single() as OutMotion
     assertEquals(-0.5f, e.pointers[0].vscroll)
@@ -183,7 +183,7 @@ class InputTranslatorTest {
       listOf("release(1) state=0", "up state=0", "hover_move state=0", "hover_exit state=0"),
       names(feed("pointer_leave", "pointer_frame")),
     )
-    // Coming back hovers again; a stale release is ignored.
+    // Coming back hovers again, and a stale release is ignored.
     assertEquals(
       listOf("hover_move state=0"),
       names(feed("pointer_enter 1.00 1.00", "pointer_frame", "pointer_button 3 272 0")),
@@ -207,7 +207,7 @@ class InputTranslatorTest {
     assertEquals(listOf("move state=0"), names(mv))
     assertEquals(listOf(11f, 31f), (mv.single() as OutMotion).pointers.map { it.x })
 
-    // First finger lifts: pointer 0 at index 0; a new finger then reuses id 0.
+    // The first finger lifts as pointer 0 at index 0, and a new finger then reuses id 0.
     assertEquals(listOf("pointer_up(0) state=0"), names(feed("touch_up 4 7", "touch_frame")))
     val d3 = feed("touch_down 5 3 50.00 60.00", "touch_frame").single() as OutMotion
     assertEquals(MotionEvent.ACTION_POINTER_DOWN, d3.action and MotionEvent.ACTION_MASK)
@@ -314,7 +314,7 @@ class InputTranslatorTest {
 
   @Test
   fun modifiersHeldBeforeFocusComeFromXkb() {
-    // Ctrl held on the host before the window got focus: only the modifiers line says so.
+    // Ctrl was held on the host before the window got focus, so only the modifiers line reports it.
     val c = feed("keyboard_enter", "modifiers 4 0 0 0", "key 1 46 1").single() as OutKey
     assertEquals(KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON, c.metaState)
     // Super via xkb Mod4, Alt via Mod1.
@@ -331,7 +331,7 @@ class InputTranslatorTest {
   @Test
   fun staleXkbMaskDoesNotLeakIntoModifierRelease() {
     feed("key 1 29 1", "modifiers 4 0 0 0")
-    // Ctrl released: the compositor's modifiers update comes after the key line.
+    // When Ctrl is released, the compositor's modifiers update comes after the key line.
     val up = feed("key 2 29 0").single() as OutKey
     assertEquals(0, up.metaState)
   }
@@ -388,7 +388,7 @@ class InputTranslatorTest {
     val b = feed("pointer_motion 1032 3.00 3.00", "pointer_frame").single().eventTime
     assertEquals(16, b - a)
     assertTrue(b <= now)
-    // Host clock far ahead (or wrapped): clamped to now, never backwards.
+    // A host clock far ahead, or wrapped, is clamped to now and never goes backwards.
     val c = feed("pointer_motion 999999 4.00 4.00", "pointer_frame").single().eventTime
     assertEquals(now, c)
     val d = feed("pointer_motion 5 5.00 5.00", "pointer_frame").single().eventTime
@@ -530,7 +530,7 @@ class InputTranslatorTest {
   fun keysGoToTheFocusedWindow() {
     feed("keyboard_enter 5")
     assertEquals(5, feed("key 1 30 1").single().displayId)
-    // Focus moves to window 7 with A held: A is cancelled on 5.
+    // Focus moves to window 7 with A held, so A is cancelled on 5.
     val moved = feed("keyboard_leave 5", "keyboard_enter 7")
     val up = moved.single() as OutKey
     assertEquals(KeyEvent.ACTION_UP, up.action)
@@ -558,7 +558,7 @@ class InputTranslatorTest {
     tr = InputTranslator(TranslatorConfig(scrollPixelsPerUnit = 64f), now = { now })
     feed("window 800 600 2.000 5", "pointer_enter 1.00 1.00 5", "pointer_frame")
     val e = feed("pointer_axis 1 0 16.000", "pointer_frame").single() as OutMotion
-    // 16 surface px = 32 display px = half a unit; Wayland down is VSCROLL -1.
+    // 16 surface px are 32 display px, which is half a unit. Wayland down is VSCROLL -1.
     assertEquals(-0.5f, e.pointers[0].vscroll)
   }
 
@@ -567,7 +567,7 @@ class InputTranslatorTest {
   private fun axis(e: OutEvent, axis: Int, pointer: Int = 0) =
     e.motion().pointers[pointer].axes[axis] ?: 0f
 
-  // GestureConverter's handleScroll/endScroll: a fake finger that moves against the scroll.
+  // GestureConverter's handleScroll/endScroll moves a fake finger against the scroll.
   @Test
   fun fingerScrollIsAFakeFingerSwipe() {
     feed("window 640 400 2.000", "pointer_motion 1 100.00 100.00", "pointer_frame")
@@ -580,7 +580,7 @@ class InputTranslatorTest {
     assertEquals(MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE, down.classification)
     assertEquals(100f, down.pointers[0].y)
     assertEquals(1f, down.pointers[0].pressure)
-    // 5 surface px at scale 2 is 10 display px; scrolling down drags the content up.
+    // 5 surface px at scale 2 is 10 display px. Scrolling down drags the content up.
     val move = start[2].motion()
     assertEquals(90f, move.pointers[0].y)
     assertEquals(10f, axis(move, MotionEvent.AXIS_GESTURE_SCROLL_Y_DISTANCE))
@@ -592,7 +592,8 @@ class InputTranslatorTest {
     assertEquals(104f, next[0].motion().pointers[0].x)
     assertEquals(down.downTime, next[0].motion().downTime)
 
-    // The fingers lift: UP (the app flings from the finger's velocity), then the hover.
+    // When the fingers lift, UP comes first, and the app flings from the finger's velocity. The
+    // hover follows.
     now += 10
     val end =
       feed(
@@ -662,7 +663,7 @@ class InputTranslatorTest {
     assertTrue(verifier.idle)
   }
 
-  // GestureConverter's handlePinch/endPinch: two fake fingers around the cursor.
+  // GestureConverter's handlePinch/endPinch puts two fake fingers around the cursor.
   @Test
   fun pinchIsTwoFakeFingers() {
     feed("pointer_motion 1 300.00 200.00", "pointer_frame")
@@ -680,7 +681,7 @@ class InputTranslatorTest {
     assertEquals(MotionEvent.ACTION_MOVE, zoom.action)
     assertEquals(1.5f, axis(zoom, MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR))
     assertEquals(listOf(150f, 450f), zoom.pointers.map { it.x })
-    // The factor is since the last event; Wayland's scale is since the begin.
+    // The factor is relative to the last event, and Wayland's scale to the begin.
     val back = feed("gesture_pinch_update 4 0.00 0.00 0.7500 0.00").single().motion()
     assertEquals(0.5f, axis(back, MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR))
 
@@ -789,7 +790,7 @@ class InputTranslatorTest {
     assertEquals(listOf("move state=0"), names(stroke))
     assertEquals(1f, stroke[0].motion().pointers[0].pressure)
     assertEquals(down[1].motion().downTime, stroke[0].motion().downTime)
-    // The lift repeats the last contact; the new position hovers.
+    // The lift repeats the last contact, and the new position hovers.
     val up = feed("tablet_up", "tablet_motion 112.00 56.00", "tablet_pressure 0", "tablet_frame 6")
     assertEquals(listOf("up state=0", "hover_enter state=0", "hover_move state=0"), names(up))
     assertEquals(stroke[0].motion().pointers, up[0].motion().pointers)

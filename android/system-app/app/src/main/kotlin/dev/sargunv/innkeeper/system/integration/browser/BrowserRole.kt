@@ -9,11 +9,11 @@ import android.util.Log
 
 /**
  * Keeps [BrowserActivity] as Android's default browser so ordinary links open on the desktop.
- * Verified App Links still win before the browser role. Custom Tabs may explicitly target an
+ * Verified App Links take precedence over the browser role. Custom Tabs may explicitly target an
  * installed Android browser without giving it ordinary links.
  *
- * The image's WebView test shell would otherwise be the browser; its browser activity is turned off
- * (apps that pick a browser themselves, like Wikipedia, would choose it).
+ * The image's WebView test shell would otherwise be the browser, so its browser activity is turned
+ * off. Apps that pick a browser themselves, like Wikipedia, would otherwise choose it.
  */
 object BrowserRole {
   /** Browsers that come with the image and aren't meant for users. */

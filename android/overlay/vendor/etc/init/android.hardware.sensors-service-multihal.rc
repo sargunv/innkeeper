@@ -1,1 +1,1 @@
-# innkeeper: disabled image HAL; the session has no sensors
+# innkeeper: blanked to drop the image's sensors HAL, since the session has no sensors.

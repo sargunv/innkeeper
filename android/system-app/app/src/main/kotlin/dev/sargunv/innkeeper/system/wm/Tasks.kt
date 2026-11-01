@@ -13,7 +13,7 @@ import dev.sargunv.innkeeper.system.bridge.toRgba
 object Tasks {
   private val loadIcon by lazy { ActivityManager.TaskDescription::class.java.getMethod("loadIcon") }
 
-  /** Includes resource icons and icons persisted by system_server, not just in-memory bitmaps. */
+  /** Includes resource icons and icons persisted by system_server as well as in-memory bitmaps. */
   fun descriptionIcon(context: Context, description: ActivityManager.TaskDescription): Wire.Rgba? {
     val icon = (loadIcon.invoke(description) as? Icon)?.loadDrawable(context) ?: return null
     val width = icon.intrinsicWidth.coerceAtLeast(1)
@@ -49,7 +49,7 @@ object Tasks {
 
   fun displayId(t: ActivityManager.RunningTaskInfo): Int = displayIdField.getInt(t)
 
-  /** An ordinary app task: not home, recents, the assistant or a dream. */
+  /** An ordinary app task, excluding home, recents, the assistant and dreams. */
   fun isAppTask(t: ActivityManager.RunningTaskInfo): Boolean {
     val type = activityTypeField.getInt(t)
     return (type == ACTIVITY_TYPE_STANDARD || type == ACTIVITY_TYPE_UNDEFINED) &&

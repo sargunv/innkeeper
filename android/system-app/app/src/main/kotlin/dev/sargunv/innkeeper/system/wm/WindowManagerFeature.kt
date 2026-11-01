@@ -44,15 +44,15 @@ import kotlin.math.roundToInt
  *    SurfaceFlinger then creates the HWC virtual display, which gets the requested window.
  * 2. The app starts there (`ActivityOptions.setLaunchDisplayId`).
  * 3. Window events: a resize (`window`) resizes the display to the window's logical size times its
- *    scale, at 160 dpi times the scale; `close` removes the tasks and releases the display once
- *    they are gone (see [close]); `keyboard_enter` focuses the display's top task.
+ *    scale, at 160 dpi times the scale. `close` removes the tasks and releases the display once
+ *    they are gone (see [close]). `keyboard_enter` focuses the display's top task.
  * 4. A task stack listener closes the window when the display's last task is gone, and moves any
  *    app task that shows up on display 0 into a window of its own.
  *
- * A launch may carry the desktop's activation token (docs/display.md, "Launch feedback"): a new
- * window uses it on its first frame, a shown one when it is focused.
+ * A launch may carry the desktop's activation token (docs/display.md, "Launch feedback"). A new
+ * window uses it on its first frame, and a shown window uses it when it is focused.
  *
- * Everything runs on one handler thread; public methods post to it.
+ * Everything runs on one handler thread, and public methods post to it.
  */
 class WindowManagerFeature(
   private val context: Context,
@@ -74,13 +74,13 @@ class WindowManagerFeature(
 
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
   /**
-   * Phone mode (innkeeper-session's vendor.innkeeper.mode): display 0, with SystemUI and the
-   * launcher, in one window; apps start there instead of in windows of their own.
+   * Phone mode (innkeeper-session's vendor.innkeeper.mode) shows display 0, with SystemUI and the
+   * launcher, in one window. Apps start there instead of in windows of their own.
    */
   private val phone = SystemProperties.get("vendor.innkeeper.mode") == "phone"
-  /** Phone mode: the bridge shows display 0's window. */
+  /** In phone mode, whether the bridge shows display 0's window. */
   private var phoneMapped = false
-  /** Phone mode: display 0's rotation, as its window shows it. */
+  /** In phone mode, display 0's rotation as its window shows it. */
   private var phoneRotation = 0
   private val phoneDisplays =
     object : DisplayManager.DisplayListener {
@@ -92,8 +92,8 @@ class WindowManagerFeature(
 
       override fun onDisplayRemoved(id: Int) {}
     }
-  // The scale new windows start at: the last one a window reported (kept across restarts, so the
-  // first window after boot opens at the desktop's scale).
+  // New windows start at the last scale a window reported. It is kept across restarts, so the
+  // first window after boot opens at the desktop's scale.
   private var scale = prefs.getFloat(PREF_SCALE, 1f).toDouble().takeIf { it in 0.5..8.0 } ?: 1.0
   private var refreshQueued = false
   private val changeListeners = CopyOnWriteArrayList<() -> Unit>()
@@ -130,7 +130,7 @@ class WindowManagerFeature(
     /** Counted down once the window shows its first frame. */
     val shown = CountDownLatch(1)
     val created = SystemClock.uptimeMillis()
-    /** The owning Android task; null only while a desktop launch is starting. */
+    /** The owning Android task. It is null only while a desktop launch is starting. */
     var taskId: Int? = null
     var tasks: List<Int> = emptyList()
     var hadTask = false
@@ -174,7 +174,7 @@ class WindowManagerFeature(
     handler = Handler(thread.looper)
     frames.start()
     frameHandler = Handler(frames.looper)
-    // Host visibility owns display power. Do not acquire our own screen wake lock:
+    // Host visibility controls display power. Don't acquire a screen wake lock here, because
     // it would feed back into the policy observed for desktop idle inhibition.
     Settings.System.putInt(
       context.contentResolver,
@@ -183,10 +183,10 @@ class WindowManagerFeature(
     )
     input.addListener(this)
     atm.registerTaskStackListener(taskListener)
-    // AppWarnings shows these on the default display, which has no window; AppWarningActivity
+    // AppWarnings shows these on the default display, which has no window. AppWarningActivity
     // shows the same warning in the app's own window instead.
     runCatching { SystemProperties.set("debug.wm.disable_deprecated_target_sdk_dialog", "true") }
-    // Our empty HOME is for windowed profiles; a phone's is its launcher.
+    // The empty HOME is for windowed profiles. In phone mode the launcher is HOME.
     context.packageManager.setComponentEnabledSetting(
       ComponentName(context, HomeActivity::class.java),
       if (phone) PackageManager.COMPONENT_ENABLED_STATE_DISABLED
@@ -206,7 +206,7 @@ class WindowManagerFeature(
     val uri: Uri? = null,
     val widthDp: Int = 0,
     val heightDp: Int = 0,
-    /** The desktop's `xdg_activation_v1` token for this launch (empty: none). */
+    /** The desktop's `xdg_activation_v1` token for this launch, or empty for none. */
     val token: String = "",
     val file: Boolean = false,
     /** An explicit file handoff prepared by the system app (VIEW or SEND). */
@@ -244,7 +244,7 @@ class WindowManagerFeature(
     }
   }
 
-  /** Closes the window of [display] (or of [pkg]): finishes its tasks, releases the display. */
+  /** Closes the window of [display] or of [pkg], finishing its tasks and releasing the display. */
   fun close(display: Int?, pkg: String?): String = onWm {
     val w =
       windows.values.firstOrNull { (display != null && it.id == display) || it.pkg == pkg }
@@ -360,7 +360,7 @@ class WindowManagerFeature(
           Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(r.component)
         else -> pm.getLaunchIntentForPackage(r.pkg) ?: return "error: no launcher activity"
       }
-    // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher does: an existing task comes to the front.
+    // NEW_TASK | RESET_TASK_IF_NEEDED, as a launcher uses, brings an existing task to the front.
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
     if (phone) {
       start(intent, DEFAULT_DISPLAY)
@@ -374,12 +374,13 @@ class WindowManagerFeature(
         return "error: launcher activity does not support multiple tasks"
       intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
     }
-    // A desktop link is an untrusted-origin VIEW: only activities that accept web links.
+    // A desktop link is an untrusted-origin VIEW, so it may open only activities that accept web
+    // links.
     if (r.uri != null && !r.file) intent.addCategory(Intent.CATEGORY_BROWSABLE)
 
     refreshTasks()
-    // Like a launcher, restore the most recently used task of the package, not the oldest
-    // window. Window ownership itself is always by task, including a cross-app activity stack.
+    // Like a launcher, restore the package's most recently used task instead of its oldest
+    // window. Window ownership is always by task, including a cross-app activity stack.
     val recent = tasksOf(r.pkg).firstOrNull()
     val existingWindow =
       TaskRouting.launcherWindow(
@@ -391,8 +392,8 @@ class WindowManagerFeature(
     existingWindow
       ?.takeUnless { r.newWindow }
       ?.let { w ->
-        // A link or another activity opens in the app's window; its launcher activity just
-        // brings the task back.
+        // A link or another activity opens in the app's window. Its launcher activity brings
+        // the task back.
         if (r.launchIntent != null || r.uri != null || r.component != null) start(intent, w.id)
         focus(w, activate = true, token = r.token)
         return "focused display=${w.id} package=${r.pkg}"
@@ -409,7 +410,7 @@ class WindowManagerFeature(
         r.token,
         if (r.newWindow) null else recent?.taskDescription,
       ) ?: return "error: no virtual display"
-    // An existing task (say, started on display 0) moves over instead of starting anew.
+    // An existing task, such as one started on display 0, moves over instead of starting anew.
     val existing = tasksOf(r.pkg).firstOrNull()
     if (!r.newWindow && existing != null && r.uri == null && r.launchIntent == null) {
       move(existing, w)
@@ -497,7 +498,7 @@ class WindowManagerFeature(
     return w
   }
 
-  // Asks the bridge for the window, then gives the display its surface: SurfaceFlinger creates
+  // Asks the bridge for the window, then gives the display its surface. SurfaceFlinger creates
   // the HWC virtual display at that point, and the bridge shows it in the requested window.
   private fun attachSurface(w: AppWindow) {
     val requested =
@@ -537,7 +538,7 @@ class WindowManagerFeature(
       }
     }
     input.destroyWindow(w.id)
-    // DESTROY_CONTENT_ON_REMOVAL: whatever is left on the display goes with it.
+    // With DESTROY_CONTENT_ON_REMOVAL, whatever is left on the display is destroyed with it.
     wms.setDisplayWindowInsetsController(w.id, null)
     // Detach the surface now so no in-flight frame races the reader close at the deferred
     // release (the software renderer keeps presenting during teardown). The display stays
@@ -553,12 +554,12 @@ class WindowManagerFeature(
   // Android 17 relaunches an activity that finished mid-relaunch for a display move onto the
   // task's new display at the end of that transition (AppCompatDisplayCompatPolicy's self-kill
   // recovery). If the display is released first, that launch targets a missing display id and
-  // takes system_server down with every app window (#50). So [close] only tears the window down;
-  // [releaseDisplayWhenTasksGone] polls on its own thread (the gettasks binder walk must not
-  // delay the window manager's thread) until no task is on the display or still being removed,
-  // then posts the release after a short settle. A task that never leaves, or a relaunch that
-  // came back here, is cut off at RELEASE_TIMEOUT_MS: the release reparents it to the default
-  // display, where it is adopted into a new window.
+  // takes system_server down with every app window (#50). So [close] only tears the window down.
+  // [releaseDisplayWhenTasksGone] polls until no task is on the display or still being removed,
+  // then posts the release after a short settle. It polls on its own thread because the getTasks
+  // binder walk must not delay the window manager's thread. A task that never leaves, or a
+  // relaunch that came back here, is cut off at RELEASE_TIMEOUT_MS. The release reparents it to
+  // the default display, where it is adopted into a new window.
   private fun releaseDisplayWhenTasksGone(
     w: AppWindow,
     removed: Set<Int>,
@@ -573,7 +574,7 @@ class WindowManagerFeature(
         }
         val busy =
           when (val tasks = allTasksOrError()) {
-            null -> true // a failed getTasks is not "all tasks gone": the display stays held.
+            null -> true // a failed getTasks doesn't mean no tasks, so keep the display held.
             else -> tasks.any { Tasks.displayId(it) == w.id || it.taskId in removed }
           }
         if (busy) {
@@ -585,7 +586,7 @@ class WindowManagerFeature(
         Thread.sleep(RELEASE_POLL_MS)
       }
       // The release runs on the window manager's thread, after any pending
-      // close/start work; the state machine above did the waiting.
+      // close or start work. The state machine above has already done the waiting.
       handler.post {
         val left =
           try {
@@ -616,7 +617,7 @@ class WindowManagerFeature(
     }
   }
 
-  // A new connection (the bridge restarted, without our windows): ask for them again.
+  // A new connection means the bridge restarted without our windows, so ask for them again.
   override fun onConnected() {
     handler.post {
       if (phone) requestPhoneWindow()
@@ -642,7 +643,7 @@ class WindowManagerFeature(
           scale = e.scale
           prefs.edit().putFloat(PREF_SCALE, e.scale.toFloat()).apply()
         }
-        // Coalesce interactive resizes; each one is a configuration change for the app.
+        // Coalesce interactive resizes, since each one is a configuration change for the app.
         w.resize?.let(handler::removeCallbacks)
         val r = Runnable {
           w.resize = null
@@ -673,7 +674,8 @@ class WindowManagerFeature(
           queueAppearance(it)
         }
       is HostEvent.WindowUnmapped -> {
-        // Its HWC display went away, or the composer did (closed windows are gone from [windows]).
+        // Its HWC display or the composer went away. Closed windows are already gone from
+        // [windows].
         val w = windows[e.display] ?: return
         Log.w(TAG, "window of display ${w.id} disappeared; requesting it again")
         remap(w)
@@ -682,8 +684,8 @@ class WindowManagerFeature(
     }
   }
 
-  // A hidden window's display group sleeps, which stops its activity; each window owns its group,
-  // so this can't sleep another window or display 0. The display and tasks stay registered.
+  // A hidden window's display group sleeps, which stops its activity. Each window owns its group,
+  // so this can't put another window or display 0 to sleep. The display and tasks stay registered.
   private fun setVisible(w: AppWindow, shown: Boolean) {
     val visible = w.visibility.update(shown) ?: return
     val now = SystemClock.uptimeMillis()
@@ -874,11 +876,11 @@ class WindowManagerFeature(
   // Syncs windows with the tasks on their displays: closes windows whose app is gone, shows
   // app warnings once a window has its task, and adopts app tasks from display 0.
   private fun refreshTasks() {
-    // A phone's apps stay on display 0, in its one window.
+    // In phone mode, apps stay on display 0 in its single window.
     if (phone) return
     val tasks = allTasksOrError() ?: return
-    // Oldest first: a desktop launch claims its pending display before an activity it starts
-    // creates another task there. Activity starts without NEW_TASK keep the same task id.
+    // Go oldest first so that a desktop launch claims its pending display before an activity it
+    // starts creates another task there. Activity starts without NEW_TASK keep the same task id.
     for (t in tasks.asReversed()) {
       if (!Tasks.isAppTask(t)) continue
       val component = t.baseActivity ?: t.topActivity ?: continue
@@ -906,7 +908,7 @@ class WindowManagerFeature(
           TaskRouting.Destination.Ignore -> null
         } ?: continue
       w.taskId = t.taskId
-      // Record ownership before moving: the next callback must not create another display.
+      // Record ownership before moving so that the next callback doesn't create another display.
       if (source != w.id) move(t, w)
     }
     val byDisplay = tasks.groupBy { t ->
@@ -963,7 +965,8 @@ class WindowManagerFeature(
     /** Phone mode's window: its `app_id` suffix, and its package in [packages]. */
     private const val PHONE_PACKAGE = "phone"
     private const val PHONE_TITLE = "Android"
-    // PowerManager: operate on this window's OWN_DISPLAY_GROUP, never the whole session.
+    // PowerManager wake and sleep calls target this window's OWN_DISPLAY_GROUP, never the whole
+    // session.
     private const val WAKE_REASON_APPLICATION = 2
     private const val SLEEP_REASON_APPLICATION = 0
     private const val SLEEP_FLAG_NO_DOZE = 1
@@ -978,9 +981,10 @@ class WindowManagerFeature(
     private const val RELEASE_SETTLE_MS = 500L
     private const val RELEASE_TIMEOUT_MS = 3_000L
 
-    // WindowManager.DISPLAY_IME_POLICY_LOCAL: the input method binds to editors in the window. The
-    // default one, the Innkeeper Keyboard (ime/), draws nothing; an Android IME the user picks
-    // shows inside the window. HIDE would keep any IME from binding (IMMS returns NO_IME).
+    // With WindowManager.DISPLAY_IME_POLICY_LOCAL, the input method binds to editors in the window.
+    // The default input method, the Innkeeper Keyboard (ime/), draws nothing, and an Android IME
+    // the user picks shows inside the window. HIDE would keep any IME from binding (IMMS returns
+    // NO_IME).
     private const val DISPLAY_IME_POLICY_LOCAL = 0
 
     // DisplayManager.VIRTUAL_DISPLAY_FLAG_* (several are @SystemApi or hidden).

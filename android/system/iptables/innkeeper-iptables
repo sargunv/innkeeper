@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# Android shares the host's network. Accept netd's firewall commands without
-# changing it; restore stays alive and echoes its #PING acknowledgements.
+# Android shares the host's network, so this accepts netd's firewall commands
+# without applying them. The -restore variants keep running and echo netd's
+# #PING lines back as acknowledgements.
 case ${0##*/} in
   *-restore)
     while IFS= read -r line; do

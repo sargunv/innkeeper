@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The bridge client's framing over a socketpair, with the test as the
-// bridge: messages encode as docs/bridge-protocol.md says, fds cross, and
-// lxb_call skips events to find its reply.
+// Tests the bridge client's framing over a socketpair, with the test acting
+// as the bridge. Messages must encode as docs/bridge-protocol.md specifies,
+// fds must cross, and lxb_call must skip events to find its reply.
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +19,7 @@
     }                                                            \
   } while (0)
 
-// The bridge's side: a raw packet, optionally with an fd.
+// Sends a raw packet from the bridge's side, optionally with an fd.
 static void bridge_send(int sock, const uint8_t* b, size_t n, int fd) {
   struct lxb_msg m = {.n = n};
   memcpy(m.b, b, n);
@@ -67,8 +67,8 @@ static void test_overflow_refused(int client) {
   CHECK(lxb_send(client, &m, -1) == -EMSGSIZE);
 }
 
-// lxb_call skips an event (and closes its fd) and returns the reply with
-// its status split off, and its fd.
+// lxb_call skips an event and closes its fd, then returns the reply with its
+// status split off and its fd attached.
 static void test_call(int client, int bridge) {
   int pipefd[2];
   CHECK(pipe(pipefd) == 0);

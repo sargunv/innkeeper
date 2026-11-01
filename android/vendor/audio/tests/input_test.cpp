@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Android-side low-level FMQ test. PCM is fake: never accesses host audio.
+// Android-side low-level FMQ test. The PCM device is fake and does not
+// access host audio.
 #include <cstdio>
 #include <cstdlib>
 

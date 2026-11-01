@@ -15,11 +15,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * One connection to a host bridge service (docs/bridge-protocol.md): HELLO for [service], then
- * requests from any thread, each answered by a reply that may carry fds, and events for [listener]
- * on the reader thread. Reconnects with backoff.
+ * One connection to a host bridge service (docs/bridge-protocol.md). It sends HELLO for [service],
+ * then requests from any thread, each answered by a reply that may carry fds. Events go to
+ * [listener] on the reader thread. It reconnects with backoff.
  *
- * [latencySensitive]: the reader thread runs at display priority (host input).
+ * With [latencySensitive], the reader thread runs at display priority for host input.
  */
 class BridgeConnection(
   private val service: Int,
@@ -29,13 +29,13 @@ class BridgeConnection(
   private val path: String = SOCKET,
 ) {
   interface Listener {
-    /** After each HELLO, on a thread of its own: it may make blocking [call]s. */
+    /** Called after each HELLO on its own thread, so it may make blocking [call]s. */
     fun onConnected() {}
 
-    /** The connection ended; reader thread. */
+    /** The connection ended. Called on the reader thread. */
     fun onDisconnected() {}
 
-    /** One event; [fds] are closed when this returns. Reader thread. */
+    /** One event, on the reader thread. [fds] are closed when this returns. */
     fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) {}
   }
 
@@ -54,7 +54,7 @@ class BridgeConnection(
 
   private var thread: Thread? = null
   private val tags = AtomicInteger(HELLO_TAG + 1)
-  // Reply handlers by tag; each owns the reply's fds.
+  // Reply handlers by tag. Each owns the reply's fds.
   private val pending = ConcurrentHashMap<Int, (Reply) -> Unit>()
   private val writeLock = Any()
 
@@ -64,8 +64,8 @@ class BridgeConnection(
   }
 
   /**
-   * Sends request [type] and waits for its reply (null: not connected, failed or timed out). The
-   * caller closes the reply's fds. [fd], if given, goes along and stays the caller's.
+   * Sends request [type] and waits for its reply, or returns null if not connected, failed or timed
+   * out. The caller closes the reply's fds. [fd], if given, goes along and stays the caller's.
    */
   fun call(
     type: Int,
@@ -86,8 +86,8 @@ class BridgeConnection(
 
   /**
    * Sends request [type] without waiting. [blob], if given, goes along as a sealed memfd.
-   * [onReply], if given, gets the reply on the reader thread; its fds are closed after. Returns
-   * false if not connected or the write failed.
+   * [onReply], if given, gets the reply on the reader thread, and its fds are closed afterwards.
+   * Returns false if not connected or the write failed.
    */
   fun send(
     type: Int,
@@ -118,7 +118,7 @@ class BridgeConnection(
     return writeFiles(type, if (fd == null) emptyArray() else arrayOf(fd), body, onReply)
   }
 
-  /** Sends up to four fds; ownership stays with the caller. */
+  /** Sends up to four fds. Ownership stays with the caller. */
   fun writeFiles(
     type: Int,
     fds: Array<FileDescriptor>,
@@ -208,14 +208,15 @@ class BridgeConnection(
             if (status != 0) throw IOException("bridge refused service $service: $status")
             connected = true
             Log.i(TAG, "connected to bridge service $service")
-            // On its own thread: it may make calls, whose replies this thread reads.
+            // This runs on its own thread because it may make calls, whose replies this thread
+            // reads.
             Thread(listener::onConnected, "innkeeper-bridge-$service-up").start()
             continue
           }
           val handler = pending.remove(tag)
           if (handler != null) {
             val reply = Reply(status, body.slice().order(ByteOrder.LITTLE_ENDIAN), fds)
-            fds = emptyArray() // the handler's now
+            fds = emptyArray() // now owned by the handler
             handler(reply)
           } else if (status != 0) {
             Log.w(TAG, "service $service request $tag failed: $status")
@@ -233,8 +234,8 @@ class BridgeConnection(
     }
   }
 
-  // Negative nice values need RLIMIT_NICE, which the rootless session may not grant: take what
-  // there is.
+  // Negative nice values need RLIMIT_NICE, which the rootless session may not grant, so try each
+  // priority in turn and keep the default if neither is allowed.
   private fun raisePriority() {
     for (prio in
       intArrayOf(Process.THREAD_PRIORITY_URGENT_DISPLAY, Process.THREAD_PRIORITY_DISPLAY)) {

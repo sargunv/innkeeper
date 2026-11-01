@@ -15,11 +15,12 @@ import android.view.KeyEvent
 /**
  * `ACTION_OPEN_DOCUMENT`, `GET_CONTENT`, `CREATE_DOCUMENT` and `OPEN_DOCUMENT_TREE`, answered with
  * the desktop's file chooser (the FileChooser portal, parented to the app's window). Its intent
- * filters outrank DocumentsUI's (priority 200 against 100; honoured for privileged apps). The
- * results are [HostDocumentsProvider] URIs. Without the bridge the request goes on to DocumentsUI.
+ * filters outrank DocumentsUI's (priority 200 against 100, which Android honours for privileged
+ * apps). The results are [HostDocumentsProvider] URIs. Without the bridge the request goes on to
+ * DocumentsUI.
  *
- * Grants follow DocumentsUI: read for GET_CONTENT; read, write and persistable for OPEN_DOCUMENT
- * and CREATE_DOCUMENT; plus prefix for a folder.
+ * Grants follow DocumentsUI. GET_CONTENT gets read access, and OPEN_DOCUMENT and CREATE_DOCUMENT
+ * get read, write and persistable access. A folder also gets a prefix grant.
  */
 class PickerActivity : Activity() {
   private val state = PickerState()
@@ -34,7 +35,7 @@ class PickerActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     if (savedInstanceState != null) {
-      // The process restarted under us; the pick is gone.
+      // The process restarted during the pick, so the pick is gone.
       finish()
       return
     }
@@ -69,7 +70,7 @@ class PickerActivity : Activity() {
         // The immediate connected check can race the HELLO callback. Only the first wins.
         if (!isFinishing && state.connected()) {
           stopWaiting()
-          // PICK waits for an acknowledgement; keep that wait off the UI thread too.
+          // PICK waits for an acknowledgement. Keep that wait off the UI thread too.
           Thread(
               {
                 val ok = HostFiles.pick(mode, write, displayId, "", name, mimes, pickListener)
@@ -143,8 +144,8 @@ class PickerActivity : Activity() {
     finish()
   }
 
-  // The window shows nothing, but it has focus while the dialog is up: Escape or Back gives up
-  // (the desktop dialog stays until the user closes it; its answer is then ignored).
+  // The window shows nothing, but it has focus while the dialog is up, so Escape or Back cancels
+  // the pick. The desktop dialog stays until the user closes it, and its answer is then ignored.
   override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
     if (keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BACK) {
       cancel()

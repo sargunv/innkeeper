@@ -72,8 +72,8 @@ AllocStatus allocateBuffer(
   AllocStatus st = checkRequest(req, &l);
   if (st != AllocStatus::Ok) return st;
 
-  // CPU mappings (cursors and our software codecs and cameras read them too)
-  // and multi-plane formats retain the existing LINEAR path, as in minigbm.
+  // Buffers with CPU mappings (cursors, software codecs and cameras read
+  // them) and multi-plane formats stay LINEAR, as in minigbm.
   const bool gpuOnly =
     !(req.usage &
       (usage::CPU_READ_MASK | usage::CPU_WRITE_MASK | usage::COMPOSER_CURSOR |

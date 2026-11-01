@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// On-device gralloc test. Needs servicemanager and our allocator running.
-//  1. IAllocator over binder + mapper.innkeeper.so via dlopen (what libui
-//  does).
-//  2. The public AHardwareBuffer API, i.e. libnativewindow -> libui Gralloc5 ->
-//     our allocator, with the mapper found through the VINTF manifest.
+// On-device gralloc test. It needs servicemanager and the Innkeeper allocator
+// running, and covers two paths:
+//  1. IAllocator over binder and mapper.innkeeper.so through dlopen, as libui
+//     does.
+//  2. The public AHardwareBuffer API, which goes through libnativewindow and
+//     libui's Gralloc5 to the allocator, with the mapper found through the
+//     VINTF manifest.
 #include <string>
 #include <vector>
 

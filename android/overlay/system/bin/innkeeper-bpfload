@@ -1,10 +1,10 @@
 #!/system/bin/sh
-# Wrapper for netbpfload in an Innkeeper session (see the tethering APEX's
-# netbpfload.35rc override). Runs in its own mount namespace. netbpfload
+# Wraps netbpfload in an Innkeeper session (see the tethering APEX's
+# netbpfload.35rc override). It runs in its own mount namespace. netbpfload
 # writes /proc/sys/kernel/unprivileged_bpf_disabled and
-# /proc/sys/net/core/bpf_jit_{enable,kallsyms}; in our user and network
-# namespaces the first is read-only and the others don't exist, so give it
-# writable stand-ins (only it can see them).
+# /proc/sys/net/core/bpf_jit_{enable,kallsyms}. In the session's user and
+# network namespaces the first is read-only and the others don't exist, so this
+# script gives netbpfload writable stand-ins that only its namespace sees.
 d=/dev/.innkeeper-bpfload
 mkdir -p $d/core
 echo 2 >$d/unprivileged_bpf_disabled

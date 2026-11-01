@@ -10,7 +10,7 @@ import android.util.Log
 /**
  * The desktop's PowerProfileMonitor portal as Android's battery saver, which apps read from
  * `PowerManager.isPowerSaveMode` and its broadcast (AntennaPod pauses downloads). The desktop's
- * value wins whenever it is sent: at each connect and on each change.
+ * value wins whenever it is sent, which is at each connect and on each change.
  */
 class PowerSaver(context: Context) {
   private val pm = context.getSystemService(PowerManager::class.java)

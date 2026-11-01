@@ -4,8 +4,8 @@ package dev.sargunv.innkeeper.system.wm
 /** One ImageReader's acquired images. All calls run on its frame handler. */
 class RetainedFrames<T>(private val limit: Int, private val close: (T) -> Unit) {
   private val held = LinkedHashMap<Long, T>()
-  // RELEASE can beat ImageReader.onImageAvailable. These are credits for one
-  // acquisition, never permission to overwrite a later frame of the same buffer.
+  // RELEASE can arrive before ImageReader.onImageAvailable. Each credit covers one
+  // acquisition and does not allow overwriting a later frame of the same buffer.
   private val released = LinkedHashSet<Long>()
   val hasCapacity: Boolean
     get() = held.size < limit

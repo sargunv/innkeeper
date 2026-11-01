@@ -10,8 +10,9 @@ namespace innkeeper::hwc {
 
 namespace {
 constexpr int64_t kPrimaryDisplay = 0;
-// HWC ids of virtual displays (SurfaceFlinger maps them to its own ids). Never
-// reused, so a late command for a destroyed display can't hit a new one.
+// HWC ids of virtual displays (SurfaceFlinger maps them to its own ids). They
+// are never reused, so a late command for a destroyed display can't hit a new
+// one.
 constexpr int64_t kFirstVirtualDisplay = 100;
 constexpr int32_t kMaxVirtualDisplays = 32;
 }  // namespace
@@ -36,7 +37,7 @@ class ComposerClient::Results {
 
 ComposerClient::ComposerClient() {
   mNextVirtualDisplay = kFirstVirtualDisplay;
-  // One primary display; windows show virtual displays.
+  // There is one primary display, and windows show virtual displays.
   const DisplayConfig config = primaryConfig();
   mDisplays.emplace(
     kPrimaryDisplay, std::make_unique<Display>(
@@ -115,8 +116,8 @@ ndk::ScopedAStatus ComposerClient::createVirtualDisplay(
   if (mCallback) d->vsync().setCallback(mCallback);
   mDisplays.emplace(id, std::move(d));
   out->display = id;
-  // The sink decides the format; "implementation defined" sinks (an
-  // ImageReader with PRIVATE format) get RGBA_8888 from our gralloc anyway.
+  // The sink decides the format. Our gralloc resolves "implementation
+  // defined" sinks (an ImageReader with PRIVATE format) to RGBA_8888.
   out->format = format == common::PixelFormat::IMPLEMENTATION_DEFINED
                   ? common::PixelFormat::RGBA_8888
                   : format;
@@ -174,7 +175,7 @@ void ComposerClient::executeDisplayCommand(
 
   if (cmd.colorTransformMatrix) d->setColorTransform(*cmd.colorTransformMatrix);
   if (cmd.brightness) {
-    // No BRIGHTNESS capability is advertised; accept and ignore.
+    // No BRIGHTNESS capability is advertised, so accept and ignore the call.
   }
   if (cmd.activeConfig && cmd.activeConfig->configId != d->config().id) {
     results.error(Error::BadConfig);
@@ -371,8 +372,8 @@ ndk::ScopedAStatus ComposerClient::getDisplayCapabilities(
   int64_t displayId, std::vector<DisplayCapability>* out
 ) {
   DISPLAY_OR_RETURN();
-  // We never apply color transforms ourselves (so no
-  // SKIP_CLIENT_COLOR_TRANSFORM).
+  // The composer does not apply color transforms, so it does not advertise
+  // SKIP_CLIENT_COLOR_TRANSFORM.
   *out = {DisplayCapability::MULTI_THREADED_PRESENT};
   return ndk::ScopedAStatus::ok();
 }
@@ -389,7 +390,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayIdentificationData(
   int64_t displayId, DisplayIdentification*
 ) {
   DISPLAY_OR_RETURN();
-  // No EDID: SurfaceFlinger falls back to a port-based display id.
+  // Without an EDID, SurfaceFlinger falls back to a port-based display id.
   return toStatus(Error::Unsupported);
 }
 

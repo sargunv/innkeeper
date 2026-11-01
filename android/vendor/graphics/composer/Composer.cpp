@@ -38,7 +38,8 @@ ndk::ScopedAStatus Composer::createClient(
 }
 
 ndk::ScopedAStatus Composer::getCapabilities(std::vector<Capability>* out) {
-  // We return no present fences (or unreliable ones from future backends).
+  // The composer returns no present fences, and future backends may return
+  // unreliable ones.
   *out = {Capability::PRESENT_FENCE_IS_NOT_RELIABLE};
   return ndk::ScopedAStatus::ok();
 }

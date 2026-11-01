@@ -25,11 +25,11 @@ import org.json.JSONObject
  * {"action":"close","display":-1,"package":P}
  * ```
  *
- * The answer is `{"error":"","reply":...}`: for `launch` and `close` one line that starts with the
- * outcome (`launched display=N ...`, `focused ...`, `closed ...`), for `windows` one line per
- * window. `launch` with `wait` answers once a new window shows its first frame (at most
- * [FIRST_FRAME_TIMEOUT_MS]; `shown=no` after the reply if it didn't). Runs on a worker thread,
- * never the UI thread.
+ * The answer is `{"error":"","reply":...}`. For `launch` and `close` the reply is one line that
+ * starts with the outcome (`launched display=N ...`, `focused ...`, `closed ...`), and for
+ * `windows` it is one line per window. `launch` with `wait` answers once a new window shows its
+ * first frame, waiting at most [FIRST_FRAME_TIMEOUT_MS]. If no frame arrives in time, the reply
+ * ends with `shown=no`. This runs on a worker thread and not on the UI thread.
  */
 class WindowCommands(private val context: Context) {
   fun execute(command: JSONObject): JSONObject =

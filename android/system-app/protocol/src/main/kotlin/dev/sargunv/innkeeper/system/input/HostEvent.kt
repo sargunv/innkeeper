@@ -2,13 +2,13 @@
 package dev.sargunv.innkeeper.system.input
 
 /**
- * An event from the bridge's input service (host/bridge/src/input/proto.rs): one input line
- * (protocol v2, [parse]), or a window's mapping. Coordinates are in the pixels of the display the
+ * An event from the bridge's input service (host/bridge/src/input/proto.rs), either one input line
+ * (protocol v2, [parse]) or a window's mapping. Coordinates are in the pixels of the display the
  * event targets, times are the compositor's millisecond clock (u32, wraps), buttons and keys are
  * Linux evdev codes.
  *
- * Every window is an Android display: the lines that start a pointer, keyboard or touch sequence
- * (and `window`, `close` and the leave lines) carry the display id of their window.
+ * Every window is an Android display. The lines that start a pointer, keyboard or touch sequence,
+ * as well as `window`, `close` and the leave lines, carry the display id of their window.
  */
 sealed interface HostEvent {
   /** Window size in logical (surface) pixels and the output scale. */
@@ -31,10 +31,12 @@ sealed interface HostEvent {
 
   data class PointerButton(val time: Long, val button: Int, val pressed: Boolean) : HostEvent
 
-  /** [axis] 0 = vertical, 1 = horizontal; [value] in surface pixels, positive = down/right. */
+  /**
+   * [axis] is 0 for vertical, 1 for horizontal. [value] is in surface pixels, positive down/right.
+   */
   data class PointerAxis(val time: Long, val axis: Int, val value: Double) : HostEvent
 
-  /** High-resolution wheel steps: 120 = one detent. */
+  /** High-resolution wheel steps, where 120 is one detent. */
   data class PointerAxisValue120(val axis: Int, val v120: Int) : HostEvent
 
   data class PointerAxisStop(val time: Long, val axis: Int) : HostEvent
@@ -54,7 +56,7 @@ sealed interface HostEvent {
 
   data class PinchBegin(val time: Long, val fingers: Int) : HostEvent
 
-  /** [scale] since the begin; [rotation] in degrees clockwise since the last update. */
+  /** [scale] is relative to the begin. [rotation] is in degrees clockwise since the last update. */
   data class PinchUpdate(
     val time: Long,
     val dx: Float,
@@ -71,7 +73,7 @@ sealed interface HostEvent {
 
   // A tablet tool (pen, eraser), gathered until [TabletFrame].
 
-  /** [tool] is its `BTN_TOOL_*` code; later tablet events go to [display]. */
+  /** [tool] is its `BTN_TOOL_*` code. Later tablet events go to [display]. */
   data class TabletProximityIn(val tool: Int, val display: Int = 0) : HostEvent
 
   data object TabletProximityOut : HostEvent
@@ -102,9 +104,9 @@ sealed interface HostEvent {
 
   /**
    * Key [code] (evdev). Under the host's keymap a press also carries [sym], the key's level-1
-   * keysym in the active layout (0: unknown), and what it types: [text], or [compose] for a step of
-   * a compose sequence (a dead key), which types nothing. [repeat]: the compositor repeated a held
-   * key (wl_keyboard v10, after a repeat rate of 0).
+   * keysym in the active layout (0 if unknown), and what it types, which is either [text] or
+   * [compose] for a step of a compose sequence (a dead key) that types nothing. [repeat] means the
+   * compositor repeated a held key (wl_keyboard v10, after a repeat rate of 0).
    */
   data class Key(
     val time: Long,
@@ -116,7 +118,7 @@ sealed interface HostEvent {
     val repeat: Boolean = false,
   ) : HostEvent
 
-  /** The host's key repeat: [rate] per second (0: off) after [delay] ms. */
+  /** The host's key repeat of [rate] per second, or 0 for off, after [delay] ms. */
   data class RepeatInfo(val rate: Int, val delay: Int) : HostEvent
 
   /** xkb modifier masks in the compositor's keymap. */
@@ -145,12 +147,12 @@ sealed interface HostEvent {
   /** The user asked to close the window of [display]. */
   data class Close(val display: Int = 0) : HostEvent
 
-  // The input service's window events (not lines), see WindowManagerFeature.
+  // The input service's window events, which are not lines. See WindowManagerFeature.
 
   /** [display] shows in the window the window manager asked for. */
   data class WindowMapped(val display: Int) : HostEvent
 
-  /** The window of [display] is gone: its HWC display went away, or it was destroyed. */
+  /** The window of [display] is gone because its HWC display went away or it was destroyed. */
   data class WindowUnmapped(val display: Int) : HostEvent
 
   // Text input (docs/input.md): the host input method's results for the Innkeeper
@@ -159,13 +161,13 @@ sealed interface HostEvent {
   /** Delete [before] bytes before the cursor and [after] bytes after it. */
   data class TextDelete(val before: Int, val after: Int) : HostEvent
 
-  /** Insert [text] (several lines append). */
+  /** Insert [text]. Several of these lines append to each other. */
   data class TextCommit(val text: String) : HostEvent
 
-  /** The new preedit and its cursor (-1: hidden); empty: none. */
+  /** The new preedit and its cursor, which is -1 when hidden. An empty preedit means none. */
   data class TextPreedit(val begin: Int, val end: Int, val text: String) : HostEvent
 
-  /** Apply what came since the last one, for the window of [display]. */
+  /** Apply what arrived since the last TextDone to the window of [display]. */
   data class TextDone(val display: Int) : HostEvent
 
   companion object {
@@ -193,7 +195,7 @@ sealed interface HostEvent {
 
       val args = f.size - 1
 
-      // Trailing display id; [default] if absent.
+      // The trailing display id, or [default] if absent.
       fun display(i: Int, default: Int) = if (args >= i) int(i) else default
 
       return when (f[0]) {
@@ -265,7 +267,7 @@ sealed interface HostEvent {
       }
     }
 
-    // `key <t> <code> <0|1|2> [<sym> [text <text> | compose]]`; null if the text is malformed.
+    // `key <t> <code> <0|1|2> [<sym> [text <text> | compose]]`. Null if the text is malformed.
     private fun key(f: List<String>): Key? {
       val repeat = f[3] == "2"
       val pressed = repeat || flag(f[3])
@@ -285,7 +287,7 @@ sealed interface HostEvent {
         else -> throw NumberFormatException(s)
       }
 
-    // Extra trailing fields are accepted (forward compatibility); missing ones are not.
+    // Extra trailing fields are accepted for forward compatibility, but missing ones are not.
     private inline fun need(args: Int, n: Int, make: () -> HostEvent): HostEvent? =
       if (args >= n) make() else null
   }

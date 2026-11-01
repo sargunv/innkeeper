@@ -16,12 +16,12 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * Diagnostic window for docs/display.md: shows (and logs, tag `InnkeeperProbe`) the window's
+ * Diagnostic window for docs/display.md. It shows and logs (tag `InnkeeperProbe`) the window's
  * system-bar and IME insets and its size, over a card with 24 dp elevation on a light background,
  * so a screenshot shows whether elevation shadows render.
  *
- * `innkeeper run dev.sargunv.innkeeper.probes` opens the probes' launcher; e2e launches this
- * activity through the session API's `Launch` with its component.
+ * `innkeeper run dev.sargunv.innkeeper.probes` opens the probes' launcher. The e2e tests launch
+ * this activity through the session API's `Launch` with its component.
  */
 class WindowProbeActivity : Activity() {
   private lateinit var text: TextView

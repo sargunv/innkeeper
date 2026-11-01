@@ -10,9 +10,9 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_sargunv_innkeeper_system_wm_FrameSink_presentationToken(
   JNIEnv* env, jobject, jobject hardwareBuffer
 ) {
-  // AHardwareBuffer_getId identifies the GraphicBuffer wrapper, rather than
-  // the gralloc allocation that HWC receives. This LL-NDK system API exposes
-  // its native handle without mapping the image's pixels.
+  // AHardwareBuffer_getId identifies the GraphicBuffer wrapper, which differs
+  // from the gralloc allocation that HWC receives. This LL-NDK system API
+  // exposes the allocation's native handle without mapping the image's pixels.
   using GetHandle = const native_handle_t* (*)(const AHardwareBuffer*);
   static auto getHandle = reinterpret_cast<GetHandle>(
     dlsym(RTLD_DEFAULT, "AHardwareBuffer_getNativeHandle")

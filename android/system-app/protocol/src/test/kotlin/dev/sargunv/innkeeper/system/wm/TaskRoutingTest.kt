@@ -30,9 +30,10 @@ class TaskRoutingTest {
   @Test
   fun crossAppActivityStaysInTaskButNewTaskLeavesCallersWindow() {
     val windows = listOf(Window(4, 31), Window(5, 32))
-    // No NEW_TASK: Android changes the top activity, keeping task 31.
+    // Without NEW_TASK, Android changes the top activity and keeps task 31.
     assertEquals(Destination.Existing(4), TaskRouting.destination(31, 4, windows))
-    // NEW_TASK/MULTIPLE_TASK: Android supplies a new task id, even on the caller's display.
+    // With NEW_TASK and MULTIPLE_TASK, Android supplies a new task id, even on the caller's
+    // display.
     assertEquals(Destination.NewWindow, TaskRouting.destination(33, 4, windows))
   }
 

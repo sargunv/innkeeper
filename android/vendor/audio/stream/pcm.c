@@ -99,7 +99,8 @@ void bridge_pcm_close(struct bridge_pcm* p) {
   free(p);
 }
 
-// Capture ignores it: the bridge drops SET_METADATA on record streams.
+// Capture streams skip this because the bridge drops SET_METADATA on record
+// streams.
 void bridge_pcm_set_usage(struct bridge_pcm* p, uint32_t usage) {
   if (!p || p->input) return;
   pthread_mutex_lock(&p->lock);
@@ -113,8 +114,8 @@ void bridge_pcm_set_usage(struct bridge_pcm* p, uint32_t usage) {
 
 // ---- output ----
 
-// Frames presented as of now (all rings and fallback time), never more than
-// written.
+// Frames presented so far across all rings and fallback time, capped at the
+// frames written.
 static uint64_t presented_locked(struct bridge_pcm* p) {
   uint64_t total = total_of(p);
   uint64_t pr;
@@ -130,9 +131,9 @@ static uint64_t presented_locked(struct bridge_pcm* p) {
   return pr > total ? total : pr;
 }
 
-// The ring is our share of the latency, so keep it small whatever buffer
-// the stream asked for: two periods of at most RING_PERIOD_MS. A write
-// bigger than the ring simply blocks until the last part fits.
+// The ring adds to the output latency, so it stays at two periods of at most
+// RING_PERIOD_MS whatever buffer the stream asked for. A write bigger than the
+// ring blocks until its last part fits.
 static uint32_t ring_period(const struct bridge_pcm* p) {
   uint32_t max = p->rate * RING_PERIOD_MS / 1000;
   uint32_t f = p->period_frames < max ? p->period_frames : max;
@@ -145,8 +146,9 @@ static void connect_locked(struct bridge_pcm* p) {
     .rate = p->rate,
     .channels = (uint8_t)p->channels,
     .format = LXB_S16LE,
-    // Capture cannot backpressure the source: retain the stream's buffer so
-    // a burst read does not lose samples while its consumer is scheduled out.
+    // Capture cannot backpressure the source, so the ring keeps the stream's
+    // whole buffer and a burst read loses no samples while its consumer is
+    // scheduled out.
     .period_frames = p->input ? p->period_frames : ring_period(p),
     .periods = p->input ? p->periods : 2,
     .name = "Android",
@@ -157,11 +159,12 @@ static void connect_locked(struct bridge_pcm* p) {
   }
   uint64_t pos = presented_locked(p);
   if (lxb_open_output(&c, &p->s) == 0) {
-    // Whatever the virtual clock hadn't played yet is lost; start the
-    // new ring's positions from here.
+    // Frames the virtual clock had not played yet are lost, and the new
+    // ring's positions start from here.
     p->base = total_of(p);
     p->fallback = false;
-    // A reopened ring starts as "Android"; restore the last reported usage.
+    // A reopened ring starts with the "Android" label, so restore the last
+    // reported usage.
     if (p->usage_set) lxb_set_metadata(&p->s, p->usage, "");
   } else if (!p->fallback) {
     p->fallback = true;
@@ -179,7 +182,7 @@ static void enter_fallback_locked(struct bridge_pcm* p) {
   p->fb_f0 = pos;
 }
 
-// No bridge: block like a device consuming at the nominal rate.
+// Without a bridge, block like a device that consumes at the nominal rate.
 static int fallback_write(struct bridge_pcm* p, uint32_t frames) {
   for (;;) {
     pthread_mutex_lock(&p->lock);
@@ -218,7 +221,7 @@ static int write_frames(
     __atomic_fetch_add(&p->total, (uint64_t)r, __ATOMIC_ACQ_REL);
     return r;
   }
-  // Dead stream, or the bridge stopped consuming for WRITE_TIMEOUT_MS.
+  // The stream died, or the bridge stopped consuming for WRITE_TIMEOUT_MS.
   ALOGW(
     "bridge stream %s; dropping to the virtual clock",
     r == 0 ? "stalled" : "died"

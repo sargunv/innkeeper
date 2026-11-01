@@ -1,2 +1,2 @@
-<!-- innkeeper: a sensor-hub HAL sample; the session has no sensors (see android/overlay/README.md) -->
+<!-- innkeeper: blanks a sample sensor-hub HAL, since the session has no sensors. See android/overlay/README.md. -->
 <manifest version="9.0" type="device"/>

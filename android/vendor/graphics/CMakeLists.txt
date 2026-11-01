@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Innkeeper display HALs, part of the root superbuild. With the NDK (preset
-# "android"): the vendor binaries and on-device tests. Natively (preset
-# "host-tests"): host (glibc) unit tests of the buffer/mapper code.
+# Innkeeper display HALs, part of the root superbuild. The NDK build (preset
+# "android") produces the vendor binaries and on-device tests. The native build
+# (preset "host-tests") produces host (glibc) unit tests of the buffer and
+# mapper code.
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -19,7 +20,7 @@ innkeeper_gen_aidl(
 set(HAL ${CMAKE_CURRENT_SOURCE_DIR})
 set(HAL_INCLUDES ${HAL}/common/include ${AOSP}/include ${AIDL_GEN_DIR}/include)
 if(NOT ANDROID)
-  # glibc host: shims for headers that assume Bionic.
+  # Shims for headers that assume Bionic, for glibc host builds.
   list(APPEND HAL_INCLUDES ${HAL}/common/host-compat)
   add_compile_options(-include ${HAL}/common/host-compat/host_compat.h)
 endif()
@@ -34,7 +35,7 @@ if(ANDROID)
   target_link_libraries(innkeeper_common PUBLIC log)
 endif()
 
-# IMapper v5: exports only AIMapper_loadIMapper + ANDROID_HAL_STABLEC_VERSION.
+# IMapper v5 exports only AIMapper_loadIMapper and ANDROID_HAL_STABLEC_VERSION.
 add_library(mapper SHARED mapper/mapper.cpp)
 set_target_properties(
   mapper
@@ -116,7 +117,7 @@ if(ANDROID)
       nativewindow
       dl)
 
-  # On-device tests (never installed).
+  # On-device tests, which are not installed.
   add_executable(
     gpu_copy_test tests/android/gpu_copy_test.cpp composer/GpuCopy.cpp
     composer/Buffer.cpp allocator/gpu_buffer.cpp)

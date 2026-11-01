@@ -23,7 +23,8 @@ class BufferRef {
   const native_handle_t* handle() const { return mHandle; }
   // Our gralloc's handle info, or nullptr for foreign buffers.
   const BufferHandle* info() const { return asBufferHandle(mHandle); }
-  // CPU mapping of the whole fd (lazy, cached); nullptr on failure.
+  // Maps the whole fd for CPU access on first use and caches the mapping.
+  // Returns nullptr on failure.
   const uint8_t* map();
   bool setPresentationToken(uint64_t token);
 
@@ -38,8 +39,8 @@ using BufferPtr = std::shared_ptr<BufferRef>;
 class BufferSlots {
  public:
   void resize(size_t n) { mSlots.resize(n); }
-  // Applies a composer3 Buffer: a non-null handle replaces the slot (dup'ing
-  // its fds), a null handle selects the cached one.
+  // Applies a composer3 Buffer. A non-null handle replaces the slot with a
+  // dup of its fds, and a null handle selects the cached one.
   Error update(const c3::Buffer& buffer, BufferPtr* out);
 
  private:

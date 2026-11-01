@@ -2,24 +2,25 @@
  * Vulkan vendor driver smoke test for a Bionic process (NDK build).
  *
  *   vkdriver_test [--hal /vendor/lib64/hw/vulkan.radv.so | --loader]
- * [--udmabuf] [--anb]
+ *                 [--udmabuf] [--anb] [--anb-hal] [--deferred]
  *
- * --hal (default vulkan.radv.so): load the HAL module the way Android's
- *   libvulkan does (sphal namespace via libvndksupport, HMI symbol, open
- * "vk0").
- * --loader: go through the system libvulkan.so instead (needs properties).
+ * --hal (default vulkan.radv.so) loads the HAL module as Android's libvulkan
+ *   does, through the sphal namespace with libvndksupport, the HMI symbol and
+ *   open("vk0").
+ * --loader goes through the system libvulkan.so instead and needs properties.
  *
- * Always: create an instance and device, then run a compute dispatch into a
- * host-visible buffer and check the result.
- * --udmabuf: import a memfd/udmabuf dma-buf as VkDeviceMemory, write it from a
- *   compute shader, check through the memfd mapping.
- * --anb-hal: same, but the buffer comes from the graphics HAL's allocator
- *   code and is imported through the real mapper.innkeeper.so (libhalbuf.so).
- * --deferred: with --anb/--anb-hal, use libvulkan's deferred-allocation
- *   swapchain path (bind the gralloc buffer with vkBindImageMemory2).
- * --anb: create a VkImage from a gralloc-style native handle
- *   (VkNativeBufferANDROID) backed by udmabuf, as libvulkan's swapchain does;
- *   requires the mock mapper (MESA_GRALLOC_MAPPER_SUFFIX=inkptest).
+ * Every run creates an instance and device, then runs a compute dispatch into
+ * a host-visible buffer and checks the result.
+ * --udmabuf imports a memfd/udmabuf dma-buf as VkDeviceMemory, writes it from
+ *   a compute shader and checks it through the memfd mapping.
+ * --anb creates a VkImage from a gralloc-style native handle
+ *   (VkNativeBufferANDROID) backed by udmabuf, as libvulkan's swapchain does.
+ *   It requires the mock mapper (MESA_GRALLOC_MAPPER_SUFFIX=inkptest).
+ * --anb-hal runs the --anb test with a buffer from the graphics HAL's
+ *   allocator code, imported through the real mapper.innkeeper.so
+ *   (libhalbuf.so).
+ * --deferred, with --anb or --anb-hal, uses libvulkan's deferred-allocation
+ *   swapchain path, which binds the gralloc buffer with vkBindImageMemory2.
  */
 #define _GNU_SOURCE
 #define VK_NO_PROTOTYPES
@@ -312,7 +313,7 @@ static void setup_device(PFN_vkCreateInstance create_instance) {
   for (unsigned i = 0; i < sizeof(want) / sizeof(*want); i++) {
     bool have = has_ext(want[i]);
     printf("  %-52s %s\n", want[i], have ? "yes" : "NO");
-    /* Leave out the Android-only extensions: the loader owns those. */
+    /* Leave out the Android-only extensions, which the loader owns. */
     if (have && strncmp(want[i], "VK_ANDROID_", 11))
       enable[nenable++] = want[i];
   }
@@ -345,7 +346,8 @@ static void setup_device(PFN_vkCreateInstance create_instance) {
   load_device_fns();
   vkGetDeviceQueue(dev, qfam, 0, &queue);
   /* Dispatchable objects from a HAL carry HWVULKAN_DISPATCH_MAGIC for the
-   * loader to overwrite; we call the driver directly, so leave it. */
+   * loader to overwrite. This test calls the driver directly, so it leaves the
+   * magic in place. */
 
   /* Compute pipeline: data[i] = i * i + seed */
   VkShaderModuleCreateInfo smci = {
@@ -526,8 +528,8 @@ static int test_compute(void) {
   return bad != 0;
 }
 
-/* memfd + /dev/udmabuf, the way our gralloc allocates. Returns the dma-buf fd.
- */
+/* Allocates a memfd and wraps it with /dev/udmabuf, as our gralloc does.
+ * Returns the dma-buf fd. */
 static int make_udmabuf(size_t size, int* memfd_out, void** map_out) {
   int memfd = memfd_create("vkdriver_test", MFD_ALLOW_SEALING);
   if (
@@ -662,9 +664,10 @@ static int test_anb(bool hal) {
   VkNativeBufferANDROID nb = {
     .sType = VK_STRUCTURE_TYPE_NATIVE_BUFFER_ANDROID,
     .handle = h,
-    /* Deliberately wrong (the real row pitch is wider): only the mapper's
-     * PLANE_LAYOUTS metadata has the truth, so this passes only if the
-     * driver asked the IMapper rather than guessing from the ANB. */
+    /* This stride is deliberately wrong, because the real row pitch is
+     * wider. Only the mapper's PLANE_LAYOUTS metadata has the real pitch, so
+     * the test passes only if the driver asks the IMapper instead of guessing
+     * from the ANB. */
     .stride = width,
     .format = 1,     /* HAL_PIXEL_FORMAT_RGBA_8888 */
     .usage3 = 0x300, /* GPU_TEXTURE | GPU_RENDER_TARGET */
@@ -686,9 +689,9 @@ static int test_anb(bool hal) {
   VkImage img;
   VkResult r;
   if (anb_deferred) {
-    /* libvulkan's deferred-allocation swapchain (what ANGLE uses): create
-     * the image with VkImageSwapchainCreateInfoKHR only, then bind the
-     * gralloc buffer at acquire time with vkBindImageMemory2(memory =
+    /* libvulkan's deferred-allocation swapchain, which ANGLE uses, creates
+     * the image with only VkImageSwapchainCreateInfoKHR and binds the gralloc
+     * buffer at acquire time with vkBindImageMemory2(memory =
      * VK_NULL_HANDLE, pNext = VkNativeBufferANDROID -> swapchain info).
      * The driver never dereferences the swapchain handle on Android. */
     VkImageSwapchainCreateInfoKHR isci = {
@@ -776,8 +779,8 @@ static int test_anb(bool hal) {
   vkCmdCopyBufferToImage(
     cmd, src, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy
   );
-  /* Hand the buffer to the "presenter": general layout, foreign queue, host
-   * visible. */
+  /* Hand the buffer to the "presenter" with a general layout, the foreign
+   * queue and host visibility. */
   ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   ib.dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_MEMORY_READ_BIT;
   ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;

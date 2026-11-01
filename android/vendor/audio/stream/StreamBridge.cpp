@@ -74,8 +74,8 @@ ndk::ScopedAStatus StreamOut::updateMetadata(
   for (const auto& track : metadata.tracks) {
     usages.push_back(static_cast<int32_t>(track.usage));
   }
-  // Empty track list: leave the last label in place. bridge_pcm_set_usage skips
-  // a repeated usage once the bridge stream exists.
+  // An empty track list leaves the last label in place. bridge_pcm_set_usage
+  // skips a repeated usage once the bridge stream exists.
   stream_->noteUsage(selectUsage(usages.data(), usages.size()));
   return ndk::ScopedAStatus::ok();
 }

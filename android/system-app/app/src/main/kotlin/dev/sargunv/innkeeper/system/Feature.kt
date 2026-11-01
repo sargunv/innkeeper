@@ -6,8 +6,8 @@ interface Feature {
   val name: String
 
   /**
-   * Starts the feature's own threads; must not block. Features run for the life of the persistent
-   * process, so there is no stop.
+   * Starts the feature's own threads and must not block. Features run for the life of the
+   * persistent process, so there is no stop.
    */
   fun start()
 }

@@ -22,8 +22,7 @@ int main() {
   CHECK(!validBufferSize(48001));
   CHECK(kPeriodFrames * kPeriods * 1000 / kRate == 10);
   CHECK(kFrameBytes == 4);
-  // Report the whole downstream queue; round up, including partial
-  // milliseconds.
+  // Report the whole downstream queue, rounding partial milliseconds up.
   CHECK(latencyMs(0) == 0);
   CHECK(latencyMs(1) == 1);
   CHECK(latencyMs(48) == 1);

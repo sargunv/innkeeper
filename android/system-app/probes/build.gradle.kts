@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// InnkeeperProbes.apk (dev.sargunv.innkeeper.probes): diagnostic activities and the input
-// harness for the end-to-end and compat tests. Platform-signed like the system
-// app, but never staged: `:probes:install` puts it in out/test/probes, and the
-// tests install it into their session.
+// InnkeeperProbes.apk (dev.sargunv.innkeeper.probes) holds diagnostic activities and the input
+// harness for the end-to-end and compat tests. It is platform-signed like the system app but is
+// not staged. `:probes:install` puts it in out/test/probes, and the tests install it into their
+// session.
 plugins { id("com.android.application") }
 
 val sdk = extra["compileSdk"] as Int

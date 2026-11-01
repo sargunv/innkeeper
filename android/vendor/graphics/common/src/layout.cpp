@@ -98,8 +98,8 @@ const FormatInfo kFormats[] = {
    {packed(16, {Y, 6, 10}), {32, 2, 2, 2, {{CB, 6, 10}, {CR, 22, 10}}}}},
 };
 
-// RADV needs linear row pitches that are multiples of 256 bytes (measured,
-// android/vendor/vulkan/README.md).
+// RADV needs linear row pitches that are multiples of 256 bytes, as measured
+// in android/vendor/vulkan/README.md.
 constexpr uint64_t kRowAlign = 256;
 
 uint32_t divUp(uint32_t v, uint32_t d) { return (v + d - 1) / d; }

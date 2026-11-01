@@ -15,7 +15,7 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/** Ordinary VIEW and sharesheet intents with a read-granted ODT, never shipped. */
+/** Ordinary VIEW and sharesheet intents with a read-granted ODT. It is not shipped. */
 class HandoffProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Primary scheduling clock follows host presentation phase; other displays
-// and the no-window fallback use a CLOCK_MONOTONIC timer.
+// The primary display's scheduling clock follows the host presentation
+// phase. Other displays and the no-window fallback use a CLOCK_MONOTONIC
+// timer.
 #pragma once
 
 #include <atomic>

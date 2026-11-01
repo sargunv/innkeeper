@@ -16,8 +16,8 @@ import java.nio.ByteBuffer
 
 /**
  * The host's state over the bridge's host state service (host/bridge/src/hoststate/proto.rs): the
- * power saver, the network's metering and location. (The battery goes to the Health HAL,
- * android/vendor/health, over a connection of its own.) Events are handled on the feature's thread.
+ * power saver, the network's metering and location. The battery goes to the Health HAL
+ * (android/vendor/health) over its own connection. Events are handled on the feature's thread.
  */
 class HostStateFeature(private val context: Context, private val network: HostNetworkFeature) :
   Feature, BridgeConnection.Listener {
@@ -67,7 +67,7 @@ class HostStateFeature(private val context: Context, private val network: HostNe
       Wire.EV_NETWORK -> {
         body.get() // available
         val m = body.get().toInt() and 0xff
-        // 0 unknown, 1 not metered, 2 metered. Unknown reads as unmetered, as Android's own
+        // 0 unknown, 1 not metered, 2 metered. Unknown reads as unmetered, matching Android's
         // default for wired networks.
         network.setMetered(m == 2)
       }

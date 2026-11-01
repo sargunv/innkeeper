@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package dev.sargunv.innkeeper.system.input
 
-/** Per-package Escape policy, read for every new key press; held keys keep their original code. */
+/** Per-package Escape policy, read for every new key press. Held keys keep their original code. */
 class PackageInputSettings(
   private val read: (String) -> Boolean,
   private val write: (String, Boolean) -> Unit,

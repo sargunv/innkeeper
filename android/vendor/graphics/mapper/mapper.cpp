@@ -97,7 +97,7 @@ class Registry {
 
 Registry& registry() {
   static Registry* r =
-    new Registry();  // never destroyed: used from any thread at exit
+    new Registry();  // never destroyed, because any thread may use it at exit
   return *r;
 }
 
@@ -216,7 +216,7 @@ AIMapper_Error lock(
   }
   waitFence(acquireFence);
   if (!b->mapPixels()) return AIMAPPER_ERROR_NO_RESOURCES;
-  // Memory is CPU-coherent shmem on x86; no DMA_BUF_IOCTL_SYNC needed.
+  // Memory is CPU-coherent shmem on x86, so no DMA_BUF_IOCTL_SYNC is needed.
   *outData = b->base;
   return AIMAPPER_ERROR_NONE;
 }

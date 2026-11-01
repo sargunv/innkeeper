@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The buffer_handle_t layout shared by our allocator, mapper and composer.
 //
-// Two fds, as minigbm and Mesa's importers expect (planes first, metadata
-// last):
+// The handle has two fds, pixel data first and metadata last, as minigbm and
+// Mesa's importers expect:
 //   fd          pixel data, [0, totalSize), layerCount layers. A dma-buf from
 //               /dev/udmabuf (or a plain memfd if udmabuf is not available,
 //               flagged by kFlagDmabuf being clear), or, for GPU-only RGB
@@ -78,7 +78,8 @@ static_assert(
 );
 static_assert(sizeof(BufferHandle) % sizeof(int) == 0);
 
-// Validates layout/magic; returns nullptr if h is not one of ours.
+// Validates the layout and magic. Returns nullptr if h is not an Innkeeper
+// handle.
 inline const BufferHandle* asBufferHandle(const native_handle_t* h) {
   if (
     !h || h->version != int(sizeof(native_handle_t)) ||
@@ -107,11 +108,11 @@ struct SharedMetadata {
   float smpte2086[10];  // R.xy G.xy B.xy W.xy maxLum minLum
   uint32_t hasCta861_3;
   float cta861_3[2];  // maxContentLightLevel maxFrameAverageLightLevel
-  // SMPTE2094_10, SMPTE2094_40, SMPTE2094_50; len 0 = unset
+  // SMPTE2094_10, SMPTE2094_40 and SMPTE2094_50. A length of 0 means unset.
   uint32_t blobLen[3];
   uint8_t blob[3][kMaxBlob];
   // Composer's lease of this sink image. Zero means it was not handed to
-  // Wayland (or has been released). The token is unique for each frame;
+  // Wayland or has been released. The token is unique for each frame;
   // access it atomically across the composer and the ImageReader consumer.
   alignas(8) uint64_t presentationToken;
   uint64_t modifier;  // DRM modifier; CPU-accessed buffers are LINEAR (zero).

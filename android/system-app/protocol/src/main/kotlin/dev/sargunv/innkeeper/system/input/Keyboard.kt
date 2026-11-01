@@ -5,35 +5,35 @@ import android.view.KeyEvent
 
 /**
  * What Android's key character map types for a key, as `KeyCharacterMap.get(keyCode, metaState)`
- * (0: nothing). Injected keys use `Virtual.kcm`, which is US.
+ * returns it. 0 means the key types nothing. Injected keys use `Virtual.kcm`, which is US.
  */
 fun interface KeyChars {
   fun get(keyCode: Int, metaState: Int): Int
 }
 
 /**
- * Host keyboard state to Android key events and meta state.
+ * Turns host keyboard state into Android key events and meta state.
  *
- * - Keycodes follow the host layout, as in Mac.apk's host keymap: a key whose level-1 keysym (the
- *   bridge resolves it under the compositor's xkb keymap) is a letter, digit or one of Android's
- *   punctuation keys gets that keycode, so shortcuts follow the layout (Ctrl+Z on AZERTY). Other
- *   keys keep their physical keycode from [EvdevKeymap] (Android's Generic.kl). The scan code is
- *   always the evdev code, so games that read it keep physical positions. Unmapped keys are
- *   dropped.
- * - Text Android would get wrong: when what the key types under the host layout (the line's text,
- *   composed by the bridge from dead keys and Compose) isn't what [chars] gives for the keycode,
- *   the key down carries [OutKey.text] and the Innkeeper Keyboard commits that text instead; a step
- *   of a compose sequence carries empty text and types nothing.
- * - Window shortcuts ([windowShortcuts]): Ctrl+W and Ctrl+Q call [onClose] instead of reaching the
- *   app, and Alt+Left is BACK. Ctrl+W reaches apps that [keepCtrlW] (web browsers close a tab).
- * - Meta state is tracked from the modifier keys themselves, like Android's KeyboardInputMapper (a
- *   modifier's own DOWN already carries its bit, its UP no longer does). Modifiers the compositor
- *   reports as held without us having seen the key (held before the window got focus, or sticky
- *   keys) come from the xkb masks. Caps Lock and Num Lock come from the xkb locked mask.
- * - Key repeat: Android's InputDispatcher synthesizes repeats for injected key downs (they are
- *   trusted), with the host's rate and delay (the system app sets them). A compositor that repeats
- *   keys itself (wl_keyboard v10, after a rate of 0) sends repeats, which become downs with a
- *   repeat count, or taps for a key that is no longer held.
+ * - Keycodes follow the host layout, as in Mac.apk's host keymap. The bridge resolves each key's
+ *   level-1 keysym under the compositor's xkb keymap. A key whose keysym is a letter, digit or one
+ *   of Android's punctuation keys gets that keycode, so shortcuts follow the layout (Ctrl+Z on
+ *   AZERTY). Other keys keep their physical keycode from [EvdevKeymap] (Android's Generic.kl). The
+ *   scan code is always the evdev code, so games that read it keep physical positions. Unmapped
+ *   keys are dropped.
+ * - Android would get some text wrong. The line's text is what the key types under the host layout,
+ *   which the bridge composes from dead keys and Compose. When it isn't what [chars] gives for the
+ *   keycode, the key down carries [OutKey.text] and the Innkeeper Keyboard commits that text
+ *   instead. A step of a compose sequence carries empty text and types nothing.
+ * - With [windowShortcuts], Ctrl+W and Ctrl+Q call [onClose] instead of reaching the app, and
+ *   Alt+Left is BACK. Ctrl+W reaches apps that [keepCtrlW], since web browsers close a tab with it.
+ * - Meta state is tracked from the modifier keys, like Android's KeyboardInputMapper: a modifier's
+ *   own DOWN already carries its bit, and its UP does not. Modifiers that the compositor reports as
+ *   held without a key event, such as keys held before the window got focus or sticky keys, come
+ *   from the xkb masks. Caps Lock and Num Lock come from the xkb locked mask.
+ * - Android's InputDispatcher synthesizes key repeats for injected key downs, which are trusted, at
+ *   the host's rate and delay as the system app sets them. A compositor that repeats keys itself
+ *   (wl_keyboard v10, after a rate of 0) sends repeats, which become downs with a repeat count, or
+ *   taps for a key that is no longer held.
  */
 class Keyboard(
   private val escapeAsBack: Boolean = false,
@@ -43,7 +43,7 @@ class Keyboard(
   private val escapeBack: () -> Boolean = { escapeAsBack },
   private val onClose: () -> Unit = {},
 ) {
-  /** [clearMeta]: meta bits the key's events leave out (Alt, for Alt+Left as BACK). */
+  /** [clearMeta] holds meta bits the key's events leave out, such as Alt for Alt+Left as BACK. */
   private class Held(val keyCode: Int, val downTime: Long, val clearMeta: Int = 0) {
     var repeats = 0
   }
@@ -52,7 +52,7 @@ class Keyboard(
   private var keyMeta = 0
   private var xkbDepressed = 0
   private var xkbLocked = 0
-  // Modifier families whose key changed since the last `modifiers` line: the xkb masks are stale
+  // Modifier families whose key changed since the last `modifiers` line. The xkb masks are stale
   // for them until the compositor sends the update that follows the key event.
   private var xkbStale = 0
 
@@ -78,7 +78,7 @@ class Keyboard(
 
   fun key(e: HostEvent.Key, time: Long, out: MutableList<OutEvent>) {
     val evdev = e.code
-    // Volume belongs to the desktop, even when its compositor passes these keys to us.
+    // The desktop handles volume, even when its compositor passes these keys to Android.
     if (evdev in 113..115) return // KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP
     if (!e.pressed) {
       val h = held.remove(evdev) ?: return
@@ -99,8 +99,8 @@ class Keyboard(
     if (e.repeat) {
       val h = held[evdev]
       if (h == null) {
-        // KWin repeats a key whose press a host input method passed on as a press and release:
-        // each repeat is another tap, as a native toolkit types it.
+        // KWin repeats a key whose press a host input method passed on as a press and release.
+        // Each repeat is another tap, as a native toolkit types it.
         key(e.copy(repeat = false), time, out)
         key(e.copy(pressed = false, repeat = false), time, out)
         return
@@ -143,15 +143,16 @@ class Keyboard(
     out += OutKey(KeyEvent.ACTION_DOWN, code, evdev, meta, FLAGS, time, time, text = text)
   }
 
-  // What the IME commits instead of the key's character; null: the key types what it should.
+  // What the IME commits instead of the key's character, or null if the key types what it should.
   private fun textFor(code: Int, meta: Int, e: HostEvent.Key): String? {
-    // Ctrl and Meta chords are shortcuts, never text.
+    // Ctrl and Meta chords are shortcuts and type no text.
     if (meta and (KeyEvent.META_CTRL_ON or KeyEvent.META_META_ON) != 0) return null
     if (e.compose) return ""
     val t = e.text ?: return null
     fun types(c: Int) = c != 0 && String(Character.toChars(c)) == t
-    // Without Alt too: Alt+F types "f" under xkb but nothing in Android (an Alt chord), while AltGr
-    // characters differ from the key's own.
+    // Also compare without Alt. Alt+F types "f" under xkb but nothing in Android, where it is an
+    // Alt
+    // chord, while AltGr characters differ from the key's own.
     if (types(chars.get(code, meta)) || types(chars.get(code, meta and ALT_MASK.inv()))) {
       return null
     }
@@ -181,7 +182,8 @@ class Keyboard(
 
   private fun keycodeFor(evdev: Int, sym: Int): Int {
     val physical = EvdevKeymap.keycode(evdev)
-    // Only character keys follow the layout; Escape or F1 stay put whatever a layout puts there.
+    // Only character keys follow the layout. Escape and F1 keep their keycode whatever a layout
+    // puts there.
     val code = if (physical in CHARACTER_KEYS) layoutKeycode(sym) ?: physical else physical
     return if (escapeBack() && code == KeyEvent.KEYCODE_ESCAPE) KeyEvent.KEYCODE_BACK else code
   }
@@ -245,7 +247,7 @@ class Keyboard(
 
     /**
      * The Android keycode for an xkb keysym that is a Latin letter, a digit or one of Android's
-     * punctuation keys (their keysyms are their ASCII codes); null for any other.
+     * punctuation keys (their keysyms are their ASCII codes), or null for any other keysym.
      */
     fun layoutKeycode(sym: Int): Int? =
       when (sym) {

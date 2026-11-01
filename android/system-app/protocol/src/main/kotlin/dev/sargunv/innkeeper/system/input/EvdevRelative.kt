@@ -21,7 +21,7 @@ class EvdevRelative {
     y -= iy
     return buildList {
       if (ix != 0) add(Triple(2, 0, ix)) // EV_REL, REL_X
-      if (iy != 0) add(Triple(2, 1, iy)) // EV_REL, REL_Y; bridge appends SYN_REPORT
+      if (iy != 0) add(Triple(2, 1, iy)) // EV_REL, REL_Y. The bridge appends SYN_REPORT.
     }
   }
 }

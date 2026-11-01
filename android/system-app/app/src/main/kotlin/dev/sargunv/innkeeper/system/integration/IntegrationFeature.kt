@@ -81,7 +81,7 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
     }
 
   // The settings and the host clipboard come as events while START is handled, so the reset goes
-  // first. START can take a while: the bridge starts each desktop service it needs.
+  // first. START can take a while because the bridge starts each desktop service it needs.
   override fun onConnected() {
     handler.post { settings.reset() }
     connection.send(Wire.START, onReply = ::onStarted)
@@ -111,7 +111,8 @@ class IntegrationFeature(private val context: Context, private val wm: WindowMan
   }
 
   override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) {
-    // Blob fds are closed when this returns: read them here, handle the rest on our thread.
+    // Blob fds are closed when this returns, so read them here and handle the rest on the
+    // feature's thread.
     when (type) {
       Wire.EV_SETTINGS -> {
         val s = DesktopSettings.decode(body)

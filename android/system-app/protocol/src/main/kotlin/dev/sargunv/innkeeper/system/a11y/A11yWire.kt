@@ -6,10 +6,10 @@ import java.nio.ByteBuffer
 
 /**
  * The bridge's accessibility service (id 7, host/bridge/src/a11y/proto.rs) and its snapshot blob
- * (host/bridge/src/a11y/wire.rs): one window's AccessibilityNodeInfo tree in the field set of
- * Chromium's ARC++ `accessibility_helper.mojom`. Encoding clamps every string, count and float to
- * what the bridge accepts, so a snapshot is never refused for its size.
- * `host/bridge/src/a11y/snapshot-fixture.txt` is checked by both sides.
+ * (host/bridge/src/a11y/wire.rs). A snapshot holds one window's AccessibilityNodeInfo tree in the
+ * field set of Chromium's ARC++ `accessibility_helper.mojom`. Encoding clamps every string, count
+ * and float to what the bridge accepts, so the bridge never refuses a snapshot for its size. Both
+ * sides test against `host/bridge/src/a11y/snapshot-fixture.txt`.
  */
 object A11yWire {
   const val SERVICE = 7
@@ -48,7 +48,7 @@ object A11yWire {
   const val IMPORTANT = 1 shl 18
   const val CHECKED_MIXED = 1 shl 19
 
-  // Actions (wire::action): bit indexes in a node's action mask, and ACTION events' action.
+  // Actions (wire::action) are bit indexes in a node's action mask and the action of ACTION events.
   const val CLICK = 0
   const val LONG_CLICK = 1
   const val FOCUS = 2
@@ -82,7 +82,7 @@ object A11yWire {
   const val MAX_LONG = 4096
   const val MAX_SHORT = 1024
   const val MAX_BLOB = 16 shl 20
-  /** Node ids are 1 until this; the bridge's own ids are above. */
+  /** Node ids range from 1 up to this value. The bridge's own ids are above it. */
   const val MAX_ID = 1L shl 62
 
   class Range(val kind: Int, val min: Float, val max: Float, val current: Float)
@@ -102,7 +102,7 @@ object A11yWire {
     val heading: Boolean,
   )
 
-  /** One AccessibilityNodeInfo, in the bridge's fields. [bounds]: left, top, right, bottom. */
+  /** One AccessibilityNodeInfo in the bridge's fields. [bounds] is left, top, right, bottom. */
   class Node(val id: Long) {
     var flags = 0
     var actions = 0
@@ -127,9 +127,9 @@ object A11yWire {
   }
 
   /**
-   * A snapshot blob. A full one's first node is the window's root; a partial one re-sends changed
-   * nodes with their children. [focus] is the node with input focus (0: none, or unchanged in a
-   * partial one); [scale] is display pixels per logical pixel.
+   * A snapshot blob. A full snapshot's first node is the window's root, and a partial one re-sends
+   * changed nodes with their children. [focus] is the node with input focus. It is 0 for none, or
+   * for unchanged in a partial snapshot. [scale] is display pixels per logical pixel.
    */
   fun encode(
     partial: Boolean,
@@ -190,7 +190,9 @@ object A11yWire {
     return w.bytes()
   }
 
-  /** A string field: no NUL (D-Bus strings can't hold one), at most [max] bytes of UTF-8. */
+  /**
+   * A string field without NUL, which D-Bus strings can't hold, and at most [max] bytes of UTF-8.
+   */
   private fun str(w: Wire.Writer, s: String, max: Int) {
     w.line(if (s.indexOf('\u0000') >= 0) s.replace("\u0000", "") else s, max)
   }

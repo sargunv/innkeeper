@@ -11,8 +11,8 @@ import java.lang.reflect.Method
 
 /**
  * Builds real `MotionEvent`/`KeyEvent`s from [OutEvent]s and injects them through the hidden
- * `InputManagerGlobal.injectInputEvent` (needs INJECT_EVENTS; hidden APIs are open to
- * platform-signed apps). Injection is asynchronous: InputDispatcher queues the event and returns.
+ * `InputManagerGlobal.injectInputEvent`, which needs INJECT_EVENTS. Hidden APIs are open to
+ * platform-signed apps. Injection is asynchronous, so InputDispatcher queues the event and returns.
  */
 class Injector {
   private val inputManager: Any =
@@ -39,17 +39,17 @@ class Injector {
     // InputManager.INJECT_INPUT_EVENT_MODE_ASYNC (hidden).
     private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 
-    // Hidden; injected events go to this display's focused window or the window under the pointer.
+    // Hidden. Injected events go to this display's focused window or the window under the pointer.
     private val setDisplayId: Method by lazy {
       InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
     }
 
-    // Hidden (@TestApi); the public obtain() overloads have no action button.
+    // Hidden (@TestApi). The public obtain() overloads have no action button.
     private val setActionButton: Method by lazy {
       MotionEvent::class.java.getMethod("setActionButton", Int::class.javaPrimitiveType)
     }
 
-    // Hidden; the public obtain() overloads have no display, flags or classification.
+    // Hidden. The public obtain() overloads have no display, flags or classification.
     private val obtain: Method by lazy {
       val i = Int::class.javaPrimitiveType
       val l = Long::class.javaPrimitiveType
@@ -78,9 +78,9 @@ class Injector {
     }
 
     /**
-     * Display pixels per AXIS_VSCROLL unit ([TranslatorConfig.scrollPixelsPerUnit]):
-     * `ViewConfiguration.getScaledVerticalScrollFactor()` without a UI context, the framework's
-     * config_verticalScrollFactor (64 dp unless overlaid).
+     * Display pixels per AXIS_VSCROLL unit ([TranslatorConfig.scrollPixelsPerUnit]). This is
+     * `ViewConfiguration.getScaledVerticalScrollFactor()` without a UI context, which is the
+     * framework's config_verticalScrollFactor (64 dp unless overlaid).
      */
     fun scrollPixelsPerUnit(): Float {
       val res = Resources.getSystem()

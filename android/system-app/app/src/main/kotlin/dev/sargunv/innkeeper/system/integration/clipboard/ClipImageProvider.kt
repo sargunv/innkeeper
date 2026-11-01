@@ -15,9 +15,10 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * Serves images copied on the desktop to Android apps that paste them:
- * `content://dev.sargunv.innkeeper.system.clipboard/<n>.png`. Not exported; ClipboardService grants
- * the pasting app read access to the clip's URI. Only the latest image is kept.
+ * Serves images copied on the desktop to Android apps that paste them, as
+ * `content://dev.sargunv.innkeeper.system.clipboard/<n>.png`. The provider is not exported.
+ * ClipboardService grants the pasting app read access to the clip's URI. Only the latest image is
+ * kept.
  */
 class ClipImageProvider : ContentProvider() {
   override fun onCreate() = true
@@ -66,7 +67,7 @@ class ClipImageProvider : ContentProvider() {
       return File(dir(c), name).takeIf { it.isFile }
     }
 
-    /** Saves [bmp] as the current clipboard image; returns its URI. */
+    /** Saves [bmp] as the current clipboard image and returns its URI. */
     @Synchronized
     fun store(c: Context, bmp: Bitmap): Uri? =
       try {

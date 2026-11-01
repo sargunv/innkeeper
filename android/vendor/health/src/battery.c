@@ -81,8 +81,8 @@ void innkeeper_health_from(
   }
   const bool ac = b->ac || status == ST_CHARGING || status == ST_FULL;
   int level = b->level;
-  // BatteryService shuts Android down at level 0 without power: a session
-  // never does that to the desktop it runs in.
+  // BatteryService shuts Android down at level 0 without power, and a session
+  // must not do that to the desktop it runs in.
   if (level < 1 && !ac) level = 1;
   int cap;
   if (status == ST_FULL || level >= 100)

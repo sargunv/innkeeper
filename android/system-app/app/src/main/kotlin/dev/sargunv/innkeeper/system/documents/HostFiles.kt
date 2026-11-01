@@ -14,10 +14,10 @@ import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * The bridge's documents service (host/bridge/src/documents/proto.rs): host files and folders the
- * user picks in the desktop's file chooser. Android only ever sees grant ids and file descriptors,
- * never host paths. One process-wide connection, shared by [PickerActivity] and
- * [HostDocumentsProvider].
+ * The bridge's documents service (host/bridge/src/documents/proto.rs), which serves host files and
+ * folders the user picks in the desktop's file chooser. Android sees grant ids and file descriptors
+ * and never host paths. [PickerActivity] and [HostDocumentsProvider] share one process-wide
+ * connection.
  */
 object HostFiles {
   const val TAG = "InnkeeperDocs"
@@ -104,7 +104,9 @@ object HostFiles {
   val connected
     get() = channel.connected
 
-  /** Opens the desktop's file chooser over the window of [display]; returns false if it can't. */
+  /**
+   * Opens the desktop's file chooser over the window of [display], or returns false if it can't.
+   */
   fun pick(
     mode: Int,
     write: Boolean,
@@ -158,12 +160,12 @@ object HostFiles {
     }
   }
 
-  // The bridge went away: its picks are gone, so end them.
+  // The bridge went away and its picks are gone, so end them.
   private fun failAll() {
     for (id in pending.keys.toList()) pending.remove(id)?.listener?.onDone(EIO, emptyList())
   }
 
-  /** Ends a pick the app abandoned (its activity finished). */
+  /** Ends a pick the app abandoned because its activity finished. */
   fun abandon(listener: PickListener) {
     pending.entries.removeIf { it.value.listener === listener }
   }
@@ -274,7 +276,7 @@ object HostFiles {
     if (r?.ok != true) fail("rename", r?.status)
   }
 
-  /** u16 length + UTF-8 (paths and file names; the bridge checks them). */
+  /** A u16 length and UTF-8, for paths and file names. The bridge checks them. */
   private fun Wire.Writer.text16(s: String) {
     val b = s.toByteArray(Charsets.UTF_8)
     require(b.size <= 400) { "path too long" }

@@ -1,7 +1,7 @@
-# innkeeper: adbd starts only for a profile with adb on, from init.innkeeper.rc
-# (vendor.innkeeper.adb), never from the USB configuration. The image's
-# persist.sys.usb.config=adb would otherwise start it at every boot, listening
-# on persist.adb.tcp.port 5555 without authentication.
+# innkeeper: init.innkeeper.rc starts adbd for a profile with adb on
+# (vendor.innkeeper.adb). The USB configuration doesn't start it, because the
+# image's persist.sys.usb.config=adb would start it at every boot, listening on
+# persist.adb.tcp.port 5555 without authentication.
 # Copyright (C) 2012 The Android Open Source Project
 #
 # USB configuration common for all android devices
@@ -43,7 +43,7 @@ on property:sys.usb.config=adb && property:sys.usb.configfs=0
     write /sys/class/android_usb/android0/idProduct 4EE7
     write /sys/class/android_usb/android0/functions ${sys.usb.config}
     write /sys/class/android_usb/android0/enable 1
-    # innkeeper: no start adbd
+    # innkeeper: the USB configuration does not start adbd.
     setprop sys.usb.state ${sys.usb.config}
 
 # USB accessory configuration
@@ -62,7 +62,7 @@ on property:sys.usb.config=accessory,adb && property:sys.usb.configfs=0
     write /sys/class/android_usb/android0/idProduct 2d01
     write /sys/class/android_usb/android0/functions ${sys.usb.config}
     write /sys/class/android_usb/android0/enable 1
-    # innkeeper: no start adbd
+    # innkeeper: the USB configuration does not start adbd.
     setprop sys.usb.state ${sys.usb.config}
 
 # audio accessory configuration
@@ -81,7 +81,7 @@ on property:sys.usb.config=audio_source,adb && property:sys.usb.configfs=0
     write /sys/class/android_usb/android0/idProduct 2d03
     write /sys/class/android_usb/android0/functions ${sys.usb.config}
     write /sys/class/android_usb/android0/enable 1
-    # innkeeper: no start adbd
+    # innkeeper: the USB configuration does not start adbd.
     setprop sys.usb.state ${sys.usb.config}
 
 # USB and audio accessory configuration
@@ -100,7 +100,7 @@ on property:sys.usb.config=accessory,audio_source,adb && property:sys.usb.config
     write /sys/class/android_usb/android0/idProduct 2d05
     write /sys/class/android_usb/android0/functions ${sys.usb.config}
     write /sys/class/android_usb/android0/enable 1
-    # innkeeper: no start adbd
+    # innkeeper: the USB configuration does not start adbd.
     setprop sys.usb.state ${sys.usb.config}
 
 # Used to set USB configuration at boot and to switch the configuration

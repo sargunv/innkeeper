@@ -10,8 +10,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * host/bridge/src/ipc/wire-fixtures.txt, which the bridge's tests also check: each message built
- * from its fields must match the hex, and read back.
+ * Tests against host/bridge/src/ipc/wire-fixtures.txt, which the bridge's tests also check. Each
+ * message built from its fields must match the hex and read back.
  */
 class WireFixturesTest {
   private class Case(val fields: List<Pair<String, String>>, val bytes: ByteArray)

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// On-device composer3 test, acting like SurfaceFlinger: hotplug, vsync,
-// validate (DEVICE -> CLIENT), accept, client target + present, slot cache.
-// Needs servicemanager, our allocator and composer running.
+// On-device composer3 test that acts like SurfaceFlinger. It covers hotplug,
+// vsync, validate (DEVICE to CLIENT), accept, client target and present, and
+// the slot cache. It needs servicemanager, the allocator and the composer
+// running.
 #include <aidl/android/hardware/graphics/allocator/IAllocator.h>
 #include <aidl/android/hardware/graphics/composer3/BnComposerCallback.h>
 #include <aidl/android/hardware/graphics/composer3/IComposer.h>
@@ -176,7 +177,7 @@ int main() {
   );
   CHECK(client->setPowerMode(D, PowerMode::ON).isOk());
 
-  // Vsync: ~60 Hz while enabled, silent when disabled.
+  // Vsync ticks at about 60 Hz while enabled and stops when disabled.
   CHECK(client->setVsyncEnabled(D, true).isOk());
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   CHECK(client->setVsyncEnabled(D, false).isOk());
@@ -205,7 +206,8 @@ int main() {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   CHECK(cb->vsyncs == before);
 
-  // Client target from our allocator, filled by the "renderer" (us).
+  // The client target comes from the allocator, and this test fills it as the
+  // renderer.
   auto alloc = IAllocator::fromBinder(
     ndk::SpAIBinder(AServiceManager_waitForService(
       (std::string(IAllocator::descriptor) + "/default").c_str()
@@ -252,7 +254,8 @@ int main() {
   CHECK(client->createLayer(D, 3, &l1).isOk());
   CHECK(client->createLayer(D, 3, &l2).isOk());
 
-  // Frame 1: SF asks for DEVICE + SOLID_COLOR; we must answer CLIENT for both.
+  // In frame 1 SurfaceFlinger asks for DEVICE and SOLID_COLOR, and the
+  // composer must answer CLIENT for both.
   std::vector<DisplayCommand> cmds(1);
   cmds[0].display = D;
   LayerCommand lc1, lc2;
@@ -301,15 +304,16 @@ int main() {
   CHECK(rf && rf->display == D);
   CHECK(
     find<CommandResultPayload::presentFence>(res) == nullptr
-  );  // headless: none
+  );  // headless returns no present fence
 
-  // Present without validate -> NOT_VALIDATED.
+  // Presenting without validate returns NOT_VALIDATED.
   res = present(1, true, false);
   CHECK(countErrors(res) == 1);
   auto* e = find<CommandResultPayload::error>(res);
   CHECK(e && e->errorCode == IComposerClient::EX_NOT_VALIDATED);
 
-  // presentOrValidate -> Validated; then frames alternating cached slots.
+  // presentOrValidate returns Validated. The following frames alternate
+  // between cached slots.
   for (int i = 0; i < 6; i++) {
     DisplayCommand c;
     c.display = D;

@@ -7,8 +7,8 @@ import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 
 /**
  * Hands http(s) links to the bridge as a HANDOFF URI (host/bridge/src/system/handoff.rs), which
- * opens them in the host browser through the OpenURI portal. The URL is sent percent-encoded ASCII;
- * the bridge checks it again.
+ * opens them in the host browser through the OpenURI portal. The URL is sent as percent-encoded
+ * ASCII, and the bridge checks it again.
  */
 class UrlOpener(private val feature: IntegrationFeature) {
   /** Returns false if [url] isn't http(s) or the bridge isn't there. */
@@ -25,7 +25,7 @@ class UrlOpener(private val feature: IntegrationFeature) {
       metadata,
       onReply = { if (!it.ok) Log.w(TAG, "the bridge refused to open the link: ${it.status}") },
     ) {
-      // Window 0: no parent; action 1 (URI), no files, don't ask.
+      // Window 0 means no parent. Action 1 opens the URI, with no files and no prompt.
       u32(0).u8(1).u8(0).u8(0).u8(0).u32(metadata.size)
     }
   }

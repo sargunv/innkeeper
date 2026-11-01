@@ -7,7 +7,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 
-/** Open With receiver: proves the supplied URI, MIME, flags and actual file contents. */
+/** Open With receiver that checks the supplied URI, MIME type, flags and file contents. */
 class FileProbe : Activity() {
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)

@@ -1,10 +1,12 @@
-# innkeeper: the image's definitions of the services that need our shim,
-# replaced whole ("override"; init reads /system_ext after /system). Each
-# preloads the shim and names its INNKEEPER_SHIM_ROLE, which picks the
-# service-specific workarounds in supervisor/shim/innkeeper_shim.c. Copied from
-# the files image/fork-bases.sha256 guards; port their changes on a pin bump.
+# innkeeper: these stanzas replace the image's definitions of the services that
+# need our shim. "override" works because init reads /system_ext after /system.
+# Each service preloads the shim, and INNKEEPER_SHIM_ROLE selects the
+# service-specific workarounds in supervisor/shim/innkeeper_shim.c.
+# image/fork-bases.sha256 guards the files these stanzas copy, so port their
+# changes when the pin moves.
 
-# system/etc/init/servicemanager.rc: CHECKs selinux_status_open().
+# From system/etc/init/servicemanager.rc. servicemanager CHECKs
+# selinux_status_open().
 service servicemanager /system/bin/servicemanager
     class core animation
     user system
@@ -23,8 +25,9 @@ service servicemanager /system/bin/servicemanager
     setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     override
 
-# system/etc/init/vold.rc: labels the directories it creates (setfscreatecon),
-# and mounts the emulated storage through the shim's FUSE handshake.
+# From system/etc/init/vold.rc. vold labels the directories it creates
+# (setfscreatecon) and mounts the emulated storage through the shim's FUSE
+# handshake.
 service vold /system/bin/vold \
         --blkid_context=u:r:blkid:s0 --blkid_untrusted_context=u:r:blkid_untrusted:s0 \
         --fsck_context=u:r:fsck:s0 --fsck_untrusted_context=u:r:fsck_untrusted:s0
@@ -39,8 +42,9 @@ service vold /system/bin/vold \
     setenv INNKEEPER_SHIM_ROLE vold
     override
 
-# system/etc/init/installd.rc: labels the directories it creates, and its stat
-# reports the owners chown recorded (supervisor/README.md).
+# From system/etc/init/installd.rc. installd labels the directories it creates,
+# and its stat calls report the owners that chown recorded
+# (supervisor/README.md).
 service installd /system/bin/installd
     class main
     user root
@@ -49,8 +53,9 @@ service installd /system/bin/installd
     setenv INNKEEPER_SHIM_ROLE installd
     override
 
-# system/etc/init/netd.rc: netd can't load its eBPF maps in the sandbox, so its
-# boot self test always fails and would reboot the session: make it a no-op.
+# From system/etc/init/netd.rc. netd can't load its eBPF maps in the sandbox,
+# so its boot self test always fails and would reboot the session. This stanza
+# makes the test a no-op.
 service netd1shot /system/bin/true
     disabled # only started once bpf programs are loaded
     class main
@@ -58,9 +63,9 @@ service netd1shot /system/bin/true
     oneshot
     override
 
-# netd shares the host's network, where its routing rules are refused; the
-# shim reports them done. Without its eBPF programs netd aborts: run it once
-# instead of crash-looping, and don't restart zygote with it.
+# netd shares the host's network, which refuses its routing rules, so the shim
+# reports them as done. Without its eBPF programs netd aborts, so it runs once
+# instead of crash-looping, and zygote does not restart with it.
 service netd /system/bin/netd
     disabled # only started once bpf programs are loaded
     class main
@@ -81,8 +86,8 @@ service netd /system/bin/netd
     setenv INNKEEPER_SHIM_ROLE netd
     override
 
-# system/etc/init/hw/init.zygote64.rc: zygote calls selinux_android_setcon()
-# for system_server and apps.
+# From system/etc/init/hw/init.zygote64.rc. zygote calls
+# selinux_android_setcon() for system_server and apps.
 service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
     class main
     priority -20
@@ -106,10 +111,10 @@ service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-s
     setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so
     override
 
-# system/etc/init/lmkd.rc: lmkd's 1 s PSI windows need a capability the
-# sandbox lacks, so the shim widens them to 2 s; and it maps oom_score_adj into
-# the unprivileged range, so foreground promotion can lower a cached app's
-# kernel score again.
+# From system/etc/init/lmkd.rc. lmkd's 1 s PSI windows need a capability the
+# sandbox lacks, so the shim widens them to 2 s. The shim also maps
+# oom_score_adj into the unprivileged range, so foreground promotion can lower
+# a cached app's kernel score again.
 service lmkd /system/bin/lmkd
     class core
     user lmkd

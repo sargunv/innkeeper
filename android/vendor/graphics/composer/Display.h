@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// One HWC3 display: config, layers, validate/present state machine.
-// Not thread safe; ComposerClient serialises access.
+// One HWC3 display with its config, layers and validate/present state
+// machine. It is not thread safe, so ComposerClient serialises access.
 #pragma once
 
 #include <map>
@@ -63,7 +63,7 @@ class Display {
   Error setPowerMode(c3::PowerMode mode);
   void setColorTransform(const std::vector<float>& m);
 
-  // validate: returns the composition changes (if any) SF must accept.
+  // Returns the composition changes, if any, that SurfaceFlinger must accept.
   Error validate(std::optional<c3::ChangedCompositionTypes>* changes);
   Error acceptChanges();
   Error present();

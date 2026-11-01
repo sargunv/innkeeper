@@ -16,9 +16,9 @@ import java.io.File
 import java.net.InetAddress
 
 /**
- * Android shares the host's network namespace, as any desktop app does. Offer the host's network as
- * Android's default network: an agent with no interface, whose DNS servers are the host's. Sockets
- * use the host's routes.
+ * Android shares the host's network namespace, as any desktop app does. This offers the host's
+ * network as Android's default network through an agent with no interface whose DNS servers are the
+ * host's. Sockets use the host's routes.
  *
  * The resolvers come from the sandbox's `/etc/resolv.conf`, which Flatpak keeps current (a link
  * into `/run/host/monitor`), and are sent again whenever it changes, such as when the host joins a

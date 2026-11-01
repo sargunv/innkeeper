@@ -6,8 +6,8 @@
 namespace innkeeper::audio::input {
 inline constexpr uint32_t kRate = 48000;
 inline constexpr uint32_t kPeriodFrames = 480;  // 10 ms capture bursts
-// The source cannot backpressure: retain 80 ms for scheduling jitter without
-// waiting for the ring to fill before serving a read.
+// The source cannot backpressure, so the ring retains 80 ms to absorb
+// scheduling jitter. A read is served without waiting for the ring to fill.
 inline constexpr uint32_t kPeriods = 8;
 inline constexpr int32_t kNominalLatencyMs = 10;
 inline bool validBufferSize(int64_t frames) {

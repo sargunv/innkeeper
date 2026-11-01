@@ -15,16 +15,16 @@ import dev.sargunv.innkeeper.system.input.HostInputClient
 import kotlin.math.roundToInt
 
 /**
- * "Innkeeper Keyboard": the host's keyboard and input methods (IBus, Fcitx) for Android text
- * fields, through the bridge's `zwp_text_input_v3` (docs/input.md).
+ * "Innkeeper Keyboard" connects the host's keyboard and input methods (IBus, Fcitx) to Android text
+ * fields through the bridge's `zwp_text_input_v3` (docs/input.md).
  *
- * It shows no keyboard. Keys still arrive as injected key events, which this service passes on,
- * except those whose character Android's key character map would get wrong under the host layout
- * (accented letters, dead keys, Compose): for those it commits the host's text instead
- * ([HostInputClient.keyText]). For each editor it tells the bridge to enable text input (with the
- * content type), and keeps the bridge up to date with the surrounding text and the cursor
- * rectangle; the host input method's preedit, commit and delete come back as `ti_*` lines from the
- * bridge's input service and are applied here through the `InputConnection`.
+ * It shows no keyboard. Keys still arrive as injected key events, which this service passes on. The
+ * exception is keys whose character Android's key character map would get wrong under the host
+ * layout (accented letters, dead keys, Compose), for which it commits the host's text instead
+ * ([HostInputClient.keyText]). For each editor it tells the bridge to enable text input with the
+ * content type, and keeps the bridge up to date with the surrounding text and the cursor rectangle.
+ * The host input method's preedit, commit and delete come back as `ti_*` lines from the bridge's
+ * input service and are applied here through the `InputConnection`.
  */
 class HostImeService : InputMethodService(), HostInputClient.Listener {
   private val main = Handler(Looper.getMainLooper())
@@ -51,7 +51,7 @@ class HostImeService : InputMethodService(), HostInputClient.Listener {
     super.onDestroy()
   }
 
-  // No on-screen keyboard, ever: the host keyboard types.
+  // There is no on-screen keyboard because the host keyboard types.
   override fun onEvaluateInputViewShown() = false
 
   override fun onShowInputRequested(flags: Int, configChange: Boolean) = false
@@ -126,7 +126,7 @@ class HostImeService : InputMethodService(), HostInputClient.Listener {
     val ic = currentInputConnection
     val text = if (ic != null) input.keyText(event) else null
     if (ic == null || text == null) return super.onKeyDown(keyCode, event)
-    // Repeats (InputDispatcher's) commit again; a dead key commits nothing.
+    // InputDispatcher's repeats commit again, and a dead key commits nothing.
     if (text.isNotEmpty()) ic.commitText(text, 1)
     committedKeys += event.scanCode
     return true
@@ -147,7 +147,7 @@ class HostImeService : InputMethodService(), HostInputClient.Listener {
     return session.surroundingLine("", 0, 0)
   }
 
-  // Host events arrive on the input thread; InputConnection calls belong on the main thread.
+  // Host events arrive on the input thread, but InputConnection calls belong on the main thread.
   override fun onHostEvent(e: HostEvent) {
     when (e) {
       is HostEvent.TextDelete,

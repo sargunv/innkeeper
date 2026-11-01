@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // android.hardware.health.IHealth/default (AIDL V5), fed by the bridge's
-// host state service: the host's battery (UPower) instead of sysfs, which
-// the session masks. Modeled on cuttlefish's health-aidl.cpp and the
-// callback contract of hardware/interfaces/health/aidl/default: every
-// registered IHealthInfoCallback gets the current HealthInfo at once and on
-// each change.
+// host state service. It reports the host's battery from UPower instead of
+// sysfs, which the session masks. It is modeled on cuttlefish's
+// health-aidl.cpp and follows the callback contract of
+// hardware/interfaces/health/aidl/default, in which every registered
+// IHealthInfoCallback gets the current HealthInfo at once and on each change.
 //
-// Health starts with the other HALs, before the bridge may be up: until the
-// bridge answers it reports AC power and no battery, and it reconnects
+// Health starts with the other HALs, possibly before the bridge is up. Until
+// the bridge answers, it reports AC power and no battery. It reconnects
 // whenever the bridge goes away, as the composer does.
 #define LOG_TAG "innkeeper-health"
 
@@ -54,7 +54,7 @@ class Health : public BnHealth {
  public:
   Health() { set(INNKEEPER_BATTERY_AC_ONLY); }
 
-  // A new state from the bridge: every callback hears it.
+  // Every callback hears a new state from the bridge.
   void set(const innkeeper_battery& b) {
     innkeeper_health h;
     innkeeper_health_from(&b, &h);
@@ -69,7 +69,8 @@ class Health : public BnHealth {
     i.batteryChargeTimeToFullNowSeconds = h.time_to_full_s;
     i.chargingState = BatteryChargingState::NORMAL;
     i.chargingPolicy = BatteryChargingPolicy::DEFAULT;
-    // A room-temperature battery: BatteryService shuts down when hot.
+    // Report a room-temperature battery, because BatteryService shuts down
+    // when the battery is hot.
     i.batteryTemperatureTenthsCelsius = 250;
     i.batteryVoltageMillivolts = h.battery_present ? 3800 : 0;
     i.batteryTechnology = h.battery_present ? "Li-ion" : "";
@@ -96,7 +97,7 @@ class Health : public BnHealth {
       mCallbacks.push_back(cb);
       i = mInfo;
     }
-    // The default implementation's contract: the current state at once.
+    // The default implementation's contract sends the current state at once.
     cb->healthInfoChanged(i);
     return ScopedAStatus::ok();
   }
@@ -169,8 +170,8 @@ class Health : public BnHealth {
   }
 
  private:
-  // Outside the lock: a callback into system_server may take a while, and a
-  // dead one is dropped.
+  // Call back outside the lock, because a callback into system_server may
+  // take a while. A dead callback is dropped.
   void notify(
     const std::vector<std::shared_ptr<IHealthInfoCallback>>& cbs,
     const HealthInfo& i
@@ -188,8 +189,8 @@ class Health : public BnHealth {
   std::vector<std::shared_ptr<IHealthInfoCallback>> mCallbacks;
 };
 
-// The bridge connection: START (battery), then BATTERY events, reconnecting
-// once a second while the bridge is missing.
+// The bridge connection sends START for the battery feature and then reads
+// BATTERY events. It reconnects once a second while the bridge is missing.
 void bridgeLoop(std::shared_ptr<Health> health) {
   pthread_setname_np(pthread_self(), "health-bridge");
   lxb_backoff backoff{};

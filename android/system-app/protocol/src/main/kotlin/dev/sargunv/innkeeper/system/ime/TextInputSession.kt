@@ -6,7 +6,7 @@ import android.view.inputmethod.EditorInfo
 import dev.sargunv.innkeeper.system.input.HostEvent
 import dev.sargunv.innkeeper.system.input.PercentText
 
-/** The `InputConnection` calls the IME makes; an interface so the logic runs on a plain JVM. */
+/** The `InputConnection` calls the IME makes, as an interface so the logic runs on a plain JVM. */
 interface TextEditor {
   fun beginBatchEdit()
 
@@ -20,12 +20,12 @@ interface TextEditor {
 }
 
 /**
- * The Innkeeper IME's side of `zwp_text_input_v3` (docs/input.md), without Android types: it builds
+ * The Innkeeper IME's side of `zwp_text_input_v3` (docs/input.md), without Android types. It builds
  * the lines for the bridge (`ti_*`, parsed by the bridge's `input/ime.rs`) and applies the host
  * input method's results to a [TextEditor].
  */
 class TextInputSession {
-  /** The surrounding text last sent: what the bridge's byte offsets refer to. */
+  /** The surrounding text last sent, which the bridge's byte offsets refer to. */
   private var sentText = ""
   private var sentSelStart = 0 // UTF-16 index into sentText
   private var sentSelEnd = 0
@@ -35,11 +35,11 @@ class TextInputSession {
   private var hasCommit = false
   private var preedit: HostEvent.TextPreedit? = null
 
-  /** A preedit is shown in the editor (as composing text). */
+  /** Whether a preedit is shown in the editor as composing text. */
   var composing = false
     private set
 
-  /** A new editor: forget the old one's state. */
+  /** Forgets the old editor's state when a new editor starts. */
   fun reset() {
     sentText = ""
     sentSelStart = 0
@@ -56,13 +56,15 @@ class TextInputSession {
   fun enableLines(info: ContentType): List<String> =
     listOf("ti_enable", "ti_content ${info.hint} ${info.purpose}")
 
-  /** Set when a batch changed the text: the next selection update is the input method's doing. */
+  /**
+   * Set when a batch changed the text, so the next selection update counts as the input method's.
+   */
   private var ownEdit = false
 
   /**
    * The `ti_surrounding` line for [text] with the selection [selStart]..[selEnd] (UTF-16 indices),
    * trimmed around the selection until the line fits. The change counts as the input method's if it
-   * follows one of its edits, else as "other" (which resets the host input method).
+   * follows one of its edits, and otherwise as "other", which resets the host input method.
    */
   fun surroundingLine(text: CharSequence, selStart: Int, selEnd: Int): String {
     val cause = if (ownEdit) 0 else 1
@@ -89,7 +91,7 @@ class TextInputSession {
         return line
       }
       if (keep == 0) {
-        // The selection alone doesn't fit: send no text, just the cursor.
+        // If the selection alone doesn't fit, send the cursor without text.
         sentText = ""
         sentSelStart = 0
         sentSelEnd = 0
@@ -99,7 +101,7 @@ class TextInputSession {
     }
   }
 
-  /** Gathers one event; on [HostEvent.TextDone], applies the batch to [editor]. */
+  /** Gathers one event, and applies the batch to [editor] on [HostEvent.TextDone]. */
   fun onEvent(e: HostEvent, editor: TextEditor?) {
     when (e) {
       is HostEvent.TextDelete -> delete = e
@@ -119,8 +121,8 @@ class TextInputSession {
     }
   }
 
-  // zwp_text_input_v3's order: remove the preedit, delete around the cursor, insert the commit,
-  // show the new preedit.
+  // This follows zwp_text_input_v3's order: remove the preedit, delete around the cursor, insert
+  // the commit, and show the new preedit.
   private fun apply(ed: TextEditor) {
     ownEdit = delete != null || hasCommit || preedit?.text?.isNotEmpty() == true || composing
     ed.beginBatchEdit()
@@ -152,7 +154,7 @@ class TextInputSession {
     }
   }
 
-  /** The bridge's byte lengths, as code points of the text around the selection last sent. */
+  /** Converts the bridge's byte lengths to code point counts around the selection last sent. */
   private fun codePoints(beforeBytes: Int, afterBytes: Int): Pair<Int, Int> {
     var n = 0
     var bytes = 0
@@ -163,7 +165,7 @@ class TextInputSession {
       bytes += utf8Len(cp)
       n++
     }
-    val before = n + (beforeBytes - bytes).coerceAtLeast(0) // past what we sent: assume ASCII
+    val before = n + (beforeBytes - bytes).coerceAtLeast(0) // beyond the sent text, assume ASCII
     n = 0
     bytes = 0
     i = sentSelEnd.coerceIn(0, sentText.length)
@@ -208,7 +210,7 @@ class TextInputSession {
     const val PURPOSE_TIME = 11
     const val PURPOSE_DATETIME = 12
 
-    /** Whether an editor with this input type wants text input (TYPE_NULL: raw keys only). */
+    /** Whether an editor with this input type wants text input. TYPE_NULL wants raw keys only. */
     fun wantsText(inputType: Int) = inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
 
     /** Maps `EditorInfo.inputType` and `imeOptions` to a content type. */

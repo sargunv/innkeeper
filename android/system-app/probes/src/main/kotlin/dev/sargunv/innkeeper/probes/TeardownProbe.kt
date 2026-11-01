@@ -10,7 +10,7 @@ import android.util.Log
 import android.widget.TextView
 
 /**
- * An activity that handles no configuration changes, for the display teardown check: moving its
+ * An activity that handles no configuration changes, for the display teardown check. Moving its
  * task between displays relaunches it, and it finishes itself while that happens.
  *
  * Modes (via --es mode):
@@ -18,8 +18,8 @@ import android.widget.TextView
  * - `finish`: finishes itself whenever it is recreated (self-kill on display move).
  * - `kill`: kills its own process whenever it is recreated.
  *
- * Manifest: no android:configChanges; the probes application is not game-category, so no
- * display-compat suppression applies (AppCompatDisplayCompatPolicy).
+ * The manifest declares no android:configChanges, and the probes application is not game-category,
+ * so no display-compat suppression applies (AppCompatDisplayCompatPolicy).
  */
 class TeardownProbe : Activity() {
   private var relaunched = false

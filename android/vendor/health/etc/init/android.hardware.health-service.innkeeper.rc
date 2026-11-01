@@ -1,5 +1,6 @@
-# The host's battery for Android (android/vendor/health). The audio group
-# enters the bridge's socket directory (/dev/socket/innkeeper, root:audio).
+# Reports the host's battery to Android (android/vendor/health). The audio
+# group grants access to the bridge's socket directory, /dev/socket/innkeeper,
+# which is root:audio.
 service vendor.health-innkeeper /vendor/bin/hw/android.hardware.health-service.innkeeper
     class hal
     user system

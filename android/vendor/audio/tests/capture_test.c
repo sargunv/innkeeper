@@ -1,4 +1,5 @@
-// The host has no Android bridge socket: capture must remain a paced device.
+// The host has no Android bridge socket, so capture must stay a paced
+// device.
 #include <assert.h>
 #include <stdint.h>
 #include <string.h>

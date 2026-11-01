@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Android 17 remote insets controller; compile-only, never shipped.
+// Stub of the Android 17 remote insets controller. It is compile-only and stays out of the APK.
 package android.view;
 
 import android.content.ComponentName;

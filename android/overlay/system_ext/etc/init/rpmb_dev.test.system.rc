@@ -1,1 +1,1 @@
-# innkeeper: disabled cuttlefish-only service; see android/overlay/README.md (RPMB mock for Trusty test VMs)
+# innkeeper: blanked to drop a Cuttlefish-only service, the RPMB mock for Trusty test VMs. See android/overlay/README.md.

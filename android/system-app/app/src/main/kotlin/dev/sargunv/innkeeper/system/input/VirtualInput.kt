@@ -22,11 +22,11 @@ import dev.sargunv.innkeeper.system.bridge.BridgeConnection
  * Modifiers and every ordinary mouse event go through the broker's evdev devices, because Android
  * 17's `KeyboardInputMapper::updateMetaStateIfNeeded` updates InputReader's global meta state only
  * for real devices and `CursorInputMapper::sync` reads it, so a modifier held during a drag reaches
- * the mouse; injected keys never update it. Ordinary keys stay on the injection stream with
+ * the mouse. Injected keys never update it. Ordinary keys stay on the injection stream with
  * explicit meta state, so typing doesn't depend on how the two streams interleave. Each window's
  * mouse is associated with its display by unique id (Android 17's display-association,
  * mouse-scaling and cursor-position test APIs) and never reassigned, so in-flight records keep
- * their destination; records wait in host order until the association exists. The broker sends a
+ * their destination. Records wait in host order until the association exists. The broker sends a
  * batch only after EventHub read the last one, so epoll can't reorder modifiers and motion.
  * Relative motion can't leave a window, so leaving ends the stream with `SYN_DROPPED` +
  * `SYN_REPORT`, which makes InputReader reset the device and emit HOVER_EXIT.
@@ -102,7 +102,7 @@ class VirtualInput(
 
   // Android 17 CursorInputMapper::configureOnPointerCapture changes mSource and
   // bumps the device generation. InputDeviceListener and sources are public SDK
-  // APIs; unlike a hidden cursor, SOURCE_MOUSE_RELATIVE unambiguously means capture.
+  // APIs, and unlike a hidden cursor, SOURCE_MOUSE_RELATIVE unambiguously means capture.
   // Capture is global in InputReader, so the bridge selects its focused window.
   private fun captureChanged() {
     val enabled =
@@ -217,8 +217,8 @@ class VirtualInput(
         continue
       }
       val e = (pending as Pending.Mouse).event
-      // A removal callback can precede a late report from the host. Never let
-      // an obsolete display block surviving displays or modifier releases.
+      // A removal callback can precede a late report from the host. An obsolete
+      // display must not block surviving displays or modifier releases.
       if (dm.getDisplay(e.displayId) == null) {
         queue.removeFirst()
         continue
@@ -275,9 +275,9 @@ class VirtualInput(
 
   private fun endNativeHover(mouse: Mouse, time: Long) {
     // A relative mouse has no out-of-range coordinate. End this discontinuous
-    // stream with evdev's resync marker; InputReader resets the device, and
+    // stream with evdev's resync marker. InputReader resets the device, and
     // InputDispatcher emits HOVER_EXIT under its real ID. An injected exit
-    // cannot do this: Android rewrites injected device IDs to -1.
+    // cannot do this because Android rewrites injected device IDs to -1.
     if (mouse.nativeHover && send(mouse.device, time, listOf(Triple(0, 3, 0))))
       mouse.nativeHover = false
     mouse.pointer.reset()

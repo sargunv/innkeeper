@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The exec relay: an init service, and the client `innkeeper-session exec` runs.
+# The exec relay, which runs as an init service and as the client that
+# `innkeeper-session exec` starts.
 if(ANDROID)
   add_executable(innkeeper-exec innkeeper-exec.c)
   target_compile_options(innkeeper-exec PRIVATE -Wall -Werror)

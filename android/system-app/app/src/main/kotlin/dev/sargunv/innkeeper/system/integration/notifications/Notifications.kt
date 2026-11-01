@@ -27,15 +27,16 @@ import dev.sargunv.innkeeper.system.integration.IntegrationFeature
 import dev.sargunv.innkeeper.system.wm.WindowManagerFeature
 
 /**
- * Forwards Android notifications to the desktop (host/bridge/src/system/notify.rs): posted, updated
+ * Forwards Android notifications to the desktop (host/bridge/src/system/notify.rs). Posted, updated
  * and removed notifications from [NotificationForwarder] become `NOTIFY`/`NOTIFY_CLOSE` requests,
- * and clicks, actions, inline replies and dismissals come back from the desktop. Runs on the
+ * and clicks, actions, inline replies and dismissals come back from the desktop. This runs on the
  * integration thread.
  *
- * Not forwarded: group summaries (the children are), media notifications while their app has a
- * window (MPRIS shows those; with no window, a media service's notification is what reopens it),
- * and notifications from the system itself (`android`, SystemUI). Foreground services'
- * notifications are resident on the desktop.
+ * Group summaries are not forwarded, since their children are. Media notifications are not
+ * forwarded while their app has a window, because MPRIS shows them. Without a window, a media
+ * service's notification is what reopens the app. Notifications from the system (`android`,
+ * SystemUI) are not forwarded either. Foreground services' notifications are resident on the
+ * desktop.
  */
 class Notifications(
   private val context: Context,
@@ -43,7 +44,9 @@ class Notifications(
   private val wm: WindowManagerFeature?,
 ) {
   private class Entry(val id: Int, var sbn: StatusBarNotification, var sentAt: Long = 0) {
-    /** Hash of the last blob sent: apps repost unchanged notifications often (timers). */
+    /**
+     * Hash of the last blob sent, since apps such as timers often repost unchanged notifications.
+     */
     var sentHash = 0
   }
 
@@ -57,7 +60,7 @@ class Notifications(
 
   val component = ComponentName(context, NotificationForwarder::class.java)
 
-  /** Grants our own listener access (it's what the desktop sees through). */
+  /** Grants this app's own listener access, which forwarding to the desktop depends on. */
   fun start() {
     val nm = context.getSystemService(NotificationManager::class.java)
     try {
@@ -83,13 +86,13 @@ class Notifications(
 
   fun onConnected() = postAll()
 
-  /** Windows opened or closed: forwards or withdraws media notifications. */
+  /** Forwards or withdraws media notifications when windows open or close. */
   fun refresh() {
     if (feature.connection.connected) postAll(initial = false)
   }
 
   fun onDisconnected() {
-    // The bridge closed our desktop notifications; post them again on reconnect.
+    // The bridge closed our desktop notifications, so post them again on reconnect.
     for (e in byKey.values) e.sentAt = 0
   }
 
@@ -119,7 +122,7 @@ class Notifications(
         }
     val update = e.sentAt != 0L && !initial
     e.sbn = sbn
-    // Progress updates can come many times a second: send at most two per second.
+    // Progress updates can come many times a second, so send at most two per second.
     val wait = e.sentAt + MIN_INTERVAL_MS - SystemClock.uptimeMillis()
     if (wait > 0) {
       feature.handler.removeCallbacksAndMessages(e)
@@ -351,8 +354,9 @@ class Notifications(
   }
 
   /**
-   * Sends [pi]. An activity it starts opens in the app's window if it has one (the window then
-   * comes to the front); otherwise on display 0, where the window manager gives it a window.
+   * Sends [pi]. An activity it starts opens in the app's window if it has one, and that window
+   * comes to the front. Otherwise the activity opens on display 0, where the window manager gives
+   * it a window.
    */
   private fun send(pi: PendingIntent?, pkg: String, fill: Intent?) {
     if (pi == null) return

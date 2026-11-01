@@ -1,2 +1,2 @@
-<!-- innkeeper: blanks the image's minigbm mapper; our mapper (android/vendor/graphics) replaces it -->
+<!-- innkeeper: blanks the image's minigbm mapper, which our mapper in android/vendor/graphics replaces. -->
 <manifest version="9.0" type="device"/>

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
-  Innkeeper System: privileged, platform-signed, persistent. Installed in
-  /system_ext/priv-app/InnkeeperSystem with
+  Innkeeper System is a privileged, platform-signed, persistent app. It is
+  installed in /system_ext/priv-app/InnkeeperSystem together with
   /system_ext/etc/permissions/dev.sargunv.innkeeper.system.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -17,66 +17,71 @@
   <uses-permission android:name="android.permission.REVOKE_RUNTIME_PERMISSIONS" />
   <uses-permission android:name="android.permission.GET_RUNTIME_PERMISSIONS" />
 
-  <!-- signature: granted by the platform key. -->
+  <!-- Signature permissions, granted by the platform key. -->
   <uses-permission android:name="android.permission.INJECT_EVENTS" />
   <uses-permission android:name="android.permission.ASSOCIATE_INPUT_DEVICE_TO_DISPLAY" />
   <uses-permission android:name="android.permission.SET_POINTER_SPEED" />
 
-  <!-- Window manager (docs/display.md). Trusted, always-unlocked virtual displays with their
-       own focus and display group; secure, so FLAG_SECURE windows aren't blacked out. -->
+  <!-- The window manager (docs/display.md) creates trusted, always-unlocked virtual displays
+       with their own focus and display group. They are secure so that FLAG_SECURE windows
+       aren't blacked out. -->
   <uses-permission android:name="android.permission.ADD_TRUSTED_DISPLAY" />
   <uses-permission android:name="android.permission.ADD_ALWAYS_UNLOCKED_DISPLAY" />
   <uses-permission android:name="android.permission.CAPTURE_SECURE_VIDEO_OUTPUT" />
-  <!-- Launching onto any display, moving tasks between displays, display IME policy. -->
+  <!-- For launching onto any display, moving tasks between displays, and setting the display
+       IME policy. -->
   <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
-  <!-- Task stack listener, focusTopTask; removing tasks; every app's tasks. -->
+  <!-- For the task stack listener, focusTopTask, removing tasks, and seeing every app's tasks. -->
   <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
   <uses-permission android:name="android.permission.REMOVE_TASKS" />
   <uses-permission android:name="android.permission.REORDER_TASKS" />
   <uses-permission android:name="android.permission.MANAGE_APP_TOKENS" />
   <uses-permission android:name="android.permission.SET_ORIENTATION" />
-  <!-- Labels and launch intents of the apps it opens. -->
+  <!-- For the labels and launch intents of the apps it opens. -->
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-  <!-- signature|privileged: listed in dev.sargunv.innkeeper.system.xml. -->
+  <!-- Signature|privileged permissions, allowlisted in dev.sargunv.innkeeper.system.xml. -->
   <uses-permission android:name="android.permission.REAL_GET_TASKS" />
   <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
-  <!-- signature|privileged: makes the Innkeeper Keyboard the default input method, turns the
-       accessibility service on and off, and applies the desktop settings below. -->
+  <!-- A signature|privileged permission. It lets the app make the Innkeeper Keyboard the default
+       input method, turn the accessibility service on and off, and apply the desktop settings
+       below. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
   <!-- Desktop integration (host/bridge/src/system/proto.rs). Holders get the "audio" group,
-       which may enter the host bridge's socket directory (/dev/socket/innkeeper, root:audio 0750);
-       the bridge then admits only this app's uid to its system service. -->
+       which may enter the host bridge's socket directory (/dev/socket/innkeeper, root:audio 0750).
+       The bridge admits only this app's uid to its system service. -->
   <permission
     android:name="dev.sargunv.innkeeper.permission.HOST_BRIDGE"
     android:protectionLevel="signature" />
 
   <uses-permission android:name="dev.sargunv.innkeeper.permission.HOST_BRIDGE" />
-  <!-- Desktop settings: night mode, theme seed, contrast and animation scales, time zone,
-       locales, 12/24-hour clock, font scale. -->
+  <!-- For the desktop settings: night mode, theme seed, contrast and animation scales, time
+       zone, locales, 12/24-hour clock and font scale. -->
   <uses-permission android:name="android.permission.MODIFY_DAY_NIGHT_MODE" />
   <uses-permission android:name="android.permission.WRITE_SETTINGS" />
   <uses-permission android:name="android.permission.SET_TIME_ZONE" />
   <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
-  <!-- Notifications to the desktop: our own listener access; media sessions. -->
+  <!-- For forwarding notifications to the desktop: granting the app's own listener access, and
+       controlling media sessions. -->
   <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
   <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
   <!-- Audio playback callbacks with the playing app's uid (PlaybackApps). Without it the
        callback's configurations are anonymized and the desktop mixer cannot name the app. -->
   <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" />
-  <!-- Clipboard sync while no window of ours has focus. -->
+  <!-- For clipboard sync while none of the app's windows has focus. -->
   <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" />
-  <!-- Default browser role (BrowserRole): ordinary links go to the desktop. -->
+  <!-- For the default browser role (BrowserRole), which sends ordinary links to the desktop. -->
   <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
   <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
-  <!-- Host state (integration/HostStateFeature.kt): the network location provider and its gps
-       test provider (granting itself the mock location app op), and the battery saver. -->
+  <!-- For host state (integration/HostStateFeature.kt): the network location provider, its gps
+       test provider, which needs the app to grant itself the mock location app op, and the
+       battery saver. -->
   <uses-permission android:name="android.permission.INSTALL_LOCATION_PROVIDER" />
   <uses-permission android:name="android.permission.LOCATION_HARDWARE" />
   <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" />
   <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
   <uses-permission android:name="android.permission.DEVICE_POWER" />
-  <!-- The host's network as Android's (integration/network/HostNetworkFeature.kt). -->
+  <!-- For registering the host's network as Android's (integration/network/HostNetworkFeature.kt). -->
   <uses-permission android:name="android.permission.NETWORK_FACTORY" />
 
   <application
@@ -86,8 +91,8 @@
     android:label="@string/app_name"
     android:persistent="true">
 
-    <!-- Display 0 has no desktop window. HOME stays in our existing persistent process;
-         apps use their own virtual displays, and the desktop owns task switching. -->
+    <!-- Display 0 has no desktop window. HOME stays in this app's existing persistent process.
+         Apps use their own virtual displays, and the desktop handles task switching. -->
     <activity
       android:name=".wm.HomeActivity"
       android:excludeFromRecents="true"
@@ -101,7 +106,7 @@
       </intent-filter>
     </activity>
 
-    <!-- The deprecated-target-SDK warning, in the app's window (see AppWarningActivity). -->
+    <!-- Shows the deprecated-target-SDK warning in the app's window (see AppWarningActivity). -->
     <activity
       android:name=".wm.AppWarningActivity"
       android:excludeFromRecents="true"
@@ -110,8 +115,8 @@
       android:taskAffinity=""
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-    <!-- Innkeeper Keyboard: host keyboard and input methods through zwp_text_input_v3
-         (docs/input.md). -->
+    <!-- The Innkeeper Keyboard connects the host keyboard and input methods through
+         zwp_text_input_v3 (docs/input.md). -->
     <service
       android:name=".ime.HostImeService"
       android:exported="true"
@@ -125,8 +130,8 @@
         android:resource="@xml/method" />
     </service>
 
-    <!-- Android apps on the desktop's AT-SPI bus (a11y/; host/bridge/src/a11y/). Enabled by
-         A11yFeature only while the desktop's assistive technologies are on. -->
+    <!-- Exposes Android apps on the desktop's AT-SPI bus (a11y/ and host/bridge/src/a11y/).
+         A11yFeature enables it while the desktop's assistive technologies are on. -->
     <service
       android:name=".a11y.HostAccessibilityService"
       android:exported="true"
@@ -140,8 +145,8 @@
         android:resource="@xml/accessibility_service" />
     </service>
 
-    <!-- Document picker: the desktop's file chooser (documents/;
-         host/bridge/src/documents/proto.rs). Outranks DocumentsUI (priority 100). -->
+    <!-- The document picker opens the desktop's file chooser (documents/ and
+         host/bridge/src/documents/proto.rs). Its priority of 200 outranks DocumentsUI's 100. -->
     <activity
       android:name=".documents.PickerActivity"
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
@@ -172,7 +177,7 @@
       </intent-filter>
     </activity>
 
-    <!-- The CLI's file chooser, opened through the same fd-grant VIEW path as an app. -->
+    <!-- The CLI's app chooser, opened through the same fd-grant VIEW path that apps use. -->
     <activity
       android:name=".documents.OpenWithActivity"
       android:excludeFromRecents="true"
@@ -180,7 +185,7 @@
       android:label="@string/open_with_title"
       android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
 
-    <!-- The picked host files as documents; reachable only through granted URIs. -->
+    <!-- Serves picked host files as documents. They are reachable only through granted URIs. -->
     <provider
       android:name=".documents.HostDocumentsProvider"
       android:authorities="dev.sargunv.innkeeper.system.documents"
@@ -192,7 +197,7 @@
       </intent-filter>
     </provider>
 
-    <!-- Desktop integration (integration/). Android notifications to the desktop. -->
+    <!-- Forwards Android notifications to the desktop (integration/). -->
     <service
       android:name=".integration.notifications.NotificationForwarder"
       android:exported="true"
@@ -203,8 +208,8 @@
       </intent-filter>
     </service>
 
-    <!-- Desktop browser: the default browser role routes ordinary http(s) links here.
-         Verified App Links still win before the browser role. -->
+    <!-- The default browser role routes ordinary http(s) links here, and this activity opens
+         them on the desktop. Verified App Links take precedence over the browser role. -->
     <activity
       android:name=".integration.browser.BrowserActivity"
       android:excludeFromRecents="true"
@@ -221,11 +226,13 @@
       </intent-filter>
     </activity>
 
-    <!-- Android 17 matches schemes literally, so enumerate external schemes. MIME */*
-         catches unclaimed content/file VIEWs. Priority -1000 leaves real Android handlers first. -->
-    <!-- Handoffs may move with the caller's task onto its virtual display. Handle the
-         configuration change in place: Android 17's display-compat self-kill recovery can
-         otherwise relaunch onto a display our window manager has already released (#98). -->
+    <!-- Android 17 matches schemes literally, so the filter lists each external scheme. The */*
+         MIME filter catches unclaimed content and file VIEWs. Priority -1000 lets real Android
+         handlers go first. -->
+    <!-- Handoffs may move with the caller's task onto its virtual display. The activity handles
+         the configuration change in place because Android 17's display-compat self-kill
+         recovery can otherwise relaunch it onto a display that the window manager has already
+         released (#98). -->
     <activity
       android:name=".integration.handoff.HandoffActivity"
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
@@ -272,8 +279,8 @@
       </intent-filter>
     </service>
 
-    <!-- The desktop's location as Android's network provider (integration/location/). Version 0:
-         any other provider outranks it. -->
+    <!-- Provides the desktop's location as Android's network provider (integration/location/).
+         At version 0, any other provider outranks it. -->
     <service
       android:name=".integration.location.HostLocationService"
       android:directBootAware="true"
@@ -287,7 +294,7 @@
         android:value="0" />
     </service>
 
-    <!-- Images copied on the desktop, pasted into Android apps. -->
+    <!-- Serve files and images copied on the desktop to Android apps that paste them. -->
     <provider
       android:name=".integration.clipboard.ClipFileProvider"
       android:authorities="dev.sargunv.innkeeper.system.clipboard.files"

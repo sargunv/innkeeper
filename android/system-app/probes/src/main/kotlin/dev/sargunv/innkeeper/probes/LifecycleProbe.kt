@@ -30,7 +30,7 @@ import kotlin.math.sin
 
 /**
  * Real alarm-clock and foreground audio APIs for the e2e audio/lifecycle groups, and a JobScheduler
- * job for checking job timing by hand; never shipped.
+ * job for checking job timing by hand. It is not shipped.
  */
 class LifecycleProbe : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,7 +44,7 @@ class LifecycleProbe : Activity() {
         schedule(this, at)
       }
       "job" -> {
-        // A CPU-only job: a minimum latency in seconds, or a period with --ei period.
+        // A CPU-only job with a minimum latency in seconds, or a period with --ei period.
         val job = JobInfo.Builder(1, ComponentName(this, Job::class.java))
         val period = intent.getIntExtra("period", 0)
         if (period > 0) job.setPeriodic(period * 1000L)

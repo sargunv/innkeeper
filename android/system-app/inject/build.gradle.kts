@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Android input events from :protocol's translated ones, and their injection:
-// shared by the system app and the probes' input harness.
+// Builds Android input events from :protocol's translated events and injects
+// them. The system app and the probes' input harness share this module.
 plugins { id("com.android.library") }
 
 val sdk = extra["compileSdk"] as Int

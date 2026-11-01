@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The BATTERY event as host/bridge/src/hoststate/proto.rs encodes it, and
-// the HealthInfo fields the Health HAL reports for it.
+// Tests decoding the BATTERY event as host/bridge/src/hoststate/proto.rs
+// encodes it, and the HealthInfo fields the Health HAL reports for it.
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,17 +21,19 @@ int main(void) {
   assert(h.battery_present && !h.ac_online && h.status == 3 && h.level == 42);
   assert(h.capacity_level == 3 && h.time_to_full_s == -1);
 
-  // Charging: on AC whatever OnBattery said, with a time to full.
+  // A charging battery reports AC power whatever OnBattery said, with a time
+  // to full.
   b.state = 1;
   b.time_to_full = 600;
   innkeeper_health_from(&b, &h);
   assert(h.ac_online && h.status == 2 && h.time_to_full_s == 600);
 
-  // No battery: AC and full.
+  // A host without a battery reports AC power and a full battery.
   innkeeper_health_from(&INNKEEPER_BATTERY_AC_ONLY, &h);
   assert(h.ac_online && !h.battery_present && h.status == 5 && h.level == 100);
 
-  // Empty and unplugged never reads 0 (BatteryService would shut down).
+  // An empty, unplugged battery never reads 0, because BatteryService would
+  // shut down.
   b = (struct innkeeper_battery){
     .present = true, .state = 3, .ac = false, .level = 0
   };

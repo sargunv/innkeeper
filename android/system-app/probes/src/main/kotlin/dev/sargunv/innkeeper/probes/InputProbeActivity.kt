@@ -32,8 +32,8 @@ class InputProbeActivity : Activity() {
       TAG,
       "configuration keyboard=${resources.configuration.keyboard} windowDisplay=${display?.displayId}",
     )
-    // Back (predictive back takes KEYCODE_BACK before dispatchKeyEvent) is logged, not acted on,
-    // so the window stays for the rest of a test.
+    // Back is logged without being acted on, so the window stays for the rest of a test.
+    // Predictive back takes KEYCODE_BACK before dispatchKeyEvent.
     onBackInvokedDispatcher.registerOnBackInvokedCallback(
       OnBackInvokedDispatcher.PRIORITY_DEFAULT,
     ) {

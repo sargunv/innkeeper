@@ -6,10 +6,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * The bridge protocol (docs/bridge-protocol.md, host/bridge/src/ipc/wire.rs): little-endian
- * messages of at most 512 bytes over SOCK_SEQPACKET, and the system service's types. Large payloads
- * go in a sealed memfd next to a small request. `host/bridge/src/ipc/wire-fixtures.txt` holds
- * encodings both sides are tested against.
+ * The bridge protocol (docs/bridge-protocol.md, host/bridge/src/ipc/wire.rs) and the system
+ * service's types. Messages are little-endian, at most 512 bytes, and travel over SOCK_SEQPACKET.
+ * Large payloads go in a sealed memfd next to a small request.
+ * `host/bridge/src/ipc/wire-fixtures.txt` holds encodings that both sides are tested against.
  */
 object Wire {
   const val MAX_MSG = 512
@@ -92,7 +92,7 @@ object Wire {
       out.write(b)
     }
 
-    /** A blob image: u16 width, u16 height, RGBA bytes (0x0: none). */
+    /** A blob image: u16 width, u16 height, RGBA bytes. A 0x0 image means none. */
     fun image(img: Rgba?) = apply {
       if (img == null) {
         u16(0).u16(0)
@@ -110,14 +110,14 @@ object Wire {
 
   fun message(type: Int, tag: Int): Writer = Writer().u16(type).u16(0).u32(tag)
 
-  /** The first message on every connection: binds it to [service]. */
+  /** The first message on every connection, which binds it to [service]. */
   fun hello(tag: Int, service: Int, name: String): ByteArray =
     message(HELLO, tag).u16(MAJOR).u16(MINOR).u32(service).name(name).bytes()
 
-  /** A received message: its header and a little-endian reader over its body. */
+  /** A received message, with its header and a little-endian reader over its body. */
   data class Message(val type: Int, val tag: Int, val body: ByteBuffer)
 
-  /** Parses the first [len] bytes of [buf]; null if that isn't a message's size. */
+  /** Parses the first [len] bytes of [buf], or returns null if that isn't a message's size. */
   fun parse(buf: ByteArray, len: Int): Message? {
     if (len < HDR || len > MAX_MSG) return null
     val r = ByteBuffer.wrap(buf, 0, len).order(ByteOrder.LITTLE_ENDIAN)

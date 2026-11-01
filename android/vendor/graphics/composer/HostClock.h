@@ -6,9 +6,9 @@
 
 namespace innkeeper::hwc {
 
-// Host presentation phase in CLOCK_MONOTONIC. Extrapolate between feedback
-// samples. Silence on a static visible window preserves its clock; only
-// an explicit source removal returns to the boot timer.
+// Host presentation phase in CLOCK_MONOTONIC, extrapolated between feedback
+// samples. A static visible window that sends no feedback keeps its clock.
+// Only an explicit source removal returns to the boot timer.
 class HostClock {
  public:
   static constexpr int64_t kDefaultPeriod = 16'666'666;
