@@ -1,6 +1,7 @@
-# The Innkeeper Flatpak (README.md here). build.sh fills the two out/flatpak
-# dirs this reads: src (`git archive HEAD`, a clean tree) with the vendored
-# crates, and prebuilt (what runs inside Android, from `mise run build`).
+# The Innkeeper Flatpak manifest (see README.md here). build.sh fills the two
+# out/flatpak directories that it reads. src holds a clean tree from
+# `git archive HEAD` with the vendored crates, and prebuilt holds the guest side
+# from `mise run build`.
 id: dev.sargunv.Innkeeper
 runtime: org.gnome.Platform
 runtime-version: "51"
@@ -12,27 +13,30 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=pulseaudio
-  # The render node and /dev/udmabuf. --device=all would bind the host's /dev
-  # over the sandbox's writable one, where the session makes its binder nodes.
+  # This grants the render node and /dev/udmabuf. --device=all would bind the
+  # host's /dev over the sandbox's writable /dev, where the session creates its
+  # binder nodes.
   - --device=dri
-  # Controllers through evdev; also exposes host keyboards/mice (desktop parity).
+  # Controllers use evdev. This also exposes the host's keyboards and mice,
+  # which matches what other desktop apps can read.
   - --device=input
-  # The host's network, as any desktop app has; Android uses it directly.
+  # Android uses the host's network directly, like any desktop app.
   - --share=network
-  # Android's notifications, with replace-in-place, progress and inline reply,
+  # Android notifications need replace-in-place, progress and inline reply,
   # which the Notification portal lacks.
   - --talk-name=org.freedesktop.Notifications
-  # The desktop's assistive-technology switch (Flatpak's AT-SPI proxy alone
-  # exposes GetAddress, not org.a11y.Status properties).
+  # The bridge reads the desktop's assistive-technology switch here. Flatpak's
+  # AT-SPI proxy exposes GetAddress but not the org.a11y.Status properties.
   - --talk-name=org.a11y.Bus
-  # adb into a profile (off by default): only the user's adb public key, read
-  # to authorize it in the profile's data (host/profile/src/adb.rs).
+  # adb access to a profile is off by default. When it is on, Innkeeper reads
+  # the user's adb public key to authorize it in the profile's data
+  # (host/profile/src/adb.rs).
   - --filesystem=~/.android/adbkey.pub:ro
   # No battery portal exists on the supported desktop baseline.
   - --system-talk-name=org.freedesktop.UPower
 modules:
-  # Bionic and static binaries, Android's partitions and the image scripts:
-  # nothing in them links the runtime.
+  # Bionic and static binaries, the guest partitions and the image scripts.
+  # Nothing in this module links against the runtime.
   - name: android
     buildsystem: simple
     build-commands:

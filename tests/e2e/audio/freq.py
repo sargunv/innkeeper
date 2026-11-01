@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dominant frequency and level of a raw capture (no numpy needed).
+"""Report the dominant frequency and level of a raw capture without numpy.
 
   freq.py FILE [--rate 48000] [--channels 2] [--format s16|f32] [--expect HZ]
 
@@ -71,7 +71,7 @@ def main():
   n = 1 << 16
   while n > len(ch0) and n > 1024:
     n >>= 1
-  # Loudest window (in 1/8-window steps).
+  # Find the loudest window, stepping by 1/8 of a window.
   best, best_e = 0, -1.0
   for s in range(0, max(1, len(ch0) - n + 1), n // 8):
     e = sum(v * v for v in ch0[s : s + n : 16])

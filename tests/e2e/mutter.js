@@ -1,4 +1,4 @@
-// Loaded only by the disposable GNOME Shell's --automation-script option.
+// The disposable GNOME Shell loads this through its --automation-script option.
 import Clutter from "gi://Clutter";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
@@ -15,7 +15,7 @@ export function init() {
     `test desktop: automation init; Shell starting=${Main.layoutManager._startingUp}`,
   );
   St.Settings.get().inhibit_animations();
-  // A fresh virtual pointer starts in GNOME's overview hot corner.
+  // A new virtual pointer starts in the hot corner, which opens the overview.
   new Gio.Settings({ schema_id: "org.gnome.desktop.interface" }).set_boolean(
     "enable-hot-corners",
     false,
@@ -25,8 +25,8 @@ export function init() {
   keyboard = seat.create_virtual_device(
     Clutter.InputDeviceType.KEYBOARD_DEVICE,
   );
-  // Shell connects startup-complete after awaiting the automation module's
-  // import. If startup won that race, its performance runner never calls us.
+  // Shell connects startup-complete after it awaits this module's import. If
+  // startup finished first, the performance runner never calls this module.
   if (!Main.layoutManager._startingUp) {
     console.log(
       "test desktop: Shell already started; starting automation directly",
@@ -78,7 +78,8 @@ export async function run() {
             pointer.notify_relative_motion(time, x, y);
             break;
           case "button":
-            // Clutter numbers buttons; the shared seat stream uses evdev codes.
+            // The seat stream uses evdev codes, and Clutter numbers buttons
+            // from 1.
             pointer.notify_button(
               time,
               x === 273 ? 3 : x === 274 ? 2 : x >= 275 ? x - 267 : x - 271,

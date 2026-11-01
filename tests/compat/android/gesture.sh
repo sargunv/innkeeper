@@ -1,14 +1,16 @@
 #!/system/bin/sh
-# Touch gestures for compat scripts, as input lines (protocol v2,
-# host/bridge/src/input/proto.rs) paced in real time. Runs inside the session
-# and is piped into the probes APK's dev.sargunv.innkeeper.probes.InputStdinHarness.
+# Write touch gestures for compat scripts as input lines (protocol v2,
+# host/bridge/src/input/proto.rs), paced in real time. The script runs inside the
+# session, and its output is piped into the probes APK's
+# dev.sargunv.innkeeper.probes.InputStdinHarness.
 #   gesture.sh pinch|pan|doubletap X Y DISPLAY W H
 # X Y are in the pixels of the app's W x H window on Android display DISPLAY.
 g=$1 x=$2 y=$3 t=1000 d=$4 w=$5 h=$6
 echo "window $w $h 1.000 $d"
-# The harness (app_process) needs about a second to start reading. Events that
-# reach it in a burst are clamped to its clock, which squeezes a double tap's
-# gap below GestureDetector's 40 ms minimum, so wait before the timed part.
+# The harness (app_process) needs about a second to start reading. It clamps
+# events that arrive in a burst to its clock, which squeezes a double tap's gap
+# below GestureDetector's 40 ms minimum, so the script waits before the timed
+# part.
 sleep 1.5
 case $g in
   pinch) # two fingers 80 px apart spreading to 560 px: zoom in

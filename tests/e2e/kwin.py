@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
+"""Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
-The same interface tests/e2e/mutter.js serves in GNOME Shell: Input through
-org_kde_kwin_fake_input, Visibility and Position through KWin scripts, and
-Screenshot through org.kde.KWin.ScreenShot2. KWin grants this executable both
-restricted interfaces from the desktop file tests/nested.sh writes.
+tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
+org_kde_kwin_fake_input, Visibility and Position use KWin scripts, and
+Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
+restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
 
 import os
@@ -210,7 +210,7 @@ class TestDesktop(dbus.service.Object):
     return False
 
   def script(self, body, reply):
-    """Run body for each probe window; reply whether any matched."""
+    """Run body for each probe window and reply whether any window matched."""
     self.scripts += 1
     name = f"innkeeper-test-desktop-{self.scripts}"
     path = scratch / f"{name}.js"
@@ -239,8 +239,9 @@ class TestDesktop(dbus.service.Object):
       self.bus.get_object("org.kde.KWin", f"/Scripting/Script{ident}"),
       "org.kde.kwin.Script",
     ).run()
-    # A mapped Android frame can precede the desktop window list. Answer
-    # false so the runner retries rather than accepting a silent no-op.
+    # An Android frame can be mapped before its window is in KWin's window
+    # list. If the script doesn't report back within a second, answer false so
+    # that the runner retries.
     GLib.timeout_add(1000, self.finish, name, False)
 
 

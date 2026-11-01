@@ -19,21 +19,23 @@ sccache = "0.19.0"
 _.file = "tools/build/toolchain.env"
 ANDROID_HOME = "{{ env.ANDROID_HOME | default(value=env.HOME ~ '/Android/Sdk') }}"
 ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.ANDROID_NDK_VERSION }}"
-# One compiler cache for every checkout on the machine (tools/build/sccache.sh),
-# with its own server port so another project's sccache server, started with
-# other settings and another cache, never answers ours.
+# Every checkout on the machine shares one compiler cache
+# (tools/build/sccache.sh). The server has its own port so that another
+# project's sccache server, which has other settings and another cache, can't
+# answer our requests.
 SCCACHE_DIR = "{{ env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache') }}/innkeeper/sccache"
 SCCACHE_SERVER_PORT = "4227"
-# Dependency crates (glib, gtk, ...) come from the cache in a new worktree.
+# In a new worktree, dependency crates (glib, gtk, ...) come from the cache.
 # sccache passes incremental compilations through, so dev builds of workspace
-# crates stay incremental. CI sets it empty (tools/ci/setup.sh).
+# crates stay incremental. CI sets RUSTC_WRAPPER to an empty value
+# (tools/ci/setup.sh).
 RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
 
 # ---- build -------------------------------------------------------------------
-# Each build:<module> fills out/build/<module>/install/, a tree of paths
-# relative to the stage prefix; `build` merges them into out/stage. Shared:
-# host, broker, image-tools. Android: ndk, vulkan, system-app, data.
-# OpenHarmony: ohos.
+# Each build:<module> task fills out/build/<module>/install/ with a tree of
+# paths relative to the stage prefix, and `build` merges the trees into
+# out/stage. Both systems use the host, broker and image-tools modules. Android
+# adds ndk, vulkan, system-app and data, and OpenHarmony adds ohos.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# build:host: what runs on the desktop and in the Flatpak sandbox, into
-# out/build/host/install: bin/{innkeeper,innkeeper-manager},
-# libexec/innkeeper/{innkeeper-bridge,innkeeper-session}, the manager's desktop
-# entry, metainfo, icons and MIME types.
+# build:host builds what runs on the desktop and in the Flatpak sandbox into
+# out/build/host/install. That is bin/{innkeeper,innkeeper-manager},
+# libexec/innkeeper/{innkeeper-bridge,innkeeper-session}, and the manager's
+# desktop entry, metainfo, icons and MIME types.
 set -euo pipefail
 cargo build -q --release -p innkeeper -p innkeeper-manager -p innkeeper-bridge -p innkeeper-session
 bin=out/cargo/release

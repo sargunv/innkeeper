@@ -1,14 +1,14 @@
 # Compat corpus: pinned F-Droid APKs (see tests/compat/README.md).
 #
 # `mise run test:compat -- fetch` downloads each APK into out/test/compat/corpus/
-# and checks its SHA-256; the APKs are never committed. To bump an app, copy
-# the new version code, URL and SHA-256 from
-# https://f-droid.org/repo/index-v2.json. Prefer x86_64 or universal APKs
-# (`native` lists the ABIs the APK ships).
+# and checks its SHA-256. The APKs are not committed. To bump an app, copy the
+# new version code, URL and SHA-256 from https://f-droid.org/repo/index-v2.json.
+# Prefer x86_64 or universal APKs. `native` lists the ABIs that the APK ships.
 #
-# Per app: framework = the UI framework or engine the APK is built with
-# (identified by hand from its libs and assets, see tests/compat/README.md).
-# The harness reads neither `framework` nor `native`; they help pick apps.
+# Each app's `framework` is the UI framework or engine that the APK is built
+# with, identified by hand from its libraries and assets (see
+# tests/compat/README.md). The harness ignores `framework` and `native`, which
+# help with choosing apps.
 #
 # Per app, optional:
 #   settle = <seconds>  wait after launch before the first-frame check (default 8)
@@ -27,8 +27,8 @@
 #                       "gesture:<pinch|pan|doubletap> X Y"  multi-touch via
 #                                       Innkeeper System's input bridge
 #                       "shot:<name>"   screenshot, must not be blank
-#                       "changed:<name>" ditto, and must differ from the last
-#                                       shot (did the gesture do anything?)
+#                       "changed:<name>" like shot:, and must differ from the
+#                                       last shot (to show the gesture worked)
 #   note = "..."        why the app is in the corpus
 #   manual = "..."      what to verify by hand later (not automated)
 

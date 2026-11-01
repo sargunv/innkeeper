@@ -1,6 +1,9 @@
 #!/usr/bin/python3
-"""Minimize or restore the probe windows on the runner's private desktop, never
-the user's bus. Exits 1 when no window matched, so the runner can retry."""
+"""Minimize or restore the probe windows on the runner's private desktop.
+
+The script refuses to use the user's bus. It exits 1 when no window matched so
+that the runner can retry.
+"""
 
 import os
 import sys

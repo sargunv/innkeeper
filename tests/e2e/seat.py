@@ -1,6 +1,9 @@
 #!/usr/bin/python3
-"""Input on the disposable compositor seat: abs:x,y, rel:x,y, button:code,state,
-key:code,state, axis:axis,value (from argv, or lines on stdin with --stdin)."""
+"""Send input to the disposable compositor's seat.
+
+The events are abs:x,y, rel:x,y, button:code,state, key:code,state and
+axis:axis,value. They come from argv, or from lines on stdin with --stdin.
+"""
 
 import sys
 

@@ -1,10 +1,11 @@
-# The build container: tools for cross-compiling Mesa, libdrm, LLVM and
-# Android, for the static image tools (image/tools/build.sh), and musl's
-# headers for OpenHarmony's VDIs (ohos/build.sh).
-# The NDK comes from the host (tools/container/run.sh mounts $HOME), pinned in
-# tools/build/toolchain.env.
+# The build container has the tools for cross-compiling Mesa, libdrm, LLVM and
+# Android code, for the static image tools (image/tools/build.sh), and musl's
+# headers for OpenHarmony's VDIs (ohos/build.sh). The NDK comes from the host,
+# because tools/container/run.sh mounts $HOME, and tools/build/toolchain.env
+# pins its version.
 FROM registry.fedoraproject.org/fedora:44
-# Avoid slow or unreachable mirrors selected by the metalinks on hosted runners.
+# Set the base URLs directly because, on hosted runners, the metalinks can pick
+# slow or unreachable mirrors.
 RUN dnf -y \
       --setopt='fedora.metalink=' \
       --setopt='fedora.baseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/$releasever/Everything/$basearch/os/' \

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Manual only: builds and measurements share a bounded host scope.
+# A manual benchmark. The build and the measurements run in one host scope with
+# a memory limit.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 case ${1:-} in
@@ -14,7 +15,8 @@ export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-bench-$1-$(date +%s%N)} INNKEEPER_
   echo 'expected fresh bench-* profile' >&2
   exit 1
 }
-# Refuse before installing traps: an existing profile belongs to someone else.
+# Check this before installing traps, because the cleanup would stop a profile
+# that belongs to someone else.
 [[ ! -e out/bench/$INNKEEPER_PROFILE && ! -e out/dev/flatpak/$INNKEEPER_PROFILE ]] || {
   echo 'benchmark profile must be fresh' >&2
   exit 1

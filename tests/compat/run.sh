@@ -3,7 +3,8 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-compat}
-# Links are only logged; notifications and media players stay off the desktop.
+# Test mode only logs links and keeps notifications and media players off the
+# desktop.
 export INNKEEPER_TEST=1
 if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   for arg in "$@"; do

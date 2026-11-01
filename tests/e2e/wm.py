@@ -1,11 +1,14 @@
 #!/usr/bin/python3
-"""The session's window operations over Session1, for the e2e scripts:
+"""Run the session's window operations over Session1 for the e2e scripts.
+
 wm LAUNCH --es package P [--es component C] [--ez new-window true]
 wm LIST
 wm CLOSE (--es package P | --ei display N)
-Prints the window manager's reply, one line per window for LIST, or
-`error: ...` (still exiting 0, as `am broadcast` did: closing a window that
-isn't there is routine)."""
+
+Prints the window manager's reply, with one line per window for LIST. An error
+prints `error: ...` and still exits 0, because closing a window that isn't
+there is routine.
+"""
 
 import os
 import sys

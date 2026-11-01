@@ -1,4 +1,4 @@
-"""Private desktop cleanup preserves the command result and reports leaks."""
+"""The private desktop's cleanup keeps the command's result and reports leaks."""
 
 import json
 import os
@@ -131,8 +131,9 @@ kill() { printf '["kill", "%s"]\\n' "$*" >>"$trace"; }
       work = Path(work)
       binary = work / "bin"
       binary.mkdir()
-      # The desktop never starts: setup stops at the compositor service, or
-      # earlier on a host without PipeWire's config, after the cache is cleared.
+      # The desktop never starts. Setup fails at the compositor service, or
+      # earlier on a host without PipeWire's config, and both happen after the
+      # cache is cleared.
       for command, status in (
         ("systemd-run", 3),
         ("journalctl", 0),
