@@ -1,7 +1,7 @@
-//! `innkeeper-manager`: the Innkeeper manager. Install Android apps by drag and
-//! drop or from the file manager, open and remove them, and watch the
-//! session. A GTK 4 / libadwaita front end over `innkeeper-core`; see
-//! host/manager/README.md.
+//! `innkeeper-manager` is the Innkeeper app window. It installs Android apps
+//! from drag and drop or the file manager, opens and uninstalls them, and shows
+//! the session's state. It is a GTK 4 and libadwaita front end over
+//! `innkeeper-core`. See host/manager/README.md.
 
 mod app;
 mod errors;
@@ -36,7 +36,7 @@ pub fn remember_profile(name: &ProfileName) {
     let _ = std::fs::write(f, format!("{name}\n"));
 }
 
-/// The first profile by name, made if there is none.
+/// Returns the first profile by name, and creates one if there are none.
 pub fn first_profile() -> anyhow::Result<String> {
     match innkeeper_core::profiles::list()?.into_iter().next() {
         Some(p) => Ok(p.name),
@@ -46,8 +46,8 @@ pub fn first_profile() -> anyhow::Result<String> {
     }
 }
 
-/// The profile to show: `named` (`--profile`), else the one shown last if it
-/// still exists, else the first.
+/// Picks the profile to show. That is `named` from `--profile` if it is given,
+/// then the profile shown last if it still exists, then the first profile.
 fn initial_profile(named: Option<&str>) -> anyhow::Result<ProfileName> {
     if let Some(n) = named {
         return innkeeper_core::profiles::existing(n);
@@ -59,7 +59,8 @@ fn initial_profile(named: Option<&str>) -> anyhow::Result<ProfileName> {
     }
 }
 
-/// `--profile NAME` taken out of the arguments GApplication parses.
+/// Removes `--profile NAME` from the arguments before GApplication parses
+/// them, and returns the name.
 fn split_profile(mut args: Vec<String>) -> (Option<String>, Vec<String>) {
     match args.iter().position(|a| a == "--profile") {
         Some(i) if i + 1 < args.len() => {

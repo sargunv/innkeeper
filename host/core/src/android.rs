@@ -137,7 +137,7 @@ pub fn launcher_component(s: &Session, pkg: &str) -> Result<String> {
     match comp.split_once('/') {
         Some((p, _)) if p == pkg && !comp.contains(char::is_whitespace) => Ok(comp.to_string()),
         _ => Err(
-            anyhow::anyhow!("{pkg} has no launcher activity (is it installed?)")
+            anyhow::anyhow!("{pkg} isn't installed or has no launcher activity")
                 .context(ErrorKind::NoLauncherActivity),
         ),
     }

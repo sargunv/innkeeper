@@ -1,5 +1,6 @@
-//! Turns `innkeeper-core` errors into messages for people: what failed, the
-//! one thing to do about it if there is one, and the original text as details.
+//! Turns `innkeeper-core` errors into messages for the user. A message has a
+//! heading that says what failed, an optional action to take, and the full
+//! error text as details.
 
 /// What the user was doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,20 +9,19 @@ pub enum Op {
     Install,
     Open,
     Uninstall,
-    /// Starting or stopping the session; the name is its system's.
     Start,
     Stop,
     AppSettings,
     Preferences,
     Profiles,
-    /// Downloading and unpacking the image; the name is its system's.
+    /// Downloading and unpacking the image.
     Prepare,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Humane {
     pub heading: String,
-    /// The one thing to do about it, if there is one.
+    /// An action the user can take, if there is one.
     pub body: Option<String>,
     /// The full error chain, for a "Details" expander.
     pub details: String,
@@ -46,7 +46,7 @@ fn classify(
 ) -> (String, Option<&'static str>) {
     use innkeeper_core::ErrorKind::*;
     let app = name.map_or_else(|| "the App".to_string(), cap);
-    // Only an Android profile installs and opens apps.
+    // Apps install and open in Android profiles, so app errors name Android.
     let system = match op {
         Op::Start | Op::Stop | Op::Prepare => name.unwrap_or("Android"),
         _ => "Android",

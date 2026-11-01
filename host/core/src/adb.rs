@@ -46,7 +46,7 @@ pub fn set(name: &str, on: bool, report: Report) -> Result<Settings> {
             );
             if let Err(e) = r {
                 report(Event::Warning(format!(
-                    "{e:#}; `adb devices` finds {} once a server runs",
+                    "{e:#}. `adb devices` lists {} after an adb server starts",
                     serial(&s)
                 )));
             }
@@ -78,7 +78,7 @@ fn apply(session: &Session, s: &Settings) -> Result<()> {
 pub fn missing_key() -> Option<String> {
     adb::user_key().is_none().then(|| {
         format!(
-            "no adb key at {}; `adb start-server` creates one",
+            "there is no adb key at {}. Run `adb start-server` to create one",
             adb::user_key_path().display()
         )
     })

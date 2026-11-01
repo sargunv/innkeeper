@@ -1,16 +1,18 @@
 //! Plain-language names for Android permissions on the install and app pages.
 
-/// A permission as the install page shows it: a title, and whether it gives
-/// access to something personal (listed first, with a warning icon).
+/// A permission as the install page shows it.
 pub struct Shown {
     pub title: String,
+    /// The permission gives access to personal data. These permissions list
+    /// first and get a warning icon.
     pub sensitive: bool,
 }
 
-/// Describes `name` (`android.permission.CAMERA`). Unknown permissions keep
-/// their constant, made readable (`READ_SYNC_SETTINGS` -> "Read sync
-/// settings"); an app's own (`com.example.app.C2D_MESSAGE`) is `None`, since
-/// it means nothing to the user.
+/// Describes `name`, such as `android.permission.CAMERA`. An unknown platform
+/// permission gets its constant in readable form, so `READ_SYNC_SETTINGS`
+/// becomes "Read sync settings". An app's own permission, such as
+/// `com.example.app.C2D_MESSAGE`, returns `None` because its name means nothing
+/// to the user.
 pub fn describe(name: &str) -> Option<Shown> {
     let short = name
         .strip_prefix("android.permission.")
@@ -71,7 +73,8 @@ fn readable(constant: &str) -> Shown {
     }
 }
 
-/// The permissions to show, deduplicated by title, personal ones first.
+/// Returns the permissions to show, deduplicated by title, with personal ones
+/// first.
 pub fn shown(names: &[String]) -> Vec<Shown> {
     let mut v: Vec<Shown> = vec![];
     for n in names {
@@ -85,9 +88,10 @@ pub fn shown(names: &[String]) -> Vec<Shown> {
     v
 }
 
-/// The app page's rows for runtime permissions `names`, in order: a title,
-/// and the permission's constant as a subtitle only where titles collide
-/// (`READ_CONTACTS` and `WRITE_CONTACTS` are both "Contacts and accounts").
+/// Returns a title and subtitle for each runtime permission in `names`, in
+/// order, for the app page. The subtitle is the permission's constant when two
+/// permissions share a title, and empty otherwise. For example,
+/// `READ_CONTACTS` and `WRITE_CONTACTS` are both "Contacts and accounts".
 pub fn titles<'a>(names: impl Iterator<Item = &'a str>) -> Vec<(String, String)> {
     let rows: Vec<(String, &str)> = names
         .map(|n| (describe(n).map_or_else(|| n.to_string(), |s| s.title), n))

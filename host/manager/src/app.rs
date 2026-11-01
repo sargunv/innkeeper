@@ -1,4 +1,5 @@
-//! Installed app details. Blocking session calls always run on the worker.
+//! The page for an installed app's details and settings. Blocking session
+//! calls run on the worker thread.
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -75,8 +76,9 @@ impl Page {
                     if let Some(window) = state.window.upgrade() {
                         window.show_error(Op::AppSettings, Some(&state.app.name), &e);
                     }
-                    // Re-read after an uncertain or rejected mutation. Preserve the previous
-                    // controls until the user retries, but don't leave a toggle claiming success.
+                    // A failed command may have applied or not, so the old controls could
+                    // show the wrong state. Replace them with a button that reads the
+                    // settings again.
                     state.clear();
                     let retry = gtk::Button::with_label("Try Again");
                     let s = Rc::downgrade(&state);

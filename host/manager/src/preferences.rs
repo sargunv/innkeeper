@@ -1,6 +1,7 @@
-//! The Profile Settings page: the shown profile's settings, and Keep Running,
-//! which every profile shares. An OpenHarmony profile has only its display:
-//! the rest is Android's. Reads and writes run off the GTK thread.
+//! The Profile Settings page. It shows the current profile's settings and the
+//! Keep Running preference, which applies to every profile. An OpenHarmony
+//! profile shows the Display setting alone, because the others are for
+//! Android. Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -20,14 +21,14 @@ use crate::{
 struct Page {
     window: WeakWindow,
     content: gtk::Box,
-    /// The profile whose settings show.
+    /// The profile whose settings the page shows.
     profile: String,
     settings: RefCell<Settings>,
     keep_running: Cell<bool>,
     busy: Cell<bool>,
 }
 
-/// The display choices, with a device window's size.
+/// The display choices. Each device window lists its size.
 const DISPLAYS: [(Display, &str, &str); 4] = [
     (Display::Windowed, "Windowed", ""),
     (Display::SmallPhone, "Small Phone", "720 × 1280"),
@@ -85,8 +86,8 @@ impl Page {
         }
     }
 
-    /// Runs `f` off the GTK thread with the page insensitive; reloads after
-    /// a failure, or always with `reload`.
+    /// Runs `f` off the GTK thread while the page is insensitive. Reloads the
+    /// page afterwards if `f` fails or `reload` is set.
     fn work(
         self: &Rc<Self>,
         reload: bool,
@@ -114,7 +115,8 @@ impl Page {
         change(&mut self.settings.borrow_mut());
         let (name, next) = (self.profile.clone(), self.settings.borrow().clone());
         self.work(false, move || {
-            // adb has its own path (it applies live and needs a key).
+            // Keep the adb fields. `adb_row` sets them through `adb::set`, which
+            // applies adb to the running session and authorizes a key.
             profiles::update(&name, |s| {
                 *s = Settings {
                     adb: s.adb,
@@ -219,8 +221,8 @@ impl Page {
         self.content.append(&page);
     }
 
-    /// Windowed or a device window, of those the profile's system has; for
-    /// the next start.
+    /// The Display row. It lists the display modes the profile's system
+    /// supports, and a change applies at the next start.
     fn display_row(self: &Rc<Self>, p: &Settings) -> adw::ComboRow {
         let choices: Vec<_> = DISPLAYS
             .into_iter()
@@ -231,8 +233,8 @@ impl Page {
         let row = adw::ComboRow::builder()
             .title("Display")
             .subtitle(match choices[current].2 {
-                "" => "Applies at next start".to_string(),
-                size => format!("{size} · Applies at next start"),
+                "" => "Applies at the next start".to_string(),
+                size => format!("{size} · Applies at the next start"),
             })
             .model(&model)
             .selected(current as u32)
@@ -317,7 +319,7 @@ impl Page {
                 return;
             };
             let (n, on) = (s.profile.clone(), r.is_active());
-            // Reloaded after, so the subtitle shows the port it got.
+            // Reload afterwards so the subtitle shows the assigned port.
             s.work(true, move || {
                 innkeeper_core::adb::set(&n, on, &innkeeper_core::ops::quiet)?;
                 match innkeeper_core::adb::missing_key().filter(|_| on) {

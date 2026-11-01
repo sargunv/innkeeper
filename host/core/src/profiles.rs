@@ -61,7 +61,7 @@ pub fn existing(name: &str) -> Result<ProfileName> {
     let p = ProfileName::new(name)?;
     if !paths(&p)?.data.exists() {
         if name != FIRST {
-            bail!("no profile {name} (`innkeeper profile create {name}` makes it)");
+            bail!("no profile named {name}. Create it with `innkeeper profile create {name}`");
         }
         create(FIRST, &Settings::default())?;
     }

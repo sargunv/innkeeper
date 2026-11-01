@@ -212,7 +212,7 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
         && !base.native_code.iter().any(|c| abis.contains(c))
     {
         return Err(anyhow::anyhow!(
-            "{pkg} only has native code for {} (this session runs {})",
+            "{pkg} has native code for {}, but this session runs {}",
             base.native_code.join(", "),
             abis.join(", ")
         )

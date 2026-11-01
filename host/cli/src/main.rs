@@ -1,7 +1,8 @@
-//! `innkeeper`: manage profiles, each running Android or OpenHarmony; install
-//! Android apps into one with desktop entries and icons, run, list and
-//! uninstall them. A thin front end over `innkeeper-core` (shared with
-//! `innkeeper-manager`). See host/cli/README.md.
+//! `innkeeper` is the command-line interface. It manages profiles, each of
+//! which runs Android or OpenHarmony. In an Android profile, it installs apps
+//! with desktop entries and icons, and runs, lists and uninstalls them. It is a
+//! front end over `innkeeper-core`, which `innkeeper-manager` also uses. See
+//! host/cli/README.md.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
@@ -29,7 +30,7 @@ use splash::Splash;
     about = "Run Android and OpenHarmony apps on Linux"
 )]
 struct Cli {
-    /// The profile to work with, a name from `profile list`.
+    /// The name of the profile to use, as `profile list` shows it.
     #[arg(long, global = true, value_name = "NAME", default_value = innkeeper_profile::profile::FIRST)]
     profile: String,
     #[command(subcommand)]
@@ -85,13 +86,13 @@ enum AppCmd {
     ClearData { package: String },
     /// Force-stop the app.
     Stop { package: String },
-    /// Change settings.
+    /// Change the app's settings.
     Set {
         package: String,
-        /// Run with no window open.
+        /// Let the app run with no window open.
         #[arg(long, value_parser = ["on", "off"])]
         background: Option<String>,
-        /// Use Escape as Back.
+        /// Make Escape act as Back.
         #[arg(long, value_parser = ["on", "off"])]
         escape_back: Option<String>,
         /// Grant or revoke a runtime permission (repeatable).
@@ -100,7 +101,7 @@ enum AppCmd {
     },
 }
 
-/// `NAME=on|off`.
+/// Parses `NAME=on` or `NAME=off`.
 fn permission_setting(s: &str) -> Result<(String, bool), String> {
     match s.rsplit_once('=') {
         Some((name, "on")) if !name.is_empty() => Ok((name.into(), true)),
@@ -116,13 +117,13 @@ enum ProfileCmd {
     /// Create a profile.
     Create {
         name: String,
-        /// The system, which can't be changed later.
+        /// The profile's system. It can't be changed later.
         #[arg(long, default_value = "android", value_parser = ["android", "ohos"])]
         system: String,
     },
     /// Rename a stopped profile.
     Rename { from: String, to: String },
-    /// Delete a stopped profile, with its apps and data.
+    /// Delete a stopped profile and its apps and data.
     Delete { name: String },
     /// Start the profile and wait for it to boot.
     Start {
@@ -146,16 +147,17 @@ enum ProfileCmd {
 
 #[derive(clap::Args)]
 struct SetArgs {
-    /// Windowed apps, or one device window; applies at next start.
+    /// Show apps in their own windows or in one device window. Applies at the
+    /// next start.
     #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
     display: Option<String>,
-    /// adb on localhost.
+    /// Run adb on localhost.
     #[arg(long, value_parser = ["on", "off"])]
     adb: Option<String>,
-    /// Idle minutes before the profile stops (1 to 120).
+    /// Minutes with no apps open before the profile stops (1 to 120).
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=120))]
     idle_minutes: Option<u32>,
-    /// Keep every profile running, starting at login.
+    /// Keep every profile running, and start them at login.
     #[arg(long, value_parser = ["on", "off"])]
     keep_running: Option<String>,
     /// Add apps installed inside Android to the app menu.
@@ -176,9 +178,10 @@ struct SetArgs {
 }
 
 impl SetArgs {
-    /// The first given setting that only Android has: OpenHarmony has no
-    /// adb, app-menu mirroring or desktop following, and its session never
-    /// stops idle (only the system app reports activity).
+    /// Returns the first given setting that OpenHarmony profiles don't have.
+    /// OpenHarmony has no adb, app menu mirroring or desktop following. Its
+    /// session doesn't stop when idle, because Android's system app is what
+    /// reports activity.
     fn android_only(&self) -> Option<&'static str> {
         [
             (self.adb.is_some(), "--adb"),
@@ -193,7 +196,8 @@ impl SetArgs {
         .find_map(|(given, what)| given.then_some(what))
     }
 
-    /// The profile settings to change, if any, applied to `s`.
+    /// Applies the given profile settings to `s`, and returns whether any were
+    /// given.
     fn apply(&self, s: &mut innkeeper_profile::profile::Settings) -> bool {
         let on = |v: &Option<String>| v.as_deref().map(|v| v == "on");
         let mut changed = false;
@@ -224,7 +228,7 @@ impl SetArgs {
     }
 }
 
-/// Progress and warnings on stderr.
+/// Prints progress and warnings to stderr.
 fn stderr(e: Event) {
     match e {
         Event::Status(m) | Event::Warning(m) => eprintln!("innkeeper: {m}"),
@@ -238,12 +242,11 @@ fn install(profile: &ProfileName, file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The static desktop entry handles both APK installation and file VIEW.
-/// The package formats `install` takes, which `open` refuses.
+/// The package formats that `install` takes. `open` refuses them.
 const PACKAGE_EXTENSIONS: [&str; 4] = ["apk", "apks", "xapk", "apkm"];
 
-/// Opens documents with an Android app the user picks: each is granted to
-/// the session, then the system app's chooser shows.
+/// Opens documents in an Android app that the user picks. Each file is
+/// granted to the session, and then the system app shows its app chooser.
 fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Result<()> {
     if let Some(p) = files.iter().find(|p| {
         p.extension()
@@ -251,7 +254,7 @@ fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Resu
             .is_some_and(|e| PACKAGE_EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
     }) {
         bail!(
-            "{} is an app; install it with `innkeeper install`",
+            "{} is an app package. Install it with `innkeeper install`",
             p.display()
         );
     }
@@ -277,7 +280,8 @@ fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Resu
     .map(drop)
 }
 
-/// A read-only grant of the file at `path` on profile `profile`'s session.
+/// Grants profile `profile`'s session read access to the file at `path`, and
+/// returns the grant's id.
 fn grant(profile: &ProfileName, path: &Path) -> Result<u64> {
     let file = open_input(path)?;
     let name = path
@@ -296,8 +300,8 @@ fn uninstall(profile: &ProfileName, pkg: &str, keep_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// Launches an app. From a desktop launch on a stopped session, a splash
-/// window shows at once and hands its focus on to the app's window.
+/// Launches an app. If the session is stopped, a splash window shows right
+/// away and passes focus to the app's window when that window opens.
 fn run(
     profile: &ProfileName,
     pkg: &str,
@@ -333,8 +337,8 @@ fn run(
     };
     let r = (|| {
         ops::ensure_session(profile, &stderr)?;
-        // The splash used the launch's token; the app's window gets one of
-        // the splash's.
+        // The splash used the launch's activation token. The app's window
+        // gets a new token from the splash.
         let token = match &splash {
             Some(s) => s.token(Duration::from_secs(2)),
             None => token,
@@ -381,8 +385,8 @@ fn run(
     r.map(drop)
 }
 
-/// Opens a regular file to grant, refusing special files without waiting for
-/// a FIFO writer.
+/// Opens a regular file for granting. Special files are refused, and a FIFO
+/// is refused without waiting for a writer.
 fn open_input(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
@@ -401,8 +405,8 @@ fn open_input(path: &Path) -> Result<File> {
     Ok(file)
 }
 
-/// The splash colour of an app whose entry doesn't say (Android's light
-/// window background).
+/// The splash colour for an app whose entry has none. It matches Android's
+/// light window background.
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
 fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
@@ -445,7 +449,7 @@ fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
             }
             ensure!(
                 !v.is_empty(),
-                "nothing to set: give --background, --escape-back or --permission"
+                "app set needs --background, --escape-back or --permission"
             );
             v
         }
@@ -456,7 +460,7 @@ fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
     Ok(())
 }
 
-/// `app info`'s text form.
+/// Formats `app info` output as text.
 fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
     let mb = |b: u64| format!("{:.1} MB", b as f64 / 1e6);
     let on = |b: bool| if b { "on" } else { "off" };
@@ -497,7 +501,7 @@ fn list(profile: &ProfileName) -> Result<()> {
     Ok(())
 }
 
-/// `profile`: `name` is `--profile`'s.
+/// Runs a `profile` subcommand. `name` is the `--profile` value.
 fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
     match cmd {
         ProfileCmd::List => {
@@ -529,7 +533,7 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
         ProfileCmd::Start { all } => {
             let report = |m: &str| eprintln!("innkeeper: {m}");
             if all {
-                // One that fails doesn't keep the others from starting.
+                // Keep starting the other profiles if one fails.
                 let mut failed = None;
                 for p in profiles::list()? {
                     if let Err(e) = profiles::start(&p.name, &report) {
@@ -556,7 +560,7 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
     Ok(())
 }
 
-/// `profile set`.
+/// Runs `profile set`.
 fn set(name: &str, args: &SetArgs) -> Result<()> {
     let mut probe = innkeeper_profile::profile::Settings::default();
     let profile_change = args.apply(&mut probe);
@@ -572,7 +576,7 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
             args.apply(s);
         })?;
         if args.display.is_some() {
-            println!("display {}: applies at next start", s.display.name());
+            println!("display {} applies at the next start", s.display.name());
         }
     }
     if let Some(on) = &args.keep_running {
@@ -596,12 +600,12 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    // A desktop launch's token is ours to use once; nothing we start
-    // inherits it.
+    // A desktop launch's activation token is valid for one use. Remove it
+    // from the environment so that child processes don't inherit it.
     let token = std::env::var("XDG_ACTIVATION_TOKEN")
         .ok()
         .and_then(|t| validate::activation_token(&t).map(str::to_string));
-    // SAFETY: no other threads yet.
+    // SAFETY: no other threads exist yet.
     unsafe {
         std::env::remove_var("XDG_ACTIVATION_TOKEN");
         std::env::remove_var("DESKTOP_STARTUP_ID");
@@ -716,7 +720,7 @@ mod tests {
         assert_eq!(s.display, innkeeper_profile::profile::Display::SmallPhone);
         assert_eq!(s.idle_minutes, 30);
         assert!(!s.follow_dark && s.follow_accent && s.mirror_apps);
-        // Global and live-applied ones aren't profile file changes.
+        // --keep-running and --adb don't change the profile's settings file.
         let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --keep-running on --adb on")
         else {
             panic!("profile set did not parse");

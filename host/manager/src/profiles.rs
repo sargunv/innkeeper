@@ -1,6 +1,7 @@
-//! The Profiles page: every profile, each a separate Android or OpenHarmony
-//! setup with its own apps, data and settings, to create, delete, start and
-//! stop. Every core call runs off the GTK thread.
+//! The Profiles page lists every profile and lets the user create, rename,
+//! delete, start and stop them. Each profile is a separate Android or
+//! OpenHarmony setup with its own apps, data and settings. Core calls run off
+//! the GTK thread.
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -21,12 +22,11 @@ struct Page {
     window: WeakWindow,
     group: adw::PreferencesGroup,
     rows: RefCell<Vec<gtk::Widget>>,
-    /// The profile this window shows the apps of.
-    /// The profile this window shows, if any.
+    /// The profile the window shows, if any.
     current: RefCell<Option<String>>,
-    /// A profile being started, stopped or deleted from here.
+    /// The profile this page is starting, stopping, renaming or deleting.
     busy: RefCell<Option<String>>,
-    /// Profiles whose settings show.
+    /// The profiles whose rows are expanded.
     expanded: RefCell<HashSet<String>>,
     /// Refreshes the list while the page shows.
     timer: RefCell<Option<glib::SourceId>>,
@@ -70,7 +70,8 @@ pub fn page(window: &Window) -> adw::NavigationPage {
     let s = state.clone();
     page.connect_showing(move |_| {
         s.load();
-        // Profiles start and stop by themselves too (idle, the CLI).
+        // Profiles also start and stop from the CLI or when idle, so poll the
+        // list.
         let weak = Rc::downgrade(&s);
         let timer = glib::timeout_add_local(Duration::from_secs(2), move || {
             if let Some(s) = weak.upgrade() {
@@ -257,7 +258,8 @@ impl Page {
         );
     }
 
-    /// Runs `f` for profile `name` off the GTK thread, then shows the list.
+    /// Runs `f` for profile `name` off the GTK thread and reloads the list. If
+    /// `f` succeeds, shows `done` as a toast.
     fn work(
         self: &Rc<Self>,
         name: &str,
@@ -272,7 +274,7 @@ impl Page {
         });
     }
 
-    /// [`Self::work`], calling `then` on the GTK thread if `f` succeeds.
+    /// Like [`Self::work`], but calls `then` on the GTK thread if `f` succeeds.
     fn work_then(
         self: &Rc<Self>,
         name: &str,
@@ -307,7 +309,9 @@ impl Page {
 
     fn create(self: &Rc<Self>) {
         let body = |system: Option<&System>| match system {
-            Some(System::Ohos) => "Built-in apps only. The system can’t be changed later.",
+            Some(System::Ohos) => {
+                "OpenHarmony profiles can’t install apps. The system can’t be changed later."
+            }
             _ => "The system can’t be changed later.",
         };
         let d = adw::AlertDialog::new(Some("New Profile"), Some(body(None)));
@@ -394,7 +398,9 @@ impl Page {
                         return;
                     };
                     _ = w.say(&format!("Profile {name} deleted"));
-                    // The window shows another profile's apps, or a new one's.
+                    // The window showed the deleted profile. Switch to the first
+                    // remaining profile, which `first_profile` creates if none
+                    // are left.
                     if current {
                         glib::spawn_future_local(async move {
                             match worker::run_quiet(crate::first_profile).await {
