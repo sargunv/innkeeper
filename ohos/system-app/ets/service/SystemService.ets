@@ -1,6 +1,7 @@
 import ServiceExtensionAbility from '@ohos.app.ability.ServiceExtensionAbility';
 import Want from '@ohos.app.ability.Want';
 import { startApps } from '../bridge/Apps';
+import { startClipboard } from '../clipboard/Clipboard';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
 import { startSettings } from '../settings/Settings';
 
@@ -12,5 +13,6 @@ export default class SystemService extends ServiceExtensionAbility {
     startApps();
     startLifecycle();
     startSettings();
+    startClipboard(this.context);
   }
 }

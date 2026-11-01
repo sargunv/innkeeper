@@ -4,6 +4,7 @@
 #   share/innkeeper/ohos/sys_prod/app/InnkeeperSystem/InnkeeperSystem.hap
 #   share/innkeeper/ohos/sys_prod/etc/app/install_list.json
 #   share/innkeeper/ohos/sys_prod/etc/app/install_list_capability.json
+#   share/innkeeper/ohos/sys_prod/etc/app/install_list_permissions.json
 # The native module, libinnkeeper.so, builds as the VDIs do (ohos/build.sh),
 # against the musl headers that build:ohos copies out of the build container.
 set -euo pipefail
@@ -74,4 +75,18 @@ cat >"$out/etc/app/install_list_capability.json" <<EOF
     }
   ]
 }
+EOF
+# READ_PASTEBOARD is a user_grant permission. The bundle manager grants the
+# permissions that install_list_permissions.json lists at install, so no
+# dialog asks for it, and the user can't revoke it.
+cat >"$out/etc/app/install_list_permissions.json" <<EOF
+[
+  {
+    "bundleName": "$bundle",
+    "app_signature": ["${bundle}_$app_id"],
+    "permissions": [
+      { "name": "ohos.permission.READ_PASTEBOARD", "userCancellable": false }
+    ]
+  }
+]
 EOF

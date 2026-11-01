@@ -691,22 +691,23 @@ else
     exit 1
   fi
   echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link'
+  # probe_field sets field to the centre of the probe's text field on the
+  # panel and its text, from the inspector dump: "<x> <y>|<text>".
+  # shellcheck disable=SC2329 # invoked through until_ok
+  probe_field() {
+    local w
+    w=$(s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^probes[0-9]+$/ { print $4; exit }')
+    [[ -n $w ]] || return
+    field=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
+      awk '/compid: probe_text$/ { f = 1 } f && /^ *text: / { t = substr($0, index($0, ":") + 2) }
+        f && /^ *top: / { top = $2 } f && /^ *left: / { left = $2 } f && /^ *width: / { width = $2 }
+        f && /^ *height: / { printf "%d %d|%s\n", left + width / 2, top + $2 / 2, t; exit }')
+    [[ -n $field ]]
+  }
   # shellcheck disable=SC2329 # invoked through timed
   ohos_text() {
     local field x y
     geometry || return
-    # probe_field sets field to the centre of the probe's text field on the
-    # panel and its text, from the inspector dump: "<x> <y>|<text>".
-    probe_field() {
-      local w
-      w=$(s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^probes[0-9]+$/ { print $4; exit }')
-      [[ -n $w ]] || return
-      field=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
-        awk '/compid: probe_text$/ { f = 1 } f && /^ *text: / { t = substr($0, index($0, ":") + 2) }
-          f && /^ *top: / { top = $2 } f && /^ *left: / { left = $2 } f && /^ *width: / { width = $2 }
-          f && /^ *height: / { printf "%d %d|%s\n", left + width / 2, top + $2 / 2, t; exit }')
-      [[ -n $field ]]
-    }
     until_ok probe_field || return
     # Innkeeper Keyboard logs each editor it starts. hilog's per-process flow
     # control would drop the line among the IME process's other logs.
@@ -740,6 +741,36 @@ else
     exit 1
   fi
   echo "ok   the desktop's keyboard types into the probe's text field in the desktop's layout, and Ctrl+A follows the layout"
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_clipboard() {
+    local copier field result=0
+    # Innkeeper System puts the desktop's copy on OpenHarmony's pasteboard,
+    # and Ctrl+V pastes it into the probe's field, which still has focus.
+    wl-copy --foreground 'from the desktop' &
+    copier=$!
+    received() { s /system/bin/hilog -x -T InnkeeperClipboard | grep -q 'clip from the desktop (kind 1, 16 bytes)'; }
+    pasted() { probe_field && [[ ${field#*|} == 'from the desktop' ]]; }
+    until_ok received || result=$?
+    if ((result == 0)); then
+      printf '%s\n' key:29,1 key:47,1 key:47,0 key:29,0 | /usr/bin/python3 "$here/seat.py" --stdin
+      until_ok pasted || result=$?
+    fi
+    kill "$copier" 2>/dev/null || true
+    wait "$copier" 2>/dev/null || true
+    ((result == 0)) || return "$result"
+    # A copy in OpenHarmony reaches the desktop. AZERTY's A key types "a",
+    # Ctrl+A selects the field's text, and Ctrl+C copies it.
+    printf '%s\n' key:16,1 key:16,0 key:29,1 key:16,1 key:16,0 key:46,1 key:46,0 key:29,0 |
+      /usr/bin/python3 "$here/seat.py" --stdin
+    copied() { [[ $(wl-paste --no-newline 2>/dev/null) == 'from the desktopa' ]]; }
+    until_ok copied
+  }
+  if ! timed ohos-clipboard ohos_clipboard; then
+    echo "the desktop holds: $(wl-paste --no-newline 2>&1)" >&2
+    s /system/bin/hilog -x -T InnkeeperClipboard | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   a desktop copy pastes into the probe's text field, and a copy there reaches the desktop"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
