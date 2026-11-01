@@ -11,10 +11,12 @@ It builds no artifact of its own. `cargo test -p innkeeper-core` runs its tests.
   `.apkm`) in-process, without the Android SDK. It filters ABI splits to the
   session's `ro.product.cpu.abilist`. One PackageInstaller session streams every
   APK through `install-write -`, so Android makes no extra copy.
-- **OpenHarmony** (`hap.rs`, `ohos.rs`): core reads a HAP's `module.json` and
-  resolves its label through `resources.index`, in both of restool's layouts. It
-  installs, starts, lists and removes bundles with `bm` and `aa` over exec. Both
-  tools exit 0 on failure, so core reads their output.
+- **OpenHarmony** (`hap/`, `ohos.rs`): core reads a HAP's `module.json` and
+  resolves its labels and icon through `resources.index`, in both of restool's
+  layouts. It reads a label for each locale and the custom URL schemes of the
+  abilities that open links from a browser. It installs, starts, lists and
+  removes bundles with `bm` and `aa` over exec. Both tools exit 0 on failure, so
+  core reads their output.
 - **APK metadata** (`apk/`): core parses the binary `AndroidManifest.xml` and
   the `resources.arsc` values it refers to, following AOSP's `ResourceTypes.h`.
   It picks a label for each locale the way Android does. The language and the
@@ -25,6 +27,10 @@ It builds no artifact of its own. `cargo test -p innkeeper-core` runs its tests.
   for the bridge's app mirror. Adaptive and vector icons get the system mask.
   Before installation, `apk/icon.rs` renders static adaptive and vector layers
   on the host with resvg ([manager limits](../manager/README.md#install-page)).
+  `hap/icon.rs` renders a HAP's PNG, JPEG, WebP or SVG icon, or its layered
+  icon, on the host. OpenHarmony draws both layers of a layered icon at the full
+  size and cuts them with its icon mask, which the image's system resources
+  hold. Without the image, as before installation, a layered icon stays square.
 - **Desktop entries** (`desktop.rs`, `xdg.rs`, `dynlauncher.rs`): each app's
   record, `dev.sargunv.innkeeper.<pkg>.desktop`, stays in the Flatpak's data
   dir. It lists the app's custom URL schemes as `x-scheme-handler/*`. The

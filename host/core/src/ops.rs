@@ -63,8 +63,8 @@ pub struct Package {
     pub abis: Vec<String>,
     /// Size of the input file in bytes.
     pub size: u64,
-    /// A host-rendered adaptive icon or the largest legacy bitmap. HAPs have
-    /// none.
+    /// A host-rendered icon: an APK's adaptive icon or its largest legacy
+    /// bitmap, or a HAP's icon.
     pub icon: Option<Vec<u8>>,
     contents: Contents,
 }
@@ -195,7 +195,9 @@ fn inspect_hap(file: &Path, size: u64) -> Result<Package> {
         permissions: h.permissions,
         abis: h.native_code,
         size,
-        icon: None,
+        // The host has no OpenHarmony image here, so a layered icon shows
+        // without OpenHarmony's mask.
+        icon: hap::icons(file, None, &[192]).pop().map(|(_, png)| png),
         package: pkg,
         contents: Contents::Ohos,
     })
