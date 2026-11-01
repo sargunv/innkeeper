@@ -161,11 +161,6 @@ impl Page {
         let display = adw::PreferencesGroup::new();
         display.add(&self.display_row(&p));
         page.add(&display);
-        if p.system == System::Ohos {
-            page.add(&self.lifecycle_group(&p));
-            self.content.append(&page);
-            return;
-        }
 
         let desktop = adw::PreferencesGroup::builder()
             .title("Follow the Desktop")
@@ -173,9 +168,12 @@ impl Page {
         self.switch(&desktop, "Dark Mode", "", p.follow_dark, |p, v| {
             p.follow_dark = v
         });
-        self.switch(&desktop, "Accent Color", "", p.follow_accent, |p, v| {
-            p.follow_accent = v
-        });
+        // OpenHarmony has no accent color.
+        if p.system != System::Ohos {
+            self.switch(&desktop, "Accent Color", "", p.follow_accent, |p, v| {
+                p.follow_accent = v
+            });
+        }
         self.switch(
             &desktop,
             "Language and Region",
@@ -187,8 +185,11 @@ impl Page {
             p.follow_clock = v
         });
         page.add(&desktop);
-
         page.add(&self.lifecycle_group(&p));
+        if p.system == System::Ohos {
+            self.content.append(&page);
+            return;
+        }
 
         let apps = adw::PreferencesGroup::builder()
             .title("Android Integration")

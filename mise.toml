@@ -124,7 +124,7 @@ run = "rm -rf out/build out/stage out/cargo out/test/probes"
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit behaviour: Rust, Kotlin protocol/input, HALs, supervisor, image scripts and the OpenHarmony IME"
+description = "Unit behaviour: Rust, Kotlin protocol/input, HALs, supervisor, image scripts and Innkeeper System for OpenHarmony"
 run = """
 set -euo pipefail
 cargo test -q --workspace

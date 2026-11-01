@@ -83,8 +83,10 @@ the probe's text field starts Innkeeper Keyboard, and keys typed in a French
 layout on the nested desktop type "aé" in the field. OH's music volume must be
 at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays
 through OH's audio API must reach a private null sink on the nested desktop.
-Last, root grants the probe the microphone with `atm perm -g`, the host plays a
+Root then grants the probe the microphone with `atm perm -g`, the host plays a
 tone into the null sink, and the probe must record it from the sink's monitor.
+Last, OH must take the time zone that the session started with, and it must turn
+dark when the nested desktop's portal does.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -152,6 +154,8 @@ reports boot completion. Issue #312 tracks the features that build on it.
   foreground service. The bridge counts OH's screen window while it is open. The
   session therefore stops after the profile's idle timeout once the window is
   closed and no user app runs a continuous task.
+- **Desktop settings.** The app follows the desktop's settings
+  ([Desktop settings](#desktop-settings)).
 - **Session1 commands.** The app answers each command that the bridge relays
   with "OpenHarmony profiles don't support this action.", so callers don't wait
   for the bridge's timeout.
@@ -179,6 +183,37 @@ reports boot completion. Issue #312 tracks the features that build on it.
   directory when it composes the root.
 
 The connection's host tests (`native/tests`) run in `mise run test`.
+
+### Desktop settings
+
+As Android's system app does, Innkeeper System connects to the bridge's system
+service and follows the desktop's settings (`ets/settings/`). A setting changes
+in OH when it changes on the desktop, so a change made in OH's Settings lasts
+until then. With a profile's follow switch off, OH keeps its own value
+([session.md](../docs/session.md#profiles)). Each setting uses a system API:
+
+| Desktop setting              | OpenHarmony API                                                     |
+| ---------------------------- | ------------------------------------------------------------------- |
+| Dark mode                    | `@ohos.uiAppearance` `setDarkMode`                                  |
+| Text scale                   | `@ohos.uiAppearance` `setFontScale`                                 |
+| High contrast                | `@ohos.accessibility.config` `highContrastText`                     |
+| Reduced motion               | `@ohos.accessibility.config` `animationOff`                         |
+| Time zone                    | `@ohos.systemDateTime` `setTimezone`                                |
+| Languages                    | `@ohos.i18n` `System.setSystemLanguage`                             |
+| Region, from `LC_TIME`       | `@ohos.i18n` `System.setSystemRegion`                               |
+| First day of the week        | `@ohos.i18n` `System.setFirstDayOfWeek`                             |
+| Units, from `LC_MEASUREMENT` | `@ohos.i18n` `System.setSystemMeasurement` and `setTemperatureType` |
+| 12- or 24-hour clock         | `@ohos.i18n` `System.set24HourClock`                                |
+
+OpenHarmony has no accent color, so the app ignores the desktop's accent, and
+`profile set --follow-accent` refuses OpenHarmony profiles. The image offers
+English, Simplified and Traditional Chinese, Tibetan and Uyghur as system
+languages. The app picks the first of the desktop's languages that OpenHarmony
+offers, with `I18NUtil.getBestMatchLocale`, and a desktop in another language
+gets English with the desktop's region and formats. The app needs
+`UPDATE_CONFIGURATION`, `SET_TIME_ZONE` and the accessibility configuration
+permissions, which a `system_basic` app may request. OH's time service also sets
+the kernel's time zone, which the shim allows ([How it boots](#how-it-boots)).
 
 ## Image
 
@@ -397,8 +432,8 @@ with the bridge, so the host's IBus or Fcitx composes text for OH editors.
   of order. Typing doesn't produce such gaps, and a test that sends keys in a
   burst can.
 
-`ohos/system-app/tests` runs the input method's line and key logic under Node
-with `mise run test`.
+`ohos/system-app/tests` runs the input method's line and key logic and the
+desktop settings' decoding and mapping under Node with `mise run test`.
 
 ## Audio
 
@@ -497,6 +532,11 @@ the same as Android's. OH's session stops when idle, as Android's does
   installd resolves each code path with `realpath` and refuses any path outside
   `/data/app/el1/bundle/`. The shim's `realpath` returns `/data` in place of the
   host directory, so installs and other path checks see guest paths.
+- **Time zone.** The sandbox may not set the kernel's time zone. OH's time
+  service stores a new zone and then sets the kernel's zone with `settimeofday`,
+  and it fails the change if that call fails. The kernel's zone is obsolete, so
+  the shim's `settimeofday` succeeds without a change when the caller passes no
+  time.
 - **Broker.** OH runs the same static musl broker as Android, because OH's root
   has no Bionic. With `INNKEEPER_GUEST=ohos` it also traps `open(2)`, because
   musl does not use `openat`. It serves `/etc/passwd` and `/etc/group` from

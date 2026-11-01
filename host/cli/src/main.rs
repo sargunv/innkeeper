@@ -177,14 +177,11 @@ struct SetArgs {
 
 impl SetArgs {
     /// Returns the first given setting that OpenHarmony profiles don't have.
-    /// OpenHarmony has no adb or desktop following.
+    /// OpenHarmony has no adb and no accent colour.
     fn android_only(&self) -> Option<&'static str> {
         [
             (self.adb.is_some(), "--adb"),
-            (self.follow_dark.is_some(), "--follow-dark"),
             (self.follow_accent.is_some(), "--follow-accent"),
-            (self.follow_locale.is_some(), "--follow-locale"),
-            (self.follow_clock.is_some(), "--follow-clock"),
         ]
         .into_iter()
         .find_map(|(given, what)| given.then_some(what))
@@ -835,9 +832,10 @@ mod tests {
             android_only("profile set --display small-phone --adb on"),
             Some("--adb")
         );
+        assert_eq!(android_only("profile set --follow-clock off"), None);
         assert_eq!(
-            android_only("profile set --follow-clock off"),
-            Some("--follow-clock")
+            android_only("profile set --follow-dark off --follow-accent off"),
+            Some("--follow-accent")
         );
     }
 
