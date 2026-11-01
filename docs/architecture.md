@@ -1,13 +1,14 @@
 # Architecture
 
-Innkeeper runs a near-stock AOSP userspace (ART, system_server, SurfaceFlinger)
-as ordinary host processes in a rootless, on-demand session. Our code sits at
-Android's stable boundaries, so routine work never needs an AOSP build.
+Innkeeper runs a near-stock AOSP userspace, including ART, system_server and
+SurfaceFlinger, as ordinary host processes. The session starts on demand and
+runs without root. Innkeeper's code plugs into Android's stable boundaries, so
+routine work doesn't need an AOSP build.
 
 ## Runtime zones
 
-Everything runs as the user inside Innkeeper's Flatpak sandbox; only the
-desktop's own services are outside it.
+Everything runs as the user inside Innkeeper's Flatpak sandbox. The desktop's
+services are the only parts outside it.
 
 ```mermaid
 flowchart LR
@@ -35,30 +36,30 @@ flowchart LR
   bridge <--> host
 ```
 
-- **Host side.** The CLI and manager install and launch apps through
-  `innkeeper-core`; the launcher assembles and starts the session; the bridge is
+- **Host side.** The CLI and the manager install and launch apps through
+  `innkeeper-core`. The launcher assembles and starts the session. The bridge is
   the only process that talks to the desktop.
-- **Broker.** One seccomp filter on Android's init traps what the sandbox can't
-  do (binder, eBPF, Android credentials over one kernel uid, session-local
-  evdev). The Rust broker defines the filter, starts init under it as its child,
-  serves every notification and reaps orphans. See
-  [supervisor/README.md](../supervisor/README.md).
-- **Guest.** The pinned image plus our overlay layer, vendor HALs and the
-  privileged system app. Each Android module installs a tree that mirrors
-  Android's partition paths, which the session stacks over the image's
-  ([session.md](session.md#overlay-stack)). A profile can run an OpenHarmony
-  guest instead, on the same broker, bridge and launcher
+- **Broker.** A seccomp filter on Android's init traps the operations that the
+  sandbox can't perform. These are binder, eBPF, Android credentials on a single
+  kernel uid, and session-local evdev. The Rust broker defines the filter and
+  starts init under it as a child process. It serves every notification and
+  reaps orphaned processes. See [supervisor/README.md](../supervisor/README.md).
+- **Guest.** The guest is the pinned image plus Innkeeper's overlay layer,
+  vendor HALs and privileged system app. Each Android module installs a tree
+  that mirrors Android's partition paths. The session stacks these trees over
+  the image's partitions ([session.md](session.md#overlay-stack)). A profile can
+  run an OpenHarmony guest instead, with the same broker, bridge and launcher
   ([ohos](../ohos/README.md)).
 
-The channels between zones are the seccomp notification fd and one socket,
+The zones communicate through the seccomp notification fd and one socket,
 `bridge.sock` ([bridge-protocol.md](bridge-protocol.md)). The bridge also writes
-input records to the broker's private `evdev.sock`. Nothing in Android reaches
-the desktop any other way, apart from `/dev/dri`, `/dev/udmabuf` and the host
-network ([session.md](session.md)).
+input records to the broker's private `evdev.sock`. Android has no other path to
+the desktop except `/dev/dri`, `/dev/udmabuf` and the host network
+([session.md](session.md)).
 
 ## Modules
 
-What each directory builds and where it runs. The stage's
+This table lists what each directory builds and where it runs. The stage's
 `share/innkeeper/manifest.tsv` lists every staged file and the module that built
 it.
 
@@ -87,62 +88,64 @@ it.
 
 ## Decisions
 
-- **Real Android userspace, not a reimplementation.** Compatibility comes from
-  AOSP's own code. Reimplementing the framework (ATL, Mac.apk) means chasing
-  stubs forever. A fake system_server or a SurfaceFlinger-less libgui would
-  depend on unstable internals; they stay out unless measured session cost
-  demands them.
-- **Stable boundaries only.** HAL AIDL and stable-C interfaces, NDK APIs, rc and
-  overlay files, LD_PRELOAD and seccomp at the syscall ABI. The image is never
-  patched in place, and there is no AOSP patch queue; one would need a written
-  reason why no stable boundary works.
-- **Google's CI image, downloaded at setup.** An unmodified AOSP build from
-  ci.android.com, fetched and verified on the user's machine; we never
-  redistribute it ([image/README.md](../image/README.md)). No local AOSP build
-  is needed.
-- **Vendor code links only LL-NDK libraries** plus what we install in
-  `/vendor/lib64`, and builds out of tree with the NDK.
-- **Binder in userspace.** The broker serves binder from the seccomp supervisor,
-  so a session needs no binderfs and no SELinux module, and it works where
-  nested user namespaces are blocked.
-- **The bridge owns the desktop.** The composer is a pure HWC: it hands frames
-  to the bridge, which is the Wayland client (decorations, fractional scale,
-  activation). Bionic code never links desktop libraries.
-- **Languages by where code runs.** C or C++ for code loaded into Android
-  processes or on C ABIs (HALs, the mapper and Vulkan `.so`, the shim, Mesa
-  patches), kept small. Rust for standalone components, especially at trust
-  boundaries (broker, bridge, launcher, host tools). Kotlin for the system app.
-  Not Zig: no binder/AIDL ecosystem, and the NDK already cross-compiles C.
-- **x86_64 first.** Most non-game apps ship x86_64, but most top games don't
-  (Unity and Unreal default to arm64), so ARM translation through a NativeBridge
-  is a later milestone.
+- **The real Android userspace.** Compatibility comes from AOSP's own code.
+  Projects that reimplement the framework, such as ATL and Mac.apk, have to keep
+  writing stubs for missing APIs. A fake system_server or a libgui without
+  SurfaceFlinger would depend on unstable internals. Innkeeper doesn't use them
+  unless measurements of session cost require it.
+- **Stable boundaries.** Innkeeper uses HAL AIDL and stable C interfaces, NDK
+  APIs, rc and overlay files, and LD_PRELOAD and seccomp at the syscall ABI. It
+  doesn't patch the image in place, and it has no AOSP patch queue. An AOSP
+  patch would need a written reason why no stable boundary works.
+- **Google's CI image, downloaded at setup.** The image is an unmodified AOSP
+  build from ci.android.com. Innkeeper downloads and verifies it on the user's
+  machine and doesn't redistribute it ([image/README.md](../image/README.md)).
+  No local AOSP build is needed.
+- **Vendor code links LL-NDK libraries** and the libraries Innkeeper installs in
+  `/vendor/lib64`, and nothing else. It builds out of tree with the NDK.
+- **Binder in userspace.** The broker serves binder from the seccomp supervisor.
+  A session therefore needs no binderfs and no SELinux module, and it works
+  where nested user namespaces are blocked.
+- **The bridge owns the desktop connection.** The composer is a plain HWC that
+  hands frames to the bridge. The bridge is the Wayland client and handles
+  decorations, fractional scale and activation. Bionic code doesn't link desktop
+  libraries.
+- **The language depends on where code runs.** Code loaded into Android
+  processes or on C ABIs is C or C++ and stays small. This covers the HALs, the
+  mapper and Vulkan `.so` files, the shim and the Mesa patches. Standalone
+  components are Rust, especially at trust boundaries: the broker, bridge,
+  launcher and host tools. The system app is Kotlin. Zig isn't used, because it
+  has no binder or AIDL ecosystem and the NDK already cross-compiles C.
+- **x86_64 first.** Most apps other than games ship x86_64 code. Most top games
+  don't, because Unity and Unreal default to arm64. ARM translation through a
+  NativeBridge is a later milestone.
 
 ## Packaging scope
 
-- Innkeeper ships as a Flatpak. Per-app Flatpaks are an optional extra, never a
-  design constraint.
-- **Desktop baseline: current major distro releases only.** We support the
+- Innkeeper ships as a Flatpak. Per-app Flatpaks are an optional extra and don't
+  constrain the design.
+- **Desktop baseline: current major distro releases.** Innkeeper supports the
   oldest desktop stack in a current release of Debian, Ubuntu, Fedora, openSUSE
-  or Arch (Debian 13: GNOME 48, Plasma 6.3, xdg-desktop-portal 1.20). Portals
-  and freedesktop specs come first, a desktop-specific path only where a
-  baseline desktop has no standard one, and nothing older than the baseline gets
-  a fallback.
-- Installing anything never needs `sudo`: no RPM/deb/AUR packages, SELinux
-  modules, AppArmor profiles or kernel modules.
-- `out/stage` is the installable prefix and already has the Flatpak shape: it
+  or Arch. That is Debian 13, with GNOME 48, Plasma 6.3 and xdg-desktop-portal
+  1.20. Portals and freedesktop specs come first. A desktop-specific path is
+  used where a baseline desktop has no standard one. Desktops older than the
+  baseline get no fallback.
+- Installing Innkeeper doesn't need `sudo`. It needs no RPM, deb or AUR
+  packages, SELinux modules, AppArmor profiles or kernel modules.
+- `out/stage` is the installable prefix, laid out as the Flatpak expects. It
   becomes `/app` in the Flatpak. Every lookup is relative to the running
-  executable, and runtime state lives in the XDG dirs, so dev, test and packaged
-  runs share one code path.
-- Inside Flatpak there are no nested user namespaces, mounts or capabilities, so
-  the session runs in the app's own sandbox as one kernel uid, with a root built
-  from symlinks (Flatpak's `/` is a writable tmpfs) and the host's network
-  ([session.md](session.md)). No `flatpak-spawn --host`: that is a sandbox
-  escape.
+  executable, and runtime state lives in the XDG directories. Development, test
+  and packaged runs therefore share one code path.
+- Flatpak allows no nested user namespaces, mounts or capabilities. The session
+  therefore runs in the app's own sandbox as one kernel uid, with the host's
+  network ([session.md](session.md)). Its root is built from symlinks, because
+  Flatpak's `/` is a writable tmpfs. Innkeeper doesn't use
+  `flatpak-spawn --host`, because that escapes the sandbox.
 
 ## Non-goals
 
 - **Virtual machines.** Android runs as host processes integrated with the
-  desktop. VM-based Android exists (the emulator, Cuttlefish, ChromeOS ARCVM); a
-  VM or guest kernel is never an acceptable architecture here.
+  desktop. VM-based Android already exists in the emulator, Cuttlefish and
+  ChromeOS ARCVM. Innkeeper won't use a VM or a guest kernel.
 - **Play Integrity.** Banking and other apps that require it are out of scope.
 - **Protection beyond desktop parity** ([security.md](security.md)).
