@@ -6,8 +6,8 @@ use std::future::Future;
 use gtk::{gio, glib};
 use innkeeper_core::ops::Event;
 
-/// Runs `f` off the UI thread. Each [`Event`] it reports is handed to
-/// `on_event` on the UI thread; the returned future resolves to `f`'s result.
+/// Runs `f` off the UI thread and calls `on_event` on the UI thread for each
+/// [`Event`] that `f` reports. The returned future resolves to `f`'s result.
 pub fn run<T, F, E>(f: F, on_event: E) -> impl Future<Output = T>
 where
     T: Send + 'static,

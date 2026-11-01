@@ -1,9 +1,9 @@
-//! The launch splash (docs/display.md, "Launch feedback"): while a cold
-//! session boots, `innkeeper run` shows a toplevel of its own at once, in the
-//! app's splash colour and window size with its icon, under the app's own
-//! app id. It takes focus with the desktop launch's `XDG_ACTIVATION_TOKEN`
-//! (which completes the startup notification), then asks for a fresh token
-//! for the app's real window; [`Splash::close`] drops it once that window
+//! The launch splash, which docs/display.md describes under "Launch
+//! feedback". While a stopped session boots, `innkeeper run` shows a window
+//! right away. The window has the app's splash colour, window size, icon and
+//! app id. It takes focus with the desktop launch's `XDG_ACTIVATION_TOKEN`,
+//! which completes the startup notification. Then it asks for a new token for
+//! the app's window. [`Splash::close`] closes the splash after that window
 //! shows its first frame.
 
 use std::fs::File;
@@ -36,13 +36,13 @@ pub struct Look {
     pub title: String,
     /// `0xRRGGBB`.
     pub color: u32,
-    /// Logical pixels: the app window's size in dp.
+    /// The app window's size in dp, used as logical pixels.
     pub width: u32,
     pub height: u32,
     pub icon: Option<Rgba>,
 }
 
-/// A decoded icon, not premultiplied.
+/// A decoded icon. Its alpha isn't premultiplied.
 pub struct Rgba {
     pub width: u32,
     pub height: u32,
@@ -91,7 +91,7 @@ pub struct Splash {
 
 impl Splash {
     /// Shows `look` on the desktop's compositor and activates it with
-    /// `token`. None if there is no compositor to show it on.
+    /// `token`. Returns None if there is no Wayland compositor.
     pub fn show(look: Look, token: Option<String>) -> Option<Splash> {
         let conn = Connection::connect_to_env().ok()?;
         let (close, closed) = channel::channel();
@@ -111,8 +111,9 @@ impl Splash {
         })
     }
 
-    /// An activation token for the app's window, from the splash once it
-    /// has focus: what lets the compositor move focus on to that window.
+    /// Returns an activation token for the app's window. The splash requests
+    /// it after it gets focus, and the compositor uses it to move focus to the
+    /// app's window.
     pub fn token(&self, wait: Duration) -> Option<String> {
         self.token.recv_timeout(wait).ok()
     }
@@ -210,8 +211,9 @@ impl State {
     }
 }
 
-/// Fills `canvas` (XRGB8888, `w`x`h`) with the splash colour and the icon,
-/// centred, a third of the shorter side but at most 192 logical pixels.
+/// Fills `canvas`, a `w` by `h` XRGB8888 buffer, with the splash colour and
+/// draws the icon in the centre. The icon is a third of the shorter side, up
+/// to 192 logical pixels.
 fn paint(canvas: &mut [u8], w: u32, h: u32, look: &Look, scale: u32) {
     let bg = look.color & 0xff_ffff;
     let px = bg.to_le_bytes();
@@ -226,7 +228,8 @@ fn paint(canvas: &mut [u8], w: u32, h: u32, look: &Look, scale: u32) {
     let (x0, y0) = ((w - side.min(w)) / 2, (h - side.min(h)) / 2);
     let [bb, bg_, br, _] = px;
     for y in 0..side.min(h) {
-        // Nearest-neighbour sampling: a splash is up for a second or two.
+        // Nearest-neighbour sampling is good enough for a splash that shows
+        // for a second or two.
         let sy = (y as u64 * icon.height as u64 / side as u64) as usize;
         for x in 0..side.min(w) {
             let sx = (x as u64 * icon.width as u64 / side as u64) as usize;
@@ -249,7 +252,7 @@ fn paint(canvas: &mut [u8], w: u32, h: u32, look: &Look, scale: u32) {
 
 impl WindowHandler for State {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        // Hide it; the app's window still comes.
+        // Close the splash. The app's window still opens.
         self.quit = true;
     }
 
@@ -275,7 +278,8 @@ impl WindowHandler for State {
                 a.activate::<State>(self.window.wl_surface(), t);
             }
         }
-        // Focused now, so the compositor grants the app's window a token.
+        // The splash has focus now, so the compositor grants a token for the
+        // app's window.
         if c.is_activated()
             && !self.asked_token
             && let Some(a) = &self.activation

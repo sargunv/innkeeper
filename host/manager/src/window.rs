@@ -1,6 +1,7 @@
-//! The main window: installed apps, the session's status, drag and drop, the
-//! navigation to the install page, and the first run's image download. An
-//! OpenHarmony profile shows only its session: it can't install apps yet.
+//! The main window. It lists the installed apps, shows the session's state,
+//! accepts dropped files, opens the install page, and downloads the image on
+//! the first run. OpenHarmony profiles can't install apps, so their window
+//! shows the session row and no app controls.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -32,29 +33,29 @@ impl WeakWindow {
 }
 
 pub struct Inner {
-    /// The profile whose apps and session show.
+    /// The profile whose apps and session the window shows.
     profile: RefCell<ProfileName>,
-    /// Its system, once read.
+    /// The profile's system, after the window has read it.
     system: Cell<System>,
-    /// The empty state, and its button to install an APK.
+    /// The empty state page and its button for installing an APK.
     empty: adw::StatusPage,
     open_button: gtk::Button,
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
-    /// "empty", "list", or "preparing" while the image downloads.
+    /// Switches between the "empty", "list" and "preparing" pages.
     stack: gtk::Stack,
     preparing: Preparing,
     apps: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
     installed: RefCell<Vec<DesktopApp>>,
     sessions: [SessionRow; 2],
-    /// The session is being started or stopped from here.
+    /// True while this window starts or stops the session.
     session_busy: Cell<bool>,
     busy_apps: RefCell<HashMap<String, String>>,
     open_apps: RefCell<HashSet<String>>,
     session_proxy: RefCell<Option<gio::DBusProxy>>,
-    /// The title, with the profile whose apps show.
+    /// The window title, with the profile's name as its subtitle.
     title: adw::WindowTitle,
     state_read: Cell<u64>,
     last_status: Cell<Option<Status>>,
@@ -63,13 +64,15 @@ pub struct Inner {
     refresh_pending: Cell<bool>,
 }
 
-/// The first run's "Downloading Android" page, shown while the image downloads.
+/// The "Downloading Android" page that shows while the first run downloads the
+/// image.
 struct Preparing {
     page: adw::StatusPage,
     spinner: adw::Spinner,
     retry: gtk::Button,
     active: Cell<bool>,
-    /// Files opened meanwhile, shown once the image is ready.
+    /// Files opened during the download. Their install pages open after the
+    /// image is ready.
     opened: RefCell<Vec<gio::File>>,
 }
 
@@ -112,8 +115,9 @@ impl std::ops::Deref for Window {
     }
 }
 
-/// The "Android" (or "OpenHarmony") row: state, start/stop. The window has
-/// one in the empty state and one above the app list.
+/// The session row, titled with the profile's system. It shows the session's
+/// state and a Start or Stop button. The window has one row in the empty state
+/// and one below the app list.
 struct SessionRow {
     group: adw::PreferencesGroup,
     row: adw::ActionRow,
@@ -194,7 +198,6 @@ impl Window {
     pub fn new(app: &adw::Application, profile: ProfileName) -> Self {
         let sessions = [SessionRow::new(), SessionRow::new()];
 
-        // Empty state.
         let open_btn = gtk::Button::builder()
             .label("_Open APK…")
             .use_underline(true)
@@ -218,7 +221,6 @@ impl Window {
             .vexpand(true)
             .build();
 
-        // List.
         let apps = adw::PreferencesGroup::builder()
             .title("Installed Apps")
             .build();
@@ -266,7 +268,7 @@ impl Window {
         let nav = adw::NavigationView::new();
         nav.add(&main_page);
 
-        // Drop hint over everything.
+        // The drop hint covers the whole window.
         let hint = adw::StatusPage::builder()
             .icon_name("document-send-symbolic")
             .title("Drop to Install")
@@ -386,8 +388,8 @@ impl Window {
         self.toasts.add_toast(t);
     }
 
-    /// A plain toast; `text` isn't markup. Progress toasts are dismissed
-    /// when their operation ends.
+    /// Shows `text` in a toast without parsing it as markup, and returns the
+    /// toast.
     pub fn say(&self, text: &str) -> adw::Toast {
         let t = adw::Toast::builder().title(text).use_markup(false).build();
         self.toast(t.clone());
@@ -431,9 +433,9 @@ impl Window {
         });
     }
 
-    /// Shows the install page for `file` (drag and drop, the file chooser, or
-    /// the desktop's "open with"); after the first run's download, if that is
-    /// still going.
+    /// Shows the install page for `file`, which comes from drag and drop, the
+    /// file chooser or the desktop's Open With. If the first run's download is
+    /// still going, the page opens after it finishes.
     pub fn open_file(&self, file: &gio::File) {
         if self.preparing.active.get() {
             self.preparing.opened.borrow_mut().push(file.clone());
@@ -492,8 +494,8 @@ impl Window {
         *self.monitor.borrow_mut() = Some(m);
     }
 
-    /// Reloads the profile's system and app list (desktop entries, plus the
-    /// session's own list if it is running).
+    /// Reloads the profile's system and app list. The list comes from the
+    /// desktop entries and, if the session is running, its package list.
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
@@ -517,8 +519,8 @@ impl Window {
         });
     }
 
-    /// Shows what the profile's system has: an OpenHarmony profile installs
-    /// no apps.
+    /// Adjusts the window to the profile's system. OpenHarmony profiles can't
+    /// install apps, so the window hides the install controls for them.
     fn set_system(&self, system: System) {
         self.system.set(system);
         let android = system == System::Android;
@@ -539,7 +541,8 @@ impl Window {
                 .set_description(Some("Drag and drop an APK here"));
         } else {
             self.empty.set_title(system.title());
-            self.empty.set_description(Some("Built-in apps only"));
+            self.empty
+                .set_description(Some("Start the session to use its built-in apps"));
         }
         self.preparing
             .page
@@ -618,8 +621,8 @@ impl Window {
         if !self.begin_app(pkg, "Opening…") {
             return;
         }
-        // An activation token from our window (which has focus), so the
-        // app's window may take it.
+        // Get an activation token from this window, which has focus, so the
+        // app's window can take focus.
         let token = gio::prelude::AppLaunchContextExt::startup_notify_id(
             &gtk::prelude::WidgetExt::display(&self.0.win).app_launch_context(),
             None::<&gio::AppInfo>,
@@ -709,7 +712,7 @@ impl Window {
         }
     }
 
-    /// Downloads the image if it isn't there yet (the first run).
+    /// Downloads the image on the first run, when it isn't there yet.
     fn prepare_if_needed(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
@@ -718,7 +721,7 @@ impl Window {
                 Session::of_profile(&p).map(|s| (s.system(), s.image_ready()))
             })
             .await;
-            // No launcher: the session row says so.
+            // On an error, the session row's Start button reports it.
             if let Ok((system, false)) = ready {
                 w.set_system(system);
                 w.prepare();
@@ -768,8 +771,8 @@ impl Window {
         self.show_apps(apps);
     }
 
-    /// Watch the bridge's real lifetime and its readiness/window signals. The
-    /// proxy never activates a session merely to display its state.
+    /// Watches the bridge's bus name and its Changed signal. The proxy doesn't
+    /// auto-start the bridge, so showing the state doesn't start a session.
     fn watch_session(&self) {
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
@@ -823,7 +826,7 @@ impl Window {
         self.profile.borrow().clone()
     }
 
-    /// Shows profile `name`'s apps and session from now on, and the next
+    /// Switches the window to profile `name` and remembers it for the next
     /// time the manager opens.
     pub fn switch_profile(&self, name: &str) -> anyhow::Result<()> {
         let name = ProfileName::new(name)?;
@@ -861,8 +864,9 @@ impl Window {
             }
             let (booted, packages) = state.unwrap_or_default();
             *w.open_apps.borrow_mut() = packages.into_iter().collect();
-            // Only Android's system app reports a completed boot; starting
-            // from here waits for OpenHarmony's.
+            // Android's system app reports when boot completes, and OpenHarmony
+            // has no such report. Starting OpenHarmony from the manager waits
+            // for its boot, so a running OpenHarmony session counts as booted.
             let booted = booted || running && w.system.get() != System::Android;
             let st = Status { running, booted };
             let was_booted = w.last_status.replace(Some(st)).is_some_and(|s| s.booted);

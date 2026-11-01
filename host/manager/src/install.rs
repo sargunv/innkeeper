@@ -1,5 +1,5 @@
-//! The install confirmation page: what the APK is and asks for, then the
-//! install itself with its progress.
+//! The install page. It shows an APK's details and permissions, then the
+//! install's progress.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,17 +14,18 @@ use crate::permissions;
 use crate::window::{Window, details_expander};
 use crate::worker;
 
-/// Permissions listed before the rest fold into "N more".
+/// How many permissions show before the rest fold into an "N More" row.
 const SHOWN_PERMISSIONS: usize = 6;
 
-/// Progress text for a core status message ("waiting for Android to boot").
+/// Turns a core status message such as "waiting for Android to boot" into
+/// progress text.
 pub fn status_text(m: &str) -> String {
     let m = match m
         .strip_prefix("waiting for ")
         .and_then(|s| s.strip_suffix(" to boot"))
     {
         Some(system) => format!("starting {system}"),
-        // The package and version show already.
+        // The page already shows the package and version.
         None if m.starts_with("installing") => "installing".into(),
         None => m.into(),
     };
@@ -34,8 +35,8 @@ pub fn status_text(m: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A navigation page that reads `file` (off the UI thread) and then shows
-/// the confirmation.
+/// Returns a navigation page that reads `file` off the UI thread and then
+/// shows its details.
 pub fn page(w: &Window, file: PathBuf) -> adw::NavigationPage {
     let name = file
         .file_name()
@@ -130,7 +131,6 @@ fn details(
         toolbar.add_top_bar(&b);
     }
 
-    // Header: icon, name, package, the button.
     let head = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(6)
@@ -181,8 +181,8 @@ fn details(
         .build();
     progress.append(&adw::Spinner::new());
     progress.append(&progress_label);
-    // Fixed height, so the page doesn't shift when the button turns into
-    // progress.
+    // A fixed height keeps the page from shifting when the progress replaces
+    // the button.
     let actions = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .valign(gtk::Align::Center)
@@ -195,7 +195,6 @@ fn details(
     let head_group = adw::PreferencesGroup::new();
     head_group.add(&head);
 
-    // Details.
     let info = adw::PreferencesGroup::builder().title("Details").build();
     let mut version = if p.version.is_empty() {
         "Unknown".to_string()
@@ -228,7 +227,6 @@ fn details(
             .unwrap_or_default(),
     ));
 
-    // Permissions.
     let perms = adw::PreferencesGroup::builder()
         .title("Permissions")
         .build();
