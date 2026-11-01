@@ -2,15 +2,15 @@
 //!
 //! Each process's address space is a sparse page map and its receive region a
 //! bump allocator, so transactions are translated end to end without the
-//! kernel. Ioctls are issued the way libbinder issues them: each
+//! kernel. Ioctls are issued the way libbinder issues them. Each
 //! `BINDER_WRITE_READ` gets its bwr, write buffer and read buffer in the
 //! calling process's memory, and its answer is recorded with what the
 //! driver copied out. Any fallible operation can be made to fail through
 //! [`FakeUserspace::fault`], and a call's wait can be interrupted like a
 //! signal does, so every rollback path is reachable. Once a call has ended
 //! (answered, interrupted or abandoned), the driver must not write into its
-//! bwr or buffers in any later ioctl: the thread may be stopped, or already
-//! using that memory again.
+//! bwr or buffers in any later ioctl, because the thread may be stopped or
+//! may already be reusing that memory.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Range;
@@ -19,7 +19,8 @@ use crate::binder::driver::{BinderDriver, Call, InstallError, ProcId, Userspace}
 use crate::binder::uapi::{BINDER_WRITE_READ, BinderWriteRead, pod_bytes, read_pod};
 
 const PAGE: u64 = 4096;
-/// Where calls' bwrs and buffers live: one `CALL_SPAN` per call.
+/// The base address of the calls' bwrs and buffers. Each call gets one
+/// `CALL_SPAN`.
 const SCRATCH: u64 = 0x7000_0000_0000;
 const CALL_SPAN: u64 = 0x2_0000;
 const WRITE_AT: u64 = 0x100;
@@ -32,16 +33,17 @@ pub enum Fault {
     CopyFromUser,
     /// Writing user memory other than a call's bwr (`EFAULT`).
     CopyToUser,
-    /// Writing a call's bwr back (`EFAULT`). libbinder then can't tell what
-    /// its write consumed and resends all of it, under the kernel too.
+    /// Writing a call's bwr back (`EFAULT`). libbinder then can't tell how
+    /// much of its write was consumed and resends all of it. This also happens
+    /// with the real kernel.
     CopyBwr,
     /// Allocating in a receive region (`ENOSPC`).
     AllocRecv,
     /// Capturing a sender's fd (`EBADF`).
     CaptureFd,
-    /// Installing an fd into a reader (its fd table is full).
+    /// Installing an fd into a reader, as when its fd table is full.
     InstallFd,
-    /// A signal ends the call's wait just before it is answered or an fd is
+    /// A signal ends the call's wait right before it is answered or an fd is
     /// installed for it.
     Signal,
 }
@@ -77,10 +79,10 @@ pub enum Status {
     /// Not answered yet (blocked in a read).
     Pending,
     Answered(Outcome),
-    /// Its wait ended without an answer (a signal); the thread restarts it.
+    /// A signal ended its wait without an answer. The thread restarts it.
     Interrupted,
-    /// Its thread has issued another ioctl since (its restart, or the thread
-    /// moved on).
+    /// Its thread has since issued another ioctl, either the restart or an
+    /// unrelated one.
     Abandoned,
 }
 
@@ -101,27 +103,27 @@ pub struct FakeUserspace {
     pub captured: HashMap<u64, (ProcId, u32)>,
     /// Captured tokens installed into a reader at least once.
     installed: HashSet<u64>,
-    /// Captured fds dropped without ever being installed (source proc,
-    /// source fd): their transaction failed or was dropped.
+    /// Captured fds (source proc, source fd) dropped without ever being
+    /// installed, because their transaction failed or was dropped.
     pub never_installed: Vec<(ProcId, u32)>,
     next_token: u64,
     calls: BTreeMap<u64, CallRecord>,
     next_call: u64,
     bwr_addrs: HashSet<u64>,
-    /// The latest call whose bwr and buffers are at each `bwr_addrs` address
-    /// (a restart reuses its call's).
+    /// The latest call whose bwr and buffers are at each `bwr_addrs` address.
+    /// A restart reuses the memory of the call it restarts.
     call_at: HashMap<u64, u64>,
-    /// A clock that advances at every ioctl and every signal from outside:
-    /// an ioctl may still write into a call that ended during it (to roll a
-    /// read back), but not into one that ended before.
+    /// A clock that advances at every ioctl and every external signal. An
+    /// ioctl may still write into a call that ended during it, to roll a read
+    /// back, but not into one that ended earlier.
     now: u64,
     /// The driver's clock in milliseconds ([`FakeUserspace::advance`]), and
     /// the earliest time it asked to be woken at.
     pub clock_ms: u64,
     pub timer: Option<u64>,
-    /// Decides whether each fallible operation fails (never, if unset).
+    /// Decides whether each fallible operation fails. If unset, none fail.
     pub fault: Option<Box<dyn FnMut(Fault) -> bool>>,
-    /// OpenHarmony: each process's (token, first token).
+    /// Each process's OpenHarmony (token, first token) pair.
     pub tokens: HashMap<ProcId, (u64, u64)>,
 }
 
@@ -240,8 +242,8 @@ impl FakeUserspace {
         base..base + CALL_SPAN
     }
 
-    /// Restart an interrupted call, as the kernel does after a signal: the
-    /// same ioctl with the same argument.
+    /// Restarts an interrupted call with the same ioctl and argument, as the
+    /// kernel does after a signal.
     pub fn restart(&mut self, b: &mut BinderDriver, call: Call) -> Call {
         let r = &self.calls[&call.id];
         assert!(matches!(r.status, Status::Interrupted));
@@ -259,7 +261,7 @@ impl FakeUserspace {
         }
     }
 
-    /// A signal ends `call`'s wait: it can no longer be answered.
+    /// A signal ends `call`'s wait, so it can no longer be answered.
     pub fn interrupt(&mut self, call: Call) {
         self.now += 1;
         self.end(call, Status::Interrupted);
@@ -294,7 +296,7 @@ impl FakeUserspace {
         matches!(r.status, Status::Pending).then_some(r)
     }
 
-    /// A signal arriving now, if the fault hook says so.
+    /// Interrupts `call` now if the fault hook says so.
     fn signal(&mut self, call: Call) {
         if self.pending_call(call).is_some() && self.fails(Fault::Signal) {
             self.end(call, Status::Interrupted);
@@ -445,7 +447,7 @@ impl Userspace for FakeUserspace {
         let Some(p) = self.procs.get_mut(&proc) else {
             return false;
         };
-        // Once per process, as in notify.rs.
+        // The fd is swapped once per process, as in notify.rs.
         if p.poll_swaps == 0 {
             p.poll_swaps = 1;
         }

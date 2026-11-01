@@ -1,12 +1,12 @@
-//! innkeeper-brk `[--preload <lib>] <init> [<arg>...]`: starts the guest's
+//! innkeeper-brk `[--preload <lib>] <init> [<arg>...]` starts the guest's
 //! init under the session's seccomp filter and serves that filter as init's
-//! parent (supervisor/README.md). Exits with init's status.
+//! parent (supervisor/README.md). It exits with init's status.
 //!
 //! The broker stays every guest process's ancestor, so process-memory access
-//! works under Yama's default `ptrace_scope=1`, and reaps orphans as the
-//! subreaper. Init alone gets `LD_PRELOAD=<lib>` (the shim) and
-//! `INNKEEPER_SHIM_ROLE=init`, since it isn't pid 1 here; the broker never
-//! loads the shim.
+//! works under Yama's default `ptrace_scope=1`. As the subreaper, it also
+//! reaps orphans. Only init gets `LD_PRELOAD=<lib>` (the shim) and
+//! `INNKEEPER_SHIM_ROLE=init`, because init isn't pid 1 here. The broker
+//! doesn't load the shim.
 use std::ffi::{CString, OsString};
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -43,8 +43,8 @@ fn main() {
             panic!("subreaper: {}", std::io::Error::last_os_error());
         }
     }
-    // The session's bpffs, for the bpf emulator's pins: opened before the
-    // guest can mount anything over it.
+    // The session's bpffs, which holds the bpf emulator's pins. Open it before
+    // the guest can mount anything over it.
     let pins = unsafe {
         let fd = libc::open(
             c"/sys/fs/bpf".as_ptr(),
@@ -64,7 +64,8 @@ fn main() {
     {
         panic!("socketpair: {}", std::io::Error::last_os_error());
     }
-    // Still single-threaded: the child may run Rust until it execs.
+    // The process is still single-threaded, so the child may run Rust until
+    // it execs.
     let init = unsafe { libc::fork() };
     if init < 0 {
         panic!("fork: {}", std::io::Error::last_os_error());
@@ -104,8 +105,8 @@ fn reap(init: i32) -> ! {
     }
 }
 
-/// In the forked child: install the filter, send its listener over `sock`
-/// and exec init.
+/// Runs in the forked child. Installs the filter, sends its listener over
+/// `sock` and execs init.
 fn start_init(guest: innkeeper_broker::Guest, sock: i32, argv: &[CString], env: &[CString]) -> ! {
     let mut argv_ptr: Vec<_> = argv.iter().map(|s| s.as_ptr()).collect();
     argv_ptr.push(std::ptr::null());
@@ -147,7 +148,7 @@ fn start_init(guest: innkeeper_broker::Guest, sock: i32, argv: &[CString], env: 
     }
 }
 
-/// The one fd sent over `sock`.
+/// Receives the fd sent over `sock`.
 fn receive_fd(sock: i32) -> Option<i32> {
     unsafe {
         let mut control = [0usize; 4];

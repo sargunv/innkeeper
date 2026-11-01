@@ -1,28 +1,29 @@
-//! OpenHarmony's access tokens (`INNKEEPER_GUEST=ohos`): the identity OH's
-//! kernel keeps beside the uid, a token and a first token per task
+//! OpenHarmony's access tokens (`INNKEEPER_GUEST=ohos`). OH's kernel keeps
+//! this identity beside the uid as a token and a first token per task
 //! (`current->token`, `current->ftoken`). Init and appspawn set them before
-//! exec through `/dev/access_token_id`; processes read their own back there,
-//! and binder hands the sender's to the receiving thread
+//! exec through `/dev/access_token_id`. Processes read their own back there,
+//! and binder hands the sender's tokens to the receiving thread
 //! (`BINDER_GET_ACCESS_TOKEN`, `BINDER_GET_SENDER_INFO` in
 //! [`crate::binder::driver`]).
 //!
-//! The kernel keeps them in the task, so fork inherits them. The broker keeps
-//! one record per process: keyed by pid plus start time, so a reused pid
-//! never shows a dead process's token, and a process without a record of its
-//! own gets its closest recorded ancestor's, which it would have inherited.
-//! The same node holds the kernel's permission table: a 2048-bit map per
-//! native token, which init fills from the service cfgs' "permission" lists
-//! and the access-token service reads to answer permission checks.
+//! The kernel keeps the tokens in the task, so fork inherits them. The broker
+//! keeps one record per process, keyed by pid plus start time so that a
+//! reused pid doesn't show a dead process's token. A process without a record
+//! of its own gets its closest recorded ancestor's tokens, which it would have
+//! inherited. The same node holds the kernel's permission table, a 2048-bit
+//! map per native token. Init fills it from the service cfgs' "permission"
+//! lists, and the access-token service reads it to answer permission checks.
 //!
-//! Callers are not checked: OH's kernel only lets privileged callers set
-//! tokens or permissions, a guard beyond desktop parity (docs/security.md).
+//! Callers are not checked. OH's kernel lets only privileged callers set
+//! tokens or permissions, which is a guard beyond desktop parity
+//! (docs/security.md).
 //!
-//! The node is an empty file the launcher plants; the broker serves its
-//! `'A'` ioctls and lets the open itself through.
+//! The node is an empty file that the launcher plants. The broker serves its
+//! `'A'` ioctls and lets the open go through.
 
 use std::collections::HashMap;
 
-/// The device node; its ioctls are type `'A'` (`ACCESS_TOKEN_ID_IOCTL_BASE`).
+/// The device node. Its ioctls are type `'A'` (`ACCESS_TOKEN_ID_IOCTL_BASE`).
 pub const NODE: &str = "/dev/access_token_id";
 pub const IOCTL_TYPE: u8 = b'A';
 
@@ -51,7 +52,7 @@ const GET_ALL_PERMISSIONS: u32 = ioc(W, 11, PERM_MAP);
 /// The kernel's bound on tokens with a permission map (`MAX_NODE_NUM`).
 const MAX_PERM_TOKENS: usize = 1000;
 
-/// Is `cmd` an access-token ioctl (by its type byte)?
+/// Whether `cmd` is an access-token ioctl, judged by its type byte.
 pub fn is_token_ioctl(cmd: u32) -> bool {
     (cmd >> 8) & 0xff == IOCTL_TYPE as u32
 }
@@ -83,8 +84,8 @@ fn u32_at(b: &[u8], i: usize) -> u32 {
 }
 
 impl Tokens {
-    /// `pid`'s tokens as last resolved: the per-transaction lookup, which
-    /// reads no `/proc` files. A pid without a record has none.
+    /// `pid`'s tokens as last resolved. This is the per-transaction lookup,
+    /// and it reads no `/proc` files. A pid without a record has no tokens.
     pub fn get(&self, pid: i32) -> (u64, u64) {
         self.map.get(&pid).map_or((0, 0), |e| (e.token, e.ftoken))
     }
@@ -103,8 +104,8 @@ impl Tokens {
         }
         let mut inherited = (0, 0);
         let mut p = pid;
-        // Bounded: a chain of more than a few dozen recordless ancestors
-        // would be a loop in a racing reparent.
+        // A chain of more than a few dozen ancestors without records would be
+        // a loop caused by a racing reparent.
         for _ in 0..64 {
             let Some((_, parent)) = stat(p) else { break };
             if parent <= 0 {
@@ -129,8 +130,8 @@ impl Tokens {
         inherited
     }
 
-    /// Serve access-token ioctl `cmd` from process `pid`: the ioctl's
-    /// return value, or an errno.
+    /// Serves access-token ioctl `cmd` from process `pid`. Returns the
+    /// ioctl's return value, or an errno.
     pub fn ioctl(&mut self, pid: i32, cmd: u32, stat: Stat, arg: &mut dyn Arg) -> Result<i64, i32> {
         let read = |arg: &mut dyn Arg, len| arg.read(len).ok_or(libc::EFAULT);
         let done = |ok: bool| if ok { Ok(0) } else { Err(libc::EFAULT) };
@@ -194,7 +195,7 @@ impl Tokens {
                     .for_each(|w| out.extend_from_slice(&w.to_ne_bytes()));
                 done(arg.write(&out))
             }
-            // Newer kernels' SPM entries and reference counts: absent, as
+            // Newer kernels' SPM entries and reference counts are absent, as
             // on a kernel built without them.
             _ => Err(libc::ENOTTY),
         }
@@ -219,7 +220,7 @@ mod tests {
         move |p| m.get(&p).copied()
     }
 
-    /// The caller's argument: `buf`, which writes replace.
+    /// The caller's argument, held in a buffer that writes replace.
     struct Buf(Vec<u8>);
     impl Arg for Buf {
         fn read(&mut self, len: usize) -> Option<Vec<u8>> {
@@ -271,7 +272,7 @@ mod tests {
         assert_eq!(t.get(12), (0, 0), "no record before it is resolved");
         assert_eq!(t.resolve(12, &s), (5, 0));
         assert_eq!(t.get(12), (5, 0));
-        // The child's own token is its own from then on.
+        // From then on the child keeps the token it set.
         set(&mut t, 12, &s, SET_TOKENID, 9);
         assert_eq!((t.get(10), t.get(12)), ((5, 0), (9, 0)));
     }

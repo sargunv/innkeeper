@@ -2,23 +2,24 @@
 //!
 //! The session's user namespace maps only the user's uid and gid, so the
 //! kernel can't give Android's processes their own uids. The broker traps the
-//! credential syscalls instead, and this module is their pure model:
+//! credential syscalls instead, and this module is their pure model. It holds
 //! per-process credentials, the kernel's `set*id` rules (`kernel/sys.c`), and
 //! an interning table.
 //!
-//! Where the credentials live: in the process itself, as the soft
-//! `RLIMIT_RTTIME` limit, which holds an id into the [`CredTable`]. Rlimits
-//! are per process, inherited by `fork` and kept across `execve`, and the
-//! supervisor can read and set them with `prlimit(pid, ...)`, so a new process
-//! carries its parent's identity with no fork tracking and no races. The
-//! default (`RLIM_INFINITY`) is root. `RLIMIT_RTTIME` only limits real-time
-//! tasks, and the session has none (SCHED_FIFO/RR requests are faked).
+//! The credentials live in the process, as the soft `RLIMIT_RTTIME` limit,
+//! which holds an id into the [`CredTable`]. Rlimits are per process,
+//! inherited by `fork` and kept across `execve`, and the supervisor can read
+//! and set them with `prlimit(pid, ...)`. A new process therefore carries its
+//! parent's identity without fork tracking or races. The default
+//! (`RLIM_INFINITY`) is root. `RLIMIT_RTTIME` limits only real-time tasks, and
+//! the session has none because SCHED_FIFO/RR requests are faked.
 
 use std::collections::HashMap;
 
 /// The kernel's NGROUPS_MAX.
 pub const NGROUPS_MAX: usize = 65536;
-/// `(uid_t)-1`: "leave unchanged" for setre*/setres*, invalid elsewhere.
+/// `(uid_t)-1`, which means "leave unchanged" for setre*/setres* and is
+/// invalid elsewhere.
 pub const NO_ID: u32 = u32::MAX;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -31,8 +32,8 @@ pub struct Creds {
     pub egid: u32,
     pub sgid: u32,
     pub fsgid: u32,
-    /// Supplementary groups, sorted (the kernel sorts them too, and
-    /// getgroups returns that order).
+    /// Supplementary groups, sorted. The kernel sorts them too, and getgroups
+    /// returns that order.
     pub groups: Vec<u32>,
 }
 
@@ -66,8 +67,8 @@ pub enum SetId {
     Groups(Vec<u32>),
 }
 
-/// CAP_SETUID and CAP_SETGID for a credential syscall. Virtual root has both;
-/// every other uid has neither. `capset` is answered without changing the
+/// CAP_SETUID and CAP_SETGID for a credential syscall. Virtual root has both,
+/// and every other uid has neither. `capset` is answered without changing the
 /// kernel's set, and a sandboxed `CapEff` is always 0, so there is nothing
 /// else to read.
 #[derive(Clone, Copy, Debug, Default)]
@@ -76,9 +77,9 @@ pub struct Caps {
     pub setgid: bool,
 }
 
-/// Apply `op` to `old` like the kernel would: the new credentials and the
-/// syscall's return value, or an errno. (setfsuid/setfsgid never fail: they
-/// return the previous fs id, changed or not.)
+/// Applies `op` to `old` as the kernel would. Returns the new credentials and
+/// the syscall's return value, or an errno. setfsuid and setfsgid don't fail.
+/// They return the previous fs id whether or not it changed.
 pub fn apply(old: &Creds, op: &SetId, caps: Caps) -> Result<(Creds, i64), i32> {
     let mut new = old.clone();
     match *op {
@@ -221,7 +222,7 @@ pub fn apply(old: &Creds, op: &SetId, caps: Caps) -> Result<(Creds, i64), i32> {
     Ok((new, 0))
 }
 
-/// getgroups(size, list): how many entries to write, or an errno.
+/// The number of entries getgroups(size, list) writes, or an errno.
 pub fn getgroups_count(c: &Creds, size: usize) -> Result<usize, i32> {
     if size == 0 || size >= c.groups.len() {
         Ok(c.groups.len())
@@ -230,8 +231,8 @@ pub fn getgroups_count(c: &Creds, size: usize) -> Result<usize, i32> {
     }
 }
 
-/// Interned credentials. Id 0 is root; the encoding in a process's soft
-/// `RLIMIT_RTTIME` is `id` for ids >= 1 and `RLIM_INFINITY` for root.
+/// Interned credentials. Id 0 is root. A process's soft `RLIMIT_RTTIME`
+/// encodes ids >= 1 as `id` and root as `RLIM_INFINITY`.
 pub struct CredTable {
     by_id: Vec<Creds>,
     ids: HashMap<Creds, u64>,
@@ -266,8 +267,8 @@ impl CredTable {
         id
     }
 
-    /// Credentials for a raw soft-limit value. Anything that isn't one of
-    /// ours (infinity, 0, out of range) is root.
+    /// Credentials for a raw soft-limit value. Any value that isn't one of
+    /// the table's ids (infinity, 0, out of range) is root.
     pub fn lookup(&self, rlim: u64) -> &Creds {
         let id = if rlim == RLIM_INFINITY { 0 } else { rlim };
         self.by_id.get(id as usize).unwrap_or(&self.by_id[0])
@@ -280,8 +281,9 @@ impl CredTable {
 }
 
 /// The kernel's permission-bit check (`generic_permission` without ACLs or
-/// capabilities): may a process with `uid`, `gid` and `groups` access a file
-/// with `st_mode`, owned by `owner:group`, for `want` (R=4, W=2, X=1)?
+/// capabilities). Returns whether a process with `uid`, `gid` and `groups` may
+/// access a file with `st_mode`, owned by `owner:group`, for `want` (R=4, W=2,
+/// X=1).
 pub fn may_access(
     st_mode: u32,
     owner: u32,
@@ -353,8 +355,9 @@ pub fn parse_proc_status(path: &[u8]) -> Option<ProcStatus> {
     }
 }
 
-/// `status` contents with the Uid/Gid/Groups lines replaced by `c`'s (in
-/// the kernel's format: tab-separated, groups each followed by a space).
+/// `status` contents with the Uid, Gid and Groups lines replaced by `c`'s.
+/// The lines use the kernel's format, with tab-separated fields and a space
+/// after each group.
 pub fn rewrite_status(content: &str, c: &Creds) -> String {
     let mut out = String::with_capacity(content.len() + 64);
     for line in content.split_inclusive('\n') {
@@ -455,7 +458,7 @@ mod tests {
         let c = creds(1000, 2000, 2000);
         let (n, _) = apply(&c, &SetId::Reuid(2000, 1000), UNPRIV).unwrap();
         assert_eq!((n.ruid, n.euid, n.suid), (2000, 1000, 1000));
-        // Only euid set, to the real uid: saved stays.
+        // Setting only the euid, to the real uid, leaves the saved uid alone.
         let (n, _) = apply(&c, &SetId::Reuid(NO_ID, 1000), UNPRIV).unwrap();
         assert_eq!((n.ruid, n.euid, n.suid), (1000, 1000, 2000));
         assert_eq!(
@@ -478,10 +481,10 @@ mod tests {
     #[test]
     fn setfsuid_returns_previous() {
         let c = creds(1000, 1000, 1000);
-        // Query idiom: setfsuid(-1) changes nothing.
+        // setfsuid(-1) is a query and changes nothing.
         let (n, r) = apply(&c, &SetId::Fsuid(NO_ID), UNPRIV).unwrap();
         assert_eq!((r, n.fsuid), (1000, 1000));
-        // Not allowed: unchanged, but no error.
+        // A disallowed change leaves the fs uid unchanged without an error.
         let (n, r) = apply(&c, &SetId::Fsuid(0), UNPRIV).unwrap();
         assert_eq!((r, n.fsuid), (1000, 1000));
         let (n, r) = apply(&c, &SetId::Fsuid(0), PRIV).unwrap();
@@ -585,7 +588,7 @@ mod tests {
         assert!(v.contains("\nGroups:\t1004 1007 \n"));
         assert!(v.starts_with("Name:\tsystem_server\n"));
         assert!(v.ends_with("NStgid:\t348\n"));
-        // Root with no groups: an empty Groups line, like the kernel's.
+        // Root with no groups gets an empty Groups line, as from the kernel.
         assert!(rewrite_status(real, &Creds::root()).contains("\nGroups:\t\n"));
     }
 
@@ -636,7 +639,8 @@ mod tests {
                 let Ok((n, ret)) = apply(&c, &op, caps) else {
                     continue;
                 };
-                // Without CAP_SETUID no new uid appears; same for gids.
+                // Without CAP_SETUID no new uid appears. The same holds for
+                // gids.
                 let olduids = [c.ruid, c.euid, c.suid, c.fsuid];
                 let oldgids = [c.rgid, c.egid, c.sgid, c.fsgid];
                 if !caps.setuid {
@@ -720,7 +724,8 @@ mod tests {
 
     #[test]
     fn access_bits() {
-        // base.apk: system:system 0644. The app may read, not write.
+        // base.apk is system:system 0644. The app may read it but not write
+        // it.
         assert!(may_access(0o100644, 1000, 1000, 10050, 10050, &[], 4));
         assert!(!may_access(0o100644, 1000, 1000, 10050, 10050, &[], 2));
         assert!(may_access(0o100644, 1000, 1000, 1000, 1000, &[], 6));

@@ -1,18 +1,21 @@
-//! Ashmem for OpenHarmony (`INNKEEPER_GUEST=ohos`): OH's kernel keeps the
-//! staging ashmem driver, and its c_utils (`AshmemCreate`) and everything on
-//! it (IPC parcels, the display HDI's shared command queues) need
-//! `/dev/ashmem`. The host has none, so each open of it gets a fresh sealable
-//! memfd, and the broker answers the ashmem ioctls on those memfds:
+//! Ashmem for OpenHarmony (`INNKEEPER_GUEST=ohos`). OH's kernel keeps the
+//! staging ashmem driver, and its c_utils (`AshmemCreate`) and everything
+//! built on it, such as IPC parcels and the display HDI's shared command
+//! queues, need `/dev/ashmem`. The host has no such device, so each open of it
+//! gets a fresh sealable memfd, and the broker answers the ashmem ioctls on
+//! those memfds:
 //!
-//! - the size is the memfd's: SET_SIZE truncates, GET_SIZE is its length;
-//! - a protection mask without `PROT_WRITE` is `F_SEAL_FUTURE_WRITE` (no new
-//!   writable mappings, as ashmem refuses them), and masks only shrink;
-//! - names, pinning and purging are accepted and have no effect: memfd pages
+//! - The size is the memfd's. SET_SIZE truncates, and GET_SIZE returns its
+//!   length.
+//! - A protection mask without `PROT_WRITE` becomes `F_SEAL_FUTURE_WRITE`,
+//!   which refuses new writable mappings as ashmem does. Masks can only
+//!   shrink.
+//! - Names, pinning and purging are accepted and have no effect. memfd pages
 //!   are never purged, so every region stays pinned.
 //!
-//! The state lives in the memfd itself, so a region passed to another process
-//! answers the same there. c_utils also checks that the opened node is a
-//! character device: the broker's fstat ([`crate::fs`]) shows a region as
+//! The state lives in the memfd, so a region passed to another process
+//! behaves the same there. c_utils also checks that the opened node is a
+//! character device, so the broker's fstat ([`crate::fs`]) shows a region as
 //! [`RDEV`].
 
 use std::fs::File;
@@ -21,7 +24,7 @@ use std::os::fd::AsRawFd;
 pub const NODE: &[u8] = b"/dev/ashmem";
 /// `__ASHMEMIOC`.
 pub const IOCTL_TYPE: u8 = 0x77;
-/// What fstat shows as a region's device: misc 10:61, as ashmem was.
+/// The device fstat shows for a region, misc 10:61, which was ashmem's.
 pub const RDEV: u64 = 10 << 8 | 61;
 /// The memfd name, which marks the broker's regions (`/memfd:ashmem`).
 pub const NAME: &std::ffi::CStr = c"ashmem";
@@ -41,12 +44,12 @@ const NAME_LEN: usize = 256;
 const IS_PINNED: i64 = 1;
 const ALL_PROT: u64 = (libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC) as u64;
 
-/// Is `cmd` an ashmem ioctl (by its type byte)?
+/// Whether `cmd` is an ashmem ioctl, judged by its type byte.
 pub fn is_ashmem_ioctl(cmd: u32) -> bool {
     (cmd >> 8) & 0xff == IOCTL_TYPE as u32
 }
 
-/// Is `link` (an fd's `/proc` link) one of the broker's regions?
+/// Whether `link`, an fd's `/proc` link, is one of the broker's regions.
 pub fn is_region(link: &[u8]) -> bool {
     link.strip_prefix(b"/memfd:")
         .is_some_and(|n| n.starts_with(NAME.to_bytes()))
@@ -79,8 +82,9 @@ fn prot(f: &File) -> Result<u64, i32> {
     })
 }
 
-/// Serves `cmd` on region `f`. `arg` is the ioctl's argument; `write` stores
-/// bytes at the pointer it names. Returns the ioctl's value or an errno.
+/// Serves `cmd` on region `f`. `arg` is the ioctl's argument, and `write`
+/// stores bytes at the pointer it names. Returns the ioctl's value or an
+/// errno.
 pub fn ioctl(
     f: &File,
     cmd: u32,

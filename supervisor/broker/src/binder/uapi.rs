@@ -1,9 +1,9 @@
 //! Binder UAPI constants and wire structs.
 //!
-//! Mirror of `include/uapi/linux/android/binder.h` for the x86_64 (64-bit
-//! `binder_uintptr_t`) ABI that the AOSP 17 image uses: the pieces the broker
-//! uses, and the freezer's. Structs are `#[repr(C)]`, so their bytes are what
-//! libbinder writes into the command stream and reads back.
+//! This mirrors `include/uapi/linux/android/binder.h` for the x86_64 ABI
+//! (64-bit `binder_uintptr_t`) that the AOSP 17 image uses. It covers the parts
+//! the broker uses, including the freezer. Structs are `#[repr(C)]`, so their
+//! bytes match what libbinder writes into the command stream and reads back.
 
 pub type BinderSize = u64;
 pub type BinderUintptr = u64;
@@ -49,9 +49,10 @@ pub const BINDER_SET_CONTEXT_MGR_EXT: u32 = iow(b'b', 13, size_of::<FlatBinderOb
 pub const BINDER_ENABLE_ONEWAY_SPAM_DETECTION: u32 = iow(b'b', 16, size_of::<u32>());
 pub const BINDER_GET_EXTENDED_ERROR: u32 = iowr(b'b', 17, size_of::<BinderExtendedError>());
 
-/// Is `cmd` one of the binder ioctls? (used by the seccomp dispatcher)
+/// Whether `cmd` is a binder ioctl. The seccomp dispatcher uses this.
 pub fn is_binder_ioctl(cmd: u32) -> bool {
-    // All share type 'b'; match on type byte to be tolerant of size drift.
+    // All binder ioctls share type 'b'. Matching on the type byte alone
+    // tolerates changes in the encoded size.
     ((cmd >> 8) & 0xff) == b'b' as u32
 }
 
@@ -218,7 +219,7 @@ pub struct BinderPtrCookie {
     pub cookie: BinderUintptr,
 }
 
-/// `__packed` in the UAPI (12 bytes): the size is part of the
+/// The UAPI declares this `__packed` (12 bytes). The size is part of the
 /// BC_*_DEATH_NOTIFICATION command codes.
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -262,7 +263,7 @@ pub struct BinderExtendedError {
     pub param: i32,
 }
 
-// The freezer: BINDER_FREEZE and freeze notifications.
+// Freezer ioctls and freeze notifications.
 pub const BINDER_FREEZE: u32 = iow(b'b', 14, size_of::<BinderFreezeInfo>());
 pub const BINDER_GET_FROZEN_INFO: u32 = iowr(b'b', 15, size_of::<BinderFrozenStatusInfo>());
 pub const BR_FROZEN_REPLY: u32 = ioc(IOC_NONE, b'r', 18, 0);
@@ -294,14 +295,14 @@ pub struct BinderFrozenStateInfo {
     pub reserved: u32,
 }
 
-/// Read/write a little-endian POD from/to a byte slice.
+/// Reads a little-endian POD from a byte slice.
 pub(crate) fn read_pod<T: Copy>(buf: &[u8], off: usize) -> Option<T> {
     let sz = size_of::<T>();
     if off.checked_add(sz)? > buf.len() {
         return None;
     }
-    // SAFETY: bounds checked; T is a #[repr(C)] POD and x86_64 is LE so the
-    // wire bytes match the in-memory layout.
+    // SAFETY: The bounds are checked above. T is a #[repr(C)] POD, and x86_64
+    // is little-endian, so the wire bytes match the in-memory layout.
     let mut v = std::mem::MaybeUninit::<T>::uninit();
     unsafe {
         std::ptr::copy_nonoverlapping(buf.as_ptr().add(off), v.as_mut_ptr() as *mut u8, sz);
@@ -325,17 +326,17 @@ pub(crate) fn align_up(v: usize, a: usize) -> usize {
     (v + a - 1) & !(a - 1)
 }
 
-// ---- OpenHarmony's extensions -------------------------------------------
-// OpenHarmony's kernel adds these to the same driver (drivers/android/
-// binder.c in kernel_linux_6.6; communication_ipc's sys_binder.h). The
-// driver serves them only for that guest (`BinderDriver::with_guest`).
+// OpenHarmony's kernel adds these extensions to the same driver
+// (drivers/android/binder.c in kernel_linux_6.6, and communication_ipc's
+// sys_binder.h). The driver serves them only for that guest
+// (`BinderDriver::with_guest`).
 
-/// `BINDER_FEATURE_SET`'s answer, as OH's kernel builds it with
+/// The `BINDER_FEATURE_SET` answer of an OpenHarmony kernel built with
 /// CONFIG_ACCESS_TOKENID and CONFIG_BINDER_SENDER_INFO.
 pub const OHOS_FEATURES: u64 = 1 << 0 | 1 << 2;
 
-/// A transaction's access tokens: the sending task's token and first token
-/// (`current->token`, `current->ftoken`) when it sent.
+/// The access tokens of a transaction. These are the sending task's token and
+/// first token (`current->token` and `current->ftoken`) at send time.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AccessToken {

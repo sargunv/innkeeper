@@ -1,6 +1,7 @@
 //! Session-local evdev devices. EventHub polls a socket endpoint installed by
-//! ADDFD; its peer receives the bridge's input_event records. Nothing reaches
-//! the host input subsystem. The ordinary tmpfs nodes exist for inotify only.
+//! ADDFD, and its peer receives the bridge's input_event records. Nothing
+//! reaches the host input subsystem. The ordinary tmpfs nodes exist only for
+//! inotify.
 pub mod gamepad;
 
 use std::collections::HashMap;
@@ -12,15 +13,17 @@ use crate::notify::{Listener, SeccompNotif, mem_read, mem_write, open_mem, read_
 
 pub use innkeeper_evdev_proto::{EVENT_SIZE, KEYBOARD, MOUSE, Message, event};
 // Flatpak's input grant mounts a host-owned directory at /dev/input. Discovery
-// uses our own tmpfs directory; virtual names cannot shadow host eventN nodes.
+// uses the broker's own tmpfs directory, so virtual names can't shadow host
+// eventN nodes.
 const DIRECTORY: &str = "/dev/innkeeper-input";
 const PREFIX: &[u8] = b"/dev/input/innkeeper-event";
 
 struct Client {
     device: u32,
     peer: OwnedFd,
-    /// Remember the installed socket's identity without retaining its endpoint:
-    /// the peer must receive POLLHUP when Android closes the last reference.
+    /// The installed socket's identity. The broker doesn't retain the
+    /// endpoint, because the peer must receive POLLHUP when Android closes the
+    /// last reference.
     identity: std::path::PathBuf,
     pid: u32,
     fd: i32,
@@ -113,9 +116,9 @@ fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
     b
 }
 
-/// EVIOCG* answers, including the caller's requested bitmap/string length.
-/// Return value is bytes copied for variable-length queries, zero for fixed
-/// structs, as evdev does. Unknown ioctls stay ENOTTY.
+/// EVIOCG* answers, cut to the caller's requested bitmap or string length.
+/// The return value is the number of bytes copied for variable-length queries
+/// and zero for fixed structs, as in evdev. Unknown ioctls return ENOTTY.
 fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i64), i32> {
     let nr = cmd & 0xff;
     let size = ((cmd >> 16) & 0x3fff) as usize;
@@ -260,7 +263,7 @@ fn pad_answer(device: u32, pad: &Pad, cmd: u32, keys: &[u8]) -> Result<(Vec<u8>,
 }
 
 // Registration carries an optional already-open rumble fd. Android receives
-// only broker sockets; only the bridge reads the host controller's events.
+// only broker sockets, and only the bridge reads the host controller's events.
 fn receive(socket: &UnixDatagram, bytes: &mut [u8]) -> std::io::Result<(usize, Option<OwnedFd>)> {
     let mut iov = libc::iovec {
         iov_base: bytes.as_mut_ptr().cast(),
@@ -313,7 +316,8 @@ impl Default for Devices {
 impl Devices {
     fn changed(&self) {
         if let Some(wake) = &self.wake {
-            // Nonblocking: an already queued notification also wakes the poll.
+            // A failed nonblocking send is fine, because an already queued
+            // notification also wakes the poll.
             let _ = wake.send(&[1]);
         }
     }
@@ -327,8 +331,9 @@ impl Devices {
     }
 }
 
-// Drain before an ioctl too: a following erase/update must not overtake
-// EV_FF writes that the caller already queued on its installed socket.
+// Drain before an ioctl too, so that a following erase or update can't
+// overtake EV_FF writes that the caller already queued on its installed
+// socket.
 fn drain_writes(client: &Client, state: &mut Devices) {
     let mut packet = [0; EVENT_SIZE * 64];
     loop {
@@ -386,8 +391,9 @@ fn reap_closed_clients(state: &mut Devices) {
     }
 }
 
-// New opens/removals wake the snapshot poll; writes and final closes wake
-// directly on the peer. There is no timer when Android has no input work.
+// New opens and removals wake the snapshot poll. Writes and final closes wake
+// the poll directly on the peer. There is no timer when Android has no input
+// work.
 fn wait_for_writes(devices: &Mutex<Devices>, wake: &UnixDatagram) -> std::io::Result<()> {
     let clients = devices.lock().unwrap().clients.clone();
     let mut polls: Vec<_> = std::iter::once(wake.as_raw_fd())
@@ -435,8 +441,8 @@ fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Pat
 }
 
 fn prepare_directories(dev: &std::path::Path) -> std::io::Result<()> {
-    // EventHub checks existence before its redirected scan. Flatpak only
-    // supplies /dev/input when the host has one; leave an existing bind intact.
+    // EventHub checks existence before its redirected scan. Flatpak supplies
+    // /dev/input only when the host has one. Leave an existing bind intact.
     std::fs::create_dir_all(dev.join("input"))?;
     std::fs::create_dir_all(dev.join("innkeeper-input"))
 }
@@ -535,8 +541,8 @@ impl Input {
                     .cloned()
                     .collect();
                 drop(s);
-                // Do not hold device state while waiting: EventHub may need an
-                // ioctl answer before it can drain its socket.
+                // Don't hold device state while waiting, because EventHub may
+                // need an ioctl answer before it can drain its socket.
                 for client in clients {
                     if let Err(e) = client.deliver(records) {
                         eprintln!("evdev: delivery failed: {e}");
@@ -544,8 +550,9 @@ impl Input {
                 }
             }
         });
-        // Create after the input socket is ready; EventHub observes these via
-        // its initial scan or inotify. /dev is the sandbox's private tmpfs.
+        // Create the nodes after the input socket is ready. EventHub observes
+        // them through its initial scan or inotify. /dev is the sandbox's
+        // private tmpfs.
         for n in 0..1 {
             std::fs::write(dir.join(format!("innkeeper-event{n}")), []).ok()?;
         }
@@ -917,7 +924,7 @@ mod tests {
         );
         state.clients.push(Arc::new(client));
         reap_closed_clients(&mut state);
-        assert_eq!(state.clients.len(), 1); // still open: keep the effect
+        assert_eq!(state.clients.len(), 1); // still open, so the effect stays
         drop(reader);
         reap_closed_clients(&mut state);
         assert!(state.clients.is_empty());

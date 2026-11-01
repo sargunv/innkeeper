@@ -1,4 +1,4 @@
-//! The binder driver: its state machine and the kernel UAPI it speaks.
+//! The binder driver state machine and the kernel UAPI it implements.
 
 pub mod driver;
 pub mod uapi;

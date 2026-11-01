@@ -1,14 +1,12 @@
-//! Unit tests for the broker state machine. They drive the broker exactly as
-//! libbinder would: build a BC_* command stream, issue `BINDER_WRITE_READ`
-//! through the fake userspace, and decode the BR_* stream the call is
-//! answered with, asserting the kernel's observable behaviour.
+//! Unit tests for the broker state machine. They drive the broker as libbinder
+//! does. Each test builds a BC_* command stream, issues `BINDER_WRITE_READ`
+//! through the fake userspace, decodes the BR_* stream the call is answered
+//! with, and asserts the kernel's observable behaviour.
 #![allow(clippy::field_reassign_with_default)] // readable struct-by-field setup
 
 use super::fake::{FakeUserspace, Fault};
 use crate::binder::driver::*;
 use crate::binder::uapi::*;
-
-// ---- command-stream helpers -------------------------------------------
 
 #[derive(Default)]
 struct Bc(Vec<u8>);
@@ -76,8 +74,8 @@ fn td_from(p: &[u8]) -> BinderTransactionData {
     read_pod(p, 0).unwrap()
 }
 
-// A standard two-process setup: a server that is the context manager, and a
-// client. recv regions far apart so target addresses are unambiguous.
+// A two-process setup with a server and a client. Their receive regions are
+// far apart so that target addresses are unambiguous.
 struct Setup {
     b: BinderDriver,
     us: FakeUserspace,
@@ -137,8 +135,8 @@ impl Setup {
     }
 }
 
-/// The server's thread 2 is a looper (joinThreadPool); the client's thread 1
-/// is a plain caller.
+/// Makes the server the context manager, with thread 2 as a looper (as in
+/// joinThreadPool). The client's thread 1 is a plain caller.
 fn setup() -> Setup {
     setup_on(crate::Guest::Android)
 }
@@ -151,8 +149,8 @@ fn setup_on(guest: crate::Guest) -> Setup {
     s
 }
 
-/// A transaction to the context manager whose data is `obj` (one object at
-/// offset 0), from the client's memory.
+/// A transaction to the context manager from the client's memory. Its data is
+/// `obj`, a single object at offset 0.
 fn txn_with_object(s: &mut Setup, obj: &[u8], flags: u32) -> BinderTransactionData {
     let data_addr = 0x9001_0000u64;
     let off_addr = 0x9002_0000u64;
@@ -168,8 +166,6 @@ fn txn_with_object(s: &mut Setup, obj: &[u8], flags: u32) -> BinderTransactionDa
     td.data_offsets = off_addr;
     td
 }
-
-// ---- tests ------------------------------------------------------------
 
 #[test]
 fn version_and_ctx_mgr() {
@@ -188,8 +184,8 @@ fn version_and_ctx_mgr() {
 #[test]
 fn register_service_and_transact() {
     let mut s = setup();
-    // Client sends a transaction to the context manager (handle 0) that
-    // contains one BINDER_TYPE_BINDER (registering a service object).
+    // The client registers a service object by sending the context manager
+    // (handle 0) a transaction that contains one BINDER_TYPE_BINDER.
     let mut fbo = FlatBinderObject::default();
     fbo.hdr_type = BINDER_TYPE_BINDER;
     fbo.flags = FLAT_BINDER_FLAG_ACCEPTS_FDS;
@@ -228,12 +224,13 @@ fn register_service_and_transact() {
     let (strong, _weak) = s.b.ref_counts(s.server, handle).unwrap();
     assert_eq!(strong, 1);
 
-    // Client is now blocked awaiting the reply (sync call).
+    // The call is synchronous, so the client blocks waiting for the reply.
     let cblock = s.wr(s.client, 1, &[], 256);
     assert!(s.us.is_pending(cblock));
 
-    // Server replies; client wakes and, on the same read, receives its
-    // deferred node handshake (INCREFS/ACQUIRE), TRANSACTION_COMPLETE and REPLY.
+    // The server replies. The client wakes and, on the same read, receives its
+    // deferred node handshake (INCREFS and ACQUIRE), TRANSACTION_COMPLETE and
+    // REPLY.
     let mut rtd = BinderTransactionData::default();
     rtd.code = 0;
     let wr = Bc::default().cmd(BC_REPLY).td(&rtd).done();
@@ -251,8 +248,8 @@ fn register_service_and_transact() {
     );
 }
 
-/// A data_size near u64::MAX must fail the transaction, not overflow the
-/// alignment (a panic in debug builds) or wrap to a tiny buffer.
+/// A data_size near u64::MAX must fail the transaction. Aligning it must not
+/// overflow, which panics in debug builds, or wrap to a tiny buffer.
 #[test]
 fn huge_data_size_fails() {
     let mut s = setup();
@@ -272,7 +269,8 @@ fn huge_data_size_fails() {
 #[test]
 fn sync_call_and_reply_routing() {
     let mut s = setup();
-    // Client calls the context-manager node directly (handle 0), server replies.
+    // The client calls the context manager node (handle 0), and the server
+    // replies.
     let mut td = BinderTransactionData::default();
     td.target = 0;
     td.code = 42;
@@ -352,7 +350,7 @@ fn ohos_readers_get_the_senders_tokens() {
     let info = sender_info(&mut s, server, 2);
     assert_eq!(info.tokens, token(0x2800_0001, 0x2800_0002));
     assert_eq!(info.sender_pid_nr, 1001, "the client's pid");
-    // The caller reads the reply's: the server's tokens, and no pid.
+    // For the reply, the caller reads the server's tokens and no pid.
     let rc = s.wr(s.client, 1, &[], 256);
     let rtd = BinderTransactionData::default();
     s.wr(
@@ -367,7 +365,7 @@ fn ohos_readers_get_the_senders_tokens() {
         (info.tokens, info.sender_pid_nr),
         (token(0x2000_0003, 0), 0)
     );
-    // A oneway call carries tokens, not a pid.
+    // A oneway call carries tokens but no pid.
     td.flags = TF_ONE_WAY;
     s.write(
         s.client,
@@ -456,8 +454,8 @@ fn death_notification_fires_on_release() {
     let handle = read_pod::<FlatBinderObject>(&obj, 0)
         .unwrap()
         .binder_or_handle as u32;
-    // Server replies to the registration so its thread returns to proc work;
-    // it reads its own TRANSACTION_COMPLETE on the same call.
+    // The server replies to the registration so that its thread returns to
+    // process work. It reads its own TRANSACTION_COMPLETE on the same call.
     let rtd = BinderTransactionData::default();
     s.wr(
         s.server,
@@ -479,7 +477,7 @@ fn death_notification_fires_on_release() {
     let park = s.wr(s.server, 2, &[], 256);
     assert!(s.us.is_pending(park));
 
-    // Client dies: the server's read is answered with BR_DEAD_BINDER.
+    // When the client dies, the server's read is answered with BR_DEAD_BINDER.
     s.b.release_proc(s.client, &mut s.us);
     let stream = s.stream(park);
     let p = find(&stream, BR_DEAD_BINDER).expect("server gets BR_DEAD_BINDER");
@@ -500,7 +498,8 @@ fn node_ref_handshake() {
         1,
         &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
     );
-    // drive the server to translate (creates the incoming ref), then reply
+    // The server's read translates the object, which creates the incoming
+    // ref. Then the server replies.
     s.read(s.server, 2, 256);
     let rtd = BinderTransactionData::default();
     s.wr(
@@ -523,11 +522,10 @@ fn bad_command_is_einval() {
     assert_eq!(s.us.outcome(c).errno, libc::EINVAL);
 }
 
-// ---- the read lifecycle ------------------------------------------------
-
 impl Setup {
-    /// Make the bwr and buffers of the next `wr` from `proc` read-only (as a
-    /// read-only shared page is, even through /proc/<pid>/mem).
+    /// Makes the bwr and buffers of the next `wr` from `proc` read-only, like a
+    /// read-only shared page, which stays read-only even through
+    /// /proc/<pid>/mem.
     fn readonly_next_call(&mut self, proc: ProcId) {
         let span = self.us.next_call_memory();
         self.us.procs.get_mut(&proc).unwrap().readonly = vec![span];
@@ -535,8 +533,8 @@ impl Setup {
 }
 
 /// A bwr that can be read but not written back fails the ioctl with
-/// EFAULT, as binder_ioctl_write_read does, rather than succeeding with the
-/// caller's consumed counters left stale.
+/// EFAULT, as binder_ioctl_write_read does. Succeeding would leave the
+/// caller's consumed counters stale.
 #[test]
 fn bwr_writeback_failure_is_efault() {
     for read_size in [0, 256] {
@@ -553,9 +551,9 @@ fn bwr_writeback_failure_is_efault() {
     }
 }
 
-/// A looper whose blocking read fails (its bwr can't be written back) never
-/// waits: the next incoming transaction goes to a looper that is really
-/// reading, not to the failed one, where a synchronous caller would hang.
+/// A looper whose blocking read fails because its bwr can't be written back
+/// does not wait. The next incoming transaction goes to a looper that is
+/// reading. Delivering it to the failed looper would hang a synchronous caller.
 #[test]
 fn failed_block_leaves_no_waiting_looper() {
     let mut s = setup();
@@ -576,8 +574,8 @@ fn failed_block_leaves_no_waiting_looper() {
     assert!(find(&s.stream(good), BR_TRANSACTION).is_some());
 }
 
-/// A signal ends a blocked read's wait just as work arrives: the delivery
-/// is rolled back, and the restarted ioctl reads the same transaction.
+/// A signal ends a blocked read's wait as work arrives. The delivery is rolled
+/// back, and the restarted ioctl reads the same transaction.
 #[test]
 fn interrupted_delivery_is_read_again() {
     let mut s = setup();
@@ -597,7 +595,8 @@ fn interrupted_delivery_is_read_again() {
     ));
     let again = s.us.restart(&mut s.b, park);
     assert!(find(&s.stream(again), BR_TRANSACTION).is_some());
-    // It is on the server's stack once: the reply reaches the client.
+    // The transaction is on the server's stack once, so the reply reaches the
+    // client.
     let rtd = BinderTransactionData::default();
     s.wr(
         s.server,
@@ -628,8 +627,9 @@ fn published_read_survives_notification_restart() {
     );
     let delivered = s.stream(parked);
     assert!(find(&delivered, BR_TRANSACTION).is_some());
-    // The model's answer succeeded, but the caller saw EINTR: same argument,
-    // including the already published read counters, rather than a new read.
+    // The model's answer succeeded, but the caller saw EINTR. It retries with
+    // the same argument, including the published read counters, instead of
+    // starting a new read.
     let retry = s.ioctl(s.server, 2, BINDER_WRITE_READ, parked.arg);
     assert!(
         !s.us.is_pending(retry),
@@ -651,7 +651,8 @@ fn published_read_survives_notification_restart() {
 fn undeliverable_process_work_goes_back_to_the_process() {
     let mut s = setup();
     s.write(s.server, 3, &Bc::default().cmd(BC_ENTER_LOOPER).done());
-    // Queued as process work: no server thread is waiting.
+    // No server thread is waiting, so the transaction is queued as process
+    // work.
     s.write(
         s.client,
         1,
@@ -704,8 +705,8 @@ fn set_max_threads(s: &mut Setup, n: u32) {
     assert_eq!(s.us.outcome(c).errno, 0);
 }
 
-/// What `call`'s read buffer holds (the driver must not write it once the
-/// call is gone).
+/// What `call`'s read buffer holds. The driver must not write it once the
+/// call is gone.
 fn read_buffer(s: &Setup, proc: ProcId, call: Call, len: usize) -> Vec<u8> {
     let bwr: BinderWriteRead =
         read_pod(&s.us.peek(proc, call.arg, size_of::<BinderWriteRead>()), 0).unwrap();
@@ -742,7 +743,7 @@ fn dropped_oneway_unblocks_the_async_queue() {
 }
 
 /// A reply whose fd can't be installed fails the caller with
-/// BR_FAILED_REPLY, as binder_thread_read does, rather than leaving it
+/// BR_FAILED_REPLY, as binder_thread_read does, so the caller is not left
 /// waiting.
 #[test]
 fn reply_whose_fd_cannot_be_installed_fails_the_caller() {
@@ -774,12 +775,12 @@ fn reply_whose_fd_cannot_be_installed_fails_the_caller() {
         &Bc::default().cmd(BC_REPLY).td(&rtd).done(),
         256,
     );
-    // The transaction-complete item comes first; the reply only fails as the
+    // The transaction-complete item comes first. The reply fails only as the
     // first item of a read.
     assert!(find(&s.stream(waiting), BR_TRANSACTION_COMPLETE).is_some());
-    // The caller's next read also queues work behind the reply (a call to a
-    // handle it doesn't have fails). The failed reply ends the read, as a
-    // reply does.
+    // The caller's next read also queues work behind the reply by calling a
+    // handle it doesn't have, which fails. The failed reply ends the read, as
+    // a reply does.
     let mut bad = BinderTransactionData::default();
     bad.target = 99;
     let c = s.wr(
@@ -804,8 +805,8 @@ fn reply_whose_fd_cannot_be_installed_fails_the_caller() {
     assert_eq!(s.b.counts().0, 0, "transactions left");
 }
 
-/// The longest-waiting looper's wait was ended by a signal that stopped it
-/// (SIGSTOP, ptrace) without the driver knowing. Process work goes to the
+/// A stopping signal (SIGSTOP or ptrace) ended the longest-waiting looper's
+/// wait without the driver knowing. Process work goes to the
 /// other looper, and nothing is written into the stopped one's memory.
 #[test]
 fn process_work_skips_a_stopped_looper() {
@@ -828,13 +829,14 @@ fn process_work_skips_a_stopped_looper() {
     );
     assert!(find(&s.stream(live), BR_TRANSACTION).is_some());
     assert_eq!(read_buffer(&s, s.server, stopped, 8), vec![0; 8]);
-    // Restarted, the stopped thread just waits again.
+    // When restarted, the stopped thread waits again.
     let again = s.us.restart(&mut s.b, stopped);
     assert!(s.us.is_pending(again));
 }
 
-/// A BR_SPAWN_LOOPER whose read is rolled back is asked for again by the
-/// restarted read, and only one is outstanding once a read delivers it.
+/// If the read carrying a BR_SPAWN_LOOPER is rolled back, the restarted read
+/// asks for it again. Once a read delivers it, only one request is
+/// outstanding.
 #[test]
 fn spawn_request_survives_rollback_once() {
     let mut s = setup();
@@ -856,7 +858,8 @@ fn spawn_request_survives_rollback_once() {
     let got = s.read(s.server, 2, 256);
     assert_eq!(got[0].0, BR_SPAWN_LOOPER);
     assert!(find(&got, BR_TRANSACTION).is_some());
-    // Reply; the next read finds the request outstanding and asks no more.
+    // After the reply, the next read finds the request outstanding and does
+    // not ask again.
     let rtd = BinderTransactionData::default();
     let c = s.wr(
         s.server,
@@ -882,7 +885,7 @@ fn poll_setup_is_retried_by_the_restart() {
     let c = s.us.restart(&mut s.b, c);
     assert_eq!(s.us.outcome(c).errno, 0);
     assert_eq!(s.us.procs[&s.server].poll_swaps, 1);
-    // The thread polls: work for the process makes its fd readable.
+    // While the thread polls, work for the process makes its fd readable.
     s.write(
         s.client,
         1,
@@ -894,9 +897,8 @@ fn poll_setup_is_retried_by_the_restart() {
     assert!(s.us.procs[&s.server].poll_ready);
 }
 
-// ---- the freezer --------------------------------------------------------
-
-/// `BINDER_FREEZE` of `pid` from the client's thread 3; returns the call.
+/// Issues `BINDER_FREEZE` of `pid` from the client's thread 3 and returns the
+/// call.
 fn freeze(s: &mut Setup, pid: u32, enable: bool, timeout_ms: u32) -> Call {
     let at = 0x9100_0000;
     let info = BinderFreezeInfo {
@@ -944,9 +946,10 @@ fn call_server(s: &mut Setup, flags: u32) -> Vec<(u32, Vec<u8>)> {
     s.stream(c)
 }
 
-/// The kernel's BinderLibTest.Freeze and FreezeTxn: a frozen process fails
-/// synchronous calls with BR_FROZEN_REPLY, takes oneways with
-/// BR_TRANSACTION_PENDING_FROZEN, and reports both; thawed, it works again.
+/// Mirrors BinderLibTest.Freeze and FreezeTxn. A frozen process fails
+/// synchronous calls with BR_FROZEN_REPLY, accepts oneways with
+/// BR_TRANSACTION_PENDING_FROZEN, and reports both. Once thawed, it works
+/// again.
 #[test]
 fn frozen_process_fails_calls_and_queues_oneways() {
     let mut s = setup();
@@ -960,7 +963,7 @@ fn frozen_process_fails_calls_and_queues_oneways() {
     assert!(find(&r, BR_TRANSACTION_COMPLETE).is_none());
     let r = call_server(&mut s, TF_ONE_WAY);
     assert!(find(&r, BR_TRANSACTION_PENDING_FROZEN).is_some());
-    // (Bit 1: the oneway is still outstanding.)
+    // Bit 1 means the oneway is still outstanding.
     assert_eq!(frozen_info(&mut s, 1000), Ok((3, 1)));
     // The oneway is queued for the server, which reads it once it runs.
     assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
@@ -976,9 +979,9 @@ fn frozen_process_fails_calls_and_queues_oneways() {
 }
 
 /// A freeze with a timeout waits for the target's queued transactions to be
-/// read, and fails with EAGAIN (thawing it) if they aren't in time. One
-/// without a timeout fails at once; so does one while the target serves a
-/// call, which GET_FROZEN_INFO reports as bit 1 of sync_recv.
+/// read. If they aren't read in time, it thaws the target and fails with
+/// EAGAIN. A freeze without a timeout fails at once, as does a freeze while the
+/// target serves a call, which GET_FROZEN_INFO reports as bit 1 of sync_recv.
 #[test]
 fn freeze_waits_for_outstanding_transactions() {
     let mut s = setup();
@@ -987,7 +990,7 @@ fn freeze_waits_for_outstanding_transactions() {
     assert_eq!(freeze_errno(&mut s, 1000, true, 0), libc::EAGAIN);
     let f = freeze(&mut s, 1000, true, 1000);
     assert!(s.us.is_pending(f));
-    // Reading it drains the server: the freeze succeeds.
+    // Reading it drains the server, so the freeze succeeds.
     let r = s.read(s.server, 2, 256);
     let td = td_from(find(&r, BR_TRANSACTION).unwrap());
     assert_eq!(s.us.outcome(f).errno, 0);
@@ -999,7 +1002,7 @@ fn freeze_waits_for_outstanding_transactions() {
     );
     assert_eq!(freeze_errno(&mut s, 1000, false, 0), 0);
 
-    // One that doesn't drain in time.
+    // A oneway that doesn't drain in time.
     call_server(&mut s, TF_ONE_WAY);
     let f = freeze(&mut s, 1000, true, 1000);
     s.us.advance(&mut s.b, 999);
@@ -1007,8 +1010,8 @@ fn freeze_waits_for_outstanding_transactions() {
     s.us.advance(&mut s.b, 1);
     s.b.check_invariants();
     assert_eq!(s.us.outcome(f).errno, libc::EAGAIN);
-    // A failed freeze thaws: a call goes through (the client waits for its
-    // reply).
+    // A failed freeze thaws the target, so a call goes through. The client
+    // waits for its reply.
     let w = Bc::default()
         .cmd(BC_TRANSACTION)
         .td(&BinderTransactionData::default())
@@ -1016,8 +1019,8 @@ fn freeze_waits_for_outstanding_transactions() {
     let c = s.wr(s.client, 1, &w, 256);
     assert!(s.us.is_pending(c));
 
-    // The server reads the oneway, then the call. Serving the call, it
-    // can't be frozen.
+    // The server reads the oneway, then the call. While it serves the call,
+    // it can't be frozen.
     let r = s.read(s.server, 2, 256);
     let td = td_from(find(&r, BR_TRANSACTION).unwrap());
     assert_ne!(td.flags & TF_ONE_WAY, 0);
@@ -1029,15 +1032,15 @@ fn freeze_waits_for_outstanding_transactions() {
     assert_eq!(frozen_info(&mut s, 1000), Ok((2, 0)));
 }
 
-/// A signal that ends a freeze's wait thaws its target; the restarted
-/// ioctl starts over.
+/// A signal that ends a freeze's wait thaws its target. The restarted ioctl
+/// starts over.
 #[test]
 fn interrupted_freeze_thaws_its_target() {
     let mut s = setup();
     call_server(&mut s, TF_ONE_WAY);
     let f = freeze(&mut s, 1000, true, 1000);
     s.us.interrupt(f);
-    // Still marked frozen until the driver hears of it.
+    // The target stays marked frozen until the driver learns of the signal.
     let f = s.us.restart(&mut s.b, f);
     s.b.check_invariants();
     assert!(s.us.is_pending(f));
@@ -1081,11 +1084,11 @@ fn handle_cookie(cmd: u32, handle: u32, cookie: u64) -> Vec<u8> {
     v
 }
 
-/// The kernel's freeze notifications (binderDriverInterfaceTest's
+/// Freeze notifications, as in binderDriverInterfaceTest's
 /// RequestFrozenNotification, OverwritePendingFrozenNotification and
-/// ResendFrozenNotification): the state at once, then every change, with a
-/// change while one is unacknowledged sent again after the ack, and changes
-/// before a delivery coalesced.
+/// ResendFrozenNotification. A request delivers the current state at once,
+/// then every change. A change made while a notification is unacknowledged is
+/// sent after the ack, and changes made before a delivery coalesce.
 #[test]
 fn freeze_notifications() {
     let mut s = setup();
@@ -1112,7 +1115,8 @@ fn freeze_notifications() {
 
     freeze(&mut s, 1000, true, 0);
     assert_eq!(frozen_state(&s.read(s.client, 2, 256)), Some((77, 1)));
-    // Changes while that is unacknowledged: sent again after the ack.
+    // Changes made while that notification is unacknowledged are sent after
+    // the ack.
     freeze(&mut s, 1000, false, 0);
     assert!({
         let c = s.client;
@@ -1128,7 +1132,8 @@ fn freeze_notifications() {
     let r = s.read(s.client, 2, 256);
     assert_eq!(frozen_state(&r), Some((77, 1)));
     assert_eq!(r.iter().filter(|(c, _)| *c == BR_FROZEN_BINDER).count(), 1);
-    // Cleared while unacknowledged: CLEAR_DONE after the ack.
+    // If the request is cleared while unacknowledged, CLEAR_DONE comes after
+    // the ack.
     s.write(
         s.client,
         2,
@@ -1149,7 +1154,7 @@ fn freeze_notifications() {
     let c = s.wr(s.client, 2, &w, 0);
     assert_eq!(s.us.outcome(c).errno, libc::EINVAL, "not watched");
     freeze(&mut s, 1000, false, 0);
-    // A request whose ref goes away goes with it.
+    // A request is removed when its ref goes away.
     s.write(
         s.client,
         2,
@@ -1163,7 +1168,8 @@ fn freeze_notifications() {
     });
 }
 
-/// A read from the thread blocks. (Its next ioctl abandons it.)
+/// Whether a read from the thread blocks. The thread's next ioctl abandons
+/// the read.
 fn nothing_to_read(s: &mut Setup, proc: ProcId, tid: u32) -> bool {
     let c = s.wr(proc, tid, &[], 256);
     s.us.is_pending(c)
