@@ -463,6 +463,8 @@ else
   # audio check records the monitor too.
   export INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
   export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
+  # An idle session stops a second after its window closes.
+  export INNKEEPER_TEST_TIMERS=1
   mod=$(pactl load-module module-null-sink sink_name="$INNKEEPER_AUDIO_SINK" rate=48000 channels=2)
   trap 'stop_session; pactl unload-module "$mod"' EXIT
   # shellcheck disable=SC2329 # invoked through until_ok
@@ -810,7 +812,16 @@ while True:
   echo 'ok   the probe HAP records a tone that the desktop plays into its source'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_screen() {
-    local frames
+    local frames keeper run=$XDG_RUNTIME_DIR/app/dev.sargunv.Innkeeper/innkeeper-$INNKEEPER_PROFILE
+    # Innkeeper System reports no continuous tasks, and the bridge counts the
+    # open window, which keeps the session up.
+    until_ok file_has "$run/lifecycle" '^windows=1$' || return
+    file_has "$run/lifecycle" '^services=0$' || return
+    # A running command keeps the session up while the window is closed.
+    s /system/bin/sh -c 'echo ready; while ! test -f /data/e2e-idle; do sleep 0.1; done' \
+      >"$T/keeper.log" 2>&1 &
+    keeper=$!
+    until_ok file_has "$T/keeper.log" '^ready$' || return
     # Closing the window leaves OpenHarmony running, and its composer's
     # display stays headless until `run` opens the window again.
     frames=$(grep -c 'window [0-9]* shows its first frame' "$bridge_log")
@@ -818,13 +829,23 @@ while True:
     until_ok file_has "$bridge_log" 'display 0 stays headless' || return
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
     reopened() { (($(grep -c 'window [0-9]* shows its first frame' "$bridge_log") > frames)); }
-    until_ok reopened
+    until_ok reopened || return
+    # With the window closed and the command done, the session stops after
+    # the grace period.
+    until_ok file_has "$run/lifecycle" '^windows=1$' || return
+    desktop Close dev.sargunv.innkeeper.ohos | grep -q true || return
+    until_ok file_has "$run/lifecycle" '^windows=0$' || return
+    s /system/bin/touch /data/e2e-idle
+    wait "$keeper"
+    gone() { ! "$S" status >/dev/null 2>&1; }
+    until_ok gone || return
+    file_has "$(dirname "$bridge_log")/session.log" 'idle for 1 s: stopping'
   }
   if ! timed ohos-screen ohos_screen; then
     tail -n 20 "$bridge_log" >&2
     exit 1
   fi
-  echo "ok   closing the window leaves OpenHarmony running, and run opens the window again"
+  echo "ok   the open window keeps OpenHarmony running, closing it leaves OpenHarmony running, run opens it again, and with it closed the session stops when idle"
   echo 'e2e: PASS'
   exit
 fi

@@ -127,6 +127,12 @@ stateDiagram-v2
   busy when there is no report yet, for example while booting or while the
   system app restarts. It also counts as busy while an `exec` runs, which holds
   `exec.lock` shared, and when an alarm is less than 3 minutes away or ago.
+- **OpenHarmony.** OpenHarmony's system app reports user apps' running
+  continuous tasks as services (`ohos/system-app/ets/lifecycle/`). The bridge
+  adds OpenHarmony's screen window to the windows, so the session stays up while
+  that window is open, even on the home screen. Closing the window starts the
+  grace period. No OpenHarmony API lists other apps' reminders, so the report
+  has no wakeup, and a stopped session misses reminders.
 - **Idle timeout.** The profile's `idle-minutes` setting is the grace period
   before the launcher stops an idle session, as `stop` does. The default is 2
   minutes, and Keep Running disables it. A change applies to a running session.
@@ -190,11 +196,11 @@ directory next to the data version record (`host/profile/src/profile.rs`). The
 settings therefore move and back up with the data. They cover the system, the
 display, adb and its port, the idle timeout and following the desktop. A missing
 file or setting takes its default, and an unknown setting is an error.
-OpenHarmony uses only the display setting, which is a phone preset because
-OpenHarmony has no windowed mode. The CLI and the manager refuse the other
-settings for OpenHarmony, along with app settings and opening files in apps.
-`innkeeper profile set` and the manager's Profile Settings page change settings.
-A running profile applies the live settings at once.
+OpenHarmony uses the display setting, which is a phone preset because
+OpenHarmony has no windowed mode, and the idle timeout. The CLI and the manager
+refuse the other settings for OpenHarmony, along with app settings and opening
+files in apps. `innkeeper profile set` and the manager's Profile Settings page
+change settings. A running profile applies the live settings at once.
 
 Keep Running is an Innkeeper preference shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops

@@ -39,7 +39,7 @@ pub struct Hub {
     state: Mutex<State>,
     clients: Subscribers,
     focus_watch: Mutex<Option<FocusWatch>>,
-    window_watch: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    window_watch: Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
     packages: Mutex<HashMap<u32, String>>,
     /// The seat's newest `repeat_info` line, for connections that come later.
     repeat: Mutex<Option<String>>,
@@ -84,7 +84,7 @@ impl Hub {
     }
 
     pub fn watch_windows(&self, watch: impl Fn() + Send + Sync + 'static) {
-        *self.window_watch.lock().unwrap() = Some(Box::new(watch));
+        self.window_watch.lock().unwrap().push(Box::new(watch));
     }
 
     pub fn open_packages(&self) -> Vec<String> {
@@ -95,7 +95,7 @@ impl Hub {
     }
 
     fn windows_changed(&self) {
-        if let Some(watch) = &*self.window_watch.lock().unwrap() {
+        for watch in &*self.window_watch.lock().unwrap() {
             watch();
         }
     }
@@ -238,6 +238,12 @@ impl Hub {
         if let Some(conn) = conn {
             self.screens.close(conn);
         }
+    }
+
+    /// How many of the bridge's own windows are on screen.
+    pub fn own_windows(&self) -> usize {
+        let s = self.state.lock().unwrap();
+        s.shown.keys().filter(|w| Hub::is_own(**w)).count()
     }
 
     /// Shows the bridge's own windows, opening them again if the user closed
