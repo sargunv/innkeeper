@@ -4,8 +4,8 @@ package dev.sargunv.innkeeper.system.input
 import android.view.KeyEvent
 
 /**
- * What Android's key character map types for a key, as `KeyCharacterMap.get(keyCode, metaState)` (0
- * for nothing). Injected keys use `Virtual.kcm`, which is US.
+ * What Android's key character map types for a key, as `KeyCharacterMap.get(keyCode, metaState)`
+ * returns it. 0 means the key types nothing. Injected keys use `Virtual.kcm`, which is US.
  */
 fun interface KeyChars {
   fun get(keyCode: Int, metaState: Int): Int
