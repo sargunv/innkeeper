@@ -316,6 +316,13 @@ pub fn launch(
         .context("launch failed")
 }
 
+/// Shows the screen window of profile `profile`'s OpenHarmony session, and
+/// opens it again if the user closed it. `token` is an activation token or
+/// empty. Returns false if the session has no screen window.
+pub fn show_screen(profile: &innkeeper_profile::profile::ProfileName, token: &str) -> Result<bool> {
+    Ok(proxy(profile)?.call("ShowScreen", &(token,))?)
+}
+
 /// Lists profile `profile`'s windows, one line each
 /// (`display=N package=P ...`).
 pub fn windows(profile: &innkeeper_profile::profile::ProfileName) -> Result<Vec<String>> {

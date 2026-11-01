@@ -326,6 +326,12 @@ pub fn run(
     let launch = || -> Result<String> {
         let (s, system) = session(profile, report)?;
         if system == System::Ohos {
+            // The app opens on OpenHarmony's screen, so its window comes up
+            // first. A session without a desktop has none.
+            let token = opts.token.as_deref().unwrap_or_default();
+            if let Err(e) = crate::app_settings::show_screen(profile, token) {
+                report(Event::Warning(format!("can't show the window: {e:#}")));
+            }
             return match uri {
                 Some(u) => ohos::open_uri(&s, pkg, u),
                 None => ohos::start(&s, pkg),

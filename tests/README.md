@@ -35,7 +35,8 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   `run` with a link delivers its URI to the probe. OpenHarmony's music volume
   must be at its maximum, and a tone it plays must reach a private null sink.
   The probe, granted the microphone, must record a tone that the host plays into
-  that sink. This group uses its own profile, `<profile>-ohos`, so it runs
+  that sink. Closing the window leaves OpenHarmony running, and `run` opens the
+  window again. This group uses its own profile, `<profile>-ohos`, so it runs
   alone.
 
 The runner starts a private desktop

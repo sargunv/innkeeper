@@ -2,7 +2,7 @@
 """Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
 tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
-org_kde_kwin_fake_input, Visibility, Position and Geometry use KWin scripts,
+org_kde_kwin_fake_input, Visibility, Position, Geometry and Close use KWin scripts,
 Layout writes kxkbrc, and Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
 restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
@@ -202,6 +202,13 @@ class TestDesktop(dbus.service.Object):
     )
 
   @dbus.service.method(
+    NAME, in_signature="s", out_signature="b", async_callbacks=("ok", "err")
+  )
+  def Close(self, app_id, ok, err):
+    """Close the windows whose class contains app_id, as a close button does."""
+    self.script("w.closeWindow();\n", ok, str(app_id))
+
+  @dbus.service.method(
     NAME,
     in_signature="s",
     out_signature="(iiii)",
@@ -299,8 +306,9 @@ class TestDesktop(dbus.service.Object):
 
     GLib.timeout_add(1500, unload)
 
-  def script(self, body, reply):
-    """Run body for each probe window and reply whether any window matched."""
+  def script(self, body, reply, app_id=PROBES):
+    """Run body for each window whose class contains app_id, the probes by
+    default, and reply whether any window matched."""
     self.scripts += 1
     name = f"innkeeper-test-desktop-{self.scripts}"
     self.pending[name] = reply
@@ -308,7 +316,7 @@ class TestDesktop(dbus.service.Object):
       name,
       "let matched = false;\n"
       "for (const w of workspace.windowList()) {\n"
-      f'  if (!String(w.resourceClass).includes("{PROBES}")) continue;\n'
+      f'  if (!String(w.resourceClass).includes("{app_id}")) continue;\n'
       f"  {body}"
       "  matched = true;\n"
       "}\n"
