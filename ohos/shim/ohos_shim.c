@@ -29,6 +29,10 @@
 //    and free inodes from statfs. BMS refuses any install that needs more
 //    inodes than are free ("Insufficient inodes"), including SceneBoard's. On
 //    those filesystems statfs reports a free inode per free block.
+//  - /data is a symlink to the profile's directory on the host, so realpath
+//    would return host paths. installd refuses to rename a code path unless
+//    it starts with /data/app/el1/bundle/, which fails every install.
+//    realpath returns /data in place of the host directory.
 //
 // The shim is built freestanding, with no libc headers or link. It binds to
 // the guest's musl at load time, so one file works with whichever libc the
@@ -63,6 +67,12 @@ extern int* __errno_location(void);
 
 static long init_pid;
 static int spawner;
+
+extern void* dlsym(void*, const char*);
+#define RTLD_NEXT ((void*)-1)
+static char* (*next_realpath)(const char*, char*);
+static char data_dir[4096];
+static unsigned long data_len;
 
 static long sys6(long nr, long a, long b, long c, long d, long e, long f) {
   long r;
@@ -101,6 +111,10 @@ static int same(const char* a, const char* b) {
 // that the services init starts don't inherit it. The shim recognizes the
 // spawners by name, and the apps they fork inherit the spawner flag.
 __attribute__((constructor)) static void ohos_shim_init(void) {
+  next_realpath = (char* (*)(const char*, char*))dlsym(RTLD_NEXT, "realpath");
+  if (next_realpath("/data", data_dir)) {
+    while (data_dir[data_len]) data_len++;
+  }
   const char* role = getenv("INNKEEPER_SHIM_ROLE");
   if (role && same(role, "init")) {
     init_pid = sys0(SYS_getpid);
@@ -216,6 +230,22 @@ int statfs(const char* path, struct statfs* st) {
   long r = ret(sys6(SYS_statfs, (long)path, (long)st, 0, 0, 0, 0));
   if (r == 0 && st->f_files == 0) st->f_files = st->f_ffree = st->f_bavail;
   return (int)r;
+}
+
+// The host directory is longer than "/data", so the result shrinks in place.
+char* realpath(const char* path, char* out) {
+  char* r = next_realpath(path, out);
+  if (
+    r && data_len >= 5 && starts(r, data_dir) &&
+    (r[data_len] == '/' || r[data_len] == 0)
+  ) {
+    const char* rest = r + data_len;
+    char* d = r;
+    for (const char* p = "/data"; *p; p++) *d++ = *p;
+    while ((*d++ = *rest++)) {
+    }
+  }
+  return r;
 }
 
 int setpriority(int which, unsigned who, int prio) {

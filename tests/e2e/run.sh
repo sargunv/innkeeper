@@ -461,6 +461,10 @@ else
     # The caller tests this function's status, which turns off errexit here.
     s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1 || return
     "$S" selftest >>"$T/ohos.txt" || return
+    # bm installs a HAP over exec. The image's calculator is a signed HAP that
+    # is already in the guest.
+    s bm install -p /system/app/com.example.distributedcalc/Calc_Demo.hap >>"$T/ohos.txt" 2>&1
+    grep -q 'install bundle successfully' "$T/ohos.txt" || return
     # Screen 0 must appear in its own window on this desktop.
     until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
     until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
@@ -470,7 +474,7 @@ else
     echo "e2e: FAIL (ohos); init's log: $(dirname "$bridge_log")/kmsg.log" >&2
     exit 1
   fi
-  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
+  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window, passes selftest and installs a HAP'
   echo 'e2e: PASS'
   exit
 fi
