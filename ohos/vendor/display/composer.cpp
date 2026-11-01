@@ -80,17 +80,22 @@ uint32_t drmFormat(int32_t format) {
   }
 }
 
-constexpr int kMaxLayers = 64;
-struct Layer {
-  bool used;
-  bool changed;  // reported as CLIENT by the next GetDisplayCompChange
-  int32_t type;
-};
-
-// The latest client target, as a dup of its fd and its layout.
+// A buffer to show, as a dup of its fd and its layout.
 struct Target {
   int fd = -1;
   int32_t width, height, stride, format;
+};
+
+constexpr int kMaxLayers = 64;
+struct Layer {
+  bool used = false;
+  bool changed = false;  // reported as CLIENT by the next GetDisplayCompChange
+  int32_t type = COMPOSITION_CLIENT;
+  Target buffer;
+  int fence = -1;  // the buffer's acquire fence
+  IRect region = {}, crop = {};
+  int32_t transform = 0;
+  bool translucent = false;  // a global alpha below 255
 };
 
 // One import of a client target in the bridge, keyed by the dma-buf's inode.
@@ -113,6 +118,7 @@ struct State {
   Layer layers[kMaxLayers] = {};
   Target client;
   int clientFence = -1;  // its acquire fence
+  int direct = -1;       // the layer that Commit shows, or -1 for the client
   // The bridge connection, once its window is shown.
   int sock = -1;
   uint32_t nextTag = 1;
@@ -315,6 +321,17 @@ struct Lock {
   ~Lock() { pthread_mutex_unlock(&g.mu); }
 };
 
+void closeFd(int& fd) {
+  if (fd >= 0) close(fd);
+  fd = -1;
+}
+
+int dupFd(int fd) { return fd >= 0 ? fcntl(fd, F_DUPFD_CLOEXEC, 0) : -1; }
+
+bool same(const IRect& a, const IRect& b) {
+  return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
 Layer* layer(uint32_t devId, uint32_t id) {
   if (devId != kDisplay || id >= kMaxLayers || !g.layers[id].used) {
     return nullptr;
@@ -403,13 +420,44 @@ EXPORT int32_t SetDisplayProperty(uint32_t, uint32_t, uint64_t) {
   return HDF_ERR_NOT_SUPPORT;
 }
 
+// Returns the layer that Commit can show as it is, or -1. That is an opaque
+// device layer that is the only layer and fills the display with a whole,
+// untransformed buffer in a format the bridge takes. render_service's
+// uni-render output is such a layer. When the composer takes it, render_service
+// does not copy it into a client target with GL on its composer thread.
+int directLayer() {
+  int found = -1;
+  for (int i = 0; i < kMaxLayers; i++) {
+    if (!g.layers[i].used) continue;
+    if (found >= 0) return -1;
+    found = i;
+  }
+  if (found < 0) return -1;
+  const Layer& x = g.layers[found];
+  const Target& b = x.buffer;
+  static const Mode d = mode();
+  const IRect screen = {0, 0, int32_t(d.width), int32_t(d.height)};
+  const IRect whole = {0, 0, b.width, b.height};
+  const bool ok = x.type == COMPOSITION_DEVICE && b.fd >= 0 &&
+                  drmFormat(b.format) && x.transform == 0 && !x.translucent &&
+                  same(x.region, screen) && same(x.crop, whole);
+  return ok ? found : -1;
+}
+
 EXPORT int32_t PrepareDisplayLayers(uint32_t devId, bool& needFlushFb) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   Lock l;
-  for (auto& layer : g.layers) {
-    if (layer.used && layer.type != COMPOSITION_CLIENT) layer.changed = true;
+  const int direct = directLayer();
+  if (direct != g.direct) {
+    LOGI("composing %s", direct >= 0 ? "the device layer" : "a client target");
   }
-  needFlushFb = true;
+  g.direct = direct;
+  for (auto& layer : g.layers) {
+    if (direct < 0 && layer.used && layer.type != COMPOSITION_CLIENT) {
+      layer.changed = true;
+    }
+  }
+  needFlushFb = direct < 0;
   return HDF_SUCCESS;
 }
 
@@ -444,13 +492,12 @@ EXPORT int32_t SetDisplayClientBuffer(
 ) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   Lock l;
-  if (g.client.fd >= 0) close(g.client.fd);
-  if (g.clientFence >= 0) close(g.clientFence);
+  closeFd(g.client.fd);
+  closeFd(g.clientFence);
   g.client = {
-    buffer.fd >= 0 ? fcntl(buffer.fd, F_DUPFD_CLOEXEC, 0) : -1, buffer.width,
-    buffer.height, buffer.stride, buffer.format
+    dupFd(buffer.fd), buffer.width, buffer.height, buffer.stride, buffer.format
   };
-  g.clientFence = fence >= 0 ? fcntl(fence, F_DUPFD_CLOEXEC, 0) : -1;
+  g.clientFence = dupFd(fence);
   return HDF_SUCCESS;
 }
 
@@ -509,16 +556,17 @@ EXPORT int32_t Commit(uint32_t devId, int32_t& fence) {
   fence = -1;
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   pthread_mutex_lock(&g.mu);
-  const int acquire = g.clientFence;
-  g.clientFence = -1;
+  int& pending = g.direct >= 0 ? g.layers[g.direct].fence : g.clientFence;
+  const int acquire = pending;
+  pending = -1;
   pthread_mutex_unlock(&g.mu);
   if (acquire >= 0) {
     pollfd p = {acquire, POLLIN, 0};
-    if (poll(&p, 1, 1000) != 1) LOGW("client target fence timeout");
+    if (poll(&p, 1, 1000) != 1) LOGW("acquire fence timeout");
     close(acquire);
   }
   Lock l;
-  present(g.client);
+  present(g.direct >= 0 ? g.layers[g.direct].buffer : g.client);
   return HDF_SUCCESS;
 }
 
@@ -529,7 +577,8 @@ EXPORT int32_t CreateLayer(uint32_t devId, const void*, uint32_t& layerId) {
   Lock l;
   for (uint32_t i = 0; i < kMaxLayers; i++) {
     if (g.layers[i].used) continue;
-    g.layers[i] = {true, false, COMPOSITION_CLIENT};
+    g.layers[i] = Layer{};
+    g.layers[i].used = true;
     layerId = i;
     return HDF_SUCCESS;
   }
@@ -540,7 +589,10 @@ EXPORT int32_t DestroyLayer(uint32_t devId, uint32_t layerId) {
   Lock l;
   Layer* x = layer(devId, layerId);
   if (!x) return HDF_ERR_INVALID_PARAM;
+  closeFd(x->buffer.fd);
+  closeFd(x->fence);
   *x = {};
+  if (g.direct == int(layerId)) g.direct = -1;
   return HDF_SUCCESS;
 }
 
@@ -553,22 +605,69 @@ SetLayerCompositionType(uint32_t devId, uint32_t layerId, int32_t type) {
   return HDF_SUCCESS;
 }
 
-// render_service composes every layer itself, so their properties and
-// buffers don't matter here.
+EXPORT int32_t SetLayerBuffer(
+  uint32_t devId, uint32_t layerId, const BufferHandle& buffer, int32_t fence
+) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  closeFd(x->buffer.fd);
+  closeFd(x->fence);
+  x->buffer = {
+    dupFd(buffer.fd), buffer.width, buffer.height, buffer.stride, buffer.format
+  };
+  x->fence = dupFd(fence);
+  return HDF_SUCCESS;
+}
+
+EXPORT int32_t
+SetLayerRegion(uint32_t devId, uint32_t layerId, const IRect& rect) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  x->region = rect;
+  return HDF_SUCCESS;
+}
+
+EXPORT int32_t
+SetLayerCrop(uint32_t devId, uint32_t layerId, const IRect& rect) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  x->crop = rect;
+  return HDF_SUCCESS;
+}
+
+EXPORT int32_t
+SetLayerTransformMode(uint32_t devId, uint32_t layerId, int32_t type) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  x->transform = type;
+  return HDF_SUCCESS;
+}
+
+EXPORT int32_t
+SetLayerAlpha(uint32_t devId, uint32_t layerId, const LayerAlpha& alpha) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  x->translucent = alpha.enGlobalAlpha && alpha.gAlpha < 255;
+  return HDF_SUCCESS;
+}
+
+// The composer shows a layer itself only when it is the only layer, and the
+// window is opaque, so the layer's order, blending and regions don't change
+// what it shows.
 #define LAYER_SETTER(name, ...)                                         \
   EXPORT int32_t name(uint32_t devId, uint32_t layerId, __VA_ARGS__) {  \
     Lock l;                                                             \
     return layer(devId, layerId) ? HDF_SUCCESS : HDF_ERR_INVALID_PARAM; \
   }
-LAYER_SETTER(SetLayerAlpha, const void*)
-LAYER_SETTER(SetLayerRegion, const IRect&)
-LAYER_SETTER(SetLayerCrop, const IRect&)
 LAYER_SETTER(SetLayerZorder, uint32_t)
 LAYER_SETTER(SetLayerPreMulti, bool)
-LAYER_SETTER(SetLayerTransformMode, int32_t)
 LAYER_SETTER(SetLayerDirtyRegion, const lxvec<IRect>&)
 LAYER_SETTER(SetLayerVisibleRegion, lxvec<IRect>&)
-LAYER_SETTER(SetLayerBuffer, const BufferHandle&, int32_t)
 LAYER_SETTER(SetLayerBlendType, int32_t)
 LAYER_SETTER(SetLayerMaskInfo, int32_t)
 LAYER_SETTER(SetLayerColor, const void*)

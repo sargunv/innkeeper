@@ -117,12 +117,15 @@ file changes.
 
 - **Composer** (`libdisplay_composer_vdi_impl.z.so`). It reports one display, 0,
   at 60 Hz in the panel's mode. The display is a built-in panel, so OH uses it
-  as the main screen. render_service composes every layer
-  (`COMPOSITION_CLIENT`). Each committed client target goes to the bridge's
-  display service as an opaque LINEAR dma-buf, through the shared
+  as the main screen. render_service's uni-render output is one full-screen
+  device layer, and the composer shows that buffer itself. With any other set of
+  layers, render_service composes every layer (`COMPOSITION_CLIENT`) into a
+  client target with GL, which costs about 60% more render_service CPU on
+  llvmpipe. Each shown buffer goes to the bridge's display service as an opaque
+  LINEAR dma-buf, through the shared
   [bridge client](../guest/bridge-client/include/innkeeper/bridge_client.h).
   `DISPLAY_WINDOW` gives the display its own desktop window. Commit waits up to
-  two frames for the compositor to release the other targets, so render_service
+  two frames for the compositor to release the other buffers, so render_service
   does not draw into a buffer that is on screen. A 60 Hz timer provides vsync.
   Without a desktop (`start --headless`), the display is headless.
 - **Buffers** (`passthrough/libdisplay_buffer_vdi_impl.z.so`). Buffers are
