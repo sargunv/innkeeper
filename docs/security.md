@@ -82,10 +82,10 @@ sandbox shows Android.
   the user can already access through uaccess ACLs, and write rumble effects to
   them. The grant also lets every Android app read the host's input devices,
   including keyboards and mice, as any Flatpak app with that grant could. This
-  is accepted for controller support. EventHub scans the broker's private
-  discovery directory so that keyboard, mouse and controller input isn't
-  duplicated. That routing is not an access boundary. The grant needs Flatpak
-  1.15.6 or newer, and Debian 13 ships 1.16.
+  is accepted for controller support. EventHub and OpenHarmony's MMI scan the
+  broker's private discovery directory so that keyboard, mouse and controller
+  input isn't duplicated. That routing is not an access boundary. The grant
+  needs Flatpak 1.15.6 or newer, and Debian 13 ships 1.16.
 
 The Flatpak has these grants: `--device=dri`, `--device=input`,
 `--share=network`, `--share=ipc`, `--socket=wayland`, `--socket=pulseaudio`, and

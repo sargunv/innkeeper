@@ -9,6 +9,17 @@ pub const EVENT_SIZE: usize = 24;
 /// The keyboard and mouse devices.
 pub const KEYBOARD: u32 = 0;
 pub const MOUSE: u32 = 1;
+/// The touchscreen, which shows the bridge's own windows (DISPLAY_WINDOW) to
+/// a guest without a window manager on the input service. Its axes span
+/// [`touch::MAX`] across the screen, whatever the screen's size.
+pub const TOUCHSCREEN: u32 = gamepad::FIRST - 1;
+
+pub mod touch {
+    /// The largest value of the touchscreen's X and Y axes.
+    pub const MAX: i32 = 32767;
+    /// The number of multitouch slots.
+    pub const SLOTS: usize = 10;
+}
 
 /// The canonical evdev layout that Android's Generic.kl consumes. The bridge
 /// maps host axes to it. FF_RUMBLE keeps the Linux `ff_effect` ABI.

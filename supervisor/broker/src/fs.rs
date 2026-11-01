@@ -29,11 +29,15 @@
 //!    image's copy from `/system/etc`, which is the image's `/etc`. musl
 //!    resolves service users by name there, and the sandbox binds its own
 //!    read-only files over both.
+//!  * On OpenHarmony, `stat`, `readlink`, `openat` and `fstat` show the
+//!    session's evdev devices as the kernel's sysfs would
+//!    ([`crate::input::sysfs`]).
 
 use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
+use crate::input::sysfs;
 use crate::notify::{
     Listener, SeccompNotif, mem_write, open_mem, read_path, status_field, vm_read,
 };
@@ -50,6 +54,8 @@ pub(crate) struct Fs {
     gid: u32,
     /// The DRM node Android may open, if any.
     render_node: Option<std::path::PathBuf>,
+    /// The evdev devices, whose sysfs view OpenHarmony gets.
+    nodes: Option<crate::input::Nodes>,
 }
 
 const SYS_FCHMODAT2: i64 = 452;
@@ -60,6 +66,7 @@ pub(crate) fn is_fs_syscall(nr: i64) -> bool {
         nr,
         libc::SYS_readlinkat
             | libc::SYS_readlink
+            | libc::SYS_stat
             | libc::SYS_getcwd
             | libc::SYS_fstat
             | libc::SYS_mkdir
@@ -144,12 +151,13 @@ pub(crate) fn root_ids(st: &mut libc::stat) {
 }
 
 impl Fs {
-    pub(crate) fn new(listener: Listener, cfg: &Config) -> Fs {
+    pub(crate) fn new(listener: Listener, cfg: &Config, nodes: Option<crate::input::Nodes>) -> Fs {
         Fs {
             listener,
             guest: cfg.guest,
             map: cfg.root_map.clone(),
             render_node: cfg.render_node.clone(),
+            nodes: nodes.filter(|_| cfg.guest == Guest::Ohos),
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
         }
@@ -212,7 +220,11 @@ impl Fs {
         let tid = req.pid as i32;
         let a = req.data.args;
         let nr = req.data.nr as i64;
+        if self.sysfs(req) {
+            return;
+        }
         match nr {
+            libc::SYS_stat => return self.cont(req.id),
             libc::SYS_fstat => return self.fstat(req),
             libc::SYS_mkdir | libc::SYS_mkdirat => return self.mkdir(req),
             libc::SYS_chmod | libc::SYS_fchmod | libc::SYS_fchmodat | SYS_FCHMODAT2 => {
@@ -268,6 +280,75 @@ impl Fs {
         self.reply(req.id, n as i64, 0);
     }
 
+    /// Answers `stat` and `readlink` of a path in the evdev devices' sysfs
+    /// view ([`sysfs`]). Returns false for any other call or path.
+    fn sysfs(&self, req: &SeccompNotif) -> bool {
+        let Some(nodes) = &self.nodes else {
+            return false;
+        };
+        let tid = req.pid as i32;
+        let a = req.data.args;
+        let (path, buf, size) = match req.data.nr as i64 {
+            libc::SYS_stat => (a[0], a[1], 0),
+            libc::SYS_readlink => (a[0], a[1], a[2] as usize),
+            libc::SYS_readlinkat if a[0] as i32 == libc::AT_FDCWD => (a[1], a[2], a[3] as usize),
+            _ => return false,
+        };
+        let prefix = vm_read(tid, path, (4096 - (path as usize & 4095)).min(5));
+        if !prefix.is_some_and(|p| p.starts_with(b"/sys/") || p.starts_with(b"/dev/")) {
+            return false;
+        }
+        let Some(entry) = read_path(tid, path).as_deref().and_then(sysfs::parse) else {
+            return false;
+        };
+        if !nodes.exists(entry.device()) {
+            return false;
+        }
+        let out = if req.data.nr as i64 == libc::SYS_stat {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            (st.st_mode, st.st_nlink, st.st_size) = match entry.stat() {
+                sysfs::Stat::Char(rdev) => {
+                    st.st_rdev = rdev;
+                    (libc::S_IFCHR | 0o660, 1, 0)
+                }
+                sysfs::Stat::Dir => (libc::S_IFDIR | 0o755, 2, 0),
+                sysfs::Stat::File => (libc::S_IFREG | 0o644, 1, 4096),
+                sysfs::Stat::Link => (libc::S_IFLNK | 0o777, 1, 0),
+            };
+            (st.st_blksize, st.st_dev) = (4096, 0);
+            unsafe {
+                std::slice::from_raw_parts(
+                    &st as *const libc::stat as *const u8,
+                    size_of::<libc::stat>(),
+                )
+            }
+            .to_vec()
+        } else {
+            match entry.target() {
+                Some(t) => t.into_bytes().into_iter().take(size).collect(),
+                None => {
+                    self.reply(req.id, 0, libc::EINVAL);
+                    return true;
+                }
+            }
+        };
+        let Some(mem) = open_mem(tid) else {
+            self.cont(req.id);
+            return true;
+        };
+        if !self.listener.valid(req.id) {
+            return true;
+        }
+        if !mem_write(mem.raw(), buf, &out) {
+            self.reply(req.id, 0, libc::EFAULT);
+        } else if req.data.nr as i64 == libc::SYS_stat {
+            self.reply(req.id, 0, 0);
+        } else {
+            self.reply(req.id, out.len() as i64, 0);
+        }
+        true
+    }
+
     /// fstat(fd, st) through the caller's /proc fd link, with the user's ids
     /// shown as root's.
     fn fstat(&self, req: &SeccompNotif) {
@@ -290,12 +371,17 @@ impl Fs {
             st.st_gid = 0;
         }
         // OpenHarmony's c_utils takes /dev/ashmem only as a character device.
+        // libinput compares an evdev fd's device number with its udev device.
         if self.guest == Guest::Ohos
-            && std::fs::read_link(OsStr::from_bytes(link.as_bytes()))
-                .is_ok_and(|l| crate::ashmem::is_region(l.as_os_str().as_bytes()))
+            && let Ok(target) = std::fs::read_link(OsStr::from_bytes(link.as_bytes()))
         {
-            st.st_mode = libc::S_IFCHR | 0o666;
-            st.st_rdev = crate::ashmem::RDEV;
+            if crate::ashmem::is_region(target.as_os_str().as_bytes()) {
+                st.st_mode = libc::S_IFCHR | 0o666;
+                st.st_rdev = crate::ashmem::RDEV;
+            } else if let Some(device) = self.nodes.as_ref().and_then(|n| n.device_of(&target)) {
+                st.st_mode = libc::S_IFCHR | 0o660;
+                st.st_rdev = crate::input::sysfs::rdev(device);
+            }
         }
         let b = unsafe {
             std::slice::from_raw_parts(
@@ -459,6 +545,22 @@ impl Fs {
             }
             return true;
         }
+        if let Some(nodes) = &self.nodes
+            && prefix.as_deref().is_some_and(|p| p.starts_with(b"/sys/"))
+            && let Some(entry) = read_path(tid, a[1]).as_deref().and_then(sysfs::parse)
+            && nodes.exists(entry.device())
+        {
+            let body = match entry {
+                sysfs::Entry::DeviceUevent(d) => nodes.uevent(d),
+                sysfs::Entry::EventUevent(d) => Some(sysfs::event_uevent(d)),
+                _ => None,
+            };
+            match body {
+                Some(body) => self.inject(req, body.as_bytes()),
+                None => self.reply(req.id, 0, libc::EISDIR),
+            }
+            return true;
+        }
         if self.guest == Guest::Ohos
             && prefix.as_deref().is_some_and(|p| p.starts_with(b"/etc/"))
             && let Some(name) = read_path(tid, a[1]).as_deref().and_then(ohos_etc)
@@ -606,6 +708,7 @@ mod tests {
                 render_node: None,
                 init: 0,
             },
+            None,
         )
     }
 

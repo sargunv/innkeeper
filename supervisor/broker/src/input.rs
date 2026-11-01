@@ -3,15 +3,18 @@
 //! reaches the host input subsystem. The ordinary tmpfs nodes exist only for
 //! inotify.
 pub mod gamepad;
+pub mod sysfs;
 
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixDatagram;
 use std::sync::{Arc, Mutex};
 
-use crate::notify::{Listener, SeccompNotif, mem_read, mem_write, open_mem, read_path};
+use crate::notify::{
+    Listener, SeccompNotif, mem_read, mem_write, open_mem, read_path, status_field,
+};
 
-pub use innkeeper_evdev_proto::{EVENT_SIZE, KEYBOARD, MOUSE, Message, event};
+pub use innkeeper_evdev_proto::{EVENT_SIZE, KEYBOARD, MOUSE, Message, TOUCHSCREEN, event, touch};
 // Flatpak's input grant mounts a host-owned directory at /dev/input. Discovery
 // uses the broker's own tmpfs directory, so virtual names can't shadow host
 // eventN nodes.
@@ -106,6 +109,83 @@ pub(crate) struct Input {
     devices: Arc<Mutex<Devices>>,
 }
 
+/// The devices as the fs worker sees them, for their sysfs view
+/// ([`sysfs`]) and their `fstat`.
+#[derive(Clone)]
+pub(crate) struct Nodes(Arc<Mutex<Devices>>);
+
+impl Nodes {
+    /// The device whose installed socket has this `/proc/<pid>/fd` link.
+    pub(crate) fn device_of(&self, link: &std::path::Path) -> Option<u32> {
+        let state = self.0.lock().unwrap();
+        state
+            .clients
+            .iter()
+            .find(|c| c.identity == link)
+            .map(|c| c.device)
+    }
+
+    pub(crate) fn exists(&self, device: u32) -> bool {
+        self.0.lock().unwrap().keys.contains_key(&device)
+    }
+
+    /// The input device's `uevent`, with the capability bitmaps that its
+    /// ioctls report.
+    pub(crate) fn uevent(&self, device: u32) -> Option<String> {
+        let state = self.0.lock().unwrap();
+        let keys = state.keys.get(&device)?;
+        let ask = |nr: u32, size: u32| {
+            let cmd = 0x80004500 | nr | size << 16;
+            match state.pads.get(&device) {
+                Some(pad) => pad_answer(device, pad, cmd, keys),
+                None => answer(device, cmd, keys, &state.leds),
+            }
+            .map(|(b, _)| b)
+            .unwrap_or_default()
+        };
+        let text = |nr| {
+            let b = ask(nr, 256);
+            String::from_utf8_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())])
+                .into_owned()
+        };
+        let id: Vec<u16> = ask(0x02, 8)
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes(*b))
+            .collect();
+        let mut u = format!(
+            "PRODUCT={:x}/{:x}/{:x}/{:x}\nNAME=\"{}\"\nPHYS=\"{}\"\nUNIQ=\"{}\"\nPROP={}\nEV={}\n",
+            id[0],
+            id[1],
+            id[2],
+            id[3],
+            text(0x06),
+            text(0x07),
+            text(0x08),
+            sysfs::bitmap(&ask(0x09, 8)),
+            sysfs::bitmap(&ask(0x20, 8)),
+        );
+        let ev = ask(0x20, 8);
+        // KEY, REL, ABS, MSC, LED, SND, FF and SW, when the device has them.
+        for (ty, name, bytes) in [
+            (1, "KEY", 96),
+            (2, "REL", 8),
+            (3, "ABS", 8),
+            (4, "MSC", 8),
+            (17, "LED", 8),
+            (18, "SND", 8),
+            (21, "FF", 16),
+            (5, "SW", 8),
+        ] {
+            if ev[ty / 8] & (1 << (ty % 8)) != 0 {
+                u += &format!("{name}={}\n", sysfs::bitmap(&ask(0x20 + ty as u32, bytes)));
+            }
+        }
+        Some(u)
+    }
+}
+
 fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
     let mut b = vec![0; size];
     for bit in bits {
@@ -116,6 +196,27 @@ fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
     b
 }
 
+/// The touchscreen's multitouch axes: ABS_MT_SLOT, ABS_MT_POSITION_X and _Y,
+/// and ABS_MT_TRACKING_ID.
+const MT_AXES: [usize; 4] = [0x2f, 0x35, 0x36, 0x39];
+
+/// The `struct input_absinfo` of the touchscreen's axis `code`.
+fn touch_absinfo(code: usize) -> Option<Vec<u8>> {
+    let (min, max) = match code {
+        0 | 1 | 0x35 | 0x36 => (0, touch::MAX),
+        0x2f => (0, touch::SLOTS as i32 - 1),
+        0x39 => (0, 0xffff),
+        _ => return None,
+    };
+    // value, minimum, maximum, fuzz, flat, resolution
+    Some(
+        [0, min, max, 0, 0, 0]
+            .into_iter()
+            .flat_map(i32::to_le_bytes)
+            .collect(),
+    )
+}
+
 /// EVIOCG* answers, cut to the caller's requested bitmap or string length.
 /// The return value is the number of bytes copied for variable-length queries
 /// and zero for fixed structs, as in evdev. Unknown ioctls return ENOTTY.
@@ -123,45 +224,42 @@ fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i
     let nr = cmd & 0xff;
     let size = ((cmd >> 16) & 0x3fff) as usize;
     let read = cmd >> 30 & 2 != 0;
+    let touch = device == TOUCHSCREEN;
     let mut variable = false;
     let mut b = match (read, nr) {
         (true, 0x01) => 0x010001i32.to_le_bytes().to_vec(), // EV_VERSION
-        (true, 0x02) => [6u16, 0x1209, 0x4c00 + u16::from(device != KEYBOARD), 1]
-            .into_iter()
-            .flat_map(u16::to_le_bytes)
-            .collect(),
+        (true, 0x02) => {
+            let product = match device {
+                KEYBOARD => 0x4c00,
+                TOUCHSCREEN => 0x4c03,
+                _ => 0x4c01,
+            };
+            [6u16, 0x1209, product, 1]
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect()
+        }
         (true, 0x03) => [0i32, 0].into_iter().flat_map(i32::to_le_bytes).collect(),
         (true, 0x06..=0x08) => {
             variable = true;
-            let s = match nr {
-                0x06 => {
-                    if device == KEYBOARD {
-                        "Innkeeper Keyboard".to_owned()
-                    } else {
-                        format!("Innkeeper Mouse {}", device - 1)
-                    }
-                }
-                0x07 => {
-                    if device == KEYBOARD {
-                        "innkeeper/keyboard".to_owned()
-                    } else {
-                        format!("innkeeper/mouse/{}", device - 1)
-                    }
-                }
-                _ => {
-                    if device == KEYBOARD {
-                        "innkeeper-keyboard".to_owned()
-                    } else {
-                        format!("innkeeper-mouse-{}", device - 1)
-                    }
-                }
+            let s = match (nr, device) {
+                (0x06, KEYBOARD) => "Innkeeper Keyboard".to_owned(),
+                (0x06, TOUCHSCREEN) => "Innkeeper Touchscreen".to_owned(),
+                (0x06, _) => format!("Innkeeper Mouse {}", device - 1),
+                (0x07, KEYBOARD) => "innkeeper/keyboard".to_owned(),
+                (0x07, TOUCHSCREEN) => "innkeeper/touchscreen".to_owned(),
+                (0x07, _) => format!("innkeeper/mouse/{}", device - 1),
+                (_, KEYBOARD) => "innkeeper-keyboard".to_owned(),
+                (_, TOUCHSCREEN) => "innkeeper-touchscreen".to_owned(),
+                _ => format!("innkeeper-mouse-{}", device - 1),
             };
             [s.as_bytes(), &[0]].concat()
         }
         (true, 0x09) => {
             variable = true;
-            vec![0; size]
-        } // EVIOCGPROP
+            // INPUT_PROP_DIRECT
+            bitmap(size, if touch { vec![1] } else { vec![] })
+        }
         (true, 0x18) => {
             variable = true;
             keys.to_vec()
@@ -176,28 +274,21 @@ fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i
         } // EVIOCGSW
         (true, 0x20..=0x3f) => {
             variable = true;
-            match nr - 0x20 {
-                0 => bitmap(
-                    size,
-                    if device == KEYBOARD {
-                        vec![0, 1, 17]
-                    } else {
-                        vec![0, 1, 2]
-                    },
-                ),
-                1 => bitmap(
-                    size,
-                    if device == KEYBOARD {
-                        (1..=248).chain([464]).collect::<Vec<_>>()
-                    } else {
-                        (272..=279).collect()
-                    },
-                ),
-                2 if device != KEYBOARD => bitmap(size, [0, 1, 6, 8, 11, 12]),
-                17 if device == KEYBOARD => bitmap(size, [0, 1, 2]),
+            match (nr - 0x20, device) {
+                (0, KEYBOARD) => bitmap(size, [0, 1, 17]),
+                (0, TOUCHSCREEN) => bitmap(size, [0, 1, 3]),
+                (0, _) => bitmap(size, [0, 1, 2]),
+                (1, KEYBOARD) => bitmap(size, (1..=248).chain([464])),
+                (1, TOUCHSCREEN) => bitmap(size, [330]), // BTN_TOUCH
+                (1, _) => bitmap(size, 272..=279),
+                (2, KEYBOARD | TOUCHSCREEN) => vec![0; size],
+                (2, _) => bitmap(size, [0, 1, 6, 8, 11, 12]),
+                (3, TOUCHSCREEN) => bitmap(size, [0, 1].into_iter().chain(MT_AXES)),
+                (17, KEYBOARD) => bitmap(size, [0, 1, 2]),
                 _ => vec![0; size],
             }
         }
+        (true, 0x40..=0x7f) if touch => touch_absinfo((nr - 0x40) as usize).ok_or(libc::EINVAL)?,
         (false, 0x03 | 0x90 | 0xa0) => vec![], // repeat, grab, monotonic clock
         _ => return Err(libc::ENOTTY),
     };
@@ -208,6 +299,32 @@ fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i
     } else {
         Ok((b, 0))
     }
+}
+
+/// EVIOCGMTSLOTS: `request` starts with the axis code, and the answer fills
+/// the rest with each slot's value. No contact is current when a reader
+/// opens the device, so every tracking id is -1.
+fn mt_slots(device: u32, request: &[u8]) -> Result<Vec<u8>, i32> {
+    let code = u32::from_le_bytes(request.get(..4).ok_or(libc::EINVAL)?.try_into().unwrap());
+    if device != TOUCHSCREEN || !MT_AXES.contains(&(code as usize)) {
+        return Err(libc::EINVAL);
+    }
+    let value: i32 = if code == 0x39 { -1 } else { 0 };
+    let slots = (request.len() / 4 - 1).min(touch::SLOTS);
+    let mut b = request.to_vec();
+    for i in 0..slots {
+        b[4 + 4 * i..8 + 4 * i].copy_from_slice(&value.to_le_bytes());
+    }
+    Ok(b)
+}
+
+/// Whether `path` names `/dev/input`. MMI watches and scans `/dev/input/`.
+fn input_dir(path: &[u8]) -> bool {
+    let mut p = path;
+    while let Some(rest) = p.strip_suffix(b"/") {
+        p = rest;
+    }
+    p == b"/dev/input"
 }
 
 fn pad_answer(device: u32, pad: &Pad, cmd: u32, keys: &[u8]) -> Result<(Vec<u8>, i64), i32> {
@@ -559,13 +676,22 @@ impl Input {
         Some(Self { listener, devices })
     }
 
+    pub(crate) fn nodes(&self) -> Nodes {
+        Nodes(Arc::clone(&self.devices))
+    }
+
     pub(crate) fn serve(&self, req: &SeccompNotif) -> bool {
         let nr = req.data.nr as i64;
         if nr == libc::SYS_openat || nr == libc::SYS_inotify_add_watch {
             let path = read_path(req.pid as i32, req.data.args[1]);
-            if path.as_deref() == Some(b"/dev/input") {
+            if path.as_deref().is_some_and(input_dir) {
                 if nr == libc::SYS_inotify_add_watch {
-                    let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, req.pid, 0) } as i32;
+                    // A pidfd names a thread group. MMI adds its watch on a
+                    // worker thread, whose tid pidfd_open refuses.
+                    let tgid = status_field(req.pid as i32, "Tgid:")
+                        .and_then(|t| t.parse::<i32>().ok())
+                        .unwrap_or(-1);
+                    let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, tgid, 0) } as i32;
                     let result = if pidfd < 0 {
                         -1
                     } else {
@@ -677,6 +803,12 @@ impl Input {
                 } else {
                     pad_answer(c.device, pad, cmd, &keys[&c.device])
                 }
+            } else if cmd & 0xff == 0x0a {
+                let size = ((cmd >> 16) & 0x3fff) as usize;
+                mem_read(mem.raw(), req.data.args[2], size)
+                    .ok_or(libc::EFAULT)
+                    .and_then(|r| mt_slots(c.device, &r))
+                    .map(|b| (b, 0))
             } else {
                 answer(c.device, cmd, &keys[&c.device], leds)
             };
@@ -1109,6 +1241,97 @@ mod tests {
                 .0,
             vec![0; 16]
         );
+    }
+
+    #[test]
+    fn the_touchscreen_is_a_direct_multitouch_device() {
+        let has = |b: &[u8], bit: usize| b[bit / 8] & (1 << (bit % 8)) != 0;
+        let ev = answer(TOUCHSCREEN, get(0x20, 8), &[], &[]).unwrap().0;
+        assert!(has(&ev, 3) && !has(&ev, 2)); // EV_ABS, no EV_REL
+        let prop = answer(TOUCHSCREEN, get(0x09, 8), &[], &[]).unwrap().0;
+        assert!(has(&prop, 1)); // INPUT_PROP_DIRECT
+        let keys = answer(TOUCHSCREEN, get(0x21, 96), &[], &[]).unwrap().0;
+        assert!(has(&keys, 330)); // BTN_TOUCH
+        assert!(!(272..288).any(|b| has(&keys, b))); // no mouse button
+        let abs = answer(TOUCHSCREEN, get(0x23, 8), &[], &[]).unwrap().0;
+        for axis in [0, 1, 0x2f, 0x35, 0x36, 0x39] {
+            assert!(has(&abs, axis), "{axis:#x}");
+        }
+        let info = |code: u32| {
+            let b = answer(TOUCHSCREEN, get(0x40 + code, 24), &[], &[])
+                .unwrap()
+                .0;
+            b.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| i32::from_le_bytes(*b))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(info(0x35), [0, 0, touch::MAX, 0, 0, 0]);
+        assert_eq!(info(0x2f), [0, 0, touch::SLOTS as i32 - 1, 0, 0, 0]);
+        assert!(answer(TOUCHSCREEN, get(0x40 + 0x18, 24), &[], &[]).is_err());
+        assert_eq!(
+            answer(TOUCHSCREEN, get(6, 80), &[], &[]).unwrap().0,
+            b"Innkeeper Touchscreen\0"
+        );
+    }
+
+    #[test]
+    fn mt_slots_report_no_contact() {
+        let mut request = 0x39u32.to_le_bytes().to_vec();
+        request.extend_from_slice(&[0x55; 12]);
+        let answer = mt_slots(TOUCHSCREEN, &request).unwrap();
+        let values: Vec<_> = answer
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| i32::from_le_bytes(*b))
+            .collect();
+        assert_eq!(values, [0x39, -1, -1, -1]);
+        let mut request = 0x35u32.to_le_bytes().to_vec();
+        request.extend_from_slice(&[0x55; 4 * 12]);
+        let answer = mt_slots(TOUCHSCREEN, &request).unwrap();
+        assert_eq!(&answer[4..4 + 4 * touch::SLOTS], &[0; 4 * touch::SLOTS]);
+        assert_eq!(&answer[4 + 4 * touch::SLOTS..], &[0x55; 8]);
+        assert_eq!(
+            mt_slots(TOUCHSCREEN, &0u32.to_le_bytes()),
+            Err(libc::EINVAL)
+        );
+        assert_eq!(mt_slots(MOUSE, &request), Err(libc::EINVAL));
+        assert_eq!(mt_slots(TOUCHSCREEN, &[1, 0]), Err(libc::EINVAL));
+    }
+
+    #[test]
+    fn discovery_takes_the_directory_with_trailing_slashes() {
+        assert!(input_dir(b"/dev/input"));
+        assert!(input_dir(b"/dev/input/"));
+        assert!(input_dir(b"/dev/input//"));
+        assert!(!input_dir(b"/dev/input/event0"));
+        assert!(!input_dir(b"/dev/inputs"));
+        assert!(!input_dir(b"/dev/"));
+    }
+
+    #[test]
+    fn uevents_carry_the_ioctl_capabilities() {
+        let mut devices = Devices::default();
+        devices.keys.insert(TOUCHSCREEN, [0; 96]);
+        let nodes = Nodes(Arc::new(Mutex::new(devices)));
+        let touch = nodes.uevent(TOUCHSCREEN).unwrap();
+        assert_eq!(
+            touch,
+            "PRODUCT=6/1209/4c03/1\nNAME=\"Innkeeper Touchscreen\"\n\
+             PHYS=\"innkeeper/touchscreen\"\nUNIQ=\"innkeeper-touchscreen\"\nPROP=2\n\
+             EV=b\nKEY=400 0 0 0 0 0\nABS=260800000000003\n"
+        );
+        let keyboard = nodes.uevent(KEYBOARD).unwrap();
+        assert!(keyboard.contains("NAME=\"Innkeeper Keyboard\"\n"));
+        assert!(keyboard.contains("EV=20003\n"));
+        assert!(keyboard.contains("LED=7\n"));
+        // Keys 1 to 248 and KEY_MACRO1 (464).
+        assert!(keyboard.contains(
+            "KEY=10000 0 0 0 1ffffffffffffff ffffffffffffffff ffffffffffffffff fffffffffffffffe\n"
+        ));
+        assert_eq!(nodes.uevent(MOUSE), None);
     }
 
     #[test]

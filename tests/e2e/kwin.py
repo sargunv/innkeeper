@@ -2,7 +2,7 @@
 """Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
 tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
-org_kde_kwin_fake_input, Visibility and Position use KWin scripts, and
+org_kde_kwin_fake_input, Visibility, Position and Geometry use KWin scripts, and
 Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
 restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
@@ -157,6 +157,7 @@ class TestDesktop(dbus.service.Object):
     self.bus = bus
     self.seat = FakeInput()
     self.pending = {}
+    self.geometries = {}
     self.scripts = 0
 
   @dbus.service.method(NAME, in_signature="s", out_signature="")
@@ -199,6 +200,39 @@ class TestDesktop(dbus.service.Object):
       ok,
     )
 
+  @dbus.service.method(
+    NAME,
+    in_signature="s",
+    out_signature="(iiii)",
+    async_callbacks=("ok", "err"),
+  )
+  def Geometry(self, app_id, ok, err):
+    """Reply with the frame of a window whose class contains app_id, or zeros."""
+    self.scripts += 1
+    name = f"innkeeper-test-desktop-{self.scripts}"
+    self.geometries[name] = ok
+    self.run_script(
+      name,
+      "for (const w of workspace.windowList()) {\n"
+      f'  if (!String(w.resourceClass).includes("{app_id}")) continue;\n'
+      "  const g = w.frameGeometry;\n"
+      f'  callDBus("{NAME}", "{PATH}", "{SCRIPT}", "Report", "{name}",'
+      " Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height));\n"
+      "  break;\n"
+      "}\n",
+    )
+    GLib.timeout_add(1000, self.report, name, 0, 0, 0, 0)
+
+  @dbus.service.method(SCRIPT, in_signature="siiii", out_signature="")
+  def Report(self, name, x, y, w, h):
+    self.report(str(name), x, y, w, h)
+
+  def report(self, name, x, y, w, h):
+    reply = self.geometries.pop(name, None)
+    if reply:
+      reply((int(x), int(y), int(w), int(h)))
+    return False
+
   @dbus.service.method(SCRIPT, in_signature="sb", out_signature="")
   def Done(self, name, matched):
     self.finish(str(name), bool(matched))
@@ -209,36 +243,42 @@ class TestDesktop(dbus.service.Object):
       reply(matched)
     return False
 
+  def run_script(self, name, source):
+    """Load and run a KWin script, and unload it after it has run."""
+    path = scratch / f"{name}.js"
+    path.write_text(source)
+    scripting = dbus.Interface(
+      self.bus.get_object("org.kde.KWin", "/Scripting"),
+      "org.kde.kwin.Scripting",
+    )
+    ident = scripting.loadScript(str(path), name, signature="ss")
+    dbus.Interface(
+      self.bus.get_object("org.kde.KWin", f"/Scripting/Script{ident}"),
+      "org.kde.kwin.Script",
+    ).run()
+
+    def unload():
+      scripting.unloadScript(name)
+      path.unlink(missing_ok=True)
+      return False
+
+    GLib.timeout_add(1500, unload)
+
   def script(self, body, reply):
     """Run body for each probe window and reply whether any window matched."""
     self.scripts += 1
     name = f"innkeeper-test-desktop-{self.scripts}"
-    path = scratch / f"{name}.js"
-    path.write_text(
+    self.pending[name] = reply
+    self.run_script(
+      name,
       "let matched = false;\n"
       "for (const w of workspace.windowList()) {\n"
       f'  if (!String(w.resourceClass).includes("{PROBES}")) continue;\n'
       f"  {body}"
       "  matched = true;\n"
       "}\n"
-      f'callDBus("{NAME}", "{PATH}", "{SCRIPT}", "Done", "{name}", matched);\n'
+      f'callDBus("{NAME}", "{PATH}", "{SCRIPT}", "Done", "{name}", matched);\n',
     )
-    scripting = dbus.Interface(
-      self.bus.get_object("org.kde.KWin", "/Scripting"),
-      "org.kde.kwin.Scripting",
-    )
-    ident = scripting.loadScript(str(path), name, signature="ss")
-
-    def finish(matched):
-      scripting.unloadScript(name)
-      path.unlink(missing_ok=True)
-      reply(matched)
-
-    self.pending[name] = finish
-    dbus.Interface(
-      self.bus.get_object("org.kde.KWin", f"/Scripting/Script{ident}"),
-      "org.kde.kwin.Script",
-    ).run()
     # An Android frame can be mapped before its window is in KWin's window
     # list. If the script doesn't report back within a second, answer false so
     # that the runner retries.

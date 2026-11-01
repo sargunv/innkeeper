@@ -17,7 +17,7 @@
 //! a new window of its own instead of one the window manager asked for on the
 //! input service. It is for a guest without a window manager on the input
 //! service, such as OpenHarmony's composer. The reply is `u32 window`. The
-//! window's input goes nowhere yet.
+//! window's input goes to the broker's touchscreen (`input::direct`).
 //!
 //! IMAGE_RELEASE (0x0207): u32 display, u64 presentation token. HWC sends it
 //! after it observes RELEASE, to release a leased ImageReader image. The

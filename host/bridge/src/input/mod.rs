@@ -4,9 +4,11 @@
 //!
 //! The display service owns the Wayland connection and the windows. It hands
 //! seat events to [`seat`] and [`text_input`], whose lines go to every input
-//! connection through the [`Hub`].
+//! connection through the [`Hub`]. Lines for the bridge's own windows go to
+//! the broker's evdev devices instead ([`direct`]).
 
 pub(crate) mod capture;
+pub mod direct;
 pub mod evdev;
 pub mod gamepad;
 pub(crate) mod gestures;
