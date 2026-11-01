@@ -41,6 +41,18 @@ enum { COMPOSITION_CLIENT = 0, COMPOSITION_DEVICE = 1 };
 enum { DISP_INTF_BUILT_IN = 10 };
 // DispPowerStatus
 enum { POWER_STATUS_ON = 0 };
+// LayerType
+enum { LAYER_TYPE_CURSOR = 3 };
+// DisplayPropertyId (V1_2), queried through GetDisplayProperty.
+enum { DISPLAY_CAPBILITY_HARDWARE_CURSOR = 2 };
+
+struct LayerInfo {
+  int32_t width;
+  int32_t height;
+  int32_t type;  // LayerType
+  int32_t bpp;
+  int32_t pixFormat;
+};
 
 struct BufferHandle {
   int32_t fd;

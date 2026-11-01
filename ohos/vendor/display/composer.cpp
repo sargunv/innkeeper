@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -24,6 +26,14 @@ extern "C" int GetParameter(
   const char* key, const char* def, char* value, uint32_t len
 );
 
+// linux/dma-buf.h
+struct dma_buf_sync {
+  uint64_t flags;
+};
+constexpr uint64_t DMA_BUF_SYNC_READ = 1, DMA_BUF_SYNC_START = 0;
+constexpr uint64_t DMA_BUF_SYNC_END = 1 << 2;
+constexpr unsigned long DMA_BUF_IOCTL_SYNC = _IOW('b', 0, dma_buf_sync);
+
 #define LOG_TAG "innkeeper-composer"
 #define EXPORT extern "C" __attribute__((visibility("default")))
 
@@ -37,7 +47,7 @@ constexpr const char* kTitle = "OpenHarmony";
 
 // Bridge display service (host/bridge/src/display/proto.rs).
 constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
-constexpr uint16_t kFrame = 0x0205, kDisplayWindow = 0x0208;
+constexpr uint16_t kFrame = 0x0205, kCursor = 0x0206, kDisplayWindow = 0x0208;
 constexpr uint16_t kEvRelease = 0x4201;
 
 // The panel mode, which also sizes the window. It comes from the
@@ -95,9 +105,14 @@ struct Target {
   int32_t width, height, stride, format;
 };
 
+// MMI draws its hardware cursor into a buffer of this size, with the
+// pointer's position at the centre (ScreenPointer in multimodalinput).
+constexpr int kCursorSize = 512;
+
 constexpr int kMaxLayers = 64;
 struct Layer {
   bool used = false;
+  bool cursor = false;   // render_service's hardware cursor layer
   bool changed = false;  // reported as CLIENT by the next GetDisplayCompChange
   int32_t type = COMPOSITION_CLIENT;
   Target buffer;
@@ -133,6 +148,9 @@ struct State {
   uint32_t nextTag = 1;
   uint32_t nextBuffer = 1;
   Imported imported[kMaxBuffers] = {};
+  // MMI's cursor image as last read, and whether the bridge has it.
+  uint32_t cursor[kCursorSize * kCursorSize];
+  bool cursorSent = false;
 };
 State g;
 
@@ -224,6 +242,7 @@ void* bridgeLoop(void*) {
     LOGW("bridge gone");
     pthread_mutex_lock(&g.mu);
     g.sock = -1;
+    g.cursorSent = false;
     forgetImports();
     pthread_mutex_unlock(&g.mu);
     close(sock);
@@ -291,6 +310,55 @@ void present(const Target& c) {
   for (auto& i : g.imported) {
     if (&i != b) waitIdle(&i, 2 * kPeriodNs);
   }
+}
+
+// Sends the visible part of cursor image `px` (RGBA, kCursorSize square,
+// with its top left at display pixel `(left, top)`) to the bridge, or hides the
+// cursor when it has none. The host compositor draws it at the host pointer.
+// Called with g.mu held.
+void sendCursor(const uint32_t* px, int32_t left, int32_t top) {
+  int x0 = kCursorSize, y0 = kCursorSize, x1 = -1, y1 = -1;
+  for (int y = 0; y < kCursorSize; y++) {
+    for (int x = 0; x < kCursorSize; x++) {
+      if (!(px[y * kCursorSize + x] >> 24)) continue;
+      x0 = x < x0 ? x : x0;
+      x1 = x > x1 ? x : x1;
+      y0 = y < y0 ? y : y0;
+      y1 = y > y1 ? y : y1;
+    }
+  }
+  lxb_msg m = message(kCursor);
+  if (x1 < 0) {
+    const uint32_t fields[] = {kDisplay, 0, 0, 0, 0};
+    for (uint32_t v : fields) lxb_put_u32(&m, v);
+    g.cursorSent = lxb_send(g.sock, &m, -1) == 0;
+    return;
+  }
+  const int w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const int fd = memfd_create("cursor", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (fd < 0) return;
+  // OH's RGBA bytes become wl_shm's BGRA.
+  uint32_t row[kCursorSize];
+  bool ok = true;
+  for (int y = y0; y <= y1 && ok; y++) {
+    for (int x = x0; x <= x1; x++) {
+      const uint32_t p = px[y * kCursorSize + x];
+      row[x - x0] = (p & 0xff00ff00) | (p & 0xff) << 16 | (p >> 16 & 0xff);
+    }
+    ok = write(fd, row, w * 4) == w * 4;
+  }
+  if (
+    ok &&
+    fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) == 0
+  ) {
+    const int32_t fields[] = {
+      int32_t(kDisplay),   w, h, left + x0, top + y0, kCursorSize / 2 - x0,
+      kCursorSize / 2 - y0
+    };
+    for (int32_t v : fields) lxb_put_u32(&m, uint32_t(v));
+    g.cursorSent = lxb_send(g.sock, &m, fd) == 0;
+  }
+  close(fd);
 }
 
 // --- vsync -------------------------------------------------------------------
@@ -424,8 +492,52 @@ EXPORT int32_t SetDisplayBacklight(uint32_t devId, uint32_t level) {
   return devId == kDisplay ? HDF_SUCCESS : HDF_ERR_INVALID_PARAM;
 }
 
-EXPORT int32_t GetDisplayProperty(uint32_t, uint32_t, uint64_t&) {
-  return HDF_ERR_NOT_SUPPORT;
+// MMI draws its cursor into buffers of its own and gives them to
+// UpdateHardwareCursor, and render_service leaves the cursor out of the frame.
+EXPORT int32_t
+GetDisplayProperty(uint32_t devId, uint32_t id, uint64_t& value) {
+  if (devId != kDisplay || id != DISPLAY_CAPBILITY_HARDWARE_CURSOR) {
+    return HDF_ERR_NOT_SUPPORT;
+  }
+  value = 1;
+  return HDF_SUCCESS;
+}
+
+// MMI calls this on each move with the cursor's position and image. The
+// bridge shows the image as the host's cursor, so only a new image matters.
+EXPORT int32_t UpdateHardwareCursor(
+  uint32_t devId, int32_t x, int32_t y, BufferHandle* buffer
+) {
+  if (devId != kDisplay || !buffer) return HDF_ERR_INVALID_PARAM;
+  const BufferHandle& b = *buffer;
+  if (
+    b.width != kCursorSize || b.height != kCursorSize ||
+    b.stride < kCursorSize * 4 ||
+    drmFormat(b.format) != drmFormat(PIXEL_FMT_RGBA_8888)
+  ) {
+    return HDF_ERR_INVALID_PARAM;
+  }
+  const size_t size = size_t(b.stride) * b.height;
+  void* map = mmap(nullptr, size, PROT_READ, MAP_SHARED, b.fd, 0);
+  if (map == MAP_FAILED) return HDF_FAILURE;
+  dma_buf_sync sync = {DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ};
+  ioctl(b.fd, DMA_BUF_IOCTL_SYNC, &sync);
+  {
+    Lock l;
+    bool changed = false;
+    for (int y = 0; y < kCursorSize; y++) {
+      const void* row = static_cast<const char*>(map) + size_t(y) * b.stride;
+      uint32_t* to = &g.cursor[y * kCursorSize];
+      if (memcmp(to, row, kCursorSize * 4) == 0) continue;
+      memcpy(to, row, kCursorSize * 4);
+      changed = true;
+    }
+    if (g.sock >= 0 && (changed || !g.cursorSent)) sendCursor(g.cursor, x, y);
+  }
+  sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+  ioctl(b.fd, DMA_BUF_IOCTL_SYNC, &sync);
+  munmap(map, size);
+  return HDF_SUCCESS;
 }
 
 EXPORT int32_t SetDisplayProperty(uint32_t, uint32_t, uint64_t) {
@@ -433,14 +545,15 @@ EXPORT int32_t SetDisplayProperty(uint32_t, uint32_t, uint64_t) {
 }
 
 // Returns the layer that Commit can show as it is, or -1. That is an opaque
-// device layer that is the only layer and fills the display with a whole,
-// untransformed buffer in a format the bridge takes. render_service's
-// uni-render output is such a layer. When the composer takes it, render_service
-// does not copy it into a client target with GL on its composer thread.
+// device layer that is the only layer apart from the cursor's and fills the
+// display with a whole, untransformed buffer in a format the bridge takes.
+// render_service's uni-render output is such a layer. When the composer takes
+// it, render_service does not copy it into a client target with GL on its
+// composer thread.
 int directLayer() {
   int found = -1;
   for (int i = 0; i < kMaxLayers; i++) {
-    if (!g.layers[i].used) continue;
+    if (!g.layers[i].used || g.layers[i].cursor) continue;
     if (found >= 0) return -1;
     found = i;
   }
@@ -465,7 +578,10 @@ EXPORT int32_t PrepareDisplayLayers(uint32_t devId, bool& needFlushFb) {
   }
   g.direct = direct;
   for (auto& layer : g.layers) {
-    if (direct < 0 && layer.used && layer.type != COMPOSITION_CLIENT) {
+    if (
+      direct < 0 && layer.used && !layer.cursor &&
+      layer.type != COMPOSITION_CLIENT
+    ) {
       layer.changed = true;
     }
   }
@@ -584,13 +700,15 @@ EXPORT int32_t Commit(uint32_t devId, int32_t& fence) {
 
 // --- layers ------------------------------------------------------------------
 
-EXPORT int32_t CreateLayer(uint32_t devId, const void*, uint32_t& layerId) {
+EXPORT int32_t
+CreateLayer(uint32_t devId, const LayerInfo& info, uint32_t& layerId) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   Lock l;
   for (uint32_t i = 0; i < kMaxLayers; i++) {
     if (g.layers[i].used) continue;
     g.layers[i] = Layer{};
     g.layers[i].used = true;
+    g.layers[i].cursor = info.type == LAYER_TYPE_CURSOR;
     layerId = i;
     return HDF_SUCCESS;
   }
@@ -668,9 +786,9 @@ SetLayerAlpha(uint32_t devId, uint32_t layerId, const LayerAlpha& alpha) {
   return HDF_SUCCESS;
 }
 
-// The composer shows a layer itself only when it is the only layer, and the
-// window is opaque, so the layer's order, blending and regions don't change
-// what it shows.
+// The composer shows a layer itself only when it is the only layer apart from
+// the cursor's, which it leaves out, and the window is opaque, so the layer's
+// order, blending and regions don't change what it shows.
 #define LAYER_SETTER(name, ...)                                         \
   EXPORT int32_t name(uint32_t devId, uint32_t layerId, __VA_ARGS__) {  \
     Lock l;                                                             \

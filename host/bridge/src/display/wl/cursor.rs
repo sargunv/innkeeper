@@ -1,9 +1,10 @@
-//! Shows Android's hardware cursor plane as a Wayland cursor surface. HWC3
-//! has no style or hotspot metadata, so each bitmap's hotspot is learned as
-//! the pointer position minus the layer origin. A hotspot is learned only on
-//! a stationary frame and then cached per bitmap. Restoring a cursor uses the
-//! cached hotspot and does not subtract positions, because the pointer and
-//! the layer move independently.
+//! Shows a guest's hardware cursor as a Wayland cursor surface. OpenHarmony's
+//! composer gives each image's hotspot. HWC3 has no style or hotspot
+//! metadata, so for Android each bitmap's hotspot is learned as the pointer
+//! position minus the layer origin. A hotspot is learned only on a stationary
+//! frame and then cached per bitmap. Restoring a cursor uses the cached
+//! hotspot and does not subtract positions, because the pointer and the layer
+//! move independently.
 use super::{State, Unit};
 use crate::input::PointerPosition;
 use rustix::fs::{MemfdFlags, SealFlags};
@@ -21,6 +22,8 @@ pub struct Image {
     pub height: u32,
     pub x: i32,
     pub y: i32,
+    /// The hotspot in the image, when the composer knows it.
+    pub hotspot: Option<(i32, i32)>,
     pub pixels: Vec<u8>, // premultiplied B,G,R,A (wl_shm ARGB8888)
 }
 
@@ -54,11 +57,14 @@ impl Cursor {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         (image.width, image.height, &image.pixels).hash(&mut hash);
         self.bitmap = hash.finish();
-        self.hotspot = self
-            .hotspots
-            .get(&self.bitmap)
-            .copied()
-            .unwrap_or(self.hotspot);
+        self.hotspot = match image.hotspot {
+            Some(h) => hotspot(h, (0, 0), image.width, image.height),
+            None => self
+                .hotspots
+                .get(&self.bitmap)
+                .copied()
+                .unwrap_or(self.hotspot),
+        };
         self.image = image;
     }
     fn frame(&mut self, pointer: Option<PointerPosition>) -> bool {
@@ -66,6 +72,7 @@ impl Cursor {
         if let Some(p) = pointer
             && self.previous == Some((p, (self.image.x, self.image.y), self.bitmap))
             && !self.image.pixels.is_empty()
+            && self.image.hotspot.is_none()
             && !self.hotspots.contains_key(&self.bitmap)
         {
             self.hotspot = hotspot(
@@ -208,6 +215,7 @@ mod tests {
             height: 32,
             x: 94,
             y: 68,
+            hotspot: None,
             pixels: vec![255; 32 * 32 * 4],
         };
         let mut cursor = Cursor::new(image.clone());
@@ -245,5 +253,33 @@ mod tests {
         assert_eq!(cursor.hotspot, (10, 10));
         cursor.update(image);
         assert_eq!(cursor.hotspot, (6, 12));
+    }
+
+    #[test]
+    fn a_given_hotspot_is_used_as_it_is() {
+        let still = Some(PointerPosition {
+            position: (100, 80),
+            generation: 1,
+        });
+        let image = |hotspot| Image {
+            width: 36,
+            height: 55,
+            x: 94,
+            y: 68,
+            hotspot: Some(hotspot),
+            pixels: vec![255; 36 * 55 * 4],
+        };
+        let mut cursor = Cursor::new(image((0, 0)));
+        assert_eq!(cursor.hotspot, (0, 0));
+        // A stationary pointer elsewhere doesn't replace it.
+        assert!(!cursor.frame(still));
+        assert!(!cursor.frame(still));
+        assert_eq!(cursor.hotspot, (0, 0));
+        // An I-beam's hotspot is in its middle.
+        cursor.update(image((18, 27)));
+        assert_eq!(cursor.hotspot, (18, 27));
+        // A hotspot outside the image is clamped into it.
+        cursor.update(image((40, -3)));
+        assert_eq!(cursor.hotspot, (35, 0));
     }
 }
