@@ -23,7 +23,7 @@ int main() {
 
   CHECK(!c.update(t + 48'000'000, 8'333'333, t + 46'000'000));
   CHECK(!c.update(t + 47'000'000, 0, t + 47'000'000));
-  // Static visible 120 Hz window: two seconds without drawing must not
+  // A static visible 120 Hz window that draws nothing for two seconds must not
   // change the output period or lose its phase.
   const int64_t silent = t + 2'000'000'000;
   CHECK(c.period(silent) == 8'333'333);

@@ -7,7 +7,7 @@
 
 namespace innkeeper::hwc {
 
-// Minimal owning fd (libbase's unique_fd is not available to us).
+// Minimal owning fd, because vendor code cannot use libbase's unique_fd.
 class UniqueFd {
  public:
   UniqueFd() = default;
@@ -30,11 +30,11 @@ class UniqueFd {
   int mFd = -1;
 };
 
-// Waits for a sync_file (or any pollable fd) to signal. -1 is "already
-// signalled". Returns false on timeout/error.
+// Waits for a sync_file, or any pollable fd, to signal. A fence of -1 counts
+// as already signalled. Returns false on timeout or error.
 bool waitFence(int fd, int timeoutMs);
 
-// Duplicates an fd (F_DUPFD_CLOEXEC); -1 stays -1.
+// Duplicates an fd with F_DUPFD_CLOEXEC. An fd of -1 stays -1.
 int dupFd(int fd);
 
 }  // namespace innkeeper::hwc

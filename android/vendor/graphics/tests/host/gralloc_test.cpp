@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Host (glibc) tests for the buffer layout, allocation and the IMapper v5
-// implementation. The mapper is dlopen'ed exactly like libui does it.
+// implementation. The mapper is dlopen'ed the same way libui does it.
 #include <string>
 #include <vector>
 
@@ -204,7 +204,8 @@ static void testMapper() {
     (unsigned long long)bh->totalSize.get()
   );
   CHECK(isDmabuf(bh->fd) == !!(bh->flags & kFlagDmabuf));
-  // Pixels only; metadata and the 100-byte reserved region have their own fd.
+  // The pixel fd holds only pixels. Metadata and the 100-byte reserved region
+  // have their own fd.
   CHECK_EQ(uint64_t(lseek(bh->fd, 0, SEEK_END)), bh->totalSize.get());
   CHECK_EQ(lseek(bh->metadataFd, 0, SEEK_END), off_t(2 * kPageSize));
 
@@ -438,7 +439,7 @@ static void testAllFormats() {
     CHECK_EQ(layouts.size(), size_t(bh->numPlanes));
     void* p;
     CHECK_EQ(gMapper->v5.lock(a, 0x33, ARect{}, -1, &p), AIMAPPER_ERROR_NONE);
-    // Touch the last byte of every plane: must be mapped.
+    // Touch the last byte of every plane, which must be mapped.
     for (auto& pl : layouts) {
       CHECK(
         pl.offsetInBytes + pl.totalSizeInBytes <= int64_t(bh->layerSize.get())
@@ -462,7 +463,8 @@ static void testAllFormats() {
     gMapper->v5.freeBuffer(a);
     nativeHandleCloseAndDelete(raw);
   }
-  // Large (> udmabuf size limit) still works via memfd fallback.
+  // A buffer over the udmabuf size limit still works through the memfd
+  // fallback.
   native_handle_t* big = alloc(fmt::RGBA_FP16, 3840, 2160, 0x33, "big");
   if (big) {
     const BufferHandle* bh = asBufferHandle(big);
@@ -476,7 +478,8 @@ static void testAllFormats() {
     gMapper->v5.freeBuffer(a);
     nativeHandleCloseAndDelete(big);
   }
-  // Over the udmabuf size limit: CPU-only falls back to memfd, GPU usage fails.
+  // Over the udmabuf size limit, CPU-only buffers fall back to memfd and GPU
+  // usage fails.
   if (udmabufAvailable()) {
     native_handle_t* nh = nullptr;
     CHECK(
@@ -520,7 +523,8 @@ static GpuBuffer testGpuAllocation(const AllocRequest& req, Layout* layout) {
     layout->planes[0].size + (gpuOffsetCovered ? gpuPlaneOffset : 0), kPageSize
   );
   layout->pixelBytes = layout->layerSize;
-  // Exactly the image, as a driver's dedicated allocation is.
+  // The allocation is the size of the image, as a driver's dedicated
+  // allocation is.
   int fd = memfd_create("gpu-layout-fixture", MFD_CLOEXEC);
   if (fd < 0 || ftruncate(fd, off_t(layout->pixelBytes))) abort();
   return {fd, 0x0100000000000002};
@@ -566,8 +570,8 @@ static void testGpuLayout() {
     }
     nativeHandleCloseAndDelete(raw);
   }
-  // A plane at a nonzero offset stays tiled when the allocation covers it,
-  // and falls back to LINEAR rather than producing an unimportable handle.
+  // A plane at a nonzero offset stays tiled when the allocation covers it.
+  // Otherwise the buffer falls back to LINEAR so the handle stays importable.
   for (bool covered : {true, false}) {
     gpuPlaneOffset = kPageSize;
     gpuOffsetCovered = covered;
@@ -616,8 +620,8 @@ int main(int argc, char** argv) {
   CHECK_EQ(gMapper->version, AIMAPPER_VERSION_5);
 
   if (getenv("INNKEEPER_UDMABUF")) {
-    // Run with INNKEEPER_UDMABUF=/nonexistent: CPU buffers fall back to
-    // memfd, GPU/composer buffers are refused.
+    // With INNKEEPER_UDMABUF=/nonexistent, CPU buffers fall back to memfd and
+    // GPU or composer buffers are refused.
     printf("no-udmabuf mode\n");
     native_handle_t* nh = nullptr;
     CHECK(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Real EGL imports: pixel correctness, cache reuse and display teardown while
-// another binder thread presents. Run in the named bionic Flatpak harness.
+// Tests real EGL imports for pixel correctness, cache reuse and display
+// teardown while another binder thread presents. Runs in the named bionic
+// Flatpak harness.
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -37,7 +38,8 @@ static std::unique_ptr<BufferRef> buffer() {
 int main() {
   auto source = buffer();
   auto target = buffer();
-  // Producer pixels are written by this test, never by the GPU-copy path.
+  // The test writes the producer pixels through a CPU mapping, and the
+  // GPU-copy path does not map them.
   void* pixels = mmap(
     nullptr, source->info()->totalSize.get(), PROT_READ | PROT_WRITE,
     MAP_SHARED, source->info()->fd, 0

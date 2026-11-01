@@ -6,7 +6,8 @@
 
 namespace innkeeper::hwc {
 
-// System property, or `def` if unset (always on the host).
+// Returns a system property, or `def` if it is unset. Every property is unset
+// on the host.
 std::string getProperty(const char* name, const std::string& def = "");
 
 }  // namespace innkeeper::hwc

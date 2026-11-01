@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // android.hardware.graphics.allocator.IAllocator/default (AIDL V3).
-// GPU-only RGB targets are driver-allocated; CPU buffers use udmabuf.
+// The Vulkan driver allocates GPU-only RGB targets, and CPU buffers use
+// udmabuf.
 #define LOG_TAG "innkeeper-allocator"
 
 #include <cerrno>
@@ -77,8 +78,8 @@ class Allocator : public BnAllocator {
   ndk::ScopedAStatus allocate(
     const std::vector<uint8_t>&, int32_t, AllocationResult*
   ) override {
-    // IMapper 4 descriptors are not supported; clients use allocate2 with
-    // IMapper 5.
+    // Clients use allocate2 with IMapper 5, so IMapper 4 descriptors are
+    // unsupported.
     return error(AllocationError::UNSUPPORTED);
   }
 
@@ -149,9 +150,9 @@ class Allocator : public BnAllocator {
 }  // namespace
 }  // namespace innkeeper
 
-// Started as root (see the .rc): open /dev/udmabuf, then become
-// system:graphics. In the rootless session only uid 0 (the host user) can open
-// the device.
+// The service starts as root (see the .rc) to open /dev/udmabuf, then
+// switches to system:graphics. In the rootless session only uid 0, the host
+// user, can open the device.
 static void dropPrivileges() {
   constexpr uid_t kSystem = 1000;
   constexpr gid_t kGraphics = 1003;

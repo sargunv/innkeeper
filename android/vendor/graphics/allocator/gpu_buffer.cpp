@@ -115,7 +115,8 @@ GpuBuffer allocateGpuBuffer(const AllocRequest& req, Layout* layout) {
   vkGetPhysicalDeviceFormatProperties2(ctx.physical, fmt, &properties);
   std::vector<uint64_t> modifiers;
   for (const auto& mod : supported) {
-    // Compression may need auxiliary planes; our handle has one RGB plane.
+    // Compression may need auxiliary planes, and the handle has one RGB
+    // plane.
     if (
       mod.drmFormatModifier && mod.drmFormatModifierPlaneCount == 1 &&
       (mod.drmFormatModifierTilingFeatures &

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Allocation of linear buffers: memfd -> udmabuf.
+// Buffer allocation. CPU-visible buffers are linear memfds wrapped in
+// udmabufs, and GPU-only targets can come from the gpuAllocate callback.
 #pragma once
 
 #include <cstdint>
@@ -30,17 +31,17 @@ struct GpuBuffer {
 };
 using GpuAllocate = GpuBuffer (*)(const AllocRequest&, Layout*);
 
-// Allocates one buffer and returns a new native handle (caller owns fds +
-// struct).
+// Allocates one buffer and returns a new native handle. The caller owns its
+// fds and the struct.
 AllocStatus allocateBuffer(
   const AllocRequest& req, native_handle_t** outHandle,
   GpuAllocate gpuAllocate = nullptr
 );
 
-// True if the last allocation produced a dma-buf (udmabuf available).
+// True once any allocation has produced a udmabuf dma-buf.
 bool udmabufAvailable();
 
-// Opens /dev/udmabuf (or $INNKEEPER_UDMABUF) now; later calls reuse the fd.
+// Opens /dev/udmabuf, or $INNKEEPER_UDMABUF, and keeps the fd for later calls.
 // The allocator calls this before dropping root, since in the session only
 // root (the host user) can open the device. Returns false if unavailable.
 bool openUdmabufDevice();

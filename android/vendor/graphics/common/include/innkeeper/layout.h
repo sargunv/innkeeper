@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Pixel format table and linear buffer layout. Pure C++ (no Android deps) so
-// it can be unit-tested on the host.
+// Pixel format table and linear buffer layout. This is plain C++ with no
+// Android dependencies, so it can be unit-tested on the host.
 #pragma once
 
 #include <cstdint>
@@ -31,8 +31,8 @@ constexpr uint64_t CPU_READ_MASK = 0xf, CPU_WRITE_MASK = 0xf0,
                    VIDEO_DECODER = 1 << 22, GPU_DATA_BUFFER = 1 << 24,
                    COMPOSER_CURSOR = 1 << 15, GPU_CUBE_MAP = 1 << 25,
                    GPU_MIPMAP_COMPLETE = 1 << 26;
-// Usages whose consumers import the buffer as a dma-buf (GPU drivers): these
-// must not get the memfd fallback.
+// Usages whose consumers, such as GPU drivers, import the buffer as a
+// dma-buf. These buffers must not get the memfd fallback.
 constexpr uint64_t NEEDS_DMABUF =
   GPU_TEXTURE | GPU_RENDER_TARGET | COMPOSER_OVERLAY | COMPOSER_CLIENT_TARGET |
   COMPOSER_CURSOR | GPU_DATA_BUFFER | GPU_CUBE_MAP | GPU_MIPMAP_COMPLETE;
@@ -73,8 +73,8 @@ struct FormatInfo {
   PlaneFormat planes[kMaxPlanes];
 };
 
-// nullptr if unsupported. IMPLEMENTATION_DEFINED / YCBCR_420_888 resolve via
-// resolveFormat().
+// Returns nullptr if the format is unsupported. resolveFormat() maps
+// IMPLEMENTATION_DEFINED and YCBCR_420_888 to a concrete format.
 const FormatInfo* formatInfo(int32_t format);
 // Maps flexible formats to a concrete one (0 if unsupported).
 int32_t resolveFormat(int32_t format, uint64_t usage);
@@ -102,7 +102,7 @@ struct Layout {
 
 // Returns false for unsupported format/size. Every plane's rows are padded to
 // 256-byte multiples (except BLOB) so GPU drivers can import the buffer as
-// linear; for YV12 that means a 512-byte luma stride.
+// linear. For YV12 that means a 512-byte luma stride.
 bool computeLayout(
   int32_t format, uint32_t width, uint32_t height, uint32_t layerCount,
   uint64_t usage, Layout* out
