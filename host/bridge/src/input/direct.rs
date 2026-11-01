@@ -1,17 +1,23 @@
 //! Input for the bridge's own windows (DISPLAY_WINDOW). Such a window shows a
 //! guest that has no window manager on the input service, such as
 //! OpenHarmony. Its seat lines ([`super::proto`]) become records for the
-//! broker's touchscreen, which the guest reads as a kernel device.
+//! broker's touchscreen and keyboard, which the guest reads as kernel
+//! devices.
 //!
 //! The touchscreen's axes span [`touch::MAX`], and each window maps its
 //! display's pixels onto that span. The pointer's left button touches the
 //! screen, so a click is a tap and a drag is a swipe. Each host touch is a
 //! contact of its own. A contact stays on the window where it started, and
 //! it lifts when its window goes away.
+//!
+//! Keys go to the keyboard while an own window has keyboard focus. They keep
+//! their evdev codes, so the guest applies its own layout. The guest repeats
+//! held keys itself, so the host's repeats are dropped. Held keys are
+//! released when the window loses focus or goes away.
 
 use std::collections::HashMap;
 
-use innkeeper_evdev_proto::{TOUCHSCREEN, touch};
+use innkeeper_evdev_proto::{KEYBOARD, TOUCHSCREEN, touch};
 
 const EV_KEY: u16 = 1;
 const EV_ABS: u16 = 3;
@@ -54,6 +60,9 @@ pub struct Direct {
     next_tracking_id: i32,
     /// The current touch frame's records.
     frame: Vec<(u16, u16, i32)>,
+    /// The own window with keyboard focus, and the keys held there.
+    keyboard: Option<u32>,
+    keys: Vec<u16>,
 }
 
 impl Direct {
@@ -88,10 +97,46 @@ impl Direct {
         if !records.is_empty() {
             out.push(Out::Events(TOUCHSCREEN, records));
         }
+        if self.keyboard == Some(window) {
+            self.keyboard = None;
+            out.extend(self.release_keys());
+        }
         if self.windows.is_empty() {
             out.push(Out::Device(TOUCHSCREEN, false));
         }
         out
+    }
+
+    fn release_keys(&mut self) -> Vec<Out> {
+        let records: Vec<_> = self.keys.drain(..).map(|k| (EV_KEY, k, 0)).collect();
+        if records.is_empty() {
+            vec![]
+        } else {
+            vec![Out::Events(KEYBOARD, records)]
+        }
+    }
+
+    /// A `key` line's evdev code and state: 0 release, 1 press, 2 repeat.
+    fn key(&mut self, code: Option<i64>, state: Option<i64>) -> Vec<Out> {
+        let (Some(_), Some(code), Some(state)) = (self.keyboard, code, state) else {
+            return vec![];
+        };
+        let Ok(code) = u16::try_from(code) else {
+            return vec![];
+        };
+        let held = self.keys.contains(&code);
+        let value = match state {
+            1 if !held => {
+                self.keys.push(code);
+                1
+            }
+            0 if held => {
+                self.keys.retain(|&k| k != code);
+                0
+            }
+            _ => return vec![],
+        };
+        vec![Out::Events(KEYBOARD, vec![(EV_KEY, code, value)])]
     }
 
     /// Translates one seat line. Lines for other windows give nothing.
@@ -102,6 +147,17 @@ impl Direct {
         let num = |i: usize| args.get(i).and_then(|a| a.parse::<f64>().ok());
         let int = |i: usize| args.get(i).and_then(|a| a.parse::<i64>().ok());
         let records = match kind {
+            "keyboard_enter" => {
+                self.keyboard = int(0)
+                    .map(|w| w as u32)
+                    .filter(|w| self.windows.contains_key(w));
+                vec![]
+            }
+            "keyboard_leave" => {
+                self.keyboard = None;
+                return self.release_keys();
+            }
+            "key" => return self.key(int(1), int(2)),
             "pointer_enter" => {
                 self.pointer = match (num(0), num(1), int(2)) {
                     (Some(x), Some(y), Some(w)) if self.windows.contains_key(&(w as u32)) => {
@@ -438,6 +494,60 @@ mod tests {
                         (EV_KEY, BTN_TOUCH, 0),
                     ]
                 ),
+                Out::Device(TOUCHSCREEN, false),
+            ]
+        );
+    }
+
+    fn keys(out: Vec<Out>) -> Vec<(u16, u16, i32)> {
+        match out.as_slice() {
+            [Out::Events(KEYBOARD, r)] => r.clone(),
+            [] => vec![],
+            o => panic!("{o:?}"),
+        }
+    }
+
+    #[test]
+    fn keys_reach_the_keyboard_while_an_own_window_has_focus() {
+        let mut d = screen();
+        assert!(d.line("key 1 30 1 97 text a").is_empty());
+        assert!(d.line(&format!("keyboard_enter {W}")).is_empty());
+        assert_eq!(keys(d.line("key 2 42 1")), [(EV_KEY, 42, 1)]);
+        assert_eq!(keys(d.line("key 3 30 1 65 text A")), [(EV_KEY, 30, 1)]);
+        // The guest repeats keys itself.
+        assert!(d.line("key 4 30 2 65 text A").is_empty());
+        assert!(d.line("key 5 30 1 65 text A").is_empty());
+        assert_eq!(keys(d.line("key 6 30 0")), [(EV_KEY, 30, 0)]);
+        assert!(d.line("key 7 30 0").is_empty());
+        assert!(d.line("modifiers 1 0 0 0").is_empty());
+        assert_eq!(
+            keys(d.line(&format!("keyboard_leave {W}"))),
+            [(EV_KEY, 42, 0)]
+        );
+        assert!(d.line("key 8 30 1").is_empty());
+        assert!(d.line(&format!("keyboard_leave {W}")).is_empty());
+    }
+
+    #[test]
+    fn other_windows_and_bad_keys_type_nothing() {
+        let mut d = screen();
+        d.line("keyboard_enter 3");
+        assert!(d.line("key 1 30 1").is_empty());
+        d.line(&format!("keyboard_enter {W}"));
+        assert!(d.line("key 1 -1 1").is_empty());
+        assert!(d.line("key 1 70000 1").is_empty());
+        assert!(d.line("key 1 30").is_empty());
+    }
+
+    #[test]
+    fn a_closed_window_releases_its_keys() {
+        let mut d = screen();
+        d.line(&format!("keyboard_enter {W}"));
+        d.line("key 1 29 1");
+        assert_eq!(
+            d.unmap(W),
+            [
+                Out::Events(KEYBOARD, vec![(EV_KEY, 29, 0)]),
                 Out::Device(TOUCHSCREEN, false),
             ]
         );
