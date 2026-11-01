@@ -124,7 +124,7 @@ run = "rm -rf out/build out/stage out/cargo out/test/probes"
 # ---- test --------------------------------------------------------------------
 
 [tasks.test]
-description = "Unit behaviour: Rust, Kotlin protocol/input, HALs, supervisor and image scripts"
+description = "Unit behaviour: Rust, Kotlin protocol/input, HALs, supervisor, image scripts and the OpenHarmony IME"
 run = """
 set -euo pipefail
 cargo test -q --workspace
@@ -135,6 +135,7 @@ ctest --preset host-tests
 for t in image/tests/*.sh; do echo "== $t"; "$t"; done
 python3 -B -m unittest discover -s tools/ci/tests
 python3 -B -m unittest discover -s tests/e2e -p 'test_*.py'
+node --test ohos/system-app/tests/*.test.mjs
 """
 
 [tasks."test:bionic"]

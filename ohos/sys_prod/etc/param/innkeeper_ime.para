@@ -1,0 +1,3 @@
+# Innkeeper Keyboard (ohos/system-app/ets/ime) is the default input method. A
+# choice the user makes in Settings persists over it.
+persist.sys.default_ime=dev.sargunv.innkeeper.system/HostIme
