@@ -501,17 +501,19 @@ impl Window {
     }
 
     /// Reloads the profile's system and app list. The list comes from the
-    /// desktop entries and, if the session is running, its package list.
+    /// desktop entries and, if an Android session is running, its package
+    /// list.
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
             match worker::run_quiet(move || -> anyhow::Result<_> {
                 let system = profiles::settings(&p)?.system;
-                if system != System::Android {
-                    return Ok((system, vec![]));
-                }
-                let apps = ops::installed_apps(&p, ops::android_packages(&p).as_deref())?;
+                let packages = match system {
+                    System::Android => ops::android_packages(&p),
+                    System::Ohos => None,
+                };
+                let apps = ops::installed_apps(&p, packages.as_deref())?;
                 Ok((system, apps))
             })
             .await
