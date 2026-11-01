@@ -449,7 +449,6 @@ else
   mkdir -p "$T"
   : >"$T/timings.log"
   cli=$repo/tools/dev/innkeeper.sh
-  ohos_image=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$repo/ohos/pin.toml")
   stop_session
   "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
   "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
@@ -547,18 +546,23 @@ else
   echo "ok   desktop keys reach OpenHarmony's input service"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
-    # The CLI installs a HAP and starts its launcher ability. The image's
-    # calculator is a signed HAP, read from the image cache.
-    "$cli" install "$INNKEEPER_IMAGES/$ohos_image/img/system/system/app/com.example.distributedcalc/Calc_Demo.hap" \
-      >>"$T/ohos.txt" 2>&1 || return
-    grep -q 'installed com.ohos.calculator as "Calculator"' "$T/ohos.txt" || return
-    "$cli" run com.ohos.calculator >>"$T/ohos.txt" 2>&1
+    # The CLI installs the probe HAP (ohos/probe), lists it and starts its
+    # launcher ability, which comes to the foreground over the home screen.
+    probe() {
+      s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
+      grep -A5 'app name \[dev.sargunv.innkeeper.probes\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
+    }
+    "$cli" install "$repo/out/test/probes/InnkeeperProbes.hap" >>"$T/ohos.txt" 2>&1 || return
+    grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
+    "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
+    "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
+    until_ok probe FOREGROUND
   }
   if ! timed ohos-hap ohos_hap; then
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs and starts a HAP'
+  echo 'ok   the CLI installs, lists and starts the probe HAP, which comes to the foreground'
   echo 'e2e: PASS'
   exit
 fi

@@ -31,6 +31,28 @@ has neither.
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
 same static broker, `libexec/innkeeper/innkeeper-brk`.
 
+## Probe HAP
+
+`ohos/probe` is a small app for the tests, `dev.sargunv.innkeeper.probes`. Its
+launcher ability shows one page. `mise run build:ohos-probe` builds it into
+`out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
+
+The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
+[ohos/sdk.env](sdk.env) pins the SDK release that matches the image, and
+`ohos/sdk.sh` fetches the parts the build uses into `$OHOS_SDK_HOME`
+(`~/.cache/innkeeper/ohos-sdk`). The SDK archive holds one zip per component,
+and the build needs the first two, so a fetch reads about 180 MB of the
+archive's 3.7 GB. These parts are open source under Apache 2.0.
+
+- restool compiles the resources and resolves the resource references in
+  `module.json`.
+- The SDK's ArkTS compiler, ets-loader, compiles `ets/` into `modules.abc`.
+  ets-loader is a set of rollup plugins written for hvigor's rollup fork.
+  `ohos/probe/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK)
+  and adds the few plugin-context members that the fork provides.
+- The packing tool makes the HAP. `ohos/probe/sign.sh` signs it with the SDK's
+  public keys and a release profile, as OpenHarmony's own apps are signed.
+
 To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
@@ -40,7 +62,7 @@ and a click on the nested desktop's seat then unlock the lock screen and open
 Settings. OH's input injector then scrolls Settings and goes home, and
 render_service must not have restarted since boot
 ([tests/render.sh](tests/render.sh)). A key press reaches MMI, and the CLI
-installs and starts the image's calculator HAP.
+installs and lists the probe HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
