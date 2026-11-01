@@ -66,7 +66,10 @@ on the nested desktop's seat then opens Settings. OH's input injector then
 scrolls Settings and goes home, and render_service must not have restarted since
 boot ([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe
 HAP, signed for the profile's UDID, then installs and shows in `innkeeper list`,
-and `innkeeper run` puts its window on screen with input focus.
+and `innkeeper run` puts its window on screen with input focus. OH's music
+volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a

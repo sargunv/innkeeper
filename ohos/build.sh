@@ -46,7 +46,7 @@ fi
 "$llvm/llvm-strip" "$out/sys_prod/bin/innkeeper-exec"
 stubs=out/build/ohos/stubs
 mkdir -p "$stubs"
-for lib in libc.so libc++.so libhilog.so libbegetutil.z.so; do
+for lib in libc.so libc++.so libhilog.so libbegetutil.z.so libohaudio.so; do
   "$llvm/clang" --target=x86_64-linux-musl -shared -nostdlib -Wl,-soname,$lib \
     -o "$stubs/$lib" -x c /dev/null
 done
@@ -75,3 +75,11 @@ so=$out/vendor/lib64/libaudio_primary_impl.z.so
   ohos/vendor/audio/primary.c guest/audio-client/audio.c guest/audio-client/pcm.c \
   "$stubs/bridge_client.o" "$stubs/libhilog.so" "$stubs/libc.so"
 "$llvm/llvm-strip" "$so"
+# The e2e audio checks run this tool in OH (ohos/tests/tone.c). It is a test
+# artifact and stays out of the layer.
+mkdir -p out/test/ohos
+# The stubs define no symbols, so the link leaves them for the loader.
+"$llvm/clang" "${cflags[@]}" -std=gnu17 -pie -nostdlib -Wl,--unresolved-symbols=ignore-all \
+  -Wl,-z,now -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 -o out/test/ohos/tone \
+  "$musl/lib64/Scrt1.o" "$musl/lib64/crti.o" ohos/tests/tone.c \
+  "$stubs/libohaudio.so" "$stubs/libc.so" "$musl/lib64/crtn.o"
