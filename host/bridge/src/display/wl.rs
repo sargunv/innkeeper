@@ -1065,6 +1065,7 @@ impl State {
         for _ in 0..releases {
             self.release(buffer, false);
         }
+        self.cursor_density(id);
     }
 
     /// Activates a window with `token`, or else with a new token for the

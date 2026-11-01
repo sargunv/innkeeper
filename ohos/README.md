@@ -303,10 +303,12 @@ of the frame, and MMI gives each cursor image to the composer's
 `UpdateHardwareCursor`. MMI draws the image in a 512 by 512 buffer with the
 cursor's hotspot at the centre. The composer crops it and sends it to the bridge
 when it changes, and the bridge shows it as the host's cursor over the window.
-The host compositor draws it at the host pointer, so it doesn't wait for OH's
-next frame, and OH's shapes such as the I-beam carry over. render_service also
-gives the composer a layer of type `LAYER_TYPE_CURSOR`, which the composer
-leaves out.
+The image has the panel's density, so the bridge scales it as the window scales
+the panel. On a scale-1 desktop, a 2x panel's I-beam is 55 pixels tall in OH and
+28 pixels tall on the host. The host compositor draws it at the host pointer, so
+it doesn't wait for OH's next frame, and OH's shapes such as the I-beam carry
+over. render_service also gives the composer a layer of type
+`LAYER_TYPE_CURSOR`, which the composer leaves out.
 
 The composer reports the panel's physical size at 160 dpi, a desktop monitor's
 density, so DMS gives apps an x and y dpi near 160. The density that OH lays out
