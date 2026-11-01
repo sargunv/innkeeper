@@ -851,22 +851,34 @@ while True:
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
     reopened() { (($(grep -c 'window [0-9]* shows its first frame' "$bridge_log") > frames)); }
     until_ok reopened || return
-    # With the window closed and the command done, the session stops after
-    # the grace period.
+    # The probe's continuous task counts as a service, and it keeps the
+    # session up with the window closed and the command done.
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps task start \
+      >>"$T/ohos.txt" 2>&1 || return
+    until_ok file_has "$run/lifecycle" '^services=1$' || return
     until_ok file_has "$run/lifecycle" '^windows=1$' || return
     desktop Close dev.sargunv.innkeeper.ohos | grep -q true || return
     until_ok file_has "$run/lifecycle" '^windows=0$' || return
     s /system/bin/touch /data/e2e-idle
     wait "$keeper"
+    local session_log
+    session_log=$(dirname "$bridge_log")/session.log
+    service_keeps_it_up() { [[ $(grep -o 'activity: .*' "$session_log" | tail -n 1) == 'activity: 1 foreground service(s)' ]]; }
+    until_ok service_keeps_it_up || return
+    # Once the task stops, the session stops after the grace period.
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps task stop \
+      >>"$T/ohos.txt" 2>&1 || return
     gone() { ! "$S" status >/dev/null 2>&1; }
     until_ok gone || return
-    file_has "$(dirname "$bridge_log")/session.log" 'idle for 1 s: stopping'
+    file_has "$session_log" 'idle for 1 s: stopping'
   }
   if ! timed ohos-screen ohos_screen; then
     tail -n 20 "$bridge_log" >&2
+    grep 'activity: ' "$(dirname "$bridge_log")/session.log" | tail -n 5 >&2
+    s /system/bin/hilog -x -T InnkeeperProbes,InnkeeperLifecycle 2>/dev/null | tail -n 5 >&2
     exit 1
   fi
-  echo "ok   the open window keeps OpenHarmony running, closing it leaves OpenHarmony running, run opens it again, and with it closed the session stops when idle"
+  echo "ok   the open window keeps OpenHarmony running, closing it leaves OpenHarmony running, run opens it again, an app's continuous task keeps the session up with the window closed, and the session stops when idle"
   echo 'e2e: PASS'
   exit
 fi

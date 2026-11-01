@@ -62,6 +62,13 @@ cat >"$out/etc/app/install_list.json" <<EOF
   ]
 }
 EOF
+# The image's own entry for the background task service's resources lists a
+# certificate fingerprint that its HAP doesn't have. Without singleton, the
+# bundle manager installs that HAP for user 100 alone, and the service, which
+# runs as user 0, can't load its notification texts. Every continuous task
+# then fails with 9800006. The second entry matches the image's appId.
+bgtask_res=com.ohos.backgroundtaskmgr.resources
+bgtask_res_key=BBCORX5amL5E0TjFirHG8bR0FzBSi6V8E66NJAHISp4iPikRx0eCnlDERyiM06IfDTuREXh/RaYE/PWWcxVdzas=
 cat >"$out/etc/app/install_list_capability.json" <<EOF
 {
   "install_list": [
@@ -71,6 +78,12 @@ cat >"$out/etc/app/install_list_capability.json" <<EOF
       "keepAlive": true,
       "singleton": true,
       "allowAppUsePrivilegeExtension": true
+    },
+    {
+      "bundleName": "$bgtask_res",
+      "app_signature": ["${bgtask_res}_$bgtask_res_key"],
+      "singleton": true,
+      "allowAppDesktopIconHide": true
     }
   ]
 }

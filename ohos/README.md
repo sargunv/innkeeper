@@ -39,7 +39,9 @@ same static broker, `libexec/innkeeper/innkeeper-brk`.
 `ohos/probe` is a small app for the tests, `dev.sargunv.innkeeper.probes`. Its
 launcher ability shows one page with a text field. Started with
 `--ps mode capture`, it records half a second from the microphone and logs the
-loudest sample to hilog. `mise run build:ohos-probe` builds it into
+loudest sample to hilog. Started with `--ps task start` or `--ps task stop`, it
+starts or stops an audio playback continuous task and logs the result.
+`mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
 
 The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
@@ -85,8 +87,10 @@ at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays
 through OH's audio API must reach a private null sink on the nested desktop.
 Root then grants the probe the microphone with `atm perm -g`, the host plays a
 tone into the null sink, and the probe must record it from the sink's monitor.
-Last, OH must take the time zone that the session started with, and it must turn
-dark when the nested desktop's portal does.
+OH must take the time zone that the session started with, and it must turn dark
+when the nested desktop's portal does. Last, the probe starts an audio playback
+continuous task. With the window closed, the task must keep the session up, and
+once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -114,7 +118,15 @@ reports boot completion. Issue #312 tracks the features that build on it.
   otherwise refuses. The entry matches the app by its appId, which is the bundle
   name and the signing key's public EC point. hap-sign-tool issues a new app
   certificate at each signing, so a certificate fingerprint wouldn't match. AMS
-  starts a kept-alive app's main element at boot and restarts it if it dies.
+  starts a kept-alive app's main element at boot and restarts it if it dies. The
+  file also makes the image's `com.ohos.backgroundtaskmgr.resources` a
+  singleton. The image's own entry for that bundle names a certificate
+  fingerprint that the bundle's HAP doesn't have, so BMS would install it for
+  user 100 alone. The background task service runs as user 0 and loads the
+  notification texts for continuous tasks from that bundle. Without the texts,
+  every continuous task fails with 9800006. A profile created before this entry
+  existed keeps the old install, because BMS doesn't change a singleton on a
+  rescan.
 - **Signing.** `ohos/sign.sh --system` signs with the SDK's public keys and a
   release profile at `system_basic` with `hos_system_app`. A release profile
   names no device, so one HAP serves every profile.
