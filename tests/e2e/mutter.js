@@ -43,6 +43,7 @@ export async function run() {
       <method name="Visibility"><arg type="b" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
+      <method name="Geometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
     </interface></node>`,
     {
       async ScreenshotAsync([path], invocation) {
@@ -122,6 +123,16 @@ export async function run() {
           }
         }
         return matched;
+      },
+      Geometry(appId) {
+        for (const actor of global.get_window_actors()) {
+          const window = actor.meta_window;
+          if (!actor.mapped || !String(window.get_wm_class()).includes(appId))
+            continue;
+          const r = window.get_frame_rect();
+          return [r.x, r.y, r.width, r.height];
+        }
+        return [0, 0, 0, 0];
       },
       async PositionAsync(_args, invocation) {
         let positioned = 0;

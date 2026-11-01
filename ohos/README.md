@@ -35,8 +35,9 @@ To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
-([tests/boot.sh](tests/boot.sh)). It also checks that the window shows, and that
-the CLI installs and starts the image's calculator HAP.
+([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A drag
+and a click on the nested desktop's seat then unlock the lock screen and open
+Settings, and the CLI installs and starts the image's calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a

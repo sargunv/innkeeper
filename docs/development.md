@@ -121,8 +121,9 @@ null sink and no hardware monitors. `nested.sh` removes all of these when the
 command exits. Use it for anything that opens windows, portals or notifications.
 
 The nested desktop serves `dev.sargunv.Innkeeper.TestDesktop`, which provides
-input, window visibility and position, and screenshots. `tests/e2e/kwin.py`
-serves it on KWin, and `tests/e2e/mutter.js` serves it on GNOME Shell.
+input, window visibility, position and geometry, and screenshots.
+`tests/e2e/kwin.py` serves it on KWin, and `tests/e2e/mutter.js` serves it on
+GNOME Shell.
 
 - KWin offers `org_kde_kwin_fake_input` and `org.kde.KWin.ScreenShot2` to a
   client whose resolved executable matches the `Exec` of a desktop file. That

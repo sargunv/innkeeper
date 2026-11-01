@@ -462,15 +462,8 @@ else
     # The caller tests this function's status, which turns off errexit here.
     s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1 || return
     "$S" selftest >>"$T/ohos.txt" || return
-    # The CLI installs a HAP and starts its launcher ability. The image's
-    # calculator is a signed HAP, read from the image cache. Its window stays
-    # hidden behind the lock screen, which nothing dismisses yet.
-    "$cli" install "$INNKEEPER_IMAGES/$ohos_image/img/system/system/app/com.example.distributedcalc/Calc_Demo.hap" \
-      >>"$T/ohos.txt" 2>&1 || return
-    grep -q 'installed com.ohos.calculator as "Calculator"' "$T/ohos.txt" || return
-    "$cli" run com.ohos.calculator >>"$T/ohos.txt" 2>&1 || return
     # Screen 0 must appear in its own window on this desktop.
-    until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
+    until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)' || return
     until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
   }
   if ! timed ohos ohos_boot; then
@@ -478,7 +471,66 @@ else
     echo "e2e: FAIL (ohos); init's log: $(dirname "$bridge_log")/kmsg.log" >&2
     exit 1
   fi
-  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window, passes selftest, and installs and starts a HAP with the CLI'
+  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_input() {
+    local x y w h panel pw ph cw ch left top
+    locked() { s /system/bin/hidumper -s ScreenlockService -a -all | grep -Eq "screenLocked[[:space:]]+$1"; }
+    settings() {
+      s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
+      grep -A3 'main name \[com.ohos.settings.MainAbility\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
+    }
+    framed() {
+      read -r x y w h < <(desktop Geometry dev.sargunv.innkeeper.ohos | tr -d '(),')
+      ((w > 0))
+    }
+    until_ok framed || return
+    # The window shows the panel at the window's scale, with the frame's
+    # title bar above it. OpenHarmony's coordinates are panel pixels.
+    panel=$(s /system/bin/param get const.innkeeper.display)
+    pw=${panel%%x*} ph=${panel#*x} ph=${ph%%@*}
+    read -r cw ch < <(grep -Eo '"OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\) [0-9]+x[0-9]+' "$bridge_log" |
+      tail -n 1 | sed 's/.* //; s/x/ /')
+    left=$((x + (w - cw) / 2)) top=$((y + h - ch - (w - cw) / 2))
+    at() { echo "abs:$((left + $1 * cw / pw)),$((top + $2 * ch / ph))"; }
+    until_ok locked true || return
+    # A drag up the lock screen unlocks it.
+    {
+      at $((pw / 2)) $((ph * 9 / 10))
+      echo button:272,1
+      for i in 8 7 6 5 4 3 2; do at $((pw / 2)) $((ph * i / 10)); done
+      echo button:272,0
+    } | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok locked false || return
+    # A click on the home screen's Settings icon opens Settings. The home
+    # screen ignores clicks while it animates in after the unlock.
+    ! settings '[A-Z]+' || return
+    click_settings() {
+      { at 90 200 && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin
+      settings '[A-Z]+'
+    }
+    until_ok click_settings || return
+    until_ok settings FOREGROUND
+  }
+  if ! timed ohos-input ohos_input; then
+    echo "e2e: FAIL (ohos-input); render_service: $(s /system/bin/pidof render_service)" >&2
+    exit 1
+  fi
+  echo 'ok   desktop pointer input unlocks the lock screen and opens Settings'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_hap() {
+    # The CLI installs a HAP and starts its launcher ability. The image's
+    # calculator is a signed HAP, read from the image cache.
+    "$cli" install "$INNKEEPER_IMAGES/$ohos_image/img/system/system/app/com.example.distributedcalc/Calc_Demo.hap" \
+      >>"$T/ohos.txt" 2>&1 || return
+    grep -q 'installed com.ohos.calculator as "Calculator"' "$T/ohos.txt" || return
+    "$cli" run com.ohos.calculator >>"$T/ohos.txt" 2>&1
+  }
+  if ! timed ohos-hap ohos_hap; then
+    tail -n 20 "$T/ohos.txt" >&2
+    exit 1
+  fi
+  echo 'ok   the CLI installs and starts a HAP'
   echo 'e2e: PASS'
   exit
 fi
