@@ -1,7 +1,8 @@
 //! Input service messages (id 6, types 0x0600..=0x06ff, events
-//! 0x4600..=0x46ff). The client is the Innkeeper System app: its window
-//! manager asks for windows, its injector gets the seat, and its IME drives
-//! the host's input methods. Only the system app's uid may open the service.
+//! 0x4600..=0x46ff). The client is the Innkeeper System app. Its window
+//! manager asks for windows, its injector receives the seat's input, and its
+//! IME drives the host's input methods. Only the system app's uid may open the
+//! service.
 //!
 //! | Type     | Request        | Body                                                                                                                                         | Reply                                                     |
 //! | -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -17,24 +18,26 @@
 //! | `0x4603` | WINDOW_UNMAPPED | `u32 window`: its display went away, or it was destroyed               |
 //!
 //! IMAGE_RELEASE (0x4604): u32 window, u64 presentation token. The system app
-//! closes that display/ImageReader's acquired image only after this event.
+//! closes the acquired image of that display's ImageReader only after this
+//! event.
 //!
 //! **Windows.** A queued request waits up to 10 s for the composer to add an
 //! HWC virtual display of exactly `width`×`height` (display service
-//! `DISPLAY_ADD`); that display then shows in a new toplevel, which starts at
+//! `DISPLAY_ADD`). That display then shows in a new toplevel, which starts at
 //! the display's size in dp. The window manager queues the request before it
-//! gives its VirtualDisplay a surface, which is what makes SurfaceFlinger
-//! create the HWC display.
+//! gives its VirtualDisplay a surface, because the surface is what makes
+//! SurfaceFlinger create the HWC display.
 //!
 //! **Activation.** `token` is an `xdg_activation_v1` token from the desktop
-//! launch (`XDG_ACTIVATION_TOKEN`, or one the launch's splash window asked
-//! for); empty: none. A new window uses it once its first frame is on
-//! screen, so the compositor focuses it without flagging it as demanding
-//! attention.
+//! launch, either `XDG_ACTIVATION_TOKEN` or one that the launch's splash
+//! window asked for. It is empty if there is none. A new window uses it once
+//! its first frame is on screen, so the compositor focuses the window without
+//! flagging it as demanding attention.
 //!
-//! Input line `window_visible <0|1> <display>` reports compositor suspension
-//! or a one-second outstanding frame callback. A pending callback remains live
-//! while hidden so restoring can resume Android without a new application frame.
+//! The input line `window_visible <0|1> <display>` reports that the compositor
+//! suspended the window or that a frame callback has been outstanding for one
+//! second. A pending callback stays live while the window is hidden, so
+//! restoring it can resume Android without a new application frame.
 //!
 //! `WINDOW_KEEP_AWAKE` (0x060d): u32 window, u32 requested (0 or 1).
 //! Android's per-display screen-timeout policy includes SCREEN_* wake locks
@@ -43,46 +46,56 @@
 //! `WINDOW_POLICY` (0x0605): u32 display, u32 orientation (0 unspecified,
 //! 1 portrait, 2 landscape), u32 legacy automatic fullscreen (0 or 1), u32
 //! immersive request (both bars hidden, 0 or 1). The bridge ignores the last two
-//! fields: desktop fullscreen is a user control. The Android window manager
-//! sends the current policy when mapped and when it changes; only orientation
-//! reshapes floating toplevels.
+//! fields because desktop fullscreen is a user control. The Android window
+//! manager sends the current policy when the window is mapped and whenever it
+//! changes. Only orientation reshapes floating toplevels.
 //!
 //! `WINDOW_ROTATION` (0x060e): u32 display, u32 rotation (quarter turns,
-//! Surface.ROTATION_*). A display whose buffer keeps its natural orientation
-//! while Android rotates its content (phone mode's display 0): the bridge
-//! shows its frames turned back upright, with the turned window shape, and
-//! maps input to the rotated display. `-ENOENT` if not shown.
+//! Surface.ROTATION_*). It is for a display whose buffer keeps its natural
+//! orientation while Android rotates its content, such as phone mode's
+//! display 0. The bridge shows the display's frames turned back upright in a
+//! window of the rotated shape, and maps input to the rotated display. The
+//! reply is `-ENOENT` if the window is not shown.
 //!
-//! `WINDOW_MINIMIZE` (0x0607): u32 display; minimize the toplevel when Android
-//! moves its root task to the back. `-ENOENT` if not shown.
+//! `WINDOW_MINIMIZE` (0x0607): u32 display. Android sends it when it moves the
+//! display's root task to the back, and the bridge minimizes the toplevel. The
+//! reply is `-ENOENT` if the window is not shown.
 //!
 //! `WINDOW_APPEARANCE` (0x0606): u32 display, u32 primary colour (Android ARGB,
-//! 0: default caption), u32 blob length, one sealed memfd containing a blob
-//! RGBA image (u16 width/height, packed pixels; 0x0 clears the icon). Each side
-//! is at most 256 pixels; at most 262148 bytes. Sent on mapping and debounced
-//! TaskDescription changes. Unsupported icon protocols receive no fallback.
+//! 0 for the default caption), u32 blob length, and one sealed memfd with a
+//! blob RGBA image (u16 width and height, then packed pixels). A 0x0 image
+//! clears the icon. Each side is at most 256 pixels, and the blob is at most
+//! 262148 bytes. Android sends it on mapping and on debounced TaskDescription
+//! changes. There is no fallback when the compositor lacks an icon protocol.
+//!
 //! `EVDEV` (0x0608): u32 device (0 keyboard, display + 1 mouse), u64 monotonic
 //! microseconds, u32 count (1..32), then count records of u16 type, u16 code,
 //! i32 value. The bridge adds SYN_REPORT and writes to the broker's evdev.sock.
-//! `WINDOW_TOKEN` (0x060c): u32 source display; reply: name token (empty if
-//! unavailable). Requests `xdg_activation_v1` authority from that window's surface
-//! before moving a newly created task to its own display.
-//! `POINTER_CAPTURE` (0x060b): u32 enabled, Android InputReader capture state.
-//! The bridge locks only its focused content surface.
 //!
-//! `EVDEV_DEVICE` (0x060a): u32 device (display + 1), u32 enabled; create/remove a mouse.
-//! `POINTER_POSITION` (0x0609): u32 display, i32 x, i32 y in display pixels,
-//! sent before mouse records so the cursor layer origin can yield its hotspot.
+//! `WINDOW_TOKEN` (0x060c): u32 source display. The reply is a name token,
+//! empty if unavailable. The bridge requests the `xdg_activation_v1` token
+//! from that window's surface. The system app asks for it before moving a
+//! newly created task to its own display.
+//!
+//! `POINTER_CAPTURE` (0x060b): u32 enabled, the Android InputReader capture
+//! state. The bridge locks the pointer only on its focused content surface.
+//!
+//! `EVDEV_DEVICE` (0x060a): u32 device (display + 1), u32 enabled. Creates or
+//! removes a mouse.
+//!
+//! `POINTER_POSITION` (0x0609): u32 display, i32 x, i32 y in display pixels.
+//! It is sent before mouse records so the cursor layer origin can yield its
+//! hotspot.
 //!
 //! **Input lines** are protocol v2: ASCII, space-separated fields, in the
 //! order the seat produced them.
 //!
 //! - Coordinates are in the pixels of the target display (surface-local
 //!   position × the shown frame's size / the window's logical size), as
-//!   floats with 2 decimals. `<display>` is the window's Android display id:
-//!   the lines that start a pointer, keyboard or touch sequence carry it, and
+//!   floats with 2 decimals. `<display>` is the window's Android display id.
+//!   The lines that start a pointer, keyboard or touch sequence carry it, and
 //!   the events that follow belong to that window. `<t>` is the compositor's
-//!   millisecond clock; buttons and keys are Linux evdev codes.
+//!   millisecond clock. Buttons and keys are Linux evdev codes.
 //! - `window <logical_w> <logical_h> <scale> <display>`: the window's size
 //!   or scale changed.
 //! - `close <display>`: the user asked to close the window.
@@ -90,41 +103,44 @@
 //!   the host lock is active, sent through that window's evdev mouse.
 //! - `pointer_enter <x> <y> <display>`, `pointer_leave <display>`,
 //!   `pointer_motion <t> <x> <y>`, `pointer_button <t> <button> <0|1>`,
-//!   `pointer_axis <t> <axis> <value>` (axis 0 vertical, 1 horizontal; value
-//!   in surface units), `pointer_axis_value120 <axis> <v120>` (120 = one
+//!   `pointer_axis <t> <axis> <value>` (axis 0 vertical, 1 horizontal, value
+//!   in surface units), `pointer_axis_value120 <axis> <v120>` (120 is one
 //!   detent), `pointer_axis_source <source>` (0 wheel, 1 finger,
-//!   2 continuous, 3 wheel tilt; at most one per frame; the values already
-//!   include natural scrolling), `pointer_axis_stop <t> <axis>`,
-//!   `pointer_frame`.
+//!   2 continuous, 3 wheel tilt, at most one per frame),
+//!   `pointer_axis_stop <t> <axis>`, `pointer_frame`. Axis values already
+//!   include natural scrolling.
 //! - Touchpad gestures over a window's content, which go where the pointer
 //!   is: `gesture_swipe_begin <t> <fingers>`, `gesture_swipe_update <t> <dx>
 //!   <dy>`, `gesture_pinch_begin <t> <fingers>`, `gesture_pinch_update <t>
 //!   <dx> <dy> <scale> <rotation>` (the center's motion in display pixels,
 //!   the scale since the begin, degrees clockwise since the last update),
 //!   `gesture_hold_begin <t> <fingers>`, and `gesture_{swipe,pinch,hold}_end
-//!   <t> <0|1>` (1: cancelled).
+//!   <t> <0|1>` (1 if cancelled).
 //! - A tablet tool: `tablet_proximity_in <tool> <display>` (the tool is its
-//!   `BTN_TOOL_*` code: 0x140 pen, 0x141 eraser, …), `tablet_proximity_out`,
-//!   `tablet_down`, `tablet_up`, `tablet_motion <x> <y>`,
-//!   `tablet_pressure <0..65535>`, `tablet_distance <0..65535>`,
+//!   `BTN_TOOL_*` code, such as 0x140 pen or 0x141 eraser),
+//!   `tablet_proximity_out`, `tablet_down`, `tablet_up`,
+//!   `tablet_motion <x> <y>`, `tablet_pressure <0..65535>`,
+//!   `tablet_distance <0..65535>`,
 //!   `tablet_tilt <x> <y>` (degrees), `tablet_button <button> <0|1>`, each
 //!   group ended by `tablet_frame <t>`.
-//! - `back <display>`: a title-bar Back click, a BACK key tap on that display.
+//! - `back <display>`: a title-bar Back click, which acts as a BACK key tap on
+//!   that display.
 //! - `keyboard_enter <display>`, `keyboard_leave <display>`,
-//!   `key <t> <keycode> <0|1|2> [<sym> [text <text> | compose]]` (2: a
-//!   repeat, from a wl_keyboard v10 compositor that repeats keys itself;
-//!   KWin also repeats a key whose press a host input method turned into a
-//!   press and release),
+//!   `key <t> <keycode> <0|1|2> [<sym> [text <text> | compose]]`,
 //!   `modifiers <depressed> <latched> <locked> <group>` (xkb masks),
-//!   `repeat_info <rate> <delay>` (`wl_keyboard.repeat_info`: repeats per
-//!   second, 0 when the compositor repeats or there is no repeat, and ms;
-//!   also sent to each new connection).
-//!   Under the compositor's keymap ([`super::xkb`]) a press also carries
-//!   `<sym>`, the key's level-1 keysym in the active layout (decimal), and
-//!   what it types: `text` and the percent-encoded text (as `ti_commit`),
-//!   `compose` for a step of a compose sequence (it types nothing), or
-//!   neither (a repeat never feeds compose). Without a keymap, and on
-//!   release, only the evdev code.
+//!   `repeat_info <rate> <delay>` (`wl_keyboard.repeat_info`, with the rate
+//!   in repeats per second, 0 when the compositor repeats or there is no
+//!   repeat, and the delay in ms). `repeat_info` is also sent to each new
+//!   connection.
+//!   A `key` state of 2 is a repeat from a wl_keyboard v10 compositor that
+//!   repeats keys itself. KWin also repeats a key whose press a host input
+//!   method turned into a press and release.
+//!   Under the compositor's keymap ([`super::xkb`]), a press or repeat also
+//!   carries `<sym>`, the key's level-1 keysym in the active layout
+//!   (decimal), and what it types. That is `text` with the percent-encoded
+//!   text (as in `ti_commit`), `compose` for a step of a compose sequence,
+//!   which types nothing, or neither. A repeat never feeds compose. Without
+//!   a keymap, and on release, the line carries only the evdev code.
 //! - `touch_down <t> <id> <x> <y> <display>`, `touch_motion <t> <id> <x> <y>`,
 //!   `touch_up <t> <id>`, `touch_frame`, `touch_cancel`.
 //! - `ti_delete`, `ti_commit`, `ti_preedit`, `ti_done <display>`: the host
@@ -175,17 +191,18 @@ pub struct WindowRequest {
     pub width: u32,
     pub height: u32,
     pub dpi: u32,
-    /// Minimum logical size (0: the bridge's default).
+    /// Minimum logical size (0 for the bridge's default).
     pub min_width: u32,
     pub min_height: u32,
     pub app_id: String,
     pub title: String,
-    /// An activation token for the new window (empty: none).
+    /// An activation token for the new window, empty if there is none.
     pub token: String,
 }
 
 impl WindowRequest {
-    /// The logical size the window starts at: the display's size in dp.
+    /// The logical size the window starts at, which is the display's size in
+    /// dp.
     pub fn logical_size(&self) -> (u32, u32) {
         let dp =
             |px: u32| ((px as u64 * 160 + self.dpi as u64 / 2) / self.dpi as u64).max(1) as u32;
@@ -193,7 +210,8 @@ impl WindowRequest {
     }
 }
 
-/// Per-display Android requests. Orientation: 0 unspecified, 1 portrait, 2 landscape.
+/// Android's per-display window policy. `orientation` is 0 for unspecified,
+/// 1 for portrait or 2 for landscape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowPolicy {
     pub window: u32,
@@ -416,7 +434,7 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Events, as bodies (the caller adds the header).
+/// Event bodies. The caller adds the header.
 pub mod event {
     use super::*;
 

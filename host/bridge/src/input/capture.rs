@@ -1,6 +1,7 @@
-//! Android's device source change requests a one-shot host pointer lock.
-//! Escape, compositor unlock, focus loss and window removal inhibit relocking
-//! until Android releases capture. Relative motion keeps the ordered evdev path.
+//! Host pointer lock for Android pointer capture. A change of Android's device
+//! source requests a one-shot lock. Escape, a compositor unlock, focus loss or
+//! removal of the window blocks relocking until Android releases capture.
+//! Relative motion goes through the ordered evdev path.
 use crate::display::wl::State;
 use sctk::dispatch2::Dispatch2;
 use sctk::reexports::client::globals::GlobalList;

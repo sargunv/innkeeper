@@ -1,12 +1,13 @@
-//! Graphics tablets (`zwp_tablet_v2`) as input lines: the pen or eraser in
-//! proximity of a window's content, its position, pressure, distance, tilt
-//! and buttons, one `tablet_frame` per tool frame ([`super::proto`]). The
-//! system app injects them as Android stylus events (`docs/input.md`).
+//! Graphics tablets (`zwp_tablet_v2`) as input lines ([`super::proto`]). The
+//! lines report a pen or eraser in proximity of a window's content, with its
+//! position, pressure, distance, tilt and buttons, and one `tablet_frame` per
+//! tool frame. The system app injects them as Android stylus events
+//! (`docs/input.md`).
 //!
-//! One tool at a time: a second tool that comes into proximity while
-//! another is in is ignored until it leaves and comes back. Pads (buttons,
-//! rings, strips) are bound only because the protocol creates them; they are
-//! not forwarded.
+//! Only one tool is tracked at a time. A second tool that comes into
+//! proximity while another is in is ignored until it leaves and comes back.
+//! Pads (buttons, rings, strips) are bound only because the protocol creates
+//! them, and are not forwarded.
 
 use std::collections::HashMap;
 
@@ -41,8 +42,8 @@ pub(crate) struct Tablets {
     tools: HashMap<ObjectId, (u32, Option<WpCursorShapeDeviceV1>)>,
     /// The tool in proximity of a window's content, and that window.
     focus: Option<(ObjectId, u32)>,
-    /// The tool whose events go out until its next frame (also the frame
-    /// after its proximity_out).
+    /// The tool whose events go out until its next frame. This includes the
+    /// frame after its proximity_out.
     framing: Option<ObjectId>,
     last_time: u32,
 }
@@ -53,7 +54,7 @@ pub(crate) struct T;
 impl Tablets {
     pub(crate) fn bind(globals: &GlobalList, qh: &QueueHandle<State>) -> Tablets {
         Tablets {
-            // Version 1: version 2 only adds pad dials and the bus type.
+            // Version 2 only adds pad dials and the bus type.
             manager: globals.bind(qh, 1..=1, T).ok(),
             ..Default::default()
         }
@@ -79,7 +80,7 @@ impl Tablets {
         }
     }
 
-    /// The window `id` is gone: a tool over it leaves.
+    /// Ends proximity for a tool over window `id`, which is gone.
     pub(crate) fn forget(&mut self, id: u32, hub: &Hub) {
         if self.focus.as_ref().is_some_and(|(_, w)| *w == id) {
             self.focus = None;
@@ -157,7 +158,7 @@ impl Dispatch2<ZwpTabletToolV2, State> for T {
             } => {
                 st.seat.last_serial = serial;
                 let win = st.window_of(&surface);
-                // The default arrow over any of our surfaces.
+                // Show the default arrow over any of our surfaces.
                 if let Some(m) = &st.seat.cursor_shape {
                     let entry = st.seat.tablets.tools.entry(id.clone()).or_default();
                     entry
@@ -220,7 +221,8 @@ impl Dispatch2<ZwpTabletToolV2, State> for T {
     }
 }
 
-// Tablets and pads: bound because the protocol creates them, never used.
+// Tablets and pads are bound because the protocol creates them. Their events
+// are ignored.
 
 impl Dispatch2<ZwpTabletV2, State> for T {
     fn event(

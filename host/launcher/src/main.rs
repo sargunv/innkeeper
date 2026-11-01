@@ -1,6 +1,6 @@
-//! The Innkeeper session launcher (`innkeeper-session`, host/launcher/README.md),
-//! an internal tool. What host/core shares with it is innkeeper-profile.
-//! docs/session.md describes the session.
+//! The Innkeeper session launcher (`innkeeper-session`), an internal tool
+//! described in host/launcher/README.md. It shares code with host/core through
+//! the innkeeper-profile crate. docs/session.md describes the session.
 
 mod adb;
 mod cli;

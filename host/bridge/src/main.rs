@@ -1,19 +1,20 @@
-//! `innkeeper-bridge`, started by the launcher for the profile in
-//! `INNKEEPER_PROFILE`; it takes no arguments.
+//! `innkeeper-bridge`. The launcher starts it for the profile in
+//! `INNKEEPER_PROFILE`, and it takes no arguments.
 //!
-//! Listens on `<run>/bridge/bridge.sock` (the launcher binds `<run>/bridge`
-//! into the Android session), keeps MPRIS artwork in `<run>/art` and writes
-//! the system app's activity reports to `<run>/lifecycle` for the launcher.
-//! Document grants persist in `<state>/documents.grants`. `<run>` and
-//! `<state>` are the profile's [`innkeeper_core::paths`] dirs.
+//! The bridge listens on `<run>/bridge/bridge.sock`. The launcher binds
+//! `<run>/bridge` into the Android session. The bridge keeps MPRIS artwork in
+//! `<run>/art` and writes the system app's activity reports to
+//! `<run>/lifecycle` for the launcher. Document grants persist in
+//! `<state>/documents.grants`. `<run>` and `<state>` are the profile's
+//! [`innkeeper_core::paths`] dirs.
 //!
-//! - `INNKEEPER_TEST=1`: a test session, isolated from the desktop's
-//!   clipboard, portals, OpenURI, notifications, MPRIS, AT-SPI and location;
-//!   apps installed inside Android get no desktop entries.
-//! - `INNKEEPER_AUDIO_SINK`, `INNKEEPER_AUDIO_SOURCE`: the PipeWire sink and
-//!   capture source (default: the desktop's).
-//! - `INNKEEPER_BRIDGE_DEBUG=1`: debug logging and the frame and input trace
-//!   ([`innkeeper_bridge::log`]).
+//! - `INNKEEPER_TEST=1` marks a test session. It is isolated from the
+//!   desktop's clipboard, portals, OpenURI, notifications, MPRIS, AT-SPI and
+//!   location, and apps installed inside Android get no desktop entries.
+//! - `INNKEEPER_AUDIO_SINK`, `INNKEEPER_AUDIO_SOURCE` name the PipeWire sink
+//!   and capture source. The default is the desktop's.
+//! - `INNKEEPER_BRIDGE_DEBUG=1` turns on debug logging and the frame and
+//!   input trace ([`innkeeper_bridge::log`]).
 
 use std::sync::Arc;
 
@@ -38,7 +39,8 @@ fn main() -> Result<()> {
     let (run_dir, state_dir, data_dir, profile) =
         (paths.run, paths.state, paths.data, paths.profile);
     let socket = run_dir.join("bridge/bridge.sock");
-    // A report from before a restart is stale; the system app sends a new one.
+    // A report from before a restart is stale. The system app sends a new
+    // one.
     let _ = std::fs::remove_file(run_dir.join("lifecycle"));
     let backend = Backend::Pulse {
         sink: env("INNKEEPER_AUDIO_SINK"),
@@ -47,16 +49,17 @@ fn main() -> Result<()> {
     innkeeper_bridge::info!("audio: {backend:?}");
     let mut services = Registry::default();
     let streams = Arc::new(AtomicUsize::new(0));
-    // The composer's displays in host windows (needs $WAYLAND_DISPLAY), and
-    // the system app's side of them: window requests, the seat, the IME.
+    // The composer's displays in host windows need $WAYLAND_DISPLAY. The
+    // system app's side covers window requests, the seat and the IME.
     let hub = Hub::new();
     *hub.evdev.lock().unwrap() = Some(innkeeper_bridge::input::evdev::Evdev::new(
         run_dir.join("bridge/evdev.sock"),
     )?);
     innkeeper_bridge::input::gamepad::start(run_dir.join("bridge/evdev.sock"));
-    // Not in the socket directory, which is shared with Android.
+    // Shared keeps its files in `<run>`, outside the socket directory, which
+    // is shared with Android.
     let shared = Shared::new(&run_dir, desktop, hub.clone(), &profile);
-    // The system app names the playing app; each audio connection applies
+    // The system app names the playing app. Each audio connection applies
     // that name to the playback streams it has open and the next one it opens.
     let audio_shared = shared.clone();
     services.register(service::AUDIO, "audio", move |peer, _events| {
@@ -93,7 +96,7 @@ fn main() -> Result<()> {
         Ok(Box::new(SystemService::new(shared.clone(), peer, events)))
     });
     // On SIGTERM (session stop) or SIGINT, close our desktop notifications
-    // before exiting; they would otherwise outlive the session.
+    // before exiting. They would otherwise outlive the session.
     let mut signals = signal_hook::iterator::Signals::new([
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGINT,
@@ -107,9 +110,9 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         })?;
-    // Android apps' accessibility trees on AT-SPI, while the desktop's
-    // assistive technologies are on (never in a test session on the user's
-    // own bus).
+    // Android apps' accessibility trees are published on AT-SPI while the
+    // desktop's assistive technologies are on. A test session does not
+    // publish them on the user's bus.
     let a11y = innkeeper_bridge::a11y::Shared::new(desktop);
     let focus = a11y.clone();
     a11y_hub.watch_focus(Box::new(move |w| focus.keyboard_focus(w)));
@@ -128,7 +131,6 @@ fn main() -> Result<()> {
             innkeeper_bridge::hoststate::HostStateService::new(host_state.clone(), peer, events),
         ))
     });
-    // Host files the user picks for Android.
     let store = innkeeper_bridge::documents::Store::new(Some(state_dir.join("documents.grants")));
     let session_store = store.clone();
     services.register(service::DOCUMENTS, "documents", move |peer, events| {

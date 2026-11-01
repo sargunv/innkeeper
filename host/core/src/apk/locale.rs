@@ -1,21 +1,24 @@
-//! Resource locales and how Android picks a value for one
-//! (`ResTable_config::match` and `isLocaleBetterThan`): the language must be
-//! the same and so must the script, which, when a locale doesn't name one,
-//! is the language's usual script. So `kk` matches `b+kk+Cyrl`, `zh-HK`
-//! matches `zh-TW` (both Traditional), and `sr-Latn` doesn't match `sr`.
+//! Resource locales, and how Android picks a value for a locale
+//! (`ResTable_config::match` and `isLocaleBetterThan`). The language must be
+//! the same, and so must the script. When a locale doesn't name a script, its
+//! script is the language's usual one. So `kk` matches `b+kk+Cyrl`, `zh-HK`
+//! matches `zh-TW` because both are Traditional, and `sr-Latn` doesn't match
+//! `sr`.
 
-/// A locale of a resource configuration; empty fields are absent.
+/// A locale of a resource configuration. An empty field means the qualifier
+/// is absent.
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Locale {
     pub lang: String,
-    /// Only when the configuration names it (`b+sr+Latn`).
+    /// Set only when the configuration names a script, as in `b+sr+Latn`.
     pub script: String,
     pub region: String,
     pub variant: String,
 }
 
-/// Languages whose usual script isn't Latin, from CLDR's likely subtags
-/// (the commonest Android resource languages; any other is taken as Latin).
+/// Languages whose usual script isn't Latin, from CLDR's likely subtags. The
+/// list covers the most common Android resource languages, and any other
+/// language is taken as Latin.
 const SCRIPTS: &[(&str, &str)] = &[
     (
         "Cyrl",
@@ -72,7 +75,8 @@ const REGION_SCRIPTS: &[(&str, &str, &str)] = &[
 ];
 
 impl Locale {
-    /// aapt2's form: `de`, `pt-BR`, `sr-Latn`, `es-419`; empty for the default.
+    /// The tag in aapt2's form, such as `de`, `pt-BR`, `sr-Latn` or `es-419`.
+    /// It is empty for the default locale.
     pub fn tag(&self) -> String {
         let mut t = self.lang.clone();
         for part in [&self.script, &self.region, &self.variant] {
@@ -88,7 +92,7 @@ impl Locale {
         self.lang.is_empty()
     }
 
-    /// The script, named or usual.
+    /// The named script, or else the language's usual one.
     fn script(&self) -> &str {
         if !self.script.is_empty() {
             return &self.script;
@@ -111,8 +115,9 @@ impl Locale {
         canon(&self.lang) == canon(&o.lang)
     }
 
-    /// How well a resource in this locale serves `want`: None if it can't,
-    /// higher is better. The default locale always serves, worst.
+    /// How well a resource in this locale serves `want`. Higher is better, and
+    /// None means it can't. The default locale always serves, with the lowest
+    /// score.
     pub fn score(&self, want: &Locale) -> Option<u8> {
         if self.is_default() {
             return Some(0);

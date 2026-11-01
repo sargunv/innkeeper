@@ -1,5 +1,5 @@
-//! Starting the guest's init (second stage) under the broker, with a clean
-//! environment plus what the broker and the shim read.
+//! Starts the guest's second-stage init under the broker, with a clean
+//! environment plus the variables that the broker and the shim read.
 
 use std::path::Path;
 use std::process::Command;
@@ -7,13 +7,13 @@ use std::process::Command;
 use crate::conf::Config;
 use crate::profile::System;
 
-/// `innkeeper-brk --preload <shim> /system/bin/init <second stage>`, plus
-/// `extra` variables. The image's first stage only mounts block devices and
-/// switches root.
+/// Builds `innkeeper-brk --preload <shim> /system/bin/init <second stage>`
+/// with `extra` added to the environment. The image's first stage is skipped
+/// because it only mounts block devices and switches root.
 pub fn command(cfg: &Config, extra: &[(&str, String)]) -> Command {
     let mut c = Command::new(cfg.paths.libexec.join("innkeeper-brk"));
-    // The shim's path is absolute: a bare name is not found from APEX linker
-    // namespaces.
+    // The shim's path is absolute because a bare name is not found from APEX
+    // linker namespaces.
     let (shim, stage, path): (_, &[&str], _) = match cfg.system {
         System::Android => (
             "/system/lib64/libinnkeeper_shim.so",

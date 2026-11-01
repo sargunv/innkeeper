@@ -1,10 +1,11 @@
-//! Input files: a plain `.apk`, or a split-APK bundle (`.apks` from
-//! bundletool, `.xapk`, `.apkm`), which are all zip archives of APKs.
+//! Input files. An input is a plain `.apk` or a split-APK bundle, such as an
+//! `.apks` from bundletool, an `.xapk` or an `.apkm`. All of them are zip
+//! archives of APKs.
 //!
-//! Bundle members are extracted to a private work directory under the user's
-//! cache dir (never `/tmp`, which is RAM-backed on the dev host) with generated
-//! names: entry names are untrusted and never become paths. Sizes are capped
-//! against zip bombs.
+//! Bundle members are extracted with generated names into a private work
+//! directory under the user's cache dir. The work directory is not in `/tmp`,
+//! which is RAM-backed on the dev host. Entry names are untrusted, so they
+//! never become paths. Sizes are capped to guard against zip bombs.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -18,11 +19,12 @@ use anyhow::{Context, Result, bail};
 const MAX_APK: u64 = 4 << 30;
 const MAX_TOTAL: u64 = 8 << 30;
 
-/// One APK to install: a host path plus the name it gets in the install session.
+/// One APK to install, with the zip entry it came from.
 #[derive(Debug, Clone)]
 pub struct Member {
     pub path: PathBuf,
-    /// Zip entry name (for messages only).
+    /// The zip entry name, or the file path for a plain APK. It is used only
+    /// in messages.
     pub origin: String,
 }
 
@@ -47,10 +49,11 @@ fn is_zip(path: &Path) -> Result<bool> {
     Ok(f.read_exact(&mut magic).is_ok() && magic == *b"PK\x03\x04")
 }
 
-/// Which entries of a bundle to install. bundletool `.apks`: `splits/*.apk`
-/// (else `universal.apk`, else root APKs; `standalones/` are for pre-L
-/// devices). `.xapk`/`.apkm`: the APKs at any depth. OBB files are reported as
-/// skipped.
+/// Chooses which entries of a bundle to install. A bundletool `.apks`
+/// installs `splits/*.apk`, or else `universal.apk`. Any other bundle, such as
+/// an `.xapk` or `.apkm`, installs its APKs at any depth outside
+/// `standalones/`, which holds APKs for pre-L devices. OBB files are reported
+/// as skipped.
 pub fn select_entries(names: &[String]) -> (Vec<String>, Vec<String>) {
     let apks: Vec<&String> = names
         .iter()
@@ -80,8 +83,8 @@ pub fn select_entries(names: &[String]) -> (Vec<String>, Vec<String>) {
     (v, skipped)
 }
 
-/// Opens `path`. A plain APK is used in place; a bundle is unpacked into a new
-/// directory under `work_root`.
+/// Opens `path`. A plain APK is used in place. A bundle is unpacked into a
+/// new directory under `work_root`.
 pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
     if !is_zip(path)? {
         return Err(anyhow::anyhow!(
@@ -124,7 +127,8 @@ pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
         );
     }
     fs::create_dir_all(work_root)?;
-    // Unique per process and per open: the GUI can hold several at once.
+    // The name is unique per process and per open, because the GUI can hold
+    // several inputs at once.
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let work = work_root.join(format!(
         "install-{}-{}",
@@ -161,8 +165,8 @@ pub fn open(path: &Path, work_root: &Path) -> Result<Input> {
     Ok(input)
 }
 
-/// ABI of a config split name (`config.arm64_v8a` -> `arm64-v8a`, as in
-/// `ro.product.cpu.abilist`).
+/// The ABI of a config split name, spelled as in `ro.product.cpu.abilist`
+/// (`config.arm64_v8a` -> `arm64-v8a`).
 pub fn split_abi(split: &str) -> Option<String> {
     let cfg = split.rsplit_once("config.").map(|(_, c)| c)?;
     let abi = match cfg {

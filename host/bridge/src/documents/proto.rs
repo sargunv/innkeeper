@@ -1,7 +1,8 @@
 //! Documents service messages (id 4, types 0x0400..=0x04ff, events
 //! 0x4400..=0x44ff). The client is the Innkeeper System app's document
 //! picker (`PickerActivity.kt`) and DocumentsProvider
-//! (`HostDocumentsProvider.kt`); only its uid may open the service.
+//! (`HostDocumentsProvider.kt`). Only the system app's uid may open the
+//! service.
 //!
 //! | Type     | Request | Body                                                                                                                                                                                                   | Reply                                                                                                                                                         |
 //! | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -19,11 +20,11 @@
 //! | `0x4401` | PICKED    | `u32 request`, `u64 grant`, `u8 kind`, `u8 writable`, name (display name), one per item    |
 //! | `0x4402` | PICK_DONE | `u32 request`, `i32 status` (0, `-ECANCELED` when the user cancelled, `-EIO`), `u32 count` |
 //!
-//! Paths are relative to a folder grant: `u16 len` + `/`-separated UTF-8
-//! names, none empty, `.` or `..`, at most 400 bytes; names are at most 255
-//! bytes with no NUL or `/`. A meta is `u8 kind`, `u64 size`,
-//! `i64 mtime_ms`, `u8 writable`, `u16 len` + name. Writes, creates, deletes
-//! and renames need a grant made for writing.
+//! Paths are relative to a folder grant. A path is `u16 len` + `/`-separated
+//! UTF-8 names, at most 400 bytes. No name may be empty, `.` or `..`. Names
+//! are at most 255 bytes with no NUL or `/`. A meta is `u8 kind`,
+//! `u64 size`, `i64 mtime_ms`, `u8 writable`, `u16 len` + name. Writes,
+//! creates, deletes and renames need a grant made for writing.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -37,15 +38,14 @@ pub mod ty {
     pub const RENAME: u16 = 0x0407;
     pub const FORGET: u16 = 0x0408;
 
-    /// Events.
     pub const PICKED: u16 = 0x4401;
     pub const PICK_DONE: u16 = 0x4402;
 }
 
 pub mod limits {
-    /// Relative paths inside a granted folder, in bytes.
+    /// Longest relative path inside a granted folder, in bytes.
     pub const MAX_PATH: usize = 400;
-    /// One file name, in bytes.
+    /// Longest file name, in bytes.
     pub const MAX_NAME: usize = 255;
     pub const MAX_MIMES: usize = 16;
 }
@@ -85,10 +85,10 @@ pub struct Pick {
     /// The client's id for this pick, echoed in the events.
     pub request: u32,
     pub mode: PickMode,
-    /// The app asked for write access.
+    /// Whether the app asked for write access.
     pub write: bool,
-    /// Android display id of the app's window (0: none), for the dialog's
-    /// parent.
+    /// Android display id of the app's window, or 0 for none. It parents the
+    /// dialog.
     pub window: u32,
     pub title: String,
     /// SaveFile's suggested name.
@@ -132,13 +132,15 @@ pub enum Request {
     },
 }
 
-/// A relative path inside a granted folder: `/`-separated names, none empty,
-/// `.` or `..`, no NUL, at most MAX_PATH bytes. Empty is the folder itself.
+/// Checks a relative path inside a granted folder. It has `/`-separated names
+/// with no NUL, at most MAX_PATH bytes, and no name may be empty, `.` or `..`.
+/// An empty path names the folder itself.
 pub fn valid_path(p: &str) -> bool {
     p.len() <= limits::MAX_PATH && (p.is_empty() || p.split('/').all(valid_name))
 }
 
-/// One file name: 1 to 255 bytes, no `/` or NUL, not `.` or `..`.
+/// Checks one file name. It must be 1 to 255 bytes, without `/` or NUL, and
+/// not `.` or `..`.
 pub fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= limits::MAX_NAME
@@ -331,8 +333,8 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// File metadata, as STAT's reply and each LIST entry: `u8 kind`, `u64
-/// size`, `i64 mtime_ms`, `u8 writable`, `u16 len` + name.
+/// File metadata, as in STAT's reply and each LIST entry. It is `u8 kind`,
+/// `u64 size`, `i64 mtime_ms`, `u8 writable`, `u16 len` + name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Meta {
     pub kind: Kind,
@@ -355,8 +357,8 @@ impl Meta {
 pub mod event {
     use super::*;
 
-    /// One picked item: `u32 request`, `u64 grant`, `u8 kind`, `u8
-    /// writable`, name (display name, truncated).
+    /// One picked item: `u32 request`, `u64 grant`, `u8 kind`,
+    /// `u8 writable`, and the truncated display name.
     pub fn picked(request: u32, grant: u64, kind: Kind, writable: bool, name: &str) -> Vec<u8> {
         let mut w = Writer::default();
         w.u32(request)
@@ -367,7 +369,7 @@ pub mod event {
         w.into_vec()
     }
 
-    /// The pick ended: `u32 request`, `i32 status` (0, -ECANCELED, -EIO),
+    /// The end of a pick: `u32 request`, `i32 status` (0, -ECANCELED, -EIO),
     /// `u32 count`.
     pub fn done(request: u32, status: i32, count: u32) -> Vec<u8> {
         let mut w = Writer::default();

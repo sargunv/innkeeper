@@ -1,7 +1,7 @@
-//! End-to-end tests of the bridge over a real socket, with the null output:
-//! a well-behaved client streams through the ring, and hostile clients
-//! (garbage, oversized packets, attached fds, resource exhaustion) are
-//! answered or dropped without disturbing anyone else.
+//! End-to-end tests of the bridge over a real socket with the null output. A
+//! well-behaved client streams through the ring. Misbehaving clients that send
+//! garbage, oversized packets or attached fds, or that exhaust resources, are
+//! answered or dropped without disturbing other clients.
 
 use std::io::IoSliceMut;
 use std::mem::MaybeUninit;
@@ -28,7 +28,7 @@ use rustix::net::{
 
 static N: AtomicU32 = AtomicU32::new(0);
 
-/// A test service: request 0x0d01 echoes its body back as event 0x4001.
+/// A test service. Request 0x0d01 echoes its body back as event 0x4001.
 const ECHO: u32 = 13;
 struct Echo(Events);
 impl Service for Echo {
@@ -119,7 +119,7 @@ impl Client {
         transport::send_owned(&self.sock, b, fds)
     }
 
-    /// Receives one packet: None on EOF or timeout.
+    /// Receives one packet. Returns None on EOF or timeout.
     fn recv(&self) -> Option<(Vec<u8>, Vec<OwnedFd>)> {
         let mut pfd = [PollFd::new(&self.sock, PollFlags::IN)];
         let t = rustix::time::Timespec {
@@ -209,7 +209,7 @@ fn stream_through_ring() {
     assert_eq!((r.capacity_frames, r.data_offset), (1920, 4096));
     assert_eq!(fds.len(), 3);
     let [memfd, data, space]: [OwnedFd; 3] = fds.try_into().unwrap();
-    // SAFETY: test mapping of the ring we were given, of its advertised size.
+    // SAFETY: The test maps the ring it was given, at its advertised size.
     let map = unsafe {
         rustix::mm::mmap(
             std::ptr::null_mut(),
@@ -221,7 +221,7 @@ fn stream_through_ring() {
         )
         .unwrap()
     } as *mut u8;
-    // SAFETY: header fields are 8-aligned inside the first page.
+    // SAFETY: The header fields are 8-aligned inside the first page.
     let hdr = |off: usize| unsafe { &*(map.add(off) as *const std::sync::atomic::AtomicU64) };
     assert_eq!(unsafe { *(map as *const u32) }, 0x5241_584c);
     // The client cannot shrink the ring under the bridge.
@@ -303,7 +303,7 @@ fn stream_fds_cannot_block_the_bridge() {
     // Saturate the space signal, if it is a counter we can write.
     let _ = rustix::io::write(&space, &(u64::MAX - 1).to_ne_bytes());
     // Queue a full ring so the stream consumes and signals space.
-    // SAFETY: test mapping of the ring we were given, of its advertised size.
+    // SAFETY: The test maps the ring it was given, at its advertised size.
     let map = unsafe {
         rustix::mm::mmap(
             std::ptr::null_mut(),
@@ -315,7 +315,7 @@ fn stream_fds_cannot_block_the_bridge() {
         )
         .unwrap()
     } as *mut u8;
-    // SAFETY: header fields are 8-aligned inside the first page.
+    // SAFETY: The header fields are 8-aligned inside the first page.
     let write_pos = unsafe { &*(map.add(64) as *const std::sync::atomic::AtomicU64) };
     write_pos.store(1920, Ordering::Release);
     rustix::io::write(&data, &1u64.to_ne_bytes()).unwrap();
@@ -362,8 +362,8 @@ fn protocol_errors() {
 
     let mut c = Client::connect(&path);
     c.hello();
-    // Second HELLO, event types, bad values, unknown type, unknown stream:
-    // answered.
+    // A second HELLO, event types, bad values, an unknown type and an
+    // unknown stream are answered.
     assert_eq!(
         c.call_with(|t| hello(1, service::AUDIO).encode(t))
             .unwrap()
@@ -391,7 +391,7 @@ fn protocol_errors() {
     let (b, fds) = c.recv().unwrap();
     assert!(fds.is_empty());
     assert_eq!(wire::decode_reply(&b).unwrap().1, -EPROTO);
-    // Oversized packet: dropped.
+    // An oversized packet drops the connection.
     c.send_raw(&[0u8; 2000], &[]).unwrap();
     assert!(c.recv().is_none());
 
@@ -415,7 +415,8 @@ fn resource_caps() {
     assert_eq!(a.call(&out_cfg(480, 2)).unwrap().0, -EBUSY); // per client
     let mut b = Client::connect(&path);
     b.hello();
-    // 16384 * 16 frames * 4 bytes = 1 MiB + header: over the byte budget.
+    // 16384 * 16 frames * 4 bytes = 1 MiB, plus the header, is over the byte
+    // budget.
     assert_eq!(b.call(&out_cfg(16384, 16)).unwrap().0, -EBUSY);
     assert_eq!(b.call(&out_cfg(480, 2)).unwrap().0, 0);
     assert_eq!(b.call(&out_cfg(480, 2)).unwrap().0, -EBUSY); // global
@@ -423,7 +424,7 @@ fn resource_caps() {
     drop(a);
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(b.call(&out_cfg(480, 2)).unwrap().0, 0);
-    // Client cap: 4 connections at most.
+    // The client cap is 4 connections.
     let extra: Vec<Client> = (0..4).map(|_| Client::connect(&path)).collect();
     std::thread::sleep(Duration::from_millis(200));
     let mut last = Client::connect(&path);
@@ -478,7 +479,8 @@ fn service_events() {
 fn connected_events_follow_the_hello_reply() {
     let path = start(Limits::default());
     let mut c = Client::connect(&path);
-    // call_with reads the next message as the reply: the greeting can't come first.
+    // call_with reads the next message as the reply, so the greeting can't
+    // come first.
     assert_eq!(c.call_with(|t| hello(1, GREET).encode(t)).unwrap().0, 0);
     let (b, _) = c.recv().unwrap();
     assert_eq!(wire::decode_header(&b).unwrap().ty, 0x4002);

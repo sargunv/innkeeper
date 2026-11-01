@@ -1,8 +1,8 @@
-//! The input service (id 6): the Innkeeper System app's window requests, the
-//! host seat as input lines, and the host's input methods for its IME. The
-//! wire spec is in [`proto`].
+//! The input service (id 6). It carries the Innkeeper System app's window
+//! requests, the host seat as input lines, and the host's input methods for
+//! the app's IME. The wire spec is in [`proto`].
 //!
-//! The display service owns the Wayland connection and the windows; it hands
+//! The display service owns the Wayland connection and the windows. It hands
 //! seat events to [`seat`] and [`text_input`], whose lines go to every input
 //! connection through the [`Hub`].
 

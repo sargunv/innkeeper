@@ -1,7 +1,8 @@
-//! Android → desktop handoffs. Metadata is a sealed blob; content fds are
-//! copied to real, size-capped files in the profile cache (portals cannot
-//! export memfds). Opened files and email attachments stay until session
-//! shutdown so a launched app can read them after the portal responds.
+//! Handoffs from Android to the desktop. The metadata arrives as a sealed
+//! blob. Content fds are copied to real, size-capped files in the profile
+//! cache, because portals cannot export memfds. Opened files and email
+//! attachments stay until session shutdown so that a launched app can read
+//! them after the portal responds.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -33,7 +34,8 @@ pub struct Payload {
 }
 
 impl Payload {
-    /// version 1; text (≤32 KiB), subject (≤4 KiB), one name (≤255 B) per fd.
+    /// Decodes version 1: text of up to 32 KiB, a subject of up to 4 KiB, and
+    /// one name of up to 255 bytes per fd.
     pub fn decode(bytes: &[u8], files: u8) -> Result<Self, DecodeError> {
         let mut d = Doc::new(bytes);
         if d.0.u32()? != 1 {
@@ -105,7 +107,8 @@ impl Handoffs {
         }
     }
 
-    /// An outstanding portal operation, released by the worker on every exit.
+    /// Reserves a slot for an outstanding portal operation. The worker
+    /// releases it on every exit path.
     pub fn slot(self: &Arc<Self>) -> Option<Slot> {
         self.active
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
@@ -117,7 +120,8 @@ impl Handoffs {
 
     fn stage(&self, p: &Payload, fds: Vec<OwnedFd>) -> Result<Stage, i32> {
         self.initialized.get_or_init(|| {
-            // One bridge owns a profile; reap copies after a previous crash.
+            // One bridge owns a profile, so any copies here are left over
+            // from a previous crash.
             let _ = std::fs::remove_dir_all(&self.root);
         });
         for fd in &fds {
@@ -221,7 +225,7 @@ impl Handoffs {
                     mimes: vec![],
                 };
                 let paths = portal::pick_with_activation(conn, &parent, &pick, &token)?;
-                // Only the portal's explicitly chosen destination is written.
+                // Only the destination chosen in the portal is written.
                 let mut target = OpenOptions::new()
                     .write(true)
                     .create(true)
@@ -234,8 +238,9 @@ impl Handoffs {
             return Ok(()); // Stage's Drop removes the now-saved copies.
         }
         let stage = stage.map(Arc::new);
-        // Reserve before launching, without locking across a portal dialog.
-        // An earlier item may still need its copy if a later item fails.
+        // Reserve cache space before launching, without holding the lock
+        // across a portal dialog. If a later item fails, an earlier item may
+        // still need its copy.
         if let Some(stage) = &stage {
             let mut retained = self.retained.lock().unwrap();
             if retained.iter().map(|s| s.bytes).sum::<u64>() + stage.bytes > MAX_CACHE {
@@ -293,7 +298,8 @@ enum Operation<'a> {
     Email(&'a str, &'a str, Vec<Fd<'a>>),
 }
 
-/// Subscribe before the call so an immediate Response cannot be lost.
+/// Calls a portal method and waits for its Response. It subscribes before
+/// the call so that an immediate Response cannot be lost.
 fn request(
     conn: &zbus::blocking::Connection,
     parent: &str,

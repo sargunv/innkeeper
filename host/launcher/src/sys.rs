@@ -1,5 +1,5 @@
-//! Thin wrappers over the syscalls the launcher makes, with the path in every
-//! error.
+//! Thin wrappers over the syscalls the launcher makes. Errors name the path
+//! involved.
 
 use std::ffi::{CString, OsStr};
 use std::fs;
@@ -40,7 +40,7 @@ pub fn mkfifo(p: &Path, mode: libc::mode_t) -> Result<()> {
     Ok(())
 }
 
-/// A pidfd for `pid`, readable once it exits.
+/// Opens a pidfd for `pid`. The fd becomes readable once the process exits.
 pub fn pidfd(pid: u32) -> io::Result<OwnedFd> {
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
     if fd < 0 {
@@ -49,7 +49,7 @@ pub fn pidfd(pid: u32) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
 }
 
-/// poll(2) on `fds` for `events`; returns each fd's revents.
+/// Calls poll(2) on `fds`, retrying on EINTR, and returns each fd's revents.
 pub fn poll(fds: &[(RawFd, i16)], timeout_ms: i32) -> io::Result<Vec<i16>> {
     let mut p: Vec<libc::pollfd> = fds
         .iter()
@@ -101,8 +101,8 @@ pub fn alive(pid: i32) -> bool {
     pid > 0 && Path::new(&format!("/proc/{pid}")).exists()
 }
 
-/// The children of `pid` whose command name is one of `names`, by scanning
-/// /proc (any name if `names` is empty).
+/// Returns the children of `pid` whose command name is in `names`, or all of
+/// them if `names` is empty. Scans /proc.
 pub fn children(pid: i32, names: &[&str]) -> Vec<i32> {
     let mut v = vec![];
     let Ok(dir) = fs::read_dir("/proc") else {
@@ -115,7 +115,8 @@ pub fn children(pid: i32, names: &[&str]) -> Vec<i32> {
         let Ok(stat) = fs::read_to_string(format!("/proc/{p}/stat")) else {
             continue;
         };
-        // "pid (comm) state ppid ...": comm may hold spaces and parens.
+        // The format is "pid (comm) state ppid ...". comm may contain spaces
+        // and parentheses.
         let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
             continue;
         };
@@ -132,7 +133,7 @@ pub fn children(pid: i32, names: &[&str]) -> Vec<i32> {
     v
 }
 
-/// Every process's parent, from /proc.
+/// Returns (pid, ppid) for every process in /proc.
 fn parents() -> Vec<(i32, i32)> {
     let mut v = vec![];
     for e in fs::read_dir("/proc").into_iter().flatten().flatten() {
@@ -153,8 +154,8 @@ fn parents() -> Vec<(i32, i32)> {
     v
 }
 
-/// Kills every descendant of this process. They are all stopped first, so
-/// none is reparented out of reach (to the sandbox's pid 1) while its parent
+/// Kills every descendant of this process. They are all stopped first so that
+/// none is reparented to the sandbox's pid 1, out of reach, when its parent
 /// dies.
 pub fn kill_descendants() {
     let me = pid();
@@ -186,8 +187,8 @@ pub fn kill_descendants() {
     }
 }
 
-/// Blocks `sigs` in this thread and the threads it starts (child processes
-/// get an empty mask from std), and returns a set for [`wait_signal`].
+/// Blocks `sigs` in this thread and the threads it starts, and returns a set
+/// for [`wait_signal`]. Child processes get an empty mask from std.
 pub fn block_signals(sigs: &[libc::c_int]) -> libc::sigset_t {
     unsafe {
         let mut set: libc::sigset_t = std::mem::zeroed();

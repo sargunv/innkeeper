@@ -1,12 +1,13 @@
 //! Clipboard transfers shared by ext-data-control and the display service's
 //! focus-scoped wl_data_device (GNOME). Test sessions never create this hub.
 //!
-//! - Host to Android: each new host selection with text (or, without text,
-//!   a PNG image) is read (capped), and sent to every subscribed system-app
-//!   connection as a `CLIP` event with a sealed memfd.
-//! - Android to host: `CLIP_SET` becomes our data source. It also offers a
-//!   private marker type, so the selection event that follows is recognised
-//!   as our own and not echoed back.
+//! - Host to Android: each new host selection is read up to a size cap, in
+//!   the first type it offers among a file transfer key, a URI list, text
+//!   and a PNG image. It is sent to every subscribed system-app connection
+//!   as a `CLIP` event with a sealed memfd.
+//! - Android to host: `CLIP_SET` becomes the bridge's data source. It also
+//!   offers a private marker type, so the selection event that follows is
+//!   recognised as the bridge's own and not echoed back.
 //!
 //! Sensitive clips (Android's `EXTRA_IS_SENSITIVE`) carry KDE's
 //! `x-kde-passwordManagerHint: secret`, which keeps them out of history.
@@ -50,9 +51,9 @@ const TEXT_TYPES: [&str; 5] = [
     "TEXT",
     "STRING",
 ];
-/// Longest a transfer may take, either way.
+/// The longest a transfer may take in either direction.
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(5);
-/// Largest host image we take (each side).
+/// The largest host image accepted, per side.
 const MAX_IMAGE_SIDE: u32 = 2048;
 
 /// Clipboard content.
@@ -90,7 +91,7 @@ enum Cmd {
     Set(Arc<Offered>),
 }
 
-/// What our data source serves: bytes per MIME type.
+/// What the bridge's data source serves, as bytes per MIME type.
 pub(crate) struct Offered {
     pub(crate) types: HashMap<String, Arc<Vec<u8>>>,
     _file: Option<files::CachedFiles>,
@@ -232,7 +233,8 @@ impl ClipboardHub {
     }
 
     /// Supersedes in-flight transfers on a new selection or publication. The
-    /// current lock serializes this with accepting a completed read and set().
+    /// `current` lock orders this against accepting a completed read and
+    /// against set().
     pub(crate) fn invalidate_reads(&self) -> u64 {
         let _current = self.current.lock().unwrap();
         self.epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
@@ -243,8 +245,9 @@ impl ClipboardHub {
         if self.epoch.load(Ordering::Relaxed) != epoch || current.as_ref() == Some(&clip) {
             return;
         }
-        // A host replacement must not replay the last Android offer when the
-        // display connection is recreated. Its source retains any in-flight copy.
+        // The last Android offer must not be replayed after a host selection
+        // replaces it, even when the display connection is recreated. The
+        // offer's source keeps any in-flight copy alive.
         *self.offered.lock().unwrap() = None;
         crate::info!(
             "clipboard: host selection ({}{})",
@@ -428,7 +431,8 @@ impl Dispatch<ExtDataControlDeviceV1, ()> for State {
                     return;
                 };
                 let types = state.offers.get(&offer.id()).cloned().unwrap_or_default();
-                // Offers are only good until the next selection; drop the rest.
+                // An offer is valid only until the next selection, so the
+                // others are dropped.
                 state.offers.retain(|k, _| *k == offer.id());
                 if let Some(hub) = state.hub.upgrade() {
                     receive(&offer, &types, conn, hub);
@@ -458,7 +462,8 @@ fn receive(
     receive_offer(types, conn, hub, |mime, fd| offer.receive(mime.into(), fd));
 }
 
-/// Both Wayland protocols use the same MIME negotiation and bounded reader.
+/// Reads a host offer with the MIME negotiation and bounded reader that both
+/// Wayland protocols share.
 pub(crate) fn receive_offer(
     types: &[String],
     conn: &Connection,

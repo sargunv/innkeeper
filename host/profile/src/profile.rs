@@ -1,13 +1,14 @@
-//! Profiles: separate guest systems (Android or OpenHarmony, chosen when the
-//! profile is made), each with its own apps, data and settings, that can run
-//! side by side. A running profile is a session. Each
-//! is named (the launcher's by `INNKEEPER_PROFILE`), and suffixes every path
-//! of its own ([`crate::paths`]). None is special: the first is
-//! made on demand as [`FIRST`], and can be renamed or deleted like any other.
+//! A profile is a separate guest system, Android or OpenHarmony, chosen when
+//! the profile is made. Each profile has its own apps, data and settings, and
+//! profiles can run side by side. A running profile is a session. Every
+//! profile has a name, which suffixes each of its paths ([`crate::paths`]).
+//! The launcher takes its profile's name from `INNKEEPER_PROFILE`. No profile
+//! is special. The first is made on demand as [`FIRST`] and can be renamed or
+//! deleted like any other.
 //!
 //! A profile's settings live in one file in its data directory, beside the
-//! guest's own data (and Android's data version record, docs/session.md), so
-//! they move, back up and go with the data.
+//! guest's data and Android's data version record (docs/session.md). They
+//! move and get backed up together with the data.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,8 +25,8 @@ pub const FIRST: &str = "default";
 /// The longest profile name.
 const MAX_NAME: usize = 32;
 
-/// Checks a profile name: lowercase ASCII letters, digits and inner dashes,
-/// as every per-profile path carries it.
+/// Checks that a profile name uses only lowercase ASCII letters, digits and
+/// inner dashes, because every per-profile path carries it.
 pub fn check_name(name: &str) -> Result<()> {
     ensure!(!name.is_empty(), "no profile selected");
     ensure!(
@@ -42,7 +43,7 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// A profile's name, checked by [`check_name`]: never empty, so every
+/// A profile's name, checked by [`check_name`]. It is never empty, so every
 /// per-profile path, bus name and desktop entry carries one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -98,8 +99,8 @@ impl std::fmt::Display for ProfileName {
     }
 }
 
-/// The profiles under `data_home` (`$XDG_DATA_HOME/innkeeper`): its
-/// `data-<name>` directories, by name.
+/// The profiles under `data_home` (`$XDG_DATA_HOME/innkeeper`), found from
+/// its `data-<name>` directories and sorted by name.
 pub fn list(data_home: &Path) -> Vec<ProfileName> {
     let mut v: Vec<ProfileName> = fs::read_dir(data_home)
         .map(|d| {
@@ -116,8 +117,8 @@ pub fn list(data_home: &Path) -> Vec<ProfileName> {
     v
 }
 
-/// The guest system a profile runs, chosen when it is made: its data is that
-/// system's.
+/// The guest system a profile runs. It is chosen when the profile is made,
+/// because the profile's data belongs to that system.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum System {
@@ -141,7 +142,7 @@ impl System {
         Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
-    /// Its name for people.
+    /// Its user-facing name.
     pub fn title(self) -> &'static str {
         match self {
             System::Android => "Android",
@@ -150,8 +151,8 @@ impl System {
     }
 
     /// The displays it can show as. OpenHarmony composes every window into
-    /// one screen (ohos/README.md, "One window for all apps"), so it is a
-    /// phone; a tablet's landscape layout is untested there.
+    /// one screen (ohos/README.md, "One window for all apps"), so it shows
+    /// as a phone. A tablet's landscape layout is untested there.
     pub fn displays(self) -> &'static [Display] {
         match self {
             System::Android => &Display::ALL,
@@ -159,7 +160,8 @@ impl System {
         }
     }
 
-    /// Fails unless an Android profile: `what` is Android's alone.
+    /// Fails unless the system is Android, because `what` exists only for
+    /// Android profiles.
     pub fn need_android(self, what: &str) -> Result<()> {
         ensure!(
             self == System::Android,
@@ -170,7 +172,7 @@ impl System {
     }
 }
 
-/// A profile's settings; a missing key takes its default.
+/// A profile's settings. A missing key takes its default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
@@ -178,14 +180,15 @@ pub struct Settings {
     pub system: System,
     /// How the guest shows. Applies at the next start.
     pub display: Display,
-    /// Android's adb on loopback TCP. Off by default; it applies live.
+    /// Android's adb on loopback TCP. It is off by default and applies live.
     pub adb: bool,
-    /// adb's port on 127.0.0.1, one of the emulator's ([`ports`]), the
-    /// profile's own once it has been on (0: none yet). It stays, so tools
-    /// keep finding the profile there.
+    /// adb's port on 127.0.0.1, one of the emulator's ports ([`ports`]). It
+    /// is 0 until adb is first turned on. The port is kept after that, so
+    /// tools keep finding the profile there.
     pub adb_port: u16,
-    /// Minutes with nothing to do before the session stops, 1 to 120
-    /// (unless Keep Running, [`crate::preferences`]). Applies live.
+    /// Minutes with nothing to do before the session stops, from 1 to 120.
+    /// The Keep Running preference ([`crate::preferences`]) overrides it.
+    /// Applies live.
     pub idle_minutes: u32,
     /// Apps installed inside Android get app-menu entries. Applies live.
     pub mirror_apps: bool,
@@ -214,9 +217,10 @@ impl Default for Settings {
     }
 }
 
-/// How a profile shows on the desktop: each app task in a window of its own,
-/// or the whole device, its launcher and system bars, in one window the size
-/// of a device preset (Android Studio's virtual devices of the same names).
+/// How a profile shows on the desktop. Windowed puts each app task in its own
+/// window. The other presets show the whole device, with its launcher and
+/// system bars, in one window the size of the preset. The presets match
+/// Android Studio's virtual devices of the same names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Display {
@@ -236,7 +240,7 @@ impl Display {
     ];
 
     /// The device window's width and height in pixels, in its natural
-    /// orientation, and density; None when windowed.
+    /// orientation, and its density. None when windowed.
     pub fn screen(self) -> Option<(u32, u32, u32)> {
         match self {
             Display::Windowed => None,
@@ -268,18 +272,18 @@ impl Display {
     }
 }
 
-/// Where adb ports come from: the Android Emulator's adb ports, the
-/// odd ones from 5555 to 5585, each with its console port one below. An adb
-/// server looks for devices there, so it finds a profile as
-/// `emulator-<port - 1>` with no `adb connect`, and so do Android Studio and
-/// Gradle (whose test engine fails for `host:port` serials).
+/// The adb ports a profile can use. These are the Android Emulator's adb
+/// ports, the odd ones from 5555 to 5585, each with its console port one
+/// below. An adb server looks for devices on them, so it finds a profile as
+/// `emulator-<port - 1>` without `adb connect`. Android Studio and Gradle
+/// find it the same way. Gradle's test engine fails for `host:port` serials.
 pub fn ports() -> impl Iterator<Item = u16> {
     (5555..=5585).step_by(2)
 }
 
-/// The first adb port in [`ports`] that no other profile has (`taken`) and
-/// whose pair `free` accepts (a running emulator holds both), as the
-/// emulator picks its own.
+/// The first adb port in [`ports`] that is not in `taken` and whose port pair
+/// `free` accepts, since a running emulator holds both. The emulator picks
+/// its own port the same way.
 pub fn pick_port(taken: &[u16], free: impl Fn(u16) -> bool) -> Option<u16> {
     ports().find(|p| !taken.contains(p) && free(*p) && free(*p - 1))
 }
@@ -295,8 +299,8 @@ pub fn settings_path(data: &Path) -> PathBuf {
 }
 
 impl Settings {
-    /// A new profile's settings for `system`: the defaults, and a phone
-    /// where the system can't show apps in windows of their own.
+    /// A new profile's settings for `system`. These are the defaults, with a
+    /// phone display when the system can't show apps in separate windows.
     pub fn new(system: System) -> Self {
         Self {
             system,
@@ -305,7 +309,8 @@ impl Settings {
         }
     }
 
-    /// The settings in data directory `data`; the defaults if it has none.
+    /// Loads the settings in data directory `data`, or the defaults if it has
+    /// none.
     pub fn load(data: &Path) -> Result<Self> {
         let path = settings_path(data);
         let text = match fs::read_to_string(&path) {
@@ -349,7 +354,7 @@ impl Settings {
         Ok(())
     }
 
-    /// Seconds with nothing to do before the session stops; 0: never.
+    /// Seconds with nothing to do before the session stops, or 0 for never.
     pub fn idle_seconds(&self, keep_running: bool) -> u64 {
         if keep_running {
             0
@@ -358,9 +363,9 @@ impl Settings {
         }
     }
 
-    /// Gives adb of the profile with data directory `data` a port of its
-    /// own, if it has none: one no other profile under `data_home` has and
-    /// nothing listens on. Returns whether it changed.
+    /// Gives the profile with data directory `data` an adb port if it has
+    /// none. The port is one that no other profile under `data_home` has and
+    /// nothing listens on. Returns whether the port changed.
     pub fn assign_port(&mut self, data_home: &Path, data: &Path) -> Result<bool> {
         if self.adb_port != 0 {
             return Ok(false);
@@ -388,8 +393,8 @@ impl Settings {
     }
 }
 
-/// Deletes everything in data directory `data` but the profile's settings
-/// file: Android starts over, and the profile keeps its settings.
+/// Deletes everything in data directory `data` except the profile's settings
+/// file, so the guest starts over and the profile keeps its settings.
 pub fn reset(data: &Path) -> Result<()> {
     let Ok(entries) = fs::read_dir(data) else {
         return Ok(());
@@ -417,9 +422,9 @@ fn ensure_stopped(paths: &crate::Paths) -> Result<()> {
     Ok(())
 }
 
-/// Renames profile `from.profile` to `to.profile`: its data, settings and
-/// logs move; its composed root, a cache, is dropped. It
-/// must be stopped.
+/// Renames profile `from.profile` to `to.profile`. Its data, settings and
+/// logs move, and its composed root, which is a cache, is deleted. The
+/// profile must be stopped.
 pub fn rename(from: &crate::Paths, to: &crate::Paths) -> Result<()> {
     ensure_stopped(from)?;
     ensure!(from.data.is_dir(), "no profile {}", from.profile);
@@ -586,7 +591,7 @@ mod tests {
     fn ports_are_the_emulators_and_skip_busy_pairs_and_other_profiles() {
         let all_free = |_| true;
         assert_eq!(pick_port(&[], all_free), Some(5555));
-        // A running emulator holds 5554 and 5555; one holding only its
+        // A running emulator holds 5554 and 5555. One holding only its
         // console port still blocks the pair.
         let emulator = |p: u16| p != 5554 && p != 5555;
         assert_eq!(pick_port(&[], emulator), Some(5557));
@@ -602,8 +607,8 @@ mod tests {
         }
         .save(&other)
         .unwrap();
-        // A profile keeps its own port, a set one too; a new one gets a free
-        // pair.
+        // A profile keeps an assigned or explicitly set port, and a new
+        // profile gets a free pair.
         let mut s = Settings::default();
         assert!(s.assign_port(&d, &d.join("data-new")).unwrap());
         assert!(s.adb_port != 5555 && ports().any(|p| p == s.adb_port));

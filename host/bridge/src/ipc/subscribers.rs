@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::server::Events;
 
 /// Connections that want one kind of event. A client whose socket is full
-/// misses the event; one that is gone is dropped.
+/// misses the event. A client that has gone away is dropped.
 #[derive(Default)]
 pub struct Subscribers {
     next: AtomicU64,
@@ -38,8 +38,8 @@ impl Subscribers {
     }
 }
 
-/// Did an event send leave the connection usable (sent, or only dropped
-/// because the client isn't reading)?
+/// Whether an event send left the connection usable. A send that failed
+/// with EAGAIN because the client isn't reading still counts as usable.
 fn alive(r: anyhow::Result<()>) -> bool {
     match r {
         Ok(()) => true,
@@ -53,9 +53,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// A subscriber that stops reading can't stall a broadcast (which holds
-    /// the subscriber lock), and keeps its subscription; one that is gone is
-    /// dropped.
+    /// A subscriber that stops reading can't stall a broadcast, which holds
+    /// the subscriber lock, and it keeps its subscription. A subscriber that
+    /// has gone away is dropped.
     #[test]
     fn broadcast_never_waits_for_a_slow_client() {
         let (a, b) = rustix::net::socketpair(

@@ -1,5 +1,6 @@
-//! Preparing the pinned image: fetched and extracted, its APEXes flattened,
-//! its files read-only, and the derived layers current (image/README.md).
+//! Prepares the pinned Android image. It fetches and extracts the image,
+//! flattens its APEXes, makes its files read-only and brings the derived layer
+//! up to date. See image/README.md.
 
 use std::fs;
 use std::io::{self, Write};
@@ -16,8 +17,9 @@ use crate::profile::System;
 
 const DATA_VERSION: &str = ".innkeeper-data-version";
 
-/// Order Google's CI frameworks by SDK, then numeric build ID, never by the
-/// cache directory's name. Read the actual system image, not the pin's label.
+/// An AOSP CI framework build, read from the system image's build.prop.
+/// Builds are ordered by SDK and then by numeric build ID. The cache
+/// directory's name and the pin's label play no part in the order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Framework {
     image: String,
@@ -45,8 +47,10 @@ impl Framework {
     }
 }
 
-/// An attempted boot may already have migrated /data before it fails. Keep
-/// that floor as well as the last success; retrying it or upgrading is safe.
+/// The frameworks that have opened /data. A boot attempt may migrate /data
+/// before it fails, so the record keeps the last attempt as well as the last
+/// successful boot. Starting the attempted framework again or a newer one is
+/// safe.
 #[derive(Debug, Serialize, Deserialize)]
 struct DataVersion {
     started: Framework,
@@ -91,8 +95,10 @@ impl DataVersion {
     }
 }
 
-/// Read-only gate, also in the calling sandbox so background start reports
-/// the actionable error directly. Preparing an image alone never adopts data.
+/// Fails if `image` is older than a framework that has opened `data`, and
+/// writes nothing. `start` also runs it in the calling sandbox so that a
+/// background start reports the error directly. Preparing an image does not
+/// record a data version.
 pub fn check_data(data: &Path, image: &Image) -> Result<()> {
     let current = Framework::read(image)?;
     if let Some(state) = DataVersion::load(data)? {
@@ -101,9 +107,10 @@ pub fn check_data(data: &Path, image: &Image) -> Result<()> {
     Ok(())
 }
 
-/// Called before any setup of /data or Android process. Persist the attempt
-/// before exposing data, and give init an atomic replacement to commit at
-/// sys.boot_completed=1. An interrupted boot keeps the old `booted` value.
+/// Records a boot attempt. It must run before /data is set up or any Android
+/// process starts. The attempt is persisted before data is exposed, and init
+/// gets a replacement record to commit atomically at sys.boot_completed=1. An
+/// interrupted boot keeps the old `booted` value.
 pub fn begin_boot(data: &Path, image: &Image, innkeeper: &Path) -> Result<()> {
     let current = Framework::read(image)?;
     let previous = DataVersion::load(data)?;
@@ -147,10 +154,10 @@ fn run(c: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Makes every file under `dir` read-only (a-w), `last` after all others, so
-/// a tree whose `last` is read-only is done. Composed roots hardlink these
-/// files, so this keeps a session from writing the cache
-/// through them (and ART refuses dex files its process could write).
+/// Makes every file under `dir` read-only (a-w). `last` goes after all others,
+/// so a read-only `last` marks a finished tree. Composed roots hardlink these
+/// files, so this keeps a session from writing to the cache through them. ART
+/// also refuses dex files that its process could write.
 fn make_read_only(dir: &Path, last: &Path) -> Result<()> {
     if fs::metadata(last).is_ok_and(|m| m.permissions().mode() & 0o222 == 0) {
         return Ok(());
@@ -182,7 +189,8 @@ pub fn walk_files(dir: &Path, f: &mut dyn FnMut(&Path, u32) -> Result<()>) -> Re
     Ok(())
 }
 
-/// What the derived layer was made from: the APEX tree and derive.sh's hash.
+/// Describes the inputs of the derived layer, which are the APEX tree and the
+/// hash of derive.sh.
 fn derive_source(paths: &Paths, image: &Image) -> Result<String> {
     let script = fs::read(paths.libexec.join("image/derive.sh"))?;
     let h: String = Sha256::digest(&script)
@@ -215,7 +223,7 @@ pub fn prepare(paths: &Paths, image: &Image) -> Result<crate::prune::Lease> {
             .arg(paths.share.join("image/bootconfig"))
             .arg(&tmp))?;
         make_read_only(&tmp, &tmp.join("apex-info-list.xml"))?;
-        // Another profile may have won the race: fine.
+        // Another profile may have won the race, which is fine.
         if fs::rename(&tmp, &image.apexdir).is_err() {
             let _ = fs::remove_dir_all(&tmp);
         }

@@ -1,5 +1,5 @@
-//! Android's root: the partitions, the image's top-level entries, the binder
-//! nodes and `/innkeeper`.
+//! Builds Android's root, which holds the partitions, the image's top-level
+//! entries, the binder nodes and `/innkeeper`.
 
 use std::fs;
 use std::io::Write;
@@ -23,11 +23,12 @@ pub const PARTITIONS: &[&str] = &[
     "odm_dlkm",
 ];
 
-/// The partitions our layers go over (the `*_dlkm` ones are the image's
-/// alone).
+/// The partitions our layers go over. The `*_dlkm` partitions come from the
+/// image alone.
 pub const LAYERED: &[&str] = &["system", "vendor", "system_ext", "product", "odm"];
 
-/// The image's extracted partition `name` (system is system-as-root).
+/// The image's extracted partition `name`. The system partition is
+/// system-as-root, so it is under `system/system`.
 pub fn image_partition(img: &Path, name: &str) -> PathBuf {
     if name == "system" {
         img.join("system/system")
@@ -36,10 +37,11 @@ pub fn image_partition(img: &Path, name: &str) -> PathBuf {
     }
 }
 
-/// Copies the top-level entries of the system-as-root image (symlinks such as
-/// `/bin`, `init.environ.rc`, empty mount points) into `dst` where it has
-/// none: links as links, dirs empty (with their mode if `keep_mode`), files
-/// with their mode and times.
+/// Copies the top-level entries of the system-as-root image, such as the
+/// `/bin` symlink, `init.environ.rc` and empty mount points, into `dst` where
+/// it lacks them. Symlinks stay symlinks, and files keep their mode and
+/// times. Directories are created empty, with the image's mode if
+/// `keep_mode` is set and 0755 otherwise.
 pub fn copy_top_level(img: &Path, dst: &Path, keep_mode: bool) -> Result<()> {
     let top = img.join("system");
     for e in fs::read_dir(&top).with_context(|| format!("read {}", top.display()))? {
@@ -66,7 +68,7 @@ pub fn copy_top_level(img: &Path, dst: &Path, keep_mode: bool) -> Result<()> {
     Ok(())
 }
 
-/// `cp -p`: contents, mode and times.
+/// Copies a file like `cp -p`, keeping its contents, mode and times.
 pub fn copy_file(src: &Path, dst: &Path) -> Result<()> {
     fs::copy(src, dst).with_context(|| format!("copy {} to {}", src.display(), dst.display()))?;
     let m = fs::metadata(src)?;
@@ -79,13 +81,14 @@ pub fn copy_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Binder is served in userspace (supervisor/README.md), so `/dev` (`d`)
-/// gets dummy, readable binder nodes, made before the seccomp filter is
-/// installed: libbinder gates on `access("/dev/binder", R_OK)` in
-/// selfIfKernelBinderEnabled(), the supervisor intercepts real opens and
-/// injects a memfd, and init can't create them itself (its own open of
-/// /dev/binder is intercepted). `binderfs/features` says what binderfs would
-/// report about the driver (libbinder reads it): the broker implements each.
+/// Creates dummy, readable binder nodes in the `/dev` directory `d`. Binder is
+/// served in userspace (supervisor/README.md). libbinder checks
+/// `access("/dev/binder", R_OK)` in selfIfKernelBinderEnabled(), and the
+/// supervisor intercepts real opens and injects a memfd. The nodes are made
+/// before the seccomp filter is installed, because init's own open of
+/// /dev/binder is intercepted and so init can't create them.
+/// `binderfs/features` lists the driver features that binderfs would report,
+/// which libbinder reads. The broker implements each of them.
 pub fn binder_nodes(d: &Path) -> Result<()> {
     for n in ["binder", "hwbinder", "vndbinder"] {
         fs::write(d.join(n), b"")?;
@@ -103,16 +106,17 @@ pub fn binder_nodes(d: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `/innkeeper/`: what the session fakes for Android, read by the shim, the
-/// broker and our init scripts.
-///  - `apexd-mounts`: what apexd would see in /proc/mounts had it mounted
-///    each APEX itself (erofs file-backed: `<file> /apex/<name>@<version>`),
-///    for /system/bin/innkeeper-apexd.
-///  - `proc/`: stand-ins for /proc files: cmdline and bootconfig carry our
-///    `androidboot.*` values; init insists on raising ASLR entropy (fatal if
-///    it can't), so it gets a writable mmap_rnd_bits (the host's setting
-///    applies regardless); the BPF sysctls netbpfload sets, read by the
-///    broker.
+/// Writes `/innkeeper/`, the files the session fakes for Android. The shim,
+/// the broker and our init scripts read them.
+///  - `apexd-mounts`: the /proc/mounts lines apexd would see if it had
+///    mounted each APEX itself as file-backed erofs
+///    (`<file> /apex/<name>@<version>`). /system/bin/innkeeper-apexd reads
+///    it.
+///  - `proc/`: stand-ins for /proc files. cmdline and bootconfig carry our
+///    `androidboot.*` values. init fails if it can't raise ASLR entropy, so
+///    it gets a writable mmap_rnd_bits. The host's setting still applies. The
+///    directory also holds the BPF sysctls that netbpfload sets, which the
+///    broker reads.
 ///  - `config.gz`: a kernel config for code that wants /proc/config.gz
 ///    (supervisor/shim).
 pub fn innkeeper_dir(cfg: &Config, l: &Path) -> Result<()> {
@@ -131,8 +135,8 @@ pub fn innkeeper_dir(cfg: &Config, l: &Path) -> Result<()> {
     fs::write(proc.join("sys/kernel/unprivileged_bpf_disabled"), "2\n")?;
     fs::write(proc.join("sys/net/core/bpf_jit_enable"), "1\n")?;
     fs::write(proc.join("sys/net/core/bpf_jit_kallsyms"), "0\n")?;
-    // The sandbox can't read /boot. The one option system_server reads,
-    // as every x86_64 distro kernel sets it.
+    // The sandbox can't read /boot. The config holds only the option that
+    // system_server reads, with the value every x86_64 distro kernel uses.
     let mut gz = GzEncoder::new(
         fs::File::create(l.join("config.gz"))?,
         Compression::default(),

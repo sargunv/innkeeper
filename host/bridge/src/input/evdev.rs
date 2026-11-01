@@ -1,6 +1,7 @@
-//! Translation stays in the system app (host layout, shortcuts, gestures).
-//! Eligible translated events return here to the broker's session-local evdev
-//! endpoints; this bridge is the only writer of input_event records.
+//! The system app translates input (host layout, shortcuts, gestures) and
+//! sends eligible translated events back here. The bridge writes them to the
+//! broker's session-local evdev endpoints and is the only writer of
+//! input_event records.
 use innkeeper_evdev_proto::{Message, event};
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
@@ -53,8 +54,9 @@ impl Evdev {
             synthetic,
         }
         .encode();
-        // Connect once for sendmsg's ancillary fd; normal records still use
-        // send_to on the same destination.
+        // sendmsg without an address needs a connected socket to carry the
+        // ancillary fd. Normal records keep using send_to with the same
+        // destination.
         self.socket.connect(&self.path)?;
         let mut iov = libc::iovec {
             iov_base: b.as_mut_ptr().cast(),
@@ -84,8 +86,8 @@ impl Evdev {
     }
 
     fn packet(&self, b: &[u8]) -> std::io::Result<()> {
-        // The kernel's bounded receive queue supplies backpressure. Retry
-        // interruptions, and wait for room rather than dropping transitions.
+        // The kernel's bounded receive queue supplies backpressure. Retry on
+        // EINTR and block until there is room, so no transition is dropped.
         loop {
             match self.socket.send_to(b, &self.path) {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,

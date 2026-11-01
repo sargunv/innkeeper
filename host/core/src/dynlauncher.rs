@@ -1,9 +1,10 @@
-//! App-menu entries from inside the Flatpak, through the DynamicLauncher
-//! portal (`org.freedesktop.portal.DynamicLauncher`). A sandboxed app can't
-//! write the user's `applications` dir; the portal writes the entry for it,
-//! after the user confirms it in a dialog, and rewrites `Exec` to
-//! `flatpak run --command=<program> <app id> <args>`, which survives updates of
-//! the Flatpak. Entry ids must be `<app id>.<something>`.
+//! App-menu entries written from inside the Flatpak through the
+//! DynamicLauncher portal (`org.freedesktop.portal.DynamicLauncher`). A
+//! sandboxed app can't write the user's `applications` dir, so the portal
+//! writes the entry after the user confirms it in a dialog. The portal rewrites
+//! `Exec` to `flatpak run --command=<program> <app id> <args>`, which keeps
+//! working across updates of the Flatpak. Entry ids must have the form
+//! `<app id>.<something>`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,7 +16,7 @@ use zbus::zvariant::{OwnedValue, Value};
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 const IFACE: &str = "org.freedesktop.portal.DynamicLauncher";
-/// `launcher_type`: an application (not a web app).
+/// The `launcher_type` value for an application.
 const APPLICATION: u32 = 1;
 
 static TOKEN: AtomicU64 = AtomicU64::new(0);
@@ -31,10 +32,11 @@ fn connect() -> Result<Connection> {
     Connection::session().context("connect to the session bus")
 }
 
-/// Asks the user to add `entry` (a desktop file without `Icon`; the portal
-/// sets `Name` and `Icon` from the dialog) to the app menu as `id`
-/// (`<app id>.<suffix>.desktop`), with `icon` (a square PNG of at most 512
-/// px) and `name` as the dialog's defaults. Blocks until the user answers.
+/// Asks the user to add `entry` to the app menu as `id`, which has the form
+/// `<app id>.<suffix>.desktop`. `entry` is a desktop file without `Icon`,
+/// because the portal sets `Name` and `Icon` from the dialog. `name` and
+/// `icon` are the dialog's defaults, and `icon` is a square PNG of at most 512
+/// px. Blocks until the user answers.
 pub fn install(id: &str, name: &str, icon: &[u8], entry: &str) -> Result<Answer> {
     let conn = connect()?;
     let token = format!(
@@ -94,12 +96,14 @@ pub fn install(id: &str, name: &str, icon: &[u8], entry: &str) -> Result<Answer>
     Ok(Answer::Added)
 }
 
-/// The installed entry `id`, as the portal wrote it; None if there is none.
+/// Returns the installed entry `id` as the portal wrote it, or None if there
+/// is none.
 pub fn get(id: &str) -> Result<Option<String>> {
     let conn = connect()?;
     match conn.call_method(Some(PORTAL), PATH, Some(IFACE), "GetDesktopEntry", &(id,)) {
         Ok(m) => Ok(Some(m.body().deserialize()?)),
-        // A missing entry is the GFileError of reading it, unmapped.
+        // The portal reports a missing entry as the unmapped GFileError from
+        // reading the file.
         Err(zbus::Error::MethodError(name, _, _))
             if name.contains("g_2dfile_2derror_2dquark")
                 || name.as_str() == "org.freedesktop.portal.Error.NotFound" =>
@@ -110,7 +114,7 @@ pub fn get(id: &str) -> Result<Option<String>> {
     }
 }
 
-/// Removes entry `id` and its icon (no dialog).
+/// Removes entry `id` and its icon without a dialog.
 pub fn uninstall(id: &str) -> Result<()> {
     let conn = connect()?;
     let opts: HashMap<&str, Value<'_>> = HashMap::new();
@@ -119,8 +123,8 @@ pub fn uninstall(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Splits a command line the way `g_shell_parse_argv` does for what the
-/// portal writes: words, `'...'`, `"..."` with backslash escapes.
+/// Splits a command line as `g_shell_parse_argv` would, for the forms the
+/// portal writes: bare words, `'...'`, and `"..."` with backslash escapes.
 fn shell_words(s: &str) -> Vec<String> {
     let mut out = vec![];
     let mut it = s.chars().peekable();
@@ -150,10 +154,10 @@ fn shell_words(s: &str) -> Vec<String> {
     }
 }
 
-/// The command an installed entry's `Exec` (as [`get`] returns it, already
-/// unescaped) runs inside the app: `flatpak run [--opt...]
-/// --command=<program> <app id> <args>` read back as `<program> <args>`.
-/// None if it isn't that shape.
+/// Reads back the command that an installed entry's `Exec` runs inside the
+/// app. `exec` is the unescaped value that [`get`] returns.
+/// `flatpak run [--opt...] --command=<program> <app id> <args>` becomes
+/// `<program> <args>`. Returns None for any other shape.
 pub fn app_command(exec: &str, app_id: &str) -> Option<Vec<String>> {
     let w = shell_words(exec);
     let w = w.strip_prefix(&["flatpak".to_string(), "run".to_string()])?;

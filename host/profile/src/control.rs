@@ -1,15 +1,17 @@
-//! The session's control socket. Each `flatpak run` is a sandbox of its own,
+//! The session's control socket. Each `flatpak run` is a separate sandbox,
 //! with its own pid namespace and `/`, so the CLI or the manager can't enter
 //! the session's sandbox. The session's launcher listens on
 //! `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/control.sock`, which
 //! every instance of the app shares, and serves `status`, `stop` and `exec`.
 //!
-//! One SOCK_SEQPACKET message per request: NUL-separated words (the command,
-//! then exec's argv), with exec's stdin, stdout and stderr as SCM_RIGHTS. The
-//! reply is one message: status's text, exec's exit code, or `ok` for stop
-//! (the connection then closes when the session has ended).
+//! Each request is one SOCK_SEQPACKET message of NUL-separated words, the
+//! command followed by exec's argv. An exec request carries its stdin, stdout
+//! and stderr as SCM_RIGHTS. The reply is one message holding status's text,
+//! exec's exit code, or `ok` for stop. After `ok`, the connection closes when
+//! the session has ended.
 //!
-//! This is the client and the message helpers; the launcher serves.
+//! This module has the client and the message helpers. The launcher has the
+//! server.
 
 use std::ffi::OsStr;
 use std::io;
@@ -20,7 +22,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-/// A request's largest size (an exec's argv).
+/// The largest request size, which bounds an exec's argv.
 const MAX_MSG: usize = 256 << 10;
 
 /// A SOCK_SEQPACKET socket.
@@ -81,7 +83,7 @@ pub fn send(fd: RawFd, data: &[u8], fds: &[RawFd]) -> io::Result<()> {
     Ok(())
 }
 
-/// One message and the fds it carried; an empty message is EOF.
+/// Receives one message and the fds it carried. An empty message means EOF.
 pub fn recv(fd: RawFd) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
     let mut buf = vec![0u8; MAX_MSG];
     let mut iov = libc::iovec {
@@ -123,7 +125,8 @@ pub fn recv(fd: RawFd) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
     Ok((buf, fds))
 }
 
-/// Sends a request to the session at `path`. `None` when no session listens.
+/// Sends a request to the session at `path`. Returns `None` when no session
+/// listens.
 fn request(path: &Path, words: &[&[u8]], fds: &[RawFd]) -> Result<Option<OwnedFd>> {
     let s = socket()?;
     let (a, len) = addr(path)?;
@@ -145,8 +148,8 @@ pub fn status(path: &Path) -> Option<String> {
     (!m.is_empty()).then(|| String::from_utf8_lossy(&m).into_owned())
 }
 
-/// Stops the session at `path` and waits until it is gone; false if none
-/// listens.
+/// Stops the session at `path` and waits until it is gone. Returns false if
+/// no session listens.
 pub fn stop(path: &Path) -> Result<bool> {
     let Some(s) = request(path, &[b"stop"], &[])? else {
         return Ok(false);
@@ -155,7 +158,7 @@ pub fn stop(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// Runs argv through the session at `path` with this process's stdio;
+/// Runs `argv` through the session at `path` with this process's stdio and
 /// returns its exit code.
 pub fn exec(path: &Path, argv: &[&OsStr]) -> Result<i32> {
     let mut words: Vec<&[u8]> = vec![b"exec"];

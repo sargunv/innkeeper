@@ -1,7 +1,7 @@
-//! The resource table (`resources.arsc`): each resource's values per
-//! configuration (`ResTable_config`). Only what an install needs is decoded:
-//! a value's locale, density and SDK level, and whether any other qualifier
-//! (night mode, screen size, ...) is set.
+//! The resource table (`resources.arsc`), which holds each resource's values
+//! per configuration (`ResTable_config`). Only what an install needs is
+//! decoded: a value's locale, density and SDK level, and whether any other
+//! qualifier, such as night mode or screen size, is set.
 
 use std::collections::BTreeSet;
 
@@ -20,7 +20,7 @@ const FLAG_OFFSET16: u8 = 0x02;
 const ENTRY_COMPLEX: u16 = 0x0001;
 const ENTRY_COMPACT: u16 = 0x0008;
 
-/// A resource configuration, reduced to what we select by.
+/// A resource configuration, reduced to the fields used to select values.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Config {
     pub locale: Locale,
@@ -29,12 +29,12 @@ pub struct Config {
     pub density: u16,
     /// The `-vN` qualifier.
     pub sdk: u16,
-    /// Any other qualifier is set.
+    /// Whether any other qualifier is set.
     pub other: bool,
 }
 
-/// A two-letter code, or a three-letter one packed into two bytes
-/// (`ResTable_config::unpackLanguageOrRegion`); `base` is `a` or `0`.
+/// Unpacks a two-letter code, or a three-letter code packed into two bytes
+/// (`ResTable_config::unpackLanguageOrRegion`). `base` is `a` or `0`.
 fn unpack(b: [u8; 2], base: u8) -> String {
     if b[0] & 0x80 != 0 {
         let first = b[1] & 0x1f;
@@ -60,8 +60,8 @@ fn ascii(b: &[u8]) -> String {
 }
 
 impl Config {
-    /// Parses a `ResTable_config`, which grew over Android releases: fields
-    /// past its `size` are zero.
+    /// Parses a `ResTable_config`. The struct grew over Android releases, and
+    /// fields past its `size` read as zero.
     pub fn parse(b: &[u8]) -> Result<Self> {
         let size = (u32_at(b, 0)? as usize).min(b.len());
         let mut c = [0u8; 64];
@@ -69,8 +69,8 @@ impl Config {
         let u16 = |o: usize| u16::from_le_bytes([c[o], c[o + 1]]);
         let locale = Locale {
             lang: unpack([c[8], c[9]], b'a'),
-            // A script Android computed (`localeScriptWasComputed`) wasn't
-            // named by the APK.
+            // A script that Android computed (`localeScriptWasComputed`)
+            // wasn't named by the APK, so drop it.
             script: if c[52] != 0 {
                 String::new()
             } else {
@@ -79,9 +79,10 @@ impl Config {
             region: unpack([c[10], c[11]], b'0'),
             variant: ascii(&c[40..48]),
         };
-        // mcc, mnc; orientation through inputFlags (except density) and
-        // grammatical gender; screen sizes; minor version; screen layout, UI
-        // mode, dp sizes; screenLayout2 and colour mode.
+        // The other qualifiers are mcc and mnc, orientation through
+        // inputFlags (except density), grammatical gender, screen sizes,
+        // minor version, screen layout, UI mode, dp sizes, screenLayout2 and
+        // colour mode.
         let other = c[4..8].iter().any(|b| *b != 0)
             || [12, 13, 16, 17, 18, 19].iter().any(|o| c[*o] != 0)
             || c[20..24].iter().any(|b| *b != 0)
@@ -137,7 +138,7 @@ impl<'a> Table<'a> {
         })
     }
 
-    /// Every locale any resource has a value for (the default included).
+    /// Every locale that any resource has a value for, including the default.
     pub fn locales(&self) -> BTreeSet<&Locale> {
         self.packages
             .iter()
@@ -168,7 +169,7 @@ impl<'a> Table<'a> {
         let entries = u32_at(h, 16)? as usize;
         let offsets = ty.chunk.body;
         let off = if flags & FLAG_SPARSE != 0 {
-            // (index, offset / 4) pairs sorted by index.
+            // Sparse entries are (index, offset / 4) pairs sorted by index.
             let mut found = None;
             for k in 0..count {
                 let idx = u16_at(offsets, k * 4)? as usize;
@@ -204,7 +205,8 @@ impl<'a> Table<'a> {
         let (vty, data) = if eflags & ENTRY_COMPACT != 0 {
             ((eflags >> 8) as u8, u32_at(d, at + 4)?)
         } else if eflags & ENTRY_COMPLEX != 0 {
-            // Styles, arrays, plurals: nothing an install reads.
+            // Complex entries are styles, arrays and plurals, which an install
+            // doesn't read.
             return Ok(Some(Value::Other));
         } else {
             (u8_at(d, at + size + 3)?, u32_at(d, at + size + 4)?)
@@ -255,7 +257,7 @@ pub mod build {
         c
     }
 
-    /// Value entries: (entry index, type, data).
+    /// How a type chunk lays out its entry offsets.
     pub enum Layout {
         Dense,
         Offset16,
@@ -263,7 +265,8 @@ pub mod build {
         Compact,
     }
 
-    /// A type chunk of type `id` in `config`.
+    /// A type chunk of type `id` in `config`. `entries` are (entry index,
+    /// type, data).
     pub fn type_chunk(
         id: u8,
         config: &[u8],
@@ -354,7 +357,7 @@ mod tests {
         c[8..10].copy_from_slice(&[0xce, 0x40]);
         c[10..12].copy_from_slice(&[0xa4, 0x24]);
         assert_eq!(tag(&c), "ast-419");
-        // b+sr+Latn: the script shows unless it was computed.
+        // For b+sr+Latn, the script shows unless it was computed.
         let mut c = config("sr", "", 0, 0);
         c[36..40].copy_from_slice(b"Latn");
         assert_eq!(tag(&c), "sr-Latn");
@@ -440,7 +443,7 @@ mod tests {
             if d.len() >= 8 {
                 d[4..8].copy_from_slice(&(n as u32).to_le_bytes());
             }
-            // Never a panic; values from a truncated table may be missing.
+            // A truncated table must not panic, but its values may be missing.
             if let Ok(t) = Table::parse(&d) {
                 t.values(0x7f01_0000);
             }

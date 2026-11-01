@@ -1,11 +1,12 @@
-//! What the system app last reported about a session's activity
-//! (`<run>/lifecycle`, written by the bridge), which keeps it up.
+//! The system app's last report of a session's activity, which decides
+//! whether the session stays up. The bridge writes it to `<run>/lifecycle`.
 
 use std::fs;
 
 use crate::Paths;
 
-/// What the system app last reported (`<run>/lifecycle`, `key=value` lines).
+/// The system app's last report, read from the `key=value` lines of
+/// `<run>/lifecycle`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Activity {
     /// App windows, shown or starting.

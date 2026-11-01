@@ -1,5 +1,5 @@
-//! The session's control socket server (innkeeper_profile::control has the
-//! protocol and the client).
+//! The session's control socket server. innkeeper_profile::control has the
+//! protocol and the client.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -21,9 +21,10 @@ use crate::sys;
 
 /// How the session runs `exec`'s commands.
 pub struct Exec {
-    /// The lock a running exec holds shared ([`crate::lifecycle`]).
+    /// The lock that a running exec holds in shared mode. See
+    /// [`crate::lifecycle`].
     pub lock: std::path::PathBuf,
-    /// The guest, whose exec relay runs them.
+    /// The guest system, whose exec relay runs the commands.
     pub system: System,
 }
 

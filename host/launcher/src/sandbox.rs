@@ -1,16 +1,16 @@
-//! The session (docs/session.md) runs in Innkeeper's own
-//! sandbox, which allows no namespaces, mounts or systemd units, but whose
-//! `/`, `/dev` and `/sys` are writable tmpfs dirs of its own.
+//! The session (docs/session.md) runs in Innkeeper's Flatpak sandbox. The
+//! sandbox allows no namespaces, mounts or systemd units, but its `/`, `/dev`
+//! and `/sys` are writable tmpfs dirs private to it.
 //!
-//! - The root is composed on disk: per partition, hardlinks to the (read-only)
-//!   image cache plus copies of the layers above it, files read-only. It is
-//!   composed once per image, stage and addons, and only the start-time layer
-//!   goes on at each start.
-//! - `/` gets symlinks to it, the binder nodes and socket dirs; the broker
-//!   shows the Android paths behind the links (supervisor/broker/src/fs.rs).
-//! - init is the broker's child, and the session
-//!   lives as long as the process that started it, which serves the control
-//!   socket ([`crate::control`]).
+//! - The root is composed on disk. Each partition holds hardlinks to the
+//!   read-only image cache plus copies of the layers above it, and all files
+//!   are read-only. The root is composed once per combination of image, stage
+//!   and addons. Only the start-time layer is applied at each start.
+//! - `/` gets symlinks to the root, the binder nodes and the socket dirs. The
+//!   broker shows the Android paths behind the links
+//!   (supervisor/broker/src/fs.rs).
+//! - init is the broker's child. The session lives as long as the process
+//!   that started it, which serves the control socket ([`crate::control`]).
 
 pub use innkeeper_profile::remove_tree;
 use std::env;
@@ -48,8 +48,9 @@ fn cp(args: &[&std::ffi::OsStr]) -> Result<()> {
     Ok(())
 }
 
-/// A layer's files over the composed tree. `--remove-destination` unlinks a
-/// hardlinked file before replacing it, so the image cache is never written.
+/// Copies a layer's files over the composed tree. `--remove-destination`
+/// unlinks a hardlinked file before replacing it, so the image cache is never
+/// written.
 pub(crate) fn over(layer: &Path, dst: &Path) -> Result<()> {
     if !layer.is_dir() {
         return Ok(());
@@ -67,8 +68,8 @@ pub(crate) fn over(layer: &Path, dst: &Path) -> Result<()> {
     ])
 }
 
-/// Read-only files, as on read-only mounts: ART refuses to load a dex file
-/// its process could write.
+/// Makes every file under `dir` read-only, as on read-only mounts. ART
+/// refuses to load a dex file that its process could write.
 pub(crate) fn files_read_only(dir: &Path) -> Result<()> {
     walk_files(dir, &mut |p, m| {
         if m & 0o222 != 0 {
@@ -78,8 +79,9 @@ pub(crate) fn files_read_only(dir: &Path) -> Result<()> {
     })
 }
 
-/// What the composed root is made of: the image, its derived layer, the
-/// stage (its manifest has every file's hash) and the addons' files.
+/// Hashes the inputs of the composed root. These are the image, its derived
+/// layer, the stage, the display mode and the addons' files. The stage's
+/// manifest has every file's hash.
 fn compose_key(cfg: &Config) -> Result<String> {
     let mut h = Sha256::new();
     h.update(COMPOSE_VERSION);
@@ -107,9 +109,10 @@ fn compose_key(cfg: &Config) -> Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Copies a tree of the image cache into the root dir `root` as hardlinks,
-/// or as reflink copies where they can't cross mounts (the dev driver grants
-/// the image cache and the root separately); `probe` is a file of the cache.
+/// Returns a function that copies a tree of the image cache into the root dir
+/// `root`. It uses hardlinks, or reflink copies when hardlinks can't cross
+/// mounts. That happens when the dev driver grants the image cache and the
+/// root separately. `probe` is a file in the cache.
 pub(crate) fn tree_linker(
     probe: &Path,
     root: &Path,
@@ -142,7 +145,8 @@ fn compose(cfg: &Config) -> Result<()> {
     let link = tree_linker(&cfg.image.apexdir.join("apex-info-list.xml"), r);
     let p = &cfg.paths;
     let addons = p.addon_layers();
-    // Each partition's stack, bottom first; the start-time layer goes on at each start.
+    // Build each partition's stack, bottom first. The start-time layer goes on
+    // at each start.
     for part in PARTITIONS {
         let src = root::image_partition(&cfg.image.img, part);
         if !src.is_dir() {
@@ -172,14 +176,15 @@ fn compose(cfg: &Config) -> Result<()> {
     link(&cfg.image.apexdir, &apex)?;
     over(&cfg.image.derived.join("apex"), &apex)?;
     files_read_only(r)?;
-    // The derived APEX files have exact modes that code verifies (clatd's
-    // 06755), so they go on again.
+    // Code verifies the exact modes of the derived APEX files (clatd's
+    // 06755), so they are copied again after the files are made read-only.
     over(&cfg.image.derived.join("apex"), &apex)?;
     fs::write(&key_file, key)?;
     Ok(())
 }
 
-/// The start-time layer over the composed root, read-only too.
+/// Applies the start-time layer over the composed root, makes its files
+/// read-only and writes `/innkeeper`.
 fn apply_run_layer(cfg: &Config) -> Result<()> {
     let r = &cfg.paths.root;
     let layer = cfg.run_layer();
@@ -200,7 +205,7 @@ fn apply_run_layer(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-/// A symlink `link` -> `target`, replacing whatever is at `link`.
+/// Creates a symlink `link` -> `target`, replacing whatever is at `link`.
 pub(crate) fn link(target: &Path, link: &Path) -> Result<()> {
     if let Ok(m) = link.symlink_metadata() {
         if m.is_dir() {
@@ -212,7 +217,7 @@ pub(crate) fn link(target: &Path, link: &Path) -> Result<()> {
     symlink(target, link).with_context(|| format!("link {}", link.display()))
 }
 
-/// The sandbox's `/` as Android's root.
+/// Sets up the sandbox's `/` as Android's root.
 fn sandbox_root(cfg: &Config) -> Result<()> {
     let r = &cfg.paths.root;
     let slash = Path::new("/");
@@ -224,19 +229,20 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     let data = &cfg.paths.data;
     fs::create_dir_all(data)?;
     link(data, Path::new("/data"))?;
-    // vold binds /data/data onto /data/user/0, where apps' data dirs are (the
-    // broker's lstat shows the symlink as that directory).
+    // vold binds /data/data onto /data/user/0, where apps' data dirs are. A
+    // symlink stands in here, and the broker's lstat shows it as a directory.
     fs::create_dir_all(data.join("user"))?;
     fs::create_dir_all(data.join("data"))?;
     if data.join("user/0").symlink_metadata().is_err() {
         symlink("/data/data", data.join("user/0"))?;
     }
-    // The image's other top-level entries, where the sandbox has none (its
-    // /etc and /bin stay).
+    // Add the image's other top-level entries where the sandbox has none. The
+    // sandbox's /etc and /bin stay.
     root::copy_top_level(&cfg.image.img, slash, false)?;
-    // Shared storage without FUSE (vold can't mount MediaProvider's, nor bind
-    // /mnt/user/0 over /storage): apps reach /data/media directly, so it is
-    // on disk rather than in the sandbox's tmpfs.
+    // Shared storage works without FUSE, because vold can't mount
+    // MediaProvider's FUSE filesystem or bind /mnt/user/0 over /storage. Apps
+    // reach /data/media directly, so it is on disk and not in the sandbox's
+    // tmpfs.
     link(Path::new("/data/media"), Path::new("/storage/emulated"))?;
     for base in ["/mnt/user/0", "/mnt/pass_through/0"] {
         fs::create_dir_all(base)?;
@@ -247,9 +253,10 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
         Path::new("/storage/emulated/0"),
         Path::new("/storage/self/primary"),
     )?;
-    // Android's /etc is /system/etc. The sandbox's /etc stays (the glibc side
-    // needs it) and gains the entries it lacks, such as task_profiles.json:
-    // dirs as symlinks, files as copies (libbase opens files O_NOFOLLOW).
+    // Android's /etc is /system/etc. The sandbox's /etc stays because the
+    // glibc side needs it, and it gains the entries it lacks, such as
+    // task_profiles.json. Directories become symlinks and files become copies,
+    // because libbase opens files with O_NOFOLLOW.
     for e in fs::read_dir(r.join("system/etc"))? {
         let e = e?;
         let to = Path::new("/etc").join(e.file_name());
@@ -267,19 +274,19 @@ fn sandbox_root(cfg: &Config) -> Result<()> {
     }
     root::binder_nodes(Path::new("/dev"))?;
     dev_sockets(cfg)?;
-    // The bpf() emulator's pins (supervisor/broker/src/bpf.rs).
+    // The bpf() emulator pins objects here (supervisor/broker/src/bpf.rs).
     fs::create_dir_all("/sys/fs/bpf")?;
     fs::set_permissions("/sys/fs/bpf", fs::Permissions::from_mode(0o1777))?;
-    // No cgroup tree in the sandbox: /sys/fs/cgroup is a plain directory, so
+    // The sandbox has no cgroup tree. /sys/fs/cgroup is a plain directory, so
     // process groups are bookkeeping only and kills fall back to the process
-    // group. netd attaches its (emulated) eBPF programs there.
+    // group. netd attaches its emulated eBPF programs there.
     fs::create_dir_all("/sys/fs/cgroup/system")?;
     fs::create_dir_all("/sys/fs/cgroup/apps")?;
     Ok(())
 }
 
-/// The guest's `/dev/socket/innkeeper` (the bridge's socket dir) and
-/// `/dev/kmsg` (the FIFO into kmsg.log).
+/// Links the guest's `/dev/socket/innkeeper` to the bridge's socket dir and
+/// `/dev/kmsg` to the FIFO that feeds kmsg.log.
 pub(crate) fn dev_sockets(cfg: &Config) -> Result<()> {
     let (dev, run) = (Path::new("/dev"), &cfg.paths.run);
     fs::set_permissions(run.join("bridge"), fs::Permissions::from_mode(0o700))?;
@@ -288,10 +295,11 @@ pub(crate) fn dev_sockets(cfg: &Config) -> Result<()> {
     link(&run.join("kmsg"), &dev.join("kmsg"))
 }
 
-/// Ends the session: kills everything it started and removes its socket.
-/// When this process is the sandbox's main one (its parent is the
-/// sandbox's pid 1), that is everything else in the sandbox: Android
-/// processes orphaned by a dying init would otherwise keep it alive.
+/// Ends the session by killing everything it started and removing its
+/// control socket. When this process is the sandbox's main process, with the
+/// sandbox's pid 1 as its parent, it kills everything else in the sandbox.
+/// Otherwise Android processes orphaned by a dying init would keep the
+/// sandbox alive.
 fn teardown(p: &Paths) {
     session::ENDING.store(true, std::sync::atomic::Ordering::SeqCst);
     sys::kill_descendants();
@@ -307,13 +315,14 @@ fn teardown(p: &Paths) {
     let _ = fs::remove_file(p.control());
 }
 
-/// How a session that ended by itself went idle: `Some(wakeup)` once idle.
+/// Set to `Some(wakeup)` when the session stops itself for idleness, where
+/// `wakeup` is the next alarm, if any.
 type Idle = Arc<Mutex<Option<Option<u64>>>>;
 
-/// Runs the session in this sandbox until init exits; with `follow`, shows
-/// its log meanwhile. It ends with this process: on a signal, `stop`, or
-/// init's exit. When it stops for idleness with an alarm ahead, this process
-/// stays as the waiter that starts it again ([`wait_to_wake`]).
+/// Runs the session in this sandbox until init exits, showing its log if
+/// `follow` is set. The session ends with this process, on a signal, on
+/// `stop` or when init exits. When it stops for idleness with an alarm ahead,
+/// this process stays as the waiter that starts it again ([`wait_to_wake`]).
 pub fn run(
     cfg: &Config,
     follow: bool,
@@ -340,10 +349,11 @@ pub fn run(
     }
 }
 
-/// Stays in the sandbox, stopped, until shortly before `at_ms` (ms since the
-/// epoch), then starts the session again as `start` does, in a new sandbox:
-/// this one's `/` holds the last boot's runtime files. `status` reports it
-/// stopped, and `stop` (or a new `start`) ends it.
+/// Waits in the sandbox until shortly before `at_ms` (ms since the epoch),
+/// then starts the session again in a new sandbox, as `start` does. A new
+/// sandbox is needed because this one's `/` holds the last boot's runtime
+/// files. Meanwhile `status` reports the session as stopped, and `stop` or a
+/// new `start` ends the wait.
 fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     let p = &cfg.paths;
     request_background(p);
@@ -368,7 +378,8 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
             lifecycle::calendar(at / 1000)
         ),
     );
-    // Wall-clock time, checked often: a suspended host wakes late, not never.
+    // Wall-clock time is checked at least every 30 s, so after a host
+    // suspend the session starts late instead of never.
     loop {
         let now = lifecycle::now_ms();
         if now >= at {
@@ -376,7 +387,7 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
         }
         sleep(Duration::from_millis((at - now).min(30_000)));
     }
-    // Not waiting any more, so `start` doesn't stop this process first.
+    // Remove the socket so that `start` doesn't stop this process first.
     let _ = fs::remove_file(&sock);
     let mut c = Command::new(env::current_exe()?);
     c.arg("start");
@@ -390,9 +401,10 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
     Ok(())
 }
 
-/// Asks the Background portal to let Innkeeper run with no window open
-/// (media, alarms, background work), so the desktop doesn't stop it. Best
-/// effort, without waiting for the answer: `gdbus` is in the Flatpak runtime.
+/// Asks the Background portal to let Innkeeper run with no window open, for
+/// media, alarms and background work, so the desktop doesn't stop it. This
+/// is best effort and doesn't wait for the answer. `gdbus` comes from the
+/// Flatpak runtime.
 pub fn request_background(p: &Paths) {
     if crate::preferences::Preferences::load().is_ok_and(|p| p.keep_running) {
         return;
@@ -429,8 +441,8 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
             crate::image::begin_boot(&p.data, &cfg.image, &p.root.join("innkeeper"))?;
             trace.mark(p, "data version recorded");
             sandbox_root(cfg).context("set up the sandbox's /")?;
-            // realpath (via /proc/self/fd) must retain the public volume
-            // path: MediaProvider treats canonical /data/media paths as
+            // realpath (via /proc/self/fd) must keep the public volume path,
+            // because MediaProvider treats canonical /data/media paths as
             // internal storage.
             format!(
                 "{}=/\n{}=/data\n{}=/storage/emulated",
@@ -497,7 +509,8 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
     let (idle, paths) = (idle.clone(), p.clone());
     lifecycle::watch(cfg, move |wakeup| {
         *idle.lock().unwrap() = Some(wakeup);
-        // As `stop` does: killing the broker alone would orphan init.
+        // Tear down as `stop` does, because killing the broker alone would
+        // orphan init.
         teardown(&paths);
     });
     println!(
@@ -507,17 +520,17 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         p.kmsg_log().display()
     );
     if follow {
-        // A closed stdout ends the log, not the session.
+        // A closed stdout ends the log but leaves the session running.
         let _ = session::tail(&p.kmsg_log(), &|| sys::alive(init));
     }
     broker.wait()?;
     Ok(())
 }
 
-/// Starts the session in a sandbox of its own, through the Flatpak portal's
-/// Spawn (`flatpak-spawn` without `--host`: a new instance of this app with
-/// its permissions, not an escape), so it outlives the caller's sandbox.
-/// Returns once it is up.
+/// Starts the session in a new sandbox through the Flatpak portal's Spawn, so
+/// it outlives the caller's sandbox. `flatpak-spawn` without `--host` starts
+/// a new instance of this app with the same permissions and does not escape
+/// the sandbox. Returns once the session is up.
 pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
     let mut c = Command::new("flatpak-spawn");
     c.arg("/usr/bin/env");
@@ -525,7 +538,8 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
         let name = k.to_string_lossy();
         if name.starts_with("INNKEEPER_")
             || [
-                // The adb server a profile with adb on is announced to.
+                // Selects the adb server that profiles with adb on are
+                // announced to.
                 "ANDROID_ADB_SERVER_PORT",
                 "XDG_DATA_HOME",
                 "XDG_CONFIG_HOME",
@@ -534,8 +548,8 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
             ]
             .contains(&name.as_ref())
         {
-            // Flatpak sets XDG_*_HOME in the new sandbox over any --env;
-            // env(1) sets them after it.
+            // Flatpak sets XDG_*_HOME in the new sandbox and overrides any
+            // --env, so env(1) sets them afterwards.
             let mut a = OsString::new();
             a.push(&k);
             a.push("=");
@@ -556,8 +570,9 @@ pub fn spawn(p: &Paths, exe: &Path, headless: bool) -> Result<()> {
         .context("run flatpak-spawn")?;
     for _ in 0..600 {
         if let Some(s) = control::status(&p.control()) {
-            // flatpak-spawn would wait for the session to end (and keep this
-            // sandbox alive meanwhile); SIGKILL isn't forwarded to it.
+            // flatpak-spawn would otherwise wait for the session to end and
+            // keep this sandbox alive meanwhile. SIGKILL isn't forwarded to
+            // it.
             let _ = child.kill();
             let _ = child.wait();
             let pid = crate::Status::parse(&s)

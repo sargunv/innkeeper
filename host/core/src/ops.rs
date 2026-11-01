@@ -1,6 +1,6 @@
-//! User-level operations shared by the CLI and the GUI. They block (reading
-//! APKs, the session, Android's package manager), so the GUI runs them off its UI
-//! thread; progress and warnings go to a [`Report`] callback.
+//! User-level operations shared by the CLI and the GUI. They block on reading
+//! APKs, on the session and on Android's package manager, so the GUI runs them
+//! off its UI thread. Progress and warnings go to a [`Report`] callback.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -19,9 +19,9 @@ use innkeeper_profile::profile::ProfileName;
 /// Progress from a long operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// What it's doing now ("waiting for Android to boot").
+    /// What the operation is doing, such as "waiting for Android to boot".
     Status(String),
-    /// Something the user should know that doesn't stop it.
+    /// Something the user should know that doesn't stop the operation.
     Warning(String),
 }
 
@@ -30,8 +30,8 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// Profile `profile`'s running session, after starting it if needed. Apps
-/// are Android's: an OpenHarmony profile has no app install yet.
+/// Returns profile `profile`'s running session and starts it if needed. App
+/// management needs Android, because OpenHarmony profiles can't install apps.
 fn session(profile: &ProfileName, report: Report) -> Result<Session> {
     crate::profiles::need_android(profile, "managing apps")?;
     let s = Session::of_profile(profile)?;
@@ -44,19 +44,20 @@ pub fn ensure_session(profile: &ProfileName, report: Report) -> Result<()> {
     session(profile, report).map(drop)
 }
 
-/// An APK or bundle, read and checked but not installed yet: what an install
-/// confirmation shows.
+/// An APK or bundle that has been read and checked but not installed. An
+/// install confirmation shows it.
 pub struct Package {
     pub file: PathBuf,
     pub package: String,
-    /// The app's name (validated; the package name if it has none).
+    /// The app's validated name, or the package name if it has none.
     pub label: String,
-    /// `versionName` (validated; may be empty) and `versionCode`.
+    /// The validated `versionName`, which may be empty.
     pub version: String,
     pub version_code: String,
     /// Declared permissions (`android.permission.CAMERA`, ...).
     pub permissions: Vec<String>,
-    /// ABIs it has native code for (empty: none, runs anywhere).
+    /// The ABIs the app has native code for. It is empty if the app has no
+    /// native code and runs anywhere.
     pub abis: Vec<String>,
     /// Size of the input file in bytes.
     pub size: u64,
@@ -76,11 +77,12 @@ impl Package {
         )
     }
 
-    /// Whether this image can run it, judging by its native code alone (the
-    /// session's ABI list is checked again at install).
+    /// Whether the pinned image can run the app, judging by its native code
+    /// alone. [`install`] checks the session's ABI list again.
     pub fn runs_here(&self) -> bool {
-        // Use the ABI declaration applied to the pinned image. It excludes
-        // NativeBridge ABIs until a translator is installed (image/vendor.prop).
+        // Use the ABI list from image/vendor.prop, which the pinned image
+        // applies. It excludes NativeBridge ABIs until a translator is
+        // installed.
         let abis = include_str!("../../../image/vendor.prop")
             .lines()
             .find_map(|l| l.strip_prefix("ro.product.cpu.abilist="))
@@ -92,7 +94,7 @@ impl Package {
     }
 }
 
-/// Reads an APK or bundle (no session needed).
+/// Reads an APK or bundle. This needs no session.
 pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     let size = file
         .metadata()
@@ -164,9 +166,9 @@ fn version_name(v: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Installs an inspected package into the session (starting it if needed).
-/// The session's bridge adds it to the app menu (if mirroring is on), as for
-/// any app installed inside Android.
+/// Installs an inspected package into the session, starting the session if
+/// needed. When mirroring is on, the session's bridge adds the app to the app
+/// menu, as it does for any app installed inside Android.
 pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()> {
     let pkg = p.package.clone();
     let s = session(profile, report)?;
@@ -176,7 +178,8 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
         .map(|a| a.trim().to_string())
         .collect();
 
-    // Base first, then splits; ABI splits only for ABIs the session runs.
+    // Install the base first, then the splits. ABI splits are included only
+    // for ABIs the session runs.
     let (base_path, base) = p.base();
     let mut apks: Vec<&Path> = vec![base_path];
     let mut abi_splits = 0;
@@ -222,8 +225,8 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
     android::install(&s, &apks)
 }
 
-/// Uninstalls a user app (system apps are refused); the session's bridge
-/// removes its app-menu entry. Returns whether Android had it installed.
+/// Uninstalls a user app and leaves system apps alone. The session's bridge
+/// removes the app-menu entry. Returns whether Android had the app installed.
 pub fn uninstall(
     profile: &ProfileName,
     pkg: &str,
@@ -239,10 +242,10 @@ pub fn uninstall(
     Ok(from_android)
 }
 
-/// Launches an app (in a window of its own), optionally opening a URI in it.
-/// An empty URI is none: the DynamicLauncher portal quotes `%U` in the
-/// entries it writes (`'%U'`), which launchers expand to an empty argument.
-/// Returns the window manager's reply.
+/// Launches an app in its own window, optionally opening a URI in it. An
+/// empty URI counts as no URI, because the DynamicLauncher portal writes `%U`
+/// quoted as `'%U'`, which launchers expand to an empty argument. Returns the
+/// window manager's reply.
 pub fn run(
     profile: &ProfileName,
     pkg: &str,
@@ -269,7 +272,8 @@ pub fn run(
         crate::app_settings::launch(profile, &l, opts)
     };
     match launch() {
-        // The session stopped for idleness just as this came: once more.
+        // The session stopped for idleness just as this launch arrived, so try
+        // once more.
         Err(_) if !Session::of_profile(profile)?.running() => launch(),
         r => r,
     }
@@ -280,12 +284,12 @@ pub struct ListedApp {
     pub package: String,
     /// The `Name` of its desktop entry.
     pub label: Option<String>,
-    /// Whether it may run in the background; None before the system app's
-    /// first activity report.
+    /// Whether the app may run in the background. It is None until the system
+    /// app's first activity report.
     pub background: Option<bool>,
 }
 
-/// The session's user apps.
+/// Lists the session's user apps.
 pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
     let s = session(profile, report)?;
     let d = Dirs::from_env();
@@ -303,9 +307,9 @@ pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
         .collect())
 }
 
-/// Profile `profile`'s apps, from their desktop entries (no session
-/// needed). If `android` is given (the session's user packages), apps
-/// installed without an entry are added too.
+/// Lists profile `profile`'s apps from their desktop entries, which needs no
+/// session. If `android` holds the session's user packages, apps installed
+/// without an entry are added too.
 pub fn installed_apps(
     profile: &ProfileName,
     android: Option<&[String]>,
@@ -330,8 +334,8 @@ pub fn installed_apps(
     Ok(v)
 }
 
-/// Profile `profile`'s user packages, if it is running and booted (doesn't
-/// start it).
+/// Returns profile `profile`'s user packages if it is running and booted. It
+/// does not start the profile.
 pub fn android_packages(profile: &ProfileName) -> Option<Vec<String>> {
     let s = Session::of_profile(profile).ok()?;
     if !s.running() || !s.booted() {
@@ -357,7 +361,8 @@ mod tests {
         .unwrap();
         zip.finish().unwrap();
 
-        // Metadata fixtures: no third-party APK or native libraries needed.
+        // These are metadata fixtures, so no third-party APK or native library
+        // is needed.
         for (native_code, runnable) in [
             (vec!["x86"], false),
             (vec!["x86_64"], true),

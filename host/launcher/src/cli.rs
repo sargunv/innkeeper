@@ -25,11 +25,11 @@ checkout, `mise run session -- CMD` runs it in the development Flatpak.
 Its environment variables are in host/launcher/README.md.
 ";
 
-/// The oldest kernel the supervisor works on: seccomp ADDFD with SEND (5.14)
-/// for binder's injected fds, openat2 (5.6).
+/// The oldest kernel the supervisor works on. It needs seccomp ADDFD with SEND
+/// (5.14) for binder's injected fds, and openat2 (5.6).
 const KERNEL_FLOOR: (u32, u32) = (5, 14);
-/// Unprivileged PSI triggers (6.5), without which lmkd exits and every
-/// ActivityManager write to it stalls 3 s.
+/// The kernel that added unprivileged PSI triggers. Without them, lmkd exits
+/// and every ActivityManager write to it stalls for 3 s.
 const PSI_KERNEL_FLOOR: (u32, u32) = (6, 5);
 
 pub fn main() {
@@ -135,8 +135,8 @@ fn system(paths: &Paths) -> Result<System> {
     Ok(Settings::load(&paths.data)?.system)
 }
 
-/// Prepares `system`'s image: fetched and extracted, and for Android
-/// flattened and derived. The lease keeps it from being pruned.
+/// Fetches and extracts `system`'s image, and for Android also flattens and
+/// derives it. The returned lease keeps the image from being pruned.
 fn prepare(paths: &Paths, system: System) -> Result<crate::prune::Lease> {
     let image = paths.image_of(system)?;
     match system {
@@ -189,8 +189,8 @@ fn wayland_socket() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `start`, and `_serve` (`serve`): the session in a sandbox of its own,
-/// which `start` spawns.
+/// Runs `start`, or `_serve` when `serve` is set. Without `-f`, `start`
+/// spawns a sandbox that runs the session through `_serve`.
 fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     let trace = session::BootTrace::new();
     let (mut follow, mut headless) = (false, false);
@@ -211,7 +211,7 @@ fn start(paths: &Paths, opts: &[&str], serve: bool) -> Result<()> {
     check_kernel()?;
     let exe = exe()?;
     // Windows go through the bridge's display service, which connects to the
-    // host compositor; --headless shows none.
+    // host compositor. With --headless there are no windows.
     let wayland = if headless {
         None
     } else {

@@ -10,12 +10,12 @@ const RESOURCE_MAP: u16 = 0x0180;
 const START_ELEMENT: u16 = 0x0102;
 const END_ELEMENT: u16 = 0x0103;
 
-/// Deeper nesting than any real manifest; bounds the tree.
+/// A nesting limit deeper than any real manifest, which bounds the tree.
 const MAX_DEPTH: usize = 128;
 
 /// `android:` attributes by resource ID. Android identifies framework
-/// attributes by ID alone, so these names win over the string pool's (which
-/// shrinkers may rename).
+/// attributes by ID alone, so these names take precedence over the string
+/// pool's names, which shrinkers may rename.
 const ANDROID_ATTRS: &[(u32, &str)] = &[
     (0x01010199, "drawable"),
     (0x01010402, "viewportWidth"),
@@ -56,7 +56,7 @@ const ANDROID_ATTRS: &[(u32, &str)] = &[
     (0x0101_0545, "appCategory"),
 ];
 
-/// An element, with attributes by local name (namespaces dropped).
+/// An element with its attributes keyed by local name. Namespaces are dropped.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Element {
     pub name: String,
@@ -82,7 +82,8 @@ pub fn parse(b: &[u8]) -> Result<Element> {
     }
     let mut pool = None;
     let mut ids: Vec<u32> = vec![];
-    // The open elements; a synthetic root collects the document element.
+    // The stack of open elements. A synthetic root collects the document
+    // element.
     let mut stack = vec![Element::default()];
     for c in doc.children() {
         let c = c?;
@@ -113,7 +114,7 @@ pub fn parse(b: &[u8]) -> Result<Element> {
                 let e = stack.pop().unwrap();
                 stack.last_mut().unwrap().children.push(e);
             }
-            // Namespaces, text, comments.
+            // Namespace, text and comment chunks are ignored.
             _ => {}
         }
     }
@@ -275,11 +276,13 @@ mod tests {
         assert_eq!(app.attr("x"), None);
     }
 
-    /// Android goes by an `android:` attribute's ID, not its pool name.
+    /// Android identifies an `android:` attribute by its ID and ignores its
+    /// pool name.
     #[test]
     fn attribute_ids_win() {
         let mut doc = document(&Node("manifest", vec![("label", V::S("x"))], vec![]));
-        // The pool is UTF-16 and "label" its first string: rename it "LABEL".
+        // The pool is UTF-16 and "label" is its first string. Rename it to
+        // "LABEL".
         let at = doc
             .windows(10)
             .position(|w| {
@@ -299,7 +302,7 @@ mod tests {
     #[test]
     fn malformed() {
         let doc = document(&Node("manifest", vec![("package", V::S("a"))], vec![]));
-        // Truncated anywhere: an error, never a panic.
+        // A document truncated anywhere returns an error and must not panic.
         for n in 0..doc.len() {
             let mut d = doc[..n].to_vec();
             if d.len() >= 8 {

@@ -1,24 +1,26 @@
-//! One window's tree: Android nodes ([`RawNode`]) mapped to AccessKit nodes,
-//! and the mirror of what AccessKit holds, so every `TreeUpdate` handed to
-//! it is valid.
+//! One window's tree. It maps Android nodes ([`RawNode`]) to AccessKit nodes
+//! and mirrors what AccessKit holds, so every `TreeUpdate` handed to
+//! AccessKit is valid.
 //!
-//! **Mapping** follows Chromium's ARC++ (`accessibility_node_info_data_wrapper.cc`):
-//! roles from the editable flag, link spans, collection info and the Android
-//! class name; the name from the content description, the labelling node,
-//! the text and the hint; value, checked, expanded and range states. AccessKit
-//! roles mirror Chromium's, so the tables carry over. Editable text gets one
-//! text run child, which is what gives AT-SPI clients the Text interface and
+//! **Mapping** follows Chromium's ARC++
+//! (`accessibility_node_info_data_wrapper.cc`). Roles come from the editable
+//! flag, link spans, collection info and the Android class name. The name
+//! comes from the content description, the labelling node, the text and the
+//! hint. The value, checked, expanded and range states are mapped too.
+//! AccessKit roles mirror Chromium's, so the tables carry over. Editable text
+//! gets a text run child, which gives AT-SPI clients the Text interface and
 //! the caret.
 //!
-//! **Validity.** `accesskit_consumer` panics on an update that isn't a tree
-//! over what it holds (a child it doesn't know, a node nobody lists, a node
-//! listed twice, a focus outside the tree), and a panic there would take the
-//! adapter down. [`WindowTree::apply`] keeps a mirror of AccessKit's nodes
-//! and their parents, and rewrites each snapshot into an update that keeps
-//! the tree a tree: unknown children and orphans are dropped, a node moved
-//! to a new parent is removed from its old one, and the focus is clamped to
-//! a live node. Coordinates are logical pixels relative to the window: on
-//! Wayland nothing knows where the window is.
+//! **Validity.** `accesskit_consumer` panics on an update that doesn't form a
+//! tree with what it already holds. Examples are a child it doesn't know, a
+//! node no parent lists, a node listed twice, or a focus outside the tree. A
+//! panic there would take the adapter down. [`WindowTree::apply`] keeps a
+//! mirror of AccessKit's nodes and their parents, and rewrites each snapshot
+//! into an update that keeps the tree valid. Unknown children and orphans are
+//! dropped, a node moved to a new parent is removed from its old one, and the
+//! focus is clamped to a live node. Coordinates are logical pixels relative
+//! to the window, because on Wayland clients don't know where their windows
+//! are.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,7 +45,7 @@ struct Meta {
     actions: u32,
     clickable: bool,
     custom: Vec<i32>,
-    /// Editable nodes: the text and selection (UTF-16 offsets).
+    /// The text and selection (UTF-16 offsets) of an editable node.
     text: Option<(String, (i32, i32))>,
     collection: Option<CollectionKind>,
 }
@@ -79,14 +81,16 @@ fn collection_kind(n: &RawNode) -> Option<CollectionKind> {
     None
 }
 
-/// The node's role: Chromium's `PopulateAXRole`, adjusted for AccessKit, which
-/// leaves generic containers out of AT-SPI. A generic container that is
-/// clickable (a Compose button is a clickable `View` around its text) becomes
-/// a button, which AccessKit names from its contents as Chromium's
-/// `ComputeNameFromContents` does; a named leaf (an icon's content
-/// description) a label, so that naming sees it; and one that is focusable or
-/// named a group. A button that is unnamed, inert and empty is no control
-/// (Compose puts one inside each button for its role), so it is left out.
+/// The node's role. It is Chromium's `PopulateAXRole`, adjusted for
+/// AccessKit, which leaves generic containers out of AT-SPI. A clickable
+/// generic container becomes a button, because a Compose button is a
+/// clickable `View` around its text. AccessKit names the button from its
+/// contents, as Chromium's `ComputeNameFromContents` does. A named leaf
+/// generic container, such as an icon with a content description, becomes a
+/// label so that this naming sees it. Any other focusable or named generic
+/// container becomes a group. A button that is unnamed, inert and empty is not
+/// a control, because Compose puts one inside each button for its role, so it
+/// is left out.
 fn role(n: &RawNode, ancestor: Option<CollectionKind>) -> Role {
     let clickable = n.has(flag::CLICKABLE)
         || n.has(flag::LONG_CLICKABLE)
@@ -161,8 +165,8 @@ fn chromium_role(n: &RawNode, ancestor: Option<CollectionKind>) -> Role {
         "android.widget.Spinner" => Some(Role::ComboBox),
         "android.widget.Switch" => Some(Role::Switch),
         "android.widget.TabWidget" => Some(Role::TabList),
-        // AccessKit has no toggle-button role: a button with a toggled
-        // state is one on AT-SPI.
+        // AccessKit has no toggle-button role. On AT-SPI, a button with a
+        // toggled state is a toggle button.
         "android.widget.ToggleButton" => Some(Role::Button),
         "android.view.View" => Some(Role::GenericContainer),
         "android.view.ViewGroup" => Some(Role::Group),
@@ -181,8 +185,8 @@ fn chromium_role(n: &RawNode, ancestor: Option<CollectionKind>) -> Role {
     }
 }
 
-/// Chromium's `ComputeAXName`: content description, the labelling node's
-/// name, the text unless editable, and the hint.
+/// Chromium's `ComputeAXName`. The name joins the content description, the
+/// labelling node's name, the text unless the node is editable, and the hint.
 fn name(n: &RawNode) -> String {
     let editable = n.has(flag::EDITABLE);
     let parts = [
@@ -195,7 +199,7 @@ fn name(n: &RawNode) -> String {
     parts.join(" ")
 }
 
-/// A UTF-16 offset as a char index into `s` (clamped).
+/// Converts a UTF-16 offset to a char index into `s`, clamped.
 fn char_index(s: &str, utf16: i32) -> usize {
     let mut units = 0usize;
     for (i, c) in s.chars().enumerate() {
@@ -207,7 +211,7 @@ fn char_index(s: &str, utf16: i32) -> usize {
     s.chars().count()
 }
 
-/// A char index into `s` as a UTF-16 offset (clamped).
+/// Converts a char index into `s` to a UTF-16 offset, clamped.
 fn utf16_offset(s: &str, chars: usize) -> i32 {
     s.chars().take(chars).map(char::len_utf16).sum::<usize>() as i32
 }
@@ -217,8 +221,8 @@ fn mask(s: &str) -> String {
     "•".repeat(s.chars().count())
 }
 
-/// The text run child of an editable node: the whole value, one character
-/// per Unicode scalar value.
+/// The text run child of an editable node. It holds the whole value, with
+/// one character per Unicode scalar value.
 fn text_run(value: &str, bounds: Option<Rect>) -> Node {
     let mut run = Node::new(Role::TextRun);
     run.set_value(value);
@@ -239,8 +243,8 @@ fn text_run(value: &str, bounds: Option<Rect>) -> Node {
     run
 }
 
-/// Builds the AccessKit node(s) for one Android node: the node, and for
-/// editable text its run.
+/// Builds the AccessKit node for one Android node, plus a text run for
+/// editable text.
 fn convert(
     n: &RawNode,
     scale: f32,
@@ -283,8 +287,8 @@ fn convert(
     if !n.hint.is_empty() && editable {
         node.set_placeholder(n.hint.as_str());
     }
-    // State description: a range's value text, a checkable's state, or else
-    // a description.
+    // The state description is a range's value text, a checkable's state,
+    // or otherwise a description.
     if !n.state_description.is_empty() {
         if n.range.is_some() {
             node.set_value(n.state_description.as_str());
@@ -362,7 +366,7 @@ fn convert(
         }
     }
 
-    // Actions. AT-SPI clients see only what's added here.
+    // AT-SPI clients see only the actions added here.
     let clickable = n.has(flag::CLICKABLE) || n.can(act::CLICK);
     if clickable {
         node.add_action(Action::Click);
@@ -431,7 +435,7 @@ fn convert(
     let mut run = None;
     let mut text = None;
     if editable {
-        // Chromium: the value is the text unless it is the hint showing.
+        // As in Chromium, the value is the text unless the text is the hint.
         let raw = if n.has(flag::SHOWING_HINT_TEXT) {
             ""
         } else {
@@ -471,7 +475,7 @@ fn convert(
     (node, meta, run)
 }
 
-/// One window's tree, as AccessKit holds it.
+/// One window's tree as AccessKit holds it.
 #[derive(Default)]
 pub struct WindowTree {
     nodes: HashMap<NodeId, Entry>,
@@ -490,7 +494,7 @@ impl WindowTree {
         self.nodes.contains_key(&id)
     }
 
-    /// The whole tree as one update: what AccessKit starts from.
+    /// The whole tree as one update, which AccessKit starts from.
     pub fn full_update(&self) -> Option<TreeUpdate> {
         let root = self.root?;
         Some(TreeUpdate {
@@ -530,7 +534,7 @@ impl WindowTree {
         None
     }
 
-    /// Applies a snapshot; returns the update to hand AccessKit. A partial
+    /// Applies a snapshot and returns the update to hand AccessKit. A partial
     /// snapshot needs a full one first.
     pub fn apply(&mut self, s: &Snapshot) -> Result<TreeUpdate, &'static str> {
         let full = !s.partial;
@@ -546,12 +550,12 @@ impl WindowTree {
         } else {
             self.root.unwrap()
         };
-        // In a full snapshot nothing from before counts: it must stand alone.
+        // A full snapshot must stand alone, so nothing from before counts.
         let empty = HashMap::new();
         let before = if full { &empty } else { &self.nodes };
 
-        // 1. Who claims which child: the first claim wins; the root, unknown
-        //    ids and self-references are dropped.
+        // 1. Find which parent claims each child. The first claim wins. The
+        //    root, unknown ids and self-references are dropped.
         let incoming: HashMap<NodeId, &RawNode> =
             s.nodes.iter().map(|n| (NodeId(n.id), n)).collect();
         let mut kept: Vec<&RawNode> = s.nodes.iter().collect();
@@ -605,8 +609,8 @@ impl WindowTree {
                 parent_of.remove(c);
                 banned.insert((*p, *c));
             }
-            // 2. A node must stay attached: the root, claimed now, or still
-            //    listed by a parent that isn't re-sent.
+            // 2. A node must stay attached. It must be the root, be claimed
+            //    now, or still be listed by a parent that isn't re-sent.
             let attached = |n: &&RawNode| {
                 let id = NodeId(n.id);
                 id == root
@@ -623,8 +627,8 @@ impl WindowTree {
             }
         }
 
-        // 3. The nodes, with their new parents; a moved node's old parent
-        //    (not re-sent) is re-sent without it.
+        // 3. Build the nodes with their new parents. When a moved node's old
+        //    parent isn't in the snapshot, it is re-sent without the node.
         let mut parents: HashMap<NodeId, NodeId> = HashMap::new();
         for (p, cs) in &claims {
             for c in cs {
@@ -700,7 +704,7 @@ impl WindowTree {
             entries.push((id, e));
         }
 
-        // 4. The mirror: what is reachable from the root now.
+        // 4. Update the mirror to what is now reachable from the root.
         let mut next: HashMap<NodeId, Entry> = if full {
             HashMap::new()
         } else {
@@ -810,8 +814,8 @@ impl WindowTree {
             }
             _ => return None,
         };
-        // Android refuses what the node doesn't list, except clicks on
-        // clickable views and focus, which views take without listing them.
+        // Android refuses actions the node doesn't list. Clicks on clickable
+        // views and focus are exceptions, which views take without listing.
         let listed = matches!(ev.action, act::CLICK | act::FOCUS | act::CUSTOM) || can(ev.action);
         listed.then_some(ev)
     }
@@ -1120,8 +1124,6 @@ mod tests {
         assert_eq!((b.x0, b.y0, b.x1, b.y1), (20.0, 40.0, 60.0, 80.0));
     }
 
-    // ---- the tree
-
     fn full(nodes: Vec<RawNode>, focus: u64) -> Snapshot {
         Snapshot {
             partial: false,
@@ -1209,7 +1211,7 @@ mod tests {
             ))
             .unwrap();
         let mut c = accesskit_consumer::Tree::new(u0, true);
-        // 4 moves under 3; 2 isn't re-sent.
+        // 4 moves under 3, and 2 isn't re-sent.
         let mut s = full(vec![with_children(raw(3), &[4])], 4);
         s.partial = true;
         let u = t.apply(&s).unwrap();
@@ -1219,7 +1221,7 @@ mod tests {
                 .any(|(id, n)| *id == NodeId(2) && n.children().is_empty())
         );
         c.update_and_process_changes(u, &mut Nop);
-        // Now 3 drops 4: it must go away without a panic.
+        // When 3 drops 4, 4 must go away without a panic.
         let mut s = full(vec![raw(3)], 0);
         s.partial = true;
         c.update_and_process_changes(t.apply(&s).unwrap(), &mut Nop);
@@ -1230,7 +1232,8 @@ mod tests {
     #[test]
     fn bad_references_are_dropped() {
         let mut t = WindowTree::default();
-        // 9 doesn't exist, 3 is listed twice, 5 is an orphan, 1 is the root.
+        // 9 doesn't exist, 3 is listed twice, 5 is an orphan, and 1 is the
+        // root.
         let u = t
             .apply(&full(
                 vec![
@@ -1256,7 +1259,8 @@ mod tests {
             u.nodes.is_empty(),
             "an orphan in a partial snapshot is dropped"
         );
-        // A cycle: 2 claims its parent's parent.
+        // 3 moves under 2 and claims 1, its new parent's parent, which would
+        // form a cycle.
         let mut s = full(
             vec![with_children(raw(3), &[1]), with_children(raw(2), &[3])],
             0,
@@ -1307,7 +1311,7 @@ mod tests {
             )
             .is_none()
         );
-        // The selection covers "b"; UTF-16 offsets on the wire.
+        // The selection covers "b", in UTF-16 offsets on the wire.
         let r = t
             .action(
                 7,

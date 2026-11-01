@@ -1,11 +1,13 @@
 //! The battery and the power saver.
 //!
-//! Battery: UPower's `DisplayDevice` (the composite of every battery:
-//! `IsPresent`, `State`, `Percentage`, `TimeToEmpty`, `TimeToFull`) and its
-//! `OnBattery`, re-read on each `PropertiesChanged`. Without UPower, or
-//! without a battery, the host is on AC and full ([`Battery::AC_ONLY`]).
+//! The battery comes from UPower's `DisplayDevice`, the composite of every
+//! battery (`IsPresent`, `State`, `Percentage`, `TimeToEmpty`,
+//! `TimeToFull`), and from UPower's `OnBattery`. They are re-read on each
+//! `PropertiesChanged`. Without UPower, or without a battery, the host is on
+//! AC and full ([`Battery::AC_ONLY`]).
 //!
-//! Power saver: the PowerProfileMonitor portal's `power-saver-enabled`.
+//! The power saver is the PowerProfileMonitor portal's
+//! `power-saver-enabled`.
 
 use super::proto::Battery;
 use super::{Topic, get_all, signals, signals_under};
@@ -28,8 +30,8 @@ pub fn watch_battery(system: Option<Connection>, topic: &Topic<Battery>) {
     let Some(conn) = system else {
         return topic.set(Battery::AC_ONLY, Battery::encode);
     };
-    // Subscribed before the first read, so no change slips between them.
-    // OnBattery changes on the root object, the rest on the devices.
+    // Subscribe before the first read so that no change slips in between.
+    // OnBattery changes on the root object, and the rest on the devices.
     let changes = signals_under(&conn, UPOWER_PATH, PROPERTIES, "PropertiesChanged");
     match read_battery(&conn) {
         Ok(b) => topic.set(b, Battery::encode),
@@ -55,8 +57,8 @@ fn read_battery(conn: &Connection) -> zbus::Result<Battery> {
     Ok(battery_from(&dev, &root))
 }
 
-/// UPower's properties as a [`Battery`]; missing or malformed values read as
-/// unknown.
+/// Converts UPower's properties to a [`Battery`]. Missing or malformed
+/// values read as unknown.
 pub fn battery_from(
     dev: &HashMap<String, OwnedValue>,
     root: &HashMap<String, OwnedValue>,
@@ -159,7 +161,8 @@ mod tests {
                 time_to_full: 0,
             }
         );
-        // No battery: AC and full, whatever else UPower says.
+        // Without a battery the host is on AC and full, whatever else UPower
+        // says.
         let none = map(&[
             ("IsPresent", Value::from(false)),
             ("Percentage", Value::from(0.0f64)),

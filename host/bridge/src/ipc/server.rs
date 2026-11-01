@@ -1,11 +1,11 @@
 //! The accept loop and per-connection threads.
 //!
-//! Each connection must come from our own uid (`SO_PEERCRED`; every Android
-//! process runs as the host user), must start with HELLO naming one
-//! registered service, and is
-//! then handed to that service. A service is anything implementing
-//! [`Service`]; register a factory for its id in a [`Registry`] (see
-//! `main.rs`, and `docs/bridge-protocol.md` for the conventions).
+//! Each connection must come from our own uid, checked with `SO_PEERCRED`.
+//! Every Android process runs as the host user. A connection must start with
+//! HELLO naming one registered service, and is then handed to that service.
+//! A service is anything implementing [`Service`]. To add one, register a
+//! factory for its id in a [`Registry`], as `main.rs` does.
+//! `docs/bridge-protocol.md` describes the conventions.
 
 use std::os::fd::{BorrowedFd, OwnedFd};
 use std::sync::Arc;
@@ -17,7 +17,8 @@ use crate::ipc::proto::{self, Hello};
 use crate::ipc::transport;
 use crate::ipc::wire::{self, MAX_MSG, errno::*};
 
-/// A reply to one request: status (0 or -errno), body, fds to pass.
+/// A reply to one request, with a status (0 or -errno), a body and fds to
+/// pass.
 pub struct Reply {
     pub status: i32,
     pub body: Vec<u8>,
@@ -51,7 +52,8 @@ impl Reply {
 /// Who is on the other end of a connection.
 #[derive(Debug, Clone)]
 pub struct Peer {
-    /// Host uid and pid (from SO_PEERCRED); pid 0 is outside this PID namespace.
+    /// Host uid and pid from SO_PEERCRED. Pid 0 means the peer is outside
+    /// this PID namespace.
     pub uid: u32,
     pub pid: i32,
     /// Client name from HELLO.
@@ -73,9 +75,9 @@ impl Peer {
 }
 
 /// Sends unsolicited events (types `wire::EVENT_MIN..=EVENT_MAX`, tag 0) to
-/// one connection. Cheap to clone; a service can hand it to its own threads.
-/// Each event is one packet, so events and replies never interleave
-/// mid-message (their order relative to each other is not defined). Sending
+/// one connection. It is cheap to clone, so a service can hand it to its own
+/// threads. Each event is one packet, so events and replies can't interleave
+/// mid-message. Their order relative to each other is not defined. Sending
 /// after the client went away fails with an error.
 #[derive(Clone)]
 pub struct Events {
@@ -83,14 +85,14 @@ pub struct Events {
 }
 
 impl Events {
-    /// Events on `sock` (tests).
+    /// Creates events on `sock`, for tests.
     pub fn new(sock: Arc<OwnedFd>) -> Events {
         Events { sock }
     }
 
-    /// Sends one event. Never waits: when the client's socket buffer is full
-    /// this fails with EAGAIN, so a client that doesn't read loses events
-    /// rather than stalling the service (or every client sharing its locks).
+    /// Sends one event without waiting. When the client's socket buffer is
+    /// full this fails with EAGAIN. A client that doesn't read loses events
+    /// instead of stalling the service and every client sharing its locks.
     pub fn try_send(&self, ty: u16, body: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
         if !(wire::EVENT_MIN..=wire::EVENT_MAX).contains(&ty) {
             bail!("event type {ty:#06x} outside the event range");
@@ -103,22 +105,23 @@ impl Events {
         transport::send_nonblocking(&self.sock, &w.0, fds)
     }
 
-    /// Ends the connection (the client sees EOF and may reconnect), e.g. when
-    /// the service's backend went away.
+    /// Ends the connection, for example when the service's backend went
+    /// away. The client sees EOF and may reconnect.
     pub fn shutdown(&self) {
         let _ = rustix::net::shutdown(&*self.sock, rustix::net::Shutdown::Both);
     }
 }
 
 /// A service bound to one connection. `handle` gets every request after
-/// HELLO: the message type, the untrusted body (decode it with
-/// `wire::Reader`), and any fds the client attached (closed when dropped).
-/// Dropping the service is the connection's cleanup.
+/// HELLO with its message type, its untrusted body and any fds the client
+/// attached. Decode the body with `wire::Reader`. The fds close when dropped.
+/// Dropping the service cleans up the connection.
 pub trait Service: Send {
     fn handle(&mut self, ty: u16, body: &[u8], fds: Vec<OwnedFd>) -> Reply;
 
-    /// Called once the HELLO reply is out: the client drops events that come
-    /// before it, so state a new connection needs goes out from here.
+    /// Called once the HELLO reply has been sent. The client drops events
+    /// that arrive before the reply, so send the state a new connection needs
+    /// from here.
     fn connected(&mut self) {}
 }
 
@@ -159,7 +162,7 @@ pub struct Config {
     pub services: Registry,
 }
 
-/// Accept loop; returns only if accept fails hard.
+/// Runs the accept loop. It returns only if accept fails hard.
 pub fn serve(listener: OwnedFd, cfg: Arc<Config>) -> Result<()> {
     let clients = Arc::new(AtomicUsize::new(0));
     let own = rustix::process::getuid().as_raw();
@@ -218,7 +221,7 @@ fn client(sock: OwnedFd, cfg: &Config, mut peer: Peer) -> Result<()> {
         let body = &msg[wire::HDR..];
         let Some(s) = svc.as_mut() else {
             // The first message must be a well-formed HELLO for a known
-            // service at our major version; anything else ends the
+            // service at our major version. Anything else ends the
             // connection.
             if !pkt.fds.is_empty() || h.ty != proto::HELLO {
                 send_reply(&sock, h.tag, &Reply::err(-EPROTO))?;

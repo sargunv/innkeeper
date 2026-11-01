@@ -2,7 +2,8 @@
 //! (`ResChunk_header`), string pools (`ResStringPool`) and typed values
 //! (`Res_value`), as laid out in AOSP's
 //! `frameworks/base/libs/androidfw/include/androidfw/ResourceTypes.h`.
-//! Every read is bounds-checked: a malformed file is an error, never a panic.
+//! Every read is bounds-checked, so a malformed file returns an error instead
+//! of panicking.
 
 use anyhow::{Context, Result, bail};
 
@@ -29,8 +30,8 @@ pub struct Chunk<'a> {
     pub ty: u16,
     pub header: &'a [u8],
     pub body: &'a [u8],
-    /// The whole chunk (header and body); offsets inside a chunk count from
-    /// its start.
+    /// The whole chunk, header and body. Offsets inside a chunk count from its
+    /// start.
     pub data: &'a [u8],
 }
 
@@ -80,8 +81,8 @@ impl<'a> Iterator for Children<'a> {
     }
 }
 
-/// A string pool chunk. Strings are decoded on demand: a resource table's
-/// pool can hold hundreds of thousands.
+/// A string pool chunk. Strings are decoded on demand, because a resource
+/// table's pool can hold hundreds of thousands of them.
 pub struct StringPool<'a> {
     data: &'a [u8],
     count: usize,
@@ -118,7 +119,8 @@ impl<'a> StringPool<'a> {
         }
         let mut o = self.strings_start + u32_at(self.data, self.offsets + i * 4)? as usize;
         if self.utf8 {
-            // UTF-16 length, then UTF-8 byte length; each 1 or 2 bytes.
+            // The UTF-16 length comes first, then the UTF-8 byte length. Each
+            // takes 1 or 2 bytes.
             let mut len8 = || -> Result<usize> {
                 let a = u8_at(self.data, o)? as usize;
                 o += 1;
@@ -137,7 +139,7 @@ impl<'a> StringPool<'a> {
                 .context("string runs past its pool")?;
             Ok(String::from_utf8_lossy(s).into_owned())
         } else {
-            // Length in UTF-16 units: 1 or 2 u16s.
+            // The length in UTF-16 units takes 1 or 2 u16s.
             let a = u16_at(self.data, o)? as usize;
             o += 2;
             let n = if a & 0x8000 == 0 {
@@ -175,12 +177,13 @@ pub enum Value {
     Float(u32),
     /// Android ARGB colour.
     Color(u32),
-    /// Anything else (floats, dimensions, colours, theme attributes).
+    /// Anything else, such as dimensions, fractions and theme attributes.
     Other,
 }
 
 impl Value {
-    /// `ty` and `data` of a `Res_value`; `STRING` data indexes `pool`.
+    /// Decodes the `ty` and `data` of a `Res_value`. `STRING` data is an index
+    /// into `pool`.
     pub fn new(ty: u8, data: u32, pool: &StringPool) -> Result<Self> {
         Ok(match ty {
             0x01 | 0x07 => Value::Ref(data),
@@ -275,8 +278,8 @@ mod tests {
         // Header larger than the chunk.
         assert!(Chunk::at(&[1, 0, 16, 0, 8, 0, 0, 0]).is_err());
         let mut b = build::pool(&["abc"], true);
-        // The string's byte length (after the header and one offset) now
-        // runs past the pool.
+        // Make the string's byte length, after the header and one offset, run
+        // past the pool.
         b[28 + 4 + 1] = 0x7f;
         let p = StringPool::new(Chunk::at(&b).unwrap()).unwrap();
         assert!(p.get(0).is_err());

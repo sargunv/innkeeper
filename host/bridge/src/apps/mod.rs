@@ -1,8 +1,9 @@
-//! The apps service (id 5): apps installed or removed inside Android (an app
-//! store, PackageInstaller, `pm install`) get or lose their desktop entry and
-//! icons. The Innkeeper System app reports package events; the entries are
-//! written with `innkeeper-core`. This is the only writer of app entries:
-//! `innkeeper install` installs, and the entry follows from here.
+//! The apps service (id 5). Apps installed inside Android, whether through an
+//! app store, PackageInstaller or `pm install`, get a desktop entry and
+//! icons, and removed apps lose them. The Innkeeper System app reports
+//! package events, and the entries are written with `innkeeper-core`. This
+//! service is the only writer of app entries. `innkeeper install` installs
+//! the package, and the entry comes from here.
 //!
 //! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
 //! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -10,16 +11,16 @@
 //! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 splash` (ARGB; alpha 0: none), `u16 width`, `u16 height` (the launch window, dp), `u16 len` + the APK's Android path (≤ 1024 B, under `/data/app/`), `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
 //! | `0x0503` | REMOVED | name package                                                                                              |                                                                                                        |
 //!
-//! At each connection the system app sends HAVE for every launchable user
-//! app, so installs made while the bridge was away catch up; then it follows
-//! package broadcasts.
+//! On each connection the system app sends HAVE for every launchable user
+//! app, so installs made while the bridge was away catch up. After that it
+//! follows package broadcasts.
 //!
-//! The bridge reads the installed APK (Android's `/data` is the profile's
-//! data dir) with `innkeeper-core`'s parser for the entry's localized names
-//! and URL schemes. An entry for another session profile is never touched;
-//! an uninstall inside Android removes this profile's entry. With app
-//! mirroring off nothing is added, and in a test session every request
-//! succeeds and does nothing, so tests don't fill the user's app menu.
+//! The bridge reads the installed APK with `innkeeper-core`'s parser to get
+//! the entry's localized names and URL schemes. Android's `/data` is the
+//! profile's data dir. An entry for another profile is left alone, and an
+//! uninstall inside Android removes this profile's entry. With app mirroring
+//! off nothing is added. In a test session every request succeeds and does
+//! nothing, so tests don't fill the user's app menu.
 
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -40,29 +41,30 @@ pub mod ty {
     pub const REMOVED: u16 = 0x0503;
 }
 
-/// Largest icon blob (all sizes together).
+/// Largest icon blob, counting all sizes together.
 pub const MAX_ICONS: u32 = 4 << 20;
-/// Icons per app.
+/// Most icons per app.
 const MAX_ICON_COUNT: usize = 8;
 const MAX_ICON_SIZE: u32 = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    /// Is the desktop entry for `package` at `version` current?
+    /// Asks whether the desktop entry for `package` at `version` is current.
     Have {
         package: String,
         version: String,
     },
-    /// `package` was installed or updated; its icons come in a blob.
+    /// Reports that `package` was installed or updated. Its icons come in a
+    /// blob.
     Added {
         package: String,
         version: String,
         label: String,
-        /// `ApplicationInfo.category` (-1 for none).
+        /// `ApplicationInfo.category`, or -1 for none.
         category: i32,
         game: bool,
-        /// The launch splash colour (ARGB; alpha 0: none) and window size
-        /// in dp.
+        /// The launch splash colour (ARGB, with alpha 0 meaning none) and
+        /// window size in dp.
         splash: u32,
         window: (u16, u16),
         /// The installed base APK's path in Android.
@@ -82,11 +84,12 @@ impl Request {
 
 /// HAVE's answer.
 pub mod have {
-    /// No entry, or ours for another version: send ADDED.
+    /// There is no entry, or this profile's entry is for another version.
+    /// The client should send ADDED.
     pub const MISSING: u8 = 0;
     pub const CURRENT: u8 = 1;
-    /// Someone else's entry (`innkeeper install`, another profile), or
-    /// mirroring is off: leave it.
+    /// The entry isn't this profile's, or mirroring is off. The client
+    /// should leave it alone.
     pub const NOT_OURS: u8 = 2;
 }
 
@@ -96,8 +99,8 @@ fn package(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     Ok(p)
 }
 
-/// The APK's Android path: `u16 len` + UTF-8, at most 1024 bytes, an `.apk`
-/// under `/data/app/` with no `..`.
+/// Reads the APK's Android path as `u16 len` + UTF-8, at most 1024 bytes. It
+/// must be an `.apk` under `/data/app/` with no `..`.
 fn apk_path(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     let n = r.u16()? as usize;
     if n > 1024 {
@@ -185,8 +188,9 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Icons in a blob: repeated `u32 size`, `u32 len`, `len` bytes of PNG.
-/// Only square hicolor sizes up to 512 whose PNG header matches are kept.
+/// Parses the icons in a blob, which repeats `u32 size`, `u32 len`, `len`
+/// bytes of PNG. Each icon must be square, at most 512, and match its PNG
+/// header, and at most 8 icons are allowed. Anything else is an error.
 pub fn parse_icons(b: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, i32> {
     let mut r = Reader::new(b);
     let mut out = Vec::new();
@@ -207,13 +211,13 @@ pub fn parse_icons(b: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, i32> {
 
 /// Settings shared by every connection.
 pub struct Config {
-    /// Off: every request is a no-op (test sessions).
+    /// When false, as in test sessions, every request is a no-op.
     pub enabled: bool,
     pub mirror_apps: AtomicBool,
     pub dirs: xdg::Dirs,
-    /// The session profile entries are made for.
+    /// The profile that entries are made for.
     pub profile: innkeeper_profile::profile::ProfileName,
-    /// Android's `/data` on the host, where installed APKs are.
+    /// Android's `/data` on the host, which holds installed APKs.
     pub data: std::path::PathBuf,
 }
 
@@ -241,7 +245,7 @@ impl Config {
         desktop::read_key(text, "X-Innkeeper-Profile").as_deref() == Some(self.profile.as_str())
     }
 
-    /// The existing entry for `pkg`: (ours, its version), or None.
+    /// The existing entry for `pkg` as (ours, its version), or None.
     fn existing(&self, pkg: &str) -> Option<(bool, String)> {
         let text = std::fs::read_to_string(self.dirs.app_desktop(pkg)).ok()?;
         let ours = self.owns(&text);
@@ -274,8 +278,8 @@ struct Added {
     apk: String,
 }
 
-/// The entry for `a`, with what its APK (`info`, if it could be read) adds:
-/// localized names and URL schemes.
+/// The entry for `a`, plus the localized names and URL schemes from its APK
+/// (`info`, if the APK could be read).
 fn entry(
     profile: &innkeeper_profile::profile::ProfileName,
     a: Added,
@@ -348,7 +352,7 @@ impl AppsService {
         let pkg = a.package.clone();
         let mut entry = entry(&self.cfg.profile, a, info.as_ref());
         // The record is written before the portal's dialog shows, so a HAVE
-        // meanwhile finds it current.
+        // in the meantime finds it current.
         let text = match xdg::write_record(&self.cfg.dirs, &mut entry, &icons) {
             Ok(t) => t,
             Err(e) => {
@@ -376,8 +380,8 @@ impl AppsService {
         if !self.cfg.enabled {
             return Reply::ok();
         }
-        // The app is gone from this profile: drop its entry, whoever wrote
-        // it, unless it belongs to another profile.
+        // The app is gone from this profile, so drop its entry if the entry
+        // is this profile's.
         let Some(text) = std::fs::read_to_string(self.cfg.dirs.app_desktop(pkg)).ok() else {
             return Reply::ok();
         };
@@ -594,7 +598,8 @@ mod tests {
                 height: 915
             })
         );
-        // No APK: the system app's label alone; no splash without a colour.
+        // Without an APK the entry uses the system app's label alone, and
+        // there is no splash without a colour.
         let mut a = added("org.ex.a", "1");
         a.splash = 0x0020_2124;
         let e = entry(&profile, a, None);
@@ -646,7 +651,7 @@ mod tests {
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
         assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
-        // The APK isn't there: the entry is written without what it adds.
+        // The APK isn't there, so the entry is written without its data.
         let r = s.added(added("org.ex.a", "1"), vec![(48, png(48))]);
         assert_eq!(r.status, 0);
         let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.a")).unwrap();
@@ -671,11 +676,11 @@ mod tests {
         assert_eq!(cfg.have("org.ex.c", "1"), have::NOT_OURS);
         s.removed("org.ex.c");
         assert!(cfg.dirs.app_desktop("org.ex.c").is_file());
-        // Mirroring off: nothing is added.
+        // With mirroring off, nothing is added.
         cfg.mirror_apps.store(false, Ordering::Relaxed);
         assert_eq!(cfg.have("org.ex.b", "1"), have::NOT_OURS);
         cfg.mirror_apps.store(true, Ordering::Relaxed);
-        // Uninstalled here: this profile's entry goes.
+        // An uninstall in this profile removes this profile's entry.
         s.removed("org.ex.a");
         assert!(!cfg.dirs.app_desktop("org.ex.a").exists());
         assert!(

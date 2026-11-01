@@ -1,8 +1,9 @@
-//! `file://` URIs, as desktop launches and the FileChooser portal pass files.
+//! Parsing of `file://` URIs, the form in which desktop launches and the
+//! FileChooser portal pass files.
 
 use std::path::PathBuf;
 
-/// A local path from a `file://` URI (percent-decoded), or None.
+/// Returns the percent-decoded local path of a `file://` URI, or None.
 pub fn file_path(uri: &str) -> Option<PathBuf> {
     let rest = uri.strip_prefix("file://")?;
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);

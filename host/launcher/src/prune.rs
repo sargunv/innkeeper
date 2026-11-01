@@ -1,8 +1,9 @@
-//! Image cache collection, serialized with preparation. Build and APEX tree
-//! leases live outside collected trees and stay locked from prepare through
-//! session exit, including while a session is starting and has no control
-//! socket yet. Every guest's images share the cache: each guest's pinned
-//! image is kept whichever guest prepares.
+//! Garbage collection for the image cache, serialized with preparation.
+//! Leases on builds and APEX trees are lock files outside the collected
+//! trees. They stay locked from prepare until the session exits, including
+//! while a session is starting and has no control socket yet. All guests
+//! share the cache, so each guest's pinned image is kept no matter which
+//! guest prepares.
 
 use std::fs::{self, File};
 use std::io;
@@ -16,7 +17,7 @@ use crate::paths::{Image, Paths};
 pub struct Lease {
     pub was_in_use: bool,
     _build: File,
-    /// Android's APEX tree; OpenHarmony's image has none.
+    /// Android's APEX tree. OpenHarmony's image has none.
     _apex: Option<File>,
 }
 
@@ -25,7 +26,8 @@ fn lock_file(path: &Path) -> Result<File> {
     Ok(File::options().create(true).append(true).open(path)?)
 }
 
-/// Never unlink lock files: another process may already have opened one.
+/// Lock files are never unlinked, because another process may already have
+/// one open.
 fn build_lock(images: &Path, build: &Path) -> PathBuf {
     images.join(".locks").join(build.file_name().unwrap())
 }
@@ -66,9 +68,10 @@ fn unused(path: &Path) -> Result<Option<File>> {
     }
 }
 
-/// The image a running session's `session.conf` names. Only that table is
-/// read: the session may run another Innkeeper build, whose config differs.
-/// An answering socket with an unreadable config aborts pruning.
+/// The image that a running session's `session.conf` names. Only the image
+/// table is read, because the session may run another Innkeeper build whose
+/// config differs. A session that answers on its socket but has an
+/// unreadable config aborts pruning.
 fn running_image(conf: &Path) -> Result<Image> {
     #[derive(serde::Deserialize)]
     struct Running {
@@ -128,7 +131,7 @@ fn apex_tree(name: &str) -> bool {
 }
 
 /// Allocated bytes that unlinking this tree releases. Hardlinks still held by
-/// composed roots do not free their file's blocks. Do not follow symlinks.
+/// composed roots do not free their file's blocks. Symlinks are not followed.
 fn freed_bytes(path: &Path) -> Result<u64> {
     let m = fs::symlink_metadata(path)?;
     let mut bytes = if m.nlink() == 1 || m.is_dir() {
@@ -154,9 +157,10 @@ fn remove(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Called only under the cache's prepare lock, with the current lease held.
-/// Keeps the `pinned` images ([`pinned`]) and running sessions'. Unknown
-/// directories, symlinks and unfinished APEX extractions are left alone.
+/// Must be called under the cache's prepare lock, with the current lease
+/// held. Keeps the `pinned` images ([`pinned`]) and those of running
+/// sessions. Unknown directories, symlinks and unfinished APEX extractions
+/// are left alone.
 pub fn prune(paths: &Paths, pinned: &[Image]) -> Result<()> {
     let running = running_images(paths).context("find running images before pruning")?;
     for entry in fs::read_dir(&paths.images)? {
@@ -165,7 +169,7 @@ pub fn prune(paths: &Paths, pinned: &[Image]) -> Result<()> {
             continue;
         }
         let build = entry.path();
-        // Only image-cache trees, never unrelated directories beside them.
+        // Skip directories that are not image-cache builds.
         if !build.join("img").is_dir() && !build.join("derived").is_dir() {
             continue;
         }
@@ -284,7 +288,8 @@ mod tests {
         let old = make("ci-old", "bbbbbbbbbbbb");
         let same_build = make("ci-new", "cccccccccccc");
         let stale = make("ci-stale", "dddddddddddd");
-        // The other guest's pinned image: no APEX tree, no lease.
+        // The other guest's pinned image has no APEX tree, so it has no APEX
+        // lease.
         let mut ohos = make("oniro-1", "");
         ohos.apexdir = ohos.dir.join("apex");
         fs::create_dir_all(&ohos.img)?;

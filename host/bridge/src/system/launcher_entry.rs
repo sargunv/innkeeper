@@ -1,5 +1,6 @@
-//! Unity LauncherEntry, understood by Plasma and Ubuntu Dock / Dash to Dock.
-//! State belongs to Android notifications, including those suppressed by DND.
+//! Unity LauncherEntry, which Plasma, Ubuntu Dock and Dash to Dock
+//! understand. Its state comes from Android notifications, including those
+//! suppressed by Do Not Disturb.
 
 use std::collections::{HashMap, HashSet};
 
@@ -75,8 +76,9 @@ impl LauncherEntry {
             count += i64::from(n.badge);
             urgent |= n.urgent;
             if n.progress != -1 {
-                // Unity has no indeterminate state. Keep busy work visible at
-                // 50%; concurrent tasks share an equally weighted mean.
+                // Unity has no indeterminate state, so indeterminate progress
+                // shows as 50%. Concurrent tasks are averaged with equal
+                // weight.
                 sum += if n.progress == -2 { 50 } else { n.progress };
                 tasks += 1;
             }

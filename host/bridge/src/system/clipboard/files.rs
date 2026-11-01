@@ -1,5 +1,6 @@
-//! Bounded multi-file clipboard payloads and cache copies. File-transfer portal
-//! keys let file managers cross the Flatpak boundary without broad filesystem access.
+//! Size-bounded multi-file clipboard payloads and their copies in the cache.
+//! File-transfer portal keys let file managers cross the Flatpak boundary
+//! without broad filesystem access.
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,7 +26,7 @@ pub struct ClipFile {
     pub bytes: Vec<u8>,
 }
 
-/// One selection, bounded including every file's metadata.
+/// One selection. Its size bound includes every file's metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipFiles(pub Vec<ClipFile>);
 
@@ -80,7 +81,8 @@ impl ClipFiles {
     }
 }
 
-/// `dir`, emptied: an earlier process's selections are no longer served.
+/// Empties `dir` and returns it. Selections from an earlier process are no
+/// longer served.
 pub fn fresh_cache(dir: &std::path::Path) -> Result<PathBuf> {
     if dir.exists() {
         std::fs::remove_dir_all(dir)?;
@@ -89,8 +91,9 @@ pub fn fresh_cache(dir: &std::path::Path) -> Result<PathBuf> {
     Ok(dir.to_path_buf())
 }
 
-/// Deleted when the source is replaced/cancelled. Never reuse a pathname: a
-/// recipient may still have a URI from an earlier selection.
+/// Cached copies of one selection, deleted when the source is replaced or
+/// cancelled. Each selection gets new pathnames, because a recipient may
+/// still hold a URI from an earlier selection.
 pub struct CachedFiles {
     dir: PathBuf,
     paths: Vec<PathBuf>,

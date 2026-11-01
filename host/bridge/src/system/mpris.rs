@@ -1,13 +1,15 @@
 //! Android media sessions as MPRIS players, so desktop media controls and
 //! media keys drive them.
 //!
-//! The system app sends a media blob per active `MediaSession` (keyed by its
-//! own nonzero player id) whenever its metadata or state changes. Each player
-//! is its own session-bus connection owning
-//! `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper.<package, _ for .>` (plus
-//! `.instance<N>` if the package has two), serving `/org/mpris/MediaPlayer2`. MPRIS calls come
-//! back as `MEDIA_CMD` events. Artwork arrives as RGBA and is written as our
-//! own PNG encoding to a private directory (`mpris:artUrl` must be a URL).
+//! The system app sends a media blob for each active `MediaSession`, keyed by
+//! a nonzero player id that the app chooses, whenever the session's metadata
+//! or state changes. Each player has its own session-bus connection, which
+//! serves `/org/mpris/MediaPlayer2` and owns
+//! `org.mpris.MediaPlayer2.dev.sargunv.Innkeeper.<package>` with `_` in place
+//! of `.`. If that name is taken, the player appends
+//! `.instance<client>_<player>`. MPRIS calls come back as `MEDIA_CMD` events.
+//! Artwork arrives as RGBA, and the bridge writes it as PNG to a private
+//! directory because `mpris:artUrl` must be a URL.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,7 +29,7 @@ use crate::ipc::wire::DecodeError;
 pub const MAX_PER_CLIENT: usize = 8;
 const PATH: &str = "/org/mpris/MediaPlayer2";
 const MAX_ART_SIDE: u16 = 512;
-/// Longest duration or position we accept: about four months.
+/// The longest duration or position accepted, about four months.
 const MAX_US: i64 = 10_000_000_000_000;
 
 pub mod actions {
@@ -57,7 +59,7 @@ pub struct Media {
     pub album: String,
     pub state: u8,
     pub actions: u32,
-    /// Microseconds; -1 unknown.
+    /// In microseconds, or -1 if unknown.
     pub duration_us: i64,
     pub position_us: i64,
     pub rate: f32,
@@ -67,9 +69,10 @@ pub struct Media {
 pub const MEDIA_VERSION: u32 = 1;
 
 impl Media {
-    /// Layout: `u32 version (1)`, text package, app name, title, artist,
-    /// album; `u8 state`, `u8 0`, `u16 0`, `u32 actions`, `i64 duration_us`,
-    /// `i64 position_us`, `f32 rate`, then the artwork (at most 512x512).
+    /// The layout is `u32 version (1)`, then text package, app name, title,
+    /// artist and album, then `u8 state`, `u8 0`, `u16 0`, `u32 actions`,
+    /// `i64 duration_us`, `i64 position_us`, `f32 rate` and the artwork (at
+    /// most 512x512).
     pub fn decode(b: &[u8]) -> Result<Media, DecodeError> {
         let mut d = Doc::new(b);
         if d.0.u32()? != MEDIA_VERSION {
@@ -149,7 +152,7 @@ impl Media {
 /// A player's state, shared by its two D-Bus interfaces.
 struct PState {
     media: Media,
-    /// When `media.position_us` was true.
+    /// The time at which `media.position_us` was current.
     at: Instant,
     track: u64,
     art_url: String,
@@ -266,7 +269,7 @@ impl Player {
     }
     fn set_position(&self, track_id: ObjectPath<'_>, position: i64) {
         let st = self.st.lock().unwrap();
-        // The spec: ignore stale track ids and positions out of range.
+        // The spec says to ignore stale track ids and out-of-range positions.
         if track_id.as_str() != track_path(st.track)
             || position < 0
             || (st.media.duration_us > 0 && position > st.media.duration_us)
@@ -458,7 +461,7 @@ impl MprisHub {
         }
         let mut art_file = None;
         let art_url = self.write_art(client, player, art.as_ref(), &mut art_file);
-        // Under the manager's id, which Flatpak lets the app own.
+        // The name is under the manager's id, which Flatpak lets the app own.
         let base = format!(
             "org.mpris.MediaPlayer2.{MANAGER_ID}.{}",
             media.package.replace('.', "_")
@@ -531,7 +534,7 @@ impl MprisHub {
         }
     }
 
-    /// Writes the artwork as PNG (only when it changed); returns its URL.
+    /// Writes the artwork as PNG if it changed, and returns its URL.
     fn write_art(
         &self,
         client: u64,

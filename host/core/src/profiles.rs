@@ -1,8 +1,8 @@
-//! Profiles ([`innkeeper_profile::profile`]), each running Android or
-//! OpenHarmony, as the CLI and the manager show
-//! them: listed with their state and settings, created, renamed, deleted,
-//! started and stopped, and the one to use when none is named. Each works on
-//! the named profile, whatever this process's is.
+//! Profiles ([`innkeeper_profile::profile`]) as the CLI and the manager show
+//! them. Each profile runs Android or OpenHarmony. This module lists profiles
+//! with their state and settings, and creates, renames, deletes, starts and
+//! stops them. Each function works on the profile it is given, regardless of
+//! this process's own profile.
 
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use crate::launcher::Session;
 use crate::paths::Prefix;
 use crate::xdg::{self, Dirs};
 
-/// A profile and what it is doing.
+/// A profile and its state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
     pub name: String,
@@ -26,11 +26,10 @@ fn paths(name: &str) -> Result<innkeeper_profile::Paths> {
     Prefix::locate()?.profile_paths(name)
 }
 
-/// The profiles' names.
 fn names() -> Vec<ProfileName> {
     let mut v = profile::list(&innkeeper_profile::paths::data_home());
-    // A test profile whose data lives elsewhere (`INNKEEPER_DATA`, with its
-    // `INNKEEPER_PROFILE`) is still one.
+    // A test profile keeps its data in `INNKEEPER_DATA` and is named by
+    // `INNKEEPER_PROFILE`. List it too.
     if let Ok(p) = innkeeper_profile::paths::profile()
         && std::env::var_os("INNKEEPER_DATA").is_some()
         && !v.contains(&p)
@@ -40,8 +39,8 @@ fn names() -> Vec<ProfileName> {
     v
 }
 
-/// Every profile, by name. One whose settings can't be read shows the
-/// defaults; [`settings`] reports the error.
+/// Lists every profile. A profile whose settings can't be read shows the
+/// defaults, and [`settings`] reports the error.
 pub fn list() -> Result<Vec<Profile>> {
     names()
         .into_iter()
@@ -56,8 +55,8 @@ pub fn list() -> Result<Vec<Profile>> {
         .collect()
 }
 
-/// Profile `name`, which must exist; [`FIRST`] is created if it doesn't,
-/// so a first command works with no setup.
+/// Returns profile `name`, which must exist. [`FIRST`] is created if it is
+/// missing, so the first command works with no setup.
 pub fn existing(name: &str) -> Result<ProfileName> {
     let p = ProfileName::new(name)?;
     if !paths(&p)?.data.exists() {
@@ -74,7 +73,8 @@ pub fn settings(name: &str) -> Result<Settings> {
     Settings::load(&paths(name)?.data)
 }
 
-/// Fails unless profile `name` runs Android: `what` is Android's alone.
+/// Fails unless profile `name` runs Android. `what` names the Android-only
+/// feature in the error.
 pub fn need_android(name: &str, what: &str) -> Result<()> {
     settings(name)?
         .system
@@ -82,15 +82,15 @@ pub fn need_android(name: &str, what: &str) -> Result<()> {
         .with_context(|| format!("profile {name}"))
 }
 
-/// The settings of this process's own profile (`INNKEEPER_PROFILE`), as its
-/// bridge reads them.
+/// Loads the settings of this process's profile, named by
+/// `INNKEEPER_PROFILE`. The bridge reads its settings this way.
 pub fn own() -> Result<Settings> {
     Settings::load(&Prefix::locate()?.session_paths()?.data)
 }
 
 /// Changes profile `name`'s settings with `change` and saves them. A running
-/// profile's bridge applies the live ones at once; the display applies at the
-/// next start.
+/// profile's bridge applies the live settings at once. Display settings take
+/// effect at the next start.
 pub fn update(name: &str, change: impl FnOnce(&mut Settings)) -> Result<Settings> {
     let data = paths(name)?.data;
     let mut s = Settings::load(&data)?;
@@ -100,7 +100,8 @@ pub fn update(name: &str, change: impl FnOnce(&mut Settings)) -> Result<Settings
     Ok(s)
 }
 
-/// Has profile `name`'s bridge, if it runs, apply its saved settings.
+/// Asks profile `name`'s bridge, if it is running, to apply the saved
+/// settings.
 fn reload(name: &str) -> Result<()> {
     let connection = zbus::blocking::connection::Builder::session()?
         .method_timeout(Duration::from_secs(5))
@@ -132,16 +133,16 @@ pub fn create(name: &str, settings: &Settings) -> Result<()> {
     settings.save(&p.data)
 }
 
-/// Renames profile `from` to `to`, with its apps' app-menu entries. It must
-/// be stopped.
+/// Renames profile `from` to `to`, along with its apps' app-menu entries. The
+/// profile must be stopped.
 pub fn rename(from: &str, to: &str) -> Result<()> {
     profile::rename(&paths(from)?, &paths(to)?)?;
     xdg::move_entries(&Dirs::from_env(), from, to);
     Ok(())
 }
 
-/// Deletes profile `name`: its apps and their data, its settings and its
-/// app-menu entries. It must be stopped.
+/// Deletes profile `name` with its apps and their data, its settings and its
+/// app-menu entries. The profile must be stopped.
 pub fn delete(name: &str) -> Result<()> {
     let p = paths(name)?;
     if !p.data.exists() {
@@ -157,13 +158,13 @@ pub fn delete(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Starts profile `name` (with windows) and waits for it to boot.
+/// Starts profile `name` with windows and waits for it to boot.
 pub fn start(name: &str, status: &dyn Fn(&str)) -> Result<()> {
     Session::of_profile(name)?.ensure(status)
 }
 
-/// Deletes profile `name`'s Android data, keeping its settings: Android
-/// starts over at the next start. It must be stopped.
+/// Deletes profile `name`'s Android data but keeps its settings, so Android
+/// starts over at the next start. The profile must be stopped.
 pub fn reset(name: &str) -> Result<()> {
     Session::of_profile(name)?.reset()
 }

@@ -1,7 +1,7 @@
-//! APK metadata, read from the APK itself: its binary `AndroidManifest.xml`
-//! ([`xml`]), the `resources.arsc` values the manifest refers to ([`table`]),
-//! and `lib/<abi>/` for native code. No Android SDK or session is needed.
-//! Everything read is untrusted: front ends validate it before use.
+//! APK metadata, read from the APK's binary `AndroidManifest.xml` ([`xml`]),
+//! the `resources.arsc` values that the manifest refers to ([`table`]), and
+//! `lib/<abi>/` for native code. No Android SDK or session is needed.
+//! Everything read is untrusted, so front ends validate it before use.
 
 mod chunk;
 pub mod icon;
@@ -22,10 +22,12 @@ use locale::Locale;
 use table::Table;
 use xml::Element;
 
-/// The oldest Android API level a session runs (Android 16; the image is 17).
+/// The oldest Android API level a session runs, which is Android 16. The
+/// image is Android 17.
 pub const SESSION_MIN_SDK: u32 = 36;
 
-/// Read caps for the two files we parse (the largest corpus table is 3 MiB).
+/// Read caps for the two parsed files. The largest resource table in the
+/// compat corpus is 3 MiB.
 const MAX_MANIFEST: u64 = 16 << 20;
 const MAX_TABLE: u64 = 256 << 20;
 
@@ -38,28 +40,30 @@ pub struct ApkInfo {
     pub package: String,
     pub version_code: String,
     pub version_name: String,
-    /// `config.x86_64` for split APKs; empty for the base.
+    /// The split name, such as `config.x86_64`, or empty for the base.
     pub split: String,
-    /// Default-locale label.
+    /// The label in the default locale.
     pub label: String,
     /// (locale tag, label) for the APK's locales where the label differs
     /// from the default, e.g. ("pt-BR", "Calculadora"), sorted.
     pub labels: Vec<(String, String)>,
-    /// Every variant of the launcher icon as (density, path inside the APK):
-    /// 160 for mdpi (or no density), 0xfffe for anydpi (adaptive or vector
-    /// XML), 0xffff for nodpi.
+    /// Every variant of the launcher icon as (density, path inside the APK).
+    /// The density is 160 for mdpi or no density, 0xfffe for anydpi (adaptive
+    /// or vector XML), and 0xffff for nodpi.
     pub icons: Vec<(u32, String)>,
     /// ABIs with libraries under `lib/`, sorted.
     pub native_code: Vec<String>,
-    /// `uses-permission` names that apply to a session's SDK (sorted,
-    /// deduplicated, as declared).
+    /// `uses-permission` names that apply to a session's SDK, as declared,
+    /// sorted and deduplicated.
     pub permissions: Vec<String>,
     /// `android:appCategory` (`ApplicationInfo.CATEGORY_*`).
     pub app_category: Option<i32>,
     pub is_game: bool,
-    /// Custom URI schemes of exported, browsable VIEW filters (sorted, valid).
+    /// Custom URI schemes of exported, browsable VIEW filters, validated and
+    /// sorted.
     pub schemes: Vec<String>,
-    /// Hosts of exported, browsable `http(s)` VIEW filters (sorted, valid).
+    /// Hosts of exported, browsable `http(s)` VIEW filters, validated and
+    /// sorted.
     pub web_hosts: Vec<String>,
 }
 
@@ -94,8 +98,8 @@ pub fn read(apk: &Path) -> Result<ApkInfo> {
         .with_context(|| format!("read the manifest of {}", apk.display()))
 }
 
-/// [`read`] on an APK's parts: the manifest, the resource table and the
-/// names of its files.
+/// Does what [`read`] does, given an APK's manifest, resource table and file
+/// names.
 pub fn parse(manifest: &[u8], table: Option<&[u8]>, files: &[String]) -> Result<ApkInfo> {
     let root = xml::parse(manifest)?;
     if root.name != "manifest" {
@@ -122,8 +126,8 @@ pub fn parse(manifest: &[u8], table: Option<&[u8]>, files: &[String]) -> Result<
         )
     }) {
         let name = text(p, "name");
-        // Requested only up to an old SDK (`maxSdkVersion`): doesn't apply
-        // in the session, which runs a current Android.
+        // A permission requested only up to an old SDK (`maxSdkVersion`)
+        // doesn't apply in the session, which runs a current Android.
         let max: Option<u32> = p
             .attr("maxSdkVersion")
             .and_then(|v| res.text(v)?.parse().ok());
@@ -190,7 +194,8 @@ fn links(app: &Element, res: &Res, info: &mut ApkInfo) {
             if data.iter().any(|d| d.attr("mimeType").is_some()) {
                 continue;
             }
-            // <data> elements of one filter combine: every scheme x every host.
+            // The <data> elements of one filter combine, so every scheme pairs
+            // with every host.
             let schemes: Vec<String> = data.iter().filter_map(|d| text(d, "scheme")).collect();
             let hosts: Vec<String> = data.iter().filter_map(|d| text(d, "host")).collect();
             for s in &schemes {
@@ -214,8 +219,9 @@ struct Res<'a>(Option<Table<'a>>);
 
 impl Res<'_> {
     /// The value of resource `id` that Android would pick for `locale`.
-    /// Values for other qualifiers (night mode, screen sizes) are ignored;
-    /// of several SDK levels the highest wins, as on a current Android.
+    /// Values with other qualifiers, such as night mode or screen size, are
+    /// ignored. Among several SDK levels the highest wins, as on a current
+    /// Android.
     fn pick(&self, id: u32, locale: &Locale) -> Option<Value> {
         let t = self.0.as_ref()?;
         t.values(id)
@@ -226,7 +232,7 @@ impl Res<'_> {
             .map(|(_, v)| v)
     }
 
-    /// `v` in `locale`, with references followed.
+    /// Resolves `v` in `locale`, following references.
     fn resolve(&self, v: &Value, locale: &Locale) -> Value {
         let mut v = v.clone();
         for _ in 0..MAX_REFS {
@@ -241,12 +247,13 @@ impl Res<'_> {
         Value::Other
     }
 
-    /// `v` in the default configuration.
+    /// Resolves `v` in the default configuration.
     fn value(&self, v: &Value) -> Value {
         self.resolve(v, &Locale::default())
     }
 
-    /// `v` as text in the default configuration (integers in decimal).
+    /// Formats `v` as text in the default configuration. Integers are in
+    /// decimal.
     fn text(&self, v: &Value) -> Option<String> {
         match self.value(v) {
             Value::Str(s) => Some(s),
@@ -256,9 +263,10 @@ impl Res<'_> {
         }
     }
 
-    /// The default text of `v`, and its text in each locale of the APK where
-    /// that differs (as aapt2 lists it: `pt-BR` is listed if any resource
-    /// has a `pt-BR` value, with the label Android shows there).
+    /// Returns the default text of `v` and its text in each of the APK's
+    /// locales where it differs. Locales are listed as aapt2 lists them:
+    /// `pt-BR` is listed if any resource has a `pt-BR` value, with the label
+    /// that Android shows there.
     fn localized(&self, v: &Value) -> (String, Vec<(String, String)>) {
         let text = |loc: &Locale| match self.resolve(v, loc) {
             Value::Str(s) => s,
@@ -276,7 +284,7 @@ impl Res<'_> {
         (default, labels)
     }
 
-    /// The files (paths inside the APK) of every density of `v`, sorted.
+    /// The files of every density of `v` as paths inside the APK, sorted.
     fn files(&self, v: &Value, depth: usize) -> Vec<(u32, String)> {
         let mut out = vec![];
         match v {

@@ -1,12 +1,13 @@
-//! The host seat, turned into input lines ([`super::proto`]). The display
-//! service owns the Wayland connection; its seat's pointer, keyboard and
-//! touch events land here, and [`super::gestures`] and [`super::tablet`]
-//! add touchpad gestures and tablets. Pointer and touch events over a window's
-//! client-side frame go back to the display service, which drives the frame.
+//! Turns the host seat into input lines ([`super::proto`]). The display
+//! service owns the Wayland connection. Its seat's pointer, keyboard and
+//! touch events are handled here, and [`super::gestures`] and
+//! [`super::tablet`] add touchpad gestures and tablets. Pointer and touch
+//! events over a window's client-side frame go back to the display service,
+//! which drives the frame.
 //!
-//! Content uses Android's cursor bitmap; the frame keeps its own arrow and
-//! resize shapes (`wp_cursor_shape_v1`, where
-//! the compositor has it). Android draws no pointer of its own.
+//! Over content the cursor is Android's cursor bitmap. The frame uses its own
+//! arrow and resize shapes through `wp_cursor_shape_v1` when the compositor
+//! has it. Android draws no pointer of its own.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -40,29 +41,33 @@ pub(crate) struct Seat {
     pub(crate) pointer: Option<wl_pointer::WlPointer>,
     pub(crate) capture: Capture,
     pub(crate) cursor_shape: Option<WpCursorShapeManagerV1>,
-    /// The pointer's cursor-shape device, the serial of its last enter and
-    /// the shape set since.
+    /// The pointer's cursor-shape device, the serial of the pointer's last
+    /// enter, and the shape set since that enter.
     cursor: Option<WpCursorShapeDeviceV1>,
     enter_serial: u32,
     shape: Option<Shape>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     touch: Option<wl_touch::WlTouch>,
-    /// Where the pointer is: a window's content, or a window's frame.
+    /// The window under the pointer. The flag is true over the window's frame
+    /// and false over its content.
     pointer_focus: Option<(u32, bool)>,
     /// The surface the pointer entered (decoration parts are subsurfaces).
     pointer_surface: Option<ObjectId>,
     pub(crate) keyboard_focus: Option<u32>,
     touch_focus: HashMap<i32, u32>,
-    /// The frame has one click point; keep its first contact separate from Android.
+    /// The touch that drives a window's frame. The frame has a single click
+    /// point, so only one touch drives it, and that touch stays separate from
+    /// Android's.
     frame_touch: Option<FrameTouch>,
     /// zwp_text_input_v3 for the IME.
     pub(crate) text: TextInput,
     pub(crate) gestures: Gestures,
     pub(crate) tablets: Tablets,
-    /// The newest input serial (window moves, resizes and activation).
+    /// The newest input serial, used for window moves, resizes and
+    /// activation.
     pub(crate) last_serial: u32,
-    /// The compositor's keymap; None until it sends one, or without
-    /// libxkbcommon (then keys go out as evdev codes only).
+    /// The compositor's keymap. It is None until the compositor sends one, or
+    /// when libxkbcommon is missing. Keys then go out as evdev codes only.
     xkb: Option<Xkb>,
     rotate_key: Option<u32>,
 }
@@ -196,7 +201,8 @@ impl Seat {
         }
     }
 
-    /// The window `id` is gone; gestures and a tablet tool over it end.
+    /// Forgets window `id`, which is gone. Gestures and a tablet tool over it
+    /// end.
     pub(crate) fn forget(&mut self, id: u32, hub: &Hub) {
         self.capture.forget(id);
         self.gestures.forget(id, hub);
@@ -246,8 +252,8 @@ impl Dispatch2<WpCursorShapeDeviceV1, State> for Cursor {
     }
 }
 
-/// The shape for a client-side frame's cursor (edges resize, the rest is
-/// the arrow).
+/// The cursor shape for a client-side frame. Edges get resize shapes, and the
+/// rest gets the arrow.
 fn frame_shape(icon: CursorIcon) -> Shape {
     use CursorIcon as C;
     match icon {
@@ -460,8 +466,8 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 let Some(id) = st.seat.keyboard_focus else {
                     return;
                 };
-                // wl_keyboard v10: a compositor that sent a repeat rate of 0
-                // repeats keys itself.
+                // With wl_keyboard v10, a compositor that sent a repeat rate
+                // of 0 repeats keys itself.
                 use wl_keyboard::KeyState as K;
                 let state = match state {
                     WEnum::Value(K::Pressed) => KeyLine::Press,
@@ -476,7 +482,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kbd {
                 if key == 1 && state == KeyLine::Press {
                     st.seat.capture.cancel();
                 }
-                // F11 toggles fullscreen, as in desktop apps; Android never
+                // F11 toggles fullscreen, as in desktop apps. Android never
                 // sees it.
                 if key == KEY_F11 {
                     if state == KeyLine::Press {
@@ -530,9 +536,9 @@ enum KeyLine {
     Repeat = 2,
 }
 
-/// The `key` line ([`super::proto`]): with a keymap, a press or repeat also
-/// carries the key's level-1 keysym and what it types. Repeats don't feed
-/// compose.
+/// Formats the `key` line ([`super::proto`]). With a keymap, a press or
+/// repeat also carries the key's level-1 keysym and what it types. Repeats
+/// don't feed compose.
 fn key_line(xkb: Option<&mut Xkb>, time: u32, key: u32, state: KeyLine) -> String {
     let mut l = format!("key {time} {key} {}", state as u8);
     let resolved = xkb.and_then(|x| match state {
@@ -551,8 +557,9 @@ fn key_line(xkb: Option<&mut Xkb>, time: u32, key: u32, state: KeyLine) -> Strin
     l
 }
 
-/// wl_touch motion coordinates stay relative to the down surface, and interactive
-/// move/resize must use that down's serial, rather than the pointer's last serial.
+/// wl_touch motion coordinates stay relative to the surface of the down event.
+/// Interactive move and resize must use the down event's serial instead of the
+/// pointer's last serial.
 struct FrameTouch {
     id: i32,
     window: u32,
@@ -669,7 +676,7 @@ mod tests {
         assert_eq!(line(Some(&mut fr), 16, Repeat), "key 7 16 2 97 text a");
         assert_eq!(line(Some(&mut fr), 16, Release), "key 7 16 0");
         assert_eq!(line(Some(&mut fr), 3, Press), "key 7 3 1 233 text é");
-        // The dead circumflex, then a space: the circumflex itself.
+        // A dead circumflex followed by a space types the circumflex.
         assert_eq!(line(Some(&mut fr), 26, Press), "key 7 26 1 65106 compose");
         assert_eq!(line(Some(&mut fr), 57, Press), "key 7 57 1 32 text ^");
         assert_eq!(line(Some(&mut fr), 28, Press), "key 7 28 1 65293");

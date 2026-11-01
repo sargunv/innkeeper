@@ -1,19 +1,20 @@
-//! The documents service (id 4): host files and folders the user picks in the
-//! FileChooser portal, for the Innkeeper System app's document picker and
-//! DocumentsProvider. Messages: [`proto`].
+//! The documents service (id 4). It serves host files and folders the user
+//! picks in the FileChooser portal to the Innkeeper System app's document
+//! picker and DocumentsProvider. The messages are in [`proto`].
 //!
-//! The bridge is the only one that knows host paths. Android gets opaque
-//! grant ids and file descriptors:
+//! Only the bridge knows host paths. Android gets opaque grant ids and file
+//! descriptors.
 //!
-//! - Portal grants expose only what the user picked. CLI imports hold just the
-//!   supplied file fd, read-only, until session exit or FORGET. Portal grants persist (the provider's URIs outlive the session)
-//!   in the profile's state directory, and FORGET drops one.
+//! - Portal grants expose only what the user picked. They persist in the
+//!   profile's state directory because the provider's URIs outlive the
+//!   session, and FORGET drops one. Imported files are held only as the
+//!   supplied fd, read-only, until the session exits or FORGET drops them.
 //! - A file grant opens only that file. A folder grant opens paths beneath it
 //!   through `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` from the
 //!   folder's fd, so `..`, absolute symlinks and `/proc` links can't leave
-//!   it; paths are also checked for `.`/`..` before that.
-//! - Only regular files are opened (FIFOs and devices are refused before any
-//!   blocking open), and writes need a grant made for writing.
+//!   it. Paths are also checked for `.` and `..` before that.
+//! - Only regular files are opened. FIFOs and devices are refused before any
+//!   blocking open. Writes need a grant made for writing.
 
 pub mod portal;
 pub mod proto;
@@ -33,13 +34,13 @@ use crate::ipc::wire::Writer;
 use crate::ipc::wire::errno::*;
 use proto::{Kind, Meta, OpenMode, Pick, PickMode, Request};
 
-/// Grants kept at most; the oldest go first.
+/// Most grants kept. The oldest go first.
 const MAX_GRANTS: usize = 4096;
-/// Entries one LIST returns at most.
+/// Most entries one LIST returns.
 const MAX_LIST: usize = 10_000;
-/// Picks waiting for the user, bridge-wide. A pick outlives its connection
-/// (its dialog stays up until the user answers), so a per-connection limit
-/// would let a client reconnect for more.
+/// Most picks waiting for the user, bridge-wide. A pick outlives its
+/// connection because its dialog stays up until the user answers, so a
+/// per-connection limit would let a client reconnect for more.
 const MAX_PICKS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +54,8 @@ pub struct Grant {
 pub struct Store {
     file: Option<PathBuf>,
     grants: Mutex<Vec<(u64, Grant)>>,
-    /// Desktop Open With files: held by fd, read-only, until forgotten or session exit.
+    /// Files imported through Session1 `Import`. They are held by fd,
+    /// read-only, until forgotten or until the session exits.
     files: Mutex<Vec<(u64, OwnedFd, String)>>,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     picks: AtomicUsize,
@@ -80,7 +82,7 @@ impl Store {
         })
     }
 
-    /// A slot for one more pick, unless MAX_PICKS are outstanding.
+    /// Takes a slot for one more pick, unless MAX_PICKS are outstanding.
     pub fn pick_slot(self: &Arc<Self>) -> Option<PickSlot> {
         let ok = self
             .picks
@@ -109,7 +111,8 @@ impl Store {
     pub fn add(&self, grant: Grant) -> u64 {
         let id = random_id();
         let mut g = self.grants.lock().unwrap();
-        // Picking the same thing again reuses its grant (widened to write).
+        // Picking the same thing again reuses its grant, widened to write if
+        // the new pick asked for it.
         if let Some((i, old)) = g
             .iter_mut()
             .find(|(_, o)| o.path == grant.path && o.dir == grant.dir)
@@ -134,8 +137,8 @@ impl Store {
         self.save(&g);
     }
 
-    /// Imports `fd`, which must be a regular file, as a read-only grant
-    /// (Session1 `Import`); no host path reaches Android.
+    /// Imports `fd`, which must be a regular file, as a read-only grant for
+    /// Session1 `Import`. No host path reaches Android.
     pub fn import_file(&self, fd: OwnedFd, name: String) -> Result<u64, i32> {
         let st = rustix::fs::fstat(&fd).map_err(errno)?;
         if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
@@ -249,12 +252,12 @@ fn errno(e: rustix::io::Errno) -> i32 {
     -e.raw_os_error()
 }
 
-/// File operations on one grant. Paths are already validated
-/// (`proto::valid_path`).
+/// File operations on one grant. Callers have already validated paths with
+/// `proto::valid_path`.
 pub struct Fs<'a>(pub &'a Grant);
 
 impl Fs<'_> {
-    /// The grant's folder, as an `O_PATH` fd.
+    /// Opens the grant's folder as an `O_PATH` fd.
     fn root(&self) -> Result<OwnedFd, i32> {
         rustix::fs::open(
             &self.0.path,
@@ -264,8 +267,8 @@ impl Fs<'_> {
         .map_err(errno)
     }
 
-    /// Opens `rel` with `flags`: the grant itself (empty path), or a path
-    /// beneath a folder grant.
+    /// Opens `rel` with `flags`. An empty path opens the grant itself, and
+    /// any other path must be beneath a folder grant.
     fn open_at(&self, rel: &str, flags: OFlags, mode: Mode) -> Result<OwnedFd, i32> {
         // openat2 refuses flags that don't apply to O_PATH.
         let flags = if flags.contains(OFlags::PATH) {
@@ -290,7 +293,7 @@ impl Fs<'_> {
         .map_err(errno)
     }
 
-    /// The folder holding `rel`, and `rel`'s last name.
+    /// Opens the folder holding `rel` and returns it with `rel`'s last name.
     fn parent<'p>(&self, rel: &'p str) -> Result<(OwnedFd, &'p str), i32> {
         if rel.is_empty() || !self.0.dir {
             return Err(-EPERM);
@@ -304,7 +307,7 @@ impl Fs<'_> {
         if self.0.write { Ok(()) } else { Err(-EACCES) }
     }
 
-    /// A regular file, opened for `mode`.
+    /// Opens a regular file for `mode`.
     pub fn open(&self, rel: &str, mode: OpenMode) -> Result<OwnedFd, i32> {
         if mode.writes() {
             self.need_write()?;
@@ -315,8 +318,8 @@ impl Fs<'_> {
             OpenMode::ReadWrite => OFlags::RDWR,
             OpenMode::Append => OFlags::WRONLY | OFlags::APPEND,
         };
-        // Check the type through O_PATH first: opening a FIFO for reading
-        // would block, and truncating must only happen to regular files.
+        // Check the type through O_PATH first. Opening a FIFO for reading
+        // would block, and only regular files may be truncated.
         let probe = self.open_at(rel, OFlags::PATH, Mode::empty())?;
         let st = rustix::fs::fstat(&probe).map_err(errno)?;
         if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
@@ -367,8 +370,8 @@ impl Fs<'_> {
         self.meta_of(&st, &name).ok_or(-EINVAL)
     }
 
-    /// The folder's regular files and folders (symlinks and special files
-    /// are left out), at most MAX_LIST.
+    /// Lists the folder's regular files and folders, at most MAX_LIST.
+    /// Symlinks and special files are left out.
     pub fn list(&self, rel: &str) -> Result<Vec<Meta>, i32> {
         if !self.0.dir {
             return Err(-ENOTDIR);
@@ -399,8 +402,8 @@ impl Fs<'_> {
         Ok(out)
     }
 
-    /// Creates a file or folder `name` in `rel`; if the name is taken, tries
-    /// "name (1).ext" and so on. Returns the name used.
+    /// Creates a file or folder `name` in `rel`. If the name is taken, it
+    /// tries "name (1).ext" and so on. Returns the name used.
     pub fn create(&self, rel: &str, kind: Kind, name: &str) -> Result<String, i32> {
         self.need_write()?;
         if !self.0.dir {
@@ -456,7 +459,7 @@ impl Fs<'_> {
         rustix::fs::unlinkat(&dir, name, flags).map_err(errno)
     }
 
-    /// Renames within the same folder, never replacing.
+    /// Renames within the same folder without replacing an existing entry.
     pub fn rename(&self, rel: &str, to: &str) -> Result<(), i32> {
         self.need_write()?;
         let (dir, name) = self.parent(rel)?;
@@ -469,7 +472,7 @@ pub struct DocumentsService {
     store: Arc<Store>,
     events: Events,
     label: String,
-    /// False in a test session: picks cancel without asking the portal.
+    /// False in a test session, where picks cancel without asking the portal.
     desktop: bool,
 }
 
@@ -557,7 +560,7 @@ fn run_pick(store: &Store, events: &Events, p: &Pick, label: &str) {
 }
 
 /// The grant for what the user picked, after checking it is what was asked
-/// for. A saved file is created (empty) right away, like Android's
+/// for. A saved file is created empty right away, as Android's
 /// CREATE_DOCUMENT does.
 fn grant_for(path: &Path, p: &Pick) -> Result<Grant, String> {
     if !path.is_absolute() {
@@ -796,9 +799,9 @@ mod tests {
         );
     }
 
-    /// Outstanding picks are counted for the whole bridge (every connection
-    /// shares the Store), and stay charged until the pick finishes, not
-    /// until its connection closes.
+    /// Outstanding picks are counted for the whole bridge, because every
+    /// connection shares the Store. A pick stays counted until it finishes,
+    /// even if its connection closes first.
     #[test]
     fn picks_are_capped_bridge_wide() {
         let s = Store::new(None);

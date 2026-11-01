@@ -1,4 +1,5 @@
-//! Window policy without Wayland objects or side effects. Shape: 0 unchanged, 1 portrait, 2 landscape.
+//! Window policy without Wayland objects or side effects. A shape is 0 for
+//! unchanged, 1 for portrait or 2 for landscape.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct AppRequest {
@@ -26,8 +27,9 @@ pub(super) struct WindowState {
     pub constrained: bool,
 }
 
-/// Reduce every app/user/compositor event to one desired state. Consume a shape request only
-/// while floating: a later compositor configure wins, and Ctrl+R isn't undone by old app metadata.
+/// Reduces each app, user or compositor event to one desired window state. A
+/// shape request is applied once, and only while the window floats. A later
+/// compositor configure then wins, and old app metadata can't undo Ctrl+R.
 pub(super) fn desired_window_state(
     mut policy: Policy,
     event: Event,

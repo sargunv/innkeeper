@@ -1,8 +1,9 @@
 //! System service messages (id 3, types 0x0300..=0x03ff, events
-//! 0x4300..=0x43ff). The client is the Innkeeper System app
-//! (`BridgeConnection` plus its integration features): it sends `START`,
-//! then gets events. Anything that can exceed one message travels as a
-//! sealed memfd blob ([`crate::ipc::blob`]); the messages carry its length.
+//! 0x4300..=0x43ff). The client is the Innkeeper System app, through
+//! `BridgeConnection` and its integration features. It sends `START` and
+//! then receives events. Anything that can exceed one message travels as a
+//! sealed memfd blob ([`crate::ipc::blob`]), and the message carries the
+//! blob's length.
 //!
 //! | Type     | Request      | Body (fd)                                                                       | Reply                                                                                          |
 //! | -------- | ------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -17,15 +18,17 @@
 //! | `0x030a` | PLAYBACK_APP | name package (empty: nothing playing), name label | labels Android's mixed playback stream in the desktop mixer ([`PlaybackApp`]) |
 //!
 //! HANDOFF carries every portal operation that hands something from Android
-//! to the desktop. Its metadata: `u32 version` (1), text (≤32 KiB), subject
-//! (≤4 KiB), then one display name (≤255 B, no `/`, not `.` or `..`) per
-//! content fd, each a `u32` length and UTF-8. URI has no content fds and
-//! refuses `file:`, `content:`, `intent:`, `javascript:` and `data:`. The
-//! reply means scheduled, not done: the bridge logs a portal's cancellation
-//! or failure. Open/save without files writes text as a `.txt` file;
-//! email without files uses text as the body. Each content file is ≤64 MiB.
-//! Opened files/attachments stay in the profile cache until session shutdown,
-//! capped at 256 MiB retained. Save copies are removed after writing.
+//! to the desktop. Its metadata is `u32 version` (1), text (≤32 KiB), a
+//! subject (≤4 KiB), and then one display name (≤255 B, no `/`, not `.` or
+//! `..`) per content fd. Each string is a `u32` length followed by UTF-8. A
+//! URI handoff has no content fds and refuses `file:`, `content:`,
+//! `intent:`, `javascript:` and `data:`. The reply means the operation was
+//! scheduled, and the bridge logs a portal's cancellation or failure. Open
+//! and save without files write the text as a `.txt` file, and email without
+//! files uses the text as the body. Each content file is at most 64 MiB.
+//! Opened files and attachments stay in the profile cache until session
+//! shutdown, capped at 256 MiB in total. Save copies are removed after
+//! writing.
 //!
 //! | Event    | Message      | Body (fd)                                                                                                                                                                                                |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -34,15 +37,16 @@
 //! | `0x4303` | CLIP         | `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len` (fd: the content)                                                                                                                                          |
 //! | `0x4304` | MEDIA_CMD    | `u32 player`, `u8 cmd` (1 play, 2 pause, 3 play/pause, 4 stop, 5 next, 6 previous, 7 seek by, 8 seek to, 9 raise), `u8 0`, `u16 0`, `i64 arg` (µs)                                                       |
 //!
-//! Blob contents start with `u32 version` (1); [`super::notify::Note`] and
-//! [`super::mpris::Media`] document theirs, and the system app's encoders
-//! (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is `u32 len` +
-//! UTF-8; images are `u16 width, u16 height` + raw RGBA8 rows, so nothing
-//! Android sends reaches a host image decoder. Clip kind 3 is `u32 count`
-//! (1..16) files, each a text name (1..255 bytes, no slash), a text MIME
-//! (1..255 bytes), then `u32 size` and raw bytes (at most 16 MiB minus 1024);
-//! 16 MiB in all, with no trailing bytes. Clipboard text is raw UTF-8, without
-//! a length prefix.
+//! Blob contents start with `u32 version` (1). [`super::notify::Note`] and
+//! [`super::mpris::Media`] document their layouts, and the system app's
+//! encoders (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is a
+//! `u32 len` followed by UTF-8. Images are `u16 width, u16 height` followed
+//! by raw RGBA8 rows, so nothing Android sends reaches a host image decoder.
+//! Clip kind 3 is a `u32 count` (1..16) of files. Each file is a text name
+//! (1..255 bytes, no slash), a text MIME type (1..255 bytes), then a
+//! `u32 size` and raw bytes (at most 16 MiB minus 1024). The whole blob is at
+//! most 16 MiB, with no trailing bytes. Clipboard text is raw UTF-8 without a
+//! length prefix.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -72,7 +76,7 @@ pub mod limits {
     pub const CLIP_IMAGE: u32 = 16 << 20;
     pub const CLIP_FILE: u32 = 16 << 20;
     pub const MEDIA_BLOB: u32 = 2 << 20;
-    /// LIFECYCLE's blob, and the background-allowed apps in it.
+    /// Caps on LIFECYCLE's blob and on the background-allowed apps it lists.
     pub const LIFECYCLE_BLOB: u32 = 16 << 10;
     pub const BACKGROUND_APPS: usize = 32;
 }
@@ -84,7 +88,8 @@ pub enum ClipKind {
     Text = 1,
     /// An RGBA image (`blob::Doc::image`).
     Image = 2,
-    /// File: blob text name, blob text MIME, u32 byte count, raw bytes.
+    /// Files: a `u32` count, then per file a blob text name, a blob text MIME
+    /// type, a `u32` byte count and the raw bytes.
     File = 3,
 }
 
@@ -107,21 +112,22 @@ impl ClipKind {
 }
 
 /// What keeps the session up, as the system app sees it (docs/session.md,
-/// "Lifecycle"). It sends one whenever a part changes.
+/// "Lifecycle"). The app sends a new report whenever a part changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Lifecycle {
-    /// The window manager's windows (shown or starting).
+    /// Windows the window manager has shown or is starting.
     pub windows: u32,
     /// User apps' running foreground services.
     pub services: u32,
-    /// The next alarm clock, in ms since the epoch (0: none).
+    /// The next alarm clock in ms since the epoch, or 0 for none.
     pub wakeup_ms: u64,
-    /// The blob's length: the apps the user lets run in the background, one
-    /// `package<TAB>label` line each ([`background_apps`]). 0: none, and no fd.
+    /// Length of the blob that lists the apps the user lets run in the
+    /// background, one `package<TAB>label` line each ([`background_apps`]).
+    /// 0 means no apps and no fd.
     pub len: u32,
 }
 
-/// The lines of a LIFECYCLE blob: (package, label), at most
+/// Parses a LIFECYCLE blob into (package, label) pairs, at most
 /// [`limits::BACKGROUND_APPS`].
 pub fn background_apps(blob: &[u8]) -> Result<Vec<(String, String)>, DecodeError> {
     let text = std::str::from_utf8(blob).map_err(|_| DecodeError::Invalid("utf-8"))?;
@@ -144,27 +150,30 @@ pub fn background_apps(blob: &[u8]) -> Result<Vec<(String, String)>, DecodeError
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    /// Reply: `u8 notifications`, whether NOTIFY reaches the desktop.
+    /// The reply is `u8 notifications`, which says whether NOTIFY reaches the
+    /// desktop.
     Start,
-    /// `u32 id` (nonzero), `u32 len`; fd: notification blob. Posting an id
-    /// again updates that notification.
+    /// `u32 id` (nonzero) and `u32 len`, with the notification blob as the
+    /// fd. Posting an id again updates that notification.
     Notify { id: u32, len: u32 },
     /// `u32 id`.
     NotifyClose { id: u32 },
-    /// `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len`; fd: the content.
+    /// `u8 kind`, `u8 sensitive`, `u16 0` and `u32 len`, with the content as
+    /// the fd.
     ClipSet {
         kind: ClipKind,
         sensitive: bool,
         len: u32,
     },
-    /// `u32 player` (nonzero), `u32 len`; fd: media blob.
+    /// `u32 player` (nonzero) and `u32 len`, with the media blob as the fd.
     Media { player: u32, len: u32 },
     /// `u32 player`.
     MediaClose { player: u32 },
-    /// `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len`; fd (if len >
-    /// 0): background apps.
+    /// `u32 windows`, `u32 services`, `u64 wakeup` and `u32 len`. If len > 0,
+    /// the fd holds the background apps.
     Lifecycle(Lifecycle),
-    /// Metadata memfd followed by `files` content fds; see `handoff`.
+    /// The fds are a metadata memfd followed by `files` content fds. See
+    /// `handoff`.
     Handoff {
         window: u32,
         action: u8,
@@ -177,20 +186,19 @@ pub enum Request {
     PlaybackApp(PlaybackApp),
 }
 
-/// What the desktop mixer shows for Android's one playback stream. Android
-/// mixes every app into that stream, so this is the most recently started
-/// app that is playing, not a per-app stream.
+/// What the desktop mixer shows for Android's single playback stream.
+/// Android mixes every app into that stream, so this names the most recently
+/// started app that is playing.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PlaybackApp {
     /// Android package, or empty when nothing is playing.
     pub package: String,
-    /// The app's label. Empty when nothing is playing; the bridge then
-    /// uses the package.
+    /// The app's label. If it is empty, the bridge uses the package.
     pub label: String,
 }
 
 impl Request {
-    /// Whether this request comes with exactly one fd.
+    /// The number of fds this request carries.
     pub fn fd_count(&self) -> usize {
         if let Request::Handoff { files, .. } = self {
             return 1 + *files as usize;
@@ -359,8 +367,6 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-// ---- events ------------------------------------------------------------------
-
 /// Desktop settings, sent after START and whenever one changes. Unknown
 /// values are 0 or empty, and the client leaves those settings alone.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -370,24 +376,26 @@ pub struct Settings {
     pub color_scheme: u8,
     /// `accent-color` as sRGB bytes.
     pub accent: Option<[u8; 3]>,
-    /// Opt out: has_accent=2 leaves Android’s accent untouched.
+    /// Set when the user opted out, sent as has_accent=2. Android's accent is
+    /// then left untouched.
     pub accent_disabled: bool,
     /// `contrast`: 0 normal, 1 high.
     pub contrast: u8,
     /// `reduced-motion`: 0 no preference, 1 reduced.
     pub reduced_motion: u8,
-    /// 0 unknown, 1 12-hour, 2 24-hour.
+    /// Clock format: 0 unknown, 1 12-hour, 2 24-hour.
     pub clock: u8,
-    /// Text scaling factor (0: unknown; else 0.5 to 3).
+    /// Text scaling factor from 0.5 to 3, or 0 if unknown.
     pub text_scale: f32,
     /// IANA time zone id, e.g. `Europe/Berlin`.
     pub timezone: String,
     /// BCP 47 language tags in preference order, comma-separated.
     pub locales: String,
-    /// The `LC_TIME` locale as a BCP 47 tag (week start, regional
-    /// preferences); empty if unset.
+    /// The `LC_TIME` locale as a BCP 47 tag, used for the week start and
+    /// regional preferences. It is empty if unset.
     pub time_locale: String,
-    /// The `LC_MEASUREMENT` locale as a BCP 47 tag (temperature unit).
+    /// The `LC_MEASUREMENT` locale as a BCP 47 tag, used for the temperature
+    /// unit.
     pub measure_locale: String,
 }
 
@@ -443,13 +451,14 @@ impl Settings {
 
 /// What happened to a notification on the desktop.
 pub mod notify_event {
-    /// The notification itself was clicked.
+    /// The notification was clicked.
     pub const CLICKED: u8 = 1;
     /// Action `action` was invoked.
     pub const ACTION: u8 = 2;
     /// The user dismissed it on the desktop.
     pub const DISMISSED: u8 = 3;
-    /// An inline reply to action `action`; fd: the text (`len` bytes).
+    /// An inline reply to action `action`. The fd holds the text (`len`
+    /// bytes).
     pub const REPLY: u8 = 4;
 }
 
@@ -460,7 +469,8 @@ pub fn notify_event(id: u32, what: u8, action: u8, len: u32) -> Vec<u8> {
     w.into_vec()
 }
 
-/// `CLIP` body: `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len`; fd: content.
+/// `CLIP` body: `u8 kind`, `u8 sensitive`, `u16 0`, `u32 len`. The fd holds
+/// the content.
 pub fn clip_event(kind: ClipKind, sensitive: bool, len: u32) -> Vec<u8> {
     let mut w = Writer::default();
     w.u8(kind as u8).u8(sensitive as u8).u16(0).u32(len);

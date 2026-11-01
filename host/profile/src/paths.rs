@@ -1,5 +1,5 @@
-//! Where a session's files are, from the prefix the launcher runs from and the
-//! environment (docs/session.md, "Where things live").
+//! Where a session's files are, derived from the launcher's install prefix
+//! and the environment (docs/session.md, "Where things live").
 
 use std::env;
 use std::fs;
@@ -14,20 +14,20 @@ use crate::profile::{ProfileName, System};
 /// The Flatpak app id, when `FLATPAK_ID` doesn't say.
 const APP_ID: &str = "dev.sargunv.Innkeeper";
 
-/// The profile in `INNKEEPER_PROFILE`, which must name one: the launcher's
-/// and the programs it starts. Front ends name profiles explicitly.
+/// The profile named by `INNKEEPER_PROFILE`, which must be set. The launcher
+/// and the programs it starts use it. Front ends name profiles explicitly.
 pub fn profile() -> Result<ProfileName> {
     ProfileName::new(&env::var("INNKEEPER_PROFILE").unwrap_or_default())
         .context("INNKEEPER_PROFILE")
 }
 
-/// `name-<profile>`: the session's directories are named this way.
+/// Returns `name-<profile>`, the naming scheme of the session's directories.
 pub fn per_profile(name: &str, profile: &ProfileName) -> String {
     format!("{name}-{profile}")
 }
 
-/// An XDG base directory: `$var` if it is absolute, else `default` under
-/// `$HOME`.
+/// An XDG base directory. It is `$var` if that is absolute, and otherwise
+/// `default` under `$HOME`.
 pub fn xdg_home(var: &str, default: &str) -> PathBuf {
     env::var_os(var)
         .map(PathBuf::from)
@@ -37,7 +37,8 @@ pub fn xdg_home(var: &str, default: &str) -> PathBuf {
         })
 }
 
-/// `$XDG_DATA_HOME/innkeeper`: the profiles' data, the image cache, addons.
+/// `$XDG_DATA_HOME/innkeeper`, which holds the profiles' data, the image
+/// cache and addons.
 pub fn data_home() -> PathBuf {
     xdg_home("XDG_DATA_HOME", ".local/share").join("innkeeper")
 }
@@ -49,20 +50,23 @@ fn env_path(var: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// A session's paths. Every per-profile one carries the profile suffix.
+/// A session's paths. Every per-profile path carries the profile suffix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paths {
     /// Serialized as `profile` in session.conf.
     pub profile: ProfileName,
-    /// `<prefix>/libexec/innkeeper`: the bridge, the image scripts.
+    /// `<prefix>/libexec/innkeeper`, which holds the bridge and the image
+    /// scripts.
     pub libexec: PathBuf,
-    /// `<prefix>/share/innkeeper`: the guests' trees, the image config.
+    /// `<prefix>/share/innkeeper`, which holds the guests' trees and the image
+    /// config.
     pub share: PathBuf,
     /// `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>`, which every
-    /// instance of the app shares: session.conf, the control socket, the
-    /// kmsg FIFO, the bridge's socket dir, the start-time layer.
+    /// instance of the app shares. It holds session.conf, the control socket,
+    /// the kmsg FIFO, the bridge's socket dir and the start-time layer.
     pub run: PathBuf,
-    /// `$XDG_STATE_HOME/innkeeper-<profile>`: logs, the documents grants.
+    /// `$XDG_STATE_HOME/innkeeper-<profile>`, which holds the logs and the
+    /// documents grants.
     pub state: PathBuf,
     /// `$XDG_DATA_HOME/innkeeper`.
     pub data_home: PathBuf,
@@ -70,7 +74,7 @@ pub struct Paths {
     pub data: PathBuf,
     /// The image cache (`INNKEEPER_IMAGES`, default `images`).
     pub images: PathBuf,
-    /// The composed root: `root-<profile>`.
+    /// The composed root, `root-<profile>`.
     pub root: PathBuf,
 }
 
@@ -90,7 +94,7 @@ impl Paths {
             );
         }
         let profile = ProfileName::new(name)?;
-        // INNKEEPER_DATA is the environment's own profile's.
+        // INNKEEPER_DATA applies only to the profile named in the environment.
         let data_env =
             env_path("INNKEEPER_DATA").filter(|_| self::profile().ok().as_ref() == Some(&profile));
         let sfx = |n: &str| per_profile(n, &profile);
@@ -132,19 +136,20 @@ impl Paths {
         self.run.join("session.conf")
     }
 
-    /// The control socket, which other instances of the app (the CLI, the
-    /// manager) reach the session through.
+    /// The control socket, through which other instances of the app, such as
+    /// the CLI and the manager, reach the session.
     pub fn control(&self) -> PathBuf {
         self.run.join("control.sock")
     }
 
-    /// What the system app last reported about the session's activity
-    /// (written by the bridge, [`crate::lifecycle`]).
+    /// The system app's last report of the session's activity, written by the
+    /// bridge. See [`crate::activity`].
     pub fn lifecycle(&self) -> PathBuf {
         self.run.join("lifecycle")
     }
 
-    /// Held shared by every running `exec`, which keeps the session up.
+    /// The lock that every running `exec` holds in shared mode, which keeps
+    /// the session up.
     pub fn exec_lock(&self) -> PathBuf {
         self.run.join("exec.lock")
     }
@@ -171,8 +176,8 @@ impl Paths {
         self.share.join("ohos")
     }
 
-    /// Addon layers over the partitions, one dir each (test:bionic's test
-    /// vendor binaries).
+    /// The dir of addon layers over the partitions, one dir per layer.
+    /// test:bionic uses it for its test vendor binaries.
     pub fn addons(&self) -> PathBuf {
         self.data_home.join("addons")
     }
@@ -191,7 +196,7 @@ impl Paths {
         v
     }
 
-    /// The extra `androidboot.*` values (image/bootconfig), one token each.
+    /// The extra `androidboot.*` values from image/bootconfig, one token each.
     pub fn image_bootconfig(&self) -> Result<Vec<String>> {
         let p = self.share.join("image/bootconfig");
         let text = fs::read_to_string(&p).with_context(|| format!("read {}", p.display()))?;
@@ -220,19 +225,20 @@ impl Paths {
         })
     }
 
-    /// `system`'s image pin: `share/innkeeper/<system>/pin.toml`, from the
-    /// guest's tree (android/pin.toml, ohos/pin.toml).
+    /// `system`'s image pin, `share/innkeeper/<system>/pin.toml`, staged from
+    /// the guest's tree (android/pin.toml, ohos/pin.toml).
     pub fn pin(&self, system: System) -> PathBuf {
         self.share.join(system.name()).join("pin.toml")
     }
 }
 
-/// A pinned image's files: its extracted partitions (`img`) and, for
-/// Android's AOSP CI build, its flattened APEXes (`apexdir`, one per vendor
-/// APEX selection, shared by every profile and never rewritten under a
-/// running session) and the layer derived from them (image/README.md).
-/// OpenHarmony's image has neither: its `apexdir` (`apex`, not an
-/// `apex-<hash>` tree) and `derived` are never made.
+/// A pinned image's files (image/README.md). `img` holds the extracted
+/// partitions. For Android's AOSP CI build, `apexdir` holds the flattened
+/// APEXes and `derived` holds the layer derived from them. There is one
+/// `apexdir` per vendor APEX selection. It is shared by every profile and
+/// never rewritten under a running session. OpenHarmony's image has neither,
+/// so its `apexdir` (`apex`, not an `apex-<hash>` tree) and `derived` are
+/// never made.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
     pub name: String,
@@ -243,14 +249,15 @@ pub struct Image {
 }
 
 impl Image {
-    /// What the derived layer was made from (`image::prepare`); absent until
-    /// derive.sh has finished.
+    /// The record of what the derived layer was made from (`image::prepare`).
+    /// It is absent until derive.sh has finished.
     pub fn derived_source(&self) -> PathBuf {
         self.derived.join(".source")
     }
 }
 
-/// The pin's top-level name: the keys before any `[table]` header.
+/// The pin's top-level `name`, looked up among the keys before any `[table]`
+/// header.
 fn pin_name(pin: &str) -> Option<String> {
     for line in pin.lines() {
         let l = line.trim_start();
@@ -269,8 +276,8 @@ fn pin_name(pin: &str) -> Option<String> {
     None
 }
 
-/// image/bootconfig's `androidboot.*=value` tokens: whitespace-separated,
-/// with `#` comments.
+/// The `androidboot.*=value` tokens of image/bootconfig, which are
+/// whitespace-separated and may have `#` comments.
 fn bootconfig_tokens(text: &str) -> Vec<String> {
     text.lines()
         .flat_map(|l| l.split('#').next().unwrap_or("").split_whitespace())
@@ -278,9 +285,9 @@ fn bootconfig_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The flattened APEX tree's suffix: a hash of the vendor APEX selection
-/// (`androidboot.vendor.apex.<name>=<file>|none`, which apexd and
-/// image/flatten-apex.sh both honour).
+/// The flattened APEX tree's suffix, a hash of the vendor APEX selection. The
+/// selection is the `androidboot.vendor.apex.<name>=<file>|none` tokens,
+/// which apexd and image/flatten-apex.sh both honour.
 fn apex_selection_hash(bootconfig: &[String]) -> String {
     let mut h = Sha256::new();
     for t in bootconfig

@@ -1,10 +1,11 @@
-//! One render node and Vulkan feature set for the whole Android session.
+//! Selects the render node and Vulkan feature set for the Android session.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Prefer RADV on hybrid hosts, then ANV on supported i915 devices. Unsupported nodes must not
-/// hide a supported GPU later in sysfs. Return the matching HAL with its node.
+/// Picks a render node and its Vulkan HAL. RADV is preferred on hybrid hosts,
+/// then ANV on i915 devices listed in `anv_ids`. Every node is checked, so an
+/// unsupported node does not hide a supported GPU later in sysfs.
 pub fn select_node(drm: &Path, dev: &Path, anv_ids: &str) -> Option<(PathBuf, &'static str)> {
     let mut nodes: Vec<_> = fs::read_dir(drm)
         .ok()?

@@ -1,8 +1,8 @@
-//! A profile as both sides see it: the launcher, which runs its session, and
-//! host/core, which works with it without running the launcher. Its name,
-//! settings and paths, Innkeeper's own preferences, its session's status and
-//! activity report, the control socket client, and adb's keys and server
-//! protocol. docs/session.md describes profiles and sessions.
+//! Profile code shared by the launcher, which runs a profile's session, and
+//! host/core, which works with a profile without running the launcher. It
+//! covers a profile's name, settings and paths, Innkeeper's preferences, the
+//! session's status and activity report, the control socket client, and adb's
+//! keys and server protocol. docs/session.md describes profiles and sessions.
 
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -41,7 +41,8 @@ pub fn remove_tree(dir: &Path) -> Result<()> {
 /// A session's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
-    /// The guest's init's pid in the session's sandbox, while it runs.
+    /// The pid of the guest's init as seen from outside the session's
+    /// sandbox, while it runs.
     pub pid: Option<i32>,
 }
 
@@ -55,7 +56,7 @@ impl Status {
         format!("{head}\n")
     }
 
-    /// The state in [`Status::text`]'s output.
+    /// Parses the output of [`Status::text`].
     pub fn parse(text: &str) -> Self {
         Status {
             pid: field(text, "running")
