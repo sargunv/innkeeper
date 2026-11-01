@@ -34,7 +34,7 @@ enum {
 enum { HBM_USE_ASSIGN_SIZE = 1 << 7 };
 
 // CompositionType
-enum { COMPOSITION_CLIENT = 0 };
+enum { COMPOSITION_CLIENT = 0, COMPOSITION_DEVICE = 1 };
 // InterfaceType. render_service casts it into its own enum, which starts
 // with UNKNOW, and treats only that enum's MIPI value (10) as a built-in
 // panel, the main screen. In HDI, 10 is DISP_INTF_PANEL.
@@ -67,6 +67,14 @@ struct AllocInfo {
 
 struct IRect {
   int32_t x, y, w, h;
+};
+
+struct LayerAlpha {
+  bool enGlobalAlpha;
+  bool enPixelAlpha;
+  uint8_t alpha0;
+  uint8_t alpha1;
+  uint8_t gAlpha;
 };
 
 struct DisplayModeInfo {
