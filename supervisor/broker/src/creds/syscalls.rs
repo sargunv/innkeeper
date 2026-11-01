@@ -1,26 +1,26 @@
-//! The credential syscalls the session's seccomp filter traps
+//! The credential syscalls that the session's seccomp filter traps
 //! (supervisor/README.md), answered with the model in [`crate::creds::table`].
 //!
-//!  * `get*id`/`getgroups`: the caller's virtual credentials.
-//!  * `set*id`/`setgroups`: the kernel's rules, applied to the virtual
-//!    credentials; the new ones are interned and stored in the process's soft
-//!    `RLIMIT_RTTIME` (see `table.rs`). Virtual root is privileged (see
-//!    `caps`).
-//!  * `chown` family: unmapped ids would fail with EINVAL, so the call is
-//!    emulated: the file is resolved in the caller's root, a no-op
-//!    `fchownat(-1, -1)` keeps the kernel's checks (EROFS, ENOENT, ...), and
-//!    the virtual owner goes into the `user.innkeeper.owner` xattr. This runs
-//!    on worker threads: a path on a FUSE mount could otherwise block the
-//!    broker on a FUSE daemon that is waiting for binder.
-//!  * `getsockopt(SO_PEERCRED)`: the peer's virtual euid/egid and its pid in
-//!    Android's pid namespace.
-//!  * `lstat()` (exactly `newfstatat(AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW)`)
-//!    of paths that can carry a recorded owner (`/data`, the eBPF pins, clatd):
-//!    emulated on a worker thread, with the recorded owner. Code that verifies
-//!    owners uses lstat (libcutils' fs_prepare_dir, ClatCoordinator), and the
+//!  * `get*id`/`getgroups` return the caller's virtual credentials.
+//!  * `set*id`/`setgroups` apply the kernel's rules to the virtual
+//!    credentials. The new credentials are interned and stored in the
+//!    process's soft `RLIMIT_RTTIME` (see `table.rs`). Virtual root is
+//!    privileged (see `caps`).
+//!  * The `chown` family is emulated, because unmapped ids would fail with
+//!    EINVAL. The file is resolved in the caller's root, a no-op
+//!    `fchownat(-1, -1)` keeps the kernel's checks (EROFS, ENOENT and so on),
+//!    and the virtual owner goes into the `user.innkeeper.owner` xattr. This
+//!    runs on worker threads, because a path on a FUSE mount could otherwise
+//!    block the broker on a FUSE daemon that is waiting for binder.
+//!  * `getsockopt(SO_PEERCRED)` returns the peer's virtual euid/egid and its
+//!    pid in Android's pid namespace.
+//!  * `lstat()`, meaning `newfstatat(AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW)`,
+//!    is emulated on a worker thread with the recorded owner for paths that
+//!    can carry one (`/data`, the eBPF pins, clatd). Code that verifies owners
+//!    uses lstat (libcutils' fs_prepare_dir, ClatCoordinator), and the
 //!    LD_PRELOAD shim's stat wrappers don't reach code in isolated linker
 //!    namespaces such as the Tethering APEX. Every other lstat continues
-//!    natively; other stat calls aren't trapped at all.
+//!    natively. Other stat calls aren't trapped.
 
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -45,7 +45,7 @@ const PIDFD_THREAD: i32 = 0o200; // O_EXCL
 const AT_FDCWD: i32 = -100;
 const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
 const AT_EMPTY_PATH: u64 = 0x1000;
-/// AID_NOBODY: the identity reported for a peer that is gone.
+/// AID_NOBODY, the identity reported for a peer that is gone.
 const AID_NOBODY: u32 = 9999;
 
 /// What to answer a trapped syscall with.
@@ -58,8 +58,9 @@ pub(crate) enum Answer {
     Continue,
 }
 
-/// Could `path` (absolute) carry a recorded owner? Never true for FUSE mounts
-/// (/storage, /mnt, /sdcard), so emulated lookups can't block on MediaProvider.
+/// Whether the absolute `path` can carry a recorded owner. It is false for
+/// FUSE mounts (/storage, /mnt, /sdcard), so emulated lookups can't block on
+/// MediaProvider.
 fn owner_tracked(path: &[u8]) -> bool {
     const PREFIXES: [&[u8]; 4] = [
         b"/data",
@@ -72,7 +73,7 @@ fn owner_tracked(path: &[u8]) -> bool {
         .any(|p| path.starts_with(p) && (path.len() == p.len() || path[p.len()] == b'/'))
 }
 
-/// Is this notification a credential syscall?
+/// Whether this notification is a credential syscall.
 pub(crate) fn is_cred_syscall(nr: i64, args: &[u64; 6]) -> bool {
     const NRS: [i64; 20] = [
         libc::SYS_getuid,
@@ -106,15 +107,15 @@ pub(crate) fn is_cred_syscall(nr: i64, args: &[u64; 6]) -> bool {
             && args[2] as i32 == libc::SO_PEERCRED)
 }
 
-/// A chown or lstat to run on a worker thread.
+/// A chown, lstat or access call to run on a worker thread.
 struct Job {
     id: u64,
     tid: i32,
     nr: i64,
     args: [u64; 6],
-    /// lstat, access: the path, already read.
+    /// The path, already read, for lstat and access.
     path: Vec<u8>,
-    /// access: the caller's ids.
+    /// The caller's ids, for access.
     creds: Option<Creds>,
 }
 
@@ -123,10 +124,10 @@ pub(crate) struct Vid {
     listener: Listener,
     pool: Arc<Pool>,
     fs: Arc<Fs>,
-    /// Init's pid, which SO_PEERCRED shows as 1: init isn't pid 1, but its
-    /// property service treats a peer that isn't as a client (and init's own
-    /// setprop from its restorecon thread as a new restorecon request,
-    /// forever).
+    /// Init's pid, which SO_PEERCRED reports as 1. Init isn't pid 1, but its
+    /// property service treats any peer that isn't pid 1 as a client. It would
+    /// then treat init's own setprop from its restorecon thread as a new
+    /// restorecon request, forever.
     init: i32,
 }
 
@@ -141,12 +142,12 @@ impl Vid {
         })
     }
 
-    /// Run a chown, lstat or access on a worker thread.
+    /// Runs a chown, lstat or access call on a worker thread.
     fn run(&self, job: Job) {
-        // A queued job's task may be gone (signal, exit, exec) and its tid
-        // reused: pin the address space tid has now, then drop the job unless
-        // tid is still the caller. The job's memory access goes through that
-        // pinned fd, so nothing reaches a later image.
+        // A queued job's task may be gone after a signal, exit or exec, and
+        // its tid reused. Pin the address space tid has now, then drop the job
+        // unless tid is still the caller. The job's memory access goes through
+        // that pinned fd, so nothing reaches a later image.
         let mem = open_mem(job.tid);
         if !self.listener.valid(job.id) {
             return;
@@ -163,7 +164,7 @@ impl Vid {
         self.finish(job.id, r);
     }
 
-    /// Answer one notification on the receive thread.
+    /// Answers one notification on the receive thread.
     pub(crate) fn serve(self: &Arc<Self>, req: &SeccompNotif) {
         let a = self.handle(req);
         self.finish(req.id, a);
@@ -177,7 +178,7 @@ impl Vid {
         }
     }
 
-    /// The virtual credentials of process (or thread) `pid`, in the
+    /// The virtual credentials of process or thread `pid`, in the
     /// supervisor's pid namespace.
     pub(crate) fn creds(&self, pid: i32) -> Option<Creds> {
         let soft = get_rttime(pid)?.0;
@@ -203,7 +204,7 @@ impl Vid {
         self.listener.reply(id, val, error);
     }
 
-    /// Answer one notification (see the module docs).
+    /// Answers one notification (see the module docs).
     fn handle(self: &Arc<Self>, req: &SeccompNotif) -> Answer {
         let tid = req.pid as i32;
         let nr = req.data.nr as i64;
@@ -211,7 +212,7 @@ impl Vid {
         let mut path = Vec::new();
         let mut job_creds = None;
         if nr == libc::SYS_faccessat || nr == SYS_FACCESSAT2 {
-            // Root's access checks are the kernel's; others are checked
+            // The kernel does root's access checks. Other callers are checked
             // against recorded owners (see access()).
             let Some(c) = self.creds(tid) else {
                 return Answer::Continue;
@@ -340,11 +341,12 @@ impl Vid {
         }
     }
 
-    /// openat of a `/proc/.../status` file (read-only, absolute path): answer
-    /// with a memfd holding the real contents with the virtual Uid/Gid/Groups.
-    /// Code reads uids there (ActivityManager's Process.getUidForPid when it
-    /// checks that a provider's process is still the same app, ps, tests).
-    /// Returns false to let the caller handle the openat.
+    /// Serves a read-only openat of a `/proc/.../status` file by absolute
+    /// path. The answer is a memfd holding the real contents with the virtual
+    /// Uid, Gid and Groups lines. Code reads uids there, for example
+    /// ActivityManager's Process.getUidForPid when it checks that a
+    /// provider's process is still the same app, ps, and tests. Returns false
+    /// to let the caller handle the openat.
     pub(crate) fn proc_status(&self, req: &SeccompNotif) -> bool {
         let tid = req.pid as i32;
         let a = req.data.args;
@@ -367,8 +369,8 @@ impl Vid {
 
     fn serve_status(&self, req: &SeccompNotif, which: table::ProcStatus) -> bool {
         let tid = req.pid as i32;
-        // The file and the process whose ids replace its own. A missing pid
-        // stays with the kernel (ENOENT).
+        // The file, and the process whose ids replace the file's own. The
+        // kernel handles a missing pid with ENOENT.
         let (path, subject) = match which {
             table::ProcStatus::Myself => {
                 let Some(p) = status_field(tid, "Tgid:").and_then(|v| v.parse::<i32>().ok()) else {
@@ -400,19 +402,18 @@ impl Vid {
         {
             return false;
         }
-        // On failure the target is gone (or the id went stale): it was
-        // answered either way only if this succeeds; otherwise let the kernel
-        // run it.
+        // On failure the target is gone or the id went stale. The open counts
+        // as answered only if this succeeds. Otherwise let the kernel run it.
         self.listener.open_with(req, fd.as_raw_fd()) >= 0 || {
             self.listener.cont(req.id);
             true
         }
     }
 
-    /// The caller's address space, for a call that transfers memory: pinned
-    /// (`/proc/<tid>/mem`) and then checked to be the caller's. A signal can
-    /// end the notification wait and let the caller exec before we write, so
-    /// writing by numeric tid could reach the new image.
+    /// The caller's address space for a call that transfers memory. It is
+    /// pinned (`/proc/<tid>/mem`) and then checked to be the caller's. A
+    /// signal can end the notification wait and let the caller exec before
+    /// the broker writes, so writing by numeric tid could reach the new image.
     fn pin(&self, id: u64, tid: i32) -> Result<PinnedMem, Answer> {
         let mem = open_mem(tid);
         if !self.listener.valid(id) {
@@ -533,8 +534,8 @@ fn set_rttime(pid: i32, soft: u64, hard: u64) -> Result<(), i32> {
     if r == 0 { Ok(()) } else { Err(errno()) }
 }
 
-/// CAP_SETUID/CAP_SETGID: virtual root has both. Every other uid has neither:
-/// a sandboxed `CapEff` is always 0, so there is no set to read.
+/// CAP_SETUID and CAP_SETGID. Virtual root has both, and every other uid has
+/// neither. A sandboxed `CapEff` is always 0, so there is no set to read.
 fn caps(c: &Creds) -> table::Caps {
     table::Caps {
         setgid: c.euid == 0,
@@ -586,8 +587,9 @@ struct OpenHow {
     resolve: u64,
 }
 
-/// Resolve `path` (relative to `dirfd`, which is AT_FDCWD or a fd number in
-/// the target) inside thread `tid`'s root, as an O_PATH fd.
+/// Resolves `path` inside thread `tid`'s root and returns an O_PATH fd. A
+/// relative path is relative to `dirfd`, which is AT_FDCWD or an fd number in
+/// the target.
 fn resolve(fs: &Fs, tid: i32, dirfd: i32, path: &[u8], nofollow: bool) -> Result<OwnedFd, i32> {
     resolve_how(fs, tid, dirfd, path, nofollow, 0)
 }
@@ -603,8 +605,9 @@ fn resolve_how(
     if path.is_empty() {
         return Err(libc::ENOENT);
     }
-    // Absolute: from the root. Relative: prefix the directory's path as the
-    // target sees it (so ".." works and stays inside its root), else resolve
+    // An absolute path resolves from the root. A relative path gets the
+    // directory's path, as the target sees it, as a prefix, so that ".."
+    // works and stays inside the root. If that path is unavailable, resolve
     // from the directory itself.
     let mut abs: Option<Vec<u8>> = None;
     if path[0] == b'/' {
@@ -681,9 +684,9 @@ fn recorded_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
     }
 }
 
-/// Emulate lstat(path, st) for a path that can carry a recorded owner.
+/// Emulates lstat(path, st) for a path that can carry a recorded owner.
 /// Paths with symlinks before the last component continue natively
-/// (RESOLVE_NO_SYMLINKS), so a lookup never wanders onto a FUSE mount.
+/// (RESOLVE_NO_SYMLINKS), so a lookup can't wander onto a FUSE mount.
 fn lstat(j: &Job, v: &Vid, mem: MemFd) -> Answer {
     let mut fd = match resolve_how(&v.fs, j.tid, AT_FDCWD, &j.path, true, RESOLVE_NO_SYMLINKS) {
         Ok(f) => f,
@@ -695,8 +698,8 @@ fn lstat(j: &Job, v: &Vid, mem: MemFd) -> Answer {
     if r != 0 {
         return Answer::Errno(errno());
     }
-    // A bind mount inside /data is a symlink to another /data
-    // dir (/data/user/0 -> /data/data); show what it stands for.
+    // A bind mount inside /data is a symlink to another /data directory, such
+    // as /data/user/0 -> /data/data. Report what the link stands for.
     if st.st_mode & libc::S_IFMT == libc::S_IFLNK
         && let Some(target) = crate::fs::bind_target(&fd)
         && let Ok(t) = resolve_how(&v.fs, j.tid, AT_FDCWD, &target, true, RESOLVE_NO_SYMLINKS)
@@ -719,7 +722,8 @@ fn lstat(j: &Job, v: &Vid, mem: MemFd) -> Answer {
             size_of::<libc::stat>(),
         )
     };
-    // The path was resolved in tid's root: still the caller's?
+    // The path was resolved in tid's root. Check that tid is still the
+    // caller.
     if !v.listener.valid(j.id) {
         return Answer::Deferred;
     }
@@ -730,9 +734,9 @@ fn lstat(j: &Job, v: &Vid, mem: MemFd) -> Answer {
 }
 
 /// The recorded owner of `path` or, if it has none, of its closest ancestor
-/// that has one: files an app creates in its directories (with no chown)
-/// belong to the app, and APKs that system_server writes under /data/app to
-/// system.
+/// that has one. Files that an app creates in its directories without a chown
+/// belong to the app, and APKs that system_server writes under /data/app
+/// belong to system.
 fn inherited_owner(fs: &Fs, tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
     if let Some(o) = recorded_owner(fd) {
         return o;
@@ -755,11 +759,12 @@ fn inherited_owner(fs: &Fs, tid: i32, path: &[u8], fd: &OwnedFd) -> (u32, u32) {
     (0, 0)
 }
 
-/// Emulate faccessat(AT_FDCWD, path, mode) for a non-root caller and a path
-/// that can carry a recorded owner: the permission bits are checked against
-/// the recorded (or inherited) owner and the caller's virtual ids, the way
-/// the kernel checks real ones. ART refuses to load a dex file the app can
-/// write (`access(W_OK)`), and to the one kernel uid every APK is writable.
+/// Emulates faccessat(AT_FDCWD, path, mode) for a non-root caller and a path
+/// that can carry a recorded owner. The permission bits are checked against
+/// the recorded or inherited owner and the caller's virtual ids, the way the
+/// kernel checks real ones. ART refuses to load a dex file that the app can
+/// write, which it checks with `access(W_OK)`, and every APK is writable to
+/// the single kernel uid that the session runs as.
 fn access(j: &Job, fs: &Fs) -> Answer {
     let Some(c) = &j.creds else {
         return Answer::Continue;
@@ -800,7 +805,7 @@ fn access(j: &Job, fs: &Fs) -> Answer {
     Answer::Val(0)
 }
 
-/// Emulate one chown-family call (see the module docs).
+/// Emulates one chown-family call (see the module docs).
 fn chown(j: &Job, v: &Vid, mem: MemFd) -> Answer {
     let a = j.args;
     let (fd, uid, gid) = match j.nr {
@@ -843,12 +848,13 @@ fn chown(j: &Job, v: &Vid, mem: MemFd) -> Answer {
         Ok(f) => f,
         Err(e) => return Answer::Errno(e),
     };
-    // The path and fd were resolved through tid: still the caller's?
+    // The path and fd were resolved through tid. Check that tid is still the
+    // caller.
     if !v.listener.valid(j.id) {
         return Answer::Deferred;
     }
-    // The kernel's own checks (read-only mounts, immutable files, ...), and
-    // its side effects (ctime, clearing set-id bits), without changing ids.
+    // Run the kernel's checks (read-only mounts, immutable files and so on)
+    // and side effects (ctime, clearing set-id bits) without changing ids.
     let empty = c"";
     let r = unsafe {
         libc::fchownat(
@@ -866,7 +872,7 @@ fn chown(j: &Job, v: &Vid, mem: MemFd) -> Answer {
         return Answer::Val(0);
     }
     // Record the virtual owner. user.* xattrs exist only on regular files and
-    // directories; elsewhere (sockets, devices, symlinks) it is dropped.
+    // directories. On sockets, devices and symlinks the owner is dropped.
     let path = CString::new(format!("/proc/self/fd/{}", fd.as_raw_fd())).unwrap();
     let name = CString::new(table::OWNER_XATTR).unwrap();
     let mut buf = [0u8; 32];
@@ -905,9 +911,9 @@ fn chown(j: &Job, v: &Vid, mem: MemFd) -> Answer {
     Answer::Val(0)
 }
 
-/// Run `f` (an xattr write on `path`); if it fails with EACCES, retry with
-/// the owner's write bit set for the call. Without a user namespace (Flatpak
-/// mode) Android's root has no CAP_DAC_OVERRIDE, and a user.* xattr needs
+/// Runs `f`, an xattr write on `path`. If it fails with EACCES, retries with
+/// the owner's write bit set for the call. Without a user namespace, as in
+/// Flatpak mode, Android's root has no CAP_DAC_OVERRIDE. A user.* xattr needs
 /// write permission, which a 0440 file such as an eBPF pin doesn't give.
 fn owner_writable(path: &CString, f: impl Fn() -> libc::c_int) {
     if f() == 0 || errno() != libc::EACCES {
@@ -931,7 +937,7 @@ mod tests {
     use crate::notify::vm_read;
 
     /// The inline answers (getresuid and friends, SO_PEERCRED, getgroups)
-    /// write through the caller's pinned address space: once the caller has
+    /// write through the caller's pinned address space. Once the caller has
     /// exec'd, the write fails instead of landing in the new image, which a
     /// write by numeric tid would reach.
     #[test]

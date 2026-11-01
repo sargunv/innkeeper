@@ -1,5 +1,5 @@
-//! Binder through the real filter and broker: concurrent opens and fd reuse,
-//! one-way ordering, replies, and reads that signals interrupt and the
+//! Binder through the real filter and broker. Covers concurrent opens and fd
+//! reuse, one-way ordering, replies, and reads that signals interrupt and the
 //! client restarts without replaying commands.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -69,7 +69,8 @@ fn exchange(fd: c_int, bwr: &mut BinderWriteRead) {
         if super::errno() != EINTR {
             fail("BINDER_WRITE_READ");
         }
-        // The driver keeps write_consumed across a restart: never replay.
+        // The driver keeps write_consumed across a restart, so the client
+        // must not replay commands.
         INTERRUPTED.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -253,8 +254,8 @@ fn client(id: u32, done: c_int) -> ! {
     finish(done)
 }
 
-/// In the filtered child: a context manager and CLIENTS clients, all
-/// signalled repeatedly while they talk.
+/// Runs in the filtered child. Starts a context manager and CLIENTS clients,
+/// and signals them all repeatedly while they talk.
 fn clients() -> i32 {
     let (mut ready, mut done) = ([0; 2], [0; 2]);
     unsafe {
@@ -264,7 +265,8 @@ fn clients() -> i32 {
         let mut sa: sigaction = std::mem::zeroed();
         sa.sa_sigaction = on_signal as extern "C" fn(c_int) as sighandler_t;
         sigemptyset(&mut sa.sa_mask);
-        // No SA_RESTART: reads end with EINTR and the client restarts them.
+        // Without SA_RESTART, reads end with EINTR and the client restarts
+        // them.
         if sigaction(SIGUSR1, &sa, std::ptr::null_mut()) != 0 {
             fail("sigaction");
         }
@@ -304,7 +306,8 @@ fn clients() -> i32 {
         interrupted += n;
     }
     STOP_SIGNALS.store(true, Ordering::Relaxed);
-    // Reap only after the signaler stops using these pids: no reuse race.
+    // Reap only after the signaler stops using these pids, so that pid reuse
+    // can't race with it.
     signaler.join().unwrap();
     for c in children {
         let mut status = 0;

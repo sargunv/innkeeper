@@ -1,5 +1,6 @@
-//! Canonical evdev layout consumed by Android's Generic.kl. The bridge maps
-//! host axes to this layout; FF_RUMBLE retains the Linux ff_effect ABI.
+//! Gamepads in the canonical evdev layout that Android's Generic.kl consumes.
+//! The bridge maps host axes to this layout. FF_RUMBLE keeps the Linux
+//! ff_effect ABI.
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
@@ -24,7 +25,7 @@ pub fn absinfo(code: u16, value: i32) -> Option<Vec<u8>> {
 
 pub struct Feedback {
     fd: OwnedFd,
-    // Synthetic host sources: the e2e harness's fake gamepads.
+    // Synthetic host sources are the e2e harness's fake gamepads.
     synthetic: bool,
     // Effects belong to this host open and the virtual endpoint that uploaded
     // them. They cannot outlive or move to a replacement host fd.

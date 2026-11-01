@@ -1,8 +1,9 @@
-//! Which syscalls does the session's filter turn into user notifications?
-//! Exactly what the broker serves, and nothing hot besides: open(2),
-//! access-token and ashmem ioctls only for an OpenHarmony guest.
+//! Checks which syscalls the session's filter turns into user notifications.
+//! They must be the ones the broker serves and no other hot syscalls. open(2)
+//! and the access-token and ashmem ioctls are trapped only for an OpenHarmony
+//! guest.
 //!
-//! A child installs the filter and serves its listener itself; a grandchild
+//! A child installs the filter and serves its listener itself. A grandchild
 //! makes each probe syscall, and the child records which ones arrived and
 //! lets them continue.
 
@@ -173,7 +174,7 @@ pub fn run(guest: &str) -> i32 {
         return 1;
     };
     // From here on, this process's own trapped syscalls would wait for
-    // itself: only raw writes, polls and ioctls.
+    // itself, so it makes only raw writes, polls and ioctls.
     let g = unsafe { fork() };
     if g == 0 {
         for p in &probes {

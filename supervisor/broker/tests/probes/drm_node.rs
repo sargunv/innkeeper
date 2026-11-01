@@ -1,6 +1,7 @@
-//! openat dispatch through the real filter: a guest opens only the selected
-//! DRM render node (none for software rendering), and binder still opens.
-//! Fake nodes in a private mount namespace; never a host GPU.
+//! openat dispatch through the real filter. A guest can open only the
+//! selected DRM render node, or none for software rendering, and binder still
+//! opens. The nodes are fakes in a private mount namespace, so no host GPU is
+//! touched.
 
 use std::path::Path;
 

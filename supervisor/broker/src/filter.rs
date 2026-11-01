@@ -1,6 +1,6 @@
 //! The session's syscall boundary, shared by init bootstrap and host probes.
-//! Each rule reloads the syscall number and either notifies or falls through;
-//! argument comparisons use the low word, as in the x86_64 syscall ABI.
+//! Each rule reloads the syscall number and either notifies or falls through.
+//! Argument comparisons use the low word, as in the x86_64 syscall ABI.
 
 #[repr(C)]
 struct Insn {
@@ -27,8 +27,8 @@ fn insn(code: u16, k: u32) -> Insn {
     }
 }
 
-// (argument index, mask, value). Full masks are equality comparisons;
-// W_OK and binder's ioctl type use masked comparisons.
+// Each argument test is (argument index, mask, value). Full masks are
+// equality comparisons. W_OK and binder's ioctl type use masked comparisons.
 fn rule(f: &mut Vec<Insn>, nr: i64, args: &[(u32, u32, u32)]) {
     f.push(insn(0x20, 0)); // LD W ABS nr
     let first = f.len();
@@ -48,18 +48,19 @@ fn rule(f: &mut Vec<Insn>, nr: i64, args: &[(u32, u32, u32)]) {
     }
 }
 
-/// Install the one listener inherited by every Android process. The caller
-/// must have set no_new_privs (or have the namespace's CAP_SYS_ADMIN).
-/// Waits stay interruptible for ptrace and job control; binder restarts are
-/// made idempotent by the broker.
+/// Installs the seccomp listener that every Android process inherits. The
+/// caller must have set no_new_privs or hold the namespace's CAP_SYS_ADMIN.
+/// Waits stay interruptible so that ptrace and job control work. The broker
+/// makes restarted binder ioctls idempotent.
 #[allow(clippy::unnecessary_cast)] // RLIMIT_* is i32 on bionic, u32 on glibc.
 pub fn install(guest: crate::Guest) -> std::io::Result<i32> {
     use libc::*;
     let mut f = vec![insn(0x20, 4), insn(0x15, 0xc000003e), insn(0x06, ALLOW)];
     f[1].jt = 1; // Other architectures retain the kernel's handling.
     rule(&mut f, SYS_openat, &[]);
-    // OpenHarmony: musl opens with open(2), which the broker serves as
-    // openat; its access-token device's ioctls are type 'A', ashmem's 0x77.
+    // On OpenHarmony, musl opens files with open(2), which the broker serves
+    // as openat. The access-token device's ioctls are type 'A', and ashmem's
+    // are type 0x77.
     if guest == crate::Guest::Ohos {
         rule(&mut f, SYS_open, &[]);
         for ty in [crate::ohos::IOCTL_TYPE, crate::ashmem::IOCTL_TYPE] {

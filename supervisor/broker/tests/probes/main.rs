@@ -1,7 +1,8 @@
-//! The real filter and broker against real processes on the host: no Android
-//! image, devices or privileges. Each probe runs in a fresh process of this
-//! binary (`--probe <name> ...`), under `unshare -Urm` where it needs a mount
-//! namespace, so it starts single-threaded and can fork a filtered child.
+//! The real filter and broker against real processes on the host, without an
+//! Android image, devices or privileges. Each probe runs in a fresh process of
+//! this binary (`--probe <name> ...`), under `unshare -Urm` where it needs a
+//! mount namespace, so it starts single-threaded and can fork a filtered
+//! child.
 
 mod binder_restarts;
 mod bpfemu;
@@ -49,7 +50,7 @@ fn main() {
 }
 
 /// This binary as `--probe <args>`, optionally inside `unshare -Urm sh -c
-/// <setup>` (the setup's `$@` is the probe command).
+/// <setup>`. The setup's `$@` is the probe command.
 fn probe(args: &[&str], setup: Option<&str>) -> Command {
     let me = std::env::current_exe().unwrap();
     match setup {
@@ -69,7 +70,8 @@ fn probe(args: &[&str], setup: Option<&str>) -> Command {
     }
 }
 
-/// Run `c` with a deadline; its status, or None if it had to be killed.
+/// Runs `c` with a deadline. Returns its status, or None if it had to be
+/// killed.
 fn run(c: &mut Command, secs: u64) -> Option<ExitStatus> {
     let mut child = c.stdin(Stdio::null()).spawn().unwrap();
     let end = Instant::now() + Duration::from_secs(secs);
@@ -87,9 +89,9 @@ fn run(c: &mut Command, secs: u64) -> Option<ExitStatus> {
     }
 }
 
-/// The broker as the launcher runs it: init (a shell here) is its child,
-/// under the filter and with the shim preloaded, and init's status is the
-/// broker's, even with Yama off. Without a guest it starts nothing.
+/// The broker as the launcher runs it. Init, a shell here, is its child,
+/// under the filter and with the shim preloaded. Init's status is the
+/// broker's, even with Yama off. Without a guest the broker starts nothing.
 fn bootstrap() -> bool {
     let broker = |guest: Option<&str>, script: &str| {
         let mut c = Command::new(env!("CARGO_BIN_EXE_innkeeper-brk"));
@@ -147,9 +149,10 @@ fn session(guest: Guest, render_node: Option<&str>) -> Config {
     }
 }
 
-/// Fork a child that installs the session's filter and runs `child`, serve
-/// its notifications with the broker on a thread, and return the child's
-/// exit status (128 + a signal that killed it). Call single-threaded.
+/// Forks a child that installs the session's filter and runs `child`, serves
+/// its notifications with the broker on a thread, and returns the child's
+/// exit status, or 128 plus the signal that killed it. Call it while the
+/// process is single-threaded.
 fn under_broker(cfg: Config, pins: Option<OwnedFd>, child: impl FnOnce() -> i32) -> i32 {
     let mut sp = [0; 2];
     assert_eq!(

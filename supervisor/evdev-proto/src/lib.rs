@@ -1,7 +1,8 @@
-//! The evdev.sock protocol: the desktop bridge (the only writer) sends the
-//! broker's session-local evdev devices their input, one datagram per
-//! [`Message`], to `/dev/socket/innkeeper/evdev.sock`. Little-endian; the
-//! records are x86_64 Linux `input_event`s ([`event`]).
+//! The evdev.sock protocol. The desktop bridge, which is the only writer,
+//! sends input for the broker's session-local evdev devices to
+//! `/dev/socket/innkeeper/evdev.sock`, one datagram per [`Message`]. Fields
+//! are little-endian, and the records are x86_64 Linux `input_event`s
+//! ([`event`]).
 
 /// One `input_event` record's size.
 pub const EVENT_SIZE: usize = 24;
@@ -9,8 +10,8 @@ pub const EVENT_SIZE: usize = 24;
 pub const KEYBOARD: u32 = 0;
 pub const MOUSE: u32 = 1;
 
-/// The canonical evdev layout Android's Generic.kl consumes. The bridge maps
-/// host axes to it; FF_RUMBLE keeps the Linux `ff_effect` ABI.
+/// The canonical evdev layout that Android's Generic.kl consumes. The bridge
+/// maps host axes to it. FF_RUMBLE keeps the Linux `ff_effect` ABI.
 pub mod gamepad {
     /// The first gamepad device id.
     pub const FIRST: u32 = 0x10000;
@@ -19,8 +20,8 @@ pub mod gamepad {
     pub const EFFECT_SIZE: usize = 48;
 }
 
-/// An x86_64 Linux `input_event` with a CLOCK_MONOTONIC timeval. Kept
-/// explicit: Rust struct padding is not part of the protocol.
+/// An x86_64 Linux `input_event` with a CLOCK_MONOTONIC timeval. It is built
+/// field by field because Rust struct padding is not part of the protocol.
 pub fn event(micros: i64, ty: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
     let mut b = [0; EVENT_SIZE];
     b[..8].copy_from_slice(&(micros / 1_000_000).to_le_bytes());
@@ -36,11 +37,12 @@ pub fn event(micros: i64, ty: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
 pub enum Message<'a> {
     /// `u32 device` + `input_event` records, the last a SYN_REPORT.
     Events { device: u32, records: &'a [u8] },
-    /// `u32 device`, `u8 enabled`: a keyboard or mouse appears or goes.
+    /// `u32 device`, `u8 enabled`. A keyboard or mouse appears or goes away.
     Device { device: u32, enabled: bool },
-    /// `u32 device` (at least [`gamepad::FIRST`]), `u8 kind` (2 a host evdev
-    /// device, 3 a test harness's fake), `u8 0`, an 8-byte identity, with one
-    /// fd: the device's force-feedback endpoint, if it has one.
+    /// `u32 device` (at least [`gamepad::FIRST`]), `u8 kind`, `u8 0` and an
+    /// 8-byte identity. Kind 2 is a host evdev device and kind 3 is a test
+    /// harness's fake. The datagram carries one fd, the device's
+    /// force-feedback endpoint, if it has one.
     Gamepad {
         device: u32,
         identity: &'a str,

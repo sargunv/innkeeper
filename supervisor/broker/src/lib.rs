@@ -1,17 +1,18 @@
-//! innkeeper-broker: serves the session's seccomp user notifications
+//! innkeeper-broker serves the session's seccomp user notifications
 //! (supervisor/README.md).
 //!
-//!   * [`filter`]: the seccomp filter, installed on Android's init.
-//!   * [`notify`]: the serve loop, which dispatches every notification.
-//!   * [`binder`]: the driver's state machine (`drivers/android/binder.c`) and
-//!     its UAPI. It makes no syscalls: process memory, receive buffers, fds
-//!     and answering the caller go through the [`binder::driver::Userspace`]
-//!     trait, so it is unit tested on the host against an in-memory fake.
-//!   * `creds`: virtual credentials for Android's uids.
-//!   * `fs`: what the Flatpak sandbox's missing mounts would do.
-//!   * `bpf`: eBPF objects and the rootless calls netd needs.
-//!   * [`input`]: session-local evdev devices the bridge feeds.
-//!   * [`ohos`] and [`ashmem`]: OpenHarmony's kernel extensions.
+//!   * [`filter`] is the seccomp filter, installed on Android's init.
+//!   * [`notify`] is the serve loop, which dispatches every notification.
+//!   * [`binder`] is the driver's state machine (`drivers/android/binder.c`)
+//!     and its UAPI. It makes no syscalls. Process memory, receive buffers,
+//!     fds and answering the caller go through the
+//!     [`binder::driver::Userspace`] trait, so it is unit tested on the host
+//!     against an in-memory fake.
+//!   * `creds` holds virtual credentials for Android's uids.
+//!   * `fs` does what the Flatpak sandbox's missing mounts would do.
+//!   * `bpf` holds eBPF objects and the rootless calls netd needs.
+//!   * [`input`] holds the session-local evdev devices that the bridge feeds.
+//!   * [`ohos`] and [`ashmem`] emulate OpenHarmony's kernel extensions.
 //!
 //! The environment is read once, into [`Config`].
 
@@ -28,9 +29,9 @@ pub mod ohos;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// The guest userspace the session runs. Android's behaviour is the default;
+/// The guest userspace the session runs. Android's behaviour is the default.
 /// OpenHarmony (`ohos/`) adds its kernel extensions on top of the same
-/// emulation, and nothing else changes for Android.
+/// emulation and changes nothing for Android.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Guest {
     Android,
@@ -42,11 +43,11 @@ pub enum Guest {
 pub struct Config {
     /// `INNKEEPER_GUEST`: `android` or `ohos`.
     pub guest: Guest,
-    /// `INNKEEPER_ROOT_MAP`, lines of `<host dir>=<guest path>`: the host
-    /// dirs behind the guest's paths, longest host dir first.
+    /// `INNKEEPER_ROOT_MAP`, lines of `<host dir>=<guest path>`. These are the
+    /// host dirs behind the guest's paths, longest host dir first.
     pub root_map: Vec<(Vec<u8>, Vec<u8>)>,
-    /// `INNKEEPER_RENDER_NODE`: the one DRM node the guest may open; unset
-    /// or empty for none (software rendering).
+    /// `INNKEEPER_RENDER_NODE`, the DRM node the guest may open. It is unset
+    /// or empty for none, which means software rendering.
     pub render_node: Option<PathBuf>,
     /// Init's pid, which SO_PEERCRED shows as 1.
     pub init: i32,
@@ -64,7 +65,7 @@ impl Config {
             v => panic!("INNKEEPER_GUEST must be android or ohos, not {v:?}"),
         };
         let map = std::env::var("INNKEEPER_ROOT_MAP").unwrap_or_default();
-        // INNKEEPER_BROKER_DEBUG: unset, empty or "0" = off.
+        // Tracing is off when INNKEEPER_BROKER_DEBUG is unset, empty or "0".
         let debug = var("INNKEEPER_BROKER_DEBUG").is_some_and(|v| v != "0");
         DEBUG.store(debug, Ordering::Relaxed);
         Config {
@@ -99,7 +100,8 @@ pub(crate) fn debug() -> bool {
     DEBUG.load(Ordering::Relaxed)
 }
 
-/// A trace line on stderr (the session log) when tracing is on.
+/// Writes a trace line to stderr, which is the session log, when tracing is
+/// on.
 macro_rules! trace {
     ($($a:tt)*) => {
         if $crate::debug() {

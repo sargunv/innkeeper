@@ -1,9 +1,9 @@
-//! The bpf() emulator (src/bpf.rs) through the real filter: maps, pins and
-//! netd's OFD map locks work, and the simple bounds hold (element operations
-//! on ring buffers, LPM prefixes, pins only as regular files under
-//! /sys/fs/bpf, impossible sizes, the object and memory caps). Runs in a
-//! private user and mount namespace with a tmpfs on /sys/fs/bpf, as the
-//! session has.
+//! The bpf() emulator (src/bpf.rs) through the real filter. Checks that maps,
+//! pins and netd's OFD map locks work, and that the simple bounds hold. The
+//! bounds cover element operations on ring buffers, LPM prefixes, pins as
+//! regular files under /sys/fs/bpf, impossible sizes, and the object and
+//! memory caps. Runs in a private user and mount namespace with a tmpfs on
+//! /sys/fs/bpf, as the session has.
 
 use std::ffi::{CStr, CString};
 use std::path::Path;
@@ -70,7 +70,7 @@ fn map_create(ty: u32, key: u32, val: u32, max: u32) -> i64 {
         .call(MAP_CREATE)
 }
 
-/// An element operation; `val` is written for a lookup.
+/// An element operation. `val` is written for a lookup.
 fn elem<K>(cmd: i64, fd: i64, key: &K, val: *mut u64) -> i64 {
     Attr::new()
         .u32(0, fd as u32)
@@ -112,7 +112,7 @@ impl Checks {
 }
 
 pub fn run(outside: &Path) -> i32 {
-    // Room for more objects than the cap (each holds a memfd).
+    // Make room for more objects than the cap, since each holds a memfd.
     unsafe {
         let mut rl: rlimit = std::mem::zeroed();
         getrlimit(RLIMIT_NOFILE, &mut rl);
@@ -174,7 +174,7 @@ fn tests(c: &mut Checks, outside: &str) {
     c.check(ofd_lock(g2, F_WRLCK), "closing map open releases OFD lock");
     unsafe { close(g2 as i32) };
 
-    // Element operations on ring buffers (no tables).
+    // Element operations on ring buffers, which have no tables.
     let ur = map_create(USER_RINGBUF, 0, 0, 4096);
     let rb = map_create(RINGBUF, 0, 0, 4096);
     c.check(ur >= 0 && rb >= 0, "ring buffer create");
@@ -248,8 +248,8 @@ fn tests(c: &mut Checks, outside: &str) {
         (libc::statfs(c"/sys/fs/bpf/m".as_ptr(), &mut s) == 0).then_some(s.f_type)
     };
     c.check(magic == Some(0xcafe4a11), "statfs of a pin: bpffs magic");
-    // The broker's pin directory was fixed at start: a mount over
-    // /sys/fs/bpf (FUSE, in a session) changes nothing it opens.
+    // The broker's pin directory was fixed at start, so a mount over
+    // /sys/fs/bpf, such as FUSE in a session, doesn't change what it opens.
     if unsafe {
         mount(
             c"over".as_ptr(),
@@ -292,7 +292,7 @@ fn tests(c: &mut Checks, outside: &str) {
         &format!("failed creations unregistered (id {last} after {before})"),
     );
 
-    // Aggregate map memory is capped (64 MiB each).
+    // Aggregate map memory is capped. Each map here takes 64 MiB.
     let n = (0..64)
         .take_while(|_| {
             let f = map_create(ARRAY, 4, 16384, 4096);

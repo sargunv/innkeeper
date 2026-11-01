@@ -1,7 +1,8 @@
 //! Userspace eBPF objects and the rootless syscall emulation netd needs.
 //! Objects live for the session. Pins name them in the supervisor's original
-//! bpffs directory; maps share data and an inode, with independent opens for
-//! OFD locking. Programs and attachments succeed without affecting traffic.
+//! bpffs directory. Maps share data and an inode, with independent opens for
+//! OFD locking. Program loads and attachments succeed without affecting
+//! traffic.
 
 use crate::notify::{self, Listener, MemFd, SeccompNotif, SeccompNotifAddfd};
 use std::ffi::CString;
@@ -15,8 +16,9 @@ const BTF: usize = 2;
 const LINK: usize = 3;
 const KINDS: [&str; 4] = ["map", "prog", "btf", "link"];
 
-// bpf_attr's x86_64 UAPI is a union: access by byte offset keeps each command's
-// overlapping fields explicit, without reading uninitialized union members.
+// bpf_attr's x86_64 UAPI is a union. Access by byte offset keeps each
+// command's overlapping fields explicit without reading uninitialized union
+// members.
 struct Attr([u8; 168]);
 impl Attr {
     fn u32(&self, off: usize) -> u32 {
@@ -381,8 +383,9 @@ impl Emulation {
         let flags = flags | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY;
         let fd = match self.beneath(rel, flags, mode) {
             Err(libc::EACCES) if flags & libc::O_CREAT == 0 => {
-                // netbpfload uses modes like 0060. Temporarily grant the host
-                // owner read access; Flatpak has no CAP_DAC_OVERRIDE.
+                // netbpfload uses modes like 0060. Flatpak has no
+                // CAP_DAC_OVERRIDE, so temporarily grant the host owner read
+                // access.
                 let pfd = self.beneath(rel, libc::O_PATH | libc::O_NOFOLLOW, 0)?;
                 let mut st: libc::stat = unsafe { std::mem::zeroed() };
                 if unsafe { libc::fstat(pfd.as_raw_fd(), &mut st) } != 0

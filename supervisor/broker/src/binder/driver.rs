@@ -1,73 +1,74 @@
 //! Userspace reimplementation of the Android binder driver's semantics.
 //!
-//! The driver makes no syscalls itself: process memory, receive buffers, fds
-//! and answering the caller go through the [`Userspace`] trait, so the whole
-//! driver is exercised by `cargo test` against an in-memory fake (see
-//! `tests.rs`). The seccomp binding
-//! that wires it to real Android processes lives in `src/notify.rs`.
+//! The driver makes no syscalls itself. Process memory, receive buffers, fds
+//! and answering the caller go through the [`Userspace`] trait, so `cargo
+//! test` exercises the whole driver against an in-memory fake (see
+//! `tests.rs`). The seccomp binding that connects it to real Android
+//! processes is in `src/notify.rs`.
 //!
-//! The reference is the kernel's `drivers/android/binder.c`; function names in
-//! comments refer to it. The structure deliberately follows it:
+//! The reference is the kernel's `drivers/android/binder.c`, and function
+//! names in comments refer to it. The structure follows it on purpose:
 //!
-//!  * work lists: per-process `todo`, per-thread `todo` with the
-//!    `process_todo` flag (deferred work such as the TRANSACTION_COMPLETE of a
-//!    synchronous call is queued without it), per-node `async_todo`, and the
-//!    per-process `delivered_death` list;
-//!  * thread selection: process work goes on the process `todo` and wakes
-//!    the longest-waiting thread blocked for it
-//!    (`binder_select_thread_ilocked`), else the poll threads; only looper
-//!    threads with an empty stack and queue take process work
-//!    (`binder_available_for_proc_work`);
-//!  * transactions and buffers are separate objects: a buffer outlives its
-//!    transaction until `BC_FREE_BUFFER`, and owns the references taken while
-//!    translating the objects in it (released by
-//!    `binder_transaction_buffer_release`);
-//!  * node refcounts (`internal_strong`, `local_strong/weak`, `tmp_refs`, the
-//!    set of incoming refs) and the INCREFS/ACQUIRE/RELEASE/DECREFS handshake
-//!    with `BC_*_DONE` are the kernel's;
-//!  * death notifications move through the same states (DEAD_BINDER,
-//!    DEAD_BINDER_AND_CLEAR, CLEAR_DEATH_NOTIFICATION, delivered);
-//!  * the freezer: `BINDER_FREEZE` marks every binder instance of a pid
-//!    frozen, after waiting up to its timeout for `outstanding_txns` to
-//!    drain; a synchronous transaction to a frozen process fails with
-//!    BR_FROZEN_REPLY, a oneway is queued and its sender gets
-//!    BR_TRANSACTION_PENDING_FROZEN (`binder_proc_transaction`), and freeze
+//!  * Work lists: a per-process `todo`, a per-thread `todo` with the
+//!    `process_todo` flag, a per-node `async_todo`, and the per-process
+//!    `delivered_death` list. Deferred work, such as the TRANSACTION_COMPLETE
+//!    of a synchronous call, is queued without setting `process_todo`.
+//!  * Thread selection: process work goes on the process `todo` and wakes the
+//!    longest-waiting thread blocked for it (`binder_select_thread_ilocked`),
+//!    or else the poll threads. Only looper threads with an empty stack and
+//!    queue take process work (`binder_available_for_proc_work`).
+//!  * Transactions and buffers are separate objects. A buffer outlives its
+//!    transaction until `BC_FREE_BUFFER` and owns the references taken while
+//!    translating the objects in it. `binder_transaction_buffer_release`
+//!    releases them.
+//!  * Node refcounts (`internal_strong`, `local_strong/weak`, `tmp_refs` and
+//!    the set of incoming refs) and the INCREFS/ACQUIRE/RELEASE/DECREFS
+//!    handshake with `BC_*_DONE` match the kernel's.
+//!  * Death notifications move through the same states (DEAD_BINDER,
+//!    DEAD_BINDER_AND_CLEAR, CLEAR_DEATH_NOTIFICATION and delivered).
+//!  * The freezer: `BINDER_FREEZE` marks every binder instance of a pid
+//!    frozen after waiting up to its timeout for `outstanding_txns` to drain.
+//!    A synchronous transaction to a frozen process fails with
+//!    BR_FROZEN_REPLY. A oneway is queued, and its sender gets
+//!    BR_TRANSACTION_PENDING_FROZEN (`binder_proc_transaction`). Freeze
 //!    notifications (`binder_ref_freeze`) are sent, coalesced and resent as
 //!    in `binder_add_freeze_work`. Reads of a frozen process are served as
-//!    usual: its threads stop in the cgroup freezer, which ends their waits.
+//!    usual, because its threads stop in the cgroup freezer, which ends their
+//!    waits.
 //!
-//! The driver serves whole ioctls ([`BinderDriver::ioctl`]) and owns every
-//! thread's place in them. Each `BINDER_WRITE_READ` read goes through one
+//! The driver serves whole ioctls ([`BinderDriver::ioctl`]) and tracks where
+//! each thread is in them. Each `BINDER_WRITE_READ` read goes through this
 //! lifecycle:
 //!
-//!  * **prepared**: the read takes work off its lists and renders the BR_*
-//!    stream, but changes nothing else yet (a `Delivery`);
-//!  * **blocked**: with nothing to read, the thread waits (`Wait::Blocked`),
-//!    holding its unanswered [`Call`]. Work for it, or process work it is
-//!    the longest-waiting thread for, wakes it (`Wait::Woken`), and its read
-//!    runs again before the ioctl that woke it returns;
-//!  * **committed**: once the stream and the bwr are copied out and the
-//!    call is answered, the delivery takes effect (transactions pushed on
-//!    the stack, buffers handed over, node and death states advanced);
-//!  * **rolled back**: if a copy fails (`EFAULT`) or the call is gone (a
-//!    signal interrupted it, and the kernel restarts the ioctl), the work goes
-//!    back to the front of the lists it came from (`abandon`): thread work
-//!    for the thread's restarted read, process work for the next looper;
-//!  * **abandoned**: a wait ends without a read when the thread issues
-//!    another ioctl (a thread runs one syscall at a time), when it is woken
-//!    but its call is gone (a signal stopped it, or it will restart; nothing
-//!    is written to it then, unless the signal lands after that check), or
-//!    when process release answers it.
+//!  * **Prepared**: the read takes work off its lists and renders the BR_*
+//!    stream (a `Delivery`), but changes nothing else yet.
+//!  * **Blocked**: with nothing to read, the thread waits (`Wait::Blocked`)
+//!    and holds its unanswered [`Call`]. Work for the thread, or process work
+//!    for which it is the longest-waiting thread, wakes it (`Wait::Woken`).
+//!    Its read then runs again before the ioctl that woke it returns.
+//!  * **Committed**: once the stream and the bwr are copied out and the call
+//!    is answered, the delivery takes effect. Transactions are pushed on the
+//!    stack, buffers are handed over, and node and death states advance.
+//!  * **Rolled back**: if a copy fails (`EFAULT`), or the call is gone
+//!    because a signal interrupted it and the kernel will restart the ioctl,
+//!    the work goes back to the front of the lists it came from (`abandon`).
+//!    Thread work waits for the thread's restarted read, and process work
+//!    goes to the next looper.
+//!  * **Abandoned**: a wait ends without a read when the thread issues
+//!    another ioctl (a thread runs one syscall at a time), or when process
+//!    release answers it. It also ends when the thread is woken but its call
+//!    is gone, because a signal stopped the thread or it will restart. Nothing
+//!    is written to the call then, unless the signal lands after that check.
 //!
-//! A `BINDER_FREEZE` that waits for a target to drain is the thread's wait
-//! too (`Wait::Freezing`): it ends when the target's last outstanding
-//! transaction is freed or at its deadline ([`BinderDriver::expire`]), and
-//! a wait abandoned like a read's thaws the target, as the kernel does when
-//! a signal interrupts the ioctl.
+//! A `BINDER_FREEZE` that waits for a target to drain is also a thread wait
+//! (`Wait::Freezing`). It ends when the target's last outstanding transaction
+//! is freed or at its deadline ([`BinderDriver::expire`]). Abandoning it the
+//! way a read's wait is abandoned thaws the target, as the kernel does when a
+//! signal interrupts the ioctl.
 //!
 //! A write is consumed as it is processed, and its progress is written back
-//! whatever the read does (before a thread blocks, too), so a restarted
-//! ioctl never replays it.
+//! whatever the read does, including before a thread blocks. A restarted
+//! ioctl therefore never replays it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
@@ -80,8 +81,9 @@ pub type TxnId = u64;
 type DeathId = u64;
 type FreezeId = u64;
 
-/// One binder ioctl being served: the seccomp notification that answers it,
-/// and its argument (for `BINDER_WRITE_READ`, the address of the bwr).
+/// One binder ioctl being served. `id` names the seccomp notification that
+/// answers it, and `arg` is its argument, which for `BINDER_WRITE_READ` is the
+/// address of the bwr.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Call {
     pub id: u64,
@@ -91,17 +93,17 @@ pub struct Call {
 /// Why an fd could not be installed into a reading thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallError {
-    /// The reader's call is gone (a signal interrupted it).
+    /// The reader's call is gone because a signal interrupted it.
     Interrupted,
     /// The reader can't take the fd (for example, its fd table is full).
     Failed,
 }
 
-/// The driver's access to the processes it serves (the kernel's
-/// `copy_{from,to}_user`, the binder mapping, `fd_install` and returning
-/// from the ioctl). The real implementation (`src/notify.rs`) uses each
-/// process's pinned `/proc/<pid>/mem`, a per-process memfd, `pidfd_getfd`
-/// and seccomp user notifications; tests use an in-memory fake.
+/// The driver's access to the processes it serves. It stands in for the
+/// kernel's `copy_{from,to}_user`, the binder mapping, `fd_install` and
+/// returning from the ioctl. The real implementation (`src/notify.rs`) uses
+/// each process's pinned `/proc/<pid>/mem`, a per-process memfd,
+/// `pidfd_getfd` and seccomp user notifications. Tests use an in-memory fake.
 pub trait Userspace {
     /// Read `len` bytes from `proc`'s address space at `addr`.
     fn read(&mut self, proc: ProcId, addr: u64, len: usize) -> Option<Vec<u8>>;
@@ -125,24 +127,26 @@ pub trait Userspace {
     fn install_fd(&mut self, to: ProcId, call: Call, token: u64) -> Result<u32, InstallError>;
     /// Drop a captured fd.
     fn drop_fd(&mut self, token: u64);
-    /// End `call` with `errno` (0 for success). False if the call is gone.
+    /// End `call` with `errno` (0 for success), or return false if the call
+    /// is gone.
     fn answer(&mut self, call: Call, errno: i32) -> bool;
-    /// Whether `call` still waits for its answer: false once a signal ended
-    /// it (the thread is stopped, or will restart the ioctl).
+    /// Whether `call` still waits for its answer. It doesn't once a signal
+    /// has ended it, because the thread is stopped or will restart the ioctl.
     fn pending(&mut self, call: Call) -> bool;
-    /// One of `proc`'s threads polls its binder fd from now on (`call` is
-    /// its write-only `BC_ENTER_LOOPER`): make the fd pollable, once per
-    /// process. False if that failed (the call is gone).
+    /// Make `proc`'s binder fd pollable, once per process, because one of its
+    /// threads polls the fd from now on. `call` is that thread's write-only
+    /// `BC_ENTER_LOOPER`. Return false on failure, such as when the call is
+    /// gone.
     fn make_pollable(&mut self, proc: ProcId, call: Call) -> bool;
-    /// Whether a poll of `proc`'s binder fd reports it readable.
+    /// Set whether a poll of `proc`'s binder fd reports it readable.
     fn set_poll_ready(&mut self, proc: ProcId, ready: bool);
-    /// Milliseconds on a monotonic clock (`BINDER_FREEZE` timeouts).
+    /// Milliseconds on a monotonic clock, for `BINDER_FREEZE` timeouts.
     fn now_ms(&mut self) -> u64;
     /// Call [`BinderDriver::expire`] once [`Userspace::now_ms`] reaches
-    /// `at_ms` (or later; an early call is harmless).
+    /// `at_ms`. Calling it later is fine, and an early call is harmless.
     fn arm_timer(&mut self, at_ms: u64);
-    /// OpenHarmony: the access tokens thread `tid` of `proc` sends with
-    /// (its task's token and first token).
+    /// The OpenHarmony access tokens that thread `tid` of `proc` sends with,
+    /// which are its task's token and first token.
     fn access_token(&mut self, proc: ProcId, tid: u32) -> (u64, u64) {
         let _ = (proc, tid);
         (0, 0)
@@ -179,7 +183,8 @@ enum Work {
     TransactionPendingFrozen,
     ReturnError,
     ReplyError,
-    /// A reply whose fds couldn't be installed: BR_FAILED_REPLY in its place.
+    /// A reply whose fds couldn't be installed. The reader gets
+    /// BR_FAILED_REPLY in its place.
     FailedReply,
     Node(NodeId),
     Death(DeathId),
@@ -200,9 +205,9 @@ struct Death {
     queued: bool,
 }
 
-/// A freeze notification on a ref (`binder_ref_freeze`): its work item
-/// reports `is_frozen` (BR_FROZEN_BINDER) or, once cleared, that it is gone
-/// (BR_CLEAR_FREEZE_NOTIFICATION_DONE).
+/// A freeze notification on a ref (`binder_ref_freeze`). Its work item
+/// reports `is_frozen` with BR_FROZEN_BINDER or, once the notification is
+/// cleared, sends BR_CLEAR_FREEZE_NOTIFICATION_DONE.
 struct FreezeListener {
     cookie: u64,
     is_frozen: bool,
@@ -216,8 +221,8 @@ struct FreezeListener {
     queued: bool,
 }
 
-/// A `BINDER_FREEZE` in progress: the thread waits for `targets[0]` to
-/// drain (`binder_ioctl_freeze`), then freezes the rest in turn.
+/// A `BINDER_FREEZE` in progress. The thread waits for `targets[0]` to drain
+/// (`binder_ioctl_freeze`), then freezes the rest in turn.
 #[derive(Clone, Debug)]
 struct Freezing {
     call: Call,
@@ -239,8 +244,8 @@ struct Thread {
     reply_error: u32,
     wait: Wait,
     ee: BinderExtendedError,
-    /// OpenHarmony: the tokens and sender pid of the last transaction or
-    /// reply this thread read (`thread->tokens`, `thread->sender_pid_nr`).
+    /// For OpenHarmony, the tokens and sender pid of the last transaction or
+    /// reply this thread read (`thread->tokens` and `thread->sender_pid_nr`).
     sender: BinderSenderInfo,
 }
 
@@ -250,22 +255,23 @@ enum Wait {
     /// Not waiting in the driver.
     #[default]
     None,
-    /// Blocked with nothing to read. `proc_work`: it takes process work
-    /// (`binder_wait_for_work` on the process's `waiting_threads`); `since`
-    /// orders the threads that do, longest-waiting first.
+    /// Blocked with nothing to read. `proc_work` means the thread takes
+    /// process work (`binder_wait_for_work` on the process's
+    /// `waiting_threads`). `since` orders those threads, longest-waiting
+    /// first.
     Blocked {
         read: Read,
         proc_work: bool,
         since: u64,
     },
-    /// Work arrived: the read runs again before the current ioctl returns.
+    /// Work arrived, and the read runs again before the current ioctl returns.
     Woken(Read),
     /// In `BINDER_FREEZE`, waiting for its target to drain.
     Freezing(Freezing),
 }
 
-/// A `BINDER_WRITE_READ` in its read phase: its call, and its bwr as of the
-/// end of the write phase.
+/// A `BINDER_WRITE_READ` in its read phase, with its call and its bwr as of
+/// the end of the write phase.
 #[derive(Clone, Copy, Debug)]
 struct Read {
     call: Call,
@@ -276,23 +282,24 @@ struct Read {
 enum Prepared {
     /// Nothing to read, and the caller doesn't block.
     Again,
-    /// Nothing to read: the thread blocks.
+    /// Nothing to read, so the thread blocks.
     Blocked { proc_work: bool },
     /// A BR_* stream to copy out.
     Ready(Delivery),
-    /// The call is gone (an fd could not be installed for that reason).
+    /// The call is gone, so an fd could not be installed.
     Interrupted(Delivery),
 }
 
-/// What a read took off its lists: the rendered BR_* stream, and the work
-/// to commit once the reader has it, or to put back if it never does.
+/// What a read took off its lists. It holds the rendered BR_* stream and the
+/// work to commit once the reader has the stream, or to put back if it never
+/// does.
 struct Delivery {
     bytes: Vec<u8>,
     taken: Vec<Taken>,
     /// The thread's `process_todo` before the read.
     process_todo: bool,
-    /// The stream starts with BR_SPAWN_LOOPER, already counted in
-    /// `requested_threads` (until a rollback).
+    /// The stream starts with BR_SPAWN_LOOPER, which is already counted in
+    /// `requested_threads` unless the read is rolled back.
     spawn_looper: bool,
 }
 
@@ -300,15 +307,15 @@ struct Delivery {
 enum TxnRead {
     /// Its BR_* item.
     Rendered(Vec<u8>),
-    /// Gone, or failed for good: nothing to read.
+    /// The transaction is gone or failed for good, so there is nothing to
+    /// read.
     Dropped,
-    /// A reply that failed for good: the reader gets BR_FAILED_REPLY.
+    /// A reply that failed for good. The reader gets BR_FAILED_REPLY.
     FailedReply,
-    /// Its fds can't be installed: it fails as the first item of the next
-    /// read. Unlike the kernel, which installs all of a transaction's fds or
-    /// none, fds already installed stay in the reader, and leak if the
-    /// transaction then fails for good (an fd installed with ADDFD can't be
-    /// taken back).
+    /// Its fds can't be installed, so it fails as the first item of the next
+    /// read. The kernel installs all of a transaction's fds or none. Here, fds
+    /// already installed stay in the reader and leak if the transaction then
+    /// fails for good, because an fd installed with ADDFD can't be taken back.
     NotFirst,
     /// The reader's call is gone.
     Interrupted,
@@ -333,12 +340,12 @@ impl NodeChanges {
 #[derive(Clone, Copy)]
 struct Taken {
     work: Work,
-    /// From the process's list rather than the thread's.
+    /// Taken from the process's list instead of the thread's.
     from_proc: bool,
 }
 
 struct Node {
-    /// Owner, `None` once the owner died (`node->proc == NULL`).
+    /// The owner, or `None` once the owner died (`node->proc == NULL`).
     proc: Option<ProcId>,
     ptr: u64,
     cookie: u64,
@@ -379,7 +386,7 @@ struct Process {
     requested_threads_started: u32,
     oneway_spam_detection: bool,
     threads: BTreeMap<u32, Thread>,
-    /// The binder fd was opened `O_NONBLOCK`: reads never block.
+    /// The binder fd was opened `O_NONBLOCK`, so reads never block.
     nonblock: bool,
     todo: VecDeque<Work>,
     nodes: HashMap<u64, NodeId>,
@@ -388,7 +395,7 @@ struct Process {
     delivered_death: Vec<DeathId>,
     delivered_freeze: Vec<FreezeId>,
     free_async_space: i64,
-    /// `BINDER_FREEZE`: synchronous transactions to it fail.
+    /// Frozen by `BINDER_FREEZE`. Synchronous transactions to it fail.
     is_frozen: bool,
     /// A synchronous or oneway transaction arrived while frozen.
     sync_recv: bool,
@@ -404,8 +411,8 @@ struct Context {
 }
 
 struct Txn {
-    /// Synchronous caller (`t->from`); `None` for oneway, replies, and once
-    /// the caller thread died.
+    /// The synchronous caller (`t->from`). It is `None` for oneways and
+    /// replies, and once the caller thread has died.
     from: Option<(ProcId, u32)>,
     from_parent: Option<TxnId>,
     to_proc: Option<ProcId>,
@@ -415,10 +422,11 @@ struct Txn {
     code: u32,
     flags: u32,
     sender_euid: u32,
-    /// OpenHarmony: the sender's (token, first token).
+    /// The sender's OpenHarmony (token, first token) pair.
     tokens: (u64, u64),
-    /// The process whose `outstanding_txns` counts it: its target, from
-    /// being queued until it is freed or its reader thread exits.
+    /// The process whose `outstanding_txns` counts this transaction. That is
+    /// its target, from when it is queued until it is freed or its reader
+    /// thread exits.
     outstanding: Option<ProcId>,
 }
 
@@ -439,9 +447,10 @@ struct Buffer {
     transaction: Option<TxnId>,
     allow_user_free: bool,
     objects: Vec<Obj>,
-    /// Captured fds still to install: (offset of the fd in the buffer, token).
+    /// Captured fds still to install, as (offset of the fd in the buffer,
+    /// token).
     fd_fixups: Vec<(usize, u64)>,
-    /// Address of the security context in the buffer (0: none).
+    /// Address of the security context in the buffer, or 0 if there is none.
     secctx: u64,
 }
 
@@ -459,7 +468,7 @@ pub struct BinderDriver {
     woken: VecDeque<(ProcId, u32)>,
     /// Processes whose poll readiness may have changed.
     poll_dirty: BTreeSet<ProcId>,
-    /// Frozen processes whose last outstanding transaction went away: a
+    /// Frozen processes whose last outstanding transaction went away. A
     /// freeze may be waiting for that.
     drained: BTreeSet<ProcId>,
     /// Serve OpenHarmony's ioctls and record its tokens.
@@ -484,8 +493,8 @@ impl BinderDriver {
         Self::with_guest(crate::Guest::Android)
     }
 
-    /// The driver as `guest`'s kernel has it: Android's, or Android's plus
-    /// OpenHarmony's extensions.
+    /// A driver that matches `guest`'s kernel. For OpenHarmony, that is
+    /// Android's driver plus OpenHarmony's extensions.
     pub fn with_guest(guest: crate::Guest) -> Self {
         BinderDriver {
             contexts: [ctx_new(), ctx_new(), ctx_new()],
@@ -510,8 +519,8 @@ impl BinderDriver {
         i
     }
 
-    /// Open a binder device for process `pid` with `euid`; `context` is 0=binder, 1=hwbinder,
-    /// 2=vndbinder.
+    /// Open a binder device for process `pid` with `euid`. `context` is 0 for
+    /// binder, 1 for hwbinder and 2 for vndbinder.
     pub fn open(&mut self, pid: i32, euid: u32, context: u8, nonblock: bool) -> ProcId {
         let id = self.next_proc;
         self.next_proc += 1;
@@ -533,8 +542,8 @@ impl BinderDriver {
         self.procs.contains_key(&proc)
     }
 
-    /// `BINDER_SET_CONTEXT_MGR(_EXT)`. `flat` is the optional flat_binder_object
-    /// (EXT form); pass `None` for the plain form.
+    /// `BINDER_SET_CONTEXT_MGR(_EXT)`. `flat` is the flat_binder_object of the
+    /// EXT form, or `None` for the plain form.
     fn set_context_mgr(&mut self, proc: ProcId, flat: Option<FlatBinderObject>) -> i32 {
         let p = &self.procs[&proc];
         let (ctx, euid) = (p.context as usize, p.euid);
@@ -617,7 +626,7 @@ impl BinderDriver {
         t.process_todo || (do_proc_work && !p.todo.is_empty())
     }
 
-    /// Wake a blocked thread: its read runs again before the current ioctl
+    /// Wake a blocked thread. Its read runs again before the current ioctl
     /// returns (see `settle`).
     fn wake_thread(&mut self, proc: ProcId, tid: u32) {
         if let Some(t) = self
@@ -632,8 +641,8 @@ impl BinderDriver {
         self.poll_dirty.insert(proc);
     }
 
-    /// `binder_select_thread_ilocked`: the thread that has waited longest
-    /// for process work.
+    /// The thread that has waited longest for process work
+    /// (`binder_select_thread_ilocked`).
     fn select_thread(&self, proc: ProcId) -> Option<u32> {
         self.procs
             .get(&proc)?
@@ -651,8 +660,8 @@ impl BinderDriver {
             .map(|(_, tid)| tid)
     }
 
-    /// `binder_wakeup_proc_ilocked`: wake one waiting thread, else the poll
-    /// threads.
+    /// Wake one waiting thread, or else the poll threads
+    /// (`binder_wakeup_proc_ilocked`).
     fn wakeup_proc(&mut self, proc: ProcId) {
         if let Some(tid) = self.select_thread(proc) {
             self.wake_thread(proc, tid);
@@ -668,8 +677,8 @@ impl BinderDriver {
         self.wake_thread(proc, tid);
     }
 
-    /// `binder_enqueue_deferred_thread_work_ilocked`: queued, but the thread
-    /// does not return to userspace for it alone.
+    /// Queue work for a thread without making it return to userspace for that
+    /// work alone (`binder_enqueue_deferred_thread_work_ilocked`).
     fn enqueue_deferred_thread_work(&mut self, proc: ProcId, tid: u32, w: Work) {
         self.thread_mut(proc, tid).todo.push_back(w);
     }
@@ -699,7 +708,7 @@ impl BinderDriver {
         }
     }
 
-    /// Would a poll thread of `proc` see work now (`binder_poll`)?
+    /// Whether a poll thread of `proc` would see work now (`binder_poll`).
     fn proc_pollable(&self, proc: ProcId) -> bool {
         let Some(p) = self.procs.get(&proc) else {
             return false;
@@ -718,7 +727,7 @@ impl BinderDriver {
     }
 
     /// `binder_inc_node_nilocked`. `target` is the thread whose deferred todo
-    /// receives the node work (the sender translating its own binder).
+    /// receives the node work, which is the sender translating its own binder.
     fn inc_node(
         &mut self,
         nid: NodeId,
@@ -760,8 +769,8 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_dec_node_nilocked` (+ freeing). Queues the owner's node work
-    /// when the last strong or weak reference goes away.
+    /// `binder_dec_node_nilocked`, including freeing the node. Queues the
+    /// owner's node work when the last strong or weak reference goes away.
     fn dec_node(&mut self, nid: NodeId, strong: bool, internal: bool) {
         let Some(n) = self.nodes.get_mut(&nid) else {
             return;
@@ -835,8 +844,8 @@ impl BinderDriver {
         Some(r.node)
     }
 
-    /// `binder_inc_ref_for_node`: get or create `proc`'s ref to `node`, take a
-    /// strong or weak count on it, and return its descriptor.
+    /// Get or create `proc`'s ref to `node`, take a strong or weak count on
+    /// it, and return its descriptor (`binder_inc_ref_for_node`).
     fn inc_ref_for_node(
         &mut self,
         proc: ProcId,
@@ -892,9 +901,10 @@ impl BinderDriver {
         let nid = r.node;
         if strong {
             if r.strong == 0 {
-                // binder_inc_node(node, 1, 1, target): a node with no strong
-                // refs can only gain one through translation of its owner's
-                // object (target != None) or if it is a live context manager.
+                // As in binder_inc_node(node, 1, 1, target), a node with no
+                // strong refs can gain one only through translation of its
+                // owner's object (target != None), or if it is a live context
+                // manager.
                 let n = &self.nodes[&nid];
                 let is_mgr = self.contexts.iter().any(|c| c.mgr_node == Some(nid));
                 if target.is_none()
@@ -929,7 +939,8 @@ impl BinderDriver {
         Ok(())
     }
 
-    /// `binder_dec_ref_olocked` + `binder_cleanup_ref_olocked` when it hits 0.
+    /// `binder_dec_ref_olocked`, plus `binder_cleanup_ref_olocked` when the
+    /// count reaches 0.
     fn dec_ref(&mut self, proc: ProcId, desc: u32, strong: bool) -> Result<(), i32> {
         let r = self
             .procs
@@ -986,15 +997,15 @@ impl BinderDriver {
     // ---- ioctls and the read lifecycle -----------------------------------------
 
     /// Serve binder ioctl `cmd` from thread `tid` of `proc` (`binder_ioctl`)
-    /// and answer `call`: now, or for a blocking read once there is work.
-    /// Threads it wakes are served before it returns.
+    /// and answer `call`, either now or, for a blocking read, once there is
+    /// work. Threads it wakes are served before it returns.
     pub fn ioctl(&mut self, proc: ProcId, tid: u32, cmd: u32, call: Call, us: &mut dyn Userspace) {
         if !self.proc_exists(proc) {
             us.answer(call, libc::EINVAL);
             return;
         }
-        // A thread runs one syscall at a time, so any wait it was in is over
-        // (a signal interrupted it, and this may be its restart).
+        // A thread runs one syscall at a time, so any wait it was in is over.
+        // A signal interrupted that wait, and this ioctl may be its restart.
         let t = self.thread_mut(proc, tid);
         match std::mem::take(&mut t.wait) {
             Wait::Blocked { .. } => trace!("proc={proc} tid={tid} wait abandoned"),
@@ -1099,7 +1110,7 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_ioctl_write_read`: the write phase, then the read phase.
+    /// The write phase, then the read phase (`binder_ioctl_write_read`).
     fn write_read(&mut self, proc: ProcId, tid: u32, call: Call, us: &mut dyn Userspace) {
         let Some(mut bwr) = us
             .read(proc, call.arg, size_of::<BinderWriteRead>())
@@ -1123,18 +1134,20 @@ impl BinderDriver {
                 us.answer(call, libc::EFAULT);
                 return;
             };
-            // A write-only BC_ENTER_LOOPER is IPCThreadState::setupPolling():
-            // this thread will epoll the binder fd (kernel: binder_poll marks
-            // it BINDER_LOOPER_STATE_POLL). The fd is made pollable before
-            // anything is consumed, so if that fails, the restarted ioctl (or
-            // libbinder's retry on EINTR) does it all again.
+            // A write-only BC_ENTER_LOOPER comes from
+            // IPCThreadState::setupPolling(), so this thread will epoll the
+            // binder fd. In the kernel, binder_poll marks it
+            // BINDER_LOOPER_STATE_POLL. The fd is made pollable before
+            // anything is consumed, so if that fails, the restarted ioctl or
+            // libbinder's retry on EINTR does it all again.
             if read_avail == 0
                 && self.thread_mut(proc, tid).looper & LOOPER_POLL == 0
                 && has_cmd(&write, BC_ENTER_LOOPER)
             {
                 if !us.make_pollable(proc, call) {
-                    // A failure that persists (the broker out of fds) makes
-                    // libbinder retry at once, in a loop; that is accepted.
+                    // A persistent failure, such as the broker running out of
+                    // fds, makes libbinder retry at once in a loop. This is
+                    // accepted.
                     us.answer(call, libc::EINTR);
                     return;
                 }
@@ -1154,9 +1167,10 @@ impl BinderDriver {
             }
         }
         // A signal can end the seccomp wait even when NOTIF_SEND succeeds.
-        // In that case these read bytes are already committed and published;
-        // libbinder retries with their read_consumed intact. Return them before
-        // waiting for new work (which can depend on the caller freeing them).
+        // In that case these read bytes are already committed and published,
+        // and libbinder retries with their read_consumed intact. Return them
+        // before waiting for new work, which can depend on the caller freeing
+        // them.
         if read_avail > 0 && bwr.read_consumed == 0 {
             let nonblock = self.procs[&proc].nonblock;
             self.serve_read(proc, tid, Read { call, bwr }, nonblock, us);
@@ -1170,7 +1184,7 @@ impl BinderDriver {
         }
     }
 
-    /// The read phase: deliver what there is to `tid`, or block it.
+    /// The read phase. Deliver what there is to `tid`, or block it.
     fn serve_read(
         &mut self,
         proc: ProcId,
@@ -1183,8 +1197,8 @@ impl BinderDriver {
         match self.prepare_read(proc, tid, avail, nonblock, read.call, us) {
             Prepared::Ready(d) => self.deliver(proc, tid, read, d, us),
             Prepared::Blocked { proc_work } => {
-                // Record the write's progress first, so a restarted ioctl never
-                // replays it. A thread waits only once that has worked.
+                // Record the write's progress first so that a restarted ioctl
+                // does not replay it. The thread waits only if that succeeds.
                 if !put_bwr(proc, read.call, &read.bwr, us) {
                     us.answer(read.call, libc::EFAULT);
                     return;
@@ -1209,9 +1223,10 @@ impl BinderDriver {
         self.pass_on_proc_work(proc);
     }
 
-    /// Process work a read left (it was rolled back, the buffer was full, or
-    /// the reader is gone) is for another waiting thread, not for that one to
-    /// come back for.
+    /// Hand process work that a read left behind to another waiting thread.
+    /// The read may have been rolled back, its buffer may have been full, or
+    /// the reader may be gone, and the work should not wait for that reader
+    /// to come back.
     fn pass_on_proc_work(&mut self, proc: ProcId) {
         if !self.procs[&proc].todo.is_empty() {
             self.wakeup_proc(proc);
@@ -1237,18 +1252,18 @@ impl BinderDriver {
         }
     }
 
-    /// The reader never gets `d`: a copy failed, or its call is gone. Roll it
-    /// back, and end the call with EFAULT (a no-op if it is gone) and its bwr
-    /// as it was after the write, as binder_ioctl_write_read does: the
-    /// restarted ioctl then reads the same work again without replaying the
-    /// write.
+    /// The reader never gets `d` because a copy failed or its call is gone.
+    /// Roll `d` back, and end the call with EFAULT (a no-op if the call is
+    /// gone) and with its bwr as it was after the write, as
+    /// binder_ioctl_write_read does. The restarted ioctl then reads the same
+    /// work again without replaying the write.
     fn abandon(&mut self, proc: ProcId, tid: u32, read: Read, d: Delivery, us: &mut dyn Userspace) {
         self.rollback(proc, tid, d);
         put_bwr(proc, read.call, &read.bwr, us);
         us.answer(read.call, libc::EFAULT);
     }
 
-    /// The reader has the delivery: apply what reading it means.
+    /// The reader has the delivery, so apply its effects.
     fn commit(&mut self, proc: ProcId, tid: u32, d: Delivery) {
         for Taken { work, .. } in d.taken {
             match work {
@@ -1266,8 +1281,8 @@ impl BinderDriver {
         }
     }
 
-    /// The reader never got the delivery: put its work back at the front of
-    /// the lists it came from.
+    /// The reader never got the delivery, so put its work back at the front
+    /// of the lists it came from.
     fn rollback(&mut self, proc: ProcId, tid: u32, d: Delivery) {
         trace!(
             "proc={proc} tid={tid} read rolled back: {} items",
@@ -1310,15 +1325,15 @@ impl BinderDriver {
                 if us.pending(read.call) {
                     self.serve_read(proc, tid, read, false, us);
                 } else {
-                    // A signal ended its wait: the read is abandoned, and
-                    // nothing is written to the thread, which may be stopped.
+                    // A signal ended its wait, so the read is abandoned.
+                    // Nothing is written to the thread, which may be stopped.
                     // It finds its own work when it restarts.
                     trace!("proc={proc} tid={tid} woken, but its wait is over");
                     self.pass_on_proc_work(proc);
                 }
             }
-            // Freezes waiting for a target that drained go on (which may
-            // queue freeze notifications, and wake readers).
+            // Freezes waiting for a target that drained continue. This may
+            // queue freeze notifications and wake readers.
             if self.drained.is_empty() {
                 break;
             }
@@ -1732,8 +1747,8 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_proc_transaction`. Ok(true): a oneway queued for a frozen
-    /// process (BR_TRANSACTION_PENDING_FROZEN).
+    /// `binder_proc_transaction`. Returns Ok(true) for a oneway queued for a
+    /// frozen process, whose sender then gets BR_TRANSACTION_PENDING_FROZEN.
     fn proc_transaction(
         &mut self,
         txid: TxnId,
@@ -1780,11 +1795,12 @@ impl BinderDriver {
                 BR_DEAD_REPLY
             });
         }
-        // A call for a thread up the transaction stack goes on its list. Any
-        // other goes on the process's and wakes the thread that waited
-        // longest. (The kernel queues it on that thread's own list, but here
-        // a waiting thread may be gone without the driver knowing yet: then
-        // its read is abandoned, and the work stays for the next one.)
+        // A call for a thread up the transaction stack goes on that thread's
+        // list. Any other call goes on the process's list and wakes the
+        // thread that waited longest. The kernel queues it on that thread's
+        // own list instead, but here a waiting thread may be gone without the
+        // driver knowing yet. Its read is then abandoned, and the work stays
+        // for the next thread.
         if let Some(th) = target_thread {
             self.enqueue_thread_work(target_proc, th, Work::Transaction(txid));
         } else if pending_async {
@@ -1808,8 +1824,8 @@ impl BinderDriver {
         }
     }
 
-    /// A transaction `outstanding_txns` counted is done with
-    /// (`binder_free_transaction`, or its reader thread exited). A freeze
+    /// A transaction that `outstanding_txns` counted is done, because it was
+    /// freed (`binder_free_transaction`) or its reader thread exited. A freeze
     /// may be waiting for the last one.
     fn uncount_outstanding(&mut self, proc: Option<ProcId>) {
         if let Some(proc) = proc
@@ -1838,8 +1854,8 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_free_transaction`: drop the record; its buffer lives on until
-    /// BC_FREE_BUFFER.
+    /// Drop the transaction record (`binder_free_transaction`). Its buffer
+    /// lives on until BC_FREE_BUFFER.
     fn free_txn(&mut self, txid: TxnId) {
         let Some(t) = self.txns.remove(&txid) else {
             return;
@@ -1852,8 +1868,8 @@ impl BinderDriver {
         }
     }
 
-    /// `binder_send_failed_reply`: fail the synchronous caller of `txid` (or
-    /// the first live caller up its chain).
+    /// Fail the synchronous caller of `txid`, or the first live caller up its
+    /// chain (`binder_send_failed_reply`).
     fn send_failed_reply(&mut self, txid: TxnId, err: u32) {
         let mut cur = Some(txid);
         while let Some(t) = cur {
@@ -1888,7 +1904,8 @@ impl BinderDriver {
 
     /// Copy the sender's data into a new buffer in `target_proc`, translating
     /// every object (`binder_transaction` from `binder_alloc_new_buf` to the
-    /// end of the object loop). Returns the buffer address.
+    /// end of the object loop). Returns the buffer address and whether to
+    /// report the sender as a oneway spam suspect.
     #[allow(clippy::too_many_arguments)]
     fn build_buffer(
         &mut self,
@@ -1913,7 +1930,8 @@ impl BinderDriver {
             .map(|n| self.nodes[&n].txn_security_ctx)
             .unwrap_or(false);
         const SECCTX: &[u8] = b"u:r:su:s0\0";
-        // Checked: a huge data_size must fail here, not wrap to a small total.
+        // Checked arithmetic makes a huge data_size fail here instead of
+        // wrapping to a small total.
         let off_start = data_size.checked_next_multiple_of(8).ok_or(fail)?;
         let sg_start = off_start.checked_add(offsets_size).ok_or(fail)?;
         let sg_end = sg_start.checked_add(extra).ok_or(fail)?;
@@ -2003,7 +2021,7 @@ impl BinderDriver {
         Ok((addr, spam))
     }
 
-    /// Translate the objects in `data` for `key.0`; returns the gathered
+    /// Translate the objects in `data` for `key.0` and return the gathered
     /// scatter-gather area. Objects translated so far are recorded on the
     /// buffer, so the caller releases them on failure.
     #[allow(clippy::too_many_arguments)]
@@ -2035,7 +2053,8 @@ impl BinderDriver {
         let mut sg = vec![0u8; extra];
         let mut sg_used = 0usize;
         let mut off_min = 0usize;
-        // (object offset in data, sg offset, length) of validated PTR objects
+        // For each object so far, the (sg offset, length) of a validated PTR
+        // object, or None for any other object.
         let mut ptrs: Vec<Option<(usize, usize)>> = Vec::new();
         for i in 0..offsets.len() / 8 {
             let obj_off = read_pod::<u64>(offsets, i * 8).unwrap();
@@ -2218,8 +2237,8 @@ impl BinderDriver {
         self.free_buf(key, us);
     }
 
-    /// `binder_free_buf`: the reader is done with a buffer. If it held a
-    /// oneway, the next one queued for its node becomes process work.
+    /// The reader is done with a buffer (`binder_free_buf`). If it held a
+    /// oneway, the next oneway queued for its node becomes process work.
     fn free_buf(&mut self, key: (ProcId, u64), us: &mut dyn Userspace) {
         if let Some(b) = self.buffers.get(&key)
             && b.is_async
@@ -2234,7 +2253,7 @@ impl BinderDriver {
         self.release_buffer(key, us);
     }
 
-    /// `binder_transaction_buffer_release` + `binder_alloc_free_buf`.
+    /// `binder_transaction_buffer_release` plus `binder_alloc_free_buf`.
     fn release_buffer(&mut self, key: (ProcId, u64), us: &mut dyn Userspace) {
         let Some(b) = self.buffers.remove(&key) else {
             return;
@@ -2363,8 +2382,8 @@ impl BinderDriver {
 
     // ---- the freezer ----------------------------------------------------------
 
-    /// `BINDER_FREEZE`: freeze or thaw every binder instance of a pid (in
-    /// Android's pid namespace), in turn.
+    /// Freeze or thaw every binder instance of a pid in Android's pid
+    /// namespace, one at a time (`BINDER_FREEZE`).
     fn freeze_ioctl(&mut self, proc: ProcId, tid: u32, call: Call, us: &mut dyn Userspace) {
         let Some(info) = us
             .read(proc, call.arg, size_of::<BinderFreezeInfo>())
@@ -2398,12 +2417,13 @@ impl BinderDriver {
         self.run_freeze(proc, tid, f, us);
     }
 
-    /// `binder_ioctl_freeze` for each remaining target: answer the call, or
-    /// wait for a target to drain.
+    /// Run `binder_ioctl_freeze` for each remaining target. Answer the call,
+    /// or wait for a target to drain.
     fn run_freeze(&mut self, proc: ProcId, tid: u32, mut f: Freezing, us: &mut dyn Userspace) {
         while let Some(&target) = f.targets.first() {
             let Some(p) = self.procs.get_mut(&target) else {
-                // Released (which thaws it): nothing left to freeze there.
+                // The target was released, which thaws it, so there is
+                // nothing left to freeze.
                 f.targets.remove(0);
                 f.deadline = None;
                 continue;
@@ -2440,8 +2460,8 @@ impl BinderDriver {
         us.answer(f.call, 0);
     }
 
-    /// A freeze's target drained or its deadline passed: go on, unless the
-    /// call is gone.
+    /// A freeze's target drained or its deadline passed. Continue the freeze
+    /// unless the call is gone.
     fn resume_freeze(&mut self, proc: ProcId, tid: u32, us: &mut dyn Userspace) {
         let Some(t) = self
             .procs
@@ -2463,7 +2483,7 @@ impl BinderDriver {
         }
     }
 
-    /// A signal ended a freeze's wait (`-ERESTARTSYS`): its target thaws.
+    /// A signal ended a freeze's wait (`-ERESTARTSYS`), so its target thaws.
     fn freeze_interrupted(&mut self, f: &Freezing) {
         trace!("freeze of {:?} interrupted", f.targets.first());
         if f.deadline.is_some()
@@ -2487,8 +2507,8 @@ impl BinderDriver {
         v
     }
 
-    /// The timer [`Userspace::arm_timer`] asked for fired: freezes whose
-    /// deadline passed go on.
+    /// The timer that [`Userspace::arm_timer`] asked for fired. Freezes whose
+    /// deadline passed continue.
     pub fn expire(&mut self, us: &mut dyn Userspace) {
         let now = us.now_ms();
         let mut next: Option<u64> = None;
@@ -2508,8 +2528,8 @@ impl BinderDriver {
         self.settle(us);
     }
 
-    /// `binder_txns_pending_ilocked`: transactions queued for `proc`, or one
-    /// of its threads serving a call.
+    /// Whether transactions are queued for `proc` or one of its threads is
+    /// serving a call (`binder_txns_pending_ilocked`).
     fn txns_pending(&self, proc: ProcId) -> bool {
         let p = &self.procs[&proc];
         p.outstanding_txns > 0
@@ -2520,7 +2540,8 @@ impl BinderDriver {
             })
     }
 
-    /// `BINDER_GET_FROZEN_INFO` (bit 1 of `sync_recv`: transactions pending).
+    /// `BINDER_GET_FROZEN_INFO`. Bit 1 of `sync_recv` means transactions are
+    /// pending.
     fn frozen_info(&self, pid: u32) -> Option<BinderFrozenStatusInfo> {
         let mut info = BinderFrozenStatusInfo {
             pid,
@@ -2537,9 +2558,10 @@ impl BinderDriver {
         found.then_some(info)
     }
 
-    /// `binder_add_freeze_work`: tell every holder of a ref to `proc`'s
-    /// nodes that asked for it. A notification not delivered yet just takes
-    /// the new state; one delivered but not acknowledged is sent again.
+    /// Notify every holder of a ref to `proc`'s nodes that asked for freeze
+    /// notifications (`binder_add_freeze_work`). A notification that is queued
+    /// but not delivered yet takes the new state. One that was delivered but
+    /// not acknowledged is sent again if the state changed.
     fn add_freeze_work(&mut self, proc: ProcId, is_frozen: bool) {
         let mut nodes: Vec<NodeId> = self.procs[&proc].nodes.values().copied().collect();
         nodes.sort();
@@ -2565,7 +2587,7 @@ impl BinderDriver {
         }
     }
 
-    /// `BC_REQUEST_FREEZE_NOTIFICATION`: the current state is sent at once.
+    /// `BC_REQUEST_FREEZE_NOTIFICATION`. The current state is sent at once.
     fn request_freeze_notification(
         &mut self,
         proc: ProcId,
@@ -2601,8 +2623,8 @@ impl BinderDriver {
         Ok(())
     }
 
-    /// `BC_CLEAR_FREEZE_NOTIFICATION`: detach it from its ref; its next
-    /// delivery is BR_CLEAR_FREEZE_NOTIFICATION_DONE.
+    /// `BC_CLEAR_FREEZE_NOTIFICATION`. Detaches the notification from its
+    /// ref. Its next delivery is BR_CLEAR_FREEZE_NOTIFICATION_DONE.
     fn clear_freeze_notification(
         &mut self,
         proc: ProcId,
@@ -2652,8 +2674,8 @@ impl BinderDriver {
         Ok(())
     }
 
-    /// A delivered freeze notification: a cleared one is done, a state waits
-    /// for BC_FREEZE_NOTIFICATION_DONE.
+    /// Commit a delivered freeze notification. A cleared one is done, and a
+    /// state report waits for BC_FREEZE_NOTIFICATION_DONE.
     fn commit_freeze(&mut self, proc: ProcId, f: FreezeId) {
         let Some(x) = self.freezes.get_mut(&f) else {
             return;
@@ -2668,7 +2690,8 @@ impl BinderDriver {
 
     // ---- thread / process release -------------------------------------------
 
-    /// `binder_thread_release` (BINDER_THREAD_EXIT, or the process is going).
+    /// `binder_thread_release`, on BINDER_THREAD_EXIT or when the process is
+    /// released.
     fn thread_exit(&mut self, proc: ProcId, tid: u32) {
         let Some(t) = self
             .procs
@@ -2720,7 +2743,8 @@ impl BinderDriver {
         self.poll_dirty.insert(proc);
     }
 
-    /// `binder_release_work`: fail synchronous transactions nobody will read.
+    /// Fail synchronous transactions that nobody will read
+    /// (`binder_release_work`).
     fn release_work(&mut self, _proc: ProcId, list: VecDeque<Work>) {
         for w in list {
             match w {
@@ -2756,8 +2780,8 @@ impl BinderDriver {
                         n.work_queued = false;
                     }
                 }
-                // A cleared notification is gone; one its ref holds stays
-                // until the ref goes.
+                // A cleared notification is removed. One that its ref still
+                // holds stays until the ref goes.
                 Work::Freeze(f) => match self.freezes.get_mut(&f) {
                     Some(x) if x.cleared => {
                         self.freezes.remove(&f);
@@ -2771,7 +2795,8 @@ impl BinderDriver {
     }
 
     /// The process closed its binder fd or died (`binder_deferred_release`).
-    /// Its waiting threads get `EBADF`; threads it wakes elsewhere are served.
+    /// Its waiting threads get `EBADF`. Threads that the release wakes in
+    /// other processes are served before it returns.
     pub fn release_proc(&mut self, proc: ProcId, us: &mut dyn Userspace) {
         let Some(p) = self.procs.get(&proc) else {
             return;
@@ -2797,7 +2822,8 @@ impl BinderDriver {
         for tid in tids {
             self.thread_exit(proc, tid);
         }
-        // Nodes: notify every holder that asked for a death notification.
+        // Notify every holder of the process's nodes that asked for a death
+        // notification.
         let nodes: Vec<NodeId> = self.procs[&proc].nodes.values().copied().collect();
         self.procs.get_mut(&proc).unwrap().nodes.clear();
         for nid in nodes {
@@ -2869,7 +2895,7 @@ impl BinderDriver {
                     self.free_txn(t);
                 }
             }
-            // binder_alloc_deferred_release frees the memory only: the refs
+            // binder_alloc_deferred_release frees only the memory. The refs
             // these buffers held died with the process's nodes and handles.
             if let Some(b) = self.buffers.remove(&k) {
                 for (_, tok) in b.fd_fixups {
@@ -2893,7 +2919,8 @@ impl BinderDriver {
             }
         }
         self.procs.remove(&proc);
-        // A freeze waiting for it to drain goes on to its next target.
+        // A freeze waiting for this process to drain moves on to its next
+        // target.
         self.drained.insert(proc);
         self.settle(us);
     }
@@ -2958,10 +2985,10 @@ impl BinderDriver {
 
     // ---- the read path ---------------------------------------------------------
 
-    /// `binder_thread_read`, up to copying out: take work off the thread's
-    /// and (if it takes process work) the process's lists and render the
-    /// BR_* stream for `size` bytes. Work that renders nothing is consumed
-    /// here; the rest is committed or rolled back by the caller.
+    /// `binder_thread_read` up to the copy out. Take work off the thread's
+    /// list and, if the thread takes process work, the process's list, and
+    /// render the BR_* stream for `size` bytes. Work that renders nothing is
+    /// consumed here. The caller commits or rolls back the rest.
     fn prepare_read(
         &mut self,
         proc: ProcId,
@@ -3136,10 +3163,10 @@ impl BinderDriver {
                 d.taken.push(taken);
             }
         }
-        // Ask for another looper thread if none is idle. (A waiter a signal
-        // stopped still counts until it is woken and found gone: that only
-        // delays a request, and checking every waiter would cost a syscall
-        // on every read.)
+        // Ask for another looper thread if none is idle. A waiter that a
+        // signal stopped still counts as idle until it is woken and found
+        // gone. That only delays a request, and checking every waiter would
+        // cost a syscall on every read.
         let p = &self.procs[&proc];
         let looper = p.threads[&tid].looper & (LOOPER_REGISTERED | LOOPER_ENTERED) != 0;
         let idle = p.threads.values().any(|t| {
@@ -3188,7 +3215,7 @@ impl BinderDriver {
         }
     }
 
-    /// Apply a node's work item: the owner was told its changes.
+    /// Apply a node's work item once the owner has been told its changes.
     fn apply_node_work(&mut self, nid: NodeId) {
         let Some(n) = self.nodes.get_mut(&nid) else {
             return;
@@ -3216,8 +3243,8 @@ impl BinderDriver {
         }
     }
 
-    /// A delivered death notification: a cleared one is done, a dead binder
-    /// waits for BC_DEAD_BINDER_DONE.
+    /// Commit a delivered death notification. A cleared one is done, and a
+    /// dead binder waits for BC_DEAD_BINDER_DONE.
     fn commit_death(&mut self, proc: ProcId, death: DeathId) {
         if self.deaths[&death].kind == DeathKind::Clear {
             self.deaths.remove(&death);
@@ -3230,10 +3257,11 @@ impl BinderDriver {
         }
     }
 
-    /// Render BR_TRANSACTION(_SEC_CTX) / BR_REPLY for a reader, installing
-    /// the buffer's fds into it first (`binder_apply_fd_fixups`). Fds that
-    /// can't be installed fail the transaction, which is only done as the
-    /// first item of a read, so it never reorders against work already taken.
+    /// Render BR_TRANSACTION(_SEC_CTX) or BR_REPLY for a reader, after
+    /// installing the buffer's fds into it (`binder_apply_fd_fixups`). Fds
+    /// that can't be installed fail the transaction. That happens only when it
+    /// is the first item of a read, so the failure is never reordered against
+    /// work already taken.
     fn read_transaction(
         &mut self,
         proc: ProcId,
@@ -3266,7 +3294,7 @@ impl BinderDriver {
                 }
             }
         }
-        // Installed fds are the reader's now.
+        // The installed fds now belong to the reader.
         for &(_, tok) in &fixups[..installed] {
             us.drop_fd(tok);
         }
@@ -3349,8 +3377,9 @@ impl BinderDriver {
         TxnRead::Rendered(out)
     }
 
-    /// The reader has a transaction: its buffer is the reader's to free, and
-    /// a synchronous call goes on the reader's stack until it replies.
+    /// The reader has a transaction. Its buffer is now the reader's to free,
+    /// and a synchronous call goes on the reader's stack until the reader
+    /// replies.
     fn commit_transaction(&mut self, proc: ProcId, tid: u32, txid: TxnId) {
         let t = &self.txns[&txid];
         let key = t.buffer.unwrap();
@@ -3397,9 +3426,8 @@ impl BinderDriver {
             for (&tid, t) in &p.threads {
                 match &t.wait {
                     Wait::None => {}
-                    // No work is ever left with a thread that waits instead
-                    // of reading it, and only threads that can take process
-                    // work wait for it.
+                    // A waiting thread never has work it could read, and only
+                    // threads that can take process work wait for it.
                     &Wait::Blocked { proc_work, .. } => {
                         assert!(
                             !Self::has_work(p, t, proc_work),
@@ -3412,9 +3440,10 @@ impl BinderDriver {
                         assert!(!proc_work || Self::available_for_proc_work(t));
                     }
                     Wait::Woken(_) => panic!("proc {pid} thread {tid} woken but not served"),
-                    // A freeze waits for a live target it marked frozen. (As
-                    // in the kernel, another BINDER_FREEZE may thaw it
-                    // meanwhile; the wait then ends at its deadline.)
+                    // A freeze waits for a live target that it marked frozen.
+                    // As in the kernel, another BINDER_FREEZE may thaw the
+                    // target meanwhile, and the wait then ends at its
+                    // deadline.
                     Wait::Freezing(f) => {
                         assert!(f.enable && f.deadline.is_some());
                         assert!(self.procs.contains_key(&f.targets[0]));
@@ -3467,7 +3496,8 @@ impl BinderDriver {
                 n.local_weak
             );
             // A node's internal strong count is the number of processes
-            // holding a strong ref to it, and its ref set is exactly theirs.
+            // holding a strong ref to it. Its ref set is the set of processes
+            // holding any ref to it.
             assert_eq!(
                 n.internal_strong,
                 strong_refs.get(id).copied().unwrap_or(0),
@@ -3520,15 +3550,15 @@ fn put_bwr(proc: ProcId, call: Call, bwr: &BinderWriteRead, us: &mut dyn Userspa
     us.write(proc, call.arg, pod_bytes(bwr))
 }
 
-/// The (sg offset, length) of a validated PTR object `parent` (an index into
-/// the objects already translated).
+/// The (sg offset, length) of the validated PTR object at index `parent`
+/// among the objects already translated.
 fn parent_ptr(ptrs: &[Option<(usize, usize)>], parent: u64) -> Option<(usize, usize)> {
     let i = usize::try_from(parent).ok()?;
     *ptrs.get(i)?
 }
 
-/// Does the BC_* stream contain `want`? (Walks command sizes; stops at the
-/// first unknown command.)
+/// Whether the BC_* stream contains `want`. The walk steps over each command
+/// by the argument size encoded in its code.
 fn has_cmd(buf: &[u8], want: u32) -> bool {
     let mut off = 0;
     while let Some(cmd) = read_pod::<u32>(buf, off) {

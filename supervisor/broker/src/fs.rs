@@ -1,32 +1,34 @@
 //! The session runs in the Flatpak sandbox's own namespaces, with no mounts.
-//! Android's root is the sandbox's `/`, where
-//! `/system`, `/apex`, `/data`... are symlinks into a composed tree on disk
-//! (`host/launcher/src/sandbox.rs`). The broker covers what the mounts did:
+//! Android's root is the sandbox's `/`, where `/system`, `/apex`, `/data` and
+//! the other partitions are symlinks into a composed tree on disk
+//! (`host/launcher/src/sandbox.rs`). The broker covers what mounts would do:
 //!
 //!  * `readlink` of `/proc` magic links (`/proc/self/fd/N`, `exe`, `cwd`) and
-//!    `getcwd` name the host path behind a symlink, which the linker and
-//!    bionic's `realpath` would take as the canonical one (and then refuse a
-//!    library outside its namespace's `/system/...` paths). Paths under a
-//!    mapped host dir are shown as their Android path.
-//!  * `fstat` of a file the user owns reports owner root: there is no
-//!    user namespace mapping the user to Android's root, and bionic only
-//!    trusts root-owned property areas (every file is the user's anyway).
+//!    `getcwd` would name the host path behind a symlink. The linker and
+//!    bionic's `realpath` would take that as the canonical path and then
+//!    refuse a library outside its namespace's `/system/...` paths. The broker
+//!    shows paths under a mapped host dir as their Android path.
+//!  * `fstat` of a file the user owns reports root as the owner. No user
+//!    namespace maps the user to Android's root, and bionic trusts only
+//!    root-owned property areas. Every file belongs to the user anyway.
 //!  * lstat of a symlink that stands in for a bind mount inside /data
 //!    (/data/user/0 -> /data/data) shows the directory (see [`bind_target`]).
-//!  * `mkdir` and the `chmod` family keep a directory's owner rwx: with no
-//!    capabilities, Android's root can't write into a 0511 directory such as
-//!    `/data/user` that it made itself. (Files keep their mode: code checks
-//!    exact modes, such as ClatCoordinator's 0440 eBPF pins.)
-//!    The broker runs these itself, so a path through `/proc/self`, directly
-//!    or by a symlink (OpenHarmony's per-app `/data/storage`), names the
-//!    caller's.
-//!  * `openat` of a `/proc` file the session fakes (`/innkeeper/proc/<path>`,
-//!    which bind mounts covered otherwise) gets a memfd copy of it, and
-//!    apexd's `/proc/mounts` lists the pre-mounted APEXes
-//!    (`/innkeeper/apexd-mounts`, as `innkeeper-apexd` does with a bind mount).
-//!  * OpenHarmony only: `openat` of `/etc/passwd` and `/etc/group` gets the
-//!    image's (`/system/etc`, its `/etc`): musl resolves service users by
-//!    name there, and the sandbox binds its own read-only over both.
+//!  * `mkdir` and the `chmod` family keep a directory's owner rwx bits.
+//!    Without capabilities, Android's root can't write into a 0511 directory
+//!    such as `/data/user` even if it made the directory itself. Files keep
+//!    their mode, because code checks exact modes, such as ClatCoordinator's
+//!    0440 eBPF pins. The broker runs these calls itself, so a path through
+//!    `/proc/self`, directly or by a symlink (OpenHarmony's per-app
+//!    `/data/storage`), must be rewritten to name the caller's.
+//!  * An `openat` of a `/proc` file that the session fakes
+//!    (`/innkeeper/proc/<path>`, which bind mounts would otherwise cover) gets
+//!    a memfd copy of it. apexd's `/proc/mounts` lists the pre-mounted APEXes
+//!    (`/innkeeper/apexd-mounts`), as `innkeeper-apexd` does with a bind
+//!    mount.
+//!  * On OpenHarmony, an `openat` of `/etc/passwd` or `/etc/group` gets the
+//!    image's copy from `/system/etc`, which is the image's `/etc`. musl
+//!    resolves service users by name there, and the sandbox binds its own
+//!    read-only files over both.
 
 use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -42,10 +44,11 @@ pub(crate) struct Fs {
     guest: Guest,
     /// (host dir, Android path), longest host dir first.
     map: Vec<(Vec<u8>, Vec<u8>)>,
-    /// The kernel's uid and gid for every Android process (the user's).
+    /// The kernel's uid and gid for every Android process, which are the
+    /// user's.
     uid: u32,
     gid: u32,
-    /// The one DRM node Android may open, if any.
+    /// The DRM node Android may open, if any.
     render_node: Option<std::path::PathBuf>,
 }
 
@@ -69,14 +72,14 @@ pub(crate) fn is_fs_syscall(nr: i64) -> bool {
 }
 
 impl Fs {
-    /// The path map, for the credential side (`creds`): Android
-    /// paths of mapped host dirs (such as `/data`) as host paths, so lookups
-    /// that refuse symlinks can start past them.
+    /// Translates an Android path under a mapped host dir (such as `/data`)
+    /// to its host path, so that the credential code's lookups (`creds`),
+    /// which refuse symlinks, can start past the symlink.
     pub(crate) fn to_host(&self, p: &[u8]) -> Option<Vec<u8>> {
         for (host, android) in &self.map {
             if android.as_slice() == b"/" {
-                // The composed root: "/" has a symlink to it per partition
-                // (/system, /apex...).
+                // The composed root. "/" has a symlink into it for each
+                // partition (/system, /apex and so on).
                 let first = p.get(1..)?.split(|&c| c == b'/').next()?;
                 let mut target = host.clone();
                 target.push(b'/');
@@ -106,13 +109,14 @@ impl Fs {
     }
 }
 
-/// DRM enumeration may read directories, but only the chosen device opens.
+/// DRM enumeration may read directories, but only the selected device may be
+/// opened.
 fn drm_path_allowed(path: &std::path::Path, selected: Option<&std::path::Path>) -> bool {
     !path.starts_with("/dev/dri") || Some(path) == selected || path.is_dir()
 }
 
-/// The Android path a symlink (O_PATH fd) that stands in
-/// for a bind mount inside /data points to (see host/launcher/src/sandbox.rs).
+/// The Android path that a symlink (an O_PATH fd) standing in for a bind
+/// mount inside /data points to (see host/launcher/src/sandbox.rs).
 pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
     let mut buf = [0u8; 256];
     let n = unsafe {
@@ -127,7 +131,7 @@ pub(crate) fn bind_target(link: &impl AsRawFd) -> Option<Vec<u8>> {
     (t.starts_with(b"/data/") && !t.split(|&c| c == b'/').any(|c| c == b"..")).then(|| t.to_vec())
 }
 
-/// `st`'s owner as Android sees it: the user's ids are
+/// Rewrites `st`'s owner as Android sees it, with the user's ids shown as
 /// root's (see [`Fs::fstat`]).
 pub(crate) fn root_ids(st: &mut libc::stat) {
     let (u, g) = unsafe { (libc::getuid(), libc::getgid()) };
@@ -187,10 +191,10 @@ impl Fs {
         self.listener.cont(id);
     }
 
-    /// Serve one of [`is_fs_syscall`]'s calls, or an `openat` that isn't of
+    /// Serves one of [`is_fs_syscall`]'s calls, or an `openat` that isn't of
     /// a binder device, on a worker thread.
     pub(crate) fn serve(&self, req: &SeccompNotif) {
-        // Queued notifications can have ended before we start.
+        // A queued notification can end before its job starts.
         if !self.listener.valid(req.id) {
             return;
         }
@@ -203,7 +207,7 @@ impl Fs {
         }
     }
 
-    /// Answer readlink/readlinkat/getcwd/fstat/mkdir/chmod.
+    /// Answers readlink, readlinkat, getcwd, fstat, mkdir and chmod.
     fn serve_call(&self, req: &SeccompNotif) {
         let tid = req.pid as i32;
         let a = req.data.args;
@@ -227,7 +231,8 @@ impl Fs {
             let (path, buf, size) = if nr == libc::SYS_readlink {
                 (a[0], a[1], a[2] as usize)
             } else {
-                // Only absolute paths: the /proc magic links are named so.
+                // The /proc magic links have absolute paths, so only those
+                // need serving.
                 (a[1], a[2], a[3] as usize)
             };
             match read_path(tid, path).and_then(|p| proc_path(tid, &p)) {
@@ -237,7 +242,8 @@ impl Fs {
         };
         let target = match std::fs::read_link(OsStr::from_bytes(&link)) {
             Ok(t) => t,
-            // E.g. a non-dumpable process's fds: it can read its own.
+            // For example, a non-dumpable process's fds, which it can read
+            // itself.
             Err(_) => return self.cont(req.id),
         };
         let mut out = self.to_android(target.as_os_str().as_bytes(), public_storage);
@@ -309,8 +315,9 @@ impl Fs {
         self.reply(req.id, 0, 0);
     }
 
-    /// The host path a path argument names for task `tid` (`dirfd` for
-    /// relative ones, AT_FDCWD for its cwd); None to let the kernel run it.
+    /// The host path that a path argument names for task `tid`. Relative
+    /// paths start at `dirfd`, or at the task's cwd for AT_FDCWD. Returns None
+    /// to let the kernel run the call.
     fn target_path(&self, tid: i32, dirfd: i32, addr: u64) -> Option<std::ffi::CString> {
         let p = read_path(tid, addr)?;
         if p.is_empty() {
@@ -329,8 +336,8 @@ impl Fs {
             d.extend_from_slice(&p);
             d
         };
-        // Android paths through /proc/self must name the caller, never our
-        // own fds (which include the retained bpffs directory).
+        // Android paths through /proc/self must name the caller and not the
+        // broker's own fds, which include the retained bpffs directory.
         let full = if full.starts_with(b"/proc/") {
             proc_path(tid, &full)?.0
         } else {
@@ -339,7 +346,8 @@ impl Fs {
         std::ffi::CString::new(caller_links(tid, full)?).ok()
     }
 
-    /// mkdir/mkdirat with the owner's rwx kept (the caller's umask applies).
+    /// mkdir and mkdirat with the owner's rwx kept. The caller's umask
+    /// applies.
     fn mkdir(&self, req: &SeccompNotif) {
         let tid = req.pid as i32;
         let a = req.data.args;
@@ -405,7 +413,7 @@ impl Fs {
         self.answer(req.id, r);
     }
 
-    /// Answer with a libc return value (0, or -1 and errno).
+    /// Answers with a libc return value: 0, or -1 and errno.
     fn answer(&self, id: u64, r: libc::c_int) {
         if r == 0 {
             self.reply(id, 0, 0);
@@ -420,13 +428,15 @@ impl Fs {
         }
     }
 
-    /// Serve an `openat` of a faked /proc file; false if it isn't one.
+    /// Serves an `openat` that the broker answers itself: a DRM node other
+    /// than the selected one, OpenHarmony's ashmem node and `/etc` files, and
+    /// faked /proc files. Returns false for any other open.
     pub(crate) fn openat(&self, req: &SeccompNotif) -> bool {
         let tid = req.pid as i32;
         let a = req.data.args;
-        // Flatpak grants DRM to the bridge as well. Android may only open
-        // the selected render node: Mesa (including the composer's ANGLE)
-        // cannot pick a different GPU from the allocator's consumers.
+        // Flatpak grants DRM to the bridge as well. Android may open only
+        // the selected render node, because Mesa, including the composer's
+        // ANGLE, can't pick a different GPU from the allocator's consumers.
         let n = (4096 - (a[1] as usize & 4095)).min(6);
         let prefix = vm_read(tid, a[1], n);
         if prefix
@@ -471,8 +481,8 @@ impl Fs {
         if path.split(|&c| c == b'/').any(|c| c == b"..") {
             return false;
         }
-        // apexd's mount table (init watches its own with epoll, which a memfd
-        // can't serve).
+        // Only apexd gets the faked mount table. Init watches its own with
+        // epoll, which a memfd can't serve.
         let body = if (path == b"/proc/mounts" || path == b"/proc/self/mounts")
             && std::fs::read(format!("/proc/{tid}/comm")).is_ok_and(|c| c == b"apexd\n")
         {
@@ -500,7 +510,7 @@ impl Fs {
         true
     }
 
-    /// Complete `req` (an openat) with a memfd holding `body`.
+    /// Completes `req`, an openat, with a memfd holding `body`.
     pub(crate) fn inject(&self, req: &SeccompNotif, body: &[u8]) {
         let fd =
             unsafe { libc::syscall(libc::SYS_memfd_create, c"proc".as_ptr(), libc::MFD_CLOEXEC) };
@@ -517,7 +527,7 @@ impl Fs {
         self.inject_fd(req, fd.as_raw_fd());
     }
 
-    /// Complete `req` (an openat) with a copy of `fd`.
+    /// Completes `req`, an openat, with a copy of `fd`.
     fn inject_fd(&self, req: &SeccompNotif, fd: RawFd) {
         self.listener.open_with(req, fd);
     }
@@ -532,9 +542,10 @@ fn ohos_etc(path: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// `path` with each directory on the way that is a symlink through
-/// `/proc/self` (OpenHarmony's per-app `/data/storage`, host/launcher/src/ohos.rs)
-/// replaced by the caller's: the kernel would resolve it as the broker's.
+/// `path` with each directory along it that is a symlink through `/proc/self`
+/// replaced by the caller's equivalent. OpenHarmony's per-app `/data/storage`
+/// is such a link (host/launcher/src/ohos.rs). The kernel would resolve it as
+/// the broker's.
 fn caller_links(tid: i32, mut path: Vec<u8>) -> Option<Vec<u8>> {
     let (mut end, mut hops) = (0, 0);
     while let Some(i) = path.get(end + 1..)?.iter().position(|&c| c == b'/') {
@@ -556,7 +567,8 @@ fn caller_links(tid: i32, mut path: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 /// `/proc/self/...` and `/proc/thread-self/...` as the broker must name them
-/// for task `tid`, plus whether the request names the caller; None outside /proc.
+/// for task `tid`, and whether the request names the caller. Returns None
+/// outside /proc.
 fn proc_path(tid: i32, p: &[u8]) -> Option<(Vec<u8>, bool)> {
     let rest = p.strip_prefix(b"/proc/")?;
     let tgid = || status_field(tid, "Tgid:");
@@ -625,8 +637,8 @@ mod tests {
     fn paths_through_a_proc_self_link_name_the_callers() {
         let f = fs("");
         let tid = unsafe { libc::syscall(libc::SYS_gettid) } as i32;
-        // OpenHarmony's /data/storage -> /proc/self/fd/990: the kernel would
-        // follow the link in the broker.
+        // OpenHarmony's /data/storage points to /proc/self/fd/990, and the
+        // kernel would follow that link in the broker.
         let dir = std::env::temp_dir().join(format!("innkeeper-fs-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let link = dir.join("storage");

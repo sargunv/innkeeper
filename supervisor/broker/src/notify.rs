@@ -1,25 +1,27 @@
-//! The serve loop: [`serve`] receives every notification of the session's
+//! The serve loop. [`serve`] receives every notification of the session's
 //! seccomp filter ([`crate::filter`]) and either answers it here or hands it
-//! to the module that owns it. Binder is served here, binding the
+//! to the module that owns it. Binder is served here, which connects the
 //! [`BinderDriver`] to real Android processes:
 //!
-//!  * `openat` of a binder device path -> inject a memfd (`ADDFD`+`SEND`); the
-//!    process mmaps it as its receive region, and the broker writes
+//!  * An `openat` of a binder device path injects a memfd (`ADDFD`+`SEND`).
+//!    The process maps it as its receive region, and the broker writes
 //!    transactions there through its own shared mapping.
-//!  * `ioctl(fd, BINDER_*, argp)` -> [`BinderDriver::ioctl`], which reaches
-//!    the caller's memory through its pinned `/proc/<tid>/mem` (see
-//!    [`PinnedMem`]) and answers the notification itself: at once, or for a
-//!    blocking read once there is work. Waits stay interruptible (ptrace and
-//!    job control must work): a signal ends the notification and the kernel
-//!    restarts the ioctl, which the driver makes idempotent.
-//!  * a thread that sets up polling (`IPCThreadState::setupPolling`) gets its
-//!    process's binder fd swapped for an eventfd (`ADDFD`+`SETFD`; the mapping
-//!    keeps the memfd alive) whose level the broker drives (`binder_poll`).
+//!  * `ioctl(fd, BINDER_*, argp)` goes to [`BinderDriver::ioctl`], which
+//!    reaches the caller's memory through its pinned `/proc/<tid>/mem` (see
+//!    [`PinnedMem`]) and answers the notification itself. It answers at once,
+//!    or, for a blocking read, once there is work. Waits stay interruptible so
+//!    that ptrace and job control work. A signal ends the notification, and
+//!    the kernel restarts the ioctl. The driver makes the ioctl idempotent so
+//!    the restart is safe.
+//!  * When a thread sets up polling (`IPCThreadState::setupPolling`), its
+//!    process's binder fd is swapped for an eventfd (`ADDFD`+`SETFD`) whose
+//!    level the broker drives (`binder_poll`). The mapping keeps the memfd
+//!    alive after the swap.
 //!
-//! A monitor thread watches a pidfd per process (death) and periodically
-//! checks with `kcmp` that each process still holds its binder fd (close,
-//! exec), releasing the broker process otherwise, which fires death
-//! notifications.
+//! A monitor thread watches a pidfd per process to detect death. It also
+//! checks periodically with `kcmp` that each process still holds its binder
+//! fd, which it loses on close or exec. When a process dies or loses its fd,
+//! the monitor releases its broker process, which fires death notifications.
 
 use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -31,7 +33,7 @@ use crate::binder::driver::{BinderDriver, Call, InstallError, ProcId, Userspace}
 use crate::binder::uapi::*;
 use crate::{Config, Guest, trace};
 
-// ---- seccomp uapi (x86_64) --------------------------------------------
+// Seccomp uapi for x86_64.
 
 const SECCOMP_IOC_MAGIC: u8 = b'!';
 const fn ioc(dir: u32, nr: u8, size: usize) -> u32 {
@@ -101,9 +103,9 @@ const O_CLOEXEC: u32 = 0o2000000;
 const O_NONBLOCK: u32 = 0o4000;
 const KCMP_FILE: i32 = 0;
 
-/// Size of each receive memfd. The kernel caps binder mappings at 4 MiB; the
-/// memfd is sparse, and the broker only hands out offsets inside the part the
-/// process actually mapped (libbinder: 1 MiB - 2 pages).
+/// Size of each receive memfd. The kernel caps binder mappings at 4 MiB. The
+/// memfd is sparse, and the broker hands out offsets only inside the part the
+/// process mapped, which is 1 MiB minus 2 pages for libbinder.
 const BINDER_MEMFD_SIZE: usize = 4 * 1024 * 1024;
 
 /// The session's seccomp listener and the kernel's size of a response.
@@ -142,25 +144,26 @@ impl Listener {
         }
     }
 
-    /// Answer notification `id` with `val`, or fail it with `errno` if that
-    /// is nonzero. False if it is gone (a signal ended its wait, or its task
-    /// died).
+    /// Answers notification `id` with `val`, or fails it with `errno` if that
+    /// is nonzero. Returns false if the notification is gone because a signal
+    /// ended its wait or its task died.
     pub(crate) fn reply(&self, id: u64, val: i64, errno: i32) -> bool {
         self.send(id, val, errno, 0)
     }
 
-    /// Let the kernel run notification `id`'s syscall.
+    /// Lets the kernel run notification `id`'s syscall.
     pub(crate) fn cont(&self, id: u64) -> bool {
         self.send(id, 0, 0, SECCOMP_USER_NOTIF_FLAG_CONTINUE)
     }
 
-    /// Is notification `id` still pending (its task still in the syscall)?
+    /// Whether notification `id` is still pending, with its task still in the
+    /// syscall.
     pub(crate) fn valid(&self, id: u64) -> bool {
         unsafe { libc::ioctl(self.fd, notif_id_valid_cmd() as _, &id as *const u64) == 0 }
     }
 
-    /// Install a copy of fd `a.srcfd` in the caller; the new fd number or
-    /// -1.
+    /// Installs a copy of fd `a.srcfd` in the caller and returns the new fd
+    /// number, or -1.
     pub(crate) fn addfd(&self, a: &SeccompNotifAddfd) -> i32 {
         unsafe {
             libc::ioctl(
@@ -171,8 +174,8 @@ impl Listener {
         }
     }
 
-    /// Complete `req`, an open, with a copy of `fd`, close-on-exec as its
-    /// flags ask; the new fd number or -1.
+    /// Completes `req`, an open, with a copy of `fd` that is close-on-exec if
+    /// the open's flags ask for it. Returns the new fd number, or -1.
     pub(crate) fn open_with(&self, req: &SeccompNotif, fd: RawFd) -> i32 {
         self.addfd(&SeccompNotifAddfd {
             id: req.id,
@@ -184,8 +187,8 @@ impl Listener {
     }
 }
 
-/// Worker threads for notifications that can wait on the filesystem, so they
-/// never block the receive thread, which serves binder.
+/// Worker threads for notifications that can wait on the filesystem, so that
+/// they don't block the receive thread, which serves binder.
 pub(crate) struct Pool(mpsc::Sender<Box<dyn FnOnce() + Send>>);
 
 impl Pool {
@@ -211,21 +214,20 @@ impl Pool {
     }
 }
 
-// ---- per-process state -------------------------------------------------
-
 struct ProcState {
     pid: i32,
     /// The binder fd number in the target.
     fd: u32,
     /// The receive region, which the process maps and the broker writes
-    /// through `map`. The process can resize it: if it shrinks it, the
-    /// broker's next write there faults (SIGBUS) and kills the broker, taking
-    /// binder down for the whole session. Desktop parity accepts that (a
-    /// desktop app can kill the user's session too).
+    /// through `map`. The process can resize it. If it shrinks it, the
+    /// broker's next write there faults with SIGBUS and kills the broker,
+    /// which takes binder down for the whole session. Desktop parity accepts
+    /// that, since a desktop app can also kill the user's session.
     memfd: OwnedFd,
     memfd_ino: u64,
     /// The opener's address space, pinned while its notification was valid
-    /// (see [`PinnedMem`]). All of the process's memory goes through it.
+    /// (see [`PinnedMem`]). All access to the process's memory goes through
+    /// it.
     mem: PinnedMem,
     map: *mut u8,
     /// Target mapping (base, usable length), found in /proc/<pid>/maps.
@@ -233,12 +235,12 @@ struct ProcState {
     free: Vec<(usize, usize)>,
     live: HashMap<u64, (usize, usize)>,
     pidfd: Option<OwnedFd>,
-    /// Once a thread polls: the eventfd the process holds instead of its
-    /// binder fd, readable when a polling thread has work. The process shares
-    /// its open file, flags included: if it clears O_NONBLOCK and drains or
-    /// fills the counter, the broker's next read or write of it blocks, under
-    /// its lock, and binder stops for the whole session. Desktop parity
-    /// accepts that too.
+    /// The eventfd the process holds instead of its binder fd once a thread
+    /// polls. It is readable when a polling thread has work. The process
+    /// shares the open file, including its flags. If it clears O_NONBLOCK and
+    /// drains or fills the counter, the broker's next read or write of it
+    /// blocks under the broker's lock, and binder stops for the whole session.
+    /// Desktop parity accepts that too.
     poll: Option<OwnedFd>,
     poll_ready: bool,
 }
@@ -253,8 +255,8 @@ impl Drop for ProcState {
 }
 
 impl ProcState {
-    /// Does the process still hold its binder fd (not closed, nor lost
-    /// across exec)?
+    /// Whether the process still holds its binder fd, which it loses on close
+    /// or across exec.
     fn still_open(&self) -> bool {
         let ours = self.poll.as_ref().unwrap_or(&self.memfd).as_raw_fd();
         kcmp_same_file(self.pid, ours, self.fd)
@@ -317,7 +319,6 @@ impl ProcState {
         let size = (size + 7) & !7;
         let i = self.free.partition_point(|&(o, _)| o < off);
         self.free.insert(i, (off, size));
-        // merge with next, then previous
         if i + 1 < self.free.len() && self.free[i].0 + self.free[i].1 == self.free[i + 1].0 {
             self.free[i].1 += self.free[i + 1].1;
             self.free.remove(i + 1);
@@ -333,7 +334,7 @@ pub struct Supervisor {
     guest: Guest,
     broker: BinderDriver,
     us: SeccompUserspace,
-    /// Virtual ids (binder's sender_euid comes from them).
+    /// Virtual ids. Binder's sender_euid comes from them.
     vid: Arc<crate::creds::Vid>,
     /// (tgid, fd) -> broker process
     fd_index: HashMap<(i32, u32), ProcId>,
@@ -342,11 +343,9 @@ pub struct Supervisor {
     watch: mpsc::Sender<i32>,
 }
 
-// ---- libc helpers ------------------------------------------------------
-
-/// Read memory of task `pid` by number, unpinned. Only for reads that
-/// precede a SECCOMP_IOCTL_NOTIF_ID_VALID check, or that only decide whether a
-/// call needs a closer look.
+/// Reads memory of task `pid` by number, without pinning. Use it only for
+/// reads that precede a SECCOMP_IOCTL_NOTIF_ID_VALID check, or that decide
+/// whether a call needs a closer look.
 pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
@@ -367,18 +366,19 @@ pub(crate) fn vm_read(pid: i32, addr: u64, len: usize) -> Option<Vec<u8>> {
     if n == len as isize { Some(buf) } else { None }
 }
 
-/// A task's address space, pinned: its `/proc/<tid>/mem`, which holds the mm
-/// the task had when it was opened, so after an exec it reaches nothing.
-/// Callers open it and then check SECCOMP_IOCTL_NOTIF_ID_VALID: an mm switch
-/// (exec) or tid reuse only happens after the caller's notification is gone,
-/// so a valid id afterwards means the mm is the caller's. Writes meant for a
-/// caller therefore never land in another process, or in the image it exec'd.
+/// A task's pinned address space. It is the task's `/proc/<tid>/mem`, which
+/// holds the mm the task had when the file was opened, so after an exec it
+/// reaches nothing. Callers open it and then check
+/// SECCOMP_IOCTL_NOTIF_ID_VALID. An mm switch on exec, or tid reuse, happens
+/// only after the caller's notification is gone, so a valid id afterwards
+/// means the mm is the caller's. Writes meant for a caller therefore can't
+/// land in another process or in the image it exec'd.
 ///
 /// Accesses through it use FOLL_FORCE, so unlike `process_vm_*` they also
-/// reach the caller's read-only and PROT_NONE private pages (a write there
-/// breaks copy-on-write). That is fine under the desktop-parity threat model
-/// (docs/security.md): the memory is the caller's own, which it can change
-/// itself.
+/// reach the caller's read-only and PROT_NONE private pages. A write there
+/// breaks copy-on-write. That is acceptable under the desktop-parity threat
+/// model (docs/security.md), because the memory is the caller's own and the
+/// caller can change it anyway.
 pub(crate) struct PinnedMem(OwnedFd);
 
 /// The fd of a [`PinnedMem`], for passing around under a borrow.
@@ -397,7 +397,7 @@ pub(crate) fn open_mem(tid: i32) -> Option<PinnedMem> {
     (fd >= 0).then(|| PinnedMem(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
-/// Read target memory through its pinned address space.
+/// Reads target memory through its pinned address space.
 pub(crate) fn mem_read(m: MemFd, addr: u64, len: usize) -> Option<Vec<u8>> {
     if len == 0 {
         return Some(Vec::new());
@@ -408,7 +408,7 @@ pub(crate) fn mem_read(m: MemFd, addr: u64, len: usize) -> Option<Vec<u8>> {
     (n == len as isize).then_some(buf)
 }
 
-/// Write target memory through its pinned address space.
+/// Writes target memory through its pinned address space.
 pub(crate) fn mem_write(m: MemFd, addr: u64, data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
@@ -420,8 +420,8 @@ pub(crate) fn mem_write(m: MemFd, addr: u64, data: &[u8]) -> bool {
     n == data.len() as isize
 }
 
-/// Read a NUL-terminated path, never crossing into a page that need not be
-/// mapped before it is known to be needed.
+/// Reads a NUL-terminated path. It doesn't read into the next page until it
+/// knows the path continues there, since that page need not be mapped.
 pub(crate) fn read_path(pid: i32, addr: u64) -> Option<Vec<u8>> {
     read_path_with(addr, |a, n| vm_read(pid, a, n))
 }
@@ -486,8 +486,6 @@ fn recv_memfd(name: &str) -> Option<OwnedFd> {
     (unsafe { libc::ftruncate(fd.as_raw_fd(), BINDER_MEMFD_SIZE as i64) } == 0).then_some(fd)
 }
 
-// ---- Userspace over real processes ------------------------------------
-
 /// The Android processes the driver serves, reached through their pinned
 /// memory, their receive memfds and the seccomp listener.
 struct SeccompUserspace {
@@ -500,11 +498,11 @@ struct SeccompUserspace {
     tokens: crate::ohos::Tokens,
 }
 
-/// The driver's clock, and when it asked to be woken (`monitor` calls
-/// `BinderDriver::expire` then).
+/// The driver's clock and the time it asked to be woken at. `monitor` calls
+/// `BinderDriver::expire` at that time.
 struct Timer {
     start: std::time::Instant,
-    /// Milliseconds since `start`; u64::MAX when unarmed.
+    /// Milliseconds since `start`, or u64::MAX when unarmed.
     at: AtomicU64,
 }
 
@@ -604,8 +602,8 @@ impl Userspace for SeccompUserspace {
         let Some(p) = self.procs.get(&proc) else {
             return false;
         };
-        // Once per process: swapping again would replace the eventfd under
-        // the other polling threads' epoll registrations.
+        // Swap once per process. Swapping again would replace the eventfd
+        // under the other polling threads' epoll registrations.
         if p.poll.is_some() {
             return true;
         }
@@ -661,9 +659,7 @@ impl Userspace for SeccompUserspace {
     }
 }
 
-// ---- the serve loop ----------------------------------------------------
-
-/// Receive and serve every notification on the session's single listener.
+/// Receives and serves every notification on the session's listener.
 /// `pins` is the bpffs directory opened before the guest can mount over it.
 pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
     let (listener, notif_sz) = match Listener::new(fd) {
@@ -750,8 +746,8 @@ pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
         if nr == libc::SYS_openat && vid.proc_status(&req) {
             continue;
         }
-        // Every openat in the session lands here: let the ones that can't be a
-        // binder device through without taking the lock.
+        // Every openat in the session lands here. Let the ones that can't be
+        // a binder device through without taking the lock.
         if nr == libc::SYS_openat && !binder_path(req.pid as i32, req.data.args[1]) {
             to_fs(req);
             continue;
@@ -760,9 +756,10 @@ pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
     }
 }
 
-/// musl (OpenHarmony) opens with `open(2)`, which the filter traps only for
-/// that guest: serve it as the `openat(AT_FDCWD, ...)` it is. The answer goes
-/// by notification id, so a continued request still runs the caller's open.
+/// OpenHarmony's musl opens files with `open(2)`, which the filter traps only
+/// for that guest. This serves it as the equivalent `openat(AT_FDCWD, ...)`.
+/// The answer goes by notification id, so a continued request still runs the
+/// caller's original open.
 fn as_openat(req: &mut SeccompNotif) {
     if req.data.nr as i64 == libc::SYS_open {
         let a = req.data.args;
@@ -771,8 +768,9 @@ fn as_openat(req: &mut SeccompNotif) {
     }
 }
 
-/// Is this notification for [`Supervisor::dispatch`] (every `openat`, binder
-/// `ioctl`s and OpenHarmony's device `ioctl`s) rather than the BPF emulation?
+/// Whether this notification goes to [`Supervisor::dispatch`] instead of the
+/// BPF emulation. That covers every `openat`, binder `ioctl`s and
+/// OpenHarmony's device `ioctl`s.
 fn is_binder_syscall(guest: Guest, nr: i64, args: &[u64; 6]) -> bool {
     nr == libc::SYS_openat
         || (nr == libc::SYS_ioctl
@@ -782,8 +780,9 @@ fn is_binder_syscall(guest: Guest, nr: i64, args: &[u64; 6]) -> bool {
                         || crate::ashmem::is_ashmem_ioctl(args[1] as u32)))))
 }
 
-/// Only binder devices take the binder lock. Other device opens still need
-/// Flatpak policy (in particular the selected DRM node).
+/// Whether the path names a binder device. Only binder devices take the binder
+/// lock. Other device opens still need Flatpak policy, in particular the
+/// selected DRM node.
 fn binder_path(pid: i32, addr: u64) -> bool {
     let n = (4096 - (addr as usize & 4095)).min(5);
     match vm_read(pid, addr, n) {
@@ -795,9 +794,9 @@ fn binder_path(pid: i32, addr: u64) -> bool {
     }
 }
 
-/// Watch for process death (pidfds) and for binder fds that were closed or
-/// lost across exec (kcmp sweep), and release those broker processes; and
-/// fire the driver's timer (`BINDER_FREEZE` timeouts).
+/// Watches pidfds for process death and sweeps with kcmp for binder fds that
+/// were closed or lost across exec, and releases those broker processes. It
+/// also fires the driver's timer for `BINDER_FREEZE` timeouts.
 fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>, timer: Arc<Timer>) {
     let mut watched: HashMap<i32, OwnedFd> = HashMap::new();
     let mut last_sweep = std::time::Instant::now();
@@ -836,7 +835,8 @@ fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>, timer: Arc<Time
         }
         let mut s = sup.lock().unwrap();
         if due {
-            // Disarm first: expire re-arms for the deadlines still ahead.
+            // Disarm first, because expire re-arms for the deadlines still
+            // ahead.
             timer.at.store(u64::MAX, Ordering::Relaxed);
             let s = &mut *s;
             s.broker.expire(&mut s.us);
@@ -855,7 +855,7 @@ fn monitor(sup: Arc<Mutex<Supervisor>>, rx: mpsc::Receiver<i32>, timer: Arc<Time
 }
 
 impl Supervisor {
-    /// Answer a notification that isn't a binder ioctl (`errno` positive).
+    /// Answers a notification that isn't a binder ioctl. `errno` is positive.
     fn respond(&self, id: u64, errno: i32, cont: bool) {
         if cont {
             self.us.listener.cont(id);
@@ -904,7 +904,7 @@ impl Supervisor {
             return;
         };
         // Pin the address space, then check that tid is still the task that
-        // asked (so the path read above was its too).
+        // asked, so the path read above was also its path.
         let Some(mem) = open_mem(tid) else {
             self.respond(req.id, libc::EPERM, false);
             return;
@@ -912,7 +912,7 @@ impl Supervisor {
         if !self.us.listener.valid(req.id) {
             return;
         }
-        // Drop any earlier binder fds of this process that are gone (exec).
+        // Drop any earlier binder fds of this process that exec closed.
         self.release_closed(Some(pid));
         let flags = req.data.args[2] as u32;
         let name = format!("innkeeper-binder-{}", self.next_memfd);
@@ -963,8 +963,8 @@ impl Supervisor {
         if newfd < 0 {
             return; // target gone
         }
-        // The opener's (virtual) euid, as the kernel records proc->cred at
-        // open.
+        // Record the opener's virtual euid, as the kernel records proc->cred
+        // at open.
         let euid = self.vid.creds(pid).map_or(0, |c| c.euid);
         let procid = self.broker.open(pid, euid, ctx, flags & O_NONBLOCK != 0);
         if self.guest == Guest::Ohos {
@@ -1003,8 +1003,8 @@ impl Supervisor {
         self.broker.ioctl(procid, req.pid, cmd, call, &mut self.us);
     }
 
-    /// An OpenHarmony access-token ioctl on [`crate::ohos::NODE`]; other
-    /// type-`'A'` ioctls (ALSA's) go through.
+    /// Serves an OpenHarmony access-token ioctl on [`crate::ohos::NODE`].
+    /// Other type-`'A'` ioctls, such as ALSA's, go through.
     fn token_ioctl(&mut self, req: SeccompNotif) {
         let tid = req.pid as i32;
         let [fd, cmd, arg, ..] = req.data.args;
@@ -1036,8 +1036,8 @@ impl Supervisor {
         self.us.listener.reply(req.id, val, errno);
     }
 
-    /// An ashmem ioctl on one of the broker's regions ([`crate::ashmem`]);
-    /// other type-0x77 ioctls go through.
+    /// Serves an ashmem ioctl on one of the broker's regions
+    /// ([`crate::ashmem`]). Other type-0x77 ioctls go through.
     fn ashmem_ioctl(&mut self, req: SeccompNotif) {
         let tid = req.pid as i32;
         let [fd, cmd, arg, ..] = req.data.args;
@@ -1086,8 +1086,8 @@ impl Supervisor {
         self.tgids.retain(|_, t| *t != pid);
     }
 
-    /// Release the broker processes of `pid` (all if `None`) that no longer
-    /// hold their binder fd.
+    /// Releases the broker processes of `pid`, or of every process if `None`,
+    /// that no longer hold their binder fd.
     fn release_closed(&mut self, pid: Option<i32>) {
         let gone: Vec<ProcId> = self
             .us
@@ -1106,17 +1106,18 @@ impl Supervisor {
 mod tests {
     use super::*;
 
-    /// The first mapping of `pid` (an address that is mapped).
+    /// The start of `pid`'s first mapping, an address that is mapped.
     fn first_mapping(pid: i32) -> u64 {
         let maps = std::fs::read_to_string(format!("/proc/{pid}/maps")).unwrap();
         let start = maps.split('-').next().unwrap();
         u64::from_str_radix(start, 16).unwrap()
     }
 
-    /// A process's pinned mem fd never reaches the image it exec'd into,
-    /// though its numeric pid does (the broker's writes after a failed
-    /// response, or racing an exec, must not land there). The binder path
-    /// and the credential syscalls' workers (paths read, lstat results written) use it.
+    /// A process's pinned mem fd doesn't reach the image it exec'd into,
+    /// though its numeric pid does. The broker's writes after a failed
+    /// response, or racing an exec, must not land there. The binder path and
+    /// the credential syscalls' workers use the pinned fd to read paths and
+    /// write lstat results.
     #[test]
     fn pinned_mem_does_not_follow_exec() {
         use std::io::Write;
@@ -1129,7 +1130,7 @@ mod tests {
         let mem = open_mem(pid).unwrap();
         let before = first_mapping(pid);
         assert!(mem_read(mem.raw(), before, 8).is_some());
-        // (The ELF header there has a NUL early on.)
+        // The ELF header there has a NUL early on.
         assert!(mem_read_path(mem.raw(), before).is_some());
         child.stdin.take().unwrap().write_all(b"go\n").unwrap();
         let exe = |p: i32| std::fs::read_link(format!("/proc/{p}/exe")).unwrap_or_default();
