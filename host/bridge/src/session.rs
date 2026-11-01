@@ -43,8 +43,8 @@
 //!   `package`'s window when `display` is negative. Failures are `Failed`
 //!   with the system app's message.
 //! - `ReloadSettings()` applies the profile's settings file, which the caller
-//!   has just written. Settings are broadcast again and `mirror-apps` is
-//!   picked up. An unreadable or invalid file fails with `Failed`.
+//!   has just written. Settings are broadcast again. An unreadable or invalid
+//!   file fails with `Failed`.
 //! - `Import(h fd, s name) → t grant` makes a read-only documents grant for a
 //!   regular file, shown to Android as `name` (no `/`), so a launch can pass
 //!   it to an app. Only the fd reaches the bridge, not a host path.
@@ -58,11 +58,9 @@
 //! response or `{"error":"","reply":"…"}`. Trailing bytes and extra fds are
 //! refused, and both payloads are at most 64 KiB. Up to eight requests can
 //! wait, each for at most 40 s, and a reconnect cancels them.
-//! `wm/WindowCommands.kt` documents the window operations. Turning mirroring
-//! on sends the empty event `0x4502`, and the system app reports its
-//! launchable user apps again. Escape-as-Back is stored per package in the
-//! system app's preferences, off by default, and applies to existing windows
-//! at the next key press.
+//! `wm/WindowCommands.kt` documents the window operations. Escape-as-Back is
+//! stored per package in the system app's preferences, off by default, and
+//! applies to existing windows at the next key press.
 use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex, mpsc};
@@ -208,16 +206,9 @@ impl Relay {
         Ok(())
     }
 
-    fn rescan(&self) {
-        if let Some((_, events)) = &self.0.lock().unwrap().connection {
-            let _ = events.try_send(0x4502, &[], &[]);
-        }
-    }
-
     pub fn serve(
         &self,
         shared: Arc<crate::system::Shared>,
-        apps: Arc<crate::apps::Config>,
         documents: Arc<crate::documents::Store>,
         input: Arc<crate::input::Hub>,
         profile: &innkeeper_profile::profile::ProfileName,
@@ -232,7 +223,6 @@ impl Relay {
                     relay: self.clone(),
                     input,
                     shared,
-                    apps,
                     documents,
                 },
             )?
@@ -246,7 +236,6 @@ struct SessionApi {
     input: Arc<crate::input::Hub>,
     relay: Relay,
     shared: Arc<crate::system::Shared>,
-    apps: Arc<crate::apps::Config>,
     documents: Arc<crate::documents::Store>,
 }
 
@@ -275,16 +264,8 @@ impl SessionApi {
     /// Applies the profile's settings file, which the caller has just
     /// written.
     fn reload_settings(&self) -> zbus::fdo::Result<()> {
-        let prefs = innkeeper_core::profiles::own()
-            .map_err(|e| zbus::fdo::Error::Failed(format!("{e:#}")))?;
-        let mirrored = self
-            .apps
-            .mirror_apps
-            .swap(prefs.mirror_apps, std::sync::atomic::Ordering::Relaxed);
+        innkeeper_core::profiles::own().map_err(|e| zbus::fdo::Error::Failed(format!("{e:#}")))?;
         self.shared.refresh_preferences();
-        if !mirrored && prefs.mirror_apps {
-            self.relay.rescan();
-        }
         Ok(())
     }
 

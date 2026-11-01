@@ -14,7 +14,7 @@ doesn't say.
 - `profile create --system ohos NAME` makes an OpenHarmony profile
   ([ohos](../../ohos/README.md)). Such a profile refuses the app commands
   (`install`, `run`, `open`, `list`, `uninstall`, `app`) and the settings that
-  only Android has (adb, idle timeout, mirroring, desktop following).
+  only Android has (adb, idle timeout, desktop following).
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. `content:` and
   `intent:` URIs are refused.

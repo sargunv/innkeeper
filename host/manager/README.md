@@ -62,7 +62,6 @@ It reads them without starting Android. The page has these settings:
 - **Desktop following:** the desktop's appearance, its language and region, and
   its clock. Each one is on by default.
 - **Idle timeout.**
-- **App-menu mirroring.**
 - **adb:** a switch that applies immediately
   ([README](../../README.md#for-android-developers)).
 
@@ -71,12 +70,10 @@ Android Settings in a separate window.
 
 - A profile keeps its settings in one settings file
   ([session.md](../../docs/session.md#profiles)). A running profile picks up
-  changes through `Session1`'s `ReloadSettings`. Desktop following, mirroring
-  and the idle timeout change while the profile runs. The display changes at the
-  next start.
+  changes through `Session1`'s `ReloadSettings`. Desktop following and the idle
+  timeout change while the profile runs. The display changes at the next start.
 - Turning off desktop following keeps Android's current value. Later changes in
-  Android Settings stay as they are. Turning off mirroring keeps existing
-  launchers. Turning it back on adds apps installed in the meantime.
+  Android Settings stay as they are.
 - By default, an idle Android stops after 2 minutes. The timeout can be 1 to 120
   minutes. **Keep Running** applies to every profile. With it on, no profile
   stops when idle, and one login command from the Background portal starts them

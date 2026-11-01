@@ -151,19 +151,14 @@ fn main() -> Result<()> {
         profile.clone(),
         data_dir,
     ));
-    let _session_bus = match session_api.serve(
-        for_preferences,
-        apps.clone(),
-        session_store,
-        session_hub,
-        &profile,
-    ) {
-        Ok(bus) => Some(bus),
-        Err(e) => {
-            innkeeper_bridge::warn!("session D-Bus: {e:#}");
-            None
-        }
-    };
+    let _session_bus =
+        match session_api.serve(for_preferences, session_store, session_hub, &profile) {
+            Ok(bus) => Some(bus),
+            Err(e) => {
+                innkeeper_bridge::warn!("session D-Bus: {e:#}");
+                None
+            }
+        };
     innkeeper_bridge::info!("apps: mirroring {}", if desktop { "on" } else { "off" });
     services.register(service::APPS, "apps", move |peer, events| {
         Ok(Box::new(

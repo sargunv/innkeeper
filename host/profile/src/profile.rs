@@ -190,8 +190,6 @@ pub struct Settings {
     /// The Keep Running preference ([`crate::preferences`]) overrides it.
     /// Applies live.
     pub idle_minutes: u32,
-    /// Apps installed inside Android get app-menu entries. Applies live.
-    pub mirror_apps: bool,
     /// Android follows the desktop's dark mode, accent colour, languages and
     /// formats, and clock. Applies live.
     pub follow_dark: bool,
@@ -208,7 +206,6 @@ impl Default for Settings {
             adb: false,
             adb_port: 0,
             idle_minutes: 2,
-            mirror_apps: true,
             follow_dark: true,
             follow_accent: true,
             follow_locale: true,

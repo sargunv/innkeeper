@@ -160,9 +160,6 @@ struct SetArgs {
     /// Keep every profile running, and start them at login.
     #[arg(long, value_parser = ["on", "off"])]
     keep_running: Option<String>,
-    /// Add apps installed inside Android to the app menu.
-    #[arg(long, value_parser = ["on", "off"])]
-    mirror_apps: Option<String>,
     /// Follow the desktop's dark mode.
     #[arg(long, value_parser = ["on", "off"])]
     follow_dark: Option<String>,
@@ -179,14 +176,12 @@ struct SetArgs {
 
 impl SetArgs {
     /// Returns the first given setting that OpenHarmony profiles don't have.
-    /// OpenHarmony has no adb, app menu mirroring or desktop following. Its
-    /// session doesn't stop when idle, because Android's system app is what
-    /// reports activity.
+    /// OpenHarmony has no adb or desktop following. Its session doesn't stop
+    /// when idle, because Android's system app is what reports activity.
     fn android_only(&self) -> Option<&'static str> {
         [
             (self.adb.is_some(), "--adb"),
             (self.idle_minutes.is_some(), "--idle-minutes"),
-            (self.mirror_apps.is_some(), "--mirror-apps"),
             (self.follow_dark.is_some(), "--follow-dark"),
             (self.follow_accent.is_some(), "--follow-accent"),
             (self.follow_locale.is_some(), "--follow-locale"),
@@ -207,7 +202,6 @@ impl SetArgs {
                 changed = true;
             }
         };
-        set(&mut s.mirror_apps, on(&self.mirror_apps));
         set(&mut s.follow_dark, on(&self.follow_dark));
         set(&mut s.follow_accent, on(&self.follow_accent));
         set(&mut s.follow_locale, on(&self.follow_locale));
@@ -704,7 +698,7 @@ mod tests {
     fn profile_set_covers_every_setting() {
         let cli = Cli::try_parse_from(
             "innkeeper --profile work profile set --display small-phone --idle-minutes 30 \
-             --follow-dark off --mirror-apps on"
+             --follow-dark off"
                 .split_whitespace(),
         )
         .unwrap();
@@ -712,14 +706,11 @@ mod tests {
         let Cmd::Profile(ProfileCmd::Set(a)) = cli.cmd else {
             panic!("profile set did not parse");
         };
-        let mut s = innkeeper_profile::profile::Settings {
-            mirror_apps: false,
-            ..Default::default()
-        };
+        let mut s = innkeeper_profile::profile::Settings::default();
         assert!(a.apply(&mut s));
         assert_eq!(s.display, innkeeper_profile::profile::Display::SmallPhone);
         assert_eq!(s.idle_minutes, 30);
-        assert!(!s.follow_dark && s.follow_accent && s.mirror_apps);
+        assert!(!s.follow_dark && s.follow_accent);
         // --keep-running and --adb don't change the profile's settings file.
         let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --keep-running on --adb on")
         else {
