@@ -17,10 +17,10 @@ input.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
-([host/cli](../host/cli/README.md)). AMS blocks third-party apps until the lock
-screen has been unlocked once since boot, so `run` of such an app fails before
-that. An OH profile refuses `open`, files and URIs in `run`, `app info`,
-`app set`, adb and the Android-only settings.
+([host/cli](../host/cli/README.md)). After boot the screen is off and the lock
+screen is up, and an app that `run` starts shows only once the lock screen has
+been dismissed. An OH profile refuses `open`, files and URIs in `run`,
+`app info`, `app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots and whose profile is a release profile. A debug profile fails, because it
@@ -31,6 +31,28 @@ has neither.
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
 same static broker, `libexec/innkeeper/innkeeper-brk`.
 
+## Probe HAP
+
+`ohos/probe` is a small app for the tests, `dev.sargunv.innkeeper.probes`. Its
+launcher ability shows one page. `mise run build:ohos-probe` builds it into
+`out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
+
+The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
+[ohos/sdk.env](sdk.env) pins the SDK release that matches the image, and
+`ohos/sdk.sh` fetches the parts the build uses into `$OHOS_SDK_HOME`
+(`~/.cache/innkeeper/ohos-sdk`). The SDK archive holds one zip per component,
+and the build needs the first two, so a fetch reads about 180 MB of the
+archive's 3.7 GB. These parts are open source under Apache 2.0.
+
+- restool compiles the resources and resolves the resource references in
+  `module.json`.
+- The SDK's ArkTS compiler, ets-loader, compiles `ets/` into `modules.abc`.
+  ets-loader is a set of rollup plugins written for hvigor's rollup fork.
+  `ohos/probe/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK)
+  and adds the few plugin-context members that the fork provides.
+- The packing tool makes the HAP. `ohos/probe/sign.sh` signs it with the SDK's
+  public keys and a release profile, as OpenHarmony's own apps are signed.
+
 To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
@@ -39,8 +61,9 @@ system abilities, screen 0 and SceneBoard come up and that selftest passes
 and a click on the nested desktop's seat then unlock the lock screen and open
 Settings. OH's input injector then scrolls Settings and goes home, and
 render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI, and the CLI
-installs and starts the image's calculator HAP.
+([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP
+then installs, shows in `innkeeper list` and comes to the foreground with
+`innkeeper run`.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -211,6 +234,10 @@ Android's system app reports activity.
   `/data/storage` open on a fixed fd. The session's `/data/storage` links to
   `/proc/self/fd/<fd>`, so each app process sees its own. The rest of an app's
   root is the session's.
+- **Users.** When user 100 starts, storage_daemon mounts its storage views under
+  `/storage` and `/mnt/data`. The shim makes these mounts succeed as no-ops, so
+  the views are plain directories. A failed mount would leave the user
+  unverified, and AMS would then refuse to start any third-party app.
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode

@@ -86,6 +86,15 @@ specifiers = ["zulu-25.36.205.0"]
 checksum = "sha256:e11d92589de8fd55616a843e0298ba72348848bd49b675088e930b67538497cb"
 url = "https://cdn.azul.com/zulu/bin/zulu25.36.205-ca-jdk25.0.4.1-linux_x64.tar.gz"
 
+[[tools.node]]
+version = "24.22.2"
+backend = "core:node"
+specifiers = ["24.22.2"]
+
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:361718c444e49af2ca5a110c83ba6a8901143f23ab285ebbef0341f391f482a9"
+url = "https://nodejs.org/dist/v24.22.2/node-v24.22.2-linux-x64.tar.gz"
+
 [[tools.rust]]
 version = "1.99.1"
 backend = "core:rust"

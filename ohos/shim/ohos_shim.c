@@ -13,6 +13,11 @@
 //    into the sandbox, and services would otherwise inherit that cwd, which
 //    breaks the relative paths that apps load from
 //    (system/lib64/extensionability).
+//  - storage_daemon mounts each user's storage views under /storage and
+//    /mnt/data when the user starts. If a mount fails, the account service
+//    leaves the user unverified, and AMS refuses to start third-party apps.
+//    storage_daemon's mounts and unmounts succeed as no-ops, as init's do,
+//    and the views are plain directories.
 //  - Services set their cfg's "importance" through setpriority before exec,
 //    and exit if it fails. Without CAP_SYS_NICE, raising priority is
 //    best-effort, as in the Android shim.
@@ -79,6 +84,7 @@ extern int* __errno_location(void);
 
 static long init_pid;
 static int spawner;
+static int storage;
 
 extern void* dlsym(void*, const char*);
 #define RTLD_NEXT ((void*)-1)
@@ -142,6 +148,7 @@ __attribute__((constructor)) static void ohos_shim_init(void) {
   spawner = starts(comm, "appspawn") || starts(comm, "nativespawn") ||
             starts(comm, "hybridspawn") || starts(comm, "cjappspawn") ||
             starts(comm, "nwebspawn");
+  storage = same(comm, "storage_daemon\n");
 }
 
 static int is_init(void) { return init_pid && sys0(SYS_getpid) == init_pid; }
@@ -182,7 +189,7 @@ int mount(
   const char* src, const char* dst, const char* type, unsigned long flags,
   const void* data
 ) {
-  if (init_pid) return 0;
+  if (init_pid || storage) return 0;
   if (!spawner) {
     return (int)ret(sys6(
       SYS_mount, (long)src, (long)dst, (long)type, (long)flags, (long)data, 0
@@ -204,7 +211,7 @@ int mount(
 }
 
 int umount2(const char* dst, int flags) {
-  if (init_pid || spawner) return 0;
+  if (init_pid || spawner || storage) return 0;
   return (int)ret(sys6(SYS_umount2, (long)dst, flags, 0, 0, 0, 0));
 }
 

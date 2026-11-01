@@ -13,6 +13,7 @@ lockfile = true
 "core:rust" = { version = "1.99.1", profile = "minimal", components = "rustfmt,clippy", targets = "x86_64-unknown-linux-musl" }
 "github:jdx/hk" = "2.8.1"
 "core:java" = "zulu-25.36.205.0"
+"core:node" = "24.22.2"
 sccache = "0.19.0"
 
 [env]
@@ -30,12 +31,15 @@ SCCACHE_SERVER_PORT = "4227"
 # crates stay incremental. CI sets RUSTC_WRAPPER to an empty value
 # (tools/ci/setup.sh).
 RUSTC_WRAPPER = "{{ env.RUSTC_WRAPPER | default(value='sccache') }}"
+# The OpenHarmony SDK parts that ohos/sdk.sh fetches, shared by every checkout.
+OHOS_SDK_HOME = "{{ env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache') }}/innkeeper/ohos-sdk"
 
 # ---- build -------------------------------------------------------------------
 # Each build:<module> task fills out/build/<module>/install/ with a tree of
 # paths relative to the stage prefix, and `build` merges the trees into
 # out/stage. Both systems use the host, broker and image-tools modules. Android
-# adds ndk, vulkan, system-app and data, and OpenHarmony adds ohos.
+# adds ndk, vulkan, system-app and data, and OpenHarmony adds ohos. The probe
+# apps for the tests go to out/test/probes and aren't staged.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"
@@ -98,13 +102,17 @@ install -D -m 755 -t $i/libexec/innkeeper/image image/*.sh
 description = "OpenHarmony's layer: its shim, display VDIs and init cfgs"
 run = "ohos/build.sh"
 
+[tasks."build:ohos-probe"]
+description = "InnkeeperProbes.hap for the OpenHarmony tests (out/test/probes), built with the pinned OpenHarmony SDK"
+run = "ohos/probe/build.sh"
+
 [tasks.package]
 description = "Build the stage and the Flatpak bundle in out/release/ (-- [stable] [--install])"
 depends = ["build"]
 run = "packaging/flatpak/build.sh"
 
 [tasks.clean]
-description = "Remove build output (out/build, out/stage, out/cargo, the probes APK in out/test/probes); keeps test results"
+description = "Remove build output (out/build, out/stage, out/cargo, the test probes in out/test/probes); keeps test results"
 run = "rm -rf out/build out/stage out/cargo out/test/probes"
 
 # ---- test --------------------------------------------------------------------
