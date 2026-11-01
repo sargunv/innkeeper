@@ -538,7 +538,10 @@ the same as Android's. OH's session stops when idle, as Android's does
   refuses them before ours sees them. It makes priority raises best-effort. A
   `setns` into a mount namespace still moves init to that namespace's `/`, as
   the kernel does. Init's `mksandbox` changes into its sandbox first, and
-  services inherit init's working directory.
+  services inherit init's working directory. The image's on-demand console
+  service makes init open `/dev/console`, and init waits 5 s for a missing node.
+  The sandbox's `/dev/console` links to `/dev/null`, which init opens at once
+  and can't watch, so the console shell doesn't start.
 - **Apps.** appspawn gives each app a mount namespace. It bind-mounts into
   `/mnt/sandbox/<user>/<bundle>` and then calls `pivot_root` there. Apps find
   their own files only at those paths, and `/data/storage/el1/bundle` holds the
