@@ -47,11 +47,6 @@ class AppMirrorFeature(private val context: Context, private val settings: AppSe
         override fun onConnected() = this@AppMirrorFeature.onConnected()
 
         override fun onEvent(type: Int, body: ByteBuffer, fds: Array<FileDescriptor>) {
-          if (type == 0x4502) {
-            require(!body.hasRemaining() && fds.isEmpty())
-            onConnected()
-            return
-          }
           if (type != COMMAND) return
           val id = body.long
           val len = body.int

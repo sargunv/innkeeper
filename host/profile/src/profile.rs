@@ -172,10 +172,9 @@ impl System {
     }
 }
 
-/// A profile's settings. A missing key takes its default. A key this version
-/// does not know is ignored.
+/// A profile's settings. A missing key takes its default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Settings {
     /// The guest system. Fixed when the profile is made.
     pub system: System,
@@ -512,6 +511,7 @@ mod tests {
             Settings::parse("adb = true\nadb-port = 5561\ndisplay = \"medium-tablet\"\n").unwrap();
         assert!(s.adb && s.adb_port == 5561 && s.display == Display::MediumTablet);
         for bad in [
+            "typo = true",
             "display = \"tv\"",
             "idle-minutes = 121",
             "follow-dark = \"yes\"",
@@ -522,24 +522,6 @@ mod tests {
         }
         fs::write(settings_path(&data), "display = [").unwrap();
         assert!(Settings::load(&data).is_err());
-    }
-
-    #[test]
-    fn a_file_with_mirror_apps_still_loads() {
-        for text in [
-            "mirror_apps = true\n",
-            "mirror-apps = true\nidle-minutes = 4\n",
-        ] {
-            let s = Settings::parse(text).unwrap();
-            s.validate().unwrap();
-            assert!(s.follow_dark, "{text}");
-        }
-        assert_eq!(
-            Settings::parse("mirror-apps = true\nidle-minutes = 4\n")
-                .unwrap()
-                .idle_minutes,
-            4
-        );
     }
 
     #[test]
