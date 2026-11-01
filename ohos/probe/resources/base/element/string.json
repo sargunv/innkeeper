@@ -4,6 +4,10 @@
     {
       "name": "camera_reason",
       "value": "The tests check how app info shows a permission that the user grants."
+    },
+    {
+      "name": "microphone_reason",
+      "value": "The capture test records the microphone."
     }
   ]
 }

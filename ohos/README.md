@@ -36,7 +36,9 @@ same static broker, `libexec/innkeeper/innkeeper-brk`.
 ## Probe HAP
 
 `ohos/probe` is a small app for the tests, `dev.sargunv.innkeeper.probes`. Its
-launcher ability shows one page. `mise run build:ohos-probe` builds it into
+launcher ability shows one page. Started with `--ps mode capture`, it records
+half a second from the microphone and logs the loudest sample to hilog.
+`mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
 
 The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
@@ -70,7 +72,9 @@ reaches MMI. The probe HAP, signed for the profile's UDID, then installs and
 shows in `innkeeper list`, and `innkeeper run` puts its window on screen with
 input focus. OH's music volume must be at its maximum, and a 440 Hz tone that
 [tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop.
+null sink on the nested desktop. Last, root grants the probe the microphone with
+`atm perm -g`, the host plays a tone into the null sink, and the probe must
+record it from the sink's monitor.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -274,9 +278,9 @@ path, and the launcher's composed root installs ours there. The parameter is in
 - **Mixer name.** The desktop shows the stream as "OpenHarmony". This build of
   OH's audio service sends the HDI neither the playing app nor the stream usage.
 - **Capture.** OH's privacy service refuses the microphone to processes that
-  aren't HAPs, so a native tool can't record. The bridge records the default
-  source, or `INNKEEPER_AUDIO_SOURCE`. Microphone mute zeroes the captured
-  samples.
+  aren't HAPs, so a native tool can't record. The e2e test records with the
+  probe HAP. The bridge records the default source, or `INNKEEPER_AUDIO_SOURCE`.
+  Microphone mute zeroes the captured samples.
 - **No bridge.** Without a bridge, playback runs on a virtual clock and capture
   returns paced silence, as on Android.
 

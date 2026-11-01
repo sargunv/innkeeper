@@ -452,9 +452,10 @@ else
   stop_session
   "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
   "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
-  # The bridge plays into a private null sink, and the audio check records
-  # its monitor.
+  # The bridge plays into a private null sink and records its monitor. The
+  # audio check records the monitor too.
   export INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
+  export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
   mod=$(pactl load-module module-null-sink sink_name="$INNKEEPER_AUDIO_SINK" rate=48000 channels=2)
   trap 'stop_session; pactl unload-module "$mod"' EXIT
   # shellcheck disable=SC2329 # invoked through timed
@@ -644,6 +645,12 @@ else
     until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/ohos-audio.raw" --expect 440 >>"$T/ohos.txt" || result=$?
     kill "$player" "$recorder" 2>/dev/null || true
     wait "$player" "$recorder" 2>/dev/null || true
+    # The tone keeps playing in OpenHarmony after its exec client exits, and
+    # the capture check must not hear it.
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c 'kill $(pidof tone)' 2>/dev/null || true
+    tone_stopped() { ! s /system/bin/pidof tone >/dev/null; }
+    until_ok tone_stopped || result=$?
     return "$result"
   }
   if ! timed ohos-audio ohos_audio; then
@@ -652,6 +659,44 @@ else
     exit 1
   fi
   echo "ok   OpenHarmony's music volume stays at maximum, and a tone it plays reaches the desktop's sink"
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_capture() {
+    local token player peak result=0
+    # OpenHarmony lets only HAPs record from the microphone. Root grants the
+    # probe the permission over exec, as `hdc shell atm perm -g` does for a
+    # developer, so no dialog asks for it.
+    token=$(s /system/bin/bm dump -n dev.sargunv.innkeeper.probes |
+      sed -n 's/.*"accessTokenId": *\([0-9]*\).*/\1/p' | head -n 1)
+    s /system/bin/atm perm -g -i "$token" -p ohos.permission.MICROPHONE >>"$T/ohos.txt" 2>&1 || return
+    # The bridge records the null sink's monitor, and the host plays a 440 Hz
+    # tone at amplitude 8000 into the sink.
+    /usr/bin/python3 -c '
+import math, sys
+second = b"".join(int(8000 * math.sin(2 * math.pi * 440 * i / 48000)).to_bytes(2, "little", signed=True) * 2
+                  for i in range(48000))
+while True:
+    sys.stdout.buffer.write(second)
+' 2>/dev/null | pacat -d "$INNKEEPER_AUDIO_SINK" --format=s16le --rate=48000 --channels=2 --raw &
+    player=$!
+    # The probe records half a second and logs the loudest sample.
+    captured() {
+      s /system/bin/hilog -x -T InnkeeperProbes | grep -Eo 'capture (peak=[0-9]+|failed.*)' >"$T/ohos-capture.txt"
+    }
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode capture \
+      >>"$T/ohos.txt" 2>&1 || result=$?
+    ((result)) || until_ok captured || result=$?
+    kill "$player" 2>/dev/null || true
+    wait "$player" 2>/dev/null || true
+    ((result == 0)) || return "$result"
+    peak=$(sed -n 's/^capture peak=//p' "$T/ohos-capture.txt")
+    [[ -n $peak ]] && ((peak > 4000))
+  }
+  if ! timed ohos-capture ohos_capture; then
+    cat "$T/ohos-capture.txt" >&2
+    tail -n 20 "$T/ohos.txt" >&2
+    exit 1
+  fi
+  echo 'ok   the probe HAP records a tone that the desktop plays into its source'
   echo 'e2e: PASS'
   exit
 fi
