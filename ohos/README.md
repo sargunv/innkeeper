@@ -124,8 +124,11 @@ lock screen is off for user 100, as Android's lock screen is off by default
 and SceneBoard doesn't lock the screen while the flag is set. The launcher
 writes the file before the first boot. When the user sets a PIN in Settings, the
 service clears the flag, and the lock screen asks for the PIN from the next
-restart on. The desktop has its own lock screen. OH's own injector also drives
-the screen over `exec`. `uinput -T -c 90 200` taps Settings on the home screen.
+restart on. OH's PIN and user authentication HDIs keep their data in
+`/data/chipset/el1/public/pinauth` and `userauth`. The image creates neither
+directory, so `sys_prod/etc/init/innkeeper_useriam.cfg` does. The desktop has
+its own lock screen. OH's own injector also drives the screen over `exec`.
+`uinput -T -c 90 200` taps Settings on the home screen.
 
 - **Display.** The launcher sets the panel from the profile's preset in two
   places. The composer reads the `const.innkeeper.display` parameter

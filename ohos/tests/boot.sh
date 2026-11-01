@@ -65,6 +65,15 @@ if ! retry 200 launcher_ready; then
   exit 1
 fi
 
+# Settings sets a PIN through the PIN and user authentication HDIs, which
+# fail without their data directories.
+for d in pinauth userauth; do
+  if [ ! -d "/data/chipset/el1/public/$d" ]; then
+    echo "no /data/chipset/el1/public/$d"
+    exit 1
+  fi
+done
+
 # DMS lays the screen out at the panel's dpi.
 dpi=$(/system/bin/param get persist.window.screen.dpi)
 dpi=${dpi%% *}
