@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Derive the layer the session stacks right above the image
-# (host/launcher/src/flatpak.rs) into <out-dir>. The extracted image lost its
+# (host/launcher/src/sandbox.rs) into <out-dir>. The extracted image lost its
 # fs_config ownership: every file belongs to the invoking user (root in the
 # session), so a file meant for e.g. "0550 logd logd" is unusable by its real
 # owner.
