@@ -9,11 +9,10 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
 - `mise run test:e2e -- [group...]` runs one fresh named session on an isolated
   desktop. Without arguments it runs five groups: `boot` (host safety, HOME and
   storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
-  Build and prepare the image first:
+  Build first:
 
   ```sh
   mise run build
-  INNKEEPER_PROFILE=prepare-tests mise run session -- prepare
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
@@ -39,11 +38,13 @@ The runner starts a private desktop
 portals and notifications. On exit, including on failure, it stops and resets
 its profile.
 
-Local e2e has a 55 s deadline plus at most 4 s for cleanup. Groups wait for
-observations instead of fixed delays. Audio runs after the window checks because
-AudioRecord needs a visible activity. Boot completion can come before Android
-prepares credential-encrypted app data, so setup waits for user 0 to reach
-`RUNNING_UNLOCKED` before it installs the probes.
+Local e2e has a 55 s deadline plus at most 4 s for cleanup. Before the deadline
+starts, the runner installs the dev Flatpak on the first run in a checkout and
+prepares the image. Groups wait for observations instead of fixed delays. Audio
+runs after the window checks because AudioRecord needs a visible activity. Boot
+completion can come before Android prepares credential-encrypted app data, so
+setup waits for user 0 to reach `RUNNING_UNLOCKED` before it installs the
+probes.
 
 CI runs headless Mutter with llvmpipe
 (`INNKEEPER_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1`) and a 180 s

@@ -372,6 +372,8 @@ def main():
       [str(STAGE / "libexec/innkeeper/innkeeper-session"), *args]
     ).returncode
   bootstrap()
+  if program == "session" and args[:1] == ["bootstrap"]:
+    return 0
   if program == "session" and args[:1] == ["start"]:
     return start([a for a in args[1:] if a != "-f"])
   if program == "innkeeper":
