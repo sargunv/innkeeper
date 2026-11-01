@@ -34,12 +34,37 @@ fn hotspot(position: (i32, i32), origin: (i32, i32), width: u32, height: u32) ->
     )
 }
 
+/// The surface units per display pixel for a cursor, from the window's
+/// units per pixel across and down. A cursor image has the density of the
+/// display's frames, so it scales with them. A frame whose shape lags the
+/// window's, as in a rotation, stretches across and down by different
+/// amounts. The cursor keeps its shape and scales by the mean of the two.
+fn cursor_units((ux, uy): (f64, f64)) -> f64 {
+    (ux * uy).sqrt()
+}
+
+/// Converts an image's size and hotspot from display pixels to surface
+/// units.
+fn in_surface(
+    (width, height): (u32, u32),
+    (hx, hy): (i32, i32),
+    units: f64,
+) -> ((i32, i32), (i32, i32)) {
+    let unit = |v: i64| (v as f64 * units).round() as i32;
+    (
+        (unit(width.into()).max(1), unit(height.into()).max(1)),
+        (unit(hx.into()), unit(hy.into())),
+    )
+}
+
 pub(super) struct Cursor {
     image: Image,
     bitmap: u64,
     hotspots: HashMap<u64, (i32, i32)>,
     hotspot: (i32, i32),
     previous: Option<(PointerPosition, (i32, i32), u64)>,
+    /// The surface units per display pixel that the shown image has.
+    units: Option<f64>,
 }
 impl Cursor {
     fn new(image: Image) -> Self {
@@ -49,6 +74,7 @@ impl Cursor {
             hotspots: HashMap::new(),
             hotspot: (0, 0),
             previous: None,
+            units: None,
         };
         cursor.update(image);
         cursor
@@ -111,22 +137,35 @@ impl State {
             self.restore_cursor(window);
         }
     }
+    /// Shows the cursor at the density of a new frame, whose shape may
+    /// differ from the frame that the cursor was shown with.
+    pub(super) fn cursor_density(&mut self, window: u32) {
+        let units = cursor_units(self.display_to_surface(window, 1., 1.));
+        if self
+            .cursors
+            .get(&window)
+            .is_some_and(|c| c.units.is_some_and(|u| u != units))
+        {
+            self.restore_cursor(window);
+        }
+    }
     pub(crate) fn restore_cursor(&mut self, window: u32) {
         if self.seat.pointer_window() != Some(window) {
             return;
         }
-        let Some(cursor) = self.cursors.get(&window) else {
+        let units = cursor_units(self.display_to_surface(window, 1., 1.));
+        let Some(cursor) = self.cursors.get_mut(&window) else {
             return;
         };
+        cursor.units = Some(units);
+        let cursor = &*cursor;
         let image = &cursor.image;
         if image.pixels.is_empty() {
             self.seat.set_android_cursor(window, None, 0, 0);
             return;
         }
-        let (hx, hy) = cursor.hotspot;
-        let scale = self.scale120(window) as f64 / 120.;
-        let logical_w = (image.width as f64 / scale).round().max(1.) as i32;
-        let logical_h = (image.height as f64 / scale).round().max(1.) as i32;
+        let ((logical_w, logical_h), (hx, hy)) =
+            in_surface((image.width, image.height), cursor.hotspot, units);
         let Ok(fd) = shm_pixels(&image.pixels) else {
             return;
         };
@@ -158,12 +197,7 @@ impl State {
         if let Some(v) = viewport {
             v.set_destination(logical_w, logical_h);
         }
-        self.seat.set_android_cursor(
-            window,
-            Some(surface),
-            (hx as f64 / scale).round() as i32,
-            (hy as f64 / scale).round() as i32,
-        );
+        self.seat.set_android_cursor(window, Some(surface), hx, hy);
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, image.width as i32, image.height as i32);
         surface.commit();
@@ -253,6 +287,22 @@ mod tests {
         assert_eq!(cursor.hotspot, (10, 10));
         cursor.update(image);
         assert_eq!(cursor.hotspot, (6, 12));
+    }
+
+    #[test]
+    fn an_image_shows_at_the_frames_density() {
+        // OpenHarmony's 720x1280 panel in a 360x640 window: the I-beam is
+        // 55 panel pixels tall and 28 units on the host.
+        let panel = cursor_units((0.5, 0.5));
+        assert_eq!(in_surface((36, 55), (18, 27), panel), ((18, 28), (9, 14)));
+        // Android's frame at the window's scale of 1.5.
+        let scaled = cursor_units((1. / 1.5, 1. / 1.5));
+        assert_eq!(in_surface((48, 48), (6, 9), scaled), ((32, 32), (4, 6)));
+        // A 412x915 frame in a window that turned to 915x412 keeps the
+        // cursor's shape.
+        let turning = cursor_units((915. / 412., 412. / 915.));
+        assert_eq!(in_surface((24, 24), (4, 3), turning), ((24, 24), (4, 3)));
+        assert_eq!(in_surface((1, 1), (0, 0), 0.25), ((1, 1), (0, 0)));
     }
 
     #[test]
