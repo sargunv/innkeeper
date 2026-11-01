@@ -55,13 +55,19 @@ if ! retry 50 has_screen; then
   exit 1
 fi
 
-# SceneBoard, the home ability AMS starts once user 100 is active, sets this
-# once its desktop has loaded.
-launcher_ready() {
-  /system/bin/param get bootevent.launcher.ready | grep -q true
+# SceneBoard is the home ability that AMS starts once user 100 is active. Its
+# home screen is in front when its desktop window, SCBDesktop<n>, has input
+# focus. SceneBoard sets bootevent.launcher.ready to true about 10 s later,
+# when a timer runs out, because its desktop doesn't finish preloading its
+# pages.
+desktop_focused() {
+  windows=$(/system/bin/hidumper -s WindowManagerService -a -a 2>&1)
+  id=$(echo "$windows" | sed -n 's/^Focus window: //p')
+  [ -n "$id" ] && echo "$windows" | grep -Eq "^SCBDesktop[0-9]* +[0-9]+ +[0-9]+ +$id "
 }
-if ! retry 200 launcher_ready; then
-  echo "SceneBoard not ready: $(/system/bin/pidof com.ohos.sceneboard || echo not running)"
+if ! retry 150 desktop_focused; then
+  echo "SceneBoard's home screen isn't in front: $(/system/bin/pidof com.ohos.sceneboard || echo not running)"
+  echo "$windows"
   exit 1
 fi
 
