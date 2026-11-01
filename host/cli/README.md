@@ -18,14 +18,17 @@ doesn't say.
   `app clear-cache` and `app clear-data` use `aa force-stop` and `bm clean`.
   `app info` shows the bundle's version, its sizes and its permissions. The
   sizes come from `du` over the bundle's code and its el1 and el2 data
-  directories for user 100. A `system_grant` permission shows as fixed. Such a
-  profile refuses `open`, files and URIs in `run`, `app set`, and the settings
-  that only Android has (adb, idle timeout, desktop following). OpenHarmony apps
-  get no desktop entries. `profile list` shows each OpenHarmony profile's UDID,
-  which a debug signing profile names in its `device-ids`.
+  directories for user 100. A `system_grant` permission shows as fixed. `run`
+  with a URI opens it as a browser link, as on Android. Such a profile refuses
+  `open`, files in `run`, `app set`, and the settings that only Android has
+  (adb, idle timeout, desktop following). OpenHarmony apps get no desktop
+  entries. `profile list` shows each OpenHarmony profile's UDID, which a debug
+  signing profile names in its `device-ids`.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
-  package. Only activities that accept browser links receive it. `content:` and
-  `intent:` URIs are refused.
+  package. Only activities that accept browser links receive it. On OpenHarmony
+  `aa start` sends a want with the action `ohos.want.action.viewData` and the
+  entity `entity.system.browsable`, and only abilities with a skill for both
+  receive it. `content:`, `datashare:` and `intent:` URIs are refused.
 - `run` with a path or `file:` URI opens the file read-only and hands its fd to
   the session's documents service. Android gets an opaque `content://` URI, the
   MIME type and `FLAG_GRANT_READ_URI_PERMISSION`. The grant is for that package

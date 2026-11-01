@@ -26,9 +26,10 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   reaches OpenHarmony's input service. The CLI installs the probe HAP
   (ohos/probe), signed for the profile's UDID, lists it and runs it, and its
   window has focus on screen. `app info` shows the probe's version and the grant
-  state of its two permissions. OpenHarmony's music volume must be at its
-  maximum, and a tone it plays must reach a private null sink. This group uses
-  its own profile, `<profile>-ohos`, so it runs alone.
+  state of its two permissions, and `run` with a link delivers its URI to the
+  probe. OpenHarmony's music volume must be at its maximum, and a tone it plays
+  must reach a private null sink. This group uses its own profile,
+  `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake

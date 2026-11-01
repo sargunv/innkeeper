@@ -18,8 +18,8 @@ OH's audio plays through the desktop's PipeWire.
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app info`, `app stop`, `app clear-cache` and `app clear-data` work
 there too ([host/cli](../host/cli/README.md)). `run` brings the app's window to
-the front. An OH profile refuses `open`, files and URIs in `run`, `app set`, adb
-and the Android-only settings.
+the front. `run` with a URI opens it in the app as a browser link. An OH profile
+refuses `open`, files in `run`, `app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots. A release profile installs on any device. A debug profile names the UDIDs

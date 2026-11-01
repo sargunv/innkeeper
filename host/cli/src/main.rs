@@ -309,8 +309,13 @@ fn run(
         "--new-window takes no files or URIs"
     );
     let pkg = validate::package(pkg)?;
-    if !args.iter().all(|s| s.is_empty()) {
-        profiles::need_android(profile, "opening files or URIs in apps")?;
+    let args = args
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|a| Ok((a.as_str(), file_arg(a)?)))
+        .collect::<Result<Vec<_>>>()?;
+    if args.iter().any(|(_, path)| path.is_some()) {
+        profiles::need_android(profile, "opening files in apps")?;
     }
     let session = Session::of_profile(profile)?;
     let splash = if session.running() {
@@ -347,27 +352,17 @@ fn run(
             new_window,
             size: None,
         };
-        if args.iter().all(|s| s.is_empty()) {
+        if args.is_empty() {
             return ops::run(profile, pkg, None, &opts, &stderr);
         }
         let mut reply = String::new();
-        for arg in args.iter().filter(|s| !s.is_empty()) {
-            let path = if arg.starts_with("file:") {
-                Some(
-                    innkeeper_core::uri::file_path(arg)
-                        .ok_or_else(|| anyhow::anyhow!("invalid file URI"))?,
-                )
-            } else if !arg.contains(":") || Path::new(arg).exists() {
-                Some(PathBuf::from(arg))
-            } else {
-                None
-            };
+        for (arg, path) in &args {
             reply = match path {
                 Some(path) => innkeeper_core::app_settings::launch(
                     profile,
                     &Launch::File {
                         package: pkg.into(),
-                        grants: vec![grant(profile, &path)?],
+                        grants: vec![grant(profile, path)?],
                         component: None,
                     },
                     &opts,
@@ -381,6 +376,20 @@ fn run(
         s.close();
     }
     r.map(drop)
+}
+
+/// The local file that a `run` argument names, or None for a URI.
+fn file_arg(arg: &str) -> Result<Option<PathBuf>> {
+    Ok(if arg.starts_with("file:") {
+        Some(
+            innkeeper_core::uri::file_path(arg)
+                .ok_or_else(|| anyhow::anyhow!("invalid file URI"))?,
+        )
+    } else if !arg.contains(':') || Path::new(arg).exists() {
+        Some(PathBuf::from(arg))
+    } else {
+        None
+    })
 }
 
 /// Opens a regular file for granting. Special files are refused, and a FIFO
@@ -899,6 +908,21 @@ mod tests {
         );
         let bare = innkeeper_core::ohos::BundleInfo::default();
         assert!(!bundle_info_text(&bare).contains("permissions"));
+    }
+
+    #[test]
+    fn run_arguments_are_files_or_uris() {
+        assert_eq!(file_arg("https://example.com/a").unwrap(), None);
+        assert_eq!(file_arg("sms:123").unwrap(), None);
+        assert_eq!(
+            file_arg("notes.txt").unwrap(),
+            Some(PathBuf::from("notes.txt"))
+        );
+        assert_eq!(
+            file_arg("file:///x/a%20b.txt").unwrap(),
+            Some(PathBuf::from("/x/a b.txt"))
+        );
+        assert!(file_arg("file://host/x").is_err());
     }
 
     #[test]

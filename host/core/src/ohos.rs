@@ -3,6 +3,7 @@
 //! permissions (ohos/README.md). Both tools exit 0 on failure, so results come
 //! from their output.
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
@@ -66,7 +67,16 @@ pub struct Bundle {
     pub preinstalled: bool,
     /// The ability that the home screen launches, as (module, ability).
     pub launcher: Option<(String, String)>,
+    /// The URI schemes, in lower case, that the bundle's exported abilities
+    /// open from a browser ([`BROWSABLE`]).
+    pub link_schemes: BTreeSet<String>,
 }
+
+/// The action and entity of a want that opens a link, as a browser sends
+/// it. Like Android's `BROWSABLE` category, the entity limits the start to
+/// abilities that accept links from a browser.
+const VIEW: &str = "ohos.want.action.viewData";
+const BROWSABLE: &str = "entity.system.browsable";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +125,14 @@ struct DumpSkill {
     entities: Vec<String>,
     #[serde(default)]
     actions: Vec<String>,
+    #[serde(default)]
+    uris: Vec<DumpUri>,
+}
+
+#[derive(Deserialize)]
+struct DumpUri {
+    #[serde(default)]
+    scheme: String,
 }
 
 fn dump_json(out: &str) -> Option<Dump> {
@@ -139,7 +157,21 @@ pub fn parse_dump(out: &str) -> Option<Bundle> {
         })
         .collect();
     launchers.sort_by_key(|a| a.module_name != d.entry_module_name);
+    let link_schemes = d
+        .hap_module_infos
+        .iter()
+        .flat_map(|m| &m.ability_infos)
+        .filter(|a| a.visible)
+        .flat_map(|a| &a.skills)
+        .filter(|s| {
+            s.actions.iter().any(|a| a == VIEW) && s.entities.iter().any(|e| e == BROWSABLE)
+        })
+        .flat_map(|s| &s.uris)
+        .filter(|u| !u.scheme.is_empty())
+        .map(|u| u.scheme.to_ascii_lowercase())
+        .collect();
     Some(Bundle {
+        link_schemes,
         launcher: launchers
             .first()
             .map(|a| (a.module_name.clone(), a.name.clone())),
@@ -358,6 +390,27 @@ pub fn start(s: &Session, name: &str) -> Result<String> {
     }
 }
 
+/// Opens `uri`, which [`validate::launch_uri`] checked, in bundle `name`, as
+/// a browser opens a link. AMS picks the bundle's ability whose skills match
+/// the URI.
+pub fn open_uri(s: &Session, name: &str, uri: &str) -> Result<String> {
+    let scheme = uri
+        .split_once(':')
+        .map_or("", |(s, _)| s)
+        .to_ascii_lowercase();
+    let Some(b) = bundle(s, name)? else {
+        bail!("{name} isn't installed");
+    };
+    if !b.link_schemes.contains(&scheme) {
+        bail!("{name} doesn't open {scheme}: links");
+    }
+    let argv = [
+        "aa", "start", "-b", name, "-A", VIEW, "-e", BROWSABLE, "-U", uri,
+    ];
+    expect(s, &argv, "start ability successfully")?;
+    Ok(format!("opened {} in {name}", validate::truncate(uri, 80)))
+}
+
 /// Whether SceneBoard shows its lock screen.
 fn screen_locked(s: &Session) -> bool {
     s.exec(30, &["hidumper", "-s", "ScreenlockService", "-a", "-all"])
@@ -487,6 +540,23 @@ mod tests {
     }
 
     #[test]
+    fn link_schemes_need_view_browsable_and_an_exported_ability() {
+        let abilities = r#"
+            {"name": "Links", "visible": true, "skills": [
+                {"actions": ["ohos.want.action.viewData"], "entities": ["entity.system.browsable"],
+                 "uris": [{"scheme": "HTTPS", "host": "example.com"}, {"scheme": ""}]},
+                {"actions": ["ohos.want.action.viewData"], "entities": ["entity.system.home"],
+                 "uris": [{"scheme": "sms"}]},
+                {"actions": ["ohos.want.action.sendData"], "entities": ["entity.system.browsable"],
+                 "uris": [{"scheme": "mailto"}]}]},
+            {"name": "Hidden", "visible": false, "skills": [
+                {"actions": ["ohos.want.action.viewData"], "entities": ["entity.system.browsable"],
+                 "uris": [{"scheme": "secret"}]}]}"#;
+        let b = parse_dump(&dump(abilities, "entry", false)).unwrap();
+        assert_eq!(b.link_schemes, BTreeSet::from(["https".to_string()]));
+    }
+
+    #[test]
     fn screen_lock_dump() {
         let dump = " Screenlock system state\\tValue\\t\\tDescription\n \
                     * deviceLocked  \t\tfalse\t\t100\n \
@@ -547,6 +617,7 @@ mod tests {
                 name: "dev.example.app".into(),
                 preinstalled: false,
                 launcher: Some(("entry".into(), "CalculatorAbility".into())),
+                link_schemes: BTreeSet::new(),
             }
         );
         let b = parse_dump(&dump(&abilities, "other", true)).unwrap();
