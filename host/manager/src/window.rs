@@ -1,7 +1,7 @@
 //! The main window. It lists the installed apps, shows the session's state,
 //! accepts dropped files, opens the install page, and downloads the image on
-//! the first run. OpenHarmony profiles can't install apps, so their window
-//! shows the session row and no app controls.
+//! the first run. An Android profile installs APKs, and an OpenHarmony
+//! profile installs HAPs.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -37,7 +37,7 @@ pub struct Inner {
     profile: RefCell<ProfileName>,
     /// The profile's system, after the window has read it.
     system: Cell<System>,
-    /// The empty state page and its button for installing an APK.
+    /// The empty state page and its button for installing an app.
     empty: adw::StatusPage,
     open_button: gtk::Button,
     pub win: adw::ApplicationWindow,
@@ -409,12 +409,17 @@ impl Window {
 
     fn choose_file(&self) {
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some("Android Apps"));
-        for m in innkeeper_core::desktop::PACKAGE_MIME_TYPES {
-            filter.add_mime_type(m);
-        }
-        for p in ["*.apk", "*.apks", "*.xapk", "*.apkm"] {
-            filter.add_pattern(p);
+        let system = self.system.get();
+        filter.set_name(Some(&format!("{} Apps", system.title())));
+        if system == System::Android {
+            for m in innkeeper_core::desktop::PACKAGE_MIME_TYPES {
+                filter.add_mime_type(m);
+            }
+            for p in ["*.apk", "*.apks", "*.xapk", "*.apkm"] {
+                filter.add_pattern(p);
+            }
+        } else {
+            filter.add_pattern("*.hap");
         }
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
@@ -441,10 +446,6 @@ impl Window {
             self.preparing.opened.borrow_mut().push(file.clone());
             return;
         }
-        if let Err(e) = self.system.get().need_android("Installing apps") {
-            self.show_error(Op::Install, None, &e);
-            return;
-        }
         match file.path() {
             Some(p) => {
                 let page = install::page(self, p);
@@ -459,6 +460,11 @@ impl Window {
     }
 
     /// The installed app for `pkg` in this profile, if any.
+    /// The system that the profile runs.
+    pub fn system(&self) -> System {
+        self.system.get()
+    }
+
     pub fn installed(&self, pkg: &str) -> Option<DesktopApp> {
         self.installed
             .borrow()
@@ -519,30 +525,25 @@ impl Window {
         });
     }
 
-    /// Adjusts the window to the profile's system. OpenHarmony profiles can't
-    /// install apps, so the window hides the install controls for them.
+    /// Adjusts the window to the profile's system.
     fn set_system(&self, system: System) {
         self.system.set(system);
         let android = system == System::Android;
         for s in &self.sessions {
             s.set_system(system);
         }
-        self.open_button.set_visible(android);
-        if let Some(a) = self
-            .win
-            .lookup_action("open")
-            .and_downcast::<gio::SimpleAction>()
-        {
-            a.set_enabled(android);
-        }
+        self.open_button.set_label(if android {
+            "_Open APK…"
+        } else {
+            "_Open HAP…"
+        });
         if android {
             self.empty.set_title("No Android Apps");
             self.empty
                 .set_description(Some("Drag and drop an APK here"));
         } else {
             self.empty.set_title(system.title());
-            self.empty
-                .set_description(Some("Start the session to use its built-in apps"));
+            self.empty.set_description(Some("Drag and drop a HAP here"));
         }
         self.preparing
             .page
