@@ -37,8 +37,10 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A drag
 and a click on the nested desktop's seat then unlock the lock screen and open
-Settings. A key press reaches MMI, and the CLI installs and starts the image's
-calculator HAP.
+Settings. OH's input injector then scrolls Settings and goes home, and
+render_service must not have restarted since boot
+([tests/render.sh](tests/render.sh)). A key press reaches MMI, and the CLI
+installs and starts the image's calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -105,6 +107,13 @@ window unlocks it. OH's own injector also drives it over `exec`.
   no GPU. render_service therefore draws with llvmpipe
   (`LIBGL_ALWAYS_SOFTWARE`). GPU rendering needs a Mesa built for OH's musl,
   which is milestone 8 of #191.
+- **Native fences.** The image's llvmpipe finishes every GL context in the
+  process whenever it exports a native fence fd, and EGL exports one on each
+  swap. render_service draws on several threads, and a swap on one thread would
+  flush a context that another thread is drawing with, which crashes llvmpipe.
+  The shim makes the dma-buf sync file export (`DMA_BUF_IOCTL_EXPORT_SYNC_FILE`)
+  fail, so llvmpipe offers no native fences. EGL's software swap waits for its
+  own context's rendering before it queues the buffer.
 - **Ashmem.** The HDI's command queues use ashmem, as most OH shared memory
   does. The broker emulates ashmem with memfds
   ([supervisor/README.md](../supervisor/README.md#openharmony)).

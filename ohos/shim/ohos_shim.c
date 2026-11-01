@@ -33,6 +33,14 @@
 //    would return host paths. installd refuses to rename a code path unless
 //    it starts with /data/app/el1/bundle/, which fails every install.
 //    realpath returns /data in place of the host directory.
+//  - The image's llvmpipe offers native fence fds when it can export a sync
+//    file from a dma-buf, which udmabuf allows. Each export finishes every GL
+//    context in the process from the exporting thread, and EGL exports one
+//    on each swap. A swap on one render_service thread then flushes a
+//    context that another thread is drawing with, and llvmpipe's binner
+//    crashes (#309). The sync file export fails with ENOTTY, as on a kernel
+//    before 6.0, so llvmpipe offers no native fences. EGL's software swap
+//    still waits for its own context's rendering.
 //
 // The shim is built freestanding, with no libc headers or link. It binds to
 // the guest's musl at load time, so one file works with whichever libc the
@@ -54,6 +62,10 @@
 #define SYS_setns 308
 #define SYS_setpriority 141
 #define SYS_statfs 137
+#define SYS_ioctl 16
+#define ENOTTY 25
+// _IOWR('b', 2, struct dma_buf_export_sync_file)
+#define DMA_BUF_IOCTL_EXPORT_SYNC_FILE 0xc0086202u
 #define AT_FDCWD (-100)
 #define O_DIRECTORY 0200000
 #define O_CLOEXEC 02000000
@@ -210,6 +222,15 @@ int setns(int fd, int type) {
     return 0;
   }
   return (int)ret(sys6(SYS_setns, fd, type, 0, 0, 0, 0));
+}
+
+int ioctl(int fd, int req, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, req);
+  long arg = __builtin_va_arg(ap, long);
+  __builtin_va_end(ap);
+  if ((unsigned)req == DMA_BUF_IOCTL_EXPORT_SYNC_FILE) return (int)ret(-ENOTTY);
+  return (int)ret(sys6(SYS_ioctl, fd, req, arg, 0, 0, 0));
 }
 
 int chroot(const char* root) {
