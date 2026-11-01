@@ -280,11 +280,17 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   `const.innkeeper.display.size` ([Input](#input)).
 - **GPU.** The broker's DRM policy lets the guest open only the profile's
   selected render node. Without it, the image's Mesa would open the host's card
-  node, and its composer would drive the host display's KMS. That Mesa ships
-  iris, crocus, nouveau, virtio_gpu and llvmpipe, but not radeonsi, and CI has
-  no GPU. render_service therefore draws with llvmpipe
-  (`LIBGL_ALWAYS_SOFTWARE`). GPU rendering needs a Mesa built for OH's musl,
-  which is milestone 8 of #191.
+  node, and its composer would drive the host display's KMS. That Mesa's only
+  working GL driver is llvmpipe. Its iris, crocus, radeonsi, nouveau and zink
+  entries are stubs that print "driver missing". render_service therefore draws
+  with llvmpipe (`LIBGL_ALWAYS_SOFTWARE`). For Vulkan, the layer adds Mesa's
+  RADV and ANV, built for OH's musl by `build:vulkan`
+  ([android/vendor/vulkan](../android/vendor/vulkan/README.md#openharmony)).
+  OH's Vulkan loader finds them through their manifests in
+  `/vendor/etc/vulkan/icd.d` and lists the selected GPU. OH's swapchain layer is
+  always on, and it refuses to create a device on a driver without
+  `VK_OHOS_native_buffer`. Upstream Mesa doesn't have that extension, so apps
+  can't use these drivers yet.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would
