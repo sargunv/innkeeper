@@ -136,6 +136,16 @@ reports boot completion. Issue #312 tracks the features that build on it.
   scripts as the SDK's build does. [system-app/sdk.env](system-app/sdk.env) pins
   them and the N-API headers by checksum. ets-loader reports each use of a
   system API as a warning.
+- **Updates.** BMS scans the preinstalled apps at a profile's first boot and
+  after a system update, which it detects from the image's const parameters.
+  When the launcher composes a profile's root, which it does whenever our layer
+  or the image changes, it gives init `persist.bms.test-upgrade=true` as a
+  parameter default for the next boot
+  ([launcher](../host/launcher/src/ohos.rs)). BMS then scans the preinstalled
+  apps, and it replaces a HAP whose build hash changed. The packing tool writes
+  that hash because `module.json` sets `generateBuildHash`. The launcher removes
+  the default at the following start, so later boots skip the scan, which costs
+  about 0.8 s.
 
 The connection's host tests (`native/tests`) run in `mise run test`.
 

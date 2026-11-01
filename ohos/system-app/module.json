@@ -10,7 +10,8 @@
     "compileSdkType": "OpenHarmony",
     "minAPIVersion": 26,
     "targetAPIVersion": 26,
-    "bundleType": "app"
+    "bundleType": "app",
+    "generateBuildHash": true
   },
   "module": {
     "name": "entry",
