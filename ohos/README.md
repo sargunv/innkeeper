@@ -76,14 +76,14 @@ input injector then scrolls Settings and goes home, and render_service must not
 have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
 reaches MMI. A file written to `/storage/Users/currentUser/Download` lands in
 the profile's data directory. The probe HAP, signed for the profile's UDID, then
-installs and shows in `innkeeper list`, and `innkeeper run` puts its window on
-screen with input focus. A click on the probe's text field starts Innkeeper
-Keyboard, and keys typed in a French layout on the nested desktop type "aé" in
-the field. OH's music volume must be at its maximum, and a 440 Hz tone that
-[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop. Last, root grants the probe the microphone with
-`atm perm -g`, the host plays a tone into the null sink, and the probe must
-record it from the sink's monitor.
+installs, shows in `innkeeper list` and gets a desktop entry with its label and
+icon, and `innkeeper run` puts its window on screen with input focus. A click on
+the probe's text field starts Innkeeper Keyboard, and keys typed in a French
+layout on the nested desktop type "aé" in the field. OH's music volume must be
+at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays
+through OH's audio API must reach a private null sink on the nested desktop.
+Last, root grants the probe the microphone with `atm perm -g`, the host plays a
+tone into the null sink, and the probe must record it from the sink's monitor.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -133,6 +133,18 @@ reports boot completion. Issue #312 tracks the features that build on it.
 - **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
   connects OH's text fields to the host's input method
   ([Text input](#text-input)).
+- **App menu.** As Android's system app does, the app reports each launchable
+  app that the user installed to the bridge's apps service, on each connection
+  and on `bundleMonitor`'s install, update and removal events. Preinstalled apps
+  get no entry. The app sends the path of the launcher ability's HAP, and the
+  bridge reads the localized labels, the URL schemes and the icon from it. A
+  layered icon gets OH's icon mask from the image's system resources. The
+  entries launch the app with `innkeeper run`, and the manager lists them. The
+  app needs `LISTEN_BUNDLE_CHANGE` and `GET_BUNDLE_INFO_PRIVILEGED`, which a
+  `system_basic` app may request.
+- **Session1 commands.** The app answers each command that the bridge relays
+  with "OpenHarmony profiles don't support this action.", so callers don't wait
+  for the bridge's timeout.
 - **Build.** `mise run build:ohos-system-app` builds the HAP and stages it with
   the two JSON files. The SDK's declarations leave out the system APIs, such as
   ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the SDK in

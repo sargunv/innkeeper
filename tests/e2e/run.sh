@@ -503,14 +503,20 @@ else
     boot_completed || return
     s /system/bin/bm dump -n dev.sargunv.innkeeper.system >"$T/system-app.txt" || return
     file_has "$T/system-app.txt" '"isSystemApp": true' &&
-      file_has "$T/system-app.txt" '"isKeepAlive": true'
+      file_has "$T/system-app.txt" '"isKeepAlive": true' || return
+    # The app answers a relayed Session1 command at once. A command without an
+    # answer would wait for the bridge's 40 s timeout.
+    timeout 5 gdbus call --session --dest "dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}" \
+      --object-path /dev/sargunv/Innkeeper/Session --method dev.sargunv.Innkeeper.Session1.Windows \
+      >"$T/session-command.txt" 2>&1
+    file_has "$T/session-command.txt" "OpenHarmony profiles don't support this action"
   }
   if ! timed ohos-system-app ohos_system_app; then
-    cat "$T/session-state.txt" >&2
+    cat "$T/session-state.txt" "$T/session-command.txt" >&2
     grep -E '"(isSystemApp|isKeepAlive)"' "$T/system-app.txt" >&2 || true
     exit 1
   fi
-  echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, and Innkeeper System runs as a kept-alive system app"
+  echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, Innkeeper System runs as a kept-alive system app, and it answers Session1 commands"
   # Each animation from here on draws in render_service, which must not
   # restart.
   ohos_rs=$(s /system/bin/pidof render_service)
@@ -656,6 +662,12 @@ else
     "$cli" install "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
     "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
+    # Innkeeper System reports the install, and the bridge writes the app's
+    # desktop entry with the HAP's label and icon.
+    local id=dev.sargunv.innkeeper.dev.sargunv.innkeeper.probes
+    until_ok file_has "$XDG_DATA_HOME/applications/$id.desktop" '^Name=Innkeeper Probes$' || return
+    file_has "$XDG_DATA_HOME/applications/$id.desktop" "^Icon=${id//./\\.}\$" || return
+    [[ -s $XDG_DATA_HOME/icons/hicolor/512x512/apps/$id.png ]] || return
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
     until_ok shown || return
     # app info shows the version, and a user_grant permission that the user
@@ -675,7 +687,7 @@ else
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, its window has focus on screen, app info shows its version and permissions, and it opens a link'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_text() {
     local field x y

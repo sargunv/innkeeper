@@ -143,12 +143,16 @@ fn main() -> Result<()> {
             ),
         ))
     });
-    // Apps installed inside Android get desktop entries, except in a test
+    // Apps installed inside the guest get desktop entries, except in a test
     // session.
     let session_api = innkeeper_bridge::session::Relay::default();
+    let system = innkeeper_core::profiles::own()
+        .map(|s| s.system)
+        .unwrap_or_default();
     let apps = Arc::new(innkeeper_bridge::apps::Config::from_env(
         desktop,
         profile.clone(),
+        system,
         data_dir,
     ));
     let _session_bus =

@@ -1338,6 +1338,7 @@ dependencies = [
  "wayland-protocols",
  "xkbcommon-dl",
  "zbus",
+ "zip",
 ]
 
 [[package]]

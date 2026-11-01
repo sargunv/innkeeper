@@ -41,7 +41,9 @@ It builds no artifact of its own. `cargo test -p innkeeper-core` runs its tests.
   across updates. Windows (`StartupWMClass`), notifications and MPRIS players
   use the same id. The bridge's app mirror is the only writer of these entries,
   and `install` doesn't write them. The mirror takes names and URL schemes from
-  the installed APK.
+  the installed APK or HAP, and an OpenHarmony app's icon from its HAP. An
+  OpenHarmony app's entry has no `StartupWMClass` and no startup notification,
+  because its window is the profile's one OpenHarmony window.
 - **File types:** Innkeeper's own desktop entry claims only the APK and bundle
   types. `innkeeper open` hands documents to an **Open or share with Android
   app…** chooser ([the CLI](../cli/README.md)).

@@ -84,10 +84,10 @@ Android Settings in a separate window.
 `src/profiles.rs` lists every profile and whether it runs. It creates, renames,
 deletes, starts and stops profiles. The window shows one profile's apps, and the
 profile's name is under the window title. **New Profile** asks for the profile's
-system, Android or OpenHarmony. An OpenHarmony profile installs no apps yet, so
-its window shows only its session and its settings show only its display. **Show
-Apps** switches the window to another profile. The manager shows that profile
-again the next time it opens. It stores the choice in
+system, Android or OpenHarmony. An OpenHarmony profile's window lists the apps
+that have desktop entries, and their app settings aren't available. Its settings
+show only its display. **Show Apps** switches the window to another profile. The
+manager shows that profile again the next time it opens. It stores the choice in
 `$XDG_STATE_HOME/innkeeper/manager-profile`, and `--profile NAME` overrides it.
 Opening the manager with no profile creates `default`. Deleting a profile asks
 for confirmation and removes the profile's apps, data, settings and app-menu
