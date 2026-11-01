@@ -163,7 +163,7 @@ impl System {
     pub fn need_android(self, what: &str) -> Result<()> {
         ensure!(
             self == System::Android,
-            "{what} is for Android profiles, and this one runs {}",
+            "{what} needs an Android profile, not {}",
             self.title()
         );
         Ok(())

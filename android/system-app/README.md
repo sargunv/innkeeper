@@ -91,10 +91,10 @@ magnet, webcal(s) and ftp(s). Any other custom scheme needs its own filter.
 
 The sharesheet's **Desktop** target offers four actions:
 
-- **Open with a desktop app** uses OpenFile with `ask=true`.
+- **Open with desktop app** uses OpenFile with `ask=true`.
 - **Save to file…** uses SaveFile.
 - **Copy** uses clipboard sync and handles text only.
-- **Send by email** uses Email, with attachments.
+- **Email** uses Email, with attachments.
 
 Shared text becomes a `.txt` file. The bridge takes an xdg-activation token from
 the source window's seat and parents portal dialogs with xdg-foreign.

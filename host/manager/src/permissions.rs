@@ -1,4 +1,4 @@
-//! Plain-language names for Android permissions on the install page.
+//! Plain-language names for Android permissions on the install and app pages.
 
 /// A permission as the install page shows it: a title, and whether it gives
 /// access to something personal (listed first, with a warning icon).
@@ -85,6 +85,29 @@ pub fn shown(names: &[String]) -> Vec<Shown> {
     v
 }
 
+/// The app page's rows for runtime permissions `names`, in order: a title,
+/// and the permission's constant as a subtitle only where titles collide
+/// (`READ_CONTACTS` and `WRITE_CONTACTS` are both "Contacts and accounts").
+pub fn titles<'a>(names: impl Iterator<Item = &'a str>) -> Vec<(String, String)> {
+    let rows: Vec<(String, &str)> = names
+        .map(|n| (describe(n).map_or_else(|| n.to_string(), |s| s.title), n))
+        .collect();
+    rows.iter()
+        .map(|(title, name)| {
+            let shared = rows.iter().filter(|(t, _)| t == title).count() > 1;
+            let constant = name.rsplit('.').next().unwrap_or(name);
+            (
+                title.clone(),
+                if shared {
+                    constant.into()
+                } else {
+                    String::new()
+                },
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +131,28 @@ mod tests {
                 "Shared storage",
                 "Full network access",
                 "Read sync settings"
+            ]
+        );
+    }
+
+    #[test]
+    fn colliding_titles_show_their_constant() {
+        let t = titles(
+            [
+                "android.permission.CAMERA",
+                "android.permission.READ_CONTACTS",
+                "android.permission.WRITE_CONTACTS",
+                "com.example.app.OWN",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            t,
+            [
+                ("Camera".into(), String::new()),
+                ("Contacts and accounts".into(), "READ_CONTACTS".into()),
+                ("Contacts and accounts".into(), "WRITE_CONTACTS".into()),
+                ("com.example.app.OWN".into(), String::new()),
             ]
         );
     }

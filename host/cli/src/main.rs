@@ -38,63 +38,60 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Open documents with an Android app you pick.
+    /// Open files with an Android app.
     Open {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Install an .apk, .apks, .xapk or .apkm and add it to the app menu.
+    /// Install an .apk, .apks, .xapk or .apkm file.
     Install { file: PathBuf },
-    /// Launch an app, optionally opening files or a URI in it.
+    /// Open an app, or files or a URI in it.
     Run {
         package: String,
-        /// Open a separate task/window, if the launcher activity supports it.
+        /// Open a new window, if the app supports it.
         #[arg(long)]
         new_window: bool,
         files_or_uri: Vec<String>,
     },
-    /// Uninstall an app and remove its desktop entry and icons.
+    /// Uninstall an app.
     Uninstall {
         package: String,
-        /// Keep the app's data (a later install picks it up again).
+        /// Keep the app's data.
         #[arg(long)]
         keep_data: bool,
     },
-    /// Show or change an installed app's Android settings (starting the
-    /// profile if needed).
+    /// Show or change an app's settings.
     #[command(subcommand)]
     App(AppCmd),
-    /// List installed (user) apps, with whether each may run in the
-    /// background.
+    /// List installed apps and whether each runs in the background.
     List,
-    /// Manage profiles: separate Android or OpenHarmony setups, each with its
-    /// own apps, data and settings.
+    /// Manage profiles.
     #[command(subcommand)]
     Profile(ProfileCmd),
 }
 
 #[derive(Subcommand)]
 enum AppCmd {
-    /// Storage, settings and runtime permissions.
+    /// Show storage, settings and permissions.
     Info {
         package: String,
-        /// As JSON.
+        /// Print JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Delete the app's cache.
+    /// Clear the app's cache.
     ClearCache { package: String },
-    /// Delete all of the app's data: files, accounts and settings.
+    /// Clear the app's files, accounts and settings.
     ClearData { package: String },
     /// Force-stop the app.
     Stop { package: String },
     /// Change settings.
     Set {
         package: String,
-        /// Let it run with no window open, which keeps the profile running.
+        /// Run with no window open.
         #[arg(long, value_parser = ["on", "off"])]
         background: Option<String>,
-        /// Escape acts as Android's Back in its windows.
+        /// Use Escape as Back.
         #[arg(long, value_parser = ["on", "off"])]
         escape_back: Option<String>,
         /// Grant or revoke a runtime permission (repeatable).
@@ -119,27 +116,25 @@ enum ProfileCmd {
     /// Create a profile.
     Create {
         name: String,
-        /// The system it runs, fixed once it is made. OpenHarmony runs its
-        /// built-in apps in one phone window; it can't install apps yet.
+        /// The system, which can't be changed later.
         #[arg(long, default_value = "android", value_parser = ["android", "ohos"])]
         system: String,
     },
-    /// Rename a stopped profile; its app-menu entries follow.
+    /// Rename a stopped profile.
     Rename { from: String, to: String },
-    /// Delete a stopped profile, with its apps and their data.
+    /// Delete a stopped profile, with its apps and data.
     Delete { name: String },
     /// Start the profile and wait for it to boot.
     Start {
-        /// Every profile instead (Keep Running's login command).
+        /// Start every profile.
         #[arg(long)]
         all: bool,
     },
     /// Stop the profile.
     Stop,
-    /// Delete the profile's apps and data, keeping its settings (stop it
-    /// first).
+    /// Delete a stopped profile's apps and data, keeping its settings.
     Reset,
-    /// Print the profile's kernel log (init's and early services').
+    /// Print the profile's kernel log.
     Log {
         /// Keep printing as it grows.
         #[arg(short, long)]
@@ -151,18 +146,16 @@ enum ProfileCmd {
 
 #[derive(clap::Args)]
 struct SetArgs {
-    /// Apps in windows of their own, or the whole device in one window the
-    /// size of a preset (OpenHarmony: small-phone or medium-phone); applies
-    /// at the next start.
+    /// Windowed apps, or one device window; applies at next start.
     #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
     display: Option<String>,
-    /// adb on loopback TCP, for Android Studio, Gradle and adb.
+    /// adb on localhost.
     #[arg(long, value_parser = ["on", "off"])]
     adb: Option<String>,
-    /// Minutes with nothing to do before the profile stops (1 to 120).
+    /// Idle minutes before the profile stops (1 to 120).
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=120))]
     idle_minutes: Option<u32>,
-    /// Never stop when idle, and start at login; for every profile.
+    /// Keep every profile running, starting at login.
     #[arg(long, value_parser = ["on", "off"])]
     keep_running: Option<String>,
     /// Add apps installed inside Android to the app menu.
@@ -296,10 +289,7 @@ fn grant(profile: &ProfileName, path: &Path) -> Result<u64> {
 
 fn uninstall(profile: &ProfileName, pkg: &str, keep_data: bool) -> Result<()> {
     if ops::uninstall(profile, pkg, keep_data, &stderr)? {
-        println!(
-            "uninstalled {pkg}{}",
-            if keep_data { " (data kept)" } else { "" }
-        );
+        println!("uninstalled {pkg}");
     } else {
         eprintln!("innkeeper: {pkg} isn't an installed user app");
     }
@@ -317,7 +307,7 @@ fn run(
 ) -> Result<()> {
     ensure!(
         !new_window || args.is_empty(),
-        "--new-window opens the launcher activity; omit files and URIs"
+        "--new-window takes no files or URIs"
     );
     let pkg = validate::package(pkg)?;
     let session = Session::of_profile(profile)?;
@@ -558,7 +548,7 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
         ProfileCmd::Reset => {
             let p = profiles::existing(name)?;
             profiles::reset(&p)?;
-            println!("reset profile {p}; it starts over at its next start");
+            println!("reset profile {p}");
         }
         ProfileCmd::Log { follow } => profiles::log(&profiles::existing(name)?, follow)?,
         ProfileCmd::Set(args) => set(&profiles::existing(name)?, &args)?,
@@ -582,7 +572,7 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
             args.apply(s);
         })?;
         if args.display.is_some() {
-            println!("display: {}, at the next start", s.display.name());
+            println!("display {}: applies at next start", s.display.name());
         }
     }
     if let Some(on) = &args.keep_running {

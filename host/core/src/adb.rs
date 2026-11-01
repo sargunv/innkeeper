@@ -76,7 +76,7 @@ fn apply(session: &Session, s: &Settings) -> Result<()> {
 pub fn missing_key() -> Option<String> {
     adb::user_key().is_none().then(|| {
         format!(
-            "no adb key at {} (`adb start-server` creates one), so adb will be refused",
+            "no adb key at {}; `adb start-server` creates one",
             adb::user_key_path().display()
         )
     })

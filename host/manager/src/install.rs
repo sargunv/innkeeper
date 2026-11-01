@@ -7,36 +7,31 @@ use std::sync::Arc;
 use adw::prelude::*;
 use gtk::{gdk, glib};
 use innkeeper_core::desktop::MANAGER_ID;
-use innkeeper_core::launcher;
 use innkeeper_core::ops::{self, Event, Package};
 
 use crate::errors::{self, Op};
 use crate::permissions;
 use crate::window::{Window, details_expander};
 use crate::worker;
-use innkeeper_profile::profile::System;
 
 /// Permissions listed before the rest fold into "N more".
 const SHOWN_PERMISSIONS: usize = 6;
 
-/// Progress text for a core status message.
+/// Progress text for a core status message ("waiting for Android to boot").
 pub fn status_text(m: &str) -> String {
-    if m == launcher::preparing(System::Android) {
-        "Downloading Android (about 1.2 GB)…".into()
-    } else if m.starts_with("starting the Android session") {
-        "Starting Android…".into()
-    } else if m.starts_with("waiting for Android to boot") {
-        "Waiting for Android to start…".into()
-    } else if m.starts_with("installing") {
-        "Installing…".into()
-    } else if m.starts_with("adding it to the app menu") {
-        "Adding to the app menu…".into()
-    } else {
-        let mut c = m.chars();
-        c.next()
-            .map(|f| f.to_uppercase().collect::<String>() + c.as_str() + "…")
-            .unwrap_or_default()
-    }
+    let m = match m
+        .strip_prefix("waiting for ")
+        .and_then(|s| s.strip_suffix(" to boot"))
+    {
+        Some(system) => format!("starting {system}"),
+        // The package and version show already.
+        None if m.starts_with("installing") => "installing".into(),
+        None => m.into(),
+    };
+    let mut c = m.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str() + "…")
+        .unwrap_or_default()
 }
 
 /// A navigation page that reads `file` (off the UI thread) and then shows
@@ -51,7 +46,7 @@ pub fn page(w: &Window, file: PathBuf) -> adw::NavigationPage {
         .build();
     let loading = adw::StatusPage::builder()
         .paintable(&adw::SpinnerPaintable::new(Some(&stack)))
-        .title("Reading the App…")
+        .title("Reading App…")
         .description(glib::markup_escape_text(&name))
         .build();
     stack.add_named(&loading, Some("loading"));
@@ -78,7 +73,9 @@ pub fn page(w: &Window, file: PathBuf) -> adw::NavigationPage {
                 let err = adw::StatusPage::builder()
                     .icon_name("dialog-error-symbolic")
                     .title(&h.heading)
-                    .description(glib::markup_escape_text(&h.body))
+                    .description(glib::markup_escape_text(
+                        h.body.as_deref().unwrap_or_default(),
+                    ))
                     .child(
                         &adw::Clamp::builder()
                             .maximum_size(480)
@@ -128,10 +125,7 @@ fn details(
     let installed = w.installed(&p.package);
 
     if !p.runs_here() {
-        let b = adw::Banner::new(&format!(
-            "Built only for {} processors, which this computer can’t run",
-            p.abis.join(", ")
-        ));
+        let b = adw::Banner::new("Not built for this computer");
         b.set_revealed(true);
         toolbar.add_top_bar(&b);
     }
@@ -219,13 +213,9 @@ fn details(
         ));
     }
     info.add(&property_row("Package", &p.package));
-    let mut size = glib::format_size(p.size).to_string();
-    if p.apk_count > 1 {
-        size.push_str(&format!(" · bundle of {} APKs", p.apk_count));
-    }
-    info.add(&property_row("Size", &size));
+    info.add(&property_row("Size", &glib::format_size(p.size)));
     let abis = if p.abis.is_empty() {
-        "Any (no native code)".to_string()
+        "Any".to_string()
     } else {
         p.abis.join(", ")
     };
@@ -241,15 +231,10 @@ fn details(
     // Permissions.
     let perms = adw::PreferencesGroup::builder()
         .title("Permissions")
-        .description("Android asks before an app uses personal data such as the camera")
         .build();
     let shown = permissions::shown(&p.permissions);
     if shown.is_empty() {
-        perms.add(
-            &adw::ActionRow::builder()
-                .title("No special permissions")
-                .build(),
-        );
+        perms.set_description(Some("None"));
     }
     let more = (shown.len() > SHOWN_PERMISSIONS + 1).then(|| {
         adw::ExpanderRow::builder()
@@ -264,7 +249,7 @@ fn details(
         if s.sensitive {
             let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
             icon.add_css_class("warning");
-            icon.set_tooltip_text(Some("Personal data: Android asks you first"));
+            icon.set_tooltip_text(Some("Personal data"));
             row.add_suffix(&icon);
         }
         match &more {
@@ -335,4 +320,21 @@ fn details(
         });
     });
     pp.upcast()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::status_text;
+
+    #[test]
+    fn status_reads_as_progress() {
+        for (core, shown) in [
+            ("downloading Android", "Downloading Android…"),
+            ("starting OpenHarmony", "Starting OpenHarmony…"),
+            ("waiting for Android to boot", "Starting Android…"),
+            ("installing a.b 1.0", "Installing…"),
+        ] {
+            assert_eq!(status_text(core), shown);
+        }
+    }
 }

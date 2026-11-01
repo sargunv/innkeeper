@@ -17,9 +17,6 @@ use crate::{
     worker,
 };
 
-const ISOLATION_DOCS: &str =
-    "https://github.com/sargunv/innkeeper/blob/main/docs/security.md#app-isolation";
-
 struct Page {
     window: WeakWindow,
     content: gtk::Box,
@@ -30,28 +27,12 @@ struct Page {
     busy: Cell<bool>,
 }
 
-/// The display choices, with their descriptions.
+/// The display choices, with a device window's size.
 const DISPLAYS: [(Display, &str, &str); 4] = [
-    (
-        Display::Windowed,
-        "Windowed",
-        "Each app in a window of its own",
-    ),
-    (
-        Display::SmallPhone,
-        "Small Phone",
-        "One device window, 720 × 1280",
-    ),
-    (
-        Display::MediumPhone,
-        "Medium Phone",
-        "One device window, 1080 × 2400",
-    ),
-    (
-        Display::MediumTablet,
-        "Medium Tablet",
-        "One device window, 2560 × 1600",
-    ),
+    (Display::Windowed, "Windowed", ""),
+    (Display::SmallPhone, "Small Phone", "720 × 1280"),
+    (Display::MediumPhone, "Medium Phone", "1080 × 2400"),
+    (Display::MediumTablet, "Medium Tablet", "2560 × 1600"),
 ];
 
 pub fn page(window: &Window) -> adw::NavigationPage {
@@ -152,7 +133,7 @@ impl Page {
         subtitle: &str,
         active: bool,
         set: fn(&mut Settings, bool),
-    ) -> adw::SwitchRow {
+    ) {
         let row = adw::SwitchRow::builder()
             .title(title)
             .subtitle(subtitle)
@@ -165,7 +146,6 @@ impl Page {
             }
         });
         group.add(&row);
-        row
     }
 
     fn show(self: &Rc<Self>) {
@@ -180,49 +160,29 @@ impl Page {
         display.add(&self.display_row(&p));
         page.add(&display);
         if p.system == System::Ohos {
-            page.add(
-                &adw::PreferencesGroup::builder()
-                    .title("OpenHarmony")
-                    .description(
-                        "This profile runs OpenHarmony’s built-in apps in one phone window. \
-                         Installing apps and desktop input aren’t available yet.",
-                    )
-                    .build(),
-            );
             self.content.append(&page);
             return;
         }
 
-        let desktop = adw::PreferencesGroup::builder().title("Follow the Desktop")
-            .description("Changes apply live. Turn a setting off to choose it in Android Settings; its current value is kept.").build();
-        self.switch(
-            &desktop,
-            "Dark Mode",
-            "Use the desktop’s light or dark appearance",
-            p.follow_dark,
-            |p, v| p.follow_dark = v,
-        );
-        self.switch(
-            &desktop,
-            "Accent Color",
-            "Use the desktop accent for Android’s theme",
-            p.follow_accent,
-            |p, v| p.follow_accent = v,
-        );
+        let desktop = adw::PreferencesGroup::builder()
+            .title("Follow the Desktop")
+            .build();
+        self.switch(&desktop, "Dark Mode", "", p.follow_dark, |p, v| {
+            p.follow_dark = v
+        });
+        self.switch(&desktop, "Accent Color", "", p.follow_accent, |p, v| {
+            p.follow_accent = v
+        });
         self.switch(
             &desktop,
             "Language and Region",
-            "Use the desktop’s languages and regional formats",
+            "",
             p.follow_locale,
             |p, v| p.follow_locale = v,
         );
-        self.switch(
-            &desktop,
-            "Time Format",
-            "Use the desktop’s 12- or 24-hour clock",
-            p.follow_clock,
-            |p, v| p.follow_clock = v,
-        );
+        self.switch(&desktop, "Time Format", "", p.follow_clock, |p, v| {
+            p.follow_clock = v
+        });
         page.add(&desktop);
 
         page.add(&self.lifecycle_group(&p));
@@ -230,11 +190,16 @@ impl Page {
         let apps = adw::PreferencesGroup::builder()
             .title("Android Integration")
             .build();
-        self.switch(&apps, "Mirror Apps to the App Menu", "Add launchers for apps installed inside Android. Existing launchers are kept when turned off.", p.mirror_apps, |p,v| p.mirror_apps = v);
+        self.switch(
+            &apps,
+            "Mirror Apps to the App Menu",
+            "For apps installed inside Android",
+            p.mirror_apps,
+            |p, v| p.mirror_apps = v,
+        );
         apps.add(&self.adb_row(&p));
         let settings = adw::ActionRow::builder()
-            .title("Android Settings…")
-            .subtitle("Open Android Settings in its own window")
+            .title("Android Settings")
             .activatable(true)
             .build();
         settings.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -246,31 +211,11 @@ impl Page {
         });
         apps.add(&settings);
         page.add(&apps);
-        let privacy = adw::PreferencesGroup::builder()
-            .title("App Isolation")
-            .description(
-                "Android apps are not isolated from each other: they all run as your user, \
-                 as desktop apps do.",
-            )
-            .build();
-        let docs = adw::ActionRow::builder()
-            .title("Learn More")
-            .activatable(true)
-            .build();
-        docs.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
-        let w = self.window.upgrade().map(|w| w.downgrade());
-        docs.connect_activated(move |_| {
-            gtk::UriLauncher::new(ISOLATION_DOCS).launch(
-                w.as_ref()
-                    .and_then(|w| w.upgrade())
-                    .map(|w| w.win.clone())
-                    .as_ref(),
-                gtk::gio::Cancellable::NONE,
-                |_| {},
-            );
-        });
-        privacy.add(&docs);
-        page.add(&privacy);
+        page.add(
+            &adw::PreferencesGroup::builder()
+                .description("Like desktop apps, Android apps aren’t isolated from each other.")
+                .build(),
+        );
         self.content.append(&page);
     }
 
@@ -285,10 +230,10 @@ impl Page {
         let current = choices.iter().position(|c| c.0 == p.display).unwrap_or(0);
         let row = adw::ComboRow::builder()
             .title("Display")
-            .subtitle(format!(
-                "{} · Applies the next time it starts",
-                choices[current].2
-            ))
+            .subtitle(match choices[current].2 {
+                "" => "Applies at next start".to_string(),
+                size => format!("{size} · Applies at next start"),
+            })
             .model(&model)
             .selected(current as u32)
             .build();
@@ -303,8 +248,9 @@ impl Page {
 
     fn lifecycle_group(self: &Rc<Self>, p: &Settings) -> adw::PreferencesGroup {
         let keep_running = self.keep_running.get();
-        let group = adw::PreferencesGroup::builder().title("When No Android Apps Are Open")
-            .description("Foreground services, alarms and apps allowed to run in the background still keep Android available.").build();
+        let group = adw::PreferencesGroup::builder()
+            .title("When No Apps Are Open")
+            .build();
         let stop = gtk::CheckButton::builder()
             .active(!keep_running)
             .valign(gtk::Align::Center)
@@ -316,7 +262,7 @@ impl Page {
             .build();
         let row = adw::ActionRow::builder()
             .title("Stop After")
-            .subtitle("Minutes without activity")
+            .subtitle("Minutes")
             .activatable_widget(&stop)
             .build();
         row.add_prefix(&stop);
@@ -327,8 +273,8 @@ impl Page {
         row.add_suffix(&minutes);
         group.add(&row);
         let row = adw::ActionRow::builder()
-            .title("Keep Running (Starts at Login)")
-            .subtitle("Every profile · Requires desktop permission · about 540 MB each while idle")
+            .title("Keep Running")
+            .subtitle("Starts every profile at login")
             .activatable_widget(&keep)
             .build();
         row.add_prefix(&keep);
@@ -358,12 +304,9 @@ impl Page {
         let row = adw::SwitchRow::builder()
             .title("adb")
             .subtitle(if p.adb {
-                format!(
-                    "On · <tt>{}</tt> in adb and Android Studio",
-                    innkeeper_core::adb::serial(p)
-                )
+                format!("<tt>{}</tt>", innkeeper_core::adb::serial(p))
             } else {
-                "For Android Studio, Gradle and adb on this computer".into()
+                String::new()
             })
             .use_markup(true)
             .active(p.adb)

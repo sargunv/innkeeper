@@ -1,5 +1,5 @@
-//! Turns `innkeeper-core` errors into messages for people: a heading, a
-//! sentence or two, and the original text as details.
+//! Turns `innkeeper-core` errors into messages for people: what failed, the
+//! one thing to do about it if there is one, and the original text as details.
 
 /// What the user was doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,29 +8,33 @@ pub enum Op {
     Install,
     Open,
     Uninstall,
-    Session,
+    /// Starting or stopping the session; the name is its system's.
+    Start,
+    Stop,
     AppSettings,
     Preferences,
     Profiles,
-    /// Downloading and unpacking the Android image.
+    /// Downloading and unpacking the image; the name is its system's.
     Prepare,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Humane {
     pub heading: String,
-    pub body: String,
+    /// The one thing to do about it, if there is one.
+    pub body: Option<String>,
     /// The full error chain, for a "Details" expander.
     pub details: String,
 }
 
-/// `name` is the app's name where one is known.
+/// `name` is the app's name, or for [`Op::Start`], [`Op::Stop`] and
+/// [`Op::Prepare`] the system's.
 pub fn humane(op: Op, name: Option<&str>, err: &anyhow::Error) -> Humane {
     let details = format!("{err:#}");
     let (heading, body) = classify(op, name, err.downcast_ref::<innkeeper_core::ErrorKind>());
     Humane {
         heading,
-        body,
+        body: body.map(str::to_string),
         details,
     }
 }
@@ -39,40 +43,58 @@ fn classify(
     op: Op,
     name: Option<&str>,
     kind: Option<&innkeeper_core::ErrorKind>,
-) -> (String, String) {
+) -> (String, Option<&'static str>) {
     use innkeeper_core::ErrorKind::*;
-    let app = name.unwrap_or("the app");
-    let pair = |h: &str, b: &str| (h.to_string(), b.to_string());
+    let app = name.map_or_else(|| "the App".to_string(), cap);
+    // Only an Android profile installs and opens apps.
+    let system = match op {
+        Op::Start | Op::Stop | Op::Prepare => name.unwrap_or("Android"),
+        _ => "Android",
+    };
+    let h = |h: &str| h.to_string();
+    let not_built = (h("Not Built for This Computer"), None);
     match kind {
-        Some(NotAnApk) => pair("Not a Readable Android App", "This file couldn’t be read as an APK or APK bundle. It may be incomplete or corrupt; try downloading it again."),
-        Some(UnsupportedBundle) => pair("Unsupported Bundle", "This bundle doesn’t contain exactly one installable app. Encrypted bundles aren’t supported."),
-        Some(WrongAbi) => pair("Not Built for This Computer", "This app’s native code doesn’t support this computer’s processor."),
-        Some(SessionStartFailed) => pair("Android Couldn’t Start", "The Android session didn’t start. Try again, or check the details below."),
-        Some(ImageNotPrepared) => pair("Android Isn’t Ready", "The Android image couldn’t be prepared. Check your connection and free disk space, then try again."),
-        Some(NoLauncherActivity) => (format!("{} Can’t Be Opened", cap(app)), "It has no main screen. It may be a keyboard, a widget or a background service, which run inside other apps.".into()),
-        Some(Timeout) => pair("Android Didn’t Respond", "The Android session took too long to answer. Try again in a moment."),
+        Some(NotAnApk) => (h("Not a Valid APK"), Some("Try downloading it again.")),
+        Some(UnsupportedBundle) => (h("Unsupported Bundle"), None),
+        Some(WrongAbi) => not_built,
+        Some(SessionStartFailed) => (format!("{system} Couldn’t Start"), None),
+        Some(ImageNotPrepared) => (
+            format!("Couldn’t Download {system}"),
+            Some("Check the network connection and free disk space."),
+        ),
+        Some(NoLauncherActivity) => (format!("{} Has No Main Screen", cap(&app)), None),
+        Some(Timeout) => (format!("{system} Didn’t Respond"), Some("Try again.")),
         Some(InstallFailed(code)) => match code.as_str() {
-            "INSTALL_FAILED_UPDATE_INCOMPATIBLE" => ("A Different Version Is Installed".into(), format!("The installed copy of {app} was signed by someone else. Uninstall it first to install this one.")),
-            "INSTALL_FAILED_VERSION_DOWNGRADE" => ("A Newer Version Is Installed".into(), format!("This is an older version of {app} than the one already installed.")),
-            "INSTALL_FAILED_OLDER_SDK" => pair("Needs a Newer Android", "This app requires a newer version of Android than Innkeeper runs."),
-            "INSTALL_FAILED_INSUFFICIENT_STORAGE" => pair("Not Enough Space", "There isn’t enough free disk space to install this app."),
-            "INSTALL_FAILED_NO_MATCHING_ABIS" | "INSTALL_FAILED_CPU_ABI_INCOMPATIBLE" => pair("Not Built for This Computer", "This app’s native code doesn’t support this computer’s processor."),
-            _ => pair("Android Refused the App", "Android couldn’t install this app. Check the details below for its reason."),
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE" => (
+                h("Signed by a Different Developer"),
+                Some("Uninstall the installed copy first."),
+            ),
+            "INSTALL_FAILED_VERSION_DOWNGRADE" => (
+                h("A Newer Version Is Installed"),
+                Some("Uninstall it first."),
+            ),
+            "INSTALL_FAILED_OLDER_SDK" => (h("Requires a Newer Android"), None),
+            "INSTALL_FAILED_INSUFFICIENT_STORAGE" => {
+                (h("Not Enough Disk Space"), Some("Free up disk space."))
+            }
+            "INSTALL_FAILED_NO_MATCHING_ABIS" | "INSTALL_FAILED_CPU_ABI_INCOMPATIBLE" => not_built,
+            _ => (format!("Couldn’t Install {app}"), None),
         },
-        None => {
-            let heading = match op {
-                Op::Preferences => "Couldn’t Save Preferences".to_string(),
-                Op::Profiles => "Couldn’t Change Profiles".to_string(),
-                Op::Read => "Couldn’t Read the File".to_string(),
-                Op::Install => format!("Couldn’t Install {}", cap(app)),
-                Op::Open => format!("Couldn’t Open {}", cap(app)),
-                Op::Uninstall => format!("Couldn’t Uninstall {}", cap(app)),
-                Op::AppSettings => format!("Couldn’t Change {}’s Settings", cap(app)),
-                Op::Session => "Couldn’t Control the Android Session".into(),
-                Op::Prepare => "Couldn’t Download Android".into(),
-            };
-            (heading, "Something went wrong. Try again, or check the details below.".into())
-        }
+        None => (
+            match op {
+                Op::Preferences => h("Couldn’t Save Settings"),
+                Op::Profiles => h("Couldn’t Change Profiles"),
+                Op::Read => h("Couldn’t Read the File"),
+                Op::Install => format!("Couldn’t Install {app}"),
+                Op::Open => format!("Couldn’t Open {app}"),
+                Op::Uninstall => format!("Couldn’t Uninstall {app}"),
+                Op::AppSettings => format!("Couldn’t Change {app}’s Settings"),
+                Op::Start => format!("Couldn’t Start {system}"),
+                Op::Stop => format!("Couldn’t Stop {system}"),
+                Op::Prepare => format!("Couldn’t Download {system}"),
+            },
+            None,
+        ),
     }
 }
 
@@ -92,16 +114,19 @@ mod tests {
     #[test]
     fn typed_context_selects_copy_independent_of_diagnostics() {
         for (kind, heading) in [
-            (ErrorKind::NotAnApk, "Not a Readable Android App"),
+            (ErrorKind::NotAnApk, "Not a Valid APK"),
             (ErrorKind::UnsupportedBundle, "Unsupported Bundle"),
             (ErrorKind::WrongAbi, "Not Built for This Computer"),
             (ErrorKind::SessionStartFailed, "Android Couldn’t Start"),
-            (ErrorKind::ImageNotPrepared, "Android Isn’t Ready"),
-            (ErrorKind::NoLauncherActivity, "Calculator Can’t Be Opened"),
+            (ErrorKind::ImageNotPrepared, "Couldn’t Download Android"),
+            (
+                ErrorKind::NoLauncherActivity,
+                "Calculator Has No Main Screen",
+            ),
             (ErrorKind::Timeout, "Android Didn’t Respond"),
             (
                 ErrorKind::InstallFailed("INSTALL_FAILED_UPDATE_INCOMPATIBLE".into()),
-                "A Different Version Is Installed",
+                "Signed by a Different Developer",
             ),
             (
                 ErrorKind::InstallFailed("INSTALL_FAILED_VERSION_DOWNGRADE".into()),
@@ -109,15 +134,15 @@ mod tests {
             ),
             (
                 ErrorKind::InstallFailed("INSTALL_FAILED_OLDER_SDK".into()),
-                "Needs a Newer Android",
+                "Requires a Newer Android",
             ),
             (
                 ErrorKind::InstallFailed("INSTALL_FAILED_INSUFFICIENT_STORAGE".into()),
-                "Not Enough Space",
+                "Not Enough Disk Space",
             ),
             (
                 ErrorKind::InstallFailed("INSTALL_PARSE_FAILED_NO_CERTIFICATES".into()),
-                "Android Refused the App",
+                "Couldn’t Install Calculator",
             ),
         ] {
             let e = anyhow::anyhow!("arbitrary diagnostic")
@@ -128,6 +153,26 @@ mod tests {
         let e = anyhow::anyhow!("INSTALL_FAILED_OLDER_SDK");
         let h = humane(Op::Open, Some("Calculator"), &e);
         assert_eq!(h.heading, "Couldn’t Open Calculator");
+        assert_eq!(h.body, None);
         assert_eq!(h.details, "INSTALL_FAILED_OLDER_SDK");
+    }
+
+    #[test]
+    fn session_errors_name_the_profiles_system() {
+        let failed = anyhow::anyhow!("x").context(ErrorKind::SessionStartFailed);
+        assert_eq!(
+            humane(Op::Start, Some("OpenHarmony"), &failed).heading,
+            "OpenHarmony Couldn’t Start"
+        );
+        // Installing starts Android, whatever the app is called.
+        assert_eq!(
+            humane(Op::Install, Some("Calculator"), &failed).heading,
+            "Android Couldn’t Start"
+        );
+        let e = anyhow::anyhow!("x");
+        assert_eq!(
+            humane(Op::Stop, Some("OpenHarmony"), &e).heading,
+            "Couldn’t Stop OpenHarmony"
+        );
     }
 }

@@ -51,7 +51,7 @@ impl Page {
         if self.content.first_child().is_none() {
             self.content.append(
                 &adw::StatusPage::builder()
-                    .title("Loading App Settings…")
+                    .title("Loading…")
                     .child(&adw::Spinner::new())
                     .vexpand(true)
                     .build(),
@@ -88,7 +88,6 @@ impl Page {
                     state.content.append(
                         &adw::StatusPage::builder()
                             .title("App Settings Unavailable")
-                            .description("Refresh to read the current settings from Android.")
                             .child(&retry)
                             .vexpand(true)
                             .build(),
@@ -141,27 +140,15 @@ impl Page {
             row.add_suffix(&gtk::Label::new(Some(&glib::format_size(bytes))));
             storage.add(&row);
         }
-        self.action(
-            &storage,
-            "Clear Cache",
-            "Remove temporary files",
-            "clear-cache",
-            false,
-        );
-        self.action(
-            &storage,
-            "Clear Data…",
-            "Delete this app’s settings, accounts and files",
-            "clear-data",
-            true,
-        );
+        self.action(&storage, "Clear Cache", "clear-cache", false);
+        self.action(&storage, "Clear Data…", "clear-data", true);
         prefs.add(&storage);
 
         let settings = adw::PreferencesGroup::builder().title("Behaviour").build();
         self.switch(
             &settings,
             "Escape as Back",
-            "Send Android’s Back button when you press Escape",
+            "",
             "escape-back",
             "",
             info.escape_back,
@@ -170,7 +157,7 @@ impl Page {
         self.switch(
             &settings,
             "Run in Background",
-            "Keep Android running when this app has no window",
+            "",
             "background",
             "",
             info.background,
@@ -179,18 +166,17 @@ impl Page {
         prefs.add(&settings);
 
         let permissions = adw::PreferencesGroup::builder()
-            .title("Runtime Permissions")
-            .description("Permissions marked as fixed are controlled by Android.")
+            .title("Permissions")
             .build();
         if info.permissions.is_empty() {
-            permissions.set_description(Some("This app requests no runtime permissions."));
+            permissions.set_description(Some("None"));
         }
-        for p in info.permissions {
-            let title = permissions::describe(&p.name).map_or_else(|| p.name.clone(), |p| p.title);
+        let titles = permissions::titles(info.permissions.iter().map(|p| p.name.as_str()));
+        for (p, (title, subtitle)) in info.permissions.iter().zip(titles) {
             self.switch(
                 &permissions,
                 &title,
-                &p.name,
+                &subtitle,
                 "permission",
                 &p.name,
                 p.granted,
@@ -200,13 +186,7 @@ impl Page {
         prefs.add(&permissions);
 
         let actions = adw::PreferencesGroup::new();
-        self.action(
-            &actions,
-            "Force Stop",
-            "Stop the app until it is opened again",
-            "force-stop",
-            false,
-        );
+        self.action(&actions, "Force Stop", "force-stop", false);
         let row = adw::ActionRow::builder()
             .title("Uninstall…")
             .activatable(true)
@@ -264,13 +244,11 @@ impl Page {
         self: &Rc<Self>,
         group: &adw::PreferencesGroup,
         title: &str,
-        subtitle: &str,
         action: &str,
         confirm: bool,
     ) {
         let row = adw::ActionRow::builder()
             .title(title)
-            .subtitle(subtitle)
             .activatable(true)
             .build();
         if confirm {
@@ -278,17 +256,26 @@ impl Page {
         }
         let (s, action) = (Rc::downgrade(self), action.to_string());
         row.connect_activated(move |_| {
-            let Some(s) = s.upgrade() else { return; };
+            let Some(s) = s.upgrade() else {
+                return;
+            };
             let action = action.clone();
             glib::spawn_future_local(async move {
                 if confirm {
-                    let d = adw::AlertDialog::new(Some(&format!("Clear {}’s Data?", s.app.name)), Some("All settings, accounts and files stored by this app will be permanently deleted."));
+                    let d = adw::AlertDialog::new(
+                        Some(&format!("Clear {}’s Data?", s.app.name)),
+                        Some("Its settings, accounts and files will be permanently deleted."),
+                    );
                     d.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear Data")]);
                     d.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
                     d.set_default_response(Some("cancel"));
                     d.set_close_response("cancel");
-                    let Some(window) = s.window.upgrade() else { return; };
-                    if d.choose_future(Some(&window.win)).await != "clear" { return; }
+                    let Some(window) = s.window.upgrade() else {
+                        return;
+                    };
+                    if d.choose_future(Some(&window.win)).await != "clear" {
+                        return;
+                    }
                 }
                 s.load(Command::new(&s.app.package, &action));
             });
