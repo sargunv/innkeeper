@@ -1,14 +1,15 @@
 # Tests
 
-What each tier tests is in [AGENTS.md](../AGENTS.md); move a variant down to a
-cheaper tier before removing it from e2e, keeping every bug regression.
+[AGENTS.md](../AGENTS.md) says what each tier tests. Before removing a variant
+from e2e, move it to a cheaper tier. Keep every bug regression test.
 
-- `mise run test`: Rust, Kotlin protocol/input, HAL host tests, supervisor,
-  image scripts and harness units. No Android session or APK corpus needed.
-- `mise run test:e2e -- [group...]`: one fresh named session on an isolated
-  desktop. No arguments runs five groups: `boot` (host safety, HOME and
+- `mise run test` runs the Rust tests, the Kotlin protocol and input tests, the
+  HAL host tests, the supervisor tests, the image script tests and the harness
+  unit tests. It needs no Android session or APK corpus.
+- `mise run test:e2e -- [group...]` runs one fresh named session on an isolated
+  desktop. Without arguments it runs five groups: `boot` (host safety, HOME and
   storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
-  Build and prepare first:
+  Build and prepare the image first:
 
   ```sh
   mise run build
@@ -16,29 +17,34 @@ cheaper tier before removing it from e2e, keeping every bug regression.
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
-- `mise run test:e2e -- ohos`: makes a fresh OpenHarmony profile
-  ([ohos](../ohos/README.md)), fetching its image first, and starts it on the
-  private desktop until SceneBoard is ready and its window shows; it also runs
-  selftest. It is a profile of its own (`<profile>-ohos`), so it runs alone.
+- `mise run test:e2e -- ohos` fetches the OpenHarmony image and creates a fresh
+  OpenHarmony profile ([ohos](../ohos/README.md)). It starts the profile on the
+  private desktop and waits until SceneBoard is ready and its window shows. It
+  also runs selftest. This group uses its own profile, `<profile>-ohos`, so it
+  runs alone.
 
-The runner owns a private desktop
+The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
-portals and notifications, and stops and resets its profile on exit, also on
-failure.
+portals and notifications. On exit, including on failure, it stops and resets
+its profile.
 
-Local e2e has a 55 s deadline plus at most 4 s cleanup, and groups wait for
-observations, never fixed delays. Audio runs after the window checks, since
-AudioRecord needs a visible activity. Setup waits for user 0's
-`RUNNING_UNLOCKED` before installing probes: boot completion can precede
-credential-encrypted app-data preparation. CI runs headless Mutter with llvmpipe
+Local e2e has a 55 s deadline plus at most 4 s for cleanup. Groups wait for
+observations instead of fixed delays. Audio runs after the window checks because
+AudioRecord needs a visible activity. Boot completion can come before Android
+prepares credential-encrypted app data, so setup waits for user 0 to reach
+`RUNNING_UNLOCKED` before it installs the probes.
+
+CI runs headless Mutter with llvmpipe
 (`INNKEEPER_TEST_COMPOSITOR=mutter LIBGL_ALWAYS_SOFTWARE=1`) and a 180 s
-deadline (`INNKEEPER_E2E_DEADLINE`); observation and group limits scale with it.
-Logs, captures and phase timings land in `out/test/e2e/<profile>/` and desktop
-logs in `out/test/nested/<profile>/`; CI uploads both as `checks-logs`. The
-session runs without `INNKEEPER_TEST`, as a user's would: the nested desktop's
-fake portals and notifications (`tests/e2e/desktop.py`) stand in for the real
-desktop.
+deadline (`INNKEEPER_E2E_DEADLINE`). Observation and group time limits scale
+with the deadline.
 
-- `mise run test:bionic`: manual Android-side HAL diagnostics.
-- `mise run test:compat -- --only <package>`: manual app troubleshooting; see
-  [compat/README.md](compat/README.md). It refuses to run the whole corpus.
+Logs, captures and phase timings go to `out/test/e2e/<profile>/`. Desktop logs
+go to `out/test/nested/<profile>/`. CI uploads both as `checks-logs`. The
+session runs without `INNKEEPER_TEST`, like a user's session. The nested
+desktop's fake portals and notifications (`tests/e2e/desktop.py`) stand in for
+the real desktop.
+
+- `mise run test:bionic` runs manual Android-side HAL diagnostics.
+- `mise run test:compat -- --only <package>` is for manual app troubleshooting.
+  See [compat/README.md](compat/README.md). It refuses to run the whole corpus.

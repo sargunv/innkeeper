@@ -150,7 +150,7 @@ impl System {
     }
 
     /// The displays it can show as. OpenHarmony composes every window into
-    /// one screen (ohos/README.md, "One window, not one per app"), so it is a
+    /// one screen (ohos/README.md, "One window for all apps"), so it is a
     /// phone; a tablet's landscape layout is untested there.
     pub fn displays(self) -> &'static [Display] {
         match self {
