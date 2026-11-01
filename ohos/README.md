@@ -67,11 +67,13 @@ To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
-([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A click
-on the nested desktop's seat then opens Settings, and MMI's cursor must be on
-the panel pixel under the seat's pointer. A wheel detent scrolls Settings' list.
-OH's input injector then scrolls Settings and goes home, and render_service must
-not have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
+([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. Session1
+must report the session booted only once `bootevent.boot.completed` is set, and
+`bm dump` must show Innkeeper System as a kept-alive system app. A click on the
+nested desktop's seat then opens Settings, and MMI's cursor must be on the panel
+pixel under the seat's pointer. A wheel detent scrolls Settings' list. OH's
+input injector then scrolls Settings and goes home, and render_service must not
+have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
 reaches MMI. A file written to `/storage/Users/currentUser/Download` lands in
 the profile's data directory. The probe HAP, signed for the profile's UDID, then
 installs and shows in `innkeeper list`, and `innkeeper run` puts its window on

@@ -465,11 +465,22 @@ else
   export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
   mod=$(pactl load-module module-null-sink sink_name="$INNKEEPER_AUDIO_SINK" rate=48000 channels=2)
   trap 'stop_session; pactl unload-module "$mod"' EXIT
+  # shellcheck disable=SC2329 # invoked through until_ok
+  session_state() {
+    gdbus call --session --dest "dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}" \
+      --object-path /dev/sargunv/Innkeeper/Session --method dev.sargunv.Innkeeper.Session1.State >"$T/session-state.txt"
+  }
+  # shellcheck disable=SC2329 # invoked from the functions below
+  boot_completed() { s /system/bin/param get bootevent.boot.completed | grep -q '^true'; }
   # shellcheck disable=SC2329 # invoked through timed
   ohos_boot() {
     "$S" start >/dev/null
     # The exec relay starts with OpenHarmony's post-fs-data.
     until s /system/bin/sh -c : 2>/dev/null; do sleep 0.1; done
+    # Before boot completes, Session1 must not report a booted session.
+    ! boot_completed || return
+    until_ok session_state || return
+    file_has "$T/session-state.txt" '^\(false,' || return
     # The caller tests this function's status, which turns off errexit here.
     s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1 || return
     "$S" selftest >>"$T/ohos.txt" || return
@@ -483,6 +494,23 @@ else
     exit 1
   fi
   echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
+  # Innkeeper System (ohos/system-app) is a preinstalled system app that is
+  # kept alive, and it reports boot completion to Session1.
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_system_app() {
+    session_booted() { session_state && file_has "$T/session-state.txt" '^\(true,'; }
+    until_ok session_booted || return
+    boot_completed || return
+    s /system/bin/bm dump -n dev.sargunv.innkeeper.system >"$T/system-app.txt" || return
+    file_has "$T/system-app.txt" '"isSystemApp": true' &&
+      file_has "$T/system-app.txt" '"isKeepAlive": true'
+  }
+  if ! timed ohos-system-app ohos_system_app; then
+    cat "$T/session-state.txt" >&2
+    grep -E '"(isSystemApp|isKeepAlive)"' "$T/system-app.txt" >&2 || true
+    exit 1
+  fi
+  echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, and Innkeeper System runs as a kept-alive system app"
   # Each animation from here on draws in render_service, which must not
   # restart.
   ohos_rs=$(s /system/bin/pidof render_service)

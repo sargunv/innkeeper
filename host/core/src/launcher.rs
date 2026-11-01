@@ -228,13 +228,14 @@ impl Session {
         self.booted_as(self.system())
     }
 
-    /// Whether the guest has booted. Android sets boot_completed, and
-    /// OpenHarmony loads SceneBoard, its home screen.
+    /// Whether the guest has booted. Android sets boot_completed. OpenHarmony
+    /// sets bootevent.boot.completed after SceneBoard, its home screen, has
+    /// loaded, and the system app reports the same event to the manager.
     fn booted_as(&self, system: System) -> bool {
         match system {
             System::Android => self.getprop("sys.boot_completed") == "1",
             System::Ohos => self
-                .exec(15, &["param", "get", "bootevent.launcher.ready"])
+                .exec(15, &["param", "get", "bootevent.boot.completed"])
                 .is_ok_and(|o| o.ok() && o.text().trim() == "true"),
         }
     }
