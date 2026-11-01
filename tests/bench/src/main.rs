@@ -261,7 +261,8 @@ fn collect(name: &str, out: &Path, seconds: u64) -> Result<Value> {
                 },
                 10,
             )?;
-            // Wait for the *changed* solid frame, not a transition or repaint.
+            // Wait for the changed solid frame. A transition or a repaint
+            // doesn't count.
             for _ in 0..10 {
                 let before = solid_frame(&bridge()).context("missing initial colour")?;
                 command(

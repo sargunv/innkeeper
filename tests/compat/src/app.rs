@@ -1,5 +1,5 @@
-//! One app through the harness: install, launch, first frame, interactions,
-//! logs, uninstall.
+//! Runs one app through the harness. It installs and launches the app, checks
+//! the first frame, runs interactions, collects logs and uninstalls the app.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,8 @@ pub enum Status {
     Works,
     Partly,
     Broken,
-    /// The harness or session failed, not the app; not a result.
+    /// The harness or the session failed, so the run says nothing about the
+    /// app.
     Error,
 }
 
@@ -63,12 +64,13 @@ pub struct AppResult {
 
 const TMP_APK: &str = "/data/local/tmp/compat.apk";
 const UI_XML: &str = "/data/local/tmp/compat-ui.xml";
-/// How long one `uiautomator dump` may take (it waits for the UI to go idle).
+/// How long one `uiautomator dump` may take. The dump waits for the UI to go
+/// idle.
 const UI_DUMP_SECS: u64 = 150;
 /// Writes a touch gesture as an input stream (runs inside the session).
 const GESTURE_SH: &str = include_str!("../android/gesture.sh");
-/// The probes APK, copied in for its input harness (app_process loads it from
-/// there; it isn't installed).
+/// The probes APK, copied in for its input harness. app_process loads it from
+/// there, and it isn't installed.
 const PROBES_APK: &str = "/data/local/tmp/innkeeper-probes.apk";
 
 pub struct Run<'a> {
@@ -96,8 +98,8 @@ struct Win {
 const REF_W: i32 = 1280;
 const REF_H: i32 = 800;
 
-/// `launched display=N package=P size=WxH ...` from the window manager.
-/// A window manager reply `launched display=N ... size=WxH`.
+/// Parses the window manager's reply `launched display=N package=P size=WxH
+/// ...` into the display and size.
 fn parse_launched(reply: &str) -> Option<(i32, i32, i32)> {
     let data = reply.strip_prefix("launched ")?;
     let field = |k: &str| {
@@ -133,8 +135,9 @@ fn parse_list_size(text: &str, display: i32) -> Option<(i32, i32)> {
     Some((w.parse().ok()?, h.parse().ok()?))
 }
 
-/// Keep the launch window while it exists; follow an unambiguous replacement
-/// after a startup trampoline finishes its task (e.g. Thunderbird onboarding).
+/// Keeps the launch window while it exists. After a startup trampoline
+/// finishes its task, as Thunderbird's onboarding does, follows an
+/// unambiguous replacement.
 fn app_display(text: &str, pkg: &str, original: i32) -> Option<i32> {
     let key = format!("package={pkg} ");
     let displays: Vec<i32> = text
@@ -457,10 +460,10 @@ impl<'a> Run<'a> {
         }
         self.check("install", true, "");
 
-        // Launcher activity; TV apps may only have a leanback one.
+        // Find the launcher activity. TV apps may have only a leanback one.
         let mut component = None;
-        // Right after an install (or an Android restart) the package may not
-        // resolve yet: retry a few times.
+        // Right after an install or an Android restart, the package may not
+        // resolve yet, so retry a few times.
         let cats = [
             "android.intent.category.LAUNCHER",
             "android.intent.category.LEANBACK_LAUNCHER",
@@ -526,8 +529,8 @@ impl<'a> Run<'a> {
 
         self.refresh_window();
         // Platform compatibility warnings ("built for an older version of
-        // Android") sit over a working app; note them and dismiss them. The
-        // window manager shows the first in the app's window
+        // Android") sit over a working app. Note them and dismiss them. The
+        // window manager shows the first one in the app's window
         // (AppWarningActivity).
         let mut focus = self.focus();
         // The same goes for the system's "let app always run in the
@@ -557,8 +560,8 @@ impl<'a> Run<'a> {
         let png = self.dir.join("first.png");
         match self.screencap(&png) {
             Ok(st) if st.blank() && self.secure_window() => {
-                // FLAG_SECURE: SurfaceFlinger leaves the app out of
-                // screenshots (the display itself still shows it). Judge the
+                // With FLAG_SECURE, SurfaceFlinger leaves the app out of
+                // screenshots, though the display still shows it. Judge the
                 // first screen by its UI tree instead.
                 let nodes = self.ui_nodes().unwrap_or_default();
                 let n = nodes.len();
@@ -605,7 +608,7 @@ impl<'a> Run<'a> {
         }
 
         self.refresh_window();
-        // Per-app script, from a fresh first screen.
+        // Run the per-app script from a fresh first screen.
         let script = self.app.script.clone();
         if !script.is_empty() {
             let res = self.script(&script);
@@ -779,17 +782,17 @@ impl<'a> Run<'a> {
                     }
                 }
                 "wait" => sleep(Duration::from_secs_f64(arg.parse().unwrap_or(1.0))),
-                // Text the host bridge logged since the script started, e.g. a
-                // link a test session only logs instead of opening
-                // (the `handoff: ... not opened (test session)` line,
-                // host/bridge/src/system/mod.rs).
+                // Text that the host bridge logged since the script started.
+                // For example, a test session logs a link instead of opening
+                // it, in the `handoff: ... not opened (test session)` line
+                // from host/bridge/src/system/mod.rs.
                 "bridgelog" => {
                     let log = self.s.bridge_log(log_from);
                     if !log.contains(arg) {
                         return Err(format!("{step}: not in the bridge log"));
                     }
                 }
-                // A shell command in the session; fails on a non-zero exit.
+                // A shell command in the session. It fails on a non-zero exit.
                 "sh" => {
                     let o = self.s.sh(60, arg);
                     self.save_append("script-sh.txt", &format!("$ {arg}\n{}\n", o.text));
@@ -812,14 +815,14 @@ impl<'a> Run<'a> {
                     );
                     sleep(Duration::from_secs(1));
                 }
-                // pinch|pan|doubletap X Y, as touch through Innkeeper System's
-                // translator and injector (the probes' input harness;
-                // multi-touch, which `input` can't do).
+                // pinch|pan|doubletap X Y, sent as touch through Innkeeper
+                // System's translator and injector in the probes' input
+                // harness. This gives multi-touch, which `input` can't do.
                 "gesture" => {
                     self.s
                         .push_fixed(&self.s.probes, PROBES_APK)
                         .map_err(|e| format!("{step}: {e:#}"))?;
-                    // Scaled to the app window's pixels, on its display.
+                    // Scale to the app window's pixels on its display.
                     let mut a: Vec<String> = arg.split_whitespace().map(str::to_string).collect();
                     if let (Some(w), 3) = (&self.win, a.len()) {
                         let x: i32 = a[1].parse().unwrap_or(0);
@@ -844,7 +847,7 @@ impl<'a> Run<'a> {
                     }
                     sleep(Duration::from_millis(1500));
                 }
-                // Screenshot that must not be blank; "changed" must also
+                // A screenshot that must not be blank. "changed" must also
                 // differ from the previous script screenshot.
                 "shot" | "changed" => {
                     let png = self.dir.join(format!("script-{arg}.png"));
@@ -870,8 +873,8 @@ impl<'a> Run<'a> {
                     self.input(&["keyevent", arg]);
                     sleep(Duration::from_millis(700));
                 }
-                // "try" taps like "tap" but skips a missing node (optional
-                // onboarding pages, tours, rating prompts).
+                // "try" taps like "tap" but skips a missing node, such as an
+                // optional onboarding page, tour or rating prompt.
                 "tap" | "try" => {
                     let nodes = self.ui_nodes()?;
                     let Some(n) = nodes.iter().find(|n| n.text == arg || n.desc == arg) else {
@@ -917,12 +920,13 @@ impl<'a> Run<'a> {
 
     fn ui_nodes(&self) -> Result<Vec<Node>, String> {
         // The dump waits for the UI to go idle, which busy apps rarely do on
-        // the first try. A window's display needs `--windows`: the plain dump
-        // clips every node to display 0's size.
+        // the first try. A window's display needs `--windows`, because the
+        // plain dump clips every node to display 0's size.
         let flag = if self.win.is_some() { "--windows " } else { "" };
         let mut last = String::new();
-        // Under CPU load (other sessions running) a dump can take well over a
-        // minute; give it 150 s, and four tries with a pause between them.
+        // Under CPU load, such as other sessions running, a dump can take
+        // well over a minute. Give it 150 s, and four tries with a pause
+        // between them.
         for attempt in 0..4 {
             if attempt > 0 {
                 sleep(Duration::from_secs(3));
@@ -952,8 +956,8 @@ impl<'a> Run<'a> {
         Err(format!("uiautomator dump failed: {last}"))
     }
 
-    /// Follow a replacement startup task, then re-read the window size after
-    /// the compositor reports its real scale.
+    /// Follows a replacement startup task, then re-reads the window size
+    /// after the compositor reports its real scale.
     fn refresh_window(&mut self) {
         let Some(display) = self.win.as_ref().map(|w| w.display) else {
             return;
@@ -1044,7 +1048,7 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Bounded logs and state for triage.
+    /// Collects bounded logs and state for triage.
     fn collect(&self) {
         let s = self.s;
         let logs = [

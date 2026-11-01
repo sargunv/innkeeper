@@ -1,4 +1,5 @@
-//! First-frame check: is a `screencap -p` PNG blank or uniform?
+//! The first-frame check, which decides whether a `screencap -p` PNG is blank
+//! or uniform.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -16,7 +17,8 @@ pub struct FrameStats {
 }
 
 impl FrameStats {
-    /// Nothing drawn: one colour covers (nearly) the whole app area.
+    /// Whether nothing was drawn, meaning one colour covers nearly the whole
+    /// app area.
     pub fn blank(&self) -> bool {
         self.dominant > 0.995 || self.colours <= 2
     }
@@ -31,7 +33,7 @@ impl FrameStats {
     }
 }
 
-/// Rows at the top that belong to the status bar, not the app.
+/// Rows at the top that belong to the status bar.
 const STATUS_BAR: u32 = 40;
 
 pub fn analyze(path: &Path) -> Result<FrameStats> {
