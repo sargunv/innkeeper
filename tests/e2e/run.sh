@@ -623,7 +623,7 @@ else
     }
     local udid probes=$repo/out/test/probes
     udid=$("$cli" profile list | awk -v p="$INNKEEPER_PROFILE" '$1 == p && $5 == "udid" { print $6 }')
-    "$repo/ohos/probe/sign.sh" "$probes/ohos-sign" dev.sargunv.innkeeper.probes "$udid" \
+    "$repo/ohos/sign.sh" "$probes/ohos-sign" dev.sargunv.innkeeper.probes "$udid" \
       "$probes/InnkeeperProbes.hap" "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
     "$cli" install "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
