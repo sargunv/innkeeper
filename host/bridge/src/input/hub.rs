@@ -396,9 +396,11 @@ impl Hub {
     /// Sends one input line to every input connection, and the lines of the
     /// bridge's own windows to the broker's devices. The line goes out first,
     /// so a guest's input method has a key's text before the guest reads the
-    /// key.
+    /// key. A key line for an own window carries the code that the guest
+    /// reads ([`super::direct`]).
     pub fn input(&self, line: &str) {
-        let out = self.direct.lock().unwrap().line(line);
+        let (line, out) = self.direct.lock().unwrap().input(line);
+        let line = &*line;
         self.clients
             .broadcast(ty::INPUT, &event::input(line), &[], None);
         self.to_evdev(out);

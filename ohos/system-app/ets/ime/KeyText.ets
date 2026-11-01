@@ -2,9 +2,9 @@
 // ohos/system-app/tests runs it under Node.
 //
 // OpenHarmony maps the bridge's evdev keys with its own US keymap. Each key
-// also reaches the IME as a bridge `key` line that carries what the key types
-// under the host's layout, including composed text (host/bridge/src/input/
-// proto.rs). The bridge sends the line before the key, so the line arrives
+// also reaches the IME as a bridge `key` line that carries the key's evdev
+// code and what the key types under the host's layout, including composed text
+// (host/bridge/src/input/proto.rs and direct.rs). The bridge sends the line before the key, so the line arrives
 // first. When the key event reaches the IME, the IME consumes a key that types
 // text and commits the host's text instead. Android's IME does the same in
 // HostImeService.onKeyDown. Keys reach the IME before the editor and in order,

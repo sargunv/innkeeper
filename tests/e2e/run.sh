@@ -722,11 +722,21 @@ else
       echo "the text field holds: ${field#*|}" >&2
       return 1
     }
+    # Shortcuts follow the layout. Ctrl with AZERTY's A key selects all, and
+    # Backspace deletes the selection. OpenHarmony's own keymap would make the
+    # chord Ctrl+Q and leave "a".
+    printf '%s\n' key:29,1 key:16,1 key:16,0 key:29,0 key:14,1 key:14,0 |
+      /usr/bin/python3 "$here/seat.py" --stdin
+    cleared() { probe_field && [[ -z ${field#*|} ]]; }
+    until_ok cleared || {
+      echo "the text field holds: ${field#*|}" >&2
+      return 1
+    }
   }
   if ! timed ohos-text ohos_text; then
     exit 1
   fi
-  echo "ok   the desktop's keyboard types into the probe's text field in the desktop's layout"
+  echo "ok   the desktop's keyboard types into the probe's text field in the desktop's layout, and Ctrl+A follows the layout"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
