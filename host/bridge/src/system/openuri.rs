@@ -1,19 +1,19 @@
-//! The checks on what Android hands the desktop (HANDOFF, [`super::handoff`]):
-//! a URI must be an absolute external one in plain ASCII, at most
-//! [`MAX_URI`] bytes, and a connection gets at most [`RATE`] handoffs per
-//! [`RATE_WINDOW`].
+//! Checks on what Android hands the desktop through HANDOFF
+//! ([`super::handoff`]). A URI must be an absolute external URI in plain
+//! ASCII and at most [`MAX_URI`] bytes long. A connection gets at most
+//! [`RATE`] handoffs per [`RATE_WINDOW`].
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub const MAX_URI: usize = 8192;
-/// At most this many opens per connection in any [`RATE_WINDOW`].
+/// At most this many handoffs per connection in any [`RATE_WINDOW`].
 pub const RATE: usize = 5;
 pub const RATE_WINDOW: Duration = Duration::from_secs(10);
 
-/// Checks that `u` is an external URI (http(s) must have a host), in printable
-/// ASCII without spaces, quotes or backslashes (Android sends it
-/// percent-encoded; IRIs are converted on that side).
+/// Checks that `u` is an external URI in printable ASCII without spaces,
+/// quotes or backslashes. An http or https URI must have a host. Android
+/// sends URIs percent-encoded and converts IRIs before sending.
 pub fn validate(u: &str) -> Result<(), &'static str> {
     if u.is_empty() || u.len() > MAX_URI {
         return Err("length");

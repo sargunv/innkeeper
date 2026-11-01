@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
 pub(super) type Presentation = wp_presentation::WpPresentation;
 
-// A callback-only commit can supersede the previous content commit's feedback
-// without replacing its pixels. Observe that commit separately for benchmarks.
+// A commit with only a frame callback can supersede the previous content
+// commit's feedback without replacing its pixels. A probe observes such a
+// commit separately for benchmarks.
 pub(super) struct Probe {
     pub stamp: u64,
     pub window: u32,
@@ -54,8 +55,9 @@ struct Sample {
     period: u32,
 }
 
-// Membership describes where a surface is mapped. Timing is the one output
-// currently presenting it; an enter on another output does not replace it.
+// `outputs` lists the outputs where the window's surface is mapped. `timing`
+// follows the output that currently presents it. An enter on another output
+// does not replace the timing output.
 struct WindowClock {
     outputs: BTreeMap<u32, u32>,
     timing: OutputClock,
@@ -92,8 +94,9 @@ pub(super) struct Clock {
 }
 
 impl Clock {
-    // The association boundary takes the complete visible output membership.
-    // Empty means hidden/unmapped. A static visible source stays selected.
+    // Takes the window's complete set of visible outputs. An empty set means
+    // the window is hidden or unmapped. A visible source window stays selected
+    // even when its content is static.
     fn window(
         &mut self,
         window: u32,
@@ -186,13 +189,14 @@ impl Clock {
         {
             return None;
         }
-        // Nested/virtual compositors may omit sync_output. Otherwise the
-        // compositor chooses among the mapped outputs, including while spanning.
+        // Nested and virtual compositors may omit sync_output. Otherwise the
+        // compositor picks one of the mapped outputs, also when the window
+        // spans several.
         let output = if output != 0 {
             output
         } else if refresh != 0 && t.mode_period.abs_diff(refresh) > 1 {
-            // A reported fixed refresh can distinguish nested outputs even
-            // when sync_output is absent (allow one ns of rounding).
+            // Without sync_output, a reported fixed refresh can still tell
+            // nested outputs apart. The match allows one ns of rounding.
             w.outputs
                 .iter()
                 .find(|(_, period)| period.abs_diff(refresh) <= 1)
@@ -227,8 +231,9 @@ impl State {
         let _ = self.events.try_send(ty::VSYNC, &w.into_vec(), &[]);
     }
 
-    /// The single window-state integration point: reconcile complete output
-    /// membership, rather than treating each enter/leave as a source change.
+    /// Reconciles the window's complete output membership with the
+    /// presentation clock. Window-state changes all go through here, so a
+    /// single enter or leave is not treated as a source change.
     pub(super) fn window_timing(&mut self, window: u32) {
         let outputs: Vec<_> = self
             .visible_outputs(window)
@@ -343,7 +348,7 @@ mod tests {
             c.window(1, &[(10, p)], Some(1), t),
             Some(Sample { ns: t, period: p })
         );
-        // The first commit can precede wl_surface.enter; sync_output still
+        // The first commit can precede wl_surface.enter. sync_output still
         // identifies the output of that initial feedback.
         assert_eq!(c.presented(1, None, 99, t + p as u64, p), None);
         assert_eq!(
@@ -437,7 +442,8 @@ mod tests {
                 period: 10_000_000
             })
         );
-        // Same output, new mode: feedback queued before the mode change is stale.
+        // On the same output with a new mode, feedback queued before the mode
+        // change is stale.
         assert_eq!(c.presented(3, old, 10, 600, 8_333_333), None);
         assert!(
             c.presented(3, c.generation(3), 10, 700, 10_000_000)
@@ -463,7 +469,7 @@ mod tests {
         let t = 1_000_000_000;
         c.window(1, &[(a, pa)], Some(1), t);
         let on_a = c.generation(1);
-        // Enter A, enter B, leave B: A never stopped being mapped.
+        // After enter A, enter B and leave B, A is still mapped.
         assert_eq!(c.window(1, &[(a, pa), (b, pb)], Some(1), t + 1), None);
         assert_eq!(c.generation(1), on_a);
         assert_eq!(
@@ -494,14 +500,14 @@ mod tests {
         let on_b = c.generation(1);
         assert_ne!(on_a, on_b);
         assert!(c.presented(1, on_b, a, t + 45_000_000, pa).is_some());
-        // A nested compositor can omit sync_output; the distinct refresh
-        // still identifies B, without losing A's membership.
+        // A nested compositor can omit sync_output. The distinct refresh still
+        // identifies B, and A stays a member.
         assert!(
             c.presented(1, c.generation(1), 0, t + 46_000_000, pb)
                 .is_some()
         );
         let on_b = c.generation(1);
-        // Leaving the selected B picks the remaining A, not the timer.
+        // Leaving the selected B picks the remaining A instead of the timer.
         assert_eq!(
             c.window(1, &[(a, pa)], Some(1), t + 50_000_000),
             Some(Sample {

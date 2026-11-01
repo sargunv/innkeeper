@@ -1,8 +1,8 @@
-//! What the input and display services share: the window manager's queued
-//! window requests, which display connection shows each window, and the
-//! input connections that get the seat's lines.
+//! State shared by the input and display services. It holds the window
+//! manager's queued window requests, the display connection that shows each
+//! window, and the input connections that receive the seat's lines.
 //!
-//! The window manager names windows by Android display id; the composer
+//! The window manager names windows by Android display id. The composer
 //! names its HWC displays by its own ids. A request matches the first HWC
 //! display of its size that the composer adds after it.
 
@@ -24,7 +24,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Where the bridge's own window ids start (DISPLAY_WINDOW).
 const OWN_WINDOWS: u32 = 1 << 31;
 
-/// Told where the seat's keyboard focus is: a window, or none of ours.
+/// Receives the window that has the seat's keyboard focus, or None when none
+/// of our windows has it.
 pub type FocusWatch = Box<dyn Fn(Option<u32>) + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -46,7 +47,8 @@ pub struct Hub {
     pub pointer_positions: Mutex<HashMap<u32, PointerPosition>>,
 }
 
-/// The appearance must travel with the request until HWC creates its toplevel.
+/// A queued window request and its appearance. The appearance travels with
+/// the request until the HWC display's toplevel exists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingWindow {
     pub request: WindowRequest,
@@ -59,7 +61,7 @@ struct State {
     queued: Vec<(PendingWindow, Instant)>,
     /// Window -> the display connection and HWC display showing it.
     shown: HashMap<u32, (u64, u32)>,
-    /// Display connections: their Wayland threads.
+    /// Each display connection's Wayland thread.
     displays: HashMap<u64, Sender<Cmd>>,
     next_display: u64,
     /// Windows the bridge names itself (DISPLAY_WINDOW), above any Android
@@ -95,8 +97,8 @@ impl Hub {
         self.clients.add(events)
     }
 
-    /// What a new connection needs: the newest `repeat_info` line. Locked
-    /// with [`Hub::repeat_info`], so a newer line can't go out first.
+    /// Sends a new connection the newest `repeat_info` line. It holds the
+    /// same lock as [`Hub::repeat_info`], so a newer line can't go out first.
     pub fn replay(&self, events: &Events) {
         let repeat = self.repeat.lock().unwrap();
         if let Some(l) = &*repeat {
@@ -108,7 +110,8 @@ impl Hub {
         self.clients.remove(key)
     }
 
-    /// Queues a request; one for a queued window replaces it.
+    /// Queues a request. A request for a window that is already queued
+    /// replaces the old one.
     pub fn request(&self, r: WindowRequest) -> Result<(), i32> {
         let mut s = self.state.lock().unwrap();
         if s.shown.contains_key(&r.window) {
@@ -146,7 +149,8 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
-    /// A fresh activation token using the source window and newest seat serial.
+    /// Requests a new activation token for the source window with the newest
+    /// seat serial.
     pub fn activation_token(&self, window: u32) -> Option<String> {
         let (tx, rx) = std::sync::mpsc::channel();
         {
@@ -187,7 +191,7 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
-    /// Applies Android's policy to this display's toplevel only.
+    /// Applies Android's window policy to this display's toplevel.
     pub fn window_policy(&self, policy: WindowPolicy) -> Result<(), i32> {
         let s = self.state.lock().unwrap();
         let (conn, _) = s.shown.get(&policy.window).ok_or(-ENOENT)?;
@@ -196,7 +200,8 @@ impl Hub {
             .map_err(|_| -EIO)
     }
 
-    /// Turns this display's toplevel to Android's rotation of its content.
+    /// Rotates this display's toplevel to match Android's rotation of its
+    /// content.
     pub fn window_rotation(&self, window: u32, rotation: u32) -> Result<(), i32> {
         let s = self.state.lock().unwrap();
         let (conn, _) = s.shown.get(&window).ok_or(-ENOENT)?;
@@ -230,8 +235,8 @@ impl Hub {
         }
     }
 
-    /// Goes to every display connection; the one whose seat has text-input
-    /// focus applies it.
+    /// Sends the request to every display connection. The connection whose
+    /// seat has text-input focus applies it.
     pub fn text_input(&self, req: ime::Req) {
         for d in self.state.lock().unwrap().displays.values() {
             let _ = d.send(Cmd::TextInput(req.clone()));
@@ -248,7 +253,7 @@ impl Hub {
         k
     }
 
-    /// The connection is gone, and with it its windows.
+    /// Removes a closed display connection and unmaps its windows.
     pub fn remove_display_connection(&self, conn: u64) {
         let gone: Vec<u32> = {
             let mut s = self.state.lock().unwrap();
@@ -274,7 +279,8 @@ impl Hub {
         s.next_own
     }
 
-    /// The request a new HWC display of this size answers, if any.
+    /// Takes the queued request that a new HWC display of this size answers,
+    /// if any.
     pub fn claim(&self, width: u32, height: u32) -> Option<PendingWindow> {
         let mut s = self.state.lock().unwrap();
         let now = Instant::now();
@@ -286,7 +292,8 @@ impl Hub {
         Some(s.queued.remove(i).0)
     }
 
-    /// `display` of connection `conn` now shows the window `r` asked for.
+    /// Records that `display` of connection `conn` shows the window that `r`
+    /// asked for.
     pub fn mapped(&self, conn: u64, display: u32, r: &WindowRequest) {
         self.state
             .lock()
@@ -332,8 +339,8 @@ impl Hub {
             .broadcast(ty::WINDOW_UNMAPPED, &body, &[], None);
     }
 
-    /// The keyboard's repeat rate (per second; 0: no repeat) and delay
-    /// (ms), now and for every later connection.
+    /// Sends the keyboard's repeat rate (per second, 0 for no repeat) and
+    /// delay (ms) now, and to every later connection.
     pub fn repeat_info(&self, rate: i32, delay: i32) {
         let l = format!("repeat_info {rate} {delay}");
         crate::info!("input: key {l}");
@@ -351,7 +358,7 @@ impl Hub {
         );
     }
 
-    /// One input line to every input connection.
+    /// Sends one input line to every input connection.
     pub fn input(&self, line: &str) {
         self.clients
             .broadcast(ty::INPUT, &event::input(line), &[], None);

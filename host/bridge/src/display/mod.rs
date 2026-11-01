@@ -1,9 +1,9 @@
-//! The display service (id 2): the composer's HWC virtual displays shown in
+//! The display service (id 2) shows the composer's HWC virtual displays in
 //! host windows. The wire spec is in [`proto`].
 //!
 //! Each composer connection gets its own host Wayland connection and thread
-//! ([`wl`]), whose seat feeds the input service; this connection thread only
-//! validates requests and forwards them.
+//! ([`wl`]), whose seat feeds the input service. The service connection's
+//! thread only validates requests and forwards them.
 
 pub mod proto;
 pub(crate) mod wl;
@@ -24,7 +24,7 @@ use proto::Request;
 use wl::Cmd;
 
 /// The xdg-foreign handle of the window showing Android display `window`, if
-/// the compositor exported it (for portal dialogs: `wayland:<handle>`).
+/// the compositor exported it. Portal dialogs take it as `wayland:<handle>`.
 pub fn foreign_handle(window: u32) -> Option<String> {
     wl::foreign_handles(window)
 }
@@ -81,8 +81,8 @@ impl DisplayService {
                 if let Err(e) = wl::run(conn, rx, events, seat_hub, shared) {
                     crate::warn!("display: {e:#}");
                 }
-                // Without its compositor connection the service is useless:
-                // drop the client, which reconnects and adds its displays
+                // The service can't work without its compositor connection.
+                // Dropping the client makes it reconnect and add its displays
                 // again.
                 ender.shutdown();
             })?;
@@ -116,7 +116,7 @@ impl DisplayService {
         self.show(display, pending)
     }
 
-    /// A display with a window of its own (DISPLAY_WINDOW).
+    /// Adds a display with a window of its own (DISPLAY_WINDOW).
     fn add_window(&mut self, display: u32, request: WindowRequest) -> Reply {
         if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
             return Reply::err(-EBUSY);
@@ -174,7 +174,8 @@ impl Service for DisplayService {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),
         };
-        // Only BUFFER_ADD (the dma-buf) and FRAME (an acquire fence) carry fds.
+        // BUFFER_ADD (the dma-buf), FRAME (an acquire fence) and CURSOR (the
+        // image memfd) may carry one fd. Other requests carry none.
         let max_fds = match req {
             Request::BufferAdd(_) | Request::Frame { .. } | Request::Cursor { .. } => 1,
             _ => 0,
@@ -262,7 +263,7 @@ impl Service for DisplayService {
                 let Some(fd) = fds.pop() else {
                     return Reply::err(-EINVAL);
                 };
-                // The compositor imports the dma-buf; a buffer that claims
+                // The compositor imports the dma-buf. A buffer that claims
                 // more bytes than the fd holds is refused here.
                 match fd_size(&fd) {
                     Some(n) if n >= b.bytes() => {}
@@ -283,8 +284,9 @@ impl Service for DisplayService {
                 damage,
             } => {
                 if self.buffers.get(&buffer) != Some(&display) {
-                    // A failed/removed import can still have a FRAME in flight.
-                    // A request error alone does not return its image lease.
+                    // A failed or removed import can still have a FRAME in
+                    // flight. The request error alone does not return the
+                    // frame's image lease, so RELEASE is sent as well.
                     if self
                         .events
                         .try_send(
@@ -298,7 +300,7 @@ impl Service for DisplayService {
                     }
                     return Reply::err(-ENOENT);
                 }
-                // An acquire fence, if any, is ignored: the composer only
+                // Any acquire fence is ignored, because the composer only
                 // sends frames it has finished writing.
                 drop(fds);
                 if crate::log::debug() {
@@ -357,7 +359,8 @@ mod tests {
             buffers: HashMap::from([(7, 100)]),
             label: "test".into(),
         };
-        // Composer invalidates the failed import on the service before re-add.
+        // The composer invalidates the failed import on the service before
+        // adding the buffer again.
         assert_eq!(
             service
                 .handle(proto::ty::BUFFER_REMOVE, &7u32.to_le_bytes(), vec![])

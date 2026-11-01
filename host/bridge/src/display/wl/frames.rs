@@ -45,8 +45,9 @@ impl Frames {
         Some(damage)
     }
 
-    // Used for wl_buffer.release, failed imports and display/buffer teardown.
-    // A failed BUFFER_ADD alone owes nothing; its subsequent FRAME is missing.
+    // Called on wl_buffer.release, failed imports and display or buffer
+    // teardown. A failed BUFFER_ADD by itself owes nothing. A later FRAME for
+    // it finds no buffer and is released as invalid.
     pub fn release(&mut self) -> usize {
         self.pending = None;
         self.busy = false;
@@ -68,15 +69,16 @@ mod tests {
         // Import failure releases the waiting FRAME exactly once.
         assert_eq!(failed.release(), 1);
         assert_eq!(failed.release(), 0);
-        // The allocation's old id may be submitted again before cache eviction.
-        // Both attempts must release, never consume the composer's two credits.
+        // The composer may submit the allocation's old id again before it
+        // evicts its cache. Both attempts must be released so they don't use
+        // up the composer's two credits.
         for _ in 0..2 {
             assert_eq!(
                 Frames::submit(None, false, true, [0; 4]),
                 Action::Release { invalid: true }
             );
         }
-        // Invalid RELEASE makes the producer re-import under a new id.
+        // An invalid RELEASE makes the producer re-import under a new id.
         let mut replacement = Frames::default();
         assert_eq!(
             Frames::submit(Some(&mut replacement), false, true, [1; 4]),

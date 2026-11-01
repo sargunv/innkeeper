@@ -1,5 +1,6 @@
-//! adb at a session's start: the properties that turn Android's adbd on, and
-//! telling the user's adb server ([`innkeeper_profile::adb`]).
+//! adb setup at session start. It writes the properties that turn on
+//! Android's adbd and tells the user's adb server about the profile. The
+//! shared adb code is in [`innkeeper_profile::adb`].
 
 use std::time::Duration;
 
@@ -9,8 +10,8 @@ pub use innkeeper_profile::adb::*;
 use crate::Paths;
 use crate::profile::Settings;
 
-/// The properties a boot gets for `settings`: adb authentication always, and
-/// adbd on its port when the profile has adb on.
+/// Returns the adb properties for `settings`. adb authentication is always
+/// on, and adbd listens on the profile's port when the profile has adb on.
 pub fn props(settings: &Settings) -> String {
     let mut s = String::from("ro.adb.secure=1\n");
     if settings.adb && settings.adb_port != 0 {
@@ -24,8 +25,8 @@ pub fn props(settings: &Settings) -> String {
     s
 }
 
-/// At start: the profile's adb properties, after giving adb a port and
-/// authorizing the user's key if it is on.
+/// Returns the profile's adb properties at start. When adb is on, it first
+/// assigns a port and authorizes the user's key.
 pub fn prepare(paths: &Paths) -> Result<String> {
     let mut settings = Settings::load(&paths.data)?;
     if settings.adb {
@@ -48,8 +49,8 @@ pub fn prepare(paths: &Paths) -> Result<String> {
     Ok(props(&settings))
 }
 
-/// After a start: tells the user's adb server about a profile with adb on, in
-/// the background, once adbd listens.
+/// If the profile has adb on, tells the user's adb server about it once adbd
+/// listens. This runs in a background thread.
 pub fn announce_at_start(paths: &Paths) {
     let Ok(s) = Settings::load(&paths.data) else {
         return;

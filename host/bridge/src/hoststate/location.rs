@@ -1,15 +1,15 @@
-//! Location through the XDG Location portal, which owns the desktop's
+//! Location through the XDG Location portal. The portal owns the desktop's
 //! consent dialog and reaches GeoClue under its own identity.
 //!
-//! xdg-desktop-portal drives one GeoClue client for all its Location
-//! sessions: a second session gets no initial fix, each session's thresholds
-//! overwrite the client's, and closing any session stops the client under
-//! all the others. So the bridge keeps one session ([`Hub`]) for every
-//! client that asked (in practice the system app's providers), opened at the
-//! most precise accuracy asked for, without thresholds, and closed when the
-//! last client stops.
+//! xdg-desktop-portal drives a single GeoClue client for all its Location
+//! sessions. A second session gets no initial fix, each session's thresholds
+//! overwrite the client's, and closing any session stops the client for all
+//! the others. The bridge therefore keeps a single session ([`Hub`]) for every
+//! client that asked, which in practice means the system app's providers. The
+//! session is opened at the most precise accuracy asked for, without
+//! thresholds, and closed when the last client stops.
 //!
-//! A denial (`Response` 1) holds for the bridge's lifetime: later starts get
+//! A denial (`Response` 1) holds for the bridge's lifetime. Later starts get
 //! `DENIED` at once, so Android's apps see location as off for the session
 //! while Android's own permission stays granted.
 
@@ -32,7 +32,7 @@ const PORTAL_SESSION: &str = "org.freedesktop.portal.Session";
 const ACCURACY_CITY: u32 = 2;
 const ACCURACY_EXACT: u32 = 5;
 /// xdg-desktop-portal's `NotAllowed` message when location is turned off on
-/// the desktop (GNOME Privacy > Location, or a lockdown).
+/// the desktop, in GNOME Privacy > Location or by a lockdown.
 const SERVICES_DISABLED: &str = "Location services disabled";
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
@@ -45,7 +45,7 @@ fn token(kind: &str) -> String {
     )
 }
 
-/// Every client that wants fixes, served by one desktop session.
+/// Every client that wants fixes, served by a single desktop session.
 pub struct Hub {
     inner: Mutex<Inner>,
 }
@@ -56,7 +56,7 @@ struct Inner {
     generation: u64,
     /// The running session's last fix, handed to clients that join it.
     last: Option<Fix>,
-    /// The user said no; never ask again in this bridge.
+    /// The user said no. The bridge doesn't ask again for its lifetime.
     denied: bool,
 }
 
@@ -106,8 +106,8 @@ impl Hub {
         })
     }
 
-    /// Adds (or updates) `client`. It is served by the running session if
-    /// that is precise enough, else by a new one that replaces it.
+    /// Adds or updates `client`. The running session serves it if that
+    /// session is precise enough. Otherwise a new session replaces it.
     pub fn join(self: &Arc<Self>, client: u64, events: Events, precise: bool) {
         let mut replaced = None;
         {
@@ -146,8 +146,8 @@ impl Hub {
                 }
             }
         }
-        // Closed after the swap, so its Close reaches the portal before the new
-        // session's Start does anything.
+        // The old session is closed after the swap so that its Close reaches
+        // the portal before the new session's Start does anything.
         if let Some(r) = replaced {
             r.close();
         }
@@ -204,9 +204,10 @@ impl Hub {
         }
     }
 
-    /// The session is gone: every member hears why and must start again.
-    /// The user's answer counts even if its session was replaced or closed
-    /// while the dialog was up: it then ends the current session too.
+    /// Called when the session is gone. Every member hears why and must
+    /// start again. The user's answer counts even if its session was replaced
+    /// or closed while the dialog was up. In that case it ends the current
+    /// session too.
     fn fail(&self, generation: u64, st: u8, why: &str) {
         let run = {
             let mut h = self.inner.lock().unwrap();
@@ -229,7 +230,7 @@ impl Hub {
         }
     }
 
-    /// The session's thread: opens a backend, then reads it until it ends
+    /// The session's thread. It opens a backend, then reads it until it ends
     /// or the hub moves on.
     fn run(self: Arc<Self>, generation: u64, precise: bool, opened: Arc<Mutex<Option<Opened>>>) {
         match Portal::open(precise) {
@@ -247,8 +248,8 @@ impl Hub {
         }
     }
 
-    /// Hands the opened backend to the run, unless the hub moved on
-    /// meanwhile (then it is closed here).
+    /// Hands the opened backend to the run. If the hub moved on meanwhile,
+    /// the backend is closed here instead.
     fn adopt(&self, generation: u64, slot: &Arc<Mutex<Option<Opened>>>, o: Opened) -> bool {
         let h = self.inner.lock().unwrap();
         if !h.run.as_ref().is_some_and(|r| r.generation == generation) {
@@ -270,13 +271,13 @@ struct Portal {
 }
 
 impl Portal {
-    /// Connects (a connection of its own, so closing it ends this thread),
-    /// creates a session; nothing the user sees.
+    /// Connects and creates a session. Nothing is shown to the user yet. The
+    /// connection is its own, so closing it ends this thread.
     fn open(precise: bool) -> Result<Portal, (u8, String)> {
         let failed = |e: zbus::Error| (classify(&e), e.to_string());
         let conn = Connection::session().map_err(failed)?;
         let proxy = Proxy::new(&conn, PORTAL, PORTAL_PATH, PORTAL_LOCATION).map_err(failed)?;
-        // Subscribed before any call, so neither the Response nor an early
+        // Subscribe before any call so that neither the Response nor an early
         // fix can be missed.
         let rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
@@ -285,8 +286,8 @@ impl Portal {
             .map(|b| b.build())
             .map_err(failed)?;
         let messages = MessageIterator::for_match_rule(rule, &conn, Some(64)).map_err(failed)?;
-        // No distance or time threshold: they would apply to the portal's
-        // one GeoClue client.
+        // No distance or time threshold is set, because it would apply to the
+        // portal's shared GeoClue client.
         let mut opts: HashMap<&str, Value> = HashMap::new();
         opts.insert("session_handle_token", Value::from(token("session")));
         opts.insert(
@@ -320,7 +321,8 @@ impl Portal {
             let p = Proxy::new(&self.conn, PORTAL, PORTAL_PATH, PORTAL_LOCATION)?;
             let mut opts: HashMap<&str, Value> = HashMap::new();
             opts.insert("handle_token", Value::from(self.request_token.as_str()));
-            // No parent window: the dialog names the bridge's app id.
+            // There is no parent window, so the dialog names the bridge's app
+            // id.
             let _: OwnedObjectPath = p.call("Start", &(&self.session, "", opts))?;
             Ok(())
         };
@@ -337,8 +339,8 @@ impl Portal {
                 Event::Response(1) => {
                     return hub.fail(generation, status::DENIED, "the user denied location");
                 }
-                // GNOME shows its dialog only for the focused app, and
-                // answers 2 at once otherwise, as when GeoClue fails.
+                // GNOME shows its dialog only for the focused app. Otherwise it
+                // answers 2 at once, as it does when GeoClue fails.
                 Event::Response(c) => {
                     return hub.fail(
                         generation,
@@ -408,7 +410,7 @@ enum Event {
     Other,
 }
 
-/// A Location portal dictionary: unknown speed and heading are -1,
+/// Parses a Location portal dictionary. Unknown speed and heading are -1,
 /// unknown altitude is -1 or -DBL_MAX, and `Timestamp` is `(seconds, µs)`.
 pub fn parse_fix(v: &HashMap<String, OwnedValue>) -> Option<Fix> {
     let num = |k: &str| {

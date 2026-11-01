@@ -1,8 +1,10 @@
-//! One thread per PCM stream: waits on the client's "data" eventfd, the
-//! output's own fd (PipeWire socket or a timer) and a control eventfd, moves
-//! PCM from the ring to the output, and signals the client's "space" pipe
-//! whenever it consumed frames. The client can't make either block us: data
-//! is read with RWF_NOWAIT, and only we hold the space pipe's write end.
+//! Each PCM stream has its own thread. The thread waits on the client's
+//! "data" eventfd, the output's fd (the PipeWire socket or a timer) and a
+//! control eventfd. It moves PCM between the ring and the output, and it
+//! signals the client's "space" pipe whenever frames were consumed. The
+//! client cannot use either of these two fds to block the thread. The data
+//! eventfd is read with RWF_NOWAIT, and only the bridge holds the space
+//! pipe's write end.
 
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
@@ -29,8 +31,8 @@ pub enum Ctl {
 }
 
 /// What the desktop mixer shows for a playback stream. `icon_name` is the
-/// desktop entry id (`dev.sargunv.innkeeper.<package>`, or the Flatpak form), the same
-/// name the app's `.desktop` file uses.
+/// app's desktop entry id, `<Flatpak app id>.<package>`, which is also the
+/// name of its `.desktop` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaybackApp {
     pub name: String,
@@ -43,18 +45,18 @@ pub struct PlaybackApp {
 /// app is playing.
 pub const DEFAULT_APP_NAME: &str = "Innkeeper";
 
-/// `application.id` and `application.icon_name` set on the Pulse client before
-/// a playback stream is opened. `SetClientName` does not set
-/// `application.process.binary`; that key exists on the stream only while an
-/// app is playing.
+/// The `application.id` and `application.icon_name` set on the Pulse client
+/// before a playback stream opens. `SetClientName` does not set
+/// `application.process.binary`, so that key exists on the stream only while
+/// an app is playing.
 pub const DEFAULT_APP_ID: &str = "dev.sargunv.innkeeper";
 pub const DEFAULT_APP_ICON: &str = "android";
 
-/// Pulse application properties for the mixer. `Some` is the playing app
-/// (`application.name` is the label; the other three are the desktop id).
-/// `None` writes the name, icon and id the Pulse client was opened with.
-/// `application.process.binary` is empty then: the open does not set it, and
-/// PipeWire drops a property a `Replace` sets to empty. An empty string on
+/// Pulse application properties for the mixer. For `Some`, `application.name`
+/// is the app's label and the other three keys hold its desktop id. `None`
+/// writes the name, icon and id the Pulse client was opened with. It sets
+/// `application.process.binary` to empty, because the open does not set that
+/// key and PipeWire drops a property that a `Replace` sets to empty. An empty
 /// `application.name` would blank the mixer, so that key gets the default.
 pub fn playback_app_props(app: Option<&PlaybackApp>) -> Vec<(&'static str, &str)> {
     match app {
@@ -76,9 +78,10 @@ pub fn playback_app_props(app: Option<&PlaybackApp>) -> Vec<(&'static str, &str)
 /// Moves PCM between a shared ring and the desktop, in either direction.
 pub trait StreamIo: Send {
     fn poll_fd(&self) -> BorrowedFd<'_>;
-    /// `poll_fd` is readable. Returns whether frames were consumed.
+    /// Called when `poll_fd` is readable. Returns whether frames were consumed.
     fn on_readable(&mut self, ring: &mut Ring) -> Result<bool>;
-    /// The client produced frames. Returns whether frames were consumed.
+    /// Called when the client signals the data eventfd. Returns whether frames
+    /// were consumed.
     fn on_data(&mut self, ring: &mut Ring) -> Result<bool>;
     fn control(&mut self, ring: &mut Ring, c: Ctl) -> Result<()>;
 }
@@ -107,8 +110,9 @@ pub fn usage_name_role(usage: u32) -> (&'static str, &'static str) {
     }
 }
 
-/// Consumes at the stream's nominal rate and plays nowhere (no PipeWire, or
-/// tests). Timing is exact: presented == consumed.
+/// An output that consumes frames at the stream's nominal rate and discards
+/// them. It is used when PipeWire is unavailable and in tests. The presented
+/// position it reports always equals the consumed position.
 pub struct NullOut {
     timer: OwnedFd,
     period: u64,
@@ -196,8 +200,8 @@ impl StreamHandle {
     }
 }
 
-/// Control messages only. Unlike [`StreamHandle`], dropping this leaves the
-/// stream thread running.
+/// Sends control messages to a stream thread. Unlike [`StreamHandle`],
+/// dropping this leaves the stream thread running.
 pub struct StreamSender {
     tx: Sender<Ctl>,
     wake: Arc<OwnedFd>,
@@ -221,8 +225,8 @@ impl Drop for StreamHandle {
     }
 }
 
-/// Starts a stream thread. `data` is the eventfd the client signals,
-/// `space` the write end of the pipe we signal.
+/// Starts a stream thread. `data` is the eventfd the client signals, and
+/// `space` is the write end of the pipe the bridge signals.
 pub fn spawn(
     name: String,
     ring: Ring,
@@ -254,16 +258,16 @@ pub fn spawn(
     })
 }
 
-/// Clears an eventfd without ever waiting, even if a peer sharing it
-/// cleared O_NONBLOCK (and drained it first).
+/// Clears an eventfd without waiting, even if a peer that shares it cleared
+/// O_NONBLOCK and drained it first.
 fn drain(fd: &OwnedFd) {
     let mut b = [0u8; 8];
     let mut io = [std::io::IoSliceMut::new(&mut b)];
     let _ = rustix::io::preadv2(fd, &mut io, u64::MAX, rustix::io::ReadWriteFlags::NOWAIT);
 }
 
-/// Makes the space pipe readable, unless it already is (a client that
-/// doesn't read keeps one token, not a backlog of stale wakeups).
+/// Makes the space pipe readable unless it already is. A client that does not
+/// read gets one pending byte instead of a backlog of stale wakeups.
 fn signal(space: &OwnedFd) {
     if rustix::io::ioctl_fionread(space).unwrap_or(0) == 0 {
         let _ = rustix::io::write(space, &[1]);
@@ -328,7 +332,7 @@ mod tests {
     use super::*;
 
     /// A client sharing the data eventfd can clear O_NONBLOCK and drain it
-    /// between our poll and our read; the read must not wait.
+    /// between our poll and our read. The read must not wait.
     #[test]
     fn drain_never_waits() {
         let fd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC).unwrap();
@@ -356,8 +360,8 @@ mod tests {
         assert_eq!(props[3].0, "application.process.binary");
         assert_eq!(props[2].1, props[1].1);
         assert_eq!(props[3].1, props[1].1);
-        // None writes the values the stream was opened with. An empty string
-        // would blank the mixer name; Replace does not drop the key.
+        // None writes back the values the stream was opened with. An empty
+        // name would blank the mixer.
         let restored = playback_app_props(None);
         assert_eq!(
             restored,
@@ -365,7 +369,8 @@ mod tests {
                 ("application.name", DEFAULT_APP_NAME),
                 ("application.icon_name", DEFAULT_APP_ICON),
                 ("application.id", DEFAULT_APP_ID),
-                // Empty asks PipeWire to drop the key the open never set.
+                // An empty value makes PipeWire drop this key, which the open
+                // never set.
                 ("application.process.binary", ""),
             ]
         );

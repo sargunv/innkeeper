@@ -1,5 +1,6 @@
-//! adb into a profile ([`innkeeper_profile::adb`]): turning it on and off,
-//! live if the profile runs, and telling the user's adb server about it.
+//! adb access to a profile, built on [`innkeeper_profile::adb`]. This module
+//! turns adb on and off, applies the change at once if the profile is running,
+//! and tells the user's adb server about it.
 
 use std::time::Duration;
 
@@ -11,19 +12,19 @@ use crate::launcher::Session;
 use crate::ops::{Event, Report};
 use crate::paths::Prefix;
 
-/// The serial adb knows profile `settings` by: `emulator-<port - 1>`.
+/// The serial that adb uses for the profile, `emulator-<port - 1>`.
 pub fn serial(settings: &Settings) -> String {
     adb::serial(settings.adb_port)
 }
 
-/// Where adbd listens.
+/// The address adbd listens on.
 pub fn address(settings: &Settings) -> String {
     format!("127.0.0.1:{}", settings.adb_port)
 }
 
-/// Turns adb on or off for profile `name`, at once if it runs. Turning it on
-/// gives it a port, authorizes the user's key and tells a running adb server.
-/// Returns the new settings.
+/// Turns adb on or off for profile `name` and applies the change at once if
+/// the profile is running. Turning adb on assigns it a port, authorizes the
+/// user's key and tells a running adb server. Returns the new settings.
 pub fn set(name: &str, on: bool, report: Report) -> Result<Settings> {
     let paths = Prefix::locate()?.profile_paths(name)?;
     let mut s = Settings::load(&paths.data)?;
@@ -54,7 +55,7 @@ pub fn set(name: &str, on: bool, report: Report) -> Result<Settings> {
     Ok(s)
 }
 
-/// Starts or stops adbd in running `session` as `s` says.
+/// Starts or stops adbd in the running `session` according to `s.adb`.
 fn apply(session: &Session, s: &Settings) -> Result<()> {
     let on = s.adb;
     if on {
@@ -72,7 +73,8 @@ fn apply(session: &Session, s: &Settings) -> Result<()> {
     Ok(())
 }
 
-/// Why adb will refuse the user, if it will: they have no adb key.
+/// Returns a warning if the user has no adb key, because adb will then refuse
+/// the connection.
 pub fn missing_key() -> Option<String> {
     adb::user_key().is_none().then(|| {
         format!(

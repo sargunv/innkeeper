@@ -1,6 +1,7 @@
-//! Innkeeper's own preferences, shared by every profile
-//! ([`innkeeper_profile::preferences`]): Keep Running, with the Background
-//! portal's login command. Running sessions read them as they poll.
+//! Innkeeper's preferences, shared by every profile
+//! ([`innkeeper_profile::preferences`]). Saving Keep Running also sets the
+//! Background portal's login command. Running sessions read the preferences
+//! when they poll.
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
@@ -8,7 +9,8 @@ use zbus::zvariant::{OwnedValue, Value};
 
 use innkeeper_profile::preferences::Preferences;
 
-/// Set the Background portal's login command. Never create an autostart file.
+/// Sets or clears the Background portal's login command. Innkeeper doesn't
+/// write an autostart file.
 fn autostart(enabled: bool) -> Result<()> {
     let connection = zbus::blocking::Connection::session()?;
     let token = format!("preferences{}", std::process::id());
@@ -25,7 +27,7 @@ fn autostart(enabled: bool) -> Result<()> {
         "org.freedesktop.portal.Request",
     )?;
     let mut responses = request.receive_signal("Response")?;
-    // Every profile, as Keep Running is every profile's.
+    // Keep Running applies to every profile, so start them all.
     let command: Vec<String> = [crate::xdg::INNKEEPER, "profile", "start", "--all"]
         .map(String::from)
         .into();

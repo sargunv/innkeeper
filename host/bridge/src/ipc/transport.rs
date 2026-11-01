@@ -17,11 +17,11 @@ use crate::ipc::wire::MAX_MSG;
 /// Most fds one message may carry, in either direction.
 pub const MAX_FDS: usize = 4;
 
-/// Creates the listening socket at `path`, mode 0666: access control is the
-/// directory it lives in (the session launcher makes that root:audio 0750
-/// inside the session) plus the uid allow-list. An existing socket file
-/// there is replaced, so a restarted bridge takes over; any other file is an
-/// error.
+/// Creates the listening socket at `path` with mode 0666. Access control
+/// comes from the directory it lives in, which the session launcher makes
+/// root:audio 0750 inside the session, plus the uid allow-list. An existing
+/// socket file there is replaced so that a restarted bridge takes over. Any
+/// other kind of file is an error.
 pub fn listen(path: &Path) -> Result<OwnedFd> {
     use std::os::unix::fs::FileTypeExt;
     if let Ok(m) = std::fs::symlink_metadata(path) {
@@ -48,8 +48,8 @@ pub fn listen(path: &Path) -> Result<OwnedFd> {
 /// ids, as seen from the bridge's namespaces).
 pub fn accept(listener: &OwnedFd) -> rustix::io::Result<(OwnedFd, libc::ucred)> {
     let sock = rustix::net::accept_with(listener, SocketFlags::CLOEXEC)?;
-    // A sibling Flatpak sandbox is outside our PID namespace: Linux reports
-    // pid=0. rustix::UCred cannot represent that (its Pid is nonzero).
+    // For a sibling Flatpak sandbox outside our PID namespace, Linux reports
+    // pid=0. rustix::UCred cannot represent that because its Pid is nonzero.
     let mut cred = MaybeUninit::<libc::ucred>::uninit();
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     // SAFETY: cred and len point to writable storage of the stated size.
@@ -79,12 +79,12 @@ pub fn accept(listener: &OwnedFd) -> rustix::io::Result<(OwnedFd, libc::ucred)> 
 /// One received message.
 pub struct Packet {
     pub len: usize,
-    /// Fds the peer attached (at most MAX_FDS; more ends the connection).
+    /// Fds the peer attached, at most MAX_FDS. More fds end the connection.
     pub fds: Vec<OwnedFd>,
 }
 
 /// Receives one message into `buf`. Returns None on EOF. Oversized packets
-/// and too many fds are errors (the caller drops the connection).
+/// and too many fds are errors, and the caller drops the connection.
 pub fn recv(sock: &OwnedFd, buf: &mut [u8; MAX_MSG + 1]) -> Result<Option<Packet>> {
     let mut space = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut anc = RecvAncillaryBuffer::new(&mut space);
@@ -135,7 +135,8 @@ pub fn send(sock: &OwnedFd, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> 
 }
 
 /// Like [`send`], but fails with EAGAIN instead of waiting for a full
-/// socket buffer (for events: a slow client must not stall the bridge).
+/// socket buffer. Events use it so that a slow client can't stall the
+/// bridge.
 pub fn send_nonblocking(sock: &OwnedFd, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<()> {
     if fds.len() > MAX_FDS {
         bail!("too many fds");

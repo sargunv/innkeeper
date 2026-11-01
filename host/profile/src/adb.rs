@@ -1,12 +1,12 @@
-//! adb into a profile: Android's own adbd on a loopback TCP port of the
+//! adb into a profile. Android's adbd listens on a loopback TCP port of the
 //! profile's ([`crate::profile::Settings::adb_port`]), with adb
 //! authentication on (`ro.adb.secure=1`). The user's adb key
 //! (`~/.android/adbkey.pub`, which `adb` creates on its first start) is
 //! authorized in the profile's data, so a local `adb` connects without a
-//! prompt and other users of the host can't. The user's adb server is told
-//! about the profile as the emulator tells it, over the server's own protocol
-//! on loopback (Android shares the host's network): no `adb` binary is needed
-//! in the sandbox.
+//! prompt and other users of the host can't connect. The user's adb server
+//! learns about the profile the way it learns about the emulator, over the
+//! server's protocol on loopback. This works because Android shares the
+//! host's network, and it needs no `adb` binary in the sandbox.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -21,7 +21,7 @@ pub fn user_key_path() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".android/adbkey.pub")
 }
 
-/// The user's adb public key: its first line, if it looks like one.
+/// The first line of the user's adb public key file, if it looks like a key.
 pub fn user_key() -> Option<String> {
     let text = fs::read_to_string(user_key_path()).ok()?;
     let key = text.lines().next()?.trim();
@@ -39,8 +39,8 @@ fn keys_file(data: &Path) -> PathBuf {
     data.join("misc/adb/adb_keys")
 }
 
-/// Authorizes `key` in data directory `data`, keeping the keys Android
-/// itself added. Returns whether it was new.
+/// Authorizes `key` in data directory `data`, keeping the keys that Android
+/// added. Returns whether the key was new.
 pub fn authorize(data: &Path, key: &str) -> Result<bool> {
     let file = keys_file(data);
     let old = fs::read_to_string(&file).unwrap_or_default();
@@ -62,12 +62,13 @@ pub fn authorize(data: &Path, key: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// adbd's listen address for `port`: loopback only.
+/// adbd's listen address for `port`, on loopback only.
 pub fn listen_addrs(port: u16) -> String {
     format!("tcp:localhost:{port}")
 }
 
-/// The serial adb knows the profile on `port` by: `emulator-<port - 1>`.
+/// The serial that adb shows for the profile on `port`, which is
+/// `emulator-<port - 1>`.
 pub fn serial(port: u16) -> String {
     format!("emulator-{}", port - 1)
 }
@@ -80,9 +81,9 @@ pub fn server_port() -> u16 {
         .unwrap_or(5037)
 }
 
-/// Once adbd listens on `port` (within `wait`), has the adb server on
-/// `server` list it, as the emulator does when it starts after the server.
-/// A server started later finds it by itself.
+/// Waits up to `wait` for adbd to listen on `port`, then has the adb server
+/// on `server` list it, as the emulator does when it starts after the server.
+/// A server started later finds the profile by itself.
 pub fn announce_when_listening(server: u16, port: u16, wait: Duration) -> Result<()> {
     let deadline = Instant::now() + wait;
     let addr = (Ipv4Addr::LOCALHOST, port).into();
@@ -98,7 +99,7 @@ pub fn announce_when_listening(server: u16, port: u16, wait: Duration) -> Result
 /// Tells the adb server on `server` about adbd on emulator port `port` and
 /// waits for it to list the device.
 fn announce(server: u16, port: u16) -> Result<()> {
-    // No reply: the server connects in the background.
+    // The server sends no reply and connects in the background.
     let request = format!("host:emulator:{port}");
     TcpStream::connect_timeout(
         &(Ipv4Addr::LOCALHOST, server).into(),
@@ -120,8 +121,9 @@ fn announce(server: u16, port: u16) -> Result<()> {
     bail!("the adb server didn't list {serial}")
 }
 
-/// One request to an adb server: a hex length and the request, answered by
-/// OKAY or FAIL and a hex-length message.
+/// Sends one request to an adb server. The request is a hex length followed
+/// by the request text, and the reply is OKAY or FAIL followed by a hex
+/// length and a message.
 fn server_request(port: u16, request: &str) -> Result<String> {
     let mut sock =
         TcpStream::connect_timeout(&(Ipv4Addr::LOCALHOST, port).into(), Duration::from_secs(2))?;
@@ -162,8 +164,8 @@ mod tests {
         );
     }
 
-    /// An adb server answering one request per connection with `replies`;
-    /// returns its port and the requests it got.
+    /// An adb server that answers one request per connection with `replies`.
+    /// Returns its port and a handle that yields the requests it got.
     fn server(replies: Vec<&'static [u8]>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
         use std::net::TcpListener;
         let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
@@ -206,7 +208,7 @@ mod tests {
             ]
         );
         drop(adbd);
-        // Nothing listening: it gives up at the deadline.
+        // With nothing listening, it gives up at the deadline.
         assert!(announce_when_listening(server, port, Duration::from_millis(300)).is_err());
     }
 

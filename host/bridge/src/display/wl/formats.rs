@@ -1,5 +1,7 @@
-//! Import only an advertised format/modifier pair. wl_shm ARGB8888 is the
-//! mandatory baseline fallback; never relabel the source's pixel layout.
+//! A dma-buf is imported directly only when the compositor advertises its
+//! exact format and modifier pair. Otherwise the frame falls back to wl_shm
+//! ARGB8888, which every compositor must support. The source's pixel layout is
+//! never relabelled as another format.
 pub(super) fn direct(format: u32, modifier: u64, advertised: &[(u32, u64)]) -> bool {
     advertised.contains(&(format, modifier))
 }

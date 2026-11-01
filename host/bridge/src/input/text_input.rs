@@ -1,10 +1,10 @@
 //! `zwp_text_input_v3` for the Innkeeper IME (`docs/input.md`).
 //!
-//! One text input per seat. It follows the keyboard focus: the compositor
-//! sends `enter`/`leave` for our windows' surfaces. The IME's state arrives
-//! as [`Req`]s on the input service and is applied to the window that has
-//! text-input focus; the compositor's input-method results (preedit, commit,
-//! delete) go back to the IME as input lines at each `done`.
+//! There is one text input per seat. It follows the keyboard focus, as the
+//! compositor sends `enter` and `leave` for our windows' surfaces. The IME's
+//! state arrives as [`Req`]s on the input service and is applied to the window
+//! that has text-input focus. The compositor's input-method results (preedit,
+//! commit, delete) go back to the IME as input lines at each `done`.
 //!
 //! Without a host input method (IBus, Fcitx), enabling changes nothing and
 //! keys keep arriving as `wl_keyboard` keys.
@@ -26,9 +26,9 @@ pub(crate) struct TextInput {
     ti: Option<ZwpTextInputV3>,
     /// The window whose surface has text-input focus.
     entered: Option<u32>,
-    /// Enabled since the last enter (the IME asked for it).
+    /// Whether the IME has enabled text input since the last enter.
     enabled: bool,
-    /// Gathered until the next `done`.
+    /// Results gathered until the next `done`.
     pending: Done,
 }
 
@@ -98,7 +98,8 @@ impl State {
                 other,
             } => {
                 ti.set_surrounding_text(text, cursor as i32, anchor as i32);
-                // Double-buffered; the next commit resets it to input_method.
+                // The cause is double-buffered. The next commit resets it to
+                // input_method.
                 if other {
                     ti.set_text_change_cause(ChangeCause::Other);
                 }
@@ -154,8 +155,8 @@ impl Dispatch2<ZwpTextInputV3, State> for Ti {
                 st.seat.text.pending = Done::default();
             }
             E::Leave { .. } => {
-                // The compositor dropped our state; the IME clears any
-                // preedit it shows (the protocol asks clients to reset it).
+                // The compositor dropped our state. The protocol asks clients
+                // to reset, so the IME clears any preedit it shows.
                 if let Some(id) = st.seat.text.entered.take()
                     && st.seat.text.enabled
                 {

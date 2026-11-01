@@ -1,8 +1,8 @@
-//! `exec`: a command inside the live session as the guest's root, through
-//! the exec relay. Binder needs the seccomp filter only init's descendants
-//! have, so the relay (a static binary, android/system/exec, which
-//! OpenHarmony's layer builds too) hands the command to its server under
-//! init, which runs it there.
+//! `exec` runs a command inside the live session as the guest's root, through
+//! the exec relay. Binder needs the seccomp filter that only init's
+//! descendants have, so the relay hands the command to its server under init,
+//! which runs it there. The relay is a static binary from android/system/exec,
+//! and OpenHarmony's layer builds it too.
 
 use std::fs;
 
@@ -27,9 +27,9 @@ pub fn env(system: System) -> Vec<(String, String)> {
     }
 }
 
-/// Android's environment for a command: init.environ.rc's and the derived
-/// classpath's `export NAME VALUE` lines, read from the session's root (this
-/// process's `/`), plus a shell's PATH and HOME.
+/// Android's environment for a command. It is the `export NAME VALUE` lines
+/// of init.environ.rc and the derived classpath, read from the session's root
+/// (this process's `/`), plus a shell's PATH, HOME and TMPDIR.
 fn android_env() -> Vec<(String, String)> {
     let mut env = vec![];
     for f in ["/init.environ.rc", "/data/system/environ/classpath"] {

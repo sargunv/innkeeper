@@ -1,9 +1,9 @@
 //! Android notifications as desktop notifications, through
 //! `org.freedesktop.Notifications` (KDE, GNOME, mako, dunst ...).
 //!
-//! The system app's NotificationListenerService posts a notification blob
-//! per Android notification (keyed by its own nonzero id); reposting an id
-//! replaces the desktop notification. Clicks, actions, inline replies and
+//! The system app's NotificationListenerService posts one notification blob
+//! per Android notification, keyed by a nonzero id that the app chooses.
+//! Reposting an id replaces the desktop notification. Clicks, actions, inline replies and
 //! dismissals come back as `NOTIFY_EVENT`s. When the connection ends, its
 //! notifications are closed.
 //!
@@ -30,13 +30,15 @@ pub const MAX_PER_CLIENT: usize = 64;
 const MAX_REPLY: usize = 4096;
 
 pub mod flags {
-    /// An ongoing notification (foreground service): resident, no timeout.
+    /// An ongoing notification, such as a foreground service's. It is
+    /// resident and has no timeout.
     pub const ONGOING: u8 = 1;
-    /// Don't play a sound (an update, or a silent channel).
+    /// Do not play a sound, for an update or a silent channel.
     pub const SILENT: u8 = 2;
-    /// Has a content intent: clicking it opens the app.
+    /// The notification has a content intent, so clicking it opens the app.
     pub const CLICKABLE: u8 = 4;
-    /// Eligible for a Launcher3 notification dot (channel allows badges, not ongoing).
+    /// Eligible for a Launcher3 notification dot. The channel allows badges
+    /// and the notification is not ongoing.
     pub const BADGE: u8 = 8;
     pub const ALL: u8 = ONGOING | SILENT | CLICKABLE | BADGE;
 }
@@ -44,7 +46,7 @@ pub mod flags {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Action {
     pub label: String,
-    /// Takes free text (an Android RemoteInput).
+    /// The action takes free text through an Android RemoteInput.
     pub reply: bool,
     pub placeholder: String,
 }
@@ -57,9 +59,9 @@ pub struct Note {
     pub title: String,
     pub body: String,
     pub flags: u8,
-    /// 0 low, 1 normal, 2 critical (the spec's urgency levels).
+    /// The spec's urgency levels: 0 low, 1 normal, 2 critical.
     pub urgency: u8,
-    /// -1: none, -2: indeterminate, else 0 to 100.
+    /// -1 for none, -2 for indeterminate, otherwise 0 to 100.
     pub progress: i32,
     pub actions: Vec<Action>,
     /// The app's icon, for desktops that don't know the app.
@@ -73,11 +75,11 @@ const MAX_ACTIONS: usize = 3;
 const MAX_ICON_SIDE: u16 = 256;
 
 impl Note {
-    /// Layout: `u32 version (1)`, text package, text app name, text title,
-    /// text body, `u8 flags`, `u8 urgency`, `u16 0`, `i32 progress`,
-    /// `u8 actions` (at most 3) then per action: text label, `u8 reply`, text
-    /// placeholder; then the icon and the picture (`blob::Doc::image`, at
-    /// most 256x256).
+    /// The layout is `u32 version (1)`, text package, text app name, text
+    /// title, text body, `u8 flags`, `u8 urgency`, `u16 0`, `i32 progress`
+    /// and `u8 actions` (at most 3). Each action is a text label, `u8 reply`
+    /// and a text placeholder. The icon and the picture follow
+    /// (`blob::Doc::image`, at most 256x256).
     pub fn decode(b: &[u8]) -> Result<Note, DecodeError> {
         let mut d = Doc::new(b);
         if d.0.u32()? != NOTE_VERSION {
@@ -160,7 +162,8 @@ struct Route {
     client: u64,
     id: u32,
     events: Events,
-    /// Action keys we sent, by index (`a0`, `inline-reply` ...).
+    /// The action keys sent to the server, by index, such as `a0` or
+    /// `inline-reply`.
     keys: Vec<String>,
 }
 
@@ -181,7 +184,7 @@ pub struct NotifyHub {
 }
 
 impl NotifyHub {
-    /// Connects to the notification server (activating it if need be) and
+    /// Connects to the notification server, activating it if needed, and
     /// starts the signal thread.
     pub fn start(conn: zbus::blocking::Connection) -> anyhow::Result<Arc<NotifyHub>> {
         let caps: Vec<String> = conn
@@ -349,7 +352,7 @@ impl NotifyHub {
         self.maps.lock().unwrap().launcher.contains(client, id)
     }
 
-    /// Closes everything `client` posted (its connection ended).
+    /// Closes everything `client` posted, after its connection ended.
     pub fn close_all(&self, client: u64) {
         let ids: Vec<u32> = {
             let m = self.maps.lock().unwrap();
@@ -360,7 +363,7 @@ impl NotifyHub {
         }
     }
 
-    /// Closes every notification we show (the bridge is exiting).
+    /// Closes every notification the bridge shows, when the bridge exits.
     pub fn close_everything(&self) {
         let hosts: Vec<u32> = {
             let mut m = self.maps.lock().unwrap();
@@ -426,9 +429,9 @@ impl NotifyHub {
                 let Ok((host, reason)) = body.deserialize::<(u32, u32)>() else {
                     return;
                 };
-                // 1: expired. The server keeps it in its history, where updates
-                // (replaces_id) and actions still reach it, and Android keeps
-                // it too: leave the mapping alone.
+                // Reason 1 means expired. The server keeps the notification in
+                // its history, where updates through replaces_id and actions
+                // still reach it. Android keeps it too, so the mapping stays.
                 if reason == 1 {
                     return;
                 }
@@ -437,10 +440,11 @@ impl NotifyHub {
                     return;
                 };
                 m.ids.remove(&(r.client, r.id));
-                // The popup disappeared, but Android may retain the notification
-                // (notably a non-clearable ongoing task). Only NOTIFY_CLOSE,
-                // disconnect or shutdown removes its launcher contribution.
-                // 2: dismissed by the user; 3: closed by us.
+                // The popup disappeared, but Android may keep the notification,
+                // for example a non-clearable ongoing task. Only NOTIFY_CLOSE,
+                // a disconnect or shutdown removes it from the launcher entry.
+                // Reason 2 means the user dismissed it, and 3 means the bridge
+                // closed it.
                 if reason == 2 {
                     crate::info!("notify: {host} ({}): dismissed", r.id);
                     let _ = r.events.try_send(
@@ -471,8 +475,8 @@ fn image_data(img: &Image) -> Value<'static> {
         .into()
 }
 
-/// Servers with `body-markup` parse a small HTML subset; Android text is
-/// plain, so escape it.
+/// Servers with `body-markup` parse a small HTML subset. Android text is
+/// plain, so it is escaped.
 pub fn escape_markup(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {

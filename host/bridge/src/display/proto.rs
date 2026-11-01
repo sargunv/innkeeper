@@ -1,9 +1,8 @@
 //! Display service messages (id 2, types 0x0200..=0x02ff, events
-//! 0x4200..=0x42ff). The client is the composer (the Android HWC HAL): it
-//! names its HWC virtual displays by its own ids, and buffers by ids it
-//! picks. Which display shows which window is the input service's business
-//! (`input::proto`): a display of the size the window manager asked for gets
-//! that window.
+//! 0x4200..=0x42ff). The client is the composer, the Android HWC HAL. It
+//! names its HWC virtual displays and its buffers by ids it picks. The input
+//! service (`input::proto`) decides which display shows which window. A
+//! display of the size the window manager asked for gets that window.
 //!
 //! | Type     | Request        | Body                                                                                                                                                                                 | Reply                                                                                       |
 //! | -------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
@@ -16,18 +15,21 @@
 //! DISPLAY_WINDOW (0x0208): u32 display, u32 width, u32 height (pixels),
 //! u32 dpi, name app_id, name title. Like DISPLAY_ADD, but the display gets
 //! a new window of its own instead of one the window manager asked for on the
-//! input service: for a guest with no window manager there (OpenHarmony's
-//! composer). Replies `u32 window`; the window's input goes nowhere yet.
+//! input service. It is for a guest without a window manager on the input
+//! service, such as OpenHarmony's composer. The reply is `u32 window`. The
+//! window's input goes nowhere yet.
 //!
-//! IMAGE_RELEASE (0x0207): u32 display, u64 presentation token: release a
-//! leased ImageReader image after HWC observes RELEASE. Forwarded to that window on the input service.
+//! IMAGE_RELEASE (0x0207): u32 display, u64 presentation token. HWC sends it
+//! after it observes RELEASE, to release a leased ImageReader image. The
+//! bridge forwards it to that display's window on the input service.
 //!
 //! CURSOR (0x0206): u32 display, u32 width, u32 height (each <=512),
-//! i32 x, i32 y (layer origin in display pixels). Nonzero dimensions carry
-//! one sealed memfd with width*height*4 premultiplied BGRA bytes (wl_shm
-//! ARGB8888); 0x0, without an fd, hides the cursor. The layer is excluded
-//! from FRAME. The input service supplies the last pointer position to
-//! derive the hotspot; HWC3 has no style-name or hotspot metadata.
+//! i32 x, i32 y (layer origin in display pixels). A cursor with nonzero
+//! dimensions carries one sealed memfd with width*height*4 premultiplied BGRA
+//! bytes (wl_shm ARGB8888). A 0x0 cursor without an fd hides the cursor. The
+//! layer is excluded from FRAME. The bridge derives the hotspot from the last
+//! pointer position that the input service supplies, because HWC3 has no
+//! style-name or hotspot metadata.
 //!
 //! | Event    | Message | Body                                         |
 //! | -------- | ------- | -------------------------------------------- |
@@ -56,7 +58,8 @@ pub mod ty {
 pub mod limits {
     /// Display and buffer sizes, in pixels.
     pub const MAX_DIM: u32 = 16384;
-    /// Bytes per row, as a multiple of the width's minimum.
+    /// The largest row stride in bytes. It allows the widest row at 8 bytes
+    /// per pixel plus 4096 bytes of padding.
     pub const MAX_STRIDE: u32 = 8 * MAX_DIM + 4096;
 }
 
@@ -129,13 +132,13 @@ pub enum Request {
         app_id: String,
         title: String,
     },
-    /// Carries one fd: the dma-buf.
+    /// Carries the dma-buf as one fd.
     BufferAdd(BufferSpec),
     BufferRemove {
         buffer: u32,
     },
-    /// Show `buffer` on `display`. Damage in buffer pixels (all zero: whole
-    /// buffer). May carry one fd: an acquire fence.
+    /// Shows `buffer` on `display`. Damage is in buffer pixels, and all zero
+    /// means the whole buffer. It may carry an acquire fence as one fd.
     Frame {
         display: u32,
         buffer: u32,
@@ -282,7 +285,7 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Events, as bodies (the caller adds the header).
+/// Event bodies. The caller adds the header.
 pub mod event {
     use super::*;
 

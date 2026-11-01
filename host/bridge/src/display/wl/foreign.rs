@@ -1,5 +1,5 @@
-//! `zxdg_exporter_v2` (xdg-foreign): each window's toplevel is exported, so
-//! portals can parent their dialogs to it (`wayland:<handle>`). Handles are
+//! Exports each window's toplevel with `zxdg_exporter_v2` (xdg-foreign), so
+//! portals can parent their dialogs to it as `wayland:<handle>`. Handles are
 //! published in [`crate::display::foreign_handle`] by window id.
 
 use std::collections::HashMap;
@@ -15,8 +15,8 @@ use wayland_protocols::xdg::foreign::zv2::client::{
 
 use super::State;
 
-/// Exported handles by window id (all display connections; window ids are
-/// Android display ids, unique in a session).
+/// Exported handles by window id, across all display connections. Window ids
+/// are unique in a session.
 pub(crate) static HANDLES: Mutex<Option<HashMap<u32, String>>> = Mutex::new(None);
 
 pub(super) fn export(

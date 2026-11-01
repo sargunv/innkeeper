@@ -1,5 +1,5 @@
-//! Static adaptive drawable previews. Android's paths use SVG path syntax;
-//! resvg supplies antialiasing, clipping and bitmap composition.
+//! Static previews of adaptive drawables. Android's vector paths use SVG path
+//! syntax, and resvg provides antialiasing, clipping and bitmap composition.
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -7,8 +7,9 @@ use std::path::Path;
 use super::{Res, Table, Value, xml};
 use base64::Engine;
 
-/// A host-side preview, including adaptive-only launcher icons. Failure leaves
-/// the caller free to use its generic icon; Android remains the final renderer.
+/// Renders a host-side preview of the launcher icon, including adaptive-only
+/// icons. On failure the caller can use its generic icon. The preview is an
+/// approximation, because Android does the final rendering.
 pub fn render(apk: &Path, icons: &[(u32, String)]) -> Option<Vec<u8>> {
     let mut zip = zip::ZipArchive::new(File::open(apk).ok()?).ok()?;
     let table = entry(&mut zip, "resources.arsc");
@@ -99,8 +100,8 @@ impl Renderer<'_> {
                 ))
             }
             "vector" => {
-                // Theme colours/gradients are not statically resolvable. Refuse
-                // them rather than silently producing a misleading preview.
+                // Theme colours and gradients can't be resolved statically.
+                // Refuse them so that the preview isn't silently misleading.
                 if root.attr("tint").is_some() {
                     return None;
                 }

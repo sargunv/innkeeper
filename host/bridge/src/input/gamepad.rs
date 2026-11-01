@@ -1,6 +1,7 @@
-//! Host evdev controllers, outside the Android syscall filter. Linux's gamepad
-//! codes are already a standard layout; normalize the common stick/trigger
-//! axis arrangements to Android Generic.kl. No injected gamepad events exist.
+//! Host evdev game controllers, read outside the Android syscall filter.
+//! Linux gamepad codes already follow a standard layout. The bridge normalizes
+//! the common stick and trigger axis arrangements to Android's Generic.kl.
+//! There are no injected gamepad events.
 use super::evdev::Evdev;
 use innkeeper_evdev_proto::{
     EVENT_SIZE,
@@ -94,8 +95,9 @@ impl Mapping {
         }
     }
     fn translate(&mut self, ty: u16, code: u16, value: i32) -> Option<(u16, u16, i32)> {
-        // hid-playstation uses position names for north/west. Generic.kl uses
-        // Xbox's BTN_X/BTN_Y aliases for those same numeric codes instead.
+        // hid-playstation uses these codes by their position names (north,
+        // west). Generic.kl reads the same numbers as Xbox's BTN_X/BTN_Y
+        // aliases, so the two are swapped.
         let code = if ty == 1 && self.playstation {
             match code {
                 307 => 308,
@@ -378,7 +380,7 @@ fn stable_id(identity: &str) -> u32 {
     FIRST + (hash & 0x3fffffff)
 }
 
-// Device readiness wakes immediately; the timeout only drives hotplug scans.
+// A ready device wakes the poll at once. The timeout paces hotplug scans.
 fn wait_for_input(polls: &mut [libc::pollfd], next_scan: Instant) {
     let remaining = next_scan.saturating_duration_since(Instant::now());
     let timeout =

@@ -1,62 +1,68 @@
-//! The desktop session API, version 1, for the manager and the CLI: they
-//! manage apps through it and never run commands inside Android. Starting a
-//! stopped session still goes through the launcher.
+//! The desktop session API, version 1. The manager and the CLI manage apps
+//! through it and do not run commands inside Android. Starting a stopped
+//! session still goes through the launcher.
 //!
-//! The bridge owns `dev.sargunv.Innkeeper.Session.p_<profile>` (hyphens become
-//! underscores) on the session bus, inside the Flatpak app-id namespace;
-//! object `/dev/sargunv/Innkeeper/Session`, interface
-//! `dev.sargunv.Innkeeper.Session1`.
+//! The bridge owns `dev.sargunv.Innkeeper.Session.p_<profile>` on the session
+//! bus, inside the Flatpak app-id namespace. Hyphens in the profile name
+//! become underscores. The object is `/dev/sargunv/Innkeeper/Session` and the
+//! interface is `dev.sargunv.Innkeeper.Session1`.
 //!
-//! - `State() → (b booted, as open_packages)`, a snapshot that doesn't start
-//!   Android. `booted` means the system app saw `sys.boot_completed=1` on the
-//!   current apps connection (it sends `BOOT_COMPLETED` on each connect), not
-//!   just that the channel connected; `open_packages` are the packages with
-//!   mapped windows. `Changed()` invalidates it on boot, apps-channel connect
-//!   or disconnect, and window map or unmap. Clients watch name ownership too,
-//!   subscribe before reading, and read again on each signal.
-//! - `App(s package, s action, s permission, b enabled) → s response`. Actions:
-//!   `info`, `clear-cache`, `clear-data`, `force-stop`, `permission`,
-//!   `escape-back`, `background`; only `permission` takes a permission name,
-//!   and only the last three take `enabled=true`. Bad arguments fail with
-//!   `InvalidArgs`; a disconnect, a full queue or the 20 s timeout fails with
-//!   `Failed` (after a timeout Android may still have done it, so refresh).
-//!   The response is JSON (≤ 64 KiB), `{"error":"", "info":{…}}` or
-//!   `{"error":"message", "info":null}`; `info` has `app_bytes`, `data_bytes`
-//!   (cache included), `cache_bytes`, `escape_back`, `background` and
-//!   `permissions` (`name`, `granted`, `editable`; requested dangerous ones
-//!   only). Only installed user apps change, and Android enforces grant rules.
+//! - `State() → (b booted, as open_packages)` returns a snapshot and doesn't
+//!   start Android. `booted` means the system app saw `sys.boot_completed=1`
+//!   on the current apps connection, which it reports with `BOOT_COMPLETED`
+//!   on each connect. A connected channel alone doesn't count as booted.
+//!   `open_packages` are the packages with mapped windows. `Changed()`
+//!   invalidates the snapshot on boot, on apps-channel connect or disconnect,
+//!   and on window map or unmap. Clients also watch name ownership, subscribe
+//!   before reading, and read again on each signal.
+//! - `App(s package, s action, s permission, b enabled) → s response` runs one
+//!   of the actions `info`, `clear-cache`, `clear-data`, `force-stop`,
+//!   `permission`, `escape-back` and `background`. Only `permission` takes a
+//!   permission name, and only the last three take `enabled=true`. Bad
+//!   arguments fail with `InvalidArgs`. A disconnect, a full queue or the
+//!   40 s timeout fails with `Failed`. After a timeout Android may still have
+//!   performed the action, so the client should refresh. The response is JSON
+//!   of at most 64 KiB, either `{"error":"", "info":{…}}` or
+//!   `{"error":"message", "info":null}`. `info` has `app_bytes`, `data_bytes`
+//!   (which includes the cache), `cache_bytes`, `escape_back`, `background`
+//!   and `permissions`. Each permission has `name`, `granted` and `editable`,
+//!   and only requested dangerous permissions are listed. Only installed user
+//!   apps can be changed, and Android enforces its grant rules.
 //! - `Launch(s package, s component, s uri, at grants, s token, b wait,
-//!   b new_window, u width, u height) → s reply` opens `package` in a window of
-//!   its own (its launcher activity, or `component`; with `uri`, or `Import`
-//!   grants, to view; empty strings and zeros mean none), or focuses its
-//!   window. `token` is the desktop's activation token, `new_window` asks for a
-//!   separate task, `width` and `height` size the window in dp. With `wait` it
-//!   answers once a new window shows its first frame (at most 25 s; `shown=no`
-//!   is appended if not). The reply is the window manager's line,
+//!   b new_window, u width, u height) → s reply` opens `package` in its own
+//!   window, or focuses its existing window. It starts the launcher activity
+//!   or `component`, and passes `uri` or `Import` grants to view. Empty
+//!   strings and zeros mean none. `token` is the desktop's activation token,
+//!   `new_window` asks for a separate task, and `width` and `height` size the
+//!   window in dp. With `wait` the call answers once a new window shows its
+//!   first frame, waiting at most 25 s and appending `shown=no` if it didn't.
+//!   The reply is the window manager's line,
 //!   `launched display=N package=P size=WxH ...` or `focused ...`.
-//! - `Windows() → as`, one `display=N package=P ...` line per window, and
-//!   `Close(i display, s package) → s`, which closes window `display`, or
-//!   `package`'s when it is negative. Failures are `Failed` with the system
-//!   app's message.
+//! - `Windows() → as` returns one `display=N package=P ...` line per window.
+//!   `Close(i display, s package) → s` closes window `display`, or
+//!   `package`'s window when `display` is negative. Failures are `Failed`
+//!   with the system app's message.
 //! - `ReloadSettings()` applies the profile's settings file, which the caller
-//!   just wrote: settings are broadcast again and `mirror-apps` is picked up. An unreadable or invalid file fails with `Failed`.
+//!   has just written. Settings are broadcast again and `mirror-apps` is
+//!   picked up. An unreadable or invalid file fails with `Failed`.
 //! - `Import(h fd, s name) → t grant` makes a read-only documents grant for a
 //!   regular file, shown to Android as `name` (no `/`), so a launch can pass
-//!   it to an app. Only the fd reaches the bridge, never a host path.
+//!   it to an app. Only the fd reaches the bridge, not a host path.
 //!
-//! `App`, `Launch`, `Windows` and `Close` are relayed on the apps channel:
+//! `App`, `Launch`, `Windows` and `Close` are relayed on the apps channel.
 //! [`COMMAND`] events carry `u64 request_id, u32 length` and a sealed JSON
-//! memfd (app commands `{"package","action","permission","enabled"}`, window
-//! commands `{"action":"launch"|"windows"|"close", …}` with the call's
-//! arguments, grants as 16 hex digits); the system app answers with a
-//! [`RESULT`] request in the same envelope, the app response or
-//! `{"error":"","reply":"…"}`. No trailing bytes or extra fds; both payloads
-//! ≤ 64 KiB; up to eight requests wait, each at most 40 s, and a reconnect
-//! cancels them. `wm/WindowCommands.kt` documents the window operations.
-//! Turning mirroring on sends event `0x4502` (empty), and the system app
-//! reports its launchable user apps again. Escape-as-Back lives in the system
-//! app's preferences per package (default off) and applies to existing
-//! windows at the next key press.
+//! memfd. App commands are `{"package","action","permission","enabled"}`.
+//! Window commands are `{"action":"launch"|"windows"|"close", …}` with the
+//! call's arguments, and grants written as 16 hex digits. The system app
+//! answers with a [`RESULT`] request in the same envelope, holding the app
+//! response or `{"error":"","reply":"…"}`. Trailing bytes and extra fds are
+//! refused, and both payloads are at most 64 KiB. Up to eight requests can
+//! wait, each for at most 40 s, and a reconnect cancels them.
+//! `wm/WindowCommands.kt` documents the window operations. Turning mirroring
+//! on sends the empty event `0x4502`, and the system app reports its
+//! launchable user apps again. Escape-as-Back is stored per package in the
+//! system app's preferences, off by default, and applies to existing windows
+//! at the next key press.
 use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex, mpsc};
@@ -257,7 +263,8 @@ impl SessionApi {
 
 #[zbus::interface(name = "dev.sargunv.Innkeeper.Session1")]
 impl SessionApi {
-    /// Booted only after the system app observes sys.boot_completed=1.
+    /// `booted` is true only after the system app observes
+    /// sys.boot_completed=1.
     fn state(&self) -> (bool, Vec<String>) {
         (self.relay.booted(), self.input.open_packages())
     }
@@ -281,8 +288,8 @@ impl SessionApi {
         Ok(())
     }
 
-    /// A read-only documents grant for the regular file `fd`, named `name`,
-    /// for a launch to pass to an app.
+    /// Makes a read-only documents grant for the regular file `fd`, named
+    /// `name`, for a launch to pass to an app.
     fn import(&self, fd: zbus::zvariant::OwnedFd, name: &str) -> zbus::fdo::Result<u64> {
         if !crate::documents::proto::valid_name(name) {
             return Err(zbus::fdo::Error::InvalidArgs("invalid file name".into()));
@@ -294,7 +301,8 @@ impl SessionApi {
             })
     }
 
-    /// Version 1: JSON AppInfo response; error text on failed Android operations.
+    /// Runs an app command and returns the JSON response, which carries error
+    /// text when the Android operation failed.
     fn app(
         &self,
         package: &str,
@@ -317,11 +325,11 @@ impl SessionApi {
         Ok(json)
     }
 
-    /// Opens `package` in a window of its own (its launcher activity, or
-    /// `component`; with `uri` or document `grants` to view), or focuses its
-    /// window. With `wait`, answers once a new window shows its first frame.
-    /// Returns the window manager's reply, `launched display=N ...` or
-    /// `focused ...`.
+    /// Opens `package` in its own window, or focuses its existing window. It
+    /// starts the launcher activity or `component`, and passes `uri` or
+    /// document `grants` to view. With `wait`, it answers once a new window
+    /// shows its first frame. Returns the window manager's reply,
+    /// `launched display=N ...` or `focused ...`.
     #[allow(clippy::too_many_arguments)]
     fn launch(
         &self,
@@ -349,14 +357,14 @@ impl SessionApi {
         self.window(w)
     }
 
-    /// The windows, one line each: `display=N package=P ...`.
+    /// Lists the windows, one `display=N package=P ...` line each.
     fn windows(&self) -> zbus::fdo::Result<Vec<String>> {
         let reply = self.window(app_settings::WindowCommand::Windows)?;
         Ok(reply.lines().map(str::to_string).collect())
     }
 
-    /// Closes window `display` (or, if negative, `package`'s), finishing its
-    /// tasks.
+    /// Closes window `display`, or `package`'s window if `display` is
+    /// negative, and finishes its tasks.
     fn close(&self, display: i32, package: &str) -> zbus::fdo::Result<String> {
         self.window(app_settings::WindowCommand::Close {
             display,

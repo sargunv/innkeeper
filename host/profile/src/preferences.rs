@@ -1,6 +1,6 @@
-//! Innkeeper's own preferences, shared by every profile:
-//! `$XDG_CONFIG_HOME/innkeeper/preferences.toml`. A profile's settings are
-//! its own ([`crate::profile::Settings`]).
+//! Innkeeper's preferences, shared by every profile and stored in
+//! `$XDG_CONFIG_HOME/innkeeper/preferences.toml`. Per-profile settings are in
+//! [`crate::profile::Settings`].
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Preferences {
-    /// No profile stops when idle, and every profile starts at login (the
-    /// Background portal holds one login command for the app).
+    /// No profile stops when idle, and every profile starts at login. The
+    /// Background portal holds one login command for the app.
     pub keep_running: bool,
 }
 

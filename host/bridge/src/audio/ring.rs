@@ -1,6 +1,6 @@
-//! The shared PCM ring: one sealed memfd per PCM stream, created here and
-//! handed to the Android client with an eventfd ("data") and the read end of
-//! a pipe ("space"). Layout, all little-endian:
+//! The shared PCM ring. Each PCM stream has one sealed memfd, created here
+//! and handed to the Android client together with an eventfd ("data") and
+//! the read end of a pipe ("space"). The layout is all little-endian:
 //!
 //! ```text
 //!   0  u32 magic "LXAR"   4 u32 version   8 u32 frame_bytes  12 u32 capacity_frames
@@ -32,21 +32,25 @@
 //! - The client never gets more than `capacity` frames ahead of `read_pos`.
 //! - Presentation position at time `t` is
 //!   `played_frames + (t - ts_ns) * rate` while `state == 1`, capped at
-//!   `read_pos`; app-visible latency is written minus presented.
-//! - When the bridge drops a stream (PipeWire went away, or CLOSE) it sets
-//!   `state = 2` and signals space, so a blocked writer wakes up.
+//!   `read_pos`. The app-visible latency is written frames minus presented
+//!   frames.
+//! - When the bridge drops a stream, because PipeWire went away or on CLOSE,
+//!   it sets `state = 2` and signals space so that a blocked writer wakes up.
 //!
-//! Capture reverses ownership: the bridge publishes write_pos, the client
+//! Capture reverses ownership. The bridge publishes write_pos, and the client
 //! publishes read_pos after copying. New frames are dropped on overrun so
-//! unread samples are never overwritten. The same pipe signals available
-//! capture data (or death); the eventfd requests recording.
+//! that unread samples are never overwritten. The same pipe signals
+//! available capture data or a dead stream, and the eventfd requests
+//! recording.
 //!
 //! The client can write anything into the mapping at any time, so the bridge
-//! never reads back what it owns: `read_pos` lives in this struct and is only
-//! mirrored out. The one client-owned value, `write_pos`, is clamped on every
-//! read (behind `read_pos` is ignored, more than `capacity` ahead is
-//! clamped). The memfd is sealed against shrinking, so a client cannot
-//! truncate it under our mapping.
+//! never reads back a value it owns. Its position lives in this struct, and
+//! the mapping holds a copy. The client-owned position is clamped on every
+//! read. In playback, a `write_pos` behind `read_pos` means nothing to read,
+//! and a `write_pos` more than `capacity` ahead counts as a full ring. In
+//! capture, a `read_pos` ahead of `write_pos` is clamped to it. The memfd is
+//! sealed against shrinking, so a client cannot truncate it under our
+//! mapping.
 
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr::NonNull;
@@ -81,13 +85,13 @@ pub struct Ring {
     write_pos: u64,
 }
 
-// SAFETY: the mapping is owned by this struct and only touched through it
-// (atomics for the header, raw copies for PCM), so moving it between threads
-// is fine.
+// SAFETY: The mapping is owned by this struct and only accessed through it,
+// with atomics for the header and raw copies for PCM. Moving it between
+// threads is therefore sound.
 unsafe impl Send for Ring {}
 
 impl Ring {
-    /// Size of the mapping for a ring, or None if it would be absurd.
+    /// Size of the mapping for a ring, or None if the size overflows.
     pub fn map_size(frame_bytes: u32, capacity_frames: u32) -> Option<usize> {
         let data = (frame_bytes as usize).checked_mul(capacity_frames as usize)?;
         let total = DATA_OFFSET.checked_add(data)?;
@@ -107,8 +111,8 @@ impl Ring {
             &memfd,
             SealFlags::SHRINK | SealFlags::GROW | SealFlags::SEAL,
         )?;
-        // SAFETY: a fresh shared mapping of a memfd we own, of exactly its
-        // (sealed) size.
+        // SAFETY: This is a new shared mapping of a memfd we own, with
+        // exactly the memfd's sealed size.
         let p = unsafe {
             rustix::mm::mmap(
                 std::ptr::null_mut(),
@@ -139,8 +143,9 @@ impl Ring {
 
     fn u64_at(&self, off: usize) -> &AtomicU64 {
         debug_assert!(off.is_multiple_of(8) && off + 8 <= DATA_OFFSET);
-        // SAFETY: in bounds of the header page and 8-aligned (the mapping is
-        // page-aligned); atomics are the right way to share it.
+        // SAFETY: The offset is inside the header page and 8-aligned, and the
+        // mapping is page-aligned. The header is shared with the client, so
+        // it is accessed through atomics.
         unsafe { &*self.map.as_ptr().add(off).cast::<AtomicU64>() }
     }
 
@@ -167,12 +172,13 @@ impl Ring {
         self.read_pos
     }
 
-    /// Frames the client has made available, clamped to what's plausible.
+    /// Frames the client has made available, clamped to a plausible range.
     pub fn available(&self) -> u64 {
         let w = self.u64_at(OFF_WRITE_POS).load(Ordering::Acquire);
-        // A write_pos behind ours means a confused client: nothing to read.
-        // One more than a ring ahead means it overran us: the ring is full
-        // (of whatever it last wrote).
+        // A write_pos behind read_pos comes from a confused client, so there
+        // is nothing to read. A write_pos more than a ring ahead means the
+        // client overran the bridge, and the ring is full of whatever it last
+        // wrote.
         w.checked_sub(self.read_pos)
             .map_or(0, |n| n.min(self.capacity))
     }
@@ -185,10 +191,10 @@ impl Ring {
         let start = (self.read_pos % self.capacity) as usize;
         let first = (n as usize).min(self.capacity as usize - start);
         let fb = self.frame_bytes;
-        // SAFETY: both ranges are inside the data area (start + first <=
-        // capacity, and the wrapped part starts at 0), and `out` holds n
-        // frames. The client may be writing concurrently; we copy raw bytes
-        // and treat them as opaque PCM, so a torn read is just noise.
+        // SAFETY: Both ranges are inside the data area, because start + first
+        // <= capacity and the wrapped part starts at 0. `out` holds n frames.
+        // The client may write concurrently. The bytes are copied raw and
+        // treated as opaque PCM, so a torn read only produces noise.
         unsafe {
             let data = self.map.as_ptr().add(DATA_OFFSET);
             std::ptr::copy_nonoverlapping(data.add(start * fb), out.as_mut_ptr(), first * fb);
@@ -204,8 +210,9 @@ impl Ring {
         n as usize
     }
 
-    /// Capture producer: never overwrite frames the client is still reading.
-    /// On overrun drop the new frames; only the consumer owns read_pos.
+    /// Writes captured frames without overwriting frames the client has not
+    /// read. On overrun the new frames are dropped, because only the client
+    /// moves read_pos.
     pub fn write(&mut self, input: &[u8]) -> usize {
         let read = self
             .u64_at(OFF_READ_POS)
@@ -216,8 +223,9 @@ impl Ring {
         let start = (self.write_pos % self.capacity) as usize;
         let first = n.min(self.capacity as usize - start);
         let fb = self.frame_bytes;
-        // SAFETY: both wrapped ranges fit the mapping and input; the client
-        // publishes read_pos only after copying, so unread samples stay intact.
+        // SAFETY: Both wrapped ranges fit in the mapping and in `input`. The
+        // client publishes read_pos only after copying, so unread samples
+        // stay intact.
         unsafe {
             let data = self.map.as_ptr().add(DATA_OFFSET);
             std::ptr::copy_nonoverlapping(input.as_ptr(), data.add(start * fb), first * fb);
@@ -229,7 +237,7 @@ impl Ring {
         n
     }
 
-    /// Publishes a presentation estimate (seqlock-protected for the client).
+    /// Publishes a presentation estimate under the seqlock the client reads.
     pub fn publish_timing(&self, played_frames: u64, ts_ns: u64, latency_ns: u64) {
         let seq = self.u64_at(OFF_TIMING_SEQ);
         let s = seq.load(Ordering::Relaxed);
@@ -247,7 +255,7 @@ impl Ring {
         self.u32_at(OFF_STATE).store(state, Ordering::Release);
     }
 
-    /// Test helper: what a client does to produce frames.
+    /// Test helper that writes frames the way a client does.
     #[cfg(test)]
     pub fn client_write(&self, frames: &[u8]) {
         let fb = self.frame_bytes;
@@ -277,7 +285,7 @@ impl Ring {
 impl Drop for Ring {
     fn drop(&mut self) {
         self.set_state(STATE_DEAD);
-        // SAFETY: unmapping exactly the mapping we created.
+        // SAFETY: This unmaps exactly the mapping created in `new`.
         unsafe {
             let _ = rustix::mm::munmap(self.map.as_ptr().cast(), self.len);
         }
@@ -314,7 +322,8 @@ mod tests {
         let mut out = [0u8; 16];
         assert_eq!(r.read(&mut out), 4);
         assert_eq!(&out, &frames[..16]);
-        // Wrap: 2 left, write 6 more (positions 6..12 -> indexes 6,7,0..3).
+        // Two frames are left. Writing six more wraps positions 6..12 to
+        // indexes 6, 7 and 0..3.
         let more: Vec<u8> = (100..124u8).collect();
         r.client_write(&more);
         assert_eq!(r.available(), 8);

@@ -18,9 +18,10 @@ fn data<'a>(attrs: Vec<(&'a str, V<'a>)>) -> Node<'a> {
     Node("data", attrs, vec![])
 }
 
-/// A manifest like aapt2 compiles, with a table holding the label (`7f01`
-/// strings: 0 label, 1 label alias, 2 version, 3 scheme), the icon (`7f02`
-/// mipmaps: 0 adaptive with legacy bitmaps, 1 alias of 0) and a bool (`7f03`).
+/// A manifest as aapt2 compiles it, with a resource table. The `7f01` strings
+/// are 0 label, 1 label alias, 2 version and 3 scheme. The `7f02` mipmaps are
+/// 0, an adaptive icon with legacy bitmaps, and 1, an alias of 0. `7f03` holds
+/// a bool.
 fn sample() -> ApkInfo {
     let manifest = document(&Node(
         "manifest",
@@ -160,7 +161,7 @@ fn sample() -> ApkInfo {
                 Layout::Offset16,
             ),
             type_chunk(1, &sr_latn, &[(0, 0x03, s("Kalkulator"))], Layout::Compact),
-            // Same as the default: not a translation.
+            // This matches the default, so it isn't a translation.
             type_chunk(
                 1,
                 &config("en", "GB", 0, 0),
@@ -240,7 +241,7 @@ fn localized_labels() {
 
 #[test]
 fn icon_variants() {
-    // Through the alias; the night variant is left out.
+    // The icon resolves through the alias, and the night variant is left out.
     assert_eq!(
         sample().icons,
         [

@@ -1,10 +1,12 @@
-//! Driving a profile's session through `innkeeper-session` (the prefix's, or
-//! any launcher for test harnesses). Its state (running, the image) comes
-//! from the launcher's library, or, for a launcher outside a prefix (the dev
-//! driver, tools/dev/session.sh), from its `status` and `image`; starting, stopping and commands go through the launcher
-//! itself. Commands run inside the session
-//! as argv through `innkeeper-session exec`, which hands them to the exec
-//! relay as argv: no string is ever interpreted by a shell, host or Android.
+//! Drives a profile's session through `innkeeper-session`, either the
+//! prefix's launcher or any launcher a test harness names. The session's
+//! state, such as whether it runs and where its image is, comes from the
+//! launcher's library. For a launcher outside a prefix, such as the dev driver
+//! tools/dev/session.sh, it comes from the launcher's `status` and `image`
+//! commands instead. Starting, stopping and commands go through the launcher.
+//! Commands run inside the session as argv through `innkeeper-session exec`,
+//! which hands them to the exec relay as argv. No string is ever interpreted
+//! by a shell, on the host or in Android.
 
 use std::fs::File;
 use std::io;
@@ -22,12 +24,12 @@ use crate::proc;
 
 pub struct Session {
     launcher: PathBuf,
-    /// The profile it runs; None for a harness's launcher, which knows its
-    /// own.
+    /// The profile the session runs. It is None for a harness's launcher,
+    /// which knows its own profile.
     profile: Option<innkeeper_profile::profile::ProfileName>,
 }
 
-/// Lines of session stderr worth keeping (the session's linker warns there).
+/// Drops the linker warnings that the session writes to stderr.
 fn clean_stderr(s: &str) -> String {
     s.lines()
         .filter(|l| !l.contains("linker"))
@@ -43,7 +45,7 @@ pub struct Status {
 }
 
 impl Session {
-    /// The session `launcher` runs (for harnesses outside a prefix).
+    /// The session that `launcher` runs, for harnesses outside a prefix.
     pub fn at(launcher: PathBuf) -> Self {
         Self {
             launcher,
@@ -59,7 +61,7 @@ impl Session {
         })
     }
 
-    /// The launcher, run for this session's profile.
+    /// A launcher command for this session's profile.
     fn command(&self) -> Command {
         let mut c = Command::new(&self.launcher);
         if let Some(p) = &self.profile {
@@ -68,7 +70,7 @@ impl Session {
         c
     }
 
-    /// The launcher library's view of this launcher's session.
+    /// The launcher library's paths for this session.
     pub fn paths(&self) -> Option<Paths> {
         let prefix = self.launcher.parent()?.parent()?.parent()?;
         match &self.profile {
@@ -88,14 +90,14 @@ impl Session {
         self.pid().is_some()
     }
 
-    /// Pid of the session's Android init (it changes when the session
-    /// restarts).
+    /// The pid of the session's init, which changes when the session
+    /// restarts.
     pub fn pid(&self) -> Option<u32> {
         self.state()?.pid.map(|p| p as u32)
     }
 
-    /// The output of a launcher command that only reads state, if it
-    /// succeeds.
+    /// Runs a launcher command that only reads state and returns its output
+    /// if it succeeds.
     fn query(&self, command: &str) -> Option<String> {
         let o = self.command().arg(command).output().ok()?;
         o.status
@@ -103,7 +105,7 @@ impl Session {
             .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
     }
 
-    /// Runs argv inside the session as root; returns (success, stdout, stderr).
+    /// Runs argv inside the session as root and returns its output.
     pub fn exec_with(&self, secs: u64, argv: &[&str], stdin: Stdio) -> Result<proc::Output> {
         let mut c = self.command();
         c.arg("exec").args(argv);
@@ -131,11 +133,11 @@ impl Session {
         Ok(text)
     }
 
-    /// Writes a host file to a fixed path inside the session (`dst` must be a
-    /// constant, not derived from input).
+    /// Writes a host file to a fixed path inside the session. `dst` must be a
+    /// constant and must not come from input.
     pub fn push_fixed(&self, src: &Path, dst: &'static str) -> Result<()> {
         let f = File::open(src).with_context(|| format!("open {}", src.display()))?;
-        // `$1` is the destination; the script itself is a constant.
+        // `$1` is the destination, and the script is a constant.
         let o = self.exec_with(
             120,
             &[
@@ -159,7 +161,7 @@ impl Session {
             .unwrap_or_default()
     }
 
-    /// Stops the session (no-op if it isn't running).
+    /// Stops the session. It does nothing if the session isn't running.
     pub fn stop(&self) -> Result<()> {
         let o = proc::run(
             self.command().arg("stop"),
@@ -172,8 +174,8 @@ impl Session {
         Ok(())
     }
 
-    /// Deletes the profile's Android data, keeping its settings; it must be
-    /// stopped.
+    /// Deletes the profile's Android data but keeps its settings. The session
+    /// must be stopped.
     pub fn reset(&self) -> Result<()> {
         let o = proc::run(
             self.command().arg("reset"),
@@ -215,7 +217,7 @@ impl Session {
         }
     }
 
-    /// The guest system it runs, from the profile's settings.
+    /// The guest system the session runs, read from the profile's settings.
     pub fn system(&self) -> System {
         self.paths()
             .and_then(|p| Settings::load(&p.data).ok())
@@ -226,8 +228,8 @@ impl Session {
         self.booted_as(self.system())
     }
 
-    /// Android's boot_completed, or OpenHarmony's SceneBoard (its home screen)
-    /// having loaded.
+    /// Whether the guest has booted. Android sets boot_completed, and
+    /// OpenHarmony loads SceneBoard, its home screen.
     fn booted_as(&self, system: System) -> bool {
         match system {
             System::Android => self.getprop("sys.boot_completed") == "1",
@@ -237,8 +239,8 @@ impl Session {
         }
     }
 
-    /// Whether the image is fetched, extracted and flattened (so starting
-    /// doesn't download it first).
+    /// Whether the image is fetched, extracted and flattened, so that starting
+    /// doesn't download it first.
     pub fn image_ready(&self) -> bool {
         // OpenHarmony's image has no APEX tree.
         let dirs = match self.paths() {
@@ -264,7 +266,7 @@ impl Session {
         })
     }
 
-    /// Fetches and unpacks the image; its progress goes to stderr.
+    /// Fetches and unpacks the image. Progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
         self.run_prepare()
             .context(crate::ErrorKind::ImageNotPrepared)
@@ -287,8 +289,9 @@ impl Session {
         Ok(())
     }
 
-    /// Starts the session (headless: with no windows, for tests), preparing
-    /// the image first if this is the first start. Progress goes to `status`.
+    /// Starts the session, preparing the image first if this is the first
+    /// start. A headless session has no windows and is for tests. Progress
+    /// goes to `status`.
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
         let system = self.system();
         if !self.image_ready() {
@@ -351,15 +354,16 @@ impl Session {
             sleep(Duration::from_secs(1));
         }
         if said && android {
-            // Freshly booted: wake the display and dismiss the keyguard.
+            // The session has just booted, so wake the display and dismiss
+            // the keyguard.
             let _ = self.exec(15, &["input", "keyevent", "WAKEUP"]);
             let _ = self.exec(15, &["wm", "dismiss-keyguard"]);
         }
         Ok(())
     }
 
-    /// Makes sure a session is running and booted, starting one (with
-    /// windows) if needed. Progress goes to `status`.
+    /// Makes sure a session is running and booted, and starts one with
+    /// windows if needed. Progress goes to `status`.
     pub fn ensure(&self, status: &dyn Fn(&str)) -> Result<()> {
         if !self.running() {
             self.start(false, status)?;

@@ -1,15 +1,18 @@
-//! Desktop settings for Android: dark mode, accent color, contrast, reduced
-//! motion, the clock format and text scale (portal Settings), plus the time
-//! zone (`/etc/localtime`) and the locale: the session environment, and on
-//! KDE `plasma-localerc`, which System Settings edits while the session runs
-//! (the environment only changes at the next login).
+//! Desktop settings for Android. Dark mode, accent color, contrast, reduced
+//! motion, the clock format and text scale come from portal Settings. The
+//! time zone comes from `TZ` or `/etc/localtime`. The locale comes from the
+//! session environment and, on KDE, from `plasma-localerc`. System Settings
+//! edits that file while the session runs, but the environment only changes
+//! at the next login.
 //!
-//! One watcher thread per bridge. Each change is sent as a full `SETTINGS`
-//! event to every subscribed system-app connection.
+//! Each bridge watches settings with one portal signal thread and one
+//! polling thread. Each change is sent as a full `SETTINGS` event to every
+//! subscribed system-app connection.
 //!
-//! A setting the profile opts out of keeps Android's current value: its field
-//! is unspecified (dark and clock 0, locale strings empty), and `has_accent`
-//! is 2 (0 means the desktop has no accent, 1 carries RGB).
+//! A setting that the profile opts out of keeps Android's current value. Its
+//! field is sent as unspecified: 0 for dark mode and the clock, and empty for
+//! the locale strings. For the accent, `has_accent` is 2. Otherwise 0 means
+//! the desktop has no accent and 1 carries RGB.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -32,11 +35,12 @@ pub struct SettingsHub {
     subs: Subscribers,
 }
 
-/// The settings sent, plus the two desktop switches reduced motion follows:
-/// the portal's `reduced-motion` (GNOME's accessibility "Reduce Animation",
-/// KDE's animation speed) and GNOME's `enable-animations`, which the portal
-/// doesn't map. xdg-desktop-portal 1.20 (the Debian 13 baseline) has no
-/// standardized reduced-motion key.
+/// The settings to send, plus the two desktop switches that reduced motion
+/// follows. One is the portal's `reduced-motion`, which reflects GNOME's
+/// accessibility "Reduce Animation" and KDE's animation speed. The other is
+/// GNOME's `enable-animations`, which the portal does not map.
+/// xdg-desktop-portal 1.20, the Debian 13 baseline, has no standardized
+/// reduced-motion key.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Desktop {
     s: Settings,
@@ -59,8 +63,8 @@ impl SettingsHub {
             let h = hub.clone();
             spawn("settings-portal", move || h.watch_portal(conn));
         }
-        // Polled: the zone is a symlink and plasma-localerc is rewritten
-        // whole, and both rarely change.
+        // The zone and locale are polled. The zone is a symlink,
+        // plasma-localerc is rewritten whole, and both rarely change.
         let h = hub.clone();
         spawn("settings-tz", move || {
             loop {
@@ -171,10 +175,11 @@ fn filter(mut settings: Settings, p: &innkeeper_profile::profile::Settings) -> S
     settings
 }
 
-/// Read Plasma's DND immediately before each popup, without a stale property
-/// cache. GNOME's portal does not expose show-banners on our baseline; GNOME
-/// Shell applies its own DND policy to Notify calls (including its critical
-/// urgency exception). No additional sandbox permission is needed.
+/// Reads Plasma's DND state right before each popup, without a property cache
+/// that could be stale. GNOME's portal does not expose show-banners on the
+/// baseline, and GNOME Shell applies its own DND policy to Notify calls,
+/// including its exception for critical urgency. No additional sandbox
+/// permission is needed.
 pub fn notifications_inhibited(conn: &zbus::blocking::Connection) -> bool {
     conn.call_method(
         Some("org.freedesktop.Notifications"),
@@ -242,7 +247,8 @@ fn apply(d: &mut Desktop, ns: &str, key: &str, v: &Value<'_>) {
     }
 }
 
-/// `(ddd)` sRGB in [0, 1]; out-of-range components mean "unset" (portal spec).
+/// Parses the portal's `(ddd)` sRGB accent in [0, 1]. The portal spec says
+/// out-of-range components mean "unset".
 fn accent(v: &Value<'_>) -> Option<[u8; 3]> {
     let st: &Structure = v.downcast_ref().ok()?;
     let f = st.fields();
@@ -268,7 +274,8 @@ fn text_scale(f: f64) -> f32 {
     }
 }
 
-/// An IANA zone id: `Area/Location[/More]` or `UTC`, plain ASCII.
+/// Checks for an IANA zone id in plain ASCII, such as `Area/Location[/More]`
+/// or `UTC`.
 pub fn valid_tz(t: &str) -> bool {
     !t.is_empty()
         && t.len() <= 64
@@ -278,7 +285,8 @@ pub fn valid_tz(t: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"/_+-".contains(&b))
 }
 
-/// The host zone, from the `/etc/localtime` symlink (`.../zoneinfo/<id>`).
+/// The host zone, from `TZ` or the `/etc/localtime` symlink
+/// (`.../zoneinfo/<id>`).
 fn timezone() -> String {
     if let Some(tz) = std::env::var("TZ")
         .ok()
@@ -297,9 +305,9 @@ fn timezone() -> String {
     }
 }
 
-/// The locale variables: the session's environment, overridden on KDE by
-/// `$XDG_CONFIG_HOME/plasma-localerc` (`[Formats]` `LANG` and `LC_*`,
-/// `[Translations]` `LANGUAGE`), which Plasma exports at login.
+/// Looks up locale variables in the session's environment. On KDE,
+/// `$XDG_CONFIG_HOME/plasma-localerc` overrides them (`[Formats]` `LANG` and
+/// `LC_*`, `[Translations]` `LANGUAGE`). Plasma exports that file at login.
 fn locale_env() -> impl Fn(&str) -> Option<String> {
     let kde = std::env::var("XDG_CURRENT_DESKTOP")
         .is_ok_and(|d| d.split(':').any(|d| d.eq_ignore_ascii_case("KDE")));
@@ -355,8 +363,9 @@ fn set_locales(s: &mut Settings) {
     s.measure_locale = category("LC_MEASUREMENT");
 }
 
-/// The session's languages: `LANGUAGE` (a preference list), then `LC_ALL`,
-/// `LC_MESSAGES`, `LANG`.
+/// Lists the session's languages. The `LANGUAGE` preference list comes
+/// first, followed by the first set variable among `LC_ALL`, `LC_MESSAGES`
+/// and `LANG`.
 fn locales(env: &impl Fn(&str) -> Option<String>) -> String {
     let mut list: Vec<String> = Vec::new();
     if let Some(v) = ["LC_ALL", "LC_MESSAGES", "LANG"]
@@ -373,8 +382,9 @@ fn locales(env: &impl Fn(&str) -> Option<String>) -> String {
     bcp47_list(list.into_iter().filter_map(|p| posix_to_bcp47(&p))).unwrap_or_default()
 }
 
-/// `de_DE.UTF-8@euro` -> `de-DE`, `sr_RS@latin` -> `sr-Latn-RS`; `C` and
-/// `POSIX` have no language.
+/// Converts a POSIX locale to a BCP 47 tag, for example `de_DE.UTF-8@euro`
+/// to `de-DE` and `sr_RS@latin` to `sr-Latn-RS`. `C` and `POSIX` have no
+/// language.
 pub fn posix_to_bcp47(p: &str) -> Option<String> {
     let (base, modifier) = match p.split_once('@') {
         Some((b, m)) => (b, Some(m)),
@@ -397,8 +407,8 @@ pub fn posix_to_bcp47(p: &str) -> Option<String> {
     Some(tag.join("-"))
 }
 
-/// Joins well-formed tags (letters, digits and `-`; deduplicated) with
-/// commas, within the protocol's name limit.
+/// Joins well-formed tags (letters, digits and `-`) with commas, dropping
+/// duplicates and staying within the protocol's name limit.
 fn bcp47_list(tags: impl Iterator<Item = String>) -> Option<String> {
     let mut out: Vec<String> = Vec::new();
     for t in tags {

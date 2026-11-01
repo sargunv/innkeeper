@@ -1,5 +1,5 @@
-//! session.conf: everything a session needs, decided once by `start` and read
-//! by the session and selftest.
+//! session.conf holds what a session needs. `start` decides it once, and the
+//! session and selftest read it.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -17,9 +17,10 @@ pub struct Config {
     /// The guest system, from the profile's settings.
     #[serde(default)]
     pub system: System,
-    /// No windows (tests): the composer's headless backend.
+    /// Runs without windows, using the composer's headless backend. Tests use
+    /// this.
     pub headless: bool,
-    /// The only DRM render node Android may open; None selects lavapipe.
+    /// The only DRM render node Android may open. None selects lavapipe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_node: Option<PathBuf>,
     /// The Vulkan HAL matched to render_node at start (radv, anv or lvp).
@@ -30,7 +31,8 @@ pub struct Config {
     /// `INNKEEPER_BROKER_DEBUG`, passed to the broker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broker_debug: Option<String>,
-    /// The desktop bridge's environment over this process's.
+    /// Variables for the desktop bridge, set on top of this process's
+    /// environment.
     pub bridge_env: BTreeMap<String, String>,
     pub paths: Paths,
     pub image: Image,
@@ -87,14 +89,14 @@ impl Config {
     }
 }
 
-/// The desktop bridge's environment (host/bridge/src/main.rs) over the
-/// session's own, which carries `INNKEEPER_*`. It runs outside Android, as
-/// the user, and its socket dir is Android's `/dev/socket/innkeeper`. The
-/// display service and the clipboard use the host compositor; the system
-/// service the caller's session bus; the host state service UPower on the
-/// system bus; desktop entries for apps installed inside Android go to the
-/// caller's XDG_DATA_HOME; the settings service reads the desktop's locale
-/// (plasma-localerc on KDE).
+/// The desktop bridge's environment (host/bridge/src/main.rs), set on top of
+/// the session's own, which carries `INNKEEPER_*`. The bridge runs outside
+/// Android as the user, and its socket dir is Android's
+/// `/dev/socket/innkeeper`. The display service and the clipboard use the host
+/// compositor. The system service uses the caller's session bus, and the host
+/// state service uses UPower on the system bus. Desktop entries for apps
+/// installed inside Android go to the caller's XDG_DATA_HOME. The settings
+/// service reads the desktop's locale (plasma-localerc on KDE).
 fn bridge_env(wayland: Option<&Path>) -> BTreeMap<String, String> {
     let mut e = BTreeMap::new();
     e.insert(

@@ -1,4 +1,5 @@
-//! Child processes with argv only (no shell), a time limit and captured output.
+//! Runs child processes from an argv without a shell, with a time limit and
+//! captured output.
 
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};

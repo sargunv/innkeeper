@@ -1,6 +1,6 @@
-//! The host's network: available, metered, connectivity, through the
-//! NetworkMonitor portal's `GetStatus` (v3), re-read on its `changed` signal.
-//! `Topic::set` drops identical notifications.
+//! The host's network availability, metering and connectivity. They come
+//! from the NetworkMonitor portal's `GetStatus` (v3), which is re-read on the
+//! portal's `changed` signal. `Topic::set` drops identical notifications.
 
 use std::collections::HashMap;
 
@@ -49,7 +49,8 @@ fn portal(conn: &Connection) -> zbus::Result<Network> {
     ))
 }
 
-/// Portal connectivity: 1 local, 2 limited, 3 captive portal, 4 full.
+/// Converts the portal's status. Portal connectivity is 1 local, 2 limited,
+/// 3 captive portal, 4 full.
 pub fn from_portal(available: bool, metered: bool, connectivity: u32) -> Network {
     Network {
         available: if available { YES } else { NO },

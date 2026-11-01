@@ -1,5 +1,6 @@
-//! `selftest`: host-safety probes against a live session; each must report
-//! `ok` (docs/session.md, "Host safety"). `mise run test:e2e -- boot` runs it.
+//! `selftest` runs host-safety probes against a live session. Each probe must
+//! report `ok` (docs/session.md, "Host safety"). `mise run test:e2e -- boot`
+//! runs it.
 
 use std::fs;
 use std::os::unix::fs::FileTypeExt;
@@ -23,8 +24,9 @@ impl Report {
     }
 }
 
-/// The sandbox is the boundary, so these check what it gives an Android
-/// process (the probe's own shell, under both seccomp filters).
+/// The sandbox is the boundary, so these probes check what it gives an
+/// Android process. They run in the probe's own shell, under both seccomp
+/// filters.
 const FLATPAK_PROBES: &[(&str, &str)] = &[
     ("sysfs not writable", "echo 1 > /sys/kernel/mm/ksm/run"),
     (
@@ -79,7 +81,8 @@ fn status_field(pid: i32, key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// No host supplementary group is mapped into the sandbox.
+/// Checks that setgroups is denied and that no host supplementary group is
+/// mapped into the sandbox.
 fn single_mode_groups(r: &mut Report, pid: i32) {
     let me = sys::gid();
     let overflow: u32 = fs::read_to_string("/proc/sys/kernel/overflowgid")
@@ -104,8 +107,9 @@ fn single_mode_groups(r: &mut Report, pid: i32) {
     );
 }
 
-/// What the sandbox grants, from /.flatpak-info: no host filesystem or home,
-/// no host /dev, no way out through the Flatpak service.
+/// Checks what the sandbox grants. /.flatpak-info must show no host
+/// filesystem or home, no host /dev and no way out through the Flatpak
+/// service.
 fn flatpak_info(r: &mut Report) {
     let info = fs::read_to_string("/.flatpak-info").unwrap_or_default();
     let mut section = "";
@@ -156,9 +160,10 @@ fn flatpak_info(r: &mut Report) {
         "no access to org.freedesktop.Flatpak (flatpak-spawn --host)",
         "the sandbox may talk to org.freedesktop.Flatpak",
     );
-    // What it shows: the home dir holds only the app's own dir and the
-    // user's adb public key (read-only, for adb into a profile), and /dev no
-    // block devices. Input access is an accepted desktop-parity grant.
+    // Check what the sandbox shows. The home dir holds only the app's own dir
+    // and the user's adb public key, which is read-only and used for adb into
+    // a profile. /dev holds no block devices. Input access is an accepted
+    // desktop-parity grant.
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -189,8 +194,8 @@ fn flatpak_info(r: &mut Report) {
     );
 }
 
-/// Runs the probes; true if all pass. Writes `selftest.txt` into the
-/// runtime dir.
+/// Runs the probes and returns true if all pass. Writes `selftest.txt` into
+/// the runtime dir.
 pub fn run(cfg: &Config, exe: &Path) -> Result<bool> {
     let p = &cfg.paths;
     let mut r = Report(String::new());

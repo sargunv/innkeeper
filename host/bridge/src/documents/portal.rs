@@ -1,5 +1,6 @@
-//! The FileChooser portal (`org.freedesktop.portal.FileChooser`): OpenFile and
-//! SaveFile, parented to the app's window through xdg-foreign.
+//! OpenFile and SaveFile through the FileChooser portal
+//! (`org.freedesktop.portal.FileChooser`), parented to the app's window
+//! through xdg-foreign.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,8 +17,8 @@ const IFACE: &str = "org.freedesktop.portal.FileChooser";
 
 static TOKEN: AtomicU64 = AtomicU64::new(0);
 
-/// Shows the dialog and waits for the user. Returns the chosen paths, or
-/// `-ECANCELED` if the user cancelled, `-EIO` if the portal failed.
+/// Shows the dialog and waits for the user. Returns the chosen paths. Fails
+/// with `-ECANCELED` if the user cancelled, or `-EIO` if the portal failed.
 pub fn pick(
     conn: &zbus::blocking::Connection,
     parent: &str,
@@ -124,9 +125,9 @@ fn fail(what: &str, e: impl std::fmt::Display) -> i32 {
     -EIO
 }
 
-/// The portal's `filters`: the app's exact MIME types as one filter, plus
-/// "All files". Wildcards (`text/*`) are left out: KDE's portal refuses them,
-/// and an app asking only for those gets no filter.
+/// The portal's `filters`. The app's exact MIME types form one filter, and
+/// "All files" is added. Wildcards (`text/*`) are left out because KDE's
+/// portal refuses them, so an app asking only for wildcards gets no filter.
 fn filters(mimes: &[String]) -> Vec<(String, Vec<(u32, String)>)> {
     let specific: Vec<&String> = mimes.iter().filter(|m| !m.ends_with("/*")).collect();
     if specific.is_empty() {

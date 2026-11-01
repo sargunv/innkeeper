@@ -1,5 +1,6 @@
 //! Whether a window needs a Wayland idle inhibitor. Visibility comes from the
-//! window lifecycle; Android's aggregate screen-lock policy supplies requests.
+//! window lifecycle. Android's aggregate screen-lock policy supplies the
+//! requests.
 #[derive(Default)]
 pub(super) struct Inhibit {
     pub requested: bool,
@@ -7,7 +8,8 @@ pub(super) struct Inhibit {
 }
 
 impl Inhibit {
-    /// Only transitions allocate or destroy a protocol object.
+    /// Returns the new state on a transition and None otherwise, so only a
+    /// transition creates or destroys the inhibitor object.
     pub fn update(&mut self, visible: bool, available: bool) -> Option<bool> {
         let active = self.requested && visible && available;
         if active == self.active {
@@ -37,8 +39,8 @@ mod tests {
         state.requested = true;
         assert_eq!(state.update(true, false), None);
         assert_eq!(state.update(true, true), Some(true));
-        // Destroying a window releases its owned inhibitor; a late request
-        // cannot target it because the window has left State::windows.
+        // Destroying a window releases its inhibitor. A late request can't
+        // target it, because the window has left State::windows.
         assert_eq!(state.update(false, true), Some(false));
     }
 }

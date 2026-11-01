@@ -15,8 +15,9 @@ pub fn decode_icon(bytes: &[u8]) -> Result<Option<Image>, DecodeError> {
     Ok(image)
 }
 
-/// The protocol requires a square, premultiplied ARGB8888 shm buffer. Centre
-/// rectangular Android icons in transparent padding without stretching them.
+/// The protocol requires a square, premultiplied ARGB8888 shm buffer.
+/// Rectangular Android icons are centred in transparent padding without being
+/// stretched.
 pub fn icon_pixels(image: &Image) -> (i32, Vec<u8>) {
     let side = image.width.max(image.height) as usize;
     let mut pixels = vec![0; side * side * 4];
@@ -117,7 +118,8 @@ impl Appearance {
     }
 }
 
-// tiny-skia's RGBA bytes are copied into native ARGB8888 shm on little-endian hosts.
+// The channels are swapped because tiny-skia's RGBA bytes are copied into
+// native ARGB8888 shm on little-endian hosts.
 fn color(rgb: [f64; 3]) -> Color {
     Color::from_rgba8(
         (rgb[2] * 255.).round() as u8,
@@ -138,8 +140,9 @@ fn mix(a: [f64; 3], b: [f64; 3], amount: f64) -> [f64; 3] {
 }
 fn caption_tint(base: [f64; 3], caption: [f64; 3]) -> [f64; 3] {
     // Keep every sRGB channel within three 8-bit levels of Adwaita. Bounding
-    // channels keeps both lightness and saturation subtle, even for opposite
-    // schemes or saturated captions; scaling the blend preserves the hue.
+    // the channels keeps the change in lightness and saturation subtle, even
+    // for opposite schemes or saturated captions. Scaling the blend preserves
+    // the hue.
     let distance = base
         .into_iter()
         .zip(caption)
@@ -162,8 +165,9 @@ fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
-/// One portal subscription per bridge process, shared by composer connections.
-/// Read on a worker so an unavailable portal never blocks Wayland dispatch.
+/// There is one portal subscription per bridge process, shared by all
+/// composer connections. A worker thread reads it, so an unavailable portal
+/// can't block Wayland dispatch.
 pub fn subscribe() -> calloop::channel::Channel<Appearance> {
     use std::sync::{Arc, Mutex, OnceLock};
     type Subscribers = (Appearance, Vec<calloop::channel::Sender<Appearance>>);

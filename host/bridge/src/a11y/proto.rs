@@ -1,7 +1,7 @@
 //! Accessibility service messages (id 7, types 0x0700..=0x07ff, events
 //! 0x4700..=0x47ff). The client is the Innkeeper System app's accessibility
-//! service; only the system app's uid may open the service, since its trees
-//! are the screen contents of every app and its actions click for the user.
+//! service. Only the system app's uid may open the service, because the trees
+//! hold the screen contents of every app and the actions click for the user.
 //!
 //! | Type     | Request | Body (fd)                                                     | Reply                                                                  |
 //! | -------- | ------- | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -15,15 +15,16 @@
 //! | `0x4702` | ACTION  | `u32 window`, `u64 node`, `u8 action` ([`super::wire::action`] bit index, or 31 custom), `u8 0`, `u16 0`, `i32 a`, `i32 b`, `f32 value`, `u16 len` + UTF-8 text (≤ 400 bytes) |
 //!
 //! `window` is the Android display id, which is also the host window's id
-//! (`input::proto`). ACTIVE says whether the desktop's AT-SPI bus is
-//! enabled (`org.a11y.Status` `IsEnabled` or `ScreenReaderEnabled`): the
-//! client keeps its Android accessibility service off otherwise, since
+//! (`input::proto`). ACTIVE says whether the desktop's AT-SPI bus is enabled
+//! (`org.a11y.Status` `IsEnabled` or `ScreenReaderEnabled`). The client keeps
+//! its Android accessibility service off while the bus is disabled, because
 //! enabling one changes how apps behave and costs CPU. Test sessions on the
 //! user's own bus are never active.
 //!
-//! ACTION arguments: SET_SELECTION has `a` and `b` (UTF-16 offsets),
-//! SET_PROGRESS has `value`, SET_TEXT has the text, CUSTOM has `a` (the
-//! action id); the others have none (all 0).
+//! ACTION arguments depend on the action. SET_SELECTION uses `a` and `b` as
+//! UTF-16 offsets, SET_PROGRESS uses `value`, SET_TEXT uses the text, and
+//! CUSTOM uses `a` as the action id. The other actions have no arguments, and
+//! all fields are 0.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -50,7 +51,7 @@ pub mod limits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Start,
-    /// `u32 window`, `u32 len`; fd: the snapshot.
+    /// `u32 window`, `u32 len`, with the snapshot as the fd.
     Tree {
         window: u32,
         len: u32,
@@ -108,7 +109,8 @@ pub struct ActionEvent {
 }
 
 impl ActionEvent {
-    /// The event body; text longer than [`limits::ACTION_TEXT`] is cut.
+    /// Encodes the event body. Text longer than [`limits::ACTION_TEXT`] is
+    /// cut.
     pub fn encode(&self) -> Vec<u8> {
         let text = crate::ipc::wire::truncate(&self.text, limits::ACTION_TEXT);
         let mut w = Writer::default();

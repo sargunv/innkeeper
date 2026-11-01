@@ -1,5 +1,5 @@
-//! Package and activity operations inside the session (`cmd package`,
-//! `cmd activity`, and the system app's icon helper under `app_process`).
+//! Package operations inside the session through `cmd package`, and the types
+//! that describe an app launch.
 
 use std::fs::File;
 use std::path::Path;
@@ -17,8 +17,8 @@ pub fn parse_session_id(out: &str) -> Option<u32> {
     l[a + 1..b].parse().ok()
 }
 
-/// Installs one app from its APKs (base first) in one PackageInstaller
-/// session, streaming each file through stdin (no copies in the session).
+/// Installs one app from its APKs, base first, in a single PackageInstaller
+/// session. Each file streams through stdin, so the session makes no copies.
 pub fn install(s: &Session, apks: &[&Path]) -> Result<()> {
     install_apks(s, apks).map_err(crate::errors::classify_install_error)
 }
@@ -82,7 +82,8 @@ fn install_apks(s: &Session, apks: &[&Path]) -> Result<()> {
     res
 }
 
-/// User-installed packages (`pm list packages -3`), validated.
+/// Lists the user-installed packages (`cmd package list packages -3`) whose
+/// names pass validation.
 pub fn user_packages(s: &Session) -> Result<Vec<String>> {
     let out = s.exec_ok(
         60,
@@ -147,8 +148,9 @@ pub fn launcher_component(s: &Session, pkg: &str) -> Result<String> {
 pub enum Launch {
     /// The app's launcher activity, brought to front like a launcher does.
     Main { component: String },
-    /// A URI from the desktop (`%U`): an untrusted-origin VIEW intent, so it
-    /// carries BROWSABLE and only reaches activities that accept web links.
+    /// A URI from the desktop (`%U`). It becomes a VIEW intent from an
+    /// untrusted origin, so it carries BROWSABLE and reaches only activities
+    /// that accept web links.
     View { package: String, uri: String },
     /// A read-only fd grant from the bridge documents service.
     File {
@@ -162,14 +164,15 @@ pub enum Launch {
 /// How a launch's window comes up.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchOptions {
-    /// An activation token for the window (validated), so the compositor
-    /// focuses it.
+    /// A validated activation token, so that the compositor focuses the
+    /// window.
     pub token: Option<String>,
-    /// Return only once a new window shows its first frame.
+    /// Wait until a new window shows its first frame before returning.
     pub wait: bool,
     /// Request a separate task even if the app already has a window.
     pub new_window: bool,
-    /// The window's size in dp (harnesses); None: the app's own.
+    /// The window's size in dp, used by test harnesses. None keeps the app's
+    /// own size.
     pub size: Option<(u32, u32)>,
 }
 

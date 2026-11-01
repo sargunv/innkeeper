@@ -1,17 +1,17 @@
-//! The session's lifecycle (docs/session.md, "Lifecycle"): it stops itself
-//! after a grace period with nothing to do, and a wakeup restarts it for the
-//! next alarm.
+//! The session's lifecycle (docs/session.md, "Lifecycle"). The session stops
+//! itself after a grace period with nothing to do, and a wakeup restarts it
+//! for the next alarm.
 //!
 //! - **Activity** comes from the system app, which reports its windows,
 //!   foreground services, background-allowed apps and next wakeup to the
-//!   bridge's system service; the bridge writes it to `<run>/lifecycle`
-//!   ([`Activity`]). No report (booting, or the system app is down) counts
-//!   as busy.
-//! - **Commands** keep it up while they run: `exec` holds a shared lock on
-//!   `<run>/exec.lock`.
-//! - **Wakeups:** the session's process stays as a waiter in its sandbox,
-//!   serving `status` and `stop` on the control socket, and starts the
-//!   session again at that time.
+//!   bridge's system service. The bridge writes the report to
+//!   `<run>/lifecycle` ([`Activity`]). A missing report, while booting or when
+//!   the system app is down, counts as busy.
+//! - **Commands** keep the session up while they run. `exec` holds a shared
+//!   lock on `<run>/exec.lock`.
+//! - **Wakeups** leave the session's process in its sandbox as a waiter. The
+//!   waiter serves `status` and `stop` on the control socket and starts the
+//!   session again shortly before the wakeup.
 
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -28,27 +28,27 @@ pub use innkeeper_profile::activity::Activity;
 fn poll() -> Duration {
     Duration::from_millis(if test_timers() { 200 } else { 5000 })
 }
-/// A wakeup sooner than this keeps the session up: stopping would gain
-/// little, and the alarm's app might not have rescheduled it in time.
+/// A wakeup sooner than this keeps the session up. Stopping would gain
+/// little, and the alarm's app might not reschedule the alarm in time.
 fn imminent() -> Duration {
     Duration::from_secs(if test_timers() { 3 } else { 180 })
 }
-/// How long before a wakeup the session starts again: boot, then the
-/// alarm's app reschedules it from `BOOT_COMPLETED` (Android forgets alarms
-/// when it stops).
+/// How long before a wakeup the session starts again. Android forgets alarms
+/// when it stops, so the session must boot and the alarm's app must
+/// reschedule the alarm from `BOOT_COMPLETED` before it is due.
 pub fn wake_lead() -> Duration {
     Duration::from_secs(if test_timers() { 6 } else { 60 })
 }
 
-/// Short idle polling, grace and alarm lead, for tests.
+/// Whether tests asked for short idle polling, grace and alarm lead.
 fn test_timers() -> bool {
     std::env::var("INNKEEPER_TEST_TIMERS").is_ok_and(|v| v == "1")
 }
 
-/// Seconds of idleness before the session stops; 0: never. Headless
+/// Seconds of idleness before the session stops, or 0 for never. Headless
 /// sessions (tests) never stop by themselves, and test timers stop after a
-/// second; otherwise it is the profile's idle timeout, unless Keep Running,
-/// read each time so a change applies live.
+/// second. Otherwise it is the profile's idle timeout, or never when Keep
+/// Running is on. Both are read on each call so that a change applies live.
 fn grace_secs(headless: bool, paths: &Paths) -> u64 {
     if headless {
         0
@@ -76,8 +76,8 @@ fn busy_reason(a: &Activity, now_ms: u64) -> Option<String> {
             a.background.join(", ")
         ));
     }
-    // A wakeup that has just passed is likely ringing now; one long past
-    // is stale.
+    // A wakeup that has just passed is likely ringing now. One long past is
+    // stale.
     let soon = |t: u64| {
         t.saturating_sub(now_ms) < imminent().as_millis() as u64
             && now_ms.saturating_sub(t) < imminent().as_millis() as u64
@@ -105,8 +105,8 @@ fn exec_lock_file(path: &Path) -> std::io::Result<File> {
 }
 
 /// Takes the shared exec lock at `path` ([`Paths::exec_lock`]) for as long
-/// as the returned file is open. `None` if the session's runtime dir is
-/// gone.
+/// as the returned file is open. Returns `None` if the session's runtime dir
+/// is gone.
 pub fn hold_exec_lock(path: &Path) -> Option<File> {
     let f = exec_lock_file(path).ok()?;
     (unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_SH) } == 0).then_some(f)
@@ -146,8 +146,8 @@ pub fn watch(cfg: &Config, end: impl FnOnce(Option<u64>) + Send + 'static) {
             let seconds = grace_secs(headless, &paths);
             let grace = Duration::from_secs(seconds);
             let why = busy(&paths);
-            // In Flatpak, running with no window is the Background portal's
-            // to allow.
+            // In Flatpak, the Background portal decides whether an app may
+            // run with no window.
             if !asked_background
                 && Activity::read(&paths)
                     .is_some_and(|a| a.windows == 0 && (a.services > 0 || !a.background.is_empty()))
@@ -249,7 +249,7 @@ mod tests {
         };
         let now = 1_000_000_000;
         assert!(busy_reason(&at(1_000_000 + 60), now).is_some());
-        // Just past: ringing now. Long past: stale.
+        // A wakeup just past is ringing now, and one long past is stale.
         assert!(busy_reason(&at(999_990), now).is_some());
         assert_eq!(busy_reason(&at(990_000), now), None);
         assert_eq!(busy_reason(&at(1_000_000 + 600), now), None);

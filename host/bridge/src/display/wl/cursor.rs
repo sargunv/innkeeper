@@ -1,6 +1,9 @@
-//! Android's hardware cursor plane is a Wayland cursor surface. HWC3 has no
-//! style/hotspot metadata. Learn each bitmap's fixed hotspot only on stationary
-//! frames; never subtract independently moving state while restoring a cursor.
+//! Shows Android's hardware cursor plane as a Wayland cursor surface. HWC3
+//! has no style or hotspot metadata, so each bitmap's hotspot is learned as
+//! the pointer position minus the layer origin. A hotspot is learned only on
+//! a stationary frame and then cached per bitmap. Restoring a cursor uses the
+//! cached hotspot and does not subtract positions, because the pointer and
+//! the layer move independently.
 use super::{State, Unit};
 use crate::input::PointerPosition;
 use rustix::fs::{MemfdFlags, SealFlags};
@@ -159,9 +162,9 @@ impl State {
         surface.commit();
     }
 }
-// wl_shm compositors may map a pool with PROT_WRITE; F_SEAL_WRITE would
-// reject that mapping. This copy is private to Wayland, sized once and immutable
-// from our side until wl_buffer.release.
+// Compositors may map a wl_shm pool with PROT_WRITE, which F_SEAL_WRITE would
+// refuse, so the memfd is sealed only against resizing. This copy is private
+// to Wayland, sized once, and not written by us before wl_buffer.release.
 fn shm_pixels(pixels: &[u8]) -> std::io::Result<OwnedFd> {
     let fd = rustix::fs::memfd_create("cursor", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)?;
     let mut file = std::fs::File::from(fd);

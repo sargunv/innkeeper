@@ -1,7 +1,8 @@
-//! Phone mode (a phone [`Display`]): Android's own display 0, with SystemUI and
-//! the image's launcher, in one desktop window the size of a device preset,
-//! instead of a window per app task (docs/display.md, "Phone mode"). The
-//! composer, window manager and init read these properties.
+//! Phone mode, used when the profile has a phone [`Display`]. It shows
+//! Android's display 0, with SystemUI and the image's launcher, in one desktop
+//! window the size of a device preset. Windowed profiles get a window per app
+//! task instead (docs/display.md, "Phone mode"). The composer, window manager
+//! and init read these properties.
 
 use std::path::Path;
 
@@ -9,18 +10,18 @@ use anyhow::Result;
 
 use crate::profile::{Display, Settings};
 
-/// What the overlay blanks for windowed profiles that a phone keeps from the
-/// image: the launcher (windowed profiles' home is the system app's empty
-/// activity; the desktop launches apps).
+/// Image files that the overlay blanks for windowed profiles but phone mode
+/// keeps. This is the launcher. A windowed profile's home is the system app's
+/// empty activity, and the desktop launches apps.
 pub const KEEPS: &[&str] = &["system_ext/priv-app/Launcher3QuickStep"];
 
-/// The properties a boot of `settings` gets.
+/// Returns the display properties for a boot with `settings`.
 pub fn props(settings: &Settings) -> String {
     let Some((w, h, dpi)) = settings.display.screen() else {
         return "vendor.innkeeper.mode=windowed\nvendor.innkeeper.nav=gestural\n".into();
     };
     // A large screen has a taskbar, which crash-loops in three-button mode
-    // (android/overlay); a phone gets buttons a mouse can click.
+    // (android/overlay). A phone gets buttons that a mouse can click.
     let nav = if settings.display.large() {
         "gestural"
     } else {

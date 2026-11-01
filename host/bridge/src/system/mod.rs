@@ -1,19 +1,20 @@
-//! The system service (id 3): the channel between the bridge and the
+//! The system service (id 3) is the channel between the bridge and the
 //! Innkeeper System app. It carries desktop settings to Android, Android
-//! notifications, the clipboard both ways, web links to open, and media
-//! sessions (messages: [`proto`]). Each feature lives in its
-//! own module and talks to the desktop over D-Bus or Wayland:
+//! notifications, the clipboard in both directions, web links to open, and
+//! media sessions. [`proto`] defines the messages. Each feature has its own
+//! module and talks to the desktop over D-Bus or Wayland:
 //!
 //! - `settings`: portal Settings (dark mode, accent, contrast, clock format,
 //!   text scale), the time zone and the locale
 //! - `notify`: `org.freedesktop.Notifications`
 //! - `clipboard`: the Wayland clipboard through `ext-data-control-v1`
-//! - `openuri`: external URI validation and the OpenURI portal
-//! - `handoff`: files, desktop share targets, FileChooser SaveFile and Email
+//! - `openuri`: external URI validation and the handoff rate limit
+//! - `handoff`: the OpenURI portal, files, desktop share targets,
+//!   FileChooser SaveFile and Email
 //! - `mpris`: MediaSessions as MPRIS players
-//! - lifecycle: what keeps the session up, written to `<run-dir>/lifecycle`
-//!   for the launcher's idle shutdown (docs/session.md, "Lifecycle"), and
-//!   the indicator for apps running in the background
+//! - lifecycle: the report of what keeps the session up, written to
+//!   `<run-dir>/lifecycle` for the launcher's idle shutdown (docs/session.md,
+//!   "Lifecycle"), and the indicator for apps running in the background
 
 pub mod clipboard;
 pub mod handoff;
@@ -40,19 +41,20 @@ use openuri::RateLimit;
 use proto::{ClipKind, Lifecycle, PlaybackApp, Request};
 use settings::SettingsHub;
 
-/// Bridge-wide state, created once in `main.rs`; each part starts the first
+/// Bridge-wide state, created once in `main.rs`. Each part starts the first
 /// time a client asks for it.
 pub struct Shared {
     art_dir: PathBuf,
     handoffs: Arc<handoff::Handoffs>,
-    /// `<run-dir>/lifecycle`, and the client whose report it holds.
+    /// The `<run-dir>/lifecycle` report. `lifecycle_owner` is the client
+    /// whose report it holds.
     lifecycle: PathBuf,
     lifecycle_owner: std::sync::Mutex<Option<u64>>,
-    /// `$XDG_CACHE_HOME/innkeeper-<profile>/clipboard`: files copied in
-    /// Android, served to the desktop.
+    /// `$XDG_CACHE_HOME/innkeeper-<profile>/clipboard`, which holds files
+    /// copied in Android and served to the desktop.
     clipboard_cache: PathBuf,
-    /// False in a test session: no desktop effects at all, including reads of
-    /// the clipboard and user-facing portals.
+    /// False in a test session, which has no desktop effects. That includes
+    /// clipboard reads and user-facing portals.
     desktop: bool,
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     settings: OnceLock<Arc<SettingsHub>>,
@@ -61,21 +63,21 @@ pub struct Shared {
     mpris: OnceLock<Arc<MprisHub>>,
     next_client: std::sync::atomic::AtomicU64,
     /// Audio connections whose playback streams take the playing app's name.
-    /// An entry's weak pointers go stale when that connection closes.
+    /// An entry's weak pointer goes stale when its connection closes.
     playback: std::sync::Mutex<Vec<PlaybackSlot>>,
 }
 
-/// One audio connection. `app` is what a stream opened afterwards is labelled
-/// with; `streams` receives the label for streams already open.
+/// One audio connection. `app` labels streams opened later, and `streams`
+/// receives the label for streams already open.
 struct PlaybackSlot {
     app: Arc<std::sync::Mutex<Option<crate::audio::stream::PlaybackApp>>>,
     streams: std::sync::Weak<std::sync::Mutex<HashMap<u32, crate::audio::stream::StreamHandle>>>,
 }
 
 impl Shared {
-    /// `run_dir`: the session's runtime dir (not the socket dir, which
-    /// Android shares): MPRIS artwork goes in `art/`, the lifecycle report in
-    /// `lifecycle`.
+    /// `run_dir` is the session's runtime dir, not the socket dir that
+    /// Android shares. MPRIS artwork goes in `art/` and the lifecycle report
+    /// in `lifecycle`.
     pub fn new(
         run_dir: &std::path::Path,
         desktop: bool,
@@ -103,8 +105,8 @@ impl Shared {
         })
     }
 
-    /// An audio connection that should carry the playing app's name. The
-    /// returned app is what a stream it opens afterwards is labelled with.
+    /// Registers an audio connection whose streams carry the playing app's
+    /// name. Returns the app that labels streams the connection opens later.
     pub fn register_playback(
         &self,
         streams: &Arc<std::sync::Mutex<HashMap<u32, crate::audio::stream::StreamHandle>>>,
@@ -120,9 +122,8 @@ impl Shared {
     fn set_playback_app(&self, app: Option<crate::audio::stream::PlaybackApp>) {
         let mut slots = self.playback.lock().unwrap();
         slots.retain(|s| s.streams.strong_count() > 0);
-        // Copy the handles out before sending: a send waits on the stream
-        // thread, and that must not happen while the connection's stream map
-        // (which OPEN takes) is locked.
+        // Copy the senders out first so that the sends happen without
+        // holding the connection's stream map, which OPEN also locks.
         let mut send = Vec::new();
         for slot in slots.iter() {
             *slot.app.lock().unwrap() = app.clone();
@@ -136,9 +137,9 @@ impl Shared {
         }
     }
 
-    /// Takes down what outlives a connection on the desktop: notifications
-    /// stay up after their sender exits, so close them. (MPRIS players and the
-    /// clipboard source go away with the process.)
+    /// Removes desktop state that would outlive the bridge. Notifications stay
+    /// up after their sender exits, so they are closed here. MPRIS players
+    /// and the clipboard source go away with the process.
     pub fn shutdown(&self) {
         self.handoffs.clear();
         if let Some(Some(n)) = self.notify.get() {
@@ -203,12 +204,12 @@ impl Shared {
     }
 }
 
-/// The background indicator's id among the system app's notifications
-/// (which number theirs from 1).
+/// The background indicator's notification id. The system app numbers its
+/// own notifications from 1, so the ids do not collide.
 const INDICATOR_ID: u32 = u32::MAX;
 
-/// The indicator: a resident notification naming the apps that keep the
-/// session running with no window open.
+/// The background indicator, a resident notification that names the apps
+/// keeping the session running with no window open.
 fn background_note(labels: &[&str]) -> Note {
     Note {
         package: "dev.sargunv.innkeeper.system".into(),
@@ -352,7 +353,7 @@ impl SystemService {
         }
     }
 
-    /// Writes the report for the launcher, and shows the indicator while
+    /// Writes the report for the launcher and shows the indicator while
     /// only background-allowed apps keep the session up.
     fn lifecycle(&mut self, l: &Lifecycle, background: &[(String, String)]) -> Reply {
         let mut text = format!(
@@ -378,7 +379,6 @@ impl SystemService {
         if changed {
             crate::info!("lifecycle: {}", text.trim_end().replace('\n', " "));
         }
-        // Shown while only background-allowed apps keep the session up.
         let want = (l.windows == 0 && l.services == 0 && !background.is_empty()).then(|| {
             background
                 .iter()
@@ -447,7 +447,7 @@ impl Service for SystemService {
             Ok(r) => r,
             Err(e) => return Reply::err(e.status()),
         };
-        // Metadata blobs take one fd; HANDOFF can add up to three content fds.
+        // Metadata blobs take one fd. HANDOFF can add up to three content fds.
         if fds.len() != req.fd_count() {
             return Reply::err(-EPROTO);
         }
@@ -561,7 +561,8 @@ impl Drop for SystemService {
         if let Some(m) = self.shared.mpris.get() {
             m.remove_all(self.client);
         }
-        // No report means busy to the launcher, until the system app is back.
+        // The launcher treats a missing report as busy until the system app
+        // reconnects.
         let mut owner = self.shared.lifecycle_owner.lock().unwrap();
         if *owner == Some(self.client) {
             *owner = None;
@@ -592,8 +593,9 @@ fn mixer_app(app: &PlaybackApp) -> Option<crate::audio::stream::PlaybackApp> {
     })
 }
 
-/// An Android package name: `[A-Za-z0-9_.]`, 1 to 255 bytes. These end up in
-/// D-Bus names and file names, so nothing else gets through.
+/// Checks for an Android package name: 1 to 255 bytes of `[A-Za-z0-9_.]`,
+/// not starting with a dot. Package names end up in D-Bus names and file
+/// names, so nothing else is accepted.
 pub fn valid_package(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 255
@@ -635,8 +637,9 @@ mod tests {
             crate::input::Hub::new(),
             &innkeeper_profile::profile::ProfileName::new("t").unwrap(),
         );
-        // Gating the hub itself prevents both clipboard publication and subscriptions,
-        // and even a NOTIFY_CLOSE must not connect to the real notification server.
+        // Gating the hubs blocks clipboard publication and subscriptions.
+        // Even a NOTIFY_CLOSE must not connect to the real notification
+        // server.
         assert!(shared.clipboard().is_none());
         assert!(shared.notify().is_none());
         assert!(shared.dbus().is_none());

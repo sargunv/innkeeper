@@ -3,12 +3,12 @@
 //! format. One native-protocol connection per Android PCM stream, so
 //! each shows up as its own stream in the desktop mixer.
 //!
-//! Why not libpipewire: the host has no PipeWire development headers (no
-//! `-devel` packages may be installed), the pure-Rust `pipewire-native`
-//! crate has no stream support yet, and the Pulse protocol is the stable,
-//! well-tested way most desktop apps reach PipeWire. It also keeps the
-//! bridge free of C dependencies, so it builds and lints like any Rust
-//! crate.
+//! The bridge does not use libpipewire. The host has no PipeWire development
+//! headers, because no `-devel` packages may be installed. The pure-Rust
+//! `pipewire-native` crate has no stream support yet, and most desktop apps
+//! reach PipeWire through the Pulse protocol, which is stable and well
+//! tested. Using it also keeps the bridge free of C dependencies, so it
+//! builds and lints like any Rust crate.
 
 use std::ffi::CString;
 use std::io::{Cursor, Read, Write};
@@ -32,8 +32,8 @@ const MAX_CHUNK: usize = 64 * 1024;
 const TIMING_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Target total latency (PipeWire queue plus device), in microseconds.
-/// pipewire-pulse floors it at about 16 ms (three 5.3 ms quanta at 48 kHz),
-/// so 10 ms measured the same.
+/// pipewire-pulse raises it to at least about 16 ms, three 5.3 ms quanta at
+/// 48 kHz, so a 10 ms target measured the same.
 pub const TARGET_LATENCY_US: u32 = 20_000;
 
 pub struct PulseStream {
@@ -105,8 +105,8 @@ impl PulseStream {
         };
 
         // Inside Flatpak there is no cookie file. pipewire-pulse refuses a
-        // cookie that isn't 256 bytes but doesn't check its value (local
-        // clients are authenticated by uid), so send zeros.
+        // cookie that is not 256 bytes but does not check its value, because
+        // it authenticates local clients by uid. Zeros are sent instead.
         let cookie = pulseaudio::cookie_path_from_env()
             .and_then(|p| std::fs::read(p).ok())
             .filter(|c| c.len() == COOKIE_LEN)
@@ -121,8 +121,9 @@ impl PulseStream {
         p.version = protocol::MAX_VERSION.min(auth.version);
 
         let mut props = Props::new();
-        // The client defaults. A later Ctl::App(None) writes these back; the
-        // empty process.binary in that set is only for clearing a stream key.
+        // These are the client defaults, which a later Ctl::App(None) writes
+        // back. The empty process.binary in that set clears a stream key, so
+        // it is skipped here.
         for (key, value) in playback_app_props(None) {
             if value.is_empty() {
                 continue;
@@ -219,7 +220,8 @@ impl PulseStream {
         Ok(self.seq)
     }
 
-    /// Blocking read of one frame (setup only). Returns descriptor + payload.
+    /// Reads one frame, blocking. Only setup uses it. Returns the descriptor
+    /// followed by the payload.
     fn read_frame_blocking(&mut self) -> Result<Vec<u8>> {
         let mut desc = [0u8; protocol::DESCRIPTOR_SIZE];
         self.sock.read_exact(&mut desc)?;
@@ -496,13 +498,15 @@ impl StreamIo for PulseStream {
             Ctl::Standby => {
                 self.standby = true;
                 if ring.available() == 0 && !self.corked {
-                    // Let what's queued play out; the Underflow event corks.
+                    // Let the queued audio play out. The Underflow handler
+                    // corks the stream.
                     crate::debug!("pulse: standby");
                 }
             }
             Ctl::Metadata(usage, label) => {
-                // Record streams have no playback proplist to update. Capture
-                // metadata is dropped above, with the other playback controls.
+                // Record streams have no playback proplist to update. The
+                // early return above drops their metadata with the other
+                // playback controls.
                 let (name, role) = usage_name_role(usage);
                 let mut props = Props::new();
                 let label = if label.is_empty() {
@@ -538,7 +542,8 @@ fn set_app_prop(props: &mut Props, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Pulse must resample/remix to the requested PCM ABI, never silently change it.
+/// Pulse must resample or remix to the requested PCM format. A reply with a
+/// different sample spec is an error.
 fn validate_spec(want: protocol::SampleSpec, got: protocol::SampleSpec) -> Result<()> {
     if want != got {
         bail!("server changed PCM specification: {want:?} -> {got:?}");

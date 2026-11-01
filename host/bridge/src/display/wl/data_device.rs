@@ -1,5 +1,6 @@
-//! GNOME's focus-scoped clipboard. Objects and keyboard serials must belong
-//! to this display connection, rather than the separate data-control connection.
+//! GNOME's focus-scoped clipboard (`wl_data_device`). Its objects and keyboard
+//! serials must come from this display connection, not from the separate
+//! data-control connection.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -39,8 +40,8 @@ impl Clipboard {
         shared: &Shared,
         ev: &EventLoop<State>,
     ) -> Result<Option<Self>> {
-        // Gate before binding anything: a session without the hub neither reads
-        // nor writes the desktop clipboard.
+        // Check for the hub before binding anything. A session without the hub
+        // neither reads nor writes the desktop clipboard.
         let Some(hub) = shared.clipboard().cloned() else {
             return Ok(None);
         };
@@ -165,7 +166,7 @@ impl Dispatch2<wl_data_device::WlDataDevice, State> for Data {
                 c.offers.insert(id.id(), id);
             }
             wl_data_device::Event::Selection { id } => c.selection(id, conn),
-            // No drag-and-drop handling here. Release its unused offer.
+            // Drag and drop is not handled, so release the unused offer.
             wl_data_device::Event::Enter {
                 id: Some(offer), ..
             } => {

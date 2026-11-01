@@ -13,7 +13,7 @@ impl Scale {
         self.0
     }
 
-    /// Return true only when content and decoration geometry need updating.
+    /// Returns whether content and decoration geometry need updating.
     pub fn update(&mut self, preferred: u32) -> bool {
         let next = preferred.clamp(60, 120 * 8);
         if next == self.0 {

@@ -2,10 +2,10 @@
 //! `InputMethodService` in the system app) and the seat's `zwp_text_input_v3`
 //! (`text_input.rs`).
 //!
-//! The IME's lines arrive as input requests (`TEXT_INPUT`); the bridge's go
-//! back as ordinary input lines (`INPUT` events), so they stay ordered with
-//! the keys. Everything here is pure and tested; parsing is strict and
-//! canonical.
+//! The IME's lines arrive as input requests (`TEXT_INPUT`). The bridge's
+//! lines go back as ordinary input lines (`INPUT` events), so they stay
+//! ordered with the keys. The code here is pure. Parsing is strict and accepts
+//! only the canonical form.
 //!
 //! | IME line                                         | Effect                                                                                                         |
 //! | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -15,14 +15,15 @@
 //! | `ti_cursor <x> <y> <w> <h>`                      | `set_cursor_rectangle`, from the display's pixels divided by the window's scale                                |
 //! | `ti_apply`                                       | `commit`                                                                                                       |
 //!
-//! At each `done` the IME gets `ti_delete <before> <after>` (bytes),
-//! `ti_commit <text>` (repeated for long text; the IME appends),
-//! `ti_preedit <begin> <end> [<text>]` (always; no text means no preedit),
-//! then `ti_done <window>`. On `leave` it gets an empty preedit and
+//! At each `done` the IME gets, in order, `ti_delete <before> <after>`
+//! (bytes), `ti_commit <text>`, `ti_preedit <begin> <end> [<text>]` and
+//! `ti_done <window>`. Long commit text spans several `ti_commit` lines,
+//! which the IME appends. The preedit line is always sent, and a line without
+//! text means no preedit. On `leave` the IME gets an empty preedit and
 //! `ti_done`, as the protocol asks.
 //!
-//! Text is percent-encoded: bytes up to space, DEL and `%` become `%XX`;
-//! everything else (including non-ASCII UTF-8) is sent as is.
+//! Text is percent-encoded. Bytes up to and including space, DEL and `%`
+//! become `%XX`. Everything else, including non-ASCII UTF-8, is sent as is.
 
 /// Longest line the IME may send.
 pub const MAX_LINE: usize = 480;
@@ -32,23 +33,24 @@ pub const CHUNK: usize = 320;
 /// Largest cursor-rectangle coordinate, in display pixels.
 const MAX_COORD: i32 = 1 << 20;
 
-/// zwp_text_input_v3 content hints and purposes we accept (the protocol's
-/// whole range in version 1).
+/// The largest zwp_text_input_v3 content hint mask and purpose accepted. They
+/// cover the protocol's whole range in version 1.
 pub const MAX_HINT: u32 = 0x3ff;
 pub const MAX_PURPOSE: u32 = 13;
 
 /// A request from the IME.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Req {
-    /// An editor took focus (a new input): enable text input.
+    /// An editor took focus and starts a new input. Enables text input.
     Enable,
-    /// No editor any more.
+    /// No editor has focus.
     Disable,
     /// zwp_text_input_v3 content hint bits and purpose.
     Content { hint: u32, purpose: u32 },
-    /// Text around the cursor; `cursor` and `anchor` are byte offsets into
-    /// `text`, on char boundaries. `other`: the change didn't come from the
-    /// input method (the user clicked elsewhere, the app changed the text).
+    /// Text around the cursor. `cursor` and `anchor` are byte offsets into
+    /// `text`, on char boundaries. `other` means the change didn't come from
+    /// the input method, for example when the user clicked elsewhere or the
+    /// app changed the text.
     Surrounding {
         text: String,
         cursor: u32,
@@ -142,23 +144,23 @@ pub fn parse(line: &str) -> Option<Req> {
     (req.to_line() == line).then_some(req)
 }
 
-/// What the compositor asked for in one `done` (zwp_text_input_v3 order:
-/// remove the preedit, delete around the cursor, insert the commit, show the
-/// new preedit).
+/// What the compositor asked for in one `done`. zwp_text_input_v3 applies it
+/// in this order: remove the preedit, delete around the cursor, insert the
+/// commit, show the new preedit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Done {
     /// Bytes to delete before and after the cursor (UTF-8 lengths, relative
     /// to the surrounding text the IME sent).
     pub delete: Option<(u32, u32)>,
     pub commit: Option<String>,
-    /// Preedit text and its cursor (byte offsets; -1 hides the cursor).
+    /// Preedit text and its cursor as byte offsets. -1 hides the cursor.
     pub preedit: Option<(String, i32, i32)>,
 }
 
 impl Done {
     /// The lines that carry this to the IME, ending with `ti_done <window>`.
-    /// Commit text is split over `ti_commit` lines (the IME appends them);
-    /// a preedit longer than one chunk is truncated.
+    /// Commit text is split over `ti_commit` lines, which the IME appends. A
+    /// preedit longer than one chunk is truncated.
     pub fn to_lines(&self, window: u32) -> Vec<String> {
         let mut out = Vec::new();
         if let Some((b, a)) = self.delete {
@@ -212,8 +214,8 @@ fn encode_prefix(s: &str, max: usize) -> String {
     chunks(s, max).next().unwrap_or_default()
 }
 
-/// `s` encoded and split into pieces of at most `max` bytes, never inside a
-/// character or an escape.
+/// Encodes `s` and splits it into pieces of at most `max` bytes, never inside
+/// a character or an escape.
 fn chunks(s: &str, max: usize) -> impl Iterator<Item = String> + '_ {
     let mut chars = s.chars().peekable();
     std::iter::from_fn(move || {
@@ -232,7 +234,7 @@ fn chunks(s: &str, max: usize) -> impl Iterator<Item = String> + '_ {
     })
 }
 
-/// Decodes percent-encoded text; fails on bad escapes, on bytes that should
+/// Decodes percent-encoded text. It fails on bad escapes, on bytes that should
 /// have been escaped, on escapes that needn't be, and on invalid UTF-8.
 pub fn decode(s: &str) -> Option<String> {
     let b = s.as_bytes();

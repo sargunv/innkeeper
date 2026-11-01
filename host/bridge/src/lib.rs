@@ -1,6 +1,6 @@
-//! The Innkeeper desktop bridge: services Android clients reach over
-//! `bridge.sock`. The services and their ids are in `host/bridge/README.md`;
-//! the protocol is `docs/bridge-protocol.md`.
+//! The Innkeeper desktop bridge, which serves Android clients over
+//! `bridge.sock`. `host/bridge/README.md` lists the services and their ids,
+//! and `docs/bridge-protocol.md` describes the protocol.
 
 pub mod a11y;
 pub mod apps;
@@ -14,7 +14,7 @@ pub mod log;
 pub mod session;
 pub mod system;
 
-/// A fresh, empty directory for one test's files:
+/// Creates a fresh, empty directory for one test's files at
 /// `<repo>/out/test/bridge/<name>`.
 #[cfg(test)]
 fn test_dir(name: &str) -> std::path::PathBuf {

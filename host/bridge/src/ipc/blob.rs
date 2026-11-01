@@ -1,17 +1,17 @@
-//! Payloads too big for one 512-byte message (notifications, clipboard
-//! contents, URLs, artwork) travel as a sealed memfd next to a small request
-//! or event (the system and apps services).
+//! Payloads too big for one 512-byte message, such as notifications,
+//! clipboard contents, URLs and artwork, travel as a sealed memfd next to a
+//! small request or event. The system and apps services use them.
 //!
 //! - **From a client** ([`read`]): the fd must be a memfd sealed against
-//!   writing, shrinking and growing, so its bytes can't change under us. It is
-//!   read once with `pread` into our own buffer (never mapped, so a hostile
-//!   client can't SIGBUS us), and only the declared length, which is capped per
-//!   message type, is read.
+//!   writing, shrinking and growing, so its bytes can't change while we read
+//!   them. It is read once with `pread` into our own buffer. It is not mapped,
+//!   so a client can't make the bridge take SIGBUS. Only the declared length is
+//!   read, and that length is capped per message type.
 //! - **To a client** ([`create`]): the bridge writes a memfd and seals it the
-//!   same way (plus `F_SEAL_SEAL`).
+//!   same way, adding `F_SEAL_SEAL`.
 //!
-//! [`Doc`] decodes a blob's contents: the same little-endian layout as
-//! messages, with `u32`-length text fields and RGBA images.
+//! [`Doc`] decodes a blob's contents. They use the same little-endian layout
+//! as messages, with `u32`-length text fields and RGBA images.
 
 use std::os::fd::{AsFd, OwnedFd};
 
@@ -24,14 +24,14 @@ pub const REQUIRED_SEALS: SealFlags = SealFlags::WRITE
     .union(SealFlags::SHRINK)
     .union(SealFlags::GROW);
 
-/// Reads `len` bytes (at most `max`) from a client's sealed memfd. Errors are
+/// Reads `len` bytes, at most `max`, from a client's sealed memfd. Errors are
 /// reply statuses.
 pub fn read(fd: &OwnedFd, len: u32, max: usize) -> Result<Vec<u8>, i32> {
     let len = len as usize;
     if len > max {
         return Err(-EINVAL);
     }
-    // F_GET_SEALS fails on anything that isn't a memfd (or shmem), which also
+    // F_GET_SEALS fails on anything that isn't a memfd or shmem. That also
     // rules out pipes, sockets and FUSE files that could block a read.
     let seals = rustix::fs::fcntl_get_seals(fd).map_err(|_| -EINVAL)?;
     if !seals.contains(REQUIRED_SEALS) {
@@ -54,7 +54,7 @@ pub fn read(fd: &OwnedFd, len: u32, max: usize) -> Result<Vec<u8>, i32> {
     Ok(buf)
 }
 
-/// A sealed memfd holding `bytes`, to pass to a client.
+/// Creates a sealed memfd holding `bytes` to pass to a client.
 pub fn create(name: &str, bytes: &[u8]) -> anyhow::Result<OwnedFd> {
     let fd = rustix::fs::memfd_create(name, MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)?;
     let mut off = 0;
@@ -69,7 +69,7 @@ pub fn create(name: &str, bytes: &[u8]) -> anyhow::Result<OwnedFd> {
     Ok(fd)
 }
 
-/// An RGBA image (8 bits per channel, not premultiplied, rows packed).
+/// An RGBA image with 8 bits per channel, not premultiplied, and packed rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     pub width: u16,
@@ -85,9 +85,9 @@ impl<'a> Doc<'a> {
         Doc(Reader::new(b))
     }
 
-    /// `u32 len` then UTF-8 of at most `max` bytes. NUL is rejected; other
-    /// control characters except newline and tab are dropped (Android text
-    /// ends up in desktop UI).
+    /// `u32 len` then UTF-8 of at most `max` bytes. NUL is rejected. Other
+    /// control characters except newline and tab are dropped because Android
+    /// text ends up in desktop UI.
     pub fn text(&mut self, max: usize) -> Result<String, DecodeError> {
         let n = self.0.u32()? as usize;
         if n > max {
@@ -126,7 +126,7 @@ impl<'a> Doc<'a> {
     }
 }
 
-/// Encoders matching [`Doc`] (for tests and bridge-to-client blobs).
+/// Encoders matching [`Doc`], for tests and bridge-to-client blobs.
 pub trait DocWriter {
     fn text(&mut self, s: &str) -> &mut Self;
     fn image(&mut self, img: Option<&Image>) -> &mut Self;
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(read(&fd, 12, 64), Err(-EINVAL)); // longer than the file
         assert_eq!(read(&fd, 11, 4), Err(-EINVAL)); // over the cap
 
-        // Unsealed memfd, and a pipe: refused.
+        // An unsealed memfd and a pipe are refused.
         let raw = rustix::fs::memfd_create("u", MemfdFlags::ALLOW_SEALING).unwrap();
         rustix::io::write(&raw, b"x").unwrap();
         assert_eq!(read(&raw, 1, 64), Err(-EINVAL));

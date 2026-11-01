@@ -1,13 +1,15 @@
-//! The host's keyboard layout, compose and dead keys: what each key press
-//! means under the compositor's xkb keymap. Follows winit's
-//! `platform_impl/linux/common/xkb`: libxkbcommon is loaded at run time
-//! (`xkbcommon-dl`), the state follows the compositor's `modifiers` events
-//! only, and one compose state from the locale's table is fed each press.
+//! Resolves what each key press means under the compositor's xkb keymap,
+//! including the host's layout, compose and dead keys. The design follows
+//! winit's `platform_impl/linux/common/xkb`. libxkbcommon is loaded at run
+//! time (`xkbcommon-dl`), the state follows only the compositor's `modifiers`
+//! events, and each press feeds one compose state built from the locale's
+//! table.
 //!
-//! Every press resolves to the key's level-1 keysym in the active layout
-//! (the system app picks the Android keycode from it, so shortcuts follow
-//! the layout) and to what it types: text, nothing, or a step of a compose
-//! sequence (a dead key, `Multi_key`). `docs/input.md` has the whole path.
+//! Every press resolves to the key's level-1 keysym in the active layout and
+//! to what it types. The system app picks the Android keycode from the
+//! keysym, so shortcuts follow the layout. A press types text, nothing, or a
+//! step of a compose sequence such as a dead key or `Multi_key`.
+//! `docs/input.md` describes the whole path.
 
 use std::ffi::{CStr, CString, c_char};
 use std::os::fd::OwnedFd;
@@ -30,17 +32,17 @@ pub const MAX_TEXT: usize = 64;
 pub enum Typed {
     /// Nothing (not a character key, or a Ctrl chord's control character).
     Nothing,
-    /// This text.
+    /// The text the press types.
     Text(String),
-    /// A step of a compose sequence (a dead key, `Multi_key`, or a key that
-    /// cancelled one): it types nothing itself.
+    /// A step of a compose sequence, which types nothing itself. This is a
+    /// dead key, `Multi_key`, or a key that cancelled a sequence.
     Compose,
 }
 
 /// A key press under the host layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Press {
-    /// The key's level-1 keysym (no modifiers) in the active layout; 0 if
+    /// The key's level-1 keysym (no modifiers) in the active layout, or 0 if
     /// it has none.
     pub sym: u32,
     pub typed: Typed,
@@ -69,11 +71,12 @@ struct Compose {
 unsafe impl Send for Xkb {}
 
 impl Xkb {
-    /// None without libxkbcommon; then keys go out as evdev codes only.
+    /// Returns None without libxkbcommon. Keys then go out as evdev codes
+    /// only.
     pub fn new() -> Option<Xkb> {
         let xkb = xkbcommon_dl::xkbcommon_option()?;
-        // Keymaps come from the compositor (or, in tests, explicit names),
-        // never from XKB_DEFAULT_* in our environment.
+        // Keymaps come from the compositor, or from explicit names in tests.
+        // XKB_DEFAULT_* in our environment must not apply.
         let ctx = NonNull::new(unsafe {
             (xkb.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_ENVIRONMENT_NAMES)
         })?;
@@ -89,15 +92,16 @@ impl Xkb {
         })
     }
 
-    /// `wl_keyboard.keymap` (format xkb_v1): a private mapping of `size`
-    /// bytes, NUL-terminated.
+    /// Installs the keymap from `wl_keyboard.keymap` (format xkb_v1). The fd
+    /// holds `size` bytes of NUL-terminated text and is mapped privately.
     pub fn set_keymap_fd(&mut self, fd: OwnedFd, size: u32) -> bool {
         self.keymap = None;
         if size == 0 {
             return false;
         }
         let size = size as usize;
-        // MAP_PRIVATE: compositors since wl_keyboard v7 hand out read-only fds.
+        // Since wl_keyboard v7, compositors hand out read-only fds, which need
+        // MAP_PRIVATE.
         let map = match unsafe {
             rustix::mm::mmap(
                 std::ptr::null_mut(),
@@ -129,8 +133,8 @@ impl Xkb {
         self.install(km)
     }
 
-    /// A keymap from RMLVO names (tests, and hosts without a compositor
-    /// keymap).
+    /// Installs a keymap from RMLVO names, for tests and for hosts without a
+    /// compositor keymap.
     pub fn set_keymap_names(&mut self, layout: &str, variant: &str, options: &str) -> bool {
         let c = |s: &str| CString::new(s).unwrap_or_default();
         let (layout, variant, options) = (c(layout), c(variant), c(options));
@@ -161,7 +165,8 @@ impl Xkb {
         self.keymap.is_some()
     }
 
-    /// `wl_keyboard.modifiers`: the compositor's state is the only source.
+    /// Applies `wl_keyboard.modifiers`. The compositor's state is the only
+    /// source of modifier state.
     pub fn update_mask(&mut self, depressed: u32, latched: u32, locked: u32, group: u32) {
         if let Some(k) = &self.keymap {
             unsafe {
@@ -189,14 +194,15 @@ impl Xkb {
         })
     }
 
-    /// Focus changed: a half-typed compose sequence is dropped.
+    /// Drops a half-typed compose sequence when focus changes.
     pub fn reset_compose(&mut self) {
         if let Some(c) = &self.compose {
             unsafe { (c.xkbc.xkb_compose_state_reset)(c.state.as_ptr()) };
         }
     }
 
-    /// A key repeat: its base keysym and what it types, without compose.
+    /// Resolves a key repeat to its base keysym and what it types, without
+    /// compose.
     pub fn repeat(&self, evdev: u32) -> Option<Press> {
         let k = self.keymap.as_ref()?;
         let kc = evdev + EVDEV_OFFSET;
@@ -206,7 +212,8 @@ impl Xkb {
         })
     }
 
-    /// A key press: its base keysym and what it types. Feeds compose.
+    /// Resolves a key press to its base keysym and what it types, and feeds
+    /// compose.
     pub fn press(&mut self, evdev: u32) -> Option<Press> {
         let k = self.keymap.as_ref()?;
         let kc = evdev + EVDEV_OFFSET;
@@ -237,8 +244,8 @@ impl Xkb {
     }
 }
 
-/// Text without control characters (Return, Tab, Ctrl+letter chords), and
-/// bounded.
+/// Accepts text that is bounded and has no control characters (Return, Tab,
+/// Ctrl+letter chords).
 fn text(s: String) -> Typed {
     if s.is_empty() || s.len() > MAX_TEXT || s.chars().any(char::is_control) {
         Typed::Nothing
@@ -306,8 +313,9 @@ impl Drop for Keymap {
 }
 
 impl Compose {
-    /// The table for the locale (LC_ALL, LC_CTYPE, LANG, as libc picks it),
-    /// or en_US.UTF-8's when the locale has none (C, unset).
+    /// Loads the compose table for the locale from LC_ALL, LC_CTYPE or LANG,
+    /// as libc picks it. Falls back to en_US.UTF-8's table when the locale
+    /// has none, as with C or an unset locale.
     fn from_locale(ctx: NonNull<xkb_context>) -> Option<Compose> {
         let xkbc = xkbcommon_dl::xkbcommon_compose_option()?;
         let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
@@ -341,7 +349,8 @@ impl Compose {
         }
     }
 
-    /// None if compose ignored the keysym (modifiers), else the new status.
+    /// Returns None if compose ignored the keysym, as for a modifier, and
+    /// otherwise the new status.
     fn feed(&self, sym: u32) -> Option<xkb_compose_status> {
         match unsafe { (self.xkbc.xkb_compose_state_feed)(self.state.as_ptr(), sym) } {
             xkb_compose_feed_result::XKB_COMPOSE_FEED_IGNORED => None,
@@ -371,8 +380,9 @@ impl Drop for Compose {
     }
 }
 
-/// libxkbcommon's snprintf-style string getters: the length without the
-/// NUL, then the string.
+/// Reads a string from one of libxkbcommon's snprintf-style getters. The
+/// first call returns the length without the NUL, and the second fills the
+/// buffer.
 fn read_utf8(f: impl Fn(*mut c_char, usize) -> i32) -> String {
     let n = f(std::ptr::null_mut(), 0);
     if n <= 0 {
@@ -391,9 +401,9 @@ fn read_utf8(f: impl Fn(*mut c_char, usize) -> i32) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Keymaps compiled from RMLVO names, and a model of the compositor: its
-    //! own xkb state takes the key presses and serializes the masks that
-    //! `wl_keyboard.modifiers` would carry.
+    //! Tests use keymaps compiled from RMLVO names and a model of the
+    //! compositor. The model's own xkb state takes the key presses and
+    //! serializes the masks that `wl_keyboard.modifiers` would carry.
     use super::*;
     use xkbcommon_dl::{xkb_key_direction, xkb_state_component};
 
@@ -412,7 +422,8 @@ mod tests {
     const KEY_RIGHTALT: u32 = 100;
     const KEY_ENTER: u32 = 28;
 
-    /// The client side (ours) and a compositor-side state on the same names.
+    /// Our client-side state and a compositor-side state built from the same
+    /// names.
     struct Rig {
         ours: Xkb,
         comp: Xkb,
@@ -429,8 +440,8 @@ mod tests {
             Some(Rig { ours, comp })
         }
 
-        /// The compositor sees the key; we get `modifiers` after it, as on
-        /// Wayland (the key event itself is resolved with the old state).
+        /// The compositor sees the key, and we get `modifiers` after it, as on
+        /// Wayland. The key event itself is resolved with the old state.
         fn key(&mut self, evdev: u32, down: bool) -> Option<Press> {
             let p = if down { self.ours.press(evdev) } else { None };
             let k = self.comp.keymap.as_ref().unwrap();
@@ -547,7 +558,7 @@ mod tests {
     fn chords_and_control_keys_type_nothing() {
         let Some(mut fr) = rig("fr", "") else { return };
         fr.key(KEY_LEFTCTRL, true);
-        // Ctrl+Z on AZERTY: the 'z' keysym, and a control character.
+        // Ctrl+Z on AZERTY gives the 'z' keysym and a control character.
         assert_eq!(
             fr.tap(KEY_W),
             Press {

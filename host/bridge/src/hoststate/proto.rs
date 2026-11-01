@@ -1,8 +1,8 @@
 //! Host state service messages (id 8, types 0x0801..=0x08ff, events
-//! 0x4801..=0x48ff). Clients: the Health HAL (battery) and the Innkeeper
-//! System app (power saver, network, location). A client sends `START` with
-//! the state it wants; the current value of each follows as an event, and
-//! every change after that.
+//! 0x4801..=0x48ff). The clients are the Health HAL, for the battery, and
+//! the Innkeeper System app, for the power saver, network and location. A
+//! client sends `START` with the state it wants. The current value of each
+//! follows as an event, and so does every later change.
 //!
 //! | Type     | Request        | Body                                                          | Reply                                                     |
 //! | -------- | -------------- | ------------------------------------------------------------- | --------------------------------------------------------- |
@@ -18,10 +18,10 @@
 //! | `0x4804` | LOCATION        | `f64 latitude`, `f64 longitude`, `f64 altitude` (NaN unknown), `f32 accuracy` (m), `f32 speed` (m/s), `f32 bearing` (degrees), all three -1 unknown, `u64 time` (ms since the epoch) |
 //! | `0x4805` | LOCATION_STATUS | `u8 status` (1 running, 2 denied, 3 disabled on the desktop, 4 unavailable), `u8 0`, `u16 0`                                                  |
 //!
-//! The bridge asks the desktop for location only on `LOCATION_START`, which
-//! the system app sends once an app that Android allowed asks for a location;
-//! a denial (status 2) or location turned off on the desktop (3) stays for the
-//! bridge's lifetime and is never retried through another backend.
+//! The bridge asks the desktop for location only on `LOCATION_START`. The
+//! system app sends it once an app that Android allowed asks for a location.
+//! A denial (status 2) or location turned off on the desktop (3) holds for
+//! the bridge's lifetime and is not retried through another backend.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -98,11 +98,11 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// The host's battery, from UPower's `DisplayDevice` (the composite of every
-/// battery) and `OnBattery`.
+/// The host's battery, from UPower's `DisplayDevice`, which is the composite
+/// of every battery, and from `OnBattery`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Battery {
-    /// A battery exists; without one the host is on AC and full.
+    /// Whether a battery exists. Without one the host is on AC and full.
     pub present: bool,
     /// UPower's `State`.
     pub state: u8,
@@ -115,7 +115,8 @@ pub struct Battery {
 }
 
 impl Battery {
-    /// What a host without a battery (or before UPower answers) reports.
+    /// What a host without a battery reports, and what is reported before
+    /// UPower answers.
     pub const AC_ONLY: Battery = Battery {
         present: false,
         state: 0,
@@ -195,13 +196,13 @@ impl Network {
 pub struct Fix {
     pub latitude: f64,
     pub longitude: f64,
-    /// Meters above WGS 84; NaN if unknown.
+    /// Meters above WGS 84, or NaN if unknown.
     pub altitude: f64,
-    /// Horizontal accuracy in meters; -1 if unknown.
+    /// Horizontal accuracy in meters, or -1 if unknown.
     pub accuracy: f32,
-    /// m/s; -1 if unknown.
+    /// Speed in m/s, or -1 if unknown.
     pub speed: f32,
-    /// Degrees from north, `[0, 360)`; -1 if unknown.
+    /// Degrees from north in `[0, 360)`, or -1 if unknown.
     pub bearing: f32,
     /// Milliseconds since the Unix epoch.
     pub time_ms: u64,
@@ -238,8 +239,8 @@ impl Fix {
         Ok(f)
     }
 
-    /// Coordinates in range; optional fields either -1 (NaN for altitude) or
-    /// in range.
+    /// Whether the coordinates are in range and each optional field is
+    /// either in range or unknown (-1, or NaN for altitude).
     pub fn valid(&self) -> bool {
         let opt = |v: f32, max: f32| v == -1.0 || (v.is_finite() && (0.0..max).contains(&v));
         (-90.0..=90.0).contains(&self.latitude)
@@ -251,8 +252,8 @@ impl Fix {
     }
 }
 
-/// A `u8` value, then three reserved zero bytes (POWER_SAVER,
-/// LOCATION_STATUS).
+/// Encodes a `u8` value followed by three reserved zero bytes, as
+/// POWER_SAVER and LOCATION_STATUS use.
 pub fn encode_u8(v: u8) -> Vec<u8> {
     vec![v, 0, 0, 0]
 }

@@ -1,26 +1,28 @@
-//! The core protocol: versions, the HELLO handshake and service ids. Each
-//! service defines its own message types in its module; framing, type ranges
-//! and the conventions for a new service are in `docs/bridge-protocol.md`.
+//! The core protocol, covering versions, the HELLO handshake and service ids.
+//! Each service defines its own message types in its module.
+//! `docs/bridge-protocol.md` describes framing, type ranges and the
+//! conventions for a new service.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
 /// Protocol major version. A client with another major is refused.
 pub const MAJOR: u16 = 1;
-/// Protocol minor version (additive changes only).
+/// Protocol minor version. Minor version changes are additive.
 pub const MINOR: u16 = 0;
 
 /// The first message on every connection.
 pub const HELLO: u16 = 0x0001;
 
-/// Services a connection binds to in HELLO (one service per connection).
+/// Services a connection can bind to in HELLO. Each connection binds one
+/// service.
 pub mod service {
     /// Audio output to PipeWire (`audio::proto`, types 0x0100..=0x01ff).
     pub const AUDIO: u32 = 1;
     /// The composer's displays in host windows (`display::proto`, types
     /// 0x0200..=0x02ff, events 0x4200..=0x42ff).
     pub const DISPLAY: u32 = 2;
-    /// The Innkeeper System app's channel: settings, notifications,
-    /// clipboard, links, media (`system`, types 0x0300..=0x03ff,
+    /// The Innkeeper System app's channel for settings, notifications,
+    /// clipboard, links and media (`system`, types 0x0300..=0x03ff,
     /// events 0x4300..=0x43ff).
     pub const SYSTEM: u32 = 3;
     /// Host files the user picks for the system app's document picker and
@@ -74,7 +76,7 @@ impl Hello {
     }
 }
 
-/// Body of a successful HELLO reply: the bridge's version.
+/// Body of a successful HELLO reply, which carries the bridge's version.
 pub fn hello_reply_body() -> Vec<u8> {
     let mut w = Writer::default();
     w.u16(MAJOR).u16(MINOR);

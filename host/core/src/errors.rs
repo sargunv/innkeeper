@@ -1,5 +1,6 @@
-//! Stable failure categories for front ends. Diagnostic text remains in the
-//! anyhow chain; callers downcast this context instead of parsing that text.
+//! Stable failure categories for front ends. The diagnostic text stays in the
+//! anyhow chain. Callers downcast to [`ErrorKind`] instead of parsing that
+//! text.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
@@ -28,7 +29,7 @@ impl std::fmt::Display for ErrorKind {
     }
 }
 
-/// PackageManager's symbolic failure, before truncating its diagnostic.
+/// Extracts PackageManager's symbolic failure code from its diagnostic text.
 pub fn install_failure(text: &str) -> Option<ErrorKind> {
     text.split(|c: char| !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_')
         .find(|s| {
@@ -39,8 +40,9 @@ pub fn install_failure(text: &str) -> Option<ErrorKind> {
         .map(|s| ErrorKind::InstallFailed(s.to_string()))
 }
 
-/// Keep PackageManager's code even when its diagnostic needs shortening. Other
-/// failures retain their original chain (including Timeout context).
+/// Attaches PackageManager's failure code as context and shortens its
+/// diagnostic. Other failures keep their original chain, including any Timeout
+/// context.
 pub(crate) fn classify_install_error(err: anyhow::Error) -> anyhow::Error {
     let text = format!("{err:#}");
     match install_failure(&text) {

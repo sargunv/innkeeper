@@ -1,6 +1,6 @@
-//! Audio service messages (id 1, types 0x0100..=0x01ff). The client is
-//! `android/vendor/audio`'s module (`audio_bridge`); framing and HELLO are
-//! in `docs/bridge-protocol.md`.
+//! Audio service messages (id 1, types 0x0100..=0x01ff). The client is the
+//! `audio_bridge` module in `android/vendor/audio`. `docs/bridge-protocol.md`
+//! describes framing and HELLO.
 //!
 //! | Type     | Request      | Body                                                                                                                                               | Reply                                                                                                                                          |
 //! | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -11,13 +11,13 @@
 //! | `0x0104` | SET_VOLUME   | `u32 stream`, `f32 left`, `f32 right` (each 0–1)                                                                                                   |                                                                                                                                                |
 //! | `0x0106` | SET_METADATA | `u32 stream`, `u32 usage` (Android `audio_usage_t`), label (empty: derived from usage)                                                             | Sets the PipeWire `media.name` and `media.role`                                                                                                |
 //!
-//! Limits: 8 streams and 8 MiB of rings per connection; 32 streams and 32
-//! connections in all. Over a stream limit OPEN_OUTPUT gets `-EBUSY`; over
-//! the connection limit the connection is closed. Unknown streams get
-//! `-ENOENT`.
+//! A connection may have 8 streams and 8 MiB of rings. The bridge allows 32
+//! streams and 32 connections in total. Over a stream limit, OPEN_OUTPUT and
+//! OPEN_INPUT get `-EBUSY`. Over the connection limit, the connection is
+//! closed. Requests for unknown streams get `-ENOENT`.
 //!
-//! The PCM goes through a shared ring, not messages: its layout and who
-//! writes what are in [`super::ring`].
+//! PCM data goes through a shared ring. [`super::ring`] documents its layout
+//! and which side writes each field.
 
 use crate::ipc::wire::{DecodeError, Reader, Writer};
 
@@ -153,8 +153,8 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
     Ok(req)
 }
 
-/// Encodes a request (the client side: tests, the example client, and the
-/// reference for `guest/bridge-client/audio.c`).
+/// Encodes a request on the client side. Tests and the example client use
+/// it, and it is the reference for `guest/bridge-client/audio.c`.
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match req {
         Request::OpenOutput(c) | Request::OpenInput(c) => {
@@ -207,10 +207,11 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     w.into_vec()
 }
 
-/// OPEN_OUTPUT / OPEN_INPUT reply body. The reply also carries three fds, in order: the
-/// ring memfd, the "data" eventfd (client signals) and the "space" eventfd
-/// (bridge signals). Input uses the same notification direction: the client
-/// signals a read request, the bridge signals data availability or death.
+/// The OPEN_OUTPUT and OPEN_INPUT reply body. The reply also carries three
+/// fds, in order: the ring memfd, the "data" eventfd that the client signals,
+/// and the read end of the "space" pipe that the bridge signals. Input uses
+/// the same directions. The client signals a read request, and the bridge
+/// signals available data or a dead stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenReply {
     pub stream: u32,

@@ -1,15 +1,16 @@
-//! What `start` writes into the runtime dir for one boot: the start-time
-//! layer, the top of every partition's stack, and the fake `/proc/cmdline`
-//! and `/proc/bootconfig`.
+//! The files `start` writes into the runtime dir for one boot. These are the
+//! start-time layer, which sits at the top of every partition's stack, and the
+//! fake `/proc/cmdline` and `/proc/bootconfig`.
 //!
 //! The layer holds:
-//! - `vendor/build.prop`: the image's, plus every `props.d/*.prop` (graphics,
-//!   audio), the driver selection, the composer backend and
-//!   image/vendor.prop. RADV for amdgpu, ANV for i915, else lavapipe.
+//! - `vendor/build.prop`: the image's properties plus every `props.d/*.prop`
+//!   file (graphics, audio), the Vulkan driver selection, the composer backend
+//!   and image/vendor.prop. The driver is RADV for amdgpu, ANV for i915, and
+//!   lavapipe otherwise.
 //! - `vendor/etc/permissions/`: Vulkan features matching that driver.
-//! - `apex/<name>/`: our files for the APEXes this image has (the stage's,
-//!   then the addons'), so the tree gains no directories apexd and
-//!   linkerconfig don't know about.
+//! - `apex/<name>/`: our files for the APEXes that exist in the image, from
+//!   the stage and then the addons. Files for other APEXes are skipped so the
+//!   tree gains no directories that apexd and linkerconfig don't know about.
 
 use std::collections::HashSet;
 use std::fs;
@@ -34,7 +35,7 @@ const CMDLINE: &[&str] = &[
     "androidboot.dalvik.vm.heapsize=512m",
 ];
 
-/// Our properties: what vendor/build.prop gets on top of the image's.
+/// Properties that vendor/build.prop gets on top of the image's.
 fn our_props(cfg: &Config) -> Result<String> {
     let share = &cfg.paths.share;
     if !share.join("props.d/vulkan.prop").is_file() {
@@ -65,21 +66,19 @@ fn our_props(cfg: &Config) -> Result<String> {
     }
     let vk = &cfg.vulkan_driver;
     s += &format!("ro.hardware.vulkan={vk}\n");
-    // Composer backend: windows through the bridge, or none.
+    // The composer shows windows through the bridge, or nothing when headless.
     let backend = if cfg.headless { "headless" } else { "bridge" };
     s += &format!("vendor.innkeeper.hwc.backend={backend}\n");
 
-    // No mounts, so zygote can't hide other apps' data dirs.
+    // Without mounts, zygote can't hide other apps' data dirs.
     s += "persist.zygote.app_data_isolation=false\n";
-    // The host's network is Android's (the system app's
-    // HostNetworkFeature, which follows the sandbox's resolv.conf).
     s += "# --- innkeeper-session: image/vendor.prop ---\n";
     s += &fs::read_to_string(share.join("image/vendor.prop"))?;
     Ok(s)
 }
 
-/// `image`'s lines minus every key `ours` sets, then `ours`, so ours take
-/// effect.
+/// Returns `image`'s lines without the keys that `ours` sets, followed by
+/// `ours`, so our values take effect.
 fn merge_props(image: &str, ours: &str) -> String {
     let key = |l: &str| l.split('=').next().unwrap_or("").to_string();
     let mine: HashSet<String> = ours

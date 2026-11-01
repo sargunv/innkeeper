@@ -1,8 +1,9 @@
-//! The snapshot blob of a TREE request: one window's AccessibilityNodeInfo
-//! tree, or a part of it, as the system app's `A11ySnapshot.kt` writes it.
-//! The fields are those of Chromium's ARC++ `accessibility_helper.mojom`
-//! (`AccessibilityNodeInfoData`), which [`super::tree`] maps to AccessKit as
-//! Chromium does. Little-endian; `str` is `u16 len` + UTF-8 without NUL.
+//! The snapshot blob of a TREE request. It holds one window's
+//! AccessibilityNodeInfo tree, or a part of it, as the system app's
+//! `A11ySnapshot.kt` writes it. The fields are those of Chromium's ARC++
+//! `accessibility_helper.mojom` (`AccessibilityNodeInfoData`), which
+//! [`super::tree`] maps to AccessKit as Chromium does. The encoding is
+//! little-endian, and `str` is `u16 len` + UTF-8 without NUL.
 //!
 //! | Part   | Layout |
 //! | ------ | ------ |
@@ -12,16 +13,16 @@
 //! | collection | `u8 present`, then if 1: `i32 rows, columns`, `u8 hierarchical`, `u8 selection_mode` |
 //! | item   | `u8 present`, then if 1: `i32 row, column, row_span, column_span`, `u8 heading` |
 //!
-//! A full snapshot's first node is the window's root: the system app's own
-//! node whose children are the roots of the display's Android windows. A
-//! partial snapshot re-sends changed nodes with their children.
+//! A full snapshot's first node is the window's root. It is a node of the
+//! system app whose children are the roots of the display's Android windows.
+//! A partial snapshot re-sends changed nodes with their children.
 
 use crate::ipc::wire::{DecodeError, Reader};
 
 pub const VERSION: u16 = 1;
 pub const FLAG_PARTIAL: u16 = 1;
 
-/// Node flags: AccessibilityNodeInfo's boolean properties.
+/// Node flags, one per boolean property of AccessibilityNodeInfo.
 pub mod flag {
     pub const CHECKABLE: u32 = 1 << 0;
     pub const CHECKED: u32 = 1 << 1;
@@ -40,16 +41,18 @@ pub mod flag {
     pub const HEADING: u32 = 1 << 14;
     pub const SHOWING_HINT_TEXT: u32 = 1 << 15;
     pub const DISMISSABLE: u32 = 1 << 16;
-    /// The whole text is one URLSpan (Chromium's covering URL span).
+    /// The whole text is one URLSpan, which Chromium calls a covering URL
+    /// span.
     pub const TEXT_IS_LINK: u32 = 1 << 17;
     /// `isImportantForAccessibility`.
     pub const IMPORTANT: u32 = 1 << 18;
-    /// Checked state partial (Android 16 tri-state `getChecked()`).
+    /// The checked state is partial, from Android 16's tri-state
+    /// `getChecked()`.
     pub const CHECKED_MIXED: u32 = 1 << 19;
 }
 
 /// Standard actions the node supports, one bit each. ACTION events name them
-/// by bit index; [`CUSTOM`](action::CUSTOM) is a custom action.
+/// by bit index. [`CUSTOM`](action::CUSTOM) marks a custom action.
 pub mod action {
     pub const CLICK: u8 = 0;
     pub const LONG_CLICK: u8 = 1;
@@ -88,7 +91,8 @@ pub mod limits {
     pub const TEXT: usize = 16384;
     pub const LONG: usize = 4096;
     pub const SHORT: usize = 1024;
-    /// Node ids at or above this are the bridge's own (text runs).
+    /// Node ids at or above this belong to the bridge, which uses them for
+    /// text runs.
     pub const MAX_ID: u64 = 1 << 62;
 }
 
@@ -117,7 +121,7 @@ pub struct Item {
     pub heading: bool,
 }
 
-/// One AccessibilityNodeInfo, as the system app sent it.
+/// One AccessibilityNodeInfo as the system app sent it.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RawNode {
     pub id: u64,
@@ -251,7 +255,8 @@ fn node(r: &mut Reader) -> Result<RawNode, DecodeError> {
     if children > limits::CHILDREN {
         return Err(DecodeError::Invalid("children"));
     }
-    // Bounded by what the blob holds, not by the declared count.
+    // The reservation is bounded by what the blob holds because the
+    // declared count is untrusted.
     n.children.reserve(children.min(r.remaining() / 8));
     for _ in 0..children {
         n.children.push(id(r)?);
@@ -295,8 +300,8 @@ pub fn decode(b: &[u8]) -> Result<Snapshot, DecodeError> {
     })
 }
 
-/// The encoder matching [`decode`] (tests, and the fixture the system app's
-/// encoder is checked against).
+/// The encoder matching [`decode`]. Tests use it, and it produces the
+/// fixture the system app's encoder is checked against.
 pub fn encode(s: &Snapshot) -> Vec<u8> {
     use crate::ipc::wire::Writer;
     fn string(w: &mut Writer, s: &str) {
@@ -379,8 +384,8 @@ mod tests {
             .collect()
     }
 
-    /// The snapshot `snapshot-fixture.txt` describes, which the system app's
-    /// encoder (`A11ySnapshotTest`) must also produce byte for byte.
+    /// The snapshot that `snapshot-fixture.txt` describes. The system app's
+    /// encoder (`A11ySnapshotTest`) must produce it byte for byte.
     pub(crate) fn fixture() -> Snapshot {
         Snapshot {
             partial: false,

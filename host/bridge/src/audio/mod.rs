@@ -21,13 +21,13 @@ use stream::{Ctl, NullOut, StreamHandle, StreamIo};
 /// Where streams play.
 #[derive(Debug, Clone)]
 pub enum Backend {
-    /// PipeWire through its Pulse protocol server; `sink` is a sink name
-    /// (default: the desktop's default output).
+    /// PipeWire through its Pulse protocol server. `sink` and `source` name
+    /// a device, and `None` uses the desktop's default.
     Pulse {
         sink: Option<String>,
         source: Option<String>,
     },
-    /// Nowhere, at the nominal rate.
+    /// Plays nowhere, at the nominal rate.
     Null,
 }
 
@@ -55,20 +55,20 @@ pub struct AudioService {
     total: Arc<AtomicUsize>,
     streams: Arc<std::sync::Mutex<HashMap<u32, StreamHandle>>>,
     next_id: u32,
-    /// The app a playback stream opened now is labelled with.
+    /// The app that a newly opened playback stream is labelled with.
     playback: Arc<std::sync::Mutex<Option<stream::PlaybackApp>>>,
     peer: String,
 }
 
 impl AudioService {
-    /// `total` counts streams across all connections (for the global cap).
+    /// `total` counts streams across all connections for the global cap.
     pub fn new(backend: Backend, limits: Limits, total: Arc<AtomicUsize>, peer: &Peer) -> Self {
         Self::with_playback(backend, limits, total, peer, Arc::default(), Arc::default())
     }
 
-    /// `playback` is the app the system service last named. `streams` is this
-    /// connection's streams; the system service sends [`Ctl::App`] on it when
-    /// the app changes, and a stream opened afterwards reads `playback`.
+    /// `playback` is the app the system service last named. `streams` holds
+    /// this connection's streams. The system service sends [`Ctl::App`] to
+    /// them when the app changes, and a stream opened later reads `playback`.
     pub fn with_playback(
         backend: Backend,
         limits: Limits,
@@ -102,8 +102,9 @@ impl AudioService {
     }
 
     fn open(&mut self, cfg: StreamConfig, input: bool) -> Reply {
-        // Streams whose thread died (PipeWire went away) still count until
-        // the client closes them; reap them here so they can reconnect.
+        // Streams whose thread died because PipeWire went away still count
+        // until the client closes them. Reaping them here lets the client
+        // reconnect.
         let dead: Vec<u32> = self
             .streams()
             .iter()
@@ -139,11 +140,11 @@ impl AudioService {
     fn spawn(&mut self, cfg: &StreamConfig, map_size: usize, input: bool) -> anyhow::Result<Reply> {
         let ring = Ring::new(cfg.frame_bytes(), cfg.capacity_frames(), cfg.rate)?;
         debug_assert_eq!(ring.map_len(), map_size);
-        // The client shares the data eventfd's open file description, so it
-        // can clear O_NONBLOCK: the stream thread reads it with RWF_NOWAIT.
-        // Space is a pipe: the client gets the read end, and the write end's
-        // flags are ours alone (an eventfd write can't be made non-blocking
-        // per call, and a saturated counter would block it).
+        // The client shares the data eventfd's open file description and can
+        // clear O_NONBLOCK, so the stream thread reads it with RWF_NOWAIT.
+        // Space is a pipe whose read end goes to the client, so only the
+        // bridge controls the write end's flags. An eventfd write cannot be
+        // made non-blocking per call, and a saturated counter would block it.
         let flags = EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK;
         let data = rustix::event::eventfd(0, flags)?;
         let (space_rd, space) = rustix::pipe::pipe_with(
@@ -183,8 +184,8 @@ impl AudioService {
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let capacity = cfg.capacity_frames();
         let handle = stream::spawn(format!("{}#{id}", self.peer), ring, data, space, out)?;
-        // A stream opened while an app is already playing gets that app's
-        // name; an input stream ignores it.
+        // A playback stream opened while an app is already playing gets that
+        // app's name.
         if !input && let Some(app) = self.playback.lock().unwrap().clone() {
             handle.send(Ctl::App(Some(app)));
         }

@@ -1,6 +1,8 @@
-//! A callback is a visibility observation only while one is outstanding.
-//! Keep probing static windows too: otherwise stopping Android would prevent
-//! the next callback, and a compositor without suspended could never restore it.
+//! Window visibility from frame callbacks and the toplevel's suspended state.
+//! A frame callback says something about visibility only while one is
+//! outstanding. Static windows are probed too. Otherwise stopping Android
+//! would prevent the next callback, and a compositor without the suspended
+//! state could never restore the window.
 use std::time::{Duration, Instant};
 
 pub(super) const PROBE_INTERVAL: Duration = Duration::from_millis(250);

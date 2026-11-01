@@ -1,8 +1,8 @@
-//! Touchpad gestures (`zwp_pointer_gestures_v1`) as input lines: swipes of
-//! three or more fingers, pinches and holds that begin over a window's
-//! content ([`super::proto`]). Two-finger scrolling is `wl_pointer.axis`
-//! with `axis_source` finger, not a gesture. The system app turns these into
-//! Android's touchpad gestures (`docs/input.md`).
+//! Touchpad gestures (`zwp_pointer_gestures_v1`) as input lines
+//! ([`super::proto`]). These are swipes of three or more fingers, pinches and
+//! holds that begin over a window's content. Two-finger scrolling arrives as
+//! `wl_pointer.axis` with `axis_source` finger instead. The system app turns
+//! these lines into Android's touchpad gestures (`docs/input.md`).
 
 use sctk::dispatch2::Dispatch2;
 use sctk::reexports::client::globals::GlobalList;
@@ -24,11 +24,11 @@ pub(crate) struct Gestures {
     swipe: Option<ZwpPointerGestureSwipeV1>,
     pinch: Option<ZwpPointerGesturePinchV1>,
     hold: Option<ZwpPointerGestureHoldV1>,
-    /// The window each gesture in progress began on; only those are
-    /// forwarded.
+    /// The window each gesture in progress began on. Gestures that began
+    /// outside a window's content are not forwarded.
     on: [Option<u32>; 3],
-    /// The newest gesture event's time, for the ends [`Gestures::forget`]
-    /// sends.
+    /// The newest gesture event's time, used in the end lines that
+    /// [`Gestures::forget`] sends.
     last_time: u32,
 }
 
@@ -72,7 +72,7 @@ impl Gestures {
         self.on = [None; 3];
     }
 
-    /// The window `id` is gone: its gestures end, cancelled.
+    /// Ends the gestures on window `id`, which is gone, as cancelled.
     pub(crate) fn forget(&mut self, id: u32, hub: &Hub) {
         for (g, on) in self.on.iter_mut().enumerate() {
             if *on == Some(id) {

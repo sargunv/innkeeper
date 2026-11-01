@@ -1,10 +1,11 @@
-//! The display service's Wayland side: one host Wayland connection per
-//! composer connection, one `xdg_toplevel` per window and dma-buf frames.
-//! The connection's seat is the input service's (`input::seat`).
+//! The display service's Wayland side. There is one host Wayland connection
+//! per composer connection and one `xdg_toplevel` per window, and frames
+//! arrive as dma-bufs. The connection's seat belongs to the input service
+//! (`input::seat`).
 //!
-//! Decorations: an Adwaita-style client-side frame on every desktop. Everything
-//! runs on one thread with a calloop event loop; the service sends it [`Cmd`]s
-//! over a channel.
+//! Windows get an Adwaita-style client-side frame on every desktop. Everything
+//! runs on one thread with a calloop event loop, and the service sends it
+//! [`Cmd`]s over a channel.
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -82,10 +83,11 @@ pub enum Cmd {
         color: u32,
         icon: Option<crate::ipc::blob::Image>,
     },
-    /// Activate a window, with this activation token if there is one.
+    /// Activates a window, with the activation token if there is one.
     Activate(u32, Option<String>),
     Minimize(u32),
-    /// Return a token for a portal launch rather than activating our window.
+    /// Returns an activation token for a portal launch instead of activating
+    /// our window.
     ExportToken(u32, std::sync::mpsc::Sender<String>),
     /// A buffer of the window's display.
     BufferAdd(BufferSpec, u32, OwnedFd),
@@ -133,7 +135,7 @@ struct Win {
     id: u32,
     window: Window,
     /// Android's rotation of the display's content in its buffer, in quarter
-    /// turns (WINDOW_ROTATION): shown turned back by the buffer transform.
+    /// turns (WINDOW_ROTATION). The buffer transform turns it back.
     rotation: u32,
     viewport: Option<WpViewport>,
     fractional: Option<WpFractionalScaleV1>,
@@ -161,7 +163,7 @@ struct Win {
     policy: Policy,
     /// Last windowed content size, restored if the compositor leaves size unspecified.
     windowed_size: (u32, u32),
-    /// Buffer shown now (its size maps input), and the last one asked for.
+    /// The buffer shown now and its size, which maps input to display pixels.
     shown: Option<u32>,
     shown_size: (u32, u32),
     /// The launch's activation token, used with the first frame.
@@ -190,9 +192,9 @@ pub(crate) struct State {
     exporter:
         Option<wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2>,
     qh: QueueHandle<State>,
-    /// The composer's connection (buffer releases).
+    /// The composer's connection, for buffer releases.
     events: Events,
-    /// Window and input lines go to the input service's clients.
+    /// Sends window events and input lines to the input service's clients.
     pub(crate) hub: Arc<Hub>,
 
     windows: HashMap<u32, Win>,
@@ -335,7 +337,7 @@ impl State {
             .map(|w| (w.id, true))
     }
 
-    /// Surface-local logical -> the shown frame's pixels.
+    /// Maps surface-local logical coordinates to the shown frame's pixels.
     pub(crate) fn to_display(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
         match self.windows.get(&id) {
             Some(w) if w.width > 0 && w.height > 0 && w.shown_size.0 > 0 => {
@@ -362,7 +364,8 @@ impl State {
         self.apply_window_policy(id, PolicyEvent::Rotate);
     }
 
-    /// A client chooses its floating size; the policy allows this only while floating.
+    /// Swaps the window's width and height. A client chooses its own size
+    /// only while floating, so the policy swaps only then.
     fn swap_shape(&mut self, id: u32) {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
@@ -392,9 +395,9 @@ impl State {
         self.send_configure(id);
     }
 
-    /// Shows the window's frames turned back by `rotation` quarter turns
-    /// (Android's rotation of a display whose buffer keeps its natural
-    /// orientation), and gives it the turned shape.
+    /// Shows the window's frames turned back by `rotation` quarter turns and
+    /// gives the window the turned shape. `rotation` is Android's rotation of
+    /// a display whose buffer keeps its natural orientation.
     fn rotation(&mut self, id: u32, rotation: u32) {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
@@ -535,8 +538,6 @@ impl State {
     }
 }
 
-// ---- window handling --------------------------------------------------------------
-
 impl State {
     fn release(&self, buffer: u32, invalid: bool) {
         if let Err(e) = self
@@ -573,9 +574,9 @@ impl State {
         }
     }
 
-    // The single visibility transition hook: suspended configures, callback
-    // absence and restore all arrive here. Output reporting also reconciles
-    // the primary scheduling clock from the same visible-output membership.
+    // Every visibility transition arrives here, whether from a suspended
+    // configure, a missing callback or a restore. Output reporting also
+    // reconciles the primary scheduling clock from the same visible outputs.
     fn send_visibility(&mut self, id: u32) {
         self.sync_inhibit(id);
         if self.windows.get(&id).is_some_and(|w| !w.visibility.visible) {
@@ -590,10 +591,11 @@ impl State {
         self.send_output(id);
     }
 
-    // Never return an ImageReader lease while Wayland still reads it. Replacing
-    // the last dma-buf with a shm snapshot lets wl_buffer.release retire every
-    // image even when Android has stopped producing. The surface stays mapped,
-    // including the outstanding callback that observes an eventual restore.
+    // An ImageReader lease must not go back while Wayland still reads the
+    // buffer. Replacing the last dma-buf with a shm snapshot lets
+    // wl_buffer.release retire every image even after Android stops producing
+    // frames. The surface stays mapped, and its outstanding frame callback
+    // stays live to observe a later restore.
     fn freeze(&mut self, id: u32) {
         let Some(w) = self.windows.get_mut(&id) else {
             return;
@@ -653,9 +655,10 @@ impl State {
         }
     }
 
-    /// Shared window-state boundary for output reporting and presentation
-    /// pacing: the full SCTK membership, or empty while hidden/unmapped.
-    /// Read on lifecycle/output events; it needs no poll or heartbeat.
+    /// The window's outputs, shared by output reporting and presentation
+    /// pacing. It is SCTK's full output membership, or empty while the window
+    /// is hidden or unmapped. Callers read it on lifecycle and output events,
+    /// so it needs no polling.
     pub(crate) fn visible_outputs(&self, id: u32) -> Vec<wl_output::WlOutput> {
         self.windows
             .get(&id)
@@ -709,7 +712,7 @@ impl State {
     }
 
     fn report_outputs(&mut self) {
-        // Membership lives in SCTK. Only changed Android observations are sent.
+        // SCTK tracks output membership. Only changes are sent to Android.
         let ids: Vec<_> = self.windows.keys().copied().collect();
         for id in ids {
             self.send_output(id);
@@ -831,8 +834,8 @@ impl State {
             inhibitor.destroy();
         }
         foreign::forget(id, w.exported.clone());
-        // Buffers of this window go too; busy ones were in use by the
-        // compositor, which keeps its own reference.
+        // The window's buffers go too. The compositor keeps its own reference
+        // to any buffer it still uses.
         let gone: Vec<u32> = self
             .buffers
             .iter()
@@ -1001,7 +1004,7 @@ impl State {
             let mut pixel = [0u8; 4];
             let color = Some(&b.source).and_then(|fd| {
                 use std::os::fd::AsRawFd;
-                // dma-buf descriptors support mmap, not read/pread.
+                // dma-buf fds support mmap but not read or pread.
                 let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
                 let base = b.bench_offset / page * page;
                 let within = (b.bench_offset - base) as usize;
@@ -1044,7 +1047,7 @@ impl State {
         surface.commit();
         let releases = if b.fallback { b.frames.release() } else { 0 };
         if first {
-            // Mapped now: the launch's token can focus it.
+            // The window is mapped now, so the launch's token can focus it.
             if let (Some(t), Some(a)) = (w.token.take(), &self.activation) {
                 a.activate(t, &surface);
             }
@@ -1055,9 +1058,9 @@ impl State {
         }
     }
 
-    /// Activates a window with `token`, or else with a token for the
-    /// newest input serial (which compositors may only grant as "demands
-    /// attention").
+    /// Activates a window with `token`, or else with a new token for the
+    /// newest input serial. Compositors may grant the latter only as "demands
+    /// attention".
     fn activate(&self, id: u32, token: Option<String>) {
         let (Some(a), Some(w)) = (&self.activation, self.windows.get(&id)) else {
             return;
@@ -1110,8 +1113,9 @@ impl State {
             if let Some(manager) = &self.icon_manager {
                 if let Some(image) = &icon {
                     let (side, pixels) = appearance::icon_pixels(image);
-                    // Compositors may map shm pools read/write: IPC's sealed
-                    // memfds cannot back Wayland buffers. This pool is never reused.
+                    // Compositors may map shm pools read/write, so IPC's
+                    // sealed memfds can't back Wayland buffers. This pool is
+                    // never reused.
                     let mut pool = match sctk::shm::slot::SlotPool::new(pixels.len(), &self.shm) {
                         Ok(pool) => pool,
                         Err(e) => {
@@ -1318,9 +1322,9 @@ impl WindowHandler for State {
 }
 
 impl CompositorHandler for State {
-    /// The integer scale (`wl_surface.preferred_buffer_scale`, or the
-    /// outputs the surface is on). Only used where the compositor has no
-    /// `wp_fractional_scale_v1`; the fractional scale wins otherwise.
+    /// Handles the integer scale from `wl_surface.preferred_buffer_scale` or
+    /// from the outputs the surface is on. It applies only when the compositor
+    /// lacks `wp_fractional_scale_v1`. Otherwise the fractional scale wins.
     fn scale_factor_changed(
         &mut self,
         _: &Connection,
@@ -1487,7 +1491,6 @@ impl DmabufHandler for State {
             buffer.destroy();
             return;
         };
-        // Re-home the buffer's events on our own user data (release).
         let _ = qh;
         match self.buffers.get_mut(&id) {
             Some(b) => {
@@ -1573,8 +1576,8 @@ fn turned((w, h): (u32, u32), rotation: u32) -> (u32, u32) {
 /// The buffer transform that shows a frame Android rotated by `rotation`
 /// quarter turns (Surface.ROTATION_*) upright.
 fn buffer_transform(rotation: u32) -> wl_output::Transform {
-    // Android turns content counterclockwise; Wayland names the turn that
-    // undoes it.
+    // Android turns content counterclockwise. The Wayland transform names the
+    // turn that undoes it.
     match rotation % 4 {
         1 => wl_output::Transform::_270,
         2 => wl_output::Transform::_180,

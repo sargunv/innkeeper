@@ -1,12 +1,13 @@
-//! The host state service (id 8): the desktop's battery, power saver,
-//! network and location for Android (messages: [`proto`]). Each kind of
-//! state is watched by one bridge-wide thread, started the first time a
-//! client asks for it, and sent to every connection that subscribed:
+//! The host state service (id 8). It gives Android the desktop's battery,
+//! power saver, network and location. The messages are in [`proto`]. Each
+//! kind of state is watched by a bridge-wide thread, which starts the first
+//! time a client asks for it and sends updates to every connection that
+//! subscribed.
 //!
 //! - `power`: UPower's `DisplayDevice` (the Health HAL's battery) and the
 //!   power saver (the PowerProfileMonitor portal)
 //! - `network`: the NetworkMonitor portal
-//! - `location`: one shared Location portal session
+//! - `location`: a shared Location portal session
 //!
 //! Battery, power saver and network are read-only state the desktop shows
 //! any app. Test sessions disable all session portals (`allow_portals`),
@@ -25,8 +26,8 @@ use crate::ipc::server::{Events, Peer, Reply, Service};
 use crate::ipc::wire::errno::*;
 use proto::{Battery, Network, Request, ev, feature};
 
-/// One kind of state: its last value and who wants it. Identical updates
-/// (portals can repeat themselves) are dropped.
+/// One kind of state, with its last value and the connections that want it.
+/// Identical updates are dropped, because portals can repeat themselves.
 pub struct Topic<T> {
     what: &'static str,
     event: u16,
@@ -46,8 +47,8 @@ impl<T: Clone + PartialEq + std::fmt::Debug> Topic<T> {
         }
     }
 
-    /// Subscribes `e` and sends it the current value, if known; `start`
-    /// runs once per bridge, for the first subscriber.
+    /// Subscribes `e` and sends it the current value, if known. `start` runs
+    /// once per bridge, for the first subscriber.
     fn subscribe(&self, e: Events, encode: fn(&T) -> Vec<u8>, start: impl FnOnce()) -> u64 {
         self.started.call_once(start);
         let k = self.subs.add(e.clone());
@@ -93,8 +94,9 @@ fn encode_saver(on: &bool) -> Vec<u8> {
 }
 
 impl HostState {
-    /// `allow_portals`: whether desktop portals may be reached (never in a
-    /// test session, including read-only power and network monitoring).
+    /// `allow_portals` says whether desktop portals may be reached. A test
+    /// session reaches none, not even for read-only power and network
+    /// monitoring.
     pub fn new(allow_portals: bool) -> Arc<HostState> {
         Arc::new(HostState {
             allow_portals,
@@ -285,8 +287,8 @@ fn get_all(
     Ok(p.get_all(iface)?)
 }
 
-/// Signals with this interface and member on `path` (any sender: services
-/// restart under new unique names).
+/// Signals with this interface and member on `path`. The match accepts any
+/// sender because services restart under new unique names.
 fn signals(
     conn: &zbus::blocking::Connection,
     path: &str,

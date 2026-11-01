@@ -21,7 +21,7 @@ impl Drop for Bus {
 }
 
 struct Server {
-    // 2 means this server doesn't implement Plasma's property (GNOME).
+    // 2 means this server doesn't implement Plasma's property, as on GNOME.
     inhibited: Arc<AtomicU8>,
     calls: Arc<AtomicU32>,
 }
@@ -75,7 +75,8 @@ fn launcher_updates_and_host_dnd() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     let config = dir.join("bus.conf");
-    // No service directories: this bus cannot activate host desktop services.
+    // Without service directories, this bus cannot activate host desktop
+    // services.
     std::fs::write(&config, "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><policy context=\"default\"><allow send_destination=\"*\"/><allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>").unwrap();
     let mut bus = Bus(Command::new("dbus-daemon")
         .args(["--nofork", "--print-address", "--config-file"])
@@ -188,8 +189,9 @@ fn launcher_updates_and_host_dnd() {
     note.urgency = 2;
     let host = hub.post(1, &events, 1, &note).unwrap();
     update(0.5, true, 0, true);
-    // Plasma allows dismissing resident popups. Android may keep the task:
-    // wait for the DISMISSED event, then verify launcher state survived.
+    // Plasma allows dismissing resident popups, and Android may keep the
+    // task. Wait for the DISMISSED event, then verify that the launcher state
+    // survived.
     _server
         .emit_signal(
             None::<&str>,
@@ -222,7 +224,8 @@ fn launcher_updates_and_host_dnd() {
     hub.post(1, &events, 2, &note).unwrap();
     update(0.5, true, 0, true);
     hub.close_all(1);
-    // HashMap iteration may clear either task first; consume both then verify reset.
+    // HashMap iteration may clear either task first, so consume both updates
+    // and then verify the reset.
     let _ = rx.recv_timeout(Duration::from_secs(2)).unwrap();
     update(0.0, false, 0, false);
     // DND still publishes launcher state, but makes no Notify call.

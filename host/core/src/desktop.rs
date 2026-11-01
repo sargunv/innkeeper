@@ -1,6 +1,7 @@
 //! Desktop Entry (`.desktop`) generation, escaped per the Desktop Entry
-//! Specification 1.5: string escapes (`\s \n \t \r \\`), list separators
-//! (`\;`) and the Exec quoting rules (reserved characters, `%%`).
+//! Specification 1.5. That covers string escapes (`\s \n \t \r \\`), list
+//! separators (`\;`) and the Exec quoting rules for reserved characters and
+//! `%%`.
 
 use std::fmt::Write as _;
 
@@ -8,32 +9,33 @@ use anyhow::{Result, bail};
 
 use crate::validate::is_forbidden_char;
 
-/// Desktop-file ID and icon name prefix; `StartupWMClass` uses it too.
-/// The manager's own id is `dev.sargunv.Innkeeper` (capital I), so it does not
-/// share this prefix and a directory watch of app entries ignores it.
+/// The prefix of app entries' desktop-file IDs and icon names. The system
+/// app's window ids use it too. The manager's id, `dev.sargunv.Innkeeper`, has
+/// a capital I, so it does not share this prefix and a directory watch of app
+/// entries ignores it.
 pub const PREFIX: &str = "dev.sargunv.innkeeper.";
-/// The manager app (`innkeeper-manager`): its application ID, desktop-file ID and
-/// icon name. The capital I keeps it off [`PREFIX`], so no Android package can
-/// collide with it.
+/// The application ID, desktop-file ID and icon name of the manager app
+/// (`innkeeper-manager`). The capital I keeps it outside [`PREFIX`], so no
+/// Android package can collide with it.
 pub const MANAGER_ID: &str = "dev.sargunv.Innkeeper";
-/// The manager's icon (also used where an app has no icon of its own).
+/// The manager's icon. It also stands in for apps that have no icon.
 pub const MANAGER_ICON_SVG: &str = include_str!("../../manager/data/dev.sargunv.Innkeeper.svg");
 
-/// Innkeeper's Flatpak app id (the dev build's differs from the release's).
+/// Innkeeper's Flatpak app id. The dev build's id differs from the release's.
 pub fn flatpak_app_id() -> String {
     std::env::var("FLATPAK_ID").unwrap_or_else(|_| MANAGER_ID.into())
 }
 
-/// The id desktops match an app's windows (`app_id`, `StartupWMClass`),
-/// notifications and MPRIS players to its menu entry by: `<app id>.<pkg>`,
-/// the id the portal gives the entry and the only prefix a compositor lets a
-/// sandboxed client's windows claim.
+/// The id that desktops use to match an app's windows (`app_id`,
+/// `StartupWMClass`), notifications and MPRIS players to its menu entry. It is
+/// `<app id>.<pkg>`, the id the portal gives the entry. A compositor lets a
+/// sandboxed client's windows claim only ids with the `<app id>.` prefix.
 pub fn app_id(pkg: &str) -> String {
     format!("{}.{pkg}", flatpak_app_id())
 }
 
-/// [`app_id`] for an id Android sent (`dev.sargunv.innkeeper.<pkg>`, the system
-/// app's window ids); anything else is kept.
+/// Maps a window id from the system app, `dev.sargunv.innkeeper.<pkg>`, to its
+/// [`app_id`]. Any other id is returned unchanged.
 ///
 /// The Android prefix and the Flatpak app id differ only by the case of
 /// `innkeeper` (`dev.sargunv.innkeeper.` versus `dev.sargunv.Innkeeper.`). A
@@ -49,9 +51,9 @@ pub fn desktop_app_id(android: &str) -> String {
     }
 }
 
-/// Escapes a `string`/`localestring` value. Refuses control characters other
-/// than the ones the spec has escapes for (we never write those either, but
-/// the escaping must hold on its own).
+/// Escapes a `string` or `localestring` value. Refuses forbidden characters
+/// other than the controls that the spec has escapes for. Callers don't pass
+/// such characters either, but the escaping must be safe on its own.
 pub fn escape_value(s: &str) -> Result<String> {
     let mut out = String::with_capacity(s.len());
     for (i, c) in s.chars().enumerate() {
@@ -71,7 +73,7 @@ pub fn escape_value(s: &str) -> Result<String> {
     Ok(out)
 }
 
-/// Escapes one item of a `;`-separated list value and appends the separator.
+/// Escapes each item of a `;`-separated list value and appends the separator.
 fn list(items: &[impl AsRef<str>]) -> Result<String> {
     let mut out = String::new();
     for it in items {
@@ -81,9 +83,9 @@ fn list(items: &[impl AsRef<str>]) -> Result<String> {
     Ok(out)
 }
 
-/// Quotes one Exec argument (before the general string escaping, which
-/// `exec_line` applies afterwards). Field codes are passed through unquoted by
-/// `exec_line`, so every `%` here is literal.
+/// Quotes one Exec argument. `exec_line` applies the general string escaping
+/// afterwards. It also passes field codes through unquoted, so every `%` here
+/// is literal.
 pub fn quote_exec_arg(arg: &str) -> Result<String> {
     if arg.is_empty() {
         return Ok("\"\"".into());
@@ -119,9 +121,9 @@ pub fn exec_line(args: &[String], field_code: Option<&str>) -> Result<String> {
     escape_value(&parts.join(" "))
 }
 
-/// Splits an Exec value (already string-unescaped, as [`read_key`] returns
-/// it) back into arguments: the reverse of [`exec_line`]'s quoting. Field
-/// codes stay as they are.
+/// Splits an Exec value back into arguments, reversing [`exec_line`]'s
+/// quoting. `exec` must already be string-unescaped, as [`read_key`] returns
+/// it. Field codes stay as they are.
 pub fn exec_args(exec: &str) -> Vec<String> {
     let mut args = vec![];
     let mut it = exec.chars().peekable();
@@ -156,22 +158,24 @@ pub struct AppEntry {
     pub name: String,
     /// (desktop locale, label), e.g. ("pt_BR", "Calculadora").
     pub names: Vec<(String, String)>,
-    /// The profile it runs in: `Exec` is `innkeeper --profile <profile> run
-    /// <package> %U`, and `X-Innkeeper-Profile` names it.
+    /// The profile the app runs in. `Exec` is
+    /// `innkeeper --profile <profile> run <package> %U`, and
+    /// `X-Innkeeper-Profile` names the profile.
     pub profile: innkeeper_profile::profile::ProfileName,
     pub icon: Option<String>,
-    /// `versionName`, recorded as `X-Innkeeper-Version` (omitted if empty).
+    /// `versionName`, recorded as `X-Innkeeper-Version` unless it is empty.
     pub version: String,
     pub categories: Vec<String>,
     /// Custom URI schemes, declared as `x-scheme-handler/<scheme>`.
     pub schemes: Vec<String>,
-    /// What its launch splash looks like, as `X-Innkeeper-Splash` and
+    /// The app's launch splash, recorded as `X-Innkeeper-Splash` and
     /// `X-Innkeeper-Window`.
     pub splash: Option<Splash>,
 }
 
-/// An app's launch splash: the window its launcher activity opens in, in
-/// logical pixels, filled with its splash background colour (`0xRRGGBB`).
+/// An app's launch splash. It has the size in logical pixels of the window
+/// that the launcher activity opens, filled with the splash background colour
+/// (`0xRRGGBB`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Splash {
     pub color: u32,
@@ -180,7 +184,8 @@ pub struct Splash {
 }
 
 impl Splash {
-    /// From an entry's `X-Innkeeper-Splash=#rrggbb` and `X-Innkeeper-Window=WxH`.
+    /// Parses an entry's `X-Innkeeper-Splash=#rrggbb` and
+    /// `X-Innkeeper-Window=WxH` values.
     pub fn parse(color: &str, window: &str) -> Option<Splash> {
         let color = u32::from_str_radix(color.strip_prefix('#')?, 16)
             .ok()
@@ -210,7 +215,7 @@ impl AppEntry {
         let mut s = String::from("[Desktop Entry]\nType=Application\nVersion=1.5\n");
         writeln!(s, "Name={}", escape_value(&self.name)?)?;
         for (loc, n) in &self.names {
-            // Locale keys are generated from a validated grammar; check again.
+            // Locale keys come from a validated grammar. Check them again here.
             if !loc.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                 bail!("bad locale key {loc:?}");
             }
@@ -221,8 +226,8 @@ impl AppEntry {
             writeln!(s, "Icon={}", escape_value(icon)?)?;
         }
         writeln!(s, "Exec={}", exec_line(&self.run(), Some("%U"))?)?;
-        // The launcher then passes an activation token (XDG_ACTIVATION_TOKEN),
-        // which `run` hands on to the app's window.
+        // With StartupNotify, the launcher passes an activation token
+        // (XDG_ACTIVATION_TOKEN), which `run` hands on to the app's window.
         s.push_str("Terminal=false\nStartupNotify=true\n");
         writeln!(
             s,
@@ -263,7 +268,8 @@ pub const PACKAGE_MIME_TYPES: &[&str] = &[
     "application/x-android-apkm",
 ];
 
-/// Category mapping for `ApplicationInfo.category` / `android:appCategory`.
+/// Maps `ApplicationInfo.category` (`android:appCategory`) to desktop
+/// categories.
 pub fn categories_for(app_category: Option<i32>, is_game: bool) -> Vec<String> {
     let v: &[&str] = if is_game {
         &["Game"]
@@ -284,8 +290,8 @@ pub fn categories_for(app_category: Option<i32>, is_game: bool) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// Reads one key from the `[Desktop Entry]` group (unescaped for the simple
-/// escapes; enough for reading back our own files).
+/// Reads one key from the `[Desktop Entry]` group and undoes the simple string
+/// escapes. That is enough to read back the files Innkeeper writes.
 pub fn read_key(text: &str, key: &str) -> Option<String> {
     let mut in_group = false;
     for line in text.lines() {
@@ -322,9 +328,9 @@ pub fn read_key(text: &str, key: &str) -> Option<String> {
     None
 }
 
-/// `text` with the value of `key` in the `[Desktop Entry]` group replaced by
-/// `value` (already escaped); every other line is kept as it is. None if the
-/// key isn't there.
+/// Replaces the value of `key` in the `[Desktop Entry]` group of `text` with
+/// `value`, which must already be escaped. Every other line is kept as it is.
+/// Returns None if the key isn't there.
 pub fn replace_key(text: &str, key: &str, value: &str) -> Option<String> {
     replace_group_key(text, "Desktop Entry", key, value)
 }
@@ -443,8 +449,8 @@ mod tests {
     fn label_cannot_inject_keys() {
         let mut e = entry();
         e.name = "Calc\nExec=rm -rf ~".into();
-        // Validated labels never contain newlines; even if one got here it is
-        // escaped onto a single line.
+        // Validated labels never contain newlines. If one got here anyway, it
+        // is escaped onto a single line.
         let s = e.render().unwrap();
         assert!(s.contains("Name=Calc\\nExec=rm -rf ~\n"));
         assert_eq!(s.lines().filter(|l| l.starts_with("Exec=")).count(), 1);

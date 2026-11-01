@@ -1,29 +1,29 @@
 //! Framing and untrusted-input helpers shared by every service.
 //!
-//! One `SOCK_SEQPACKET` packet is one message: an 8-byte header (`u16 type`,
-//! `u16 flags` (must be 0), `u32 tag`) and a little-endian body of at most
-//! `MAX_MSG - HDR` bytes. Requests get exactly one REPLY with the same tag;
-//! the bridge may also send events (types `EVENT_MIN..=EVENT_MAX`, tag 0).
+//! One `SOCK_SEQPACKET` packet is one message. It has an 8-byte header
+//! (`u16 type`, `u16 flags`, `u32 tag`) and a little-endian body of at most
+//! `MAX_MSG - HDR` bytes. The flags must be 0. Each request gets one REPLY
+//! with the same tag. The bridge may also send events (types
+//! `EVENT_MIN..=EVENT_MAX`, tag 0).
 //!
-//! Decoding goes through [`Reader`], which never trusts a length or count
-//! from the peer: every read is bounds-checked, names are bounded UTF-8
+//! Decoding goes through [`Reader`], which does not trust any length or count
+//! from the peer. Every read is bounds-checked, names are bounded UTF-8
 //! without control characters, and [`Reader::end`] rejects trailing bytes.
-//! Everything here is pure, so it can be fuzzed directly.
+//! The code here is pure, so it can be fuzzed directly.
 
 /// Largest message either side sends. Longer packets end the connection.
 pub const MAX_MSG: usize = 512;
 /// Longest UTF-8 name or label, in bytes.
 pub const MAX_NAME: usize = 96;
-/// Header size.
 pub const HDR: usize = 8;
-/// Reply type (requests use `0x0001..EVENT_MIN`).
+/// Reply type. Requests use `0x0001..EVENT_MIN`.
 pub const REPLY: u16 = 0x8000;
-/// Unsolicited bridge-to-client messages (tag 0).
+/// Type range of unsolicited bridge-to-client messages, which have tag 0.
 pub const EVENT_MIN: u16 = 0x4000;
 pub const EVENT_MAX: u16 = 0x7fff;
 
-/// Errno values used in reply statuses (Linux numbering, which both sides
-/// share; spelled out so decoding needs no libc).
+/// Errno values used in reply statuses. Both sides use Linux numbering. The
+/// values are spelled out so decoding needs no libc.
 pub mod errno {
     pub const EPERM: i32 = 1;
     pub const ENOENT: i32 = 2;
@@ -50,7 +50,7 @@ pub enum DecodeError {
     Long,
     /// Reserved header flags were set.
     Flags,
-    /// Unknown message type (forward compatibility: answer ENOSYS).
+    /// Unknown message type. For forward compatibility, the reply is ENOSYS.
     UnknownType(u16),
     /// A field was out of range or malformed.
     Invalid(&'static str),
@@ -80,7 +80,7 @@ pub struct Header {
     pub tag: u32,
 }
 
-/// Parses and checks a header; the body is `&buf[HDR..]`.
+/// Parses and checks a header. The body is `&buf[HDR..]`.
 pub fn decode_header(buf: &[u8]) -> Result<Header, DecodeError> {
     if buf.len() < HDR {
         return Err(DecodeError::Short);
@@ -142,7 +142,7 @@ impl<'a> Reader<'a> {
             _ => Err(DecodeError::Invalid("bool")),
         }
     }
-    /// An f32 in `[0, 1]` (NaN and infinities rejected).
+    /// An f32 in `[0, 1]`. NaN and infinities are rejected.
     pub fn unit_f32(&mut self) -> Result<f32, DecodeError> {
         let v = self.f32()?;
         if v.is_finite() && (0.0..=1.0).contains(&v) {
@@ -165,7 +165,7 @@ impl<'a> Reader<'a> {
         }
     }
     /// `u16 len` then `len` bytes of UTF-8, at most MAX_NAME, without NUL or
-    /// other control characters (names end up in desktop UI and C strings).
+    /// other control characters. Names end up in desktop UI and C strings.
     pub fn name(&mut self) -> Result<String, DecodeError> {
         let n = self.u16()? as usize;
         if n > MAX_NAME {
@@ -244,7 +244,7 @@ impl Writer {
     }
 }
 
-/// A reply: REPLY header, `i32 status` (0 or -errno), then a body.
+/// Builds a reply: a REPLY header, `i32 status` (0 or -errno), then a body.
 pub fn reply(tag: u32, status: i32, body: &[u8]) -> Vec<u8> {
     let mut w = Writer::message(REPLY, tag);
     w.i32(status);
@@ -275,8 +275,8 @@ pub fn truncate(s: &str, max: usize) -> &str {
 mod tests {
     use super::*;
 
-    /// `wire-fixtures.txt`, which the system app's tests also check: each
-    /// message built from its fields must match the hex, and read back.
+    /// Checks `wire-fixtures.txt`, which the system app's tests also check.
+    /// Each message built from its fields must match the hex and read back.
     #[test]
     fn shared_fixtures() {
         fn int(v: &str) -> i64 {

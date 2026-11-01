@@ -1,7 +1,6 @@
-//! Where things are: the install prefix this program runs from, profiles'
-//! runtime paths, and the XDG base directories. Profiles are always named by
-//! the caller; only programs the launcher starts read their own from
-//! `INNKEEPER_PROFILE` ([`Prefix::session_paths`]).
+//! The install prefix this program runs from and the runtime paths of
+//! profiles. The caller names the profile. Programs that the launcher starts
+//! read theirs from `INNKEEPER_PROFILE` through [`Prefix::session_paths`].
 
 use std::env;
 use std::path::PathBuf;
@@ -11,13 +10,14 @@ use anyhow::{Context, Result};
 /// The session launcher, relative to the prefix.
 const LAUNCHER: &str = "libexec/innkeeper/innkeeper-session";
 
-/// An installed Innkeeper: `/app` in the Flatpak, `out/stage` in a checkout.
+/// The prefix of an installed Innkeeper. It is `/app` in the Flatpak and
+/// `out/stage` in a checkout.
 pub struct Prefix(PathBuf);
 
 impl Prefix {
-    /// The prefix this program is installed in: the nearest ancestor of its
-    /// executable that holds the launcher (so it works from `bin/` and from
-    /// `libexec/innkeeper/`).
+    /// Finds the prefix this program is installed in. That is the nearest
+    /// ancestor of the executable that holds the launcher, which works from
+    /// both `bin/` and `libexec/innkeeper/`.
     pub fn locate() -> Result<Prefix> {
         let exe = env::current_exe()
             .and_then(|p| p.canonicalize())
@@ -40,13 +40,13 @@ impl Prefix {
         self.0.join(LAUNCHER)
     }
 
-    /// The runtime paths of the profile in `INNKEEPER_PROFILE`: for programs
-    /// the launcher starts, such as the bridge.
+    /// The runtime paths of the profile named by `INNKEEPER_PROFILE`. Programs
+    /// that the launcher starts, such as the bridge, use this.
     pub fn session_paths(&self) -> Result<innkeeper_profile::Paths> {
         innkeeper_profile::Paths::new(&self.0)
     }
 
-    /// Runtime paths of profile `name`.
+    /// The runtime paths of profile `name`.
     pub fn profile_paths(&self, name: &str) -> Result<innkeeper_profile::Paths> {
         innkeeper_profile::Paths::for_profile(&self.0, name)
     }
@@ -54,8 +54,8 @@ impl Prefix {
 
 use innkeeper_profile::profile::ProfileName;
 
-/// The argv that runs the CLI ([`crate::xdg::INNKEEPER`]) against profile
-/// `profile` with `args`: `innkeeper --profile <profile> <args>`.
+/// Builds the argv `innkeeper --profile <profile> <args>`, which runs the CLI
+/// ([`crate::xdg::INNKEEPER`]) against `profile`.
 pub fn cli(profile: &ProfileName, args: &[&str]) -> Vec<String> {
     let mut v = vec![
         crate::xdg::INNKEEPER.to_string(),

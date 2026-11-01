@@ -1,25 +1,26 @@
-//! The accessibility service (id 7): Android apps' AccessibilityNodeInfo
-//! trees on the desktop's AT-SPI bus, so screen readers and other assistive
-//! technologies see them as they see native apps. Messages: [`proto`];
-//! snapshots: [`wire`]; the mapping to AccessKit: [`tree`].
+//! The accessibility service (id 7). It publishes Android apps'
+//! AccessibilityNodeInfo trees on the desktop's AT-SPI bus, so screen readers
+//! and other assistive technologies see them as they see native apps. The
+//! messages are in [`proto`], the snapshot format is in [`wire`], and the
+//! mapping to AccessKit is in [`tree`].
 //!
-//! The system app's accessibility service sends a snapshot per window
-//! (full, then partial ones as apps change); each window with a tree gets
-//! one `accesskit_unix::Adapter`, which shows it as a frame of the bridge's
-//! AT-SPI application, named by the window's title. AT-SPI actions come back
-//! as ACTION events, which the system app performs on the node. Whether
-//! anything runs at all follows the desktop's AT-SPI switch
-//! (`org.a11y.Status`): ACTIVE tells the system app, which enables its
-//! Android service only while it is on.
+//! The system app's accessibility service sends a full snapshot per window,
+//! then partial ones as apps change. Each window with a tree gets an
+//! `accesskit_unix::Adapter`, which shows it as a frame of the bridge's AT-SPI
+//! application, named by the window's title. AT-SPI actions come back as
+//! ACTION events, which the system app performs on the node. The service
+//! follows the desktop's AT-SPI switch (`org.a11y.Status`). ACTIVE events tell
+//! the system app the switch's state, and the system app enables its Android
+//! service only while it is on.
 //!
-//! Keyboard focus comes from the seat ([`crate::input::Hub`]): AccessKit
+//! Keyboard focus comes from the seat ([`crate::input::Hub`]). AccessKit
 //! sends focus events only for the focused window, as AT-SPI expects.
 //!
-//! Limits: every Android window is a frame of one AT-SPI application named
-//! after this process (`innkeeper-bridge`), since AccessKit has one per
-//! process. Extents are relative to the window, because Wayland tells no
-//! client where its windows are, so a screen reader's mouse review can't find
-//! Android nodes under the pointer.
+//! Every Android window is a frame of a single AT-SPI application named after
+//! this process (`innkeeper-bridge`), because AccessKit has one application
+//! per process. Extents are relative to the window because Wayland does not
+//! tell clients where their windows are. As a result, a screen reader's mouse
+//! review can't find Android nodes under the pointer.
 
 pub mod proto;
 pub mod tree;
@@ -48,7 +49,7 @@ struct Window {
 
 /// Bridge-wide state, created once in `main.rs`.
 pub struct Shared {
-    /// False for test sessions on the user's own bus: never active.
+    /// False for test sessions on the user's own bus, which are never active.
     presence: bool,
     active: AtomicBool,
     watching: OnceLock<()>,
@@ -75,7 +76,8 @@ impl Shared {
         })
     }
 
-    /// The seat's keyboard focus moved (to no window of ours: `None`).
+    /// Called when the seat's keyboard focus moves. `None` means it moved to
+    /// a window that isn't ours.
     pub fn keyboard_focus(&self, window: Option<u32>) {
         *self.focus.lock().unwrap() = window;
         for (id, w) in self.windows.lock().unwrap().iter() {
@@ -226,8 +228,8 @@ impl A11yService {
                         return Reply::err(-EINVAL);
                     }
                 };
-                // The tree lock is released first: AccessKit's activation
-                // takes the adapter's lock, then ours.
+                // The tree lock is released first because AccessKit's
+                // activation takes the adapter's lock, then ours.
                 w.adapter.lock().unwrap().update_if_active(|| update);
                 Reply::ok()
             }

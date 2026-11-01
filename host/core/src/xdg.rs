@@ -1,7 +1,7 @@
-//! Host desktop integration: app desktop entries and their hicolor icons. The
-//! entries in `applications` are the app's own record (in the Flatpak's
-//! private data dir); the app menu gets them through the DynamicLauncher
-//! portal ([`crate::dynlauncher`]).
+//! Host desktop integration for app desktop entries and their hicolor icons.
+//! The entries in `applications` are Innkeeper's own records and live in the
+//! Flatpak's private data dir. The app menu gets them through the
+//! DynamicLauncher portal ([`crate::dynlauncher`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,22 +13,24 @@ use crate::dynlauncher::{self, Answer};
 use crate::paths;
 use innkeeper_profile::paths::xdg_home;
 
-/// Sizes we render icons at; all are hicolor theme directories.
+/// Icon sizes to render. Each is a hicolor theme directory.
 pub const ICON_SIZES: &[u32] = &[48, 64, 128, 256, 512];
-/// hicolor's fixed-size directories (for APK PNG fallbacks).
+/// The fixed-size hicolor directories, used for APK PNG fallbacks.
 const HICOLOR_SIZES: &[u32] = &[16, 22, 24, 32, 36, 48, 64, 72, 96, 128, 192, 256, 512];
 
 pub struct Dirs {
     pub data: PathBuf,
     pub config: PathBuf,
     pub cache: PathBuf,
-    /// The app id whose DynamicLauncher portal entries make the app menu, as
-    /// `<app id>.<pkg>.desktop`. None only in tests: records without a menu.
+    /// The app id of the DynamicLauncher portal entries that form the app menu
+    /// (`<app id>.<pkg>.desktop`). It is None in tests, which write records
+    /// without a menu entry.
     pub portal: Option<String>,
 }
 
-/// The `Key=value` an app's record carries when the user declined its
-/// app-menu entry, so repairs don't ask again (an install does).
+/// The key an app's record carries, as `X-Innkeeper-Menu=declined`, when the
+/// user declined its app-menu entry. Repairs then don't ask again, but an
+/// install does.
 const DECLINED: &str = "X-Innkeeper-Menu";
 
 impl Dirs {
@@ -76,7 +78,8 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     fs::rename(&tmp, path).with_context(|| format!("write {}", path.display()))
 }
 
-/// Removes every hicolor PNG named `<id>.png` (all sizes). Returns how many.
+/// Removes every hicolor PNG named `<id>.png` at all sizes and returns how
+/// many it removed.
 fn remove_icons(d: &Dirs, id: &str) -> usize {
     let mut n = 0;
     if let Ok(rd) = fs::read_dir(d.hicolor()) {
@@ -90,7 +93,7 @@ fn remove_icons(d: &Dirs, id: &str) -> usize {
     n
 }
 
-/// Width and height of a PNG (from IHDR).
+/// Reads the width and height of a PNG from its IHDR chunk.
 pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     if png.len() < 24 || !png.starts_with(b"\x89PNG\r\n\x1a\n") || &png[12..16] != b"IHDR" {
         return None;
@@ -103,11 +106,11 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
 /// Where an app's menu entry went.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Menu {
-    /// Added through the DynamicLauncher portal, as this id.
+    /// Added through the DynamicLauncher portal with this id.
     Portal(String),
     /// The user declined the portal's dialog.
     Declined,
-    /// No app menu ([`Dirs::portal`] is None).
+    /// There is no app menu because [`Dirs::portal`] is None.
     None,
 }
 
@@ -122,8 +125,8 @@ impl std::fmt::Display for Menu {
 }
 
 /// Writes an app's record and icons, replacing any previous ones, and
-/// returns the record. `icons` are (size, PNG); sizes that aren't hicolor
-/// directories are skipped.
+/// returns the record. `icons` are (size, PNG) pairs. An icon is skipped if
+/// its size isn't a hicolor directory or doesn't match the PNG.
 pub fn write_record(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) -> Result<String> {
     let id = entry.id();
     remove_icons(d, &id);
@@ -144,9 +147,9 @@ pub fn write_record(d: &Dirs, entry: &mut AppEntry, icons: &[(u32, Vec<u8>)]) ->
     Ok(text)
 }
 
-/// The portal's entry for record `text` of `pkg`: unless the app menu
-/// already has one that runs the record's command, asks the user to add it.
-/// With `repair`, a record whose entry the user declined is left alone.
+/// Makes sure the app menu has a portal entry for record `text` of `pkg`. If
+/// the menu has no entry that runs the record's command, asks the user to add
+/// one. With `repair`, a record whose entry the user declined is left alone.
 pub fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu> {
     let (Some(app_id), Some(id)) = (d.portal.as_deref(), d.portal_id(pkg)) else {
         return Ok(Menu::None);
@@ -163,15 +166,16 @@ pub fn add_to_menu(d: &Dirs, pkg: &str, text: &str, repair: bool) -> Result<Menu
         return Ok(Menu::Declined);
     }
     let name = desktop::read_key(text, "Name").unwrap_or_else(|| pkg.to_string());
-    // The largest PNG the portal takes (512 px), else the manager's icon.
+    // Use the largest PNG the portal accepts (512 px), or else the manager's
+    // icon.
     let icon = HICOLOR_SIZES
         .iter()
         .rev()
         .filter(|s| **s <= 512)
         .find_map(|s| fs::read(d.icon_path(*s, &format!("{PREFIX}{pkg}"))).ok())
         .unwrap_or_else(|| MANAGER_ICON_SVG.as_bytes().to_vec());
-    // The portal sets Name and Icon from its dialog; the record's own keys
-    // (DECLINED) stay out.
+    // The portal sets Name and Icon from its dialog. Keys private to the
+    // record, such as DECLINED, stay out.
     let entry: String = text
         .lines()
         .filter(|l| !l.starts_with("Icon=") && !l.starts_with(&format!("{DECLINED}=")))
@@ -215,14 +219,15 @@ pub fn remove_app(d: &Dirs, pkg: &str) -> bool {
     remove_icons(d, &format!("{PREFIX}{pkg}")) > 0 || had_entry
 }
 
-/// The `Name=` of our desktop entry for `pkg`, if any.
+/// The `Name=` of Innkeeper's desktop entry for `pkg`, if any.
 pub fn app_label(d: &Dirs, pkg: &str) -> Option<String> {
     let t = fs::read_to_string(d.app_desktop(pkg)).ok()?;
     desktop::read_key(&t, "Name")
 }
 
-/// What a launch shows before the app's first frame: its name, splash and
-/// icon, from its desktop entry. None if it has no entry.
+/// Reads what a launch shows before the app's first frame from the app's
+/// desktop entry: its name, splash and icon. Returns None if the app has no
+/// entry.
 pub fn launch_look(
     d: &Dirs,
     pkg: &str,
@@ -256,8 +261,9 @@ pub fn largest_icon(d: &Dirs, id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Our app entries: (package, path, text) for every `dev.sargunv.innkeeper.<pkg>`
-/// desktop file that says it is `pkg`'s.
+/// Lists Innkeeper's app entries as (package, path, text) for every
+/// `dev.sargunv.innkeeper.<pkg>` desktop file whose `X-Innkeeper-Package` is
+/// `pkg`.
 fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
     let Ok(rd) = fs::read_dir(d.applications()) else {
         return vec![];
@@ -274,7 +280,7 @@ fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
         .collect()
 }
 
-/// Apps with a Innkeeper desktop entry (any profile), sorted by name.
+/// Lists apps with an Innkeeper desktop entry in any profile, sorted by name.
 pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     let mut v: Vec<DesktopApp> = app_entries(d)
         .into_iter()
@@ -290,13 +296,13 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     v
 }
 
-/// Points the entries of profile `from`'s apps at profile `to` (renamed).
-/// Returns how many were rewritten.
+/// Points the entries of profile `from`'s apps at profile `to` after a
+/// rename. Returns how many were rewritten.
 pub fn move_entries(d: &Dirs, from: &str, to: &str) -> usize {
     rewrite_entries(d, (from, to))
 }
 
-/// The program desktop entries run, which the DynamicLauncher portal runs as
+/// The program that desktop entries run. The DynamicLauncher portal runs it as
 /// `flatpak run --command=innkeeper`.
 pub const INNKEEPER: &str = "innkeeper";
 
@@ -335,7 +341,8 @@ mod tests {
     fn declines_are_recorded_in_the_record() {
         let entry = "[Desktop Entry]\nName=App\nExec=innkeeper run a.b %U\n";
         let record = menu_record(entry, true);
-        // The repair path reads exactly this key before requesting installation again.
+        // The repair path reads this key before asking to install the entry
+        // again.
         assert_eq!(
             desktop::read_key(&record, DECLINED).as_deref(),
             Some("declined")
@@ -366,7 +373,7 @@ mod tests {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(48u32.to_be_bytes());
         png.extend(48u32.to_be_bytes());
-        // A wrong-size PNG is skipped rather than misfiled.
+        // A PNG whose size doesn't match is skipped so that it isn't misfiled.
         write_record(&d, &mut e, &[(48, png.clone()), (64, png.clone())]).unwrap();
         let p = d.app_desktop("org.example.app");
         assert!(p.ends_with("applications/dev.sargunv.innkeeper.org.example.app.desktop"));
@@ -394,7 +401,7 @@ mod tests {
                     .as_path()
             )
         );
-        // Reinstall replaces; remove cleans up.
+        // A reinstall replaces the icons, and removal cleans up.
         write_record(&d, &mut e, &[]).unwrap();
         assert!(
             !d.icon_path(48, "dev.sargunv.innkeeper.org.example.app")

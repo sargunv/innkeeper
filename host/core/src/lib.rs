@@ -1,6 +1,6 @@
-//! Innkeeper host library: everything the `innkeeper` CLI and the
-//! `innkeeper-manager` app share. [`ops`] holds the user-level operations
-//! (inspect, install, uninstall, run, list); the other modules are their
+//! The Innkeeper host library, shared by the `innkeeper` CLI and the
+//! `innkeeper-manager` app. [`ops`] holds the user-level operations such as
+//! inspect, install, uninstall, run and list. The other modules are their
 //! building blocks. See host/core/README.md.
 
 pub mod adb;
@@ -22,7 +22,8 @@ pub mod uri;
 pub mod validate;
 pub mod xdg;
 
-/// A fresh, empty directory for one test's files: `<repo>/out/test/core/<name>`.
+/// Creates a fresh, empty directory for one test's files at
+/// `<repo>/out/test/core/<name>`.
 #[cfg(test)]
 fn test_dir(name: &str) -> std::path::PathBuf {
     let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

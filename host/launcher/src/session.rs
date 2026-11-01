@@ -1,4 +1,4 @@
-//! What runs beside Android: the kmsg log reader and the desktop bridge.
+//! Runs the kmsg log reader and the desktop bridge beside Android.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -14,7 +14,7 @@ use crate::conf::Config;
 use crate::paths::Paths;
 use crate::sys;
 
-/// `path` opened for appending (created if missing).
+/// Opens `path` for appending and creates it if missing.
 pub fn append(path: &Path) -> Result<File> {
     OpenOptions::new()
         .create(true)
@@ -30,8 +30,9 @@ pub fn log(paths: &Paths, msg: &str) {
     }
 }
 
-/// Launcher milestones, on Android's CLOCK_BOOTTIME timebase too, so init's
-/// ro.boottime.* properties and boot_progress events can be compared directly.
+/// Logs launcher milestones. Each entry also has a time on Android's
+/// CLOCK_BOOTTIME timebase, so init's ro.boottime.* properties and
+/// boot_progress events can be compared directly.
 pub struct BootTrace(Instant);
 
 impl BootTrace {
@@ -144,7 +145,7 @@ pub fn tail(file: &Path, alive: &dyn Fn() -> bool) -> Result<()> {
         if !alive() {
             return Ok(());
         }
-        // Truncated (a new session): start over.
+        // A new session truncated the file, so start over.
         if f.stream_position()? > f.metadata()?.len() {
             f.seek(SeekFrom::Start(0))?;
         }

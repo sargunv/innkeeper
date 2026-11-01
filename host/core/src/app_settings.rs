@@ -1,6 +1,6 @@
-//! The session's `Session1` D-Bus API, as clients call it: per-app settings
-//! and window operations. Both go through the bridge to the privileged system
-//! app, never the session's exec socket.
+//! The client side of the session's `Session1` D-Bus API, which offers per-app
+//! settings and window operations. Both go through the bridge to the
+//! privileged system app and do not use the session's exec socket.
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,8 @@ pub const INTERFACE: &str = "dev.sargunv.Innkeeper.Session1";
 pub const PATH: &str = "/dev/sargunv/Innkeeper/Session";
 pub const MAX_JSON: usize = 64 * 1024;
 
-/// The session's bus name: `.p_<name>`, with hyphens as underscores.
+/// The session's bus name, which ends in `.p_<name>` with hyphens replaced by
+/// underscores.
 pub fn bus_name(profile: &innkeeper_profile::profile::ProfileName) -> String {
     format!(
         "dev.sargunv.Innkeeper.Session.p_{}",
@@ -129,22 +130,22 @@ impl Response {
 pub enum WindowCommand {
     Launch {
         package: String,
-        /// Empty: the launcher activity.
+        /// Empty for the launcher activity.
         component: String,
-        /// Empty: none.
+        /// Empty for no URI.
         uri: String,
         /// Documents grants, 16 hex digits each.
         grants: Vec<String>,
         token: String,
         wait: bool,
         new_window: bool,
-        /// The window's size in dp; 0: the app's own.
+        /// The window's size in dp, or 0 for the app's own size.
         width: u32,
         height: u32,
     },
     Windows,
     Close {
-        /// Negative: the window of `package`.
+        /// A negative display selects the window of `package`.
         display: i32,
         package: String,
     },
@@ -194,7 +195,7 @@ pub struct WindowResponse {
 }
 
 impl WindowResponse {
-    /// The reply, or the error the system app reported.
+    /// Returns the reply, or the error that the system app reported.
     pub fn decode(bytes: &[u8]) -> Result<String> {
         ensure!(bytes.len() <= MAX_JSON, "window response too large");
         let r: Self = serde_json::from_slice(bytes)?;
@@ -207,7 +208,7 @@ impl WindowResponse {
     }
 }
 
-/// Profile `profile`'s running session's Session1 object.
+/// The Session1 object of profile `profile`'s running session.
 fn proxy(
     profile: &innkeeper_profile::profile::ProfileName,
 ) -> Result<zbus::blocking::Proxy<'static>> {
@@ -247,8 +248,8 @@ pub fn request(
         .ok_or_else(|| anyhow::anyhow!("missing app information"))
 }
 
-/// Session1 `Launch`'s arguments for `l` and `o`: package, component, URI,
-/// grants, token, wait, new window.
+/// The arguments of Session1 `Launch`: package, component, URI, grants,
+/// token, wait, new window, width and height.
 type LaunchArgs<'a> = (
     &'a str,
     &'a str,
@@ -302,9 +303,8 @@ fn launch_args<'a>(
     )
 }
 
-/// Opens `l` in a window through profile `profile`'s session (one window
-/// per app). Returns the window manager's reply (`launched display=N ...` or
-/// `focused ...`).
+/// Opens `l` in a window through profile `profile`'s session. Returns the
+/// window manager's reply, such as `launched display=N ...` or `focused ...`.
 pub fn launch(
     profile: &innkeeper_profile::profile::ProfileName,
     l: &crate::android::Launch,
@@ -315,13 +315,15 @@ pub fn launch(
         .context("launch failed")
 }
 
-/// Profile `profile`'s windows, one line each (`display=N package=P ...`).
+/// Lists profile `profile`'s windows, one line each
+/// (`display=N package=P ...`).
 pub fn windows(profile: &innkeeper_profile::profile::ProfileName) -> Result<Vec<String>> {
     Ok(proxy(profile)?.call("Windows", &())?)
 }
 
-/// A read-only grant on the running session's bridge for `file` (only its
-/// fd reaches the bridge, never its path), shown to Android as `name`.
+/// Creates a read-only grant for `file` on the running session's bridge and
+/// returns its id. Android sees the file as `name`. Only the fd reaches the
+/// bridge, not the path.
 pub fn import(
     profile: &innkeeper_profile::profile::ProfileName,
     file: &std::fs::File,
