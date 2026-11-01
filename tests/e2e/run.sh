@@ -437,8 +437,15 @@ if [[ ${groups[*]} != ohos ]]; then
       ;;
     esac
   done
+  # Setup doesn't count toward the deadline. The first run in a checkout
+  # installs the dev Flatpak (packaging/flatpak/dev-init.sh), and prepare also
+  # prepares the profile's image.
+  if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then "$S" prepare >/dev/null; fi
 elif [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
-  # Fetching the image is setup and doesn't count toward the deadline.
+  # Setup doesn't count toward the deadline. The first run in a checkout
+  # installs the dev Flatpak (packaging/flatpak/dev-init.sh). The profile
+  # doesn't exist yet, so the runner fetches the image with fetch.sh.
+  "$S" bootstrap >/dev/null
   st=$repo/out/stage
   "$st/libexec/innkeeper/image/fetch.sh" ohos "$st/share/innkeeper/ohos/pin.toml" \
     "${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}" >/dev/null

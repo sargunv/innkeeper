@@ -89,11 +89,13 @@ sandbox without building the Flatpak. They use `tools/dev/session.sh`, and
 `tools/dev/innkeeper.sh` for the CLI.
 
 - The first use runs `dev-init.sh`, which installs a snapshot of `out/stage`
-  into the private `out/flatpak/user`. Each later run mounts the current stage
-  as `/app` (`flatpak run --app-path`) and grants it read-only. Sessions that
-  the portal spawns, including alarm wakeups, therefore also start the stage's
-  files. The snapshot's `innkeeper` and `innkeeper-manager` forward to the stage
-  for menu entries. Rerun `dev-init.sh` to test a Flatpak update.
+  into the private `out/flatpak/user`. `tools/dev/session.sh bootstrap` runs
+  `dev-init.sh` if the app isn't installed and then exits. Each later run mounts
+  the current stage as `/app` (`flatpak run --app-path`) and grants it
+  read-only. Sessions that the portal spawns, including alarm wakeups, therefore
+  also start the stage's files. The snapshot's `innkeeper` and
+  `innkeeper-manager` forward to the stage for menu entries. Rerun `dev-init.sh`
+  to test a Flatpak update.
 - HOME and the XDG dirs are scratch dirs under `out/dev/flatpak/<profile>`. The
   image cache stays in the user's home directory.
 - A runtime systemd drop-in in
