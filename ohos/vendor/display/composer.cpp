@@ -358,9 +358,12 @@ EXPORT int32_t GetDisplayCapability(uint32_t devId, DisplayCapability& info) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   setString(info.name, "innkeeper");
   info.type = DISP_INTF_BUILT_IN;
-  const Mode d = mode();
-  info.phyWidth = d.width * 254 / (d.dpi * 10);
-  info.phyHeight = d.height * 254 / (d.dpi * 10);
+  // The panel reports no physical size. For a display with a size, MMI
+  // multiplies mouse motion by a factor for the screen's diagonal. Without
+  // one, it uses the flat curve in sys_prod, and one unit of motion moves
+  // its cursor by one pixel, which the bridge needs to place the cursor.
+  info.phyWidth = 0;
+  info.phyHeight = 0;
   info.supportLayers = kMaxLayers;
   info.virtualDispCount = 0;
   info.supportWriteBack = false;
