@@ -518,6 +518,22 @@ else
   fi
   echo 'ok   desktop pointer input unlocks the lock screen and opens Settings'
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_keys() {
+    # MMI logs each key with its device, OpenHarmony's key code and state.
+    # KEY_A is OpenHarmony's KEYCODE_A, 2017.
+    keyed() {
+      s /system/bin/hidumper -s MultimodalInput -a -e |
+        grep -q 'deviceId:0,sourceType:[a-z-]*,keyCode:2017,keyAction:key_action_up'
+    }
+    ! keyed || return
+    printf '%s\n' key:30,1 key:30,0 | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok keyed
+  }
+  if ! timed ohos-keys ohos_keys; then
+    exit 1
+  fi
+  echo "ok   desktop keys reach OpenHarmony's input service"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
     # The CLI installs a HAP and starts its launcher ability. The image's
     # calculator is a signed HAP, read from the image cache.

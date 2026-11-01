@@ -12,8 +12,8 @@ init starts its services, samgr comes up, and OH's core system abilities
 register with it. render_service composes OH's screen through our display HDI,
 and the bridge shows the screen in a desktop window. SceneBoard is OH's window
 manager and home screen. It starts and draws the lock screen, and built-in apps
-such as Settings run in it. The window takes desktop pointer and touch input.
-There is no keyboard input yet.
+such as Settings run in it. The window takes desktop pointer, touch and keyboard
+input.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
@@ -37,7 +37,8 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A drag
 and a click on the nested desktop's seat then unlock the lock screen and open
-Settings, and the CLI installs and starts the image's calculator HAP.
+Settings. A key press reaches MMI, and the CLI installs and starts the image's
+calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -158,7 +159,13 @@ seat to the Innkeeper Touchscreen (`host/bridge/src/input/direct.rs`). A click
 is a tap, and a drag with the left button is a swipe. Oniro's emulator also
 turns its pointer into a touchscreen. MMI moves its cursor by each event's
 relative motion, which an absolute pointer doesn't report. A host touch is a
-contact on the touchscreen. Keys, the wheel and text input don't reach OH yet.
+contact on the touchscreen.
+
+Keys go to the Innkeeper Keyboard while the window has keyboard focus. They keep
+their evdev codes, and OH maps them with its own keymap, so the host's layout
+doesn't apply. MMI repeats held keys itself, so the bridge drops the
+compositor's repeats. The wheel and text input from the host's input method
+don't reach OH yet.
 
 ## How it boots
 
