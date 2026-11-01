@@ -23,10 +23,12 @@ been dismissed. An OH profile refuses `open`, files and URIs in `run`,
 `app info`, `app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
-roots and whose profile is a release profile. Each profile has a UDID, which
+roots. A release profile installs on any device. A debug profile names the UDIDs
+of the devices it installs on. Each profile has a UDID, which
 `innkeeper profile list` shows. The launcher derives it from the profile's name
-and sets it as `const.product.udid`. A debug profile still fails, because
-installd hands it to the kernel's code-signing device, and the session has none.
+and sets it as `const.product.udid`. installd hands a debug profile's
+certificate chain to the kernel's code-signing device, `/dev/code_sign`, which
+the broker serves.
 
 `ohos/build.sh` (`mise run build:ohos`) builds our layer. `mise run build`
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
@@ -51,8 +53,10 @@ archive's 3.7 GB. These parts are open source under Apache 2.0.
   ets-loader is a set of rollup plugins written for hvigor's rollup fork.
   `ohos/probe/arkts.js` runs them on upstream rollup 3 (pinned beside the SDK)
   and adds the few plugin-context members that the fork provides.
-- The packing tool makes the HAP. `ohos/probe/sign.sh` signs it with the SDK's
-  public keys and a release profile, as OpenHarmony's own apps are signed.
+- The packing tool makes the HAP. A test signs it with `ohos/probe/sign.sh`,
+  which uses the SDK's public keys and a debug profile for the test profile's
+  UDID, as a developer signs an app under test. The build copies the SDK files
+  that sign.sh uses to `out/test/probes/ohos-sign`.
 
 To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
@@ -62,9 +66,9 @@ system abilities, screen 0 and SceneBoard come up and that selftest passes
 and a click on the nested desktop's seat then unlock the lock screen and open
 Settings. OH's input injector then scrolls Settings and goes home, and
 render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP
-then installs, shows in `innkeeper list` and comes to the foreground with
-`innkeeper run`.
+([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP,
+signed for the profile's UDID, then installs, shows in `innkeeper list` and
+comes to the foreground with `innkeeper run`.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -251,4 +255,5 @@ Android's system app reports activity.
   has no Bionic. With `INNKEEPER_GUEST=ohos` it also traps `open(2)`, because
   musl does not use `openat`. It serves `/etc/passwd` and `/etc/group` from
   `/system/etc`, handles OH's binder ioctls and serves `/dev/access_token_id`
+  and `/dev/code_sign`
   ([supervisor/README.md](../supervisor/README.md#openharmony)).

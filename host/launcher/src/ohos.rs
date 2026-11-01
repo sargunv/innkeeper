@@ -161,11 +161,14 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
         }
     }
     let dev = Path::new("/dev");
-    // The broker serves the binder nodes and the access-token node.
+    // The broker serves the binder nodes, the access-token node and the
+    // code-signing node.
     crate::root::binder_nodes(dev)?;
-    let token = dev.join("access_token_id");
-    fs::write(&token, b"")?;
-    fs::set_permissions(&token, fs::Permissions::from_mode(0o666))?;
+    for node in ["access_token_id", "code_sign"] {
+        let node = dev.join(node);
+        fs::write(&node, b"")?;
+        fs::set_permissions(&node, fs::Permissions::from_mode(0o666))?;
+    }
     crate::sandbox::dev_sockets(cfg)
 }
 

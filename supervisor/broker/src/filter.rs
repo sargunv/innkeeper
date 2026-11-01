@@ -61,11 +61,15 @@ pub fn install(guest: crate::Guest) -> std::io::Result<i32> {
     // On OpenHarmony, musl opens files with open(2), which the broker serves
     // as openat. musl's stat(3) is stat(2), which the broker answers for the
     // evdev devices' sysfs view. The access-token device's ioctls are type
-    // 'A', and ashmem's are type 0x77.
+    // 'A', ashmem's are type 0x77, and the code-signing device's are type 'k'.
     if guest == crate::Guest::Ohos {
         rule(&mut f, SYS_open, &[]);
         rule(&mut f, SYS_stat, &[]);
-        for ty in [crate::ohos::IOCTL_TYPE, crate::ashmem::IOCTL_TYPE] {
+        for ty in [
+            crate::ohos::IOCTL_TYPE,
+            crate::ashmem::IOCTL_TYPE,
+            crate::code_sign::IOCTL_TYPE,
+        ] {
             rule(&mut f, SYS_ioctl, &[(1, 0xff00, (ty as u32) << 8)]);
         }
     }

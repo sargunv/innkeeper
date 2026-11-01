@@ -19,6 +19,7 @@
 pub mod ashmem;
 pub mod binder;
 mod bpf;
+pub mod code_sign;
 mod creds;
 pub mod filter;
 mod fs;

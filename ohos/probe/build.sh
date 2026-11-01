@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# build:ohos-probe: InnkeeperProbes.hap, the app that the ohos e2e group
-# installs, into out/test/probes. It builds from this directory's sources with
-# the SDK that ohos/sdk.sh fetches, and without hvigor:
+# build:ohos-probe: the unsigned InnkeeperProbes.hap, the app that the ohos e2e
+# group installs, into out/test/probes. It builds from this directory's
+# sources with the SDK that ohos/sdk.sh fetches, and without hvigor:
 #   restool      resources and module.json  -> resources.index, module.json
 #   arkts.js     ets/                       -> ets/modules.abc
-#   packing tool all of the above           -> the unsigned HAP
-#   sign.sh      the unsigned HAP           -> InnkeeperProbes.hap
+#   packing tool all of the above           -> InnkeeperProbes.hap
+# A HAP installs only once it is signed for the device, so the test signs it
+# with sign.sh for its profile's UDID. The build copies the SDK files that
+# sign.sh uses to out/test/probes/ohos-sign.
 set -euo pipefail
 top=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$top"
@@ -40,5 +42,8 @@ java -jar "$sdk/toolchains/lib/app_packing_tool.jar" --mode hap --force true \
   cat "$work/pack.log" >&2
   exit 1
 }
-mkdir -p out/test/probes
-ohos/probe/sign.sh "$sdk/toolchains/lib" "$bundle" "$work/unsigned.hap" out/test/probes/InnkeeperProbes.hap
+kit=out/test/probes/ohos-sign
+rm -rf "$kit"
+mkdir -p "$kit"
+cp "$sdk"/toolchains/lib/{hap-sign-tool.jar,OpenHarmony.p12,OpenHarmonyProfileDebug.pem,UnsgnedDebugProfileTemplate.json} "$kit/"
+cp "$work/unsigned.hap" out/test/probes/InnkeeperProbes.hap

@@ -781,7 +781,8 @@ fn is_binder_syscall(guest: Guest, nr: i64, args: &[u64; 6]) -> bool {
             && (is_binder_ioctl(args[1] as u32)
                 || (guest == Guest::Ohos
                     && (crate::ohos::is_token_ioctl(args[1] as u32)
-                        || crate::ashmem::is_ashmem_ioctl(args[1] as u32)))))
+                        || crate::ashmem::is_ashmem_ioctl(args[1] as u32)
+                        || crate::code_sign::is_code_sign_ioctl(args[1] as u32)))))
 }
 
 /// Whether the path names a binder device. Only binder devices take the binder
@@ -990,6 +991,9 @@ impl Supervisor {
         if self.guest == Guest::Ohos && crate::ashmem::is_ashmem_ioctl(cmd) {
             return self.ashmem_ioctl(req);
         }
+        if self.guest == Guest::Ohos && crate::code_sign::is_code_sign_ioctl(cmd) {
+            return self.code_sign_ioctl(req);
+        }
         let procid = match self
             .tgid(req.pid as i32)
             .and_then(|pid| self.fd_index.get(&(pid, fd)))
@@ -1036,6 +1040,22 @@ impl Supervisor {
             &mut Mem(mem.raw(), arg),
         );
         trace!("token pid={pid} cmd={cmd:#x} {r:?}");
+        let (val, errno) = r.map_or_else(|e| (0, e), |v| (v, 0));
+        self.us.listener.reply(req.id, val, errno);
+    }
+
+    /// Serves a code-signing ioctl on [`crate::code_sign::NODE`]. Other
+    /// type-`'k'` ioctls go through.
+    fn code_sign_ioctl(&mut self, req: SeccompNotif) {
+        let [fd, cmd, ..] = req.data.args;
+        let tid = req.pid as i32;
+        if !std::fs::read_link(format!("/proc/{tid}/fd/{fd}"))
+            .is_ok_and(|p| p.as_os_str() == crate::code_sign::NODE)
+        {
+            return self.respond(req.id, 0, true);
+        }
+        let r = crate::code_sign::ioctl(cmd as u32);
+        trace!("code_sign tid={tid} cmd={cmd:#x} {r:?}");
         let (val, errno) = r.map_or_else(|e| (0, e), |v| (v, 0));
         self.us.listener.reply(req.id, val, errno);
     }
