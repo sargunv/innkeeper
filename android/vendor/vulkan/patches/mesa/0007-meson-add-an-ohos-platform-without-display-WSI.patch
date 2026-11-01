@@ -1,0 +1,58 @@
+meson: add an ohos platform without display WSI
+
+OpenHarmony's musl has no pthread_cancel or pthread_setcanceltype, which
+wsi_common_display.c calls, and musl resolves every symbol at load. The
+drivers would then fail to load. OpenHarmony processes have no use for
+VK_KHR_display, so the ohos platform leaves it out, as android does.
+
+diff --git a/meson.build b/meson.build
+index 5f19ef9..46764bc 100644
+--- a/meson.build
++++ b/meson.build
+@@ -487,6 +487,7 @@ with_platform_wayland = _platforms.contains('wayland')
+ with_platform_haiku = _platforms.contains('haiku')
+ with_platform_windows = _platforms.contains('windows')
+ with_platform_macos = _platforms.contains('macos')
++with_platform_ohos = _platforms.contains('ohos')
+ 
+ with_gfxstream_emulated_android = with_gfxstream_vk and with_platform_android and host_machine.system() == 'linux'
+ if with_gfxstream_emulated_android
+diff --git a/meson.options b/meson.options
+index 93a60e3..40d80b7 100644
+--- a/meson.options
++++ b/meson.options
+@@ -12,7 +12,7 @@ option(
+   type : 'array',
+   value : ['auto'],
+   choices : [
+-    'auto', 'x11', 'wayland', 'haiku', 'android', 'windows', 'macos',
++    'auto', 'x11', 'wayland', 'haiku', 'android', 'windows', 'macos', 'ohos',
+   ],
+   description : 'window systems to support. If this is set to `auto`, all ' +
+                 'platforms applicable will be enabled.'
+diff --git a/src/vulkan/meson.build b/src/vulkan/meson.build
+index 614a33a..b95e595 100644
+--- a/src/vulkan/meson.build
++++ b/src/vulkan/meson.build
+@@ -54,7 +54,7 @@ if with_platform_wayland
+   vulkan_wsi_deps += dep_wayland_client
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_WAYLAND_KHR'
+ endif
+-if system_has_kms_drm and not with_platform_android
++if system_has_kms_drm and not with_platform_android and not with_platform_ohos
+   vulkan_wsi_deps += [dep_libdrm, dep_display_info]
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_DISPLAY_KHR'
+ endif
+diff --git a/src/vulkan/wsi/meson.build b/src/vulkan/wsi/meson.build
+index 80925d1..04b11a8 100644
+--- a/src/vulkan/wsi/meson.build
++++ b/src/vulkan/wsi/meson.build
+@@ -38,7 +38,7 @@ if with_platform_macos
+   files_vulkan_wsi += files('wsi_common_metal.c', 'wsi_common_metal_layer.m')
+ endif
+ 
+-if system_has_kms_drm and not with_platform_android
++if system_has_kms_drm and not with_platform_android and not with_platform_ohos
+   files_vulkan_wsi += files('wsi_common_display.c')
+ endif
+ 

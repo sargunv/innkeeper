@@ -37,10 +37,10 @@ OHOS_SDK_HOME = "{{ env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache') }}/
 # ---- build -------------------------------------------------------------------
 # Each build:<module> task fills out/build/<module>/install/ with a tree of
 # paths relative to the stage prefix, and `build` merges the trees into
-# out/stage. Both systems use the host, broker and image-tools modules. Android
-# adds ndk, vulkan, system-app and data, and OpenHarmony adds ohos and
-# ohos-system-app. The probe
-# apps for the tests go to out/test/probes and aren't staged.
+# out/stage. Both systems use the host, broker, image-tools and vulkan modules.
+# Android adds ndk, system-app and data, and OpenHarmony adds ohos and
+# ohos-system-app. The probe apps for the tests go to out/test/probes and
+# aren't staged.
 
 [tasks.build]
 description = "Build every module and stage them into out/stage"
@@ -74,7 +74,7 @@ cmake --install out/build/android --strip --prefix "$i" >/dev/null
 """
 
 [tasks."build:vulkan"]
-description = "Mesa RADV, ANV and lavapipe (build container; skipped when its inputs are unchanged)"
+description = "Mesa RADV, ANV and lavapipe for Android, and RADV and ANV for OpenHarmony (build container; skipped when its inputs are unchanged)"
 run = "android/vendor/vulkan/build.sh"
 
 [tasks."build:system-app"]
