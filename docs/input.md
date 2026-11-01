@@ -14,8 +14,8 @@ InputDispatcher in one ordered stream. That stream keeps the results of the
 host's layout, compose and input method intact. `input/VirtualInput.kt` explains
 the split.
 
-An OpenHarmony window gets the seat from the bridge as a touchscreen
-([ohos](../ohos/README.md#input)).
+An OpenHarmony window gets the seat from the bridge as a touchscreen and a
+keyboard ([ohos](../ohos/README.md#input)).
 
 ## Devices
 

@@ -21,9 +21,9 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   OpenHarmony profile ([ohos](../ohos/README.md)). It starts the profile on the
   private desktop and waits until SceneBoard is ready and its window shows. It
   also runs selftest. A drag and a click on the desktop's seat then unlock the
-  lock screen and open Settings, and the CLI installs and starts the image's
-  calculator HAP. This group uses its own profile, `<profile>-ohos`, so it runs
-  alone.
+  lock screen and open Settings, a key press reaches OpenHarmony's input
+  service, and the CLI installs and starts the image's calculator HAP. This
+  group uses its own profile, `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
