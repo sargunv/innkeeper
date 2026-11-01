@@ -808,6 +808,23 @@ while True:
     exit 1
   fi
   echo 'ok   the probe HAP records a tone that the desktop plays into its source'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_screen() {
+    local frames
+    # Closing the window leaves OpenHarmony running, and its composer's
+    # display stays headless until `run` opens the window again.
+    frames=$(grep -c 'window [0-9]* shows its first frame' "$bridge_log")
+    desktop Close dev.sargunv.innkeeper.ohos | grep -q true || return
+    until_ok file_has "$bridge_log" 'display 0 stays headless' || return
+    "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
+    reopened() { (($(grep -c 'window [0-9]* shows its first frame' "$bridge_log") > frames)); }
+    until_ok reopened
+  }
+  if ! timed ohos-screen ohos_screen; then
+    tail -n 20 "$bridge_log" >&2
+    exit 1
+  fi
+  echo "ok   closing the window leaves OpenHarmony running, and run opens the window again"
   echo 'e2e: PASS'
   exit
 fi

@@ -6,9 +6,10 @@
 //! thread only validates requests and forwards them.
 
 pub mod proto;
+pub mod screens;
 pub(crate) mod wl;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -55,6 +56,9 @@ pub struct DisplayService {
     limits: Limits,
     /// HWC display -> the window it shows.
     displays: HashMap<u32, u32>,
+    /// Displays whose own window the user closed ([`screens`]). Their frames
+    /// are released at once.
+    headless: HashSet<u32>,
     /// Buffer -> its HWC display.
     buffers: HashMap<u32, u32>,
     label: String,
@@ -94,6 +98,7 @@ impl DisplayService {
             thread: Some(thread),
             limits,
             displays: HashMap::new(),
+            headless: HashSet::new(),
             buffers: HashMap::new(),
             label: peer.label.clone(),
         })
@@ -107,7 +112,7 @@ impl DisplayService {
     }
 
     fn add_display(&mut self, display: u32, width: u32, height: u32) -> Reply {
-        if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
+        if self.has(display) || self.displays.len() >= self.limits.displays {
             return Reply::err(-EBUSY);
         }
         let Some(pending) = self.hub.claim(width, height) else {
@@ -116,16 +121,40 @@ impl DisplayService {
         self.show(display, pending)
     }
 
-    /// Adds a display with a window of its own (DISPLAY_WINDOW).
+    /// Whether `display` exists.
+    fn has(&self, display: u32) -> bool {
+        self.displays.contains_key(&display) || self.headless.contains(&display)
+    }
+
+    /// Adds a display with a window of its own (DISPLAY_WINDOW). If the user
+    /// closed that window, the display stays headless.
     fn add_window(&mut self, display: u32, request: WindowRequest) -> Reply {
-        if self.displays.contains_key(&display) || self.displays.len() >= self.limits.displays {
+        if self.has(display) || self.displays.len() + self.headless.len() >= self.limits.displays {
             return Reply::err(-EBUSY);
         }
         let window = self.hub.own_window();
+        let attach = self
+            .hub
+            .screens
+            .attach(self.conn, self.events.clone(), &request.app_id);
+        let token = match attach {
+            screens::Attach::Show { token } => token,
+            screens::Attach::Headless => {
+                crate::info!("display: display {display} stays headless, its window is closed");
+                self.headless.insert(display);
+                let mut w = Writer::default();
+                w.u32(window);
+                return Reply::with_body(w.into_vec());
+            }
+        };
         self.show(
             display,
             PendingWindow {
-                request: WindowRequest { window, ..request },
+                request: WindowRequest {
+                    window,
+                    token,
+                    ..request
+                },
                 color: 0,
                 icon: None,
             },
@@ -152,6 +181,10 @@ impl DisplayService {
     }
 
     fn remove_display(&mut self, display: u32) -> Reply {
+        if self.headless.remove(&display) {
+            self.buffers.retain(|_, d| *d != display);
+            return Reply::ok();
+        }
         let Some(window) = self.displays.remove(&display) else {
             return Reply::err(-ENOENT);
         };
@@ -198,6 +231,9 @@ impl Service for DisplayService {
                 y,
                 hotspot,
             } => {
+                if self.headless.contains(&display) {
+                    return Reply::ok();
+                }
                 let Some(&window) = self.displays.get(&display) else {
                     return Reply::err(-ENOENT);
                 };
@@ -255,9 +291,10 @@ impl Service for DisplayService {
                 },
             ),
             Request::BufferAdd(b) => {
-                let Some(&window) = self.displays.get(&b.display) else {
+                let window = self.displays.get(&b.display).copied();
+                if window.is_none() && !self.headless.contains(&b.display) {
                     return Reply::err(-ENOENT);
-                };
+                }
                 if self.buffers.contains_key(&b.buffer) || self.buffers.len() >= self.limits.buffers
                 {
                     return Reply::err(-EBUSY);
@@ -272,11 +309,17 @@ impl Service for DisplayService {
                     _ => return Reply::err(-EINVAL),
                 }
                 self.buffers.insert(b.buffer, b.display);
-                self.send(Cmd::BufferAdd(b, window, fd))
+                match window {
+                    Some(window) => self.send(Cmd::BufferAdd(b, window, fd)),
+                    None => Reply::ok(),
+                }
             }
             Request::BufferRemove { buffer } => {
-                if self.buffers.remove(&buffer).is_none() {
+                let Some(display) = self.buffers.remove(&buffer) else {
                     return Reply::err(-ENOENT);
+                };
+                if self.headless.contains(&display) {
+                    return Reply::ok();
                 }
                 self.send(Cmd::BufferRemove(buffer))
             }
@@ -305,6 +348,20 @@ impl Service for DisplayService {
                 // Any acquire fence is ignored, because the composer only
                 // sends frames it has finished writing.
                 drop(fds);
+                if self.headless.contains(&display) {
+                    if self
+                        .events
+                        .try_send(
+                            proto::ty::RELEASE,
+                            &proto::event::release(buffer, false),
+                            &[],
+                        )
+                        .is_err()
+                    {
+                        self.events.shutdown();
+                    }
+                    return Reply::ok();
+                }
                 if crate::log::debug() {
                     crate::log::trace(format_args!(
                         "receive ns={} buffer={buffer}",
@@ -328,6 +385,7 @@ impl Drop for DisplayService {
             let _ = t.join();
         }
         self.hub.remove_display_connection(self.conn);
+        self.hub.screens.detach(self.conn);
         crate::info!("{}: display connection closed", self.label);
     }
 }
@@ -358,6 +416,7 @@ mod tests {
             thread: None,
             limits: Limits::default(),
             displays: HashMap::from([(100, 2)]),
+            headless: HashSet::new(),
             buffers: HashMap::from([(7, 100)]),
             label: "test".into(),
         };

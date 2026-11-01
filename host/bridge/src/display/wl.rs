@@ -520,7 +520,7 @@ impl State {
             return;
         };
         match action {
-            FrameAction::Close => self.hub.input(&format!("close {id}")),
+            FrameAction::Close => self.hub.close(id),
             FrameAction::Minimize => w.window.set_minimized(),
             FrameAction::Maximize => w.window.set_maximized(),
             FrameAction::UnMaximize => w.window.unset_maximized(),
@@ -1211,7 +1211,7 @@ impl State {
 impl WindowHandler for State {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
         if let Some(w) = self.windows.values().find(|w| &w.window == window) {
-            self.hub.input(&format!("close {}", w.id));
+            self.hub.close(w.id);
         }
     }
 

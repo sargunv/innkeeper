@@ -17,9 +17,10 @@ OH's audio plays through the desktop's PipeWire.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app info`, `app stop`, `app clear-cache` and `app clear-data` work
-there too ([host/cli](../host/cli/README.md)). `run` brings the app's window to
-the front. `run` with a URI opens it in the app as a browser link. An OH profile
-refuses `open`, files in `run`, `app set`, adb and the Android-only settings.
+there too ([host/cli](../host/cli/README.md)). `run` brings the app to the front
+and opens OH's window again if the user closed it. `run` with a URI opens it in
+the app as a browser link. An OH profile refuses `open`, files in `run`,
+`app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots. A release profile installs on any device. A debug profile names the UDIDs
@@ -204,6 +205,12 @@ Screen 0 opens as one window the size of the profile's display preset. The
 presets are `small-phone` (720x1280 at 320 dpi, the default) and `medium-phone`.
 OH has no windowed mode, and a tablet's landscape layout is untested. Run OH on
 a nested desktop (`tests/nested.sh`) and not on your own.
+
+Closing the window leaves OH running. The bridge ends the composer's display
+connection, and the composer connects again with a headless display, whose
+frames the bridge releases without showing them. `innkeeper run` calls
+Session1's `ShowScreen`, which ends the headless connection, and the composer's
+next connection gets a new window.
 
 SceneBoard shows the home screen about 30 s after samgr starts. A new profile's
 lock screen is off for user 100, as Android's lock screen is off by default

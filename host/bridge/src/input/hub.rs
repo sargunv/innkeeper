@@ -47,6 +47,8 @@ pub struct Hub {
     pub pointer_positions: Mutex<HashMap<u32, PointerPosition>>,
     /// The seat as the broker's devices, for the bridge's own windows.
     direct: Mutex<super::direct::Direct>,
+    /// Which of the bridge's own windows the user closed.
+    pub screens: crate::display::screens::Screens,
 }
 
 /// A queued window request and its appearance. The appearance travels with
@@ -223,6 +225,40 @@ impl Hub {
         s.displays[conn]
             .send(Cmd::KeepAwake { window, requested })
             .map_err(|_| -EIO)
+    }
+
+    /// The user asked to close a window. A guest's window manager closes
+    /// its own windows, and the bridge closes the windows it named itself.
+    pub fn close(&self, window: u32) {
+        if !Hub::is_own(window) {
+            self.input(&format!("close {window}"));
+            return;
+        }
+        let conn = self.state.lock().unwrap().shown.get(&window).map(|s| s.0);
+        if let Some(conn) = conn {
+            self.screens.close(conn);
+        }
+    }
+
+    /// Shows the bridge's own windows, opening them again if the user closed
+    /// them, and activates them with `token` if it isn't empty. Returns false
+    /// if there are none.
+    pub fn show_screens(&self, token: &str) -> bool {
+        if self.screens.show(token) {
+            return true;
+        }
+        let own: Vec<u32> = {
+            let s = self.state.lock().unwrap();
+            s.shown
+                .keys()
+                .copied()
+                .filter(|w| Hub::is_own(*w))
+                .collect()
+        };
+        for w in &own {
+            let _ = self.activate(*w, token.into());
+        }
+        !own.is_empty()
     }
 
     /// Drops a queued request, or closes a shown window.

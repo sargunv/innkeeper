@@ -42,6 +42,11 @@
 //!   `Close(i display, s package) → s` closes window `display`, or
 //!   `package`'s window when `display` is negative. Failures are `Failed`
 //!   with the system app's message.
+//! - `ShowScreen(s token) → b` shows the window of a guest that draws its
+//!   whole screen in one window, as OpenHarmony does, and opens it again if
+//!   the user closed it. `token` activates it. The bridge answers this
+//!   itself. It returns false if the session has no such window, as on
+//!   Android.
 //! - `ReloadSettings()` applies the profile's settings file, which the caller
 //!   has just written. Settings are broadcast again. An unreadable or invalid
 //!   file fails with `Failed`.
@@ -262,6 +267,17 @@ impl SessionApi {
 
     #[zbus(signal)]
     async fn changed(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
+
+    /// Shows the guest's screen window, opening it again if the user closed
+    /// it. Returns false if the session has none.
+    fn show_screen(&self, token: &str) -> zbus::fdo::Result<bool> {
+        if !token.is_empty() && innkeeper_core::validate::activation_token(token).is_none() {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "invalid activation token".into(),
+            ));
+        }
+        Ok(self.input.show_screens(token))
+    }
 
     /// Applies the profile's settings file, which the caller has just
     /// written.

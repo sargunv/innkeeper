@@ -44,6 +44,7 @@ export async function run() {
       <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
       <method name="Geometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
+      <method name="Close"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Layout"><arg type="s" direction="in"/></method>
     </interface></node>`,
     {
@@ -154,6 +155,19 @@ export async function run() {
           } else {
             window.minimize();
           }
+        }
+        return matched;
+      },
+      // Closes the windows whose class contains appId, as a close button
+      // does.
+      Close(appId) {
+        let matched = false;
+        for (const actor of global.get_window_actors()) {
+          const window = actor.meta_window;
+          if (!actor.mapped || !String(window.get_wm_class()).includes(appId))
+            continue;
+          window.delete(global.get_current_time());
+          matched = true;
         }
         return matched;
       },
