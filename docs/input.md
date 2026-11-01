@@ -16,7 +16,9 @@ the split.
 
 An OpenHarmony window gets the seat from the bridge as a mouse, a touchscreen
 and a keyboard, and OpenHarmony's Innkeeper Keyboard connects its text fields to
-the host's input method ([ohos](../ohos/README.md#input)).
+the host's input method ([ohos](../ohos/README.md#input)). Touchpad scrolls,
+holds and pinches become fake fingers on the touchscreen, as they do on Android
+([ohos](../ohos/README.md#touchpad-gestures)).
 
 ## Devices
 

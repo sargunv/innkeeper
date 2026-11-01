@@ -213,14 +213,15 @@ fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
 }
 
 /// The touchscreen's multitouch axes: ABS_MT_SLOT, ABS_MT_POSITION_X and _Y,
-/// and ABS_MT_TRACKING_ID.
-const MT_AXES: [usize; 4] = [0x2f, 0x35, 0x36, 0x39];
+/// ABS_MT_TOOL_TYPE and ABS_MT_TRACKING_ID.
+const MT_AXES: [usize; 5] = [0x2f, 0x35, 0x36, 0x37, 0x39];
 
 /// The `struct input_absinfo` of the touchscreen's axis `code`.
 fn touch_absinfo(code: usize) -> Option<Vec<u8>> {
     let (min, max) = match code {
         0 | 1 | 0x35 | 0x36 => (0, touch::MAX),
         0x2f => (0, touch::SLOTS as i32 - 1),
+        0x37 => (0, 2), // MT_TOOL_FINGER to MT_TOOL_PALM
         0x39 => (0, 0xffff),
         _ => return None,
     };
@@ -319,7 +320,8 @@ fn answer(device: u32, cmd: u32, keys: &[u8], leds: &[u8]) -> Result<(Vec<u8>, i
 
 /// EVIOCGMTSLOTS: `request` starts with the axis code, and the answer fills
 /// the rest with each slot's value. No contact is current when a reader
-/// opens the device, so every tracking id is -1.
+/// opens the device, so every tracking id is -1 and every tool is
+/// MT_TOOL_FINGER (0).
 fn mt_slots(device: u32, request: &[u8]) -> Result<Vec<u8>, i32> {
     let code = u32::from_le_bytes(request.get(..4).ok_or(libc::EINVAL)?.try_into().unwrap());
     if device != TOUCHSCREEN || !MT_AXES.contains(&(code as usize)) {
@@ -1270,7 +1272,7 @@ mod tests {
         assert!(has(&keys, 330)); // BTN_TOUCH
         assert!(!(272..288).any(|b| has(&keys, b))); // no mouse button
         let abs = answer(TOUCHSCREEN, get(0x23, 8), &[], &[]).unwrap().0;
-        for axis in [0, 1, 0x2f, 0x35, 0x36, 0x39] {
+        for axis in [0, 1, 0x2f, 0x35, 0x36, 0x37, 0x39] {
             assert!(has(&abs, axis), "{axis:#x}");
         }
         let info = |code: u32| {
@@ -1285,6 +1287,8 @@ mod tests {
         };
         assert_eq!(info(0x35), [0, 0, touch::MAX, 0, 0, 0]);
         assert_eq!(info(0x2f), [0, 0, touch::SLOTS as i32 - 1, 0, 0, 0]);
+        // MT_TOOL_FINGER to MT_TOOL_PALM
+        assert_eq!(info(0x37), [0, 0, 2, 0, 0, 0]);
         assert!(answer(TOUCHSCREEN, get(0x40 + 0x18, 24), &[], &[]).is_err());
         assert_eq!(
             answer(TOUCHSCREEN, get(6, 80), &[], &[]).unwrap().0,
@@ -1337,7 +1341,7 @@ mod tests {
             touch,
             "PRODUCT=6/1209/4c03/1\nNAME=\"Innkeeper Touchscreen\"\n\
              PHYS=\"innkeeper/touchscreen\"\nUNIQ=\"innkeeper-touchscreen\"\nPROP=2\n\
-             EV=b\nKEY=400 0 0 0 0 0\nABS=260800000000003\n"
+             EV=b\nKEY=400 0 0 0 0 0\nABS=2e0800000000003\n"
         );
         let keyboard = nodes.uevent(KEYBOARD).unwrap();
         assert!(keyboard.contains("NAME=\"Innkeeper Keyboard\"\n"));
