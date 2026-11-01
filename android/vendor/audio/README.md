@@ -3,11 +3,12 @@
 This directory holds our AIDL audio module, `IModule/innkeeper`. It is Android's
 playback and capture path, and it carries audio through the bridge's PipeWire
 streams. `StreamBridge` handles output and `StreamInBridge` handles input. Both
-use the bridge's shared rings through `stream/pcm.c`, a blocking PCM device over
-the audio client in `stream/audio.c`. The service and its rc are an overlay in
-`/apex/com.android.hardware.audio/`, and the image is unmodified. As in the
-graphics HALs, the frozen NDK AIDL bindings are generated at configure time with
-the pinned build-tools.
+use the bridge's shared rings through `pcm.c`, a blocking PCM device over the
+audio client in `audio.c`. Both are in
+[guest/audio-client](../../../guest/audio-client/include/innkeeper/pcm.h). The
+service and its rc are an overlay in `/apex/com.android.hardware.audio/`, and
+the image is unmodified. As in the graphics HALs, the frozen NDK AIDL bindings
+are generated at configure time with the pinned build-tools.
 
 The image's example HAL still runs for `IConfig`, remote submix, Bluetooth and
 effects. The policy XML empties its primary module, because its ALSA microphone,
@@ -57,8 +58,8 @@ microphone is the only built-in input.
 
 `mise run build:ndk` builds and stages the artifacts of both services. Host unit
 tests cover output buffer sizes, position and latency arithmetic, usage
-priority, FMQ wrapping and wakeups, paced capture without a bridge, and the
-audio client's capture underruns, partial reads and bridge death. The audio
-group of `mise run test:e2e` plays a 440 Hz tone into a private null sink and
-checks its frequency. It then reads that sink's monitor through AudioRecord and
-detects a known marker.
+priority, and FMQ wrapping and wakeups. The audio client's tests cover paced
+capture without a bridge, capture underruns, partial reads and bridge death. The
+audio group of `mise run test:e2e` plays a 440 Hz tone into a private null sink
+and checks its frequency. It then reads that sink's monitor through AudioRecord
+and detects a known marker.

@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "pcm.h"
+#include "innkeeper/pcm.h"
 
 static int64_t now_ns(void) {
   struct timespec ts;
@@ -14,9 +14,9 @@ static int64_t now_ns(void) {
 }
 
 int main(void) {
-  struct bridge_pcm* pcm = bridge_pcm_open(true, 48000, 1, 480, 2);
+  struct bridge_pcm* pcm = bridge_pcm_open(true, 48000, 1, 480, 2, "Test");
   assert(pcm);
-  assert(!bridge_pcm_open(true, 48000, 3, 480, 2));
+  assert(!bridge_pcm_open(true, 48000, 3, 480, 2, "Test"));
   int16_t samples[480];
   int64_t start = now_ns();
   for (int i = 0; i < 3; ++i) {

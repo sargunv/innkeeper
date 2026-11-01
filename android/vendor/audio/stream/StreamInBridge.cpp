@@ -37,7 +37,8 @@ ndk::ScopedAStatus StreamInBridge::close() {
 bool StreamInBridge::open() {
   if (pcm_) return true;
   pcm_ = bridge_pcm_open(
-    true, input::kRate, channels_, input::kPeriodFrames, input::kPeriods
+    true, input::kRate, channels_, input::kPeriodFrames, input::kPeriods,
+    "Android"
   );
   return pcm_ != nullptr;
 }
