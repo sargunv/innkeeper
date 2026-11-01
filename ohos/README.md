@@ -11,16 +11,14 @@ The pinned image boots on the host kernel in the profile's Flatpak sandbox. OH's
 init starts its services, samgr comes up, and OH's core system abilities
 register with it. render_service composes OH's screen through our display HDI,
 and the bridge shows the screen in a desktop window. SceneBoard is OH's window
-manager and home screen. It starts and draws the lock screen, and built-in apps
-such as Settings run in it. The window takes desktop pointer, touch and keyboard
-input.
+manager and home screen. Boot ends on its home screen, and built-in apps such as
+Settings run in it. The window takes desktop pointer, touch and keyboard input.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
-([host/cli](../host/cli/README.md)). After boot the screen is off and the lock
-screen is up, and an app that `run` starts shows only once the lock screen has
-been dismissed. An OH profile refuses `open`, files and URIs in `run`,
-`app info`, `app set`, adb and the Android-only settings.
+([host/cli](../host/cli/README.md)). `run` brings the app's window to the front.
+An OH profile refuses `open`, files and URIs in `run`, `app info`, `app set`,
+adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots. A release profile installs on any device. A debug profile names the UDIDs
@@ -62,13 +60,12 @@ To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
-([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A drag
-and a click on the nested desktop's seat then unlock the lock screen and open
-Settings. OH's input injector then scrolls Settings and goes home, and
-render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP,
-signed for the profile's UDID, then installs, shows in `innkeeper list` and
-comes to the foreground with `innkeeper run`.
+([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A click
+on the nested desktop's seat then opens Settings. OH's input injector then
+scrolls Settings and goes home, and render_service must not have restarted since
+boot ([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe
+HAP, signed for the profile's UDID, then installs and shows in `innkeeper list`,
+and `innkeeper run` puts its window on screen with input focus.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -116,10 +113,14 @@ presets are `small-phone` (720x1280 at 320 dpi, the default) and `medium-phone`.
 OH has no windowed mode, and a tablet's landscape layout is untested. Run OH on
 a nested desktop (`tests/nested.sh`) and not on your own.
 
-SceneBoard shows the lock screen about 30 s after samgr starts. A drag up the
-window unlocks it. OH's own injector also drives it over `exec`.
-`uinput -T -m 360 1150 360 300 300` swipes up to the home screen, and
-`uinput -T -c 90 200` taps Settings there.
+SceneBoard shows the home screen about 30 s after samgr starts. Its lock screen
+is off for user 100, as Android's lock screen is off by default
+(`ro.lockscreen.disable.default`). OH's screenlock service keeps that setting
+per user in `/data/service/el1/public/screenlock/screenlock_state.xml`, and
+`sys_prod/etc/init/innkeeper_screenlock.cfg` copies our version there before
+foundation starts. The desktop has its own lock screen. OH's own injector also
+drives the screen over `exec`. `uinput -T -c 90 200` taps Settings on the home
+screen.
 
 - **Display.** The launcher sets the panel from the profile's preset in two
   places. The composer reads the `const.innkeeper.display` parameter

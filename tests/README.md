@@ -20,13 +20,13 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
 - `mise run test:e2e -- ohos` fetches the OpenHarmony image and creates a fresh
   OpenHarmony profile ([ohos](../ohos/README.md)). It starts the profile on the
   private desktop and waits until SceneBoard is ready and its window shows. It
-  also runs selftest. A drag and a click on the desktop's seat then unlock the
-  lock screen and open Settings. OpenHarmony's input injector scrolls Settings
-  and goes home, and render_service must not have restarted since boot. A key
-  press reaches OpenHarmony's input service. The CLI installs the probe HAP
-  (ohos/probe), signed for the profile's UDID, lists it and starts it, and it
-  comes to the foreground. This group uses its own profile, `<profile>-ohos`, so
-  it runs alone.
+  also runs selftest. Boot ends on the home screen, and a click on the desktop's
+  seat opens Settings. OpenHarmony's input injector scrolls Settings and goes
+  home, and render_service must not have restarted since boot. A key press
+  reaches OpenHarmony's input service. The CLI installs the probe HAP
+  (ohos/probe), signed for the profile's UDID, lists it and runs it, and its
+  window has focus on screen. This group uses its own profile, `<profile>-ohos`,
+  so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake

@@ -495,17 +495,11 @@ else
       tail -n 1 | sed 's/.* //; s/x/ /')
     left=$((x + (w - cw) / 2)) top=$((y + h - ch - (w - cw) / 2))
     at() { echo "abs:$((left + $1 * cw / pw)),$((top + $2 * ch / ph))"; }
-    until_ok locked true || return
-    # A drag up the lock screen unlocks it.
-    {
-      at $((pw / 2)) $((ph * 9 / 10))
-      echo button:272,1
-      for i in 8 7 6 5 4 3 2; do at $((pw / 2)) $((ph * i / 10)); done
-      echo button:272,0
-    } | /usr/bin/python3 "$here/seat.py" --stdin
+    # The lock screen is off (ohos/sys_prod/etc/init/innkeeper_screenlock.cfg),
+    # so boot ends on the home screen.
     until_ok locked false || return
     # A click on the home screen's Settings icon opens Settings. The home
-    # screen ignores clicks while it animates in after the unlock.
+    # screen ignores clicks while it animates in after boot.
     ! settings '[A-Z]+' || return
     click_settings() {
       { at 90 200 && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin
@@ -518,7 +512,7 @@ else
     echo "e2e: FAIL (ohos-input); render_service: $(s /system/bin/pidof render_service)" >&2
     exit 1
   fi
-  echo 'ok   desktop pointer input unlocks the lock screen and opens Settings'
+  echo 'ok   boot ends on the home screen, and desktop pointer input opens Settings'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_render() {
     s /system/bin/sh -s "$ohos_rs" <"$repo/ohos/tests/render.sh" >>"$T/ohos.txt" 2>&1
@@ -548,11 +542,13 @@ else
   ohos_hap() {
     # The probe HAP (ohos/probe) is signed with a debug profile for this
     # profile's UDID, which profile list shows. The CLI installs it, lists it
-    # and starts its launcher ability, which comes to the foreground over the
-    # home screen.
-    probe() {
-      s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
-      grep -A5 'app name \[dev.sargunv.innkeeper.probes\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
+    # and starts its launcher ability. WMS then shows the probe's window
+    # (probes0) with input focus.
+    shown() {
+      local id
+      s /system/bin/hidumper -s WindowManagerService -a -a >"$T/windows.txt"
+      id=$(awk '$1 ~ /^probes[0-9]+$/ { print $4 }' "$T/windows.txt")
+      [[ -n $id ]] && grep -x "Focus window: $id" "$T/windows.txt" >/dev/null
     }
     local udid probes=$repo/out/test/probes
     udid=$("$cli" profile list | awk -v p="$INNKEEPER_PROFILE" '$1 == p && $5 == "udid" { print $6 }')
@@ -562,13 +558,13 @@ else
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
     "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
-    until_ok probe FOREGROUND
+    until_ok shown
   }
   if ! timed ohos-hap ohos_hap; then
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and starts the debug-signed probe HAP, which comes to the foreground'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, and its window has focus on screen'
   echo 'e2e: PASS'
   exit
 fi
