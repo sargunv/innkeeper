@@ -25,11 +25,12 @@ impl std::fmt::Display for ErrorKind {
             Self::UnsupportedBundle => f.write_str("unsupported APK bundle"),
             Self::WrongSystem => f.write_str("app for another system"),
             Self::WrongAbi => f.write_str("incompatible processor architecture"),
-            Self::SessionStartFailed => f.write_str("Android could not start"),
-            Self::ImageNotPrepared => f.write_str("Android image is not prepared"),
-            Self::NoLauncherActivity => f.write_str("app has no launcher activity"),
-            Self::Timeout => f.write_str("Android did not respond in time"),
-            // OpenHarmony profiles fail installs with this kind too.
+            // Both systems' profiles fail with the kinds below, so the text
+            // names neither system.
+            Self::SessionStartFailed => f.write_str("the session could not start"),
+            Self::ImageNotPrepared => f.write_str("the system image is not prepared"),
+            Self::NoLauncherActivity => f.write_str("app has no home screen entry"),
+            Self::Timeout => f.write_str("the session did not respond in time"),
             Self::InstallFailed(code) => write!(f, "installation refused ({code})"),
         }
     }
@@ -62,7 +63,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_failures_name_no_system() {
+    fn kinds_both_systems_reach_name_no_system() {
+        for kind in [
+            ErrorKind::SessionStartFailed,
+            ErrorKind::ImageNotPrepared,
+            ErrorKind::NoLauncherActivity,
+            ErrorKind::Timeout,
+            ErrorKind::InstallFailed("9568404".into()),
+        ] {
+            let text = kind.to_string();
+            assert!(
+                !text.contains("Android")
+                    && !text.contains("OpenHarmony")
+                    && !text.contains("activity"),
+                "{text}"
+            );
+        }
         assert_eq!(
             ErrorKind::InstallFailed("9568404".into()).to_string(),
             "installation refused (9568404)"
