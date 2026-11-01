@@ -45,7 +45,9 @@ void StreamBridge::noteUsage(std::optional<int32_t> usage) {
 }
 bool StreamBridge::open() {
   if (pcm_) return true;
-  pcm_ = bridge_pcm_open(false, kRate, kChannels, kPeriodFrames, kPeriods);
+  pcm_ = bridge_pcm_open(
+    false, kRate, kChannels, kPeriodFrames, kPeriods, "Android"
+  );
   if (!pcm_) return false;
   // Caller holds closeMutex_. A usage can arrive before the ring exists.
   publishUsage();

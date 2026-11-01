@@ -11,7 +11,7 @@
 #include "Defaults.h"
 #include "Queue.h"
 #include "Usage.h"
-#include "pcm.h"
+#include "innkeeper/pcm.h"
 
 namespace innkeeper::audio {
 namespace core = aidl::android::hardware::audio::core;

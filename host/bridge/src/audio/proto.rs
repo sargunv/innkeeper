@@ -154,7 +154,7 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
 }
 
 /// Encodes a request on the client side. Tests and the example client use
-/// it, and it is the reference for `guest/bridge-client/audio.c`.
+/// it, and it is the reference for `guest/audio-client/audio.c`.
 pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
     let w = match req {
         Request::OpenOutput(c) | Request::OpenInput(c) => {

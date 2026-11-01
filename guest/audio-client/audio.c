@@ -1,4 +1,5 @@
-// The bridge's audio service. See audio.h.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The bridge's audio service. See audio_client.h.
 
 #include <errno.h>
 #include <poll.h>
@@ -10,22 +11,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audio.h"
-
+#include "innkeeper/audio_client.h"
 #include "innkeeper/bridge_client.h"
-#ifdef __ANDROID__
-#include <android/log.h>
-#define ALOGI(...) \
-  __android_log_print(ANDROID_LOG_INFO, "innkeeper-audio", __VA_ARGS__)
-#define ALOGW(...) \
-  __android_log_print(ANDROID_LOG_WARN, "innkeeper-audio", __VA_ARGS__)
-#define ALOGE(...) \
-  __android_log_print(ANDROID_LOG_ERROR, "innkeeper-audio", __VA_ARGS__)
-#else
-#define ALOGI(...) ((void)0)
-#define ALOGW(...) ((void)0)
-#define ALOGE(...) ((void)0)
-#endif
+#include "log.h"
 
 // Wire constants, mirrored from host/bridge/src/audio/{proto,ring}.rs.
 #define T_OPEN_OUTPUT 0x0101

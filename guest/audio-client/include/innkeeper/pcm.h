@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// One bridge audio stream (audio.h) as a blocking 16-bit PCM device, for
-// StreamBridge and StreamInBridge.
+// One bridge audio stream (audio_client.h) as a blocking 16-bit PCM device,
+// for the guests' audio HALs.
 //
 // - The bridge stream opens lazily on the first read/write.
 // - Writes block while the ring is full, pacing the HAL by the host's audio
@@ -19,11 +19,12 @@ extern "C" {
 
 struct bridge_pcm;
 
-// Opens an S16LE device at `rate` with 1 or 2 channels. Returns NULL if the
-// config is unsupported.
+// Opens an S16LE device at `rate` with 1 or 2 channels. The desktop mixer
+// shows the stream as `name` until a usage is reported. `name` must outlive
+// the device. Returns NULL if the config is unsupported.
 struct bridge_pcm* bridge_pcm_open(
   bool input, uint32_t rate, uint32_t channels, uint32_t period_frames,
-  uint32_t periods
+  uint32_t periods, const char* name
 );
 void bridge_pcm_close(struct bridge_pcm* p);
 // Transfers the whole buffer. Returns 0, or -errno.

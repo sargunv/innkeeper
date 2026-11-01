@@ -20,7 +20,8 @@ struct bridge_pcm {
 };
 static int opens = 0, closes = 0;
 extern "C" bridge_pcm* bridge_pcm_open(
-  bool input, uint32_t rate, uint32_t, uint32_t period_frames, uint32_t
+  bool input, uint32_t rate, uint32_t, uint32_t period_frames, uint32_t,
+  const char*
 ) {
   CHECK(input && rate == 48000 && period_frames == 480);
   return new bridge_pcm{++opens};

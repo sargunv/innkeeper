@@ -7,18 +7,11 @@
 #include <string.h>
 #include <time.h>
 
-#include "pcm.h"
+#include "innkeeper/pcm.h"
 
-#include "audio.h"
+#include "innkeeper/audio_client.h"
 #include "innkeeper/bridge_client.h"
-
-#ifdef __ANDROID__
-#include <android/log.h>
-#define ALOGW(...) \
-  __android_log_print(ANDROID_LOG_WARN, "innkeeper-audio", __VA_ARGS__)
-#else
-#define ALOGW(...) ((void)0)
-#endif
+#include "log.h"
 
 #define FRAME_SAMPLE_BYTES 2u  // S16LE
 #define WRITE_TIMEOUT_MS 500
@@ -27,6 +20,7 @@
 struct bridge_pcm {
   bool input;
   uint32_t rate, channels, period_frames, periods;
+  const char* name;
   pthread_mutex_t lock;
   // Output.
   struct lxb_stream s;  // s.map != NULL while connected
@@ -64,7 +58,7 @@ static uint64_t buffer_frames(const struct bridge_pcm* p) {
 
 struct bridge_pcm* bridge_pcm_open(
   bool input, uint32_t rate, uint32_t channels, uint32_t period_frames,
-  uint32_t periods
+  uint32_t periods, const char* name
 ) {
   if (
     channels < 1 || channels > 2 || rate < 8000 || rate > 192000 ||
@@ -79,6 +73,7 @@ struct bridge_pcm* bridge_pcm_open(
   p->channels = channels;
   p->period_frames = period_frames;
   p->periods = periods;
+  p->name = name;
   p->s.data_fd = p->s.space_fd = -1;
   return p;
 }
@@ -151,7 +146,7 @@ static void connect_locked(struct bridge_pcm* p) {
     // scheduled out.
     .period_frames = p->input ? p->period_frames : ring_period(p),
     .periods = p->input ? p->periods : 2,
-    .name = "Android",
+    .name = p->name,
   };
   if (p->input) {
     lxb_open_input(&c, &p->s);
@@ -163,7 +158,7 @@ static void connect_locked(struct bridge_pcm* p) {
     // ring's positions start from here.
     p->base = total_of(p);
     p->fallback = false;
-    // A reopened ring starts with the "Android" label, so restore the last
+    // A reopened ring starts with the stream's name, so restore the last
     // reported usage.
     if (p->usage_set) lxb_set_metadata(&p->s, p->usage, "");
   } else if (!p->fallback) {
