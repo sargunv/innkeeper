@@ -1,32 +1,48 @@
 //! Input for the bridge's own windows (DISPLAY_WINDOW). Such a window shows a
 //! guest that has no window manager on the input service, such as
 //! OpenHarmony. Its seat lines ([`super::proto`]) become records for the
-//! broker's touchscreen and keyboard, which the guest reads as kernel
+//! broker's mouse, touchscreen and keyboard, which the guest reads as kernel
 //! devices.
 //!
+//! The pointer is the mouse. The guest moves its cursor by each report's
+//! relative motion, one display pixel per unit. Each motion therefore sends
+//! the difference between the pixel under the host pointer and the pixel
+//! where the guest's cursor is. When the pointer enters a window, one large
+//! negative motion first moves the guest's cursor into the top-left corner,
+//! where the guest stops it, so that the two positions start out the same.
+//! The guest drops motion that comes before it has opened the mouse and
+//! learned its display, so the cursor goes through the corner again before
+//! each press that starts a click.
+//!
 //! The touchscreen's axes span [`touch::MAX`], and each window maps its
-//! display's pixels onto that span. The pointer's left button touches the
-//! screen, so a click is a tap and a drag is a swipe. Each host touch is a
-//! contact of its own. A contact stays on the window where it started, and
-//! it lifts when its window goes away.
+//! display's pixels onto that span. Each host touch is a contact of its own.
+//! A contact stays on the window where it started, and it lifts when its
+//! window goes away.
 //!
 //! Keys go to the keyboard while an own window has keyboard focus. They keep
 //! their evdev codes, so the guest applies its own layout. The guest repeats
-//! held keys itself, so the host's repeats are dropped. Held keys are
-//! released when the window loses focus or goes away.
+//! held keys itself, so the host's repeats are dropped. Held keys and
+//! buttons are released when the window loses focus or goes away.
 
 use std::collections::HashMap;
 
-use innkeeper_evdev_proto::{KEYBOARD, TOUCHSCREEN, touch};
+use innkeeper_evdev_proto::{KEYBOARD, MOUSE, TOUCHSCREEN, touch};
 
 const EV_KEY: u16 = 1;
+const EV_REL: u16 = 2;
 const EV_ABS: u16 = 3;
-const BTN_LEFT: u32 = 0x110;
+const REL_X: u16 = 0;
+const REL_Y: u16 = 1;
+/// BTN_LEFT to BTN_TASK, the buttons the mouse reports.
+const BUTTONS: std::ops::RangeInclusive<i64> = 0x110..=0x117;
 const BTN_TOUCH: u16 = 0x14a;
 const ABS_MT_SLOT: u16 = 0x2f;
 const ABS_MT_POSITION_X: u16 = 0x35;
 const ABS_MT_POSITION_Y: u16 = 0x36;
 const ABS_MT_TRACKING_ID: u16 = 0x39;
+/// A motion that takes the guest's cursor past the top-left corner of any
+/// display.
+const PIN: i32 = -(1 << 15);
 
 /// What [`Direct`] asks the broker for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,15 +54,9 @@ pub enum Out {
     Events(u32, Vec<(u16, u16, i32)>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Source {
-    Pointer,
-    Touch(i32),
-}
-
 #[derive(Debug, Clone, Copy)]
 struct Contact {
-    source: Source,
+    id: i32,
     window: u32,
 }
 
@@ -54,8 +64,12 @@ struct Contact {
 pub struct Direct {
     /// Each own window's display size in pixels.
     windows: HashMap<u32, (u32, u32)>,
-    /// The own window under the pointer, and the pointer's position there.
-    pointer: Option<(u32, f64, f64)>,
+    /// The own window under the pointer.
+    pointer: Option<u32>,
+    /// The display pixel under the guest's cursor, or None until a motion
+    /// moves the cursor into the corner first.
+    cursor: Option<(i32, i32)>,
+    buttons: Vec<u16>,
     slots: [Option<Contact>; touch::SLOTS],
     next_tracking_id: i32,
     /// The current touch frame's records.
@@ -67,25 +81,30 @@ pub struct Direct {
 
 impl Direct {
     /// Window `window` shows a display of `width`×`height` pixels. The first
-    /// window brings the touchscreen.
+    /// window brings the mouse and the touchscreen. A new size moves the
+    /// guest's cursor into the corner again on the next motion.
     pub fn map(&mut self, window: u32, width: u32, height: u32) -> Vec<Out> {
         let first = self.windows.is_empty();
-        self.windows.insert(window, (width.max(1), height.max(1)));
+        let size = (width.max(1), height.max(1));
+        if self.windows.insert(window, size).is_some_and(|s| s != size) {
+            self.cursor = None;
+        }
         if first {
-            vec![Out::Device(TOUCHSCREEN, true)]
+            vec![Out::Device(MOUSE, true), Out::Device(TOUCHSCREEN, true)]
         } else {
             vec![]
         }
     }
 
-    /// Window `window` went away. Its contacts lift, and the touchscreen
-    /// goes with the last window.
+    /// Window `window` went away. Its contacts lift, the buttons and keys
+    /// held there are released, and the devices go with the last window.
     pub fn unmap(&mut self, window: u32) -> Vec<Out> {
         if self.windows.remove(&window).is_none() {
             return vec![];
         }
-        if self.pointer.is_some_and(|(w, ..)| w == window) {
-            self.pointer = None;
+        let mut out = vec![];
+        if self.pointer == Some(window) {
+            out.extend(self.leave());
         }
         let mut records = std::mem::take(&mut self.frame);
         for slot in 0..touch::SLOTS {
@@ -93,7 +112,6 @@ impl Direct {
                 records.extend(self.lift(slot));
             }
         }
-        let mut out = vec![];
         if !records.is_empty() {
             out.push(Out::Events(TOUCHSCREEN, records));
         }
@@ -102,6 +120,8 @@ impl Direct {
             out.extend(self.release_keys());
         }
         if self.windows.is_empty() {
+            self.cursor = None;
+            out.push(Out::Device(MOUSE, false));
             out.push(Out::Device(TOUCHSCREEN, false));
         }
         out
@@ -139,6 +159,78 @@ impl Direct {
         vec![Out::Events(KEYBOARD, vec![(EV_KEY, code, value)])]
     }
 
+    /// Moves the guest's cursor to the pixel at display position `(x, y)`.
+    fn motion(&mut self, x: f64, y: f64) -> Vec<Out> {
+        let Some((w, h)) = self.pointer.and_then(|p| self.windows.get(&p).copied()) else {
+            return vec![];
+        };
+        let pixel = |v: f64, size: u32| (v.floor() as i32).clamp(0, size as i32 - 1);
+        let to = (pixel(x, w), pixel(y, h));
+        let mut out = vec![];
+        let from = self.cursor.unwrap_or_else(|| {
+            out.push(Out::Events(
+                MOUSE,
+                vec![(EV_REL, REL_X, PIN), (EV_REL, REL_Y, PIN)],
+            ));
+            (0, 0)
+        });
+        out.extend(self.relative(from, to));
+        self.cursor = Some(to);
+        out
+    }
+
+    /// The motion from pixel `from` to pixel `to`, if they differ.
+    fn relative(&self, from: (i32, i32), to: (i32, i32)) -> Option<Out> {
+        let records: Vec<_> = [(REL_X, to.0 - from.0), (REL_Y, to.1 - from.1)]
+            .into_iter()
+            .filter(|&(_, d)| d != 0)
+            .map(|(code, d)| (EV_REL, code, d))
+            .collect();
+        (!records.is_empty()).then_some(Out::Events(MOUSE, records))
+    }
+
+    /// The pointer leaves its window, and the buttons held there are
+    /// released. The guest's cursor stays where it is.
+    fn leave(&mut self) -> Vec<Out> {
+        self.pointer = None;
+        let records: Vec<_> = self.buttons.drain(..).map(|b| (EV_KEY, b, 0)).collect();
+        if records.is_empty() {
+            vec![]
+        } else {
+            vec![Out::Events(MOUSE, records)]
+        }
+    }
+
+    fn button(&mut self, code: Option<i64>, state: Option<i64>) -> Vec<Out> {
+        let (Some(_), Some(code), Some(state)) = (self.pointer, code, state) else {
+            return vec![];
+        };
+        if !BUTTONS.contains(&code) {
+            return vec![];
+        }
+        let code = code as u16;
+        let held = self.buttons.contains(&code);
+        let mut out = vec![];
+        match state {
+            1 if !held => {
+                if self.buttons.is_empty()
+                    && let Some(at) = self.cursor
+                {
+                    out.push(Out::Events(
+                        MOUSE,
+                        vec![(EV_REL, REL_X, PIN), (EV_REL, REL_Y, PIN)],
+                    ));
+                    out.extend(self.relative((0, 0), at));
+                }
+                self.buttons.push(code)
+            }
+            0 if held => self.buttons.retain(|&b| b != code),
+            _ => return vec![],
+        }
+        out.push(Out::Events(MOUSE, vec![(EV_KEY, code, state as i32)]));
+        out
+    }
+
     /// Translates one seat line. Lines for other windows give nothing.
     pub fn line(&mut self, line: &str) -> Vec<Out> {
         let mut words = line.split(' ');
@@ -159,49 +251,29 @@ impl Direct {
             }
             "key" => return self.key(int(1), int(2)),
             "pointer_enter" => {
-                self.pointer = match (num(0), num(1), int(2)) {
-                    (Some(x), Some(y), Some(w)) if self.windows.contains_key(&(w as u32)) => {
-                        Some((w as u32, x, y))
-                    }
-                    _ => None,
+                let mut out = self.leave();
+                if let (Some(x), Some(y), Some(w)) = (num(0), num(1), int(2))
+                    && self.windows.contains_key(&(w as u32))
+                {
+                    self.pointer = Some(w as u32);
+                    self.cursor = None;
+                    out.extend(self.motion(x, y));
+                }
+                return out;
+            }
+            "pointer_leave" => return self.leave(),
+            "pointer_motion" => {
+                return match (num(1), num(2)) {
+                    (Some(x), Some(y)) => self.motion(x, y),
+                    _ => vec![],
                 };
-                vec![]
             }
-            "pointer_leave" => {
-                self.pointer = None;
-                self.find(Source::Pointer)
-                    .map(|slot| self.lift(slot))
-                    .unwrap_or_default()
-            }
-            "pointer_motion" => match (self.pointer.as_mut(), num(1), num(2)) {
-                (Some(p), Some(x), Some(y)) => {
-                    (p.1, p.2) = (x, y);
-                    match self.find(Source::Pointer) {
-                        Some(slot) => self.moved(slot, x, y),
-                        None => vec![],
-                    }
-                }
-                _ => vec![],
-            },
-            "pointer_button" => match (self.pointer, int(1), int(2)) {
-                (Some((window, x, y)), Some(b), Some(1)) if b == i64::from(BTN_LEFT) => {
-                    match self.find(Source::Pointer) {
-                        Some(_) => vec![],
-                        None => self.down(Source::Pointer, window, x, y),
-                    }
-                }
-                (_, Some(b), Some(0)) if b == i64::from(BTN_LEFT) => self
-                    .find(Source::Pointer)
-                    .map(|slot| self.lift(slot))
-                    .unwrap_or_default(),
-                _ => vec![],
-            },
+            "pointer_button" => return self.button(int(1), int(2)),
             "touch_down" => match (int(1), num(2), num(3), int(4)) {
                 (Some(id), Some(x), Some(y), Some(w))
-                    if self.windows.contains_key(&(w as u32))
-                        && self.find(Source::Touch(id as i32)).is_none() =>
+                    if self.windows.contains_key(&(w as u32)) && self.find(id as i32).is_none() =>
                 {
-                    let records = self.down(Source::Touch(id as i32), w as u32, x, y);
+                    let records = self.down(id as i32, w as u32, x, y);
                     self.frame.extend(records);
                     vec![]
                 }
@@ -209,7 +281,7 @@ impl Direct {
             },
             "touch_motion" => match (int(1), num(2), num(3)) {
                 (Some(id), Some(x), Some(y)) => {
-                    if let Some(slot) = self.find(Source::Touch(id as i32)) {
+                    if let Some(slot) = self.find(id as i32) {
                         let records = self.moved(slot, x, y);
                         self.frame.extend(records);
                     }
@@ -218,7 +290,7 @@ impl Direct {
                 _ => vec![],
             },
             "touch_up" => {
-                if let Some(slot) = int(1).and_then(|id| self.find(Source::Touch(id as i32))) {
+                if let Some(slot) = int(1).and_then(|id| self.find(id as i32)) {
                     let records = self.lift(slot);
                     self.frame.extend(records);
                 }
@@ -226,10 +298,8 @@ impl Direct {
             }
             "touch_cancel" => {
                 for slot in 0..touch::SLOTS {
-                    if matches!(self.slots[slot], Some(c) if matches!(c.source, Source::Touch(_))) {
-                        let records = self.lift(slot);
-                        self.frame.extend(records);
-                    }
+                    let records = self.lift(slot);
+                    self.frame.extend(records);
                 }
                 std::mem::take(&mut self.frame)
             }
@@ -243,10 +313,10 @@ impl Direct {
         }
     }
 
-    fn find(&self, source: Source) -> Option<usize> {
+    fn find(&self, id: i32) -> Option<usize> {
         self.slots
             .iter()
-            .position(|c| c.is_some_and(|c| c.source == source))
+            .position(|c| c.is_some_and(|c| c.id == id))
     }
 
     /// The axis value of display pixel `x` on a display `size` pixels long.
@@ -265,17 +335,17 @@ impl Direct {
 
     /// A new contact in the first free slot. A contact beyond the last slot
     /// is dropped.
-    fn down(&mut self, source: Source, window: u32, x: f64, y: f64) -> Vec<(u16, u16, i32)> {
+    fn down(&mut self, id: i32, window: u32, x: f64, y: f64) -> Vec<(u16, u16, i32)> {
         let Some(slot) = self.slots.iter().position(Option::is_none) else {
             return vec![];
         };
         let first = self.slots.iter().all(Option::is_none);
-        self.slots[slot] = Some(Contact { source, window });
-        let id = self.next_tracking_id;
-        self.next_tracking_id = (id + 1) & 0xffff;
+        self.slots[slot] = Some(Contact { id, window });
+        let tracking = self.next_tracking_id;
+        self.next_tracking_id = (tracking + 1) & 0xffff;
         let mut r = vec![
             (EV_ABS, ABS_MT_SLOT, slot as i32),
-            (EV_ABS, ABS_MT_TRACKING_ID, id),
+            (EV_ABS, ABS_MT_TRACKING_ID, tracking),
         ];
         r.extend(self.position(window, x, y));
         if first {
@@ -316,91 +386,222 @@ mod tests {
 
     fn screen() -> Direct {
         let mut d = Direct::default();
-        assert_eq!(d.map(W, 720, 1280), [Out::Device(TOUCHSCREEN, true)]);
+        assert_eq!(
+            d.map(W, 720, 1280),
+            [Out::Device(MOUSE, true), Out::Device(TOUCHSCREEN, true)]
+        );
         d
     }
 
-    fn records(out: Vec<Out>) -> Vec<(u16, u16, i32)> {
-        match out.as_slice() {
-            [Out::Events(TOUCHSCREEN, r)] => r.clone(),
-            [] => vec![],
-            o => panic!("{o:?}"),
+    fn mouse(out: Vec<Out>) -> Vec<Vec<(u16, u16, i32)>> {
+        out.into_iter()
+            .map(|o| match o {
+                Out::Events(MOUSE, r) => r,
+                o => panic!("{o:?}"),
+            })
+            .collect()
+    }
+
+    const CORNER: [(u16, u16, i32); 2] = [(EV_REL, REL_X, PIN), (EV_REL, REL_Y, PIN)];
+
+    #[test]
+    fn entering_moves_the_cursor_from_the_corner_to_the_pointer() {
+        let mut d = screen();
+        assert_eq!(
+            mouse(d.line(&format!("pointer_enter 360.00 640.75 {W}"))),
+            [
+                CORNER.to_vec(),
+                vec![(EV_REL, REL_X, 360), (EV_REL, REL_Y, 640)]
+            ]
+        );
+        assert_eq!(
+            mouse(d.line("pointer_motion 1 100.99 640.20")),
+            [vec![(EV_REL, REL_X, -260)]]
+        );
+        // The same pixel needs no motion.
+        assert!(d.line("pointer_motion 2 100.10 640.90").is_empty());
+        assert_eq!(
+            mouse(d.line("pointer_motion 3 101.00 639.99")),
+            [vec![(EV_REL, REL_X, 1), (EV_REL, REL_Y, -1)]]
+        );
+        assert!(d.line(&format!("pointer_leave {W}")).is_empty());
+        assert!(d.line("pointer_motion 4 5.00 5.00").is_empty());
+        // Each enter starts from the corner again.
+        assert_eq!(
+            mouse(d.line(&format!("pointer_enter 0.00 0.00 {W}"))),
+            [CORNER.to_vec()]
+        );
+    }
+
+    #[test]
+    fn motion_outside_the_display_stops_at_its_edge() {
+        let mut d = screen();
+        d.line(&format!("pointer_enter 700.00 10.00 {W}"));
+        assert_eq!(
+            mouse(d.line("pointer_motion 1 900.00 -30.00")),
+            [vec![(EV_REL, REL_X, 19), (EV_REL, REL_Y, -10)]]
+        );
+        assert!(d.line("pointer_motion 2 2000.00 -1.00").is_empty());
+    }
+
+    /// The guest keeps its cursor as a fraction. It stops the whole pixels at
+    /// the display's edges, keeps the fraction, and shows the cursor at the
+    /// pixel the position truncates to.
+    struct Guest(f64, f64);
+    impl Guest {
+        fn apply(&mut self, out: Vec<Out>) {
+            for records in mouse(out) {
+                for (ty, code, v) in records {
+                    if ty == EV_KEY {
+                        continue;
+                    }
+                    assert_eq!(ty, EV_REL);
+                    let (p, size) = match code {
+                        REL_X => (&mut self.0, 720),
+                        REL_Y => (&mut self.1, 1280),
+                        _ => panic!("{code}"),
+                    };
+                    let moved = *p + f64::from(v);
+                    let whole = (moved as i32).clamp(0, size - 1);
+                    *p = f64::from(whole) + (moved - moved.floor());
+                }
+            }
+        }
+        fn pixel(&self) -> (i32, i32) {
+            (self.0 as i32, self.1 as i32)
         }
     }
 
     #[test]
-    fn a_click_taps_at_the_pointer() {
+    fn the_cursor_stays_on_the_pointers_pixel_from_any_start() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: f64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 10_000) as f64 / 10_000.0 * n
+        };
+        for start in [(0.0, 0.0), (359.5, 640.25), (719.9, 1279.0)] {
+            let mut d = screen();
+            let mut guest = Guest(start.0, start.1);
+            let (mut x, mut y) = (next(720.0), next(1280.0));
+            guest.apply(d.line(&format!("pointer_enter {x:.2} {y:.2} {W}")));
+            for i in 0..2000 {
+                x = (x + next(400.0) - 200.0).clamp(-50.0, 770.0);
+                y = (y + next(400.0) - 200.0).clamp(-50.0, 1330.0);
+                guest.apply(d.line(&format!("pointer_motion {i} {x:.2} {y:.2}")));
+                let host = (
+                    (format!("{x:.2}").parse::<f64>().unwrap().floor() as i32).clamp(0, 719),
+                    (format!("{y:.2}").parse::<f64>().unwrap().floor() as i32).clamp(0, 1279),
+                );
+                assert_eq!(guest.pixel(), host, "move {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_click_places_a_cursor_that_missed_earlier_motion() {
         let mut d = screen();
-        assert!(
-            d.line(&format!("pointer_enter 360.00 640.00 {W}"))
-                .is_empty()
-        );
+        // The guest isn't ready yet and drops the enter's motion.
+        d.line(&format!("pointer_enter 200.00 14.00 {W}"));
+        let mut guest = Guest(360.0, 640.0);
+        guest.apply(d.line("pointer_motion 1 360.50 600.50"));
+        assert_eq!(guest.pixel(), (520, 1226));
+        guest.apply(d.line("pointer_button 2 272 1"));
+        assert_eq!(guest.pixel(), (360, 600));
+        // A press while another button is held doesn't move the cursor.
+        guest.0 = 0.0;
+        guest.apply(d.line("pointer_button 3 273 1"));
+        assert_eq!(guest.pixel(), (0, 600));
+    }
+
+    #[test]
+    fn a_new_display_size_moves_from_the_corner_on_the_next_motion() {
+        let mut d = screen();
+        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
+        assert!(d.map(W, 720, 1280).is_empty());
         assert_eq!(
-            records(d.line("pointer_button 5 272 1")),
-            [
-                (EV_ABS, ABS_MT_SLOT, 0),
-                (EV_ABS, ABS_MT_TRACKING_ID, 0),
-                (EV_ABS, ABS_MT_POSITION_X, 16384),
-                (EV_ABS, ABS_MT_POSITION_Y, 16384),
-                (EV_KEY, BTN_TOUCH, 1),
-            ]
+            mouse(d.line("pointer_motion 1 11.00 10.00")),
+            [vec![(EV_REL, REL_X, 1)]]
         );
+        assert!(d.map(W, 1080, 1920).is_empty());
         assert_eq!(
-            records(d.line("pointer_motion 6 0.00 1279.99")),
+            mouse(d.line("pointer_motion 2 11.00 10.00")),
             [
-                (EV_ABS, ABS_MT_SLOT, 0),
-                (EV_ABS, ABS_MT_POSITION_X, 0),
-                (EV_ABS, ABS_MT_POSITION_Y, touch::MAX),
-            ]
-        );
-        assert_eq!(
-            records(d.line("pointer_button 7 272 0")),
-            [
-                (EV_ABS, ABS_MT_SLOT, 0),
-                (EV_ABS, ABS_MT_TRACKING_ID, -1),
-                (EV_KEY, BTN_TOUCH, 0),
+                CORNER.to_vec(),
+                vec![(EV_REL, REL_X, 11), (EV_REL, REL_Y, 10)]
             ]
         );
     }
 
     #[test]
-    fn hover_and_other_buttons_touch_nothing() {
+    fn buttons_press_and_release_on_the_mouse() {
         let mut d = screen();
-        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
-        assert!(d.line("pointer_motion 1 20.00 20.00").is_empty());
-        assert!(d.line("pointer_button 2 273 1").is_empty());
-        assert!(d.line("pointer_button 3 273 0").is_empty());
-        // A release without a press, such as one that started on the frame.
-        assert!(d.line("pointer_button 4 272 0").is_empty());
-        assert!(d.line("pointer_frame").is_empty());
+        assert!(d.line("pointer_button 1 272 1").is_empty());
+        d.line(&format!("pointer_enter 10.00 0.00 {W}"));
+        // A press that starts a click moves through the corner first.
+        assert_eq!(
+            mouse(d.line("pointer_button 2 272 1")),
+            [
+                CORNER.to_vec(),
+                vec![(EV_REL, REL_X, 10)],
+                vec![(EV_KEY, 0x110, 1)]
+            ]
+        );
+        for (line, records) in [
+            ("pointer_button 3 273 1", vec![(EV_KEY, 0x111, 1)]),
+            ("pointer_button 4 274 1", vec![(EV_KEY, 0x112, 1)]),
+            ("pointer_button 5 273 0", vec![(EV_KEY, 0x111, 0)]),
+        ] {
+            assert_eq!(mouse(d.line(line)), [records], "{line}");
+        }
+        // Repeats, releases of unheld buttons and other codes send nothing.
+        for line in [
+            "pointer_button 6 272 1",
+            "pointer_button 7 273 0",
+            "pointer_button 8 330 1",
+            "pointer_button 9 272",
+        ] {
+            assert!(d.line(line).is_empty(), "{line}");
+        }
+        assert_eq!(
+            mouse(d.line(&format!("pointer_leave {W}"))),
+            [vec![(EV_KEY, 0x110, 0), (EV_KEY, 0x112, 0)]]
+        );
+        assert!(d.line("pointer_button 10 272 0").is_empty());
+        d.line(&format!("pointer_enter 0.00 0.00 {W}"));
+        assert_eq!(
+            mouse(d.line("pointer_button 11 273 1")),
+            [CORNER.to_vec(), vec![(EV_KEY, 0x111, 1)]]
+        );
     }
 
     #[test]
     fn other_windows_get_nothing() {
         let mut d = screen();
-        d.line("pointer_enter 10.00 10.00 3");
-        assert!(d.line("pointer_button 1 272 1").is_empty());
-        assert!(d.line("touch_down 1 0 10.00 10.00 3").is_empty());
-        assert!(d.line("touch_frame").is_empty());
-        assert!(d.line("pointer_enter 10.00").is_empty());
-        assert!(d.line("touch_down 1 0 x 10.00 3").is_empty());
+        for line in [
+            "pointer_enter 10.00 10.00 3",
+            "pointer_motion 1 20.00 20.00",
+            "pointer_button 1 272 1",
+            "pointer_axis_source 0",
+            "pointer_axis 1 0 15.000",
+            "pointer_axis_value120 0 120",
+            "pointer_frame",
+            "touch_down 1 0 10.00 10.00 3",
+            "touch_frame",
+            "pointer_enter 10.00",
+            "touch_down 1 0 x 10.00 3",
+        ] {
+            assert!(d.line(line).is_empty(), "{line}");
+        }
     }
 
-    #[test]
-    fn leaving_the_window_ends_a_drag() {
-        let mut d = screen();
-        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
-        d.line("pointer_button 1 272 1");
-        assert_eq!(
-            records(d.line(&format!("pointer_leave {W}"))),
-            [
-                (EV_ABS, ABS_MT_SLOT, 0),
-                (EV_ABS, ABS_MT_TRACKING_ID, -1),
-                (EV_KEY, BTN_TOUCH, 0),
-            ]
-        );
-        assert!(d.line("pointer_motion 2 20.00 20.00").is_empty());
-        assert!(d.line("pointer_button 3 272 0").is_empty());
+    fn touches(out: Vec<Out>) -> Vec<(u16, u16, i32)> {
+        match out.as_slice() {
+            [Out::Events(TOUCHSCREEN, r)] => r.clone(),
+            [] => vec![],
+            o => panic!("{o:?}"),
+        }
     }
 
     #[test]
@@ -412,7 +613,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            records(d.line("touch_frame")),
+            touches(d.line("touch_frame")),
             [
                 (EV_ABS, ABS_MT_SLOT, 0),
                 (EV_ABS, ABS_MT_TRACKING_ID, 0),
@@ -429,7 +630,7 @@ mod tests {
         d.line("touch_motion 2 9 360.00 640.00");
         d.line("touch_motion 2 8 0.00 0.00");
         assert_eq!(
-            records(d.line("touch_frame")),
+            touches(d.line("touch_frame")),
             [
                 (EV_ABS, ABS_MT_SLOT, 0),
                 (EV_ABS, ABS_MT_TRACKING_ID, -1),
@@ -439,7 +640,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            records(d.line("touch_cancel")),
+            touches(d.line("touch_cancel")),
             [
                 (EV_ABS, ABS_MT_SLOT, 1),
                 (EV_ABS, ABS_MT_TRACKING_ID, -1),
@@ -450,38 +651,45 @@ mod tests {
     }
 
     #[test]
-    fn the_pointer_and_touches_share_the_slots() {
+    fn contacts_beyond_the_last_slot_are_dropped() {
         let mut d = screen();
-        for id in 0..touch::SLOTS {
+        for id in 0..=touch::SLOTS {
             d.line(&format!("touch_down 1 {id} 1.00 1.00 {W}"));
         }
-        d.line("touch_frame");
-        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
-        assert!(d.line("pointer_button 1 272 1").is_empty());
-        assert!(d.line("pointer_button 2 272 0").is_empty());
-        d.line("touch_up 3 4");
-        d.line("touch_frame");
-        let down = records(d.line("pointer_button 4 272 1"));
-        assert_eq!(down[0], (EV_ABS, ABS_MT_SLOT, 4));
+        let down = touches(d.line("touch_frame"));
+        assert_eq!(
+            down.iter().filter(|r| r.1 == ABS_MT_TRACKING_ID).count(),
+            touch::SLOTS
+        );
+        d.line("touch_up 2 4");
+        d.line(&format!("touch_down 3 20 1.00 1.00 {W}"));
+        let down = touches(d.line("touch_frame"));
+        assert_eq!(down[2], (EV_ABS, ABS_MT_SLOT, 4));
         assert!(!down.contains(&(EV_KEY, BTN_TOUCH, 1)));
     }
 
     #[test]
-    fn a_closed_window_lifts_its_contacts_and_the_last_takes_the_device() {
+    fn a_closed_window_lifts_its_contacts_and_the_last_takes_the_devices() {
         let mut d = screen();
         let other = W + 1;
         assert!(d.map(other, 100, 100).is_empty());
         d.line(&format!("touch_down 1 0 1.00 1.00 {W}"));
         d.line(&format!("touch_down 1 1 1.00 1.00 {other}"));
         d.line("touch_frame");
+        d.line(&format!("pointer_enter 1.00 1.00 {W}"));
+        d.line("pointer_button 2 272 1");
         assert_eq!(
             d.unmap(W),
-            [Out::Events(
-                TOUCHSCREEN,
-                vec![(EV_ABS, ABS_MT_SLOT, 0), (EV_ABS, ABS_MT_TRACKING_ID, -1)]
-            )]
+            [
+                Out::Events(MOUSE, vec![(EV_KEY, 0x110, 0)]),
+                Out::Events(
+                    TOUCHSCREEN,
+                    vec![(EV_ABS, ABS_MT_SLOT, 0), (EV_ABS, ABS_MT_TRACKING_ID, -1)]
+                ),
+            ]
         );
         assert!(d.line("touch_motion 2 0 5.00 5.00").is_empty());
+        assert!(d.line("pointer_motion 3 5.00 5.00").is_empty());
         assert!(d.unmap(W).is_empty());
         assert_eq!(
             d.unmap(other),
@@ -494,6 +702,7 @@ mod tests {
                         (EV_KEY, BTN_TOUCH, 0),
                     ]
                 ),
+                Out::Device(MOUSE, false),
                 Out::Device(TOUCHSCREEN, false),
             ]
         );
@@ -548,6 +757,7 @@ mod tests {
             d.unmap(W),
             [
                 Out::Events(KEYBOARD, vec![(EV_KEY, 29, 0)]),
+                Out::Device(MOUSE, false),
                 Out::Device(TOUCHSCREEN, false),
             ]
         );

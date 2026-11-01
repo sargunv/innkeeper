@@ -72,6 +72,11 @@ struct State {
 }
 
 impl Hub {
+    /// Whether the bridge named this window itself (DISPLAY_WINDOW).
+    pub fn is_own(window: u32) -> bool {
+        window > OWN_WINDOWS
+    }
+
     pub fn new() -> Arc<Hub> {
         Arc::default()
     }
@@ -312,7 +317,7 @@ impl Hub {
         }
         self.windows_changed();
         crate::info!("input: window {} shows display {display}", r.window);
-        if r.window > OWN_WINDOWS {
+        if Hub::is_own(r.window) {
             let out = self.direct.lock().unwrap().map(r.window, r.width, r.height);
             self.to_evdev(out);
         }

@@ -478,14 +478,11 @@ else
   # Each animation from here on draws in render_service, which must not
   # restart.
   ohos_rs=$(s /system/bin/pidof render_service)
+  # Sets the window's geometry for at(), which prints the seat's position of
+  # panel pixel <x> <y>.
   # shellcheck disable=SC2329 # invoked through timed
-  ohos_input() {
-    local x y w h panel pw ph cw ch left top
-    locked() { s /system/bin/hidumper -s ScreenlockService -a -all | grep -Eq "screenLocked[[:space:]]+$1"; }
-    settings() {
-      s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
-      grep -A3 'main name \[com.ohos.settings.MainAbility\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
-    }
+  geometry() {
+    local x y w h panel
     framed() {
       read -r x y w h < <(desktop Geometry dev.sargunv.innkeeper.ohos | tr -d '(),')
       ((w > 0))
@@ -498,7 +495,17 @@ else
     read -r cw ch < <(grep -Eo '"OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\) [0-9]+x[0-9]+' "$bridge_log" |
       tail -n 1 | sed 's/.* //; s/x/ /')
     left=$((x + (w - cw) / 2)) top=$((y + h - ch - (w - cw) / 2))
-    at() { echo "abs:$((left + $1 * cw / pw)),$((top + $2 * ch / ph))"; }
+  }
+  # shellcheck disable=SC2329 # invoked through timed
+  at() { echo "abs:$((left + $1 * cw / pw)),$((top + $2 * ch / ph))"; }
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_input() {
+    geometry || return
+    locked() { s /system/bin/hidumper -s ScreenlockService -a -all | grep -Eq "screenLocked[[:space:]]+$1"; }
+    settings() {
+      s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
+      grep -A3 'main name \[com.ohos.settings.MainAbility\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
+    }
     # A new profile's lock screen is off (host/launcher/src/ohos.rs), so boot
     # ends on the home screen.
     until_ok locked false || return
@@ -510,13 +517,20 @@ else
       settings '[A-Z]+'
     }
     until_ok click_settings || return
+    # The pointer is OpenHarmony's mouse, and its cursor is on the panel
+    # pixel under the host pointer.
+    cursor_at() {
+      s /system/bin/hidumper -s MultimodalInput -a -c | grep -A3 hasPointerDevice | sed -n 3p |
+        tr -s ' |' ' ' | cut -d' ' -f4,5 | grep -qx "$1"
+    }
+    until_ok cursor_at '90 200' || return
     until_ok settings FOREGROUND
   }
   if ! timed ohos-input ohos_input; then
     echo "e2e: FAIL (ohos-input); render_service: $(s /system/bin/pidof render_service)" >&2
     exit 1
   fi
-  echo 'ok   boot ends on the home screen, and desktop pointer input opens Settings'
+  echo "ok   boot ends on the home screen, and the desktop pointer opens Settings as OpenHarmony's mouse"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_render() {
     s /system/bin/sh -s "$ohos_rs" <"$repo/ohos/tests/render.sh" >>"$T/ohos.txt" 2>&1
