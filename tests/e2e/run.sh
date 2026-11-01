@@ -562,13 +562,21 @@ else
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
     "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
-    until_ok shown
+    until_ok shown || return
+    # app info shows the version, and a user_grant permission that the user
+    # hasn't granted next to a system_grant permission that BMS granted.
+    "$cli" app info dev.sargunv.innkeeper.probes >"$T/info.txt" 2>>"$T/ohos.txt" || return
+    cat "$T/info.txt" >>"$T/ohos.txt"
+    grep -x 'version      1.0 (1)' "$T/info.txt" >/dev/null &&
+      grep -E '^app size     [0-9]+\.[0-9] MB$' "$T/info.txt" >/dev/null &&
+      grep -x '  ohos.permission.CAMERA  denied' "$T/info.txt" >/dev/null &&
+      grep -x '  ohos.permission.INTERNET  granted (fixed)' "$T/info.txt" >/dev/null
   }
   if ! timed ohos-hap ohos_hap; then
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, and its window has focus on screen'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, its window has focus on screen, and app info shows its version and permissions'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0

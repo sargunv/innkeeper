@@ -1,1 +1,9 @@
-{ "string": [{ "name": "app_name", "value": "Innkeeper Probes" }] }
+{
+  "string": [
+    { "name": "app_name", "value": "Innkeeper Probes" },
+    {
+      "name": "camera_reason",
+      "value": "The tests check how app info shows a permission that the user grants."
+    }
+  ]
+}
