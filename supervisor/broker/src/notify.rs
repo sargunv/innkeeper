@@ -677,10 +677,14 @@ pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
         at: AtomicU64::new(u64::MAX),
     });
     let pool = Arc::new(Pool::new(4));
-    let fs = Arc::new(crate::fs::Fs::new(listener, &cfg));
+    let input = crate::input::Input::new(listener);
+    let fs = Arc::new(crate::fs::Fs::new(
+        listener,
+        &cfg,
+        input.as_ref().map(|i| i.nodes()),
+    ));
     // Virtual ids for every process (supervisor/README.md).
     let vid = crate::creds::Vid::new(listener, Arc::clone(&pool), Arc::clone(&fs), cfg.init);
-    let input = crate::input::Input::new(listener);
     let sup = Arc::new(Mutex::new(Supervisor {
         guest,
         broker: BinderDriver::with_guest(guest),

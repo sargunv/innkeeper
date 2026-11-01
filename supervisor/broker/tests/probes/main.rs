@@ -7,6 +7,7 @@
 mod binder_restarts;
 mod bpfemu;
 mod drm_node;
+mod input_sysfs;
 mod seccomp_filter;
 
 use std::os::fd::{FromRawFd, OwnedFd, RawFd};
@@ -26,6 +27,7 @@ fn main() {
             "bpfemu" => bpfemu::run(Path::new(&rest[0])),
             "binder-restarts" => binder_restarts::run(),
             "drm-node" => drm_node::run(rest.first().map_or("", String::as_str)),
+            "input-sysfs" => input_sysfs::run(),
             p => panic!("unknown probe {p}"),
         };
         std::process::exit(code);
@@ -39,6 +41,7 @@ fn main() {
         ("bpfemu", bpfemu::check(&scratch)),
         ("binder-restarts", binder_restarts::check()),
         ("drm-node", drm_node::check(&scratch)),
+        ("input-sysfs", input_sysfs::check(&scratch)),
         ("bootstrap", bootstrap()),
     ] {
         if !ok {

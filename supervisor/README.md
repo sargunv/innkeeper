@@ -185,6 +185,12 @@ include none of these additions.
   mask without `PROT_WRITE` becomes `F_SEAL_FUTURE_WRITE`, and pinning and
   purging do nothing because memfd pages are never purged. The state lives in
   the memfd, so a region passed to another process gives the same answers there.
+- **Input devices in sysfs** (`src/input/sysfs.rs`). MMI's libinput gets each
+  evdev device's udev properties from MMI's own libudev, which reads sysfs. The
+  broker answers `stat`, `readlink`, `open` and `fstat` for the devices' nodes
+  and sysfs entries. Their device numbers and `uevent` capability bitmaps match
+  the devices' ioctls. musl's `stat(3)` is `stat(2)`, so the filter also traps
+  that call.
 
 ## Tests
 

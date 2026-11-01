@@ -14,17 +14,21 @@ InputDispatcher in one ordered stream. That stream keeps the results of the
 host's layout, compose and input method intact. `input/VirtualInput.kt` explains
 the split.
 
+An OpenHarmony window gets the seat from the bridge as a touchscreen
+([ohos](../ohos/README.md#input)).
+
 ## Devices
 
 The broker serves an Innkeeper Keyboard, one Innkeeper Mouse per window and one
-device per host controller. All of them are private to Android. EventHub's
-`/dev/input` is redirected to a broker directory, so EventHub sees only these
-devices, and their records arrive over `evdev.sock`. Innkeeper doesn't use
-uinput, because uinput creates host-global devices that the compositor picks up,
-and VirtualDeviceManager is built on uinput. Apps see a real keyboard
-(`Configuration.keyboard` is QWERTY) and one mouse per window, tied to that
-window's display. Mouse motion follows the host's absolute coordinates, which
-the host has already accelerated, so Android's pointer scaling is off.
+device per host controller, and an Innkeeper Touchscreen for OpenHarmony. All of
+them are private to the guest. EventHub's `/dev/input` is redirected to a broker
+directory, so EventHub sees only these devices, and their records arrive over
+`evdev.sock`. Innkeeper doesn't use uinput, because uinput creates host-global
+devices that the compositor picks up, and VirtualDeviceManager is built on
+uinput. Apps see a real keyboard (`Configuration.keyboard` is QWERTY) and one
+mouse per window, tied to that window's display. Mouse motion follows the host's
+absolute coordinates, which the host has already accelerated, so Android's
+pointer scaling is off.
 
 **Controllers.** The bridge reads the host gamepads that the user's ACLs already
 allow, through Flatpak's `--device=input`
