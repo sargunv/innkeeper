@@ -11,6 +11,7 @@ pub mod bundle;
 pub mod desktop;
 pub mod dynlauncher;
 pub mod errors;
+pub mod hap;
 pub use errors::ErrorKind;
 pub mod launcher;
 pub mod ops;
