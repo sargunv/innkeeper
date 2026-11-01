@@ -41,10 +41,6 @@ pub fn page(window: &Window) -> adw::NavigationPage {
         .build();
     let group = adw::PreferencesGroup::builder()
         .title("Profiles")
-        .description(
-            "Each profile is a separate Android or OpenHarmony with its own apps, data and \
-             settings. Profiles can run side by side.",
-        )
         .header_suffix(&add)
         .build();
     let content = adw::PreferencesPage::new();
@@ -144,7 +140,7 @@ impl Page {
             subtitle = format!("{} · {subtitle}", p.settings.system.title());
         }
         if current {
-            subtitle += " · Apps shown here";
+            subtitle += " · Current";
         }
         let dot = gtk::Box::builder()
             .valign(gtk::Align::Center)
@@ -201,7 +197,6 @@ impl Page {
         if !current {
             let show = adw::ActionRow::builder()
                 .title("Show Apps")
-                .subtitle("Show this profile’s apps in the window")
                 .activatable(true)
                 .build();
             show.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -219,11 +214,7 @@ impl Page {
             row.add_row(&show);
         }
         let rename = adw::EntryRow::builder()
-            .title(if p.running {
-                "Name · Stop it to rename"
-            } else {
-                "Name"
-            })
+            .title("Name")
             .text(&p.name)
             .show_apply_button(true)
             .sensitive(idle && !p.running)
@@ -316,14 +307,8 @@ impl Page {
 
     fn create(self: &Rc<Self>) {
         let body = |system: Option<&System>| match system {
-            Some(System::Ohos) => {
-                "OpenHarmony runs its built-in apps in one phone window. It can’t install apps \
-                 yet. A profile’s system can’t be changed later."
-            }
-            _ => {
-                "A separate system with its own apps, data and settings. A profile’s system \
-                 can’t be changed later."
-            }
+            Some(System::Ohos) => "Built-in apps only. The system can’t be changed later.",
+            _ => "The system can’t be changed later.",
         };
         let d = adw::AlertDialog::new(Some("New Profile"), Some(body(None)));
         let entry = adw::EntryRow::builder()
@@ -383,9 +368,7 @@ impl Page {
     fn confirm_delete(self: &Rc<Self>, name: &str) {
         let d = adw::AlertDialog::new(
             Some(&format!("Delete Profile {name}?")),
-            Some(
-                "Its apps, their data and its settings will be deleted, and its apps removed from the app menu. This can’t be undone.",
-            ),
+            Some("Its apps, data and settings will be permanently deleted."),
         );
         d.add_responses(&[("cancel", "_Cancel"), ("delete", "_Delete")]);
         d.set_response_appearance("delete", adw::ResponseAppearance::Destructive);

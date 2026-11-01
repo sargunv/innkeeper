@@ -22,7 +22,7 @@ texts. For screenshots, use the nested desktop in
   files. `mise run package -- --install` installs the manager from a checkout's
   stage. The manager runs as a single instance. Opening another APK adds an
   install page to the running window.
-- **First run** prepares the Android image and shows "Preparing Android".
+- **First run** downloads the Android image and shows "Downloading Android".
 - **The list** comes from the profile's desktop entries, so it shows without
   booting Android. A directory monitor picks up changes made with the CLI. At
   startup, the manager repairs stale entries the same way `innkeeper list` does.

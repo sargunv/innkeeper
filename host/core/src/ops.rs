@@ -60,8 +60,6 @@ pub struct Package {
     pub abis: Vec<String>,
     /// Size of the input file in bytes.
     pub size: u64,
-    /// Number of APKs (1 for a plain APK).
-    pub apk_count: usize,
     /// A host-rendered adaptive icon or the largest legacy bitmap.
     pub icon: Option<Vec<u8>>,
     input: Input,
@@ -103,7 +101,7 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     let input = bundle::open(file, &Dirs::from_env().cache)?;
     for s in &input.skipped {
         report(Event::Warning(format!(
-            "skipping {} (OBB expansion files aren't supported yet)",
+            "skipping {}: OBB files aren't supported",
             validate::truncate(s, 120)
         )));
     }
@@ -151,7 +149,6 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
         permissions: permissions.into_iter().collect(),
         abis: abis.into_iter().collect(),
         size,
-        apk_count: input.apks.len(),
         icon,
         package: pkg,
         input,
@@ -219,10 +216,8 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
         .context(ErrorKind::WrongAbi));
     }
     report(Event::Status(format!(
-        "installing {pkg} {} ({} APK{})",
-        validate::truncate(&base.version_name, 40),
-        apks.len(),
-        if apks.len() == 1 { "" } else { "s" }
+        "installing {pkg} {}",
+        validate::truncate(&base.version_name, 40)
     )));
     android::install(&s, &apks)
 }
@@ -383,7 +378,6 @@ mod tests {
                 permissions: vec![],
                 abis: info.native_code.clone(),
                 size: 0,
-                apk_count: 1,
                 icon: None,
                 input: bundle::open(&file, &dir).unwrap(),
                 info: vec![info],

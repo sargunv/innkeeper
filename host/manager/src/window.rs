@@ -63,7 +63,7 @@ pub struct Inner {
     refresh_pending: Cell<bool>,
 }
 
-/// The first run's "Preparing Android" page, shown while the image downloads.
+/// The first run's "Downloading Android" page, shown while the image downloads.
 struct Preparing {
     page: adw::StatusPage,
     spinner: adw::Spinner,
@@ -91,8 +91,7 @@ impl Preparing {
         content.append(&retry);
         let page = adw::StatusPage::builder()
             .icon_name("folder-download-symbolic")
-            .title("Preparing Android")
-            .description("Downloading Android (about 1.2 GB). This happens only once.")
+            .title("Downloading Android")
             .child(&content)
             .vexpand(true)
             .build();
@@ -121,7 +120,6 @@ struct SessionRow {
     dot: gtk::Box,
     button: gtk::Button,
     spinner: adw::Spinner,
-    system: Cell<System>,
 }
 
 impl SessionRow {
@@ -150,12 +148,10 @@ impl SessionRow {
             dot,
             button,
             spinner,
-            system: Cell::new(System::Android),
         }
     }
 
     fn set_system(&self, system: System) {
-        self.system.set(system);
         self.row.set_title(system.title());
     }
 
@@ -173,15 +169,11 @@ impl SessionRow {
         self.button.set_sensitive(true);
         match st {
             None => {
-                self.row
-                    .set_subtitle("Not set up (the session launcher wasn’t found)");
+                self.row.set_subtitle("Unavailable");
                 self.button.set_sensitive(false);
             }
             Some(s) if !s.running => {
-                self.row.set_subtitle(match self.system.get() {
-                    System::Android => "Stopped · Starts by itself when you open an app",
-                    System::Ohos => "Stopped",
-                });
+                self.row.set_subtitle("Stopped");
                 self.button.set_label("Start");
             }
             Some(s) => {
@@ -189,7 +181,7 @@ impl SessionRow {
                     self.row.set_subtitle("Running");
                     self.dot.add_css_class("running");
                 } else {
-                    self.row.set_subtitle("Starting");
+                    self.row.set_subtitle("Starting…");
                     self.dot.add_css_class("starting");
                 }
                 self.button.set_label("Stop");
@@ -221,7 +213,7 @@ impl Window {
         let empty = adw::StatusPage::builder()
             .icon_name(MANAGER_ID)
             .title("No Android Apps")
-            .description("Drag an APK here or open one to install it")
+            .description("Drag and drop an APK here")
             .child(&empty_box)
             .vexpand(true)
             .build();
@@ -251,7 +243,7 @@ impl Window {
         header.pack_start(
             &gtk::Button::builder()
                 .icon_name("list-add-symbolic")
-                .tooltip_text("Install an App")
+                .tooltip_text("Install App")
                 .action_name("win.open")
                 .build(),
         );
@@ -405,7 +397,7 @@ impl Window {
     pub fn show_error(&self, op: Op, name: Option<&str>, err: &anyhow::Error) {
         let h = errors::humane(op, name, err);
         eprintln!("innkeeper-manager: {}", h.details);
-        let d = adw::AlertDialog::new(Some(&h.heading), Some(&h.body));
+        let d = adw::AlertDialog::new(Some(&h.heading), h.body.as_deref());
         d.add_response("close", "_Close");
         d.set_default_response(Some("close"));
         d.set_close_response("close");
@@ -415,7 +407,7 @@ impl Window {
 
     fn choose_file(&self) {
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some("Android apps"));
+        filter.set_name(Some("Android Apps"));
         for m in innkeeper_core::desktop::PACKAGE_MIME_TYPES {
             filter.add_mime_type(m);
         }
@@ -425,7 +417,7 @@ impl Window {
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
-            .title("Install an Android App")
+            .title("Install App")
             .accept_label("_Install")
             .filters(&filters)
             .default_filter(&filter)
@@ -544,23 +536,14 @@ impl Window {
         if android {
             self.empty.set_title("No Android Apps");
             self.empty
-                .set_description(Some("Drag an APK here or open one to install it"));
+                .set_description(Some("Drag and drop an APK here"));
         } else {
             self.empty.set_title(system.title());
-            self.empty.set_description(Some(
-                "Its built-in apps show in one phone window while it runs. \
-                 Installing apps isn’t available yet.",
-            ));
+            self.empty.set_description(Some("Built-in apps only"));
         }
-        let name = system.title();
-        self.preparing.page.set_title(&format!("Preparing {name}"));
-        self.preparing.page.set_description(Some(&format!(
-            "Downloading {name} ({}). This happens only once.",
-            match system {
-                System::Android => "about 1.2 GB",
-                System::Ohos => "about 1 GB",
-            }
-        )));
+        self.preparing
+            .page
+            .set_title(&format!("Downloading {}", system.title()));
     }
 
     fn show_apps(&self, apps: Vec<DesktopApp>) {
@@ -605,7 +588,7 @@ impl Window {
         let indicator = gtk::Label::builder()
             .label("Open")
             .css_classes(["success", "caption"])
-            .tooltip_text("This app has an open window")
+            .tooltip_text("Has an open window")
             .visible(self.open_apps.borrow().contains(&a.package))
             .build();
         row.add_suffix(&indicator);
@@ -676,14 +659,8 @@ impl Window {
         if self.busy_apps.borrow().contains_key(&a.package) {
             return;
         }
-        let d = adw::AlertDialog::new(
-            Some(&format!("Uninstall {}?", a.name)),
-            Some("It will be removed from Android and from the app menu."),
-        );
-        let keep = adw::SwitchRow::builder()
-            .title("Keep App Data")
-            .subtitle("Installing it again restores its settings and files")
-            .build();
+        let d = adw::AlertDialog::new(Some(&format!("Uninstall {}?", a.name)), None);
+        let keep = adw::SwitchRow::builder().title("Keep App Data").build();
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
@@ -718,11 +695,7 @@ impl Window {
             match r {
                 Ok(_) => {
                     w.nav.pop_to_tag("main");
-                    _ = w.say(&format!(
-                        "{} uninstalled{}",
-                        a.name,
-                        if keep_data { " (data kept)" } else { "" }
-                    ))
+                    _ = w.say(&format!("{} uninstalled", a.name))
                 }
                 Err(e) => w.show_error(Op::Uninstall, Some(&a.name), &e),
             }
@@ -775,7 +748,7 @@ impl Window {
                 }
                 Err(e) => {
                     p.retry.set_visible(true);
-                    w.show_error(Op::Prepare, None, &e);
+                    w.show_error(Op::Prepare, Some(w.system.get().title()), &e);
                 }
             }
         });
@@ -937,7 +910,8 @@ impl Window {
             .await;
             w.session_busy.set(false);
             if let Err(e) = r {
-                w.show_error(Op::Session, None, &e);
+                let op = if running { Op::Stop } else { Op::Start };
+                w.show_error(op, Some(w.system.get().title()), &e);
             }
             w.read_session();
         });

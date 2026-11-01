@@ -16,7 +16,6 @@
       A profile can run OpenHarmony instead. OpenHarmony support is
       experimental, and its built-in apps show in one phone window.
     </p>
-    <p>To install an app, open its APK file. Then launch the app from the app menu.</p>
   </description>
   <launchable type="desktop-id">dev.sargunv.Innkeeper.desktop</launchable>
   <provides>
