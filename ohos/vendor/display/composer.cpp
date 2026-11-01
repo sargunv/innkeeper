@@ -43,9 +43,11 @@ constexpr uint16_t kEvRelease = 0x4201;
 // The panel mode, which also sizes the window. It comes from the
 // const.innkeeper.display parameter, <width>x<height>@<dpi>, which the
 // launcher sets from the profile's display (host/launcher/src/ohos.rs). The
-// launcher also gives the dpi to DMS.
+// launcher also gives the dpi to DMS. The panel's physical size in
+// millimetres comes from const.innkeeper.display.size, <width>x<height>.
 struct Mode {
   uint32_t width = 720, height = 1280, dpi = 320;
+  uint32_t mmWidth = 0, mmHeight = 0;
 };
 
 Mode mode() {
@@ -57,6 +59,13 @@ Mode mode() {
     sscanf(s, "%ux%u@%u", &w, &h, &d) == 3 && w && h && d
   )
     m = {w, h, d};
+  if (
+    GetParameter("const.innkeeper.display.size", "", s, sizeof(s)) > 0 &&
+    sscanf(s, "%ux%u", &w, &h) == 2 && w && h
+  ) {
+    m.mmWidth = w;
+    m.mmHeight = h;
+  }
   return m;
 }
 
@@ -358,12 +367,12 @@ EXPORT int32_t GetDisplayCapability(uint32_t devId, DisplayCapability& info) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   setString(info.name, "innkeeper");
   info.type = DISP_INTF_BUILT_IN;
-  // The panel reports no physical size. For a display with a size, MMI
-  // multiplies mouse motion by a factor for the screen's diagonal. Without
-  // one, it uses the flat curve in sys_prod, and one unit of motion moves
-  // its cursor by one pixel, which the bridge needs to place the cursor.
-  info.phyWidth = 0;
-  info.phyHeight = 0;
+  // DMS derives the x and y dpi that apps see from the physical size. MMI
+  // scales mouse motion by it, and the launcher writes MMI a curve that
+  // keeps one unit of motion at one pixel for this size.
+  const Mode d = mode();
+  info.phyWidth = d.mmWidth;
+  info.phyHeight = d.mmHeight;
   info.supportLayers = kMaxLayers;
   info.virtualDispCount = 0;
   info.supportWriteBack = false;

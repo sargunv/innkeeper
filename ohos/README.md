@@ -142,9 +142,9 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   the `<dpi>` in its config, which is the only place it takes density from. The
   image's value of 160 would make a small phone a tablet 720 vp wide. At 320 dpi
   a small phone is 360x640 vp, which matches `const.product.devicetype`
-  (`default`, a phone) and the window's size on the desktop. The panel has no
-  physical size, which the mouse needs ([Input](#input)), so DMS reports its x
-  and y DPI as infinite.
+  (`default`, a phone) and the window's size on the desktop. The composer also
+  reads the panel's physical size in millimetres from
+  `const.innkeeper.display.size` ([Input](#input)).
 - **GPU.** The broker's DRM policy lets the guest open only the profile's
   selected render node. Without it, the image's Mesa would open the host's card
   node, and its composer would drive the host display's KMS. That Mesa ships
@@ -217,13 +217,19 @@ the Innkeeper Mouse, and OH draws its own cursor, with hover and the right
 button's menus. The host's cursor is hidden over the window. A host touch is a
 contact on the Innkeeper Touchscreen.
 
-MMI moves its cursor by relative motion, and it scales the motion. A display
-with a physical size gets a factor for the screen's diagonal, so our composer
-reports no physical size. MMI then takes its curve from
-`etc/multimodalinput/pointer_motion_acceleration_config.json`, which
-config_policy looks up in `sys_prod` before `system`. Our file there has a flat
-curve at every pointer speed, so one unit of motion moves the cursor one panel
-pixel. The host has already accelerated the pointer, and OH's pointer speed
+The composer reports the panel's physical size at 160 dpi, a desktop monitor's
+density, so DMS gives apps an x and y dpi near 160. The density that OH lays out
+with stays the profile's dpi.
+
+MMI moves its cursor by relative motion, and it scales the motion. For a display
+with a physical size, it multiplies by a factor for the screen's diagonal, which
+is 1 from 8 to 17 inches, and by its dynamic curve. The curve depends on the
+pointer speed and on the display's ppi, and MMI reads it from
+`etc/multimodalinput/pointer_motion_acceleration_config.json`. config_policy
+looks that file up in `sys_prod` before `system`. The launcher writes one there
+with a flat curve whose standard ppi is the panel's, so one unit of motion moves
+the cursor one panel pixel. Both phone presets have a diagonal in the range at
+160 dpi. The host has already accelerated the pointer, and OH's pointer speed
 setting has no effect. The bridge sends the difference between the pixel under
 the host pointer and the pixel under OH's cursor. When the pointer enters the
 window, a large negative motion first moves OH's cursor into the top-left

@@ -23,7 +23,7 @@ use crate::profile::System;
 use crate::sandbox::{files_read_only, link, over, remove_tree, tree_linker};
 
 /// Bumped when the composition below changes.
-const COMPOSE_VERSION: &str = "ohos-2";
+const COMPOSE_VERSION: &str = "ohos-3";
 
 /// DMS's config. Its `<dpi>` is the only place DMS takes density from.
 const DMS_CONFIG: &str = "vendor/etc/window/resources/display_manager_config.xml";
@@ -34,6 +34,14 @@ const POLICY_CONFIG: &str = "vendor/etc/audio/audio_policy_config.xml";
 /// The audio policy's volume levels. The policy reads the copy in
 /// `sys_prod` in place of the image's.
 const VOLUME_CONFIG: &str = "etc/audio/audio_volume_config.xml";
+
+/// MMI's mouse acceleration curves. MMI looks the file up in `sys_prod`
+/// before `system`.
+const POINTER_CONFIG: &str = "etc/multimodalinput/pointer_motion_acceleration_config.json";
+
+/// The density, in pixels per inch, that sizes the panel in millimetres. It
+/// is a desktop monitor's density, because the window shows the panel on one.
+const PHYSICAL_DPI: f64 = 160.0;
 
 /// The screen lock service's per-user "lock screen disabled" flags, under
 /// `/data`.
@@ -70,6 +78,43 @@ fn dms_config(xml: &str, dpi: u32) -> String {
         return xml.into();
     };
     format!("{}<dpi>{dpi}{}", &xml[..a], &xml[b..])
+}
+
+/// Returns the physical size in millimetres of a `width` by `height` pixel
+/// panel at [`PHYSICAL_DPI`]. DMS derives the x and y dpi that apps see from
+/// it.
+fn physical_size(width: u32, height: u32) -> (u32, u32) {
+    let mm = |px: u32| (f64::from(px) * 25.4 / PHYSICAL_DPI).round() as u32;
+    (mm(width), mm(height))
+}
+
+/// Returns the ppi that MMI computes from a panel's pixels and physical size
+/// (multimodalinput's `MouseTransformProcessor::UpdateMouseMoveLocation`).
+/// MMI divides by 25.4 as a float.
+fn mmi_ppi(width: u32, height: u32, (mm_width, mm_height): (u32, u32)) -> f64 {
+    let diagonal =
+        |a: u32, b: u32| (f64::from(a) * f64::from(a) + f64::from(b) * f64::from(b)).sqrt();
+    diagonal(width, height) * f64::from(25.4f32) / diagonal(mm_width, mm_height)
+}
+
+/// Returns MMI's mouse curve for a panel with a physical size. MMI then
+/// scales a unit of motion `v` by `t(v) * speeds[s] * ppi / standard_ppi`,
+/// where `t` is `slow[0] * ln(slow[1] * v + slow[2]) + slow[3]` below 13.5
+/// and `fast[0] * ln(fast[1] * ln(v) - fast[2]) + fast[3]` above it
+/// (`PointerMotionAcceleration::CalcDynamicMouseGain`). With these values each
+/// factor is 1, so one unit of motion moves the cursor one panel pixel at
+/// every pointer speed. The bridge needs that to place the cursor
+/// (host/bridge/src/input/direct.rs), and the host has already accelerated
+/// the pointer. The standard ppi is MMI's ppi to the last bit, so the ratio
+/// is 1 with no rounding error.
+fn pointer_config(width: u32, height: u32, size: (u32, u32)) -> String {
+    let speeds = ["1.0"; 20].join(", ");
+    let ppi = mmi_ppi(width, height, size);
+    format!(
+        "{{\n  \"MouseDynamic\": {{\n    \"speeds\": [{speeds}],\n    \
+         \"slow_gains\": [0.0, 1.0, 1.0, 1.0],\n    \"fast_gains\": [0.0, 1.0, 0.0, 1.0],\n    \
+         \"standard_ppi\": {ppi}\n  }}\n}}\n"
+    )
 }
 
 /// Returns `audio_volume_config.xml` with each volume type's default level
@@ -178,11 +223,19 @@ pub fn compose(cfg: &Config) -> Result<()> {
     let to = r.join("sys_prod").join(VOLUME_CONFIG);
     fs::create_dir_all(to.parent().unwrap())?;
     fs::write(&to, volume_config(&xml))?;
+    let size = physical_size(w, h);
+    let to = r.join("sys_prod").join(POINTER_CONFIG);
+    fs::create_dir_all(to.parent().unwrap())?;
+    fs::write(&to, pointer_config(w, h, size))?;
     let param = r.join("vendor/etc/param");
     fs::create_dir_all(&param)?;
     fs::write(
         param.join("innkeeper.para"),
-        format!("const.innkeeper.display={w}x{h}@{dpi}\nconst.product.udid={udid}\n"),
+        format!(
+            "const.innkeeper.display={w}x{h}@{dpi}\nconst.innkeeper.display.size={}x{}\n\
+             const.product.udid={udid}\n",
+            size.0, size.1
+        ),
     )?;
     files_read_only(r)?;
     fs::write(&key_file, key)?;
@@ -284,6 +337,67 @@ mod tests {
             "<a>\n    <!-- dpi -->\n    <dpi>320</dpi>\n</a>\n"
         );
         assert_eq!(dms_config("<a/>", 320), "<a/>");
+    }
+
+    /// Returns the numbers of `key` in an MMI curve file.
+    fn numbers(config: &str, key: &str) -> Vec<f64> {
+        let from = config.find(&format!("\"{key}\": ")).unwrap() + key.len() + 4;
+        let rest = &config[from..];
+        let to = rest.find(['\n', ']']).unwrap();
+        rest[..to]
+            .trim_start_matches('[')
+            .split(", ")
+            .map(|n| n.parse().unwrap())
+            .collect()
+    }
+
+    /// Returns where one unit of motion `v` along x moves MMI's cursor from
+    /// 0, at pointer speed `speed`, for a panel with a physical size (MMI's
+    /// `UpdateMouseMoveLocation`, `ScreenFactor` and `CalcDynamicMouseGain`).
+    fn mmi_move(config: &str, (w, h): (u32, u32), size: (u32, u32), v: f64, speed: usize) -> f64 {
+        let (speeds, slow, fast) = (
+            numbers(config, "speeds"),
+            numbers(config, "slow_gains"),
+            numbers(config, "fast_gains"),
+        );
+        let standard = numbers(config, "standard_ppi")[0];
+        let mm = (f64::from(size.0).powi(2) + f64::from(size.1).powi(2)).sqrt();
+        let factor = match (mm / f64::from(25.4f32)) as i32 {
+            ..=0 => 1.0f32,
+            1..=7 => 0.7,
+            8..=17 => 1.0,
+            18..=26 => 1.2,
+            27..=54 => 1.6,
+            _ => 2.4,
+        };
+        let ppi = (f64::from(w).powi(2) + f64::from(h).powi(2)).sqrt() * f64::from(25.4f32) / mm;
+        let t = if v < 13.5 {
+            slow[0] * (slow[1] * v + slow[2]).ln() + slow[3]
+        } else {
+            fast[0] * (fast[1] * v.ln() - fast[2]).ln() + fast[3]
+        };
+        let gain = t * speeds[speed - 1] * (ppi / standard);
+        v * f64::from(factor) * gain
+    }
+
+    #[test]
+    fn mmi_moves_the_cursor_one_pixel_per_unit_on_every_panel() {
+        for display in innkeeper_profile::profile::System::Ohos.displays() {
+            let (w, h, _) = display.screen().unwrap();
+            let size = physical_size(w, h);
+            let config = pointer_config(w, h, size);
+            for speed in 1..=20 {
+                for v in [1.0, 2.0, 13.0, 13.5, 14.0, 255.0, 1024.0] {
+                    assert_eq!(mmi_move(&config, (w, h), size, v, speed), v, "{display:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn panels_have_a_desktop_density() {
+        assert_eq!(physical_size(720, 1280), (114, 203));
+        assert_eq!(physical_size(1080, 2400), (171, 381));
     }
 
     #[test]
