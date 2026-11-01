@@ -393,7 +393,17 @@ pub fn bundle_info(profile: &ProfileName, pkg: &str, report: Report) -> Result<o
     if system != System::Ohos {
         bail!("profile {profile} runs {}", system.title());
     }
-    ohos::info(&s, pkg)
+    let mut info = ohos::info(&s, pkg)?;
+    info.background = background_apps(&s).map(|b| b.iter().any(|p| p == pkg));
+    Ok(info)
+}
+
+/// The installed apps that may run in the background, from the system app's
+/// last activity report, or None before its first report.
+fn background_apps(s: &Session) -> Option<Vec<String>> {
+    s.paths()
+        .and_then(|p| innkeeper_profile::activity::Activity::read(&p))
+        .map(|a| a.background)
 }
 
 /// A user app in the session.
@@ -402,7 +412,7 @@ pub struct ListedApp {
     /// The `Name` of its desktop entry.
     pub label: Option<String>,
     /// Whether the app may run in the background. It is None until the system
-    /// app's first activity report, and on OpenHarmony.
+    /// app's first activity report.
     pub background: Option<bool>,
 }
 
@@ -410,21 +420,18 @@ pub struct ListedApp {
 /// the bundle manager reports.
 pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
     let (s, system) = session(profile, report)?;
+    let background = background_apps(&s);
     if system == System::Ohos {
         return Ok(ohos::user_bundles(&s)?
             .into_iter()
             .map(|(package, label)| ListedApp {
                 label: validate::label(&label),
-                background: None,
+                background: background.as_ref().map(|b| b.contains(&package)),
                 package,
             })
             .collect());
     }
     let d = Dirs::from_env();
-    let background = s
-        .paths()
-        .and_then(|p| innkeeper_profile::activity::Activity::read(&p))
-        .map(|a| a.background);
     Ok(android::user_packages(&s)?
         .into_iter()
         .map(|package| ListedApp {
