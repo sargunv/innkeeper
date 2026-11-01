@@ -25,8 +25,9 @@ been dismissed. An OH profile refuses `open`, files and URIs in `run`,
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots and whose profile is a release profile. Each profile has a UDID, which
 `innkeeper profile list` shows. The launcher derives it from the profile's name
-and sets it as `const.product.udid`. A debug profile still fails, because
-installd hands it to the kernel's code-signing device, and the session has none.
+and sets it as `const.product.udid`. installd hands a debug profile's
+certificate chain to the kernel's code-signing device, `/dev/code_sign`, which
+the broker serves.
 
 `ohos/build.sh` (`mise run build:ohos`) builds our layer. `mise run build`
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
@@ -251,4 +252,5 @@ Android's system app reports activity.
   has no Bionic. With `INNKEEPER_GUEST=ohos` it also traps `open(2)`, because
   musl does not use `openat`. It serves `/etc/passwd` and `/etc/group` from
   `/system/etc`, handles OH's binder ioctls and serves `/dev/access_token_id`
+  and `/dev/code_sign`
   ([supervisor/README.md](../supervisor/README.md#openharmony)).

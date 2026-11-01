@@ -177,6 +177,11 @@ include none of these additions.
   Records are keyed by pid and start time, so a reused pid starts from its
   parent's record. SPM entries and reference counts from newer kernels return
   `ENOTTY`, as on a kernel built without them.
+- **Code signing** (`src/code_sign.rs`). `/dev/code_sign` is an empty file, and
+  the broker serves its type-`'k'` ioctls. When installd installs a HAP with a
+  debug signing profile, key_enable adds the profile's certificate chain there,
+  and BMS refuses the install if that fails. The session's kernel enforces no
+  code signatures, so the broker accepts each add and remove and keeps nothing.
 - **Ashmem** (`src/ashmem.rs`). OpenHarmony's c_utils needs `/dev/ashmem`, and
   so does everything built on it, such as IPC parcels and the display HDI's
   command queues. Each open gets a new sealable memfd named `ashmem`. The
