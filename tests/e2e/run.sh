@@ -459,6 +459,19 @@ else
   stop_session
   "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
   "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
+  # The probe HAP (ohos/probe) is signed with a debug profile for this
+  # profile's UDID, which profile list shows. Signing takes about 2 s, so it
+  # runs while OpenHarmony boots.
+  rm -f "$T/sign.status"
+  udid=$("$cli" profile list | awk -v p="$INNKEEPER_PROFILE" '$1 == p && $5 == "udid" { print $6 }')
+  {
+    if "$repo/ohos/sign.sh" "$repo/out/test/probes/ohos-sign" dev.sargunv.innkeeper.probes "$udid" \
+      "$repo/out/test/probes/InnkeeperProbes.hap" "$T/probes.hap" >"$T/sign.txt" 2>&1; then
+      echo 0 >"$T/sign.status"
+    else
+      echo 1 >"$T/sign.status"
+    fi
+  } &
   # The bridge plays into a private null sink and records its monitor. The
   # audio check records the monitor too.
   export INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
@@ -648,20 +661,18 @@ else
   echo "ok   a file in the user's Download is on disk in the profile and in OpenHarmony's media view"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
-    # The probe HAP (ohos/probe) is signed with a debug profile for this
-    # profile's UDID, which profile list shows. The CLI installs it, lists it
-    # and starts its launcher ability. WMS then shows the probe's window
-    # (probes0) with input focus.
+    # The CLI installs the signed probe HAP, lists it and starts its launcher
+    # ability. WMS then shows the probe's window (probes0) with input focus.
     shown() {
       local id
       s /system/bin/hidumper -s WindowManagerService -a -a >"$T/windows.txt"
       id=$(awk '$1 ~ /^probes[0-9]+$/ { print $4 }' "$T/windows.txt")
       [[ -n $id ]] && grep -x "Focus window: $id" "$T/windows.txt" >/dev/null
     }
-    local udid probes=$repo/out/test/probes
-    udid=$("$cli" profile list | awk -v p="$INNKEEPER_PROFILE" '$1 == p && $5 == "udid" { print $6 }')
-    "$repo/ohos/sign.sh" "$probes/ohos-sign" dev.sargunv.innkeeper.probes "$udid" \
-      "$probes/InnkeeperProbes.hap" "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
+    signed() { [[ -s $T/sign.status ]]; }
+    until_ok signed || return
+    cat "$T/sign.txt" >>"$T/ohos.txt"
+    [[ $(<"$T/sign.status") == 0 ]] || return
     "$cli" install "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
     "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
