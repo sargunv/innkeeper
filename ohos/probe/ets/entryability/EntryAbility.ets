@@ -1,4 +1,5 @@
-import { AbilityConstant, UIAbility, Want, wantAgent, WantAgent } from '@kit.AbilityKit';
+import { AbilityConstant, common, UIAbility, Want, wantAgent, WantAgent } from '@kit.AbilityKit';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { audio } from '@kit.AudioKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -67,10 +68,33 @@ async function notify(): Promise<void> {
   }
 }
 
+// Starts or stops an audio playback continuous task and logs the result.
+// The task's notification opens this ability.
+async function task(context: common.UIAbilityContext, start: boolean): Promise<void> {
+  try {
+    if (start) {
+      const agent = await wantAgent.getWantAgent({
+        wants: [{ bundleName: context.abilityInfo.bundleName, abilityName: context.abilityInfo.name }],
+        actionType: wantAgent.OperationType.START_ABILITY,
+        requestCode: 0,
+        actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+      });
+      await backgroundTaskManager.startBackgroundRunning(context,
+        backgroundTaskManager.BackgroundMode.AUDIO_PLAYBACK, agent);
+    } else {
+      await backgroundTaskManager.stopBackgroundRunning(context);
+    }
+    hilog.info(0x0000, TAG, 'task %{public}s', start ? 'started' : 'stopped');
+  } catch (e) {
+    hilog.error(0x0000, TAG, 'task failed: %{public}s', JSON.stringify(e));
+  }
+}
+
 // The tests read the URI of each want from hilog. `aa start --ps mode
-// capture` records from the microphone, and `--ps mode notify` posts a
-// notification.
-function run(want: Want): void {
+// capture` records from the microphone, `--ps mode notify` posts a
+// notification, and `--ps task start` or `stop` starts or stops a continuous
+// task.
+function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
   }
@@ -82,15 +106,19 @@ function run(want: Want): void {
   } else if (mode === 'clicked' || mode === 'action' || mode === 'reply') {
     hilog.info(0x0000, TAG, 'notification %{public}s: %{public}s', mode, `${want.parameters?.['reply'] ?? ''}`);
   }
+  const t = want.parameters?.['task'];
+  if (t === 'start' || t === 'stop') {
+    task(context, t === 'start');
+  }
 }
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    run(want);
+    run(want, this.context);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    run(want);
+    run(want, this.context);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
