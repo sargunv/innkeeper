@@ -106,9 +106,15 @@ impl State {
             }
             Req::Cursor { x, y, w, h } => {
                 // Display pixels to surface-local (logical) coordinates.
-                let s = self.scale120(id) as i64;
-                let f = |v: i32| (v as i64 * 120 / s) as i32;
-                ti.set_cursor_rectangle(f(x), f(y), f(w).max(1), f(h).max(1));
+                let (x0, y0) = self.display_to_surface(id, f64::from(x), f64::from(y));
+                let (x1, y1) = self.display_to_surface(id, f64::from(x + w), f64::from(y + h));
+                let (x0, y0) = (x0.floor() as i32, y0.floor() as i32);
+                ti.set_cursor_rectangle(
+                    x0,
+                    y0,
+                    (x1.ceil() as i32 - x0).max(1),
+                    (y1.ceil() as i32 - y0).max(1),
+                );
             }
             Req::Apply => ti.commit(),
         }
