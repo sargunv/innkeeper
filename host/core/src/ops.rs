@@ -1,11 +1,13 @@
 //! User-level operations shared by the CLI and the GUI. They block on reading
-//! APKs, on the session and on Android's package manager, so the GUI runs them
-//! off its UI thread. Progress and warnings go to a [`Report`] callback.
+//! packages, on the session and on the guest's package manager, so the GUI
+//! runs them off its UI thread. Progress and warnings go to a [`Report`]
+//! callback. Android profiles take APKs and bundles, and OpenHarmony profiles
+//! take HAPs.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 pub use crate::android::LaunchOptions;
 use crate::android::{self, Launch};
@@ -13,8 +15,8 @@ use crate::apk::{self, ApkInfo};
 use crate::bundle::{self, Input};
 use crate::launcher::Session;
 use crate::xdg::{self, DesktopApp, Dirs};
-use crate::{ErrorKind, validate};
-use innkeeper_profile::profile::ProfileName;
+use crate::{ErrorKind, hap, ohos, validate};
+use innkeeper_profile::profile::{ProfileName, System};
 
 /// Progress from a long operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,13 +32,13 @@ pub type Report<'a> = &'a dyn Fn(Event);
 /// A [`Report`] that ignores everything.
 pub fn quiet(_: Event) {}
 
-/// Returns profile `profile`'s running session and starts it if needed. App
-/// management needs Android, because OpenHarmony profiles can't install apps.
-fn session(profile: &ProfileName, report: Report) -> Result<Session> {
-    crate::profiles::need_android(profile, "managing apps")?;
+/// Returns profile `profile`'s running session and its system, and starts the
+/// session if needed.
+fn session(profile: &ProfileName, report: Report) -> Result<(Session, System)> {
     let s = Session::of_profile(profile)?;
     s.ensure(&|m| report(Event::Status(m.to_string())))?;
-    Ok(s)
+    let system = s.system();
+    Ok((s, system))
 }
 
 /// Starts profile `profile` if it isn't running, and waits for it to boot.
@@ -44,8 +46,8 @@ pub fn ensure_session(profile: &ProfileName, report: Report) -> Result<()> {
     session(profile, report).map(drop)
 }
 
-/// An APK or bundle that has been read and checked but not installed. An
-/// install confirmation shows it.
+/// An APK, APK bundle or HAP that has been read and checked but not
+/// installed. An install confirmation shows it.
 pub struct Package {
     pub file: PathBuf,
     pub package: String,
@@ -61,25 +63,39 @@ pub struct Package {
     pub abis: Vec<String>,
     /// Size of the input file in bytes.
     pub size: u64,
-    /// A host-rendered adaptive icon or the largest legacy bitmap.
+    /// A host-rendered adaptive icon or the largest legacy bitmap. HAPs have
+    /// none.
     pub icon: Option<Vec<u8>>,
-    input: Input,
-    /// Metadata of each member of `input`, in order.
-    info: Vec<ApkInfo>,
-    base: usize,
+    contents: Contents,
+}
+
+enum Contents {
+    Android {
+        input: Input,
+        /// Metadata of each member of `input`, in order.
+        info: Vec<ApkInfo>,
+        base: usize,
+    },
+    /// A HAP, which [`Package::file`] holds.
+    Ohos,
 }
 
 impl Package {
-    fn base(&self) -> (&Path, &ApkInfo) {
-        (
-            self.input.apks[self.base].path.as_path(),
-            &self.info[self.base],
-        )
+    /// The system that runs the package.
+    pub fn system(&self) -> System {
+        match self.contents {
+            Contents::Android { .. } => System::Android,
+            Contents::Ohos => System::Ohos,
+        }
     }
 
     /// Whether the pinned image can run the app, judging by its native code
     /// alone. [`install`] checks the session's ABI list again.
     pub fn runs_here(&self) -> bool {
+        if let Contents::Ohos = self.contents {
+            // The pinned OpenHarmony image is x86_64 only.
+            return self.abis.is_empty() || self.abis.iter().any(|a| a == "x86_64");
+        }
         // Use the ABI list from image/vendor.prop, which the pinned image
         // applies. It excludes NativeBridge ABIs until a translator is
         // installed.
@@ -94,12 +110,18 @@ impl Package {
     }
 }
 
-/// Reads an APK or bundle. This needs no session.
+/// Reads an APK, APK bundle or HAP. This needs no session.
 pub fn inspect(file: &Path, report: Report) -> Result<Package> {
     let size = file
         .metadata()
         .with_context(|| format!("open {}", file.display()))?
         .len();
+    if file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("hap"))
+    {
+        return inspect_hap(file, size);
+    }
     let input = bundle::open(file, &Dirs::from_env().cache)?;
     for s in &input.skipped {
         report(Event::Warning(format!(
@@ -153,9 +175,29 @@ pub fn inspect(file: &Path, report: Report) -> Result<Package> {
         size,
         icon,
         package: pkg,
-        input,
-        info,
-        base: bases[0],
+        contents: Contents::Android {
+            input,
+            info,
+            base: bases[0],
+        },
+    })
+}
+
+/// Reads a HAP. An app with several HAPs installs each one on its own.
+fn inspect_hap(file: &Path, size: u64) -> Result<Package> {
+    let h = hap::read(file).context(ErrorKind::NotAHap)?;
+    let pkg = validate::package(&h.bundle)?.to_string();
+    Ok(Package {
+        file: file.to_path_buf(),
+        label: validate::label(&h.label).unwrap_or_else(|| pkg.clone()),
+        version: version_name(&h.version_name),
+        version_code: h.version_code,
+        permissions: h.permissions,
+        abis: h.native_code,
+        size,
+        icon: None,
+        package: pkg,
+        contents: Contents::Ohos,
     })
 }
 
@@ -167,11 +209,25 @@ fn version_name(v: &str) -> String {
 }
 
 /// Installs an inspected package into the session, starting the session if
-/// needed. The session's bridge adds the app to the app menu, as it does for
-/// any app installed inside Android. A test session adds no menu entries.
+/// needed. On Android the session's bridge adds the app to the app menu, as
+/// it does for any app installed inside Android. A test session adds no menu
+/// entries.
 pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()> {
     let pkg = p.package.clone();
-    let s = session(profile, report)?;
+    let system = crate::profiles::settings(profile)?.system;
+    if system != p.system() {
+        return Err(anyhow::anyhow!(
+            "{pkg} is an {} app, and profile {profile} runs {}",
+            p.system().title(),
+            system.title()
+        )
+        .context(ErrorKind::WrongSystem));
+    }
+    let (s, _) = session(profile, report)?;
+    let Contents::Android { input, info, base } = &p.contents else {
+        report(Event::Status(format!("installing {pkg} {}", p.version)));
+        return ohos::install(&s, &p.file);
+    };
     let abis: Vec<String> = s
         .getprop("ro.product.cpu.abilist")
         .split(',')
@@ -180,10 +236,10 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
 
     // Install the base first, then the splits. ABI splits are included only
     // for ABIs the session runs.
-    let (base_path, base) = p.base();
+    let (base_path, base) = (input.apks[*base].path.as_path(), &info[*base]);
     let mut apks: Vec<&Path> = vec![base_path];
     let mut abi_splits = 0;
-    for (m, b) in p.input.apks.iter().zip(&p.info) {
+    for (m, b) in input.apks.iter().zip(info) {
         if b.split.is_empty() {
             continue;
         }
@@ -196,8 +252,7 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
         apks.push(m.path.as_path());
     }
     if abi_splits > 0
-        && !p
-            .info
+        && !info
             .iter()
             .any(|b| bundle::split_abi(&b.split).is_some_and(|a| abis.contains(&a)))
     {
@@ -225,8 +280,9 @@ pub fn install(profile: &ProfileName, p: &Package, report: Report) -> Result<()>
     android::install(&s, &apks)
 }
 
-/// Uninstalls a user app and leaves system apps alone. The session's bridge
-/// removes the app-menu entry. Returns whether Android had the app installed.
+/// Uninstalls a user app and leaves system apps alone. On Android the
+/// session's bridge removes the app-menu entry. Returns whether the guest had
+/// the app installed as a user app.
 pub fn uninstall(
     profile: &ProfileName,
     pkg: &str,
@@ -234,7 +290,14 @@ pub fn uninstall(
     report: Report,
 ) -> Result<bool> {
     let pkg = validate::package(pkg)?;
-    let s = session(profile, report)?;
+    let (s, system) = session(profile, report)?;
+    if system == System::Ohos {
+        let user = ohos::bundle(&s, pkg)?.is_some_and(|b| !b.preinstalled);
+        if user {
+            ohos::uninstall(&s, pkg, keep_data)?;
+        }
+        return Ok(user);
+    }
     let from_android = android::user_packages(&s)?.iter().any(|p| p == pkg);
     if from_android {
         android::uninstall(&s, pkg, keep_data)?;
@@ -259,7 +322,13 @@ pub fn run(
         .map(validate::launch_uri)
         .transpose()?;
     let launch = || -> Result<String> {
-        let s = session(profile, report)?;
+        let (s, system) = session(profile, report)?;
+        if system == System::Ohos {
+            if uri.is_some() {
+                bail!("OpenHarmony apps can't open URIs yet");
+            }
+            return ohos::start(&s, pkg);
+        }
         let l = match uri {
             Some(u) => Launch::View {
                 package: pkg.into(),
@@ -279,19 +348,58 @@ pub fn run(
     }
 }
 
+/// What `app` does to an OpenHarmony bundle. Android's equivalents go through
+/// the system app ([`crate::app_settings`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleAction {
+    Stop,
+    ClearCache,
+    ClearData,
+}
+
+/// Applies `action` to bundle `pkg` in OpenHarmony profile `profile`.
+pub fn bundle_action(
+    profile: &ProfileName,
+    pkg: &str,
+    action: BundleAction,
+    report: Report,
+) -> Result<()> {
+    let pkg = validate::package(pkg)?;
+    let (s, system) = session(profile, report)?;
+    if system != System::Ohos {
+        bail!("profile {profile} runs {}", system.title());
+    }
+    match action {
+        BundleAction::Stop => ohos::force_stop(&s, pkg),
+        BundleAction::ClearCache => ohos::clean(&s, pkg, true),
+        BundleAction::ClearData => ohos::clean(&s, pkg, false),
+    }
+}
+
 /// A user app in the session.
 pub struct ListedApp {
     pub package: String,
     /// The `Name` of its desktop entry.
     pub label: Option<String>,
     /// Whether the app may run in the background. It is None until the system
-    /// app's first activity report.
+    /// app's first activity report, and on OpenHarmony.
     pub background: Option<bool>,
 }
 
-/// Lists the session's user apps.
+/// Lists the session's user apps. On OpenHarmony the label is the one that
+/// the bundle manager reports.
 pub fn list(profile: &ProfileName, report: Report) -> Result<Vec<ListedApp>> {
-    let s = session(profile, report)?;
+    let (s, system) = session(profile, report)?;
+    if system == System::Ohos {
+        return Ok(ohos::user_bundles(&s)?
+            .into_iter()
+            .map(|(package, label)| ListedApp {
+                label: validate::label(&label),
+                background: None,
+                package,
+            })
+            .collect());
+    }
     let d = Dirs::from_env();
     let background = s
         .paths()
@@ -384,12 +492,48 @@ mod tests {
                 abis: info.native_code.clone(),
                 size: 0,
                 icon: None,
-                input: bundle::open(&file, &dir).unwrap(),
-                info: vec![info],
-                base: 0,
+                contents: Contents::Android {
+                    input: bundle::open(&file, &dir).unwrap(),
+                    info: vec![info],
+                    base: 0,
+                },
             };
             assert_eq!(p.runs_here(), runnable, "native code: {native_code:?}");
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn haps_are_for_openharmony() {
+        let dir = crate::test_dir("package-hap");
+        let file = dir.join("app.HAP");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&file).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        zip.start_file("module.json", opts).unwrap();
+        std::io::Write::write_all(
+            &mut zip,
+            br#"{"app": {"bundleName": "dev.example.app", "versionCode": 3,
+                 "versionName": "1.2", "label": "Example"},
+                 "module": {"name": "entry"}}"#,
+        )
+        .unwrap();
+        zip.start_file("libs/arm64-v8a/libapp.so", opts).unwrap();
+        zip.finish().unwrap();
+        let mut p = inspect(&file, &quiet).unwrap();
+        assert_eq!(p.system(), System::Ohos);
+        assert_eq!(
+            (p.package.as_str(), p.label.as_str(), p.version.as_str()),
+            ("dev.example.app", "Example", "1.2")
+        );
+        assert_eq!(p.version_code, "3");
+        assert!(!p.runs_here());
+        p.abis.push("x86_64".into());
+        assert!(p.runs_here());
+        p.abis.clear();
+        assert!(p.runs_here());
+        fs::write(&file, b"not a zip").unwrap();
+        let e = inspect(&file, &quiet).err().unwrap();
+        assert_eq!(e.downcast_ref::<ErrorKind>(), Some(&ErrorKind::NotAHap));
         fs::remove_dir_all(dir).unwrap();
     }
 

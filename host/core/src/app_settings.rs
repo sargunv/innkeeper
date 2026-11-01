@@ -231,6 +231,7 @@ pub fn request(
     report: crate::ops::Report,
 ) -> Result<AppInfo> {
     command.validate()?;
+    crate::profiles::need_android(profile, "app settings")?;
     crate::ops::ensure_session(profile, report)?;
     let json: String = proxy(profile)?.call(
         "App",

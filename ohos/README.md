@@ -12,8 +12,19 @@ init starts its services, samgr comes up, and OH's core system abilities
 register with it. render_service composes OH's screen through our display HDI,
 and the bridge shows the screen in a desktop window. SceneBoard is OH's window
 manager and home screen. It starts and draws the lock screen, and built-in apps
-such as Settings run in it. There is no desktop input or app install yet. An OH
-profile refuses the CLI's app commands, adb and the Android-only settings.
+such as Settings run in it. There is no desktop input yet.
+
+The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
+`uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
+([host/cli](../host/cli/README.md)). AMS blocks third-party apps until the lock
+screen has been unlocked once since boot, so `run` of such an app fails before
+that. An OH profile refuses `open`, files and URIs in `run`, `app info`,
+`app set`, adb and the Android-only settings.
+
+The bundle manager installs a HAP whose signature chains to OpenHarmony's public
+roots and whose profile is a release profile. A debug profile fails, because it
+needs the device's UDID and the kernel's code-signing device, and the session
+has neither.
 
 `ohos/build.sh` (`mise run build:ohos`) builds our layer. `mise run build`
 stages it in `share/innkeeper/ohos` beside Android's tree. Both guests run the
@@ -23,8 +34,8 @@ To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
-([tests/boot.sh](tests/boot.sh)). It also checks that the window shows and that
-`bm` installs the image's calculator HAP.
+([tests/boot.sh](tests/boot.sh)). It also checks that the window shows, and that
+the CLI installs and starts the image's calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a

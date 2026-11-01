@@ -449,6 +449,7 @@ else
   mkdir -p "$T"
   : >"$T/timings.log"
   cli=$repo/tools/dev/innkeeper.sh
+  ohos_image=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$repo/ohos/pin.toml")
   stop_session
   "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
   "$cli" profile create --system ohos "$INNKEEPER_PROFILE" >/dev/null
@@ -461,10 +462,13 @@ else
     # The caller tests this function's status, which turns off errexit here.
     s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1 || return
     "$S" selftest >>"$T/ohos.txt" || return
-    # bm installs a HAP over exec. The image's calculator is a signed HAP that
-    # is already in the guest.
-    s bm install -p /system/app/com.example.distributedcalc/Calc_Demo.hap >>"$T/ohos.txt" 2>&1
-    grep -q 'install bundle successfully' "$T/ohos.txt" || return
+    # The CLI installs a HAP and starts its launcher ability. The image's
+    # calculator is a signed HAP, read from the image cache. Its window stays
+    # hidden behind the lock screen, which nothing dismisses yet.
+    "$cli" install "$INNKEEPER_IMAGES/$ohos_image/img/system/system/app/com.example.distributedcalc/Calc_Demo.hap" \
+      >>"$T/ohos.txt" 2>&1 || return
+    grep -q 'installed com.ohos.calculator as "Calculator"' "$T/ohos.txt" || return
+    "$cli" run com.ohos.calculator >>"$T/ohos.txt" 2>&1 || return
     # Screen 0 must appear in its own window on this desktop.
     until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
     until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
@@ -474,7 +478,7 @@ else
     echo "e2e: FAIL (ohos); init's log: $(dirname "$bridge_log")/kmsg.log" >&2
     exit 1
   fi
-  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window, passes selftest and installs a HAP'
+  echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window, passes selftest, and installs and starts a HAP with the CLI'
   echo 'e2e: PASS'
   exit
 fi
