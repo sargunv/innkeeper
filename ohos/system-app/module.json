@@ -32,6 +32,15 @@
         "icon": "$media:icon",
         "label": "$string:app_name",
         "exported": false
+      },
+      {
+        "name": "HostIme",
+        "srcEntry": "./ets/ime/HostIme.ets",
+        "type": "inputMethod",
+        "description": "$string:ime_description",
+        "icon": "$media:icon",
+        "label": "$string:ime_name",
+        "exported": true
       }
     ]
   }

@@ -36,9 +36,9 @@ same static broker, `libexec/innkeeper/innkeeper-brk`.
 ## Probe HAP
 
 `ohos/probe` is a small app for the tests, `dev.sargunv.innkeeper.probes`. Its
-launcher ability shows one page. Started with `--ps mode capture`, it records
-half a second from the microphone and logs the loudest sample to hilog.
-`mise run build:ohos-probe` builds it into
+launcher ability shows one page with a text field. Started with
+`--ps mode capture`, it records half a second from the microphone and logs the
+loudest sample to hilog. `mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
 
 The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
@@ -77,11 +77,13 @@ have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
 reaches MMI. A file written to `/storage/Users/currentUser/Download` lands in
 the profile's data directory. The probe HAP, signed for the profile's UDID, then
 installs and shows in `innkeeper list`, and `innkeeper run` puts its window on
-screen with input focus. OH's music volume must be at its maximum, and a 440 Hz
-tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must reach a
-private null sink on the nested desktop. Last, root grants the probe the
-microphone with `atm perm -g`, the host plays a tone into the null sink, and the
-probe must record it from the sink's monitor.
+screen with input focus. A click on the probe's text field starts Innkeeper
+Keyboard, and keys typed in a French layout on the nested desktop type "aé" in
+the field. OH's music volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop. Last, root grants the probe the microphone with
+`atm perm -g`, the host plays a tone into the null sink, and the probe must
+record it from the sink's monitor.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -128,6 +130,9 @@ reports boot completion. Issue #312 tracks the features that build on it.
   connection. Session1's `State()` reports the session booted from then on, so
   the manager shows an OH profile as running once its home screen is up. The CLI
   reads the same parameter over `exec`.
+- **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
+  connects OH's text fields to the host's input method
+  ([Text input](#text-input)).
 - **Build.** `mise run build:ohos-system-app` builds the HAP and stages it with
   the two JSON files. The SDK's declarations leave out the system APIs, such as
   ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the SDK in
@@ -314,11 +319,47 @@ a fifteenth of a detent, so the fractions of a high-resolution wheel reach OH. A
 touchpad's scroll becomes wheel degrees, at 63 surface units to the detent,
 which is how far one detent scrolls an OH list.
 
-Keys go to the Innkeeper Keyboard while the window has keyboard focus. They keep
-their evdev codes, and OH maps them with its own keymap, so the host's layout
-doesn't apply. MMI repeats held keys itself, so the bridge drops the
-compositor's repeats. Text input from the host's input method doesn't reach OH
-yet.
+Keys go to the Innkeeper Keyboard device while the window has keyboard focus.
+They keep their evdev codes, and OH maps them with its own US keymap. MMI
+repeats held keys itself, so the bridge drops the compositor's repeats.
+
+### Text input
+
+Innkeeper System's input method, Innkeeper Keyboard (`ets/ime/HostIme.ets`),
+connects OH's text fields to the host's input method. It works like Android's
+([docs/input.md](../docs/input.md#text-input)) and speaks the same `ti_*` lines
+with the bridge, so the host's IBus or Fcitx composes text for OH editors.
+
+- **Default.** `sys_prod/etc/param/innkeeper_ime.para` sets
+  `persist.sys.default_ime` to the input method. The image's file names its own
+  keyboard, and OH reads our file after it. A choice the user makes in Settings
+  persists over the default. The input method creates no panel, so no soft
+  keyboard covers the window.
+- **Editors.** OH's `inputStart` enables text input with the editor's content
+  type, and `inputStop` disables it. A password field gets the password purpose
+  and the hidden-text hint. The surrounding text and the cursor's rectangle
+  follow the editor, so the host's candidate window opens at the text cursor.
+  ArkUI's TextInput reports the pattern `PATTERN_NULL`, which the input method
+  treats as plain text. `cursorContextChange` gives the cursor's top, although
+  the SDK's declaration says bottom.
+- **Results.** The host's commits insert text, its preedit shows as OH's preview
+  text, and its deletions delete around the cursor. OH's `deleteForward` deletes
+  before the cursor and `deleteBackward` after it. OH has no cursor inside a
+  preview.
+- **Layout.** A key that types text reaches the input method before the editor,
+  as on Android. The input method consumes it and commits what the key types
+  under the host's layout and compose (`ets/ime/KeyText.ets`). The bridge's
+  `key` line carries that text, and the bridge sends the line before it writes
+  the key, so the text is there first. Keys without text, such as arrows, Enter
+  and Backspace, and chords with Ctrl, Alt or Meta reach the editor as keys.
+  Shortcuts keep OH's US key positions.
+- **Order.** Keys and the text that replaces them reach the editor in the order
+  they were typed. Key events less than about a millisecond apart can arrive out
+  of order. Typing doesn't produce such gaps, and a test that sends keys in a
+  burst can.
+
+`ohos/system-app/tests` runs the input method's line and key logic under Node
+with `mise run test`.
 
 ## Audio
 

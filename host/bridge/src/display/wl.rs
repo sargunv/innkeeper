@@ -339,16 +339,25 @@ impl State {
 
     /// Maps surface-local logical coordinates to the shown frame's pixels.
     pub(crate) fn to_display(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
-        match self.windows.get(&id) {
-            Some(w) if w.width > 0 && w.height > 0 && w.shown_size.0 > 0 => {
-                let (sw, sh) = turned(w.shown_size, w.rotation);
-                (
-                    x * sw as f64 / w.width as f64,
-                    y * sh as f64 / w.height as f64,
-                )
-            }
-            _ => (x, y),
+        match self.windows.get(&id).and_then(pixel_ratio) {
+            Some((rx, ry)) => (x * rx, y * ry),
+            None => (x, y),
         }
+    }
+
+    /// Maps the shown frame's pixels to surface-local logical coordinates,
+    /// the inverse of [`State::to_display`]. Before the first frame it divides
+    /// by the window's scale.
+    pub(crate) fn display_to_surface(&self, id: u32, x: f64, y: f64) -> (f64, f64) {
+        let (rx, ry) = self
+            .windows
+            .get(&id)
+            .and_then(pixel_ratio)
+            .unwrap_or_else(|| {
+                let s = f64::from(self.scale120(id)) / 120.0;
+                (s, s)
+            });
+        (x / rx, y / ry)
     }
 
     /// The window's scale × 120.
@@ -1569,6 +1578,22 @@ pub(super) fn foreign_handles(window: u32) -> Option<String> {
 }
 
 /// A frame's sides as shown, turned by `rotation` quarter turns.
+/// The shown frame's pixels per logical unit of the window, across and down.
+fn pixel_ratio(w: &Win) -> Option<(f64, f64)> {
+    pixels_per_unit((w.width, w.height), w.shown_size, w.rotation)
+}
+
+fn pixels_per_unit(logical: (u32, u32), shown: (u32, u32), rotation: u32) -> Option<(f64, f64)> {
+    if logical.0 == 0 || logical.1 == 0 || shown.0 == 0 {
+        return None;
+    }
+    let (sw, sh) = turned(shown, rotation);
+    Some((
+        f64::from(sw) / f64::from(logical.0),
+        f64::from(sh) / f64::from(logical.1),
+    ))
+}
+
 fn turned((w, h): (u32, u32), rotation: u32) -> (u32, u32) {
     if rotation % 2 == 1 { (h, w) } else { (w, h) }
 }
@@ -1715,5 +1740,26 @@ mod tests {
         assert_eq!(turned((1080, 2400), 3), (2400, 1080));
         assert_eq!(buffer_transform(1), wl_output::Transform::_270);
         assert_eq!(buffer_transform(4), wl_output::Transform::Normal);
+    }
+
+    #[test]
+    fn display_pixels_per_logical_unit() {
+        // OpenHarmony's 720x1280 panel in a window of 360x640 logical units.
+        assert_eq!(
+            pixels_per_unit((360, 640), (720, 1280), 0),
+            Some((2.0, 2.0))
+        );
+        // A rotated frame keeps its buffer's orientation.
+        assert_eq!(
+            pixels_per_unit((640, 360), (720, 1280), 1),
+            Some((2.0, 2.0))
+        );
+        assert_eq!(
+            pixels_per_unit((800, 400), (1200, 600), 0),
+            Some((1.5, 1.5))
+        );
+        // Before the first frame, or for an empty window, there is none.
+        assert_eq!(pixels_per_unit((360, 640), (0, 0), 0), None);
+        assert_eq!(pixels_per_unit((0, 640), (720, 1280), 0), None);
     }
 }

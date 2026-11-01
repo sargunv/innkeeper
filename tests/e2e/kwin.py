@@ -2,8 +2,8 @@
 """Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
 tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
-org_kde_kwin_fake_input, Visibility, Position and Geometry use KWin scripts, and
-Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
+org_kde_kwin_fake_input, Visibility, Position and Geometry use KWin scripts,
+Layout writes kxkbrc, and Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
 restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
 
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import dbus
+import dbus.lowlevel
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 import gi
@@ -222,6 +223,40 @@ class TestDesktop(dbus.service.Object):
       "}\n",
     )
     GLib.timeout_add(1000, self.report, name, 0, 0, 0, 0)
+
+  @dbus.service.method(
+    NAME, in_signature="s", out_signature="", async_callbacks=("ok", "err")
+  )
+  def Layout(self, layout, ok, err):
+    """Make layout the keyboard's xkb layout, and reply once KWin uses it."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "kxkbrc"
+    path.write_text(f"[Layout]\nLayoutList={layout}\nUse=true\n")
+    # KWin reloads kxkbrc when KConfigWatcher's signal names the changed keys.
+    changed = dbus.lowlevel.SignalMessage(
+      "/kxkbrc", "org.kde.kconfig.notify", "ConfigChanged"
+    )
+    changed.append(
+      dbus.Dictionary(
+        {"Layout": [dbus.ByteArray(b"LayoutList"), dbus.ByteArray(b"Use")]},
+        signature="saay",
+      )
+    )
+    self.bus.send_message(changed)
+    layouts = dbus.Interface(
+      self.bus.get_object("org.kde.keyboard", "/Layouts"),
+      "org.kde.KeyboardLayouts",
+    )
+
+    def check(tries):
+      if [str(entry[0]) for entry in layouts.getLayoutsList()] == [layout]:
+        ok()
+      elif tries:
+        GLib.timeout_add(50, check, tries - 1)
+      else:
+        err(dbus.DBusException(f"KWin didn't load the layout {layout}"))
+      return False
+
+    check(40)
 
   @dbus.service.method(SCRIPT, in_signature="siiii", out_signature="")
   def Report(self, name, x, y, w, h):

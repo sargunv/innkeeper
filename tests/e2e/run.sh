@@ -677,6 +677,45 @@ else
   fi
   echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, its window has focus on screen, app info shows its version and permissions, and it opens a link'
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_text() {
+    local field x y
+    geometry || return
+    # probe_field sets field to the centre of the probe's text field on the
+    # panel and its text, from the inspector dump: "<x> <y>|<text>".
+    probe_field() {
+      local w
+      w=$(s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^probes[0-9]+$/ { print $4; exit }')
+      [[ -n $w ]] || return
+      field=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
+        awk '/compid: probe_text$/ { f = 1 } f && /^ *text: / { t = substr($0, index($0, ":") + 2) }
+          f && /^ *top: / { top = $2 } f && /^ *left: / { left = $2 } f && /^ *width: / { width = $2 }
+          f && /^ *height: / { printf "%d %d|%s\n", left + width / 2, top + $2 / 2, t; exit }')
+      [[ -n $field ]]
+    }
+    until_ok probe_field || return
+    # Innkeeper Keyboard logs each editor it starts. hilog's per-process flow
+    # control would drop the line among the IME process's other logs.
+    s /system/bin/hilog -Q pidoff >/dev/null || return
+    started() { s /system/bin/hilog -x -T InnkeeperIme | grep -q 'input started'; }
+    ! started || return
+    read -r x y <<<"${field%%|*}"
+    { at "$x" "$y" && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok started || return
+    # On AZERTY, the Q key types a and the 2 key types é. OpenHarmony's own
+    # keymap would type q2.
+    desktop Layout fr >/dev/null || return
+    printf '%s\n' key:16,1 key:16,0 key:3,1 key:3,0 | /usr/bin/python3 "$here/seat.py" --stdin
+    typed() { probe_field && [[ ${field#*|} == aé ]]; }
+    until_ok typed || {
+      echo "the text field holds: ${field#*|}" >&2
+      return 1
+    }
+  }
+  if ! timed ohos-text ohos_text; then
+    exit 1
+  fi
+  echo "ok   the desktop's keyboard types into the probe's text field in the desktop's layout"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
     # The desktop mixer is the volume control, so OH's music volume stays at

@@ -15,7 +15,8 @@ host's layout, compose and input method intact. `input/VirtualInput.kt` explains
 the split.
 
 An OpenHarmony window gets the seat from the bridge as a mouse, a touchscreen
-and a keyboard ([ohos](../ohos/README.md#input)).
+and a keyboard, and OpenHarmony's Innkeeper Keyboard connects its text fields to
+the host's input method ([ohos](../ohos/README.md#input)).
 
 ## Devices
 

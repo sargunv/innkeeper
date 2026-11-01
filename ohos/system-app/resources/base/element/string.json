@@ -4,6 +4,11 @@
     {
       "name": "service_description",
       "value": "Connects OpenHarmony to the desktop."
+    },
+    { "name": "ime_name", "value": "Innkeeper Keyboard" },
+    {
+      "name": "ime_description",
+      "value": "Types with the desktop's keyboard and input method."
     }
   ]
 }
