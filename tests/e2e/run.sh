@@ -546,13 +546,19 @@ else
   echo "ok   desktop keys reach OpenHarmony's input service"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
-    # The CLI installs the probe HAP (ohos/probe), lists it and starts its
-    # launcher ability, which comes to the foreground over the home screen.
+    # The probe HAP (ohos/probe) is signed with a debug profile for this
+    # profile's UDID, which profile list shows. The CLI installs it, lists it
+    # and starts its launcher ability, which comes to the foreground over the
+    # home screen.
     probe() {
       s /system/bin/hidumper -s AbilityManagerService -a -a >"$T/abilities.txt"
       grep -A5 'app name \[dev.sargunv.innkeeper.probes\]' "$T/abilities.txt" | grep -Eq "^ *state #$1"
     }
-    "$cli" install "$repo/out/test/probes/InnkeeperProbes.hap" >>"$T/ohos.txt" 2>&1 || return
+    local udid probes=$repo/out/test/probes
+    udid=$("$cli" profile list | awk -v p="$INNKEEPER_PROFILE" '$1 == p && $5 == "udid" { print $6 }')
+    "$repo/ohos/probe/sign.sh" "$probes/ohos-sign" dev.sargunv.innkeeper.probes "$udid" \
+      "$probes/InnkeeperProbes.hap" "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
+    "$cli" install "$T/probes.hap" >>"$T/ohos.txt" 2>&1 || return
     grep -q 'installed dev.sargunv.innkeeper.probes as "Innkeeper Probes"' "$T/ohos.txt" || return
     "$cli" list | grep '^dev\.sargunv\.innkeeper\.probes' >/dev/null || return
     "$cli" run dev.sargunv.innkeeper.probes >>"$T/ohos.txt" 2>&1 || return
@@ -562,7 +568,7 @@ else
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and starts the probe HAP, which comes to the foreground'
+  echo 'ok   the CLI installs, lists and starts the debug-signed probe HAP, which comes to the foreground'
   echo 'e2e: PASS'
   exit
 fi

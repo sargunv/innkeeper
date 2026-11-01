@@ -24,8 +24,9 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   lock screen and open Settings. OpenHarmony's input injector scrolls Settings
   and goes home, and render_service must not have restarted since boot. A key
   press reaches OpenHarmony's input service. The CLI installs the probe HAP
-  (ohos/probe), lists it and starts it, and it comes to the foreground. This
-  group uses its own profile, `<profile>-ohos`, so it runs alone.
+  (ohos/probe), signed for the profile's UDID, lists it and starts it, and it
+  comes to the foreground. This group uses its own profile, `<profile>-ohos`, so
+  it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
