@@ -24,12 +24,14 @@
 //! bridge forwards it to that display's window on the input service.
 //!
 //! CURSOR (0x0206): u32 display, u32 width, u32 height (each <=512),
-//! i32 x, i32 y (layer origin in display pixels). A cursor with nonzero
-//! dimensions carries one sealed memfd with width*height*4 premultiplied BGRA
-//! bytes (wl_shm ARGB8888). A 0x0 cursor without an fd hides the cursor. The
-//! layer is excluded from FRAME. The bridge derives the hotspot from the last
-//! pointer position that the input service supplies, because HWC3 has no
-//! style-name or hotspot metadata.
+//! i32 x, i32 y (layer origin in display pixels), and optionally i32 hot_x,
+//! i32 hot_y (the hotspot in the image). A cursor with nonzero dimensions
+//! carries one sealed memfd with width*height*4 premultiplied BGRA bytes
+//! (wl_shm ARGB8888). A 0x0 cursor without an fd hides the cursor. The layer
+//! is excluded from FRAME. HWC3 has no style-name or hotspot metadata, so
+//! Android's composer sends no hotspot, and the bridge derives one from the
+//! last pointer position that the input service supplies. OpenHarmony's
+//! composer sends the hotspot that MMI drew the image around.
 //!
 //! | Event    | Message | Body                                         |
 //! | -------- | ------- | -------------------------------------------- |
@@ -115,6 +117,7 @@ pub enum Request {
         height: u32,
         x: i32,
         y: i32,
+        hotspot: Option<(i32, i32)>,
     },
     DisplayAdd {
         display: u32,
@@ -163,6 +166,11 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             height: r.u32_in(0..=512, "cursor height")?,
             x: r.i32()?,
             y: r.i32()?,
+            hotspot: if r.is_empty() {
+                None
+            } else {
+                Some((r.i32()?, r.i32()?))
+            },
         },
         ty::DISPLAY_ADD => Request::DisplayAdd {
             display: r.u32()?,
@@ -223,9 +231,13 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             height,
             x,
             y,
+            hotspot,
         } => {
             w = Writer::message(ty::CURSOR, tag);
             w.u32(*display).u32(*width).u32(*height).i32(*x).i32(*y);
+            if let Some((hx, hy)) = hotspot {
+                w.i32(*hx).i32(*hy);
+            }
         }
         Request::DisplayAdd {
             display,
@@ -346,6 +358,22 @@ mod tests {
                 display: 3,
                 buffer: 7,
                 damage: [0, 0, 1280, 800],
+            },
+            Request::Cursor {
+                display: 3,
+                width: 36,
+                height: 55,
+                x: -4,
+                y: 10,
+                hotspot: None,
+            },
+            Request::Cursor {
+                display: 0,
+                width: 36,
+                height: 55,
+                x: 100,
+                y: 200,
+                hotspot: Some((0, 0)),
             },
         ] {
             assert_eq!(roundtrip(&encode(1, &req)), Ok(req));

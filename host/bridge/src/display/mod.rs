@@ -196,6 +196,7 @@ impl Service for DisplayService {
                 height,
                 x,
                 y,
+                hotspot,
             } => {
                 let Some(&window) = self.displays.get(&display) else {
                     return Reply::err(-ENOENT);
@@ -221,6 +222,7 @@ impl Service for DisplayService {
                         height,
                         x,
                         y,
+                        hotspot,
                         pixels,
                     },
                 })

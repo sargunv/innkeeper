@@ -5,10 +5,11 @@
 //! events over a window's client-side frame go back to the display service,
 //! which drives the frame.
 //!
-//! Over content the cursor is Android's cursor bitmap. The frame uses its own
-//! arrow and resize shapes through `wp_cursor_shape_v1` when the compositor
-//! has it. Android draws no pointer of its own. A guest in the bridge's own
-//! window draws its cursor, so the host's cursor is hidden there.
+//! Over content the cursor is the guest's cursor bitmap, which its composer
+//! sends. The frame uses its own arrow and resize shapes through
+//! `wp_cursor_shape_v1` when the compositor has it. Android draws no pointer
+//! of its own. Until a guest in the bridge's own window sends a bitmap, the
+//! host's cursor is hidden there.
 
 use std::collections::HashMap;
 use std::time::Duration;
