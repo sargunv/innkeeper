@@ -18,8 +18,8 @@ retry() {
   return 1
 }
 
-# A render_service crash also restarts SceneBoard on the lock screen, so each
-# check of the screen checks render_service's pid first.
+# A render_service crash also restarts SceneBoard, so each check of the screen
+# checks render_service's pid first.
 same_render_service() {
   now=$(/system/bin/pidof render_service)
   [ "$now" = "$rs" ] && return 0
