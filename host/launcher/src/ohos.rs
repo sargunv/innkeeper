@@ -206,6 +206,20 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
     // Add the image's other top-level entries where the sandbox has none,
     // such as /chipset and the empty mount points.
     crate::root::copy_top_level(&cfg.image.img, slash, false)?;
+    // appspawn binds the user's files into each app's sandbox at
+    // /storage/Users, and the shared files at /storage/Share. An app here
+    // sees the session's /storage, so these links stand in for the binds.
+    // storage_daemon makes user 100's view when the user starts.
+    let storage = Path::new("/storage");
+    link(
+        Path::new("/mnt/user/100/nosharefs/docs"),
+        &storage.join("Users"),
+    )?;
+    link(Path::new("Users"), &storage.join("users"))?;
+    link(
+        Path::new("/data/service/el1/public/storage_daemon/share/public"),
+        &storage.join("Share"),
+    )?;
     // OH binaries ask for /lib/ld-musl-x86_64.so.1, and the image's /lib is
     // /system/lib. The sandbox's /lib is a symlink to /usr/lib, so it is
     // replaced by a directory of the same entries plus the musl loader.

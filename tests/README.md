@@ -24,7 +24,8 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   seat opens Settings with OpenHarmony's cursor under the pointer. A wheel
   detent scrolls Settings' list. OpenHarmony's input injector scrolls Settings
   and goes home, and render_service must not have restarted since boot. A key
-  press reaches OpenHarmony's input service. The CLI installs the probe HAP
+  press reaches OpenHarmony's input service. A file written to the user's
+  Download lands in the profile's data directory. The CLI installs the probe HAP
   (ohos/probe), signed for the profile's UDID, lists it and runs it, and its
   window has focus on screen. `app info` shows the probe's version and the grant
   state of its two permissions, and `run` with a link delivers its URI to the

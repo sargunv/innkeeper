@@ -14,10 +14,13 @@
 //    breaks the relative paths that apps load from
 //    (system/lib64/extensionability).
 //  - storage_daemon mounts each user's storage views under /storage and
-//    /mnt/data when the user starts. If a mount fails, the account service
+//    /mnt when the user starts. If a mount fails, the account service
 //    leaves the user unverified, and AMS refuses to start third-party apps.
-//    storage_daemon's mounts and unmounts succeed as no-ops, as init's do,
-//    and the views are plain directories.
+//    storage_daemon's mounts and unmounts succeed. Each bind or sharefs
+//    mount becomes a symlink to the resolved source, so every view shows
+//    the user's files in /data/service/el2/<user>/hmdfs/account.
+//    storage_daemon refuses a source or mount point that lstat shows as a
+//    symlink, so its lstat shows a symlink into /data as the directory.
 //  - Services set their cfg's "importance" through setpriority before exec,
 //    and exit if it fails. Without CAP_SYS_NICE, raising priority is
 //    best-effort, as in the Android shim.
@@ -67,6 +70,8 @@
 #define SYS_setns 308
 #define SYS_setpriority 141
 #define SYS_statfs 137
+#define SYS_newfstatat 262
+#define SYS_readlink 89
 #define SYS_ioctl 16
 #define ENOTTY 25
 // _IOWR('b', 2, struct dma_buf_export_sync_file)
@@ -75,6 +80,9 @@
 #define O_DIRECTORY 0200000
 #define O_CLOEXEC 02000000
 #define O_PATH 010000000
+#define AT_SYMLINK_NOFOLLOW 0x100
+#define S_IFMT 0170000
+#define S_IFLNK 0120000
 #define MS_BIND 4096
 #define CLONE_NEWNS 0x00020000
 
@@ -185,29 +193,76 @@ long syscall(long nr, long a, long b, long c, long d, long e, long f) {
   return ret(sys6(nr, a, b, c, d, e, f));
 }
 
+char* realpath(const char* path, char* out);
+
+// Replaces the mount point that the caller made, an empty directory or file,
+// with a symlink to src.
+static void replace(const char* src, const char* dst) {
+  if (sys6(SYS_rmdir, (long)dst, 0, 0, 0, 0, 0) != 0) {
+    sys6(SYS_unlink, (long)dst, 0, 0, 0, 0, 0);
+  }
+  sys6(SYS_symlink, (long)src, (long)dst, 0, 0, 0, 0);
+}
+
+// Whether path resolves to the host directory behind /data.
+static int in_data(const char* path) {
+  char buf[4096];
+  char* r = next_realpath(path, buf);
+  return r && data_len && starts(r, data_dir) &&
+         (r[data_len] == '/' || r[data_len] == 0);
+}
+
 int mount(
   const char* src, const char* dst, const char* type, unsigned long flags,
   const void* data
 ) {
-  if (init_pid || storage) return 0;
+  if (init_pid) return 0;
+  if (storage) {
+    // A bind or sharefs mount of another path becomes a symlink. sharefs
+    // filters access, and its view shows the source's files. A mount point
+    // in /data stays a directory. The appdata views are mount points in the
+    // user's Docs, and a symlink there would show in the user's files.
+    if (
+      src && dst && *src == '/' && !same(src, dst) &&
+      ((flags & MS_BIND) || (type && same(type, "sharefs"))) && !in_data(dst)
+    ) {
+      char real[4096];
+      replace(realpath(src, real) ? real : src, dst);
+    }
+    return 0;
+  }
   if (!spawner) {
     return (int)ret(sys6(
       SYS_mount, (long)src, (long)dst, (long)type, (long)flags, (long)data, 0
     ));
   }
-  // A bind of another path into an app's sandbox becomes a symlink that
-  // replaces the mount point the spawner made, an empty directory or file.
+  // A bind of another path into an app's sandbox becomes a symlink.
   // Binds of the root, or of a path onto itself, need nothing.
   if (
     (flags & MS_BIND) && src && dst && starts(dst, "/mnt/sandbox/") &&
     !same(src, "/") && !same(src, dst)
   ) {
-    if (sys6(SYS_rmdir, (long)dst, 0, 0, 0, 0, 0) != 0) {
-      sys6(SYS_unlink, (long)dst, 0, 0, 0, 0, 0);
-    }
-    sys6(SYS_symlink, (long)src, (long)dst, 0, 0, 0, 0);
+    replace(src, dst);
   }
   return 0;
+}
+
+// storage_daemon checks each mount's source and mount point with lstat, and
+// it refuses a symlink. A symlink into /data that stands for a mount shows as
+// the directory it points to, as the broker shows such links inside /data.
+// The kernel's struct stat, which musl uses as is, has st_mode at byte 24.
+int lstat(const char* path, void* st) {
+  long r = sys6(
+    SYS_newfstatat, AT_FDCWD, (long)path, (long)st, AT_SYMLINK_NOFOLLOW, 0, 0
+  );
+  if (storage && r == 0 && (*(unsigned*)((char*)st + 24) & S_IFMT) == S_IFLNK) {
+    char t[6];
+    long n = sys6(SYS_readlink, (long)path, (long)t, sizeof(t), 0, 0, 0);
+    if (n == sizeof(t) && starts(t, "/data/")) {
+      r = sys6(SYS_newfstatat, AT_FDCWD, (long)path, (long)st, 0, 0, 0);
+    }
+  }
+  return (int)ret(r);
 }
 
 int umount2(const char* dst, int flags) {
