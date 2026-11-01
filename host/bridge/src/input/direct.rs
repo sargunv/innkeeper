@@ -15,12 +15,27 @@
 //! each press that starts a click.
 //!
 //! The wheel sends REL_WHEEL in degrees, one fifteenth of a detent, together
-//! with REL_WHEEL_HI_RES. A touchpad's scroll sends degrees for its distance.
+//! with REL_WHEEL_HI_RES. A continuous scroll, such as a trackpoint's, sends
+//! degrees for its distance.
 //!
 //! The touchscreen's axes span [`touch::MAX`], and each window maps its
 //! display's pixels onto that span. Each host touch is a contact of its own.
 //! A contact stays on the window where it started, and it lifts when its
 //! window goes away.
+//!
+//! Touchpad gestures are fake fingers on the touchscreen, as on Android
+//! (`docs/input.md`). The guest's touchpad path drops a touchpad's pointer
+//! events and then closes the app they were for (`ohos/README.md`). A two-finger
+//! scroll puts one finger down at the cursor and drags it with the content,
+//! and the finger lifts when the host's fingers do, so the guest flings from
+//! its velocity. The guest takes that velocity from the last motion even
+//! when the finger has rested since, so a finger that rested repeats its
+//! position before it lifts. A finger that would leave the display lifts
+//! there and starts again at the cursor. A hold after a scroll stops the
+//! fling with a contact that turns into a palm, which the guest cancels
+//! without a tap. A pinch is two fingers that spread and turn around the
+//! cursor. Gestures don't start while a button or a host touch is down, and
+//! host touches that begin during a gesture are dropped.
 //!
 //! Keys go to the keyboard while an own window has keyboard focus. The guest
 //! maps evdev codes with a US layout. A character key whose level-1 keysym
@@ -53,7 +68,17 @@ const BTN_TOUCH: u16 = 0x14a;
 const ABS_MT_SLOT: u16 = 0x2f;
 const ABS_MT_POSITION_X: u16 = 0x35;
 const ABS_MT_POSITION_Y: u16 = 0x36;
+const ABS_MT_TOOL_TYPE: u16 = 0x37;
 const ABS_MT_TRACKING_ID: u16 = 0x39;
+const MT_TOOL_FINGER: i32 = 0;
+const MT_TOOL_PALM: i32 = 2;
+/// A scroll finger that has not moved for this many milliseconds of the
+/// host's clock has rested.
+const REST_MS: u32 = 40;
+/// The distance between a pinch's fingers when it begins, in display pixels,
+/// and the bounds of its scale, as on Android.
+const PINCH_SEPARATION: f64 = 200.0;
+const PINCH_SCALE: std::ops::RangeInclusive<f64> = 0.01..=100.0;
 /// A motion that takes the guest's cursor past the top-left corner of any
 /// display.
 const PIN: i32 = -(1 << 15);
@@ -87,9 +112,12 @@ fn layout_code(code: u16, sym: Option<i64>) -> u16 {
         .unwrap_or(code)
 }
 
-/// OpenHarmony scrolls a list by 63 vp for one detent. A touchpad's scroll
+/// OpenHarmony scrolls a list by 63 vp for one detent. A continuous scroll's
 /// distance is in surface units, which are vp at the window's default size.
 const VP_PER_DETENT: f64 = 63.0;
+
+/// One evdev record: type, code and value.
+type Record = (u16, u16, i32);
 
 /// What [`Direct`] asks the broker for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +131,8 @@ pub enum Out {
 
 #[derive(Debug, Clone, Copy)]
 struct Contact {
-    id: i32,
+    /// The host's touch id, or None for a gesture's fake finger.
+    id: Option<i32>,
     window: u32,
 }
 
@@ -115,12 +144,39 @@ struct Scroll {
     /// Vertical and horizontal, in surface units and in 120ths of a detent.
     value: [f64; 2],
     value120: [i32; 2],
+    /// The time of the frame's last axis value, and of its axis stop.
+    time: Option<u32>,
+    stop: Option<u32>,
+}
+
+/// A touchpad gesture in progress, with its fake fingers' slots and display
+/// positions.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+enum Gesture {
+    #[default]
+    None,
+    /// The finger last moved at host time `moved`.
+    Scroll {
+        slot: usize,
+        at: (f64, f64),
+        moved: u32,
+    },
+    /// The fingers turn by `angle` radians clockwise around `center`, and
+    /// their distance is `scale` times [`PINCH_SEPARATION`].
+    Pinch {
+        slots: [usize; 2],
+        center: (f64, f64),
+        scale: f64,
+        angle: f64,
+    },
 }
 
 #[derive(Default)]
 pub struct Direct {
     /// Each own window's display size in pixels.
     windows: HashMap<u32, (u32, u32)>,
+    /// Each own window's width in surface units.
+    logical: HashMap<u32, f64>,
     /// The own window under the pointer.
     pointer: Option<u32>,
     /// The display pixel under the guest's cursor, or None until a motion
@@ -132,6 +188,9 @@ pub struct Direct {
     degrees: [f64; 2],
     slots: [Option<Contact>; touch::SLOTS],
     next_tracking_id: i32,
+    gesture: Gesture,
+    /// A scroll's finger lifted, and the guest may be flinging.
+    fling: bool,
     /// The current touch frame's records.
     frame: Vec<(u16, u16, i32)>,
     /// The own window with keyboard focus, and the keys held there, each
@@ -157,16 +216,18 @@ impl Direct {
         }
     }
 
-    /// Window `window` went away. Its contacts lift, the buttons and keys
-    /// held there are released, and the devices go with the last window.
+    /// Window `window` went away. Its gesture ends, its contacts lift, the
+    /// buttons and keys held there are released, and the devices go with the
+    /// last window.
     pub fn unmap(&mut self, window: u32) -> Vec<Out> {
-        if self.windows.remove(&window).is_none() {
+        if !self.windows.contains_key(&window) {
             return vec![];
         }
         let mut out = vec![];
         if self.pointer == Some(window) {
             out.extend(self.leave());
         }
+        self.windows.remove(&window);
         let mut records = std::mem::take(&mut self.frame);
         for slot in 0..touch::SLOTS {
             if self.slots[slot].is_some_and(|c| c.window == window) {
@@ -251,13 +312,14 @@ impl Direct {
     }
 
     /// Moves the guest's cursor to the pixel at display position `(x, y)`.
+    /// The motion ends a touchpad gesture.
     fn motion(&mut self, x: f64, y: f64) -> Vec<Out> {
         let Some((w, h)) = self.pointer.and_then(|p| self.windows.get(&p).copied()) else {
             return vec![];
         };
         let pixel = |v: f64, size: u32| (v.floor() as i32).clamp(0, size as i32 - 1);
         let to = (pixel(x, w), pixel(y, h));
-        let mut out = vec![];
+        let mut out = self.end_gesture(None);
         let from = self.cursor.unwrap_or_else(|| {
             out.push(Out::Events(
                 MOUSE,
@@ -280,18 +342,19 @@ impl Direct {
         (!records.is_empty()).then_some(Out::Events(MOUSE, records))
     }
 
-    /// The pointer leaves its window, and the buttons held there are
-    /// released. The guest's cursor stays where it is.
+    /// The pointer leaves its window, its gesture ends, and the buttons held
+    /// there are released. The guest's cursor stays where it is.
     fn leave(&mut self) -> Vec<Out> {
+        let mut out = self.end_gesture(None);
         self.pointer = None;
         self.scroll = Scroll::default();
         self.degrees = [0.0; 2];
+        self.fling = false;
         let records: Vec<_> = self.buttons.drain(..).map(|b| (EV_KEY, b, 0)).collect();
-        if records.is_empty() {
-            vec![]
-        } else {
-            vec![Out::Events(MOUSE, records)]
+        if !records.is_empty() {
+            out.push(Out::Events(MOUSE, records));
         }
+        out
     }
 
     fn button(&mut self, code: Option<i64>, state: Option<i64>) -> Vec<Out> {
@@ -303,7 +366,10 @@ impl Direct {
         }
         let code = code as u16;
         let held = self.buttons.contains(&code);
-        let mut out = vec![];
+        if !matches!((state, held), (1, false) | (0, true)) {
+            return vec![];
+        }
+        let mut out = self.end_gesture(None);
         match state {
             1 if !held => {
                 if self.buttons.is_empty()
@@ -324,13 +390,25 @@ impl Direct {
         out
     }
 
-    /// Sends the frame's scroll. A wheel's detents count in 120ths, and other
-    /// sources count in surface units.
+    /// Sends the frame's scroll. A touchpad's scroll moves a finger unless a
+    /// button is held. Not every frame of a touchpad's scroll names its
+    /// source. A wheel's detents count in 120ths, and other sources count in
+    /// surface units.
     fn scroll(&mut self) -> Vec<Out> {
         let scroll = std::mem::take(&mut self.scroll);
         if self.pointer.is_none() {
             return vec![];
         }
+        let scrolling = matches!(self.gesture, Gesture::Scroll { .. });
+        if (scroll.source == Some(1) || (scroll.source.is_none() && scrolling))
+            && self.buttons.is_empty()
+        {
+            return self.finger_scroll(&scroll);
+        }
+        if scroll.value == [0.0; 2] && scroll.value120 == [0; 2] {
+            return vec![];
+        }
+        let mut out = self.end_gesture(None);
         let wheel = matches!(scroll.source, None | Some(0 | 3));
         let mut records = vec![];
         // Wayland's axes point down and right. REL_WHEEL points up.
@@ -357,10 +435,247 @@ impl Direct {
                 records.push((EV_REL, hi, n * HI_RES_PER_DEGREE));
             }
         }
-        if records.is_empty() {
-            vec![]
-        } else {
-            vec![Out::Events(MOUSE, records)]
+        if !records.is_empty() {
+            out.push(Out::Events(MOUSE, records));
+        }
+        out
+    }
+
+    /// The display pixels per surface unit of window `window`. The `window`
+    /// line gives its size in surface units.
+    fn units(&self, window: u32) -> f64 {
+        match (self.windows.get(&window), self.logical.get(&window)) {
+            (Some(&(w, _)), Some(&l)) if l > 0.0 => f64::from(w) / l,
+            _ => 1.0,
+        }
+    }
+
+    /// The window and display position where a gesture's fingers start, which
+    /// is the guest's cursor. None if a gesture can't start: the pointer is
+    /// outside the own windows, a button or a host touch is down, or a
+    /// gesture runs.
+    fn origin(&self) -> Option<(u32, (f64, f64))> {
+        let window = self.pointer?;
+        let (x, y) = self.cursor?;
+        let idle = self.gesture == Gesture::None
+            && self.buttons.is_empty()
+            && self.frame.is_empty()
+            && self.slots.iter().all(Option::is_none);
+        idle.then_some((window, (f64::from(x), f64::from(y))))
+    }
+
+    /// Moves the scroll's finger against the frame's distance, so it drags
+    /// the content along. The first distance puts the finger down, and an
+    /// axis stop lifts it. A pinch ignores the scroll.
+    fn finger_scroll(&mut self, scroll: &Scroll) -> Vec<Out> {
+        let mut out = vec![];
+        let moving = scroll.value != [0.0; 2];
+        if moving && self.gesture == Gesture::None {
+            let Some((window, at)) = self.origin() else {
+                return out;
+            };
+            let time = scroll.time.unwrap_or(0);
+            if let Some(started) = self.finger(window, at, time) {
+                out.push(started);
+            }
+        }
+        if let Gesture::Scroll { slot, at, moved } = self.gesture
+            && moving
+        {
+            let window = self.slots[slot].map_or(0, |c| c.window);
+            let units = self.units(window);
+            let (w, h) = self.windows.get(&window).copied().unwrap_or((1, 1));
+            let time = scroll.time.unwrap_or(moved);
+            let d = (scroll.value[1] * units, scroll.value[0] * units);
+            let mut to = (at.0 - d.0, at.1 - d.1);
+            let inside = |p: (f64, f64)| {
+                (0.0..f64::from(w)).contains(&p.0) && (0.0..f64::from(h)).contains(&p.1)
+            };
+            if !inside(to) {
+                // The finger lifts at rest, so the content doesn't fling, and
+                // a new finger goes on from the cursor.
+                out.extend(self.end_gesture(None));
+                self.fling = false;
+                let Some((window, at)) = self.origin() else {
+                    return out;
+                };
+                if let Some(started) = self.finger(window, at, time) {
+                    out.push(started);
+                }
+                to = (at.0 - d.0, at.1 - d.1);
+            }
+            if let Gesture::Scroll { slot, .. } = self.gesture {
+                self.gesture = Gesture::Scroll {
+                    slot,
+                    at: to,
+                    moved: time,
+                };
+                out.push(Out::Events(TOUCHSCREEN, self.moved(slot, to.0, to.1)));
+            }
+        }
+        if let Some(stop) = scroll.stop
+            && matches!(self.gesture, Gesture::Scroll { .. })
+        {
+            out.extend(self.end_gesture(Some(stop)));
+        }
+        out
+    }
+
+    /// Puts a scroll's finger down at display position `at` of `window`.
+    fn finger(&mut self, window: u32, at: (f64, f64), time: u32) -> Option<Out> {
+        let (slot, records) = self.down(None, window, at.0, at.1)?;
+        self.gesture = Gesture::Scroll {
+            slot,
+            at,
+            moved: time,
+        };
+        self.fling = false;
+        Some(Out::Events(TOUCHSCREEN, records))
+    }
+
+    /// Ends the gesture in progress at host time `time`, if any. A scroll's
+    /// finger lifts, and the guest flings unless the finger rested. A finger
+    /// rests if it hasn't moved for [`REST_MS`], or if the gesture ends
+    /// without a time.
+    fn end_gesture(&mut self, time: Option<u32>) -> Vec<Out> {
+        match std::mem::take(&mut self.gesture) {
+            Gesture::None => vec![],
+            Gesture::Scroll { slot, at, moved } => {
+                let rested = time.is_none_or(|t| t.wrapping_sub(moved) >= REST_MS);
+                self.fling = !rested;
+                let mut out = vec![];
+                if rested {
+                    out.push(Out::Events(TOUCHSCREEN, self.moved(slot, at.0, at.1)));
+                }
+                out.push(Out::Events(TOUCHSCREEN, self.lift(slot)));
+                out
+            }
+            Gesture::Pinch { slots, .. } => {
+                let mut records = self.lift(slots[0]);
+                records.extend(self.lift(slots[1]));
+                vec![Out::Events(TOUCHSCREEN, records)]
+            }
+        }
+    }
+
+    /// A contact that the guest cancels: it turns into a palm, then lifts.
+    fn cancel(&mut self, slots: &[usize]) -> Vec<Out> {
+        let mut palm = vec![];
+        let mut lift = vec![];
+        for &slot in slots {
+            palm.extend([
+                (EV_ABS, ABS_MT_SLOT, slot as i32),
+                (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM),
+            ]);
+            lift.extend(self.lift(slot));
+        }
+        vec![
+            Out::Events(TOUCHSCREEN, palm),
+            Out::Events(TOUCHSCREEN, lift),
+        ]
+    }
+
+    /// Fingers on the touchpad after a scroll stop the guest's fling. A
+    /// contact goes down at the cursor and is cancelled.
+    fn hold(&mut self) -> Vec<Out> {
+        if !self.fling {
+            return vec![];
+        }
+        let Some((window, at)) = self.origin() else {
+            return vec![];
+        };
+        self.fling = false;
+        let Some((slot, records)) = self.down(None, window, at.0, at.1) else {
+            return vec![];
+        };
+        let mut out = vec![Out::Events(TOUCHSCREEN, records)];
+        out.extend(self.cancel(&[slot]));
+        out
+    }
+
+    /// The pinch's fingers' display positions.
+    fn pinch_fingers(center: (f64, f64), scale: f64, angle: f64) -> [(f64, f64); 2] {
+        let half = PINCH_SEPARATION * scale / 2.0;
+        let (dx, dy) = (half * angle.cos(), half * angle.sin());
+        [
+            (center.0 - dx, center.1 - dy),
+            (center.0 + dx, center.1 + dy),
+        ]
+    }
+
+    /// A pinch's two fingers go down around the cursor, after any scroll
+    /// ends.
+    fn pinch_begin(&mut self) -> Vec<Out> {
+        let mut out = self.end_gesture(None);
+        let Some((window, center)) = self.origin() else {
+            return out;
+        };
+        let mut records = vec![];
+        let mut slots = [0; 2];
+        for (i, at) in Self::pinch_fingers(center, 1.0, 0.0)
+            .into_iter()
+            .enumerate()
+        {
+            match self.down(None, window, at.0, at.1) {
+                Some((slot, r)) => {
+                    slots[i] = slot;
+                    records.extend(r);
+                }
+                None => return out,
+            }
+        }
+        self.gesture = Gesture::Pinch {
+            slots,
+            center,
+            scale: 1.0,
+            angle: 0.0,
+        };
+        self.fling = false;
+        out.push(Out::Events(TOUCHSCREEN, records));
+        out
+    }
+
+    /// The center follows the fingers' common motion `d` in display pixels,
+    /// `scale` is the distance's factor since the begin, and the fingers
+    /// turn by `rotation` degrees clockwise.
+    fn pinch_update(&mut self, d: (f64, f64), scale: f64, rotation: f64) -> Vec<Out> {
+        let Gesture::Pinch {
+            slots,
+            center,
+            angle,
+            ..
+        } = self.gesture
+        else {
+            return vec![];
+        };
+        let center = (center.0 + d.0, center.1 + d.1);
+        let scale = scale.clamp(*PINCH_SCALE.start(), *PINCH_SCALE.end());
+        let angle = angle + rotation.to_radians();
+        self.gesture = Gesture::Pinch {
+            slots,
+            center,
+            scale,
+            angle,
+        };
+        let mut records = vec![];
+        for (slot, at) in slots
+            .into_iter()
+            .zip(Self::pinch_fingers(center, scale, angle))
+        {
+            records.extend(self.moved(slot, at.0, at.1));
+        }
+        vec![Out::Events(TOUCHSCREEN, records)]
+    }
+
+    /// A pinch's fingers lift, or the guest cancels them.
+    fn pinch_end(&mut self, cancelled: bool) -> Vec<Out> {
+        match self.gesture {
+            Gesture::Pinch { slots, .. } if cancelled => {
+                self.gesture = Gesture::None;
+                self.cancel(&slots)
+            }
+            Gesture::Pinch { .. } => self.end_gesture(None),
+            _ => vec![],
         }
     }
 
@@ -413,6 +728,7 @@ impl Direct {
             "pointer_axis" => {
                 if let (Some(a @ 0..=1), Some(v)) = (int(1), num(2)) {
                     self.scroll.value[a as usize] += v;
+                    self.scroll.time = int(0).map(|t| t as u32);
                 }
                 vec![]
             }
@@ -422,13 +738,37 @@ impl Direct {
                 }
                 vec![]
             }
+            "pointer_axis_stop" => {
+                self.scroll.stop = int(0).map(|t| t as u32);
+                vec![]
+            }
             "pointer_frame" => return self.scroll(),
+            "window" => {
+                if let (Some(w), Some(id)) = (num(0), int(3)) {
+                    self.logical.insert(id as u32, w);
+                }
+                vec![]
+            }
+            "gesture_hold_begin" => return self.hold(),
+            "gesture_pinch_begin" => return self.pinch_begin(),
+            "gesture_pinch_update" => {
+                return match (num(1), num(2), num(3), num(4)) {
+                    (Some(dx), Some(dy), Some(scale), Some(rotation)) => {
+                        self.pinch_update((dx, dy), scale, rotation)
+                    }
+                    _ => vec![],
+                };
+            }
+            "gesture_pinch_end" => return self.pinch_end(int(1) == Some(1)),
             "touch_down" => match (int(1), num(2), num(3), int(4)) {
                 (Some(id), Some(x), Some(y), Some(w))
-                    if self.windows.contains_key(&(w as u32)) && self.find(id as i32).is_none() =>
+                    if self.windows.contains_key(&(w as u32))
+                        && self.find(id as i32).is_none()
+                        && self.gesture == Gesture::None =>
                 {
-                    let records = self.down(id as i32, w as u32, x, y);
-                    self.frame.extend(records);
+                    if let Some((_, records)) = self.down(Some(id as i32), w as u32, x, y) {
+                        self.frame.extend(records);
+                    }
                     vec![]
                 }
                 _ => vec![],
@@ -452,8 +792,10 @@ impl Direct {
             }
             "touch_cancel" => {
                 for slot in 0..touch::SLOTS {
-                    let records = self.lift(slot);
-                    self.frame.extend(records);
+                    if self.slots[slot].is_some_and(|c| c.id.is_some()) {
+                        let records = self.lift(slot);
+                        self.frame.extend(records);
+                    }
                 }
                 std::mem::take(&mut self.frame)
             }
@@ -470,7 +812,7 @@ impl Direct {
     fn find(&self, id: i32) -> Option<usize> {
         self.slots
             .iter()
-            .position(|c| c.is_some_and(|c| c.id == id))
+            .position(|c| c.is_some_and(|c| c.id == Some(id)))
     }
 
     /// The axis value of display pixel `x` on a display `size` pixels long.
@@ -487,25 +829,32 @@ impl Direct {
         ]
     }
 
-    /// A new contact in the first free slot. A contact beyond the last slot
-    /// is dropped.
-    fn down(&mut self, id: i32, window: u32, x: f64, y: f64) -> Vec<(u16, u16, i32)> {
-        let Some(slot) = self.slots.iter().position(Option::is_none) else {
-            return vec![];
-        };
+    /// A new contact in the first free slot, with the slot and its records.
+    /// A contact beyond the last slot is dropped. The guest takes a contact
+    /// as a palm if its slot's tool is a palm when the contact begins, so the
+    /// tool goes back to a finger first.
+    fn down(
+        &mut self,
+        id: Option<i32>,
+        window: u32,
+        x: f64,
+        y: f64,
+    ) -> Option<(usize, Vec<Record>)> {
+        let slot = self.slots.iter().position(Option::is_none)?;
         let first = self.slots.iter().all(Option::is_none);
         self.slots[slot] = Some(Contact { id, window });
         let tracking = self.next_tracking_id;
         self.next_tracking_id = (tracking + 1) & 0xffff;
         let mut r = vec![
             (EV_ABS, ABS_MT_SLOT, slot as i32),
+            (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER),
             (EV_ABS, ABS_MT_TRACKING_ID, tracking),
         ];
         r.extend(self.position(window, x, y));
         if first {
             r.push((EV_KEY, BTN_TOUCH, 1));
         }
-        r
+        Some((slot, r))
     }
 
     fn moved(&self, slot: usize, x: f64, y: f64) -> Vec<(u16, u16, i32)> {
@@ -802,40 +1151,356 @@ mod tests {
     }
 
     #[test]
-    fn touchpad_scrolling_sends_degrees_for_its_distance() {
+    fn continuous_scrolling_sends_degrees_for_its_distance() {
         let mut d = screen();
         d.line(&format!("pointer_enter 10.00 10.00 {W}"));
         assert_eq!(
             scroll(
                 &mut d,
-                &["pointer_axis_source 1", "pointer_axis 1 0 42.000"]
+                &["pointer_axis_source 2", "pointer_axis 1 0 42.000"]
             ),
             [vec![
                 (EV_REL, REL_WHEEL, -10),
                 (EV_REL, REL_WHEEL_HI_RES, -80)
             ]]
         );
-        let small = ["pointer_axis_source 1", "pointer_axis 2 0 -2.100"];
+        let small = ["pointer_axis_source 2", "pointer_axis 2 0 -2.100"];
         assert!(scroll(&mut d, &small).is_empty());
         assert_eq!(
             scroll(&mut d, &small),
             [vec![(EV_REL, REL_WHEEL, 1), (EV_REL, REL_WHEEL_HI_RES, 8)]]
         );
-        assert!(
-            scroll(
+        // A leave drops the part of a degree that is left.
+        d.line("pointer_axis_source 2");
+        d.line("pointer_axis 3 0 2.000");
+        assert!(d.line("pointer_frame").is_empty());
+        d.line(&format!("pointer_leave {W}"));
+        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
+        assert!(scroll(&mut d, &["pointer_axis_source 2", "pointer_axis 5 0 3.000"]).is_empty());
+    }
+
+    /// The touchscreen's reports in `out`.
+    fn screen_reports(out: Vec<Out>) -> Vec<Vec<(u16, u16, i32)>> {
+        out.into_iter()
+            .map(|o| match o {
+                Out::Events(TOUCHSCREEN, r) => r,
+                o => panic!("{o:?}"),
+            })
+            .collect()
+    }
+
+    fn at(slot: i32, x: f64, y: f64) -> Vec<(u16, u16, i32)> {
+        vec![
+            (EV_ABS, ABS_MT_SLOT, slot),
+            (EV_ABS, ABS_MT_POSITION_X, Direct::axis(x, 720)),
+            (EV_ABS, ABS_MT_POSITION_Y, Direct::axis(y, 1280)),
+        ]
+    }
+
+    fn finger_down(slot: i32, tracking: i32, x: f64, y: f64, first: bool) -> Vec<(u16, u16, i32)> {
+        let mut r = vec![
+            (EV_ABS, ABS_MT_SLOT, slot),
+            (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER),
+            (EV_ABS, ABS_MT_TRACKING_ID, tracking),
+        ];
+        r.extend(&at(slot, x, y)[1..]);
+        if first {
+            r.push((EV_KEY, BTN_TOUCH, 1));
+        }
+        r
+    }
+
+    fn finger_up(slot: i32, last: bool) -> Vec<(u16, u16, i32)> {
+        let mut r = vec![
+            (EV_ABS, ABS_MT_SLOT, slot),
+            (EV_ABS, ABS_MT_TRACKING_ID, -1),
+        ];
+        if last {
+            r.push((EV_KEY, BTN_TOUCH, 0));
+        }
+        r
+    }
+
+    /// A 720×1280 display in a window 360 surface units wide, with the
+    /// guest's cursor at pixel (100, 600).
+    fn pad() -> Direct {
+        let mut d = screen();
+        assert!(d.line(&format!("window 360 640 2.000 {W}")).is_empty());
+        d.line(&format!("pointer_enter 100.00 600.00 {W}"));
+        d
+    }
+
+    fn frame(d: &mut Direct, lines: &[&str]) -> Vec<Vec<(u16, u16, i32)>> {
+        for l in lines {
+            assert!(d.line(l).is_empty(), "{l}");
+        }
+        screen_reports(d.line("pointer_frame"))
+    }
+
+    #[test]
+    fn a_touchpad_scroll_drags_a_finger_that_lifts_with_the_fingers() {
+        let mut d = pad();
+        // Scrolling down drags the content up, two display pixels per unit.
+        assert_eq!(
+            frame(
+                &mut d,
+                &["pointer_axis_source 1", "pointer_axis 10 0 5.000"]
+            ),
+            [finger_down(0, 0, 100.0, 600.0, true), at(0, 100.0, 590.0)]
+        );
+        // Not every frame names its source.
+        assert_eq!(
+            frame(&mut d, &["pointer_axis 20 1 -3.000"]),
+            [at(0, 106.0, 590.0)]
+        );
+        // The fingers lift while they move, so the guest flings.
+        assert_eq!(
+            frame(
                 &mut d,
                 &[
                     "pointer_axis_source 1",
-                    "pointer_axis_stop 3 0",
-                    "pointer_axis 4 0 2.000"
+                    "pointer_axis_stop 30 0",
+                    "pointer_axis_stop 30 1"
+                ]
+            ),
+            [finger_up(0, true)]
+        );
+        // A hold stops the fling with a contact that turns into a palm.
+        assert_eq!(
+            screen_reports(d.line("gesture_hold_begin 40 2")),
+            [
+                finger_down(0, 1, 100.0, 600.0, true),
+                vec![
+                    (EV_ABS, ABS_MT_SLOT, 0),
+                    (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM)
+                ],
+                finger_up(0, true),
+            ]
+        );
+        assert!(d.line("gesture_hold_end 50 0").is_empty());
+        assert!(d.line("gesture_hold_begin 60 2").is_empty());
+    }
+
+    #[test]
+    fn a_rested_finger_repeats_its_position_before_it_lifts() {
+        let mut d = pad();
+        frame(
+            &mut d,
+            &["pointer_axis_source 1", "pointer_axis 10 0 5.000"],
+        );
+        assert_eq!(
+            frame(&mut d, &["pointer_axis_source 1", "pointer_axis_stop 50 0"]),
+            [at(0, 100.0, 590.0), finger_up(0, true)]
+        );
+        // No fling follows, so a hold does nothing.
+        assert!(d.line("gesture_hold_begin 60 2").is_empty());
+        // The host's clock wraps.
+        d.line(&format!("touch_down 70 3 1.00 1.00 {W}"));
+        d.line("touch_frame");
+        d.line("touch_up 71 3");
+        d.line("touch_frame");
+        frame(
+            &mut d,
+            &["pointer_axis_source 1", "pointer_axis 4294967290 0 1.000"],
+        );
+        assert_eq!(
+            frame(&mut d, &["pointer_axis_source 1", "pointer_axis_stop 4 0"]),
+            [finger_up(0, true)]
+        );
+    }
+
+    #[test]
+    fn a_finger_that_would_leave_the_display_starts_again_at_the_cursor() {
+        let mut d = pad();
+        frame(
+            &mut d,
+            &["pointer_axis_source 1", "pointer_axis 10 0 200.000"],
+        );
+        assert_eq!(
+            frame(
+                &mut d,
+                &["pointer_axis_source 1", "pointer_axis 20 0 200.000"]
+            ),
+            [
+                at(0, 100.0, 200.0),
+                finger_up(0, true),
+                finger_down(0, 1, 100.0, 600.0, true),
+                at(0, 100.0, 200.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pinch_spreads_and_turns_two_fingers_around_the_cursor() {
+        let mut d = pad();
+        let mut down = finger_down(0, 0, 0.0, 600.0, true);
+        down.extend(finger_down(1, 1, 200.0, 600.0, false));
+        assert_eq!(screen_reports(d.line("gesture_pinch_begin 1 2")), [down]);
+        let mut moved = at(0, 110.0, 400.0);
+        moved.extend(at(1, 110.0, 800.0));
+        assert_eq!(
+            screen_reports(d.line("gesture_pinch_update 2 10.00 0.00 2.0000 90.00")),
+            [moved]
+        );
+        // The scale is since the begin, and the rotation since the last update.
+        let mut moved = at(0, 210.0, 600.0);
+        moved.extend(at(1, 10.0, 600.0));
+        assert_eq!(
+            screen_reports(d.line("gesture_pinch_update 3 0.00 0.00 1.0000 90.00")),
+            [moved]
+        );
+        // A touchpad scroll during a pinch does nothing.
+        assert!(
+            frame(
+                &mut d,
+                &[
+                    "pointer_axis_source 1",
+                    "pointer_axis 4 0 5.000",
+                    "pointer_axis_stop 4 0"
                 ]
             )
             .is_empty()
         );
-        // A leave drops the part of a degree that is left.
+        let mut up = finger_up(0, false);
+        up.extend(finger_up(1, true));
+        assert_eq!(screen_reports(d.line("gesture_pinch_end 5 0")), [up]);
+        assert!(
+            d.line("gesture_pinch_update 6 1.00 1.00 1.0000 0.00")
+                .is_empty()
+        );
+        assert!(d.line("gesture_pinch_end 7 0").is_empty());
+        // A pinch doesn't fling.
+        assert!(d.line("gesture_hold_begin 8 2").is_empty());
+    }
+
+    #[test]
+    fn a_cancelled_pinch_is_cancelled_in_the_guest() {
+        let mut d = pad();
+        d.line("gesture_pinch_begin 1 2");
+        let palm = |slot| {
+            [
+                (EV_ABS, ABS_MT_SLOT, slot),
+                (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM),
+            ]
+        };
+        let mut up = finger_up(0, false);
+        up.extend(finger_up(1, true));
+        assert_eq!(
+            screen_reports(d.line("gesture_pinch_end 2 1")),
+            [[palm(0), palm(1)].concat(), up]
+        );
+    }
+
+    #[test]
+    fn the_pointer_ends_a_gesture() {
+        let mut d = pad();
+        let scrolled = |d: &mut Direct| {
+            frame(d, &["pointer_axis_source 1", "pointer_axis 10 0 5.000"]);
+        };
+        let rested_up = Out::Events(TOUCHSCREEN, finger_up(0, true));
+        let rested_at = Out::Events(TOUCHSCREEN, at(0, 100.0, 590.0));
+        scrolled(&mut d);
+        assert_eq!(
+            d.line("pointer_motion 11 101.00 600.00"),
+            [
+                rested_at.clone(),
+                rested_up.clone(),
+                Out::Events(MOUSE, vec![(EV_REL, REL_X, 1)])
+            ]
+        );
+        d.line("pointer_motion 12 100.00 600.00");
+        scrolled(&mut d);
+        assert_eq!(
+            d.line("pointer_button 13 272 1"),
+            [
+                rested_at.clone(),
+                rested_up.clone(),
+                Out::Events(MOUSE, CORNER.to_vec()),
+                Out::Events(MOUSE, vec![(EV_REL, REL_X, 100), (EV_REL, REL_Y, 600)]),
+                Out::Events(MOUSE, vec![(EV_KEY, 0x110, 1)]),
+            ]
+        );
+        d.line("pointer_button 14 272 0");
+        scrolled(&mut d);
+        assert_eq!(
+            d.line("pointer_axis_source 0")
+                .into_iter()
+                .chain(d.line("pointer_axis 15 0 15.000"))
+                .chain(d.line("pointer_axis_value120 0 120"))
+                .chain(d.line("pointer_frame"))
+                .collect::<Vec<_>>(),
+            [
+                rested_at.clone(),
+                rested_up.clone(),
+                Out::Events(
+                    MOUSE,
+                    vec![(EV_REL, REL_WHEEL, -15), (EV_REL, REL_WHEEL_HI_RES, -120)]
+                ),
+            ]
+        );
+        scrolled(&mut d);
+        assert_eq!(
+            d.line(&format!("pointer_leave {W}")),
+            [rested_at.clone(), rested_up.clone()]
+        );
+        d.line(&format!("pointer_enter 100.00 600.00 {W}"));
+        d.line("gesture_pinch_begin 16 2");
+        let mut up = finger_up(0, false);
+        up.extend(finger_up(1, true));
+        assert_eq!(
+            d.unmap(W),
+            [
+                Out::Events(TOUCHSCREEN, up),
+                Out::Device(MOUSE, false),
+                Out::Device(TOUCHSCREEN, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn gestures_wait_for_buttons_and_touches() {
+        let mut d = pad();
+        // With a button held, a touchpad's scroll scrolls the wheel.
+        d.line("pointer_button 1 272 1");
+        assert_eq!(
+            scroll(
+                &mut d,
+                &["pointer_axis_source 1", "pointer_axis 2 0 42.000"]
+            ),
+            [vec![
+                (EV_REL, REL_WHEEL, -10),
+                (EV_REL, REL_WHEEL_HI_RES, -80)
+            ]]
+        );
+        assert!(d.line("gesture_pinch_begin 3 2").is_empty());
+        d.line("pointer_button 4 272 0");
+        // A host touch holds gestures off, and a touch during a gesture is
+        // dropped.
+        d.line(&format!("touch_down 5 1 1.00 1.00 {W}"));
+        d.line("touch_frame");
+        assert!(d.line("gesture_pinch_begin 6 2").is_empty());
+        assert!(frame(&mut d, &["pointer_axis_source 1", "pointer_axis 7 0 5.000"]).is_empty());
+        d.line("touch_up 8 1");
+        d.line("touch_frame");
+        d.line("gesture_pinch_begin 9 2");
+        assert!(d.line(&format!("touch_down 10 2 1.00 1.00 {W}")).is_empty());
+        assert!(d.line("touch_frame").is_empty());
+        assert!(d.line("touch_cancel").is_empty());
+        // Outside the own windows, nothing starts.
+        d.line("gesture_pinch_end 11 0");
         d.line(&format!("pointer_leave {W}"));
-        d.line(&format!("pointer_enter 10.00 10.00 {W}"));
-        assert!(scroll(&mut d, &["pointer_axis_source 1", "pointer_axis 5 0 3.000"]).is_empty());
+        assert!(d.line("gesture_pinch_begin 12 2").is_empty());
+        assert!(d.line("gesture_hold_begin 13 2").is_empty());
+    }
+
+    #[test]
+    fn a_window_without_a_size_line_scrolls_one_pixel_per_unit() {
+        let mut d = screen();
+        d.line(&format!("pointer_enter 100.00 600.00 {W}"));
+        assert_eq!(
+            frame(&mut d, &["pointer_axis_source 1", "pointer_axis 1 0 5.000"]),
+            [finger_down(0, 0, 100.0, 600.0, true), at(0, 100.0, 595.0)]
+        );
     }
 
     fn touches(out: Vec<Out>) -> Vec<(u16, u16, i32)> {
@@ -858,11 +1523,13 @@ mod tests {
             touches(d.line("touch_frame")),
             [
                 (EV_ABS, ABS_MT_SLOT, 0),
+                (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER),
                 (EV_ABS, ABS_MT_TRACKING_ID, 0),
                 (EV_ABS, ABS_MT_POSITION_X, 0),
                 (EV_ABS, ABS_MT_POSITION_Y, 0),
                 (EV_KEY, BTN_TOUCH, 1),
                 (EV_ABS, ABS_MT_SLOT, 1),
+                (EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER),
                 (EV_ABS, ABS_MT_TRACKING_ID, 1),
                 (EV_ABS, ABS_MT_POSITION_X, touch::MAX),
                 (EV_ABS, ABS_MT_POSITION_Y, 16384),

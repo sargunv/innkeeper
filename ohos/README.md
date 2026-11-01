@@ -385,8 +385,42 @@ press that starts a click.
 MMI reads libinput's legacy wheel events, whose value is the REL_WHEEL count
 times the mouse's click angle. The broker gives the mouse an angle of 1 degree,
 a fifteenth of a detent, so the fractions of a high-resolution wheel reach OH. A
-touchpad's scroll becomes wheel degrees, at 63 surface units to the detent,
-which is how far one detent scrolls an OH list.
+continuous scroll, such as a trackpoint's, becomes wheel degrees at 63 surface
+units to the detent, which is how far one detent scrolls an OH list.
+
+### Touchpad gestures
+
+Touchpad gestures are fake fingers on the Innkeeper Touchscreen, as on Android
+([docs/input.md](../docs/input.md#translation)).
+
+- **Scroll.** A two-finger scroll puts a finger down at OH's cursor and drags it
+  by the scroll's distance in panel pixels, so the content follows the host's
+  fingers. The finger lifts when the host's fingers lift, and OH flings from its
+  velocity. OH takes that velocity from the finger's last motion, even after the
+  finger has rested, so the bridge repeats a rested finger's position before it
+  lifts the finger. A finger that would leave the panel lifts at rest and starts
+  again at the cursor.
+- **Hold.** Fingers that rest on the touchpad after a scroll stop OH's fling.
+  The bridge puts a contact down at the cursor, turns it into a palm
+  (`MT_TOOL_PALM`) and lifts it. libinput cancels a contact that becomes a palm,
+  so the contact stops the fling without a tap. libinput reads a slot's tool
+  when a contact begins, so each new contact sets its tool to a finger before
+  its tracking id.
+- **Pinch.** A pinch is two fingers 200 panel pixels apart around the cursor.
+  They spread with the host's scale, turn with its rotation and move with its
+  center. A cancelled pinch turns them into palms.
+- Gestures don't start while a mouse button or a host touch is down, and host
+  touches that begin during a gesture are dropped. Pointer motion, a button, a
+  wheel and leaving the window end a gesture. Swipes of three or more fingers do
+  nothing.
+
+MMI also has a touchpad path, and it accepts a broker touchpad with multitouch
+contacts, `INPUT_PROP_POINTER` and `INPUT_PROP_BUTTONPAD`. It scrolls and flings
+from such a device. It also drops the touchpad's own pointer events, because it
+looks the device up in a table that touchscreen contacts fill. After 3 seconds
+of dropped events to one window, MMI reports the window as broken, and
+SceneBoard closes the app. No stable boundary changes that, so the bridge uses
+the touchscreen.
 
 Keys go to the Innkeeper Keyboard device while the window has keyboard focus. OH
 maps evdev codes with its own US keymap. A character key whose level-1 keysym in
