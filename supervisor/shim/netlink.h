@@ -5,10 +5,11 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-// Concurrent sessions are separate pid namespaces on the host's network, so a
-// uevent socket bound to its pid (vold's) collides with another session's. Let
-// the kernel choose the port; other netlink protocols keep theirs. A header of
-// its own for shim/tests/netlink.c.
+// Concurrent sessions run in separate pid namespaces on the host's network, so
+// a uevent socket bound to its pid, as vold's is, collides with another
+// session's. The kernel chooses the port for uevent sockets, and other netlink
+// protocols keep theirs. This is a separate header so that
+// shim/tests/netlink.c can include it.
 static int innkeeper_netlink_bind(
   int fd, const struct sockaddr* addr, socklen_t len
 ) {

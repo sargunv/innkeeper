@@ -9,14 +9,16 @@ description = "Innkeeper broker: serves the session's seccomp user notifications
 innkeeper-evdev-proto = { path = "../evdev-proto" }
 libc = "0.2"
 
-# Installed as libexec/innkeeper/innkeeper-brk, static musl for both guests. Tests match the name in
-# /proc/<pid>/comm, so it stays within TASK_COMM_LEN (15 characters).
+# Installed as libexec/innkeeper/innkeeper-brk and linked statically against
+# musl for both guests. Tests match the name in /proc/<pid>/comm, so it stays
+# within TASK_COMM_LEN (15 characters).
 [[bin]]
 name = "innkeeper-brk"
 path = "src/main.rs"
 
-# The real filter and broker against real processes (tests/probes). Its own
-# main: each probe needs a fresh single-threaded process to fork from.
+# Tests the real filter and broker against real processes (tests/probes). It
+# has its own main because each probe needs a fresh single-threaded process to
+# fork from.
 [[test]]
 name = "probes"
 path = "tests/probes/main.rs"

@@ -1,7 +1,7 @@
 // init reads executable labels and vold_prepare_subdirs reads directory labels
-// even with SELinux disabled.
-// Ubuntu's files have no security.selinux xattr. Supply a label for our
-// no-op security_compute_create, preserving real labels and file errors.
+// even with SELinux disabled. On hosts without SELinux, such as Ubuntu, files
+// have no security.selinux xattr. These getters supply a label for our no-op
+// security_compute_create and pass real labels and file errors through.
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdlib.h>
