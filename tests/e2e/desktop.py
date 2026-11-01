@@ -111,7 +111,11 @@ class Portal(OpenUri):
     self.SettingChanged(namespace, key, value)
 
 
+# The notification server. Each notification gets a new id, and Invoke
+# invokes an action of the last one, as a click on its button would.
 class Notifications(dbus.service.Object):
+  last = 0
+
   @dbus.service.method(NOTIFY, in_signature="", out_signature="as")
   def GetCapabilities(self):
     return ["body", "actions"]
@@ -119,7 +123,22 @@ class Notifications(dbus.service.Object):
   @dbus.service.method(NOTIFY, in_signature="susssasa{sv}i", out_signature="u")
   def Notify(self, app, replaces, icon, title, body, actions, hints, timeout):
     print(f"notification: {title}: {body}", flush=True)
-    return 1
+    if actions:
+      print(f"notification actions: {' '.join(actions[1::2])}", flush=True)
+    self.last = replaces or self.last + 1
+    return self.last
+
+  @dbus.service.signal(NOTIFY, signature="us")
+  def ActionInvoked(self, id, key):
+    pass
+
+  @dbus.service.method(
+    "dev.sargunv.Innkeeper.TestNotifications",
+    in_signature="s",
+    out_signature="",
+  )
+  def Invoke(self, key):
+    self.ActionInvoked(self.last, key)
 
   @dbus.service.method(NOTIFY, in_signature="u", out_signature="")
   def CloseNotification(self, id):

@@ -5,7 +5,12 @@
 //! per Android notification, keyed by a nonzero id that the app chooses.
 //! Reposting an id replaces the desktop notification. Clicks, actions, inline replies and
 //! dismissals come back as `NOTIFY_EVENT`s. When the connection ends, its
-//! notifications are closed.
+//! notifications are closed. OpenHarmony's system app posts its notifications
+//! in the same way.
+//!
+//! The server sends an activation token before it reports a click or an
+//! action. The bridge keeps the token, and OpenHarmony's SHOW_SCREEN uses it
+//! to bring up the screen window.
 //!
 //! The baseline Notification portal cannot update a notification in place
 //! or show progress, so the bridge uses the freedesktop notification service.
@@ -173,7 +178,31 @@ struct Maps {
     routes: HashMap<u32, Route>,
     /// (client, Android-side id) -> desktop id.
     ids: HashMap<(u64, u32), u32>,
+    /// (client, Android-side id) -> the activation token of the last click
+    /// or action.
+    tokens: HashMap<(u64, u32), String>,
     launcher: LauncherEntry,
+}
+
+impl Maps {
+    /// Keeps the activation token that the server sent for desktop
+    /// notification `host`.
+    fn activated(&mut self, host: u32, token: &str) {
+        let Some(r) = self.routes.get(&host) else {
+            return;
+        };
+        if let Some(t) = innkeeper_core::validate::activation_token(token) {
+            self.tokens.insert((r.client, r.id), t.to_owned());
+        }
+    }
+
+    /// Forgets (client, id) and returns its desktop id, if it is showing.
+    fn forget(&mut self, client: u64, id: u32) -> Option<u32> {
+        self.tokens.remove(&(client, id));
+        let host = self.ids.remove(&(client, id))?;
+        self.routes.remove(&host);
+        Some(host)
+    }
 }
 
 pub struct NotifyHub {
@@ -325,13 +354,18 @@ impl NotifyHub {
         let host = {
             let mut m = self.maps.lock().unwrap();
             m.launcher.close(&self.conn, client, id);
-            let Some(host) = m.ids.remove(&(client, id)) else {
-                return;
-            };
-            m.routes.remove(&host);
-            host
+            m.forget(client, id)
         };
-        self.close_host(host);
+        if let Some(host) = host {
+            self.close_host(host);
+        }
+    }
+
+    /// Takes the activation token of the last click or action on (client,
+    /// id), or returns an empty string.
+    pub fn take_token(&self, client: u64, id: u32) -> String {
+        let mut m = self.maps.lock().unwrap();
+        m.tokens.remove(&(client, id)).unwrap_or_default()
     }
 
     fn close_host(&self, host: u32) {
@@ -369,6 +403,7 @@ impl NotifyHub {
             let mut m = self.maps.lock().unwrap();
             m.launcher.clear(&self.conn);
             m.ids.clear();
+            m.tokens.clear();
             m.routes.drain().map(|(h, _)| h).collect()
         };
         for host in hosts {
@@ -383,6 +418,12 @@ impl NotifyHub {
         let Some(member) = h.member() else { return };
         let body = msg.body();
         match member.as_str() {
+            "ActivationToken" => {
+                let Ok((host, token)) = body.deserialize::<(u32, String)>() else {
+                    return;
+                };
+                self.maps.lock().unwrap().activated(host, &token);
+            }
             "ActionInvoked" => {
                 let Ok((host, key)) = body.deserialize::<(u32, String)>() else {
                     return;
@@ -571,5 +612,37 @@ mod tests {
         b.push(0);
         assert!(Note::decode(&b).is_err());
         assert_eq!(escape_markup("<b>&"), "&lt;b&gt;&amp;");
+    }
+
+    fn route(client: u64, id: u32) -> Route {
+        let (server, _client) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::NONBLOCK,
+            None,
+        )
+        .unwrap();
+        Route {
+            client,
+            id,
+            events: Events::new(Arc::new(server)),
+            keys: vec![],
+        }
+    }
+
+    #[test]
+    fn a_click_keeps_its_activation_token_until_taken_or_closed() {
+        let mut m = Maps::default();
+        m.ids.insert((1, 5), 40);
+        m.routes.insert(40, route(1, 5));
+        // A token for a notification that isn't showing, and an invalid one.
+        m.activated(41, "unknown");
+        m.activated(40, "bad token");
+        assert!(m.tokens.is_empty());
+        m.activated(40, "kwin-123");
+        assert_eq!(m.tokens.get(&(1, 5)).map(String::as_str), Some("kwin-123"));
+        assert_eq!(m.forget(1, 5), Some(40));
+        assert!(m.tokens.is_empty() && m.routes.is_empty());
+        assert_eq!(m.forget(1, 5), None);
     }
 }

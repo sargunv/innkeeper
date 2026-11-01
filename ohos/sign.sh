@@ -56,7 +56,13 @@ if (device === "--system") {
   info["distribution-certificate"] = leaf;
   info.apl = "system_basic";
   info["app-feature"] = "hos_system_app";
-  p.acls = { "allowed-acls": [] };
+  // The system app reads and removes the notifications of every app, and it
+  // starts the abilities that they open, which may be private. Those
+  // permissions are above the APL of the app, so the profile allows them by
+  // ACL.
+  p.acls = {
+    "allowed-acls": ["ohos.permission.NOTIFICATION_CONTROLLER", "ohos.permission.START_INVISIBLE_ABILITY"],
+  };
 } else {
   info["development-certificate"] = leaf;
   p["debug-info"]["device-ids"] = [device];

@@ -35,11 +35,13 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   `run` with a link delivers its URI to the probe. OpenHarmony's music volume
   must be at its maximum, and a tone it plays must reach a private null sink.
   The probe, granted the microphone, must record a tone that the host plays into
-  that sink. OpenHarmony takes the session's time zone and turns dark when the
-  desktop's portal does. The open window keeps the session up. Closing it leaves
-  OpenHarmony running, and `run` opens it again. With the window closed, the
-  session stops after the grace period, which test timers make one second. This
-  group uses its own profile, `<profile>-ohos`, so it runs alone.
+  that sink. A notification that the probe posts reaches the desktop's
+  notification server with its buttons, and invoking its first button there
+  reaches the probe. OpenHarmony takes the session's time zone and turns dark
+  when the desktop's portal does. The open window keeps the session up. Closing
+  it leaves OpenHarmony running, and `run` opens it again. With the window
+  closed, the session stops after the grace period, which test timers make one
+  second. This group uses its own profile, `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake

@@ -2,6 +2,7 @@ import ServiceExtensionAbility from '@ohos.app.ability.ServiceExtensionAbility';
 import Want from '@ohos.app.ability.Want';
 import { startApps } from '../bridge/Apps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
+import { startNotifications } from '../notify/Notifications';
 import { startSettings } from '../settings/Settings';
 
 // The app's main element. The profile's layer marks the app keep-alive
@@ -11,6 +12,7 @@ export default class SystemService extends ServiceExtensionAbility {
   onCreate(want: Want): void {
     startApps();
     startLifecycle();
+    startNotifications(this.context);
     startSettings();
   }
 }
