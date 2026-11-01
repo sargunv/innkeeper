@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# build:vulkan: the vendor Vulkan drivers (Mesa RADV, ANV and lavapipe) for Android
-# x86_64, cross-built with the NDK pin in the build container
-# (tools/container/run.sh), into out/build/vulkan/install:
+# build:vulkan cross-builds the vendor Vulkan drivers (Mesa RADV, ANV and
+# lavapipe) for Android x86_64 with the pinned NDK in the build container
+# (tools/container/run.sh). It installs these into out/build/vulkan/install:
 #   share/innkeeper/android/vendor/lib64/hw/vulkan.{radv,anv,lvp}.so
 #   share/innkeeper/android/vendor/etc/libdrm/amdgpu.ids
 #   share/innkeeper/props.d/vulkan.prop
-# and the test programs tests/run.sh runs (out/build/vulkan/{test,test-vendor}).
-# Skipped when its inputs (this directory, the container, the toolchain pin)
-# still hash to out/build/vulkan/.stamp.
+# It also builds the test programs that tests/run.sh runs
+# (out/build/vulkan/{test,test-vendor}). The build is skipped when its inputs
+# (this directory, the container and the toolchain pin) still hash to
+# out/build/vulkan/.stamp.
 set -euo pipefail
 
 # ---- pins -------------------------------------------------------------------
@@ -56,7 +57,8 @@ vendor=$work/install/share/innkeeper/android/vendor
 rm -rf "$work/install"
 mkdir -p "$src" "$build" "$deps" "$vendor"
 
-# Generated cross file with the absolute NDK path; combined with cross/android-x86_64.ini.
+# Generated cross file with the absolute NDK path, used together with
+# cross/android-x86_64.ini.
 cat >"$build/ndk.ini" <<EOF
 [constants]
 ndk_bin = '$ndk_bin'
@@ -68,8 +70,8 @@ export PKG_CONFIG_LIBDIR=$deps/vendor/lib64/pkgconfig
 export PKG_CONFIG_SYSROOT_DIR=$deps
 unset PKG_CONFIG_PATH
 
-# fetch <dir> <url> <tag>: shallow clone at a pinned tag, then apply
-# patches/<dir>/*.patch. Resets the tree only when the tag or patches change.
+# fetch <dir> <url> <tag> shallow-clones a pinned tag and applies
+# patches/<dir>/*.patch. It resets the tree only when the tag or patches change.
 fetch() {
   local dir=$1 url=$2 tag=$3
   if [[ ! -d $src/$dir/.git ]]; then
@@ -111,12 +113,13 @@ build_libdrm() {
     -Dvalgrind=disabled -Dman-pages=disabled -Dtests=false -Dinstall-test-programs=false
   meson compile -C "$b" -j "$JOBS"
   DESTDIR=$deps meson install -C "$b" --quiet
-  # libdrm installs amdgpu.ids to <datadir>/libdrm; that path is baked into libdrm_amdgpu.
+  # libdrm installs amdgpu.ids to <datadir>/libdrm, and libdrm_amdgpu has that
+  # path baked in.
   install -Dm644 "$deps/vendor/etc/libdrm/amdgpu.ids" "$vendor/etc/libdrm/amdgpu.ids"
 }
 
-# zlib for Mesa's shader cache: link the NDK's static libz so the driver does not
-# need libz.so (not LL-NDK).
+# Mesa's shader cache needs zlib. Link the NDK's static libz so the driver does
+# not need libz.so, which is not LL-NDK.
 static_zlib() {
   mkdir -p "$PKG_CONFIG_LIBDIR"
   install -m644 "$ndk_sysroot/usr/lib/x86_64-linux-android/libz.a" "$deps/vendor/lib64/libz.a"
@@ -129,8 +132,9 @@ Cflags:
 EOF
 }
 
-# ANV compiles internal OpenCL shaders at build time. These native tools stay
-# in the container; LLVM/Clang are never linked into the Android hardware HALs.
+# ANV compiles internal OpenCL shaders at build time. These native tools, and
+# the LLVM and Clang they use, stay in the container and are not linked into
+# the Android hardware HALs.
 build_shader_tools() {
   fetch mesa "$MESA_URL" "$MESA_TAG"
   local b=$build/mesa-tools
@@ -238,18 +242,21 @@ build_lvp() {
   install_driver "$b/src/gallium/targets/lavapipe/libvulkan_lvp.so" lvp
 }
 
-# install_driver <built .so> <name>: install as /vendor/lib64/hw/vulkan.<name>.so.
+# install_driver <built .so> <name> installs the driver as
+# /vendor/lib64/hw/vulkan.<name>.so.
 install_driver() {
   local so=$1 name=$2 dst=$build/vulkan.$2.so
   install -d "$vendor/lib64/hw"
-  # libvulkan dlopens vulkan.<ro.hardware.vulkan>.so; give it a matching soname.
+  # libvulkan dlopens vulkan.<ro.hardware.vulkan>.so, so give the driver a
+  # matching soname.
   "$ndk_bin/llvm-objcopy" --strip-unneeded "$so" "$dst"
   patchelf --set-soname "vulkan.$name.so" --remove-rpath "$dst"
   install -m644 "$dst" "$vendor/lib64/hw/vulkan.$name.so"
   check_elf "$vendor/lib64/hw/vulkan.$name.so"
 }
 
-# Allowed DT_NEEDED for vendor libraries: LL-NDK + what we ship in /vendor/lib64.
+# Vendor libraries may only need LL-NDK libraries and what we ship in
+# /vendor/lib64.
 LLNDK="libc.so libm.so libdl.so liblog.so libnativewindow.so libsync.so libvndksupport.so \
 libbinder_ndk.so libEGL.so libGLESv1_CM.so libGLESv2.so libGLESv3.so libvulkan.so libselinux.so \
 libcamera_metadata.so libmediandk.so libapexsupport.so libvendorsupport.so"
@@ -263,7 +270,8 @@ check_elf() {
       bad=1
     fi
   done
-  # A HAL module should export HMI and nothing else (no static LLVM/libc++).
+  # A HAL module should export only HMI, with no symbols from the static LLVM
+  # or libc++.
   local exports
   exports=$(readelf -sW --dyn-syms "$f" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") {print $8}' | sort -u)
   if [[ $exports != HMI ]]; then
@@ -274,13 +282,13 @@ check_elf() {
   return $bad
 }
 
-# Graphics properties for the launcher; feature XMLs are written at start.
+# Graphics properties for the launcher. The feature XMLs are written at start.
 install_etc() {
   install -D -m644 -t "$work/install/share/innkeeper/props.d" "$here/etc/vulkan.prop"
 }
 
-# Test programs for tests/run.sh: $work/test (bound at /data/nativetest64)
-# and a test-only vendor layer, $work/test-vendor.
+# Test programs for tests/run.sh go in $work/test, which is bound at
+# /data/nativetest64, and a test-only vendor layer goes in $work/test-vendor.
 build_test() {
   local t=$work/test cc=$ndk_bin/x86_64-linux-android$API-clang
   rm -rf "$t" "$work/test-vendor"
@@ -292,7 +300,7 @@ build_test() {
   "$cc" -O2 -Wall -o "$t/ahb_vk_test" "$here/tests/ahb_vk_test.c" -lvulkan -lnativewindow
   "$cc" -O2 -Wall -o "$t/swapchain_test" "$here/tests/swapchain_test.c" -lvulkan -lmediandk -lnativewindow
   "$cc" -O2 -Wall -o "$t/fake_sf" "$here/tests/fake_sf.c" -lbinder_ndk -ldl
-  # vkdriver_test --anb-hal: buffers from our allocator's code.
+  # Buffers from the allocator's code, for vkdriver_test --anb-hal.
   local graphics=$repo/android/vendor/graphics
   "$cc++" -O2 -std=c++20 -shared -fPIC -fvisibility=hidden -static-libstdc++ \
     -I"$graphics/common/include" -o "$t/libhalbuf.so" "$here/tests/halbuf.cpp" \

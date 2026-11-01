@@ -1,11 +1,11 @@
 /*
- * Test double for a stable-C IMapper v5 (mapper.<suffix>.so): answers the
- * StandardMetadata queries Mesa's u_gralloc makes, from a native_handle_t
- * laid out as  fds: [dmabuf]  ints: [MOCK_MAGIC, width, height, stride_bytes,
- * fourcc].
+ * Test double for a stable-C IMapper v5 (mapper.<suffix>.so). It answers the
+ * StandardMetadata queries that Mesa's u_gralloc makes, from a native_handle_t
+ * with fds [dmabuf] and ints [MOCK_MAGIC, width, height, stride_bytes, fourcc].
  *
- * Built as mapper.inkptest.so for the vulkan tests only; never installed. The
- * metadata encoding here is what a real IMapper v5 must produce (see
+ * It is built as mapper.inkptest.so for the vulkan tests only and is not
+ * installed. The metadata encoding here is what a real IMapper v5 must produce
+ * (see
  * hardware/interfaces/graphics/mapper/stable-c/implutils/.../IMapperMetadataTypes.h).
  */
 #include <stddef.h>

@@ -1,8 +1,9 @@
 /*
- * The Vulkan half of ANGLE's AHardwareBuffer import, step by step, for YUV
- * buffers: vkGetAndroidHardwareBufferPropertiesANDROID, then an image with the
- * external format, AHB memory import, bind, and a VkSamplerYcbcrConversion.
- * Prints where it fails (ANGLE only reports EGL_BAD_PARAMETER).
+ * Runs the Vulkan half of ANGLE's AHardwareBuffer import step by step for YUV
+ * buffers. The steps are vkGetAndroidHardwareBufferPropertiesANDROID, an image
+ * with the external format, the AHB memory import, the bind and a
+ * VkSamplerYcbcrConversion. The test prints the step that fails, because ANGLE
+ * only reports EGL_BAD_PARAMETER.
  */
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <android/hardware_buffer.h>

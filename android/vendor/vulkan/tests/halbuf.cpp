@@ -1,5 +1,5 @@
 // Test helper for vkdriver_test --anb-hal: allocate a buffer with the graphics
-// HAL's allocator code (memfd -> udmabuf, innkeeper handle layout) and import
+// HAL's allocator code (a udmabuf over a memfd, Innkeeper layout) and import
 // it through the real mapper.innkeeper.so, as libui would in an app process.
 // Built from the graphics HAL sources by android/vendor/vulkan/build.sh.
 #include <dlfcn.h>

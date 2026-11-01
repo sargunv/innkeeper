@@ -19,8 +19,9 @@ driver_tests() {
   }
   local vk=("$t/vkdriver_test" --hal "vulkan.$d.so")
   bionic -- "${vk[@]}" --udmabuf
-  # --anb hands the driver a deliberately wrong stride: it passes only if the
-  # layout came from the mapper (mock_mapper.c here, ours with --anb-hal).
+  # --anb hands the driver a deliberately wrong stride, so it passes only if
+  # the layout came from the mapper. That is mock_mapper.c here, or the
+  # Innkeeper mapper with --anb-hal.
   bionic -e MESA_GRALLOC_MAPPER_SUFFIX=inkptest -- "${vk[@]}" --anb
   bionic -e MESA_GRALLOC_MAPPER_SUFFIX=inkptest -- "${vk[@]}" --anb --deferred
   bionic -- "${vk[@]}" --anb-hal --deferred
@@ -34,8 +35,8 @@ driver_tests() {
   bionic -- "$t/gles_yuv_test"
 }
 
-# Ask a normal session, so the hardware test uses exactly the node and HAL
-# selected by the launcher and permitted by its broker (also on hybrid hosts).
+# Ask a normal session, so the hardware test uses the node and HAL that the
+# launcher selected and its broker permits, including on hybrid hosts.
 # shellcheck disable=SC2016 # getprop runs inside Android
 selected=$("$repo/tests/bionic/run.sh" -- /system/bin/sh -c \
   'echo "innkeeper-selected-driver=$(getprop ro.hardware.vulkan)"' |

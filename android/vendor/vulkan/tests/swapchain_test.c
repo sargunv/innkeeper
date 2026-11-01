@@ -1,15 +1,17 @@
 /*
- * Acquire/present loop through Android's real WSI: libvulkan's swapchain on an
- * ANativeWindow from AImageReader (an in-process BufferQueue consumer), with
- * buffers from the system gralloc (our allocator + mapper).
+ * Runs an acquire/present loop through Android's real WSI, which is
+ * libvulkan's swapchain on an ANativeWindow from AImageReader (an in-process
+ * BufferQueue consumer). Buffers come from the system gralloc, which is the
+ * Innkeeper allocator and mapper.
  *
  *   swapchain_test [--deferred] [--frames N]
  *
- * Each frame clears the acquired image to a frame-specific color and presents;
- * the consumer side acquires the image, waits on its fence, locks the
+ * Each frame clears the acquired image to a frame-specific color and presents
+ * it. The consumer side acquires the image, waits on its fence, locks the
  * AHardwareBuffer and checks the color. --deferred asks for
  * VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_EXT, as ANGLE does.
- * Needs a session (servicemanager + IAllocator) and ro.hardware.vulkan.
+ * The test needs a session (servicemanager and IAllocator) and
+ * ro.hardware.vulkan.
  */
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <android/hardware_buffer.h>

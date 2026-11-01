@@ -1,16 +1,17 @@
 /*
- * YUV AHardwareBuffers through EGL/ANGLE, the way SurfaceFlinger's RenderEngine
- * (Skia GL) imports video frames:
- *   eglGetNativeClientBufferANDROID ->
- * eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID)
- *   -> GL_TEXTURE_EXTERNAL_OES -> sample in a shader -> glReadPixels.
+ * Imports YUV AHardwareBuffers through EGL and ANGLE the way SurfaceFlinger's
+ * RenderEngine (Skia GL) imports video frames. The path goes through
+ * eglGetNativeClientBufferANDROID,
+ * eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID) and GL_TEXTURE_EXTERNAL_OES,
+ * samples in a shader and ends with glReadPixels.
  *
- * For YV12, flexible YCbCr_420_888 (our gralloc: NV12) and NV21, fill four
- * quadrants with known colors (BT.601 limited range) through
- * AHardwareBuffer_lockPlanes, then check the rendered RGB.
+ * For YV12, flexible YCbCr_420_888 (NV12 in our gralloc) and NV21, the test
+ * fills four quadrants with known colors (BT.601 limited range) through
+ * AHardwareBuffer_lockPlanes, then checks the rendered RGB.
  *
- *   gles_yuv_test [width height]      default 896x480 (NewPipe's decoder
- * output)
+ *   gles_yuv_test [width height]
+ *
+ * The default size is 896x480, NewPipe's decoder output.
  */
 #define EGL_EGLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES

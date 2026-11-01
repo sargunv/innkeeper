@@ -1,6 +1,7 @@
 /*
- * GLES through the system libEGL (ro.hardware.egl=angle -> ANGLE -> Vulkan
- * HAL): render into a pbuffer and check glReadPixels.
+ * Renders GLES into a pbuffer through the system libEGL and checks
+ * glReadPixels. With ro.hardware.egl=angle, libEGL goes through ANGLE to the
+ * Vulkan HAL.
  */
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -42,7 +43,8 @@ int main(void) {
   }
   const EGLint pb_attr[] = {EGL_WIDTH, 64, EGL_HEIGHT, 64, EGL_NONE};
   EGLSurface surf = eglCreatePbufferSurface(dpy, cfg, pb_attr);
-  // ES 3.0: ANGLE on lavapipe offers no 3.2 context (EGL_BAD_MATCH).
+  // Request ES 3.0, because ANGLE on lavapipe offers no 3.2 context
+  // (EGL_BAD_MATCH).
   const EGLint ctx_attr[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
   EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
   if (
