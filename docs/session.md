@@ -197,10 +197,12 @@ settings therefore move and back up with the data. They cover the system, the
 display, adb and its port, the idle timeout and following the desktop. A missing
 file or setting takes its default, and an unknown setting is an error.
 OpenHarmony uses the display setting, which is a phone preset because
-OpenHarmony has no windowed mode, and the idle timeout. The CLI and the manager
-refuse the other settings for OpenHarmony, along with app settings and opening
-files in apps. `innkeeper profile set` and the manager's Profile Settings page
-change settings. A running profile applies the live settings at once.
+OpenHarmony has no windowed mode, the idle timeout, and the settings for
+following the desktop. OpenHarmony has no accent color. The CLI and the manager
+refuse adb and following the accent for OpenHarmony, along with app settings and
+opening files in apps. `innkeeper profile set` and the manager's Profile
+Settings page change settings. A running profile applies the live settings at
+once.
 
 Keep Running is an Innkeeper preference shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops

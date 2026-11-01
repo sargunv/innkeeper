@@ -201,8 +201,8 @@ pub struct Settings {
     /// The Keep Running preference ([`crate::preferences`]) overrides it.
     /// Applies live.
     pub idle_minutes: u32,
-    /// Android follows the desktop's dark mode, accent colour, languages and
-    /// formats, and clock. Applies live.
+    /// The guest follows the desktop's dark mode, accent colour, languages and
+    /// formats, and clock. OpenHarmony has no accent colour. Applies live.
     pub follow_dark: bool,
     pub follow_accent: bool,
     pub follow_locale: bool,

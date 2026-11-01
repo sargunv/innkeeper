@@ -20,10 +20,10 @@ doesn't say.
   sizes come from `du` over the bundle's code and its el1 and el2 data
   directories for user 100. A `system_grant` permission shows as fixed. `run`
   with a URI opens it as a browser link, as on Android. Such a profile refuses
-  `open`, files in `run`, `app set`, and the settings that only Android has (adb
-  and desktop following). OpenHarmony apps get no desktop entries.
-  `profile list` shows each OpenHarmony profile's UDID, which a debug signing
-  profile names in its `device-ids`.
+  `open`, files in `run`, `app set`, and the settings that OpenHarmony lacks
+  (adb and following the desktop's accent color). `profile list` shows each
+  OpenHarmony profile's UDID, which a debug signing profile names in its
+  `device-ids`.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. On OpenHarmony
   `aa start` sends a want with the action `ohos.want.action.viewData` and the

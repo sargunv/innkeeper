@@ -72,8 +72,8 @@ Android Settings in a separate window.
   ([session.md](../../docs/session.md#profiles)). A running profile picks up
   changes through `Session1`'s `ReloadSettings`. Desktop following and the idle
   timeout change while the profile runs. The display changes at the next start.
-- Turning off desktop following keeps Android's current value. Later changes in
-  Android Settings stay as they are.
+- Turning off desktop following keeps the guest's current value. Later changes
+  in Android's or OpenHarmony's Settings stay as they are.
 - By default, an idle profile stops after 2 minutes. The timeout can be 1 to 120
   minutes. **Keep Running** applies to every profile. With it on, no profile
   stops when idle, and one login command from the Background portal starts them
@@ -86,8 +86,9 @@ deletes, starts and stops profiles. The window shows one profile's apps, and the
 profile's name is under the window title. **New Profile** asks for the profile's
 system, Android or OpenHarmony. An OpenHarmony profile's window lists the apps
 that have desktop entries, and their app settings aren't available. Its settings
-show only its display. **Show Apps** switches the window to another profile. The
-manager shows that profile again the next time it opens. It stores the choice in
+show its display and desktop following, without the accent color. **Show Apps**
+switches the window to another profile. The manager shows that profile again the
+next time it opens. It stores the choice in
 `$XDG_STATE_HOME/innkeeper/manager-profile`, and `--profile NAME` overrides it.
 Opening the manager with no profile creates `default`. Deleting a profile asks
 for confirmation and removes the profile's apps, data, settings and app-menu
