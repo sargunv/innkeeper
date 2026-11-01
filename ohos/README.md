@@ -17,10 +17,10 @@ input.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
-([host/cli](../host/cli/README.md)). AMS blocks third-party apps until the lock
-screen has been unlocked once since boot, so `run` of such an app fails before
-that. An OH profile refuses `open`, files and URIs in `run`, `app info`,
-`app set`, adb and the Android-only settings.
+([host/cli](../host/cli/README.md)). After boot the screen is off and the lock
+screen is up, and an app that `run` starts shows only once the lock screen has
+been dismissed. An OH profile refuses `open`, files and URIs in `run`,
+`app info`, `app set`, adb and the Android-only settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots and whose profile is a release profile. A debug profile fails, because it
@@ -211,6 +211,10 @@ Android's system app reports activity.
   `/data/storage` open on a fixed fd. The session's `/data/storage` links to
   `/proc/self/fd/<fd>`, so each app process sees its own. The rest of an app's
   root is the session's.
+- **Users.** When user 100 starts, storage_daemon mounts its storage views under
+  `/storage` and `/mnt/data`. The shim makes these mounts succeed as no-ops, so
+  the views are plain directories. A failed mount would leave the user
+  unverified, and AMS would then refuse to start any third-party app.
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode
