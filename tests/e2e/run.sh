@@ -476,7 +476,8 @@ else
   boot_completed() { s /system/bin/param get bootevent.boot.completed | grep -q '^true'; }
   # shellcheck disable=SC2329 # invoked through timed
   ohos_boot() {
-    "$S" start >/dev/null
+    # The bridge takes the desktop's time zone from TZ, and OH follows it.
+    TZ=Pacific/Auckland "$S" start >/dev/null
     # The exec relay starts with OpenHarmony's post-fs-data.
     until s /system/bin/sh -c : 2>/dev/null; do sleep 0.1; done
     # Before boot completes, Session1 must not report a booted session.
@@ -810,6 +811,26 @@ while True:
     exit 1
   fi
   echo 'ok   the probe HAP records a tone that the desktop plays into its source'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_settings() {
+    # Innkeeper System sets OH's time zone to the desktop's, which OH's
+    # defaults don't use.
+    zone() { s /system/bin/param get persist.time.timezone | grep -q '^Pacific/Auckland'; }
+    until_ok zone || return
+    # The fake portal (desktop.py) starts with no color scheme, so OH keeps
+    # its light default until the desktop turns dark.
+    dark() { s /system/bin/param get persist.ace.darkmode | grep -q '^dark'; }
+    ! dark || return
+    gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop \
+      --method dev.sargunv.Innkeeper.TestPortal.SetSetting org.freedesktop.appearance color-scheme '<uint32 1>' \
+      >/dev/null || return
+    until_ok dark
+  }
+  if ! timed ohos-settings ohos_settings; then
+    s /system/bin/hilog -x -T InnkeeperSettings | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   OpenHarmony follows the desktop's time zone and dark mode"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_screen() {
     local frames keeper run=$XDG_RUNTIME_DIR/app/dev.sargunv.Innkeeper/innkeeper-$INNKEEPER_PROFILE

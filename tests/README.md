@@ -5,8 +5,8 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
 
 - `mise run test` runs the Rust tests, the Kotlin protocol and input tests, the
   HAL host tests, the supervisor tests, the image script tests, the harness unit
-  tests and the OpenHarmony input method's tests. It needs no Android session or
-  APK corpus.
+  tests and the tests of OpenHarmony's system app. It needs no Android session
+  or APK corpus.
 - `mise run test:e2e -- [group...]` runs one fresh named session on an isolated
   desktop. Without arguments it runs five groups: `boot` (host safety, HOME and
   storage), `input`, `audio`, `desktop` (including sharing) and `lifecycle`.
@@ -35,10 +35,11 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   `run` with a link delivers its URI to the probe. OpenHarmony's music volume
   must be at its maximum, and a tone it plays must reach a private null sink.
   The probe, granted the microphone, must record a tone that the host plays into
-  that sink. The open window keeps the session up. Closing it leaves OpenHarmony
-  running, and `run` opens it again. With the window closed, the session stops
-  after the grace period, which test timers make one second. This group uses its
-  own profile, `<profile>-ohos`, so it runs alone.
+  that sink. OpenHarmony takes the session's time zone and turns dark when the
+  desktop's portal does. The open window keeps the session up. Closing it leaves
+  OpenHarmony running, and `run` opens it again. With the window closed, the
+  session stops after the grace period, which test timers make one second. This
+  group uses its own profile, `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake

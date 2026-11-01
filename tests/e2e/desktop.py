@@ -14,8 +14,10 @@ DBusGMainLoop(set_as_default=True)
 bus = dbus.SessionBus()
 PATH = "/org/freedesktop/portal/desktop"
 NOTIFY = "org.freedesktop.Notifications"
+SETTINGS = "org.freedesktop.portal.Settings"
 selected = Path(sys.argv[1])
 selected.write_text("innkeeper-e2e-file")
+settings = {"org.freedesktop.appearance": {"color-scheme": dbus.UInt32(0)}}
 
 
 class Request(dbus.service.Object):
@@ -78,6 +80,35 @@ class Portal(OpenUri):
     return self.respond(
       options, sender, {"uris": dbus.Array([selected.as_uri()], signature="s")}
     )
+
+  # The portal's Settings. The desktop starts with no color scheme, and
+  # SetSetting changes a value as a desktop's own settings would.
+  @dbus.service.method(SETTINGS, in_signature="as", out_signature="a{sa{sv}}")
+  def ReadAll(self, namespaces):
+    return dbus.Dictionary(
+      {
+        ns: dbus.Dictionary(kv, signature="sv")
+        for ns, kv in settings.items()
+        if not namespaces or ns in namespaces
+      },
+      signature="sa{sv}",
+    )
+
+  @dbus.service.method(SETTINGS, in_signature="ss", out_signature="v")
+  def ReadOne(self, namespace, key):
+    return settings[namespace][key]
+
+  @dbus.service.signal(SETTINGS, signature="ssv")
+  def SettingChanged(self, namespace, key, value):
+    pass
+
+  @dbus.service.method(
+    "dev.sargunv.Innkeeper.TestPortal", in_signature="ssv", out_signature=""
+  )
+  def SetSetting(self, namespace, key, value):
+    settings.setdefault(namespace, {})[key] = value
+    print(f"setting: {namespace} {key} {value}", flush=True)
+    self.SettingChanged(namespace, key, value)
 
 
 class Notifications(dbus.service.Object):
