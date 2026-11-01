@@ -3,17 +3,17 @@
 # way apexd would mount them:
 #   <out>/<apex-name>/...          payload contents (name from apex_manifest.pb)
 #   <out>/apex-info-list.xml       what apexd writes to /apex/apex-info-list.xml
-# Unprivileged, with the static tools from image/tools.
+# It runs unprivileged, with the static tools from image/tools.
 #
 # usage: flatten-apex.sh <extracted-image-dir> <bootconfig> <out-dir>
 #
-# Multi-install vendor APEXes (several files with one manifest name, e.g.
-# cuttlefish's keymint.rust_nonsecure / keymint.rust_cf_remote) are selected
-# the way apexd does it: androidboot.vendor.apex.<name>=<file without .apex>
-# (ro.boot.vendor.apex.*) picks one, and "none" drops a vendor APEX. The
-# selections are read from <bootconfig> (image/bootconfig: whitespace-separated
-# androidboot.*=value tokens, # comments), which the session also passes to
-# init.
+# A multi-install vendor APEX is several files with one manifest name, such as
+# cuttlefish's keymint.rust_nonsecure and keymint.rust_cf_remote. The script
+# selects among them as apexd does. androidboot.vendor.apex.<name>=<file
+# without .apex>, which becomes ro.boot.vendor.apex.*, picks one file, and
+# "none" drops the vendor APEX. The selections come from <bootconfig>, which
+# the session also passes to init. image/bootconfig holds whitespace-separated
+# androidboot.*=value tokens and # comments.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 usage="usage: flatten-apex.sh <img-dir> <bootconfig> <out-dir>"
@@ -97,8 +97,8 @@ for rel in system/system/apex system_ext/apex product/apex vendor/apex odm/apex;
     rm -rf "$dest"
     mkdir -p "$dest"
     "$here/fs-extract.sh" "$work/x/apex_payload.img" "$dest"
-    # apexd exposes the manifest at /apex/<name>/apex_manifest.pb; the payload
-    # already carries it, but make sure.
+    # apexd exposes the manifest at /apex/<name>/apex_manifest.pb. The payload
+    # normally carries it, so this copy is a fallback.
     [[ -e $dest/apex_manifest.pb ]] || cp "$work/x/apex_manifest.pb" "$dest/"
     path="${mountpoint_of[$rel]}/$file"
     printf '    <apex-info moduleName="%s" modulePath="%s" preinstalledModulePath="%s" versionCode="%s" versionName="" isFactory="true" isActive="true" lastUpdateMillis="0" provideSharedApexLibs="false" partition="%s"/>\n' \

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# fetch.sh's hook for Android: an AOSP CI "-img-<build>.zip"
-# into plain directory trees:
+# fetch.sh's hook for Android. It extracts an AOSP CI "-img-<build>.zip" into
+# plain directory trees:
 #   <out>/{system,system_ext,product,vendor,odm,*_dlkm}
-# The zip's sparse super.img holds the dynamic partitions (A/B: the _a slot is
-# taken; the _b slot is empty or system_other). Unprivileged, with the static
-# tools from image/tools.
+# The zip's sparse super.img holds the A/B dynamic partitions. The script takes
+# the _a slot, and the _b slot is empty or holds system_other. It runs
+# unprivileged, with the static tools from image/tools.
 #
 # usage: extract-android.sh <ci-img.zip> <out-dir>
 set -euo pipefail

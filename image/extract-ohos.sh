@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# fetch.sh's hook for OpenHarmony: Oniro's emulator zip into plain directory
-# trees, read-only as on a mount:
+# fetch.sh's hook for OpenHarmony. It extracts Oniro's emulator zip into plain
+# directory trees, read-only as on a mount:
 #   <out>/system  system.img's system-as-root tree
 #   <out>/vendor
-# One raw ext4 image at a time (system.img alone is 3 GiB), with
-# fs-extract.sh's static debugfs. The guest kernel, ramdisk and other images
-# are left out: the guest runs on the host kernel.
+# It unpacks one raw ext4 image at a time, because system.img alone is 3 GiB,
+# and extracts each with fs-extract.sh's static debugfs. The guest runs on the
+# host kernel, so the guest kernel, ramdisk and other images are left out.
 #
 # usage: extract-ohos.sh <oniro_emulator.zip> <out-dir>
 set -euo pipefail

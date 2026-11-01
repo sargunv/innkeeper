@@ -4,8 +4,8 @@
 #   <images>/<name>/dl/   the zip from the pin (resumable), deleted once
 #                         extracted
 #   <images>/<name>/img/  the partitions
-# For Android, the session flattens the APEXes itself (per vendor APEX
-# selection).
+# For Android, the session flattens the APEXes according to the vendor APEX
+# selection.
 #
 # usage: fetch.sh <android|ohos> <pin.toml> <images>
 set -euo pipefail
@@ -26,7 +26,7 @@ IFS=$'\t' read -r name url size sha < <(
 dest=$images/$name
 mkdir -p "$dest/dl"
 
-# One fetch per image at a time (several profiles may start at once).
+# Several profiles may start at once, so the lock allows one fetch per image.
 exec 9>"$dest/.lock"
 flock 9
 
@@ -46,7 +46,7 @@ elif verify "$zip" "$size" "$sha"; then
 else
   rm -f "$zip"
   echo "downloading ${zip##*/} ($((size / 1048576)) MiB) from $url"
-  # Android's CI serves GET only (HEAD is 404); -C - resumes a partial
+  # Android's CI serves only GET, and HEAD returns 404. -C - resumes a partial
   # download.
   if [[ ! -f $zip.part || $(stat -c %s "$zip.part") -lt $size ]]; then
     curl -fL --retry 5 --retry-delay 5 -C - -o "$zip.part" "$url"

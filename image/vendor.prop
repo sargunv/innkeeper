@@ -1,9 +1,9 @@
 # Vendor properties for the AOSP CI cuttlefish image, merged into the
 # generated /vendor/build.prop (replacing the image's values for these keys).
 
-# No block devices in the session: no factory-reset-protection partition
-# (PersistentDataBlockService would fail on /dev/block/by-name/frp), and no
-# pmem device for the reboot escrow HAL.
+# The session has no block devices. Without a factory-reset-protection
+# partition, PersistentDataBlockService would fail on /dev/block/by-name/frp,
+# and the reboot escrow HAL has no pmem device.
 ro.frp.pst=
 ro.rebootescrow.device=
 
@@ -11,19 +11,20 @@ ro.rebootescrow.device=
 ro.vendor.hwcomposer.pmem=
 vendor.hwc.drm.device=
 
-# No lock screen (a session isn't a phone): LockSettingsService's default.
+# A session isn't a phone, so LockSettingsService defaults to no lock screen.
 ro.lockscreen.disable.default=true
 
-# Cuttlefish lists arm64-v8a for its (absent here) native bridge; with
-# ro.dalvik.vm.native.bridge=0 arm64-only apps would install and then fail at
-# runtime. Advertise x86_64 only until a translator lands (M6). Set
-# explicitly, init then skips deriving them from
-# ro.{product,odm,vendor,system}.product.cpu.abilist* (odm's would win).
+# Cuttlefish lists arm64-v8a for its native bridge, which the session lacks.
+# With ro.dalvik.vm.native.bridge=0, arm64-only apps would install and then
+# fail at runtime, so these advertise only x86_64 until a translator lands
+# (M6). When these are set, init skips deriving them from
+# ro.{product,odm,vendor,system}.product.cpu.abilist*, where odm's would win.
 ro.product.cpu.abilist=x86_64
 ro.product.cpu.abilist64=x86_64
 ro.product.cpu.abilist32=
 
-# There is no tracefs in the session. libcutils disables atrace when opening
-# trace_marker fails; silence its per-process error without faking tracing or
-# exposing the host's tracefs. Other tags keep their normal log levels.
+# The session has no tracefs. libcutils disables atrace when it fails to open
+# trace_marker, and this silences the error it logs in every process without
+# faking tracing or exposing the host's tracefs. Other tags keep their normal
+# log levels.
 log.tag.cutils-trace=S

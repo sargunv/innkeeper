@@ -8,7 +8,7 @@ tools=$(cd "$(dirname "$0")/.." && pwd)
 usage="usage: fs-extract.sh <fs-image> <out-dir>"
 fs=${1:?$usage} out=${2:?$usage}
 
-# The superblock magic: erofs at byte 1024, ext4 at 1080.
+# The superblock magic is at byte 1024 for erofs and at byte 1080 for ext4.
 magic() { od -An -tx1 -j "$1" -N "$2" "$fs" | tr -d ' \n'; }
 mkdir -p "$out"
 if [[ $(magic 1024 4) == e2e1f5e0 ]]; then
