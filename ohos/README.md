@@ -256,14 +256,15 @@ frames the bridge releases without showing them. `innkeeper run` calls
 Session1's `ShowScreen`, which ends the headless connection, and the composer's
 next connection gets a new window.
 
-SceneBoard shows the home screen about 30 s after samgr starts. A new profile's
-lock screen is off for user 100, as Android's lock screen is off by default
-(`ro.lockscreen.disable.default`). OH's screenlock service keeps a per-user
-"disabled" flag in `/data/service/el1/public/screenlock/screenlock_state.xml`,
-and SceneBoard doesn't lock the screen while the flag is set. The launcher
-writes the file before the first boot. When the user sets a PIN in Settings, the
-service clears the flag, and the lock screen asks for the PIN from the next
-restart on. OH's PIN and user authentication HDIs keep their data in
+On a new profile, SceneBoard shows the home screen about 10 s after samgr
+starts. A new profile's lock screen is off for user 100, as Android's lock
+screen is off by default (`ro.lockscreen.disable.default`). OH's screenlock
+service keeps a per-user "disabled" flag in
+`/data/service/el1/public/screenlock/screenlock_state.xml`, and SceneBoard
+doesn't lock the screen while the flag is set. The launcher writes the file
+before the first boot. When the user sets a PIN in Settings, the service clears
+the flag, and the lock screen asks for the PIN from the next restart on. OH's
+PIN and user authentication HDIs keep their data in
 `/data/chipset/el1/public/pinauth` and `userauth`. The image creates neither
 directory, so `sys_prod/etc/init/innkeeper_useriam.cfg` does. The desktop has
 its own lock screen. OH's own injector also drives the screen over `exec`.
@@ -538,7 +539,10 @@ the same as Android's. OH's session stops when idle, as Android's does
   refuses them before ours sees them. It makes priority raises best-effort. A
   `setns` into a mount namespace still moves init to that namespace's `/`, as
   the kernel does. Init's `mksandbox` changes into its sandbox first, and
-  services inherit init's working directory.
+  services inherit init's working directory. The image's on-demand console
+  service makes init open `/dev/console`, and init waits 5 s for a missing node.
+  The sandbox's `/dev/console` links to `/dev/null`, which init opens at once
+  and can't watch, so the console shell doesn't start.
 - **Apps.** appspawn gives each app a mount namespace. It bind-mounts into
   `/mnt/sandbox/<user>/<bundle>` and then calls `pivot_root` there. Apps find
   their own files only at those paths, and `/data/storage/el1/bundle` holds the
