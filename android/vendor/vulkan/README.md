@@ -65,7 +65,9 @@ The same build makes RADV and ANV for OpenHarmony
 `/vendor/lib64/chipsetsdk/libvulkan_{radeon,intel}.so`, with ICD manifests in
 `/vendor/etc/vulkan/icd.d`. OpenHarmony's Vulkan loader reads manifests from
 `/system/etc/vulkan/icd.d` and `/vendor/etc/vulkan/icd.d`, and each manifest
-names its driver by absolute path.
+names its driver by absolute path. The loader lists the GPU, but OH's swapchain
+layer refuses to create a device until the drivers support
+`VK_OHOS_native_buffer`.
 
 - **Toolchain.** The drivers build with the NDK's clang for `x86_64-linux-musl`
   (`cross/ohos-x86_64.ini`). The sysroot is the build container's musl with the
