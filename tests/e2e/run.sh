@@ -458,8 +458,9 @@ else
     "$S" start >/dev/null
     # The exec relay starts with OpenHarmony's post-fs-data.
     until s /system/bin/sh -c : 2>/dev/null; do sleep 0.1; done
-    s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1
-    "$S" selftest >>"$T/ohos.txt"
+    # The caller tests this function's status, which turns off errexit here.
+    s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1 || return
+    "$S" selftest >>"$T/ohos.txt" || return
     # Screen 0 must appear in its own window on this desktop.
     until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
     until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
