@@ -37,8 +37,10 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A drag
 and a click on the nested desktop's seat then unlock the lock screen and open
-Settings. A key press reaches MMI, and the CLI installs and starts the image's
-calculator HAP.
+Settings. OH's input injector then scrolls Settings and goes home, and
+render_service must not have restarted since boot
+([tests/render.sh](tests/render.sh)). A key press reaches MMI, and the CLI
+installs and starts the image's calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a

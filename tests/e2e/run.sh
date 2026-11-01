@@ -472,6 +472,9 @@ else
     exit 1
   fi
   echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
+  # Each animation from here on draws in render_service, which must not
+  # restart.
+  ohos_rs=$(s /system/bin/pidof render_service)
   # shellcheck disable=SC2329 # invoked through timed
   ohos_input() {
     local x y w h panel pw ph cw ch left top
@@ -517,6 +520,15 @@ else
     exit 1
   fi
   echo 'ok   desktop pointer input unlocks the lock screen and opens Settings'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_render() {
+    s /system/bin/sh -s "$ohos_rs" <"$repo/ohos/tests/render.sh" >>"$T/ohos.txt" 2>&1
+  }
+  if ! timed ohos-render ohos_render; then
+    tail -n 5 "$T/ohos.txt" >&2
+    exit 1
+  fi
+  echo 'ok   render_service draws the unlock, Settings and its scrolling without a restart'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_keys() {
     # MMI logs each key with its device, OpenHarmony's key code and state.
