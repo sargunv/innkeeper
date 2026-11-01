@@ -68,13 +68,14 @@ on the nested desktop's seat then opens Settings, and MMI's cursor must be on
 the panel pixel under the seat's pointer. A wheel detent scrolls Settings' list.
 OH's input injector then scrolls Settings and goes home, and render_service must
 not have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
-reaches MMI. The probe HAP, signed for the profile's UDID, then installs and
-shows in `innkeeper list`, and `innkeeper run` puts its window on screen with
-input focus. OH's music volume must be at its maximum, and a 440 Hz tone that
-[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop. Last, root grants the probe the microphone with
-`atm perm -g`, the host plays a tone into the null sink, and the probe must
-record it from the sink's monitor.
+reaches MMI. A file written to `/storage/Users/currentUser/Download` lands in
+the profile's data directory. The probe HAP, signed for the profile's UDID, then
+installs and shows in `innkeeper list`, and `innkeeper run` puts its window on
+screen with input focus. OH's music volume must be at its maximum, and a 440 Hz
+tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must reach a
+private null sink on the nested desktop. Last, root grants the probe the
+microphone with `atm perm -g`, the host plays a tone into the null sink, and the
+probe must record it from the sink's monitor.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -322,9 +323,16 @@ Android's system app reports activity.
   `/proc/self/fd/<fd>`, so each app process sees its own. The rest of an app's
   root is the session's.
 - **Users.** When user 100 starts, storage_daemon mounts its storage views under
-  `/storage` and `/mnt/data`. The shim makes these mounts succeed as no-ops, so
-  the views are plain directories. A failed mount would leave the user
-  unverified, and AMS would then refuse to start any third-party app.
+  `/storage` and `/mnt`. A failed mount would leave the user unverified, and AMS
+  would then refuse to start any third-party app. The image's storage_daemon
+  runs without hmdfs, so each view is a bind or sharefs mount of a directory in
+  `/data`. In storage_daemon, the shim turns these mounts into symlinks to their
+  sources. The user's files are in `/data/service/el2/100/hmdfs/account/files`,
+  and `Docs` there holds Documents, Download and Desktop. appspawn binds the
+  `Docs` view into apps' sandboxes at `/storage/Users/currentUser`, and the
+  launcher links the session's `/storage/Users` to the same view. Apps and
+  FileManager's "My phone" see the same files, and they stay in the profile's
+  data directory on the host. hmdfs's distributed and cloud views stay empty.
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode

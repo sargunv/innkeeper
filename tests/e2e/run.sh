@@ -588,6 +588,21 @@ else
   fi
   echo "ok   desktop keys reach OpenHarmony's input service"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_storage() {
+    # Apps write the user's files at /storage/Users/currentUser. The files
+    # are on disk in the profile's data dir, and storage_daemon's other views
+    # show them too.
+    local data=${INNKEEPER_DATA:-$repo/out/dev/flatpak/$INNKEEPER_PROFILE/android-data}
+    written() { s /system/bin/sh -c 'echo e2e >/storage/Users/currentUser/Download/e2e.txt' 2>/dev/null; }
+    until_ok written || return
+    [[ $(<"$data/service/el2/100/hmdfs/account/files/Docs/Download/e2e.txt") == e2e ]] &&
+      [[ $(s /system/bin/cat /storage/media/100/local/files/Docs/Download/e2e.txt) == e2e ]]
+  }
+  if ! timed ohos-storage ohos_storage; then
+    exit 1
+  fi
+  echo "ok   a file in the user's Download is on disk in the profile and in OpenHarmony's media view"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
     # The probe HAP (ohos/probe) is signed with a debug profile for this
     # profile's UDID, which profile list shows. The CLI installs it, lists it
