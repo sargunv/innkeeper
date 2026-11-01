@@ -570,13 +570,17 @@ else
     grep -x 'version      1.0 (1)' "$T/info.txt" >/dev/null &&
       grep -E '^app size     [0-9]+\.[0-9] MB$' "$T/info.txt" >/dev/null &&
       grep -x '  ohos.permission.CAMERA  denied' "$T/info.txt" >/dev/null &&
-      grep -x '  ohos.permission.INTERNET  granted (fixed)' "$T/info.txt" >/dev/null
+      grep -x '  ohos.permission.INTERNET  granted (fixed)' "$T/info.txt" >/dev/null || return
+    # run with a URI sends a browser's link want, and the probe logs its URI.
+    opened() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: opened innkeeper-probe://e2e/link' >/dev/null; }
+    "$cli" run dev.sargunv.innkeeper.probes innkeeper-probe://e2e/link >>"$T/ohos.txt" 2>&1 || return
+    until_ok opened
   }
   if ! timed ohos-hap ohos_hap; then
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, its window has focus on screen, and app info shows its version and permissions'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, its window has focus on screen, app info shows its version and permissions, and it opens a link'
   # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
