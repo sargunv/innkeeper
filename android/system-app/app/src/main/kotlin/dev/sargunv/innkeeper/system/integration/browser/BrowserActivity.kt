@@ -39,7 +39,7 @@ class BrowserActivity : Activity() {
     val ok = IntegrationFeature.instance?.urls?.open(uri.toString()) == true
     if (!ok) {
       Log.w(UrlOpener.TAG, "could not open $uri on the desktop")
-      Toast.makeText(this, "Couldn't open the link on the desktop", Toast.LENGTH_SHORT).show()
+      Toast.makeText(this, "Couldn't open the link", Toast.LENGTH_SHORT).show()
     }
   }
 

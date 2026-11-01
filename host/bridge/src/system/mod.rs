@@ -214,11 +214,7 @@ fn background_note(labels: &[&str]) -> Note {
         package: "dev.sargunv.innkeeper.system".into(),
         app_name: "Innkeeper".into(),
         title: "Running in the background".into(),
-        body: format!(
-            "{} {} running with no window open.",
-            labels.join(", "),
-            if labels.len() == 1 { "keeps" } else { "keep" }
-        ),
+        body: labels.join(", "),
         flags: notify::flags::ONGOING | notify::flags::SILENT,
         urgency: 0,
         progress: -1,

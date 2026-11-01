@@ -264,8 +264,7 @@ impl Session {
         })
     }
 
-    /// Fetches and unpacks the image ([`preparing`] says its size). Its
-    /// progress goes to stderr.
+    /// Fetches and unpacks the image; its progress goes to stderr.
     pub fn prepare(&self) -> Result<()> {
         self.run_prepare()
             .context(crate::ErrorKind::ImageNotPrepared)
@@ -293,11 +292,11 @@ impl Session {
     pub fn start(&self, headless: bool, status: &dyn Fn(&str)) -> Result<()> {
         let system = self.system();
         if !self.image_ready() {
-            status(preparing(system));
+            status(&format!("downloading {}", system.title()));
             self.run_prepare()
                 .context(crate::ErrorKind::ImageNotPrepared)?;
         }
-        status(&format!("starting the {} session", system.title()));
+        status(&format!("starting {}", system.title()));
         let mut c = self.command();
         c.arg("start").stdin(Stdio::null()).stdout(Stdio::null());
         if headless {
@@ -366,14 +365,6 @@ impl Session {
             self.start(false, status)?;
         }
         self.wait_booted(status)
-    }
-}
-
-/// The status line for a first start's image download.
-pub fn preparing(system: System) -> &'static str {
-    match system {
-        System::Android => "preparing Android (first run: downloading about 1.2 GB)",
-        System::Ohos => "preparing OpenHarmony (first run: downloading about 1 GB)",
     }
 }
 

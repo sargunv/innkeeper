@@ -23,11 +23,11 @@ doesn't say.
   MIME type and `FLAG_GRANT_READ_URI_PERMISSION`. The grant is for that package
   and lasts until the session stops. No host directory is exposed. The file must
   already be accessible inside the CLI's Flatpak sandbox.
-- `open` grants files the same way and then shows **Open or share with Android
-  app…**. **Open** lists `VIEW` handlers. **Share** lists `SEND` targets for one
-  file and `SEND_MULTIPLE` targets for several. A target must accept the MIME
-  type of every file. Targets are queried each time, so newly installed and
-  removed apps show up immediately.
+- `open` grants files the same way and then shows **Open or share**. **Open**
+  lists `VIEW` handlers. **Share** lists `SEND` targets for one file and
+  `SEND_MULTIPLE` targets for several. A target must accept the MIME type of
+  every file. Targets are queried each time, so newly installed and removed apps
+  show up immediately.
 - `open` refuses APKs and bundles, which `install` takes. The desktop opens
   those files with the manager. Innkeeper's desktop entry claims no document
   types, so it doesn't become their default handler.

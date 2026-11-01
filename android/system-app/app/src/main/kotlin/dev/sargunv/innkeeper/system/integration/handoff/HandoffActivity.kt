@@ -44,16 +44,16 @@ class HandoffActivity : Activity() {
     }
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
     if (streams.isEmpty() && text.isEmpty()) return fail("Nothing to share")
-    val labels = mutableListOf("Open with a desktop app", "Save to file…")
+    val labels = mutableListOf("Open with desktop app", "Save to file…")
     val actions = mutableListOf(OPEN, SAVE)
     if (streams.isEmpty() && text.isNotEmpty()) {
       labels.add("Copy")
       actions.add(COPY)
     }
-    labels.add("Send by email")
+    labels.add("Email")
     actions.add(EMAIL)
     AlertDialog.Builder(this)
-      .setTitle("Share to the desktop")
+      .setTitle("Share to desktop")
       .setItems(labels.toTypedArray()) { _, which ->
         val action = actions[which]
         if (action == COPY) {
