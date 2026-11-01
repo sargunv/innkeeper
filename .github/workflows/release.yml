@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  # After CI succeeds on a push to main. Packaging that commit here, instead
-  # of building alongside CI, avoids a second full build and a snapshot of a
-  # commit CI rejected. The workflow file on main is what runs.
+  # Runs after CI succeeds on a push to main. Packaging the stage that CI
+  # built avoids a second full build and keeps commits that failed CI out of
+  # the snapshot. GitHub runs the version of this file on main.
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -17,7 +17,8 @@ on:
         type: boolean
         default: true
 
-# contents: write creates the GitHub Release and moves the snapshot tag.
+# contents: write lets the jobs create the GitHub Release and move the
+# snapshot tag.
 permissions:
   contents: write
 
@@ -29,8 +30,8 @@ concurrency:
 
 jobs:
   build:
-    # A snapshot packages the stage CI already saved. A tag or a manual run
-    # has no such run, so it builds.
+    # A snapshot reuses the stage that CI saved. Tags and manual runs have no
+    # CI run to reuse, so they build the stage here.
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-26.04
     timeout-minutes: 120
@@ -40,8 +41,8 @@ jobs:
 
   package:
     needs: build
-    # A skipped build is the snapshot path. A failed CI run, or a CI run that
-    # was not a push, does not publish.
+    # The build job is skipped for snapshots. A snapshot is published only
+    # after a successful CI run that a push triggered.
     if: |
       !cancelled() &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
@@ -53,7 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # workflow_run's github.sha is main's tip, not the commit CI tested.
+          # For workflow_run, github.sha is main's current tip, which can be
+          # newer than the commit CI tested.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
       - uses: ./.github/actions/stage
@@ -79,8 +81,9 @@ jobs:
           notes="Snapshot of $(git rev-parse HEAD), built ${built}."
           notes="${notes}"$'\n\n```sh\n'"flatpak install --user ./${name}"$'\n```\n\n'
           notes="${notes}A newer snapshot is a reinstall of the new file."
-          # One floating release. Move the tag onto this commit, then replace
-          # the asset and drop any other (a renamed app id leaves the old bundle).
+          # The snapshot is a single floating release. Move its tag onto this
+          # commit, upload the bundle, and delete any other asset, such as a
+          # bundle left behind by a renamed app id.
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/tags/snapshot"
           if gh release view snapshot >/dev/null 2>&1; then
@@ -89,7 +92,7 @@ jobs:
             gh release create snapshot --prerelease --title snapshot --notes "$notes"
           fi
           gh release upload snapshot "$bundle" --clobber
-          # --clobber only replaces an asset with the same name.
+          # --clobber replaces only an asset with the same name.
           gh release view snapshot --json assets --jq '.assets[].name' |
             while IFS= read -r asset; do
               [[ -n $asset && $asset != "$name" ]] || continue

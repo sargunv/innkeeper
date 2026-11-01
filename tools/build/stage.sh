@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Copy every module's install tree (out/build/<module>/install) into out/stage,
-# the installable prefix, and write its manifest, share/innkeeper/manifest.tsv:
-# one "path<TAB>module<TAB>sha256" line per file (a symlink's sha256 is of its
-# target). Fails if two modules write one path.
+# the installable prefix, and write its manifest to share/innkeeper/manifest.tsv.
+# The manifest has one "path<TAB>module<TAB>sha256" line per file, and a
+# symlink's sha256 is the hash of its target. The script fails if two modules
+# write the same path.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 stage=out/stage
 manifest=share/innkeeper/manifest.tsv
 
-# Every file and symlink, as "path<TAB>module".
+# List every file and symlink as "path<TAB>module".
 rows=$(
   for tree in out/build/*/install; do
     m=${tree#out/build/} m=${m%/install}

@@ -1,5 +1,8 @@
 #!/usr/bin/python3
-"""Run the stage in a private Flatpak; all systemd access stays on the host."""
+"""Run the stage in a private Flatpak installation.
+
+All systemd access stays on the host.
+"""
 
 import array
 import configparser
@@ -43,8 +46,9 @@ ENV.setdefault(
 SCRATCH = BASE / "flatpak" / PROFILE
 SCRATCH.mkdir(parents=True, exist_ok=True)
 XDG = ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
-# Entries, Flatpak state and notices never go to the real XDG dirs: only ones
-# under out/ (a nested test desktop's) are kept.
+# Desktop entries, Flatpak state and notices must stay out of the user's real
+# XDG directories. Keep an XDG directory only if it is under out/, as a nested
+# test desktop's are.
 for key in XDG:
   if not ENV.get(key, "").startswith(str(TOP / "out") + "/"):
     ENV[key] = str(SCRATCH / key.split("_")[1].lower())
@@ -54,15 +58,15 @@ ENV["FLATPAK_USER_DIR"] = str(INSTALL)
 ENV["HOME"] = str(SCRATCH / "home")
 Path(ENV["HOME"]).mkdir(parents=True, exist_ok=True)
 HOST_BUS = f"unix:path=/run/user/{os.getuid()}/bus"
-# Every scope Flatpak makes for the app gets these limits, including the ones
-# the portal starts for alarm wakeups: systemd applies a unit-name-prefix
-# drop-in to each new app-flatpak-dev.sargunv.Innkeeper-<n>.scope.
+# Every scope that Flatpak creates for the app gets these limits, including the
+# scopes the portal starts for alarm wakeups. systemd applies a drop-in for a
+# unit-name prefix to each new app-flatpak-dev.sargunv.Innkeeper-<n>.scope.
 DROPIN = Path(
   f"/run/user/{os.getuid()}/systemd/user/app-flatpak-{APP}-.scope.d/50-innkeeper-dev-memory.conf"
 )
 MEMORY = "[Scope]\nMemoryHigh=6G\nMemoryMax=8G\n"
 MEMORY_MAX = str(8 << 30)
-# Room for one capped session plus the desktop.
+# This leaves room for one capped session plus the desktop.
 MIN_AVAILABLE_GIB = 10
 SYSTEMD_ENV = dict(
   os.environ,
@@ -98,20 +102,21 @@ def command(program, args):
     "--no-documents-portal",
     f"--app-path={STAGE}",
   ]
-  # The manifest's current permissions, which dev-init.sh's snapshot may lack.
+  # Grant the manifest's current permissions, which dev-init.sh's snapshot may
+  # lack.
   manifest = (TOP / "packaging/flatpak/dev.sargunv.Innkeeper.yml").read_text()
   finish = manifest.split("finish-args:\n", 1)[1].split("modules:", 1)[0]
   argv += re.findall(r"^  - (--\S+)$", finish, re.MULTILINE)
   argv.append(f"--filesystem={STAGE}:ro")
-  # Exact scratch paths and the image cache only; never --filesystem=home/host.
+  # Grant the scratch paths and the image cache, but not home or host.
   paths = {
     str(SCRATCH),
     str(Path(ENV["INNKEEPER_DATA"]).parent),
     ENV["INNKEEPER_IMAGES"],
   }
   paths.update(ENV[k] for k in XDG)
-  # Flatpak skips a --filesystem path that doesn't exist, so the image
-  # download would land in the sandbox's RAM-backed tmpfs.
+  # Flatpak skips a --filesystem path that doesn't exist, and the image
+  # download would then land in the sandbox's RAM-backed tmpfs.
   for p in paths:
     Path(p).mkdir(parents=True, exist_ok=True)
   if program == "innkeeper":
@@ -125,7 +130,8 @@ def command(program, args):
     ):
       argv.append(f"--filesystem={p}")
   inner_env = []
-  # Flatpak sets XDG_*_HOME over any --env; env(1) sets them after it.
+  # Flatpak sets XDG_*_HOME after it applies --env, so pass these variables
+  # through env(1), which runs later.
   for k, v in ENV.items():
     if (
       k.startswith("INNKEEPER_")
@@ -150,7 +156,8 @@ def command(program, args):
     if program == "innkeeper"
     else str(STAGE / "libexec/innkeeper/innkeeper-session")
   )
-  # The CLI is told its profile; the launcher reads INNKEEPER_PROFILE.
+  # The CLI takes its profile as an argument, and the launcher reads
+  # INNKEEPER_PROFILE.
   if program == "innkeeper":
     args = ["--profile", PROFILE, *args]
   argv += ["--command=env", APP, *inner_env, target, *args]
@@ -203,8 +210,8 @@ def control(args):
         pass
       return 0
     text = sock.recv(4096).decode()
-    # Sandbox pids repeat on reboot. Use the host scope's process as the
-    # harness's session identity so compat detects a replaced sandbox.
+    # Sandbox pids repeat across reboots. Report the host pid of the scope's
+    # process instead so that the compat harness detects a replaced sandbox.
     cg = session_cgroup()
     if text.startswith("running:") and cg:
       try:
@@ -227,7 +234,7 @@ def available():
 
 
 def cap():
-  """Install the memory drop-in. systemd finds a new drop-in only on reload."""
+  """Install the memory drop-in and reload systemd so that it sees the file."""
   if DROPIN.is_file() and DROPIN.read_text() == MEMORY:
     return
   DROPIN.parent.mkdir(parents=True, exist_ok=True)
@@ -238,9 +245,12 @@ def cap():
 
 
 def session_cgroup():
-  """The cgroup of this profile's session sandbox, wherever it was started:
-  by `start`, by the CLI through the portal, or by an alarm wakeup. A portal
-  session wins over a `start -f` sandbox left waiting for the alarm."""
+  """Return the cgroup of this profile's session sandbox.
+
+  The sandbox may have been started by `start`, by the CLI through the portal,
+  or by an alarm wakeup. A session that the portal started takes precedence
+  over a `start -f` sandbox that is still waiting for the alarm.
+  """
   found = []
   runtime = Path(ENV.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
   for info in runtime.glob(".flatpak/*/info"):
@@ -254,8 +264,8 @@ def session_cgroup():
         continue
       pid = (info.parent / "pid").read_text().strip()
       argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-      # `start -f` from start(), or the launcher's `_serve` for a session
-      # the portal spawned.
+      # start() runs `start -f`, and the launcher runs `_serve` for a session
+      # that the portal spawned.
       if b"_serve" not in argv and not (b"start" in argv and b"-f" in argv):
         continue
       cg = Path(f"/proc/{pid}/cgroup").read_text().strip().split("::", 1)[1]
@@ -266,7 +276,7 @@ def session_cgroup():
 
 
 def capped(cg):
-  """Whether the scope of cgroup cg has the drop-in's MemoryMax."""
+  """Return whether the scope of cgroup cg has the drop-in's MemoryMax."""
   o = subprocess.run(
     ["systemctl", "--user", "show", "-P", "MemoryMax", cg.name],
     env=SYSTEMD_ENV,
@@ -284,9 +294,9 @@ def start(args):
       return 0
     available()
     cap()
-    # flatpak run's client gets a scope of its own, so the session outlives
-    # the caller's unit (a terminal, a test desktop). Flatpak moves the
-    # sandbox itself to its app scope.
+    # The flatpak run client gets its own scope so that the session outlives
+    # the caller's unit, such as a terminal or a test desktop. Flatpak moves
+    # the sandbox to its app scope.
     restore = [
       f"{k}={ENV[k]}"
       for k in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
@@ -355,8 +365,9 @@ def main():
   ):
     return control(args)
   if program == "session" and args[:1] == ["image"]:
-    # This only reads the pin and paths; the launcher allows it outside
-    # Flatpak. Core checks it before every start, so avoid a second sandbox.
+    # `image` reads only the pin and paths, so the launcher allows it outside
+    # Flatpak. The core runs it before every start, and running it on the host
+    # avoids starting a second sandbox.
     return run(
       [str(STAGE / "libexec/innkeeper/innkeeper-session"), *args]
     ).returncode

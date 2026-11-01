@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Register a stage snapshot once (or refresh it to test a Flatpak update).
-# The dev runner mounts out/stage over /app, so ordinary rebuilds need no export.
+# Register a snapshot of the stage as an installed app. Run it once, or again to
+# test a Flatpak update. The dev runner mounts out/stage over /app, so ordinary
+# rebuilds don't need a new export.
 set -euo pipefail
 top=$(cd "$(dirname "$0")/../.." && pwd)
 export FLATPAK_USER_DIR=$top/out/flatpak/user
@@ -25,10 +26,10 @@ runtime=org.gnome.Platform/x86_64/51
 sdk=org.gnome.Sdk/x86_64/51
 command=innkeeper
 EOF
-# Use the distributable app's permissions plus the exact read-only stage.
+# Use the distributable app's permissions plus read-only access to the stage.
 mapfile -t grants < <(sed -n '/^finish-args:/,/^modules:/s/^  - \(--[^ ]*\)$/\1/p' "$top/packaging/flatpak/$id.yml")
-# Menu entries start the registered deployment. Resolve their executable to the
-# current stage too, without repacking after every edit.
+# Menu entries start the registered deployment, so its executables are wrappers
+# that run the current stage and don't need repacking after every edit.
 for program in innkeeper innkeeper-manager; do
   cat >"$out/app/files/bin/$program" <<WRAPPER
 #!/bin/sh

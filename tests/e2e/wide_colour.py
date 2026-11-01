@@ -1,4 +1,4 @@
-"""Whether a desktop screenshot shows WideColorProbe's SDR orange."""
+"""Check whether a desktop screenshot shows WideColorProbe's SDR orange."""
 
 import sys
 

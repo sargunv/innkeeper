@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs only inside the grouped runner's fresh, isolated desktop and Android session.
+# The grouped e2e runner runs this inside its fresh, isolated desktop and
+# Android session.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 T=$repo/out/test/e2e/$INNKEEPER_PROFILE
@@ -23,7 +24,8 @@ chooser_ready() {
 }
 choose_share() {
   until_ok chooser_ready
-  # Disabled section headings are skipped: first Open target, then Share probe.
+  # Focus skips the disabled section headings, so the first DPAD_DOWN reaches
+  # the Open target and the second reaches the Share probe.
   s input -d "$display" keyevent KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_ENTER
 }
 received() {
@@ -38,7 +40,8 @@ first=$(sha256sum "$T/share.md" | cut -d ' ' -f1)
 second=$(sha256sum "$T/share.txt" | cut -d ' ' -f1)
 s logcat -c
 "$repo/tools/dev/innkeeper.sh" open "$T/share.md" "$T/share.txt"
-# MarkdownShareOnly must be excluded from the mixed batch, even though it matches text/*.
+# MarkdownShareOnly matches text/*, but it must not be offered for the mixed
+# batch.
 # shellcheck disable=SC2329 # invoked through until_ok
 share_targets() {
   s logcat -d -s InnkeeperOpenWith:I | grep -E 'share action=android.intent.action.SEND_MULTIPLE files=2 apps=dev.sargunv.innkeeper.probes$' >/dev/null

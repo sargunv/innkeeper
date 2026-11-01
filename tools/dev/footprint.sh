@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Memory of a running session (INNKEEPER_PROFILE names its profile): PSS and RSS of every
-# process in it, largest PSS first, then the session cgroup's totals.
-#   tools/dev/footprint.sh [-n N]    (only the N largest processes)
-# Android's processes are read from inside the session, since
-# the host user can't read them; the outer ones (bridge, pasta,
-# the broker) from the host.
+# Show the memory use of the running session for INNKEEPER_PROFILE: the PSS and
+# RSS of every process in it, largest PSS first, then the session cgroup's
+# totals. -n N lists only the N largest processes.
+#   tools/dev/footprint.sh [-n N]
+# The host user can't read Android's processes, so the script reads them from
+# inside the session. It reads the outer processes (the bridge, pasta and the
+# broker) from the host.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 session=$repo/tools/dev/session.sh
@@ -18,7 +19,8 @@ pid=$("$session" status | sed -n 's/^running: host pid //p')
 }
 cg=$("$session" cgroup)
 
-# "pss_kb rss_kb pid name" for each readable /proc/<pid> in $@ (default: all).
+# Print "pss_kb rss_kb pid name" for each readable /proc/<pid> in $@, or for
+# every process if $@ is empty.
 # shellcheck disable=SC2016 # also runs inside the session
 rollup='[ $# -gt 0 ] || set -- /proc/[0-9]*
 for d in "$@"; do
@@ -30,7 +32,7 @@ for d in "$@"; do
 done
 true'
 
-# The dev driver reports a scope PID, which may be outside Android's PID namespace.
+# The dev driver reports a scope PID, which can be outside Android's PID namespace.
 android_ns=$("$session" exec readlink /proc/self/ns/pid)
 outer=()
 while read -r p; do

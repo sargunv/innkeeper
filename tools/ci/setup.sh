@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Hosted runners only: never run privileged setup on a contributor's machine.
-# build: compile, lint and unit-test the sources. runtime: run or package the
-# stage on a software desktop.
+# Provision a GitHub-hosted runner. The script uses sudo, so it refuses to run
+# anywhere else, including a contributor's machine. The build mode prepares to
+# compile, lint and unit-test the sources. The runtime mode prepares to run or
+# package the stage on a software-rendered desktop.
 set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true ]] || {
   echo 'GitHub runner required' >&2
@@ -16,15 +17,18 @@ case $mode in
       podman uidmap passt
     {
       echo "CARGO_BUILD_JOBS=4"
-      # Debug symbols and per-checkout incremental state only inflate caches.
+      # Debug symbols and per-checkout incremental state would inflate the
+      # caches without speeding up CI.
       echo "CARGO_PROFILE_DEV_DEBUG=0"
       echo "CARGO_PROFILE_TEST_DEBUG=0"
       echo "CARGO_INCREMENTAL=0"
       echo "CMAKE_BUILD_PARALLEL_LEVEL=4"
-      # sccache comes from mise and the CMake presets; git worktree list in
-      # tools/build/sccache.sh makes the workspace its one base dir.
+      # sccache comes from mise and the CMake presets. tools/build/sccache.sh
+      # finds the workspace with git worktree list and uses it as the base
+      # directory.
       echo "SCCACHE_CACHE_SIZE=500M"
-      # out/cargo is cached whole; wrapping rustc would copy it into the cap.
+      # CI caches out/cargo whole. Wrapping rustc with sccache would also copy
+      # those artifacts into sccache's size-capped cache.
       echo "RUSTC_WRAPPER="
     } >>"$GITHUB_ENV"
     ;;

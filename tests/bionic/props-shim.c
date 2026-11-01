@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// LD_PRELOADed into a test program by tests/bionic/run.sh when it sets
-// read-only properties, which the session's property service has already
-// seeded. Test only; never installed.
-//  - __system_property_*: a per-process store, seeded with
+// tests/bionic/run.sh preloads this into a test program to set read-only
+// properties, which the session's property service has already seeded. It is
+// used only in tests and is not installed.
+//  - __system_property_* use a per-process store, seeded with
 //    servicemanager.ready=true (libbinder's defaultServiceManager() waits
 //    for it) and INNKEEPER_PROPS="name=value;name=value".
-//  - __android_log_write_log_message: mirror logs to stderr, the runner's
-//    output.
+//  - __android_log_write_log_message mirrors logs to stderr, which is the
+//    runner's output.
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -129,7 +129,8 @@ EXPORT bool __system_property_wait(
   const struct timespec* timeout
 ) {
   (void)pi;
-  // Values never change from outside the process: sleep instead of spinning.
+  // Nothing outside the process changes these values, so each call sleeps for
+  // up to 100 ms to keep callers from spinning.
   struct timespec ts = {0, 100 * 1000 * 1000};
   if (timeout && timeout->tv_sec == 0 && timeout->tv_nsec < ts.tv_nsec)
     ts = *timeout;

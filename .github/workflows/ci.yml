@@ -100,14 +100,15 @@ jobs:
         run: |
           # Flatpak must see a host directory before sharing it.
           mkdir -p "$INNKEEPER_IMAGES"
-          # actions/cache drops xattrs. Recreate the derived layer (it holds
-          # CLAT's owner record); extracted partitions and flattened APEXes
-          # remain cached.
+          # actions/cache drops xattrs, and the derived layer keeps CLAT's
+          # owner record in one, so prepare must recreate that layer. The
+          # extracted partitions and flattened APEXes stay cached.
           find "$INNKEEPER_IMAGES" -path '*/derived/.source' -delete
           mise run session -- prepare
           img=$(out/stage/libexec/innkeeper/innkeeper-session image | sed -n 's/^img=//p')
           test -f "$img/system/system/build.prop"
-      # Save before e2e, whose failures must not discard expensive preparation.
+      # Save the cache before e2e so that an e2e failure doesn't discard the
+      # prepared image.
       - uses: actions/cache/save@v4
         if: steps.image.outputs.cache-hit != 'true'
         with:
@@ -137,8 +138,8 @@ jobs:
             !**/android-data*/**
           retention-days: 7
 
-  # An OpenHarmony profile's boot: its own session and image, beside Android's
-  # e2e.
+  # Boots an OpenHarmony profile with its own session and image, in parallel
+  # with the Android e2e job.
   e2e-ohos:
     needs: build
     runs-on: ubuntu-26.04
@@ -155,7 +156,7 @@ jobs:
           flatpak=$(git ls-tree -r HEAD -- packaging/flatpak/dev-init.sh \
             packaging/flatpak/dev.sargunv.Innkeeper.yml tools/dev/run.py | sha256sum)
           echo "flatpak=${flatpak%% *}" >>"$GITHUB_OUTPUT"
-      # The e2e job saves it.
+      # The e2e job saves this cache.
       - uses: actions/cache/restore@v4
         with:
           path: out/flatpak/user
@@ -196,7 +197,8 @@ jobs:
             !out/test/nested/**/data/**
           retention-days: 7
 
-  # The single required gate: a skipped or failed job must not pass.
+  # This is the only required check. It fails when a job it needs failed or
+  # was skipped.
   checks:
     needs: [lint, build, unit, e2e, e2e-ohos]
     if: always()

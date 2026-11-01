@@ -1,10 +1,11 @@
 #!/usr/bin/python3
-"""Synthetic host evdev sources, without uinput or access to real input devices.
+"""Synthetic host evdev sources that need neither uinput nor real input devices.
 
-serve DIR: two independently hotpluggable sources. Removing DIR/eventN closes
-that source; SIGUSR1 removes controller 0, SIGUSR2 reconnects it. Each source's
-FF socket records uploads, erases and playback in DIR/rumbleN.jsonl.
-check DUMP: the input group's single Android gamepad enumeration assertion.
+`serve DIR` serves two sources that can be hotplugged independently. Removing
+DIR/eventN closes that source. SIGUSR1 removes controller 0, and SIGUSR2
+reconnects it. Each source's FF socket records uploads, erases and playback in
+DIR/rumbleN.jsonl.
+`check DUMP` checks that Android enumerated the gamepads, for the input group.
 """
 
 import json
@@ -111,7 +112,8 @@ def serve(directory):
         try:
           data = client.recv(4096)
         except ConnectionResetError:
-          # Closing with unread initial reports resets a seqpacket connection.
+          # Closing a seqpacket connection with unread initial reports resets
+          # it.
           data = b""
         if not data:
           disconnect(key)

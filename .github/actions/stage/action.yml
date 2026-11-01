@@ -13,8 +13,9 @@ runs:
       id: inputs
       shell: bash
       run: |
-        # Every build input's tree (paths, symlinks, modes and contents): an
-        # exact hit restores the stage and probes and skips setup and build.
+        # The digest covers the paths, symlinks, modes and contents of every
+        # build input. An exact hit restores the stage and probes, and the job
+        # skips setup and build.
         digest=$(git ls-tree -r HEAD -- host supervisor/shim \
           supervisor/broker android ohos guest image tools/build tools/container \
           packaging/flatpak Cargo.toml Cargo.lock \

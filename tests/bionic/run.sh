@@ -4,11 +4,11 @@
 #
 #   tests/bionic/run.sh [-e VAR=val]... [-v VENDOR_DIR]... [-t TEST_DIR] -- PROG [ARGS...]
 #
-# -v layers VENDOR_DIR over /vendor through a session addon (first on top),
-# -t copies TEST_DIR to /data/nativetest64, and -e passes VAR=val to PROG.
-# INNKEEPER_PROPS="name=value;..." sets those properties; read-only ones are
-# per-process, through the props shim (props-shim.c) preloaded into PROG.
-# TIMEOUT=<s> (default 300) bounds PROG.
+# -v layers VENDOR_DIR over /vendor through a session addon, with the first -v
+# on top. -t copies TEST_DIR to /data/nativetest64, and -e passes VAR=val to
+# PROG. INNKEEPER_PROPS="name=value;..." sets those properties. Read-only
+# properties apply only to PROG, through the props shim (props-shim.c) that is
+# preloaded into it. PROG is killed after TIMEOUT seconds (default 300).
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 session=$repo/tools/dev/session.sh
@@ -70,8 +70,8 @@ done
   echo 'session failed to boot' >&2
   exit 1
 }
-# HAL clients need exclusive access to the composer. Keep init, logd,
-# properties and the HALs, but stop framework clients.
+# HAL clients need exclusive access to the composer. Stop the framework
+# clients, and keep init, logd, the property service and the HALs running.
 "$session" exec stop
 for _ in $(seq 100); do
   if ! "$session" exec pidof surfaceflinger >/dev/null; then break; fi
@@ -88,9 +88,9 @@ for e in "${envs[@]}"; do
     for p in "${props[@]}"; do
       if [[ $p != ro.* ]]; then "$session" exec setprop "${p%%=*}" "${p#*=}"; fi
     done
-    # Read-only test properties must be per-process; init has already seeded
-    # the real property area. Preload from a path permitted by this test's
-    # vendor or platform linker namespace.
+    # init has already seeded the real property area, so read-only test
+    # properties must be per-process. Preload the shim from a path that this
+    # test's vendor or platform linker namespace permits.
     args+=("$e")
     if [[ $1 == /vendor/* || $1 == /odm/* ]]; then
       args+=(LD_PRELOAD=/vendor/lib64/libinnkeeper_test_props.so)

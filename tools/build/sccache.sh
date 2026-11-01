@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run a native build with sccache sharing one disk cache (SCCACHE_DIR, set in
-# mise.toml) across every checkout of this repository on the machine.
+# Run a native build with sccache, sharing one disk cache (SCCACHE_DIR, set in
+# mise.toml) between all checkouts of this repository on the machine.
 #
 #   tools/build/sccache.sh CMD [ARGS...]
 #
@@ -11,21 +11,24 @@
 #
 # Shared entries also need preprocessor cache mode (SCCACHE_DIRECT) off. That
 # mode answers a repeat compilation from a lookup keyed on the source path and
-# command line, and its hit restores the depfile stored with the shared entry,
-# which names the headers of whichever checkout compiled it first: Ninja would
-# then track another worktree's files and miss header edits here. With the mode
-# off each compilation preprocesses locally and keeps the depfile it wrote.
+# command line, and a hit restores the depfile stored with the shared entry.
+# That depfile names the headers of the checkout that compiled the entry first,
+# so Ninja would track another worktree's files and miss header edits in this
+# one. With the mode off, each compilation preprocesses locally and keeps the
+# depfile it wrote.
 #
-# The server reads both settings once, when it starts, so a new worktree means a
-# restart. Stopping the server drains the compilations in flight, so a restart
-# is safe during a concurrent build. Inside the build container
-# (tools/container/run.sh) the server is the container's own and ends with it.
+# The server reads both settings once, when it starts, so a new worktree needs a
+# server restart. Stopping the server drains the compilations in flight, so a
+# restart is safe during a concurrent build. Inside the build container
+# (tools/container/run.sh), the server belongs to the container and exits with
+# it.
 set -euo pipefail
 (($#)) || {
   echo "usage: ${0##*/} CMD [ARGS...]" >&2
   exit 2
 }
-# Git hooks export these; clear them so `git worktree list` resolves normally.
+# Git hooks export these variables. Clear them so that `git worktree list` sees
+# the repository normally.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
 
 SCCACHE_BASEDIRS=$(git -C "$(dirname "$0")" worktree list --porcelain |

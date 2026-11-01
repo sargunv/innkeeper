@@ -27,15 +27,15 @@ cleanup() {
       fi
     done
   fi
-  # A deadline can interrupt the runner before its trap reaches session stop.
-  # Flatpak's scope is outside this desktop's service; reap that test scope too.
+  # A deadline can interrupt the runner before its trap stops the session. The
+  # Flatpak scope is outside this desktop's service, so stop that scope here.
   local cg
   if [[ ${INNKEEPER_E2E:-} == 1 ]] && cg=$("$repo/tools/dev/session.sh" cgroup 2>/dev/null); then
     DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" XDG_RUNTIME_DIR="$host_runtime" \
       systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
-  # Resolve only the owner on our private bus, before stopping that bus.
-  # Looking up an absent owner does not activate a new portal during teardown.
+  # Find the document portal on the private bus before stopping that bus.
+  # Looking up the owner of a name doesn't activate a portal that isn't running.
   if [[ -n $private_bus ]]; then
     portal=$(timeout 1 gdbus call --address "$private_bus" --dest org.freedesktop.DBus \
       --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.GetConnectionUnixProcessID \
@@ -50,7 +50,8 @@ cleanup() {
     timeout 1 fusermount3 -u "$rt/doc" 2>/dev/null ||
       timeout 1 fusermount3 -uz "$rt/doc" 2>/dev/null
   fi
-  # Never descend into a portal mount which could not be detached.
+  # Don't delete the directory while the document portal is still mounted in
+  # it, because rm would descend into the mount.
   if mountpoint -q "$rt/doc"; then
     echo "nested: cleanup leaked private runtime $rt (document portal still mounted)" >&2
   elif ! rm -rf "$rt"; then
@@ -61,13 +62,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$N"/{home,config,data,cache,state}
-# KDE's service cache would keep an older run's TestSeat entry, and KWin would
-# refuse its interfaces.
+# KDE's service cache can hold a TestSeat entry from an older run, which makes
+# KWin refuse the entry's interfaces.
 rm -f "$N"/cache/ksycoca6*
 : >"$N/compositor.log"
 # KWin grants fake seat input and screenshots only to an executable whose
-# desktop file names them: tests/e2e/kwin.py. This entry lives solely on this
-# disposable desktop.
+# desktop file lists those interfaces. Here that executable is the Python that
+# runs tests/e2e/kwin.py, and the entry exists only on this disposable desktop.
 mkdir -p "$N/data/applications"
 cat >"$N/data/applications/dev.sargunv.Innkeeper.TestSeat.desktop" <<DESKTOP
 [Desktop Entry]
@@ -85,7 +86,8 @@ echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
 exec /usr/bin/python3 "$repo/tests/e2e/kwin.py" "$N"
 HOLD
 chmod +x "$N/hold.sh"
-# Explicit daemon config avoids system fragments (including network devices).
+# An explicit daemon config keeps out the system's config fragments, including
+# network devices.
 mkdir -p "$N/config/pipewire" "$N/config/wireplumber/wireplumber.conf.d"
 cat >"$N/config/pipewire/test.conf" <<'AUDIO'
 context.properties = { core.daemon = true core.name = pipewire-0 }
@@ -104,7 +106,8 @@ context.objects = [
 ]
 AUDIO
 cp /usr/share/pipewire/pipewire-pulse.conf "$N/config/pipewire/test-pulse.conf"
-# No hardware monitors: test capture must never see a real microphone.
+# Disable the hardware monitors so that test capture can't see a real
+# microphone.
 cat >"$N/config/wireplumber/wireplumber.conf.d/90-private-audio.conf" <<'AUDIO'
 wireplumber.profiles = {
   main = {
@@ -130,8 +133,9 @@ wireplumber >"$N/wireplumber.log" 2>&1 &
 /usr/libexec/at-spi-bus-launcher --launch-immediately --a11y=1 &
 gdbus wait --session --timeout 10 org.a11y.Bus
 /usr/libexec/at-spi2-registryd &
-# CI's GPU-less runners: headless GNOME Shell with surfaceless llvmpipe needs
-# no DRM node and, unlike KWin's virtual backend, offers linux-dmabuf v3.
+# CI's runners have no GPU. Headless GNOME Shell uses surfaceless llvmpipe,
+# which needs no DRM node, and it offers linux-dmabuf v3, which KWin's virtual
+# backend lacks.
 if [ "$INNKEEPER_TEST_COMPOSITOR" = mutter ]; then
   echo "\$DBUS_SESSION_BUS_ADDRESS" >"$N/bus"
   exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 3200x1080 \\
@@ -152,13 +156,15 @@ export XDG_CACHE_HOME=$N/cache XDG_STATE_HOME=$N/state
 export XDG_CURRENT_DESKTOP=KDE
 if [[ $INNKEEPER_TEST_COMPOSITOR == mutter ]]; then export XDG_CURRENT_DESKTOP=GNOME; fi
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
-# Explicit renderer overrides belong to this desktop, not the user's manager.
+# Pass the caller's renderer overrides to this desktop's service. They must not
+# be set in the user's systemd manager.
 renderer_env=()
 for key in LIBGL_ALWAYS_SOFTWARE KWIN_COMPOSE; do
   if [[ -v $key ]]; then renderer_env+=("$key=${!key}"); fi
 done
-# systemd itself is reached through the host bus; everything it starts inherits
-# the private runtime and the nested Wayland socket before dbus-run-session.
+# systemd-run reaches systemd through the host bus. The service it starts gets
+# the private runtime directory and the nested Wayland socket before
+# dbus-run-session starts the private bus.
 phase='starting private compositor service'
 DBUS_SESSION_BUS_ADDRESS="unix:path=$host_runtime/bus" systemd-run --user --quiet --collect \
   --unit "$unit" -p MemoryMax=3G -p "StandardOutput=append:$N/compositor.log" \

@@ -4,16 +4,17 @@
 #
 #   packaging/flatpak/build.sh [snapshot|stable] [--install]
 #
-# snapshot (the default) versions the bundle 0.0.<git rev-list --count HEAD>;
-# stable versions it from the v* tag on HEAD. There is no OSTree repo and no
-# signing: a user installs the file, and a newer file is a reinstall. The GNOME
-# runtime comes from Flathub. --install reinstalls the bundle into
-# FLATPAK_USER_DIR (default: the user installation).
+# A snapshot bundle (the default) has the version 0.0.<git rev-list --count
+# HEAD>, and a stable bundle takes its version from the v* tag on HEAD. The
+# bundle isn't signed or published in an OSTree repo. Users install the file
+# and update by installing a newer file. The GNOME runtime comes from Flathub.
+# --install reinstalls the bundle into FLATPAK_USER_DIR, which defaults to the
+# user installation.
 #
-# What runs on the desktop is built by flatpak-builder inside the GNOME SDK
-# from `git archive HEAD`. What runs inside Android comes from out/stage
-# (`mise run build`), which needs the NDK and the build container; none of it
-# links the runtime. Uncommitted changes are refused.
+# flatpak-builder builds the desktop side inside the GNOME SDK from
+# `git archive HEAD`. The guest side comes from out/stage (`mise run build`),
+# which needs the NDK and the build container, and none of it links against the
+# runtime. The script refuses to run with uncommitted changes.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
@@ -55,22 +56,22 @@ fi
   exit 1
 }
 
-# The desktop side's sources: a clean tree, and the crates it locks.
+# The desktop side builds from a clean tree and its locked, vendored crates.
 rm -rf "$out/src" "$out/vendor" "$out/prebuilt"
 mkdir -p "$out/src"
 git archive HEAD | tar -x -C "$out/src"
 cargo vendor -q --locked --manifest-path "$out/src/Cargo.toml" "$out/vendor" >/dev/null
 
-# The Android side: every staged file the host module didn't write, with
-# their rows of the stage manifest (the innkeeper module adds its own).
+# The guest side is every staged file that the host module didn't write, with
+# its rows of the stage manifest. The innkeeper module adds its own rows.
 stage=out/stage
 m=share/innkeeper/manifest.tsv
 mkdir -p "$out/prebuilt/share/innkeeper"
 awk -F'\t' '$2 != "host"' "$stage/$m" >"$out/prebuilt/$m"
 cut -f1 "$out/prebuilt/$m" | (cd "$stage" && cpio -pdm --quiet "$out/prebuilt")
 
-# Builder runs from its own installation: Flatpak hides that installation
-# inside the sandbox, so the SDK it builds against lives in another one.
+# Flatpak hides Builder's own installation inside the sandbox, so the SDK that
+# Builder builds against has to live in a second installation.
 tools=$out/tools sdk=$out/sdk
 flathub=https://dl.flathub.org/repo/flathub.flatpakrepo
 for d in "$tools" "$sdk"; do
@@ -79,7 +80,7 @@ done
 FLATPAK_USER_DIR=$tools flatpak install --user -y --noninteractive --or-update \
   flathub org.flatpak.Builder
 
-# A scratch repo, only so build-bundle has a commit to pack.
+# build-bundle packs a commit from a repo, so export to a scratch repo first.
 rm -rf "$rel"
 mkdir -p "$rel/repo"
 FLATPAK_USER_DIR=$tools flatpak run --user --env=FLATPAK_USER_DIR="$sdk" \
@@ -88,8 +89,8 @@ FLATPAK_USER_DIR=$tools flatpak run --user --env=FLATPAK_USER_DIR="$sdk" \
   --state-dir="$out/state" "$out/build" "$manifest"
 flatpak build-export --subject="$version" --body="$subject" \
   "$rel/repo" "$out/build" "$channel"
-# The runtime is not in the bundle; an install fetches it from Flathub.
-# No --repo-url: a newer bundle is installed again, not updated from a repo.
+# The bundle leaves out the runtime, which an install fetches from Flathub.
+# There is no --repo-url because users update by installing a newer bundle.
 bundle=$rel/$id-$channel.flatpak
 flatpak build-bundle --runtime-repo="$flathub" "$rel/repo" "$bundle" "$id" "$channel"
 rm -rf "$rel/repo"

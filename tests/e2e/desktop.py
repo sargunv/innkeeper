@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Desktop boundary fixtures, only on the runner's isolated session bus."""
+"""Fake desktop services for the e2e runner's isolated session bus."""
 
 from pathlib import Path
 import os

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# One runner, one private desktop/session, independently selectable bounded groups.
+# Run the e2e groups in one private desktop and session. Each group can be
+# selected on its own and has a deadline.
 set -Eeuo pipefail
-# Report only top-level failures: ERR also fires inside command substitutions.
+# ERR also fires inside command substitutions, so report only top-level
+# failures.
 # shellcheck disable=SC2329 # invoked by the ERR trap
 report_error() {
   if ((BASH_SUBSHELL == 0)); then
@@ -12,12 +14,12 @@ trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-e2e}
-# OpenHarmony runs in a profile of its own: the Android groups reset theirs
-# but keep its settings, which choose the system.
+# OpenHarmony runs in its own profile. The Android groups reset their profile
+# but keep its settings, and the settings choose the system.
 if [[ $* == ohos && ${INNKEEPER_NESTED:-} != 1 ]]; then INNKEEPER_PROFILE+=-ohos; fi
 export INNKEEPER_E2E=1
-# The nested desktop is the isolation: the session is a production one, and its
-# desktop requests reach desktop.py's fake portals and notifications.
+# The nested desktop provides the isolation, so the session runs in production
+# mode. Its desktop requests reach desktop.py's fake portals and notifications.
 unset INNKEEPER_TEST
 S=$repo/tools/dev/session.sh
 T=$repo/out/test/e2e/$INNKEEPER_PROFILE
@@ -46,8 +48,8 @@ timed() (
 )
 s() { "$S" exec "$@"; }
 wm() { /usr/bin/python3 "$here/wm.py" "$@"; }
-# Poll observations, returning as soon as they arrive; the outer group deadline
-# also bounds a command that stops answering.
+# Poll for an observation and return as soon as it arrives. The group deadline
+# also stops a command that hangs.
 until_ok() {
   local end=$((SECONDS + ${observation_wait:-20}))
   until "$@"; do
@@ -61,7 +63,8 @@ until_ok() {
 booted() { [[ $(s getprop sys.boot_completed 2>/dev/null) == 1 ]]; }
 user_unlocked() { [[ $(s am get-started-user-state 0 2>/dev/null) == RUNNING_UNLOCKED ]]; }
 log_has() { s logcat -d -s "$1:I" | grep -E "$2" >/dev/null; }
-# dev.sargunv.Innkeeper.TestDesktop: mutter.js on GNOME Shell, kwin.py on KWin.
+# mutter.js serves dev.sargunv.Innkeeper.TestDesktop on GNOME Shell, and kwin.py
+# serves it on KWin.
 desktop() {
   gdbus call --session --dest dev.sargunv.Innkeeper.TestDesktop --object-path /dev/sargunv/Innkeeper/TestDesktop \
     --method "dev.sargunv.Innkeeper.TestDesktop.$1" "${@:2}"
@@ -86,8 +89,9 @@ stop_session() { "$S" stop >/dev/null; }
 if [[ ${1:-} == --group ]]; then
   case $2 in
     boot)
-      # Check the real session tree even on hosts with Yama disabled. Memory
-      # access on Ubuntu's default ptrace_scope=1 needs an ancestor broker.
+      # Check the real process tree, which matters even on hosts with Yama
+      # disabled. Ubuntu's default ptrace_scope=1 allows memory access only
+      # from an ancestor, so the broker must be one.
       # shellcheck disable=SC2016 # expanded inside Android
       s sh -c '
         for init in $(pidof init); do
@@ -102,18 +106,19 @@ if [[ ${1:-} == --group ]]; then
       cat "$T/ancestry.txt"
       echo 'ok   Android init is a child of the broker'
       "$S" selftest
-      # adb: off and authenticated by default; on, a loopback port a private
-      # adb server is told about and a throwaway user key reaches.
+      # adb is off and requires authentication by default. Turning it on opens
+      # a loopback port, announces it to a private adb server, and lets a
+      # throwaway user key connect.
       [[ $(s getprop init.svc.adbd) != running && $(s getprop ro.adb.secure) == 1 ]]
       adb=$ANDROID_HOME/platform-tools/adb
-      # The key pair stays in the test's dir; the session sees the public half
-      # where it looks for the user's, in the dev sandbox's home.
+      # The key pair stays in the test's directory. The public key is copied to
+      # where the session looks for the user's key, in the dev sandbox's home.
       rm -rf "$T/adbhome" && mkdir -p "$T/adbhome/.android"
       "$adb" keygen "$T/adbhome/.android/adbkey" >/dev/null 2>&1
       keys=$repo/out/dev/flatpak/$INNKEEPER_PROFILE/home/.android
       mkdir -p "$keys"
       cp "$T/adbhome/.android/adbkey.pub" "$keys/"
-      # A private adb server, which turning adb on tells about the profile.
+      # Turning adb on announces the profile to this private adb server.
       A=(env HOME="$T/adbhome" "$adb" -P "$ANDROID_ADB_SERVER_PORT")
       "${A[@]}" start-server >/dev/null 2>&1
       "$repo/tools/dev/innkeeper.sh" profile set --adb on >"$T/adb-on.txt" 2>&1
@@ -134,12 +139,13 @@ if [[ ${1:-} == --group ]]; then
       echo "ok   adb is off by default; on, the adb server lists it and the user's key reaches it"
       driver=$(s getprop ro.hardware.vulkan)
       feature=android.hardware.vulkan.level=1
-      # pm omits =0 when printing a version-zero feature.
+      # pm leaves out =0 when it prints a feature with version zero.
       if [[ $driver == lvp ]]; then feature=android.hardware.vulkan.level; fi
       s pm list features >"$T/features.txt"
       file_has "$T/features.txt" "^feature:$feature$"
       echo "ok   Vulkan feature matches $driver: $feature"
-      # Session1 reports the same completed boot as the launcher's property check.
+      # Session1 must report the same completed boot that the launcher's
+      # property check sees.
       # shellcheck disable=SC2329 # invoked through until_ok
       session_booted() {
         gdbus call --session --dest "dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}" \
@@ -155,21 +161,22 @@ if [[ ${1:-} == --group ]]; then
       s cmd appops set dev.sargunv.innkeeper.probes MANAGE_EXTERNAL_STORAGE allow
       s am broadcast -n dev.sargunv.innkeeper.probes/.StorageProbe >/dev/null
       until_ok log_has InnkeeperStorageProbe 'state=mounted app-dir=ok MediaStore=ok'
-      # A self-finishing activity that handles no configuration changes. If the
-      # window manager releases its display while task removal is in flight,
-      # Android 17's display-compat recovery relaunches onto the removed display
-      # and crashes system_server (#50).
+      # TeardownProbe finishes itself and handles no configuration changes. If
+      # the window manager releases its display while task removal is in
+      # flight, Android 17's display-compat recovery relaunches the activity
+      # onto the removed display and crashes system_server (#50).
       syspid=$(s pidof system_server)
       am_start() { s am start -n "dev.sargunv.innkeeper.probes/.$1" >/dev/null; }
       am_start TeardownProbe
       until_ok log_has InnkeeperTeardownProbe 'created, display='
       until_ok log_has InnkeeperTeardownProbe 'self-finishing like the storage scan end'
       until_ok log_has InnkeeperTeardownProbe 'destroyed, display='
-      # The display is released after close(), so wait until the probe's windows
-      # and its "innkeeper:<package>" displays are gone before comparing pids.
+      # The display is released after close(), so wait until the probe's
+      # windows and its "innkeeper:<package>" displays are gone before
+      # comparing pids.
       # shellcheck disable=SC2329 # invoked through until_ok
       no_probe_windows() { ! wm LIST | grep -q 'package=dev.sargunv.innkeeper.probes .*window='; }
-      # A failed or empty dumpsys must not read as "gone".
+      # A failed or empty dumpsys must not count as the display being gone.
       # shellcheck disable=SC2329 # invoked through until_ok
       probe_display_gone() {
         local dump
@@ -191,14 +198,14 @@ if [[ ${1:-} == --group ]]; then
       mapped() { wm LIST | grep "display=$display package=dev.sargunv.innkeeper.probes .*window=yes" >/dev/null; }
       until_ok mapped
       # Position the window for absolute input without resizing Android's
-      # display: resize snapshots temporarily block otherwise valid touches.
-      # HWC's first frame can precede the compositor's window for it: retry
-      # until the compositor actually found the window.
+      # display, because a resize snapshot briefly blocks valid touches. HWC's
+      # first frame can arrive before the compositor has a window for it, so
+      # retry until the compositor finds the window.
       # shellcheck disable=SC2329 # invoked through until_ok
       positioned() { desktop Position | grep -q true; }
       until_ok positioned
-      # Activity resume precedes InputDispatcher's focused-window publication.
-      # Wait for the actual input target before submitting the burst.
+      # The activity resumes before InputDispatcher publishes it as the focused
+      # window. Wait for that input target before sending the burst.
       # shellcheck disable=SC2329 # invoked through until_ok
       input_ready() {
         s dumpsys input >"$T/devices.txt"
@@ -209,13 +216,14 @@ if [[ ${1:-} == --group ]]; then
       }
       until_ok input_ready "$display"
       /usr/bin/python3 "$here/gamepads.py" check "$T/devices.txt"
-      # Keep one native seat across the keyboard, click and capture scenarios.
+      # The keyboard, click and capture scenarios share one native seat.
       mkfifo "$T/seat"
       /usr/bin/python3 "$here/seat.py" --stdin <"$T/seat" &
       seat_pid=$!
       exec {seat_fd}>"$T/seat"
-      # A submitted first frame precedes the compositor mapping/focusing the surface.
-      # Establish real pointer delivery before the uninterrupted test stream.
+      # The app submits its first frame before the compositor maps and focuses
+      # the surface. Wait until pointer events reach the app before sending the
+      # test events.
       # shellcheck disable=SC2329 # invoked through until_ok
       pointer_ready() {
         printf 'abs:800,300\nabs:900,300\n' >&"$seat_fd"
@@ -230,7 +238,7 @@ if [[ ${1:-} == --group ]]; then
       until_ok mapped
       until_ok input_ready "$display" CaptureProbeActivity
       printf '%s\n' abs:900,400 key:46,1 key:46,0 >&"$seat_fd"
-      # One capture assertion: native relative motion reaches the requesting view.
+      # Native relative motion must reach the view that requested capture.
       # shellcheck disable=SC2329 # invoked through until_ok
       captured_motion() {
         printf '%s\n' rel:20,-10 >&"$seat_fd"
@@ -242,7 +250,8 @@ if [[ ${1:-} == --group ]]; then
       wait "$seat_pid"
       rm "$T/seat"
       launch WindowModeProbe
-      # A public orientation request reshapes the real host window.
+      # An orientation request through the public API must reshape the host
+      # window.
       # shellcheck disable=SC2329 # invoked through until_ok
       shape() {
         wm LIST | /usr/bin/python3 -c '
@@ -254,7 +263,7 @@ for line in sys.stdin:
 sys.exit(1)
 ' "$display" "$1"
       }
-      # Establish the starting shape so an unchanged window cannot pass the request.
+      # Check the starting shape so that a window that never changes can't pass.
       until_ok shape portrait
       s am start --display "$display" -n dev.sargunv.innkeeper.probes/.WindowModeProbe --es action landscape >/dev/null
       until_ok shape landscape
@@ -263,8 +272,8 @@ sys.exit(1)
       /usr/bin/python3 "$here/app-settings.py"
       ;;
     audio)
-      # The desktop mixer is the only volume control: a stream-volume request
-      # must not move STREAM_MUSIC off the maximum index dumpsys reports.
+      # The desktop mixer is the volume control, so a stream-volume request must
+      # leave STREAM_MUSIC at the maximum index that dumpsys reports.
       s cmd media_session volume --stream 3 --set 1 >/dev/null || true
       audio_dump=$(s dumpsys audio)
       grep -q 'mUseFixedVolume=true' <<<"$audio_dump"
@@ -290,9 +299,9 @@ if (
       trap 'kill "$recorder" 2>/dev/null || true; wait "$recorder" 2>/dev/null || true' EXIT
       s am start-foreground-service -n "dev.sargunv.innkeeper.probes/.LifecycleProbe\$Media" >/dev/null
       until_ok log_has InnkeeperLifecycleProbe 'foreground audio started'
-      # FFT succeeds only after the capture has enough non-silent tone samples.
+      # The FFT succeeds once the capture has enough non-silent tone samples.
       until_ok /usr/bin/python3 "$here/audio/freq.py" "$T/audio.raw" --expect 440
-      # Android am returns 1 when a service was successfully stopped.
+      # am returns 1 when it successfully stops a service.
       s am stopservice -n "dev.sargunv.innkeeper.probes/.LifecycleProbe\$Media" >/dev/null || true
       launch BenchProbe
       s am start --display "$display" -n dev.sargunv.innkeeper.probes/.BenchProbe --es mode audio >/dev/null
@@ -303,7 +312,8 @@ if (
       ;;
     desktop)
       launch WideColorProbe
-      # A host screenshot checks the displayed pixels, not just Android's buffer.
+      # A host screenshot checks the pixels that the desktop displays, which can
+      # differ from Android's buffer.
       # shellcheck disable=SC2329 # invoked through until_ok
       wide_colour_visible() {
         desktop Screenshot "$T/wide-colour.png" >/dev/null || return 1
@@ -311,7 +321,7 @@ if (
       }
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'
-      # One live setting change, saved and applied as the manager does.
+      # Change one setting live, saving and applying it as the manager does.
       "$repo/tools/dev/innkeeper.sh" profile set --follow-accent off >/dev/null
       until_ok log_has InnkeeperSettings 'desktop settings: .*followAccent=false'
       echo 'ok   profile set applies a desktop-following setting live'
@@ -336,7 +346,8 @@ if (
       until_ok file_has "$desktop_log" '^openuri: https://example.com/innkeeper-e2e$'
       s am start -n dev.sargunv.innkeeper.probes/.NotificationProbe >/dev/null
       until_ok file_has "$desktop_log" '^notification: Ada Lovelace *: Are we still on for the demo at 3\?'
-      # No window is needed to exercise the picker result on Android's default display.
+      # The picker result test runs on Android's default display and needs no
+      # window.
       s am start -n dev.sargunv.innkeeper.probes/.DesktopProbe >/dev/null
       until_ok file_has "$desktop_log" '^picker: Open File$'
       until_ok log_has InnkeeperDesktopProbe 'picked: innkeeper-e2e-file'
@@ -353,7 +364,7 @@ if (
       before=$(resumes)
       until_ok /usr/bin/python3 "$here/windows.py" minimize
       until_ok log_has InnkeeperBench "BENCH stopped display=$display"
-      # A stop followed by an unintended resume while minimized is a failure.
+      # The activity must not resume while the window is minimized.
       [[ $(resumes) -eq $before ]]
       before=$(resumes)
       until_ok /usr/bin/python3 "$here/windows.py" restore
@@ -372,9 +383,9 @@ if (
       # shellcheck disable=SC2329 # invoked through until_ok
       first_task_mapped() { wm LIST | grep -q "display=$first package=dev.sargunv.innkeeper.probes .*window=yes"; }
       until_ok first_task_mapped
-      # The sole multiple-task scenario: an app's New Window starts another task on
-      # the caller's display. Both tasks must get real toplevels; closing one must
-      # leave the other task and window alive.
+      # An app's New Window starts another task on the caller's display. Both
+      # tasks must get their own toplevel, and closing one must leave the other
+      # task and its window alive.
       s am start --display "$first" --activity-single-top \
         -n dev.sargunv.innkeeper.probes/.TaskWindowProbe --ez new-window true >/dev/null
       # shellcheck disable=SC2329 # invoked through until_ok
@@ -395,7 +406,8 @@ if (
       wm CLOSE --ei display "$second" >/dev/null
       echo 'ok   a second task has its own toplevel and survives closing the first'
       s cmd appops set dev.sargunv.innkeeper.probes SCHEDULE_EXACT_ALARM allow
-      # Allow four seconds to observe idle stop before the six-second wake lead.
+      # The ten-second alarm leaves four seconds to observe the idle stop before
+      # the wakeup starts six seconds ahead of the alarm.
       s am start -n dev.sargunv.innkeeper.probes/.LifecycleProbe --es action alarm --ei seconds 10 >/dev/null
       until_ok log_has InnkeeperLifecycleProbe 'alarm scheduled at='
       wm CLOSE --es package dev.sargunv.innkeeper.probes >/dev/null
@@ -404,8 +416,8 @@ if (
       echo 'ok   session stopped idle with an alarm pending'
       until_ok running
       until_ok booted
-      # The portal started this sandbox, not the dev runner: the drop-in
-      # must still cap its scope.
+      # The portal started this sandbox instead of the dev runner, and the
+      # drop-in must still cap its scope.
       cg=$("$S" cgroup)
       [[ $(<"$cg/memory.max") == $((8 << 30)) && $(<"$cg/memory.high") == $((6 << 30)) ]]
       echo "ok   the alarm wakeup's sandbox scope is memory capped (${cg##*/})"
@@ -426,14 +438,14 @@ if [[ ${groups[*]} != ohos ]]; then
     esac
   done
 elif [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
-  # Fetching the image is setup, outside the deadline.
+  # Fetching the image is setup and doesn't count toward the deadline.
   st=$repo/out/stage
   "$st/libexec/innkeeper/image/fetch.sh" ohos "$st/share/innkeeper/ohos/pin.toml" \
     "${INNKEEPER_IMAGES:-${XDG_DATA_HOME:-$HOME/.local/share}/innkeeper/images}" >/dev/null
 else
-  # OpenHarmony is a session of its own: a fresh profile, made by the CLI and
-  # started by the same launcher as Android's, with its window on this
-  # desktop.
+  # OpenHarmony runs as a separate session in a fresh profile. The CLI creates
+  # the profile, the launcher starts it as it starts Android, and its window
+  # appears on this desktop.
   mkdir -p "$T"
   : >"$T/timings.log"
   cli=$repo/tools/dev/innkeeper.sh
@@ -444,11 +456,11 @@ else
   # shellcheck disable=SC2329 # invoked through timed
   ohos_boot() {
     "$S" start >/dev/null
-    # The exec relay starts with OH's post-fs-data.
+    # The exec relay starts with OpenHarmony's post-fs-data.
     until s /system/bin/sh -c : 2>/dev/null; do sleep 0.1; done
     s /system/bin/sh -s <"$repo/ohos/tests/boot.sh" >"$T/ohos.txt" 2>&1
     "$S" selftest >>"$T/ohos.txt"
-    # Screen 0 in a window of its own on this desktop.
+    # Screen 0 must appear in its own window on this desktop.
     until_ok file_has "$bridge_log" 'window [0-9]+ "OpenHarmony" \(dev\.sargunv\.innkeeper\.ohos\)'
     until_ok file_has "$bridge_log" 'window [0-9]+ shows its first frame'
   }
@@ -477,7 +489,7 @@ fi
 mkdir -p "$T"
 : >"$T/timings.log"
 export INNKEEPER_TEST_TIMERS=1 INNKEEPER_AUDIO_SINK=innkeeper_$INNKEEPER_PROFILE
-# Announcing adb goes to a private server, never the user's on 5037.
+# adb announcements go to a private server instead of the user's server on 5037.
 export ANDROID_ADB_SERVER_PORT=15990
 export INNKEEPER_AUDIO_SOURCE=$INNKEEPER_AUDIO_SINK.monitor
 keeper=""
@@ -502,7 +514,8 @@ cleanup() {
       echo 'e2e: system_server crashed (not a boot readiness timeout):' >&2
       cat "$T/crash.txt" >&2
     fi
-    # Keep boot's original error as well as a later recovery/watchdog failure.
+    # Keep the original boot error as well as any later recovery or watchdog
+    # failure.
     timeout 1 "$S" exec logcat -d -b main,system -t 10000 >"$T/system.txt" 2>&1 || true
   fi
   "$S" stop >/dev/null 2>&1 || true
@@ -528,17 +541,19 @@ mkdir -p "$(dirname "$bridge_log")"
 : >"$bridge_log"
 timed setup-desktop until_ok file_has "$desktop_log" ready
 timed setup-start "$S" start
-# The exec service is not ready immediately after start. Hold its existing
-# busy lock from the host until a booted Android can run the keeper instead.
+# The exec service isn't ready right after start. Hold its busy lock from the
+# host until Android has booted and can run the keeper, which then holds the
+# lock.
 exec {setup_lock}>"$XDG_RUNTIME_DIR/app/dev.sargunv.Innkeeper/innkeeper-$INNKEEPER_PROFILE/exec.lock"
 flock --shared "$setup_lock"
 timed setup-boot until_ok booted
-# BOOT_COMPLETED can precede CE app-data preparation on the software runner.
-# Installing during unlock can leave a successful install without its data dirs.
+# On the software-rendered runner, BOOT_COMPLETED can arrive before the CE app
+# data is prepared. An install during unlock can succeed without creating the
+# app's data directories.
 timed setup-user-unlock until_ok user_unlocked
 : >"$T/keeper.log"
-# Do not let the keeper inherit the host lock: lifecycle must stop the session
-# after it releases its own exec lock by observing e2e-idle.
+# The keeper must not inherit the host lock. The lifecycle group stops the
+# session after the keeper sees e2e-idle and releases its own exec lock.
 s sh -c 'echo ready; while ! test -f /data/local/tmp/e2e-idle; do sleep 0.1; done' \
   {setup_lock}>&- >"$T/keeper.log" 2>&1 &
 keeper=$!
@@ -547,9 +562,10 @@ exec {setup_lock}>&-
 setup_lock=""
 size=$(stat -c %s "$apk")
 timed setup-probes s cmd package install -r -g -S "$size" <"$apk"
-# Keep the original process-death events if Android restarts and its noisy boot
-# replaces the log ring before a failed group's snapshot. Tags, time and bytes
-# are bounded; session stop closes this exec before cleanup waits for it.
+# Record process-death events as they happen, because if Android restarts, its
+# noisy boot can overwrite the log ring before a failed group takes its
+# snapshot. The tags, duration and size are bounded, and session stop closes
+# this exec before cleanup waits for it.
 (
   # shellcheck disable=SC2016 # expanded by the Android shell
   timeout "$deadline" "$S" exec sh -c '
@@ -568,7 +584,7 @@ run_group() {
   local result=0
   timed "$1" timeout --kill-after=2 "$(((50 * deadline + 54) / 55))" "$0" --group "$1" || result=$?
   if ((result != 0)); then
-    # Preserve the failed activity sequence before lifecycle restarts logd.
+    # Save the failed activity sequence before the lifecycle group restarts logd.
     tail -n 200 "$bridge_log" >"$T/$1-bridge.log" 2>&1 || true
     timeout 1 "$S" exec logcat -d -t 1000 -s ActivityTaskManager:I ActivityManager:I InnkeeperHandoff:V >"$T/$1-activities.txt" 2>&1 || true
     timeout 1 "$S" exec logcat -d -b main,system,crash -t 10000 >"$T/$1-system.txt" 2>&1 || true
@@ -584,8 +600,9 @@ run_group() {
   fi
   return "$result"
 }
-# AudioRecord needs a visible activity. Run it after the window/input checks,
-# before lifecycle stops the session; it shares no foreground window with them.
+# AudioRecord needs a visible activity. The audio group runs after the window
+# and input checks, so it doesn't share a foreground window with them, and
+# before the lifecycle group stops the session.
 for group in "${groups[@]}"; do
   case $group in audio | lifecycle) continue ;; esac
   run_group "$group" || failed+=("$group")
@@ -595,7 +612,8 @@ for group in "${groups[@]}"; do
 done
 for group in "${groups[@]}"; do
   if [[ $group == lifecycle ]]; then
-    # Logging is an exec too: release its busy lock before testing idle stop.
+    # The logger is also an exec and holds a busy lock, so stop it before
+    # testing the idle stop.
     s touch /data/local/tmp/e2e-events-stop
     wait "$events" || true
     events=""

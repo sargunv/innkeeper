@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-"""One app-settings check in the input group, through `innkeeper app`: cache
-and a runtime permission."""
+"""Check `innkeeper app` in the input group by clearing an app's cache and
+toggling a runtime permission."""
 
 import json
 import os
@@ -41,7 +41,8 @@ assert not granted()
 innkeeper("clear-cache", package)
 assert not cache.exists(), "clear-cache left the probe's temporary file"
 assert files.read_text() == "persistent", "clear-cache removed app data"
-# The fresh install grants this; restore it for the notification scenario.
+# The fresh install grants this permission, and the notification scenario
+# needs it back.
 innkeeper("set", package, "--permission", f"{permission}=on")
 print(
   "ok   innkeeper app clears cache, preserves data and toggles a runtime permission"
