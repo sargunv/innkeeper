@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The Health HAL (IHealth AIDL V5), part of the root superbuild. With the NDK:
-# the vendor service. Natively (preset "host-tests"): the BATTERY event
-# decoder and its HealthInfo mapping.
+# The Health HAL (IHealth AIDL V5), part of the root superbuild. The NDK build
+# produces the vendor service. The native build (preset "host-tests") tests the
+# BATTERY event decoder and its HealthInfo mapping.
 set(HEALTH ${CMAKE_CURRENT_SOURCE_DIR})
 set(GRAPHICS ${CMAKE_SOURCE_DIR}/android/vendor/graphics)
 

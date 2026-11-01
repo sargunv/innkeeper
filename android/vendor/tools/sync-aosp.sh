@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Refresh android/vendor/third_party/aosp from an AOSP checkout (default
 # ~/aosp/a17): the frozen AIDL API snapshots the HALs implement, the binder NDK
-# and IMapper headers, and the binder NDK's symbol map. Read-only use
-# of the tree.
+# and IMapper headers, and the binder NDK's symbol map. The script only reads
+# the AOSP tree.
 set -euo pipefail
 AOSP=${AOSP:-$HOME/aosp/a17}
 vendor=$(cd "$(dirname "$0")/.." && pwd)

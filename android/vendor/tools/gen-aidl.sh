@@ -7,7 +7,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)/third_party/aosp/aidl
 AIDL=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aidl
 out=$1
 shift
-# Generate into a scratch dir, then replace only changed files: every configure
+# Generate into a scratch dir, then replace only changed files. Every configure
 # runs this, and fresh mtimes would recompile every HAL.
 gen=$out/.gen
 rm -rf "$gen"
