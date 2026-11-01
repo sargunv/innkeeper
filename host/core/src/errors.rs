@@ -29,7 +29,8 @@ impl std::fmt::Display for ErrorKind {
             Self::ImageNotPrepared => f.write_str("Android image is not prepared"),
             Self::NoLauncherActivity => f.write_str("app has no launcher activity"),
             Self::Timeout => f.write_str("Android did not respond in time"),
-            Self::InstallFailed(code) => write!(f, "Android refused installation ({code})"),
+            // OpenHarmony profiles fail installs with this kind too.
+            Self::InstallFailed(code) => write!(f, "installation refused ({code})"),
         }
     }
 }
@@ -59,6 +60,14 @@ pub(crate) fn classify_install_error(err: anyhow::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_failures_name_no_system() {
+        assert_eq!(
+            ErrorKind::InstallFailed("9568404".into()).to_string(),
+            "installation refused (9568404)"
+        );
+    }
 
     #[test]
     fn package_manager_codes() {
