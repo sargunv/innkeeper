@@ -497,6 +497,11 @@ the same as Android's. OH's session stops when idle, as Android's does
   installd resolves each code path with `realpath` and refuses any path outside
   `/data/app/el1/bundle/`. The shim's `realpath` returns `/data` in place of the
   host directory, so installs and other path checks see guest paths.
+- **Time zone.** The sandbox may not set the kernel's time zone. OH's time
+  service stores a new zone and then sets the kernel's zone with `settimeofday`,
+  and it fails the change if that call fails. The kernel's zone is obsolete, so
+  the shim's `settimeofday` succeeds without a change when the caller passes no
+  time.
 - **Broker.** OH runs the same static musl broker as Android, because OH's root
   has no Bionic. With `INNKEEPER_GUEST=ohos` it also traps `open(2)`, because
   musl does not use `openat`. It serves `/etc/passwd` and `/etc/group` from

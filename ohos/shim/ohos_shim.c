@@ -49,6 +49,11 @@
 //    crashes (#309). The sync file export fails with ENOTTY, as on a kernel
 //    before 6.0, so llvmpipe offers no native fences. EGL's software swap
 //    still waits for its own context's rendering.
+//  - The sandbox may not set the clock or the kernel's time zone. The time
+//    service stores a new zone and then calls settimeofday(NULL, tz), and
+//    it reports the change as failed if that call fails. The kernel's zone
+//    matters to FAT timestamps and to gettimeofday's obsolete tz field, so a
+//    call without a time succeeds and changes nothing.
 //
 // The shim is built freestanding, with no libc headers or link. It binds to
 // the guest's musl at load time, so one file works with whichever libc the
@@ -69,6 +74,7 @@
 #define SYS_unshare 272
 #define SYS_setns 308
 #define SYS_setpriority 141
+#define SYS_settimeofday 164
 #define SYS_statfs 137
 #define SYS_newfstatat 262
 #define SYS_readlink 89
@@ -334,4 +340,9 @@ char* realpath(const char* path, char* out) {
 int setpriority(int which, unsigned who, int prio) {
   long r = sys6(SYS_setpriority, which, who, prio, 0, 0, 0);
   return init_pid ? 0 : (int)ret(r);
+}
+
+int settimeofday(const void* tv, const void* tz) {
+  if (!tv) return 0;
+  return (int)ret(sys6(SYS_settimeofday, (long)tv, (long)tz, 0, 0, 0, 0));
 }
