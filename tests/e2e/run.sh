@@ -499,8 +499,8 @@ else
       tail -n 1 | sed 's/.* //; s/x/ /')
     left=$((x + (w - cw) / 2)) top=$((y + h - ch - (w - cw) / 2))
     at() { echo "abs:$((left + $1 * cw / pw)),$((top + $2 * ch / ph))"; }
-    # The lock screen is off (ohos/sys_prod/etc/init/innkeeper_screenlock.cfg),
-    # so boot ends on the home screen.
+    # A new profile's lock screen is off (host/launcher/src/ohos.rs), so boot
+    # ends on the home screen.
     until_ok locked false || return
     # A click on the home screen's Settings icon opens Settings. The home
     # screen ignores clicks while it animates in after boot.

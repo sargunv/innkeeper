@@ -35,6 +35,14 @@ const POLICY_CONFIG: &str = "vendor/etc/audio/audio_policy_config.xml";
 /// `sys_prod` in place of the image's.
 const VOLUME_CONFIG: &str = "etc/audio/audio_volume_config.xml";
 
+/// The screen lock service's per-user "lock screen disabled" flags, under
+/// `/data`.
+const SCREENLOCK_STATE: &str = "service/el1/public/screenlock/screenlock_state.xml";
+
+/// Flags that turn the lock screen off for user 100, the first user.
+const SCREENLOCK_OFF: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+    <preferences version=\"1.0\"><bool key=\"100\" value=\"true\"/></preferences>\n";
+
 /// Fetches and extracts the pinned image if it is missing, then prunes the
 /// cache as Android's preparation does. The returned lease keeps the image
 /// while the session runs.
@@ -190,6 +198,7 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
     }
     let data = &cfg.paths.data;
     fs::create_dir_all(data)?;
+    lock_screen_off_by_default(data)?;
     link(data, Path::new("/data"))?;
     // Each app gets its own /data/storage, which the shim keeps open in app
     // processes.
@@ -233,6 +242,20 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
         fs::set_permissions(&node, fs::Permissions::from_mode(0o666))?;
     }
     crate::sandbox::dev_sockets(cfg)
+}
+
+/// Turns OH's lock screen off for a new profile, as Android's image does
+/// (`ro.lockscreen.disable.default`). SceneBoard doesn't lock the screen
+/// while the screen lock service reports it disabled. The service keeps the
+/// flags in `data`, so this writes them only if the file doesn't exist yet.
+/// The service clears the flag when the user sets a PIN in Settings.
+fn lock_screen_off_by_default(data: &Path) -> Result<()> {
+    let file = data.join(SCREENLOCK_STATE);
+    if file.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+    fs::create_dir_all(file.parent().expect("a relative path with a parent"))?;
+    fs::write(&file, SCREENLOCK_OFF).with_context(|| format!("write {}", file.display()))
 }
 
 #[cfg(test)]
@@ -299,5 +322,24 @@ mod tests {
             )
         );
         assert_eq!(volume_config("<volume_type a"), "<volume_type a");
+    }
+
+    #[test]
+    fn lock_screen_flags_are_written_once() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../out/test/screenlock-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        lock_screen_off_by_default(&dir).unwrap();
+        let file = dir.join(SCREENLOCK_STATE);
+        assert!(
+            fs::read_to_string(&file)
+                .unwrap()
+                .contains(r#"<bool key="100" value="true"/>"#)
+        );
+        let on = r#"<preferences version="1.0"><bool key="100" value="false"/></preferences>"#;
+        fs::write(&file, on).unwrap();
+        lock_screen_off_by_default(&dir).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), on);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
