@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The no-op firewall front ends netd runs (README.md in android/system).
+# No-op iptables and ip6tables front ends for netd, since Android shares the
+# host's network (docs/security.md).
 if(ANDROID)
   install(
     PROGRAMS innkeeper-iptables iptables iptables-restore ip6tables

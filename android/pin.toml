@@ -1,15 +1,16 @@
-# The Android image an Android profile boots: an AOSP build from Android's
+# The Android image an Android profile boots. It is an AOSP build from Android's
 # public CI (ci.android.com), branch aosp-android-latest-release, target
 # aosp_cf_x86_64_only_phone-userdebug. Users download it from Google at setup
-# (image/fetch.sh); we never redistribute it. image/README.md explains the
-# schema, which every guest's pin shares, and how to bump this pin.
+# (image/fetch.sh), and Innkeeper doesn't redistribute it. image/README.md
+# explains the schema, which every guest's pin shares, and how to bump this pin.
 
 # The image's directory in the image cache.
 name = "ci-16644040"
 # ro.build.fingerprint of the system partition, for reference.
 version = "Android/generic_system/generic:17/CP2A.260605.016/16644040:userdebug/test-keys"
-# The partition images zip: sparse super.img (system, system_ext, product,
-# vendor, odm, system_dlkm, vendor_dlkm, odm_dlkm), init_boot.img, boot.img, ...
+# The partition images zip. It holds a sparse super.img (system, system_ext,
+# product, vendor, odm, system_dlkm, vendor_dlkm, odm_dlkm), init_boot.img,
+# boot.img and more.
 url = "https://ci.android.com/builds/submitted/16644040/aosp_cf_x86_64_only_phone-userdebug/latest/raw/aosp_cf_x86_64_only_phone-img-16644040.zip"
 size = 1163636385
 sha256 = "eccdb248e171af6cb98711a6f2fbd5e5017e9c3a6e82337580181bbd4bb2c41b"

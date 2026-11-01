@@ -7,16 +7,16 @@
 // Binder is served through the seccomp filter the broker installs on init,
 // which only init's descendants inherit. `innkeeper-session exec` runs its
 // command in the session's sandbox but outside that filter, so it would have
-// no binder (am, pm, cmd, dumpsys, service ...). The client instead hands its
+// no binder (am, pm, cmd, dumpsys, service ...). The client instead passes its
 // argv, environment, working directory and stdio fds (SCM_RIGHTS) to this
-// server, which init started; the server forks the command with those fds,
+// server, which init started. The server forks the command with those fds,
 // relays its exit status, and kills the command's process group if the client
-// goes away. This is what adbd does for `adb shell`.
+// goes away. adbd does the same for `adb shell`.
 //
 // Built static with the NDK for Android (build:ndk) and against musl for
-// OpenHarmony (ohos/build.sh). The socket lives on the session's /dev, mode
-// 0600 root, so only root inside the session can use it, and it grants
-// nothing the sandbox doesn't already give.
+// OpenHarmony (ohos/build.sh). The socket lives on the session's /dev with
+// mode 0600 and owner root, so only root inside the session can use it, and it
+// grants nothing the sandbox doesn't already give.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -63,9 +63,9 @@ static int recv_all(int fd, void* buf, size_t len) {
   return 0;
 }
 
-// Message: u32 total length, then NUL-separated strings:
+// A request is a u32 byte count followed by that many bytes of NUL-terminated
+// strings, sent together with the client's fds 0, 1 and 2:
 //   cwd \0 argc(decimal) \0 argv... \0 env... \0
-// sent together with the client's fds 0, 1, 2.
 
 static int client(int argc, char** argv) {
   const char* path = kSocket;
@@ -148,7 +148,6 @@ static void serve_one(int c) {
   char* msg = malloc(hdr + 1);
   if (!msg || recv_all(c, msg, hdr)) _exit(1);
   msg[hdr] = 0;
-  // Split into strings.
   size_t n = 0;
   for (size_t i = 0; i < hdr; i++)
     if (!msg[i]) n++;
@@ -176,8 +175,8 @@ static void serve_one(int c) {
     _exit(errno == ENOENT ? 127 : 126);
   }
   for (int i = 0; i < 3; i++) close(fds[i]);
-  // Wait for exit or disconnect together, without a polling tick that short
-  // commands (boot readiness probes) would wait out.
+  // Wait for the command's exit and the client's disconnect at once. A polling
+  // interval would delay short commands such as boot readiness probes.
   int pidfd = syscall(SYS_pidfd_open, pid, 0);
   struct pollfd watched[] = {
     {.fd = pidfd, .events = POLLIN},
