@@ -194,8 +194,9 @@ include none of these additions.
   evdev device's udev properties from MMI's own libudev, which reads sysfs. The
   broker answers `stat`, `readlink`, `open` and `fstat` for the devices' nodes
   and sysfs entries. Their device numbers and `uevent` capability bitmaps match
-  the devices' ioctls. musl's `stat(3)` is `stat(2)`, so the filter also traps
-  that call.
+  the devices' ioctls. A mouse's event node also carries the libinput property
+  that real udev would add from its hwdb, a wheel click angle of 1 degree.
+  musl's `stat(3)` is `stat(2)`, so the filter also traps that call.
 
 ## Tests
 

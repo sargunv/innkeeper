@@ -63,14 +63,14 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. A click
 on the nested desktop's seat then opens Settings, and MMI's cursor must be on
-the panel pixel under the seat's pointer. OH's input injector then scrolls
-Settings and goes home, and render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI. The probe HAP,
-signed for the profile's UDID, then installs and shows in `innkeeper list`, and
-`innkeeper run` puts its window on screen with input focus. OH's music volume
-must be at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c)
-plays through OH's audio API must reach a private null sink on the nested
-desktop.
+the panel pixel under the seat's pointer. A wheel detent scrolls Settings' list.
+OH's input injector then scrolls Settings and goes home, and render_service must
+not have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
+reaches MMI. The probe HAP, signed for the profile's UDID, then installs and
+shows in `innkeeper list`, and `innkeeper run` puts its window on screen with
+input focus. OH's music volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -227,11 +227,17 @@ mouse and has its display. That happens when the window appears under the
 pointer during boot, so the cursor goes through the corner again before each
 press that starts a click.
 
+MMI reads libinput's legacy wheel events, whose value is the REL_WHEEL count
+times the mouse's click angle. The broker gives the mouse an angle of 1 degree,
+a fifteenth of a detent, so the fractions of a high-resolution wheel reach OH. A
+touchpad's scroll becomes wheel degrees, at 63 surface units to the detent,
+which is how far one detent scrolls an OH list.
+
 Keys go to the Innkeeper Keyboard while the window has keyboard focus. They keep
 their evdev codes, and OH maps them with its own keymap, so the host's layout
 doesn't apply. MMI repeats held keys itself, so the bridge drops the
-compositor's repeats. The wheel and text input from the host's input method
-don't reach OH yet.
+compositor's repeats. Text input from the host's input method doesn't reach OH
+yet.
 
 ## Audio
 

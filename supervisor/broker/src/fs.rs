@@ -552,7 +552,7 @@ impl Fs {
         {
             let body = match entry {
                 sysfs::Entry::DeviceUevent(d) => nodes.uevent(d),
-                sysfs::Entry::EventUevent(d) => Some(sysfs::event_uevent(d)),
+                sysfs::Entry::EventUevent(d) => Some(nodes.event_uevent(d)),
                 _ => None,
             };
             match body {

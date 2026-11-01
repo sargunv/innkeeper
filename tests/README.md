@@ -21,15 +21,16 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   OpenHarmony profile ([ohos](../ohos/README.md)). It starts the profile on the
   private desktop and waits until SceneBoard is ready and its window shows. It
   also runs selftest. Boot ends on the home screen, and a click on the desktop's
-  seat opens Settings with OpenHarmony's cursor under the pointer. OpenHarmony's
-  input injector scrolls Settings and goes home, and render_service must not
-  have restarted since boot. A key press reaches OpenHarmony's input service.
-  The CLI installs the probe HAP (ohos/probe), signed for the profile's UDID,
-  lists it and runs it, and its window has focus on screen. `app info` shows the
-  probe's version and the grant state of its two permissions, and `run` with a
-  link delivers its URI to the probe. OpenHarmony's music volume must be at its
-  maximum, and a tone it plays must reach a private null sink. This group uses
-  its own profile, `<profile>-ohos`, so it runs alone.
+  seat opens Settings with OpenHarmony's cursor under the pointer. A wheel
+  detent scrolls Settings' list. OpenHarmony's input injector scrolls Settings
+  and goes home, and render_service must not have restarted since boot. A key
+  press reaches OpenHarmony's input service. The CLI installs the probe HAP
+  (ohos/probe), signed for the profile's UDID, lists it and runs it, and its
+  window has focus on screen. `app info` shows the probe's version and the grant
+  state of its two permissions, and `run` with a link delivers its URI to the
+  probe. OpenHarmony's music volume must be at its maximum, and a tone it plays
+  must reach a private null sink. This group uses its own profile,
+  `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake

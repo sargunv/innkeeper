@@ -184,6 +184,22 @@ impl Nodes {
         }
         Some(u)
     }
+
+    /// The event node's `uevent`. MMI's libudev takes the event node's
+    /// properties from this file, where udev would add them from its hwdb.
+    /// MMI reads libinput's legacy wheel events, whose value is the REL_WHEEL
+    /// count times a mouse's click angle in degrees. A real wheel's detent is
+    /// 15 degrees, so at 1 degree the bridge can send a fifteenth of a detent.
+    pub(crate) fn event_uevent(&self, device: u32) -> String {
+        let mut u = sysfs::event_uevent(device);
+        let mouse = device != KEYBOARD
+            && device != TOUCHSCREEN
+            && !self.0.lock().unwrap().pads.contains_key(&device);
+        if mouse {
+            u += "MOUSE_WHEEL_CLICK_ANGLE=1\nMOUSE_WHEEL_CLICK_ANGLE_HORIZONTAL=1\n";
+        }
+        u
+    }
 }
 
 fn bitmap(size: usize, bits: impl IntoIterator<Item = usize>) -> Vec<u8> {
@@ -1332,6 +1348,23 @@ mod tests {
             "KEY=10000 0 0 0 1ffffffffffffff ffffffffffffffff ffffffffffffffff fffffffffffffffe\n"
         ));
         assert_eq!(nodes.uevent(MOUSE), None);
+    }
+
+    #[test]
+    fn a_mouse_event_node_has_a_one_degree_wheel_click() {
+        let mut devices = Devices::default();
+        devices.keys.insert(MOUSE, [0; 96]);
+        let nodes = Nodes(Arc::new(Mutex::new(devices)));
+        assert_eq!(
+            nodes.event_uevent(MOUSE),
+            format!(
+                "{}MOUSE_WHEEL_CLICK_ANGLE=1\nMOUSE_WHEEL_CLICK_ANGLE_HORIZONTAL=1\n",
+                sysfs::event_uevent(MOUSE)
+            )
+        );
+        for device in [KEYBOARD, TOUCHSCREEN] {
+            assert_eq!(nodes.event_uevent(device), sysfs::event_uevent(device));
+        }
     }
 
     #[test]
