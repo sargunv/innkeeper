@@ -524,12 +524,16 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
                 let state = if p.running { "running" } else { "stopped" };
                 let system = p.settings.system.name();
                 let display = p.settings.display.name();
-                let adb = if p.settings.adb {
-                    format!("adb {}", innkeeper_core::adb::serial(&p.settings))
-                } else {
-                    String::new()
+                // Android shows adb's serial and OpenHarmony its UDID, which
+                // a debug signing profile lists.
+                let id = match p.settings.system {
+                    System::Ohos => format!("udid {}", innkeeper_profile::profile::udid(&p.name)),
+                    System::Android if p.settings.adb => {
+                        format!("adb {}", innkeeper_core::adb::serial(&p.settings))
+                    }
+                    System::Android => String::new(),
                 };
-                println!("{:<16} {state:<8} {system:<8} {display:<14} {adb}", p.name);
+                println!("{:<16} {state:<8} {system:<8} {display:<14} {id}", p.name);
             }
         }
         ProfileCmd::Create { name: n, system } => {

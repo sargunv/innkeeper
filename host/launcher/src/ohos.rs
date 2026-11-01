@@ -76,7 +76,9 @@ fn dirs_writable(dir: &Path) -> Result<()> {
 /// inputs. The composer reads it from the `const.innkeeper.display`
 /// parameter, and DMS gets its dpi. At 320 dpi a 720x1280 panel is 360x640
 /// vp, a phone like the image's `const.product.devicetype`. The image's 160
-/// dpi would make it a tablet 720 vp wide.
+/// dpi would make it a tablet 720 vp wide. The profile's UDID is another
+/// input. OH would derive one from `ohos.boot.sn`, which the session doesn't
+/// set, and reads `const.product.udid` first.
 pub fn compose(cfg: &Config) -> Result<()> {
     let (r, layer) = (&cfg.paths.root, cfg.paths.ohos());
     let (w, h, dpi) = panel(cfg)?;
@@ -85,6 +87,8 @@ pub fn compose(cfg: &Config) -> Result<()> {
     key.update(cfg.image.img.as_os_str().as_encoded_bytes());
     key.update(fs::read(cfg.paths.share.join("manifest.tsv"))?);
     key.update(format!("{w}x{h}@{dpi}"));
+    let udid = crate::profile::udid(&cfg.paths.profile);
+    key.update(&udid);
     let key: String = key.finalize().iter().map(|b| format!("{b:02x}")).collect();
     let key_file = r.join(".compose-key");
     if fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
@@ -107,7 +111,7 @@ pub fn compose(cfg: &Config) -> Result<()> {
     fs::create_dir_all(&param)?;
     fs::write(
         param.join("innkeeper.para"),
-        format!("const.innkeeper.display={w}x{h}@{dpi}\n"),
+        format!("const.innkeeper.display={w}x{h}@{dpi}\nconst.product.udid={udid}\n"),
     )?;
     files_read_only(r)?;
     fs::write(&key_file, key)?;

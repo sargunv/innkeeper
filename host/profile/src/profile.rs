@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// The settings file in a profile's data directory.
 const FILE: &str = ".innkeeper-profile.toml";
@@ -97,6 +98,16 @@ impl std::fmt::Display for ProfileName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+/// The UDID of OpenHarmony profile `name`, as `bm get --udid` reports it.
+/// A debug signing profile lists the UDIDs of the devices that may install
+/// its apps. OpenHarmony derives a device's UDID as 64 uppercase hex digits
+/// of a SHA-256 hash, and this is the SHA-256 hash of the profile's name. A
+/// renamed profile gets a new UDID.
+pub fn udid(name: &str) -> String {
+    let hash = Sha256::digest(format!("innkeeper profile {name}"));
+    hash.iter().map(|b| format!("{b:02X}")).collect()
 }
 
 /// The profiles under `data_home` (`$XDG_DATA_HOME/innkeeper`), found from
@@ -458,6 +469,18 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn udids_are_stable_and_differ_by_name() {
+        let a = udid("harmony");
+        assert_eq!(a.len(), 64);
+        assert!(
+            a.chars()
+                .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+        );
+        assert_eq!(a, udid("harmony"));
+        assert_ne!(a, udid("harmony-2"));
     }
 
     #[test]
