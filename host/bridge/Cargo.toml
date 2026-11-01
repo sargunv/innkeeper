@@ -58,3 +58,7 @@ accesskit_unix = "0.24"
 [dev-dependencies]
 # Checks that every update the a11y service builds is one AccessKit accepts.
 accesskit_consumer = "0.39"
+# Writes the HAP that the apps service's tests read.
+zip = { version = "9.1.2", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }

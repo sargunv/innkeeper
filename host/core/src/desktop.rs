@@ -151,9 +151,12 @@ pub fn exec_args(exec: &str) -> Vec<String> {
     }
 }
 
-/// An installed Android app's launcher entry.
+/// An installed app's launcher entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppEntry {
+    /// The system the app runs on, which the entry's comment and keywords
+    /// name.
+    pub system: innkeeper_profile::profile::System,
     pub package: String,
     pub name: String,
     /// (desktop locale, label), e.g. ("pt_BR", "Calculadora").
@@ -221,19 +224,25 @@ impl AppEntry {
             }
             writeln!(s, "Name[{loc}]={}", escape_value(n)?)?;
         }
-        writeln!(s, "Comment=Android app ({})", escape_value(&self.package)?)?;
+        let system = self.system.title();
+        writeln!(s, "Comment={system} app ({})", escape_value(&self.package)?)?;
         if let Some(icon) = &self.icon {
             writeln!(s, "Icon={}", escape_value(icon)?)?;
         }
         writeln!(s, "Exec={}", exec_line(&self.run(), Some("%U"))?)?;
-        // With StartupNotify, the launcher passes an activation token
-        // (XDG_ACTIVATION_TOKEN), which `run` hands on to the app's window.
-        s.push_str("Terminal=false\nStartupNotify=true\n");
-        writeln!(
-            s,
-            "StartupWMClass={}",
-            escape_value(&app_id(&self.package))?
-        )?;
+        s.push_str("Terminal=false\n");
+        if self.system == innkeeper_profile::profile::System::Android {
+            // With StartupNotify, the launcher passes an activation token
+            // (XDG_ACTIVATION_TOKEN), which `run` hands on to the app's
+            // window. OpenHarmony apps share the profile's one window, so
+            // they have neither.
+            s.push_str("StartupNotify=true\n");
+            writeln!(
+                s,
+                "StartupWMClass={}",
+                escape_value(&app_id(&self.package))?
+            )?;
+        }
         if !self.categories.is_empty() {
             writeln!(s, "Categories={}", list(&self.categories)?)?;
         }
@@ -245,7 +254,7 @@ impl AppEntry {
                 .collect();
             writeln!(s, "MimeType={}", list(&mimes)?)?;
         }
-        s.push_str("Keywords=Android;\n");
+        writeln!(s, "Keywords={system};")?;
         writeln!(s, "X-Innkeeper-Package={}", escape_value(&self.package)?)?;
         writeln!(s, "X-Innkeeper-Profile={}", self.profile)?;
         if !self.version.is_empty() {
@@ -379,6 +388,7 @@ mod tests {
 
     fn entry() -> AppEntry {
         AppEntry {
+            system: innkeeper_profile::profile::System::Android,
             package: "org.wikipedia".into(),
             name: "Wikipedia".into(),
             names: vec![
@@ -424,6 +434,25 @@ mod tests {
         assert_eq!(Splash::parse("#000000", "0x1"), None);
         assert_eq!(Splash::parse("000000", "1x1"), None);
         assert!(!s.contains("x-scheme-handler/http"));
+    }
+
+    #[test]
+    fn renders_openharmony_app_entry() {
+        let mut e = entry();
+        e.system = innkeeper_profile::profile::System::Ohos;
+        e.splash = None;
+        let s = e.render().unwrap();
+        assert!(
+            s.contains("Comment=OpenHarmony app (org.wikipedia)\n"),
+            "{s}"
+        );
+        assert!(s.contains("Keywords=OpenHarmony;\n"), "{s}");
+        assert!(
+            s.contains(
+                "Exec=innkeeper --profile work run org.wikipedia %U\nTerminal=false\nCategories="
+            ),
+            "{s}"
+        );
     }
 
     #[test]

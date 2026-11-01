@@ -1,23 +1,29 @@
-//! The apps service (id 5). Apps installed inside Android, whether through an
-//! app store, PackageInstaller or `pm install`, get a desktop entry and
-//! icons, and removed apps lose them. The Innkeeper System app reports
-//! package events, and the entries are written with `innkeeper-core`. This
-//! service is the only writer of app entries. `innkeeper install` installs
-//! the package, and the entry comes from here.
+//! The apps service (id 5). Apps installed inside the guest, whether through
+//! an app store, Android's PackageInstaller, `pm install` or OpenHarmony's
+//! `bm install`, get a desktop entry and icons, and removed apps lose them.
+//! The Innkeeper System app reports package events, and the entries are
+//! written with `innkeeper-core`. This service is the only writer of app
+//! entries. `innkeeper install` installs the package, and the entry comes
+//! from here.
 //!
 //! | Type     | Request | Body                                                                                                      | Reply                                                                                                  |
 //! | -------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 //! | `0x0501` | HAVE    | name package, name version                                                                                | `u8`: 0 missing or outdated (send ADDED), 1 current, 2 not ours (leave it)                             |
-//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 splash` (ARGB; alpha 0: none), `u16 width`, `u16 height` (the launch window, dp), `u16 len` + the APK's Android path (≤ 1024 B, under `/data/app/`), `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
+//! | `0x0502` | ADDED   | name package, name version, name label, `i32 category` (-1 to 64), `u8 game`, `u32 splash` (ARGB; alpha 0: none), `u16 width`, `u16 height` (the launch window, dp), `u16 len` + the package file's guest path (≤ 1024 B), `u32 len`; fd: sealed memfd | The blob is icons: repeated `u32 size`, `u32 len`, PNG (square, ≤ 512, at most 8, ≤ 4 MiB all)         |
 //! | `0x0503` | REMOVED | name package                                                                                              |                                                                                                        |
 //!
 //! On each connection the system app sends HAVE for every launchable user
 //! app, so installs made while the bridge was away catch up. After that it
 //! follows package broadcasts.
 //!
-//! The bridge reads the installed APK with `innkeeper-core`'s parser to get
-//! the entry's localized names and URL schemes. Android's `/data` is the
-//! profile's data dir. An entry for another profile is left alone, and an
+//! The package file is the installed base APK, an `.apk` under `/data/app/`,
+//! or on OpenHarmony the HAP of the app's launcher ability, a `.hap` under
+//! `/data/app/el1/bundle/public/`. The bridge reads it with
+//! `innkeeper-core`'s parsers to get the entry's localized names and URL
+//! schemes. The guest's `/data` is the profile's data dir. OpenHarmony's
+//! system app sends an empty label and no icons, so the entry takes its name
+//! from the HAP, and the bridge renders the HAP's icon with the mask from the
+//! image's system resources. An entry for another profile is left alone, and an
 //! uninstall inside Android removes this profile's entry. In a test session
 //! every request succeeds and does nothing, so tests don't fill the user's
 //! app menu.
@@ -26,7 +32,8 @@ use std::os::fd::OwnedFd;
 use std::sync::Arc;
 
 use innkeeper_core::desktop::{self, AppEntry};
-use innkeeper_core::{validate, xdg};
+use innkeeper_core::{hap, validate, xdg};
+use innkeeper_profile::profile::System;
 
 use crate::ipc::blob;
 use crate::ipc::server::{Peer, Reply, Service};
@@ -66,8 +73,8 @@ pub enum Request {
         /// window size in dp.
         splash: u32,
         window: (u16, u16),
-        /// The installed base APK's path in Android.
-        apk: String,
+        /// The guest path of the installed base APK or of the HAP.
+        path: String,
         icons_len: u32,
     },
     Removed {
@@ -98,16 +105,33 @@ fn package(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     Ok(p)
 }
 
-/// Reads the APK's Android path as `u16 len` + UTF-8, at most 1024 bytes. It
-/// must be an `.apk` under `/data/app/` with no `..`.
-fn apk_path(r: &mut Reader<'_>) -> Result<String, DecodeError> {
+/// Where OpenHarmony installs HAPs.
+const HAP_DIR: &str = "/data/app/el1/bundle/public/";
+
+/// The system whose package file `path` is: an `.apk` under `/data/app/`,
+/// or a `.hap` under [`HAP_DIR`].
+fn path_system(path: &str) -> Option<System> {
+    if path.split('/').any(|c| c == "..") {
+        None
+    } else if path.starts_with(HAP_DIR) && path.ends_with(".hap") {
+        Some(System::Ohos)
+    } else if path.starts_with("/data/app/") && path.ends_with(".apk") {
+        Some(System::Android)
+    } else {
+        None
+    }
+}
+
+/// Reads the package file's guest path as `u16 len` + UTF-8, at most 1024
+/// bytes. [`path_system`] must accept it.
+fn package_path(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     let n = r.u16()? as usize;
     if n > 1024 {
-        return Err(DecodeError::Invalid("apk path"));
+        return Err(DecodeError::Invalid("package path"));
     }
-    let p = std::str::from_utf8(r.take(n)?).map_err(|_| DecodeError::Invalid("apk path"))?;
-    if !p.starts_with("/data/app/") || !p.ends_with(".apk") || p.split('/').any(|c| c == "..") {
-        return Err(DecodeError::Invalid("apk path"));
+    let p = std::str::from_utf8(r.take(n)?).map_err(|_| DecodeError::Invalid("package path"))?;
+    if path_system(p).is_none() {
+        return Err(DecodeError::Invalid("package path"));
     }
     Ok(p.to_string())
 }
@@ -135,7 +159,7 @@ pub fn decode(t: u16, body: &[u8]) -> Result<Request, DecodeError> {
                 game: r.bool()?,
                 splash: r.u32()?,
                 window: (r.u16()?, r.u16()?),
-                apk: apk_path(&mut r)?,
+                path: package_path(&mut r)?,
                 icons_len: r.u32()?,
             }
         }
@@ -163,7 +187,7 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
             game,
             splash,
             window,
-            apk,
+            path,
             icons_len,
         } => {
             w = Writer::message(ty::ADDED, tag);
@@ -175,8 +199,8 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
                 .u32(*splash)
                 .u16(window.0)
                 .u16(window.1)
-                .u16(apk.len() as u16);
-            w.0.extend_from_slice(apk.as_bytes());
+                .u16(path.len() as u16);
+            w.0.extend_from_slice(path.as_bytes());
             w.u32(*icons_len);
         }
         Request::Removed { package } => {
@@ -215,21 +239,33 @@ pub struct Config {
     pub dirs: xdg::Dirs,
     /// The profile that entries are made for.
     pub profile: innkeeper_profile::profile::ProfileName,
-    /// Android's `/data` on the host, which holds installed APKs.
+    /// The profile's system.
+    pub system: System,
+    /// The guest's `/data` on the host, which holds installed packages.
     pub data: std::path::PathBuf,
+    /// OpenHarmony's icon mask as a PNG, if the image has one.
+    pub mask: Option<Vec<u8>>,
 }
 
 impl Config {
     pub fn from_env(
         enabled: bool,
         profile: innkeeper_profile::profile::ProfileName,
+        system: System,
         data: std::path::PathBuf,
     ) -> Config {
+        // The bridge runs in the session's sandbox, whose `/system` is the
+        // guest's.
+        let mask = (system == System::Ohos)
+            .then(|| hap::icon::icon_mask(std::path::Path::new(hap::icon::SYSTEM_RESOURCES)))
+            .flatten();
         Config {
             enabled,
             dirs: xdg::Dirs::from_env(),
             profile,
+            system,
             data,
+            mask,
         }
     }
 
@@ -260,6 +296,7 @@ impl Config {
 }
 
 /// What ADDED says about an app.
+#[derive(Clone)]
 struct Added {
     package: String,
     version: String,
@@ -268,17 +305,56 @@ struct Added {
     game: bool,
     splash: u32,
     window: (u16, u16),
-    apk: String,
+    path: String,
 }
 
-/// The entry for `a`, plus the localized names and URL schemes from its APK
-/// (`info`, if the APK could be read).
+/// What the entry takes from the installed package file.
+#[derive(Default)]
+struct FileInfo {
+    /// The label in the default locale.
+    label: String,
+    /// (locale tag, label) pairs.
+    labels: Vec<(String, String)>,
+    schemes: Vec<String>,
+    app_category: Option<i32>,
+    is_game: bool,
+}
+
+impl From<innkeeper_core::apk::ApkInfo> for FileInfo {
+    fn from(i: innkeeper_core::apk::ApkInfo) -> Self {
+        FileInfo {
+            label: i.label,
+            labels: i.labels,
+            schemes: i.schemes,
+            app_category: i.app_category,
+            is_game: i.is_game,
+        }
+    }
+}
+
+impl From<hap::HapInfo> for FileInfo {
+    fn from(i: hap::HapInfo) -> Self {
+        FileInfo {
+            label: i.label,
+            labels: i.labels,
+            schemes: i.schemes,
+            ..FileInfo::default()
+        }
+    }
+}
+
+/// The entry for `a` on `system`, plus the labels and URL schemes from its
+/// package file (`info`, if the file could be read). The system app's label
+/// is the name, or else the file's default label.
 fn entry(
     profile: &innkeeper_profile::profile::ProfileName,
+    system: System,
     a: Added,
-    info: Option<&innkeeper_core::apk::ApkInfo>,
+    info: Option<&FileInfo>,
 ) -> AppEntry {
-    let name = validate::label(&a.label).unwrap_or_else(|| a.package.clone());
+    let name = validate::label(&a.label)
+        .or_else(|| validate::label(&info?.label))
+        .unwrap_or_else(|| a.package.clone());
     let mut seen = std::collections::BTreeSet::new();
     let names = info
         .map(|i| {
@@ -291,6 +367,7 @@ fn entry(
         .unwrap_or_default();
     let (w, h) = a.window;
     AppEntry {
+        system,
         package: a.package,
         name,
         names,
@@ -334,16 +411,27 @@ impl AppsService {
         self
     }
 
-    fn added(&self, a: Added, icons: Vec<(u32, Vec<u8>)>) -> Reply {
+    fn added(&self, a: Added, mut icons: Vec<(u32, Vec<u8>)>) -> Reply {
+        if path_system(&a.path) != Some(self.cfg.system) {
+            return Reply::err(-EINVAL);
+        }
         if self.cfg.have(&a.package, &a.version) != have::MISSING {
             return Reply::ok();
         }
-        let host = self.cfg.data.join(a.apk.trim_start_matches("/data/"));
-        let info = innkeeper_core::apk::read(&host)
-            .map_err(|e| crate::warn!("apps: {}: read the APK: {e:#}", a.package))
-            .ok();
+        let host = self.cfg.data.join(a.path.trim_start_matches("/data/"));
+        let info: Option<FileInfo> = match self.cfg.system {
+            System::Android => innkeeper_core::apk::read(&host).map(FileInfo::from),
+            System::Ohos => {
+                if icons.is_empty() {
+                    icons = hap::icons(&host, self.cfg.mask.as_deref(), xdg::ICON_SIZES);
+                }
+                hap::read(&host).map(FileInfo::from)
+            }
+        }
+        .map_err(|e| crate::warn!("apps: {}: read {}: {e:#}", a.package, a.path))
+        .ok();
         let pkg = a.package.clone();
-        let mut entry = entry(&self.cfg.profile, a, info.as_ref());
+        let mut entry = entry(&self.cfg.profile, self.cfg.system, a, info.as_ref());
         // The record is written before the portal's dialog shows, so a HAVE
         // in the meantime finds it current.
         let text = match xdg::write_record(&self.cfg.dirs, &mut entry, &icons) {
@@ -446,7 +534,7 @@ impl Service for AppsService {
                 game,
                 splash,
                 window,
-                apk,
+                path,
                 icons_len,
             } => {
                 let fd = fds.pop().expect("checked above");
@@ -467,7 +555,7 @@ impl Service for AppsService {
                         game,
                         splash,
                         window,
-                        apk,
+                        path,
                     },
                     icons,
                 )
@@ -519,7 +607,7 @@ mod tests {
                 game: false,
                 splash: 0xff20_2124,
                 window: (412, 915),
-                apk: "/data/app/~~x==/org.example.app-y==/base.apk".into(),
+                path: "/data/app/~~x==/org.example.app-y==/base.apk".into(),
                 icons_len: 1000,
             },
             Request::Removed {
@@ -557,7 +645,7 @@ mod tests {
             game: false,
             splash: 0xff20_2124,
             window: (412, 915),
-            apk: format!("/data/app/~~x==/{pkg}-y==/base.apk"),
+            path: format!("/data/app/~~x==/{pkg}-y==/base.apk"),
         }
     }
 
@@ -579,7 +667,13 @@ mod tests {
             schemes: vec!["exa".into()],
             web_hosts: vec![],
         };
-        let e = entry(&profile, added("org.ex.a", "1"), Some(&info));
+        let info = FileInfo::from(info);
+        let e = entry(
+            &profile,
+            System::Android,
+            added("org.ex.a", "1"),
+            Some(&info),
+        );
         assert_eq!(e.names, [("de".to_string(), "A DE".to_string())]);
         assert_eq!(e.schemes, ["exa"]);
         assert_eq!(e.categories, ["AudioVideo", "Audio"]);
@@ -595,27 +689,46 @@ mod tests {
         // there is no splash without a colour.
         let mut a = added("org.ex.a", "1");
         a.splash = 0x0020_2124;
-        let e = entry(&profile, a, None);
+        let e = entry(&profile, System::Android, a, None);
         assert!(e.names.is_empty() && e.schemes.is_empty() && e.splash.is_none());
         assert_eq!(e.name, "A");
+        // Without the system app's label, the file's default label names the
+        // entry, and the package name stands in for both.
+        let mut a = added("org.ex.a", "1");
+        a.label = String::new();
+        assert_eq!(
+            entry(&profile, System::Android, a.clone(), Some(&info)).name,
+            "A"
+        );
+        assert_eq!(entry(&profile, System::Android, a, None).name, "org.ex.a");
     }
 
     #[test]
-    fn apk_paths_stay_under_data_app() {
+    fn package_paths_stay_under_data_app() {
         let body = |p: &str| {
             let mut w = Writer::default();
             w.u16(p.len() as u16);
             w.0.extend_from_slice(p.as_bytes());
             w.into_vec()
         };
-        let ok = body("/data/app/~~x==/org.ex.a-y==/base.apk");
-        assert!(apk_path(&mut Reader::new(&ok)).is_ok());
+        for (ok, system) in [
+            ("/data/app/~~x==/org.ex.a-y==/base.apk", System::Android),
+            (
+                "/data/app/el1/bundle/public/org.ex.a/entry.hap",
+                System::Ohos,
+            ),
+        ] {
+            assert!(package_path(&mut Reader::new(&body(ok))).is_ok());
+            assert_eq!(path_system(ok), Some(system));
+        }
         for bad in [
             "/data/app/../../etc/passwd.apk",
+            "/data/app/el1/bundle/public/../../../x.hap",
             "/system/app/x/base.apk",
             "/data/app/x/base.so",
+            "/data/app/x/entry.hap",
         ] {
-            assert!(apk_path(&mut Reader::new(&body(bad))).is_err(), "{bad}");
+            assert!(package_path(&mut Reader::new(&body(bad))).is_err(), "{bad}");
         }
     }
 
@@ -631,7 +744,9 @@ mod tests {
                 portal: None,
             },
             profile: innkeeper_profile::profile::ProfileName::new("t").unwrap(),
+            system: System::Android,
             data: tmp.join("android-data"),
+            mask: None,
         });
         let exec = |pkg: &str| {
             desktop::exec_line(
@@ -643,6 +758,10 @@ mod tests {
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
         assert_eq!(cfg.have("org.ex.a", "1"), have::MISSING);
+        // A HAP isn't an Android package.
+        let mut hap = added("org.ex.a", "1");
+        hap.path = "/data/app/el1/bundle/public/org.ex.a/entry.hap".into();
+        assert_eq!(s.added(hap, vec![]).status, -EINVAL);
         // The APK isn't there, so the entry is written without its data.
         let r = s.added(added("org.ex.a", "1"), vec![(48, png(48))]);
         assert_eq!(r.status, 0);
@@ -676,6 +795,57 @@ mod tests {
                 .icon_path(48, "dev.sargunv.innkeeper.org.ex.a")
                 .exists()
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn openharmony_entries_come_from_the_hap() {
+        use std::io::Write;
+        let tmp = crate::test_dir("apps-hap");
+        let cfg = Arc::new(Config {
+            enabled: true,
+            dirs: xdg::Dirs {
+                data: tmp.join("data"),
+                config: tmp.join("config"),
+                cache: tmp.join("cache"),
+                portal: None,
+            },
+            profile: innkeeper_profile::profile::ProfileName::new("t").unwrap(),
+            system: System::Ohos,
+            data: tmp.join("ohos-data"),
+            mask: None,
+        });
+        let dir = cfg.data.join("app/el1/bundle/public/org.ex.h");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.join("entry.hap")).unwrap());
+        zip.start_file("module.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(
+            br#"{"app": {"bundleName": "org.ex.h", "label": "Harmony"},
+                 "module": {"name": "entry", "abilities": [{"name": "Main", "exported": true,
+                   "skills": [{"entities": ["entity.system.browsable"],
+                               "actions": ["ohos.want.action.viewData"],
+                               "uris": [{"scheme": "harmony"}]}]}]}}"#,
+        )
+        .unwrap();
+        zip.finish().unwrap();
+        let s = AppsService::new(cfg.clone(), &Peer::test());
+        let mut a = added("org.ex.h", "1.0");
+        a.label = String::new();
+        // An APK isn't an OpenHarmony package.
+        assert_eq!(s.added(a.clone(), vec![]).status, -EINVAL);
+        a.path = "/data/app/el1/bundle/public/org.ex.h/entry.hap".into();
+        assert_eq!(s.added(a, vec![]).status, 0);
+        let text = std::fs::read_to_string(cfg.dirs.app_desktop("org.ex.h")).unwrap();
+        for line in [
+            "Name=Harmony\n",
+            "Comment=OpenHarmony app (org.ex.h)\n",
+            "MimeType=x-scheme-handler/harmony;\n",
+            "X-Innkeeper-Version=1.0\n",
+        ] {
+            assert!(text.contains(line), "{line:?} in {text}");
+        }
+        assert_eq!(cfg.have("org.ex.h", "1.0"), have::CURRENT);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

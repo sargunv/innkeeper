@@ -360,6 +360,7 @@ mod tests {
             portal: None,
         };
         let mut e = AppEntry {
+            system: innkeeper_profile::profile::System::Android,
             package: "org.example.app".into(),
             name: "Example".into(),
             names: vec![],
@@ -424,6 +425,7 @@ mod tests {
             portal: None,
         };
         let entry = |pkg: &str, profile: &str| AppEntry {
+            system: innkeeper_profile::profile::System::Android,
             package: pkg.into(),
             name: pkg.into(),
             names: vec![],
