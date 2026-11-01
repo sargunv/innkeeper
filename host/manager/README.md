@@ -1,83 +1,97 @@
 # innkeeper-manager
 
-The Innkeeper app (`dev.sargunv.Innkeeper`, GTK 4 and libadwaita): open or drop
-an APK, see what it is and which permissions it wants, install it, then open,
-configure or remove it from a list. `bin/innkeeper-manager` plus its desktop
-data in `data/` (entry, metainfo, icon and the `.apks`/`.xapk`/`.apkm` MIME
-types), built by `mise run build:host`.
-`data/icons/dev.sargunv.Innkeeper.source.svg` is the editable App Icon Preview
-source of the shipped icon.
+The manager is the Innkeeper app (`dev.sargunv.Innkeeper`), built with GTK 4 and
+libadwaita. A user opens or drops an APK, sees what it is and which permissions
+it wants, and installs it. A list then lets the user open, configure or remove
+each app. `mise run build:host` builds `bin/innkeeper-manager` and its desktop
+data in `data/`: the desktop entry, the metainfo, the icon and the MIME types
+for `.apks`, `.xapk` and `.apkm`. `data/icons/dev.sargunv.Innkeeper.source.svg`
+is the editable App Icon Preview source of the shipped icon.
 
-Start reading at `src/window.rs` (the list, the session row, drag and drop).
-Every core call runs on a worker thread (`src/worker.rs`), so the UI thread
-never blocks on reading APKs, the session or the package manager. Tests:
-`cargo test -p innkeeper-manager` (error, permission and progress texts). For
-screenshots, use the nested desktop in
+Start reading at `src/window.rs`, which has the list, the session row and drag
+and drop. Every core call runs on a worker thread (`src/worker.rs`), so reading
+APKs, the session or the package manager doesn't block the UI thread.
+`cargo test -p innkeeper-manager` tests the error, permission and progress
+texts. For screenshots, use the nested desktop in
 [docs/development.md](../../docs/development.md).
 
 ## Main window
 
 - **APK handler:** the desktop entry runs `innkeeper-manager %F` and declares
-  only the APK and bundle types, so "Open With" offers the manager for those;
-  `mise run package -- --install` installs it for a checkout's stage. It is
-  single-instance: opening another APK adds an install page to the running
-  window.
-- **First run** prepares the Android image ("Preparing Android").
+  only the APK and bundle types, so "Open With" offers the manager for those
+  files. `mise run package -- --install` installs the manager from a checkout's
+  stage. The manager runs as a single instance. Opening another APK adds an
+  install page to the running window.
+- **First run** prepares the Android image and shows "Preparing Android".
 - **The list** comes from the profile's desktop entries, so it shows without
-  booting Android, and a directory monitor follows CLI changes. At startup it
-  repairs stale entries as `innkeeper list` does. A row shows a spinner while
-  its app opens or uninstalls, and **Open** while it has windows.
-- **Session state** follows D-Bus name ownership and the bridge's `State` /
-  `Changed` API, including windows opened or closed elsewhere; nothing polls.
+  booting Android. A directory monitor picks up changes made with the CLI. At
+  startup, the manager repairs stale entries the same way `innkeeper list` does.
+  A row shows a spinner while its app opens or uninstalls. It shows **Open**
+  while the app has windows.
+- **Session state** follows D-Bus name ownership and the bridge's `State` and
+  `Changed` API. This includes windows opened or closed outside the manager.
+  Nothing polls.
 
 ## Install page
 
-`src/install.rs`. Adaptive icons are rendered on the host without starting
-Android: static PNG/WebP layers, solid colours and vector paths (groups,
-transforms, strokes, alpha), resolved from the APK's binary resources, with a
-circular mask and the adaptive overscan cropped. Theme tints, colour state
-lists, gradients, clip paths, trimmed paths, animated drawables, inset and
-layer-list drawables, and resources only another split supplies fall back to a
-bitmap icon, then the generic one. Android renders the installed icon.
+`src/install.rs` renders adaptive icons on the host without starting Android. It
+handles static PNG and WebP layers, solid colours and vector paths (groups,
+transforms, strokes and alpha), resolved from the APK's binary resources. It
+applies a circular mask and crops the adaptive overscan. Some icons fall back to
+a bitmap icon, and then to the generic icon. These include theme tints, colour
+state lists, gradients, clip paths, trimmed paths, animated drawables, inset and
+layer-list drawables, and resources that only another split supplies. Android
+renders the icon after installation.
 
 ## App page
 
-`src/app.rs`: storage use, clear cache or data, runtime permission switches,
-Escape as Back, Run in Background, force stop and uninstall, through the
-bridge's session D-Bus API ([session.rs](../bridge/src/session.rs)). Clearing
-data and uninstalling ask first. Controls stay disabled until Android answers,
-then every value is read again; an error offers a fresh read.
+`src/app.rs` shows storage use and has controls to clear the cache or data,
+runtime permission switches, Escape as Back, Run in Background, force stop and
+uninstall. They go through the bridge's session D-Bus API
+([session.rs](../bridge/src/session.rs)). Clearing data and uninstalling ask for
+confirmation. Controls stay disabled until Android answers, and then every value
+is read again. An error offers to read the values again.
 
 ## Profile Settings
 
-`src/preferences.rs` (Ctrl+,): the shown profile's settings, read without
-starting Android: its Display, windowed or a phone preset for its next start
-([phone mode](../../docs/display.md#phone-mode)); following the desktop's
-appearance, language/region and clock (each on by default); its idle timeout;
-app-menu mirroring; and an adb switch that applies at once
-([README](../../README.md#for-android-developers)). It also says that apps
-aren't isolated from each other and opens Android Settings in its own window.
+`src/preferences.rs` (Ctrl+,) shows the settings of the profile in the window.
+It reads them without starting Android. The page has these settings:
 
-- Settings live in the profile's one settings file
-  ([session.md](../../docs/session.md#profiles)). A running profile takes
-  changes through `Session1`'s `ReloadSettings`: desktop following, mirroring
-  and the idle timeout change live, the display at the next start.
-- Turning off desktop following keeps Android's current value and leaves later
-  changes in Android Settings alone. Turning off mirroring keeps existing
-  launchers; turning it back on adds apps installed meanwhile.
-- When idle, Android stops after 2 minutes by default (1 to 120). **Keep
-  Running** is every profile's: no profile stops when idle, and the Background
-  portal's one login command starts them all. If the portal denies it, the
-  setting stays off.
+- **Display:** windowed, or a phone preset, used from the next start
+  ([phone mode](../../docs/display.md#phone-mode)).
+- **Desktop following:** the desktop's appearance, its language and region, and
+  its clock. Each one is on by default.
+- **Idle timeout.**
+- **App-menu mirroring.**
+- **adb:** a switch that applies immediately
+  ([README](../../README.md#for-android-developers)).
+
+The page also says that apps aren't isolated from each other, and it opens
+Android Settings in a separate window.
+
+- A profile keeps its settings in one settings file
+  ([session.md](../../docs/session.md#profiles)). A running profile picks up
+  changes through `Session1`'s `ReloadSettings`. Desktop following, mirroring
+  and the idle timeout change while the profile runs. The display changes at the
+  next start.
+- Turning off desktop following keeps Android's current value. Later changes in
+  Android Settings stay as they are. Turning off mirroring keeps existing
+  launchers. Turning it back on adds apps installed in the meantime.
+- By default, an idle Android stops after 2 minutes. The timeout can be 1 to 120
+  minutes. **Keep Running** applies to every profile. With it on, no profile
+  stops when idle, and one login command from the Background portal starts them
+  all. If the portal denies the request, the setting stays off.
 
 ## Profiles
 
-`src/profiles.rs`: every profile and whether it runs, to create, rename, delete,
-start and stop. The window shows one profile's apps, named under its title;
-**New Profile** picks its system, Android or OpenHarmony. An OpenHarmony
-profile's window shows only its session, and its settings only its display: it
-installs no apps yet. **Show Apps** switches to another, which the manager shows
-again the next time it opens (`$XDG_STATE_HOME/innkeeper/manager-profile`;
-`--profile NAME` overrides it). Opening the manager with no profile creates
-`default`. Deleting asks first and removes the profile's apps, data, settings
-and app-menu entries.
+`src/profiles.rs` lists every profile and whether it runs. It creates, renames,
+deletes, starts and stops profiles. The window shows one profile's apps, and the
+profile's name is under the window title. **New Profile** asks for the profile's
+system, Android or OpenHarmony. An OpenHarmony profile installs no apps yet, so
+its window shows only its session and its settings show only its display. **Show
+Apps** switches the window to another profile. The manager shows that profile
+again the next time it opens. It stores the choice in
+`$XDG_STATE_HOME/innkeeper/manager-profile`, and `--profile NAME` overrides it.
+Opening the manager with no profile creates `default`. Deleting a profile asks
+for confirmation and removes the profile's apps, data, settings and app-menu
+entries.

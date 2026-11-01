@@ -1,20 +1,21 @@
 # GitHub Actions
 
-`CI` runs on pull requests and pushes to main: lint and one release build, then
-unit tests, e2e and OpenHarmony's boot (`test:e2e -- ohos`) in parallel on
-separate runners from that build's `stage` artifact (release tarball, test
-probes and `manifest.tsv`; tarballs keep modes and symlinks). The `checks` job
-is the single required gate: it fails unless every job succeeded, so a failed
-dependency cannot turn into a green skip. Inspect a run with
-`gh run view <run-id>`.
+The `CI` workflow runs on pull requests and on pushes to main. A lint job and a
+release build run first. The unit tests, e2e and OpenHarmony's boot
+(`test:e2e -- ohos`) then run in parallel on separate runners. They use the
+build's `stage` artifact, which holds the release tarball, the test probes and
+`manifest.tsv`. The tarballs keep file modes and symlinks. The `checks` job is
+the only required gate. It fails unless every other job succeeded, so a failed
+dependency can't turn into a skipped job that counts as green. Use
+`gh run view <run-id>` to inspect a run.
 
-`Release` publishes the Flatpak bundles
+The `Release` workflow publishes the Flatpak bundles
 ([packaging/flatpak](../../packaging/flatpak/README.md#release)).
 
-The runners are Ubuntu 26.04, which supplies the GTK baseline, Mutter and
+The runners use Ubuntu 26.04, which provides the GTK baseline, Mutter and
 Flatpak. `setup.sh` is the only script that uses sudo, and it refuses to run
 outside GitHub Actions. Tests run the stage through the development Flatpak
-driver on a `tests/nested.sh` desktop, headless Mutter with llvmpipe, so
-sessions are named and memory capped as locally. The workflow files say what
-each cache is keyed on and why. Android session data is never cached, and no
+driver on a `tests/nested.sh` desktop with headless Mutter and llvmpipe. As in
+local runs, the sessions are named and memory capped. The workflow files explain
+what each cache is keyed on and why. Android session data is never cached. No
 Android image or third-party APK is uploaded as an artifact.

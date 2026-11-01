@@ -8,15 +8,15 @@
   <description>
     <p>
       Innkeeper runs Android and OpenHarmony apps on Linux. Each Android app
-      gets its own window, app-menu entry and icon, with sound, clipboard,
-      notifications and file access through the desktop. Android itself runs
-      rootless, in a sandboxed session of its own.
+      gets its own window, app menu entry and icon. Apps play sound and use the
+      desktop's clipboard, notifications and file pickers. Android runs without
+      root, in a sandboxed session.
     </p>
     <p>
-      A profile can run OpenHarmony instead (experimental): its built-in apps
-      show in one phone window.
+      A profile can run OpenHarmony instead. OpenHarmony support is
+      experimental, and its built-in apps show in one phone window.
     </p>
-    <p>Open an APK file to install it, then launch the app from the app menu.</p>
+    <p>To install an app, open its APK file. Then launch the app from the app menu.</p>
   </description>
   <launchable type="desktop-id">dev.sargunv.Innkeeper.desktop</launchable>
   <provides>
