@@ -310,7 +310,7 @@ impl Page {
     fn create(self: &Rc<Self>) {
         let body = |system: Option<&System>| match system {
             Some(System::Ohos) => {
-                "OpenHarmony profiles can’t install apps. The system can’t be changed later."
+                "OpenHarmony profiles install HAP files. The system can’t be changed later."
             }
             _ => "The system can’t be changed later.",
         };

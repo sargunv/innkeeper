@@ -125,7 +125,13 @@ fn details(
     page.set_title(&format!("Install {}", p.label));
     let installed = w.installed(&p.package);
 
-    if !p.runs_here() {
+    // The profile installs only apps for the system it runs.
+    let other_system = (p.system() != w.system()).then(|| p.system().title());
+    if let Some(title) = other_system {
+        let b = adw::Banner::new(&format!("Made for {title}"));
+        b.set_revealed(true);
+        toolbar.add_top_bar(&b);
+    } else if !p.runs_here() {
         let b = adw::Banner::new("Not built for this computer");
         b.set_revealed(true);
         toolbar.add_top_bar(&b);
@@ -169,7 +175,7 @@ fn details(
         .use_underline(true)
         .halign(gtk::Align::Center)
         .css_classes(["pill", "suggested-action"])
-        .sensitive(p.runs_here())
+        .sensitive(p.runs_here() && other_system.is_none())
         .build();
     let progress_label = gtk::Label::new(Some("Preparing…"));
     let progress = gtk::Box::builder()
