@@ -23,7 +23,8 @@ To test, run `mise run build` and then `mise run test:e2e -- ohos`. The test
 fetches the image if needed. On a nested desktop it creates a fresh profile
 `e2e-ohos` with the CLI and starts it. Over `exec` it checks that the core
 system abilities, screen 0 and SceneBoard come up and that selftest passes
-([tests/boot.sh](tests/boot.sh)). It also checks that the window shows.
+([tests/boot.sh](tests/boot.sh)). It also checks that the window shows and that
+`bm` installs the image's calculator HAP.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
@@ -32,8 +33,9 @@ minute, so read early boot from the kmsg log.
 `mise run session -- exec` and `shell` run commands as root in OH's
 `/system/bin/sh`. They go through the exec relay from android/system/exec, built
 static against musl and started by `sys_prod/etc/init/innkeeper_exec.cfg`. Its
-native token holds `ohos.permission.DUMP` for `hidumper -ls`, `hilog -x` and
-`ps -A`.
+native token holds the permissions of hdcd, the image's `hdc shell` daemon. With
+them, `bm` installs, lists and removes bundles, `aa` starts and stops abilities,
+and `hidumper -ls`, `hilog -x` and `ps -A` work.
 
 ## Image
 
@@ -166,6 +168,10 @@ Android's system app reports activity.
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode
   per free block.
+- **Paths.** `/data` is a symlink to the profile's directory on the host.
+  installd resolves each code path with `realpath` and refuses any path outside
+  `/data/app/el1/bundle/`. The shim's `realpath` returns `/data` in place of the
+  host directory, so installs and other path checks see guest paths.
 - **Broker.** OH runs the same static musl broker as Android, because OH's root
   has no Bionic. With `INNKEEPER_GUEST=ohos` it also traps `open(2)`, because
   musl does not use `openat`. It serves `/etc/passwd` and `/etc/group` from
