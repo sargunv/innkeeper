@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// libdisplay_composer_vdi_impl.z.so: OpenHarmony's composer VDI, the C
-// functions the image's composer_host looks up by name
+// libdisplay_composer_vdi_impl.z.so is OpenHarmony's composer VDI. It exports
+// the C functions that the image's composer_host looks up by name
 // (drivers_interface display/composer/common/include/
 // display_vdi_adapter_interface.h).
 #include <errno.h>
@@ -18,8 +18,8 @@
 #include "innkeeper/bridge_client.h"
 #include "log.h"
 
-// libbegetutil's (base/startup/init interfaces/innerkits/include/
-// param/parameter.h): the value's length, or a negative error.
+// From libbegetutil (base/startup/init interfaces/innerkits/include/
+// param/parameter.h). Returns the value's length, or a negative error.
 extern "C" int GetParameter(
   const char* key, const char* def, char* value, uint32_t len
 );
@@ -40,9 +40,10 @@ constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205, kDisplayWindow = 0x0208;
 constexpr uint16_t kEvRelease = 0x4201;
 
-// The panel, and so the window: the const.innkeeper.display parameter,
-// <width>x<height>@<dpi>, which the launcher sets from the profile's display
-// and whose dpi it gives DMS too (host/launcher/src/ohos.rs).
+// The panel mode, which also sizes the window. It comes from the
+// const.innkeeper.display parameter, <width>x<height>@<dpi>, which the
+// launcher sets from the profile's display (host/launcher/src/ohos.rs). The
+// launcher also gives the dpi to DMS.
 struct Mode {
   uint32_t width = 720, height = 1280, dpi = 320;
 };
@@ -63,9 +64,9 @@ constexpr uint32_t fourcc(char a, char b, char c, char d) {
   return uint32_t(a) | uint32_t(b) << 8 | uint32_t(c) << 16 | uint32_t(d) << 24;
 }
 
-// OH formats name bytes in memory order; DRM's are little-endian words. A
-// panel shows no alpha, and render_service clears to transparent black, so
-// the window takes the target as opaque.
+// OH formats name bytes in memory order, and DRM formats name little-endian
+// words. A panel shows no alpha and render_service clears to transparent
+// black, so the window treats the target as opaque.
 uint32_t drmFormat(int32_t format) {
   switch (format) {
     case PIXEL_FMT_RGBA_8888:
@@ -86,7 +87,7 @@ struct Layer {
   int32_t type;
 };
 
-// The latest client target: a dup of its fd and its layout.
+// The latest client target, as a dup of its fd and its layout.
 struct Target {
   int fd = -1;
   int32_t width, height, stride, format;
@@ -96,8 +97,8 @@ struct Target {
 constexpr int kMaxBuffers = 4;
 struct Imported {
   ino_t ino;
-  uint32_t id;  // 0: free slot
-  bool busy;    // shown, until the bridge's RELEASE
+  uint32_t id;  // 0 marks a free slot
+  bool busy;    // set while shown, until the bridge's RELEASE
 };
 
 struct State {
@@ -142,7 +143,7 @@ void assign(lxvec<T>& v, const T* src, size_t n) {
 }
 
 void setString(lxstr& s, const char* v) {
-  const size_t n = strlen(v);  // < 23: stored inline
+  const size_t n = strlen(v);  // under 23, so stored inline
   memset(s.raw, 0, sizeof(s.raw));
   s.raw[0] = (unsigned char)(n << 1);
   memcpy(s.raw + 1, v, n);
@@ -161,7 +162,7 @@ void forgetImports() {
   pthread_cond_broadcast(&g.changed);
 }
 
-// Reconnects for the life of the process: without a bridge the display is
+// Reconnects for the life of the process. Without a bridge the display is
 // headless.
 void* bridgeLoop(void*) {
   lxb_backoff backoff{};
@@ -233,8 +234,8 @@ void present(const Target& c) {
     if (i.id && i.ino == st.st_ino) b = &i;
   }
   if (!b) {
-    // A new target: a free slot, else retire an idle import (render_service
-    // reallocated its targets).
+    // A new target takes a free slot, or else retires an idle import because
+    // render_service reallocated its targets.
     for (auto& i : g.imported) {
       if (!b && !i.id) b = &i;
     }
@@ -484,8 +485,8 @@ EXPORT int32_t RegDisplayVBlankIdleCallback(void*, void*) {
   return HDF_SUCCESS;
 }
 
-// Release fences: none. Commit returns only once the compositor is done with
-// every target but the new one.
+// There are no release fences, because Commit returns only once the
+// compositor is done with every target except the new one.
 EXPORT int32_t GetDisplayReleaseFence(
   uint32_t devId, lxvec<uint32_t>& layers, lxvec<int32_t>& fences
 ) {

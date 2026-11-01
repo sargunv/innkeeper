@@ -1,24 +1,25 @@
-# Extra androidboot.* values for the AOSP CI cuttlefish image (ci-<build>);
-# innkeeper-session adds them to the bootconfig, so they become ro.boot.*.
+# Extra androidboot.* values for the AOSP CI cuttlefish image (ci-<build>).
+# innkeeper-session adds them to the bootconfig, where they become ro.boot.*
+# properties.
 #
-# Vendor APEX selection, the mechanism cuttlefish's launcher uses: apexd
+# These values select vendor APEXes the way cuttlefish's launcher does. apexd
 # activates only the file named by ro.boot.vendor.apex.<apex name>, and "none"
-# drops the APEX (its services, VINTF fragments and feature files with it).
+# drops the APEX along with its services, VINTF fragments and feature files.
 # image/flatten-apex.sh applies the same rule. See image/README.md.
 
-# Software HALs (what launch_cvd selects for a guest without a TEE).
+# Software HALs, which launch_cvd selects for a guest without a TEE.
 androidboot.vendor.apex.com.android.hardware.keymint=com.android.hardware.keymint.rust_nonsecure
 androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure
 
-# Graphics: our allocator, mapper, composer3 and RADV/lavapipe
+# Our allocator, mapper, composer3 and RADV/lavapipe
 # (android/vendor/{graphics,vulkan}) replace minigbm, the image's composers and
 # gfxstream.
 androidboot.vendor.apex.com.android.hardware.graphics.composer=none
 androidboot.vendor.apex.com.google.cf.gralloc=none
 androidboot.vendor.apex.com.google.cf.vulkan=none
 
-# Health: ours (android/vendor/health) reports the host's battery; cuttlefish's
-# fakes a charging one.
+# Our health HAL (android/vendor/health) reports the host's battery.
+# Cuttlefish's fakes a charging one.
 androidboot.vendor.apex.com.google.cf.health=none
 
 # Devices that only exist in the cuttlefish VM (virtio consoles, vsock to the
@@ -37,17 +38,19 @@ androidboot.vendor.apex.com.android.hardware.gnss=none
 androidboot.vendor.apex.com.android.hardware.uwb=none
 androidboot.vendor.apex.com.android.hardware.usb=none
 androidboot.vendor.apex.com.android.hardware.boot=none
-# Lights talk to the cuttlefish host over vsock (the service panics without it).
+# The lights HAL talks to the cuttlefish host over vsock and panics without it.
 androidboot.vendor.apex.com.google.cf.light=none
-# Empty demo APEX; the image's own /vendor/bin/init_dev_config also disables it
+# An empty demo APEX. The image's /vendor/bin/init_dev_config also disables it
 # (ro.vendor.init_dev_config.path). apexd and flatten-apex.sh must agree.
 androidboot.vendor.apex.com.google.cf.disabled=none
-# Thread radio HAL: expects a cuttlefish instance node id (aborts with 0).
+# The Thread radio HAL expects a cuttlefish instance node id and aborts with 0.
 androidboot.vendor.apex.com.android.hardware.threadnetwork=none
 
-# Example HALs for hardware a desktop session doesn't have, each a resident
-# process for nothing (#28). Their clients cope with an absent HAL.
-# NNAPI's sample drivers (three processes); NNAPI runs on its own CPU path.
+# Example HALs for hardware that a desktop session doesn't have. Each one is a
+# resident process that serves nothing (#28), and their clients cope with an
+# absent HAL.
+# NNAPI's sample drivers are three processes. NNAPI runs on its CPU path
+# without them.
 androidboot.vendor.apex.com.android.hardware.neuralnetworks=none
 androidboot.vendor.apex.com.android.hardware.contexthub=none
 androidboot.vendor.apex.com.android.hardware.ir=none

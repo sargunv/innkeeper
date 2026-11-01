@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Derive the layer the session stacks right above the image
-# (host/launcher/src/sandbox.rs) into <out-dir>. The extracted image lost its
-# fs_config ownership: every file belongs to the invoking user (root in the
-# session), so a file meant for e.g. "0550 logd logd" is unusable by its real
-# owner.
+# Derives the layer that the session stacks directly above the image
+# (host/launcher/src/sandbox.rs) into <out-dir>. The extracted image has lost
+# its fs_config ownership. Every file belongs to the invoking user, who is root
+# in the session, so a file meant to be "0550 logd logd" is unusable by its
+# real owner.
 #   <partition>/  copies of image files with read/exec bits added.
 #   apex/         the APEX files whose owner Android verifies (clatd), with
 #                 their modes and the Android owner in the user.innkeeper.owner
@@ -49,7 +49,6 @@ relax system_ext "$img/system_ext"
 relax product "$img/product"
 relax odm "$img/odm"
 copy_apex_files
-# Each file's exact mode first, then its owner record.
 for e in "${apex_fs_config[@]}"; do
   read -r rel mode uid gid <<<"$e"
   [[ -e $out/apex/$rel ]] || continue

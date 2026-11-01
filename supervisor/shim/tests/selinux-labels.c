@@ -1,5 +1,5 @@
-// The libselinux file-label ABI over an owned test xattr. This permits both
-// absent and present labels without root or a host libselinux installation.
+// A stand-in for libselinux's file-label ABI that reads a user xattr, so tests
+// can set and clear labels without root or a host libselinux.
 #include <stdlib.h>
 #include <sys/xattr.h>
 

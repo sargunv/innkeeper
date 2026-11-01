@@ -2,19 +2,19 @@
 // Flatpak sandbox refuses or a host kernel answers differently
 // (supervisor/README.md, "The shim").
 //
-// SELinux: the session hides /sys/fs/selinux, so libselinux reports SELinux as
-// disabled and skips access checks, restorecon and app domain transitions. A
-// few call sites in init still assume an Android policy is loaded:
+// The session hides /sys/fs/selinux, so libselinux reports SELinux as disabled
+// and skips access checks, restorecon and app domain transitions. A few call
+// sites in init still assume that an Android policy is loaded:
 //
 //   * Service::Start computes a domain with security_compute_create(), which
 //     needs selinuxfs and fails, so no service without a seclabel can start.
-//   * The forked child calls setexeccon(seclabel); the host kernel's SELinux
+//   * The forked child calls setexeccon(seclabel). The host kernel's SELinux
 //     rejects Android contexts with EINVAL, and init treats that as fatal.
 //   * Sockets and files get setsockcreatecon()/setfscreatecon() contexts.
 //
 // Those calls succeed as no-ops. File contexts fall back to a synthetic label
 // on hosts without SELinux. Process and peer contexts keep their host labels,
-// used only in logs and checks libselinux already skips.
+// which appear only in logs and in checks that libselinux already skips.
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -93,9 +93,9 @@ NOOP_FILE_SETTER(setfilecon, const char*)
 NOOP_FILE_SETTER(lsetfilecon, const char*)
 NOOP_FILE_SETTER(fsetfilecon, int)
 
-// selinux_status_*: the status page lives in selinuxfs, which is hidden.
-// servicemanager CHECKs that selinux_status_open() succeeds. Report a
-// status that never changes (no policy reloads, permissive).
+// The selinux_status_* page lives in selinuxfs, which is hidden, and
+// servicemanager CHECKs that selinux_status_open() succeeds. These functions
+// report a permissive status that never changes and has no policy reloads.
 EXPORT int selinux_status_open(int fallback) {
   (void)fallback;
   return 0;
@@ -106,20 +106,20 @@ EXPORT int selinux_status_getenforce(void) { return 0; }
 EXPORT int selinux_status_policyload(void) { return 0; }
 EXPORT int selinux_status_deny_unknown(void) { return 0; }
 
-// Labelling files by writing the security.selinux xattr directly (bionic's
-// property area setup, restorecon fallbacks): the host kernel rejects Android
-// contexts, and bionic's __system_property_area_init() fails, which is fatal
-// for init. Pretend success for that one xattr; pass everything else through.
+// Some code labels files by writing the security.selinux xattr directly, such
+// as bionic's property area setup and restorecon fallbacks. The host kernel
+// rejects Android contexts, so bionic's __system_property_area_init() fails,
+// which is fatal for init. The xattr wrappers report success for that xattr.
 static int is_selinux_xattr(const char* name) {
   return name && strcmp(name, "security.selinux") == 0;
 }
 
-// The kernel rejects POSIX ACL entries
-// naming Android's uids and gids, which aren't mapped. vold gives
-// /data/media/<user> a default ACL (group media_rw/everybody) and fails user
-// storage preparation without it, and system_server then reboots to recovery
-// to wipe /data. Every Android process is the same kernel uid there, so the
-// ACL has nothing to grant: skip it.
+// The kernel rejects POSIX ACL entries that name Android's uids and gids,
+// which aren't mapped. vold gives /data/media/<user> a default ACL (group
+// media_rw/everybody) and fails user storage preparation without it, and
+// system_server then reboots to recovery to wipe /data. Every Android process
+// is the same kernel uid, so the ACL has nothing to grant and the wrappers
+// skip it. They pass other xattrs through.
 static int is_skipped_xattr(const char* name) {
   if (is_selinux_xattr(name)) return 1;
   return name && !strncmp(name, "system.posix_acl_", 17);
@@ -144,12 +144,12 @@ EXPORT int lsetxattr(
   return syscall(SYS_lsetxattr, path, name, value, size, flags);
 }
 
-// Resource limits and priorities. In a user namespace, raising a hard
-// rlimit, lowering nice below the host's RLIMIT_NICE, or picking RT policies
-// needs capabilities in the initial namespace. init treats a failed
-// setrlimit/setpriority in a service's "rlimit"/"priority" option as fatal
-// for that service (zygote has "priority -20"). Clamp limits to what we may
-// set and treat priority changes we aren't allowed to make as best-effort.
+// In a user namespace, raising a hard rlimit, lowering nice below the host's
+// RLIMIT_NICE, or picking RT policies needs capabilities in the initial
+// namespace. init treats a failed setrlimit/setpriority in a service's
+// "rlimit"/"priority" option as fatal for that service (zygote has
+// "priority -20"). These wrappers clamp limits to what the session may set and
+// treat refused priority changes as best-effort.
 
 EXPORT int setpriority(int which, id_t who, int prio) {
   long rc = syscall(SYS_setpriority, which, who, prio);
@@ -197,15 +197,15 @@ EXPORT int prlimit(
   return rc;
 }
 
-// Scope: the shim is LD_PRELOADed into init only. It has to be loaded by
-// path, and no single path is visible from every linker namespace (vendor
-// and APEX namespaces reject /system/lib64, and a bare name is only found in
-// some of them), so letting init's services inherit LD_PRELOAD makes some of
-// them fail to link. init's forked children still run the shim between fork
-// and exec, which is where init needs it. Services that need it themselves
-// get "setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so" in their rc.
-// In a Flatpak session init isn't pid 1; the broker gives it the role "init"
-// instead.
+// The broker LD_PRELOADs the shim into init, and init's services don't
+// inherit it. The shim has to be loaded by path, and no single path is visible
+// from every linker namespace. Vendor and APEX namespaces reject /system/lib64,
+// and only some namespaces find a bare name, so services that inherited
+// LD_PRELOAD would fail to link. init's forked children still run the shim
+// between fork and exec, which is where init needs it. Services that need the
+// shim themselves get "setenv LD_PRELOAD /system/lib64/libinnkeeper_shim.so"
+// in their rc. In a Flatpak session init isn't pid 1, so the broker gives it
+// the role "init" instead.
 __attribute__((constructor)) static void innkeeper_shim_init(void) {
   if (syscall(SYS_getpid) == 1 || shim_role("init")) {
     unsetenv("LD_PRELOAD");
@@ -213,11 +213,12 @@ __attribute__((constructor)) static void innkeeper_shim_init(void) {
   }
 }
 
-// The sandbox's seccomp filter fails mount, umount,
-// unshare and setns with EPERM, ahead of any filter of ours. Android's root is
-// already assembled (symlinks, see host/launcher/src/sandbox.rs) and has no
-// namespaces to make, so a refused call is treated as done: init's mounts,
-// zygote's per-app mount namespace and storage views, vold's binds.
+// The sandbox's seccomp filter fails mount, umount, unshare and setns with
+// EPERM before any filter of ours sees them. Android's root is already
+// assembled from symlinks (host/launcher/src/sandbox.rs) and needs no
+// namespaces, so the wrappers treat a refused call as done. That covers init's
+// mounts, zygote's per-app mount namespace and storage views, and vold's
+// binds.
 #include "fuse.h"
 
 static int do_open(const char* path, int flags, mode_t mode) {
@@ -267,13 +268,12 @@ EXPORT int unshare(int flags) {
 EXPORT int setns(int fd, int nstype) {
   return refused_ok(syscall(SYS_setns, fd, nstype));
 }
-// netd (role "netd"): the session
-// shares the host's network namespace, where netd may change nothing. The
-// kernel answers its rtnetlink requests (rules, routes, addresses) with
-// EPERM, and netd won't start without its routing rules: report them done.
-// Its routing then means nothing, as its marks (SO_MARK, bpfemu) and
-// firewall rules don't; sockets use the host's routes,
-// as every desktop app does.
+// For netd (role "netd"). The session shares the host's network namespace,
+// where netd may change nothing. The kernel answers its rtnetlink requests for
+// rules, routes and addresses with EPERM, and netd won't start without its
+// routing rules, so the shim reports them done. netd's routing then has no
+// effect, and neither do its marks (SO_MARK, bpfemu) or firewall rules.
+// Sockets use the host's routes, as every desktop app does.
 static int netlink_accept_state = -1;
 static void netlink_accept(int fd, void* buf, long n) {
   if (n <= 0) return;
@@ -286,7 +286,8 @@ static void netlink_accept(int fd, void* buf, long n) {
     domain != AF_NETLINK
   )
     return;
-  // An ack may be cut short: netd reads just the header and error code.
+  // An ack may be truncated, because netd reads only the header and error
+  // code.
   char* p = buf;
   while (n >= (long)(NLMSG_HDRLEN + sizeof(int))) {
     struct nlmsghdr* h = (struct nlmsghdr*)p;
@@ -331,10 +332,10 @@ EXPORT ssize_t __recvfrom_chk(
   return recvfrom(fd, buf, len, flags, addr, alen);
 }
 
-// lmkd (role "lmkd"): the kernel takes
-// PSI triggers with a window under 2 s (lmkd asks for 1 s) only from a
-// process with CAP_SYS_RESOURCE, which the sandbox never has. Widen the
-// window to 2 s; lmkd still polls the same memory pressure.
+// For lmkd (role "lmkd"). The kernel accepts a PSI trigger with a window under
+// 2 s only from a process with CAP_SYS_RESOURCE, which the sandbox lacks, and
+// lmkd asks for 1 s. psi_write rounds the window up to a multiple of 2 s, and
+// lmkd still polls the same memory pressure.
 static int psi_window_state = -1;
 static long psi_write(int fd, const void* buf, size_t n) {
   char kind[8], link[64], path[32], out[64];
@@ -360,8 +361,9 @@ static long psi_write(int fd, const void* buf, size_t n) {
 
 #include "oom.h"
 
-// lmkd only. Keep its Android scores for its own kill policy, but
-// write kernel scores that it can lower again when an app becomes foreground.
+// Used only in lmkd. lmkd keeps its Android scores for its own kill policy,
+// but the kernel gets scores that lmkd can lower again when an app comes to the
+// foreground.
 static long oom_write(int fd, const void* buf, size_t n) {
   static int floor = -2;
   if (floor == -2) {
@@ -407,16 +409,17 @@ static long do_write(int fd, const void* buf, size_t n) {
 EXPORT ssize_t write(int fd, const void* buf, size_t n) {
   return do_write(fd, buf, n);
 }
-// (Not through write(): FORTIFY turns that call back into this one.)
+// This calls do_write() because FORTIFY would turn a write() call back into
+// __write_chk().
 EXPORT ssize_t __write_chk(int fd, const void* buf, size_t n, size_t buf_size) {
   if (n > buf_size) abort();
   return do_write(fd, buf, n);
 }
 
-// socket(AF_KEY): the sandbox refuses the family before our
-// seccomp filter sees the call. The connectivity stack opens and closes one
-// only to wait for an RCU grace period after swapping eBPF maps, which
-// emulated maps don't need (supervisor/broker/src/bpf.rs).
+// The sandbox refuses socket(AF_KEY) before our seccomp filter sees the call.
+// The connectivity stack opens and closes an AF_KEY socket only to wait for an
+// RCU grace period after swapping eBPF maps, which emulated maps don't need
+// (supervisor/broker/src/bpf.rs).
 EXPORT int socket(int domain, int type, int protocol) {
   long r = syscall(SYS_socket, domain, type, protocol);
   if (r < 0 && errno == EAFNOSUPPORT && domain == AF_KEY)
@@ -424,8 +427,9 @@ EXPORT int socket(int domain, int type, int protocol) {
   return r;
 }
 
-// init forks services with "namespace mnt|pid" through clone(); without the
-// namespaces they share the session's.
+// init forks services that have "namespace mnt|pid" through clone(). If the
+// kernel refuses the namespace flags, the retry drops them and the services
+// share the session's namespaces.
 #define CLONE_NEW_ALL                                                        \
   (CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWIPC | \
    CLONE_NEWUSER | CLONE_NEWCGROUP)
@@ -447,12 +451,12 @@ EXPORT int clone(int (*fn)(void*), void* stack, int flags, void* arg, ...) {
   return r;
 }
 
-// /proc/config.gz: system_server (Debug.isVmapStack, via libvintf's
-// LoadKernelConfigs) CHECKs that it can read the kernel config, but distro
-// kernels often don't build CONFIG_IKCONFIG_PROC, and procfs can't be given a
-// file it lacks. The session launcher stages the host's /boot/config-$(uname
-// -r) as /innkeeper/config.gz; serve that when /proc/config.gz is missing.
-// (zygote, and so system_server and apps, preload this shim.)
+// system_server (Debug.isVmapStack, via libvintf's LoadKernelConfigs) CHECKs
+// that it can read the kernel config from /proc/config.gz, but distro kernels
+// often don't build CONFIG_IKCONFIG_PROC, and procfs can't be given a file it
+// lacks. The session launcher stages the host's /boot/config-$(uname -r) as
+// /innkeeper/config.gz, and gzopen serves that when /proc/config.gz is
+// missing. zygote preloads this shim, so system_server and apps have it too.
 typedef void* gzFile;
 EXPORT gzFile gzopen(const char* path, const char* mode) {
   static gzFile (*real)(const char*, const char*);
@@ -465,14 +469,15 @@ EXPORT gzFile gzopen(const char* path, const char* mode) {
   return f;
 }
 
-// Quota project ids: vold (and installd) tag app directories with
+// vold and installd tag app directories with quota project ids through
 // FS_IOC_FSSETXATTR and FS_PROJINHERIT_FL. Only the initial user namespace may
-// change a project id, so the first fails with EINVAL here, and filesystems
-// without project quotas (btrfs) reject the flag. vold forgives that only on
-// ext4 ("legacy userdata"); elsewhere it gives up on the app's external dirs,
-// getExternalFilesDir() returns null, and apps that use it crash (Godot does
-// at startup). Treat the refusal as success, as vold does on ext4, and set the
-// other flags without FS_PROJINHERIT_FL.
+// change a project id, so FS_IOC_FSSETXATTR fails with EINVAL here, and
+// filesystems without project quotas, such as btrfs, reject the flag. vold
+// forgives that only on ext4 ("legacy userdata"). Elsewhere it gives up on the
+// app's external dirs, getExternalFilesDir() returns null, and apps that use
+// it crash, as Godot does at startup. The wrapper treats the refusal as
+// success, as vold does on ext4, and sets the other flags without
+// FS_PROJINHERIT_FL.
 EXPORT int ioctl(int fd, int request, ...) {
   va_list ap;
   va_start(ap, request);
@@ -492,18 +497,17 @@ EXPORT int ioctl(int fd, int request, ...) {
   return rc;
 }
 
-// Android credentials (supervisor/README.md): the kernel sees every file
-// as owned
-// by uid 0, and the seccomp supervisor records the owner a chown asked for in
-// the "user.innkeeper.owner" xattr ("uid:gid"). installd verifies the owners of
-// the app directories it prepares (fs_prepare_dir_strict, the cache dirs, the
-// fts walks of fixupAppData and clearAppCache) and treats a mismatch as a
+// The kernel sees every file as owned by uid 0, and the seccomp supervisor
+// records the owner that a chown asked for in the "user.innkeeper.owner" xattr
+// ("uid:gid"), as supervisor/README.md describes. installd verifies the owners
+// of the app directories it prepares (fs_prepare_dir_strict, the cache dirs,
+// the fts walks of fixupAppData and clearAppCache) and treats a mismatch as a
 // failure, which makes PackageManager wipe and recreate the app's data on
-// every boot. Report the recorded owner. Only installd (role "installd")
-// pays for the extra getxattrat per stat. Not
-// zygote: its children include sandboxed processes (WebView renderers) whose
-// own seccomp policy kills them for a syscall it doesn't allow. Bionic's own
-// callers (fts) reach these wrappers through the PLT too.
+// every boot. The stat wrappers report the recorded owner. Only installd (role
+// "installd") pays for the extra getxattrat per stat. zygote doesn't, because
+// its children include sandboxed processes such as WebView renderers, whose
+// seccomp policy kills them for a syscall it doesn't allow. Bionic's internal
+// callers, such as fts, also reach these wrappers through the PLT.
 
 static int vstat_state = -1;
 static int vstat_on(void) {
@@ -523,9 +527,10 @@ static void vstat_apply(long n, const char* buf, struct stat* st) {
   }
 }
 
-// getxattrat(2) (Linux 6.13): the session's seccomp filter traps every
-// getxattr/lgetxattr (for security.selinux), which would cost a supervisor
-// round trip per stat; getxattrat isn't trapped. Older kernels fall back.
+// getxattrat(2) arrived in Linux 6.13. The session's seccomp filter traps
+// every getxattr and lgetxattr call to handle security.selinux, which would
+// cost a supervisor round trip per stat, but it doesn't trap getxattrat. Older
+// kernels fall back to getxattr and lgetxattr.
 #ifndef __NR_getxattrat
 #define __NR_getxattrat 464
 #endif
@@ -579,7 +584,8 @@ EXPORT int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
   int saved = errno;
   long r = syscall(SYS_newfstatat, dirfd, path, st, flags);
   // vold prepares its mount points with lstat, and MediaProvider lstats the
-  // volume root. These stand for mounts: show the directory, not the link.
+  // volume root. These symlinks stand in for mounts, so lstat reports the
+  // target directory instead of the link.
   if (
     r == 0 && S_ISLNK(st->st_mode) && (flags & AT_SYMLINK_NOFOLLOW) &&
     (!strcmp(path, "/storage/emulated") || !strcmp(path, kEmulatedMount) ||

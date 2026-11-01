@@ -1,6 +1,6 @@
-# The OpenHarmony image an OpenHarmony profile boots: Oniro's x86_64 emulator
-# release (ohos/README.md#image, which explains how to bump it). The schema is
-# every guest's (image/README.md).
+# The OpenHarmony image that an OpenHarmony profile boots, Oniro's x86_64
+# emulator release. ohos/README.md#image explains how to bump it. Every guest's
+# pin uses this schema (image/README.md).
 
 # The image's directory in the image cache.
 name = "oniro-7.0"

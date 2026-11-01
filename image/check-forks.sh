@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Check upstream bases, not our edited overlay copies. A pin bump must port
-# every changed fork before updating its base hash. No image content is stored.
-# A line's optional third field names the overlay file holding override
-# stanzas for the base's services, instead of a fork at the same path.
+# Checks the upstream files that our overlay forks are based on, by hash. A pin
+# bump must port every changed fork before it updates the fork's base hash. The
+# hash list stores no image content. A line's optional third field names an
+# overlay file that holds override stanzas for the base's services, in place of
+# a fork at the same path.
 set -euo pipefail
 img=${1:?img dir} apex=${2:?apex dir} bases=${3:?base hashes} overlay=${4:?overlay dir}
 failed=0

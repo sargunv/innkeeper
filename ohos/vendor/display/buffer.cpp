@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// libdisplay_buffer_vdi_impl.z.so: OpenHarmony's buffer VDI, which the
-// image's allocator_host calls to allocate and every process that maps a
-// buffer loads (passthrough). Buffers are sealed memfds turned into dma-bufs
-// by /dev/udmabuf, like Android's CPU buffers (android/vendor/graphics):
-// LINEAR, CPU-mappable, and importable by llvmpipe and by the bridge's
+// libdisplay_buffer_vdi_impl.z.so is OpenHarmony's buffer VDI. The image's
+// allocator_host calls it to allocate, and every process that maps a buffer
+// loads it (passthrough). Buffers are sealed memfds that /dev/udmabuf turns
+// into dma-bufs, like Android's CPU buffers (android/vendor/graphics). They
+// are LINEAR, CPU-mappable, and importable by llvmpipe and by the bridge's
 // compositor. Without udmabuf they stay plain memfds, which CPU users can still
 // map.
 #include <errno.h>
@@ -31,14 +31,15 @@ struct udmabuf_create {
 constexpr uint32_t kUdmabufCloexec = 1;
 constexpr unsigned long kUdmabufCreate = _IOW('u', 0x42, udmabuf_create);
 
-// Row pitch in bytes for a LINEAR buffer; 256-byte aligned as Android's
-// allocator does, which RADV and the compositors accept.
+// The row pitch alignment in bytes for a LINEAR buffer. Android's allocator
+// uses the same alignment, which RADV and the compositors accept.
 constexpr uint32_t kPitchAlign = 256;
 
 uint64_t alignUp(uint64_t v, uint64_t a) { return (v + a - 1) / a * a; }
 
-// Bytes per pixel of the first plane, and the total height in rows of that
-// pitch (YUV 4:2:0 puts both chroma planes below the luma at half size).
+// Returns the bytes per pixel of the first plane and the total height in rows
+// of that pitch. YUV 4:2:0 puts both chroma planes below the luma at half
+// size.
 bool layout(uint32_t format, uint32_t height, uint32_t* bpp, uint64_t* rows) {
   *rows = height;
   switch (format) {
@@ -72,9 +73,9 @@ int udmabufDevice() {
   return dev;
 }
 
-// The interface's vtable order (drivers_peripheral
+// The interface in its vtable order (drivers_peripheral
 // display/buffer/hdi_service/include/idisplay_buffer_vdi.h, OH 7.0). The
-// references are pointers in the ABI; the vector arguments are opaque.
+// references are pointers in the ABI, and the vector arguments are opaque.
 struct Opaque;
 class IDisplayBufferVdi {
  public:

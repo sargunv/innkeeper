@@ -15,7 +15,7 @@ int main(void) {
       previous = mapped;
     }
   }
-  // A typical desktop floor: persistent < foreground < service < cached.
+  // With a typical desktop floor, persistent < foreground < service < cached.
   assert(innkeeper_oom_adj(-900, 200) == 240);
   assert(innkeeper_oom_adj(0, 200) == 600);
   assert(innkeeper_oom_adj(500, 200) == 800);

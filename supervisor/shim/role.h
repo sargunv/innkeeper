@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// INNKEEPER_SHIM_ROLE names the one process whose workarounds the shim
-// applies: a service's rc stanza sets it
+// INNKEEPER_SHIM_ROLE names the process whose workarounds the shim applies. A
+// service's rc stanza sets it
 // (android/overlay/system_ext/etc/init/innkeeper-services.rc), and the broker
 // sets "init" for init.
 #pragma once

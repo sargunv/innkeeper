@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# build:image-tools: the tools that unpack the image at setup, built static from
-# pinned upstream sources in the build container (tools/container/run.sh), so
-# preparing an image needs nothing from the host or a container. Into
-# out/build/image-tools/install/libexec/innkeeper:
+# build:image-tools builds the tools that unpack the image at setup. They are
+# built statically from pinned upstream sources in the build container
+# (tools/container/run.sh), so preparing an image needs nothing from the host
+# or a container. They go into out/build/image-tools/install/libexec/innkeeper:
 #   simg2img, lpunpack  super.img (sparse) to partition images (android-tools)
 #   fsck.erofs          extracts the erofs partitions (erofs-utils, static lz4)
-#   debugfs             extracts the ext4 APEX payloads (e2fsprogs)
-# Skipped when its inputs (this directory, the container) still hash to
-# out/build/image-tools/.stamp.
+#   debugfs             extracts ext4 images (e2fsprogs)
+# The build is skipped when its inputs, this directory and the Containerfile,
+# still hash to out/build/image-tools/.stamp.
 set -euo pipefail
 
 # ---- pins -------------------------------------------------------------------

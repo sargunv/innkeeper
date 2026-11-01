@@ -31,7 +31,8 @@ int main(void) {
   for (int round = 0; round < 2; round++) {
     int fd = mount_volume();
     assert(fuse_open() == -1 && errno == ENODEV);
-    // INIT must not close the peer: MediaProvider treats EOF as volume death.
+    // INIT must not close the peer, because MediaProvider treats EOF as the
+    // volume dying.
     struct pollfd p = {.fd = fd, .events = POLLIN};
     assert(poll(&p, 1, 0) == 0);
     fuse_unmount("/mnt/other");

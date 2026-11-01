@@ -1,35 +1,38 @@
-// LD_PRELOADed into OpenHarmony's init and what it starts
-// (host/launcher/src/ohos.rs), the musl counterpart of supervisor/shim for what
-// the Flatpak sandbox can't give OH:
+// LD_PRELOADed into OpenHarmony's init and the processes it starts
+// (host/launcher/src/ohos.rs). It is the musl counterpart of supervisor/shim
+// and covers what the Flatpak sandbox can't give OH:
 //
-//  - init runs only as pid 1 ("Process id error"), and in the sandbox it is
-//    the broker's child: getpid() is 1 in init itself, and real in the
-//    services it forks.
+//  - init refuses to run unless it is pid 1 ("Process id error"), and in the
+//    sandbox it is the broker's child. getpid() returns 1 in init itself and
+//    the real pid in the services it forks.
 //  - Flatpak's seccomp filter refuses mount, umount2, unshare, setns, chroot
-//    and pivot_root before ours sees them; init's mounts succeed as no-ops, as
-//    the Android shim does for its init (the composed root already has what
-//    they'd mount). A mount namespace's setns still moves the caller to its
-//    root, as the kernel does: init's mksandbox chdirs into the sandbox, and
-//    services would otherwise inherit that cwd, which breaks the relative
-//    paths apps load from (system/lib64/extensionability).
-//  - Services get their cfg's "importance" through setpriority before exec,
-//    and exit if it fails: without CAP_SYS_NICE, raising priority is
+//    and pivot_root before our filter sees them. init's mounts succeed as
+//    no-ops, as the Android shim does for its init, because the composed root
+//    already has what they would mount. A setns into a mount namespace still
+//    moves the caller to the root, as the kernel does. init's mksandbox chdirs
+//    into the sandbox, and services would otherwise inherit that cwd, which
+//    breaks the relative paths that apps load from
+//    (system/lib64/extensionability).
+//  - Services set their cfg's "importance" through setpriority before exec,
+//    and exit if it fails. Without CAP_SYS_NICE, raising priority is
 //    best-effort, as in the Android shim.
-//  - appspawn and the other spawners give each app a mount namespace: bind
-//    mounts into /mnt/sandbox/<user>/<bundle>, then pivot_root there. Apps
-//    find their own files only at those paths (/data/storage/el1/bundle is
-//    the app's code). Here the namespace calls succeed as no-ops, each bind
-//    into the sandbox becomes a symlink at its mount point, and pivot_root
-//    keeps the sandbox's /data/storage open on kViewFd: the session's
-//    /data/storage links to /proc/self/fd/<kViewFd>, so each app process sees
-//    its own. The rest of the app's root is the session's.
-//  - Filesystems without a fixed inode table (btrfs) report 0 total and free
-//    inodes from statfs, and BMS refuses any install that needs more than
-//    are free ("Insufficient inodes"), SceneBoard's among them. There,
-//    statfs reports a free inode per free block.
+//  - appspawn and the other spawners give each app a mount namespace. They
+//    bind-mount paths into /mnt/sandbox/<user>/<bundle> and then pivot_root
+//    there, and apps find their files only at those paths
+//    (/data/storage/el1/bundle is the app's code). Here the namespace calls
+//    succeed as no-ops, and each bind into the sandbox becomes a symlink at
+//    its mount point. pivot_root keeps the sandbox's /data/storage open on
+//    kViewFd. The session's /data/storage links to /proc/self/fd/<kViewFd>,
+//    so each app process sees its own. The rest of the app's root is the
+//    session's.
+//  - Filesystems without a fixed inode table, such as btrfs, report 0 total
+//    and free inodes from statfs. BMS refuses any install that needs more
+//    inodes than are free ("Insufficient inodes"), including SceneBoard's. On
+//    those filesystems statfs reports a free inode per free block.
 //
-// Built freestanding (no libc headers or link): it binds to the guest's musl
-// at load time, so one file works with whichever libc the image ships.
+// The shim is built freestanding, with no libc headers or link. It binds to
+// the guest's musl at load time, so one file works with whichever libc the
+// image ships.
 #define SYS_read 0
 #define SYS_close 3
 #define SYS_getpid 39
@@ -94,9 +97,9 @@ static int same(const char* a, const char* b) {
   return starts(a, b) && starts(b, a);
 }
 
-// The broker gives init INNKEEPER_SHIM_ROLE=init, which the services init
-// starts don't inherit. The spawners are known by name; the apps they fork
-// inherit the flag.
+// The broker gives init INNKEEPER_SHIM_ROLE=init, and the shim unsets it so
+// that the services init starts don't inherit it. The shim recognizes the
+// spawners by name, and the apps they fork inherit the spawner flag.
 __attribute__((constructor)) static void ohos_shim_init(void) {
   const char* role = getenv("INNKEEPER_SHIM_ROLE");
   if (role && same(role, "init")) {
@@ -119,10 +122,11 @@ static int is_init(void) { return init_pid && sys0(SYS_getpid) == init_pid; }
 
 int getpid(void) { return is_init() ? 1 : (int)sys0(SYS_getpid); }
 
-// The rest only reach the kernel outside init (a fork that execs nothing) and
-// the spawners.
+// The wrappers below call the kernel only in processes other than init and
+// the spawners. A fork of init that has not exec'd counts as init.
 
-// An app's view of /data/storage, which the session's /data/storage names.
+// The fd of an app's view of /data/storage, which the session's /data/storage
+// links to.
 enum { kViewFd = 990 };
 
 static void enter(const char* root) {
@@ -158,9 +162,9 @@ int mount(
       SYS_mount, (long)src, (long)dst, (long)type, (long)flags, (long)data, 0
     ));
   }
-  // A bind of another path into an app's sandbox: a symlink in place of the
-  // mount point the spawner made (an empty directory or file). Binds of the
-  // root, or of a path onto itself, need nothing.
+  // A bind of another path into an app's sandbox becomes a symlink that
+  // replaces the mount point the spawner made, an empty directory or file.
+  // Binds of the root, or of a path onto itself, need nothing.
   if (
     (flags & MS_BIND) && src && dst && starts(dst, "/mnt/sandbox/") &&
     !same(src, "/") && !same(src, dst)
@@ -200,7 +204,7 @@ int chroot(const char* root) {
   return 0;
 }
 
-// The x86_64 kernel's struct statfs, which is musl's.
+// The x86_64 kernel's struct statfs, which musl uses as is.
 struct statfs {
   unsigned long f_type, f_bsize;
   unsigned long f_blocks, f_bfree, f_bavail, f_files, f_ffree;

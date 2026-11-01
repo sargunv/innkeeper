@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// vold only: complete MediaProvider's session handshake over the stable FUSE
-// wire ABI. File I/O goes directly to /data/media through the launcher's links;
-// there is no kernel mount, cache, or stream of filesystem requests to serve.
+// Used only in vold. The shim completes MediaProvider's session handshake over
+// the stable FUSE wire ABI. File I/O goes directly to /data/media through the
+// launcher's links, so there is no kernel mount, cache, or stream of filesystem
+// requests to serve.
 #include <linux/fuse.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "role.h"
 
-// VolumeManager serializes mount/unmount. Only the primary emulated volume is
-// supported; other FUSE users (AppFuse) must still fail rather than claim a
-// mount.
+// VolumeManager serializes mount and unmount. The shim supports only the
+// primary emulated volume, and other FUSE users such as AppFuse must still fail
+// instead of claiming a mount.
 static int fuse_peer = -1;
 static const char kEmulatedMount[] = "/mnt/user/0/emulated";
 
@@ -41,8 +42,9 @@ static int fuse_open(void) {
     return -1;
   }
   // Keep the peer open until unmount so MediaProvider remains available for
-  // volume scans and MediaStore operations. Its INIT reply fits in the socket;
-  // no filesystem requests are sent because the storage paths are direct.
+  // volume scans and MediaStore operations. Its INIT reply fits in the socket
+  // buffer, and no filesystem requests follow because the storage paths are
+  // direct.
   fuse_peer = pair[1];
   return pair[0];
 }

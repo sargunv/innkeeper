@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
       "ok   %s: unlabeled fallback; real label and ENOENT preserved\n", names[i]
     );
   }
-  // The lget variants must inspect the link, not inherit its target's label.
+  // The lget variants must read the link's label instead of its target's.
   const char label[] = "u:object_r:test_target:s0";
   assert(
     setxattr(path, "user.innkeeper.test.selinux", label, sizeof(label), 0) == 0
