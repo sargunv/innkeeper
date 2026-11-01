@@ -864,10 +864,6 @@ impl Window {
             }
             let (booted, packages) = state.unwrap_or_default();
             *w.open_apps.borrow_mut() = packages.into_iter().collect();
-            // Android's system app reports when boot completes, and OpenHarmony
-            // has no such report. Starting OpenHarmony from the manager waits
-            // for its boot, so a running OpenHarmony session counts as booted.
-            let booted = booted || running && w.system.get() != System::Android;
             let st = Status { running, booted };
             let was_booted = w.last_status.replace(Some(st)).is_some_and(|s| s.booted);
             if !w.session_busy.get() {

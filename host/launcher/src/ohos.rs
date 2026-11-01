@@ -43,6 +43,15 @@ const POINTER_CONFIG: &str = "etc/multimodalinput/pointer_motion_acceleration_co
 /// is a desktop monitor's density, because the window shows the panel on one.
 const PHYSICAL_DPI: f64 = 160.0;
 
+/// A parameter file that makes the bundle manager scan the preinstalled apps
+/// at boot, as it does after a system update. Without it, the bundle manager
+/// scans them only at a profile's first boot, so a new version of the system
+/// app in our layer wouldn't reach an existing profile. The launcher writes
+/// the file when it composes the root and removes it at the next start, so
+/// only the first boot of each composition scans. init loads the value as a
+/// default, which it doesn't save with the persistent parameters.
+const UPGRADE_SCAN: &str = "sys_prod/etc/param/innkeeper_upgrade_scan.para";
+
 /// The screen lock service's per-user "lock screen disabled" flags, under
 /// `/data`.
 const SCREENLOCK_STATE: &str = "service/el1/public/screenlock/screenlock_state.xml";
@@ -199,7 +208,7 @@ pub fn compose(cfg: &Config) -> Result<()> {
     let key: String = key.finalize().iter().map(|b| format!("{b:02x}")).collect();
     let key_file = r.join(".compose-key");
     if fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
-        return Ok(());
+        return upgrade_scan(r, false);
     }
     remove_tree(r)?;
     fs::create_dir_all(r)?;
@@ -237,9 +246,27 @@ pub fn compose(cfg: &Config) -> Result<()> {
             size.0, size.1
         ),
     )?;
+    upgrade_scan(r, true)?;
     files_read_only(r)?;
     fs::write(&key_file, key)?;
     Ok(())
+}
+
+/// Arranges the bundle manager's scan of the preinstalled apps for the next
+/// boot if the root was just composed, and cancels it otherwise.
+fn upgrade_scan(root: &Path, composed: bool) -> Result<()> {
+    let file = root.join(UPGRADE_SCAN);
+    if composed {
+        fs::create_dir_all(file.parent().expect("a relative path with a parent"))?;
+        return fs::write(&file, "persist.bms.test-upgrade=true\n")
+            .with_context(|| format!("write {}", file.display()));
+    }
+    match fs::remove_file(&file) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).with_context(|| format!("remove {}", file.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Sets up the sandbox's `/` as OpenHarmony's root. The sandbox keeps its
@@ -450,6 +477,26 @@ mod tests {
             )
         );
         assert_eq!(volume_config("<volume_type a"), "<volume_type a");
+    }
+
+    #[test]
+    fn only_the_first_boot_of_a_composition_scans() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../out/test/upgrade-scan-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let file = root.join(UPGRADE_SCAN);
+        upgrade_scan(&root, false).unwrap();
+        assert!(!file.exists(), "no composition, no scan");
+        upgrade_scan(&root, true).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "persist.bms.test-upgrade=true\n"
+        );
+        upgrade_scan(&root, false).unwrap();
+        assert!(!file.exists(), "the next start of the same root cancels it");
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -118,6 +118,21 @@ function withContext(p) {
   return p;
 }
 
+// hvigor's rollup resolves a relative import without an extension to an
+// .ets or .ts file.
+const fs = require("fs");
+const resolveArkts = {
+  name: "resolve-arkts",
+  resolveId(source, importer) {
+    if (!importer || !source.startsWith(".")) return null;
+    const base = path.resolve(path.dirname(importer), source);
+    for (const ext of [".ets", ".ts"]) {
+      if (fs.existsSync(base + ext)) return base + ext;
+    }
+    return null;
+  },
+};
+
 const recordImports = {
   name: "record-imports",
   async resolveId(source, importer, opts) {
@@ -133,13 +148,14 @@ const recordImports = {
   const plugins = plugin.sdkPlugins(config).filter(Boolean).map(withContext);
   const bundle = await rollup({
     input: entryObj,
-    plugins: [recordImports, ...plugins],
+    plugins: [resolveArkts, recordImports, ...plugins],
     // System modules such as @ohos.app.ability.UIAbility come from the
-    // device, so rollup can't resolve them.
+    // device, and native modules such as libfoo.so from the HAP's libs, so
+    // rollup can't resolve them.
     onwarn: (w) => {
       if (
         w.code !== "UNRESOLVED_IMPORT" ||
-        !/^@(ohos|kit|system|arkts)\./.test(w.exporter)
+        !/^(@(ohos|kit|system|arkts)\.|lib.+\.so$)/.test(w.exporter)
       ) {
         logger.warn(w.message);
       }

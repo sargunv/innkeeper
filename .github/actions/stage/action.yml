@@ -44,9 +44,10 @@ runs:
         path: ~/.cache/innkeeper-dev/keys
         key:
           platform-key-${{ hashFiles('android/system-app/build.gradle.kts') }}
-    # The OpenHarmony SDK builds the probe HAP. ohos/sdk.sh fetches it on a
-    # miss, and the cache is saved before the build so that a failed build
-    # keeps it.
+    # The OpenHarmony SDK builds the HAPs. ohos/sdk.sh fetches it on a miss,
+    # ohos/system-app/sdk.sh adds the system app's declarations and headers,
+    # and the cache is saved before the build so that a failed build keeps
+    # it.
     - uses: actions/cache/restore@v4
       if: steps.stage.outputs.cache-hit != 'true'
       id: ohos-sdk
@@ -54,13 +55,14 @@ runs:
         path: ~/.cache/innkeeper/ohos-sdk
         key:
           ohos-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{
-          hashFiles('ohos/sdk.env', 'ohos/sdk.sh') }}
+          hashFiles('ohos/sdk.env', 'ohos/sdk.sh', 'ohos/system-app/sdk.env',
+          'ohos/system-app/sdk.sh') }}
     - name: OpenHarmony SDK
       if:
         steps.ohos-sdk.outcome == 'success' && steps.ohos-sdk.outputs.cache-hit
         != 'true'
       shell: bash
-      run: mise exec -- ohos/sdk.sh
+      run: mise exec -- ohos/system-app/sdk.sh
     - uses: actions/cache/save@v4
       if:
         steps.ohos-sdk.outcome == 'success' && steps.ohos-sdk.outputs.cache-hit
