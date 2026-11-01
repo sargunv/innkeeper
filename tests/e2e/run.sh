@@ -812,6 +812,29 @@ while True:
   fi
   echo 'ok   the probe HAP records a tone that the desktop plays into its source'
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_notify() {
+    local uid
+    # The user lets the probe post notifications, as OpenHarmony's dialog
+    # would.
+    uid=$(s /system/bin/bm dump -n dev.sargunv.innkeeper.probes | sed -n 's/.*"uid": *\([0-9]*\).*/\1/p' | head -n 1)
+    s /system/bin/anm setting -e "dev.sargunv.innkeeper.probes:$uid:1" >>"$T/ohos.txt" 2>&1 || return
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode notify >>"$T/ohos.txt" 2>&1 || return
+    # Innkeeper System sends the notification to the desktop with its
+    # buttons, and the desktop's Ping button reaches the probe.
+    until_ok file_has "$desktop_log" '^notification: Innkeeper probe: A notification with actions$' || return
+    file_has "$desktop_log" '^notification actions: Open Ping Reply$' || return
+    gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications \
+      --method dev.sargunv.Innkeeper.TestNotifications.Invoke a0 >/dev/null || return
+    pinged() { s /system/bin/hilog -x -T InnkeeperProbes | grep -q 'notification action'; }
+    until_ok pinged
+  }
+  if ! timed ohos-notify ohos_notify; then
+    tail -n 20 "$T/ohos.txt" >&2
+    s /system/bin/hilog -x -T InnkeeperNotify,InnkeeperProbes | tail -n 20 >&2
+    exit 1
+  fi
+  echo "ok   a notification that the probe posts shows on the desktop, and its action button reaches the probe"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_settings() {
     # Innkeeper System sets OH's time zone to the desktop's, which OH's
     # defaults don't use.
