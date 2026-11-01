@@ -2,8 +2,10 @@ import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager'
 import bundleManager from '@ohos.bundle.bundleManager';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
-import { body, LIFECYCLE, services, Task } from './Report';
+import { blob, onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
+import { utf8 } from '../bridge/Wire';
+import { BackgroundApps } from './BackgroundApps';
+import { backgroundText, body, LIFECYCLE, services, Task } from './Report';
 
 // host/bridge/src/ipc/proto.rs
 const SYSTEM = 3;
@@ -26,19 +28,25 @@ function close(reply: Reply): void {
 // the session after a grace period with nothing to do.
 class SessionLifecycle {
   private system: number = open(SYSTEM, 'innkeeper-lifecycle');
-  // The services count that the bridge has, or -1 if it has none.
-  private sent: number = -1;
+  private background: BackgroundApps;
+  // The report that the bridge has, or an empty string if it has none.
+  private sent: string = '';
   private timer: number = -1;
   private queue: Promise<void> = Promise.resolve();
   // Whether each bundle seen is a user app. That can't change while the
   // bundle stays installed.
   private userApps: Map<string, boolean> = new Map();
 
+  constructor(background: BackgroundApps) {
+    this.background = background;
+  }
+
   start(): void {
+    this.background.onChange = (): void => this.poke();
     onEvent(this.system, (type: number, _body: ArrayBuffer, fds: number[]) => {
       fds.forEach((fd: number) => fileIo.closeSync(fd));
       if (type === CONNECTED) {
-        this.sent = -1;
+        this.sent = '';
         this.poke();
       }
     });
@@ -57,7 +65,7 @@ class SessionLifecycle {
   }
 
   // Reports soon, because something may have changed.
-  private poke(): void {
+  poke(): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.queue = this.queue.then(() => this.update()).catch((e: Error) => {
@@ -68,17 +76,21 @@ class SessionLifecycle {
 
   private async update(): Promise<void> {
     const count = await this.services();
-    if (count === this.sent) {
+    const text = backgroundText(await this.background.allowed());
+    const report = `services=${count} background=${text}`;
+    if (report === this.sent) {
       return;
     }
-    const reply = await request(this.system, LIFECYCLE, body(count), []);
+    const bytes = utf8(text);
+    const fds = bytes.length > 0 ? [blob(new Uint8Array(bytes).buffer)] : [];
+    const reply = await request(this.system, LIFECYCLE, body(count, bytes.length), fds);
     close(reply);
     if (reply.status !== 0) {
       hilog.error(DOMAIN, TAG, 'LIFECYCLE refused: %{public}d', reply.status);
       return;
     }
-    hilog.info(DOMAIN, TAG, 'lifecycle: services=%{public}d', count);
-    this.sent = count;
+    hilog.info(DOMAIN, TAG, 'lifecycle: %{public}s', JSON.stringify(report));
+    this.sent = report;
   }
 
   private async services(): Promise<number> {
@@ -112,9 +124,9 @@ class SessionLifecycle {
 
 // Starts the reports once boot completes. The screen window is open by then,
 // so an early report doesn't stop a session that is still coming up.
-export function startLifecycle(): void {
+export function startLifecycle(background: BackgroundApps): void {
   waitParameter('bootevent.boot.completed', 'true').then(() => {
-    new SessionLifecycle().start();
+    new SessionLifecycle(background).start();
   }).catch((e: Error) => {
     hilog.error(DOMAIN, TAG, 'waiting for boot: %{public}s', e.message);
   });

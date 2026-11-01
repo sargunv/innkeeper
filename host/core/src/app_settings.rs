@@ -101,6 +101,8 @@ pub struct AppInfo {
     pub permissions: Vec<Permission>,
 }
 
+/// A system app's answer to a [`Command`]. Android's answers carry the app's
+/// info. OpenHarmony's system app answers `background` without info.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
     pub error: String,
@@ -115,10 +117,6 @@ impl Response {
         if let Some(info) = &reply.info {
             ensure!(info.permissions.len() <= 512, "too many permissions");
         }
-        ensure!(
-            reply.info.is_some() || !reply.error.is_empty(),
-            "empty app response"
-        );
         Ok(reply)
     }
 }
@@ -249,6 +247,33 @@ pub fn request(
         .ok_or_else(|| anyhow::anyhow!("missing app information"))
 }
 
+/// Allows or forbids `package` to run in the background, through profile
+/// `profile`'s session, which it starts if needed. OpenHarmony's system app
+/// answers with no app info, so the info in the response is ignored.
+pub fn set_background(
+    profile: &innkeeper_profile::profile::ProfileName,
+    package: &str,
+    enabled: bool,
+    report: crate::ops::Report,
+) -> Result<()> {
+    let mut command = Command::new(package, "background");
+    command.enabled = enabled;
+    command.validate()?;
+    crate::ops::ensure_session(profile, report)?;
+    let json: String = proxy(profile)?.call(
+        "App",
+        &(
+            &command.package,
+            &command.action,
+            &command.permission,
+            command.enabled,
+        ),
+    )?;
+    let response = Response::decode(json.as_bytes())?;
+    ensure!(response.error.is_empty(), "{}", response.error);
+    Ok(())
+}
+
 /// The arguments of Session1 `Launch`: package, component, URI, grants,
 /// token, wait, new window, width and height.
 type LaunchArgs<'a> = (
@@ -376,7 +401,10 @@ mod tests {
                 .is_err()
             );
         }
-        assert!(Response::decode(br#"{"error":"","info":null}"#).is_err());
+        // OpenHarmony's system app answers without app info.
+        let r = Response::decode(br#"{"error":"","info":null}"#).unwrap();
+        assert!(r.error.is_empty() && r.info.is_none());
+        assert!(Response::decode(br#"{"info":null}"#).is_err());
         use crate::android::{Launch, LaunchOptions};
         let main = Launch::Main {
             component: "org.wikipedia/.main.MainActivity".into(),

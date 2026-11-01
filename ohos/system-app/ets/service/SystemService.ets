@@ -1,6 +1,7 @@
 import ServiceExtensionAbility from '@ohos.app.ability.ServiceExtensionAbility';
 import Want from '@ohos.app.ability.Want';
 import { startApps } from '../bridge/Apps';
+import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
 import { startSettings } from '../settings/Settings';
 
@@ -9,8 +10,9 @@ import { startSettings } from '../settings/Settings';
 // and restarts it if its process dies.
 export default class SystemService extends ServiceExtensionAbility {
   onCreate(want: Want): void {
-    startApps();
-    startLifecycle();
+    const background = new BackgroundApps(this.context);
+    startApps(background);
+    startLifecycle(background);
     startSettings();
   }
 }

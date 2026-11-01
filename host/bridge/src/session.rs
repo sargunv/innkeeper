@@ -64,8 +64,9 @@
 //! refused, and both payloads are at most 64 KiB. Up to eight requests can
 //! wait, each for at most 40 s, and a reconnect cancels them.
 //! `wm/WindowCommands.kt` documents the window operations. OpenHarmony's
-//! system app answers every command with an error, because it implements none
-//! of them yet. Escape-as-Back is
+//! system app implements the `background` app action, which it answers with
+//! `{"error":"", "info":null}`, and answers every other command with an
+//! error. Escape-as-Back is
 //! stored per package in the system app's preferences, off by default, and
 //! applies to existing windows at the next key press.
 use std::collections::HashMap;

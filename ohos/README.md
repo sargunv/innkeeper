@@ -17,10 +17,12 @@ OH's audio plays through the desktop's PipeWire.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app info`, `app stop`, `app clear-cache` and `app clear-data` work
-there too ([host/cli](../host/cli/README.md)). `run` brings the app to the front
-and opens OH's window again if the user closed it. `run` with a URI opens it in
-the app as a browser link. An OH profile refuses `open`, files in `run`,
-`app set`, adb and the Android-only settings.
+there too ([host/cli](../host/cli/README.md)). So does `app set --background`,
+which keeps the session up while the app is installed, as on Android. `run`
+brings the app to the front and opens OH's window again if the user closed it.
+`run` with a URI opens it in the app as a browser link. An OH profile refuses
+`open`, files in `run`, the other `app set` settings, adb and the Android-only
+settings.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots. A release profile installs on any device. A debug profile names the UDIDs
@@ -154,11 +156,20 @@ reports boot completion. Issue #312 tracks the features that build on it.
   foreground service. The bridge counts OH's screen window while it is open. The
   session therefore stops after the profile's idle timeout once the window is
   closed and no user app runs a continuous task.
+- **Background apps.** As Android's system app does, the app stores the apps
+  that the user lets run in the background (`innkeeper app set --background`) in
+  its EL1 preferences, and it lists the installed ones in `LIFECYCLE`. The
+  session stays up while one of them is installed, and the desktop shows the
+  "Running in the background" indicator. Labels come from
+  `bundleResourceManager` (`GET_BUNDLE_RESOURCES`). OpenHarmony's own per-bundle
+  keep-alive (`appManager.setKeepAliveForBundle`) is a different feature, which
+  restarts an app's process when it dies, and the app doesn't use it.
 - **Desktop settings.** The app follows the desktop's settings
   ([Desktop settings](#desktop-settings)).
-- **Session1 commands.** The app answers each command that the bridge relays
-  with "OpenHarmony profiles don't support this action.", so callers don't wait
-  for the bridge's timeout.
+- **Session1 commands.** The app reads each command that the bridge relays. It
+  runs the `background` app action and answers it without app info. It answers
+  every other command with "OpenHarmony profiles don't support this action.", so
+  callers don't wait for the bridge's timeout.
 - **Build.** `mise run build:ohos-system-app` builds the HAP and stages it with
   the two JSON files. The SDK's declarations leave out the system APIs, such as
   ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the SDK in
