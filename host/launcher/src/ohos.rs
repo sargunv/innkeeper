@@ -353,6 +353,11 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
         fs::write(&node, b"")?;
         fs::set_permissions(&node, fs::Permissions::from_mode(0o666))?;
     }
+    // While init parses the image's on-demand console service, it opens
+    // /dev/console to watch it for input, and it waits 5 s for a missing
+    // node. On /dev/null the open succeeds at once. epoll refuses /dev/null,
+    // so init doesn't watch it and the console shell doesn't start.
+    link(Path::new("/dev/null"), &dev.join("console"))?;
     crate::sandbox::dev_sockets(cfg)
 }
 
