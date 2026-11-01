@@ -13,6 +13,7 @@ register with it. render_service composes OH's screen through our display HDI,
 and the bridge shows the screen in a desktop window. SceneBoard is OH's window
 manager and home screen. Boot ends on its home screen, and built-in apps such as
 Settings run in it. The window takes desktop pointer, touch and keyboard input.
+OH's audio plays through the desktop's PipeWire.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 `uninstall`, `app stop`, `app clear-cache` and `app clear-data` work there too
@@ -207,6 +208,52 @@ their evdev codes, and OH maps them with its own keymap, so the host's layout
 doesn't apply. MMI repeats held keys itself, so the bridge drops the
 compositor's repeats. The wheel and text input from the host's input method
 don't reach OH yet.
+
+## Audio
+
+OH's audio service mixes every app into one render on the HDI's `primary`
+adapter, and it records from that adapter's capture. Our audio VDI
+(`vendor/audio/`) carries both through the bridge's PipeWire streams. It uses
+the blocking PCM device from
+[guest/audio-client](../guest/audio-client/include/innkeeper/pcm.h), as
+Android's audio HAL does ([android/vendor/audio](../android/vendor/audio/)).
+
+The image's `audio_host` loads `libaudio_manager_service_6.1.z.so`. That library
+loads the image's ALSA implementation by default. With `ohos.audio.hdi_impl=vdi`
+it loads OH's IDL-to-VDI adapter, which loads
+`/vendor/lib64/libaudio_primary_impl.z.so`. The image has no library at that
+path, and the launcher's composed root installs ours there. The parameter is in
+`sys_prod/etc/param/innkeeper_audio.para`.
+
+- **Format.** Renders and captures are 16-bit PCM in one or two channels. The
+  image's audio policy runs the primary pipes at 44.1 kHz. The launcher's copy
+  of `/vendor/etc/audio/audio_policy_config.xml` runs them at 48 kHz, the
+  desktop's usual rate, so neither OH nor PipeWire resamples the mix.
+- **Volume.** OH's system volumes stay at their maximum, so OH's volume and the
+  desktop mixer don't stack. `const.multimedia.audio.fixedvolume` stops volume
+  changes, and the launcher's `sys_prod/etc/audio/audio_volume_config.xml` sets
+  each volume type's default level to its maximum. The VDI reports a volume that
+  OH sets but doesn't apply it. An app's own stream volume still applies.
+- **Buffers and latency.** OH writes bursts of 256 frames (5.3 ms). The playback
+  ring holds two 5 ms periods, and the bridge asks PipeWire for another 20 ms,
+  so the VDI reports 30 ms of latency. The capture ring holds eight 10 ms
+  periods to absorb scheduling jitter.
+- **Pacing and position.** Writes block on ring space, which follows PipeWire's
+  clock. The render position is the frames written minus the bridge's estimate
+  of frames not yet presented, with a `CLOCK_MONOTONIC` time.
+- **Mixer name.** The desktop shows the stream as "OpenHarmony". This build of
+  OH's audio service sends the HDI neither the playing app nor the stream usage.
+- **Capture.** OH's privacy service refuses the microphone to processes that
+  aren't HAPs, so a native tool can't record. The bridge records the default
+  source, or `INNKEEPER_AUDIO_SOURCE`. Microphone mute zeroes the captured
+  samples.
+- **No bridge.** Without a bridge, playback runs on a virtual clock and capture
+  returns paced silence, as on Android.
+
+Host unit tests (`vendor/audio/tests`) drive the VDI through the tables that
+OH's adapter calls. They cover the adapter and its ports, rejected formats,
+per-render tables, burst pacing, latency, position, frame counts, volume and
+paced capture.
 
 ## How it boots
 

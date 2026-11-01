@@ -68,3 +68,10 @@ vdi "$out/vendor/lib64/passthrough/libdisplay_buffer_vdi_impl.z.so" \
   ohos/vendor/display/buffer.cpp
 vdi "$out/vendor/lib64/libdisplay_composer_vdi_impl.z.so" \
   ohos/vendor/display/composer.cpp "$stubs/bridge_client.o" "$stubs/libbegetutil.z.so"
+# The audio VDI is C. OH's IDL-to-VDI adapter loads it under this name.
+so=$out/vendor/lib64/libaudio_primary_impl.z.so
+"$llvm/clang" "${cflags[@]}" -std=gnu17 -DINNKEEPER_HILOG -I guest/audio-client/include \
+  -shared -nostdlib -Wl,-z,now -Wl,-soname,"${so##*/}" -o "$so" \
+  ohos/vendor/audio/primary.c guest/audio-client/audio.c guest/audio-client/pcm.c \
+  "$stubs/bridge_client.o" "$stubs/libhilog.so" "$stubs/libc.so"
+"$llvm/llvm-strip" "$so"

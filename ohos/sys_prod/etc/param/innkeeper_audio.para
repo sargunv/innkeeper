@@ -1,0 +1,5 @@
+# The audio service loads the image's IDL-to-VDI adapter, which loads our
+# VDI (vendor/audio). OH's system volume stays at its maximum, and the
+# desktop mixer controls the level.
+ohos.audio.hdi_impl=vdi
+const.multimedia.audio.fixedvolume=true
