@@ -22,11 +22,18 @@
 //! A contact stays on the window where it started, and it lifts when its
 //! window goes away.
 //!
-//! Keys go to the keyboard while an own window has keyboard focus. They keep
-//! their evdev codes, so the guest applies its own layout. The guest repeats
-//! held keys itself, so the host's repeats are dropped. Held keys and
+//! Keys go to the keyboard while an own window has keyboard focus. The guest
+//! maps evdev codes with a US layout. A character key whose level-1 keysym
+//! under the host's layout is a Latin letter, a digit or US punctuation gets
+//! the evdev code of the US key with that keysym, so shortcuts follow the
+//! host's layout. The AZERTY A key is KEY_A, and Ctrl+A selects all. Other
+//! keys keep their codes, so Cyrillic layouts keep the US shortcut
+//! positions. Input connections get the key line with the same code, so the
+//! guest's input method matches the line to the key it reads. The guest
+//! repeats held keys itself, so the host's repeats are dropped. Held keys and
 //! buttons are released when the window loses focus or goes away.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use innkeeper_evdev_proto::{KEYBOARD, MOUSE, TOUCHSCREEN, touch};
@@ -54,6 +61,32 @@ const PIN: i32 = -(1 << 15);
 /// degree.
 const DETENT: f64 = 15.0;
 const HI_RES_PER_DEGREE: i32 = 8;
+/// The US layout's character keys, as rows of the ASCII characters of their
+/// level-1 keysyms, each with the evdev code of its first key. The xkb keysym
+/// of each of these characters is its ASCII code.
+const US_ROWS: [(u16, &[u8]); 5] = [
+    (2, b"1234567890-="),
+    (16, b"qwertyuiop[]"),
+    (30, b"asdfghjkl;'`"),
+    (43, b"\\zxcvbnm,./"),
+    (57, b" "),
+];
+
+/// The evdev code that key `code` sends when its level-1 keysym is `sym`.
+fn layout_code(code: u16, sym: Option<i64>) -> u16 {
+    let character = US_ROWS
+        .iter()
+        .any(|&(first, row)| (first..first + row.len() as u16).contains(&code));
+    let Some(sym) = sym.and_then(|s| u8::try_from(s).ok()).filter(|_| character) else {
+        return code;
+    };
+    let sym = sym.to_ascii_lowercase();
+    US_ROWS
+        .iter()
+        .find_map(|&(first, row)| row.iter().position(|&c| c == sym).map(|i| first + i as u16))
+        .unwrap_or(code)
+}
+
 /// OpenHarmony scrolls a list by 63 vp for one detent. A touchpad's scroll
 /// distance is in surface units, which are vp at the window's default size.
 const VP_PER_DETENT: f64 = 63.0;
@@ -101,9 +134,10 @@ pub struct Direct {
     next_tracking_id: i32,
     /// The current touch frame's records.
     frame: Vec<(u16, u16, i32)>,
-    /// The own window with keyboard focus, and the keys held there.
+    /// The own window with keyboard focus, and the keys held there, each
+    /// with the code it sent.
     keyboard: Option<u32>,
-    keys: Vec<u16>,
+    keys: Vec<(u16, u16)>,
 }
 
 impl Direct {
@@ -155,7 +189,7 @@ impl Direct {
     }
 
     fn release_keys(&mut self) -> Vec<Out> {
-        let records: Vec<_> = self.keys.drain(..).map(|k| (EV_KEY, k, 0)).collect();
+        let records: Vec<_> = self.keys.drain(..).map(|(_, k)| (EV_KEY, k, 0)).collect();
         if records.is_empty() {
             vec![]
         } else {
@@ -163,27 +197,57 @@ impl Direct {
         }
     }
 
-    /// A `key` line's evdev code and state: 0 release, 1 press, 2 repeat.
-    fn key(&mut self, code: Option<i64>, state: Option<i64>) -> Vec<Out> {
+    /// A `key` line's evdev code, state (0 release, 1 press, 2 repeat) and
+    /// level-1 keysym. Gives the code the key sends, and its record.
+    fn key(
+        &mut self,
+        code: Option<i64>,
+        state: Option<i64>,
+        sym: Option<i64>,
+    ) -> Option<(u16, Vec<Out>)> {
         let (Some(_), Some(code), Some(state)) = (self.keyboard, code, state) else {
-            return vec![];
+            return None;
         };
-        let Ok(code) = u16::try_from(code) else {
-            return vec![];
-        };
-        let held = self.keys.contains(&code);
+        let code = u16::try_from(code).ok()?;
+        let held = self.keys.iter().find(|&&(k, _)| k == code).map(|&(_, s)| s);
+        let sent = held.unwrap_or_else(|| layout_code(code, sym));
         let value = match state {
-            1 if !held => {
-                self.keys.push(code);
+            // Two keys of a layout can share a keysym. The second press while
+            // the first is held is dropped.
+            1 if held.is_none() && !self.keys.iter().any(|&(_, s)| s == sent) => {
+                self.keys.push((code, sent));
                 1
             }
-            0 if held => {
-                self.keys.retain(|&k| k != code);
+            0 if held.is_some() => {
+                self.keys.retain(|&(k, _)| k != code);
                 0
             }
-            _ => return vec![],
+            _ => return Some((sent, vec![])),
         };
-        vec![Out::Events(KEYBOARD, vec![(EV_KEY, code, value)])]
+        Some((
+            sent,
+            vec![Out::Events(KEYBOARD, vec![(EV_KEY, sent, value)])],
+        ))
+    }
+
+    /// Translates one seat line, and gives the line for the input
+    /// connections. A key line for an own window carries the code that the
+    /// key sends.
+    pub fn input<'a>(&mut self, line: &'a str) -> (Cow<'a, str>, Vec<Out>) {
+        if !line.starts_with("key ") {
+            return (Cow::Borrowed(line), self.line(line));
+        }
+        let mut words: Vec<&str> = line.split(' ').collect();
+        let int = |i: usize| words.get(i).and_then(|a| a.parse::<i64>().ok());
+        let Some((sent, out)) = self.key(int(2), int(3), int(4)) else {
+            return (Cow::Borrowed(line), vec![]);
+        };
+        let sent = sent.to_string();
+        if words[2] == sent {
+            return (Cow::Borrowed(line), out);
+        }
+        words[2] = &sent;
+        (Cow::Owned(words.join(" ")), out)
     }
 
     /// Moves the guest's cursor to the pixel at display position `(x, y)`.
@@ -318,7 +382,11 @@ impl Direct {
                 self.keyboard = None;
                 return self.release_keys();
             }
-            "key" => return self.key(int(1), int(2)),
+            "key" => {
+                return self
+                    .key(int(1), int(2), int(3))
+                    .map_or(vec![], |(_, out)| out);
+            }
             "pointer_enter" => {
                 let mut out = self.leave();
                 if let (Some(x), Some(y), Some(w)) = (num(0), num(1), int(2))
@@ -909,6 +977,72 @@ mod tests {
         );
         assert!(d.line("key 8 30 1").is_empty());
         assert!(d.line(&format!("keyboard_leave {W}")).is_empty());
+    }
+
+    #[test]
+    fn character_keys_send_the_code_of_their_keysym() {
+        let mut d = screen();
+        d.line(&format!("keyboard_enter {W}"));
+        // AZERTY: the Q key's keysym is a, and Ctrl+A selects all.
+        assert_eq!(keys(d.line("key 1 29 1 65507")), [(EV_KEY, 29, 1)]);
+        let (line, out) = d.input("key 2 16 1 97");
+        assert_eq!(
+            (&*line, keys(out)),
+            ("key 2 30 1 97", vec![(EV_KEY, 30, 1)])
+        );
+        // The release has no keysym and releases the code that the press sent.
+        let (line, out) = d.input("key 3 16 0");
+        assert_eq!((&*line, keys(out)), ("key 3 30 0", vec![(EV_KEY, 30, 0)]));
+        // The line keeps its text, and an upper-case keysym maps too.
+        assert_eq!(d.input("key 4 16 1 65 text A").0, "key 4 30 1 65 text A");
+        assert_eq!(d.input("key 5 16 2 65 text A").0, "key 5 30 2 65 text A");
+        assert_eq!(keys(d.input("key 6 16 0").1), [(EV_KEY, 30, 0)]);
+        // AZERTY's M key sends KEY_M, and the key at US M sends KEY_COMMA.
+        assert_eq!(keys(d.line("key 7 39 1 109")), [(EV_KEY, 50, 1)]);
+        assert_eq!(keys(d.line("key 8 50 1 44")), [(EV_KEY, 51, 1)]);
+        // A digit key whose keysym is é keeps its code.
+        assert_eq!(d.input("key 9 3 1 233 text é").0, "key 9 3 1 233 text é");
+        // Escape keeps its code whatever its keysym, and so do keys without one.
+        assert_eq!(keys(d.line("key 10 1 1 97")), [(EV_KEY, 1, 1)]);
+        assert_eq!(keys(d.line("key 11 30 1")), [(EV_KEY, 30, 1)]);
+        assert_eq!(
+            keys(d.line(&format!("keyboard_leave {W}"))),
+            [
+                (EV_KEY, 29, 0),
+                (EV_KEY, 50, 0),
+                (EV_KEY, 51, 0),
+                (EV_KEY, 3, 0),
+                (EV_KEY, 1, 0),
+                (EV_KEY, 30, 0)
+            ]
+        );
+        // Lines for other windows pass as they are.
+        assert_eq!(d.input("key 12 16 1 97").0, "key 12 16 1 97");
+    }
+
+    #[test]
+    fn us_keys_keep_their_codes() {
+        // KEY_A, KEY_SEMICOLON, KEY_BACKSLASH, KEY_SLASH and KEY_SPACE.
+        for (code, sym) in [(30, b'a'), (39, b';'), (43, b'\\'), (53, b'/'), (57, b' ')] {
+            assert_eq!(layout_code(code, Some(sym.into())), code);
+        }
+        for (first, row) in US_ROWS {
+            for (i, &c) in row.iter().enumerate() {
+                let code = first + i as u16;
+                assert_eq!(layout_code(code, Some(c.into())), code);
+                assert_eq!(layout_code(code, Some(c.to_ascii_uppercase().into())), code);
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_key_with_a_held_keysym_is_dropped() {
+        let mut d = screen();
+        d.line(&format!("keyboard_enter {W}"));
+        assert_eq!(keys(d.line("key 1 30 1 97")), [(EV_KEY, 30, 1)]);
+        assert!(d.line("key 2 16 1 97").is_empty());
+        assert!(d.line("key 3 16 0").is_empty());
+        assert_eq!(keys(d.line("key 4 30 0")), [(EV_KEY, 30, 0)]);
     }
 
     #[test]

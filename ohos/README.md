@@ -335,9 +335,14 @@ a fifteenth of a detent, so the fractions of a high-resolution wheel reach OH. A
 touchpad's scroll becomes wheel degrees, at 63 surface units to the detent,
 which is how far one detent scrolls an OH list.
 
-Keys go to the Innkeeper Keyboard device while the window has keyboard focus.
-They keep their evdev codes, and OH maps them with its own US keymap. MMI
-repeats held keys itself, so the bridge drops the compositor's repeats.
+Keys go to the Innkeeper Keyboard device while the window has keyboard focus. OH
+maps evdev codes with its own US keymap. A character key whose level-1 keysym in
+the host's layout is a Latin letter, a digit or US punctuation sends the code of
+the US key with that keysym, as on Android
+([docs/input.md](../docs/input.md#keyboard-layout)). Shortcuts follow the host's
+layout, so Ctrl+A on AZERTY selects all. Other keys keep their codes, and
+Cyrillic layouts keep the US shortcut positions. MMI repeats held keys itself,
+so the bridge drops the compositor's repeats.
 
 ### Text input
 
@@ -365,10 +370,10 @@ with the bridge, so the host's IBus or Fcitx composes text for OH editors.
 - **Layout.** A key that types text reaches the input method before the editor,
   as on Android. The input method consumes it and commits what the key types
   under the host's layout and compose (`ets/ime/KeyText.ets`). The bridge's
-  `key` line carries that text, and the bridge sends the line before it writes
-  the key, so the text is there first. Keys without text, such as arrows, Enter
-  and Backspace, and chords with Ctrl, Alt or Meta reach the editor as keys.
-  Shortcuts keep OH's US key positions.
+  `key` line carries that text and the code that MMI reads. The bridge sends the
+  line before it writes the key, so the text is there first. Keys without text,
+  such as arrows, Enter and Backspace, and chords with Ctrl, Alt or Meta reach
+  the editor as keys.
 - **Order.** Keys and the text that replaces them reach the editor in the order
   they were typed. Key events less than about a millisecond apart can arrive out
   of order. Typing doesn't produce such gaps, and a test that sends keys in a

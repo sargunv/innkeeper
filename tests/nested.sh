@@ -65,6 +65,8 @@ mkdir -p "$N"/{home,config,data,cache,state}
 # KDE's service cache can hold a TestSeat entry from an older run, which makes
 # KWin refuse the entry's interfaces.
 rm -f "$N"/cache/ksycoca6*
+# A test's Layout call writes kxkbrc. Each run starts with the default layout.
+rm -f "$N/config/kxkbrc"
 : >"$N/compositor.log"
 # KWin grants fake seat input and screenshots only to an executable whose
 # desktop file lists those interfaces. Here that executable is the Python that
