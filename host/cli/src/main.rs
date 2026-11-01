@@ -407,15 +407,22 @@ fn open_input(path: &Path) -> Result<File> {
 /// light window background.
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
-/// Runs `app` on an OpenHarmony profile, which has no app settings or app
-/// info yet.
+/// Runs `app` on an OpenHarmony profile, which has no app settings yet.
 fn ohos_app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
     use ops::BundleAction;
     let (package, action) = match cmd {
         AppCmd::Stop { package } => (package, BundleAction::Stop),
         AppCmd::ClearCache { package } => (package, BundleAction::ClearCache),
         AppCmd::ClearData { package } => (package, BundleAction::ClearData),
-        AppCmd::Info { .. } => return profiles::need_android(profile, "app info"),
+        AppCmd::Info { package, json } => {
+            let info = ops::bundle_info(profile, &package, &stderr)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                print!("{}", bundle_info_text(&info));
+            }
+            return Ok(());
+        }
         AppCmd::Set { .. } => return profiles::need_android(profile, "app settings"),
     };
     ops::bundle_action(profile, &package, action, &stderr)
@@ -477,20 +484,42 @@ fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
 
 /// Formats `app info` output as text.
 fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
-    let mb = |b: u64| format!("{:.1} MB", b as f64 / 1e6);
     let on = |b: bool| if b { "on" } else { "off" };
-    let mut s = format!(
-        "app size     {}\ndata         {} (cache {})\nbackground   {}\nescape-back  {}\n",
-        mb(i.app_bytes),
-        mb(i.data_bytes),
-        mb(i.cache_bytes),
+    let mut s = sizes_text(i.app_bytes, i.data_bytes, i.cache_bytes);
+    s.push_str(&format!(
+        "background   {}\nescape-back  {}\n",
         on(i.background),
         on(i.escape_back),
-    );
-    if !i.permissions.is_empty() {
+    ));
+    s.push_str(&permissions_text(&i.permissions));
+    s
+}
+
+/// Formats `app info` output for an OpenHarmony bundle as text. OpenHarmony
+/// has no background or Escape settings.
+fn bundle_info_text(i: &innkeeper_core::ohos::BundleInfo) -> String {
+    let mut s = format!("version      {} ({})\n", i.version_name, i.version_code);
+    s.push_str(&sizes_text(i.app_bytes, i.data_bytes, i.cache_bytes));
+    s.push_str(&permissions_text(&i.permissions));
+    s
+}
+
+fn sizes_text(app: u64, data: u64, cache: u64) -> String {
+    let mb = |b: u64| format!("{:.1} MB", b as f64 / 1e6);
+    format!(
+        "app size     {}\ndata         {} (cache {})\n",
+        mb(app),
+        mb(data),
+        mb(cache)
+    )
+}
+
+fn permissions_text(permissions: &[innkeeper_core::app_settings::Permission]) -> String {
+    let mut s = String::new();
+    if !permissions.is_empty() {
         s.push_str("permissions\n");
     }
-    for p in &i.permissions {
+    for p in permissions {
         s.push_str(&format!(
             "  {}  {}{}\n",
             p.name,
@@ -836,6 +865,40 @@ mod tests {
             t.contains("  android.permission.CAMERA  denied (fixed)\n"),
             "{t}"
         );
+    }
+
+    #[test]
+    fn bundle_info_text_has_a_version_and_no_android_settings() {
+        let info = innkeeper_core::ohos::BundleInfo {
+            version_name: "1.0.2".into(),
+            version_code: 1000002,
+            app_bytes: 1_300_000,
+            data_bytes: 2_100_000,
+            cache_bytes: 16_000,
+            permissions: vec![
+                innkeeper_core::app_settings::Permission {
+                    name: "ohos.permission.CAMERA".into(),
+                    granted: false,
+                    editable: true,
+                },
+                innkeeper_core::app_settings::Permission {
+                    name: "ohos.permission.INTERNET".into(),
+                    granted: true,
+                    editable: false,
+                },
+            ],
+        };
+        assert_eq!(
+            bundle_info_text(&info),
+            "version      1.0.2 (1000002)\n\
+             app size     1.3 MB\n\
+             data         2.1 MB (cache 0.0 MB)\n\
+             permissions\n  \
+             ohos.permission.CAMERA  denied\n  \
+             ohos.permission.INTERNET  granted (fixed)\n"
+        );
+        let bare = innkeeper_core::ohos::BundleInfo::default();
+        assert!(!bundle_info_text(&bare).contains("permissions"));
     }
 
     #[test]

@@ -376,6 +376,18 @@ pub fn bundle_action(
     }
 }
 
+/// Reads the version, sizes and permissions of bundle `pkg` in OpenHarmony
+/// profile `profile`. Android's app info comes from the system app
+/// ([`crate::app_settings`]).
+pub fn bundle_info(profile: &ProfileName, pkg: &str, report: Report) -> Result<ohos::BundleInfo> {
+    let pkg = validate::package(pkg)?;
+    let (s, system) = session(profile, report)?;
+    if system != System::Ohos {
+        bail!("profile {profile} runs {}", system.title());
+    }
+    ohos::info(&s, pkg)
+}
+
 /// A user app in the session.
 pub struct ListedApp {
     pub package: String,
