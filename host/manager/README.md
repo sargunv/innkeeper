@@ -74,7 +74,7 @@ Android Settings in a separate window.
   timeout change while the profile runs. The display changes at the next start.
 - Turning off desktop following keeps Android's current value. Later changes in
   Android Settings stay as they are.
-- By default, an idle Android stops after 2 minutes. The timeout can be 1 to 120
+- By default, an idle profile stops after 2 minutes. The timeout can be 1 to 120
   minutes. **Keep Running** applies to every profile. With it on, no profile
   stops when idle, and one login command from the Background portal starts them
   all. If the portal denies the request, the setting stays off.

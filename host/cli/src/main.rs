@@ -177,12 +177,10 @@ struct SetArgs {
 
 impl SetArgs {
     /// Returns the first given setting that OpenHarmony profiles don't have.
-    /// OpenHarmony has no adb or desktop following. Its session doesn't stop
-    /// when idle, because Android's system app is what reports activity.
+    /// OpenHarmony has no adb or desktop following.
     fn android_only(&self) -> Option<&'static str> {
         [
             (self.adb.is_some(), "--adb"),
-            (self.idle_minutes.is_some(), "--idle-minutes"),
             (self.follow_dark.is_some(), "--follow-dark"),
             (self.follow_accent.is_some(), "--follow-accent"),
             (self.follow_locale.is_some(), "--follow-locale"),
@@ -832,6 +830,7 @@ mod tests {
         };
         assert_eq!(android_only("profile set --display medium-phone"), None);
         assert_eq!(android_only("profile set --keep-running on"), None);
+        assert_eq!(android_only("profile set --idle-minutes 5"), None);
         assert_eq!(
             android_only("profile set --display small-phone --adb on"),
             Some("--adb")

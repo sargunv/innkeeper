@@ -12,13 +12,14 @@
 //! - `handoff`: the OpenURI portal, files, desktop share targets,
 //!   FileChooser SaveFile and Email
 //! - `mpris`: MediaSessions as MPRIS players
-//! - lifecycle: the report of what keeps the session up, written to
+//! - `lifecycle`: the report of what keeps the session up, written to
 //!   `<run-dir>/lifecycle` for the launcher's idle shutdown (docs/session.md,
 //!   "Lifecycle"), and the indicator for apps running in the background
 
 pub mod clipboard;
 pub mod handoff;
 mod launcher_entry;
+mod lifecycle;
 pub mod mpris;
 pub mod notify;
 pub mod openuri;
@@ -46,10 +47,9 @@ use settings::SettingsHub;
 pub struct Shared {
     art_dir: PathBuf,
     handoffs: Arc<handoff::Handoffs>,
-    /// The `<run-dir>/lifecycle` report. `lifecycle_owner` is the client
-    /// whose report it holds.
-    lifecycle: PathBuf,
-    lifecycle_owner: std::sync::Mutex<Option<u64>>,
+    /// The `<run-dir>/lifecycle` report.
+    lifecycle: lifecycle::Lifecycles,
+    input: Arc<crate::input::Hub>,
     /// `$XDG_CACHE_HOME/innkeeper-<profile>/clipboard`, which holds files
     /// copied in Android and served to the desktop.
     clipboard_cache: PathBuf,
@@ -87,11 +87,11 @@ impl Shared {
         if !desktop {
             crate::info!("system: test session (log-only sinks)");
         }
-        Arc::new(Shared {
+        let shared = Arc::new(Shared {
             art_dir: run_dir.join("art"),
-            handoffs: handoff::Handoffs::new(input, profile),
-            lifecycle: run_dir.join("lifecycle"),
-            lifecycle_owner: Default::default(),
+            handoffs: handoff::Handoffs::new(input.clone(), profile),
+            lifecycle: lifecycle::Lifecycles::new(run_dir.join("lifecycle")),
+            input: input.clone(),
             clipboard_cache: innkeeper_profile::paths::xdg_home("XDG_CACHE_HOME", ".cache")
                 .join(format!("innkeeper-{profile}/clipboard")),
             desktop,
@@ -102,7 +102,62 @@ impl Shared {
             mpris: OnceLock::new(),
             next_client: Default::default(),
             playback: std::sync::Mutex::new(Vec::new()),
-        })
+        });
+        let weak = Arc::downgrade(&shared);
+        input.watch_windows(move || {
+            if let Some(s) = weak.upgrade() {
+                s.write_lifecycle();
+            }
+        });
+        shared
+    }
+
+    /// Writes the report for the launcher with the bridge's own windows
+    /// added, and shows the indicator while only background-allowed apps
+    /// keep the session up.
+    fn write_lifecycle(&self) -> Reply {
+        let own = self.input.own_windows();
+        let mut state = self.lifecycle.state.lock().unwrap();
+        let Some(r) = &state.report else {
+            return Reply::ok();
+        };
+        let text = lifecycle::text(r, own);
+        let path = &self.lifecycle.path;
+        let tmp = path.with_extension("tmp");
+        let changed = std::fs::read_to_string(path).ok().as_deref() != Some(text.as_str());
+        if let Err(e) = std::fs::write(&tmp, &text).and_then(|()| std::fs::rename(&tmp, path)) {
+            crate::warn!("lifecycle: write {}: {e}", path.display());
+            return Reply::err(-EIO);
+        }
+        if changed {
+            crate::info!("lifecycle: {}", text.trim_end().replace('\n', " "));
+        }
+        let want = lifecycle::indicator(r, own).map(|labels| (r.client, labels));
+        if want == state.indicator {
+            return Reply::ok();
+        }
+        if !self.desktop {
+            crate::info!(
+                "lifecycle: background indicator {:?} (test session)",
+                want.as_ref().map(|w| &w.1)
+            );
+        } else if let Some(hub) = self.notify() {
+            if let Some((client, _)) = &state.indicator
+                && want.as_ref().is_none_or(|w| w.0 != *client)
+            {
+                hub.close(*client, INDICATOR_ID);
+            }
+            if let Some((client, labels)) = &want {
+                let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+                if let Err(e) =
+                    hub.post(*client, &r.events, INDICATOR_ID, &background_note(&labels))
+                {
+                    crate::warn!("lifecycle: indicator: {e:#}");
+                }
+            }
+        }
+        state.indicator = want;
+        Reply::ok()
     }
 
     /// Registers an audio connection whose streams carry the playing app's
@@ -227,8 +282,6 @@ fn background_note(labels: &[&str]) -> Note {
 
 pub struct SystemService {
     shared: Arc<Shared>,
-    /// The apps the background indicator names, while it shows.
-    indicator: Option<Vec<String>>,
     events: Events,
     label: String,
     /// This connection's key in the hubs.
@@ -246,7 +299,6 @@ impl SystemService {
             + 1;
         SystemService {
             shared,
-            indicator: None,
             events,
             label: peer.label.clone(),
             client,
@@ -353,61 +405,15 @@ impl SystemService {
         }
     }
 
-    /// Writes the report for the launcher and shows the indicator while
-    /// only background-allowed apps keep the session up.
+    /// Takes the system app's report of what keeps the session up.
     fn lifecycle(&mut self, l: &Lifecycle, background: &[(String, String)]) -> Reply {
-        let mut text = format!(
-            "windows={}\nservices={}\nwakeup={}\nbackground=",
-            l.windows, l.services, l.wakeup_ms
-        );
-        text.push_str(
-            &background
-                .iter()
-                .map(|(p, _)| p.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        text.push('\n');
-        let path = &self.shared.lifecycle;
-        let tmp = path.with_extension("tmp");
-        let changed = std::fs::read_to_string(path).ok().as_deref() != Some(text.as_str());
-        if let Err(e) = std::fs::write(&tmp, &text).and_then(|()| std::fs::rename(&tmp, path)) {
-            crate::warn!("lifecycle: write {}: {e}", path.display());
-            return Reply::err(-EIO);
-        }
-        *self.shared.lifecycle_owner.lock().unwrap() = Some(self.client);
-        if changed {
-            crate::info!("lifecycle: {}", text.trim_end().replace('\n', " "));
-        }
-        let want = (l.windows == 0 && l.services == 0 && !background.is_empty()).then(|| {
-            background
-                .iter()
-                .map(|(_, n)| n.clone())
-                .collect::<Vec<_>>()
+        self.shared.lifecycle.state.lock().unwrap().report = Some(lifecycle::Report {
+            client: self.client,
+            events: self.events.clone(),
+            lifecycle: *l,
+            background: background.to_vec(),
         });
-        if want == self.indicator {
-            return Reply::ok();
-        }
-        if !self.shared.desktop {
-            crate::info!("lifecycle: background indicator {want:?} (test session)");
-        } else if let Some(hub) = self.shared.notify() {
-            match &want {
-                Some(labels) => {
-                    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-                    if let Err(e) = hub.post(
-                        self.client,
-                        &self.events,
-                        INDICATOR_ID,
-                        &background_note(&labels),
-                    ) {
-                        crate::warn!("lifecycle: indicator: {e:#}");
-                    }
-                }
-                None => hub.close(self.client, INDICATOR_ID),
-            }
-        }
-        self.indicator = want;
-        Reply::ok()
+        self.shared.write_lifecycle()
     }
 
     fn media(&mut self, player: u32, len: u32, fd: &OwnedFd) -> Reply {
@@ -562,11 +568,19 @@ impl Drop for SystemService {
             m.remove_all(self.client);
         }
         // The launcher treats a missing report as busy until the system app
-        // reconnects.
-        let mut owner = self.shared.lifecycle_owner.lock().unwrap();
-        if *owner == Some(self.client) {
-            *owner = None;
-            let _ = std::fs::remove_file(&self.shared.lifecycle);
+        // reconnects. The connection's notifications, the indicator among
+        // them, closed above.
+        let mut state = self.shared.lifecycle.state.lock().unwrap();
+        if state
+            .report
+            .as_ref()
+            .is_some_and(|r| r.client == self.client)
+        {
+            state.report = None;
+            let _ = std::fs::remove_file(&self.shared.lifecycle.path);
+        }
+        if state.indicator.as_ref().is_some_and(|i| i.0 == self.client) {
+            state.indicator = None;
         }
         crate::info!("system: {}: closed", self.label);
     }

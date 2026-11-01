@@ -143,6 +143,15 @@ reports boot completion. Issue #312 tracks the features that build on it.
   entries launch the app with `innkeeper run`, and the manager lists them. The
   app needs `LISTEN_BUNDLE_CHANGE` and `GET_BUNDLE_INFO_PRIVILEGED`, which a
   `system_basic` app may request.
+- **Activity.** As Android's system app does, the app reports what keeps the
+  session up to the bridge's system service in `LIFECYCLE`, from boot completion
+  on ([docs/session.md](../docs/session.md#lifecycle)). It counts the running
+  continuous tasks of user apps, which OH's background task manager lists and
+  announces (`GET_BACKGROUND_TASK_INFO`). A media app that plays with the window
+  closed holds an audio playback task, as an Android media app holds a
+  foreground service. The bridge counts OH's screen window while it is open. The
+  session therefore stops after the profile's idle timeout once the window is
+  closed and no user app runs a continuous task.
 - **Session1 commands.** The app answers each command that the bridge relays
   with "OpenHarmony profiles don't support this action.", so callers don't wait
   for the bridge's timeout.
@@ -443,8 +452,8 @@ OH boots the same way as Android's session
 ([docs/session.md](../docs/session.md)). The launcher composes a root on disk
 and symlinks to it from the sandbox's own `/`. It then starts the broker, and
 the broker starts init. The kmsg log, bridge, control socket and lifecycle are
-the same as Android's. OH's session does not stop when idle, because only
-Android's system app reports activity.
+the same as Android's. OH's session stops when idle, as Android's does
+([Innkeeper System](#innkeeper-system)).
 
 - **Root.** `system` and `vendor` are the extracted partitions as hardlinks or
   reflink copies. Our VDIs and the panel's settings go over `vendor`, and

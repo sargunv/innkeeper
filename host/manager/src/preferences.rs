@@ -162,6 +162,7 @@ impl Page {
         display.add(&self.display_row(&p));
         page.add(&display);
         if p.system == System::Ohos {
+            page.add(&self.lifecycle_group(&p));
             self.content.append(&page);
             return;
         }
