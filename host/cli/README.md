@@ -12,9 +12,13 @@ doesn't say.
 - Every command starts the session if it isn't running. The first start
   downloads the profile's image and shows progress on stderr.
 - `profile create --system ohos NAME` makes an OpenHarmony profile
-  ([ohos](../../ohos/README.md)). Such a profile refuses the app commands
-  (`install`, `run`, `open`, `list`, `uninstall`, `app`) and the settings that
-  only Android has (adb, idle timeout, desktop following).
+  ([ohos](../../ohos/README.md)). `install` takes `.hap` files there. `run`
+  starts the bundle's launcher ability, `list` shows the bundles that the user
+  installed, and `uninstall` refuses preinstalled bundles. `app stop`,
+  `app clear-cache` and `app clear-data` use `aa force-stop` and `bm clean`.
+  Such a profile refuses `open`, files and URIs in `run`, `app info`, `app set`,
+  and the settings that only Android has (adb, idle timeout, desktop following).
+  OpenHarmony apps get no desktop entries.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. `content:` and
   `intent:` URIs are refused.

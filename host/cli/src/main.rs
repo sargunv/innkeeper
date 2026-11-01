@@ -1,6 +1,7 @@
 //! `innkeeper` is the command-line interface. It manages profiles, each of
-//! which runs Android or OpenHarmony. In an Android profile, it installs apps
-//! with desktop entries and icons, and runs, lists and uninstalls them. It is a
+//! which runs Android or OpenHarmony. It installs, runs, lists and uninstalls
+//! apps in either. In an Android profile, apps also get desktop entries and
+//! icons, and can open files and URIs. It is a
 //! front end over `innkeeper-core`, which `innkeeper-manager` also uses. See
 //! host/cli/README.md.
 
@@ -44,7 +45,7 @@ enum Cmd {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Install an .apk, .apks, .xapk or .apkm file.
+    /// Install an .apk, .apks, .xapk, .apkm or .hap file.
     Install { file: PathBuf },
     /// Open an app, or files or a URI in it.
     Run {
@@ -237,7 +238,7 @@ fn install(profile: &ProfileName, file: &Path) -> Result<()> {
 }
 
 /// The package formats that `install` takes. `open` refuses them.
-const PACKAGE_EXTENSIONS: [&str; 4] = ["apk", "apks", "xapk", "apkm"];
+const PACKAGE_EXTENSIONS: [&str; 5] = ["apk", "apks", "xapk", "apkm", "hap"];
 
 /// Opens documents in an Android app that the user picks. Each file is
 /// granted to the session, and then the system app shows its app chooser.
@@ -308,6 +309,9 @@ fn run(
         "--new-window takes no files or URIs"
     );
     let pkg = validate::package(pkg)?;
+    if !args.iter().all(|s| s.is_empty()) {
+        profiles::need_android(profile, "opening files or URIs in apps")?;
+    }
     let session = Session::of_profile(profile)?;
     let splash = if session.running() {
         None
@@ -403,8 +407,25 @@ fn open_input(path: &Path) -> Result<File> {
 /// light window background.
 const DEFAULT_SPLASH: u32 = 0xfafafa;
 
+/// Runs `app` on an OpenHarmony profile, which has no app settings or app
+/// info yet.
+fn ohos_app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
+    use ops::BundleAction;
+    let (package, action) = match cmd {
+        AppCmd::Stop { package } => (package, BundleAction::Stop),
+        AppCmd::ClearCache { package } => (package, BundleAction::ClearCache),
+        AppCmd::ClearData { package } => (package, BundleAction::ClearData),
+        AppCmd::Info { .. } => return profiles::need_android(profile, "app info"),
+        AppCmd::Set { .. } => return profiles::need_android(profile, "app settings"),
+    };
+    ops::bundle_action(profile, &package, action, &stderr)
+}
+
 fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
     use innkeeper_core::app_settings::{Command, request};
+    if profiles::settings(profile)?.system == System::Ohos {
+        return ohos_app(profile, cmd);
+    }
     let switch = |package: &str, action: &str, on: bool| {
         let mut c = Command::new(package, action);
         c.enabled = on;
@@ -609,9 +630,11 @@ fn main() -> ExitCode {
         Cmd::Profile(cmd) => profile(&cli.profile, cmd),
         cmd => {
             let p = profiles::existing(&cli.profile)?;
-            profiles::need_android(&p, "managing apps")?;
             match cmd {
-                Cmd::Open { files } => open(&p, &files, token),
+                Cmd::Open { files } => {
+                    profiles::need_android(&p, "opening files")?;
+                    open(&p, &files, token)
+                }
                 Cmd::Install { file } => install(&p, &file),
                 Cmd::Uninstall { package, keep_data } => uninstall(&p, &package, keep_data),
                 Cmd::Run {

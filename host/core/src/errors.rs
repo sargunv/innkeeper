@@ -5,7 +5,10 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
     NotAnApk,
+    NotAHap,
     UnsupportedBundle,
+    /// The package is for the other system than the profile's.
+    WrongSystem,
     WrongAbi,
     SessionStartFailed,
     ImageNotPrepared,
@@ -18,7 +21,9 @@ impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotAnApk => f.write_str("not a readable Android app"),
+            Self::NotAHap => f.write_str("not a readable OpenHarmony app"),
             Self::UnsupportedBundle => f.write_str("unsupported APK bundle"),
+            Self::WrongSystem => f.write_str("app for another system"),
             Self::WrongAbi => f.write_str("incompatible processor architecture"),
             Self::SessionStartFailed => f.write_str("Android could not start"),
             Self::ImageNotPrepared => f.write_str("Android image is not prepared"),

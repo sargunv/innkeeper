@@ -11,6 +11,10 @@ It builds no artifact of its own. `cargo test -p innkeeper-core` runs its tests.
   `.apkm`) in-process, without the Android SDK. It filters ABI splits to the
   session's `ro.product.cpu.abilist`. One PackageInstaller session streams every
   APK through `install-write -`, so Android makes no extra copy.
+- **OpenHarmony** (`hap.rs`, `ohos.rs`): core reads a HAP's `module.json` and
+  resolves its label through `resources.index`, in both of restool's layouts. It
+  installs, starts, lists and removes bundles with `bm` and `aa` over exec. Both
+  tools exit 0 on failure, so core reads their output.
 - **APK metadata** (`apk/`): core parses the binary `AndroidManifest.xml` and
   the `resources.arsc` values it refers to, following AOSP's `ResourceTypes.h`.
   It picks a label for each locale the way Android does. The language and the

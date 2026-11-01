@@ -55,7 +55,9 @@ fn classify(
     let not_built = (h("Not Built for This Computer"), None);
     match kind {
         Some(NotAnApk) => (h("Not a Valid APK"), Some("Try downloading it again.")),
+        Some(NotAHap) => (h("Not a Valid HAP"), Some("Try downloading it again.")),
         Some(UnsupportedBundle) => (h("Unsupported Bundle"), None),
+        Some(WrongSystem) => (h("Made for Another System"), None),
         Some(WrongAbi) => not_built,
         Some(SessionStartFailed) => (format!("{system} Couldn’t Start"), None),
         Some(ImageNotPrepared) => (

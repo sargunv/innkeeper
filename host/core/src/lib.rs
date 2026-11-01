@@ -14,6 +14,7 @@ pub mod errors;
 pub mod hap;
 pub use errors::ErrorKind;
 pub mod launcher;
+pub mod ohos;
 pub mod ops;
 pub mod paths;
 pub mod preferences;
