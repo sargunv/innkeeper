@@ -32,8 +32,9 @@ minute, so read early boot from the kmsg log.
 `mise run session -- exec` and `shell` run commands as root in OH's
 `/system/bin/sh`. They go through the exec relay from android/system/exec, built
 static against musl and started by `sys_prod/etc/init/innkeeper_exec.cfg`. Its
-native token holds `ohos.permission.DUMP` for `hidumper -ls`, `hilog -x` and
-`ps -A`.
+native token holds the permissions of hdcd, the image's `hdc shell` daemon. With
+them, `bm` installs, lists and removes bundles, `aa` starts and stops abilities,
+and `hidumper -ls`, `hilog -x` and `ps -A` work.
 
 ## Image
 
