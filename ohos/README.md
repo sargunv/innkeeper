@@ -117,14 +117,18 @@ presets are `small-phone` (720x1280 at 320 dpi, the default) and `medium-phone`.
 OH has no windowed mode, and a tablet's landscape layout is untested. Run OH on
 a nested desktop (`tests/nested.sh`) and not on your own.
 
-SceneBoard shows the home screen about 30 s after samgr starts. Its lock screen
-is off for user 100, as Android's lock screen is off by default
-(`ro.lockscreen.disable.default`). OH's screenlock service keeps that setting
-per user in `/data/service/el1/public/screenlock/screenlock_state.xml`, and
-`sys_prod/etc/init/innkeeper_screenlock.cfg` copies our version there before
-foundation starts. The desktop has its own lock screen. OH's own injector also
-drives the screen over `exec`. `uinput -T -c 90 200` taps Settings on the home
-screen.
+SceneBoard shows the home screen about 30 s after samgr starts. A new profile's
+lock screen is off for user 100, as Android's lock screen is off by default
+(`ro.lockscreen.disable.default`). OH's screenlock service keeps a per-user
+"disabled" flag in `/data/service/el1/public/screenlock/screenlock_state.xml`,
+and SceneBoard doesn't lock the screen while the flag is set. The launcher
+writes the file before the first boot. When the user sets a PIN in Settings, the
+service clears the flag, and the lock screen asks for the PIN from the next
+restart on. OH's PIN and user authentication HDIs keep their data in
+`/data/chipset/el1/public/pinauth` and `userauth`. The image creates neither
+directory, so `sys_prod/etc/init/innkeeper_useriam.cfg` does. The desktop has
+its own lock screen. OH's own injector also drives the screen over `exec`.
+`uinput -T -c 90 200` taps Settings on the home screen.
 
 - **Display.** The launcher sets the panel from the profile's preset in two
   places. The composer reads the `const.innkeeper.display` parameter
