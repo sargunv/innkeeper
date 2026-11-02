@@ -68,6 +68,8 @@ MEMORY = "[Scope]\nMemoryHigh=6G\nMemoryMax=8G\n"
 MEMORY_MAX = str(8 << 30)
 # This leaves room for one capped session plus the desktop.
 MIN_AVAILABLE_GIB = 10
+# A session left running past this age is reported when another session starts.
+STALE_US = 2 * 60 * 60 * 1_000_000
 SYSTEMD_ENV = dict(
   os.environ,
   DBUS_SESSION_BUS_ADDRESS=HOST_BUS,
@@ -286,7 +288,135 @@ def capped(cg):
   return o.stdout.strip() == MEMORY_MAX
 
 
+def stale_sessions(units, now_us, limit_us):
+  """Return sessions whose ActiveEnterTimestamp is older than limit_us."""
+  return [
+    unit
+    for unit in units
+    if unit[1] is not None and now_us - unit[1] > limit_us
+  ]
+
+
+def format_stale(stale, now_us):
+  """Format the warning for sessions that have run past the age limit."""
+  lines = [
+    "run.py: these Innkeeper dev sessions have run for more than 2 hours:"
+  ]
+  for unit, entered_us, profile in stale:
+    hours = (now_us - entered_us) // (60 * 60 * 1_000_000)
+    lines.append(f"  {unit}  {hours} h  {profile}")
+  lines.append("Stop one with: systemctl --user stop <unit>")
+  return "\n".join(lines) + "\n"
+
+
+def _profile_of(unit, uid):
+  """Return the first profile or data argument in a dev runner's scope, or
+  None for a scope that isn't one.
+
+  The user's own Innkeeper sessions have the same app id, so their scopes
+  match the same pattern. A dev runner's session names paths under a
+  checkout's out/, and the user's sessions don't.
+  """
+  root = Path(
+    "/sys/fs/cgroup/user.slice"
+    f"/user-{uid}.slice/user@{uid}.service/app.slice/{unit}"
+  )
+  try:
+    pids = root.joinpath("cgroup.procs").read_text().split()
+  except OSError:
+    return None
+  profile, dev = "?", False
+  for pid in pids:
+    try:
+      args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+      continue
+    for arg in args:
+      text = arg.decode(errors="replace")
+      dev = dev or "/out/" in text
+      if profile == "?" and text.startswith(
+        ("INNKEEPER_PROFILE=", "INNKEEPER_DATA=")
+      ):
+        profile = text
+    if dev and profile != "?":
+      break
+  return profile if dev else None
+
+
+def _active_enter_us(unit):
+  shown = subprocess.run(
+    [
+      "systemctl",
+      "--user",
+      "show",
+      unit,
+      "-p",
+      "ActiveEnterTimestampMonotonic",
+      "--value",
+    ],
+    env=SYSTEMD_ENV,
+    capture_output=True,
+    text=True,
+  )
+  if shown.returncode != 0:
+    return None
+  try:
+    return int(shown.stdout.strip())
+  except ValueError:
+    return None
+
+
+def running_sessions():
+  """List the dev runner's Innkeeper scopes as (unit, active_enter_us, profile).
+
+  A missing systemctl, or a failed list, yields nothing so that start can
+  continue. A process can exit while its cmdline is read, and that miss is
+  reported as an unknown profile.
+  """
+  try:
+    listed = subprocess.run(
+      [
+        "systemctl",
+        "--user",
+        "list-units",
+        f"app-flatpak-{APP}-*.scope",
+        "--no-legend",
+        "--plain",
+      ],
+      env=SYSTEMD_ENV,
+      capture_output=True,
+      text=True,
+    )
+  except OSError:
+    return []
+  if listed.returncode != 0:
+    return []
+  uid = os.getuid()
+  found = []
+  for line in listed.stdout.splitlines():
+    name = line.split()[0] if line.split() else ""
+    if not name:
+      continue
+    profile = _profile_of(name, uid)
+    if profile is not None:
+      found.append((name, _active_enter_us(name), profile))
+  return found
+
+
+def warn_stale():
+  """Warn about dev sessions that have run for more than 2 hours."""
+  try:
+    units = running_sessions()
+  except OSError:
+    return
+  now_us = int(time.clock_gettime(time.CLOCK_MONOTONIC) * 1_000_000)
+  stale = stale_sessions(units, now_us, STALE_US)
+  if stale:
+    print(format_stale(stale, now_us), file=sys.stderr, end="")
+
+
 def start(args):
+  warn_stale()
   # Serialize starts without holding the lock for the lifetime of the session.
   with (SCRATCH / "start.lock").open("w") as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)

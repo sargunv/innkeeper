@@ -66,7 +66,8 @@ flowchart LR
   Flatpak. The host caps its memory. Its scratch HOME and XDG directories are
   under `out/dev/flatpak/<profile>`, and the default profile is `dev`. A start
   fails at once if less than 10 GiB of memory is available
-  ([packaging/flatpak](../packaging/flatpak/README.md#development)).
+  ([packaging/flatpak](../packaging/flatpak/README.md#development)). `start`
+  warns about dev sessions that have run for more than 2 hours.
 - `tools/dev/innkeeper.sh` runs the CLI's `install app.apk`, `run`, `uninstall`
   and `list` commands ([host/cli](../host/cli/README.md)) in the same Flatpak.
   It adds `--profile $INNKEEPER_PROFILE`. It needs its own desktop, for example
