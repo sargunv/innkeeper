@@ -65,6 +65,8 @@ only its node. Each invocation uses a fresh named Android session.
 nested desktop, on the GPU that the launcher selects, and it is skipped without
 a GPU. `ohos_gles_test` draws to an EGL window surface and imports a buffer with
 `EGL_NATIVE_BUFFER_OHOS`, with our EGL loaded from a copy in `/data/local/tmp`.
+It also imports NV12, NV21, I420 and YV12 buffers in a video frame's layout and
+checks the RGB that a `samplerExternalOES` reads from them.
 
 ## OpenHarmony
 
@@ -110,8 +112,12 @@ ours under those names, with `libgallium-26.2.5.so`, in
   ([third_party_mesa3d](https://gitee.com/openharmony/third_party_mesa3d), MIT).
 - **Native buffers.** render_service imports other surfaces' buffers with
   `eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS)`. The platform imports the buffer's
-  dma-buf as a linear image of its RGB format with the handle's row pitch. YUV
-  buffers don't import yet.
+  dma-buf as a linear image of its RGB format with the handle's row pitch. Video
+  frames are YUV 4:2:0 (NV12, NV21, I420 or YV12), with the chroma after the
+  luma in the same dma-buf, so the platform imports them as two or three planes
+  of it. They have no color metadata and import as BT.601 limited range, as
+  Android's gralloc fallback does. render_service samples them as external
+  textures.
 - **NDK.** The platform calls OH's NativeWindow API in `libnative_window.so`.
   `build.sh` copies OH's NDK headers for it (`android/vendor/third_party/ohos`)
   into the sysroot, with a link stub that has the library's soname. Each library

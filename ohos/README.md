@@ -434,7 +434,8 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   the image's. render_service and apps then draw with Zink on RADV or ANV, and
   `hidumper -s RenderService -a gles` names the GPU. Without a GPU, as in CI,
   the image's Mesa stays, and render_service draws with llvmpipe
-  (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software.
+  (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software. The image's
+  EGL doesn't import YUV buffers, so video shows black without a GPU.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would
