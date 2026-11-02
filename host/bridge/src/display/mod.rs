@@ -180,6 +180,51 @@ impl DisplayService {
         Reply::with_body(w.into_vec())
     }
 
+    /// Sends RELEASE for `buffer`.
+    fn release(&self, buffer: u32, invalid: bool) {
+        if self
+            .events
+            .try_send(
+                proto::ty::RELEASE,
+                &proto::event::release(buffer, invalid),
+                &[],
+            )
+            .is_err()
+        {
+            self.events.shutdown();
+        }
+    }
+
+    fn layers(&mut self, display: u32, below: u32, layers: Vec<proto::Layer>) -> Reply {
+        let headless = self.headless.contains(&display);
+        let window = self.displays.get(&display).copied();
+        if window.is_none() && !headless {
+            return Reply::err(-ENOENT);
+        }
+        // A layer whose buffer isn't the display's is left out and released,
+        // so the composer imports it again. A headless display shows none.
+        let mut shown = Vec::with_capacity(layers.len());
+        let mut below_shown = 0;
+        for (i, l) in layers.into_iter().enumerate() {
+            if self.buffers.get(&l.buffer) != Some(&display) {
+                self.release(l.buffer, true);
+            } else if headless {
+                self.release(l.buffer, false);
+            } else {
+                below_shown += u32::from((i as u32) < below);
+                shown.push(l);
+            }
+        }
+        match window {
+            Some(window) => self.send(Cmd::Layers {
+                window,
+                below: below_shown,
+                layers: shown,
+            }),
+            None => Reply::ok(),
+        }
+    }
+
     fn remove_display(&mut self, display: u32) -> Reply {
         if self.headless.remove(&display) {
             self.buffers.retain(|_, d| *d != display);
@@ -314,6 +359,11 @@ impl Service for DisplayService {
                     None => Reply::ok(),
                 }
             }
+            Request::Layers {
+                display,
+                below,
+                layers,
+            } => self.layers(display, below, layers),
             Request::BufferRemove { buffer } => {
                 let Some(display) = self.buffers.remove(&buffer) else {
                     return Reply::err(-ENOENT);
@@ -332,34 +382,14 @@ impl Service for DisplayService {
                     // A failed or removed import can still have a FRAME in
                     // flight. The request error alone does not return the
                     // frame's image lease, so RELEASE is sent as well.
-                    if self
-                        .events
-                        .try_send(
-                            proto::ty::RELEASE,
-                            &proto::event::release(buffer, true),
-                            &[],
-                        )
-                        .is_err()
-                    {
-                        self.events.shutdown();
-                    }
+                    self.release(buffer, true);
                     return Reply::err(-ENOENT);
                 }
                 // Any acquire fence is ignored, because the composer only
                 // sends frames it has finished writing.
                 drop(fds);
                 if self.headless.contains(&display) {
-                    if self
-                        .events
-                        .try_send(
-                            proto::ty::RELEASE,
-                            &proto::event::release(buffer, false),
-                            &[],
-                        )
-                        .is_err()
-                    {
-                        self.events.shutdown();
-                    }
+                    self.release(buffer, false);
                     return Reply::ok();
                 }
                 if crate::log::debug() {
@@ -398,8 +428,13 @@ mod tests {
         wire::{MAX_MSG, Reader},
     };
 
-    #[test]
-    fn frame_after_buffer_removal_still_returns_its_lease() {
+    /// A service with display 100 in window 2, display 101 headless, and
+    /// buffers 7 and 8 on display 100 and 9 on display 101.
+    fn service() -> (
+        DisplayService,
+        calloop::channel::Channel<Cmd>,
+        rustix::fd::OwnedFd,
+    ) {
         let (server, client) = rustix::net::socketpair(
             rustix::net::AddressFamily::UNIX,
             rustix::net::SocketType::SEQPACKET,
@@ -407,8 +442,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let (cmd, _rx) = calloop::channel::channel();
-        let mut service = DisplayService {
+        let (cmd, rx) = calloop::channel::channel();
+        let service = DisplayService {
             hub: Hub::new(),
             conn: 1,
             cmd,
@@ -416,10 +451,77 @@ mod tests {
             thread: None,
             limits: Limits::default(),
             displays: HashMap::from([(100, 2)]),
-            headless: HashSet::new(),
-            buffers: HashMap::from([(7, 100)]),
+            headless: HashSet::from([101]),
+            buffers: HashMap::from([(7, 100), (8, 100), (9, 101)]),
             label: "test".into(),
         };
+        (service, rx, client)
+    }
+
+    /// The RELEASE events the client has, as (buffer, invalid).
+    fn releases(client: &rustix::fd::OwnedFd) -> Vec<(u32, u32)> {
+        let mut bytes = [0; MAX_MSG + 1];
+        let mut out = Vec::new();
+        while let Ok(Some(packet)) = transport::recv(client, &mut bytes) {
+            let header = crate::ipc::wire::decode_header(&bytes[..packet.len]).unwrap();
+            assert_eq!(header.ty, proto::ty::RELEASE);
+            let mut body = Reader::new(&bytes[crate::ipc::wire::HDR..packet.len]);
+            out.push((body.u32().unwrap(), body.u32().unwrap()));
+        }
+        out
+    }
+
+    fn layers(service: &mut DisplayService, display: u32, below: u32, buffers: &[u32]) -> i32 {
+        let layers = buffers
+            .iter()
+            .map(|&buffer| proto::Layer {
+                buffer,
+                rect: [36, 558, 648, 486],
+                crop: [0, 0, 320, 240],
+            })
+            .collect();
+        let request = proto::encode(
+            1,
+            &Request::Layers {
+                display,
+                below,
+                layers,
+            },
+        );
+        service
+            .handle(proto::ty::LAYERS, &request[crate::ipc::wire::HDR..], vec![])
+            .status
+    }
+
+    #[test]
+    fn layers_leave_out_other_displays_buffers() {
+        let (mut service, rx, client) = service();
+        // Buffer 9 is display 101's, and 5 is unknown. Both are released as
+        // invalid, and the window gets the rest with one layer under its frame.
+        assert_eq!(layers(&mut service, 100, 2, &[9, 7, 5, 8]), 0);
+        assert_eq!(releases(&client), [(9, 1), (5, 1)]);
+        match rx.try_recv() {
+            Ok(Cmd::Layers {
+                window: 2,
+                below: 1,
+                layers,
+            }) => assert_eq!(layers.iter().map(|l| l.buffer).collect::<Vec<_>>(), [7, 8]),
+            _ => panic!("no LAYERS for window 2"),
+        }
+        assert_eq!(layers(&mut service, 102, 0, &[]), -ENOENT);
+    }
+
+    #[test]
+    fn a_headless_display_releases_its_layers() {
+        let (mut service, rx, client) = service();
+        assert_eq!(layers(&mut service, 101, 1, &[9]), 0);
+        assert_eq!(releases(&client), [(9, 0)]);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn frame_after_buffer_removal_still_returns_its_lease() {
+        let (mut service, _rx, client) = service();
         // The composer invalidates the failed import on the service before
         // adding the buffer again.
         assert_eq!(
@@ -442,14 +544,7 @@ mod tests {
                 .status,
             -ENOENT
         );
-        let mut bytes = [0; MAX_MSG + 1];
-        let packet = transport::recv(&client, &mut bytes).unwrap().unwrap();
-        let header = crate::ipc::wire::decode_header(&bytes[..packet.len]).unwrap();
-        assert_eq!(header.ty, proto::ty::RELEASE);
-        let mut body = Reader::new(&bytes[crate::ipc::wire::HDR..packet.len]);
-        assert_eq!(body.u32().unwrap(), 7);
-        assert_eq!(body.u32().unwrap(), 1); // invalid, not reusable
-        body.end().unwrap();
-        assert!(transport::recv(&client, &mut bytes).is_err()); // exactly one
+        // One RELEASE, which marks the import invalid.
+        assert_eq!(releases(&client), [(7, 1)]);
     }
 }

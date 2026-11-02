@@ -67,6 +67,7 @@ mod foreign;
 mod formats;
 mod frames;
 mod inhibit;
+mod layers;
 mod policy;
 mod presentation;
 mod scale;
@@ -96,6 +97,13 @@ pub enum Cmd {
         window: u32,
         buffer: u32,
         damage: [i32; 4],
+    },
+    /// The window's layers, bottom to top. The first `below` go under its
+    /// frame.
+    Layers {
+        window: u32,
+        below: u32,
+        layers: Vec<super::proto::Layer>,
     },
     /// A request from the Innkeeper IME.
     TextInput(ime::Req),
@@ -129,6 +137,8 @@ struct Buf {
     source: OwnedFd,
     spec: BufferSpec,
     bench_offset: u64,
+    /// Shown in a layer (LAYERS) instead of as a frame.
+    layer: bool,
 }
 
 struct Win {
@@ -168,6 +178,9 @@ struct Win {
     shown_size: (u32, u32),
     /// The launch's activation token, used with the first frame.
     token: Option<String>,
+    /// The display's layers, bottom to top, and how many show under the frame.
+    layers: Vec<layers::Sub>,
+    below: u32,
 }
 
 pub(crate) struct State {
@@ -182,6 +195,8 @@ pub(crate) struct State {
     dmabuf: DmabufState,
     formats: Vec<(u32, u64)>,
     viewporter: Option<WpViewporter>,
+    /// wp_color_representation_manager_v1, if it takes BT.601 limited range.
+    color_representation: Option<layers::ColorRepresentation>,
     presentation: Option<presentation::Presentation>,
     presentation_clock: presentation::Clock,
     fractional: Option<WpFractionalScaleManagerV1>,
@@ -606,6 +621,7 @@ impl State {
     // frames. The surface stays mapped, and its outstanding frame callback
     // stays live to observe a later restore.
     fn freeze(&mut self, id: u32) {
+        self.freeze_layers(id);
         let Some(w) = self.windows.get_mut(&id) else {
             return;
         };
@@ -804,6 +820,8 @@ impl State {
                 shown: None,
                 shown_size: (0, 0),
                 token: (!s.token.is_empty()).then_some(s.token),
+                layers: Vec::new(),
+                below: 0,
             },
         );
         self.window_appearance(s.window, color, icon);
@@ -829,9 +847,10 @@ impl State {
         self.seat.capture.forget(id);
         self.cursors.remove(&id);
         self.hub.pointer_positions.lock().unwrap().remove(&id);
-        let Some(w) = self.windows.remove(&id) else {
+        let Some(mut w) = self.windows.remove(&id) else {
             return;
         };
+        layers::destroy(std::mem::take(&mut w.layers));
         self.window_timing(id);
         if let Some(v) = &w.viewport {
             v.destroy();
@@ -876,6 +895,10 @@ impl State {
         let direct = params.is_some();
         if let Some(params) = params {
             params.add(fd.as_fd(), 0, b.offset, b.stride, b.modifier);
+            if b.fourcc == super::proto::fourcc::NV12 {
+                let chroma = b.offset + b.stride * b.height;
+                params.add(fd.as_fd(), 1, chroma, b.stride, b.modifier);
+            }
             let p = params.create(
                 b.width as i32,
                 b.height as i32,
@@ -909,12 +932,14 @@ impl State {
                 bench_offset: b.offset as u64
                     + (b.height / 2) as u64 * b.stride as u64
                     + (b.width / 2) as u64 * 4,
+                layer: false,
             },
         );
         // Keep the fd for a host-owned snapshot when the window goes hidden.
     }
 
     fn remove_buffer(&mut self, id: u32) {
+        self.forget_layer_buffer(id);
         if let Some(mut b) = self.buffers.remove(&id) {
             for _ in 0..b.frames.release() {
                 self.release(id, true);
@@ -988,6 +1013,7 @@ impl State {
         }
         w.frozen = snapshot;
         let first = w.shown.is_none();
+        let resized = w.shown_size != (bw, bh);
         w.shown = Some(buffer);
         w.shown_size = (bw, bh);
         if let Some(f) = w.frame.as_mut()
@@ -1064,6 +1090,10 @@ impl State {
         }
         for _ in 0..releases {
             self.release(buffer, false);
+        }
+        if resized {
+            // The layers' positions apply with the next frame.
+            self.place_layers(id);
         }
         self.cursor_density(id);
     }
@@ -1189,6 +1219,11 @@ impl State {
                 buffer,
                 damage,
             } => self.frame(window, buffer, damage),
+            Cmd::Layers {
+                window,
+                below,
+                layers,
+            } => self.layers(window, below, layers),
             Cmd::TextInput(r) => self.text_input(r),
             Cmd::PointerCapture(enabled) => {
                 self.seat.capture.state.request(enabled);
@@ -1322,6 +1357,8 @@ impl WindowHandler for State {
         {
             f.draw();
         }
+        self.place_layers(id);
+        let w = &self.windows[&id];
         w.window.commit();
         if was_visible != self.windows[&id].visibility.visible {
             self.send_visibility(id);
@@ -1507,7 +1544,11 @@ impl DmabufHandler for State {
                 b.wl = Some(buffer);
                 if let Some(damage) = b.frames.imported() {
                     let window = b.window;
-                    self.present_frame(window, id, damage);
+                    if b.layer {
+                        self.layer_imported(window, id);
+                    } else {
+                        self.present_frame(window, id, damage);
+                    }
                 }
             }
             None => buffer.destroy(),
@@ -1526,7 +1567,11 @@ impl DmabufHandler for State {
                 b.fallback = true;
                 if let Some(damage) = b.frames.imported() {
                     let window = b.window;
-                    self.present_frame(window, id, damage);
+                    if b.layer {
+                        self.layer_imported(window, id);
+                    } else {
+                        self.present_frame(window, id, damage);
+                    }
                 }
             }
         }
@@ -1638,6 +1683,7 @@ pub fn run(
         dmabuf: DmabufState::new(&globals, &qh),
         formats: Vec::new(),
         viewporter: bind_opt(&globals, &qh, 1),
+        color_representation: layers::ColorRepresentation::bind(&globals, &qh),
         presentation: bind_opt(&globals, &qh, 1),
         presentation_clock: presentation::Clock::default(),
         fractional: bind_opt(&globals, &qh, 1),
@@ -1673,6 +1719,7 @@ pub fn run(
     // Complete default feedback before accepting any BUFFER_ADD commands.
     let _feedback = st.dmabuf.get_default_feedback(&qh).ok();
     queue.roundtrip(&mut st).context("dma-buf formats")?;
+    st.color_representation = st.color_representation.take().filter(|c| c.bt601());
     WaylandSource::new(conn, queue)
         .insert(ev.handle())
         .map_err(|e| anyhow::anyhow!("wayland source: {e}"))?;
