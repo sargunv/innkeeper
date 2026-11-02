@@ -54,7 +54,7 @@ push "$tests/ohos_gles_test" "$t/ohos_gles_test"
 for lib in libEGL_impl.so libGLESv2_impl.so libgallium-26.2.5.so; do push "$gl/$lib" "$t/$lib"; done
 "$S" exec "$t/ohos_swapchain_test" | tee "$log/swapchain.log"
 "$S" exec /system/bin/sh -c "LD_LIBRARY_PATH=$t $t/ohos_gles_test $t/libEGL_impl.so" | tee "$log/gles.log"
-if ! grep -q -E '^device: .*\((RADV|Intel)' "$log/swapchain.log" ||
+if ! grep -q -E '^device: .*(RADV|Intel)' "$log/swapchain.log" ||
   ! grep -q -E '^renderer: zink .*(RADV|Intel)' "$log/gles.log"; then
   echo "FAIL: the tests did not run on RADV or ANV" >&2
   exit 1
