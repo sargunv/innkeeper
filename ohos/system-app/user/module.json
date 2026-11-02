@@ -24,8 +24,15 @@
     "virtualMachine": "ark",
     "compileMode": "esmodule",
     "requestPermissions": [
-      { "name": "ohos.permission.READ_PASTEBOARD" },
-      { "name": "ohos.permission.START_ABILITIES_FROM_BACKGROUND" }
+      {
+        "name": "ohos.permission.READ_PASTEBOARD"
+      },
+      {
+        "name": "ohos.permission.START_ABILITIES_FROM_BACKGROUND"
+      },
+      {
+        "name": "ohos.permission.SET_DEFAULT_APPLICATION"
+      }
     ],
     "extensionAbilities": [
       {
@@ -36,6 +43,67 @@
         "icon": "$media:icon",
         "label": "$string:app_name",
         "exported": false
+      }
+    ],
+    "abilities": [
+      {
+        "name": "DesktopAbility",
+        "srcEntry": "./ets/desktop/DesktopAbility.ets",
+        "description": "$string:desktop_description",
+        "icon": "$media:icon",
+        "label": "$string:desktop_label",
+        "startWindowIcon": "$media:icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "excludeFromMissions": true,
+        "removeMissionAfterTerminate": true,
+        "skills": [
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "entities": ["entity.system.browsable"],
+            "uris": [
+              {
+                "scheme": "http"
+              },
+              {
+                "scheme": "https"
+              },
+              {
+                "scheme": "mailto"
+              },
+              {
+                "scheme": "tel"
+              },
+              {
+                "scheme": "sms"
+              },
+              {
+                "scheme": "smsto"
+              },
+              {
+                "scheme": "geo"
+              },
+              {
+                "scheme": "market"
+              },
+              {
+                "scheme": "magnet"
+              },
+              {
+                "scheme": "webcal"
+              },
+              {
+                "scheme": "webcals"
+              },
+              {
+                "scheme": "ftp"
+              },
+              {
+                "scheme": "ftps"
+              }
+            ]
+          }
+        ]
       }
     ]
   }
