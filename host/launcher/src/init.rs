@@ -35,9 +35,9 @@ pub fn command(cfg: &Config, extra: &[(&str, String)]) -> Command {
             "INNKEEPER_RENDER_NODE",
             cfg.render_node.as_deref().unwrap_or(Path::new("")),
         );
-    if cfg.system == System::Ohos {
-        // The image's Mesa has no radeonsi, and CI has no GPU
-        // (ohos/README.md, "GPU").
+    if cfg.system == System::Ohos && cfg.render_node.is_none() {
+        // Without a GPU, the image's Mesa draws, and its only working driver
+        // is llvmpipe (ohos/README.md, "GPU").
         c.env("LIBGL_ALWAYS_SOFTWARE", "1");
     }
     if let Some(d) = &cfg.broker_debug {
