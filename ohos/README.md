@@ -472,7 +472,11 @@ file changes.
   by llvmpipe, by RADV and ANV, and by the compositor. A `BufferHandle` has no
   field for a tiling, so OH's swapchain layer and EGL can't pass a tiled buffer
   to the driver, and every buffer stays LINEAR. The supported formats are RGB
-  8888, 565, 888 and 1010102, and YUV 4:2:0.
+  8888, 565, 888 and 1010102, and YUV 4:2:0. A YUV buffer's chroma follows its
+  luma. NV12 and NV21 interleave it in rows of the luma's pitch, and I420 and
+  YV12 have a plane for each chroma channel at half that pitch. The luma pitch
+  of I420 and YV12 is a multiple of 512 bytes, as Android's YV12 is, because
+  RADV needs each plane's pitch to be a multiple of 256 bytes.
 - **Build.** `build.sh` compiles with the NDK's clang for `x86_64-linux-musl`,
   using the build container's musl headers. Stub libraries give the linker the
   `libc.so`, `libc++.so`, `libhilog.so` and `libbegetutil.z.so` sonames, and the
