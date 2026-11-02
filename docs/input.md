@@ -34,6 +34,14 @@ tied to that window's display. Mouse motion follows the host's absolute
 coordinates, which the host has already accelerated, so Android's pointer
 scaling is off.
 
+Each process that opens a device has its own queue of the device's records, as
+with the kernel's evdev. A process that holds a device open and doesn't read it
+delays no other reader. OpenHarmony's dhardware opens every device soon after
+boot and reads none of them for up to six seconds. Within one process, the
+broker sends a batch after the process reads the last one, because EventHub
+reads one packet per ready device and would otherwise reorder a modifier and a
+mouse button. A process that falls 1024 batches behind loses the newer ones.
+
 **Controllers.** The bridge reads the host gamepads that the user's ACLs already
 allow, through Flatpak's `--device=input`
 ([security.md](security.md#the-sandbox)). It doesn't grab them, and it looks for
