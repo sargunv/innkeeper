@@ -383,11 +383,24 @@ impl Page {
         if let Err(e) = check_name(to) {
             return self.error(Op::Profiles, &e);
         }
+        // Other changes wait, so none saves under the old name meanwhile.
+        if self.busy.replace(true) {
+            return;
+        }
+        let page = self.prefs.borrow().clone();
+        if let Some(p) = &page {
+            p.set_sensitive(false);
+        }
         let (f, t) = (from.clone(), to.to_string());
         let s = self.clone();
         let to = to.to_string();
         glib::spawn_future_local(async move {
-            match worker::run_quiet(move || profiles::rename(&f, &t)).await {
+            let r = worker::run_quiet(move || profiles::rename(&f, &t)).await;
+            s.busy.set(false);
+            if let Some(p) = &page {
+                p.set_sensitive(true);
+            }
+            match r {
                 Ok(()) => {
                     s.profile.replace(to.clone());
                     if let Some(w) = s.window.upgrade()
