@@ -749,11 +749,7 @@ mod tests {
             mask: None,
         });
         let exec = |pkg: &str| {
-            desktop::exec_line(
-                &innkeeper_core::paths::cli(&cfg.profile, &["run", pkg]),
-                Some("%U"),
-            )
-            .unwrap()
+            desktop::exec_line(&innkeeper_core::paths::app_command(pkg), Some("%U")).unwrap()
         };
         let peer = Peer::test();
         let s = AppsService::new(cfg.clone(), &peer);
