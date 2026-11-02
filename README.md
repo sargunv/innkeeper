@@ -82,6 +82,18 @@ Run instrumented tests that take screenshots in a phone or tablet profile. In
 windowed mode, each app window is a separate display, so a capture of the
 default display doesn't show the app.
 
+## For OpenHarmony developers
+
+Turn on hdc in an OpenHarmony profile's settings in Innkeeper, or run
+`innkeeper profile set --hdc on`. The profile then listens for hdc on a loopback
+port, and Innkeeper shows the command that connects to it, such as
+`hdc tconn 127.0.0.1:55555`. Innkeeper doesn't include an hdc client, so use the
+one in the OpenHarmony SDK or DevEco Studio. Innkeeper authorizes the key in
+your `~/.harmony/hdckey.pub`. If hdc has no key yet, it creates one when it
+first connects, and OpenHarmony asks whether to allow it. Turning hdc on again
+authorizes the new key. `innkeeper profile list` shows the profile's UDID, which
+a debug signing profile lists.
+
 ## How is this different from Waydroid?
 
 Waydroid runs a custom LineageOS image in an LXC container that needs root. It

@@ -2,8 +2,9 @@
 # Fetches the OpenHarmony SDK parts and the rollup that ohos/sdk.env pins into
 # $OHOS_SDK_HOME/<version>, unless they are there already, and prints that
 # directory. The SDK parts are the ArkTS compiler (ets/), restool, the packing
-# tool, hap-sign-tool, and the public signing keys and profile templates
-# (toolchains/). Each is Apache 2.0 open source, and none needs an account.
+# tool, hap-sign-tool, the public signing keys and profile templates, and the
+# hdc client that the e2e test connects with (toolchains/). Each is Apache 2.0
+# open source, and none needs an account.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=ohos/sdk.env
@@ -42,7 +43,8 @@ tar -xzf "$tmp/rollup.tgz" -C "$tmp/sdk/rollup" --strip-components=1
 # the API 8 compiler, which the build doesn't run.
 python3 -I - "$tmp/sdk" "$tmp/${names[0]}" "$tmp/${names[1]}" <<'EOF'
 import os, sys, zipfile
-keep = ("toolchains/restool", "toolchains/lib/app_packing_tool.jar",
+keep = ("toolchains/restool", "toolchains/hdc", "toolchains/libusb_shared.so",
+        "toolchains/lib/app_packing_tool.jar",
         "toolchains/lib/hap-sign-tool.jar", "toolchains/lib/OpenHarmony",
         "toolchains/lib/Unsgned", "toolchains/NOTICE.txt",
         "ets/api/", "ets/arkts/", "ets/component/", "ets/kits/",

@@ -174,9 +174,20 @@ impl System {
     /// Fails unless the system is Android, because `what` exists only for
     /// Android profiles.
     pub fn need_android(self, what: &str) -> Result<()> {
+        self.need(System::Android, what)
+    }
+
+    /// Fails unless the system is OpenHarmony, because `what` exists only for
+    /// OpenHarmony profiles.
+    pub fn need_ohos(self, what: &str) -> Result<()> {
+        self.need(System::Ohos, what)
+    }
+
+    fn need(self, system: System, what: &str) -> Result<()> {
         ensure!(
-            self == System::Android,
-            "{what} needs an Android profile, and this profile runs {}",
+            self == system,
+            "{what} needs an {} profile, and this profile runs {}",
+            system.title(),
             self.title()
         );
         Ok(())
@@ -197,6 +208,12 @@ pub struct Settings {
     /// is 0 until adb is first turned on. The port is kept after that, so
     /// tools keep finding the profile there.
     pub adb_port: u16,
+    /// OpenHarmony's hdc on loopback TCP. It is off by default and applies
+    /// live.
+    pub hdc: bool,
+    /// hdc's port on 127.0.0.1, one of [`hdc_ports`]. It is 0 until hdc is
+    /// first turned on, and it is kept after that.
+    pub hdc_port: u16,
     /// Minutes with nothing to do before the session stops, from 1 to 120.
     /// The Keep Running preference ([`crate::preferences`]) overrides it.
     /// Applies live.
@@ -216,6 +233,8 @@ impl Default for Settings {
             display: Display::Windowed,
             adb: false,
             adb_port: 0,
+            hdc: false,
+            hdc_port: 0,
             idle_minutes: 2,
             follow_dark: true,
             follow_accent: true,
@@ -296,6 +315,18 @@ pub fn pick_port(taken: &[u16], free: impl Fn(u16) -> bool) -> Option<u16> {
     ports().find(|p| !taken.contains(p) && free(*p) && free(*p - 1))
 }
 
+/// The hdc ports a profile can use, from 55555 to 55570. The image's hdcd
+/// uses 55555.
+pub fn hdc_ports() -> impl Iterator<Item = u16> {
+    55555..=55570
+}
+
+/// The first hdc port in [`hdc_ports`] that is not in `taken` and that
+/// `free` accepts.
+pub fn pick_hdc_port(taken: &[u16], free: impl Fn(u16) -> bool) -> Option<u16> {
+    hdc_ports().find(|p| !taken.contains(p) && free(*p))
+}
+
 /// Whether nothing listens on 127.0.0.1:`port`.
 pub fn port_free(port: u16) -> bool {
     std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
@@ -345,6 +376,10 @@ impl Settings {
             "adb-port is an odd port from 5555 to 5585"
         );
         ensure!(
+            self.hdc_port == 0 || hdc_ports().any(|p| p == self.hdc_port),
+            "hdc-port is a port from 55555 to 55570"
+        );
+        ensure!(
             self.system.displays().contains(&self.display),
             "{} shows as {}, not {}",
             self.system.title(),
@@ -358,6 +393,9 @@ impl Settings {
         );
         if self.adb {
             self.system.need_android("adb")?;
+        }
+        if self.hdc {
+            self.system.need_ohos("hdc")?;
         }
         Ok(())
     }
@@ -378,14 +416,19 @@ impl Settings {
         if self.adb_port != 0 {
             return Ok(false);
         }
-        let taken: Vec<u16> = list(data_home)
-            .iter()
-            .map(|n| data_home.join(crate::paths::per_profile("data", n)))
-            .filter(|d| d != data)
-            .filter_map(|d| Self::load(&d).ok())
-            .map(|s| s.adb_port)
-            .collect();
+        let taken: Vec<u16> = others(data_home, data).map(|s| s.adb_port).collect();
         self.adb_port = pick_port(&taken, port_free).context("no free adb port")?;
+        Ok(true)
+    }
+
+    /// Gives the profile an hdc port as [`Self::assign_port`] gives it an adb
+    /// port.
+    pub fn assign_hdc_port(&mut self, data_home: &Path, data: &Path) -> Result<bool> {
+        if self.hdc_port != 0 {
+            return Ok(false);
+        }
+        let taken: Vec<u16> = others(data_home, data).map(|s| s.hdc_port).collect();
+        self.hdc_port = pick_hdc_port(&taken, port_free).context("no free hdc port")?;
         Ok(true)
     }
 
@@ -399,6 +442,16 @@ impl Settings {
         fs::write(&temp, toml::to_string(self)?)?;
         fs::rename(&temp, &path).with_context(|| format!("save {}", path.display()))
     }
+}
+
+/// The settings of the profiles under `data_home` other than the one with
+/// data directory `data`.
+fn others<'a>(data_home: &'a Path, data: &'a Path) -> impl Iterator<Item = Settings> + 'a {
+    list(data_home)
+        .into_iter()
+        .map(|n| data_home.join(crate::paths::per_profile("data", &n)))
+        .filter(move |d| d != data)
+        .filter_map(|d| Settings::load(&d).ok())
 }
 
 /// Deletes everything in data directory `data` except the profile's settings
@@ -540,6 +593,8 @@ mod tests {
             "follow-dark = \"yes\"",
             "adb-port = 5556",
             "adb-port = 16500",
+            "hdc-port = 55554",
+            "hdc-port = 55571",
         ] {
             assert!(Settings::parse(bad).is_err(), "{bad}");
         }
@@ -559,6 +614,7 @@ mod tests {
             "system = \"ohos\"",
             "system = \"ohos\"\ndisplay = \"medium-tablet\"",
             "system = \"ohos\"\ndisplay = \"small-phone\"\nadb = true",
+            "hdc = true",
             "system = \"harmony\"",
         ] {
             assert!(Settings::parse(bad).is_err(), "{bad}");
@@ -567,8 +623,18 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("small-phone or medium-phone"), "{e}");
+        let s = Settings::parse(
+            "system = \"ohos\"\ndisplay = \"small-phone\"\nhdc = true\nhdc-port = 55570\n",
+        )
+        .unwrap();
+        assert!(s.hdc && s.hdc_port == 55570);
         assert!(System::Ohos.need_android("adb").is_err());
         System::Android.need_android("adb").unwrap();
+        assert_eq!(
+            System::Android.need_ohos("hdc").unwrap_err().to_string(),
+            "hdc needs an OpenHarmony profile, and this profile runs Android"
+        );
+        System::Ohos.need_ohos("hdc").unwrap();
         for s in System::ALL {
             assert_eq!(System::parse(s.name()), Some(s));
         }
@@ -641,6 +707,31 @@ mod tests {
         };
         assert!(!explicit.assign_port(&d, &d.join("data-x")).unwrap());
         assert_eq!(explicit.adb_port, 5585);
+    }
+
+    #[test]
+    fn hdc_ports_skip_busy_ports_and_other_profiles() {
+        assert_eq!(pick_hdc_port(&[], |_| true), Some(55555));
+        assert_eq!(pick_hdc_port(&[55555], |p| p != 55556), Some(55557));
+        assert_eq!(
+            pick_hdc_port(&hdc_ports().collect::<Vec<_>>(), |_| true),
+            None
+        );
+        assert_eq!(hdc_ports().count(), 16);
+        let d = dir("hdc-ports");
+        let other = d.join("data-other");
+        Settings {
+            hdc_port: 55555,
+            ..Settings::new(System::Ohos)
+        }
+        .save(&other)
+        .unwrap();
+        let mut s = Settings::new(System::Ohos);
+        assert!(s.assign_hdc_port(&d, &d.join("data-new")).unwrap());
+        assert!(s.hdc_port != 55555 && hdc_ports().any(|p| p == s.hdc_port));
+        let mut again = Settings::load(&other).unwrap();
+        assert!(!again.assign_hdc_port(&d, &other).unwrap());
+        assert_eq!(again.hdc_port, 55555);
     }
 
     #[test]

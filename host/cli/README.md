@@ -24,7 +24,9 @@ doesn't say.
   profile refuses `open`, files in `run`, the other `app set` settings, and the
   settings that OpenHarmony lacks (adb and following the desktop's accent
   color). `profile list` shows each OpenHarmony profile's UDID, which a debug
-  signing profile names in its `device-ids`.
+  signing profile names in its `device-ids`. `profile set --hdc on` turns on
+  hdc, which Android profiles refuse. With hdc on, `profile list` shows hdc's
+  address, and `profile start` prints the `hdc tconn` command once hdcd listens.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. On OpenHarmony
   `aa start` sends a want with the action `ohos.want.action.viewData` and the

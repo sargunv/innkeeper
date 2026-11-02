@@ -63,7 +63,10 @@ It reads them without starting Android. The page has these settings:
   its clock. Each one is on by default.
 - **Idle timeout.**
 - **adb:** a switch that applies immediately
-  ([README](../../README.md#for-android-developers)).
+  ([README](../../README.md#for-android-developers)). OpenHarmony profiles have
+  an **hdc** switch in its place
+  ([README](../../README.md#for-openharmony-developers)). Starting a profile
+  with hdc on shows a toast with the `hdc tconn` command.
 
 The page also says that apps aren't isolated from each other, and it opens
 Android Settings in a separate window.

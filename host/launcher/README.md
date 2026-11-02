@@ -10,7 +10,7 @@ prints the usage.
 
 The launcher shares the `innkeeper-profile` crate (`host/profile`) with
 [host/core](../core/README.md). That crate holds a profile's name, settings,
-paths, status, activity report, control client and adb keys.
+paths, status, activity report, control client, and adb and hdc keys.
 
 The subcommands are `start [-f] [--headless]`, `stop`, `status`, `prepare`,
 `image`, `reset`, `log [-f]`, `exec CMD...`, `shell` and `selftest`. `status`

@@ -1,0 +1,5 @@
+# hdcd accepts only the hdc keys in /data/service/el1/public/hdc/hdc_keys,
+# where Innkeeper puts the user's key (host/profile/src/hdc.rs). The image's
+# const.secure=0 would turn hdc authentication off at boot, and this value is
+# set first.
+const.hdc.secure=1

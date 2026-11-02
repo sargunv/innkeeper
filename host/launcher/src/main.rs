@@ -8,6 +8,7 @@ mod conf;
 mod control;
 mod exec;
 mod graphics;
+mod hdc;
 mod image;
 mod init;
 mod layer;
