@@ -53,6 +53,35 @@ class DevRunnerTests(unittest.TestCase):
     for path in shared:
       self.assertTrue(path.is_dir(), f"{path} would not be mounted")
 
+  def test_stale_sessions_keeps_units_past_the_limit(self):
+    runner = load_runner({"INNKEEPER_PROFILE": PROFILE})
+    now = 10 * runner.STALE_US
+    old = (
+      "app-flatpak-dev.sargunv.Innkeeper-1.scope",
+      now - runner.STALE_US - 1,
+      "?",
+    )
+    young = (
+      "app-flatpak-dev.sargunv.Innkeeper-2.scope",
+      now - runner.STALE_US,
+      "?",
+    )
+    self.assertEqual(
+      runner.stale_sessions([old, young], now, runner.STALE_US), [old]
+    )
+
+  def test_format_stale_lists_each_session(self):
+    runner = load_runner({"INNKEEPER_PROFILE": PROFILE})
+    unit = "app-flatpak-dev.sargunv.Innkeeper-123.scope"
+    now = 23 * 60 * 60 * 1_000_000
+    text = runner.format_stale([(unit, 0, "INNKEEPER_PROFILE=r310")], now)
+    self.assertEqual(
+      text,
+      "run.py: these Innkeeper dev sessions have run for more than 2 hours:\n"
+      f"  {unit}  23 h  INNKEEPER_PROFILE=r310\n"
+      "Stop one with: systemctl --user stop <unit>\n",
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
