@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <aidl/android/hardware/graphics/composer3/BnComposerClient.h>
 
@@ -156,6 +158,8 @@ class ComposerClient : public BnComposerClient {
  private:
   class Results;
   Display* display(int64_t id);  // requires mMutex
+  void watchPrimarySize();
+  void resizePrimary(int32_t width, int32_t height);
   void executeDisplayCommand(Results& results, const DisplayCommand& cmd);
   void executeLayerCommand(
     Results& results, Display& d, const LayerCommand& cmd
@@ -166,6 +170,8 @@ class ComposerClient : public BnComposerClient {
   int64_t mNextVirtualDisplay = 0;
   std::shared_ptr<IComposerCallback> mCallback;
   std::function<void()> mOnDestroyed;
+  std::atomic<bool> mStop{false};
+  std::thread mPrimaryWatch;  // phone mode only
 };
 
 }  // namespace innkeeper::hwc

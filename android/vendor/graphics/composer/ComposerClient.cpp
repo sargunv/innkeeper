@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #define LOG_TAG "innkeeper-hwc"
 #include <android/binder_ibinder_platform.h>
+#include <sys/system_properties.h>
+#include <unistd.h>
 
 #include "ComposerClient.h"
 
+#include "Properties.h"
 #include "innkeeper/log.h"
 
 namespace innkeeper::hwc {
@@ -44,10 +47,64 @@ ComposerClient::ComposerClient() {
                        kPrimaryDisplay, config, createPrimaryPresenter(config)
                      )
   );
+  // In phone mode, display 0 is the device's screen, and the window manager
+  // resizes it with its window.
+  if (getProperty("vendor.innkeeper.mode", "") == "phone")
+    mPrimaryWatch = std::thread([this] { watchPrimarySize(); });
+}
+
+// Waits for the window manager to set vendor.innkeeper.hwc.primary, and gives
+// display 0 a mode of that size each time it changes.
+void ComposerClient::watchPrimarySize() {
+  pthread_setname_np(pthread_self(), "hwc-primary-size");
+  const prop_info* pi = nullptr;
+  uint32_t serial = 0;
+  while (!mStop.load()) {
+    if (!pi) pi = __system_property_find("vendor.innkeeper.hwc.primary");
+    if (!pi) {
+      usleep(500'000);
+      continue;
+    }
+    // The timeout lets the destructor stop the thread.
+    uint32_t next = 0;
+    timespec timeout{1, 0};
+    if (!__system_property_wait(pi, serial, &next, &timeout)) continue;
+    serial = next;
+    if (const auto size = primarySize())
+      resizePrimary(size->first, size->second);
+  }
+}
+
+// Gives display 0 one mode of the new size, with a new id, and reports it as
+// connected again. SurfaceFlinger then reads the display's modes again and
+// rebuilds it, and the framework lays it out at the new size, as it does when
+// an Android TV's HDMI display changes.
+void ComposerClient::resizePrimary(int32_t width, int32_t height) {
+  std::shared_ptr<IComposerCallback> cb;
+  {
+    std::lock_guard lock(mMutex);
+    Display* d = display(kPrimaryDisplay);
+    if (!d) return;
+    DisplayConfig c = d->config();
+    if (c.width == width && c.height == height) return;
+    c.id++;
+    c.width = width;
+    c.height = height;
+    d->setConfig(c);
+    cb = mCallback;
+  }
+  if (!cb) return;
+  LOGI("hotplug: display 0 reconnected at %dx%d", width, height);
+  auto st =
+    cb->onHotplugEvent(kPrimaryDisplay, common::DisplayHotplugEvent::CONNECTED);
+  if (!st.isOk())
+    LOGW("onHotplugEvent failed: %s", st.getDescription().c_str());
 }
 
 ComposerClient::~ComposerClient() {
   LOGI("composer client destroyed");
+  mStop = true;
+  if (mPrimaryWatch.joinable()) mPrimaryWatch.join();
   {
     std::lock_guard lock(mMutex);
     mDisplays.clear();

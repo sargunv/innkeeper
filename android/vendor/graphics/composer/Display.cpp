@@ -28,6 +28,16 @@ Display::Display(
   if (isVirtual) mPower = c3::PowerMode::ON;
 }
 
+void Display::setConfig(const DisplayConfig& config) {
+  LOGI(
+    "display %lld: mode %d, %dx%d", (long long)mId, config.id, config.width,
+    config.height
+  );
+  mConfig = config;
+  mPresenter->resize(uint32_t(config.width), uint32_t(config.height));
+  invalidate();
+}
+
 int64_t Display::createLayer() {
   const int64_t id = mNextLayerId++;
   mLayers.emplace(id, Layer{});

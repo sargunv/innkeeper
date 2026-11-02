@@ -49,6 +49,8 @@ class Display {
   int64_t id() const { return mId; }
   bool isVirtual() const { return mVirtual; }
   const DisplayConfig& config() const { return mConfig; }
+  // Changes the display's mode, as a hotplug reconnect does.
+  void setConfig(const DisplayConfig& config);
   VsyncThread& vsync() { return mVsync; }
 
   int64_t createLayer();
