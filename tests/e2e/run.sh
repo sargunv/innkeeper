@@ -650,6 +650,26 @@ else
   fi
   echo "ok   a buffer's dma-buf exports no sync file, so the image's llvmpipe offers no native fences"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_gpu() {
+    # The broker lets the guest open only the render node that the launcher
+    # picked. With one, render_service draws with Zink on it, and without one
+    # it draws with the image's llvmpipe.
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c '
+      renderer=$(/system/bin/hidumper -s RenderService -a gles | sed -n "s/^GL_RENDERER: //p")
+      want="^llvmpipe"
+      for node in /dev/dri/renderD*; do
+        if (: <"$node") 2>/dev/null; then want="^zink .*(RADV|Intel)"; fi
+      done
+      echo "render_service draws with $renderer"
+      echo "$renderer" | grep -Eq "$want"' >>"$T/ohos.txt" 2>&1
+  }
+  if ! timed ohos-gpu ohos_gpu; then
+    tail -n 5 "$T/ohos.txt" >&2
+    exit 1
+  fi
+  echo 'ok   render_service draws with Zink on the GPU that the launcher picked, or with llvmpipe without one'
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_keys() {
     # MMI logs each key with its device, OpenHarmony's key code and state.
     # KEY_A is OpenHarmony's KEYCODE_A, 2017.

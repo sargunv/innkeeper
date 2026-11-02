@@ -24,18 +24,19 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   on the desktop's seat opens Settings with OpenHarmony's cursor under the
   pointer. A wheel detent scrolls Settings' list. A dma-buf like the display
   buffers must export no sync file, which keeps render_service's llvmpipe from
-  crashing. A key press reaches OpenHarmony's input service. A file written to
-  the user's Download lands in the profile's data directory. Innkeeper System
-  answers a Session1 command at once. The CLI installs the probe HAP
-  (ohos/probe), signed for the profile's UDID, lists it and runs it. The bridge
-  writes the probe's desktop entry with its label and icon, and its window has
-  focus on screen. Keys typed in a French layout type "aé" into the probe's text
-  field through Innkeeper Keyboard, and Ctrl+A then Backspace on AZERTY clears
-  it. `app info` shows the probe's version and the grant state of its two
-  permissions, and `run` with a link delivers its URI to the probe. hilog still
-  holds the line that Innkeeper System logged at boot. OpenHarmony's music
-  volume must be at its maximum, and a tone it plays must reach a private null
-  sink. The probe, granted the microphone, must record a tone that the host
+  crashing. render_service draws with Zink on the GPU that the launcher picked,
+  or with llvmpipe without one. A key press reaches OpenHarmony's input service.
+  A file written to the user's Download lands in the profile's data directory.
+  Innkeeper System answers a Session1 command at once. The CLI installs the
+  probe HAP (ohos/probe), signed for the profile's UDID, lists it and runs it.
+  The bridge writes the probe's desktop entry with its label and icon, and its
+  window has focus on screen. Keys typed in a French layout type "aé" into the
+  probe's text field through Innkeeper Keyboard, and Ctrl+A then Backspace on
+  AZERTY clears it. `app info` shows the probe's version and the grant state of
+  its two permissions, and `run` with a link delivers its URI to the probe.
+  hilog still holds the line that Innkeeper System logged at boot. OpenHarmony's
+  music volume must be at its maximum, and a tone it plays must reach a private
+  null sink. The probe, granted the microphone, must record a tone that the host
   plays into that sink. A notification that the probe posts reaches the
   desktop's notification server with its buttons, and invoking its first button
   there reaches the probe. The probe's media session is an MPRIS player on the
