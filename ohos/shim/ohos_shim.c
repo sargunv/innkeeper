@@ -49,6 +49,12 @@
 //    crashes (#309). The sync file export fails with ENOTTY, as on a kernel
 //    before 6.0, so llvmpipe offers no native fences. EGL's software swap
 //    still waits for its own context's rendering.
+//  - hdcd binds its TCP listener and its discovery responder (UDP 8710) to
+//    0.0.0.0. The Flatpak shares the host's network, so these would be
+//    reachable from the LAN. In hdcd, a bind to the any address binds the
+//    loopback address, and listen fails with EADDRNOTAVAIL unless the socket
+//    is bound to loopback. An unbound socket would otherwise listen on every
+//    address (host/profile/src/hdc.rs).
 //  - The sandbox may not set the clock or the kernel's time zone. The time
 //    service stores a new zone and then calls settimeofday(NULL, tz), and
 //    it reports the change as failed if that call fails. The kernel's zone
@@ -79,6 +85,12 @@
 #define SYS_newfstatat 262
 #define SYS_readlink 89
 #define SYS_ioctl 16
+#define SYS_bind 49
+#define SYS_listen 50
+#define SYS_getsockname 51
+#define AF_INET 2
+#define AF_INET6 10
+#define EADDRNOTAVAIL 99
 #define ENOTTY 25
 // _IOWR('b', 2, struct dma_buf_export_sync_file)
 #define DMA_BUF_IOCTL_EXPORT_SYNC_FILE 0xc0086202u
@@ -99,6 +111,7 @@ extern int* __errno_location(void);
 static long init_pid;
 static int spawner;
 static int storage;
+static int hdcd;
 
 extern void* dlsym(void*, const char*);
 #define RTLD_NEXT ((void*)-1)
@@ -163,6 +176,7 @@ __attribute__((constructor)) static void ohos_shim_init(void) {
             starts(comm, "hybridspawn") || starts(comm, "cjappspawn") ||
             starts(comm, "nwebspawn");
   storage = same(comm, "storage_daemon\n");
+  hdcd = same(comm, "hdcd\n");
 }
 
 static int is_init(void) { return init_pid && sys0(SYS_getpid) == init_pid; }
@@ -345,4 +359,63 @@ int setpriority(int which, unsigned who, int prio) {
 int settimeofday(const void* tv, const void* tz) {
   if (!tv) return 0;
   return (int)ret(sys6(SYS_settimeofday, (long)tv, (long)tz, 0, 0, 0, 0));
+}
+
+// struct sockaddr_in keeps the IPv4 address at byte 4, and struct
+// sockaddr_in6 keeps the IPv6 address at byte 8. An IPv4-mapped IPv6 address
+// has 0xffff in bytes 10 and 11 and the IPv4 address in bytes 12 to 15.
+static int zero(const unsigned char* p, int n) {
+  while (n--) {
+    if (*p++) return 0;
+  }
+  return 1;
+}
+
+static int mapped(const unsigned char* a6) {
+  return zero(a6, 10) && a6[10] == 0xff && a6[11] == 0xff;
+}
+
+static int loopback(const unsigned char* sa, unsigned len) {
+  unsigned short family = *(const unsigned short*)sa;
+  if (family == AF_INET) return len >= 8 && sa[4] == 127;
+  if (family != AF_INET6 || len < 24) return 0;
+  const unsigned char* a6 = sa + 8;
+  return (zero(a6, 15) && a6[15] == 1) || (mapped(a6) && a6[12] == 127);
+}
+
+int bind(int fd, const void* addr, unsigned len) {
+  unsigned char sa[28];
+  if (!hdcd || !addr || len > sizeof(sa) || len < 8) {
+    return (int)ret(sys6(SYS_bind, fd, (long)addr, len, 0, 0, 0));
+  }
+  for (unsigned i = 0; i < len; i++) sa[i] = ((const unsigned char*)addr)[i];
+  unsigned short family = *(unsigned short*)sa;
+  if (family == AF_INET && zero(sa + 4, 4)) {
+    sa[4] = 127;
+    sa[7] = 1;
+  } else if (family == AF_INET6 && len >= 24) {
+    // :: accepts IPv4 too, so it becomes the IPv4-mapped 127.0.0.1.
+    unsigned char* a6 = sa + 8;
+    if (zero(a6, 16) || (mapped(a6) && zero(a6 + 12, 4))) {
+      a6[10] = a6[11] = 0xff;
+      a6[12] = 127;
+      a6[13] = a6[14] = 0;
+      a6[15] = 1;
+    }
+  }
+  return (int)ret(sys6(SYS_bind, fd, (long)sa, len, 0, 0, 0));
+}
+
+int listen(int fd, int backlog) {
+  if (hdcd) {
+    unsigned char sa[128];
+    unsigned len = sizeof(sa);
+    long r = sys6(SYS_getsockname, fd, (long)sa, (long)&len, 0, 0, 0);
+    if (r < 0) return (int)ret(r);
+    unsigned short family = *(unsigned short*)sa;
+    if ((family == AF_INET || family == AF_INET6) && !loopback(sa, len)) {
+      return (int)ret(-EADDRNOTAVAIL);
+    }
+  }
+  return (int)ret(sys6(SYS_listen, fd, backlog, 0, 0, 0, 0));
 }
