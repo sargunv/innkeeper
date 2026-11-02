@@ -105,13 +105,19 @@ ours under those names, with `libgallium-26.2.5.so`, in
 `share/innkeeper/ohos/gpu/vendor`, a tree apart from the Vulkan drivers.
 
 - **Platform.** Patch 0009 adds an `ohos` EGL platform, and `build.sh` makes it
-  the native platform. Its driver is Zink. A window surface is a kopper drawable
-  with `VK_OHOS_surface`, which OH's swapchain layer provides, so its buffers
-  reach the Vulkan driver through `VK_OHOS_native_buffer`. The layer has no BGRA
-  formats, so the window configs are RGBA. Kopper presents inside
-  `eglSwapBuffers`, as it does on Wayland, because render_service takes its
-  screen's buffer from the window as soon as the swap returns. The patch ports
-  the surface and kopper code of OpenHarmony's Mesa
+  the native platform. Its driver is Zink, on the render node that the guest can
+  open. A window surface works as on Android's EGL platform. For each frame, it
+  requests a buffer from the `NativeWindow` and imports the buffer's dma-buf.
+  `eglSwapBuffers` flushes the buffer back to the window with a sync file that
+  signals when the frame's rendering is done. The platform keeps the imported
+  image of each of the window's buffers. The window's queue reuses its buffers
+  while their usage, format and size stay the same. render_service sets its
+  screen's usage before every frame, so a Vulkan swapchain, whose layer sets the
+  usage that the driver asks for, would get a new buffer for every frame. The
+  frame reaches the window before the swap returns, because render_service takes
+  its screen's buffer from the window as soon as the swap returns. The window
+  configs are RGBA, as OH's windows are. The surface creation follows
+  OpenHarmony's Mesa
   ([third_party_mesa3d](https://gitee.com/openharmony/third_party_mesa3d), MIT).
 - **Native buffers.** render_service imports other surfaces' buffers with
   `eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS)`. The platform imports the buffer's
