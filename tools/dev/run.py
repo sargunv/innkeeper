@@ -310,7 +310,13 @@ def format_stale(stale, now_us):
 
 
 def _profile_of(unit, uid):
-  """Return the first profile or data argument in the scope."""
+  """Return the first profile or data argument in a dev runner's scope, or
+  None for a scope that isn't one.
+
+  The user's own Innkeeper sessions have the same app id, so their scopes
+  match the same pattern. A dev runner's session names paths under a
+  checkout's out/, and the user's sessions don't.
+  """
   root = Path(
     "/sys/fs/cgroup/user.slice"
     f"/user-{uid}.slice/user@{uid}.service/app.slice/{unit}"
@@ -318,7 +324,8 @@ def _profile_of(unit, uid):
   try:
     pids = root.joinpath("cgroup.procs").read_text().split()
   except OSError:
-    return "?"
+    return None
+  profile, dev = "?", False
   for pid in pids:
     try:
       args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
@@ -326,9 +333,14 @@ def _profile_of(unit, uid):
       continue
     for arg in args:
       text = arg.decode(errors="replace")
-      if text.startswith(("INNKEEPER_PROFILE=", "INNKEEPER_DATA=")):
-        return text
-  return "?"
+      dev = dev or "/out/" in text
+      if profile == "?" and text.startswith(
+        ("INNKEEPER_PROFILE=", "INNKEEPER_DATA=")
+      ):
+        profile = text
+    if dev and profile != "?":
+      break
+  return profile if dev else None
 
 
 def _active_enter_us(unit):
@@ -355,7 +367,7 @@ def _active_enter_us(unit):
 
 
 def running_sessions():
-  """List Innkeeper app scopes as (unit, active_enter_us, profile).
+  """List the dev runner's Innkeeper scopes as (unit, active_enter_us, profile).
 
   A missing systemctl, or a failed list, yields nothing so that start can
   continue. A process can exit while its cmdline is read, and that miss is
@@ -385,7 +397,9 @@ def running_sessions():
     name = line.split()[0] if line.split() else ""
     if not name:
       continue
-    found.append((name, _active_enter_us(name), _profile_of(name, uid)))
+    profile = _profile_of(name, uid)
+    if profile is not None:
+      found.append((name, _active_enter_us(name), profile))
   return found
 
 
