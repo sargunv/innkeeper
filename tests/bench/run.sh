@@ -28,7 +28,7 @@ cleanup() {
   if cg=$(tools/dev/session.sh cgroup 2>/dev/null); then
     systemctl --user stop "${cg##*/}" 2>/dev/null || true
   fi
-  systemctl --user stop "inkp-nested-$INNKEEPER_PROFILE" 2>/dev/null || true
+  systemctl --user stop "inkp-nested-$INNKEEPER_PROFILE-$(pwd -P | sha256sum | cut -c1-8)" 2>/dev/null || true
   systemctl --user stop "$unit.scope" 2>/dev/null || true
   exit "$result"
 }

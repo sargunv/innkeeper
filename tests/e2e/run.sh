@@ -110,6 +110,11 @@ if [[ ${1:-} == --group ]]; then
       # a loopback port, announces it to a private adb server, and lets a
       # throwaway user key connect.
       [[ $(s getprop init.svc.adbd) != running && $(s getprop ro.adb.secure) == 1 ]]
+      # Runs in other checkouts share the adb server port and the profiles' adb
+      # ports, so one run at a time turns adb on. nested.sh's runtime dir is
+      # inside the user's.
+      exec {adb_lock}>"${XDG_RUNTIME_DIR%/*}/innkeeper-e2e-adb.lock"
+      flock -w "$observation_wait" "$adb_lock"
       adb=$ANDROID_HOME/platform-tools/adb
       # The key pair stays in the test's directory. The public key is copied to
       # where the session looks for the user's key, in the dev sandbox's home.
@@ -136,6 +141,10 @@ if [[ ${1:-} == --group ]]; then
       until_ok adb_shell
       "${A[@]}" kill-server
       "$repo/tools/dev/innkeeper.sh" profile set --adb off >/dev/null 2>&1
+      # shellcheck disable=SC2329 # invoked through until_ok
+      closed() { ! listening; }
+      until_ok closed
+      exec {adb_lock}>&-
       echo "ok   adb is off by default; on, the adb server lists it and the user's key reaches it"
       driver=$(s getprop ro.hardware.vulkan)
       feature=android.hardware.vulkan.level=1
