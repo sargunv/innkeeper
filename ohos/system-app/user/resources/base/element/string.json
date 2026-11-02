@@ -31,6 +31,10 @@
     {
       "name": "chooser_ok",
       "value": "OK"
+    },
+    {
+      "name": "chooser_always",
+      "value": "Always open this type with the app"
     }
   ]
 }

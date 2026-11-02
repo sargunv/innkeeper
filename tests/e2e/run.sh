@@ -837,7 +837,7 @@ else
       local w
       w=$(chooser) && [[ -n $w ]] || return
       row=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
-        awk '/compid: chooser_dev[.]sargunv[.]innkeeper[.]probes$/ { f = 1 } f && /[|] top: / { top = $3 }
+        awk '/compid: chooser_dev[.]sargunv[.]innkeeper[.]probes[/]/ { f = 1 } f && /[|] top: / { top = $3 }
           f && /[|] left: / { left = $3 } f && /[|] width: / { width = $3 }
           f && /[|] height: / { printf "%d %d\n", left + width / 2, top + $3 / 2; exit }')
       [[ -n $row ]]
