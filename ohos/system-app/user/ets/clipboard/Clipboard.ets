@@ -1,3 +1,4 @@
+import common from '@ohos.app.ability.common';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
@@ -18,10 +19,10 @@ const TAG = 'InnkeeperClipboard';
 // desktop's clipboard, and the bridge then sends the current clip and each
 // change. The connection also receives the desktop's settings, which it
 // ignores.
-export function startClipboard(): void {
+export function startClipboard(context: common.ServiceExtensionContext): void {
   waitParameter('bootevent.boot.completed', 'true').then(() => {
     const system = open(SYSTEM, 'innkeeper-clipboard');
-    const clipboard = new HostClipboard(system);
+    const clipboard = new HostClipboard(context, system);
     onEvent(system, (type: number, body: ArrayBuffer, fds: number[]) => {
       if (type === CLIP && fds.length === 1) {
         const h: ClipHeader | undefined = decodeHeader(body);

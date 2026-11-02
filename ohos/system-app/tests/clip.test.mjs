@@ -97,14 +97,21 @@ test("a PixelMap is an image", () => {
   assert.equal(c.kind, clip.IMAGE);
 });
 
-test("a clip of file URIs sends nothing, and a file next to text is the text", () => {
+test("a clip of file URIs is files, and a file next to text is the text", () => {
   const a = "file://org.example.app/data/storage/el2/base/files/a.txt";
   const b = "file://org.example.app/data/storage/el2/base/files/b.png";
   const files = clip.choose([
     item({ mime: "text/uri", uri: a, text: a }),
     item({ mime: "text/uri", uri: b, text: b }),
   ]);
-  assert.equal(files.kind, 0);
+  assert.equal(files.kind, clip.FILES);
+  assert.deepEqual(files.uris, [a, b]);
+  const many = clip.choose(
+    Array.from({ length: 17 }, () =>
+      item({ mime: "text/uri", uri: a, text: a }),
+    ),
+  );
+  assert.equal(many.kind, 0);
   const mixed = clip.choose([
     item({ mime: "text/plain", text: "hi" }),
     item({ mime: "text/uri", uri: a, text: a }),
@@ -140,4 +147,111 @@ test("the identity hash changes with the content", () => {
     clip.hash(Uint8Array.from([1, 2])),
     clip.hash(Uint8Array.from([2, 1])),
   );
+});
+
+const utf8 = {
+  encode: (s) => encoder.encode(s),
+  decode: (b) => {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(b);
+    } catch {
+      return undefined;
+    }
+  },
+};
+
+function clipFile(name, mime, bytes) {
+  return Object.assign(new clip.ClipFile(), {
+    name,
+    mime,
+    bytes: Uint8Array.from(bytes),
+  });
+}
+
+test("a file clip round-trips with the bridge's layout", () => {
+  const files = [
+    clipFile("a.txt", "text/plain", [104, 105]),
+    clipFile("é.png", "image/png", []),
+  ];
+  const b = clip.encodeFiles(files, utf8);
+  const v = new DataView(b.buffer);
+  assert.equal(v.getUint32(0, true), 2);
+  assert.equal(v.getUint32(4, true), 5);
+  assert.equal(new TextDecoder().decode(b.subarray(8, 13)), "a.txt");
+  assert.equal(
+    b.length,
+    4 +
+      clip.fileOverhead("a.txt", "text/plain", utf8) +
+      2 +
+      clip.fileOverhead("é.png", "image/png", utf8),
+  );
+  const back = clip.decodeFiles(b, utf8);
+  assert.deepEqual(
+    back.map((f) => [f.name, f.mime, [...f.bytes]]),
+    [
+      ["a.txt", "text/plain", [104, 105]],
+      ["é.png", "image/png", []],
+    ],
+  );
+});
+
+test("a file clip that breaks the format or the caps is refused", () => {
+  const good = clip.encodeFiles([clipFile("a.txt", "text/plain", [1])], utf8);
+  assert.equal(
+    clip.decodeFiles(good.subarray(0, good.length - 1), utf8),
+    undefined,
+  );
+  const extra = new Uint8Array(good.length + 1);
+  extra.set(good);
+  assert.equal(clip.decodeFiles(extra, utf8), undefined);
+  assert.equal(clip.decodeFiles(new Uint8Array(4), utf8), undefined);
+  for (const [name, mime] of [
+    ["", "text/plain"],
+    ["..", "text/plain"],
+    ["a/b", "text/plain"],
+    ["a\\b", "text/plain"],
+    ["a", "text"],
+    ["a", "text/ plain"],
+  ]) {
+    assert.equal(
+      clip.decodeFiles(
+        clip.encodeFiles([clipFile(name, mime, [])], utf8),
+        utf8,
+      ),
+      undefined,
+      `${name} ${mime}`,
+    );
+  }
+  const seventeen = Array.from({ length: 17 }, () => clipFile("a", "a/b", []));
+  assert.equal(
+    clip.decodeFiles(clip.encodeFiles(seventeen, utf8), utf8),
+    undefined,
+  );
+  const big = new Uint8Array(16);
+  new DataView(big.buffer).setUint32(0, 1, true);
+  assert.equal(clip.decodeFiles(big, utf8), undefined);
+  const latin1 = clip.encodeFiles([clipFile("a", "a/b", [])], utf8);
+  latin1[8] = 0xff;
+  assert.equal(clip.decodeFiles(latin1, utf8), undefined);
+});
+
+test("a file URI names its file, and its MIME type falls back to the name's", () => {
+  assert.equal(
+    clip.uriName(
+      "file://org.example.app/data/storage/el2/base/files/My%20Notes.txt",
+    ),
+    "My Notes.txt",
+  );
+  assert.equal(
+    clip.uriName("file://org.example.app/data/storage/el2/base/files/"),
+    "clipboard-file",
+  );
+  assert.equal(
+    clip.uriName("file://org.example.app/a/%2E%2E"),
+    "clipboard-file",
+  );
+  assert.equal(clip.uriName("file://org.example.app/a/%E0"), "%E0");
+  assert.equal(clip.fileMime("image/png", "text/plain"), "image/png");
+  assert.equal(clip.fileMime("text/uri", "text/plain"), "text/plain");
+  assert.equal(clip.fileMime("text/uri", ""), "application/octet-stream");
 });
