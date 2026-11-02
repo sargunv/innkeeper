@@ -19,6 +19,13 @@ if [[ $(cat "$dir/.stamp" 2>/dev/null) == "$want" ]]; then
   echo "$dir"
   exit 0
 fi
+# The same lock as ohos/sdk.sh's, taken after that script has returned.
+exec 9>"$OHOS_SDK_HOME/.lock"
+flock 9
+if [[ $(cat "$dir/.stamp" 2>/dev/null) == "$want" ]]; then
+  echo "$dir"
+  exit 0
+fi
 tmp=$(mktemp -d "$OHOS_SDK_HOME/.fetch.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 echo "system-app/sdk.sh: fetching the system API declarations" >&2

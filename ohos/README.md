@@ -258,8 +258,8 @@ reports boot completion. Issue #312 tracks the features that build on it.
 - **Build.** `mise run build:ohos-system-app` builds both HAPs and stages them
   with the three JSON files. The SDK's declarations leave out the system APIs,
   such as ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the
-  SDK in `$OHOS_SDK_HOME/<version>-system` with the full declarations from
-  interface_sdk-js at the release's tag, processed by that repository's own
+  SDK in `$OHOS_SDK_HOME/<version>-<stamp>-system` with the full declarations
+  from interface_sdk-js at the release's tag, processed by that repository's own
   scripts as the SDK's build does. [system-app/sdk.env](system-app/sdk.env) pins
   them and the N-API headers by checksum. ets-loader reports each use of a
   system API as a warning.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fetches the OpenHarmony SDK parts and the rollup that ohos/sdk.env pins into
-# $OHOS_SDK_HOME/<version>, unless they are there already, and prints that
+# $OHOS_SDK_HOME/<version>-<stamp>, unless they are there already, and prints that
 # directory. The SDK parts are the ArkTS compiler (ets/), restool, the packing
 # tool, hap-sign-tool, the public signing keys and profile templates, and the
 # hdc client that the e2e test connects with (toolchains/). Each is Apache 2.0
@@ -10,13 +10,23 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=ohos/sdk.env
 source "$here/sdk.env"
 : "${OHOS_SDK_HOME:?set by mise.toml}"
-dir=$OHOS_SDK_HOME/$OHOS_SDK_VERSION
 want=$(cat "$here/sdk.env" "$0" | sha256sum | cut -d' ' -f1)
+# The directory name carries the stamp, so checkouts with different pins or
+# extraction rules keep separate copies in the shared cache.
+dir=$OHOS_SDK_HOME/$OHOS_SDK_VERSION-${want:0:12}
 if [[ $(cat "$dir/.stamp" 2>/dev/null) == "$want" ]]; then
   echo "$dir"
   exit 0
 fi
+# Builds in parallel, and in other checkouts, run this at the same time. The
+# lock lets one of them fetch, and the others then find the stamp.
 mkdir -p "$OHOS_SDK_HOME"
+exec 9>"$OHOS_SDK_HOME/.lock"
+flock 9
+if [[ $(cat "$dir/.stamp" 2>/dev/null) == "$want" ]]; then
+  echo "$dir"
+  exit 0
+fi
 tmp=$(mktemp -d "$OHOS_SDK_HOME/.fetch.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 echo "sdk.sh: fetching the OpenHarmony SDK $OHOS_SDK_VERSION" >&2
