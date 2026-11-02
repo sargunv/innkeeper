@@ -22,7 +22,10 @@ which keeps the session up while the app is installed, as on Android. `run`
 brings the app to the front and opens OH's window again if the user closed it.
 `run` with a URI opens it in the app as a browser link. An OH profile refuses
 `open`, files in `run`, the other `app set` settings, adb and the Android-only
-settings.
+settings. `profile set --hdc on` turns on hdc in its place
+([README](../README.md#for-openharmony-developers)). The launcher then starts
+the image's hdcd on the profile's loopback port with
+`param set persist.hdc.port` and `begetctl start_service hdcd`.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
 roots. A release profile installs on any device. A debug profile names the UDIDs

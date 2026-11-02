@@ -1,7 +1,7 @@
 //! The Profile Settings page. It shows the current profile's settings and the
-//! Keep Running preference, which applies to every profile. An OpenHarmony
-//! profile shows the Display setting alone, because the others are for
-//! Android. Reads and writes run off the GTK thread.
+//! Keep Running preference, which applies to every profile. An Android
+//! profile has an adb switch, and an OpenHarmony profile has an hdc switch.
+//! Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -115,12 +115,15 @@ impl Page {
         change(&mut self.settings.borrow_mut());
         let (name, next) = (self.profile.clone(), self.settings.borrow().clone());
         self.work(false, move || {
-            // Keep the adb fields. `adb_row` sets them through `adb::set`, which
-            // applies adb to the running session and authorizes a key.
+            // Keep the adb and hdc fields. `debug_row` sets them through
+            // `adb::set` or `hdc::set`, which apply the change to the running
+            // session and authorize a key.
             profiles::update(&name, |s| {
                 *s = Settings {
                     adb: s.adb,
                     adb_port: s.adb_port,
+                    hdc: s.hdc,
+                    hdc_port: s.hdc_port,
                     ..next
                 }
             })
@@ -187,6 +190,11 @@ impl Page {
         page.add(&desktop);
         page.add(&self.lifecycle_group(&p));
         if p.system == System::Ohos {
+            let apps = adw::PreferencesGroup::builder()
+                .title("OpenHarmony Integration")
+                .build();
+            apps.add(&self.debug_row(&p));
+            page.add(&apps);
             self.content.append(&page);
             return;
         }
@@ -194,7 +202,7 @@ impl Page {
         let apps = adw::PreferencesGroup::builder()
             .title("Android Integration")
             .build();
-        apps.add(&self.adb_row(&p));
+        apps.add(&self.debug_row(&p));
         let settings = adw::ActionRow::builder()
             .title("Android Settings")
             .activatable(true)
@@ -297,16 +305,24 @@ impl Page {
         group
     }
 
-    fn adb_row(self: &Rc<Self>, p: &Settings) -> adw::SwitchRow {
+    /// The adb switch for Android, or the hdc switch for OpenHarmony. Its
+    /// subtitle shows how to connect while it is on.
+    fn debug_row(self: &Rc<Self>, p: &Settings) -> adw::SwitchRow {
+        let ohos = p.system == System::Ohos;
+        let (title, on, connect) = if ohos {
+            ("hdc", p.hdc, innkeeper_core::hdc::connect_command(p))
+        } else {
+            ("adb", p.adb, innkeeper_core::adb::serial(p))
+        };
         let row = adw::SwitchRow::builder()
-            .title("adb")
-            .subtitle(if p.adb {
-                format!("<tt>{}</tt>", innkeeper_core::adb::serial(p))
+            .title(title)
+            .subtitle(if on {
+                format!("<tt>{}</tt>", glib::markup_escape_text(&connect))
             } else {
                 String::new()
             })
             .use_markup(true)
-            .active(p.adb)
+            .active(on)
             .build();
         let s = Rc::downgrade(self);
         row.connect_active_notify(move |r| {
@@ -316,9 +332,15 @@ impl Page {
             let (n, on) = (s.profile.clone(), r.is_active());
             // Reload afterwards so the subtitle shows the assigned port.
             s.work(true, move || {
-                innkeeper_core::adb::set(&n, on, &innkeeper_core::ops::quiet)?;
-                match innkeeper_core::adb::missing_key().filter(|_| on) {
-                    Some(why) => Err(anyhow::anyhow!("adb is on, but {why}")),
+                let missing = if ohos {
+                    innkeeper_core::hdc::set(&n, on, &innkeeper_core::ops::quiet)?;
+                    innkeeper_core::hdc::missing_key()
+                } else {
+                    innkeeper_core::adb::set(&n, on, &innkeeper_core::ops::quiet)?;
+                    innkeeper_core::adb::missing_key()
+                };
+                match missing.filter(|_| on) {
+                    Some(why) => Err(anyhow::anyhow!("{title} is on, but {why}")),
                     None => Ok(()),
                 }
             });

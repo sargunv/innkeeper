@@ -82,6 +82,15 @@ pub fn need_android(name: &str, what: &str) -> Result<()> {
         .with_context(|| format!("profile {name}"))
 }
 
+/// Fails unless profile `name` runs OpenHarmony. `what` names the
+/// OpenHarmony-only feature in the error.
+pub fn need_ohos(name: &str, what: &str) -> Result<()> {
+    settings(name)?
+        .system
+        .need_ohos(what)
+        .with_context(|| format!("profile {name}"))
+}
+
 /// Loads the settings of this process's profile, named by
 /// `INNKEEPER_PROFILE`. The bridge reads its settings this way.
 pub fn own() -> Result<Settings> {

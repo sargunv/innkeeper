@@ -89,9 +89,9 @@ sandbox shows Android.
 
 The Flatpak has these grants: `--device=dri`, `--device=input`,
 `--share=network`, `--share=ipc`, `--socket=wayland`, `--socket=pulseaudio`, and
-read-only access to `~/.android/adbkey.pub` for [adb](#desktop-exposure). It
-also talks to these bus names, which cover what the baseline portals and proxies
-lack:
+read-only access to `~/.android/adbkey.pub` for [adb](#desktop-exposure) and to
+`~/.harmony/hdckey.pub` for hdc. It also talks to these bus names, which cover
+what the baseline portals and proxies lack:
 
 - `org.a11y.Bus`: the baseline AT-SPI proxy hides the `org.a11y.Status`
   properties that the bridge follows.
@@ -144,6 +144,15 @@ the display connection while an Innkeeper window has focus (GNOME).
   Flatpak can read only that public key. Unchanged, the image would start adbd
   at every boot on port 5555 without authentication. The overlay's `usbd.rc` and
   `init.usb.rc` keep it from starting.
+- **hdc** is off for each OpenHarmony profile until the user turns it on. When
+  it is on, the image's hdcd listens on a loopback port that belongs to the
+  profile, with hdc authentication on (`const.hdc.secure=1`). hdcd accepts the
+  keys in the profile's `/data/service/el1/public/hdc/hdc_keys`, and Innkeeper
+  adds the user's `~/.harmony/hdckey.pub` there. For any other key, hdcd asks in
+  OpenHarmony's window. The Flatpak can read only that public key. The image's
+  hdcd binds every address, and the image would turn authentication off. The
+  OpenHarmony shim binds hdcd's sockets to loopback, and it fails hdcd's
+  `listen` on any socket that isn't bound to loopback.
 - **Location** needs two consents. Android's runtime permission comes first.
   When an app that Android allowed asks for a location, the bridge asks the
   Location portal, through one portal session for all of Android. If the user

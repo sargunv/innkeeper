@@ -12,6 +12,7 @@ pub mod desktop;
 pub mod dynlauncher;
 pub mod errors;
 pub mod hap;
+pub mod hdc;
 pub use errors::ErrorKind;
 pub mod launcher;
 pub mod ohos;

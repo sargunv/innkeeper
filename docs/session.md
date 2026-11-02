@@ -197,15 +197,15 @@ Tests use named profiles with fresh data directories.
 A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
 directory next to the data version record (`host/profile/src/profile.rs`). The
 settings therefore move and back up with the data. They cover the system, the
-display, adb and its port, the idle timeout and following the desktop. A missing
-file or setting takes its default, and an unknown setting is an error.
-OpenHarmony uses the display setting, which is a phone preset because
-OpenHarmony has no windowed mode, the idle timeout, and the settings for
-following the desktop. OpenHarmony has no accent color. The CLI and the manager
+display, adb and hdc and their ports, the idle timeout and following the
+desktop. A missing file or setting takes its default, and an unknown setting is
+an error. OpenHarmony uses the display setting, which is a phone preset because
+OpenHarmony has no windowed mode, the idle timeout, the settings for following
+the desktop, and hdc. OpenHarmony has no accent color. The CLI and the manager
 refuse adb and following the accent for OpenHarmony, along with the app settings
-other than the background setting, and opening files in apps.
-`innkeeper profile set` and the manager's Profile Settings page change settings.
-A running profile applies the live settings at once.
+other than the background setting, and opening files in apps. They refuse hdc
+for Android. `innkeeper profile set` and the manager's Profile Settings page
+change settings. A running profile applies the live settings at once.
 
 Keep Running is an Innkeeper preference shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops

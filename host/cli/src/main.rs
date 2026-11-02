@@ -155,6 +155,9 @@ struct SetArgs {
     /// Run adb on localhost.
     #[arg(long, value_parser = ["on", "off"])]
     adb: Option<String>,
+    /// Run hdc on localhost.
+    #[arg(long, value_parser = ["on", "off"])]
+    hdc: Option<String>,
     /// Minutes with no apps open before the profile stops (1 to 120).
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=120))]
     idle_minutes: Option<u32>,
@@ -185,6 +188,11 @@ impl SetArgs {
         ]
         .into_iter()
         .find_map(|(given, what)| given.then_some(what))
+    }
+
+    /// Returns the first given setting that Android profiles don't have.
+    fn ohos_only(&self) -> Option<&'static str> {
+        self.hdc.is_some().then_some("--hdc")
     }
 
     /// Applies the given profile settings to `s`, and returns whether any were
@@ -589,8 +597,13 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
                 let system = p.settings.system.name();
                 let display = p.settings.display.name();
                 // Android shows adb's serial and OpenHarmony its UDID, which
-                // a debug signing profile lists.
+                // a debug signing profile lists, and hdc's address.
                 let id = match p.settings.system {
+                    System::Ohos if p.settings.hdc => format!(
+                        "udid {} hdc {}",
+                        innkeeper_profile::profile::udid(&p.name),
+                        innkeeper_core::hdc::address(&p.settings)
+                    ),
                     System::Ohos => format!("udid {}", innkeeper_profile::profile::udid(&p.name)),
                     System::Android if p.settings.adb => {
                         format!("adb {}", innkeeper_core::adb::serial(&p.settings))
@@ -619,16 +632,21 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
                 // Keep starting the other profiles if one fails.
                 let mut failed = None;
                 for p in profiles::list()? {
-                    if let Err(e) = profiles::start(&p.name, &report) {
-                        eprintln!("innkeeper: profile {}: {e:#}", p.name);
-                        failed = Some(e);
+                    match profiles::start(&p.name, &report) {
+                        Ok(()) => announce_hdc(&p.name),
+                        Err(e) => {
+                            eprintln!("innkeeper: profile {}: {e:#}", p.name);
+                            failed = Some(e);
+                        }
                     }
                 }
                 if let Some(e) = failed {
                     return Err(e);
                 }
             } else {
-                profiles::start(&profiles::existing(name)?, &report)?;
+                let p = profiles::existing(name)?;
+                profiles::start(&p, &report)?;
+                announce_hdc(&p);
             }
         }
         ProfileCmd::Stop => profiles::stop(&profiles::existing(name)?)?,
@@ -643,16 +661,34 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
     Ok(())
 }
 
+/// Tells the user how to connect hdc to profile `name` once it has started,
+/// if the profile has hdc on.
+fn announce_hdc(name: &str) {
+    let Ok(s) = profiles::settings(name) else {
+        return;
+    };
+    if !s.hdc {
+        return;
+    }
+    match innkeeper_core::hdc::wait_started(&s) {
+        Ok(()) => println!("{}", innkeeper_core::hdc::announcement(&s)),
+        Err(e) => eprintln!("innkeeper: profile {name}: {e:#}"),
+    }
+}
+
 /// Runs `profile set`.
 fn set(name: &str, args: &SetArgs) -> Result<()> {
     let mut probe = innkeeper_profile::profile::Settings::default();
     let profile_change = args.apply(&mut probe);
     ensure!(
-        profile_change || args.adb.is_some() || args.keep_running.is_some(),
+        profile_change || args.adb.is_some() || args.hdc.is_some() || args.keep_running.is_some(),
         "nothing to change (see --help)"
     );
     if let Some(what) = args.android_only() {
         profiles::need_android(name, what)?;
+    }
+    if let Some(what) = args.ohos_only() {
+        profiles::need_ohos(name, what)?;
     }
     if profile_change {
         let s = profiles::update(name, |s| {
@@ -677,6 +713,14 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
             );
         } else {
             println!("adb off");
+        }
+    }
+    if let Some(on) = &args.hdc {
+        let s = innkeeper_core::hdc::set(name, on == "on", &stderr)?;
+        if s.hdc {
+            println!("hdc on: {}", innkeeper_core::hdc::announcement(&s));
+        } else {
+            println!("hdc off");
         }
     }
     Ok(())
@@ -802,8 +846,10 @@ mod tests {
         assert_eq!(s.display, innkeeper_profile::profile::Display::SmallPhone);
         assert_eq!(s.idle_minutes, 30);
         assert!(!s.follow_dark && s.follow_accent);
-        // --keep-running and --adb don't change the profile's settings file.
-        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --keep-running on --adb on")
+        // --keep-running, --adb and --hdc don't change the profile's settings
+        // file.
+        let Ok(Cmd::Profile(ProfileCmd::Set(a))) =
+            parse("profile set --keep-running on --adb on --hdc on")
         else {
             panic!("profile set did not parse");
         };
@@ -816,6 +862,7 @@ mod tests {
             "profile set --follow-dark maybe",
             "profile start work",
             "profile set work --adb on",
+            "profile set --hdc yes",
             "profile use work",
             "adb",
             "open",
@@ -868,6 +915,15 @@ mod tests {
             android_only("profile set --follow-dark off --follow-accent off"),
             Some("--follow-accent")
         );
+        assert_eq!(android_only("profile set --hdc on"), None);
+        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --hdc off") else {
+            panic!("profile set --hdc did not parse");
+        };
+        assert_eq!(a.ohos_only(), Some("--hdc"));
+        let Ok(Cmd::Profile(ProfileCmd::Set(a))) = parse("profile set --adb on") else {
+            panic!("profile set --adb did not parse");
+        };
+        assert_eq!(a.ohos_only(), None);
     }
 
     #[test]

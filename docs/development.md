@@ -122,8 +122,9 @@ command exits. Use it for anything that opens windows, portals or notifications.
 
 The desktop runs in the systemd user unit `inkp-nested-<profile>-<hash>`, where
 the hash comes from the checkout's path. Two checkouts can run the same profile
-at the same time. The e2e boot group turns adb on under a lock in the user's
-runtime directory, because the adb ports are shared by every checkout.
+at the same time. The e2e boot group turns adb on, and the ohos group turns hdc
+on, under locks in the user's runtime directory, because the adb and hdc ports
+are shared by every checkout.
 
 The nested desktop serves `dev.sargunv.Innkeeper.TestDesktop`, which provides
 input, window visibility, position and geometry, and screenshots.

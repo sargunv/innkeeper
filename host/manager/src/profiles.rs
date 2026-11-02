@@ -302,9 +302,29 @@ impl Page {
         let n = name.to_string();
         if running {
             self.work(name, move || profiles::stop(&n), None);
-        } else {
-            self.work(name, move || profiles::start(&n, &|_| {}), None);
+            return;
         }
+        // A profile with hdc on says how to connect once hdcd listens.
+        let said = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (out, s) = (said.clone(), self.clone());
+        self.work_then(
+            name,
+            move || {
+                profiles::start(&n, &|_| {})?;
+                let p = profiles::settings(&n)?;
+                if p.hdc {
+                    innkeeper_core::hdc::wait_started(&p)?;
+                    *out.lock().unwrap() = Some(innkeeper_core::hdc::announcement(&p));
+                }
+                Ok(())
+            },
+            move || {
+                let text = said.lock().unwrap().take();
+                if let (Some(text), Some(w)) = (text, s.window.upgrade()) {
+                    _ = w.say(&text);
+                }
+            },
+        );
     }
 
     fn create(self: &Rc<Self>) {

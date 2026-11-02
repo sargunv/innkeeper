@@ -32,6 +32,10 @@ finish-args:
   # the user's adb public key to authorize it in the profile's data
   # (host/profile/src/adb.rs).
   - --filesystem=~/.android/adbkey.pub:ro
+  # hdc access to an OpenHarmony profile is off by default too. When it is on,
+  # Innkeeper reads the user's hdc public key to authorize it in the profile's
+  # data (host/profile/src/hdc.rs).
+  - --filesystem=~/.harmony/hdckey.pub:ro
   # No battery portal exists on the supported desktop baseline.
   - --system-talk-name=org.freedesktop.UPower
 modules:

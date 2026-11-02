@@ -491,8 +491,9 @@ fn run_session(cfg: &Config, follow: bool, idle: &Idle, trace: &session::BootTra
         bail!("init did not start (see {})", p.session_log().display());
     };
     trace.mark(p, "init found");
-    if cfg.system == System::Android {
-        crate::adb::announce_at_start(p);
+    match cfg.system {
+        System::Android => crate::adb::announce_at_start(p),
+        System::Ohos => crate::hdc::start_at_boot(p),
     }
     let paths = p.clone();
     control::serve(
