@@ -40,13 +40,14 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   Ctrl+A then Backspace on AZERTY clears it. `app info` shows the probe's
   version and the grant state of its two permissions, and `run` with a link
   delivers its URI to the probe. `run` with a file gives the probe a readable
-  copy, and the probe logs its text. `open` with a PNG, which the probe and
-  Gallery both take, shows Innkeeper User's app chooser, and a click on the
-  probe's row opens the file there. When the probe opens a PNG of its own,
-  Innkeeper User's app selector offers Desktop. With "always" checked, a click
-  on Desktop opens the file through the desktop's portal, and the probe's next
-  open of a PNG reaches the desktop without the selector. `app info` lists PNG
-  under Innkeeper User, and after `app clear-defaults` the probe's next open
+  copy, and the probe logs its text. The probe's N-API module, which the HAP
+  carries in `libs/x86_64`, loads and answers. `open` with a PNG, which the
+  probe and Gallery both take, shows Innkeeper User's app chooser, and a click
+  on the probe's row opens the file there. When the probe opens a PNG of its
+  own, Innkeeper User's app selector offers Desktop. With "always" checked, a
+  click on Desktop opens the file through the desktop's portal, and the probe's
+  next open of a PNG reaches the desktop without the selector. `app info` lists
+  PNG under Innkeeper User, and after `app clear-defaults` the probe's next open
   shows the selector again. The selector is a UIExtension, which adds its nodes
   to the probe window's ArkUI dump on a beta build, so the test sets
   `const.logsystem.versiontype`. hilog still holds the line that Innkeeper

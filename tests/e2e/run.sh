@@ -850,6 +850,11 @@ else
     read_file() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: read a file from the desktop' >/dev/null; }
     "$cli" run dev.sargunv.innkeeper.probes "$T/note.txt" >>"$T/ohos.txt" 2>&1 || return
     until_ok read_file || return
+    # The probe's native module loads from the HAP's libs/x86_64, and its
+    # add(2, 3) answers 5.
+    native() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: native 5' >/dev/null; }
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode native >>"$T/ohos.txt" 2>&1 || return
+    until_ok native || return
     # hilog still holds the line that Innkeeper System logged at boot.
     s /system/bin/hilog -x -T InnkeeperSystem | grep 'InnkeeperSystem: boot completed$' >/dev/null
   }
@@ -857,7 +862,7 @@ else
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link and a file'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, it opens a link and a file, and its native module answers'
   # The probe and Gallery both open PNG files, so open shows Innkeeper User's
   # app chooser. A click on the probe's row opens the file in the probe.
   # shellcheck disable=SC2329 # invoked through timed

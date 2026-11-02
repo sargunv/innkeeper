@@ -8,6 +8,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { add } from 'libprobe.so';
 
 const TAG = 'InnkeeperProbes';
 
@@ -169,12 +170,22 @@ function view(context: common.UIAbilityContext): void {
   });
 }
 
+// Calls the probe's native module, libprobe.so, which loads from the HAP's
+// libs/x86_64, and logs its answer.
+function native(): void {
+  try {
+    console.info(`innkeeper-probes: native ${add(2, 3)}`);
+  } catch (e) {
+    console.error(`innkeeper-probes: native failed: ${e}`);
+  }
+}
+
 // The tests read the URI of each want from hilog, and the content of a file
-// URI. `aa start --ps mode
-// capture` records from the microphone, `--ps mode notify` posts a
-// notification, `--ps mode media` starts a media session, `--ps mode video`
-// plays files/probe.mp4 on the page, `--ps mode view` opens a PNG file from
-// the probe, and `--ps task start` or `stop` starts or stops a continuous task.
+// URI. `aa start --ps mode capture` records from the microphone, `--ps mode
+// notify` posts a notification, `--ps mode media` starts a media session,
+// `--ps mode video` plays files/probe.mp4 on the page, `--ps mode view` opens
+// a PNG file from the probe, and `--ps mode native` calls the native module.
+// `--ps task start` or `stop` starts or stops a continuous task.
 function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
@@ -194,6 +205,8 @@ function run(want: Want, context: common.UIAbilityContext): void {
     AppStorage.setOrCreate<string>('video', `${context.filesDir}/probe.mp4`);
   } else if (mode === 'view') {
     view(context);
+  } else if (mode === 'native') {
+    native();
   } else if (mode === 'clicked' || mode === 'action' || mode === 'reply') {
     hilog.info(0x0000, TAG, 'notification %{public}s: %{public}s', mode, `${want.parameters?.['reply'] ?? ''}`);
   }

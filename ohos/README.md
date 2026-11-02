@@ -49,7 +49,10 @@ loudest sample to hilog. Started with `--ps task start` or `--ps task stop`, it
 starts or stops an audio playback continuous task and logs the result. It opens
 text files, and it logs the start of each file that it gets. Started with
 `--ps mode video`, it plays `probe.mp4` from its files directory once with
-AVPlayer on an XComponent below the field, and it logs the first frame.
+AVPlayer on an XComponent below the field, and it logs the first frame. Started
+with `--ps mode native`, it calls `add` in its N-API module, `libprobe.so`, and
+logs the sum. The module is in the HAP's `libs/x86_64`, as a third-party app's
+native code is, and it builds with the NDK's clang for musl.
 `mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
 The task also encodes the test's clip, `out/test/probes/video.mp4`, with the
@@ -95,22 +98,23 @@ path unchanged ([tests/realpath.c](tests/realpath.c)). The probe HAP, signed for
 the profile's UDID, then installs, shows in `innkeeper list` and gets a desktop
 entry with its label and icon, and `innkeeper run` puts its window on screen
 with input focus. `innkeeper run` with a text file must give the probe a URI
-that it can read, and the probe logs the file's text. A click on the probe's
-text field starts Innkeeper Keyboard, and keys typed in a French layout on the
-nested desktop type "aé" in the field. Text that `wl-copy` puts on the nested
-desktop's clipboard pastes into the field with Ctrl+V, and Ctrl+A and Ctrl+C in
-the field put its text on the desktop's clipboard. The probe then plays a
-magenta clip, and its player must render a frame. On a GPU, the magenta must
-show on the nested desktop. OH's music volume must be at its maximum, and a 440
-Hz tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must
-reach a private null sink on the nested desktop. Root then grants the probe the
-microphone with `atm perm -g`, the host plays a tone into the null sink, and the
-probe must record it from the sink's monitor. The probe's media session must be
-an MPRIS player on the nested desktop's session bus, and MPRIS `PlayPause` must
-pause it. OH must take the time zone that the session started with, and it must
-turn dark when the nested desktop's portal does. Last, the probe starts an audio
-playback continuous task. With the window closed, the task must keep the session
-up, and once it stops, the session must stop.
+that it can read, and the probe logs the file's text. The probe's native module
+must load and return its sum. A click on the probe's text field starts Innkeeper
+Keyboard, and keys typed in a French layout on the nested desktop type "aé" in
+the field. Text that `wl-copy` puts on the nested desktop's clipboard pastes
+into the field with Ctrl+V, and Ctrl+A and Ctrl+C in the field put its text on
+the desktop's clipboard. The probe then plays a magenta clip, and its player
+must render a frame. On a GPU, the magenta must show on the nested desktop. OH's
+music volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop. Root then grants the probe the microphone with
+`atm perm -g`, the host plays a tone into the null sink, and the probe must
+record it from the sink's monitor. The probe's media session must be an MPRIS
+player on the nested desktop's session bus, and MPRIS `PlayPause` must pause it.
+OH must take the time zone that the session started with, and it must turn dark
+when the nested desktop's portal does. Last, the probe starts an audio playback
+continuous task. With the window closed, the task must keep the session up, and
+once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The

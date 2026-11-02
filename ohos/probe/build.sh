@@ -6,13 +6,29 @@
 # copies the SDK files that sign.sh uses to out/test/probes/ohos-sign, and the
 # SDK's hdc client, which the test connects with, to out/test/probes/hdc. The
 # build container's FFmpeg encodes the clip that the probe plays in the video
-# check, out/test/probes/video.mp4.
+# check, out/test/probes/video.mp4. The probe's native module, libprobe.so,
+# builds with the NDK's clang for musl, as the system app's module does. It
+# takes Node's N-API headers from the system app's SDK (ohos/system-app/sdk.sh)
+# and links OpenHarmony's N-API library, libace_napi.z.so.
 set -euo pipefail
 top=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$top"
 sdk=$(ohos/sdk.sh)
-mkdir -p out/test/probes
-ohos/hap.sh "$sdk" ohos/probe out/build/ohos-probe out/test/probes/InnkeeperProbes.hap
+napi=$(ohos/system-app/sdk.sh)/node-api/include
+work=out/build/ohos-probe-native
+rm -rf "$work"
+mkdir -p out/test/probes "$work/libs/x86_64"
+llvm=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+# An empty stand-in gives the linker the N-API library's soname.
+"$llvm/clang" --target=x86_64-linux-musl -shared -nostdlib -Wl,-soname,libace_napi.z.so \
+  -o "$work/libace_napi.z.so" -x c /dev/null
+"$llvm/clang" --target=x86_64-linux-musl -O2 -fPIC -ffreestanding -nostdinc \
+  -isystem "$("$llvm/clang" -print-resource-dir)/include" -isystem "$napi" \
+  -fvisibility=hidden -Wall -Wextra -Werror -shared -nostdlib -Wl,-z,now \
+  -Wl,-soname,libprobe.so -o "$work/libs/x86_64/libprobe.so" ohos/probe/native/probe.c \
+  "$work/libace_napi.z.so"
+"$llvm/llvm-strip" "$work/libs/x86_64/libprobe.so"
+ohos/hap.sh "$sdk" ohos/probe out/build/ohos-probe out/test/probes/InnkeeperProbes.hap "$work/libs"
 kit=out/test/probes/ohos-sign
 rm -rf "$kit"
 mkdir -p "$kit"
