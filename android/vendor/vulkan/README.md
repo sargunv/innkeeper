@@ -63,7 +63,8 @@ only its node. Each invocation uses a fresh named Android session.
 `tests/ohos.sh` runs in `mise run test:bionic` too. It runs
 `ohos_swapchain_test` and `ohos_gles_test` in a fresh OpenHarmony profile on a
 nested desktop, on the GPU that the launcher selects, and it is skipped without
-a GPU. `ohos_gles_test` draws to an EGL window surface and imports a buffer with
+a GPU. `ohos_gles_test` draws to an EGL window surface, and each frame must be
+in the consumer when `eglSwapBuffers` returns. It imports a buffer with
 `EGL_NATIVE_BUFFER_OHOS`, with our EGL loaded from a copy in `/data/local/tmp`.
 It also imports NV12, NV21, I420 and YV12 buffers in a video frame's layout and
 checks the RGB that a `samplerExternalOES` reads from them.
@@ -107,8 +108,10 @@ ours under those names, with `libgallium-26.2.5.so`, in
   the native platform. Its driver is Zink. A window surface is a kopper drawable
   with `VK_OHOS_surface`, which OH's swapchain layer provides, so its buffers
   reach the Vulkan driver through `VK_OHOS_native_buffer`. The layer has no BGRA
-  formats, so the window configs are RGBA. The patch ports the surface and
-  kopper code of OpenHarmony's Mesa
+  formats, so the window configs are RGBA. Kopper presents inside
+  `eglSwapBuffers`, as it does on Wayland, because render_service takes its
+  screen's buffer from the window as soon as the swap returns. The patch ports
+  the surface and kopper code of OpenHarmony's Mesa
   ([third_party_mesa3d](https://gitee.com/openharmony/third_party_mesa3d), MIT).
 - **Native buffers.** render_service imports other surfaces' buffers with
   `eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS)`. The platform imports the buffer's

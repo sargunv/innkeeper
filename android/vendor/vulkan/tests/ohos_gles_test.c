@@ -5,8 +5,10 @@
  *
  * It loads the EGL library (by default our libEGL_impl.so in
  * /vendor/lib64/chipsetsdk) and prints GL_RENDERER. A window surface on an
- * in-process consumer surface (OH_NativeImage) is cleared and swapped, and
- * the consumer reads the color back. A NativeWindowBuffer with a known
+ * in-process consumer surface (OH_NativeImage) is cleared and swapped 30
+ * times. Each frame must be in the consumer when eglSwapBuffers returns,
+ * because render_service takes its screen's frame right after the swap, and
+ * the consumer reads its color back. A NativeWindowBuffer with a known
  * pattern is imported with EGL_NATIVE_BUFFER_OHOS, with a current context as
  * render_service passes, and read back through a framebuffer. YUV 4:2:0
  * buffers in the layout of video frames are imported the same way, sampled
@@ -194,6 +196,8 @@ int main(int argc, char** argv) {
     sym(image_lib, "OH_NativeImage_AcquireNativeWindow");
   int32_t (*acquire_buffer)(struct OH_NativeImage*, void**, int*) =
     sym(image_lib, "OH_NativeImage_AcquireNativeWindowBuffer");
+  int32_t (*release_buffer)(struct OH_NativeImage*, void*, int) =
+    sym(image_lib, "OH_NativeImage_ReleaseNativeWindowBuffer");
   struct BufferHandle* (*buffer_handle)(void*) =
     sym(window_lib, "OH_NativeWindow_GetBufferHandleFromNative");
   void* (*buffer_alloc)(const struct NativeBufferConfig*) =
@@ -298,44 +302,60 @@ int main(int argc, char** argv) {
   }
   printf("renderer: %s\n", (const char*)glGetString(GL_RENDERER));
 
-  /* Window surface: clear, swap, read the frame from the consumer. */
-  const uint8_t clear[4] = {200, 100, 50, 255};
-  glClearColor(clear[0] / 255.f, clear[1] / 255.f, clear[2] / 255.f, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
-  if (!eglSwapBuffers(dpy, surf)) {
-    printf("FAIL: eglSwapBuffers: 0x%x\n", eglGetError());
-    return 1;
-  }
-  /* Kopper presents on its own thread, so the frame arrives after the swap
-   * returns.
+  /* Window surface: clear, swap, and read each frame from the consumer at
+   * once.
    */
-  void* frame = NULL;
-  int fence = -1;
-  for (int i = 0;
-       i < 200 && (acquire_buffer(consumer, &frame, &fence) != 0 || !frame);
-       i++)
-    usleep(10000);
-  if (!frame) {
-    printf("FAIL: the swapped frame did not reach the consumer\n");
-    return 1;
+  int bad = 0, late = 0;
+  for (int n = 0; n < 30; n++) {
+    const uint8_t clear[4] = {200, 100, (uint8_t)(50 + n), 255};
+    glClearColor(clear[0] / 255.f, clear[1] / 255.f, clear[2] / 255.f, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (!eglSwapBuffers(dpy, surf)) {
+      printf("FAIL: eglSwapBuffers: 0x%x\n", eglGetError());
+      return 1;
+    }
+    void* frame = NULL;
+    int fence = -1;
+    if (acquire_buffer(consumer, &frame, &fence) != 0 || !frame) {
+      late++;
+      /* Take the frame anyway, so the next swap has a free buffer. */
+      for (int i = 0;
+           i < 200 && (acquire_buffer(consumer, &frame, &fence) != 0 || !frame);
+           i++)
+        usleep(10000);
+      if (!frame) {
+        printf("FAIL: the swapped frame did not reach the consumer\n");
+        return 1;
+      }
+    }
+    if (fence >= 0) {
+      struct pollfd p = {.fd = fence, .events = POLLIN};
+      poll(&p, 1, 1000);
+      close(fence);
+    }
+    struct BufferHandle* h = buffer_handle(frame);
+    uint8_t* px = mmap(NULL, h->size, PROT_READ, MAP_SHARED, h->fd, 0);
+    if (px == MAP_FAILED) {
+      printf("FAIL: cannot map the frame\n");
+      return 1;
+    }
+    if (!near(px, clear) || !near(px + (H - 1) * h->stride, clear)) {
+      if (!bad)
+        printf(
+          "window: frame %d pixel(0,0)=(%d,%d,%d) expected (%d,%d,%d)\n", n,
+          px[0], px[1], px[2], clear[0], clear[1], clear[2]
+        );
+      bad++;
+    }
+    munmap(px, h->size);
+    release_buffer(consumer, frame, -1);
   }
-  if (fence >= 0) {
-    struct pollfd p = {.fd = fence, .events = POLLIN};
-    poll(&p, 1, 1000);
-    close(fence);
-  }
-  struct BufferHandle* h = buffer_handle(frame);
-  uint8_t* px = mmap(NULL, h->size, PROT_READ, MAP_SHARED, h->fd, 0);
-  if (px == MAP_FAILED) {
-    printf("FAIL: cannot map the frame\n");
-    return 1;
-  }
-  int bad = !near(px, clear) || !near(px + (H - 1) * h->stride, clear);
   printf(
-    "window: pixel(0,0)=(%d,%d,%d) expected (%d,%d,%d)\n", px[0], px[1], px[2],
-    clear[0], clear[1], clear[2]
+    "window: 30 frames, %d with a wrong color, %d not in the consumer when "
+    "eglSwapBuffers returned\n",
+    bad, late
   );
-  munmap(px, h->size);
+  bad += late;
 
   /* EGL_NATIVE_BUFFER_OHOS: left half red, right half blue. */
   const struct NativeBufferConfig cfg = {
