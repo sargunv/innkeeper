@@ -1,7 +1,9 @@
 import { AbilityConstant, common, UIAbility, Want, wantAgent, WantAgent } from '@kit.AbilityKit';
+import { avSession } from '@kit.AVSessionKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { audio } from '@kit.AudioKit';
+import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 
@@ -68,6 +70,50 @@ async function notify(): Promise<void> {
   }
 }
 
+// The probe's media session. A session lives as long as the object.
+let media: avSession.AVSession | undefined = undefined;
+
+// Sets the media session's playback state and logs it.
+async function playing(play: boolean): Promise<void> {
+  await media?.setAVPlaybackState({
+    state: play ? avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_PAUSE,
+    speed: 1,
+    position: { elapsedTime: 0, updateTime: Date.now() }
+  });
+  hilog.info(0x0000, TAG, 'media %{public}s', play ? 'play' : 'pause');
+}
+
+// Creates a playing audio session with metadata, 2x2 red artwork, and play
+// and pause handlers. Each command that reaches the session logs a line.
+async function startMedia(context: common.UIAbilityContext): Promise<void> {
+  try {
+    if (media === undefined) {
+      media = await avSession.createAVSession(context, 'probe', 'audio');
+      media.on('play', () => playing(true));
+      media.on('pause', () => playing(false));
+      const red = new Uint8Array([255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255]);
+      const art = await image.createPixelMap(red.buffer, {
+        size: { width: 2, height: 2 },
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        pixelFormat: image.PixelMapFormat.RGBA_8888
+      });
+      await media.setAVMetadata({
+        assetId: 'probe-1',
+        title: 'Probe Song',
+        artist: 'Probe Artist',
+        album: 'Probe Album',
+        duration: 180000,
+        mediaImage: art
+      });
+      await media.activate();
+    }
+    await playing(true);
+    hilog.info(0x0000, TAG, 'media session %{public}s', media.sessionId);
+  } catch (e) {
+    hilog.error(0x0000, TAG, 'media failed: %{public}s', JSON.stringify(e));
+  }
+}
+
 // Starts or stops an audio playback continuous task and logs the result.
 // The task's notification opens this ability.
 async function task(context: common.UIAbilityContext, start: boolean): Promise<void> {
@@ -92,8 +138,8 @@ async function task(context: common.UIAbilityContext, start: boolean): Promise<v
 
 // The tests read the URI of each want from hilog. `aa start --ps mode
 // capture` records from the microphone, `--ps mode notify` posts a
-// notification, and `--ps task start` or `stop` starts or stops a continuous
-// task.
+// notification, `--ps mode media` starts a media session, and `--ps task
+// start` or `stop` starts or stops a continuous task.
 function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
@@ -103,6 +149,8 @@ function run(want: Want, context: common.UIAbilityContext): void {
     capture();
   } else if (mode === 'notify') {
     notify();
+  } else if (mode === 'media') {
+    startMedia(context);
   } else if (mode === 'clicked' || mode === 'action' || mode === 'reply') {
     hilog.info(0x0000, TAG, 'notification %{public}s: %{public}s', mode, `${want.parameters?.['reply'] ?? ''}`);
   }

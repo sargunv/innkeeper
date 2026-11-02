@@ -900,6 +900,32 @@ while True:
   fi
   echo "ok   a notification that the probe posts shows on the desktop, and its action button reaches the probe"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_media() {
+    local name=org.mpris.MediaPlayer2.dev.sargunv.Innkeeper.dev_sargunv_innkeeper_probes
+    mpris() { gdbus call --session --dest "$name" --object-path /org/mpris/MediaPlayer2 "$@"; }
+    status() { mpris --method org.freedesktop.DBus.Properties.Get org.mpris.MediaPlayer2.Player PlaybackStatus 2>&1; }
+    # The probe's playing media session becomes an MPRIS player on the
+    # desktop's session bus, with its metadata and artwork.
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode media >>"$T/ohos.txt" 2>&1 || return
+    playing() { status | grep -q "'Playing'"; }
+    until_ok playing || return
+    mpris --method org.freedesktop.DBus.Properties.Get org.mpris.MediaPlayer2.Player Metadata >"$T/mpris.txt" || return
+    grep -q "'xesam:title': <'Probe Song'>" "$T/mpris.txt" &&
+      grep -q "'xesam:artist': <\['Probe Artist'\]>" "$T/mpris.txt" &&
+      grep -q "'mpris:length': <int64 180000000>" "$T/mpris.txt" &&
+      grep -q "'mpris:artUrl': <'file://" "$T/mpris.txt" || return
+    # PlayPause pauses the probe's session, and the player shows the pause.
+    mpris --method org.mpris.MediaPlayer2.Player.PlayPause >/dev/null || return
+    paused() { s /system/bin/hilog -x -T InnkeeperProbes | grep -q 'media pause' && status | grep -q "'Paused'"; }
+    until_ok paused
+  }
+  if ! timed ohos-media ohos_media; then
+    cat "$T/mpris.txt" >&2 2>/dev/null
+    s /system/bin/hilog -x -T InnkeeperMedia,InnkeeperProbes | tail -n 20 >&2
+    exit 1
+  fi
+  echo "ok   the probe's media session is an MPRIS player on the desktop, and PlayPause reaches the probe"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_settings() {
     # Innkeeper System sets OH's time zone to the desktop's, which OH's
     # defaults don't use.
