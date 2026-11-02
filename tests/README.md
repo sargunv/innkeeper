@@ -24,7 +24,8 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   hdcd then listens on loopback alone, and a private hdc server connects with a
   throwaway key to run `hdc shell`. Boot ends on the home screen, and a click on
   the desktop's seat opens Settings with OpenHarmony's cursor under the pointer.
-  A wheel detent scrolls Settings' list. A dma-buf like the display buffers must
+  A wheel detent scrolls Settings' list within 2 s while another process holds
+  the mouse open without reading it. A dma-buf like the display buffers must
   export no sync file, which keeps render_service's llvmpipe from crashing.
   render_service draws with Zink on the GPU that the launcher picked, or with
   llvmpipe without one. A key press reaches OpenHarmony's input service. A file

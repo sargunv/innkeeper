@@ -689,8 +689,16 @@ else
       [[ ${now%% *} != "${first%% *}" ]] || (($(awk -v a="${now#* }" -v b="${first#* }" 'BEGIN { print (a < b) }')))
     }
     ! scrolled || return
+    # After boot, dhardware opens every input device and reads none of them
+    # for several seconds. A shell holds the mouse in the same way until its
+    # input closes, and the wheel must still reach MMI at once.
+    local hold
+    : >"$T/held.txt"
+    exec {hold}> >(s /system/bin/sh -c 'exec 3</dev/input/innkeeper-event1 && echo held && read -r _' >"$T/held.txt")
+    until_ok file_has "$T/held.txt" held || return
     { at 360 700 && echo axis:0,15; } | /usr/bin/python3 "$here/seat.py" --stdin
-    until_ok scrolled
+    observation_wait=$(((2 * deadline + 54) / 55)) until_ok scrolled || return
+    exec {hold}>&-
   }
   if ! timed ohos-wheel ohos_wheel; then
     exit 1

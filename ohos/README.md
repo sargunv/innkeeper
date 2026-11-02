@@ -82,28 +82,28 @@ must report the session booted only once `bootevent.boot.completed` is set, and
 `bm dump` must show Innkeeper System as a kept-alive system app, and Innkeeper
 User must run as user 100. A click on the nested desktop's seat then opens
 Settings, and MMI's cursor must be on the panel pixel under the seat's pointer.
-A wheel detent scrolls Settings' list. A dma-buf made as the buffer VDI makes
-one must fail the sync file export with `ENOTTY`
-([tests/dmabuf.c](tests/dmabuf.c)). A key press reaches MMI. A file written to
-`/storage/Users/currentUser/Download` lands in the profile's data directory. The
-probe HAP, signed for the profile's UDID, then installs, shows in
-`innkeeper list` and gets a desktop entry with its label and icon, and
-`innkeeper run` puts its window on screen with input focus. `innkeeper run` with
-a text file must give the probe a URI that it can read, and the probe logs the
-file's text. A click on the probe's text field starts Innkeeper Keyboard, and
-keys typed in a French layout on the nested desktop type "aé" in the field. Text
-that `wl-copy` puts on the nested desktop's clipboard pastes into the field with
-Ctrl+V, and Ctrl+A and Ctrl+C in the field put its text on the desktop's
-clipboard. OH's music volume must be at its maximum, and a 440 Hz tone that
-[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop. Root then grants the probe the microphone with
-`atm perm -g`, the host plays a tone into the null sink, and the probe must
-record it from the sink's monitor. The probe's media session must be an MPRIS
-player on the nested desktop's session bus, and MPRIS `PlayPause` must pause it.
-OH must take the time zone that the session started with, and it must turn dark
-when the nested desktop's portal does. Last, the probe starts an audio playback
-continuous task. With the window closed, the task must keep the session up, and
-once it stops, the session must stop.
+A wheel detent scrolls Settings' list within 2 s while another process holds the
+mouse open without reading it. A dma-buf made as the buffer VDI makes one must
+fail the sync file export with `ENOTTY` ([tests/dmabuf.c](tests/dmabuf.c)). A
+key press reaches MMI. A file written to `/storage/Users/currentUser/Download`
+lands in the profile's data directory. The probe HAP, signed for the profile's
+UDID, then installs, shows in `innkeeper list` and gets a desktop entry with its
+label and icon, and `innkeeper run` puts its window on screen with input focus.
+`innkeeper run` with a text file must give the probe a URI that it can read, and
+the probe logs the file's text. A click on the probe's text field starts
+Innkeeper Keyboard, and keys typed in a French layout on the nested desktop type
+"aé" in the field. Text that `wl-copy` puts on the nested desktop's clipboard
+pastes into the field with Ctrl+V, and Ctrl+A and Ctrl+C in the field put its
+text on the desktop's clipboard. OH's music volume must be at its maximum, and a
+440 Hz tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must
+reach a private null sink on the nested desktop. Root then grants the probe the
+microphone with `atm perm -g`, the host plays a tone into the null sink, and the
+probe must record it from the sink's monitor. The probe's media session must be
+an MPRIS player on the nested desktop's session bus, and MPRIS `PlayPause` must
+pause it. OH must take the time zone that the session started with, and it must
+turn dark when the nested desktop's portal does. Last, the probe starts an audio
+playback continuous task. With the window closed, the task must keep the session
+up, and once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
