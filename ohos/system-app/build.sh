@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# build:ohos-system-app: Innkeeper System, the system app that OpenHarmony
-# preinstalls from our layer, into out/build/ohos-system-app/install:
+# build:ohos-system-app: Innkeeper System and Innkeeper User, the system apps
+# that OpenHarmony preinstalls from our layer, into
+# out/build/ohos-system-app/install:
 #   share/innkeeper/ohos/sys_prod/app/InnkeeperSystem/InnkeeperSystem.hap
+#   share/innkeeper/ohos/sys_prod/app/InnkeeperUser/InnkeeperUser.hap
 #   share/innkeeper/ohos/sys_prod/etc/app/install_list.json
 #   share/innkeeper/ohos/sys_prod/etc/app/install_list_capability.json
-# The native module, libinnkeeper.so, builds as the VDIs do (ohos/build.sh),
+# Both apps load the native module, libinnkeeper.so, which builds as the VDIs do (ohos/build.sh),
 # against the musl headers that build:ohos copies out of the build container.
 set -euo pipefail
 top=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$top"
 sdk=$(ohos/system-app/sdk.sh)
-bundle=dev.sargunv.innkeeper.system
+system=dev.sargunv.innkeeper.system
+user=dev.sargunv.innkeeper.user
 work=out/build/ohos-system-app
 install=$work/install
 out=$install/share/innkeeper/ohos/sys_prod
 rm -rf "$work"
-mkdir -p "$work/stubs" "$work/libs/x86_64" "$out/app/InnkeeperSystem" "$out/etc/app"
+mkdir -p "$work/stubs" "$work/libs/x86_64" "$out/app/InnkeeperSystem" "$out/app/InnkeeperUser" "$out/etc/app"
 
 llvm=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 musl=out/build/ohos/musl
@@ -37,8 +40,11 @@ so=$work/libs/x86_64/libinnkeeper.so
 "$llvm/llvm-strip" "$so"
 
 ohos/hap.sh "$sdk" ohos/system-app "$work/hap" "$work/unsigned.hap" "$work/libs"
-ohos/sign.sh "$sdk/toolchains/lib" "$bundle" --system "$work/unsigned.hap" \
+ohos/sign.sh "$sdk/toolchains/lib" "$system" --system "$work/unsigned.hap" \
   "$out/app/InnkeeperSystem/InnkeeperSystem.hap"
+ohos/hap.sh "$sdk" ohos/system-app/user "$work/user-hap" "$work/user-unsigned.hap" "$work/libs"
+ohos/sign.sh "$sdk/toolchains/lib" "$user" --system "$work/user-unsigned.hap" \
+  "$out/app/InnkeeperUser/InnkeeperUser.hap"
 
 # The bundle manager installs each app that an install_list.json in a config
 # layer names, and applies the capabilities that install_list_capability.json
@@ -47,6 +53,10 @@ ohos/sign.sh "$sdk/toolchains/lib" "$bundle" --system "$work/unsigned.hap" \
 # allowAppUsePrivilegeExtension. hap-sign-tool issues a new
 # app certificate at each signing, so the entry matches the appId, which is
 # the bundle name and the signing key's public EC point.
+#
+# Innkeeper System is a singleton, so it runs as user 0, and AMS keeps it
+# alive. Innkeeper User isn't a singleton, so it runs as the user that
+# Innkeeper System starts it for. AMS keeps alive no app outside user 0.
 app_id=$(keytool -exportcert -rfc -keystore "$sdk/toolchains/lib/OpenHarmony.p12" \
   -storepass 123456 -alias "openharmony application release" 2>/dev/null |
   node -e '
@@ -58,7 +68,8 @@ process.stdout.write(spki.subarray(-65).toString("base64"));
 cat >"$out/etc/app/install_list.json" <<EOF
 {
   "install_list": [
-    { "app_dir": "/sys_prod/app/InnkeeperSystem", "removable": false }
+    { "app_dir": "/sys_prod/app/InnkeeperSystem", "removable": false },
+    { "app_dir": "/sys_prod/app/InnkeeperUser", "removable": false }
   ]
 }
 EOF
@@ -73,10 +84,15 @@ cat >"$out/etc/app/install_list_capability.json" <<EOF
 {
   "install_list": [
     {
-      "bundleName": "$bundle",
-      "app_signature": ["${bundle}_$app_id"],
+      "bundleName": "$system",
+      "app_signature": ["${system}_$app_id"],
       "keepAlive": true,
       "singleton": true,
+      "allowAppUsePrivilegeExtension": true
+    },
+    {
+      "bundleName": "$user",
+      "app_signature": ["${user}_$app_id"],
       "allowAppUsePrivilegeExtension": true
     },
     {

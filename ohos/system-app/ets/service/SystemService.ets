@@ -4,6 +4,7 @@ import { startApps } from '../bridge/Apps';
 import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
 import { startNotifications } from '../notify/Notifications';
+import { startPerUser } from './PerUser';
 import { startSettings } from '../settings/Settings';
 
 // The app's main element. The profile's layer marks the app keep-alive
@@ -16,5 +17,6 @@ export default class SystemService extends ServiceExtensionAbility {
     startLifecycle(background);
     startNotifications(this.context);
     startSettings();
+    startPerUser(this.context);
   }
 }
