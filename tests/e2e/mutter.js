@@ -2,6 +2,7 @@
 import Clutter from "gi://Clutter";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import Meta from "gi://Meta";
 import Shell from "gi://Shell";
 import St from "gi://St";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
@@ -84,11 +85,25 @@ export async function run() {
         // A failed set_keymap leaves nothing to await this promise.
         changed.catch(() => {});
         try {
-          // Mutter 47 added the model argument.
-          try {
-            backend.set_keymap(layout, "", "", "");
-          } catch {
-            backend.set_keymap(layout, "", "");
+          if (backend.set_keymap_async) {
+            // GNOME 50's Mutter sets a keymap from a description and a layout
+            // index.
+            const description = Meta.KeymapDescription.new_from_rules(
+              "",
+              layout,
+              "",
+              "",
+              [layout],
+              [layout],
+            );
+            await backend.set_keymap_async(description, 0, null);
+          } else {
+            // Mutter 47 added the model argument.
+            try {
+              backend.set_keymap(layout, "", "", "");
+            } catch {
+              backend.set_keymap(layout, "", "");
+            }
           }
           await changed;
           invocation.return_value(null);
