@@ -170,8 +170,11 @@ include none of these additions.
 - **Binder.** OpenHarmony's kernel adds `BINDER_FEATURE_SET` for access tokens
   and sender info, plus `BINDER_GET_ACCESS_TOKEN` and `BINDER_GET_SENDER_INFO`.
   A transaction carries its sender's token and first token. The reading thread
-  keeps them until its next read, together with the sender's pid for synchronous
-  calls.
+  keeps them until its next read, together with the sender's pid. The kernel
+  reports pid 0 for a oneway call, and the broker reports the caller's pid.
+  render_service rejects a oneway request about a surface node, such as an
+  XComponent's request for hardware composition, unless it comes from the
+  process that created the node.
 - **Access tokens** (`src/ohos.rs`). `/dev/access_token_id` is an empty file,
   and the broker serves its type-`'A'` ioctls. They cover each process's token
   and first token, which init or appspawn set before exec and which fork

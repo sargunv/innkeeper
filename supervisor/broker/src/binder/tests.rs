@@ -365,19 +365,36 @@ fn ohos_readers_get_the_senders_tokens() {
         (info.tokens, info.sender_pid_nr),
         (token(0x2000_0003, 0), 0)
     );
-    // A oneway call carries tokens but no pid.
+    // A oneway call carries the tokens and the client's pid.
     td.flags = TF_ONE_WAY;
     s.write(
         s.client,
         1,
         &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
     );
-    assert!(find(&s.read(s.server, 2, 256), BR_TRANSACTION).is_some());
+    let stream = s.read(s.server, 2, 256);
+    let tp = find(&stream, BR_TRANSACTION).expect("server gets the oneway");
+    assert_eq!(td_from(tp).sender_pid, 1001);
     let info = sender_info(&mut s, server, 2);
     assert_eq!(
         (info.tokens, info.sender_pid_nr),
-        (token(0x2800_0001, 0x2800_0002), 0)
+        (token(0x2800_0001, 0x2800_0002), 1001)
     );
+}
+
+#[test]
+fn android_oneways_report_no_sender_pid() {
+    let mut s = setup();
+    let mut td = BinderTransactionData::default();
+    td.flags = TF_ONE_WAY;
+    s.write(
+        s.client,
+        1,
+        &Bc::default().cmd(BC_TRANSACTION).td(&td).done(),
+    );
+    let stream = s.read(s.server, 2, 256);
+    let tp = find(&stream, BR_TRANSACTION).expect("server gets the oneway");
+    assert_eq!(td_from(tp).sender_pid, 0);
 }
 
 #[test]

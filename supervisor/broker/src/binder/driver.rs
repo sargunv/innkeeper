@@ -424,6 +424,11 @@ struct Txn {
     sender_euid: u32,
     /// The sender's OpenHarmony (token, first token) pair.
     tokens: (u64, u64),
+    /// The pid that an OpenHarmony oneway call reports as its sender, or 0.
+    /// The kernel reports 0 for every oneway call. render_service rejects a
+    /// oneway request about a node, such as SetHardwareEnabled for an
+    /// XComponent's surface, unless it comes from the pid in the node's id.
+    oneway_pid: i32,
     /// The process whose `outstanding_txns` counts this transaction. That is
     /// its target, from when it is queued until it is freed or its reader
     /// thread exits.
@@ -1669,6 +1674,11 @@ impl BinderDriver {
                 code: td.code,
                 flags: td.flags,
                 sender_euid: self.procs[&proc].euid,
+                oneway_pid: if self.ohos && oneway && !reply {
+                    self.procs[&proc].pid
+                } else {
+                    0
+                },
                 tokens: if self.ohos {
                     us.access_token(proc, tid)
                 } else {
@@ -3279,6 +3289,7 @@ impl BinderDriver {
             return TxnRead::Dropped;
         };
         let (code, flags, euid, from, tokens) = (t.code, t.flags, t.sender_euid, t.from, t.tokens);
+        let oneway_pid = t.oneway_pid;
         let fixups = self.buffers[&key].fd_fixups.clone();
         let mut installed = 0;
         let mut failure = None;
@@ -3344,7 +3355,7 @@ impl BinderDriver {
         td.sender_pid = from
             .and_then(|(fp, _)| self.procs.get(&fp))
             .map(|p| p.pid)
-            .unwrap_or(0);
+            .unwrap_or(oneway_pid);
         td.data_size = b.data_size as u64;
         td.offsets_size = b.offsets_size as u64;
         td.data_buffer = key.1;
