@@ -20,9 +20,10 @@ doesn't say.
   its permissions. The sizes come from `du` over the bundle's code and its el1
   and el2 data directories for user 100. A `system_grant` permission shows as
   fixed. `app set --background` works as on Android, and `list` shows the
-  setting. `run` with a URI opens it as a browser link, as on Android. Such a
-  profile refuses `open`, files in `run`, the other `app set` settings, and the
-  settings that OpenHarmony lacks (adb and following the desktop's accent
+  setting. `run` with a URI opens it as a browser link, as on Android. `run`
+  with a file opens it in the bundle, and `open` opens files in the app that
+  OpenHarmony picks. Such a profile refuses the other `app set` settings, and
+  the settings that OpenHarmony lacks (adb and following the desktop's accent
   color). `profile list` shows each OpenHarmony profile's UDID, which a debug
   signing profile names in its `device-ids`. `profile set --hdc on` turns on
   hdc, which Android profiles refuse. With hdc on, `profile list` shows hdc's

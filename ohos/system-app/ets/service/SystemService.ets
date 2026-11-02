@@ -14,7 +14,7 @@ import { startSettings } from '../settings/Settings';
 export default class SystemService extends ServiceExtensionAbility {
   onCreate(want: Want): void {
     const background = new BackgroundApps(this.context);
-    startApps(background);
+    startApps(this.context, background);
     startLifecycle(background);
     startNotifications(this.context);
     startMedia(this.context);

@@ -356,6 +356,51 @@ pub fn run(
     }
 }
 
+/// The system app that shows Android's app chooser for files, and that
+/// stands for OpenHarmony's own chooser in a launch.
+const SYSTEM_APP: &str = "dev.sargunv.innkeeper.system";
+
+/// The launch that opens documents `grants` in app `package`, or in the app
+/// that the user chooses when `package` is None. Android's chooser is an
+/// activity of the system app. On OpenHarmony, a launch of the system app's
+/// bundle asks OpenHarmony to choose.
+pub fn file_launch(system: System, package: Option<&str>, grants: Vec<u64>) -> Launch {
+    let (package, component) = match (package, system) {
+        (Some(p), _) => (p, None),
+        (None, System::Android) => (
+            SYSTEM_APP,
+            Some(format!("{SYSTEM_APP}/.documents.OpenWithActivity")),
+        ),
+        (None, System::Ohos) => (SYSTEM_APP, None),
+    };
+    Launch::File {
+        package: package.into(),
+        grants,
+        component,
+    }
+}
+
+/// Opens documents `grants` in app `package`, or in the app that the user
+/// chooses when `package` is None. Returns the window manager's reply.
+pub fn open_files(
+    profile: &ProfileName,
+    package: Option<&str>,
+    grants: Vec<u64>,
+    opts: &LaunchOptions,
+    report: Report,
+) -> Result<String> {
+    let system = crate::profiles::settings(profile)?.system;
+    if system == System::Ohos {
+        // The app opens on OpenHarmony's screen, so its window comes up
+        // first, as in run.
+        let token = opts.token.as_deref().unwrap_or_default();
+        if let Err(e) = crate::app_settings::show_screen(profile, token) {
+            report(Event::Warning(format!("can't show the window: {e:#}")));
+        }
+    }
+    crate::app_settings::launch(profile, &file_launch(system, package, grants), opts)
+}
+
 /// What `app` does to an OpenHarmony bundle. Android's equivalents go through
 /// the system app ([`crate::app_settings`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,6 +527,32 @@ pub fn android_packages(profile: &ProfileName) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_launches_name_the_app_or_the_systems_chooser() {
+        let launch = |system, package| match file_launch(system, package, vec![7]) {
+            Launch::File {
+                package,
+                grants,
+                component,
+            } => {
+                assert_eq!(grants, [7]);
+                (package, component)
+            }
+            l => panic!("not a file launch: {l:?}"),
+        };
+        for system in [System::Android, System::Ohos] {
+            assert_eq!(launch(system, Some("a.b")), ("a.b".into(), None));
+        }
+        assert_eq!(
+            launch(System::Android, None),
+            (
+                SYSTEM_APP.into(),
+                Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity".into())
+            )
+        );
+        assert_eq!(launch(System::Ohos, None), (SYSTEM_APP.into(), None));
+    }
     use std::fs;
 
     #[test]

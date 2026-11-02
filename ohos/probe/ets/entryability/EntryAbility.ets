@@ -6,6 +6,8 @@ import { audio } from '@kit.AudioKit';
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 
 const TAG = 'InnkeeperProbes';
 
@@ -136,13 +138,31 @@ async function task(context: common.UIAbilityContext, start: boolean): Promise<v
   }
 }
 
-// The tests read the URI of each want from hilog. `aa start --ps mode
+// Logs the first 256 bytes of the file at a file URI, as text.
+function read(uri: string): void {
+  try {
+    const f = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    const buf = new ArrayBuffer(256);
+    const n = fileIo.readSync(f.fd, buf);
+    fileIo.closeSync(f);
+    const text = util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+    console.info(`innkeeper-probes: read ${text}`);
+  } catch (e) {
+    console.error(`innkeeper-probes: read failed: ${JSON.stringify(e)}`);
+  }
+}
+
+// The tests read the URI of each want from hilog, and the content of a file
+// URI. `aa start --ps mode
 // capture` records from the microphone, `--ps mode notify` posts a
 // notification, `--ps mode media` starts a media session, and `--ps task
 // start` or `stop` starts or stops a continuous task.
 function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
+    if (want.uri.startsWith('file://')) {
+      read(want.uri);
+    }
   }
   const mode = want.parameters?.['mode'];
   if (mode === 'capture') {

@@ -18,9 +18,13 @@
 //    leaves the user unverified, and AMS refuses to start third-party apps.
 //    storage_daemon's mounts and unmounts succeed. Each bind or sharefs
 //    mount becomes a symlink to the resolved source, so every view shows
-//    the user's files in /data/service/el2/<user>/hmdfs/account.
+//    the user's files in /data/service/el2/<user>/hmdfs/account. The
+//    user's Docs folder holds the appdata view, a link to every app's data
+//    directories. An app opens another app's file URI through that view,
+//    after the URI permission service grants it the path.
 //    storage_daemon refuses a source or mount point that lstat shows as a
-//    symlink, so its lstat shows a symlink into /data as the directory.
+//    symlink, so its lstat shows a symlink into /data or /mnt as the
+//    directory.
 //  - Services set their cfg's "importance" through setpriority before exec,
 //    and exit if it fails. Without CAP_SYS_NICE, raising priority is
 //    best-effort, as in the Android shim.
@@ -224,14 +228,6 @@ static void replace(const char* src, const char* dst) {
   sys6(SYS_symlink, (long)src, (long)dst, 0, 0, 0, 0);
 }
 
-// Whether path resolves to the host directory behind /data.
-static int in_data(const char* path) {
-  char buf[4096];
-  char* r = next_realpath(path, buf);
-  return r && data_len && starts(r, data_dir) &&
-         (r[data_len] == '/' || r[data_len] == 0);
-}
-
 int mount(
   const char* src, const char* dst, const char* type, unsigned long flags,
   const void* data
@@ -239,12 +235,10 @@ int mount(
   if (init_pid) return 0;
   if (storage) {
     // A bind or sharefs mount of another path becomes a symlink. sharefs
-    // filters access, and its view shows the source's files. A mount point
-    // in /data stays a directory. The appdata views are mount points in the
-    // user's Docs, and a symlink there would show in the user's files.
+    // filters access, and its view shows the source's files.
     if (
       src && dst && *src == '/' && !same(src, dst) &&
-      ((flags & MS_BIND) || (type && same(type, "sharefs"))) && !in_data(dst)
+      ((flags & MS_BIND) || (type && same(type, "sharefs")))
     ) {
       char real[4096];
       replace(realpath(src, real) ? real : src, dst);
@@ -268,8 +262,10 @@ int mount(
 }
 
 // storage_daemon checks each mount's source and mount point with lstat, and
-// it refuses a symlink. A symlink into /data that stands for a mount shows as
-// the directory it points to, as the broker shows such links inside /data.
+// it refuses a symlink. A symlink into /data or /mnt that stands for a mount
+// shows as the directory it points to, as the broker shows such links inside
+// /data. The appdata view in the user's Docs links into /mnt and stays there
+// across boots.
 // The kernel's struct stat, which musl uses as is, has st_mode at byte 24.
 int lstat(const char* path, void* st) {
   long r = sys6(
@@ -278,7 +274,7 @@ int lstat(const char* path, void* st) {
   if (storage && r == 0 && (*(unsigned*)((char*)st + 24) & S_IFMT) == S_IFLNK) {
     char t[6];
     long n = sys6(SYS_readlink, (long)path, (long)t, sizeof(t), 0, 0, 0);
-    if (n == sizeof(t) && starts(t, "/data/")) {
+    if (n == sizeof(t) && (starts(t, "/data/") || starts(t, "/mnt/"))) {
       r = sys6(SYS_newfstatat, AT_FDCWD, (long)path, (long)st, 0, 0, 0);
     }
   }

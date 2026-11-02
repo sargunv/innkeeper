@@ -4,6 +4,9 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { blob, onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
 import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { backgroundCommand, response } from '../lifecycle/Background';
+import common from '@ohos.app.ability.common';
+import { fileLaunch, launched } from '../open/Launch';
+import { openInUser } from '../service/PerUser';
 import { AppMirror } from './AppMirror';
 import { Message, utf8 } from './Wire';
 
@@ -37,7 +40,17 @@ function readCommand(fd: number, length: number): string {
 }
 
 // Runs the relayed command and returns the response JSON.
-async function run(command: string, background: BackgroundApps): Promise<string> {
+async function run(command: string, context: common.ServiceExtensionContext,
+  background: BackgroundApps): Promise<string> {
+  const files = fileLaunch(command);
+  if (files !== undefined) {
+    try {
+      await openInUser(context, files.bundle, files.grants);
+      return launched(files, '');
+    } catch (e) {
+      return launched(files, `Innkeeper User didn't start: ${(e as Error).message}`);
+    }
+  }
   const c = backgroundCommand(command);
   if (c === undefined) {
     return UNSUPPORTED;
@@ -48,12 +61,13 @@ async function run(command: string, background: BackgroundApps): Promise<string>
 // Answers a COMMAND event, whose body is `u64 id, u32 length` and whose fd
 // holds the command's JSON, with a RESULT in the same envelope. The bridge's
 // caller waits up to 40 s for it. The callback closes the fds afterwards.
-function answer(apps: number, body: ArrayBuffer, fds: number[], background: BackgroundApps): void {
+function answer(apps: number, body: ArrayBuffer, fds: number[], context: common.ServiceExtensionContext,
+  background: BackgroundApps): void {
   if (body.byteLength !== 12 || fds.length !== 1) {
     return;
   }
   const command = readCommand(fds[0], new DataView(body).getUint32(8, true));
-  run(command, background).then((answer: string) => {
+  run(command, context, background).then((answer: string) => {
     const json = utf8(answer);
     const reply = new Message().raw(new Uint8Array(body, 0, 8)).u32(json.length).buffer();
     return request(apps, RESULT, reply, [blob(new Uint8Array(json).buffer)]);
@@ -67,7 +81,7 @@ function answer(apps: number, body: ArrayBuffer, fds: number[], background: Back
 // BOOT_COMPLETED, so the app sends it after `bootevent.boot.completed` and
 // again on each new connection. From then on the app also mirrors the
 // installed apps to the desktop's app menu.
-export function startApps(background: BackgroundApps): void {
+export function startApps(context: common.ServiceExtensionContext, background: BackgroundApps): void {
   const apps = open(APPS, 'innkeeper-system');
   const mirror = new AppMirror(apps, (): void => background.onChange());
   let booted = false;
@@ -85,7 +99,7 @@ export function startApps(background: BackgroundApps): void {
   };
   onEvent(apps, (type: number, body: ArrayBuffer, fds: number[]) => {
     if (type === COMMAND) {
-      answer(apps, body, fds, background);
+      answer(apps, body, fds, context, background);
     } else if (type === CONNECTED && booted) {
       report();
     }

@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
-use innkeeper_core::android::Launch;
 use innkeeper_core::launcher::Session;
 use innkeeper_core::ops::{self, Event, LaunchOptions};
 use innkeeper_core::profiles;
@@ -261,21 +260,13 @@ fn open(profile: &ProfileName, files: &[PathBuf], token: Option<String>) -> Resu
         .iter()
         .map(|p| grant(profile, p))
         .collect::<Result<Vec<_>>>()?;
-    innkeeper_core::app_settings::launch(
-        profile,
-        &Launch::File {
-            package: "dev.sargunv.innkeeper.system".into(),
-            grants,
-            component: Some("dev.sargunv.innkeeper.system/.documents.OpenWithActivity".into()),
-        },
-        &LaunchOptions {
-            token,
-            wait: false,
-            new_window: false,
-            size: None,
-        },
-    )
-    .map(drop)
+    let opts = LaunchOptions {
+        token,
+        wait: false,
+        new_window: false,
+        size: None,
+    };
+    ops::open_files(profile, None, grants, &opts, &stderr).map(drop)
 }
 
 /// Grants profile `profile`'s session read access to the file at `path`, and
@@ -317,9 +308,6 @@ fn run(
         .filter(|s| !s.is_empty())
         .map(|a| Ok((a.as_str(), file_arg(a)?)))
         .collect::<Result<Vec<_>>>()?;
-    if args.iter().any(|(_, path)| path.is_some()) {
-        profiles::need_android(profile, "opening files in apps")?;
-    }
     let session = Session::of_profile(profile)?;
     let splash = if session.running() {
         None
@@ -361,14 +349,12 @@ fn run(
         let mut reply = String::new();
         for (arg, path) in &args {
             reply = match path {
-                Some(path) => innkeeper_core::app_settings::launch(
+                Some(path) => ops::open_files(
                     profile,
-                    &Launch::File {
-                        package: pkg.into(),
-                        grants: vec![grant(profile, path)?],
-                        component: None,
-                    },
+                    Some(pkg),
+                    vec![grant(profile, path)?],
                     &opts,
+                    &stderr,
                 )?,
                 None => ops::run(profile, pkg, Some(arg), &opts, &stderr)?,
             };
@@ -743,10 +729,7 @@ fn main() -> ExitCode {
         cmd => {
             let p = profiles::existing(&cli.profile)?;
             match cmd {
-                Cmd::Open { files } => {
-                    profiles::need_android(&p, "opening files")?;
-                    open(&p, &files, token)
-                }
+                Cmd::Open { files } => open(&p, &files, token),
                 Cmd::Install { file } => install(&p, &file),
                 Cmd::Uninstall { package, keep_data } => uninstall(&p, &package, keep_data),
                 Cmd::Run {

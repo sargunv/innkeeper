@@ -55,6 +55,9 @@ from each other**. Any app can read or write another app's files and signal its
 processes. Binder, PackageManager and AppOps still see the correct virtual uids,
 but Android's own processes enforce that policy, and the kernel does not.
 
+- OpenHarmony's processes also run as the host user. Its user files hold an
+  `appdata` view of every app's data, through which an app opens another app's
+  file URIs ([ohos](../ohos/README.md#how-it-boots)).
 - This matches one desktop user running several native apps, which is the threat
   model. The README and the manager's Preferences page say so.
 - Host supplementary groups are not mapped in the sandbox. `selftest` checks

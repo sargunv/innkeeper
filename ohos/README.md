@@ -20,11 +20,12 @@ The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
 there too ([host/cli](../host/cli/README.md)). So does `app set --background`,
 which keeps the session up while the app is installed, as on Android. `run`
 brings the app to the front and opens OH's window again if the user closed it.
-`run` with a URI opens it in the app as a browser link. An OH profile refuses
-`open`, files in `run`, the other `app set` settings, adb and the Android-only
-settings. `profile set --hdc on` turns on hdc in its place
-([README](../README.md#for-openharmony-developers)). The launcher then starts
-the image's hdcd on the profile's loopback port with
+`run` with a URI opens it in the app as a browser link. `run` with a file opens
+it in the app, and `open` opens files in the app that OH picks
+([Innkeeper System](#innkeeper-system)). An OH profile refuses the other
+`app set` settings, adb and the Android-only settings. `profile set --hdc on`
+turns on hdc in its place ([README](../README.md#for-openharmony-developers)).
+The launcher then starts the image's hdcd on the profile's loopback port with
 `param set persist.hdc.port` and `begetctl start_service hdcd`.
 
 The bundle manager installs a HAP whose signature chains to OpenHarmony's public
@@ -45,7 +46,8 @@ same static broker, `libexec/innkeeper/innkeeper-brk`.
 launcher ability shows one page with a text field. Started with
 `--ps mode capture`, it records half a second from the microphone and logs the
 loudest sample to hilog. Started with `--ps task start` or `--ps task stop`, it
-starts or stops an audio playback continuous task and logs the result.
+starts or stops an audio playback continuous task and logs the result. It opens
+text files, and it logs the start of each file that it gets.
 `mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
 
@@ -86,21 +88,22 @@ one must fail the sync file export with `ENOTTY`
 `/storage/Users/currentUser/Download` lands in the profile's data directory. The
 probe HAP, signed for the profile's UDID, then installs, shows in
 `innkeeper list` and gets a desktop entry with its label and icon, and
-`innkeeper run` puts its window on screen with input focus. A click on the
-probe's text field starts Innkeeper Keyboard, and keys typed in a French layout
-on the nested desktop type "aé" in the field. Text that `wl-copy` puts on the
-nested desktop's clipboard pastes into the field with Ctrl+V, and Ctrl+A and
-Ctrl+C in the field put its text on the desktop's clipboard. OH's music volume
-must be at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c)
-plays through OH's audio API must reach a private null sink on the nested
-desktop. Root then grants the probe the microphone with `atm perm -g`, the host
-plays a tone into the null sink, and the probe must record it from the sink's
-monitor. The probe's media session must be an MPRIS player on the nested
-desktop's session bus, and MPRIS `PlayPause` must pause it. OH must take the
-time zone that the session started with, and it must turn dark when the nested
-desktop's portal does. Last, the probe starts an audio playback continuous task.
-With the window closed, the task must keep the session up, and once it stops,
-the session must stop.
+`innkeeper run` puts its window on screen with input focus. `innkeeper run` with
+a text file must give the probe a URI that it can read, and the probe logs the
+file's text. A click on the probe's text field starts Innkeeper Keyboard, and
+keys typed in a French layout on the nested desktop type "aé" in the field. Text
+that `wl-copy` puts on the nested desktop's clipboard pastes into the field with
+Ctrl+V, and Ctrl+A and Ctrl+C in the field put its text on the desktop's
+clipboard. OH's music volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop. Root then grants the probe the microphone with
+`atm perm -g`, the host plays a tone into the null sink, and the probe must
+record it from the sink's monitor. The probe's media session must be an MPRIS
+player on the nested desktop's session bus, and MPRIS `PlayPause` must pause it.
+OH must take the time zone that the session started with, and it must turn dark
+when the nested desktop's portal does. Last, the probe starts an audio playback
+continuous task. With the window closed, the task must keep the session up, and
+once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
@@ -186,8 +189,25 @@ reports boot completion. Issue #312 tracks the features that build on it.
   it reads the pasteboard while other apps have focus. It marks each clip it
   writes, and it skips a pasteboard clip with that mark or with the content of
   the last desktop clip, so no clip comes back to the side that it came from.
-  Files don't sync, because an app can't open another app's file URI in an OH
-  profile (#312). A desktop clip of files clears the pasteboard.
+  File clips don't sync yet. A desktop clip of files clears the pasteboard.
+- **Files from the desktop.** `innkeeper run <bundle> <file>` and
+  `innkeeper open <files>` make a documents grant for each file with Session1's
+  `Import`, and they send the grants in a `launch` command. Innkeeper System
+  hands the grants to Innkeeper User's `UserService`, which runs as the
+  foreground user (`user/ets/files/`). Innkeeper User reads each file through
+  the bridge's documents service and copies it into its own files, because OH
+  apps open files by path. It then starts the app with a view want that carries
+  the copies' URIs and `FLAG_AUTH_READ_URI_PERMISSION`. OH's URI permission
+  service grants the app those paths, and the app opens the URIs through the
+  user's appdata view ([How it boots](#how-it-boots)). `run` names the bundle,
+  and AMS picks its ability whose skills match the file. `open` names no bundle,
+  so AMS starts the one app whose skills match. OH would show its chooser when
+  several apps match, but on this image the chooser fails because it needs an
+  app store (`QueryAppGalleryBundleName`), and `open` then fails in Innkeeper
+  User's log. The copies stay until Innkeeper User starts again at the next
+  boot. Innkeeper System answers the command once Innkeeper User has the grants,
+  so a file that the app can't open fails in Innkeeper User's log
+  (`InnkeeperFiles`). Innkeeper User needs `START_ABILITIES_FROM_BACKGROUND`.
 - **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
   connects OH's text fields to the host's input method
   ([Text input](#text-input)).
@@ -675,6 +695,13 @@ the same as Android's. OH's session stops when idle, as Android's does
   launcher links the session's `/storage/Users` to the same view. Apps and
   FileManager's "My phone" see the same files, and they stay in the profile's
   data directory on the host. hmdfs's distributed and cloud views stay empty.
+  The `appdata` folder in `Docs` is a view of every app's data directories,
+  which storage_daemon mounts with sharefs and the shim links to
+  `/mnt/user/<user>/nosharefs/appdata`. An app opens another app's file URI at
+  `/storage/Users/currentUser/appdata/el2/base/<bundle>/...`, once OH's URI
+  permission service grants it that path. FileManager and the media library
+  leave the folder out. The link stays in `Docs` across boots, so
+  storage_daemon's `lstat` shows links into `/mnt` as directories too.
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode

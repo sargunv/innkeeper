@@ -19,6 +19,21 @@ function message(e: Object): string {
   return b.code === undefined ? `${(e as Error).message}` : `${b.code} ${b.message}`;
 }
 
+// Hands files from the desktop to Innkeeper User, which runs as the
+// foreground user and owns the copies that apps open
+// (user/ets/files/HostFiles.ets). The service gets the grants in its
+// onRequest.
+export async function openInUser(context: common.ServiceExtensionContext, bundle: string,
+  grants: string[]): Promise<void> {
+  const user = await osAccount.getAccountManager().getForegroundOsAccountLocalId();
+  const want: Want = {
+    bundleName: BUNDLE,
+    abilityName: 'UserService',
+    parameters: { 'innkeeper.open.bundle': bundle, 'innkeeper.open.grants': grants.join(',') },
+  };
+  await context.startServiceExtensionAbilityWithAccount(want, user);
+}
+
 // Runs Innkeeper User for the foreground user, and starts it again when its
 // process dies. Innkeeper System is a singleton and runs as user 0.
 // OpenHarmony keeps some state for each user, such as the pasteboard, and
