@@ -40,6 +40,10 @@ Its module table lists what each directory contains and where it runs.
   notifications under `tests/nested.sh`. Never pair a private D-Bus with the
   real `XDG_RUNTIME_DIR`. Never start plasmashell, kded, Akonadi or KDE Connect
   on the user's directories. Never restart the user's portals or buses.
+- **Stop only what you started.** Nested desktops share the host's process list,
+  so `pkill`, `killall` or `pgrep -f` with a name or pattern can match the
+  user's own processes. Stop processes by the PID you saved when you started
+  them, or by the systemd unit you started them in.
 - **Desktop baseline.** Support current major distro releases
   ([architecture.md](docs/architecture.md#packaging-scope)).
 - **Stable boundaries.** Never patch the image. Use HAL AIDL, NDK APIs, rc files
