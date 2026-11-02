@@ -55,13 +55,13 @@ struct ik_connection {
 // second until it succeeds. Returns 0 or -errno.
 int ik_connection_start(struct ik_connection* c, const struct ik_callbacks* cb);
 
-// Sends a request of `type` with `body` and, unless it is -1, `fd`, and
-// records `cookie` for its reply. The caller keeps `fd`. Returns 0, or
+// Sends a request of `type` with `body` and `nfds` fds, up to LXB_MAX_FDS,
+// and records `cookie` for its reply. The caller keeps the fds. Returns 0, or
 // -ENOTCONN while disconnected, -EBUSY when IK_MAX_PENDING requests wait, or
 // the send's -errno. On failure no callback names `cookie`.
 int ik_connection_request(
-  struct ik_connection* c, uint16_t type, const void* body, size_t len, int fd,
-  void* cookie
+  struct ik_connection* c, uint16_t type, const void* body, size_t len,
+  const int* fds, int nfds, void* cookie
 );
 
 // Stops the reader thread and fails the waiting requests with -ECANCELED.

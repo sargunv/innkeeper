@@ -109,8 +109,8 @@ int ik_connection_start(
 }
 
 int ik_connection_request(
-  struct ik_connection* c, uint16_t type, const void* body, size_t len, int fd,
-  void* cookie
+  struct ik_connection* c, uint16_t type, const void* body, size_t len,
+  const int* fds, int nfds, void* cookie
 ) {
   if (len > LXB_MAX_MSG - LXB_HEADER) return -EMSGSIZE;
   pthread_mutex_lock(&c->lock);
@@ -131,7 +131,7 @@ int ik_connection_request(
   // The lock covers the send, so the reader can't close the socket under it,
   // and the slot is filled first, so the reply finds it.
   *slot = (struct ik_pending){.tag = tag, .cookie = cookie};
-  r = lxb_send(c->sock, &m, fd);
+  r = lxb_send_fds(c->sock, &m, fds, nfds);
   if (r != 0) slot->tag = 0;
 out:
   pthread_mutex_unlock(&c->lock);
