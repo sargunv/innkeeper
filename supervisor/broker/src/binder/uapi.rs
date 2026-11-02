@@ -349,7 +349,7 @@ pub struct AccessToken {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BinderSenderInfo {
     pub tokens: AccessToken,
-    /// The sending process's pid, 0 for oneway calls and replies.
+    /// The sending process's pid, 0 for replies.
     pub sender_pid_nr: u64,
 }
 
