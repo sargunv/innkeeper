@@ -4,9 +4,10 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { blob, onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
 import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { backgroundCommand, response } from '../lifecycle/Background';
+import { defaultsCommand, defaultsResponse } from '../defaults/Defaults';
 import common from '@ohos.app.ability.common';
 import { fileLaunch, launched } from '../open/Launch';
-import { openInUser } from '../service/PerUser';
+import { defaultsInUser, openInUser } from '../service/PerUser';
 import { AppMirror } from './AppMirror';
 import { Message, utf8 } from './Wire';
 
@@ -45,6 +46,10 @@ async function run(command: string, context: common.ServiceExtensionContext,
   const files = fileLaunch(command);
   if (files !== undefined) {
     return launched(await openInUser(context, files.bundle, files.grants));
+  }
+  const d = defaultsCommand(command);
+  if (d !== undefined) {
+    return defaultsResponse(await defaultsInUser(context, d.bundle, d.clear));
   }
   const c = backgroundCommand(command);
   if (c === undefined) {

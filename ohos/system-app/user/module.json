@@ -38,6 +38,9 @@
         "name": "ohos.permission.START_ABILITIES_FROM_BACKGROUND"
       },
       {
+        "name": "ohos.permission.GET_DEFAULT_APPLICATION"
+      },
+      {
         "name": "ohos.permission.SET_DEFAULT_APPLICATION"
       },
       {

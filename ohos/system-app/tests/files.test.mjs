@@ -1,11 +1,12 @@
-// Host tests for ets/open/Launch.ets and Innkeeper User's ets/files/Docs.ets
-// and ets/files/Targets.ets.
+// Host tests for ets/open/Launch.ets, ets/service/Answer.ets and Innkeeper
+// User's ets/files/Docs.ets and ets/files/Targets.ets.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { load } from "./ets.mjs";
 
 const launch = await load("Launch", "open");
+const answer = await load("Answer", "service");
 const docs = await load("Docs", "files");
 const targets = await load("Targets", "files");
 
@@ -74,22 +75,22 @@ test("the window response carries Innkeeper User's reply or its error", () => {
 
 test("Innkeeper User's answer comes from the want's parameters", () => {
   const p = {
-    "innkeeper.opened.request": 7,
-    "innkeeper.opened.error": "",
-    "innkeeper.opened.reply": "opened 1 file in a.b",
+    "innkeeper.answer.request": 7,
+    "innkeeper.answer.error": "",
+    "innkeeper.answer.reply": "opened 1 file in a.b",
   };
   assert.deepEqual(
-    { ...launch.openedAnswer(p) },
+    { ...answer.userAnswer(p) },
     { request: 7, error: "", reply: "opened 1 file in a.b" },
   );
-  assert.equal(launch.openedAnswer(undefined), undefined);
-  assert.equal(launch.openedAnswer({}), undefined);
+  assert.equal(answer.userAnswer(undefined), undefined);
+  assert.equal(answer.userAnswer({}), undefined);
   assert.equal(
-    launch.openedAnswer({ ...p, "innkeeper.opened.request": "7" }),
+    answer.userAnswer({ ...p, "innkeeper.answer.request": "7" }),
     undefined,
   );
   assert.equal(
-    launch.openedAnswer({ ...p, "innkeeper.opened.error": undefined }),
+    answer.userAnswer({ ...p, "innkeeper.answer.error": undefined }),
     undefined,
   );
 });

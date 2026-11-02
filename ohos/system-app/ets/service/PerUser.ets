@@ -5,7 +5,7 @@ import osAccount from '@ohos.account.osAccount';
 import { BusinessError } from '@ohos.base';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { waitParameter } from 'libinnkeeper.so';
-import { Opened } from '../open/Launch';
+import { Answer } from './Answer';
 
 const BUNDLE = 'dev.sargunv.innkeeper.user';
 // An app's uid is its user's id times this, plus the app's id.
@@ -14,8 +14,8 @@ const UID_PER_USER = 200000;
 const RESTART_MS = 1000;
 const DOMAIN = 0x0000;
 const TAG = 'InnkeeperSystem';
-// How long a file launch waits for Innkeeper User's answer. The bridge's
-// caller waits 40 s.
+// How long a request waits for Innkeeper User's answer. The bridge's caller
+// waits 40 s.
 const ANSWER_MS = 30000;
 
 function message(e: Object): string {
@@ -23,42 +23,33 @@ function message(e: Object): string {
   return b.code === undefined ? `${(e as Error).message}` : `${b.code} ${b.message}`;
 }
 
-// The file launches that wait for Innkeeper User's answer, by request.
-const pending = new Map<number, (o: Opened) => void>();
+// The requests that wait for Innkeeper User's answer.
+const pending = new Map<number, (a: Answer) => void>();
 let requests = 0;
 
-function failed(error: string): Opened {
-  const o = new Opened();
-  o.error = error;
-  return o;
+function failed(error: string): Answer {
+  const a = new Answer();
+  a.error = error;
+  return a;
 }
 
-// Hands files from the desktop to Innkeeper User, which runs as the
-// foreground user and owns the copies that apps open
-// (user/ets/files/HostFiles.ets). The service gets the grants in its
-// onRequest, and it answers through answered().
-export async function openInUser(context: common.ServiceExtensionContext, bundle: string,
-  grants: string[]): Promise<Opened> {
+// Starts Innkeeper User's service as the foreground user with the want
+// parameters `p` and a request number. The service answers through
+// answered().
+async function askUser(context: common.ServiceExtensionContext, p: Record<string, Object>): Promise<Answer> {
   const request = ++requests;
-  const answer = new Promise<Opened>((resolve) => {
+  const answer = new Promise<Answer>((resolve) => {
     const timer = setTimeout(() => answered(request, failed("Innkeeper User didn't answer")), ANSWER_MS);
-    pending.set(request, (o: Opened) => {
+    pending.set(request, (a: Answer) => {
       clearTimeout(timer);
       pending.delete(request);
-      resolve(o);
+      resolve(a);
     });
   });
   try {
     const user = await osAccount.getAccountManager().getForegroundOsAccountLocalId();
-    const want: Want = {
-      bundleName: BUNDLE,
-      abilityName: 'UserService',
-      parameters: {
-        'innkeeper.open.bundle': bundle,
-        'innkeeper.open.grants': grants.join(','),
-        'innkeeper.open.request': request,
-      },
-    };
+    p['innkeeper.request'] = request;
+    const want: Want = { bundleName: BUNDLE, abilityName: 'UserService', parameters: p };
     await context.startServiceExtensionAbilityWithAccount(want, user);
   } catch (e) {
     answered(request, failed(`Innkeeper User didn't start: ${message(e as Object)}`));
@@ -66,11 +57,35 @@ export async function openInUser(context: common.ServiceExtensionContext, bundle
   return answer;
 }
 
-// Ends file launch `request` with Innkeeper User's answer `o`.
-export function answered(request: number, o: Opened): void {
+// Hands files from the desktop to Innkeeper User, which runs as the
+// foreground user and owns the copies that apps open
+// (user/ets/files/HostFiles.ets).
+export function openInUser(context: common.ServiceExtensionContext, bundle: string,
+  grants: string[]): Promise<Answer> {
+  const p: Record<string, Object> = {
+    'innkeeper.open.bundle': bundle,
+    'innkeeper.open.grants': grants.join(','),
+  };
+  return askUser(context, p);
+}
+
+// Asks Innkeeper User for the types that `bundle` opens by default, among
+// those that its app selector set, after it resets them with `clear`
+// (user/ets/selector/SelectorDefaults.ets). The reply is a JSON array.
+export function defaultsInUser(context: common.ServiceExtensionContext, bundle: string,
+  clear: boolean): Promise<Answer> {
+  const p: Record<string, Object> = {
+    'innkeeper.defaults.bundle': bundle,
+    'innkeeper.defaults.clear': clear,
+  };
+  return askUser(context, p);
+}
+
+// Ends request `request` with Innkeeper User's answer `a`.
+export function answered(request: number, a: Answer): void {
   const resolve = pending.get(request);
   if (resolve !== undefined) {
-    resolve(o);
+    resolve(a);
   }
 }
 

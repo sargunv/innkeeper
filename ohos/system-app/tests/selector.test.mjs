@@ -53,3 +53,42 @@ test("links and other actions remember nothing", () => {
     "",
   );
 });
+
+const { typesOf, defaultsRequest } = await load("Defaults", "selector");
+
+test("the record gives each app the types it opens by default, sorted", () => {
+  const record = {
+    "image/png": "dev.sargunv.innkeeper.user",
+    ".txt": "org.example.notes",
+    ".png": "dev.sargunv.innkeeper.user",
+  };
+  assert.deepEqual(typesOf(record, "dev.sargunv.innkeeper.user"), [
+    ".png",
+    "image/png",
+  ]);
+  assert.deepEqual(typesOf(record, "org.example.notes"), [".txt"]);
+  assert.deepEqual(typesOf(record, "org.example.other"), []);
+  assert.deepEqual(typesOf({}, "a.b"), []);
+});
+
+test("a defaults request needs its number, a bundle and the clear flag", () => {
+  const p = {
+    "innkeeper.request": 3,
+    "innkeeper.defaults.bundle": "a.b",
+    "innkeeper.defaults.clear": true,
+  };
+  assert.deepEqual(defaultsRequest(p), {
+    request: 3,
+    bundle: "a.b",
+    clear: true,
+  });
+  assert.equal(defaultsRequest(undefined), undefined);
+  for (const bad of [
+    { ...p, "innkeeper.request": "3" },
+    { ...p, "innkeeper.defaults.bundle": "" },
+    { ...p, "innkeeper.defaults.clear": "true" },
+    { "innkeeper.request": 3, "innkeeper.open.bundle": "a.b" },
+  ]) {
+    assert.equal(defaultsRequest(bad), undefined, JSON.stringify(bad));
+  }
+});

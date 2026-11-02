@@ -16,13 +16,13 @@ Settings run in it. The window takes desktop pointer, touch and keyboard input.
 OH's audio plays through the desktop's PipeWire.
 
 The CLI installs HAPs into an OH profile with `bm`, and `run`, `list`,
-`uninstall`, `app info`, `app stop`, `app clear-cache` and `app clear-data` work
-there too ([host/cli](../host/cli/README.md)). So does `app set --background`,
-which keeps the session up while the app is installed, as on Android. `run`
-brings the app to the front and opens OH's window again if the user closed it.
-`run` with a URI opens it in the app as a browser link. `run` with a file opens
-it in the app, and `open` opens files in the app that OH picks
-([Innkeeper System](#innkeeper-system)). An OH profile refuses the other
+`uninstall`, `app info`, `app stop`, `app clear-cache`, `app clear-data` and
+`app clear-defaults` work there too ([host/cli](../host/cli/README.md)). So does
+`app set --background`, which keeps the session up while the app is installed,
+as on Android. `run` brings the app to the front and opens OH's window again if
+the user closed it. `run` with a URI opens it in the app as a browser link.
+`run` with a file opens it in the app, and `open` opens files in the app that OH
+picks ([Innkeeper System](#innkeeper-system)). An OH profile refuses the other
 `app set` settings, adb and the Android-only settings. `profile set --hdc on`
 turns on hdc in its place ([README](../README.md#for-openharmony-developers)).
 The launcher then starts the image's hdcd on the profile's loopback port with
@@ -233,7 +233,13 @@ reports boot completion. Issue #312 tracks the features that build on it.
   The type is the want's MIME type, or the file's extension when the want has
   none, as the bundle manager reads it. The bundle manager then hands later
   opens of that type to the app, and AMS skips the selector. OH's Settings has
-  no page that resets these defaults. The selector answers AMS with the chosen
+  no page that resets these defaults, so the selector records each type and app
+  in Innkeeper User's preferences. `innkeeper app info` lists the recorded types
+  that are still the app's defaults, and `innkeeper app clear-defaults` resets
+  them with `defaultAppManager.resetDefaultApplication`. Innkeeper System hands
+  both commands to Innkeeper User, which checks each type with
+  `getDefaultApplication`. That call needs `GET_DEFAULT_APPLICATION`, which the
+  signing profile also allows by ACL. The selector answers AMS with the chosen
   app, or with a refusal when the user cancels. The calling app's process hosts
   the selector as a modal UIExtension, so the ability is exported. FileManager
   asks for the selector on every open, even when one app takes the file. Its
@@ -335,8 +341,10 @@ reports boot completion. Issue #312 tracks the features that build on it.
   sends artwork that a session gives as a PixelMap, and it leaves out artwork
   given as a URI.
 - **Session1 commands.** The app reads each command that the bridge relays. It
-  runs the `background` app action and answers it without app info. It answers
-  every other command with "OpenHarmony profiles don't support this action.", so
+  runs the `background` app action and answers it without app info. It hands
+  file launches and the `info` and `clear-defaults` app actions to Innkeeper
+  User, and it answers the app actions with `defaults` alone. It answers every
+  other command with "OpenHarmony profiles don't support this action.", so
   callers don't wait for the bridge's timeout.
 - **Build.** `mise run build:ohos-system-app` builds both HAPs and stages them
   with the three JSON files. The SDK's declarations leave out the system APIs,
