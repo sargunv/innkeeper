@@ -37,11 +37,19 @@ constexpr uint32_t kPitchAlign = 256;
 
 uint64_t alignUp(uint64_t v, uint64_t a) { return (v + a - 1) / a * a; }
 
-// Returns the bytes per pixel of the first plane and the total height in rows
-// of that pitch. YUV 4:2:0 puts both chroma planes below the luma at half
-// size.
-bool layout(uint32_t format, uint32_t height, uint32_t* bpp, uint64_t* rows) {
+// Returns the bytes per pixel of the first plane, the total height in rows
+// of that pitch, and the pitch alignment. YUV 4:2:0 puts the chroma below the
+// luma, in the same dma-buf. Semi-planar formats interleave it in rows of the
+// luma's pitch. Planar formats have a plane for each chroma channel with half
+// the luma's pitch, so their luma pitch is aligned to twice kPitchAlign, as
+// Android's allocator does for YV12. Mesa's EGL imports the planes at these
+// offsets, and RADV requires every plane's pitch to be aligned.
+bool layout(
+  uint32_t format, uint32_t height, uint32_t* bpp, uint64_t* rows,
+  uint64_t* align
+) {
   *rows = height;
+  *align = kPitchAlign;
   switch (format) {
     case PIXEL_FMT_RGBX_8888:
     case PIXEL_FMT_RGBA_8888:
@@ -56,10 +64,12 @@ bool layout(uint32_t format, uint32_t height, uint32_t* bpp, uint64_t* rows) {
     case PIXEL_FMT_RGB_565:
       *bpp = 2;
       return true;
-    case PIXEL_FMT_YCBCR_420_SP:
-    case PIXEL_FMT_YCRCB_420_SP:
     case PIXEL_FMT_YCBCR_420_P:
     case PIXEL_FMT_YCRCB_420_P:
+      *align = 2 * kPitchAlign;
+      [[fallthrough]];
+    case PIXEL_FMT_YCBCR_420_SP:
+    case PIXEL_FMT_YCRCB_420_SP:
       *bpp = 1;
       *rows = alignUp(height, 2) * 3 / 2;
       return true;
@@ -122,15 +132,16 @@ class BufferVdi final : public IDisplayBufferVdi {
     const AllocInfo& info, BufferHandle*& handle
   ) const override {
     uint32_t bpp = 0;
-    uint64_t rows = 0;
+    uint64_t rows = 0, align = 0;
     if (
       info.width == 0 || info.height == 0 || info.width > 16384 ||
-      info.height > 16384 || !layout(info.format, info.height, &bpp, &rows)
+      info.height > 16384 ||
+      !layout(info.format, info.height, &bpp, &rows, &align)
     ) {
       LOGE("unsupported %ux%u format %u", info.width, info.height, info.format);
       return HDF_ERR_NOT_SUPPORT;
     }
-    const uint64_t stride = alignUp(uint64_t(info.width) * bpp, kPitchAlign);
+    const uint64_t stride = alignUp(uint64_t(info.width) * bpp, align);
     uint64_t size = stride * rows;
     if ((info.usage & HBM_USE_ASSIGN_SIZE) && info.expectedSize > size) {
       size = info.expectedSize;

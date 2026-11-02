@@ -21,6 +21,13 @@ render_service passes its context with this target, so the platform
 ignores the context. The value of EGL_NATIVE_BUFFER_OHOS comes from
 OpenHarmony's EGL headers.
 
+Video frames are YUV 4:2:0 buffers from the same allocator, in NV12,
+NV21, I420 or YV12. Their chroma planes follow the luma plane in the
+same dma-buf, so the platform imports them as two or three planes of
+that dma-buf. The buffers carry no color metadata, so they import as
+BT.601 limited range with centered chroma, which is Android's gralloc
+default.
+
 The surface and kopper code is a port of OpenHarmony's Mesa,
 https://gitee.com/openharmony/third_party_mesa3d at
 ea74a6339917390657db153cb9792f9ccac9f5ae, which is MIT-licensed like
@@ -136,10 +143,10 @@ index aa5692a..5a69127 100644
  
 diff --git a/src/egl/drivers/dri2/platform_ohos.c b/src/egl/drivers/dri2/platform_ohos.c
 new file mode 100644
-index 0000000..fd2be5d
+index 0000000..d621170
 --- /dev/null
 +++ b/src/egl/drivers/dri2/platform_ohos.c
-@@ -0,0 +1,424 @@
+@@ -0,0 +1,474 @@
 +/*
 + * Copyright © 2026 Innkeeper contributors
 + *
@@ -336,18 +343,62 @@ index 0000000..fd2be5d
 +   return EGL_TRUE;
 +}
 +
-+static uint32_t
-+ohos_fourcc_for_format(int native_format)
++/* The YUV 4:2:0 formats that the buffer VDI allocates. The chroma planes
++ * follow the luma plane in the same dma-buf. A semi-planar format has one
++ * chroma plane with the luma's row pitch. A planar format has two chroma
++ * planes with half that pitch, in the order that the format names them.
++ */
++static const struct {
++   int native_format;
++   uint32_t fourcc;
++   bool planar;
++} ohos_yuv_formats[] = {
++   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_SP, DRM_FORMAT_NV12, false},
++   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_SP, DRM_FORMAT_NV21, false},
++   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_P, DRM_FORMAT_YUV420, true},
++   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_P, DRM_FORMAT_YVU420, true},
++};
++
++/* Fills in the fourcc and the planes of a buffer, and returns the number of
++ * planes, or 0 for a format that doesn't import.
++ */
++static int
++ohos_buffer_planes(const BufferHandle *handle, uint32_t *fourcc, int *offsets,
++                   int *pitches)
 +{
++   const int stride = handle->stride, height = handle->height;
++
++   offsets[0] = 0;
++   pitches[0] = stride;
 +   for (unsigned i = 0; i < ARRAY_SIZE(ohos_formats); i++) {
-+      if (ohos_formats[i].native_format == native_format)
-+         return ohos_formats[i].fourcc;
++      if (ohos_formats[i].native_format == handle->format) {
++         *fourcc = ohos_formats[i].fourcc;
++         return 1;
++      }
++   }
++   for (unsigned i = 0; i < ARRAY_SIZE(ohos_yuv_formats); i++) {
++      if (ohos_yuv_formats[i].native_format != handle->format)
++         continue;
++      const int chroma_rows = (height + 1) / 2;
++      const int luma = stride * height;
++      *fourcc = ohos_yuv_formats[i].fourcc;
++      if (!ohos_yuv_formats[i].planar) {
++         offsets[1] = luma;
++         pitches[1] = stride;
++         return luma + stride * chroma_rows <= handle->size ? 2 : 0;
++      }
++      offsets[1] = luma;
++      offsets[2] = luma + stride / 2 * chroma_rows;
++      pitches[1] = pitches[2] = stride / 2;
++      return offsets[2] + stride / 2 * chroma_rows <= handle->size ? 3 : 0;
 +   }
 +   return 0;
 +}
 +
 +/* A NativeWindowBuffer holds a BufferHandle, a single dma-buf with a row
-+ * pitch. The handle describes no tiling, so the buffer is linear.
++ * pitch. The handle describes no tiling, so the buffer is linear. YUV
++ * buffers have no color metadata, so they import as BT.601 limited range
++ * with centered chroma, as Android's gralloc fallback does.
 + */
 +static _EGLImage *
 +ohos_create_image_native_buffer(_EGLDisplay *disp,
@@ -357,24 +408,30 @@ index 0000000..fd2be5d
 +   BufferHandle *handle =
 +      buffer ? OH_NativeWindow_GetBufferHandleFromNative(buffer) : NULL;
 +
-+   if (!handle || handle->fd < 0 || handle->stride <= 0) {
++   if (!handle || handle->fd < 0 || handle->stride <= 0 ||
++       handle->height <= 0) {
 +      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR");
 +      return NULL;
 +   }
 +
-+   const uint32_t fourcc = ohos_fourcc_for_format(handle->format);
-+   if (!fourcc) {
++   uint32_t fourcc = 0;
++   int offsets[3], pitches[3];
++   const int planes = ohos_buffer_planes(handle, &fourcc, offsets, pitches);
++   if (!planes) {
 +      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR: unsupported format");
 +      return NULL;
 +   }
 +
-+   int fd = handle->fd, pitch = handle->stride, offset = 0;
++   int fds[3] = {handle->fd, handle->fd, handle->fd};
++   const bool yuv = planes > 1;
 +   unsigned error;
 +   struct dri_image *dri_image = dri2_from_dma_bufs(
 +      dri2_dpy->dri_screen_render_gpu, handle->width, handle->height, fourcc,
-+      DRM_FORMAT_MOD_LINEAR, &fd, 1, &pitch, &offset,
-+      __DRI_YUV_COLOR_SPACE_UNDEFINED, __DRI_YUV_RANGE_UNDEFINED,
-+      __DRI_YUV_CHROMA_SITING_UNDEFINED, __DRI_YUV_CHROMA_SITING_UNDEFINED, 0,
++      DRM_FORMAT_MOD_LINEAR, fds, planes, pitches, offsets,
++      yuv ? __DRI_YUV_COLOR_SPACE_ITU_REC601 : __DRI_YUV_COLOR_SPACE_UNDEFINED,
++      yuv ? __DRI_YUV_NARROW_RANGE : __DRI_YUV_RANGE_UNDEFINED,
++      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED,
++      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED, 0,
 +      &error, NULL);
 +   if (!dri_image) {
 +      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR: import failed");

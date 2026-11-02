@@ -8,7 +8,10 @@
  * in-process consumer surface (OH_NativeImage) is cleared and swapped, and
  * the consumer reads the color back. A NativeWindowBuffer with a known
  * pattern is imported with EGL_NATIVE_BUFFER_OHOS, with a current context as
- * render_service passes, and read back through a framebuffer. It runs as root.
+ * render_service passes, and read back through a framebuffer. YUV 4:2:0
+ * buffers in the layout of video frames are imported the same way, sampled
+ * through GL_TEXTURE_EXTERNAL_OES as render_service samples them, and their
+ * quadrants are read back as RGB. It runs as root.
  */
 #include <dlfcn.h>
 #include <poll.h>
@@ -27,6 +30,7 @@ typedef unsigned int EGLBoolean, EGLenum, GLenum, GLuint, GLbitfield;
 typedef int GLint, GLsizei;
 typedef float GLfloat;
 typedef unsigned char GLubyte;
+typedef char GLchar;
 typedef void *EGLDisplay, *EGLConfig, *EGLContext, *EGLSurface, *EGLImage;
 
 #define EGL_NONE 0x3038
@@ -50,6 +54,15 @@ typedef void *EGLDisplay, *EGLConfig, *EGLContext, *EGLSurface, *EGLImage;
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_RGBA 0x1908
 #define GL_UNSIGNED_BYTE 0x1401
+#define GL_TEXTURE_EXTERNAL_OES 0x8D65
+#define GL_TEXTURE_MIN_FILTER 0x2801
+#define GL_TEXTURE_MAG_FILTER 0x2800
+#define GL_NEAREST 0x2600
+#define GL_RGBA8 0x8058
+#define GL_TRIANGLES 0x0004
+#define GL_VERTEX_SHADER 0x8B31
+#define GL_FRAGMENT_SHADER 0x8B30
+#define GL_LINK_STATUS 0x8B82
 
 /* OpenHarmony's BufferHandle (display buffer_handle.h). */
 struct BufferHandle {
@@ -67,6 +80,10 @@ struct NativeBufferConfig {
 };
 
 #define PIXEL_FMT_RGBA_8888 12
+#define PIXEL_FMT_YCBCR_420_SP 24
+#define PIXEL_FMT_YCRCB_420_SP 25
+#define PIXEL_FMT_YCBCR_420_P 28
+#define PIXEL_FMT_YCRCB_420_P 29
 #define BUFFER_USAGE_CPU_READ (1 << 0)
 #define BUFFER_USAGE_CPU_WRITE (1 << 1)
 #define BUFFER_USAGE_MEM_DMA (1 << 3)
@@ -103,6 +120,58 @@ static void* gl(const char* name) {
 
 static int near(const uint8_t* p, const uint8_t* want) {
   return abs(p[0] - want[0]) + abs(p[1] - want[1]) + abs(p[2] - want[2]) <= 3;
+}
+
+struct color {
+  const char* name;
+  uint8_t r, g, b;
+};
+static const struct color quad[4] = {
+  {"red", 200, 40, 40},
+  {"green", 40, 200, 60},
+  {"blue", 50, 60, 210},
+  {"white", 230, 230, 230},
+};
+
+/* BT.601 limited range, rounded. */
+static void rgb_to_yuv(const struct color* c, uint8_t yuv[3]) {
+  double r = c->r, g = c->g, b = c->b;
+  yuv[0] = (uint8_t)(16 + (65.481 * r + 128.553 * g + 24.966 * b) / 255 + 0.5);
+  yuv[1] = (uint8_t)(128 + (-37.797 * r - 74.203 * g + 112.0 * b) / 255 + 0.5);
+  yuv[2] = (uint8_t)(128 + (112.0 * r - 93.786 * g - 18.214 * b) / 255 + 0.5);
+}
+
+static int quadrant(int x, int y) { return (y >= H / 2) * 2 + (x >= W / 2); }
+
+/* Writes the quadrants in the layout of a video frame from OpenHarmony's
+ * decoder. The luma plane has the buffer's row pitch, and the chroma follows
+ * it. NV12 and NV21 interleave the chroma at the luma's pitch. I420 and YV12
+ * have a plane for each chroma channel at half the pitch.
+ */
+static void fill_yuv(uint8_t* p, int format, int stride) {
+  const int planar =
+    format == PIXEL_FMT_YCBCR_420_P || format == PIXEL_FMT_YCRCB_420_P;
+  const int cr_first =
+    format == PIXEL_FMT_YCRCB_420_SP || format == PIXEL_FMT_YCRCB_420_P;
+  uint8_t* chroma = p + stride * H;
+  for (int y = 0; y < H; y++) {
+    for (int x = 0; x < W; x++) {
+      uint8_t yuv[3];
+      rgb_to_yuv(&quad[quadrant(x, y)], yuv);
+      p[y * stride + x] = yuv[0];
+      if ((x | y) & 1) continue;
+      const uint8_t first = cr_first ? yuv[2] : yuv[1];
+      const uint8_t second = cr_first ? yuv[1] : yuv[2];
+      if (planar) {
+        const int pitch = stride / 2, at = y / 2 * pitch + x / 2;
+        chroma[at] = first;
+        chroma[pitch * (H / 2) + at] = second;
+      } else {
+        chroma[y / 2 * stride + x] = first;
+        chroma[y / 2 * stride + x + 1] = second;
+      }
+    }
+  }
 }
 
 int main(int argc, char** argv) {
@@ -168,6 +237,23 @@ int main(int argc, char** argv) {
   GLenum (*glCheckFramebufferStatus)(GLenum) = gl("glCheckFramebufferStatus");
   void (*glReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*) =
     gl("glReadPixels");
+  EGLBoolean (*eglDestroyImageKHR)(EGLDisplay, EGLImage) =
+    gl("eglDestroyImageKHR");
+  GLuint (*glCreateShader)(GLenum) = gl("glCreateShader");
+  void (*glShaderSource)(GLuint, GLsizei, const GLchar* const*, const GLint*) =
+    gl("glShaderSource");
+  void (*glCompileShader)(GLuint) = gl("glCompileShader");
+  GLuint (*glCreateProgram)(void) = gl("glCreateProgram");
+  void (*glAttachShader)(GLuint, GLuint) = gl("glAttachShader");
+  void (*glLinkProgram)(GLuint) = gl("glLinkProgram");
+  void (*glGetProgramiv)(GLuint, GLenum, GLint*) = gl("glGetProgramiv");
+  void (*glUseProgram)(GLuint) = gl("glUseProgram");
+  void (*glTexParameteri)(GLenum, GLenum, GLint) = gl("glTexParameteri");
+  void (*glTexStorage2D)(GLenum, GLsizei, GLenum, GLsizei, GLsizei) =
+    gl("glTexStorage2D");
+  void (*glViewport)(GLint, GLint, GLsizei, GLsizei) = gl("glViewport");
+  void (*glDrawArrays)(GLenum, GLint, GLsizei) = gl("glDrawArrays");
+  GLenum (*glGetError)(void) = gl("glGetError");
 
   EGLDisplay dpy = eglGetDisplay(NULL);
   if (!dpy || !eglInitialize(dpy, NULL, NULL)) {
@@ -306,6 +392,120 @@ int main(int argc, char** argv) {
     out[H - 1][W - 1][2]
   );
   bad += import_bad;
+
+  /* YUV 4:2:0: each format's quadrants, drawn through a samplerExternalOES
+   * into an RGBA framebuffer.
+   */
+  const char* vs =
+    "#version 300 es\n"
+    "out vec2 uv;\n"
+    "void main() {\n"
+    "  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+    "  uv = p;\n"
+    "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+    "}\n";
+  const char* fs =
+    "#version 300 es\n"
+    "#extension GL_OES_EGL_image_external_essl3 : require\n"
+    "precision mediump float;\n"
+    "uniform samplerExternalOES t;\n"
+    "in vec2 uv;\n"
+    "out vec4 c;\n"
+    "void main() { c = texture(t, uv); }\n";
+  GLuint prog = glCreateProgram(), vsh = glCreateShader(GL_VERTEX_SHADER),
+         fsh = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(vsh, 1, &vs, NULL);
+  glShaderSource(fsh, 1, &fs, NULL);
+  glCompileShader(vsh);
+  glCompileShader(fsh);
+  glAttachShader(prog, vsh);
+  glAttachShader(prog, fsh);
+  glLinkProgram(prog);
+  GLint linked = 0;
+  glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+  if (!linked) {
+    printf("FAIL: the samplerExternalOES program does not link\n");
+    return 1;
+  }
+  GLuint rt;
+  glGenTextures(1, &rt);
+  glBindTexture(GL_TEXTURE_2D, rt);
+  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, W, H);
+  glFramebufferTexture2D(
+    GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt, 0
+  );
+  glViewport(0, 0, W, H);
+  glUseProgram(prog);
+  static const struct {
+    int format;
+    const char* name;
+  } yuv_formats[] = {
+    {PIXEL_FMT_YCBCR_420_SP, "NV12"},
+    {PIXEL_FMT_YCRCB_420_SP, "NV21"},
+    {PIXEL_FMT_YCBCR_420_P, "I420"},
+    {PIXEL_FMT_YCRCB_420_P, "YV12"},
+  };
+  for (unsigned f = 0; f < sizeof(yuv_formats) / sizeof(yuv_formats[0]); f++) {
+    const char* name = yuv_formats[f].name;
+    const struct NativeBufferConfig ycfg = {
+      W, H, yuv_formats[f].format,
+      BUFFER_USAGE_CPU_READ | BUFFER_USAGE_CPU_WRITE | BUFFER_USAGE_MEM_DMA |
+        BUFFER_USAGE_HW_TEXTURE,
+      0
+    };
+    void* ynb = buffer_alloc(&ycfg);
+    void* ynwb = ynb ? window_buffer_from_native(ynb) : NULL;
+    struct BufferHandle* yh = ynwb ? buffer_handle(ynwb) : NULL;
+    uint8_t* yp =
+      yh ? mmap(NULL, yh->size, PROT_READ | PROT_WRITE, MAP_SHARED, yh->fd, 0)
+         : MAP_FAILED;
+    if (yp == MAP_FAILED) {
+      printf("FAIL %s: cannot allocate and map a native buffer\n", name);
+      bad++;
+      continue;
+    }
+    fill_yuv(yp, yuv_formats[f].format, yh->stride);
+    munmap(yp, yh->size);
+    EGLImage yimage =
+      eglCreateImageKHR(dpy, ctx, EGL_NATIVE_BUFFER_OHOS, ynwb, image_attrs);
+    if (!yimage) {
+      printf(
+        "FAIL %s: eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS): 0x%x\n", name,
+        eglGetError()
+      );
+      bad++;
+      continue;
+    }
+    GLuint ytex;
+    glGenTextures(1, &ytex);
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, ytex);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, yimage);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, out);
+    const GLenum gerr = glGetError();
+    int wrong = gerr != 0;
+    printf("%s: stride %d, gl error 0x%x\n", name, yh->stride, gerr);
+    for (int q = 0; q < 4; q++) {
+      /* Texture row 0 is the top of the buffer, and the triangle maps it to
+       * framebuffer row 0.
+       */
+      const int x = (q & 1) ? 3 * W / 4 : W / 4,
+                y = (q & 2) ? 3 * H / 4 : H / 4;
+      const uint8_t* p = out[y][x];
+      const int d =
+        abs(p[0] - quad[q].r) + abs(p[1] - quad[q].g) + abs(p[2] - quad[q].b);
+      wrong += d > 24;
+      printf(
+        "  %-5s expected (%3d,%3d,%3d) got (%3d,%3d,%3d)%s\n", quad[q].name,
+        quad[q].r, quad[q].g, quad[q].b, p[0], p[1], p[2],
+        d > 24 ? "  <-- wrong" : ""
+      );
+    }
+    eglDestroyImageKHR(dpy, yimage);
+    bad += wrong != 0;
+  }
   printf("%s\n", bad ? "FAIL" : "PASS");
   return bad != 0;
 }

@@ -444,7 +444,8 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   the image's. render_service and apps then draw with Zink on RADV or ANV, and
   `hidumper -s RenderService -a gles` names the GPU. Without a GPU, as in CI,
   the image's Mesa stays, and render_service draws with llvmpipe
-  (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software.
+  (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software. The image's
+  EGL doesn't import YUV buffers, so video shows black without a GPU.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would
@@ -482,7 +483,11 @@ file changes.
   by llvmpipe, by RADV and ANV, and by the compositor. A `BufferHandle` has no
   field for a tiling, so OH's swapchain layer and EGL can't pass a tiled buffer
   to the driver, and every buffer stays LINEAR. The supported formats are RGB
-  8888, 565, 888 and 1010102, and YUV 4:2:0.
+  8888, 565, 888 and 1010102, and YUV 4:2:0. A YUV buffer's chroma follows its
+  luma. NV12 and NV21 interleave it in rows of the luma's pitch, and I420 and
+  YV12 have a plane for each chroma channel at half that pitch. The luma pitch
+  of I420 and YV12 is a multiple of 512 bytes, as Android's YV12 is, because
+  RADV needs each plane's pitch to be a multiple of 256 bytes.
 - **Build.** `build.sh` compiles with the NDK's clang for `x86_64-linux-musl`,
   using the build container's musl headers. Stub libraries give the linker the
   `libc.so`, `libc++.so`, `libhilog.so` and `libbegetutil.z.so` sonames, and the
