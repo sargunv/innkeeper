@@ -30,40 +30,42 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   render_service draws with Zink on the GPU that the launcher picked, or with
   llvmpipe without one. A key press reaches OpenHarmony's input service. A file
   written to the user's Download lands in the profile's data directory, and its
-  `realpath` in OpenHarmony stays in the user's storage. Innkeeper System
-  answers a Session1 command at once. The CLI installs the probe HAP
-  (ohos/probe), signed for the profile's UDID, lists it and runs it. The bridge
-  writes the probe's desktop entry with its label and icon, and its window has
-  focus on screen. Keys typed in a French layout type "aé" into the probe's text
-  field through Innkeeper Keyboard, and Ctrl+A then Backspace on AZERTY clears
-  it. `app info` shows the probe's version and the grant state of its two
-  permissions, and `run` with a link delivers its URI to the probe. `run` with a
-  file gives the probe a readable copy, and the probe logs its text. `open` with
-  a PNG, which the probe and Gallery both take, shows Innkeeper User's app
-  chooser, and a click on the probe's row opens the file there. When the probe
-  opens a PNG of its own, Innkeeper User's app selector offers Desktop. With
-  "always" checked, a click on Desktop opens the file through the desktop's
-  portal, and the probe's next open of a PNG reaches the desktop without the
-  selector. `app info` lists PNG under Innkeeper User, and after
-  `app clear-defaults` the probe's next open shows the selector again. The
-  selector is a UIExtension, which adds its nodes to the probe window's ArkUI
-  dump on a beta build, so the test sets `const.logsystem.versiontype`. hilog
-  still holds the line that Innkeeper System logged at boot. The probe plays a
-  video clip and renders its first frame, and on a GPU the clip's color reaches
-  the desktop. OpenHarmony's music volume must be at its maximum, and a tone it
-  plays must reach a private null sink. The probe, granted the microphone, must
-  record a tone that the host plays into that sink. A notification that the
-  probe posts reaches the desktop's notification server with its buttons, and
-  invoking its first button there reaches the probe. The probe's media session
-  is an MPRIS player on the desktop's session bus with its title, artist, length
-  and artwork, and MPRIS `PlayPause` pauses it in the probe. OpenHarmony takes
-  the session's time zone and turns dark when the desktop's portal does. The
-  open window keeps the session up. Closing it leaves OpenHarmony running, and
-  `run` opens it again with a frame while a text selection keeps the screen
-  static. With the window closed, the probe's audio playback continuous task
-  keeps the session up. Once the task stops, the session stops after the grace
-  period, which test timers make one second. This group uses its own profile,
-  `<profile>-ohos`, so it runs alone.
+  `realpath` in OpenHarmony stays in the user's storage. A PNG that `mediatool`
+  adds to MediaLibrary lands in the user's photos in the profile, and
+  MediaLibrary lists it. Innkeeper System answers a Session1 command at once.
+  The CLI installs the probe HAP (ohos/probe), signed for the profile's UDID,
+  lists it and runs it. The bridge writes the probe's desktop entry with its
+  label and icon, and its window has focus on screen. Keys typed in a French
+  layout type "aé" into the probe's text field through Innkeeper Keyboard, and
+  Ctrl+A then Backspace on AZERTY clears it. `app info` shows the probe's
+  version and the grant state of its two permissions, and `run` with a link
+  delivers its URI to the probe. `run` with a file gives the probe a readable
+  copy, and the probe logs its text. `open` with a PNG, which the probe and
+  Gallery both take, shows Innkeeper User's app chooser, and a click on the
+  probe's row opens the file there. When the probe opens a PNG of its own,
+  Innkeeper User's app selector offers Desktop. With "always" checked, a click
+  on Desktop opens the file through the desktop's portal, and the probe's next
+  open of a PNG reaches the desktop without the selector. `app info` lists PNG
+  under Innkeeper User, and after `app clear-defaults` the probe's next open
+  shows the selector again. The selector is a UIExtension, which adds its nodes
+  to the probe window's ArkUI dump on a beta build, so the test sets
+  `const.logsystem.versiontype`. hilog still holds the line that Innkeeper
+  System logged at boot. The probe plays a video clip and renders its first
+  frame, and on a GPU the clip's color reaches the desktop. OpenHarmony's music
+  volume must be at its maximum, and a tone it plays must reach a private null
+  sink. The probe, granted the microphone, must record a tone that the host
+  plays into that sink. A notification that the probe posts reaches the
+  desktop's notification server with its buttons, and invoking its first button
+  there reaches the probe. The probe's media session is an MPRIS player on the
+  desktop's session bus with its title, artist, length and artwork, and MPRIS
+  `PlayPause` pauses it in the probe. OpenHarmony takes the session's time zone
+  and turns dark when the desktop's portal does. The open window keeps the
+  session up. Closing it leaves OpenHarmony running, and `run` opens it again
+  with a frame while a text selection keeps the screen static. With the window
+  closed, the probe's audio playback continuous task keeps the session up. Once
+  the task stops, the session stops after the grace period, which test timers
+  make one second. This group uses its own profile, `<profile>-ohos`, so it runs
+  alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
