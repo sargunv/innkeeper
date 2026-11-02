@@ -4,6 +4,7 @@
 //! `innkeeper-core`. See host/manager/README.md.
 
 mod app;
+mod download;
 mod errors;
 mod install;
 mod permissions;

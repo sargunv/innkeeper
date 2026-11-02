@@ -22,7 +22,14 @@ texts. For screenshots, use the nested desktop in
   files. `mise run package -- --install` installs the manager from a checkout's
   stage. The manager runs as a single instance. Opening another APK adds an
   install page to the running window.
-- **First run** downloads the Android image and shows "Downloading Android".
+- **Download:** a profile whose system isn't downloaded yet shows **Download
+  Android** (or OpenHarmony) with the download's size, in place of its app list,
+  so an OpenHarmony user never fetches Android. **Manage Profiles** opens the
+  profiles page. The download starts when the user asks (`src/download.rs`). It
+  shows a progress bar with the size, speed and time left, then a spinner while
+  the image is unpacked. Core reads the progress from the size of
+  image/fetch.sh's partial download. A file opened before the image is ready
+  opens its install page once it is.
 - **The list** comes from the profile's desktop entries, so it shows without
   booting Android. A directory monitor picks up changes made with the CLI. At
   startup, the manager repairs stale entries the same way `innkeeper list` does.

@@ -1,7 +1,7 @@
 //! The main window. It lists the installed apps, shows the session's state,
-//! accepts dropped files, opens the install page, and downloads the image on
-//! the first run. An Android profile installs APKs, and an OpenHarmony
-//! profile installs HAPs.
+//! accepts dropped files, opens the install page, and offers to download the
+//! profile's image when it isn't there. An Android profile installs APKs, and
+//! an OpenHarmony profile installs HAPs.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ use innkeeper_profile::profile::ProfileName;
 use innkeeper_profile::profile::System;
 
 use crate::errors::{self, Op};
-use crate::{install, worker};
+use crate::{download, install, worker};
 
 #[derive(Clone)]
 pub struct Window(Rc<Inner>);
@@ -43,9 +43,9 @@ pub struct Inner {
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
-    /// Switches between the "empty", "list" and "preparing" pages.
+    /// Switches between the "empty", "list" and "download" pages.
     stack: gtk::Stack,
-    preparing: Preparing,
+    download: download::Page,
     apps: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
     installed: RefCell<Vec<DesktopApp>>,
@@ -62,50 +62,6 @@ pub struct Inner {
     /// Watches the desktop entries, so installs from the CLI show up.
     monitor: RefCell<Option<gio::FileMonitor>>,
     refresh_pending: Cell<bool>,
-}
-
-/// The "Downloading Android" page that shows while the first run downloads the
-/// image.
-struct Preparing {
-    page: adw::StatusPage,
-    spinner: adw::Spinner,
-    retry: gtk::Button,
-    active: Cell<bool>,
-    /// Files opened during the download. Their install pages open after the
-    /// image is ready.
-    opened: RefCell<Vec<gio::File>>,
-}
-
-impl Preparing {
-    fn new() -> Self {
-        let spinner = adw::Spinner::builder()
-            .width_request(32)
-            .height_request(32)
-            .build();
-        let retry = gtk::Button::builder()
-            .label("_Try Again")
-            .use_underline(true)
-            .halign(gtk::Align::Center)
-            .css_classes(["pill", "suggested-action"])
-            .visible(false)
-            .build();
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 24);
-        content.append(&spinner);
-        content.append(&retry);
-        let page = adw::StatusPage::builder()
-            .icon_name("folder-download-symbolic")
-            .title("Downloading Android")
-            .child(&content)
-            .vexpand(true)
-            .build();
-        Self {
-            page,
-            spinner,
-            retry,
-            active: Cell::new(false),
-            opened: RefCell::default(),
-        }
-    }
 }
 
 impl std::ops::Deref for Window {
@@ -228,11 +184,11 @@ impl Window {
         list.add(&apps);
         list.add(&sessions[1].group);
 
-        let preparing = Preparing::new();
+        let download = download::Page::new();
         let stack = gtk::Stack::new();
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&list, Some("list"));
-        stack.add_named(&preparing.page, Some("preparing"));
+        stack.add_named(&download.page, Some("download"));
 
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
@@ -303,7 +259,7 @@ impl Window {
             toasts,
             nav,
             stack,
-            preparing,
+            download,
             apps,
             rows: RefCell::default(),
             installed: RefCell::default(),
@@ -330,7 +286,7 @@ impl Window {
             s.button.connect_clicked(move |_| w2.toggle_session());
         }
         let w2 = w.clone();
-        w.preparing.retry.connect_clicked(move |_| w2.prepare());
+        w.download.button.connect_clicked(move |_| w2.prepare());
 
         let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
         let r = reveal.clone();
@@ -371,7 +327,6 @@ impl Window {
         w.win.add_action(&profiles);
         w.watch_entries();
         w.refresh();
-        w.prepare_if_needed();
         w.watch_session();
         w
     }
@@ -439,11 +394,16 @@ impl Window {
     }
 
     /// Shows the install page for `file`, which comes from drag and drop, the
-    /// file chooser or the desktop's Open With. If the first run's download is
-    /// still going, the page opens after it finishes.
+    /// file chooser or the desktop's Open With. If the profile's image isn't
+    /// ready, the page opens once it is.
     pub fn open_file(&self, file: &gio::File) {
-        if self.preparing.active.get() {
-            self.preparing.opened.borrow_mut().push(file.clone());
+        let d = &self.download;
+        if d.active.get() || d.ready.get() != Some(true) {
+            d.opened.borrow_mut().push(file.clone());
+            if d.ready.get() == Some(false) && !d.active.get() {
+                let s = self.system.get().title();
+                self.say(&format!("Download {s} to install the app"));
+            }
             return;
         }
         match file.path() {
@@ -500,29 +460,48 @@ impl Window {
         *self.monitor.borrow_mut() = Some(m);
     }
 
-    /// Reloads the profile's system and app list. The list comes from the
-    /// desktop entries and, if an Android session is running, its package
-    /// list.
+    /// Reloads the profile's system, whether its image is ready, and its app
+    /// list. The list comes from the desktop entries and, if an Android
+    /// session is running, its package list.
     pub fn refresh(&self) {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
-            match worker::run_quiet(move || -> anyhow::Result<_> {
-                let system = profiles::settings(&p)?.system;
-                let packages = match system {
-                    System::Android => ops::android_packages(&p),
-                    System::Ohos => None,
-                };
-                let apps = ops::installed_apps(&p, packages.as_deref())?;
-                Ok((system, apps))
+            let (image, apps) = worker::run_quiet(move || {
+                let image = Session::of_profile(&p)
+                    .ok()
+                    .map(|s| (s.system(), s.image_ready(), s.download_size()));
+                let apps = (|| -> anyhow::Result<_> {
+                    let system = profiles::settings(&p)?.system;
+                    let packages = match system {
+                        System::Android => ops::android_packages(&p),
+                        System::Ohos => None,
+                    };
+                    Ok((system, ops::installed_apps(&p, packages.as_deref())?))
+                })();
+                (image, apps)
             })
-            .await
-            {
+            .await;
+            // Without a session, the session row's Start button reports why.
+            let d = &w.download;
+            match image {
+                Some((system, false, size)) => {
+                    d.ready.set(Some(false));
+                    d.offer(system, size);
+                }
+                _ => d.ready.set(Some(true)),
+            }
+            match apps {
                 Ok((system, apps)) => {
                     w.set_system(system);
                     w.show_apps(apps);
                 }
                 Err(e) => eprintln!("innkeeper-manager: {e:#}"),
+            }
+            if d.ready.get() == Some(true) && !d.active.get() {
+                for f in d.opened.take() {
+                    w.open_file(&f);
+                }
             }
         });
     }
@@ -547,19 +526,19 @@ impl Window {
             self.empty.set_title(system.title());
             self.empty.set_description(Some("Drag and drop a HAP here"));
         }
-        self.preparing
-            .page
-            .set_title(&format!("Downloading {}", system.title()));
     }
 
     fn show_apps(&self, apps: Vec<DesktopApp>) {
         for r in self.rows.borrow_mut().drain(..) {
             self.apps.remove(&r);
         }
-        if !self.preparing.active.get() {
-            self.stack
-                .set_visible_child_name(if apps.is_empty() { "empty" } else { "list" });
-        }
+        self.stack.set_visible_child_name(if self.download.shown() {
+            "download"
+        } else if apps.is_empty() {
+            "empty"
+        } else {
+            "list"
+        });
         let mut rows = self.rows.borrow_mut();
         for a in &apps {
             let row = self.app_row(a);
@@ -715,45 +694,30 @@ impl Window {
         }
     }
 
-    /// Downloads the image on the first run, when it isn't there yet.
-    fn prepare_if_needed(&self) {
-        let w = self.clone();
-        glib::spawn_future_local(async move {
-            let p = w.profile();
-            let ready = worker::run_quiet(move || {
-                Session::of_profile(&p).map(|s| (s.system(), s.image_ready()))
-            })
-            .await;
-            // On an error, the session row's Start button reports it.
-            if let Ok((system, false)) = ready {
-                w.set_system(system);
-                w.prepare();
-            }
-        });
-    }
-
+    /// Downloads the profile's image, when the user asks for it.
     fn prepare(&self) {
-        let p = &self.preparing;
-        p.active.set(true);
-        p.spinner.set_visible(true);
-        p.retry.set_visible(false);
-        self.stack.set_visible_child_name("preparing");
+        let d = &self.download;
+        if d.active.get() {
+            return;
+        }
+        d.start();
+        self.stack.set_visible_child_name("download");
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
-            let r = worker::run_quiet(move || Session::of_profile(&p)?.prepare()).await;
-            let p = &w.preparing;
-            p.spinner.set_visible(false);
+            let progress = w.clone();
+            let r = worker::run(
+                move |rep| Session::of_profile(&p)?.prepare(rep),
+                move |e| progress.download.update(e),
+            )
+            .await;
             match r {
                 Ok(()) => {
-                    p.active.set(false);
+                    w.download.finished();
                     w.refresh();
-                    for f in p.opened.take() {
-                        w.open_file(&f);
-                    }
                 }
                 Err(e) => {
-                    p.retry.set_visible(true);
+                    w.download.failed();
                     w.show_error(Op::Prepare, Some(w.system.get().title()), &e);
                 }
             }
@@ -839,6 +803,9 @@ impl Window {
         self.session_proxy.replace(None);
         self.last_status.set(None);
         self.open_apps.borrow_mut().clear();
+        // Files queued for the old profile's download don't go to this one.
+        self.download.opened.borrow_mut().clear();
+        self.download.ready.set(None);
         self.watch_session();
         self.refresh();
         Ok(())

@@ -230,6 +230,30 @@ impl Paths {
     pub fn pin(&self, system: System) -> PathBuf {
         self.share.join(system.name()).join("pin.toml")
     }
+
+    /// The download that `system`'s pin describes.
+    pub fn download_of(&self, system: System) -> Result<Download> {
+        let pin = self.pin(system);
+        let text = fs::read_to_string(&pin).with_context(|| format!("read {}", pin.display()))?;
+        let d: Download =
+            toml::from_str(&text).with_context(|| format!("parse {}", pin.display()))?;
+        Ok(d)
+    }
+}
+
+/// The zip that an image pin names (image/README.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Download {
+    pub url: String,
+    /// The zip's size in bytes.
+    pub size: u64,
+}
+
+impl Download {
+    /// The zip's file name, the last segment of its URL.
+    pub fn file_name(&self) -> &str {
+        self.url.rsplit('/').next().unwrap_or(&self.url)
+    }
 }
 
 /// A pinned image's files (image/README.md). `img` holds the extracted
@@ -318,6 +342,16 @@ mod tests {
             Some("y")
         );
         assert_eq!(pin_name(""), None);
+    }
+
+    #[test]
+    fn download_of_a_pin() {
+        let d: Download = toml::from_str(
+            "name = \"x\"\nurl = \"https://h/a/b.zip\"\nsize = 12\nsha256 = \"0\"\n",
+        )
+        .unwrap();
+        assert_eq!(d.size, 12);
+        assert_eq!(d.file_name(), "b.zip");
     }
 
     #[test]
