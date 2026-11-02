@@ -203,9 +203,9 @@ an error. OpenHarmony uses the display setting, which is a phone preset because
 OpenHarmony has no windowed mode, the idle timeout, the settings for following
 the desktop, and hdc. OpenHarmony has no accent color. The CLI and the manager
 refuse adb and following the accent for OpenHarmony, along with the app settings
-other than the background setting, and opening files in apps. They refuse hdc
-for Android. `innkeeper profile set` and the manager's Profile Settings page
-change settings. A running profile applies the live settings at once.
+other than the background setting. They refuse hdc for Android.
+`innkeeper profile set` and the manager's Profile Settings page change settings.
+A running profile applies the live settings at once.
 
 Keep Running is an Innkeeper preference shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops

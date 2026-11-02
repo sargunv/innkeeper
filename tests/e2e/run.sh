@@ -801,6 +801,13 @@ else
     opened() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: opened innkeeper-probe://e2e/link' >/dev/null; }
     "$cli" run dev.sargunv.innkeeper.probes innkeeper-probe://e2e/link >>"$T/ohos.txt" 2>&1 || return
     until_ok opened || return
+    # run with a file hands Innkeeper User a documents grant. It copies the
+    # file and starts the probe with a read grant on the copy's URI, and the
+    # probe logs the file's text.
+    echo 'a file from the desktop' >"$T/note.txt"
+    read_file() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: read a file from the desktop' >/dev/null; }
+    "$cli" run dev.sargunv.innkeeper.probes "$T/note.txt" >>"$T/ohos.txt" 2>&1 || return
+    until_ok read_file || return
     # hilog still holds the line that Innkeeper System logged at boot.
     s /system/bin/hilog -x -T InnkeeperSystem | grep 'InnkeeperSystem: boot completed$' >/dev/null
   }
@@ -808,7 +815,7 @@ else
     tail -n 20 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link'
+  echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link and a file'
   # probe_field sets field to the centre of the probe's text field on the
   # panel and its text, from the inspector dump: "<x> <y>|<text>".
   # shellcheck disable=SC2329 # invoked through until_ok

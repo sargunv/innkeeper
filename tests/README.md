@@ -36,21 +36,22 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   probe's text field through Innkeeper Keyboard, and Ctrl+A then Backspace on
   AZERTY clears it. `app info` shows the probe's version and the grant state of
   its two permissions, and `run` with a link delivers its URI to the probe.
-  hilog still holds the line that Innkeeper System logged at boot. OpenHarmony's
-  music volume must be at its maximum, and a tone it plays must reach a private
-  null sink. The probe, granted the microphone, must record a tone that the host
-  plays into that sink. A notification that the probe posts reaches the
-  desktop's notification server with its buttons, and invoking its first button
-  there reaches the probe. The probe's media session is an MPRIS player on the
-  desktop's session bus with its title, artist, length and artwork, and MPRIS
-  `PlayPause` pauses it in the probe. OpenHarmony takes the session's time zone
-  and turns dark when the desktop's portal does. The open window keeps the
-  session up. Closing it leaves OpenHarmony running, and `run` opens it again
-  with a frame while a text selection keeps the screen static. With the window
-  closed, the probe's audio playback continuous task keeps the session up. Once
-  the task stops, the session stops after the grace period, which test timers
-  make one second. This group uses its own profile, `<profile>-ohos`, so it runs
-  alone.
+  `run` with a file gives the probe a readable copy, and the probe logs its
+  text. hilog still holds the line that Innkeeper System logged at boot.
+  OpenHarmony's music volume must be at its maximum, and a tone it plays must
+  reach a private null sink. The probe, granted the microphone, must record a
+  tone that the host plays into that sink. A notification that the probe posts
+  reaches the desktop's notification server with its buttons, and invoking its
+  first button there reaches the probe. The probe's media session is an MPRIS
+  player on the desktop's session bus with its title, artist, length and
+  artwork, and MPRIS `PlayPause` pauses it in the probe. OpenHarmony takes the
+  session's time zone and turns dark when the desktop's portal does. The open
+  window keeps the session up. Closing it leaves OpenHarmony running, and `run`
+  opens it again with a frame while a text selection keeps the screen static.
+  With the window closed, the probe's audio playback continuous task keeps the
+  session up. Once the task stops, the session stops after the grace period,
+  which test timers make one second. This group uses its own profile,
+  `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
