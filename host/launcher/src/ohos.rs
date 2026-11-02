@@ -330,6 +330,32 @@ pub fn sandbox_root(cfg: &Config) -> Result<()> {
         Path::new("/data/service/el1/public/storage_daemon/share/public"),
         &storage.join("Share"),
     )?;
+    // appspawn binds user 100's media and cloud views onto /storage/media and
+    // /storage/cloud in MediaLibrary's sandbox. MediaLibrary keeps its photos
+    // in /storage/cloud/files and stops at start if that directory is
+    // missing. These links show the user's files at those paths.
+    let account = Path::new("/data/service/el2/100/hmdfs/account");
+    for (view, to) in [
+        ("cloud/files", account.join("files")),
+        ("media/local", account.to_owned()),
+    ] {
+        let at = storage.join(view);
+        fs::create_dir_all(at.parent().expect("a view in a directory"))?;
+        link(&to, &at)?;
+    }
+    // Gallery and other apps with ohos.permission.ACCESS_MEDIALIB_THUMB_DB
+    // read MediaLibrary's database at /data/medialibrary/database, where
+    // appspawn binds it. Without the link, Gallery opens an empty database
+    // there and shows no photos.
+    let database = data.join("medialibrary/database");
+    if database.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        remove_tree(&database)?;
+    }
+    fs::create_dir_all(data.join("medialibrary"))?;
+    link(
+        Path::new("/data/app/el2/100/database/com.ohos.medialibrary.medialibrarydata"),
+        &database,
+    )?;
     // OH binaries ask for /lib/ld-musl-x86_64.so.1, and the image's /lib is
     // /system/lib. The sandbox's /lib is a symlink to /usr/lib, so it is
     // replaced by a directory of the same entries plus the musl loader.

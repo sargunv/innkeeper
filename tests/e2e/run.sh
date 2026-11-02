@@ -782,6 +782,31 @@ else
   fi
   echo "ok   a file in the user's Download is on disk in the profile and in OpenHarmony's media view, and its realpath stays in the user's storage"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_photos() {
+    # mediatool adds a PNG to MediaLibrary through its data share, as
+    # photoAccessHelper does. MediaLibrary stores the photo in the user's
+    # files in the profile and lists it. Gallery reads the same database at
+    # /data/medialibrary/database.
+    local data=${INNKEEPER_DATA:-$repo/out/dev/flatpak/$INNKEEPER_PROFILE/android-data} photo
+    # A 1x1 PNG.
+    base64 -d <<<'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC' >"$T/e2e.png"
+    s /system/bin/sh -c 'cat >/data/local/tmp/e2e.png' <"$T/e2e.png" || return
+    s /system/bin/mediatool send /data/local/tmp/e2e.png >>"$T/ohos.txt" 2>&1 || return
+    s /system/bin/mediatool list all >"$T/media.txt" 2>>"$T/ohos.txt" || return
+    cat "$T/media.txt" >>"$T/ohos.txt"
+    # Each row is "<uri>","<name>","<path>".
+    photo=$(awk -F '"' '$4 == "e2e.png" && $6 ~ /^\/storage\/cloud\/files\/Photo\// { print substr($6, 22) }' "$T/media.txt")
+    [[ -n $photo ]] && cmp -s "$T/e2e.png" "$data/service/el2/100/hmdfs/account/files/$photo" || return
+    s /system/bin/sh -c '[ /data/medialibrary/database/rdb/media_library.db -ef \
+      /data/app/el2/100/database/com.ohos.medialibrary.medialibrarydata/rdb/media_library.db ]'
+  }
+  if ! timed ohos-photos ohos_photos; then
+    tail -n 10 "$T/ohos.txt" >&2
+    s /system/bin/hilog -x -T MediaLibrary | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   MediaLibrary adds a PNG to the user's photos in the profile and lists it, and Gallery's view of its database is the same"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
     # The CLI installs the signed probe HAP, lists it and starts its launcher
     # ability. WMS then shows the probe's window (probes0) with input focus.

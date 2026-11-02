@@ -778,6 +778,19 @@ the same as Android's. OH's session stops when idle, as Android's does
   permission service grants it that path. FileManager and the media library
   leave the folder out. The link stays in `Docs` across boots, so
   storage_daemon's `lstat` shows links into `/mnt` as directories too.
+- **Photos.** On a device, appspawn binds user 100's cloud and media views onto
+  `/storage/cloud` and `/storage/media` in MediaLibrary's sandbox. MediaLibrary
+  keeps photos in `/storage/cloud/files/Photo` and stops at start if
+  `/storage/cloud/files` is missing. The launcher links `/storage/cloud/files`
+  and `/storage/media/local` to the user's files, so MediaLibrary finds them at
+  its paths. Gallery reads MediaLibrary's database at
+  `/data/medialibrary/database`, where appspawn binds it for apps with
+  `ohos.permission.ACCESS_MEDIALIB_THUMB_DB`, and the launcher links that path
+  to the database. storage_daemon can't mount MediaLibrary's FUSE view, because
+  the sandbox has no `/dev/fuse` and refuses mounts. MediaLibrary runs without
+  it. Apps reach photos through photoAccessHelper and URIs, and they can't open
+  photos by their FUSE paths. MediaLibrary doesn't index the images in the
+  user's Docs folder.
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode
