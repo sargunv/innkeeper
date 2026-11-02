@@ -575,15 +575,15 @@ to render_service's GL.
 
 The bridge shows each layer as a subsurface of the window, scaled with
 `wp_viewport`, and imports the NV12 buffer through linux-dmabuf. The host
-compositor converts it to RGB, as BT.601 limited range through
-`wp_color_representation_v1` where the compositor has it. Our buffers carry no
-colour metadata, and Mesa imports them the same way on the GPU path. A
-compositor without that protocol picks its own matrix, so colours can shift
-slightly. A layer whose dma-buf the compositor refuses, or the layer of a hidden
-window, shows a copy that the bridge converts on the CPU. render_service then
-draws neither the video nor a copy of its frame, and its CPU while the probe's
-clip plays drops from 0.11 to 0.025 cores on RADV, and from 2 to 4 cores to 0.03
-on llvmpipe.
+compositor converts it to RGB as BT.601 limited range, which the bridge declares
+through `wp_color_representation_v1`. Our buffers carry no colour metadata, and
+Mesa imports them the same way on the GPU path. A compositor without that
+protocol picks its own matrix and shows wrong colours, so the bridge shows a
+copy that it converts on the CPU. Plasma 6.3 and GNOME 48 lack the protocol. A
+layer whose dma-buf the compositor refuses, and the layer of a hidden window,
+also show a copy. With layers, render_service draws neither the video nor a copy
+of its frame, and its CPU while the probe's clip plays drops from 0.11 to 0.025
+cores on RADV, and from 2 to 4 cores to 0.03 on llvmpipe.
 
 ## Input
 
