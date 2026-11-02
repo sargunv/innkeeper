@@ -77,9 +77,9 @@ must report the session booted only once `bootevent.boot.completed` is set, and
 `bm dump` must show Innkeeper System as a kept-alive system app, and Innkeeper
 User must run as user 100. A click on the nested desktop's seat then opens
 Settings, and MMI's cursor must be on the panel pixel under the seat's pointer.
-A wheel detent scrolls Settings' list. OH's input injector then scrolls Settings
-and goes home, and render_service must not have restarted since boot
-([tests/render.sh](tests/render.sh)). A key press reaches MMI. A file written to
+A wheel detent scrolls Settings' list. A dma-buf made as the buffer VDI makes
+one must fail the sync file export with `ENOTTY`
+([tests/dmabuf.c](tests/dmabuf.c)). A key press reaches MMI. A file written to
 `/storage/Users/currentUser/Download` lands in the profile's data directory. The
 probe HAP, signed for the profile's UDID, then installs, shows in
 `innkeeper list` and gets a desktop entry with its label and icon, and

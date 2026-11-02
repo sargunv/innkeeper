@@ -75,11 +75,17 @@ so=$out/vendor/lib64/libaudio_primary_impl.z.so
   ohos/vendor/audio/primary.c guest/audio-client/audio.c guest/audio-client/pcm.c \
   "$stubs/bridge_client.o" "$stubs/libhilog.so" "$stubs/libc.so"
 "$llvm/llvm-strip" "$so"
-# The e2e audio checks run this tool in OH (ohos/tests/tone.c). It is a test
-# artifact and stays out of the layer.
+# The e2e audio and dma-buf checks run these tools in OH (ohos/tests/tone.c and
+# ohos/tests/dmabuf.c). They are test artifacts and stay out of the layer.
 mkdir -p out/test/ohos
 # The stubs define no symbols, so the link leaves them for the loader.
-"$llvm/clang" "${cflags[@]}" -std=gnu17 -pie -nostdlib -Wl,--unresolved-symbols=ignore-all \
-  -Wl,-z,now -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 -o out/test/ohos/tone \
-  "$musl/lib64/Scrt1.o" "$musl/lib64/crti.o" ohos/tests/tone.c \
-  "$stubs/libohaudio.so" "$stubs/libc.so" "$musl/lib64/crtn.o"
+test_tool() {
+  local tool=$1
+  shift
+  "$llvm/clang" "${cflags[@]}" -std=gnu17 -pie -nostdlib -Wl,--unresolved-symbols=ignore-all \
+    -Wl,-z,now -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 -o "out/test/ohos/$tool" \
+    "$musl/lib64/Scrt1.o" "$musl/lib64/crti.o" "ohos/tests/$tool.c" \
+    "$@" "$stubs/libc.so" "$musl/lib64/crtn.o"
+}
+test_tool tone "$stubs/libohaudio.so"
+test_tool dmabuf
