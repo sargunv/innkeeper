@@ -90,26 +90,27 @@ A wheel detent scrolls Settings' list within 2 s while another process holds the
 mouse open without reading it. A dma-buf made as the buffer VDI makes one must
 fail the sync file export with `ENOTTY` ([tests/dmabuf.c](tests/dmabuf.c)). A
 key press reaches MMI. A file written to `/storage/Users/currentUser/Download`
-lands in the profile's data directory. The probe HAP, signed for the profile's
-UDID, then installs, shows in `innkeeper list` and gets a desktop entry with its
-label and icon, and `innkeeper run` puts its window on screen with input focus.
-`innkeeper run` with a text file must give the probe a URI that it can read, and
-the probe logs the file's text. A click on the probe's text field starts
-Innkeeper Keyboard, and keys typed in a French layout on the nested desktop type
-"aé" in the field. Text that `wl-copy` puts on the nested desktop's clipboard
-pastes into the field with Ctrl+V, and Ctrl+A and Ctrl+C in the field put its
-text on the desktop's clipboard. The probe then plays a magenta clip, and its
-player must render a frame. On a GPU, the magenta must show on the nested
-desktop. OH's music volume must be at its maximum, and a 440 Hz tone that
-[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
-null sink on the nested desktop. Root then grants the probe the microphone with
-`atm perm -g`, the host plays a tone into the null sink, and the probe must
-record it from the sink's monitor. The probe's media session must be an MPRIS
-player on the nested desktop's session bus, and MPRIS `PlayPause` must pause it.
-OH must take the time zone that the session started with, and it must turn dark
-when the nested desktop's portal does. Last, the probe starts an audio playback
-continuous task. With the window closed, the task must keep the session up, and
-once it stops, the session must stop.
+lands in the profile's data directory, and the shim's `realpath` returns its
+path unchanged ([tests/realpath.c](tests/realpath.c)). The probe HAP, signed for
+the profile's UDID, then installs, shows in `innkeeper list` and gets a desktop
+entry with its label and icon, and `innkeeper run` puts its window on screen
+with input focus. `innkeeper run` with a text file must give the probe a URI
+that it can read, and the probe logs the file's text. A click on the probe's
+text field starts Innkeeper Keyboard, and keys typed in a French layout on the
+nested desktop type "aé" in the field. Text that `wl-copy` puts on the nested
+desktop's clipboard pastes into the field with Ctrl+V, and Ctrl+A and Ctrl+C in
+the field put its text on the desktop's clipboard. The probe then plays a
+magenta clip, and its player must render a frame. On a GPU, the magenta must
+show on the nested desktop. OH's music volume must be at its maximum, and a 440
+Hz tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must
+reach a private null sink on the nested desktop. Root then grants the probe the
+microphone with `atm perm -g`, the host plays a tone into the null sink, and the
+probe must record it from the sink's monitor. The probe's media session must be
+an MPRIS player on the nested desktop's session bus, and MPRIS `PlayPause` must
+pause it. OH must take the time zone that the session started with, and it must
+turn dark when the nested desktop's portal does. Last, the probe starts an audio
+playback continuous task. With the window closed, the task must keep the session
+up, and once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
@@ -776,7 +777,15 @@ the same as Android's. OH's session stops when idle, as Android's does
 - **Paths.** `/data` is a symlink to the profile's directory on the host.
   installd resolves each code path with `realpath` and refuses any path outside
   `/data/app/el1/bundle/`. The shim's `realpath` returns `/data` in place of the
-  host directory, so installs and other path checks see guest paths.
+  host directory, so installs and other path checks see guest paths. On a
+  device, the storage views and appspawn's binds are mounts, and `realpath`
+  keeps their paths. Here they are symlinks into `/data` or `/mnt`, and the
+  shim's `realpath` keeps the names of those links and of `/data/storage`.
+  FileManager names each file by its `realpath`, so its files keep their
+  `/storage/Users/currentUser` paths and `file://docs` URIs, which other apps
+  open once OH's URI permission service grants them. app_file_service's path
+  check, which requires `realpath` to return the path it was given, passes for
+  these paths too.
 - **Time zone.** The sandbox may not set the kernel's time zone. OH's time
   service stores a new zone and then sets the kernel's zone with `settimeofday`,
   and it fails the change if that call fails. The kernel's zone is obsolete, so

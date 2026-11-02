@@ -766,12 +766,21 @@ else
     written() { s /system/bin/sh -c 'echo e2e >/storage/Users/currentUser/Download/e2e.txt' 2>/dev/null; }
     until_ok written || return
     [[ $(<"$data/service/el2/100/hmdfs/account/files/Docs/Download/e2e.txt") == e2e ]] &&
-      [[ $(s /system/bin/cat /storage/media/100/local/files/Docs/Download/e2e.txt) == e2e ]]
+      [[ $(s /system/bin/cat /storage/media/100/local/files/Docs/Download/e2e.txt) == e2e ]] || return
+    # FileManager names each file by its realpath, and other apps can open the
+    # file's URI if the name stays under /storage/Users/currentUser (#391). The
+    # tool (ohos/tests/realpath.c) takes storage_daemon's LD_PRELOAD.
+    s /system/bin/sh -c 'cat >/data/local/tmp/realpath && chmod 755 /data/local/tmp/realpath' \
+      <"$repo/out/test/probes/ohos/realpath" || return
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c 'preload=$(xargs -0 -n 1 </proc/$(pidof storage_daemon)/environ | grep "^LD_PRELOAD=") &&
+      exec env "$preload" /data/local/tmp/realpath /storage/Users/currentUser/Download/e2e.txt' >>"$T/ohos.txt" 2>&1
   }
   if ! timed ohos-storage ohos_storage; then
+    tail -n 5 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo "ok   a file in the user's Download is on disk in the profile and in OpenHarmony's media view"
+  echo "ok   a file in the user's Download is on disk in the profile and in OpenHarmony's media view, and its realpath stays in the user's storage"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_hap() {
     # The CLI installs the signed probe HAP, lists it and starts its launcher

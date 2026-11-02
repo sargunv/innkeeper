@@ -75,9 +75,10 @@ so=$out/vendor/lib64/libaudio_primary_impl.z.so
   ohos/vendor/audio/primary.c guest/audio-client/audio.c guest/audio-client/pcm.c \
   "$stubs/bridge_client.o" "$stubs/libhilog.so" "$stubs/libc.so"
 "$llvm/llvm-strip" "$so"
-# The e2e audio and dma-buf checks run these tools in OH (ohos/tests/tone.c and
-# ohos/tests/dmabuf.c). They are test artifacts, so they go with the probes,
-# which CI keeps with the stage, and stay out of the layer.
+# The e2e audio, dma-buf and storage checks run these tools in OH
+# (ohos/tests/tone.c, ohos/tests/dmabuf.c and ohos/tests/realpath.c). They are
+# test artifacts, so they go with the probes, which CI keeps with the stage, and
+# stay out of the layer.
 mkdir -p out/test/probes/ohos
 # The stubs define no symbols, so the link leaves them for the loader.
 test_tool() {
@@ -90,3 +91,4 @@ test_tool() {
 }
 test_tool tone "$stubs/libohaudio.so"
 test_tool dmabuf
+test_tool realpath

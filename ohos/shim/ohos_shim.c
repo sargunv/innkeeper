@@ -45,6 +45,16 @@
 //    would return host paths. installd refuses to rename a code path unless
 //    it starts with /data/app/el1/bundle/, which fails every install.
 //    realpath returns /data in place of the host directory.
+//  - On a device, the storage views and appspawn's binds are mounts, and
+//    realpath keeps their paths. Here they are symlinks into /data or /mnt,
+//    and the session's /data/storage links to /proc/self/fd/<kViewFd>.
+//    realpath keeps the name of each such link, as it keeps the name of a
+//    mount point. FileManager resolves each folder with realpath and names
+//    its files by the result. A name under /storage/Users/currentUser becomes
+//    a file://docs URI, which other apps can open once the URI permission
+//    service grants it. A storage service path becomes a URI of FileManager's
+//    own, which they can't open. app_file_service's path check also requires
+//    realpath to return the path it was given.
 //  - The image's llvmpipe offers native fence fds when it can export a sync
 //    file from a dma-buf, which udmabuf allows. Each export finishes every GL
 //    context in the process from the exporting thread, and EGL exports one
@@ -103,12 +113,14 @@
 #define O_CLOEXEC 02000000
 #define O_PATH 010000000
 #define AT_SYMLINK_NOFOLLOW 0x100
+#define PATH_MAX 4096
 #define S_IFMT 0170000
 #define S_IFLNK 0120000
 #define MS_BIND 4096
 #define CLONE_NEWNS 0x00020000
 
 extern char* getenv(const char*);
+extern char* strdup(const char*);
 extern int unsetenv(const char*);
 extern int* __errno_location(void);
 
@@ -192,7 +204,11 @@ int getpid(void) { return is_init() ? 1 : (int)sys0(SYS_getpid); }
 
 // The fd of an app's view of /data/storage, which the session's /data/storage
 // links to.
-enum { kViewFd = 990 };
+#define VIEW_FD 990
+enum { kViewFd = VIEW_FD };
+#define STR(x) #x
+#define XSTR(x) STR(x)
+static const char kViewLink[] = "/proc/self/fd/" XSTR(VIEW_FD);
 
 static void enter(const char* root) {
   char path[4096];
@@ -217,7 +233,7 @@ long syscall(long nr, long a, long b, long c, long d, long e, long f) {
   return ret(sys6(nr, a, b, c, d, e, f));
 }
 
-char* realpath(const char* path, char* out);
+static char* resolve(const char* path, char* out);
 
 // Replaces the mount point that the caller made, an empty directory or file,
 // with a symlink to src.
@@ -240,8 +256,8 @@ int mount(
       src && dst && *src == '/' && !same(src, dst) &&
       ((flags & MS_BIND) || (type && same(type, "sharefs")))
     ) {
-      char real[4096];
-      replace(realpath(src, real) ? real : src, dst);
+      char real[PATH_MAX];
+      replace(resolve(src, real) ? real : src, dst);
     }
     return 0;
   }
@@ -332,10 +348,9 @@ int statfs(const char* path, struct statfs* st) {
 }
 
 // The host directory is longer than "/data", so the result shrinks in place.
-char* realpath(const char* path, char* out) {
-  char* r = next_realpath(path, out);
+static void guest_path(char* r) {
   if (
-    r && data_len >= 5 && starts(r, data_dir) &&
+    data_len >= 5 && starts(r, data_dir) &&
     (r[data_len] == '/' || r[data_len] == 0)
   ) {
     const char* rest = r + data_len;
@@ -344,7 +359,104 @@ char* realpath(const char* path, char* out) {
     while ((*d++ = *rest++)) {
     }
   }
+}
+
+// realpath with every link resolved, as storage_daemon's links need.
+static char* resolve(const char* path, char* out) {
+  char* r = next_realpath(path, out);
+  if (r) guest_path(r);
   return r;
+}
+
+// A symlink that stands for a mount: a view that the shim or the launcher
+// links into /data or /mnt, or the session's /data/storage.
+static int mount_link(const char* target) {
+  return starts(target, "/data/") || starts(target, "/mnt/") ||
+         same(target, kViewLink);
+}
+
+static unsigned long length(const char* s) {
+  unsigned long n = 0;
+  while (s[n]) n++;
+  return n;
+}
+
+// Writes the absolute path to out with each link resolved, apart from the
+// links that stand for mounts, which keep their names. It returns 0 if a
+// component is missing or the path is too long.
+static int walk(const char* path, char* out) {
+  char todo[PATH_MAX], target[PATH_MAX];
+  unsigned long n = 0, links = 0, len = length(path);
+  if (len >= sizeof(todo)) return 0;
+  for (unsigned long i = 0; i <= len; i++) todo[i] = path[i];
+  const char* p = todo;
+  while (*p) {
+    while (*p == '/') p++;
+    const char* name = p;
+    while (*p && *p != '/') p++;
+    unsigned long size = p - name;
+    if (size == 0 || (size == 1 && name[0] == '.')) continue;
+    if (size == 2 && name[0] == '.' && name[1] == '.') {
+      while (n && out[n - 1] != '/') n--;
+      if (n) n--;
+      continue;
+    }
+    if (n + 1 + size >= PATH_MAX) return 0;
+    out[n++] = '/';
+    for (unsigned long i = 0; i < size; i++) out[n++] = name[i];
+    out[n] = 0;
+    // The kernel's struct stat has st_mode at byte 24.
+    unsigned long st[18];
+    if (
+      sys6(
+        SYS_newfstatat, AT_FDCWD, (long)out, (long)st, AT_SYMLINK_NOFOLLOW, 0, 0
+      ) != 0
+    )
+      return 0;
+    if (((unsigned)st[3] & S_IFMT) != S_IFLNK) continue;
+    long t =
+      sys6(SYS_readlink, (long)out, (long)target, sizeof(target) - 1, 0, 0, 0);
+    if (t <= 0) return 0;
+    target[t] = 0;
+    if (mount_link(target)) continue;
+    if (++links > 40) return 0;
+    // The link's target takes the place of its name.
+    while (out[n - 1] != '/') n--;
+    n--;
+    if (target[0] == '/') n = 0;
+    unsigned long rest = length(p);
+    if (t + rest >= sizeof(target)) return 0;
+    for (unsigned long i = 0; i <= rest; i++) target[t + i] = p[i];
+    for (unsigned long i = 0; i <= t + rest; i++) todo[i] = target[i];
+    p = todo;
+  }
+  if (n == 0) out[n++] = '/';
+  out[n] = 0;
+  return 1;
+}
+
+// The kernel's struct stat has st_dev at byte 0 and st_ino at byte 8.
+static int same_file(const char* a, const char* b) {
+  unsigned long sa[18], sb[18];
+  return sys6(SYS_newfstatat, AT_FDCWD, (long)a, (long)sa, 0, 0, 0) == 0 &&
+         sys6(SYS_newfstatat, AT_FDCWD, (long)b, (long)sb, 0, 0, 0) == 0 &&
+         sa[0] == sb[0] && sa[1] == sb[1];
+}
+
+// The libc's realpath decides whether the path exists. For an absolute path,
+// the result keeps the names of the links that stand for mounts. A relative
+// path starts at the working directory, whose links the kernel has already
+// resolved.
+char* realpath(const char* path, char* out) {
+  char real[PATH_MAX], kept[PATH_MAX];
+  if (!next_realpath(path, real)) return 0;
+  char* r = real;
+  if (path[0] == '/' && walk(path, kept) && same_file(kept, real)) r = kept;
+  guest_path(r);
+  if (!out) return strdup(r);
+  unsigned long i = 0;
+  while ((out[i] = r[i])) i++;
+  return out;
 }
 
 int setpriority(int which, unsigned who, int prio) {
