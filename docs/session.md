@@ -136,10 +136,10 @@ stateDiagram-v2
   report has no wakeup, and a stopped session misses reminders.
 - **Idle timeout.** The profile's `idle-minutes` setting is the grace period
   before the launcher stops an idle session, as `stop` does. The default is 2
-  minutes, and Keep Running disables it. A change applies to a running session.
-  Headless sessions, which tests use, do not stop by themselves. Apps that are
-  not allowed in the background stop with the session, as if force-stopped.
-  Their jobs and syncs wait for the next start.
+  minutes, and the profile's `keep-running` setting disables it. A change
+  applies to a running session. Headless sessions, which tests use, do not stop
+  by themselves. Apps that are not allowed in the background stop with the
+  session, as if force-stopped. Their jobs and syncs wait for the next start.
 - **Foreground services** keep the session up. A media app keeps playing after
   its window closes, and its session stays an MPRIS player. Its notification
   shows on the desktop as resident while the app has no window. Clicking that
@@ -170,7 +170,6 @@ stateDiagram-v2
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `$XDG_DATA_HOME/innkeeper/`                          | `images/<build>/{img,apex-<hash>,derived}` (every guest's, shared by every profile), `data-<profile>/` (the guest's `/data` and `.innkeeper-profile.toml`, the profile's settings), `root-<profile>/` (the composed root), `addons/` |
 | `$XDG_STATE_HOME/innkeeper-<profile>/`               | `session.log`, `kmsg.log`, `bridge.log`, `documents.grants`                                                                                                                                                                          |
-| `$XDG_CONFIG_HOME/innkeeper/`                        | `preferences.toml`: Keep Running, shared by every profile                                                                                                                                                                            |
 | `$XDG_STATE_HOME/innkeeper/`                         | `manager-profile`, the profile the manager showed last                                                                                                                                                                               |
 | `$XDG_RUNTIME_DIR/app/<app id>/innkeeper-<profile>/` | `session.conf`, `control.sock`, the kmsg FIFO, `bridge/bridge.sock`, `layer/`, `lifecycle`, `exec.lock`; every instance of the app shares it                                                                                         |
 
@@ -185,34 +184,39 @@ profile's system is chosen when the profile is created, with
 system cannot change later, because the data belongs to that system.
 
 Innkeeper lists profiles from their `data-<name>` directories.
-`innkeeper profile` and the manager's Profiles page create, rename, delete,
-start and stop them (`host/core/src/profiles.rs`). No profile is special. A
-command names a profile with `--profile NAME`. Without it, the CLI uses
-`default` and creates it the first time. An app entry runs `innkeeper run PKG`
-and records `X-Innkeeper-Profile`, and `run` without `--profile` uses the
-recorded profile. The entry's command names no profile, so renaming the profile
-doesn't change the app-menu entry, which the DynamicLauncher portal could only
-replace by asking again. The manager opens on the profile it showed last. Core
-takes the profile from its caller. Only the launcher and the programs it starts
-read `INNKEEPER_PROFILE`. Tests use named profiles with fresh data directories.
+`innkeeper profile` and the manager's profile switcher and Profile Settings
+create, rename, delete, start and stop them (`host/core/src/profiles.rs`). No
+profile is special. A command names a profile with `--profile NAME`. Without it,
+the CLI uses `default` and creates it the first time. An app entry runs
+`innkeeper run PKG` and records `X-Innkeeper-Profile`, and `run` without
+`--profile` uses the recorded profile. The entry's command names no profile, so
+renaming the profile doesn't change the app-menu entry, which the
+DynamicLauncher portal could only replace by asking again. The manager opens on
+the profile it showed last. Core takes the profile from its caller. Only the
+launcher and the programs it starts read `INNKEEPER_PROFILE`. Tests use named
+profiles with fresh data directories.
 
 A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
 directory next to the data version record (`host/profile/src/profile.rs`). The
 settings therefore move and back up with the data. They cover the system, the
-display, adb and hdc and their ports, the idle timeout and following the
-desktop. A missing file or setting takes its default, and an unknown setting is
-an error. Android's phone presets from older versions load as the device
-display. OpenHarmony uses the display setting, which is a phone preset because
-OpenHarmony has no windowed mode, the idle timeout, the settings for following
-the desktop, and hdc. OpenHarmony has no accent color. The CLI and the manager
-refuse adb and following the accent for OpenHarmony, along with the app settings
-other than the background setting. They refuse hdc for Android.
-`innkeeper profile set` and the manager's Profile Settings page change settings.
-A running profile applies the live settings at once.
+display, adb and hdc and their ports, the idle timeout, Keep Running and
+following the desktop. A missing file or setting takes its default, and an
+unknown setting is an error. Android's phone presets from older versions load as
+the device display. OpenHarmony uses the display setting, which is a phone
+preset because OpenHarmony has no windowed mode, the idle timeout, Keep Running,
+the settings for following the desktop, and hdc. OpenHarmony has no accent
+color. The CLI and the manager refuse adb and following the accent for
+OpenHarmony, along with the app settings other than the background setting. They
+refuse hdc for Android. `innkeeper profile set` and the manager's Profile
+Settings change settings. A running profile applies the live settings at once.
 
-Keep Running is an Innkeeper preference shared by every profile
-(`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops
-when idle, and every profile starts at login.
+A profile with `keep-running` on never stops when idle, and it starts at login.
+The Background portal holds one login command for the app,
+`innkeeper profile start --login`, which starts every such profile. Core asks
+the portal to start Innkeeper at login while any profile keeps running, and
+stops asking when none does (`host/core/src/login.rs`). The launcher's own
+Background request would clear the login command, so it skips that request while
+any profile keeps running.
 
 Deleting a profile removes its data, settings, composed root, logs, runtime
 files and app-menu entries. Renaming a profile moves them and recomposes the

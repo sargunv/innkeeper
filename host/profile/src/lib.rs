@@ -1,7 +1,6 @@
 //! Profile code shared by the launcher, which runs a profile's session, and
 //! host/core, which works with a profile without running the launcher. It
-//! covers a profile's name, settings and paths, Innkeeper's preferences, the
-//! session's status and activity report, the control socket client, adb's
+//! covers a profile's name, settings and paths, the session's status and activity report, the control socket client, adb's
 //! keys and server protocol, and hdc's keys. docs/session.md describes
 //! profiles and sessions.
 
@@ -16,7 +15,6 @@ pub mod adb;
 pub mod control;
 pub mod hdc;
 pub mod paths;
-pub mod preferences;
 pub mod profile;
 
 pub use paths::Paths;

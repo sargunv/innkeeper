@@ -1,17 +1,13 @@
-//! Innkeeper's preferences, shared by every profile
-//! ([`innkeeper_profile::preferences`]). Saving Keep Running also sets the
-//! Background portal's login command. Running sessions read the preferences
-//! when they poll.
+//! Innkeeper's login command, which the Background portal holds. It starts
+//! the profiles that keep running ([`crate::profiles::set_keep_running`]).
+//! Innkeeper doesn't write an autostart file.
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
 use zbus::zvariant::{OwnedValue, Value};
 
-use innkeeper_profile::preferences::Preferences;
-
-/// Sets or clears the Background portal's login command. Innkeeper doesn't
-/// write an autostart file.
-fn autostart(enabled: bool) -> Result<()> {
+/// Sets or clears the Background portal's login command.
+pub(crate) fn autostart(enabled: bool) -> Result<()> {
     let connection = zbus::blocking::Connection::session()?;
     let token = format!("preferences{}", std::process::id());
     let sender = connection
@@ -27,8 +23,9 @@ fn autostart(enabled: bool) -> Result<()> {
         "org.freedesktop.portal.Request",
     )?;
     let mut responses = request.receive_signal("Response")?;
-    // Keep Running applies to every profile, so start them all.
-    let command: Vec<String> = [crate::xdg::INNKEEPER, "profile", "start", "--all"]
+    // The app has one login command, so it starts every profile that keeps
+    // running.
+    let command: Vec<String> = [crate::xdg::INNKEEPER, "profile", "start", "--login"]
         .map(String::from)
         .into();
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
@@ -69,26 +66,6 @@ fn autostart(enabled: bool) -> Result<()> {
             !autostart,
             "The desktop did not disable starting Android at login"
         );
-    }
-    Ok(())
-}
-
-pub fn save(prefs: Preferences) -> Result<()> {
-    let old = Preferences::load()?;
-    let login_changed = prefs.keep_running != old.keep_running;
-    if login_changed && let Err(e) = autostart(prefs.keep_running) {
-        // A partial grant must not leave login startup enabled while the
-        // saved preference still says to stop when idle.
-        if prefs.keep_running {
-            let _ = autostart(false);
-        }
-        return Err(e);
-    }
-    if let Err(e) = prefs.save() {
-        if login_changed {
-            let _ = autostart(old.keep_running);
-        }
-        return Err(e);
     }
     Ok(())
 }

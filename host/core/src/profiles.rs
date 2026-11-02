@@ -109,6 +109,30 @@ pub fn update(name: &str, change: impl FnOnce(&mut Settings)) -> Result<Settings
     Ok(s)
 }
 
+/// Sets whether profile `name` keeps running. Innkeeper starts at login while
+/// any profile does, through the Background portal. If the portal refuses,
+/// the setting stays as it was.
+pub fn set_keep_running(name: &str, on: bool) -> Result<Settings> {
+    let data_home = innkeeper_profile::paths::data_home();
+    let before = profile::any_keeps_running(&data_home);
+    // `update` can save the setting and then fail to reload a running
+    // session, so the login command follows what was saved either way.
+    let updated = update(name, |s| s.keep_running = on);
+    let after = profile::any_keeps_running(&data_home);
+    if before != after
+        && let Err(e) = crate::login::autostart(after)
+    {
+        // A partial grant must not leave login startup on while no profile
+        // keeps running.
+        if after {
+            let _ = crate::login::autostart(false);
+        }
+        let _ = update(name, |s| s.keep_running = !on);
+        return Err(e);
+    }
+    updated
+}
+
 /// Asks profile `name`'s bridge, if it is running, to apply the saved
 /// settings.
 fn reload(name: &str) -> Result<()> {
@@ -151,13 +175,18 @@ pub fn rename(from: &str, to: &str) -> Result<()> {
 }
 
 /// Deletes profile `name` with its apps and their data, its settings and its
-/// app-menu entries. The profile must be stopped.
+/// app-menu entries. The profile must be stopped. If it was the last profile
+/// that keeps running, Innkeeper stops starting at login.
 pub fn delete(name: &str) -> Result<()> {
     let p = paths(name)?;
     if !p.data.exists() {
         bail!("no profile {name}");
     }
+    let kept = Settings::load(&p.data).is_ok_and(|s| s.keep_running);
     profile::delete(&p)?;
+    if kept && !profile::any_keeps_running(&innkeeper_profile::paths::data_home()) {
+        let _ = crate::login::autostart(false);
+    }
     let d = Dirs::from_env();
     for app in xdg::desktop_apps(&d) {
         if app.profile.as_deref() == Some(name) {

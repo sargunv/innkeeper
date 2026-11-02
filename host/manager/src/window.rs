@@ -1,10 +1,10 @@
-//! The main window. It lists the installed apps, shows the session's state,
-//! accepts dropped files, opens the install page, and offers to download the
-//! profile's image when it isn't there. An Android profile installs APKs, and
-//! an OpenHarmony profile installs HAPs.
+//! The main window. It shows one profile's apps. The header switches profiles
+//! and installs apps, and its menu opens the profile's settings. Dropped files
+//! open the install page. A profile whose image isn't downloaded shows the
+//! download in place of its apps.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
@@ -24,6 +24,7 @@ use crate::{download, install, worker};
 #[derive(Clone)]
 pub struct Window(Rc<Inner>);
 
+#[derive(Clone)]
 pub struct WeakWindow(Weak<Inner>);
 
 impl WeakWindow {
@@ -32,31 +33,37 @@ impl WeakWindow {
     }
 }
 
+/// A window action's handler.
+type Action = fn(&Window);
+
+/// Shows the session's state and, while the window starts or stops it, the
+/// progress.
+pub type SessionView = Rc<dyn Fn(Option<Status>, Option<&str>)>;
+
 pub struct Inner {
-    /// The profile whose apps and session the window shows.
+    /// The profile whose apps and session show.
     profile: RefCell<ProfileName>,
     /// The profile's system, after the window has read it.
     system: Cell<System>,
-    /// The empty state page and its button for installing an app.
-    empty: adw::StatusPage,
-    open_button: gtk::Button,
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
     /// Switches between the "empty", "list" and "download" pages.
     stack: gtk::Stack,
+    empty: adw::StatusPage,
     download: download::Page,
     apps: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
     installed: RefCell<Vec<DesktopApp>>,
-    sessions: [SessionRow; 2],
-    /// True while this window starts or stops the session.
-    session_busy: Cell<bool>,
-    busy_apps: RefCell<HashMap<String, String>>,
-    open_apps: RefCell<HashSet<String>>,
+    /// The profile switcher in the header and its menu's list of profiles.
+    switcher: gtk::MenuButton,
+    profiles: gio::Menu,
+    profile_action: gio::SimpleAction,
+    /// What shows the session's state, while the profile's settings are open.
+    session_view: RefCell<Option<SessionView>>,
+    /// The profiles whose sessions this window is starting or stopping.
+    session_busy: RefCell<HashSet<ProfileName>>,
     session_proxy: RefCell<Option<gio::DBusProxy>>,
-    /// The window title, with the profile's name as its subtitle.
-    title: adw::WindowTitle,
     state_read: Cell<u64>,
     last_status: Cell<Option<Status>>,
     /// Watches the desktop entries, so installs from the CLI show up.
@@ -71,133 +78,42 @@ impl std::ops::Deref for Window {
     }
 }
 
-/// The session row, titled with the profile's system. It shows the session's
-/// state and a Start or Stop button. The window has one row in the empty state
-/// and one below the app list.
-struct SessionRow {
-    group: adw::PreferencesGroup,
-    row: adw::ActionRow,
-    dot: gtk::Box,
-    button: gtk::Button,
-    spinner: adw::Spinner,
-}
-
-impl SessionRow {
-    fn new() -> Self {
-        let dot = gtk::Box::builder()
-            .valign(gtk::Align::Center)
-            .css_classes(["status-dot"])
-            .build();
-        let spinner = adw::Spinner::builder().visible(false).build();
-        let button = gtk::Button::builder()
-            .label("Start")
-            .valign(gtk::Align::Center)
-            .build();
-        let row = adw::ActionRow::builder()
-            .title("Android")
-            .subtitle("Checking…")
-            .build();
-        row.add_prefix(&dot);
-        row.add_suffix(&spinner);
-        row.add_suffix(&button);
-        let group = adw::PreferencesGroup::builder().title("Session").build();
-        group.add(&row);
-        Self {
-            group,
-            row,
-            dot,
-            button,
-            spinner,
-        }
-    }
-
-    fn set_system(&self, system: System) {
-        self.row.set_title(system.title());
-    }
-
-    fn show(&self, st: Option<Status>, busy: Option<&str>) {
-        self.dot.remove_css_class("running");
-        self.dot.remove_css_class("starting");
-        if let Some(b) = busy {
-            self.row.set_subtitle(b);
-            self.spinner.set_visible(true);
-            self.button.set_sensitive(false);
-            self.dot.add_css_class("starting");
-            return;
-        }
-        self.spinner.set_visible(false);
-        self.button.set_sensitive(true);
-        match st {
-            None => {
-                self.row.set_subtitle("Unavailable");
-                self.button.set_sensitive(false);
-            }
-            Some(s) if !s.running => {
-                self.row.set_subtitle("Stopped");
-                self.button.set_label("Start");
-            }
-            Some(s) => {
-                if s.booted {
-                    self.row.set_subtitle("Running");
-                    self.dot.add_css_class("running");
-                } else {
-                    self.row.set_subtitle("Starting…");
-                    self.dot.add_css_class("starting");
-                }
-                self.button.set_label("Stop");
-            }
-        }
-    }
-}
-
 impl Window {
     pub fn new(app: &adw::Application, profile: ProfileName) -> Self {
-        let sessions = [SessionRow::new(), SessionRow::new()];
-
-        let open_btn = gtk::Button::builder()
-            .label("_Open APK…")
-            .use_underline(true)
-            .halign(gtk::Align::Center)
-            .css_classes(["pill", "suggested-action"])
-            .action_name("win.open")
-            .build();
-        let empty_box = gtk::Box::new(gtk::Orientation::Vertical, 36);
-        empty_box.append(&open_btn);
-        empty_box.append(
-            &adw::Clamp::builder()
-                .maximum_size(420)
-                .child(&sessions[0].group)
-                .build(),
-        );
         let empty = adw::StatusPage::builder()
             .icon_name(MANAGER_ID)
-            .title("No Android Apps")
-            .description("Drag and drop an APK here")
-            .child(&empty_box)
+            .title("No Apps")
             .vexpand(true)
             .build();
-
-        let apps = adw::PreferencesGroup::builder()
-            .title("Installed Apps")
-            .build();
+        let apps = adw::PreferencesGroup::new();
         let list = adw::PreferencesPage::new();
         list.add(&apps);
-        list.add(&sessions[1].group);
-
         let download = download::Page::new();
         let stack = gtk::Stack::new();
         stack.add_named(&empty, Some("empty"));
         stack.add_named(&list, Some("list"));
         stack.add_named(&download.page, Some("download"));
 
+        let profiles = gio::Menu::new();
+        let switcher_menu = gio::Menu::new();
+        switcher_menu.append_section(None, &profiles);
+        let section = gio::Menu::new();
+        section.append(Some("_New Profile…"), Some("win.new-profile"));
+        switcher_menu.append_section(None, &section);
+        let switcher = gtk::MenuButton::builder()
+            .label(profile.as_str())
+            .always_show_arrow(true)
+            .tooltip_text("Profiles")
+            .menu_model(&switcher_menu)
+            .css_classes(["flat"])
+            .build();
+
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
-        section.append(Some("P_rofiles"), Some("win.profiles"));
-        section.append(Some("Profile _Settings"), Some("win.preferences"));
+        section.append(Some("Profile _Settings"), Some("win.profile-settings"));
         section.append(Some("_About Innkeeper"), Some("app.about"));
         menu.append_section(None, &section);
-        let title = adw::WindowTitle::new("Innkeeper", &profile);
-        let header = adw::HeaderBar::builder().title_widget(&title).build();
+        let header = adw::HeaderBar::builder().title_widget(&switcher).build();
         header.pack_start(
             &gtk::Button::builder()
                 .icon_name("list-add-symbolic")
@@ -251,24 +167,28 @@ impl Window {
             .content(&toasts)
             .build();
 
+        let profile_action = gio::SimpleAction::new_stateful(
+            "profile",
+            Some(glib::VariantTy::STRING),
+            &profile.as_str().to_variant(),
+        );
         let w = Window(Rc::new(Inner {
             system: Cell::new(System::Android),
-            empty,
-            open_button: open_btn,
             win,
             toasts,
             nav,
             stack,
+            empty,
             download,
             apps,
             rows: RefCell::default(),
             installed: RefCell::default(),
-            sessions,
-            session_busy: Cell::new(false),
-            busy_apps: RefCell::default(),
-            open_apps: RefCell::default(),
+            switcher,
+            profiles,
+            profile_action,
+            session_view: RefCell::default(),
+            session_busy: RefCell::default(),
             session_proxy: RefCell::default(),
-            title,
             state_read: Cell::new(0),
             last_status: Cell::new(None),
             monitor: RefCell::default(),
@@ -276,14 +196,40 @@ impl Window {
             profile: RefCell::new(profile),
         }));
 
-        let open = gio::SimpleAction::new("open", None);
-        let w2 = w.clone();
-        open.connect_activate(move |_, _| w2.choose_file());
-        w.win.add_action(&open);
-
-        for s in &w.sessions {
-            let w2 = w.clone();
-            s.button.connect_clicked(move |_| w2.toggle_session());
+        let weak = w.downgrade();
+        w.profile_action.connect_activate(move |_, v| {
+            let (Some(w), Some(name)) = (weak.upgrade(), v.and_then(|v| v.str())) else {
+                return;
+            };
+            if name != w.profile().as_str()
+                && let Err(e) = w.switch_profile(name)
+            {
+                w.show_error(Op::Profiles, None, &e);
+            }
+        });
+        w.win.add_action(&w.profile_action);
+        // Profiles also come and go through the CLI, so read them again
+        // whenever the menu opens.
+        let weak = w.downgrade();
+        w.switcher.connect_active_notify(move |b| {
+            if let Some(w) = weak.upgrade().filter(|_| b.is_active()) {
+                w.read_profiles();
+            }
+        });
+        let actions: [(&str, Action); 3] = [
+            ("open", Window::choose_file),
+            ("new-profile", crate::profile::create),
+            ("profile-settings", crate::profile::settings),
+        ];
+        for (name, f) in actions {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = w.downgrade();
+            action.connect_activate(move |_, _| {
+                if let Some(w) = weak.upgrade() {
+                    f(&w);
+                }
+            });
+            w.win.add_action(&action);
         }
         let w2 = w.clone();
         w.download.button.connect_clicked(move |_| w2.prepare());
@@ -309,22 +255,6 @@ impl Window {
         });
         w.win.add_controller(drop);
 
-        let preferences = gio::SimpleAction::new("preferences", None);
-        let weak = w.downgrade();
-        preferences.connect_activate(move |_, _| {
-            if let Some(w) = weak.upgrade() {
-                w.nav.push(&crate::preferences::page(&w));
-            }
-        });
-        w.win.add_action(&preferences);
-        let profiles = gio::SimpleAction::new("profiles", None);
-        let weak = w.downgrade();
-        profiles.connect_activate(move |_, _| {
-            if let Some(w) = weak.upgrade() {
-                w.nav.push(&crate::profiles::page(&w));
-            }
-        });
-        w.win.add_action(&profiles);
         w.watch_entries();
         w.refresh();
         w.watch_session();
@@ -341,14 +271,6 @@ impl Window {
 
     pub fn toast(&self, t: adw::Toast) {
         self.toasts.add_toast(t);
-    }
-
-    /// Shows `text` in a toast without parsing it as markup, and returns the
-    /// toast.
-    pub fn say(&self, text: &str) -> adw::Toast {
-        let t = adw::Toast::builder().title(text).use_markup(false).build();
-        self.toast(t.clone());
-        t
     }
 
     pub fn show_error(&self, op: Op, name: Option<&str>, err: &anyhow::Error) {
@@ -380,7 +302,7 @@ impl Window {
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
             .title("Install App")
-            .accept_label("_Install")
+            .accept_label("_Open")
             .filters(&filters)
             .default_filter(&filter)
             .modal(true)
@@ -400,10 +322,6 @@ impl Window {
         let d = &self.download;
         if d.active.get() || d.ready.get() != Some(true) {
             d.opened.borrow_mut().push(file.clone());
-            if d.ready.get() == Some(false) && !d.active.get() {
-                let s = self.system.get().title();
-                self.say(&format!("Download {s} to install the app"));
-            }
             return;
         }
         match file.path() {
@@ -419,12 +337,12 @@ impl Window {
         }
     }
 
-    /// The installed app for `pkg` in this profile, if any.
     /// The system that the profile runs.
     pub fn system(&self) -> System {
         self.system.get()
     }
 
+    /// The installed app for `pkg` in this profile, if any.
     pub fn installed(&self, pkg: &str) -> Option<DesktopApp> {
         self.installed
             .borrow()
@@ -460,10 +378,11 @@ impl Window {
         *self.monitor.borrow_mut() = Some(m);
     }
 
-    /// Reloads the profile's system, whether its image is ready, and its app
-    /// list. The list comes from the desktop entries and, if an Android
-    /// session is running, its package list.
+    /// Reloads the profile's system, whether its image is ready, its app list
+    /// and the list of profiles. The app list comes from the desktop entries
+    /// and, if an Android session is running, its package list.
     pub fn refresh(&self) {
+        self.read_profiles();
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
@@ -487,7 +406,6 @@ impl Window {
             if w.profile() != shown {
                 return;
             }
-            // Without a session, the session row's Start button reports why.
             let d = &w.download;
             match image {
                 Some((system, false, size)) => {
@@ -511,26 +429,42 @@ impl Window {
         });
     }
 
+    /// Lists the profiles in the switcher's menu.
+    fn read_profiles(&self) {
+        let w = self.downgrade();
+        glib::spawn_future_local(async move {
+            let names = worker::run_quiet(|| {
+                profiles::list().map(|l| l.into_iter().map(|p| p.name).collect::<Vec<_>>())
+            })
+            .await;
+            let Some(w) = w.upgrade() else {
+                return;
+            };
+            match names {
+                Ok(names) => {
+                    w.profiles.remove_all();
+                    for n in names {
+                        // Underscores in a name aren't mnemonics.
+                        let item = gio::MenuItem::new(Some(&n.replace('_', "__")), None);
+                        item.set_action_and_target_value(
+                            Some("win.profile"),
+                            Some(&n.to_variant()),
+                        );
+                        w.profiles.append_item(&item);
+                    }
+                }
+                Err(e) => eprintln!("innkeeper-manager: {e:#}"),
+            }
+        });
+    }
+
     /// Adjusts the window to the profile's system.
     fn set_system(&self, system: System) {
         self.system.set(system);
-        let android = system == System::Android;
-        for s in &self.sessions {
-            s.set_system(system);
-        }
-        self.open_button.set_label(if android {
-            "_Open APK…"
-        } else {
-            "_Open HAP…"
-        });
-        if android {
-            self.empty.set_title("No Android Apps");
-            self.empty
-                .set_description(Some("Drag and drop an APK here"));
-        } else {
-            self.empty.set_title(system.title());
-            self.empty.set_description(Some("Drag and drop a HAP here"));
-        }
+        self.empty.set_description(Some(match system {
+            System::Android => "Drop an APK here",
+            System::Ohos => "Drop a HAP here",
+        }));
     }
 
     fn show_apps(&self, apps: Vec<DesktopApp>) {
@@ -554,60 +488,26 @@ impl Window {
     }
 
     fn app_row(&self, a: &DesktopApp) -> adw::ActionRow {
-        let subtitle = match &a.version {
-            Some(v) => format!("{} · {v}", a.package),
-            None => a.package.clone(),
-        };
         let row = adw::ActionRow::builder()
             .title(&a.name)
-            .subtitle(&subtitle)
+            .subtitle(a.version.as_deref().unwrap_or_default())
             .use_markup(false)
+            .activatable(true)
             .build();
         row.add_prefix(&app_icon(a.icon.as_ref(), 48));
-        let launch = gtk::Button::builder()
-            .label("Open")
-            .valign(gtk::Align::Center)
-            .build();
-        let remove = gtk::Button::builder()
-            .icon_name("user-trash-symbolic")
-            .tooltip_text("Uninstall")
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        let spinner = adw::Spinner::builder().visible(false).build();
-        let indicator = gtk::Label::builder()
-            .label("Open")
-            .css_classes(["success", "caption"])
-            .tooltip_text("Has an open window")
-            .visible(self.open_apps.borrow().contains(&a.package))
-            .build();
-        row.add_suffix(&indicator);
-        row.add_suffix(&spinner);
-        if let Some(status) = self.busy_apps.borrow().get(&a.package) {
-            row.set_subtitle(status);
-            spinner.set_visible(true);
-            launch.set_sensitive(false);
-            remove.set_sensitive(false);
-            row.set_activatable(false);
-        }
-        row.add_suffix(&launch);
-        row.add_suffix(&remove);
-        row.set_activatable(!self.busy_apps.borrow().contains_key(&a.package));
         row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-        let (w, app) = (self.clone(), a.clone());
-        row.connect_activated(move |_| w.nav.push(&crate::app::page(&w, &app)));
-        let (w, pkg, name) = (self.clone(), a.package.clone(), a.name.clone());
-        launch.connect_clicked(move |_| w.launch(&pkg, &name));
-        let (w, a2) = (self.clone(), a.clone());
-        remove.connect_clicked(move |_| w.confirm_uninstall(&a2));
+        let (w, app) = (self.downgrade(), a.clone());
+        row.connect_activated(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.nav.push(&crate::app::page(&w, &app));
+            }
+        });
         row
     }
 
-    /// Opens an app in its own window (starting the session if needed).
-    pub fn launch(&self, pkg: &str, name: &str) {
-        if !self.begin_app(pkg, "Opening…") {
-            return;
-        }
+    /// Opens an app in its own window, starting the session if needed. Shows
+    /// the progress with `progress`, and an error in a dialog.
+    pub async fn launch(&self, pkg: &str, name: &str, progress: impl Fn(&str) + 'static) {
         // Get an activation token from this window, which has focus, so the
         // app's window can take focus.
         let token = gio::prelude::AppLaunchContextExt::startup_notify_id(
@@ -622,81 +522,20 @@ impl Window {
             new_window: false,
             size: None,
         };
-        let (w, pkg, name) = (self.clone(), pkg.to_string(), name.to_string());
-        glib::spawn_future_local(async move {
-            let (p, profile) = (pkg.clone(), w.profile());
-            let (progress, progress_pkg) = (w.clone(), pkg.clone());
-            let r = worker::run(
-                move |rep| ops::run(&profile, &p, None, &opts, rep),
-                move |e| {
-                    if let Event::Status(text) = e {
-                        progress.app_progress(&progress_pkg, &install::status_text(&text));
-                    }
-                },
-            )
-            .await;
-            w.busy_apps.borrow_mut().remove(&pkg);
-            let apps = w.installed.borrow().clone();
-            w.show_apps(apps);
-            if let Err(e) = r {
-                w.show_error(Op::Open, Some(&name), &e);
-            }
-            w.read_session();
-        });
-    }
-
-    pub fn confirm_uninstall(&self, a: &DesktopApp) {
-        if self.busy_apps.borrow().contains_key(&a.package) {
-            return;
-        }
-        let d = adw::AlertDialog::new(Some(&format!("Uninstall {}?", a.name)), None);
-        let keep = adw::SwitchRow::builder().title("Keep App Data").build();
-        let list = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .css_classes(["boxed-list"])
-            .build();
-        list.append(&keep);
-        d.set_extra_child(Some(&list));
-        d.add_responses(&[("cancel", "_Cancel"), ("uninstall", "_Uninstall")]);
-        d.set_response_appearance("uninstall", adw::ResponseAppearance::Destructive);
-        d.set_default_response(Some("cancel"));
-        d.set_close_response("cancel");
-        let (w, a) = (self.clone(), a.clone());
-        glib::spawn_future_local(async move {
-            if d.choose_future(Some(&w.win)).await != "uninstall" {
-                return;
-            }
-            let keep_data = keep.is_active();
-            if !w.begin_app(&a.package, "Uninstalling…") {
-                return;
-            }
-            let (pkg, profile) = (a.package.clone(), w.profile());
-            let (progress, progress_pkg) = (w.clone(), pkg.clone());
-            let r = worker::run(
-                move |rep| ops::uninstall(&profile, &pkg, keep_data, rep),
-                move |e| {
-                    if let Event::Status(text) = e {
-                        progress.app_progress(&progress_pkg, &install::status_text(&text));
-                    }
-                },
-            )
-            .await;
-            w.busy_apps.borrow_mut().remove(&a.package);
-            match r {
-                Ok(_) => {
-                    w.nav.pop_to_tag("main");
-                    _ = w.say(&format!("{} uninstalled", a.name))
+        let (p, profile) = (pkg.to_string(), self.profile());
+        let r = worker::run(
+            move |rep| ops::run(&profile, &p, None, &opts, rep),
+            move |e| {
+                if let Event::Status(text) = e {
+                    progress(&install::status_text(&text));
                 }
-                Err(e) => w.show_error(Op::Uninstall, Some(&a.name), &e),
-            }
-            w.refresh();
-        });
-    }
-
-    fn show_session(&self, st: Option<Status>, busy: Option<&str>) {
-        for s in &self.sessions {
-            s.show(st, busy);
+            },
+        )
+        .await;
+        if let Err(e) = r {
+            self.show_error(Op::Open, Some(name), &e);
         }
+        self.read_session();
     }
 
     /// Downloads the profile's image, when the user asks for it.
@@ -729,18 +568,22 @@ impl Window {
         });
     }
 
-    fn begin_app(&self, pkg: &str, text: &str) -> bool {
-        if self.busy_apps.borrow().contains_key(pkg) {
-            return false;
-        }
-        self.app_progress(pkg, text);
-        true
+    /// Shows the session's state with `view` until [`Self::unwatch_session`].
+    pub fn watch_session_with(&self, view: SessionView) {
+        let busy = self.session_busy_here().then_some("");
+        view(self.last_status.get(), busy);
+        self.session_view.replace(Some(view));
     }
 
-    fn app_progress(&self, pkg: &str, text: &str) {
-        self.busy_apps.borrow_mut().insert(pkg.into(), text.into());
-        let apps = self.installed.borrow().clone();
-        self.show_apps(apps);
+    pub fn unwatch_session(&self) {
+        self.session_view.replace(None);
+    }
+
+    fn show_session(&self, st: Option<Status>, busy: Option<&str>) {
+        let view = self.session_view.borrow().clone();
+        if let Some(v) = view {
+            v(st, busy);
+        }
     }
 
     /// Watches the bridge's bus name and its Changed signal. The proxy doesn't
@@ -765,6 +608,10 @@ impl Window {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // The window may have switched profiles meanwhile.
+            if w.profile() != profile {
+                return;
+            }
             match proxy {
                 Ok(proxy) => {
                     let weak = w.downgrade();
@@ -803,11 +650,13 @@ impl Window {
     pub fn switch_profile(&self, name: &str) -> anyhow::Result<()> {
         let name = ProfileName::new(name)?;
         crate::remember_profile(&name);
-        self.title.set_subtitle(&name);
+        self.switcher.set_label(&name);
+        self.profile_action.set_state(&name.as_str().to_variant());
         self.profile.replace(name);
+        self.nav.pop_to_tag("main");
         self.session_proxy.replace(None);
         self.last_status.set(None);
-        self.open_apps.borrow_mut().clear();
+        self.show_session(None, None);
         // Files queued for the old profile's download don't go to this one.
         self.download.opened.borrow_mut().clear();
         self.download.ready.set(None);
@@ -825,36 +674,46 @@ impl Window {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let running = proxy.name_owner().is_some();
-            let state = if running {
+            let booted = if running {
                 proxy
                     .call_future("State", None, gio::DBusCallFlags::NO_AUTO_START, 5000)
                     .await
                     .ok()
                     .and_then(|v| v.get::<(bool, Vec<String>)>())
+                    .is_some_and(|(booted, _)| booted)
             } else {
-                None
+                false
             };
             if w.state_read.get() != generation {
                 return;
             }
-            let (booted, packages) = state.unwrap_or_default();
-            *w.open_apps.borrow_mut() = packages.into_iter().collect();
             let st = Status { running, booted };
             let was_booted = w.last_status.replace(Some(st)).is_some_and(|s| s.booted);
-            if !w.session_busy.get() {
+            if !w.session_busy_here() {
                 w.show_session(Some(st), None);
             }
-            let apps = w.installed.borrow().clone();
-            w.show_apps(apps);
+            // A booted Android lists its packages, which repairs the app list.
             if booted && !was_booted {
                 w.refresh();
             }
         });
     }
 
-    fn toggle_session(&self) {
+    /// Whether this window is starting or stopping the shown profile's
+    /// session.
+    fn session_busy_here(&self) -> bool {
+        self.session_busy.borrow().contains(&self.profile())
+    }
+
+    /// Starts the shown profile's session if it is stopped, or stops it. The
+    /// progress shows while the window shows that profile.
+    pub fn toggle_session(&self) {
+        let p = self.profile();
+        if !self.session_busy.borrow_mut().insert(p.clone()) {
+            return;
+        }
         let running = self.last_status.get().is_some_and(|s| s.running);
-        self.session_busy.set(true);
+        let system = self.system.get().title();
         self.show_session(
             self.last_status.get(),
             Some(if running {
@@ -865,11 +724,10 @@ impl Window {
         );
         let w = self.clone();
         glib::spawn_future_local(async move {
-            let w2 = w.clone();
-            let p = w.profile();
+            let (w2, p2, p3) = (w.clone(), p.clone(), p.clone());
             let r = worker::run(
                 move |rep| {
-                    let s = Session::of_profile(&p)?;
+                    let s = Session::of_profile(&p2)?;
                     if running {
                         s.stop()
                     } else {
@@ -877,18 +735,23 @@ impl Window {
                     }
                 },
                 move |e| {
-                    if let Event::Status(m) = e {
-                        w2.show_session(None, Some(&install::status_text(&m)));
+                    if let Event::Status(m) = e
+                        && w2.profile() == p3
+                    {
+                        w2.show_session(w2.last_status.get(), Some(&install::status_text(&m)));
                     }
                 },
             )
             .await;
-            w.session_busy.set(false);
+            w.session_busy.borrow_mut().remove(&p);
             if let Err(e) = r {
                 let op = if running { Op::Stop } else { Op::Start };
-                w.show_error(op, Some(w.system.get().title()), &e);
+                w.show_error(op, Some(system), &e);
             }
-            w.read_session();
+            if w.profile() == p {
+                w.show_session(w.last_status.get(), None);
+                w.read_session();
+            }
         });
     }
 }

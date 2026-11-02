@@ -1,6 +1,6 @@
 //! The page that a profile shows until its system's image is downloaded. It
-//! offers the download, since a user of one system may never need the other's,
-//! and then shows its progress, speed and time left.
+//! offers the download with its size, since a user of one system may never
+//! need the other's, and then shows its progress, speed and time left.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -50,17 +50,8 @@ impl Page {
             .halign(gtk::Align::Center)
             .css_classes(["pill", "suggested-action"])
             .build();
-        // A user of the other system may want another profile instead.
-        let profiles = gtk::Button::builder()
-            .label("Manage _Profiles")
-            .use_underline(true)
-            .halign(gtk::Align::Center)
-            .css_classes(["pill", "flat"])
-            .action_name("win.profiles")
-            .build();
         let choices = gtk::Box::new(gtk::Orientation::Vertical, 12);
         choices.append(&button);
-        choices.append(&profiles);
         let progress = gtk::Box::new(gtk::Orientation::Vertical, 12);
         progress.append(&bar);
         progress.append(&detail);
@@ -109,15 +100,8 @@ impl Page {
         self.size.set(size);
         let s = system.title();
         self.page.set_title(&format!("Download {s}"));
-        self.page.set_description(Some(&match size {
-            Some(n) => format!(
-                "Innkeeper needs a {} download of {s} to run {s} apps. Every {s} profile shares it.",
-                glib::format_size(n)
-            ),
-            None => format!(
-                "Innkeeper needs to download {s} to run {s} apps. Every {s} profile shares it."
-            ),
-        }));
+        self.page
+            .set_description(size.map(|n| glib::format_size(n).to_string()).as_deref());
         self.spinner.set_visible(false);
         self.bar.set_visible(false);
         self.detail.set_visible(false);
