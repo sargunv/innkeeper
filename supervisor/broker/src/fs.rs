@@ -78,6 +78,51 @@ pub(crate) fn is_fs_syscall(nr: i64) -> bool {
     )
 }
 
+/// The bytes of a path that [`passes`] reads.
+pub(crate) const PREFIX_LEN: usize = 6;
+
+/// The address of the path argument that [`passes`] checks, for the calls it
+/// covers.
+pub(crate) fn path_arg(nr: i64, args: &[u64; 6]) -> Option<u64> {
+    match nr {
+        libc::SYS_openat | libc::SYS_readlinkat => Some(args[1]),
+        libc::SYS_readlink | libc::SYS_stat => Some(args[0]),
+        _ => None,
+    }
+}
+
+/// Whether the broker leaves a call to the kernel when its path starts with
+/// `prefix`, the path's first [`PREFIX_LEN`] bytes. Most opens, readlinks
+/// and stats name ordinary files. The receive thread lets those through, so
+/// that they skip the workers. The rules follow the handlers, which serve
+/// these calls only under `/dev`, `/proc`, `/sys` and `/etc`:
+///
+///  * An `openat` of a relative path may reach a DRM node through its
+///    directory, so [`Fs::openat`] resolves it.
+///  * A `readlink` serves only `/proc` paths, and on OpenHarmony the evdev
+///    devices' `/dev` and `/sys` nodes.
+///  * OpenHarmony's `stat` serves only the evdev devices' nodes.
+pub(crate) fn passes(guest: Guest, nr: i64, prefix: &[u8]) -> bool {
+    if prefix.len() < PREFIX_LEN {
+        return false;
+    }
+    let ohos = guest == Guest::Ohos;
+    let under = |dir: &[u8]| prefix.starts_with(dir);
+    match nr {
+        libc::SYS_openat => {
+            prefix[0] == b'/'
+                && !under(b"/dev/")
+                && !under(b"/proc/")
+                && !(ohos && (under(b"/sys/") || under(b"/etc/")))
+        }
+        libc::SYS_readlink | libc::SYS_readlinkat => {
+            !under(b"/proc/") && !(ohos && (under(b"/sys/") || under(b"/dev/")))
+        }
+        libc::SYS_stat => !under(b"/sys/") && !under(b"/dev/"),
+        _ => false,
+    }
+}
+
 impl Fs {
     /// Translates an Android path under a mapped host dir (such as `/data`)
     /// to its host path, so that the credential code's lookups (`creds`),
@@ -755,6 +800,49 @@ mod tests {
             resolved.unwrap().to_bytes(),
             format!("/proc/{}/fd/3/el1/database", std::process::id()).as_bytes()
         );
+    }
+
+    #[test]
+    fn ordinary_paths_pass_and_served_paths_reach_the_handlers() {
+        use libc::{SYS_openat, SYS_readlink, SYS_readlinkat, SYS_stat};
+        let (a, o) = (Guest::Android, Guest::Ohos);
+        for g in [a, o] {
+            assert!(passes(g, SYS_openat, b"/system/lib64"));
+            assert!(passes(g, SYS_openat, b"/data/x"));
+            // A path that names /dev or /proc without a slash is a file in /.
+            assert!(passes(g, SYS_openat, b"/dev\0xx"));
+            assert!(!passes(g, SYS_openat, b"/dev/dri"));
+            assert!(!passes(g, SYS_openat, b"/proc/self"));
+            assert!(!passes(g, SYS_openat, b"lib/xx"));
+            assert!(!passes(g, SYS_openat, b"./card"));
+            assert!(passes(g, SYS_readlink, b"/system"));
+            assert!(passes(g, SYS_readlinkat, b"lib/xx"));
+            assert!(!passes(g, SYS_readlink, b"/proc/self/exe"));
+            assert!(!passes(g, SYS_readlinkat, b"/proc/1/fd"));
+            // The prefix ends at a page boundary.
+            assert!(!passes(g, SYS_openat, b"/sys"));
+            assert!(!passes(g, SYS_readlink, b""));
+        }
+        // OpenHarmony's evdev nodes in sysfs, and its /etc/passwd.
+        assert!(passes(a, SYS_openat, b"/sys/class"));
+        assert!(!passes(o, SYS_openat, b"/sys/class"));
+        assert!(passes(a, SYS_openat, b"/etc/passwd"));
+        assert!(!passes(o, SYS_openat, b"/etc/passwd"));
+        assert!(passes(a, SYS_readlink, b"/sys/class"));
+        assert!(!passes(o, SYS_readlink, b"/sys/class"));
+        assert!(passes(a, SYS_readlink, b"/dev/input"));
+        assert!(!passes(o, SYS_readlink, b"/dev/input"));
+        assert!(passes(o, SYS_stat, b"/system/bin"));
+        assert!(passes(o, SYS_stat, b"data/x"));
+        assert!(!passes(o, SYS_stat, b"/dev/input"));
+        assert!(!passes(o, SYS_stat, b"/sys/class"));
+        // Other calls go to their handlers.
+        assert!(!passes(o, libc::SYS_fstat, b"/system"));
+        assert_eq!(path_arg(libc::SYS_fstat, &[0; 6]), None);
+        assert_eq!(path_arg(SYS_openat, &[1, 2, 3, 4, 5, 6]), Some(2));
+        assert_eq!(path_arg(SYS_readlinkat, &[1, 2, 3, 4, 5, 6]), Some(2));
+        assert_eq!(path_arg(SYS_readlink, &[1, 2, 3, 4, 5, 6]), Some(1));
+        assert_eq!(path_arg(SYS_stat, &[1, 2, 3, 4, 5, 6]), Some(1));
     }
 
     #[test]
