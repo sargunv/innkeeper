@@ -95,8 +95,14 @@ continuous task. With the window closed, the task must keep the session up, and
 once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
-services log to hilog. hilog's buffer is 256 KiB and boot fills it within a
-minute, so read early boot from the kmsg log.
+services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
+image's hilog buffer is 256 KiB per log type, and boot fills that in about ten
+seconds. `sys_prod/etc/param/innkeeper_hilog.para` sets
+`hilog.buffersize.global` to 4 MiB, which holds the whole boot, including
+Innkeeper System's and the composer's lines. hilogd uses about 10 MB more after
+boot. The image turns off hilog's per-process and per-domain flow control in
+`hilog.para`, and its default level is Info. ArkTS `console.info` lines go to
+the app buffer under `A03d00/ArkTSApp`.
 
 `mise run session -- exec` and `shell` run commands as root in OH's
 `/system/bin/sh`. They go through the exec relay from android/system/exec, built

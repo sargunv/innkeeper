@@ -1,0 +1,4 @@
+# The image's hilog buffer is 256 KiB per log type, which holds about ten
+# seconds of boot. A 4 MiB buffer holds the whole boot, so the boot lines of
+# Innkeeper System and the composer stay readable.
+hilog.buffersize.global=4194304
