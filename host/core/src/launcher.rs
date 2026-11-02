@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use innkeeper_profile::Paths;
+use innkeeper_profile::paths::{Download, Image};
 use innkeeper_profile::profile::{Settings, System};
 
 use crate::paths::Prefix;
@@ -35,6 +36,39 @@ fn clean_stderr(s: &str) -> String {
         .filter(|l| !l.contains("linker"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// How far [`Session::prepare`] has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Preparing {
+    /// `done` of the image zip's `total` bytes are downloaded.
+    Download { done: u64, total: u64 },
+    /// The zip is downloaded and being checked and unpacked.
+    Unpack,
+}
+
+impl Preparing {
+    /// The stage that image/fetch.sh's files in the image cache show.
+    fn of(image: &Image, download: &Download) -> Self {
+        let name = download.file_name();
+        let zip = image.dir.join("dl").join(name);
+        let total = download.size;
+        match std::fs::metadata(zip.with_file_name(format!("{name}.part"))) {
+            Ok(m) if m.len() < total => {
+                return Self::Download {
+                    done: m.len(),
+                    total,
+                };
+            }
+            Ok(_) => return Self::Unpack,
+            Err(_) => {}
+        }
+        if zip.exists() || image.img.exists() || image.img.with_file_name("img.tmp").exists() {
+            Self::Unpack
+        } else {
+            Self::Download { done: 0, total }
+        }
+    }
 }
 
 /// What [`Session::status`] reports.
@@ -267,19 +301,39 @@ impl Session {
         })
     }
 
-    /// Fetches and unpacks the image. Progress goes to stderr.
-    pub fn prepare(&self) -> Result<()> {
-        self.run_prepare()
+    /// The size in bytes of the image's download.
+    pub fn download_size(&self) -> Option<u64> {
+        Some(self.paths()?.download_of(self.system()).ok()?.size)
+    }
+
+    /// Fetches and unpacks the image. The launcher's output goes to stderr.
+    /// For a launcher in a prefix, `progress` gets the stage a few times a
+    /// second.
+    pub fn prepare(&self, progress: &dyn Fn(Preparing)) -> Result<()> {
+        self.run_prepare(progress)
             .context(crate::ErrorKind::ImageNotPrepared)
     }
 
-    fn run_prepare(&self) -> Result<()> {
-        let st = self
+    fn run_prepare(&self, progress: &dyn Fn(Preparing)) -> Result<()> {
+        let watch = self.paths().and_then(|p| {
+            let system = self.system();
+            Some((p.image_of(system).ok()?, p.download_of(system).ok()?))
+        });
+        let mut child = self
             .command()
             .arg("prepare")
             .stdin(Stdio::null())
             .stdout(io::stderr())
-            .status()?;
+            .spawn()?;
+        let st = loop {
+            if let Some(st) = child.try_wait()? {
+                break st;
+            }
+            if let Some((image, download)) = &watch {
+                progress(Preparing::of(image, download));
+            }
+            sleep(Duration::from_millis(250));
+        };
         if !st.success() {
             bail!(
                 "preparing the {} image failed ({} prepare)",
@@ -297,7 +351,7 @@ impl Session {
         let system = self.system();
         if !self.image_ready() {
             status(&format!("downloading {}", system.title()));
-            self.run_prepare()
+            self.run_prepare(&|_| {})
                 .context(crate::ErrorKind::ImageNotPrepared)?;
         }
         status(&format!("starting {}", system.title()));
@@ -377,6 +431,35 @@ impl Session {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn preparing_follows_the_fetch_files() {
+        let dir = crate::test_dir("preparing-stage");
+        let image = Image {
+            name: "ci-1".into(),
+            dir: dir.clone(),
+            img: dir.join("img"),
+            apexdir: dir.join("apex"),
+            derived: dir.join("derived"),
+        };
+        let download = Download {
+            url: "https://example.com/x/a.zip".into(),
+            size: 10,
+        };
+        let stage = || Preparing::of(&image, &download);
+        assert_eq!(stage(), Preparing::Download { done: 0, total: 10 });
+        std::fs::create_dir(dir.join("dl")).unwrap();
+        std::fs::write(dir.join("dl/a.zip.part"), b"1234").unwrap();
+        assert_eq!(stage(), Preparing::Download { done: 4, total: 10 });
+        // fetch.sh checks the SHA-256 of a complete .part.
+        std::fs::write(dir.join("dl/a.zip.part"), b"0123456789").unwrap();
+        assert_eq!(stage(), Preparing::Unpack);
+        std::fs::rename(dir.join("dl/a.zip.part"), dir.join("dl/a.zip")).unwrap();
+        assert_eq!(stage(), Preparing::Unpack);
+        std::fs::remove_file(dir.join("dl/a.zip")).unwrap();
+        std::fs::create_dir(dir.join("img")).unwrap();
+        assert_eq!(stage(), Preparing::Unpack);
+    }
 
     #[test]
     fn cold_open_waits_for_user_unlock() {

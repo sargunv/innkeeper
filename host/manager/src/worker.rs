@@ -4,17 +4,18 @@
 use std::future::Future;
 
 use gtk::{gio, glib};
-use innkeeper_core::ops::Event;
 
 /// Runs `f` off the UI thread and calls `on_event` on the UI thread for each
-/// [`Event`] that `f` reports. The returned future resolves to `f`'s result.
-pub fn run<T, F, E>(f: F, on_event: E) -> impl Future<Output = T>
+/// event, such as an `innkeeper_core::ops::Event`, that `f` reports. The
+/// returned future resolves to `f`'s result.
+pub fn run<T, V, F, E>(f: F, on_event: E) -> impl Future<Output = T>
 where
     T: Send + 'static,
-    F: FnOnce(&dyn Fn(Event)) -> T + Send + 'static,
-    E: Fn(Event) + 'static,
+    V: Send + 'static,
+    F: FnOnce(&dyn Fn(V)) -> T + Send + 'static,
+    E: Fn(V) + 'static,
 {
-    let (tx, rx) = async_channel::unbounded::<Event>();
+    let (tx, rx) = async_channel::unbounded::<V>();
     glib::spawn_future_local(async move {
         while let Ok(e) = rx.recv().await {
             on_event(e);
@@ -39,5 +40,5 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    run(move |_| f(), |_| {})
+    run(move |_: &dyn Fn(())| f(), |_| {})
 }

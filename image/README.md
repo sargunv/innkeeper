@@ -36,7 +36,8 @@ unpacks `super.img`, and OpenHarmony's extracts `system.img` and `vendor.img`.
 Every profile and guest shares one cache in
 `$XDG_DATA_HOME/innkeeper/images/<name>/`:
 
-- `dl/` holds resumable downloads. The zip is deleted once extracted.
+- `dl/` holds resumable downloads. The zip is deleted once extracted. While curl
+  writes `<zip>.part`, the manager shows its size as the download's progress.
 - `img/` holds the partitions.
 - `apex-<hash>/` (Android) holds one flattened tree per vendor APEX selection. A
   tree is not rewritten while a session uses it.

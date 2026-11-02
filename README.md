@@ -38,8 +38,8 @@ Innkeeper doesn't update itself yet. To update, install a newer file with
 
 To install an app, open its APK with **Innkeeper**. Innkeeper shows the app's
 details and the permissions it requests, installs it, and adds it to your app
-menu. Each app opens in its own window. The first use downloads the Android
-image, which is about 1.2 GB.
+menu. Each app opens in its own window. Before the first install, Innkeeper asks
+to download the Android image, which is about 1.2 GB.
 
 You can also use a terminal, for example
 `flatpak run dev.sargunv.Innkeeper install App.apk`. The `--help` option lists
