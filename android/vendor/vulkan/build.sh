@@ -106,7 +106,20 @@ fetch() {
 }
 
 # Re-run meson setup on existing build dirs so option edits here take effect.
-reconf() { [[ -f $1/build.ninja ]] && echo --reconfigure || true; }
+# A source tree that fetch reset since the dir was configured can have new
+# option choices, which --reconfigure checks against the old ones, so such a
+# dir starts again with --wipe.
+reconf() {
+  [[ -f $1/build.ninja ]] || return 0
+  local f
+  for f in "$work"/fetched/*; do
+    if [[ $f -nt $1/build.ninja ]]; then
+      echo --wipe
+      return
+    fi
+  done
+  echo --reconfigure
+}
 
 build_libdrm() {
   fetch libdrm "$LIBDRM_URL" "$LIBDRM_TAG"
