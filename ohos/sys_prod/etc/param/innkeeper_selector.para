@@ -1,0 +1,6 @@
+# AMS shows the image's own app selector (com.ohos.amsdialog) when several
+# apps open a file or a link. AMS would otherwise ask an app store for its
+# selector, and the image has no app store.
+abilitymanagerservice.support.appgallery.selector=false
+# The selector shows the apps without first asking to list the installed apps.
+persist.sys.abilityms.isdialogconfirmpermission=true

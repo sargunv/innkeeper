@@ -40,10 +40,12 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   `run` with a file gives the probe a readable copy, and the probe logs its
   text. `open` with a PNG, which the probe and Gallery both take, shows
   Innkeeper User's app chooser, and a click on the probe's row opens the file
-  there. hilog still holds the line that Innkeeper System logged at boot. The
-  probe plays a video clip and renders its first frame, and on a GPU the clip's
-  color reaches the desktop. OpenHarmony's music volume must be at its maximum,
-  and a tone it plays must reach a private null sink. The probe, granted the
+  there. When the probe opens a PNG of its own, OpenHarmony's app selector
+  offers Desktop, and a click on it opens the file through the desktop's portal.
+  hilog still holds the line that Innkeeper System logged at boot. The probe
+  plays a video clip and renders its first frame, and on a GPU the clip's color
+  reaches the desktop. OpenHarmony's music volume must be at its maximum, and a
+  tone it plays must reach a private null sink. The probe, granted the
   microphone, must record a tone that the host plays into that sink. A
   notification that the probe posts reaches the desktop's notification server
   with its buttons, and invoking its first button there reaches the probe. The

@@ -124,6 +124,15 @@
                 "scheme": "ftps"
               }
             ]
+          },
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              {
+                "scheme": "file",
+                "type": "*/*"
+              }
+            ]
           }
         ]
       }

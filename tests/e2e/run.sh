@@ -856,6 +856,35 @@ else
     exit 1
   fi
   echo "ok   open shows Innkeeper User's app chooser when two apps take the file, and a click on the probe opens the file there"
+  # The probe opens a PNG file from its own files. Gallery, the probe and
+  # Innkeeper User's DesktopAbility take it, so OpenHarmony's app selector
+  # shows. A click on Desktop hands the file to the desktop's portal.
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_desktop_file() {
+    local item
+    geometry || return
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode view >>"$T/ohos.txt" 2>&1 || return
+    selector() { s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^SelectorDialog[0-9]+$/ { print $4; exit }'; }
+    desktop_item() {
+      local w
+      w=$(selector) && [[ -n $w ]] || return
+      item=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
+        awk '/^ *text: Desktop$/ { f = 1 } f && /^ *top: / { top = $2 } f && /^ *left: / { left = $2 }
+          f && /^ *width: / { width = $2 } f && /^ *height: / { printf "%d %d\n", left + width / 2, top + $2 / 2; exit }')
+      [[ -n $item ]]
+    }
+    until_ok desktop_item || return
+    # shellcheck disable=SC2086 # item is "<x> <y>"
+    { at $item && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok file_has "$desktop_log" '^openfile: from-ohos\.png$' || return
+    closed() { [[ -z $(selector) ]]; }
+    until_ok closed
+  }
+  if ! timed ohos-desktop-file ohos_desktop_file; then
+    s /system/bin/hilog -x -T InnkeeperDesktop | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   OpenHarmony's app selector offers Desktop for a file that the probe opens, and a click on it opens the file on the desktop"
   # probe_field sets field to the centre of the probe's text field on the
   # panel and its text, from the inspector dump: "<x> <y>|<text>".
   # shellcheck disable=SC2329 # invoked through until_ok

@@ -1,4 +1,4 @@
-import { AbilityConstant, common, UIAbility, Want, wantAgent, WantAgent } from '@kit.AbilityKit';
+import { AbilityConstant, common, UIAbility, Want, wantAgent, WantAgent, wantConstant } from '@kit.AbilityKit';
 import { avSession } from '@kit.AVSessionKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
@@ -6,7 +6,7 @@ import { audio } from '@kit.AudioKit';
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import { fileIo } from '@kit.CoreFileKit';
+import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 
 const TAG = 'InnkeeperProbes';
@@ -152,12 +152,29 @@ function read(uri: string): void {
   }
 }
 
+// Writes a PNG file into the probe's files and asks OpenHarmony to open it, as
+// a file manager does. OpenHarmony picks the app or shows its selector.
+function view(context: common.UIAbilityContext): void {
+  const path = `${context.filesDir}/from-ohos.png`;
+  const f = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+  fileIo.writeSync(f.fd, 'an image from OpenHarmony');
+  fileIo.closeSync(f);
+  context.startAbility({
+    action: 'ohos.want.action.viewData',
+    uri: fileUri.getUriFromPath(path),
+    type: 'image/png',
+    flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION,
+  }).catch((e: Object) => {
+    console.error(`innkeeper-probes: view failed: ${JSON.stringify(e)}`);
+  });
+}
+
 // The tests read the URI of each want from hilog, and the content of a file
 // URI. `aa start --ps mode
 // capture` records from the microphone, `--ps mode notify` posts a
 // notification, `--ps mode media` starts a media session, `--ps mode video`
-// plays files/probe.mp4 on the page, and `--ps task start` or `stop` starts or
-// stops a continuous task.
+// plays files/probe.mp4 on the page, `--ps mode view` opens a PNG file from
+// the probe, and `--ps task start` or `stop` starts or stops a continuous task.
 function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
@@ -175,6 +192,8 @@ function run(want: Want, context: common.UIAbilityContext): void {
   } else if (mode === 'video') {
     // The page shows the clip in an XComponent and plays it (pages/Index).
     AppStorage.setOrCreate<string>('video', `${context.filesDir}/probe.mp4`);
+  } else if (mode === 'view') {
+    view(context);
   } else if (mode === 'clicked' || mode === 'action' || mode === 'reply') {
     hilog.info(0x0000, TAG, 'notification %{public}s: %{public}s', mode, `${want.parameters?.['reply'] ?? ''}`);
   }
