@@ -47,9 +47,13 @@ launcher ability shows one page with a text field. Started with
 `--ps mode capture`, it records half a second from the microphone and logs the
 loudest sample to hilog. Started with `--ps task start` or `--ps task stop`, it
 starts or stops an audio playback continuous task and logs the result. It opens
-text files, and it logs the start of each file that it gets.
+text files, and it logs the start of each file that it gets. Started with
+`--ps mode video`, it plays `probe.mp4` from its files directory once with
+AVPlayer on an XComponent below the field, and it logs the first frame.
 `mise run build:ohos-probe` builds it into
 `out/test/probes/InnkeeperProbes.hap`, and `mise run build` runs that task too.
+The task also encodes the test's clip, `out/test/probes/video.mp4`, with the
+build container's FFmpeg.
 
 The build uses the OpenHarmony SDK's own tools and no hvigor, DevEco or account.
 [ohos/sdk.env](sdk.env) pins the SDK release that matches the image, and

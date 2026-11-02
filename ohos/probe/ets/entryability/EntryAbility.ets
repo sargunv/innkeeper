@@ -155,8 +155,9 @@ function read(uri: string): void {
 // The tests read the URI of each want from hilog, and the content of a file
 // URI. `aa start --ps mode
 // capture` records from the microphone, `--ps mode notify` posts a
-// notification, `--ps mode media` starts a media session, and `--ps task
-// start` or `stop` starts or stops a continuous task.
+// notification, `--ps mode media` starts a media session, `--ps mode video`
+// plays files/probe.mp4 on the page, and `--ps task start` or `stop` starts or
+// stops a continuous task.
 function run(want: Want, context: common.UIAbilityContext): void {
   if (want.uri) {
     console.info(`innkeeper-probes: opened ${want.uri}`);
@@ -171,6 +172,9 @@ function run(want: Want, context: common.UIAbilityContext): void {
     notify();
   } else if (mode === 'media') {
     startMedia(context);
+  } else if (mode === 'video') {
+    // The page shows the clip in an XComponent and plays it (pages/Index).
+    AppStorage.setOrCreate<string>('video', `${context.filesDir}/probe.mp4`);
   } else if (mode === 'clicked' || mode === 'action' || mode === 'reply') {
     hilog.info(0x0000, TAG, 'notification %{public}s: %{public}s', mode, `${want.parameters?.['reply'] ?? ''}`);
   }
