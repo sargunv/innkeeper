@@ -32,9 +32,12 @@ without capabilities or a sysctl override.
 
 The `fs` notifications and the credential notifications for `chown`, `lstat` and
 `access` share four worker threads. A slow lookup, such as an `fstat` through a
-caller's fd, therefore can't block the binder receive thread. Each BPF object
-keeps one memfd inode. Opening a pin reopens that inode with a separate file
-description, so netd's OFD map locks conflict as they do on a kernel.
+caller's fd, therefore can't block the binder receive thread. Most opens,
+readlinks and stats name paths that the broker doesn't serve. The receive thread
+reads the first bytes of the path and lets those calls run in the kernel, so
+they don't wait for a worker (`fs::passes`). Each BPF object keeps one memfd
+inode. Opening a pin reopens that inode with a separate file description, so
+netd's OFD map locks conflict as they do on a kernel.
 
 ## Binder
 

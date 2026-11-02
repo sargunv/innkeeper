@@ -725,6 +725,16 @@ pub fn serve(fd: RawFd, pins: Option<OwnedFd>, cfg: Config) {
         let mut req: SeccompNotif = unsafe { std::ptr::read_unaligned(notif.as_ptr() as *const _) };
         as_openat(&mut req);
         let nr = req.data.nr as i64;
+        // The broker serves opens, readlinks and stats only under a few
+        // directories. The others go to the kernel from here, without a
+        // worker.
+        if let Some(addr) = crate::fs::path_arg(nr, &req.data.args)
+            && vm_read(req.pid as i32, addr, crate::fs::PREFIX_LEN)
+                .is_some_and(|p| crate::fs::passes(guest, nr, &p))
+        {
+            listener.cont(req.id);
+            continue;
+        }
         if let Some(input) = &input
             && input.serve(&req)
         {
