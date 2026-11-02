@@ -135,8 +135,6 @@ struct State {
   pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
   VBlankCallback vblank = nullptr;
   void* vblankData = nullptr;
-  RefreshCallback refresh = nullptr;
-  void* refreshData = nullptr;
   bool vsync = false;
   bool threads = false;
   int32_t power = POWER_STATUS_ON;
@@ -145,6 +143,9 @@ struct State {
   Target client;
   int clientFence = -1;  // its acquire fence
   int direct = -1;       // the layer that Commit shows, or -1 for the client
+  // The target that Commit last showed. render_service draws into it again
+  // only after the next Commit, so a new window can show it.
+  Target shown;
   // The bridge connection, once its window is shown.
   int sock = -1;
   uint32_t nextTag = 1;
@@ -197,6 +198,8 @@ void forgetImports() {
   pthread_cond_broadcast(&g.changed);
 }
 
+void present(const Target& c);
+
 // Reconnects for the life of the process. Without a bridge the display is
 // headless.
 void* bridgeLoop(void*) {
@@ -223,13 +226,10 @@ void* bridgeLoop(void*) {
     lxb_close_fds(&p);
     pthread_mutex_lock(&g.mu);
     g.sock = sock;
-    const RefreshCallback refresh = g.refresh;
-    void* refreshData = g.refreshData;
+    // render_service commits a frame only when the screen changes, so a new
+    // window gets the last frame here.
+    present(g.shown);
     pthread_mutex_unlock(&g.mu);
-    // A new window shows nothing until Commit presents a frame, and
-    // render_service presents one only when the screen changes. The refresh
-    // callback makes it compose the screen again.
-    if (refresh) refresh(kDisplay, refreshData);
     while (lxb_recv(sock, &p) == 0) {
       if (p.type == kEvRelease && p.len >= 8) {
         const uint32_t id = lxb_u32(p.body);
@@ -248,6 +248,10 @@ void* bridgeLoop(void*) {
       lxb_close_fds(&p);
     }
     LOGW("bridge gone");
+    // The bridge ends the connection when the user closes or opens the
+    // window, and the composer connects again at once. If the bridge has
+    // stopped, that attempt fails and the next ones wait for the backoff.
+    backoff = {};
     pthread_mutex_lock(&g.mu);
     g.sock = -1;
     g.cursorSent = false;
@@ -660,10 +664,9 @@ RegDisplayVBlankCallback(uint32_t devId, VBlankCallback cb, void* data) {
   return HDF_SUCCESS;
 }
 
-EXPORT int32_t RegRefreshCallback(RefreshCallback cb, void* data) {
-  Lock l;
-  g.refresh = cb;
-  g.refreshData = data;
+// The composer shows the last frame again in a new window, so it needs no
+// refresh from render_service.
+EXPORT int32_t RegRefreshCallback(RefreshCallback, void*) {
   return HDF_SUCCESS;
 }
 
@@ -708,7 +711,11 @@ EXPORT int32_t Commit(uint32_t devId, int32_t& fence) {
     close(acquire);
   }
   Lock l;
-  present(g.direct >= 0 ? g.layers[g.direct].buffer : g.client);
+  const Target& c = g.direct >= 0 ? g.layers[g.direct].buffer : g.client;
+  closeFd(g.shown.fd);
+  g.shown = c;
+  g.shown.fd = dupFd(c.fd);
+  present(g.shown);
   return HDF_SUCCESS;
 }
 
