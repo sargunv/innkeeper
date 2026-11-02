@@ -1,35 +1,28 @@
-import { common, Want, wantConstant } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { targetWant } from '../files/Docs';
-import { openError } from '../files/Targets';
-import { Choice, Choices } from './Choice';
+import { Choice, Choices, Picker } from './Choice';
 
 // The chooser's dialog over a dimmed backdrop. A click outside the dialog
-// cancels it. The e2e tests find each app's row by its id,
-// `chooser_<bundle>`, in WindowManagerService's inspector dump.
+// cancels it. ChooserAbility and the app selector load this page with the
+// choices and a Picker in its LocalStorage. The e2e tests find each app's row
+// by its id, `chooser_<bundle>/<ability>`, and the checkbox by
+// `chooser_always`, in WindowManagerService's inspector dump.
 @Entry({ useSharedStorage: true })
 @Component
 struct Chooser {
   @LocalStorageLink('choices') choices: Choices = new Choices();
   @State failure: string = '';
+  @State always: boolean = false;
 
-  private context(): common.UIAbilityContext {
-    return this.getUIContext().getHostContext() as common.UIAbilityContext;
+  private picker(): Picker | undefined {
+    return this.getUIContext().getSharedLocalStorage()?.get<Picker>('picker');
   }
 
   private close(): void {
-    this.context().terminateSelf();
+    this.picker()?.close();
   }
 
   private pick(c: Choice): void {
-    const w = targetWant(c.target, this.choices.uris, this.choices.types,
-      wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION) as Want;
-    this.context().startAbility(w).then(() => {
-      hilog.info(0x0000, 'InnkeeperFiles', 'chose %{public}s', c.target.bundleName);
-      this.close();
-    }).catch((e: BusinessError) => {
-      this.failure = openError(e.code, `${e.message}`, c.target.bundleName, this.choices.types);
+    this.picker()?.pick(c, this.always).catch((e: Error) => {
+      this.failure = e.message;
     });
   }
 
@@ -75,13 +68,32 @@ struct Chooser {
                   pressed: { .backgroundColor($r('sys.color.ohos_id_color_click_effect')) },
                   normal: { .backgroundColor(Color.Transparent) },
                 })
-                .id(`chooser_${c.target.bundleName}`)
+                .id(`chooser_${c.target.bundleName}/${c.target.abilityName}`)
                 .onClick(() => this.pick(c))
               }
-            }, (c: Choice) => `${c.target.bundleName}/${c.target.moduleName}/${c.target.abilityName}`)
+            }, (c: Choice) => `${c.target.bundleName}/${c.target.moduleName}/${c.target.abilityName}/${c.appIndex}`)
           }
           .width('100%')
           .constraintSize({ maxHeight: 360 })
+          if (this.choices.always) {
+            Row({ space: 8 }) {
+              Checkbox({ name: 'always' })
+                .select(this.always)
+                .onChange((on: boolean) => {
+                  this.always = on;
+                })
+                .id('chooser_always')
+              Text($r('app.string.chooser_always'))
+                .fontSize(16)
+                .fontColor($r('sys.color.ohos_id_color_text_primary'))
+                .layoutWeight(1)
+                .onClick(() => {
+                  this.always = !this.always;
+                })
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12 })
+          }
           Button($r('app.string.chooser_cancel'))
             .width('100%')
             .backgroundColor($r('sys.color.ohos_id_color_button_normal'))

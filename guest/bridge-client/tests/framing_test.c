@@ -97,6 +97,27 @@ static void test_call(int client, int bridge) {
   CHECK(lxb_u16(sent) == 0x0102 && lxb_u32(sent + 4) == 5);
 }
 
+// Several fds cross in one packet, up to LXB_MAX_FDS.
+static void test_send_fds(int client, int bridge) {
+  int pipefd[2];
+  CHECK(pipe(pipefd) == 0);
+  struct lxb_msg m;
+  lxb_msg_init(&m, 0x0309, 3);
+  int many[LXB_MAX_FDS + 1];
+  for (int i = 0; i <= LXB_MAX_FDS; i++) many[i] = pipefd[0];
+  CHECK(lxb_send_fds(client, &m, many, LXB_MAX_FDS + 1) == -EINVAL);
+  CHECK(lxb_send_fds(client, &m, pipefd, 2) == 0);
+  close(pipefd[0]);
+  close(pipefd[1]);
+  struct lxb_packet p;
+  CHECK(lxb_recv(bridge, &p) == 0);
+  CHECK(p.type == 0x0309 && p.tag == 3 && p.nfds == 2);
+  CHECK(write(p.fds[1], "x", 1) == 1);
+  char c = 0;
+  CHECK(read(p.fds[0], &c, 1) == 1 && c == 'x');
+  lxb_close_fds(&p);
+}
+
 static void test_malformed_and_hangup(int client, int bridge) {
   const uint8_t short_reply[] = {0x00, 0x80, 0, 0, 1, 0, 0, 0, 0};
   bridge_send(bridge, short_reply, sizeof(short_reply), -1);
@@ -120,6 +141,7 @@ int main(void) {
   test_name_cut_on_utf8_boundary();
   test_overflow_refused(sv[0]);
   test_call(sv[0], sv[1]);
+  test_send_fds(sv[0], sv[1]);
   test_malformed_and_hangup(sv[0], sv[1]);
   test_backoff();
   close(sv[0]);

@@ -53,6 +53,15 @@
         "icon": "$media:icon",
         "label": "$string:app_name",
         "exported": false
+      },
+      {
+        "name": "AppSelectorExtensionAbility",
+        "srcEntry": "./ets/selector/AppSelectorExtensionAbility.ets",
+        "type": "sys/commonUI",
+        "description": "$string:selector_description",
+        "icon": "$media:icon",
+        "label": "$string:chooser_label",
+        "exported": true
       }
     ],
     "abilities": [
@@ -122,6 +131,15 @@
               },
               {
                 "scheme": "ftps"
+              }
+            ]
+          },
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              {
+                "scheme": "file",
+                "type": "*/*"
               }
             ]
           }

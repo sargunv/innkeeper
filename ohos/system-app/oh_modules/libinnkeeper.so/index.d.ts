@@ -20,8 +20,8 @@ export const onEvent: (
   callback: (type: number, body: ArrayBuffer, fds: number[]) => void,
 ) => void;
 
-// Sends a request and resolves with its reply. It takes at most one fd and
-// closes it once sent. It rejects if the connection is down or closes before
+// Sends a request and resolves with its reply. It takes up to four fds and
+// closes them once sent. It rejects if the connection is down or closes before
 // the reply.
 export const request: (
   handle: number,
@@ -29,6 +29,10 @@ export const request: (
   body: ArrayBuffer,
   fds: number[],
 ) => Promise<Reply>;
+
+// Returns a copy of `fd` that the caller owns, such as a fileIo File's fd for
+// request, which closes the fds it sends.
+export const dup: (fd: number) => number;
 
 // Returns a memfd that holds `bytes`, sealed as the bridge requires of a blob.
 export const blob: (bytes: ArrayBuffer) => number;

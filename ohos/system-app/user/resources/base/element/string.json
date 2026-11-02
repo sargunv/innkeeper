@@ -14,7 +14,7 @@
     },
     {
       "name": "desktop_description",
-      "value": "Opens links on the desktop."
+      "value": "Opens links and files on the desktop."
     },
     {
       "name": "chooser_label",
@@ -31,6 +31,14 @@
     {
       "name": "chooser_ok",
       "value": "OK"
+    },
+    {
+      "name": "chooser_always",
+      "value": "Always open this type with the app"
+    },
+    {
+      "name": "selector_description",
+      "value": "Chooses the app that opens a file or a link from an OpenHarmony app."
     }
   ]
 }

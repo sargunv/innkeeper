@@ -3,9 +3,10 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { message, toDesktop } from './Desktop';
 
-// Opens links from OpenHarmony apps on the desktop, as Android's
-// HandoffActivity does. It is the default browser. It shows no page and
-// finishes once the bridge has the link.
+// Opens links and files from OpenHarmony apps on the desktop, as Android's
+// HandoffActivity does. It is the default browser, and OpenHarmony's app
+// selector offers it for every file. It shows no page and finishes once the
+// bridge has the link or file.
 export default class DesktopAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     this.handle(want);

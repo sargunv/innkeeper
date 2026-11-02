@@ -837,7 +837,7 @@ else
       local w
       w=$(chooser) && [[ -n $w ]] || return
       row=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
-        awk '/compid: chooser_dev[.]sargunv[.]innkeeper[.]probes$/ { f = 1 } f && /[|] top: / { top = $3 }
+        awk '/compid: chooser_dev[.]sargunv[.]innkeeper[.]probes[/]/ { f = 1 } f && /[|] top: / { top = $3 }
           f && /[|] left: / { left = $3 } f && /[|] width: / { width = $3 }
           f && /[|] height: / { printf "%d %d\n", left + width / 2, top + $3 / 2; exit }')
       [[ -n $row ]]
@@ -856,6 +856,56 @@ else
     exit 1
   fi
   echo "ok   open shows Innkeeper User's app chooser when two apps take the file, and a click on the probe opens the file there"
+  # The probe opens a PNG file from its own files. Gallery, the probe and
+  # Innkeeper User's DesktopAbility take it, so AMS shows Innkeeper User's app
+  # selector over the probe. With "always" checked, a click on Desktop hands
+  # the file to the desktop's portal and makes Desktop the default app for PNG
+  # files. The probe's next open of the PNG then reaches the desktop without
+  # the selector.
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_desktop_file() {
+    local probe always desktop
+    geometry || return
+    # The selector is a UIExtension, which adds its nodes to the probe
+    # window's ArkUI dump on a beta build alone. The image leaves the constant
+    # unset, so the test sets it.
+    s /system/bin/param set const.logsystem.versiontype beta >/dev/null || return
+    view() { s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode view >>"$T/ohos.txt" 2>&1; }
+    view || return
+    probe=$(s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^probes[0-9]+$/ { print $4; exit }')
+    [[ -n $probe ]] || return
+    dump() { s /system/bin/hidumper -s WindowManagerService -a "-w $probe -default" >"$T/selector.txt"; }
+    # centre prints the centre of the dump's node with inspector id $1.
+    centre() {
+      awk -v id="$1" '/FrameRect: RectT/ { r = $0; sub(/.*- \[/, "", r); sub(/\].*/, "", r); split(r, d, " x ") }
+        / top: [0-9.]+ left: [0-9.]+/ { for (i = 1; i < NF; i++) { if ($i == "top:") t = $(i + 1); if ($i == "left:") l = $(i + 1) } }
+        $0 ~ "compid: " id "$" { printf "%d %d\n", l + d[1] / 2, t + d[2] / 2; exit }' "$T/selector.txt"
+    }
+    shown() {
+      dump || return
+      always=$(centre chooser_always)
+      desktop=$(centre 'chooser_dev[.]sargunv[.]innkeeper[.]user/DesktopAbility')
+      [[ -n $always && -n $desktop ]]
+    }
+    until_ok shown || return
+    click() { { at "$@" && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin; }
+    # shellcheck disable=SC2086 # always and desktop are "<x> <y>"
+    click $always
+    checked() { dump && awk '/compid: chooser_always$/ { f = 1 } f && /IsSelected: / { print $NF; exit }' "$T/selector.txt" | grep -q true; }
+    until_ok checked || return
+    # shellcheck disable=SC2086
+    click $desktop
+    opened() { [[ $(grep -c '^openfile: from-ohos\.png$' "$desktop_log") -ge $1 ]]; }
+    until_ok opened 1 || return
+    view || return
+    until_ok opened 2
+  }
+  if ! timed ohos-desktop-file ohos_desktop_file; then
+    s /system/bin/hidumper -s WindowManagerService -a -a >&2
+    s /system/bin/hilog -x -T InnkeeperSelector | tail -n 10 >&2
+    exit 1
+  fi
+  echo "ok   OpenHarmony's app selector offers Desktop for a file that the probe opens, and with always checked the probe's next open goes to the desktop without it"
   # probe_field sets field to the centre of the probe's text field on the
   # panel and its text, from the inspector dump: "<x> <y>|<text>".
   # shellcheck disable=SC2329 # invoked through until_ok

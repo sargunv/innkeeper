@@ -153,22 +153,24 @@ int main(void) {
   seen.refuse = 1;
   CHECK(ik_connection_start(&c, &cb) == 0);
   wait_for(&seen.attempts, 1);
-  CHECK(ik_connection_request(&c, 0x0505, NULL, 0, -1, &cookie_a) == -ENOTCONN);
+  CHECK(
+    ik_connection_request(&c, 0x0505, NULL, 0, NULL, 0, &cookie_a) == -ENOTCONN
+  );
   wait_for(&seen.connects, 1);
   CHECK(seen.attempts == 2);
 
-  // A request carries its body and fd. An event before its reply goes to the
-  // event callback, and a reply for no waiting request is dropped.
+  // A request carries its body and fds. An event before its reply goes to
+  // the event callback, and a reply for no waiting request is dropped.
   int pipefd[2];
   CHECK(pipe(pipefd) == 0);
   const uint8_t body[] = {1, 2, 3};
   CHECK(
     ik_connection_request(
-      &c, 0x0502, body, sizeof(body), pipefd[0], &cookie_a
+      &c, 0x0502, body, sizeof(body), pipefd, 2, &cookie_a
     ) == 0
   );
   close(pipefd[0]);
-  const uint32_t tag = bridge_read(0x0502, sizeof(body), 1);
+  const uint32_t tag = bridge_read(0x0502, sizeof(body), 2);
   const uint8_t event[] = {0x01, 0x45, 0, 0, 0, 0, 0, 0};
   bridge_send(event, sizeof(event), pipefd[1]);
   bridge_reply(tag + 100, 0, 7, -1);
@@ -184,20 +186,22 @@ int main(void) {
   // Bodies over one packet and requests beyond the waiting limit are refused.
   uint8_t big[LXB_MAX_MSG] = {0};
   CHECK(
-    ik_connection_request(&c, 0x0502, big, sizeof(big), -1, &cookie_a) ==
+    ik_connection_request(&c, 0x0502, big, sizeof(big), NULL, 0, &cookie_a) ==
     -EMSGSIZE
   );
   for (int i = 0; i < IK_MAX_PENDING; i++) {
-    CHECK(ik_connection_request(&c, 0x0505, NULL, 0, -1, &cookie_b) == 0);
+    CHECK(ik_connection_request(&c, 0x0505, NULL, 0, NULL, 0, &cookie_b) == 0);
   }
-  CHECK(ik_connection_request(&c, 0x0505, NULL, 0, -1, &cookie_b) == -EBUSY);
+  CHECK(
+    ik_connection_request(&c, 0x0505, NULL, 0, NULL, 0, &cookie_b) == -EBUSY
+  );
 
   // A hangup fails every waiting request, and the reader connects again.
   close(bridge());
   wait_for(&seen.failures, IK_MAX_PENDING);
   CHECK(seen.failure_err == -EPIPE);
   wait_for(&seen.connects, 2);
-  CHECK(ik_connection_request(&c, 0x0505, NULL, 0, -1, &cookie_b) == 0);
+  CHECK(ik_connection_request(&c, 0x0505, NULL, 0, NULL, 0, &cookie_b) == 0);
   bridge_read(0x0505, 0, 0);
 
   // Stopping fails the request still waiting.

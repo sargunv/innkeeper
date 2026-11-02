@@ -79,21 +79,26 @@ void lxb_close_fds(struct lxb_packet* p) {
 }
 
 int lxb_send(int sock, const struct lxb_msg* m, int fd) {
+  return lxb_send_fds(sock, m, &fd, fd >= 0 ? 1 : 0);
+}
+
+int lxb_send_fds(int sock, const struct lxb_msg* m, const int* fds, int nfds) {
   if (m->overflow) return -EMSGSIZE;
+  if (nfds < 0 || nfds > LXB_MAX_FDS) return -EINVAL;
   struct iovec iov = {.iov_base = (void*)m->b, .iov_len = m->n};
   struct msghdr h = {.msg_iov = &iov, .msg_iovlen = 1};
   union {
     struct cmsghdr align;
-    char bytes[CMSG_SPACE(sizeof(int))];
+    char bytes[CMSG_SPACE(sizeof(int) * LXB_MAX_FDS)];
   } ctl;
-  if (fd >= 0) {
+  if (nfds > 0) {
     h.msg_control = ctl.bytes;
-    h.msg_controllen = sizeof(ctl.bytes);
+    h.msg_controllen = CMSG_SPACE(sizeof(int) * (size_t)nfds);
     struct cmsghdr* c = CMSG_FIRSTHDR(&h);
     c->cmsg_level = SOL_SOCKET;
     c->cmsg_type = SCM_RIGHTS;
-    c->cmsg_len = CMSG_LEN(sizeof(int));
-    memcpy(CMSG_DATA(c), &fd, sizeof(fd));
+    c->cmsg_len = CMSG_LEN(sizeof(int) * (size_t)nfds);
+    memcpy(CMSG_DATA(c), fds, sizeof(int) * (size_t)nfds);
   }
   ssize_t n;
   do {

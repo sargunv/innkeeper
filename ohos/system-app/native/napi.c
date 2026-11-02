@@ -285,7 +285,8 @@ static napi_value js_on_event(napi_env env, napi_callback_info info) {
 }
 
 // request(handle: number, type: number, body: ArrayBuffer, fds: number[]):
-// Promise<Reply>
+// Promise<Reply>. The request takes the fds, up to LXB_MAX_FDS, and closes
+// them once they are sent.
 static napi_value js_request(napi_env env, napi_callback_info info) {
   napi_value argv[4];
   if (!get_args(env, info, 4, argv)) return NULL;
@@ -294,7 +295,7 @@ static napi_value js_request(napi_env env, napi_callback_info info) {
   uint32_t type, nfds;
   void* data;
   size_t len;
-  int32_t fd = -1;
+  int fds[LXB_MAX_FDS];
   if (
     napi_get_value_uint32(env, argv[1], &type) != napi_ok || type > 0xffff ||
     napi_get_arraybuffer_info(env, argv[2], &data, &len) != napi_ok ||
@@ -305,14 +306,14 @@ static napi_value js_request(napi_env env, napi_callback_info info) {
     );
     return NULL;
   }
-  if (nfds > 1) {
-    napi_throw_range_error(env, NULL, "a request carries at most one fd");
+  if (nfds > LXB_MAX_FDS) {
+    napi_throw_range_error(env, NULL, "a request carries at most four fds");
     return NULL;
   }
-  if (nfds == 1) {
+  for (uint32_t i = 0; i < nfds; i++) {
     napi_value v;
-    napi_get_element(env, argv[3], 0, &v);
-    if (napi_get_value_int32(env, v, &fd) != napi_ok || fd < 0) {
+    napi_get_element(env, argv[3], i, &v);
+    if (napi_get_value_int32(env, v, &fds[i]) != napi_ok || fds[i] < 0) {
       napi_throw_type_error(env, NULL, "an fd is a number");
       return NULL;
     }
@@ -320,12 +321,31 @@ static napi_value js_request(napi_env env, napi_callback_info info) {
   napi_deferred deferred;
   napi_value promise;
   napi_create_promise(env, &deferred, &promise);
-  const int r =
-    ik_connection_request(&conn->c, (uint16_t)type, data, len, fd, deferred);
-  if (fd >= 0) close(fd);
+  const int r = ik_connection_request(
+    &conn->c, (uint16_t)type, data, len, fds, (int)nfds, deferred
+  );
+  for (uint32_t i = 0; i < nfds; i++) close(fds[i]);
   if (r != 0)
     napi_reject_deferred(env, deferred, make_error(env, "bridge request", r));
   return promise;
+}
+
+// dup(fd: number): number, a copy of `fd` that the caller owns. A fileIo
+// File closes its own fd, so request takes a copy of it.
+static napi_value js_dup(napi_env env, napi_callback_info info) {
+  napi_value argv[1];
+  if (!get_args(env, info, 1, argv)) return NULL;
+  int32_t fd;
+  if (napi_get_value_int32(env, argv[0], &fd) != napi_ok || fd < 0) {
+    napi_throw_type_error(env, NULL, "dup(fd: number)");
+    return NULL;
+  }
+  const int copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+  if (copy < 0) {
+    throw_errno(env, "dup", -errno);
+    return NULL;
+  }
+  return number(env, copy);
 }
 
 // blob(bytes: ArrayBuffer): number, a memfd sealed as the bridge requires.
@@ -437,6 +457,7 @@ static napi_value init(napi_env env, napi_value exports) {
     {"onEvent", NULL, js_on_event, NULL, NULL, NULL, napi_default, NULL},
     {"request", NULL, js_request, NULL, NULL, NULL, napi_default, NULL},
     {"blob", NULL, js_blob, NULL, NULL, NULL, napi_default, NULL},
+    {"dup", NULL, js_dup, NULL, NULL, NULL, napi_default, NULL},
     {"waitParameter", NULL, js_wait_parameter, NULL, NULL, NULL, napi_default,
      NULL},
   };

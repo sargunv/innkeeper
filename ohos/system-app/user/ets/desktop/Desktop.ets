@@ -4,8 +4,8 @@ import defaultAppManager from '@ohos.bundle.defaultAppManager';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { blob, onEvent, open, Reply, request } from 'libinnkeeper.so';
-import { HANDOFF, handoffBody, handoffMetadata, isLink } from './Handoff';
+import { blob, dup, onEvent, open, Reply, request } from 'libinnkeeper.so';
+import { fileName, HANDOFF, handoffBody, handoffMetadata, isFile, isLink, OPEN, URI } from './Handoff';
 
 // host/bridge/src/ipc/proto.rs
 const SYSTEM = 3;
@@ -56,21 +56,33 @@ function connection(): Promise<number> {
   });
 }
 
-// Opens the want's link on the desktop, in the desktop's handler for its
-// scheme.
+// Opens the want's link or file on the desktop, in the desktop's handler for
+// the link's scheme or the file's type. The want grants this app read access
+// to a file.
 export async function toDesktop(uri: string): Promise<void> {
-  if (!isLink(uri)) {
-    hilog.warn(DOMAIN, TAG, 'not a link for the desktop: %{private}s', uri);
+  const file = isFile(uri);
+  if (!file && !isLink(uri)) {
+    hilog.warn(DOMAIN, TAG, 'not a link or file for the desktop: %{private}s', uri);
     return;
   }
   const c = await connection();
-  const meta = handoffMetadata(encode(uri));
-  const reply: Reply = await request(c, HANDOFF, handoffBody(meta.length), [blob(meta.buffer)]);
+  const fds: number[] = [];
+  if (file) {
+    const f = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      fds.push(dup(f.fd));
+    } finally {
+      fileIo.closeSync(f);
+    }
+  }
+  const meta = handoffMetadata(encode(file ? '' : uri), file ? [encode(fileName(uri))] : []);
+  const body = handoffBody(file ? OPEN : URI, fds.length, meta.length);
+  const reply: Reply = await request(c, HANDOFF, body, [blob(meta.buffer), ...fds]);
   reply.fds.forEach((fd: number) => fileIo.closeSync(fd));
   if (reply.status !== 0) {
-    throw new Error(`the bridge refused the link (${reply.status})`);
+    throw new Error(`the bridge refused the handoff (${reply.status})`);
   }
-  hilog.info(DOMAIN, TAG, 'opened a link on the desktop');
+  hilog.info(DOMAIN, TAG, file ? 'opened a file on the desktop' : 'opened a link on the desktop');
 }
 
 // Makes DesktopAbility the default browser of `user` once, as Android's

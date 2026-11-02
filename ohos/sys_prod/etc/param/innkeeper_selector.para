@@ -1,0 +1,5 @@
+# AMS shows an app store's app selector when several apps open a file or a
+# link. Innkeeper User provides it (ohos/system-app/user/ets/selector), and
+# its "always" checkbox sets the default app for the file's type. The image
+# has no app store, and its own selector can't remember a choice on a phone.
+const.appgallery.shaderowner.bundlename=dev.sargunv.innkeeper.user

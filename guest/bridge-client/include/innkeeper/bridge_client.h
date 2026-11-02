@@ -83,6 +83,10 @@ int lxb_connect(uint32_t service, const char* name);
 // packet, so several threads may send on one socket. Returns 0 or -errno.
 int lxb_send(int sock, const struct lxb_msg* m, int fd);
 
+// Sends one message with `nfds` fds attached, up to LXB_MAX_FDS. Returns 0,
+// -EINVAL for too many fds, or another -errno.
+int lxb_send_fds(int sock, const struct lxb_msg* m, const int* fds, int nfds);
+
 // Waits for the next packet. Returns 0, -EPIPE if the bridge hung up,
 // -EPROTO for a malformed packet, or another -errno. On failure *p holds no
 // fds.
