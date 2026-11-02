@@ -378,21 +378,29 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   selected render node. Without it, the image's Mesa would open the host's card
   node, and its composer would drive the host display's KMS. That Mesa's only
   working GL driver is llvmpipe. Its iris, crocus, radeonsi, nouveau and zink
-  entries are stubs that print "driver missing". render_service therefore draws
-  with llvmpipe (`LIBGL_ALWAYS_SOFTWARE`). For Vulkan, the layer adds Mesa's
-  RADV and ANV, built for OH's musl by `build:vulkan`
+  entries are stubs that print "driver missing". The layer adds Mesa's RADV and
+  ANV, built for OH's musl by `build:vulkan`
   ([android/vendor/vulkan](../android/vendor/vulkan/README.md#openharmony)).
   OH's Vulkan loader finds them through their manifests in
   `/vendor/etc/vulkan/icd.d` and lists the selected GPU. The drivers implement
   `VK_OHOS_native_buffer`, so Vulkan apps can present through OH's swapchain
   layer.
+- **GL.** The launcher picks the GPU as it does for Android: RADV for amdgpu,
+  ANV for an i915 GPU that ANV supports, and otherwise software. With a GPU, the
+  composed root's `/vendor/lib64/chipsetsdk` gets our EGL, GLES and Zink
+  ([android/vendor/vulkan](../android/vendor/vulkan/README.md#gl)) in place of
+  the image's. render_service and apps then draw with Zink on RADV or ANV, and
+  `hidumper -s RenderService -a gles` names the GPU. Without a GPU, as in CI,
+  the image's Mesa stays, and render_service draws with llvmpipe
+  (`LIBGL_ALWAYS_SOFTWARE`). `INNKEEPER_VULKAN=lvp` picks software.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would
   flush a context that another thread is drawing with, which crashes llvmpipe.
   The shim makes the dma-buf sync file export (`DMA_BUF_IOCTL_EXPORT_SYNC_FILE`)
   fail, so llvmpipe offers no native fences. EGL's software swap waits for its
-  own context's rendering before it queues the buffer.
+  own context's rendering before it queues the buffer. On a GPU, Zink's fences
+  are sync_files from DRM syncobjs, which the shim leaves alone.
 - **Ashmem.** The HDI's command queues use ashmem, as most OH shared memory
   does. The broker emulates ashmem with memfds
   ([supervisor/README.md](../supervisor/README.md#openharmony)).
@@ -419,8 +427,10 @@ file changes.
 - **Buffers** (`passthrough/libdisplay_buffer_vdi_impl.z.so`). Buffers are
   sealed memfds that `/dev/udmabuf` turns into dma-bufs, like Android's CPU
   buffers. They are LINEAR with a 256-byte row pitch, mappable, and importable
-  by llvmpipe and the compositor. The supported formats are RGB 8888, 565, 888
-  and 1010102, and YUV 4:2:0.
+  by llvmpipe, by RADV and ANV, and by the compositor. A `BufferHandle` has no
+  field for a tiling, so OH's swapchain layer and EGL can't pass a tiled buffer
+  to the driver, and every buffer stays LINEAR. The supported formats are RGB
+  8888, 565, 888 and 1010102, and YUV 4:2:0.
 - **Build.** `build.sh` compiles with the NDK's clang for `x86_64-linux-musl`,
   using the build container's musl headers. Stub libraries give the linker the
   `libc.so`, `libc++.so`, `libhilog.so` and `libbegetutil.z.so` sonames, and the

@@ -23,7 +23,7 @@ use crate::profile::System;
 use crate::sandbox::{files_read_only, link, over, remove_tree, tree_linker};
 
 /// Bumped when the composition below changes.
-const COMPOSE_VERSION: &str = "ohos-3";
+const COMPOSE_VERSION: &str = "ohos-4";
 
 /// DMS's config. Its `<dpi>` is the only place DMS takes density from.
 const DMS_CONFIG: &str = "vendor/etc/window/resources/display_manager_config.xml";
@@ -66,6 +66,13 @@ const SCREENLOCK_STATE: &str = "service/el1/public/screenlock/screenlock_state.x
 /// Flags that turn the lock screen off for user 100, the first user.
 const SCREENLOCK_OFF: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
     <preferences version=\"1.0\"><bool key=\"100\" value=\"true\"/></preferences>\n";
+
+/// Returns the layer of our EGL, GLES and Zink, which replace the image's
+/// Mesa when the launcher selected a GPU. Without one, the image's llvmpipe
+/// draws (ohos/README.md, "GPU").
+fn gl_layer(layer: &Path, render_node: Option<&Path>) -> Option<std::path::PathBuf> {
+    render_node.map(|_| layer.join("gpu/vendor"))
+}
 
 /// Fetches and extracts the pinned image if it is missing, then prunes the
 /// cache as Android's preparation does. The returned lease keeps the image
@@ -212,6 +219,8 @@ pub fn compose(cfg: &Config) -> Result<()> {
     key.update(format!("{w}x{h}@{dpi}"));
     let udid = crate::profile::udid(&cfg.paths.profile);
     key.update(&udid);
+    let gl = gl_layer(&layer, cfg.render_node.as_deref());
+    key.update(format!("gl={}", gl.is_some()));
     let key: String = key.finalize().iter().map(|b| format!("{b:02x}")).collect();
     let key_file = r.join(".compose-key");
     if fs::read_to_string(&key_file).is_ok_and(|k| k == key) {
@@ -224,6 +233,9 @@ pub fn compose(cfg: &Config) -> Result<()> {
     copy(&cfg.image.img.join("vendor"), &r.join("vendor"))?;
     dirs_writable(r)?;
     over(&layer.join("vendor"), &r.join("vendor"))?;
+    if let Some(gl) = &gl {
+        over(gl, &r.join("vendor"))?;
+    }
     fs::create_dir(r.join("sys_prod"))?;
     over(&layer.join("sys_prod"), &r.join("sys_prod"))?;
     let dms = r.join(DMS_CONFIG);
@@ -378,6 +390,16 @@ fn lock_screen_off_by_default(data: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn our_gl_replaces_the_images_only_on_a_gpu() {
+        let layer = Path::new("/share/ohos");
+        assert_eq!(
+            gl_layer(layer, Some(Path::new("/dev/dri/renderD128"))),
+            Some(layer.join("gpu/vendor"))
+        );
+        assert_eq!(gl_layer(layer, None), None);
+    }
 
     #[test]
     fn dms_takes_the_panels_dpi() {
