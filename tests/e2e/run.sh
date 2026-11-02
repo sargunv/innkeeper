@@ -326,7 +326,7 @@ if (
       # shellcheck disable=SC2329 # invoked through until_ok
       wide_colour_visible() {
         desktop Screenshot "$T/wide-colour.png" >/dev/null || return 1
-        /usr/bin/python3 "$repo/tests/e2e/wide_colour.py" "$T/wide-colour.png"
+        /usr/bin/python3 "$repo/tests/e2e/colour.py" "$T/wide-colour.png" 240 80 30
       }
       until_ok wide_colour_visible
       echo 'ok   wide-colour window displays its SDR pixels on the host'

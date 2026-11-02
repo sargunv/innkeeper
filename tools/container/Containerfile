@@ -1,12 +1,15 @@
 # The build container has the tools for cross-compiling Mesa, libdrm, LLVM and
 # Android code, for the static image tools (image/tools/build.sh), and musl's
-# headers for OpenHarmony's VDIs (ohos/build.sh). The NDK comes from the host,
-# because tools/container/run.sh mounts $HOME, and tools/build/toolchain.env
-# pins its version.
+# headers for OpenHarmony's VDIs (ohos/build.sh). FFmpeg encodes the video clip
+# that the OpenHarmony e2e group plays (ohos/probe/build.sh). The NDK comes
+# from the host, because tools/container/run.sh mounts $HOME, and
+# tools/build/toolchain.env pins its version.
 FROM registry.fedoraproject.org/fedora:44
 # Set the base URLs directly because, on hosted runners, the metalinks can pick
-# slow or unreachable mirrors.
+# slow or unreachable mirrors. Cisco's OpenH264 repository has only a metalink,
+# and the clip doesn't use H.264, so FFmpeg gets Fedora's OpenH264 stub.
 RUN dnf -y \
+      --disablerepo=fedora-cisco-openh264 \
       --setopt='fedora.metalink=' \
       --setopt='fedora.baseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/$releasever/Everything/$basearch/os/' \
       --setopt='updates.metalink=' \
@@ -18,5 +21,5 @@ RUN dnf -y \
       glslang bison flex gcc gcc-c++ diffutils curl tar xz bzip2 \
       autoconf automake libtool glibc-static libstdc++-static zlib-ng-compat-static \
       protobuf-devel brotli-devel lz4-devel pcre2-devel libusb1-devel libzstd-devel \
-      musl-devel \
+      musl-devel ffmpeg-free \
     && dnf clean all
