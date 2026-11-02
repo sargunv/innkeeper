@@ -46,6 +46,7 @@ impl Command {
                 "info"
                     | "clear-cache"
                     | "clear-data"
+                    | "clear-defaults"
                     | "force-stop"
                     | "permission"
                     | "escape-back"
@@ -99,14 +100,23 @@ pub struct AppInfo {
     pub escape_back: bool,
     pub background: bool,
     pub permissions: Vec<Permission>,
+    /// The types of file or link that the app opens without asking, from
+    /// Android's preferred activities. A type is a MIME type, a URI scheme
+    /// such as `https:`, or an intent action.
+    pub defaults: Vec<String>,
 }
 
 /// A system app's answer to a [`Command`]. Android's answers carry the app's
-/// info. OpenHarmony's system app answers `background` without info.
+/// info. OpenHarmony's system app answers `background` without info, and it
+/// answers `info` and `clear-defaults` with `defaults` alone.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
     pub error: String,
     pub info: Option<AppInfo>,
+    /// The MIME types and file extensions, such as `.png`, that the
+    /// OpenHarmony app opens by default after the command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<Vec<String>>,
 }
 
 impl Response {
@@ -116,6 +126,10 @@ impl Response {
         ensure!(reply.error.len() <= 4096, "app error too large");
         if let Some(info) = &reply.info {
             ensure!(info.permissions.len() <= 512, "too many permissions");
+            ensure!(info.defaults.len() <= 512, "too many defaults");
+        }
+        if let Some(defaults) = &reply.defaults {
+            ensure!(defaults.len() <= 512, "too many defaults");
         }
         Ok(reply)
     }
@@ -222,14 +236,14 @@ fn proxy(
     )?)
 }
 
-/// Starts Android if needed, then calls the bridge over the desktop bus.
-pub fn request(
+/// Starts the session if needed, then runs `command` through the bridge
+/// over the desktop bus. Fails with the error that the system app reports.
+fn call(
     profile: &innkeeper_profile::profile::ProfileName,
-    command: Command,
+    command: &Command,
     report: crate::ops::Report,
-) -> Result<AppInfo> {
+) -> Result<Response> {
     command.validate()?;
-    crate::profiles::need_android(profile, "app settings")?;
     crate::ops::ensure_session(profile, report)?;
     let json: String = proxy(profile)?.call(
         "App",
@@ -242,7 +256,17 @@ pub fn request(
     )?;
     let response = Response::decode(json.as_bytes())?;
     ensure!(response.error.is_empty(), "{}", response.error);
-    response
+    Ok(response)
+}
+
+/// Starts Android if needed, then calls the bridge over the desktop bus.
+pub fn request(
+    profile: &innkeeper_profile::profile::ProfileName,
+    command: Command,
+    report: crate::ops::Report,
+) -> Result<AppInfo> {
+    crate::profiles::need_android(profile, "app settings")?;
+    call(profile, &command, report)?
         .info
         .ok_or_else(|| anyhow::anyhow!("missing app information"))
 }
@@ -258,20 +282,24 @@ pub fn set_background(
 ) -> Result<()> {
     let mut command = Command::new(package, "background");
     command.enabled = enabled;
-    command.validate()?;
-    crate::ops::ensure_session(profile, report)?;
-    let json: String = proxy(profile)?.call(
-        "App",
-        &(
-            &command.package,
-            &command.action,
-            &command.permission,
-            command.enabled,
-        ),
-    )?;
-    let response = Response::decode(json.as_bytes())?;
-    ensure!(response.error.is_empty(), "{}", response.error);
+    call(profile, &command, report)?;
     Ok(())
+}
+
+/// Lists the types that OpenHarmony bundle `package` opens by default, among
+/// those that Innkeeper User's app selector set, through profile `profile`'s
+/// session, which it starts if needed. With `clear`, it first resets the
+/// defaults of those types, so the selector asks again.
+pub fn ohos_defaults(
+    profile: &innkeeper_profile::profile::ProfileName,
+    package: &str,
+    clear: bool,
+    report: crate::ops::Report,
+) -> Result<Vec<String>> {
+    let action = if clear { "clear-defaults" } else { "info" };
+    call(profile, &Command::new(package, action), report)?
+        .defaults
+        .context("missing default apps")
 }
 
 /// The arguments of Session1 `Launch`: package, component, URI, grants,
@@ -388,6 +416,7 @@ mod tests {
             ("a.b", "permission", "", true),
             ("a.b", "permission", "x\ny", true),
             ("a.b", "clear-data", "", true),
+            ("a.b", "clear-defaults", "", true),
             ("a.b", "clear-cache", "android.permission.CAMERA", false),
         ] {
             assert!(
@@ -403,8 +432,17 @@ mod tests {
         }
         // OpenHarmony's system app answers without app info.
         let r = Response::decode(br#"{"error":"","info":null}"#).unwrap();
-        assert!(r.error.is_empty() && r.info.is_none());
+        assert!(r.error.is_empty() && r.info.is_none() && r.defaults.is_none());
         assert!(Response::decode(br#"{"info":null}"#).is_err());
+        assert!(Command::new("a.b", "clear-defaults").encode().is_ok());
+        let r = Response::decode(br#"{"error":"","info":null,"defaults":["image/png",".png"]}"#)
+            .unwrap();
+        assert_eq!(r.defaults.unwrap(), ["image/png", ".png"]);
+        let many = format!(
+            r#"{{"error":"","info":null,"defaults":[{}]}}"#,
+            vec![r#"".png""#; 513].join(",")
+        );
+        assert!(Response::decode(many.as_bytes()).is_err());
         use crate::android::{Launch, LaunchOptions};
         let main = Launch::Main {
             component: "org.wikipedia/.main.MainActivity".into(),
