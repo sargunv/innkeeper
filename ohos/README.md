@@ -389,9 +389,9 @@ Closing the window leaves OH running. The bridge ends the composer's display
 connection, and the composer connects again with a headless display, whose
 frames the bridge releases without showing them. `innkeeper run` calls
 Session1's `ShowScreen`, which ends the headless connection, and the composer's
-next connection gets a new window. On each connection the composer calls the
-refresh callback that render_service registered, and render_service composes the
-screen again, so the new window shows a frame when OH's screen is static.
+next connection gets a new window. render_service commits a frame only when the
+screen changes, so on each connection the composer shows the last frame that
+render_service committed. A new window shows OH's screen when it is static.
 
 On a new profile, SceneBoard shows the home screen about 10 s after samgr
 starts. A new profile's lock screen is off for user 100, as Android's lock
