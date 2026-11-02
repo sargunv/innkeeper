@@ -8,6 +8,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <utility>
 
 #include "Buffer.h"
 #include "Common.h"
@@ -40,6 +42,8 @@ class Presenter {
   virtual ~Presenter() = default;
   virtual const char* name() const = 0;
   virtual void present(const FrameInput& frame) = 0;
+  // The display's mode changed to `width`x`height` pixels.
+  virtual void resize(uint32_t width, uint32_t height) {}
 };
 
 // Discards frames and logs how many it was given.
@@ -66,6 +70,9 @@ std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config);
 // Display 0's mode is 1280x800 at 160 dpi. In phone mode it is the device's
 // screen, from vendor.innkeeper.hwc.primary (WxH) and ro.sf.lcd_density.
 DisplayConfig primaryConfig();
+// Display 0's size in phone mode, from vendor.innkeeper.hwc.primary, or none
+// if the property is unset or malformed.
+std::optional<std::pair<int32_t, int32_t>> primarySize();
 // Creates the presenter for a HWC-backed virtual display
 // (ComposerClient::createVirtualDisplay). The display shows in a window if the
 // backend is "bridge" and the bridge has a window for it.

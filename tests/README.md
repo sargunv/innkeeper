@@ -17,6 +17,11 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   INNKEEPER_PROFILE=e2e-local mise run test:e2e
   ```
 
+- `mise run test:e2e -- device` creates a fresh Android profile with the device
+  display, in its own session. Display 0's window shows its first frame, and
+  display 0 is as wide as the window times its scale. The test desktop then
+  resizes the window. A wide window makes display 0 landscape with gesture
+  navigation, and a narrow one makes it portrait with three buttons.
 - `mise run test:e2e -- ohos` fetches the OpenHarmony image and creates a fresh
   OpenHarmony profile ([ohos](../ohos/README.md)). It starts the profile on the
   private desktop and waits until SceneBoard's home screen has focus and its

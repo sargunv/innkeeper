@@ -2,7 +2,7 @@
 """Serve dev.sargunv.Innkeeper.TestDesktop on the disposable KWin desktop.
 
 tests/e2e/mutter.js serves the same interface in GNOME Shell. Input uses
-org_kde_kwin_fake_input, Visibility, Position, Geometry and Close use KWin scripts,
+org_kde_kwin_fake_input, Visibility, Position, Geometry, Resize and Close use KWin scripts,
 Layout writes kxkbrc, and Screenshot uses org.kde.KWin.ScreenShot2. KWin grants this executable both
 restricted interfaces because of the desktop file that tests/nested.sh writes.
 """
@@ -207,6 +207,19 @@ class TestDesktop(dbus.service.Object):
   def Close(self, app_id, ok, err):
     """Close the windows whose class contains app_id, as a close button does."""
     self.script("w.closeWindow();\n", ok, str(app_id))
+
+  @dbus.service.method(
+    NAME, in_signature="sii", out_signature="b", async_callbacks=("ok", "err")
+  )
+  def Resize(self, app_id, width, height, ok, err):
+    """Give the windows whose class contains app_id a frame of width by
+    height, as dragging their corner does."""
+    self.script(
+      "const g = w.frameGeometry;\n"
+      f"w.frameGeometry = {{x: g.x, y: g.y, width: {int(width)}, height: {int(height)}}};\n",
+      ok,
+      str(app_id),
+    )
 
   @dbus.service.method(
     NAME,

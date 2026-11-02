@@ -64,8 +64,9 @@ is read again. An error offers to read the values again.
 `src/preferences.rs` (Ctrl+,) shows the settings of the profile in the window.
 It reads them without starting Android. The page has these settings:
 
-- **Display:** windowed, or a phone preset, used from the next start
-  ([phone mode](../../docs/display.md#phone-mode)).
+- **Display:** windowed, or a device window that Android's screen resizes with,
+  used from the next start ([phone mode](../../docs/display.md#phone-mode)).
+  OpenHarmony shows as a phone of a fixed size.
 - **Desktop following:** the desktop's appearance, its language and region, and
   its clock. Each one is on by default.
 - **Idle timeout.**

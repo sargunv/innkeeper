@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <tuple>
 
 #include "Presenter.h"
 
@@ -44,16 +45,22 @@ std::unique_ptr<Presenter> createPrimaryPresenter(const DisplayConfig& config) {
   return std::make_unique<HeadlessPresenter>();
 }
 
-DisplayConfig primaryConfig() {
-  DisplayConfig config;
+std::optional<std::pair<int32_t, int32_t>> primarySize() {
   int w = 0, h = 0;
+  char end = 0;
   const std::string size = getProperty("vendor.innkeeper.hwc.primary", "");
   if (
-    sscanf(size.c_str(), "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 &&
-    h <= 8192
-  ) {
-    config.width = w;
-    config.height = h;
+    sscanf(size.c_str(), "%dx%d%c", &w, &h, &end) == 2 && w > 0 && h > 0 &&
+    w <= 8192 && h <= 8192
+  )
+    return std::pair{w, h};
+  return std::nullopt;
+}
+
+DisplayConfig primaryConfig() {
+  DisplayConfig config;
+  if (const auto size = primarySize()) {
+    std::tie(config.width, config.height) = *size;
     config.dpi =
       std::max(1, atoi(getProperty("ro.sf.lcd_density", "160").c_str()));
   }

@@ -199,7 +199,8 @@ directory next to the data version record (`host/profile/src/profile.rs`). The
 settings therefore move and back up with the data. They cover the system, the
 display, adb and hdc and their ports, the idle timeout and following the
 desktop. A missing file or setting takes its default, and an unknown setting is
-an error. OpenHarmony uses the display setting, which is a phone preset because
+an error. Android's phone presets from older versions load as the device
+display. OpenHarmony uses the display setting, which is a phone preset because
 OpenHarmony has no windowed mode, the idle timeout, the settings for following
 the desktop, and hdc. OpenHarmony has no accent color. The CLI and the manager
 refuse adb and following the accent for OpenHarmony, along with the app settings

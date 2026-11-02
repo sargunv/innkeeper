@@ -68,8 +68,13 @@ class BridgeDisplay {
     for (auto& [_, buf] : mBuffers) buf.source->setPresentationToken(0);
   }
   uint32_t id() const { return mId; }
+  // The size is guarded by the bridge lock.
   uint32_t width() const { return mWidth; }
   uint32_t height() const { return mHeight; }
+  void setSize(uint32_t width, uint32_t height) {
+    mWidth = width;
+    mHeight = height;
+  }
   void present(const FrameInput& frame);
   void releaseImage(uint64_t token);
   void cursor(const CursorState* cursor);
@@ -97,7 +102,7 @@ class BridgeDisplay {
  private:
   Bridge* b;
   const uint32_t mId;
-  const uint32_t mWidth, mHeight;
+  uint32_t mWidth, mHeight;
   int64_t mWindow = -1;                       // guarded by the bridge lock
   std::map<uint64_t, BridgeBuffer> mBuffers;  // guarded by the bridge lock
   uint64_t mFrames = 0, mDropped = 0;
@@ -124,6 +129,8 @@ class Bridge {
   // else on connect.
   void addDisplay(std::shared_ptr<BridgeDisplay> d);
   void removeDisplay(uint32_t id);
+  // Gives display `id` a new size, which later offers carry.
+  void resizeDisplay(uint32_t id, uint32_t width, uint32_t height);
   // Offers display `id` again if the bridge has no window for it and no offer
   // is pending. This picks up a window requested after the display was added.
   void offerAgain(uint32_t id);
@@ -175,6 +182,12 @@ void Bridge::offerAgain(uint32_t id) {
   for (auto& [_, pending] : mAdds)
     if (pending == id) return;
   sendAdd(*it->second);
+}
+
+void Bridge::resizeDisplay(uint32_t id, uint32_t width, uint32_t height) {
+  std::lock_guard lock(mutex);
+  if (auto it = mDisplays.find(id); it != mDisplays.end())
+    it->second->setSize(width, height);
 }
 
 void Bridge::removeDisplay(uint32_t id) {
@@ -536,6 +549,11 @@ class BridgePrimaryPresenter : public Presenter {
     gBridge->removeDisplay(0);
   }
   const char* name() const override { return "bridge-primary"; }
+  // A window that is shown already keeps showing the display at its new
+  // size. A window that the window manager asks for later must match it.
+  void resize(uint32_t width, uint32_t height) override {
+    gBridge->resizeDisplay(0, width, height);
+  }
   void present(const FrameInput& frame) override {
     ClientTargetState* ct = frame.clientTarget;
     if (!ct || !ct->buffer || !ct->buffer->info() || !frame.clientTargetUpdated)

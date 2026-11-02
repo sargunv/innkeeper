@@ -45,6 +45,7 @@ export async function run() {
       <method name="Screenshot"><arg type="s" direction="in"/></method>
       <method name="Position"><arg type="b" direction="out"/></method>
       <method name="Geometry"><arg type="s" direction="in"/><arg type="(iiii)" direction="out"/></method>
+      <method name="Resize"><arg type="s" direction="in"/><arg type="i" direction="in"/><arg type="i" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Close"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
       <method name="Layout"><arg type="s" direction="in"/></method>
     </interface></node>`,
@@ -195,6 +196,20 @@ export async function run() {
           return [r.x, r.y, r.width, r.height];
         }
         return [0, 0, 0, 0];
+      },
+      // Gives the windows whose class contains appId a frame of width by
+      // height, as dragging their corner does.
+      Resize(appId, width, height) {
+        let matched = false;
+        for (const actor of global.get_window_actors()) {
+          const window = actor.meta_window;
+          if (!actor.mapped || !String(window.get_wm_class()).includes(appId))
+            continue;
+          const r = window.get_frame_rect();
+          window.move_resize_frame(true, r.x, r.y, width, height);
+          matched = true;
+        }
+        return matched;
       },
       async PositionAsync(_args, invocation) {
         let positioned = 0;

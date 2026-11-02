@@ -72,6 +72,7 @@ class WindowManagerFeature(
     context.createDeviceProtectedStorageContext().getSharedPreferences("wm", Context.MODE_PRIVATE)
   }
 
+  private val userId = android.os.Process.myUid() / PER_USER_RANGE
   private val windows = LinkedHashMap<Int, AppWindow>() // by display id
   /**
    * Phone mode (innkeeper-session's vendor.innkeeper.mode) shows display 0, with SystemUI and the
@@ -82,6 +83,9 @@ class WindowManagerFeature(
   private var phoneMapped = false
   /** In phone mode, display 0's rotation as its window shows it. */
   private var phoneRotation = 0
+  /** In phone mode, display 0's mode as its window last asked for it. */
+  private var phoneScreen: DeviceScreen? = null
+  private var phoneResize: Runnable? = null
   private val phoneDisplays =
     object : DisplayManager.DisplayListener {
       override fun onDisplayChanged(id: Int) {
@@ -194,6 +198,17 @@ class WindowManagerFeature(
       PackageManager.DONT_KILL_APP,
     )
     Log.i(TAG, "window manager started${if (phone) " (phone)" else ""}")
+    // Phone mode sets display 0's density, and Android keeps it across restarts. A windowed
+    // profile that was in phone mode gets display 0's own density back.
+    if (!phone)
+      runCatching {
+        if (
+          wms.getBaseDisplayDensity(DEFAULT_DISPLAY) !=
+            wms.getInitialDisplayDensity(DEFAULT_DISPLAY)
+        )
+          wms.clearForcedDisplayDensityForUser(DEFAULT_DISPLAY, userId)
+      }
+        .onFailure { Log.w(TAG, "display 0: can't reset its density: $it") }
     if (phone) dm.registerDisplayListener(phoneDisplays, handler)
     handler.post { if (phone) requestPhoneWindow() else refreshTasks() }
   }
@@ -262,19 +277,71 @@ class WindowManagerFeature(
 
   // ---- phone mode --------------------------------------------------------------
 
-  /** Asks the bridge for display 0's window, which the composer's display 0 claims. */
+  /**
+   * Asks the bridge for display 0's window, which the composer's display 0 claims. The window opens
+   * at the size it last had, or at a phone's size at first.
+   */
   private fun requestPhoneWindow() {
-    val mode = dm.getDisplay(DEFAULT_DISPLAY)?.mode ?: return
+    val screen =
+      phoneScreen
+        ?: DeviceScreen.parse(prefs.getString(PREF_PHONE_SCREEN, null))
+        ?: DeviceScreen.of(WindowSizing.PHONE_W, WindowSizing.PHONE_H, scale, 0)
+        ?: return
+    applyPhoneScreen(screen)
     input.requestWindow(
       DEFAULT_DISPLAY,
-      mode.physicalWidth,
-      mode.physicalHeight,
-      SystemProperties.getInt("ro.sf.lcd_density", BASE_DPI),
-      0,
-      0,
+      screen.width,
+      screen.height,
+      screen.dpi,
+      DeviceScreen.MIN_DP,
+      DeviceScreen.MIN_DP,
       APP_ID_PREFIX + PHONE_PACKAGE,
       PHONE_TITLE,
     )
+  }
+
+  /**
+   * Gives display 0 the mode [s]. The composer reconnects display 0 at the new size
+   * (`vendor.innkeeper.hwc.primary`), and Android lays it out again, as it does for a foldable's
+   * screen. A large screen has a taskbar, which crash-loops with three navigation buttons
+   * (android/overlay), so it gets gestures, and a phone gets buttons that a mouse can click.
+   */
+  private fun applyPhoneScreen(s: DeviceScreen) {
+    if (s == phoneScreen) return
+    Log.i(TAG, "display 0: ${phoneScreen ?: "boot"} -> $s")
+    phoneScreen = s
+    prefs.edit().putString(PREF_PHONE_SCREEN, s.toString()).apply()
+    runCatching {
+      if (wms.getBaseDisplayDensity(DEFAULT_DISPLAY) != s.dpi)
+        wms.setForcedDisplayDensityForUser(DEFAULT_DISPLAY, s.dpi, userId)
+    }
+      .onFailure { Log.w(TAG, "display 0: can't set its density to ${s.dpi}: $it") }
+    runCatching {
+      SystemProperties.set(PROP_PRIMARY_SIZE, s.size)
+      SystemProperties.set(PROP_NAV, if (s.large) "gestural" else "threebutton")
+    }
+      .onFailure { Log.w(TAG, "display 0: can't resize it to ${s.size}: $it") }
+  }
+
+  // Coalesces interactive resizes, since each one lays out display 0 again. The rotation is the
+  // one the window showed when it reported its size.
+  private fun resizePhone(e: HostEvent.Window) {
+    rememberScale(e.scale)
+    val rotation = phoneRotation
+    phoneResize?.let(handler::removeCallbacks)
+    val r = Runnable {
+      phoneResize = null
+      DeviceScreen.of(e.width, e.height, e.scale, rotation)?.let(::applyPhoneScreen)
+    }
+    phoneResize = r
+    handler.postDelayed(r, SIZE_DEBOUNCE_MS)
+  }
+
+  private fun rememberScale(s: Double) {
+    if (s != scale && s in 0.5..8.0) {
+      scale = s
+      prefs.edit().putFloat(PREF_SCALE, s.toFloat()).apply()
+    }
   }
 
   // Android rotates display 0's content inside its natural-orientation buffer; the bridge turns
@@ -297,7 +364,7 @@ class WindowManagerFeature(
         PHONE_TITLE,
         mode.physicalWidth,
         mode.physicalHeight,
-        SystemProperties.getInt("ro.sf.lcd_density", BASE_DPI),
+        phoneScreen?.dpi ?: SystemProperties.getInt("ro.sf.lcd_density", BASE_DPI),
         tasks.map { it.taskId },
         true,
         emptyMap(),
@@ -329,6 +396,7 @@ class WindowManagerFeature(
         changed()
         requestPhoneWindow()
       }
+      is HostEvent.Window -> resizePhone(e)
       // Closing the device's window powers it off, as closing an emulator does.
       is HostEvent.Close -> power.shutdown(false, "innkeeper: phone window closed", false)
       else -> {}
@@ -639,10 +707,7 @@ class WindowManagerFeature(
       }
       is HostEvent.Window -> {
         val w = windows[e.display] ?: return
-        if (e.scale != scale && e.scale in 0.5..8.0) {
-          scale = e.scale
-          prefs.edit().putFloat(PREF_SCALE, e.scale.toFloat()).apply()
-        }
+        rememberScale(e.scale)
         // Coalesce interactive resizes, since each one is a configuration change for the app.
         w.resize?.let(handler::removeCallbacks)
         val r = Runnable {
@@ -971,6 +1036,10 @@ class WindowManagerFeature(
     private const val SLEEP_REASON_APPLICATION = 0
     private const val SLEEP_FLAG_NO_DOZE = 1
     private const val PREF_SCALE = "scale"
+    private const val PREF_PHONE_SCREEN = "phone_screen"
+    private const val PROP_PRIMARY_SIZE = "vendor.innkeeper.hwc.primary"
+    private const val PROP_NAV = "vendor.innkeeper.nav"
+    private const val PER_USER_RANGE = 100_000 // UserHandle.PER_USER_RANGE (hidden)
     private const val BASE_DPI = 160
     private const val DEFAULT_DISPLAY = 0
     private const val INVALID_DISPLAY = -1

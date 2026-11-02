@@ -1,8 +1,8 @@
-//! Phone mode, used when the profile has a phone [`Display`]. It shows
+//! Phone mode, used when the profile has the device [`Display`]. It shows
 //! Android's display 0, with SystemUI and the image's launcher, in one desktop
-//! window the size of a device preset. Windowed profiles get a window per app
-//! task instead (docs/display.md, "Phone mode"). The composer, window manager
-//! and init read these properties.
+//! window, and display 0 resizes with that window. Windowed profiles get a
+//! window per app task instead (docs/display.md, "Phone mode"). The composer,
+//! window manager and init read these properties.
 
 use std::path::Path;
 
@@ -15,21 +15,16 @@ use crate::profile::{Display, Settings};
 /// empty activity, and the desktop launches apps.
 pub const KEEPS: &[&str] = &["system_ext/priv-app/Launcher3QuickStep"];
 
-/// Returns the display properties for a boot with `settings`.
+/// Returns the display properties for a boot with `settings`. Display 0 boots
+/// as a phone, with buttons that a mouse can click. The window manager then
+/// gives it its window's size, and the navigation that suits that size.
 pub fn props(settings: &Settings) -> String {
     let Some((w, h, dpi)) = settings.display.screen() else {
         return "vendor.innkeeper.mode=windowed\nvendor.innkeeper.nav=gestural\n".into();
     };
-    // A large screen has a taskbar, which crash-loops in three-button mode
-    // (android/overlay). A phone gets buttons that a mouse can click.
-    let nav = if settings.display.large() {
-        "gestural"
-    } else {
-        "threebutton"
-    };
     format!(
         "vendor.innkeeper.mode=phone\nvendor.innkeeper.hwc.primary={w}x{h}\n\
-         ro.sf.lcd_density={dpi}\nvendor.innkeeper.nav={nav}\n"
+         ro.sf.lcd_density={dpi}\nvendor.innkeeper.nav=threebutton\n"
     )
 }
 
@@ -49,14 +44,11 @@ mod tests {
             props(&s),
             "vendor.innkeeper.mode=windowed\nvendor.innkeeper.nav=gestural\n"
         );
-        s.display = Display::MediumPhone;
+        s.display = Display::Device;
         let p = props(&s);
+        assert!(p.contains("vendor.innkeeper.mode=phone\n"));
         assert!(p.contains("vendor.innkeeper.hwc.primary=1080x2400\n"));
         assert!(p.contains("ro.sf.lcd_density=420\n"));
         assert!(p.contains("vendor.innkeeper.nav=threebutton\n"));
-        s.display = Display::MediumTablet;
-        let p = props(&s);
-        assert!(p.contains("vendor.innkeeper.hwc.primary=2560x1600\n"));
-        assert!(p.contains("vendor.innkeeper.nav=gestural\n"));
     }
 }

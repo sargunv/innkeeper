@@ -149,9 +149,10 @@ enum ProfileCmd {
 
 #[derive(clap::Args)]
 struct SetArgs {
-    /// Show apps in their own windows or in one device window. Applies at the
-    /// next start.
-    #[arg(long, value_parser = ["windowed", "small-phone", "medium-phone", "medium-tablet"])]
+    /// Show apps in their own windows or in one device window. Android's
+    /// device resizes with its window, and OpenHarmony shows as a phone of a
+    /// fixed size. Applies at the next start.
+    #[arg(long, value_parser = ["windowed", "device", "small-phone", "medium-phone"])]
     display: Option<String>,
     /// Run adb on localhost.
     #[arg(long, value_parser = ["on", "off"])]
@@ -841,7 +842,7 @@ mod tests {
     #[test]
     fn profile_set_covers_every_setting() {
         let cli = Cli::try_parse_from(
-            "innkeeper --profile work profile set --display small-phone --idle-minutes 30 \
+            "innkeeper --profile work profile set --display device --idle-minutes 30 \
              --follow-dark off"
                 .split_whitespace(),
         )
@@ -852,7 +853,7 @@ mod tests {
         };
         let mut s = innkeeper_profile::profile::Settings::default();
         assert!(a.apply(&mut s));
-        assert_eq!(s.display, innkeeper_profile::profile::Display::SmallPhone);
+        assert_eq!(s.display, innkeeper_profile::profile::Display::Device);
         assert_eq!(s.idle_minutes, 30);
         assert!(!s.follow_dark && s.follow_accent);
         // --keep-running, --adb and --hdc don't change the profile's settings

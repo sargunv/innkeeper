@@ -28,12 +28,12 @@ struct Page {
     busy: Cell<bool>,
 }
 
-/// The display choices. Each device window lists its size.
+/// The display choices. A device window of a fixed size lists its size.
 const DISPLAYS: [(Display, &str, &str); 4] = [
     (Display::Windowed, "Windowed", ""),
+    (Display::Device, "Device", "Resizable"),
     (Display::SmallPhone, "Small Phone", "720 × 1280"),
     (Display::MediumPhone, "Medium Phone", "1080 × 2400"),
-    (Display::MediumTablet, "Medium Tablet", "2560 × 1600"),
 ];
 
 pub fn page(window: &Window) -> adw::NavigationPage {
