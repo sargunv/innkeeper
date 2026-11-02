@@ -212,20 +212,35 @@ reports boot completion. Issue #312 tracks the features that build on it.
   `defaultAppManager.setDefaultApplication`, which needs
   `SET_DEFAULT_APPLICATION` by ACL. A browser that the user picks later in OH's
   Settings stays the default. Another skill takes view wants for files of every
-  type. OH skills have no priority, so AMS shows OH's app selector whenever an
-  OH app also takes the file, and the selector lists the ability as "Desktop".
-  The ability opens the file with the want's read grant and sends it in a
-  `HANDOFF` open, and the desktop opens it in its default app.
-  `sys_prod/etc/param/innkeeper_selector.para` turns off AMS's app store
-  selector, so AMS shows the image's own selector (`com.ohos.amsdialog`). The
-  app store selector needs an app store that the image doesn't have
-  (`QueryAppGalleryBundleName`). The file also turns off the selector's first
-  question about listing the installed apps. The selector has no option to
-  remember a choice. Its PC layout has one, but it doesn't fit OH's window.
-  FileManager asks for the selector on every open, even when one app takes the
-  file. Its URIs name the file's path in OH's storage service
+  type. OH skills have no priority, so AMS shows the app selector whenever an OH
+  app also takes the file, and the selector lists the ability as "Desktop". The
+  ability opens the file with the want's read grant and sends it in a `HANDOFF`
+  open, and the desktop opens it in its default app.
+- **App selector.** When several apps take an implicit start, AMS asks the app
+  store that `const.appgallery.shaderowner.bundlename` names for its selector, a
+  `sys/commonUI` UIExtensionAbility named `AppSelectorExtensionAbility`.
+  `sys_prod/etc/param/innkeeper_selector.para` names Innkeeper User, which
+  provides one (`user/ets/selector/`). The image has no app store. Its own
+  selector, `com.ohos.amsdialog`, has a phone layout and a PC layout, and AMS
+  picks the phone layout while `persist.sys.abilityms.selector_dialog_possion`
+  is true, as it is on this image. The phone layout can't remember a choice. The
+  PC layout can, but it needs the PC dialog's window, which amsdialog gives it
+  on a device type other than `phone` or `default`. Innkeeper User's selector
+  reads AMS's dialog session for the apps and the want (`dialogSession`), and it
+  shows them in the chooser's page. Its checkbox makes the chosen app the user's
+  default for the file's type with `defaultAppManager.setDefaultApplication`.
+  The type is the want's MIME type, or the file's extension when the want has
+  none, as the bundle manager reads it. The bundle manager then hands later
+  opens of that type to the app, and AMS skips the selector. OH's Settings has
+  no page that resets these defaults. The selector answers AMS with the chosen
+  app, or with a refusal when the user cancels. The calling app's process hosts
+  the selector as a modal UIExtension, so the ability is exported. FileManager
+  asks for the selector on every open, even when one app takes the file. Its
+  URIs name the file's path in OH's storage service
   (`file://com.ohos.filemanager/data/service/el2/...`), and `DesktopAbility`
-  can't open that path, so a file from FileManager doesn't reach the desktop.
+  can't open that path, so a file from FileManager doesn't reach the desktop. On
+  a device, FileManager's sandbox has no `/data/service`, and its URIs name
+  `/storage/Users/currentUser` paths (#391).
 - **Files from the desktop.** `innkeeper run <bundle> <file>` and
   `innkeeper open <files>` make a documents grant for each file with Session1's
   `Import`, and they send the grants in a `launch` command. Innkeeper System
@@ -238,11 +253,11 @@ reports boot completion. Issue #312 tracks the features that build on it.
   that it names. One match opens at once. With several, Innkeeper User shows its
   app chooser, `ChooserAbility` (`user/ets/chooser/`), which lists the apps with
   their labels and icons from the bundle resource manager. Innkeeper User's own
-  abilities don't count, so a desktop file doesn't go back to the desktop. OH's
-  selector shows no dialog for a caller without a window, such as `aa start`,
-  and Innkeeper User starts apps from its service. The app starts with a view
-  want that carries the copies' URIs and `FLAG_AUTH_READ_URI_PERMISSION`. OH's
-  URI permission service grants the app those paths, and the app opens the URIs
+  abilities don't count, so a desktop file doesn't go back to the desktop. AMS
+  shows no selector for a caller without a window, such as `aa start`, and
+  Innkeeper User starts apps from its service. The app starts with a view want
+  that carries the copies' URIs and `FLAG_AUTH_READ_URI_PERMISSION`. OH's URI
+  permission service grants the app those paths, and the app opens the URIs
   through the user's appdata view ([How it boots](#how-it-boots)). The copies
   stay until Innkeeper User starts again. Innkeeper User answers by starting
   Innkeeper System's service with the outcome in the want's parameters, and

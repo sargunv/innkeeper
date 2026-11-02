@@ -35,6 +35,10 @@
     {
       "name": "chooser_always",
       "value": "Always open this type with the app"
+    },
+    {
+      "name": "selector_description",
+      "value": "Chooses the app that opens a file or a link from an OpenHarmony app."
     }
   ]
 }
