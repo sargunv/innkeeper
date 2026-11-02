@@ -156,6 +156,25 @@ reports boot completion. Issue #312 tracks the features that build on it.
   closed and no user app runs a continuous task.
 - **Desktop settings.** The app follows the desktop's settings
   ([Desktop settings](#desktop-settings)).
+- **Notifications.** As Android's system app does, the app shows OH's
+  notifications on the desktop (`ets/notify/`). It subscribes to every app's
+  notifications with `@ohos.notificationSubscribe` and sends each one to the
+  bridge's system service as `NOTIFY`, with its title, text, app name and icon,
+  large icon or picture, buttons, reply input and progress. The icon comes from
+  the app's bundle resources, or from the notification's small icon, and the
+  desktop shows it for apps without a desktop entry. A notification that OH
+  removes closes on the desktop. A click or a button on the desktop runs the
+  notification's WantAgent, and a reply adds the text to the want's parameters
+  under the button's input key. A dismissal removes the notification from OH
+  unless it is ongoing or unremovable, and a click removes it unless its app
+  turned that off. AMS starts an agent's ability only for a foreground caller or
+  for an app that may start abilities from the background, so the app reads the
+  agent's want and starts the ability itself. It asks the bridge first to show
+  OH's window (`SHOW_SCREEN`), with the click's activation token. SceneBoard
+  keeps showing the notifications in OH's window. The app needs
+  `NOTIFICATION_CONTROLLER` and `START_INVISIBLE_ABILITY`, which the signing
+  profile allows by ACL, and `START_ABILITIES_FROM_BACKGROUND` and
+  `GET_BUNDLE_RESOURCES`.
 - **Session1 commands.** The app answers each command that the bridge relays
   with "OpenHarmony profiles don't support this action.", so callers don't wait
   for the bridge's timeout.

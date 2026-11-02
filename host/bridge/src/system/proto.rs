@@ -16,6 +16,7 @@
 //! | `0x0308` | LIFECYCLE    | `u32 windows`, `u32 services`, `u64 wakeup`, `u32 len` ≤ 16 KiB (fd if len > 0: background apps) | the session's activity, for idle shutdown ([`Lifecycle`])                              |
 //! | `0x0309` | HANDOFF | `u32 window`, `u8 action` (1 URI, 2 open, 3 save, 4 email), `u8 files` (0..3), `u8 ask`, `u8 0`, `u32 len` ≤ 64 KiB; metadata fd then content fds | accepted for asynchronous portal operation; `-EBUSY` over 4 pending, `-EAGAIN` over 5 per 10 s |
 //! | `0x030a` | PLAYBACK_APP | name package (empty: nothing playing), name label | labels Android's mixed playback stream in the desktop mixer ([`PlaybackApp`]) |
+//! | `0x030b` | SHOW_SCREEN  | `u32 id` (0: no notification)                                                   | shows OpenHarmony's screen window with the activation token of notification `id`'s last click; `-ENOENT` if the session has no screen window |
 //!
 //! HANDOFF carries every portal operation that hands something from Android
 //! to the desktop. Its metadata is `u32 version` (1), text (≤32 KiB), a
@@ -60,6 +61,7 @@ pub mod ty {
     pub const LIFECYCLE: u16 = 0x0308;
     pub const HANDOFF: u16 = 0x0309;
     pub const PLAYBACK_APP: u16 = 0x030a;
+    pub const SHOW_SCREEN: u16 = 0x030b;
 }
 
 pub mod ev {
@@ -184,6 +186,10 @@ pub enum Request {
     /// The app on Android's mixed playback stream. An empty package means
     /// nothing is playing, and the mixer goes back to the default name.
     PlaybackApp(PlaybackApp),
+    /// OpenHarmony's system app is about to start an ability for notification
+    /// `id`, so the screen window comes up with the click's activation token.
+    /// Android's windows open by themselves, so its app doesn't send this.
+    ShowScreen { id: u32 },
 }
 
 /// What the desktop mixer shows for Android's single playback stream.
@@ -289,6 +295,7 @@ pub fn decode(ty: u16, body: &[u8]) -> Result<Request, DecodeError> {
             wakeup_ms: r.u64()?,
             len: limited(r.u32()?, limits::LIFECYCLE_BLOB, "len")?,
         }),
+        ty::SHOW_SCREEN => Request::ShowScreen { id: r.u32()? },
         ty::PLAYBACK_APP => {
             let package = r.name()?;
             if !package.is_empty() && !super::valid_package(&package) {
@@ -361,6 +368,11 @@ pub fn encode(tag: u32, req: &Request) -> Vec<u8> {
         Request::PlaybackApp(ref app) => {
             let mut w = Writer::message(ty::PLAYBACK_APP, tag);
             w.name(&app.package).name(&app.label);
+            w
+        }
+        Request::ShowScreen { id } => {
+            let mut w = Writer::message(ty::SHOW_SCREEN, tag);
+            w.u32(id);
             w
         }
     };
@@ -550,6 +562,8 @@ mod tests {
                 label: "Example Player".into(),
             }),
             Request::PlaybackApp(PlaybackApp::default()),
+            Request::ShowScreen { id: 0 },
+            Request::ShowScreen { id: 7 },
         ];
         for r in reqs {
             assert_eq!(roundtrip(&encode(1, &r)), Ok(r));
@@ -561,6 +575,7 @@ mod tests {
             (ty::CLIP_SET, &[1, 2, 0, 0, 1, 0, 0, 0]),
             (ty::CLIP_SET, &[1, 0, 1, 0, 1, 0, 0, 0]),
             (ty::START, &[0]),
+            (ty::SHOW_SCREEN, &[1, 0, 0]),
             // A package name with a slash.
             (ty::PLAYBACK_APP, &[3, 0, b'a', b'/', b'b', 0, 0]),
             // A label with a control character.

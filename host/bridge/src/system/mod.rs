@@ -537,6 +537,17 @@ impl Service for SystemService {
                 self.shared.set_playback_app(mixer_app(&app));
                 Reply::ok()
             }
+            Request::ShowScreen { id } => {
+                let token = match self.shared.notify() {
+                    Some(h) if id != 0 => h.take_token(self.client, id),
+                    _ => String::new(),
+                };
+                if self.shared.input.show_screens(&token) {
+                    Reply::ok()
+                } else {
+                    Reply::err(-ENOENT)
+                }
+            }
             Request::Lifecycle(l) => {
                 let apps = if l.len == 0 {
                     Ok(vec![])
