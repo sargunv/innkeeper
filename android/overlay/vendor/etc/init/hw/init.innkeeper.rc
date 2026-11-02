@@ -60,7 +60,8 @@ on property:vendor.innkeeper.adb=1
 on property:vendor.innkeeper.adb=0
     stop adbd
 
-# innkeeper-session sets vendor.innkeeper.nav from the profile's mode. A
+# innkeeper-session sets vendor.innkeeper.nav from the profile's mode, and in
+# phone mode the window manager changes it when the window crosses 600 dp. A
 # phone-sized phone-mode window gets three navigation buttons, which a mouse
 # can click, and everything else gets gestures. The overlay choice persists in
 # /data, so each boot sets it again.

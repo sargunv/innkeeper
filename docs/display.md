@@ -161,28 +161,37 @@ such as volume or USB dialogs, go to display 0 and aren't seen.
 
 ## Phone mode
 
-A profile can use a phone or tablet display, chosen in the Display row of its
-settings. This mode is for developing apps. The profile shows the whole device
-in one window: display 0, with SystemUI's bars and the image's Launcher3. Apps
-start on display 0 instead of in their own windows. Android already runs
-SystemUI, the launcher, recents, rotation and system dialogs on display 0, as it
-does on a phone. A new virtual display would need all of that emulated. The
-drawback is that display 0's mode is fixed at boot, so a change of preset
-applies at the next start.
+A profile can use the device display, chosen in the Display row of its settings.
+This mode is for developing apps. The profile shows the whole device in one
+window: display 0, with SystemUI's bars and the image's Launcher3. Apps start on
+display 0 instead of in their own windows. Android already runs SystemUI, the
+launcher, recents, rotation and system dialogs on display 0, as it does on a
+phone. A new virtual display would need all of that emulated. The image's
+launcher stays in the image only for this mode, so a change between windowed and
+device applies at the next start. Apps keep their data across modes.
 
-- **Sizes.** The presets follow Android Studio's devices. The small phone is 720
-  × 1280 at 320 dpi, the medium phone is 1080 × 2400 at 420 dpi, and the medium
-  tablet is 2560 × 1600 at 320 dpi. Apps keep their data across presets and
-  modes.
+- **Size.** Display 0 resizes with its window, as an app window's display does.
+  Its pixels are the window's logical size times its scale, and its density is
+  160 dpi times the scale. The window manager sets the size in
+  `vendor.innkeeper.hwc.primary` and forces the density on display 0. The
+  composer then gives display 0 one mode of the new size and reports display 0
+  connected again. SurfaceFlinger reads its modes again, as it does when an
+  Android TV's HDMI display changes, and Android lays the device out at the new
+  size. The window opens at the size it last had, or at a 412 × 915 dp phone at
+  first, and it can't be smaller than 320 dp on either side. A windowed profile
+  clears the forced density.
 - **Frames.** The composer copies each of display 0's client targets into its
   own LINEAR buffers on the GPU, so SurfaceFlinger gets its buffers back
   immediately.
-- **Navigation.** Phones use three-button navigation, which works with a mouse.
-  The tablet keeps gesture navigation. Closing the window stops the profile, as
-  closing an emulator does.
+- **Navigation.** A phone, under 600 dp on its short side, uses three-button
+  navigation, which works with a mouse. A larger screen has a taskbar, which
+  crash-loops with three buttons, so it uses gesture navigation. The window
+  manager switches navigation when a resize crosses 600 dp. Closing the window
+  stops the profile, as closing an emulator does.
 - **Rotation.** Android rotates the content inside display 0's buffer. The
   bridge rotates the frames back with a buffer transform, reshapes the window,
-  and maps input to match.
+  and maps input to match. A window that shows display 0 turned keeps display
+  0's natural size, so the turn doesn't resize display 0.
 - **Boot dialog.** The session has no kernel SELinux policy, so the framework
   shows an "inconsistent build" dialog at boot. Init closes it.
 
