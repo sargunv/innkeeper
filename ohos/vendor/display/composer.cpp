@@ -18,6 +18,7 @@
 
 #include "hdi.h"
 #include "innkeeper/bridge_client.h"
+#include "layers.h"
 #include "log.h"
 
 // From libbegetutil (base/startup/init interfaces/innerkits/include/
@@ -48,6 +49,7 @@ constexpr const char* kTitle = "OpenHarmony";
 // Bridge display service (host/bridge/src/display/proto.rs).
 constexpr uint16_t kBufferAdd = 0x0203, kBufferRemove = 0x0204;
 constexpr uint16_t kFrame = 0x0205, kCursor = 0x0206, kDisplayWindow = 0x0208;
+constexpr uint16_t kLayers = 0x0209;
 constexpr uint16_t kEvRelease = 0x4201;
 
 // The panel mode, which also sizes the window. It comes from the
@@ -79,55 +81,37 @@ Mode mode() {
   return m;
 }
 
-constexpr uint32_t fourcc(char a, char b, char c, char d) {
-  return uint32_t(a) | uint32_t(b) << 8 | uint32_t(c) << 16 | uint32_t(d) << 24;
-}
-
-// OH formats name bytes in memory order, and DRM formats name little-endian
-// words. A panel shows no alpha and render_service clears to transparent
-// black, so the window treats the target as opaque.
-uint32_t drmFormat(int32_t format) {
-  switch (format) {
-    case PIXEL_FMT_RGBA_8888:
-    case PIXEL_FMT_RGBX_8888:
-      return fourcc('X', 'B', '2', '4');
-    case PIXEL_FMT_BGRA_8888:
-    case PIXEL_FMT_BGRX_8888:
-      return fourcc('X', 'R', '2', '4');
-    default:
-      return 0;
-  }
-}
-
-// A buffer to show, as a dup of its fd and its layout.
-struct Target {
-  int fd = -1;
-  int32_t width, height, stride, format;
-};
-
 // MMI draws its hardware cursor into a buffer of this size, with the
 // pointer's position at the centre (ScreenPointer in multimodalinput).
 constexpr int kCursorSize = 512;
 
 constexpr int kMaxLayers = 64;
-struct Layer {
-  bool used = false;
-  bool cursor = false;   // render_service's hardware cursor layer
-  bool changed = false;  // reported as CLIENT by the next GetDisplayCompChange
-  int32_t type = COMPOSITION_CLIENT;
-  Target buffer;
-  int fence = -1;  // the buffer's acquire fence
-  IRect region = {}, crop = {};
-  int32_t transform = 0;
-  bool translucent = false;  // a global alpha below 255
-};
 
-// One import of a client target in the bridge, keyed by the dma-buf's inode.
-constexpr int kMaxBuffers = 4;
+// One import of a buffer in the bridge, keyed by the dma-buf's inode and the
+// format that the bridge shows it in. Frames and video layers each have a
+// table.
+constexpr int kMaxFrames = 4, kMaxVideoBuffers = 16;
 struct Imported {
   ino_t ino;
+  uint32_t format;
   uint32_t id;  // 0 marks a free slot
   bool busy;    // set while shown, until the bridge's RELEASE
+};
+
+// What Commit last showed: the frame, and the video layers bottom to top
+// with the first `below` under the frame.
+struct Shown {
+  Target frame;
+  Target layer[kMaxDeviceLayers];
+  IRect region[kMaxDeviceLayers], crop[kMaxDeviceLayers];
+  int count = 0, below = 0;
+};
+
+// The LAYERS request last sent.
+struct SentLayers {
+  uint32_t id[kMaxDeviceLayers];
+  IRect region[kMaxDeviceLayers], crop[kMaxDeviceLayers];
+  int count = 0, below = 0;
 };
 
 struct State {
@@ -142,15 +126,18 @@ struct State {
   Layer layers[kMaxLayers] = {};
   Target client;
   int clientFence = -1;  // its acquire fence
-  int direct = -1;       // the layer that Commit shows, or -1 for the client
-  // The target that Commit last showed. render_service draws into it again
-  // only after the next Commit, so a new window can show it.
-  Target shown;
+  Choice choice;         // the layers that Commit sends to the bridge
+  // What Commit last showed. render_service draws into those buffers again
+  // only after the next Commit, so a new window can show them.
+  Shown shown;
   // The bridge connection, once its window is shown.
   int sock = -1;
   uint32_t nextTag = 1;
   uint32_t nextBuffer = 1;
-  Imported imported[kMaxBuffers] = {};
+  Imported frames[kMaxFrames] = {};
+  Imported videos[kMaxVideoBuffers] = {};
+  uint32_t sentFrame = 0;  // the import that the last FRAME showed
+  SentLayers sentLayers;
   // MMI's cursor image as last read, and whether the bridge has it.
   uint32_t cursor[kCursorSize * kCursorSize];
   bool cursorSent = false;
@@ -194,11 +181,23 @@ lxb_msg message(uint16_t type) {
 }
 
 void forgetImports() {
-  for (auto& b : g.imported) b = {};
+  for (auto& b : g.frames) b = {};
+  for (auto& b : g.videos) b = {};
+  g.sentFrame = 0;
+  g.sentLayers = {};
   pthread_cond_broadcast(&g.changed);
 }
 
-void present(const Target& c);
+void present(const Shown& s);
+
+// Handles the bridge's RELEASE of import `id`, which `invalid` forgets.
+void released(Imported* table, int n, uint32_t id, bool invalid) {
+  for (int i = 0; i < n; i++) {
+    if (table[i].id != id) continue;
+    if (invalid) table[i] = {};
+    table[i].busy = false;
+  }
+}
 
 // Reconnects for the life of the process. Without a bridge the display is
 // headless.
@@ -235,11 +234,8 @@ void* bridgeLoop(void*) {
         const uint32_t id = lxb_u32(p.body);
         const bool invalid = lxb_u32(p.body + 4) != 0;
         pthread_mutex_lock(&g.mu);
-        for (auto& b : g.imported) {
-          if (b.id != id) continue;
-          if (invalid) b = {};
-          b.busy = false;
-        }
+        released(g.frames, kMaxFrames, id, invalid);
+        released(g.videos, kMaxVideoBuffers, id, invalid);
         pthread_cond_broadcast(&g.changed);
         pthread_mutex_unlock(&g.mu);
       } else if (p.type == LXB_REPLY && p.status != 0) {
@@ -270,57 +266,123 @@ bool waitIdle(Imported* b, int64_t ns) {
   return !b->busy;
 }
 
-// Shows the client target `c` in the window. Called with g.mu held.
-void present(const Target& c) {
-  const uint32_t format = drmFormat(c.format);
+// Returns the import of `t` in `format` from `table`, adding it to the
+// bridge if it is new. A new import takes a free slot, or else retires an
+// idle import that `keep` doesn't hold, because render_service and decoders
+// reallocate their buffers. Returns null if every slot is in use.
+Imported* import(
+  Imported* table, int n, const Target& t, uint32_t format,
+  Imported* const* keep, int kept
+) {
   struct stat st;
-  if (g.sock < 0 || c.fd < 0 || !format || fstat(c.fd, &st) != 0) return;
+  if (t.fd < 0 || !format || fstat(t.fd, &st) != 0) return nullptr;
+  for (int i = 0; i < n; i++) {
+    if (table[i].id && table[i].ino == st.st_ino && table[i].format == format) {
+      return &table[i];
+    }
+  }
   Imported* b = nullptr;
-  for (auto& i : g.imported) {
-    if (i.id && i.ino == st.st_ino) b = &i;
+  for (int i = 0; i < n && !b; i++) {
+    if (!table[i].id) b = &table[i];
   }
-  if (!b) {
-    // A new target takes a free slot, or else retires an idle import because
-    // render_service reallocated its targets.
-    for (auto& i : g.imported) {
-      if (!b && !i.id) b = &i;
-    }
-    for (auto& i : g.imported) {
-      if (!b && !i.busy) {
-        lxb_msg m = message(kBufferRemove);
-        lxb_put_u32(&m, i.id);
-        lxb_send(g.sock, &m, -1);
-        b = &i;
-      }
-    }
-    if (!b) return;
-    *b = {st.st_ino, g.nextBuffer++, false};
-    lxb_msg m = message(kBufferAdd);
-    const uint32_t fields[] = {
-      b->id,
-      kDisplay,
-      uint32_t(c.width),
-      uint32_t(c.height),
-      format,
-      uint32_t(c.stride),
-      0
-    };
-    for (uint32_t v : fields) lxb_put_u32(&m, v);
-    lxb_put_u64(&m, 0);  // LINEAR
-    if (lxb_send(g.sock, &m, c.fd) != 0) {
-      *b = {};
-      return;
-    }
+  for (int i = 0; i < n && !b; i++) {
+    bool held = table[i].busy;
+    for (int k = 0; k < kept; k++) held = held || keep[k] == &table[i];
+    if (held) continue;
+    lxb_msg m = message(kBufferRemove);
+    lxb_put_u32(&m, table[i].id);
+    lxb_send(g.sock, &m, -1);
+    b = &table[i];
   }
-  // render_service may draw into a target as soon as Commit returns, so the
-  // compositor must be done with it.
-  if (!waitIdle(b, 2 * kPeriodNs)) return;
-  lxb_msg m = message(kFrame);
-  const uint32_t fields[] = {kDisplay, b->id, 0, 0, 0, 0};
+  if (!b) return nullptr;
+  *b = {st.st_ino, format, g.nextBuffer++, false};
+  lxb_msg m = message(kBufferAdd);
+  const uint32_t fields[] = {
+    b->id,
+    kDisplay,
+    uint32_t(t.width),
+    uint32_t(t.height),
+    format,
+    uint32_t(t.stride),
+    0
+  };
   for (uint32_t v : fields) lxb_put_u32(&m, v);
-  if (lxb_send(g.sock, &m, -1) == 0) b->busy = true;
-  for (auto& i : g.imported) {
-    if (&i != b) waitIdle(&i, 2 * kPeriodNs);
+  lxb_put_u64(&m, 0);  // LINEAR
+  if (lxb_send(g.sock, &m, t.fd) != 0) {
+    *b = {};
+    return nullptr;
+  }
+  return b;
+}
+
+// Shows `s` in the window. Called with g.mu held.
+void present(const Shown& s) {
+  if (g.sock < 0) return;
+  Imported* frame = import(
+    g.frames, kMaxFrames, s.frame, drmFormat(s.frame.format, s.below > 0),
+    nullptr, 0
+  );
+  if (!frame) return;
+  // render_service commits its last frame again when only a video layer
+  // changed, and that frame stays on screen.
+  if (frame->id != g.sentFrame || !frame->busy) {
+    // render_service may draw into a frame as soon as Commit returns, so the
+    // compositor must be done with it.
+    if (!waitIdle(frame, 2 * kPeriodNs)) return;
+    lxb_msg m = message(kFrame);
+    const uint32_t fields[] = {kDisplay, frame->id, 0, 0, 0, 0};
+    for (uint32_t v : fields) lxb_put_u32(&m, v);
+    if (lxb_send(g.sock, &m, -1) != 0) return;
+    frame->busy = true;
+    g.sentFrame = frame->id;
+  }
+  Imported* video[kMaxDeviceLayers];
+  SentLayers sent;
+  for (int i = 0; i < s.count; i++) {
+    Imported* b =
+      import(g.videos, kMaxVideoBuffers, s.layer[i], kNv12, video, sent.count);
+    if (!b) continue;
+    video[sent.count] = b;
+    sent.id[sent.count] = b->id;
+    sent.region[sent.count] = s.region[i];
+    sent.crop[sent.count] = s.crop[i];
+    sent.count++;
+    if (i < s.below) sent.below++;
+  }
+  bool changed =
+    sent.count != g.sentLayers.count || sent.below != g.sentLayers.below;
+  for (int i = 0; i < sent.count && !changed; i++) {
+    changed = sent.id[i] != g.sentLayers.id[i] ||
+              !same(sent.region[i], g.sentLayers.region[i]) ||
+              !same(sent.crop[i], g.sentLayers.crop[i]);
+  }
+  if (changed) {
+    lxb_msg m = message(kLayers);
+    lxb_put_u32(&m, kDisplay);
+    lxb_put_u32(&m, uint32_t(sent.below));
+    lxb_put_u32(&m, uint32_t(sent.count));
+    for (int i = 0; i < sent.count; i++) {
+      const IRect& r = sent.region[i];
+      const IRect& c = sent.crop[i];
+      const int32_t fields[] = {
+        int32_t(sent.id[i]), r.x, r.y, r.w, r.h, c.x, c.y, c.w, c.h
+      };
+      for (int32_t v : fields) lxb_put_u32(&m, uint32_t(v));
+    }
+    if (lxb_send(g.sock, &m, -1) == 0) {
+      for (int i = 0; i < sent.count; i++) video[i]->busy = true;
+      g.sentLayers = sent;
+    }
+  }
+  // render_service draws into the other frames, and the decoder into the
+  // other video buffers, once Commit returns.
+  for (auto& i : g.frames) {
+    if (&i != frame) waitIdle(&i, 2 * kPeriodNs);
+  }
+  for (auto& i : g.videos) {
+    bool shown = false;
+    for (int k = 0; k < sent.count; k++) shown = shown || video[k] == &i;
+    if (!shown) waitIdle(&i, 2 * kPeriodNs);
   }
 }
 
@@ -416,10 +478,6 @@ void closeFd(int& fd) {
 }
 
 int dupFd(int fd) { return fd >= 0 ? fcntl(fd, F_DUPFD_CLOEXEC, 0) : -1; }
-
-bool same(const IRect& a, const IRect& b) {
-  return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
-}
 
 Layer* layer(uint32_t devId, uint32_t id) {
   if (devId != kDisplay || id >= kMaxLayers || !g.layers[id].used) {
@@ -556,48 +614,32 @@ EXPORT int32_t SetDisplayProperty(uint32_t, uint32_t, uint64_t) {
   return HDF_ERR_NOT_SUPPORT;
 }
 
-// Returns the layer that Commit can show as it is, or -1. That is an opaque
-// device layer that is the only layer apart from the cursor's and fills the
-// display with a whole, untransformed buffer in a format the bridge takes.
-// render_service's uni-render output is such a layer. When the composer takes
-// it, render_service does not copy it into a client target with GL on its
-// composer thread.
-int directLayer() {
-  int found = -1;
-  for (int i = 0; i < kMaxLayers; i++) {
-    if (!g.layers[i].used || g.layers[i].cursor) continue;
-    if (found >= 0) return -1;
-    found = i;
-  }
-  if (found < 0) return -1;
-  const Layer& x = g.layers[found];
-  const Target& b = x.buffer;
-  static const Mode d = mode();
-  const IRect screen = {0, 0, int32_t(d.width), int32_t(d.height)};
-  const IRect whole = {0, 0, b.width, b.height};
-  const bool ok = x.type == COMPOSITION_DEVICE && b.fd >= 0 &&
-                  drmFormat(b.format) && x.transform == 0 && !x.translucent &&
-                  same(x.region, screen) && same(x.crop, whole);
-  return ok ? found : -1;
-}
-
+// When the composer shows render_service's uni-render output as the frame,
+// render_service does not copy it into a client target with GL on its
+// composer thread. Video layers that the bridge shows, render_service does
+// not draw at all.
 EXPORT int32_t PrepareDisplayLayers(uint32_t devId, bool& needFlushFb) {
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
   Lock l;
-  const int direct = directLayer();
-  if (direct != g.direct) {
-    LOGI("composing %s", direct >= 0 ? "the device layer" : "a client target");
+  static const Mode d = mode();
+  const IRect screen = {0, 0, int32_t(d.width), int32_t(d.height)};
+  const Choice c = choose(g.layers, kMaxLayers, screen);
+  if (c.frame != g.choice.frame || c.count != g.choice.count) {
+    LOGI(
+      "composing %s with %d video layers",
+      c.frame >= 0 ? "a device layer" : "a client target", c.count
+    );
   }
-  g.direct = direct;
-  for (auto& layer : g.layers) {
-    if (
-      direct < 0 && layer.used && !layer.cursor &&
-      layer.type != COMPOSITION_CLIENT
-    ) {
-      layer.changed = true;
+  g.choice = c;
+  for (int i = 0; i < kMaxLayers; i++) {
+    Layer& x = g.layers[i];
+    bool shown = i == c.frame;
+    for (int k = 0; k < c.count; k++) shown = shown || c.layers[k] == i;
+    if (x.used && !x.cursor && !shown && x.type != COMPOSITION_CLIENT) {
+      x.changed = true;
     }
   }
-  needFlushFb = direct < 0;
+  needFlushFb = c.frame < 0;
   return HDF_SUCCESS;
 }
 
@@ -700,22 +742,43 @@ EXPORT int32_t SetVirtualDisplayBuffer(uint32_t, const BufferHandle&, int32_t) {
 EXPORT int32_t Commit(uint32_t devId, int32_t& fence) {
   fence = -1;
   if (devId != kDisplay) return HDF_ERR_INVALID_PARAM;
+  int acquire[1 + kMaxDeviceLayers];
+  int n = 0;
   pthread_mutex_lock(&g.mu);
-  int& pending = g.direct >= 0 ? g.layers[g.direct].fence : g.clientFence;
-  const int acquire = pending;
+  const Choice c = g.choice;
+  int& pending = c.frame >= 0 ? g.layers[c.frame].fence : g.clientFence;
+  acquire[n++] = pending;
   pending = -1;
+  for (int i = 0; i < c.count; i++) {
+    acquire[n++] = g.layers[c.layers[i]].fence;
+    g.layers[c.layers[i]].fence = -1;
+  }
   pthread_mutex_unlock(&g.mu);
-  if (acquire >= 0) {
-    pollfd p = {acquire, POLLIN, 0};
+  for (int i = 0; i < n; i++) {
+    if (acquire[i] < 0) continue;
+    pollfd p = {acquire[i], POLLIN, 0};
     if (poll(&p, 1, 1000) != 1) LOGW("acquire fence timeout");
-    close(acquire);
+    close(acquire[i]);
   }
   Lock l;
-  const Target& c = g.direct >= 0 ? g.layers[g.direct].buffer : g.client;
-  closeFd(g.shown.fd);
-  g.shown = c;
-  g.shown.fd = dupFd(c.fd);
-  present(g.shown);
+  Shown& s = g.shown;
+  closeFd(s.frame.fd);
+  for (int i = 0; i < s.count; i++) closeFd(s.layer[i].fd);
+  s.frame = c.frame >= 0 ? g.layers[c.frame].buffer : g.client;
+  s.frame.fd = dupFd(s.frame.fd);
+  s.count = 0;
+  s.below = 0;
+  for (int i = 0; i < c.count; i++) {
+    const Layer& x = g.layers[c.layers[i]];
+    if (!x.used) continue;
+    s.layer[s.count] = x.buffer;
+    s.layer[s.count].fd = dupFd(x.buffer.fd);
+    s.region[s.count] = c.region[i];
+    s.crop[s.count] = c.crop[i];
+    s.count++;
+    if (i < c.below) s.below++;
+  }
+  present(s);
   return HDF_SUCCESS;
 }
 
@@ -743,7 +806,8 @@ EXPORT int32_t DestroyLayer(uint32_t devId, uint32_t layerId) {
   closeFd(x->buffer.fd);
   closeFd(x->fence);
   *x = {};
-  if (g.direct == int(layerId)) g.direct = -1;
+  // Commit shows what remains of the last choice.
+  if (g.choice.frame == int(layerId)) g.choice = {};
   return HDF_SUCCESS;
 }
 
@@ -798,6 +862,14 @@ SetLayerTransformMode(uint32_t devId, uint32_t layerId, int32_t type) {
   return HDF_SUCCESS;
 }
 
+EXPORT int32_t SetLayerZorder(uint32_t devId, uint32_t layerId, uint32_t z) {
+  Lock l;
+  Layer* x = layer(devId, layerId);
+  if (!x) return HDF_ERR_INVALID_PARAM;
+  x->z = z;
+  return HDF_SUCCESS;
+}
+
 EXPORT int32_t
 SetLayerAlpha(uint32_t devId, uint32_t layerId, const LayerAlpha& alpha) {
   Lock l;
@@ -807,15 +879,15 @@ SetLayerAlpha(uint32_t devId, uint32_t layerId, const LayerAlpha& alpha) {
   return HDF_SUCCESS;
 }
 
-// The composer shows a layer itself only when it is the only layer apart from
-// the cursor's, which it leaves out, and the window is opaque, so the layer's
-// order, blending and regions don't change what it shows.
+// The composer shows a frame that fills the screen and opaque video layers
+// (layers.h). The frame's own pixels say where it is transparent, and
+// render_service premultiplies them, as Wayland expects. The rest of these
+// settings don't change what the composer shows.
 #define LAYER_SETTER(name, ...)                                         \
   EXPORT int32_t name(uint32_t devId, uint32_t layerId, __VA_ARGS__) {  \
     Lock l;                                                             \
     return layer(devId, layerId) ? HDF_SUCCESS : HDF_ERR_INVALID_PARAM; \
   }
-LAYER_SETTER(SetLayerZorder, uint32_t)
 LAYER_SETTER(SetLayerPreMulti, bool)
 LAYER_SETTER(SetLayerDirtyRegion, const lxvec<IRect>&)
 LAYER_SETTER(SetLayerVisibleRegion, lxvec<IRect>&)
