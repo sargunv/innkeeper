@@ -1,0 +1,5 @@
+Copied from OpenHarmony's interface_sdk_c (https://gitcode.com/openharmony/interface_sdk_c),
+tag OpenHarmony-v7.0-Release (5606a8c25984d281d22f4f9f83d6c5111164edca), from
+graphic/graphic_2d/native_window and graphic/graphic_2d/native_buffer. These are
+the NDK headers that Mesa's OpenHarmony EGL platform includes. Apache-2.0; see the
+license headers in each file.

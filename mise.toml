@@ -139,7 +139,7 @@ node --test ohos/system-app/tests/*.test.mjs
 """
 
 [tasks."test:bionic"]
-description = "Android test binaries against our HALs in a fresh named session, and the Vulkan swapchain test in a fresh OpenHarmony profile"
+description = "Android test binaries against our HALs in a fresh named session, and the Vulkan and GLES tests in a fresh OpenHarmony profile"
 run = """
 set -euo pipefail
 v=out/build/android/android/vendor/graphics/test-vendor

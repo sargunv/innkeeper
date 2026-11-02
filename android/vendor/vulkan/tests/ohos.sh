@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Run ohos_swapchain_test (built by build:vulkan into out/build/vulkan/test-ohos)
-# in a fresh OpenHarmony profile, on the RADV or ANV that the launcher selects.
+# Run ohos_swapchain_test and ohos_gles_test (built by build:vulkan into
+# out/build/vulkan/test-ohos) in a fresh OpenHarmony profile, on the RADV or ANV
+# that the launcher selects. ohos_gles_test loads our EGL, GLES and Zink from a
+# copy in /data/local/tmp.
 # Without a GPU, OpenHarmony has no Vulkan driver, and the test is skipped.
 # Off a nested desktop, the script runs itself under tests/nested.sh, which the
 # CLI needs to create the profile.
@@ -11,9 +13,10 @@ export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-vulkan-ohos}
 if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   exec "$repo/tests/nested.sh" "$0" "$@"
 fi
-test=$repo/out/build/vulkan/test-ohos/ohos_swapchain_test
-[[ -x $test ]] || {
-  echo "no $test (run \`mise run build:vulkan\`)" >&2
+tests=$repo/out/build/vulkan/test-ohos
+gl=$repo/out/build/vulkan/install/share/innkeeper/ohos/gpu/vendor/lib64/chipsetsdk
+[[ -x $tests/ohos_gles_test && -f $gl/libEGL_impl.so ]] || {
+  echo "no OpenHarmony test programs or GL libraries (run \`mise run build:vulkan\`)" >&2
   exit 1
 }
 S=$repo/tools/dev/session.sh
@@ -43,11 +46,17 @@ if ! "$S" exec /system/bin/sh -c 'for n in /dev/dri/renderD*; do (: <"$n") 2>/de
   echo "skip: the launcher selected no GPU, so OpenHarmony has no Vulkan driver"
   exit 0
 fi
-"$S" exec /system/bin/sh -c \
-  'cat >/data/local/tmp/ohos_swapchain_test && chmod 755 /data/local/tmp/ohos_swapchain_test' <"$test"
-"$S" exec /data/local/tmp/ohos_swapchain_test | tee "$log/test.log"
-grep -q -E '^device: .*\((RADV|Intel)' "$log/test.log" || {
-  echo "FAIL: the test did not run on RADV or ANV" >&2
+push() { "$S" exec /system/bin/sh -c "cat >'$2' && chmod 755 '$2'" <"$1"; }
+t=/data/local/tmp/innkeeper-gl
+"$S" exec /system/bin/mkdir -p "$t"
+push "$tests/ohos_swapchain_test" "$t/ohos_swapchain_test"
+push "$tests/ohos_gles_test" "$t/ohos_gles_test"
+for lib in libEGL_impl.so libGLESv2_impl.so libgallium-26.2.5.so; do push "$gl/$lib" "$t/$lib"; done
+"$S" exec "$t/ohos_swapchain_test" | tee "$log/swapchain.log"
+"$S" exec /system/bin/sh -c "LD_LIBRARY_PATH=$t $t/ohos_gles_test $t/libEGL_impl.so" | tee "$log/gles.log"
+if ! grep -q -E '^device: .*\((RADV|Intel)' "$log/swapchain.log" ||
+  ! grep -q -E '^renderer: zink .*(RADV|Intel)' "$log/gles.log"; then
+  echo "FAIL: the tests did not run on RADV or ANV" >&2
   exit 1
-}
-grep -q '^PASS' "$log/test.log"
+fi
+grep -q '^PASS' "$log/swapchain.log" && grep -q '^PASS' "$log/gles.log"

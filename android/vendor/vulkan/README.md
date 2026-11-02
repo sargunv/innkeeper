@@ -51,6 +51,7 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
     musl resolves every symbol when it loads a library.
   - 0008 adds `VK_OHOS_native_buffer` to RADV and ANV, which OpenHarmony's
     swapchain layer requires ([OpenHarmony](#openharmony)).
+  - 0009 adds an OpenHarmony EGL platform for Zink ([GL](#gl)).
 
 Tests: `tests/run.sh` runs in `mise run test:bionic`. It runs `vkdriver_test`
 (loading, compute, udmabuf import, ANB images, deferred binds),
@@ -60,8 +61,10 @@ on lavapipe and on the hardware driver that a normal launcher session selects.
 On hybrid systems, that is the selected GPU alone, because the broker permits
 only its node. Each invocation uses a fresh named Android session.
 `tests/ohos.sh` runs in `mise run test:bionic` too. It runs
-`ohos_swapchain_test` in a fresh OpenHarmony profile on a nested desktop, on the
-GPU that the launcher selects, and it is skipped without a GPU.
+`ohos_swapchain_test` and `ohos_gles_test` in a fresh OpenHarmony profile on a
+nested desktop, on the GPU that the launcher selects, and it is skipped without
+a GPU. `ohos_gles_test` draws to an EGL window surface and imports a buffer with
+`EGL_NATIVE_BUFFER_OHOS`, with our EGL loaded from a copy in `/data/local/tmp`.
 
 ## OpenHarmony
 
@@ -89,3 +92,28 @@ the fence code of the two extensions is shared.
   `DT_NEEDED` entry is `libc.so`, and the only exports are the three `vk_icd*`
   entry points. `build.sh` checks both. The drivers have no shader cache, zlib
   or window-system integration.
+
+### GL
+
+The same Mesa build makes EGL, GLES and Zink for OpenHarmony. OH's EGL wrapper
+(`/system/lib64/platformsdk/libEGL.so`) loads `libEGL_impl.so` and
+`libGLESv{1,2,3}_impl.so` from `/vendor/lib64/chipsetsdk`. `build.sh` installs
+ours under those names, with `libgallium-26.2.5.so`, in
+`share/innkeeper/ohos/gpu/vendor`, a tree apart from the Vulkan drivers.
+
+- **Platform.** Patch 0009 adds an `ohos` EGL platform, and `build.sh` makes it
+  the native platform. Its driver is Zink. A window surface is a kopper drawable
+  with `VK_OHOS_surface`, which OH's swapchain layer provides, so its buffers
+  reach the Vulkan driver through `VK_OHOS_native_buffer`. The layer has no BGRA
+  formats, so the window configs are RGBA. The patch ports the surface and
+  kopper code of OpenHarmony's Mesa
+  ([third_party_mesa3d](https://gitee.com/openharmony/third_party_mesa3d), MIT).
+- **Native buffers.** render_service imports other surfaces' buffers with
+  `eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS)`. The platform imports the buffer's
+  dma-buf as a linear image of its RGB format with the handle's row pitch. YUV
+  buffers don't import yet.
+- **NDK.** The platform calls OH's NativeWindow API in `libnative_window.so`.
+  `build.sh` copies OH's NDK headers for it (`android/vendor/third_party/ohos`)
+  into the sysroot, with a link stub that has the library's soname. Each library
+  needs only `libc.so`, `libgallium-26.2.5.so` and, for EGL,
+  `libnative_window.so`, and `build.sh` checks that.

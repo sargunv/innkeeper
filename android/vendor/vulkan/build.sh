@@ -9,6 +9,8 @@
 #   share/innkeeper/ohos/vendor/lib64/chipsetsdk/libvulkan_{radeon,intel}.so
 #   share/innkeeper/ohos/vendor/etc/vulkan/icd.d/{radeon,intel}_icd.x86_64.json
 #   share/innkeeper/ohos/vendor/etc/libdrm/amdgpu.ids
+#   share/innkeeper/ohos/gpu/vendor/lib64/chipsetsdk/lib{EGL,GLESv1,GLESv2,GLESv3}_impl.so
+#   share/innkeeper/ohos/gpu/vendor/lib64/chipsetsdk/libgallium-26.2.5.so
 # It also builds the test programs that tests/run.sh runs
 # (out/build/vulkan/{test,test-vendor}) and the one that tests/ohos.sh runs
 # (out/build/vulkan/test-ohos). The build is skipped when its inputs
@@ -33,7 +35,8 @@ if [[ ! -e /run/.containerenv ]]; then
   # tests/halbuf.cpp builds the graphics HAL's buffer code.
   inputs=$(
     cd "$repo" &&
-      find android/vendor/vulkan android/vendor/graphics/common tools/container/Containerfile \
+      find android/vendor/vulkan android/vendor/graphics/common android/vendor/third_party/ohos \
+        tools/container/Containerfile \
         tools/build/toolchain.env -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
   )
   if [[ -d $work/install && $(cat "$work/.stamp" 2>/dev/null) == "$inputs" ]]; then
@@ -320,6 +323,7 @@ build_test() {
 # and libc++ statically. build_musl_runtimes builds those from the pinned LLVM
 # source.
 ohos_vendor=$work/install/share/innkeeper/ohos/vendor
+ohos_gpu_vendor=$work/install/share/innkeeper/ohos/gpu/vendor
 musl=$build/musl
 ohos_deps=$work/deps-ohos
 
@@ -334,6 +338,15 @@ build_musl_runtimes() {
   cp -rL /usr/x86_64-linux-musl/lib64/. "$sys/usr/lib/"
   # OpenHarmony's libraries need musl as libc.so.
   patchelf --set-soname libc.so "$sys/usr/lib/libc.so"
+  # Mesa's OpenHarmony EGL platform uses the NDK's NativeWindow API. The
+  # sysroot gets the NDK headers and a link stub with the soname of the image's
+  # libnative_window.so, which resolves the symbols at load time.
+  cp -r "$repo/android/vendor/third_party/ohos/include/." "$sys/usr/include/"
+  printf 'void %s(void) {}\n' OH_NativeWindow_NativeWindowHandleOpt \
+    OH_NativeWindow_NativeObjectReference OH_NativeWindow_NativeObjectUnreference \
+    OH_NativeWindow_GetBufferHandleFromNative |
+    "$ndk_bin/clang" --target=x86_64-linux-musl -shared -nostdlib \
+      -Wl,-soname,libnative_window.so -o "$sys/usr/lib/libnative_window.so" -x c -
   cp -r "$("$ndk_bin/clang" -print-resource-dir)/include" "$res/include"
   local flags="-resource-dir=$res" t=x86_64-linux-musl b=$build/musl-runtimes
   rm -rf "$b"
@@ -401,10 +414,10 @@ EOF
   ohos_meson setup $(reconf "$b") "$b" "$src/mesa" "${ohos_cross[@]}" \
     --prefix=/vendor --libdir=lib64/chipsetsdk \
     -Dbuildtype=release -Db_ndebug=true -Dcpp_eh=none \
-    -Dplatforms=ohos -Dvulkan-drivers=amd,intel -Dgallium-drivers= \
+    -Dplatforms=ohos -Dvulkan-drivers=amd,intel -Dgallium-drivers=zink \
     -Dllvm=disabled -Damd-use-llvm=false -Dmesa-clc=system -Dintel-rt=disabled \
-    -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dopengl=false \
-    -Dgles1=disabled -Dgles2=disabled -Dshader-cache=disabled \
+    -Degl=enabled -Degl-native-platform=ohos -Dgbm=disabled -Dglx=disabled \
+    -Dopengl=true -Dgles1=enabled -Dgles2=enabled -Dshader-cache=disabled \
     -Dzlib=disabled -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
     -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
     -Dperfetto=false -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
@@ -422,6 +435,33 @@ EOF
   # manifests name each driver by its absolute path.
   install -D -m644 -t "$ohos_vendor/etc/vulkan/icd.d" \
     "$b/src/amd/vulkan/radeon_icd.x86_64.json" "$b/src/intel/vulkan/intel_icd.x86_64.json"
+  # OH's EGL wrapper loads libEGL_impl.so and libGLES{v1,v2,v3}_impl.so from
+  # /vendor/lib64/chipsetsdk. These replace the image's Mesa only on a GPU, so
+  # they go in a separate tree, which the launcher lays over /vendor.
+  local gl=$ohos_gpu_vendor/lib64/chipsetsdk
+  install -d "$gl"
+  ohos_gl_lib "$b/src/egl/libEGL.so.1.0.0" "$gl/libEGL_impl.so"
+  ohos_gl_lib "$b/src/mesa/glapi/es1api/libGLESv1_CM.so.1.1.0" "$gl/libGLESv1_impl.so"
+  ohos_gl_lib "$b/src/mesa/glapi/es2api/libGLESv2.so.2.0.0" "$gl/libGLESv2_impl.so"
+  ln -sf libGLESv2_impl.so "$gl/libGLESv3_impl.so"
+  ohos_gl_lib "$b/src/gallium/targets/dri/libgallium-26.2.5.so" "$gl/libgallium-26.2.5.so"
+}
+
+ohos_gl_lib() {
+  "$ndk_bin/llvm-objcopy" --strip-unneeded "$1" "$2"
+  chmod 644 "$2"
+  local needed
+  needed=$(readelf -dW "$2" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | paste -sd' ')
+  echo "ohos_gl_lib: $(basename "$2") NEEDED: $needed"
+  for n in $needed; do
+    case $n in
+      libc.so | libnative_window.so | libgallium-26.2.5.so) ;;
+      *)
+        echo "ohos_gl_lib: $2 needs $n" >&2
+        return 1
+        ;;
+    esac
+  done
 }
 
 # The OpenHarmony test program goes in $work/test-ohos. It runs on the image's
@@ -434,6 +474,10 @@ build_test_ohos() {
     -resource-dir="$musl/resource" -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld \
     -O2 -Wall -Werror -I"$src/mesa/include" -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
     -o "$t/ohos_swapchain_test" "$here/tests/ohos_swapchain_test.c"
+  "$ndk_bin/clang" --target=x86_64-linux-musl --sysroot="$musl/sysroot" \
+    -resource-dir="$musl/resource" -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld \
+    -O2 -Wall -Werror -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
+    -o "$t/ohos_gles_test" "$here/tests/ohos_gles_test.c"
 }
 
 # OpenHarmony's drivers may only need musl, and they export only the ICD
