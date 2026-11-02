@@ -8,6 +8,7 @@ pub mod sysfs;
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixDatagram;
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 
 use crate::notify::{
@@ -20,6 +21,9 @@ pub use innkeeper_evdev_proto::{EVENT_SIZE, KEYBOARD, MOUSE, Message, TOUCHSCREE
 // eventN nodes.
 const DIRECTORY: &str = "/dev/innkeeper-input";
 const PREFIX: &[u8] = b"/dev/input/innkeeper-event";
+/// The most batches that wait for one reader process. The kernel's evdev
+/// also drops events for a client that falls behind.
+const BACKLOG: usize = 1024;
 
 struct Client {
     device: u32,
@@ -30,6 +34,8 @@ struct Client {
     identity: std::path::PathBuf,
     pid: u32,
     fd: i32,
+    /// The thread group that opened the device.
+    reader: i32,
 }
 impl Client {
     fn live(&self) -> bool {
@@ -48,9 +54,7 @@ impl Client {
                 )
             };
             if n >= 0 {
-                // EventHub reads one packet per ready device, in epoll order.
-                // Wait for this batch to be read before making another device
-                // readable, preserving modifier/mouse order through InputReader.
+                // Wait for this batch to be read before the reader's next one.
                 while self.live() {
                     let mut queued = 0i32;
                     if unsafe { libc::ioctl(self.peer.as_raw_fd(), libc::TIOCOUTQ, &mut queued) }
@@ -96,9 +100,14 @@ struct Pad {
     axes: [i32; 8],
 }
 
+type Batch = (Arc<Client>, Arc<[u8]>);
+
 struct Devices {
     wake: Option<UnixDatagram>,
     clients: Vec<Arc<Client>>,
+    /// Each reader process's delivery queue. A process that doesn't read
+    /// delays no other process ([docs/input.md](../../../docs/input.md)).
+    readers: HashMap<i32, SyncSender<Batch>>,
     keys: HashMap<u32, [u8; 96]>,
     leds: [u8; 8],
     pads: HashMap<u32, Pad>,
@@ -441,6 +450,7 @@ impl Default for Devices {
         Self {
             wake: None,
             clients: Vec::new(),
+            readers: HashMap::new(),
             keys: HashMap::from([(KEYBOARD, [0; 96])]),
             leds: [0; 8],
             pads: HashMap::new(),
@@ -457,10 +467,44 @@ impl Devices {
         }
     }
 
+    fn add(&mut self, client: Client) {
+        self.readers.entry(client.reader).or_insert_with(|| {
+            let (queue, batches) = sync_channel(BACKLOG);
+            std::thread::spawn(move || deliver_in_order(batches));
+            queue
+        });
+        self.clients.push(Arc::new(client));
+        self.changed();
+    }
+
+    /// Ends the delivery threads of processes that have no open device.
+    fn forget_readers(&mut self) {
+        let clients = &self.clients;
+        self.readers
+            .retain(|reader, _| clients.iter().any(|c| c.reader == *reader));
+    }
+
+    /// Queues `records` for each reader of `device`.
+    fn send(&self, device: u32, records: &[u8]) {
+        let records: Arc<[u8]> = records.into();
+        for client in self.clients.iter().filter(|c| c.device == device) {
+            let batch = (Arc::clone(client), Arc::clone(&records));
+            if let Some(Err(TrySendError::Full(_))) =
+                self.readers.get(&client.reader).map(|q| q.try_send(batch))
+            {
+                eprintln!(
+                    "evdev: reader {} is behind, dropping a batch",
+                    client.reader
+                );
+            }
+        }
+    }
+
     fn remove(&mut self, device: u32, dir: &std::path::Path) {
         self.keys.remove(&device);
         self.pads.remove(&device);
         self.clients.retain(|c| c.device != device);
+        self.forget_readers();
         self.changed();
         let _ = std::fs::remove_file(dir.join(format!("innkeeper-event{device}")));
     }
@@ -524,6 +568,18 @@ fn reap_closed_clients(state: &mut Devices) {
             feedback.close_client(client.peer.as_raw_fd());
         }
     }
+    state.forget_readers();
+}
+
+// EventHub reads one packet per ready device, in epoll order. A process's
+// batches go out one at a time, each after the last one is read, which keeps
+// modifier and mouse order through InputReader.
+fn deliver_in_order(batches: Receiver<Batch>) {
+    for (client, records) in batches {
+        if let Err(e) = client.deliver(&records) {
+            eprintln!("evdev: delivery failed: {e}");
+        }
+    }
 }
 
 // New opens and removals wake the snapshot poll. Writes and final closes wake
@@ -567,6 +623,7 @@ fn register_pad(state: &mut Devices, device: u32, pad: Pad, dir: &std::path::Pat
         // EventHub caches an effect ID for its open. Reopen after replacing the
         // host fd, whose RAII owner has erased and forgotten the old effects.
         state.clients.retain(|c| c.device != device);
+        state.forget_readers();
         state.changed();
         let _ = std::fs::remove_file(&path);
     }
@@ -669,20 +726,7 @@ impl Input {
                         }
                     }
                 }
-                let clients: Vec<_> = s
-                    .clients
-                    .iter()
-                    .filter(|c| c.device == device)
-                    .cloned()
-                    .collect();
-                drop(s);
-                // Don't hold device state while waiting, because EventHub may
-                // need an ioctl answer before it can drain its socket.
-                for client in clients {
-                    if let Err(e) = client.deliver(records) {
-                        eprintln!("evdev: delivery failed: {e}");
-                    }
-                }
+                s.send(device, records);
             }
         });
         // Create the nodes after the input socket is ready. EventHub observes
@@ -865,15 +909,18 @@ impl Input {
         }
         let fd = self.listener.open_with(req, endpoint.as_raw_fd());
         if fd >= 0 {
-            state.clients.push(Arc::new(Client {
+            let reader = status_field(req.pid as i32, "Tgid:")
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(req.pid as i32);
+            state.add(Client {
                 device,
                 peer,
                 identity: std::fs::read_link(format!("/proc/self/fd/{}", endpoint.as_raw_fd()))
                     .expect("installed input socket"),
                 pid: req.pid,
                 fd,
-            }));
-            state.changed();
+                reader,
+            });
         }
         true
     }
@@ -903,8 +950,14 @@ mod tests {
             identity: std::fs::read_link(format!("/proc/self/fd/{}", reader.as_raw_fd())).unwrap(),
             pid: std::process::id(),
             fd: reader.as_raw_fd(),
+            reader: 1,
         };
         (client, reader)
+    }
+
+    fn client_of(device: u32, reader: i32) -> (Client, OwnedFd) {
+        let (client, fd) = client(device);
+        (Client { reader, ..client }, fd)
     }
 
     #[test]
@@ -961,6 +1014,55 @@ mod tests {
             EVENT_SIZE as isize
         );
         packet
+    }
+
+    #[test]
+    fn a_process_that_doesnt_read_delays_no_other_process() {
+        let mut state = Devices::default();
+        let (idle, _held) = client_of(MOUSE, 1);
+        let (mmi, motion) = client_of(MOUSE, 2);
+        state.add(idle);
+        state.add(mmi);
+        state.send(MOUSE, &event(1, 3, 0, 10));
+        state.send(MOUSE, &event(2, 2, 8, -1));
+        assert_eq!(receive(&motion), event(1, 3, 0, 10));
+        assert_eq!(receive(&motion), event(2, 2, 8, -1));
+    }
+
+    #[test]
+    fn a_full_backlog_drops_the_readers_new_batches() {
+        let mut state = Devices::default();
+        let (idle, held) = client_of(MOUSE, 1);
+        state.add(idle);
+        // The first batch waits on the socket, and BACKLOG more wait in the
+        // queue.
+        state.send(MOUSE, &event(0, 2, 0, 1));
+        let mut poll = libc::pollfd {
+            fd: held.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert_eq!(unsafe { libc::poll(&mut poll, 1, 1000) }, 1);
+        for i in 1..BACKLOG as i64 + 3 {
+            state.send(MOUSE, &event(i, 2, 0, 1));
+        }
+        let mut read = vec![];
+        let mut packet = [0; EVENT_SIZE];
+        loop {
+            let mut poll = libc::pollfd {
+                fd: held.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            if unsafe { libc::poll(&mut poll, 1, 200) } != 1 {
+                break;
+            }
+            let n =
+                unsafe { libc::recv(held.as_raw_fd(), packet.as_mut_ptr().cast(), EVENT_SIZE, 0) };
+            assert_eq!(n, EVENT_SIZE as isize);
+            read.push(i64::from_le_bytes(packet[8..16].try_into().unwrap()));
+        }
+        assert_eq!(read, (0..=BACKLOG as i64).collect::<Vec<_>>());
     }
 
     #[test]
