@@ -28,6 +28,11 @@ that dma-buf. The buffers carry no color metadata, so they import as
 BT.601 limited range with centered chroma, which is Android's gralloc
 default.
 
+Kopper presents on Zink's flush thread on every platform except
+Wayland. render_service acquires its screen's buffer from the
+NativeWindow as soon as eglSwapBuffers returns, so on OpenHarmony kopper
+presents inside the swap, as on Wayland.
+
 The surface and kopper code is a port of OpenHarmony's Mesa,
 https://gitee.com/openharmony/third_party_mesa3d at
 ea74a6339917390657db153cb9792f9ccac9f5ae, which is MIT-licensed like
@@ -673,7 +678,7 @@ index 234d0ec..1f4bd03 100755
  ]
  
 diff --git a/src/gallium/drivers/zink/zink_kopper.c b/src/gallium/drivers/zink/zink_kopper.c
-index 7781c00..7fe4dab 100644
+index 7781c00..e852847 100644
 --- a/src/gallium/drivers/zink/zink_kopper.c
 +++ b/src/gallium/drivers/zink/zink_kopper.c
 @@ -79,6 +79,11 @@ init_dt_type(struct kopper_displaytarget *cdt)
@@ -752,6 +757,21 @@ index 7781c00..7fe4dab 100644
  #endif
     default:
        UNREACHABLE("unsupported!");
+@@ -547,9 +581,13 @@ zink_kopper_displaytarget_create(struct zink_screen *screen, unsigned tex_usage,
+     * eglSwapBuffers() returns causes serialization issues with the Wayland
+     * surface protocol and can lead to the compositor booting the app.  This
+     * means we can't do async submit on Wayland.
++    *
++    * OpenHarmony's render_service acquires its screen's buffer from the
++    * NativeWindow as soon as eglSwapBuffers() returns, so the swapchain
++    * layer must queue the buffer inside that call too.
+     */
+    cdt->async = util_queue_is_initialized(&screen->flush_queue) &&
+-                cdt->type != KOPPER_WAYLAND;
++                cdt->type != KOPPER_WAYLAND && cdt->type != KOPPER_OHOS;
+ 
+    *stride = cdt->stride;
+    return cdt;
 diff --git a/src/gallium/drivers/zink/zink_kopper.h b/src/gallium/drivers/zink/zink_kopper.h
 index 4ed32fc..472c9f9 100644
 --- a/src/gallium/drivers/zink/zink_kopper.h
