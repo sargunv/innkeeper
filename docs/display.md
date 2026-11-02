@@ -45,8 +45,8 @@ sequenceDiagram
   libdecor, GTK or host fonts, so it can't draw a window itself. The bridge
   draws an Adwaita-style client frame on every desktop with the vendored
   `sctk-adwaita`. The frame has a ‹ Back button, which sends BACK to the
-  window's display, and a fullscreen button. If the compositor goes away, the
-  composer tries to reconnect every second and then adds its displays again.
+  window's display. If the compositor goes away, the composer tries to reconnect
+  every second and then adds its displays again.
 
 ## Cursor
 
@@ -103,12 +103,15 @@ letterboxes the app when it must.
 
 ### Fullscreen
 
-The title bar's fullscreen button and F11 toggle desktop fullscreen. In
-fullscreen, the header appears when the pointer or a touch reaches the top edge.
-Only the user controls fullscreen. An app's immersive mode doesn't change the
-host window, because each app already fills its own display. For the same
-reason, `Activity.requestFullscreenMode` is refused. The window manager still
-tracks each app's requested system-bar visibility (`wm/RequestedInsets.kt`).
+F11 toggles desktop fullscreen, as in GNOME apps. The title bar has no
+fullscreen button, so it doesn't sit beside maximize as a second, similar window
+control. KWin's window menu also offers fullscreen. In fullscreen, the header
+appears when the pointer or a touch reaches the top edge, with a Leave
+fullscreen button next to the window controls. Only the user controls
+fullscreen. An app's immersive mode doesn't change the host window, because each
+app already fills its own display. For the same reason,
+`Activity.requestFullscreenMode` is refused. The window manager still tracks
+each app's requested system-bar visibility (`wm/RequestedInsets.kt`).
 Orientation-driven shape changes wait while a window is fullscreen, maximized or
 tiled.
 
