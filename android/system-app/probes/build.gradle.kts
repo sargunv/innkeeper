@@ -38,7 +38,7 @@ android {
 
 dependencies { implementation(project(":inject")) }
 
-tasks.register<Sync>("install") {
+tasks.register<Copy>("install") {
   description = "Signs the release APK and installs it into out/test/probes."
   into(rootDir.resolve("../../out/test/probes"))
   from(tasks.named("signRelease")) { rename { "InnkeeperProbes.apk" } }
