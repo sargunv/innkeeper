@@ -151,7 +151,7 @@ android/vendor/vulkan/tests/ohos.sh
 """
 
 [tasks."test:e2e"]
-description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle] | ohos); whole run <60 s"
+description = "Observable app behaviour on an isolated desktop (-- [boot input audio desktop lifecycle] | device | ohos); whole run <60 s"
 run = "tests/e2e/run.sh"
 
 [tasks."test:compat"]

@@ -14,9 +14,11 @@ trap 'report_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 export INNKEEPER_PROFILE=${INNKEEPER_PROFILE:-e2e}
-# OpenHarmony runs in its own profile. The Android groups reset their profile
-# but keep its settings, and the settings choose the system.
+# OpenHarmony and Android's device display run in their own profiles. The
+# Android groups reset their profile but keep its settings, and the settings
+# choose the system and display.
 if [[ $* == ohos && ${INNKEEPER_NESTED:-} != 1 ]]; then INNKEEPER_PROFILE+=-ohos; fi
+if [[ $* == device && ${INNKEEPER_NESTED:-} != 1 ]]; then INNKEEPER_PROFILE+=-device; fi
 export INNKEEPER_E2E=1
 # The nested desktop provides the isolation, so the session runs in production
 # mode. Its desktop requests reach desktop.py's fake portals and notifications.
@@ -438,10 +440,10 @@ fi
 
 groups=("$@")
 ((${#groups[@]})) || groups=(boot input audio desktop lifecycle)
-if [[ ${groups[*]} != ohos ]]; then
+if [[ ${groups[*]} != ohos && ${groups[*]} != device ]]; then
   for group in "${groups[@]}"; do
     case $group in boot | input | audio | desktop | lifecycle) ;; *)
-      echo "unknown e2e group: $group (ohos runs alone)" >&2
+      echo "unknown e2e group: $group (ohos and device run alone)" >&2
       exit 2
       ;;
     esac
@@ -450,6 +452,62 @@ if [[ ${groups[*]} != ohos ]]; then
   # installs the dev Flatpak (packaging/flatpak/dev-init.sh), and prepare also
   # prepares the profile's image.
   if [[ ${INNKEEPER_NESTED:-} != 1 ]]; then "$S" prepare >/dev/null; fi
+elif [[ ${groups[*]} == device && ${INNKEEPER_NESTED:-} != 1 ]]; then
+  "$S" prepare >/dev/null
+elif [[ ${groups[*]} == device ]]; then
+  # Android's device display shows display 0 in one window, and display 0
+  # resizes with that window (docs/display.md, "Phone mode").
+  mkdir -p "$T"
+  : >"$T/timings.log"
+  cli=$repo/tools/dev/innkeeper.sh
+  stop_session
+  "$cli" profile delete "$INNKEEPER_PROFILE" >/dev/null 2>&1 || true
+  "$cli" profile create "$INNKEEPER_PROFILE" >/dev/null
+  "$cli" profile set --display device >/dev/null
+  trap stop_session EXIT
+  mkdir -p "$(dirname "$bridge_log")"
+  : >"$bridge_log"
+  phone=dev.sargunv.Innkeeper.phone
+  # shellcheck disable=SC2329 # invoked through until_ok
+  resize() { [[ $(desktop Resize "$phone" "$1" "$2") == '(true,)' ]]; }
+  # shellcheck disable=SC2329 # invoked through until_ok
+  screen_is() {
+    local w h dpi nav width
+    read -r w h < <(s wm size | sed -n 's/^Physical size: \([0-9]*\)x\([0-9]*\)$/\1 \2/p')
+    # The forced density, or the boot density if they are the same.
+    dpi=$(s wm density | awk -F': ' '/^Override/ { o = $2 } /^Physical/ { p = $2 } END { print o ? o : p }')
+    nav=$(s getprop vendor.innkeeper.nav)
+    read -r _ _ width _ < <(desktop Geometry "$phone" | tr -d '(),')
+    printf 'display 0: %sx%s at %s dpi, %s; window width %s\n' "$w" "$h" "$dpi" "$nav" "$width" >"$T/device.txt"
+    # The display's width is the window's width times its scale, and a
+    # landscape window gets a landscape display.
+    [[ -n $w && -n $dpi && $w == $(((width * dpi + 80) / 160)) ]] || return
+    case $1 in
+      landscape) ((w > h)) && [[ $nav == gestural ]] ;;
+      portrait) ((w < h)) && [[ $nav == threebutton ]] ;;
+    esac
+  }
+  # shellcheck disable=SC2329 # invoked through timed
+  device() {
+    "$S" start >/dev/null
+    until_ok booted || return
+    until_ok file_has "$bridge_log" 'window 0 "Android" \(dev\.sargunv\.Innkeeper\.phone\)' || return
+    until_ok file_has "$bridge_log" 'window 0 shows its first frame' || return
+    until_ok screen_is portrait || return
+    # A wide window makes a tablet, with a taskbar and gestures.
+    until_ok resize 1200 760 || return
+    until_ok screen_is landscape || return
+    until_ok resize 440 900 || return
+    until_ok screen_is portrait
+  }
+  if ! timed device device; then
+    cat "$T/device.txt" >&2 || true
+    s logcat -d -s InnkeeperWm:I innkeeper-hwc:I | tail -n 20 >&2
+    exit 1
+  fi
+  echo 'ok   the device window resizes display 0, which lays out as a tablet when wide and as a phone with buttons when narrow'
+  echo 'e2e: PASS'
+  exit
 elif [[ ${INNKEEPER_NESTED:-} != 1 ]]; then
   # Setup doesn't count toward the deadline. The first run in a checkout
   # installs the dev Flatpak (packaging/flatpak/dev-init.sh). The profile

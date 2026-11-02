@@ -123,6 +123,10 @@ jobs:
         run: mise run test:e2e
         env:
           INNKEEPER_E2E_DEADLINE: 180
+      - name: Resize Android's device display with its window
+        run: mise run test:e2e -- device
+        env:
+          INNKEEPER_E2E_DEADLINE: 180
       - name: Test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,9 +135,11 @@ jobs:
           overwrite: true
           path: |
             out/test/e2e/ci/
+            out/test/e2e/ci-device/
             out/test/nested/**/*.log
             out/test/nested/**/*.txt
             out/dev/flatpak/ci/*.log
+            out/dev/flatpak/ci-device/*.log
             !out/test/nested/**/data/**
             !**/android-data*/**
           retention-days: 7
