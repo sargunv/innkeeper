@@ -467,6 +467,7 @@ impl Window {
         let w = self.clone();
         glib::spawn_future_local(async move {
             let p = w.profile();
+            let shown = p.clone();
             let (image, apps) = worker::run_quiet(move || {
                 let image = Session::of_profile(&p)
                     .ok()
@@ -482,6 +483,10 @@ impl Window {
                 (image, apps)
             })
             .await;
+            // The window may have switched profiles meanwhile.
+            if w.profile() != shown {
+                return;
+            }
             // Without a session, the session row's Start button reports why.
             let d = &w.download;
             match image {
