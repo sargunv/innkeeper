@@ -889,7 +889,8 @@ impl State {
             .map(|f| (f.format, f.modifier))
             .chain(self.formats.iter().copied())
             .collect();
-        let params = formats::direct(b.fourcc, b.modifier, &advertised)
+        let bt601 = self.color_representation.is_some();
+        let params = formats::direct(b.fourcc, b.modifier, &advertised, bt601)
             .then(|| self.dmabuf.create_params(&self.qh).ok())
             .flatten();
         let direct = params.is_some();

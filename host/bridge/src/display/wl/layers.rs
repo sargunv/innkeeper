@@ -87,7 +87,8 @@ pub(super) struct Sub {
     /// The buffer to attach once its import completes.
     want: Option<u32>,
     /// A host-owned copy of the buffer, attached in its place while the
-    /// window is hidden or when the compositor can't import it.
+    /// window is hidden or when the compositor can't import it or take its
+    /// matrix.
     frozen: Option<sctk::shm::slot::Buffer>,
     /// The layer's colour representation while it shows a YUV buffer. A
     /// copy is RGB, which the BT.601 matrix doesn't apply to.
