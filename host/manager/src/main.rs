@@ -1,15 +1,15 @@
-//! `innkeeper-manager` is the Innkeeper app window. It installs Android apps
-//! from drag and drop or the file manager, opens and uninstalls them, and shows
-//! the session's state. It is a GTK 4 and libadwaita front end over
+//! `innkeeper-manager` is the Innkeeper app window. It installs Android and
+//! OpenHarmony apps from drag and drop or the file manager, opens, configures
+//! and uninstalls them, and manages profiles. It is a GTK 4 and libadwaita front end over
 //! `innkeeper-core`. See host/manager/README.md.
 
 mod app;
 mod download;
 mod errors;
+mod hero;
 mod install;
 mod permissions;
-mod preferences;
-mod profiles;
+mod profile;
 mod window;
 mod worker;
 
@@ -108,7 +108,7 @@ fn main() -> glib::ExitCode {
             &css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
-        app.set_accels_for_action("win.preferences", &["<Control>comma"]);
+        app.set_accels_for_action("win.profile-settings", &["<Control>comma"]);
         app.set_accels_for_action("win.open", &["<Control>o"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);

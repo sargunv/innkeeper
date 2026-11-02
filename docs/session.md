@@ -184,16 +184,17 @@ profile's system is chosen when the profile is created, with
 system cannot change later, because the data belongs to that system.
 
 Innkeeper lists profiles from their `data-<name>` directories.
-`innkeeper profile` and the manager's Profiles page create, rename, delete,
-start and stop them (`host/core/src/profiles.rs`). No profile is special. A
-command names a profile with `--profile NAME`. Without it, the CLI uses
-`default` and creates it the first time. An app entry runs `innkeeper run PKG`
-and records `X-Innkeeper-Profile`, and `run` without `--profile` uses the
-recorded profile. The entry's command names no profile, so renaming the profile
-doesn't change the app-menu entry, which the DynamicLauncher portal could only
-replace by asking again. The manager opens on the profile it showed last. Core
-takes the profile from its caller. Only the launcher and the programs it starts
-read `INNKEEPER_PROFILE`. Tests use named profiles with fresh data directories.
+`innkeeper profile` and the manager's profile switcher and Profile Settings
+create, rename, delete, start and stop them (`host/core/src/profiles.rs`). No
+profile is special. A command names a profile with `--profile NAME`. Without it,
+the CLI uses `default` and creates it the first time. An app entry runs
+`innkeeper run PKG` and records `X-Innkeeper-Profile`, and `run` without
+`--profile` uses the recorded profile. The entry's command names no profile, so
+renaming the profile doesn't change the app-menu entry, which the
+DynamicLauncher portal could only replace by asking again. The manager opens on
+the profile it showed last. Core takes the profile from its caller. Only the
+launcher and the programs it starts read `INNKEEPER_PROFILE`. Tests use named
+profiles with fresh data directories.
 
 A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
 directory next to the data version record (`host/profile/src/profile.rs`). The
@@ -207,8 +208,7 @@ the settings for following the desktop, and hdc. OpenHarmony has no accent
 color. The CLI and the manager refuse adb and following the accent for
 OpenHarmony, along with the app settings other than the background setting. They
 refuse hdc for Android. `innkeeper profile set` and the manager's Profile
-Settings page change settings. A running profile applies the live settings at
-once.
+Settings change settings. A running profile applies the live settings at once.
 
 A profile with `keep-running` on never stops when idle, and it starts at login.
 The Background portal holds one login command for the app,

@@ -59,7 +59,7 @@ but Android's own processes enforce that policy, and the kernel does not.
   `appdata` view of every app's data, through which an app opens another app's
   file URIs ([ohos](../ohos/README.md#how-it-boots)).
 - This matches one desktop user running several native apps, which is the threat
-  model. The README and the manager's Preferences page say so.
+  model. The README and the manager's Profile Settings say so.
 - Host supplementary groups are not mapped in the sandbox. `selftest` checks
   that no host group is mapped.
 - **Accepted:** the bridge sees every Android process as the user, so its uid

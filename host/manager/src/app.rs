@@ -1,16 +1,20 @@
-//! The page for an installed app's details and settings. Blocking session
-//! calls run on the worker thread.
-use std::cell::Cell;
+//! An installed app's page. Its top opens and force stops the app. Below are
+//! the app's storage, permissions and behaviour, which Android reports, and
+//! Uninstall. Blocking session calls run on the worker thread.
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
 use innkeeper_core::app_settings::{self, AppInfo, Command};
+use innkeeper_core::ops::{self, Event};
 use innkeeper_core::xdg::DesktopApp;
+use innkeeper_profile::profile::System;
 
 use crate::{
     errors::Op,
-    permissions,
+    hero::Hero,
+    install, permissions,
     window::{WeakWindow, Window},
     worker,
 };
@@ -18,45 +22,128 @@ use crate::{
 struct Page {
     window: WeakWindow,
     app: DesktopApp,
-    content: gtk::Box,
+    /// Weak, because the page's `showing` handler owns this state.
+    nav: glib::WeakRef<adw::NavigationPage>,
+    prefs: adw::PreferencesPage,
+    hero: Hero,
+    /// The groups that show Android's answer, or its progress or error.
+    groups: RefCell<Vec<adw::PreferencesGroup>>,
+    uninstall: adw::PreferencesGroup,
     busy: Cell<bool>,
 }
 
 pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let prefs = adw::PreferencesPage::new();
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&content));
-    let page = adw::NavigationPage::builder()
+    // The page shows the app's name below its icon.
+    toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
+    toolbar.set_content(Some(&prefs));
+    let nav = adw::NavigationPage::builder()
         .title(&app.name)
         .child(&toolbar)
         .build();
+    let hero = Hero::new(
+        &crate::window::app_icon(app.icon.as_ref(), 128),
+        &app.name,
+        &install::subtitle(&app.package, app.version.as_deref().unwrap_or_default()),
+    );
+    prefs.add(&hero.widget);
+    let uninstall = adw::PreferencesGroup::new();
+    let row = adw::ButtonRow::builder()
+        .title("_Uninstall…")
+        .use_underline(true)
+        .build();
+    row.add_css_class("destructive-action");
+    uninstall.add(&row);
+    let android = window.system() == System::Android;
     let state = Rc::new(Page {
         window: window.downgrade(),
         app: app.clone(),
-        content,
+        nav: nav.downgrade(),
+        prefs,
+        hero,
+        groups: RefCell::default(),
+        uninstall,
         busy: Cell::new(false),
     });
+
+    let s = Rc::downgrade(&state);
+    state.hero.button("_Open", true).connect_clicked(move |_| {
+        if let Some(s) = s.upgrade() {
+            s.open();
+        }
+    });
+    if android {
+        let s = Rc::downgrade(&state);
+        state
+            .hero
+            .button("_Force Stop", false)
+            .connect_clicked(move |_| {
+                if let Some(s) = s.upgrade() {
+                    s.load(Command::new(&s.app.package, "force-stop"));
+                }
+            });
+    }
+    let s = Rc::downgrade(&state);
+    row.connect_activated(move |_| {
+        if let Some(s) = s.upgrade() {
+            s.confirm_uninstall();
+        }
+    });
+    state.set_groups(vec![]);
     // The navigation page owns the state. Its rows use weak references, so
     // leaving the page releases its controls and doesn't retain the main window.
-    page.connect_showing(move |_| state.load(Command::new(&state.app.package, "info")));
-    page
+    // OpenHarmony doesn't report app settings.
+    nav.connect_showing(move |_| {
+        if android {
+            state.load(Command::new(&state.app.package, "info"));
+        }
+    });
+    nav
 }
 
 impl Page {
+    /// Shows `groups` between the top and Uninstall.
+    fn set_groups(&self, groups: Vec<adw::PreferencesGroup>) {
+        for g in self.groups.take() {
+            self.prefs.remove(&g);
+        }
+        if self.uninstall.parent().is_some() {
+            self.prefs.remove(&self.uninstall);
+        }
+        for g in &groups {
+            self.prefs.add(g);
+        }
+        self.prefs.add(&self.uninstall);
+        self.groups.replace(groups);
+    }
+
+    fn open(self: &Rc<Self>) {
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        let s = self.clone();
+        glib::spawn_future_local(async move {
+            let h = s.hero.clone();
+            s.hero.busy(Some("Opening…"));
+            w.launch(&s.app.package, &s.app.name, move |m| h.busy(Some(m)))
+                .await;
+            s.hero.busy(None);
+        });
+    }
+
+    /// Sends `command` to Android and shows the app's settings from its answer.
     fn load(self: &Rc<Self>, command: Command) {
         if self.busy.replace(true) {
             return;
         }
-        self.content.set_sensitive(false);
-        if self.content.first_child().is_none() {
-            self.content.append(
-                &adw::StatusPage::builder()
-                    .title("Loading…")
-                    .child(&adw::Spinner::new())
-                    .vexpand(true)
-                    .build(),
-            );
+        let first = self.groups.borrow().is_empty();
+        let progress = gtk::Label::new(None);
+        if first {
+            self.set_groups(vec![loading(&progress)]);
+        }
+        for g in self.groups.borrow().iter() {
+            g.set_sensitive(false);
         }
         let state = self.clone();
         let Some(profile) = self.window.upgrade().map(|w| w.profile()) else {
@@ -65,108 +152,50 @@ impl Page {
         glib::spawn_future_local(async move {
             let result = worker::run(
                 move |report| app_settings::request(&profile, command, report),
-                |_| {},
+                move |e| {
+                    if let Event::Status(m) = e {
+                        progress.set_text(&install::status_text(&m));
+                    }
+                },
             )
             .await;
             state.busy.set(false);
-            state.content.set_sensitive(true);
             match result {
                 Ok(info) => state.show(info),
                 Err(e) => {
                     if let Some(window) = state.window.upgrade() {
                         window.show_error(Op::AppSettings, Some(&state.app.name), &e);
                     }
-                    // A failed command may have applied or not, so the old controls could
-                    // show the wrong state. Replace them with a button that reads the
-                    // settings again.
-                    state.clear();
-                    let retry = gtk::Button::with_label("Try Again");
+                    // A failed command may have applied or not, so the old
+                    // controls could show the wrong state. Replace them with a
+                    // button that reads the settings again.
+                    let retry = adw::ButtonRow::builder()
+                        .title("_Try Again")
+                        .use_underline(true)
+                        .build();
                     let s = Rc::downgrade(&state);
-                    retry.connect_clicked(move |_| {
+                    retry.connect_activated(move |_| {
                         if let Some(s) = s.upgrade() {
                             s.load(Command::new(&s.app.package, "info"));
                         }
                     });
-                    state.content.append(
-                        &adw::StatusPage::builder()
-                            .title("App Settings Unavailable")
-                            .child(&retry)
-                            .vexpand(true)
-                            .build(),
-                    );
+                    let group = adw::PreferencesGroup::new();
+                    group.add(&retry);
+                    state.set_groups(vec![group]);
                 }
             }
         });
     }
 
-    fn clear(&self) {
-        while let Some(child) = self.content.first_child() {
-            self.content.remove(&child);
-        }
-    }
-
     fn show(self: &Rc<Self>, info: AppInfo) {
-        self.clear();
-        let prefs = adw::PreferencesPage::new();
-        prefs.set_vexpand(true);
-        let app = adw::PreferencesGroup::new();
-        let identity = adw::ActionRow::builder()
-            .title(&self.app.name)
-            .subtitle(&self.app.package)
-            .use_markup(false)
-            .build();
-        identity.add_prefix(&crate::window::app_icon(self.app.icon.as_ref(), 48));
-        let open = gtk::Button::builder()
-            .label("Open")
-            .valign(gtk::Align::Center)
-            .build();
-        let s = Rc::downgrade(self);
-        open.connect_clicked(move |_| {
-            if let Some(s) = s.upgrade()
-                && let Some(window) = s.window.upgrade()
-            {
-                window.launch(&s.app.package, &s.app.name);
-            }
-        });
-        identity.add_suffix(&open);
-        app.add(&identity);
-        prefs.add(&app);
-
         let storage = adw::PreferencesGroup::builder().title("Storage").build();
-        for (title, bytes) in [
-            ("App", info.app_bytes),
-            ("Data", info.data_bytes.saturating_sub(info.cache_bytes)),
-            ("Cache", info.cache_bytes),
-        ] {
-            let row = adw::ActionRow::builder().title(title).build();
-            row.add_suffix(&gtk::Label::new(Some(&glib::format_size(bytes))));
-            storage.add(&row);
-        }
-        self.action(&storage, "Clear Cache", "clear-cache", false);
-        self.action(&storage, "Clear Data…", "clear-data", true);
-        prefs.add(&storage);
-
-        let settings = adw::PreferencesGroup::builder().title("Behaviour").build();
-        self.switch(
-            &settings,
-            "Escape as Back",
-            "",
-            "escape-back",
-            "",
-            info.escape_back,
-            true,
-        );
-        self.switch(
-            &settings,
-            "Run in Background",
-            "",
-            "background",
-            "",
-            info.background,
-            true,
-        );
-        self.defaults(&settings, &info.defaults);
-        prefs.add(&settings);
+        storage.add(&size_row("App", info.app_bytes));
+        let data = size_row("Data", info.data_bytes.saturating_sub(info.cache_bytes));
+        data.add_suffix(&self.clear_button("clear-data", true));
+        storage.add(&data);
+        let cache = size_row("Cache", info.cache_bytes);
+        cache.add_suffix(&self.clear_button("clear-cache", info.cache_bytes > 0));
+        storage.add(&cache);
 
         let permissions = adw::PreferencesGroup::builder()
             .title("Permissions")
@@ -176,41 +205,60 @@ impl Page {
         }
         let titles = permissions::titles(info.permissions.iter().map(|p| p.name.as_str()));
         for (p, (title, subtitle)) in info.permissions.iter().zip(titles) {
-            self.switch(
-                &permissions,
-                &title,
-                &subtitle,
-                "permission",
-                &p.name,
-                p.granted,
-                p.editable,
-            );
+            let row = self.switch(&title, "permission", &p.name, p.granted);
+            row.set_subtitle(&subtitle);
+            row.set_sensitive(p.editable);
+            permissions.add(&row);
         }
-        prefs.add(&permissions);
 
-        let actions = adw::PreferencesGroup::new();
-        self.action(&actions, "Force Stop", "force-stop", false);
-        let row = adw::ActionRow::builder()
-            .title("Uninstall…")
-            .activatable(true)
+        let behaviour = adw::PreferencesGroup::builder().title("Behaviour").build();
+        behaviour.add(&self.switch("Escape as Back", "escape-back", "", info.escape_back));
+        behaviour.add(&self.switch("Run in Background", "background", "", info.background));
+        behaviour.add(&self.defaults(&info.defaults));
+
+        self.set_groups(vec![storage, permissions, behaviour]);
+    }
+
+    /// A Clear button that sends `action`. Clearing data asks first. An empty
+    /// cache has nothing to clear.
+    fn clear_button(self: &Rc<Self>, action: &str, enabled: bool) -> gtk::Button {
+        let button = gtk::Button::builder()
+            .label("Clear")
+            .valign(gtk::Align::Center)
+            .sensitive(enabled)
             .build();
-        row.add_css_class("error");
-        let s = Rc::downgrade(self);
-        row.connect_activated(move |_| {
-            if let Some(s) = s.upgrade()
-                && let Some(window) = s.window.upgrade()
-            {
-                window.confirm_uninstall(&s.app);
-            }
+        let data = action == "clear-data";
+        let (s, action) = (Rc::downgrade(self), action.to_string());
+        button.connect_clicked(move |_| {
+            let Some(s) = s.upgrade() else {
+                return;
+            };
+            let action = action.clone();
+            glib::spawn_future_local(async move {
+                if data && !s.confirm_clear_data().await {
+                    return;
+                }
+                s.load(Command::new(&s.app.package, &action));
+            });
         });
-        actions.add(&row);
-        prefs.add(&actions);
-        self.content.append(&prefs);
+        button
+    }
+
+    async fn confirm_clear_data(&self) -> bool {
+        let Some(window) = self.window.upgrade() else {
+            return false;
+        };
+        let d = adw::AlertDialog::new(Some(&format!("Clear {}’s Data?", self.app.name)), None);
+        d.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear Data")]);
+        d.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        d.choose_future(Some(&window.win)).await == "clear"
     }
 
     /// A row with the types that the app opens by default and a button that
     /// clears them.
-    fn defaults(self: &Rc<Self>, group: &adw::PreferencesGroup, defaults: &[String]) {
+    fn defaults(self: &Rc<Self>, defaults: &[String]) -> adw::ActionRow {
         let row = adw::ActionRow::builder().title("Open by Default").build();
         let text = defaults.join(", ");
         let types = gtk::Label::builder()
@@ -235,26 +283,21 @@ impl Page {
             }
         });
         row.add_suffix(&clear);
-        group.add(&row);
+        row
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// A switch that sends `action`, for `permission` if it is one.
     fn switch(
         self: &Rc<Self>,
-        group: &adw::PreferencesGroup,
         title: &str,
-        subtitle: &str,
         action: &str,
         permission: &str,
         active: bool,
-        editable: bool,
-    ) {
+    ) -> adw::SwitchRow {
         let row = adw::SwitchRow::builder()
             .title(title)
-            .subtitle(subtitle)
             .use_markup(false)
             .active(active)
-            .sensitive(editable)
             .build();
         let (s, action, permission) = (
             Rc::downgrade(self),
@@ -270,49 +313,86 @@ impl Page {
             command.enabled = row.is_active();
             s.load(command);
         });
-        group.add(&row);
+        row
     }
 
-    fn action(
-        self: &Rc<Self>,
-        group: &adw::PreferencesGroup,
-        title: &str,
-        action: &str,
-        confirm: bool,
-    ) {
-        let row = adw::ActionRow::builder()
-            .title(title)
-            .activatable(true)
+    fn confirm_uninstall(self: &Rc<Self>) {
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        let d = adw::AlertDialog::new(Some(&format!("Uninstall {}?", self.app.name)), None);
+        let keep = adw::SwitchRow::builder().title("Keep App Data").build();
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
             .build();
-        if confirm {
-            row.add_css_class("error");
-        }
-        let (s, action) = (Rc::downgrade(self), action.to_string());
-        row.connect_activated(move |_| {
-            let Some(s) = s.upgrade() else {
+        list.append(&keep);
+        d.set_extra_child(Some(&list));
+        d.add_responses(&[("cancel", "_Cancel"), ("uninstall", "_Uninstall")]);
+        d.set_response_appearance("uninstall", adw::ResponseAppearance::Destructive);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let s = self.clone();
+        glib::spawn_future_local(async move {
+            if d.choose_future(Some(&w.win)).await != "uninstall" {
                 return;
-            };
-            let action = action.clone();
-            glib::spawn_future_local(async move {
-                if confirm {
-                    let d = adw::AlertDialog::new(
-                        Some(&format!("Clear {}’s Data?", s.app.name)),
-                        Some("Its settings, accounts and files will be permanently deleted."),
-                    );
-                    d.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear Data")]);
-                    d.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
-                    d.set_default_response(Some("cancel"));
-                    d.set_close_response("cancel");
-                    let Some(window) = s.window.upgrade() else {
-                        return;
-                    };
-                    if d.choose_future(Some(&window.win)).await != "clear" {
-                        return;
+            }
+            let keep_data = keep.is_active();
+            s.hero.busy(Some("Uninstalling…"));
+            s.prefs.set_sensitive(false);
+            let nav = s.nav.upgrade();
+            if let Some(n) = &nav {
+                n.set_can_pop(false);
+            }
+            let (pkg, profile) = (s.app.package.clone(), w.profile());
+            let h = s.hero.clone();
+            let r = worker::run(
+                move |rep| ops::uninstall(&profile, &pkg, keep_data, rep),
+                move |e| {
+                    if let Event::Status(text) = e {
+                        h.busy(Some(&install::status_text(&text)));
                     }
+                },
+            )
+            .await;
+            if let Some(n) = &nav {
+                n.set_can_pop(true);
+            }
+            s.prefs.set_sensitive(true);
+            s.hero.busy(None);
+            match r {
+                Ok(_) => {
+                    w.nav.pop_to_tag("main");
                 }
-                s.load(Command::new(&s.app.package, &action));
-            });
+                Err(e) => w.show_error(Op::Uninstall, Some(&s.app.name), &e),
+            }
+            w.refresh();
         });
-        group.add(&row);
     }
+}
+
+fn size_row(title: &str, bytes: u64) -> adw::ActionRow {
+    let row = adw::ActionRow::builder().title(title).build();
+    row.add_suffix(
+        &gtk::Label::builder()
+            .label(glib::format_size(bytes))
+            .css_classes(["dim-label", "numeric"])
+            .build(),
+    );
+    row
+}
+
+/// A group with a spinner and `progress`, while Android answers.
+fn loading(progress: &gtk::Label) -> adw::PreferencesGroup {
+    let b = gtk::Box::builder()
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .margin_top(24)
+        .build();
+    b.append(&adw::Spinner::new());
+    progress.add_css_class("dim-label");
+    b.append(progress);
+    let group = adw::PreferencesGroup::new();
+    group.add(&b);
+    group
 }
