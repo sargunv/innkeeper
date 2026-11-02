@@ -23,7 +23,14 @@
     "installationFree": false,
     "virtualMachine": "ark",
     "compileMode": "esmodule",
+    "pages": "$profile:main_pages",
     "requestPermissions": [
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO_PRIVILEGED"
+      },
+      {
+        "name": "ohos.permission.GET_BUNDLE_RESOURCES"
+      },
       {
         "name": "ohos.permission.READ_PASTEBOARD"
       },
@@ -32,6 +39,9 @@
       },
       {
         "name": "ohos.permission.SET_DEFAULT_APPLICATION"
+      },
+      {
+        "name": "ohos.permission.START_INVISIBLE_ABILITY"
       }
     ],
     "extensionAbilities": [
@@ -46,6 +56,18 @@
       }
     ],
     "abilities": [
+      {
+        "name": "ChooserAbility",
+        "srcEntry": "./ets/chooser/ChooserAbility.ets",
+        "description": "$string:chooser_description",
+        "icon": "$media:icon",
+        "label": "$string:chooser_label",
+        "startWindowIcon": "$media:icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": false,
+        "excludeFromMissions": true,
+        "removeMissionAfterTerminate": true
+      },
       {
         "name": "DesktopAbility",
         "srcEntry": "./ets/desktop/DesktopAbility.ets",

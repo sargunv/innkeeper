@@ -5,6 +5,7 @@ import osAccount from '@ohos.account.osAccount';
 import { BusinessError } from '@ohos.base';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { waitParameter } from 'libinnkeeper.so';
+import { Opened } from '../open/Launch';
 
 const BUNDLE = 'dev.sargunv.innkeeper.user';
 // An app's uid is its user's id times this, plus the app's id.
@@ -13,25 +14,64 @@ const UID_PER_USER = 200000;
 const RESTART_MS = 1000;
 const DOMAIN = 0x0000;
 const TAG = 'InnkeeperSystem';
+// How long a file launch waits for Innkeeper User's answer. The bridge's
+// caller waits 40 s.
+const ANSWER_MS = 30000;
 
 function message(e: Object): string {
   const b = e as BusinessError;
   return b.code === undefined ? `${(e as Error).message}` : `${b.code} ${b.message}`;
 }
 
+// The file launches that wait for Innkeeper User's answer, by request.
+const pending = new Map<number, (o: Opened) => void>();
+let requests = 0;
+
+function failed(error: string): Opened {
+  const o = new Opened();
+  o.error = error;
+  return o;
+}
+
 // Hands files from the desktop to Innkeeper User, which runs as the
 // foreground user and owns the copies that apps open
 // (user/ets/files/HostFiles.ets). The service gets the grants in its
-// onRequest.
+// onRequest, and it answers through answered().
 export async function openInUser(context: common.ServiceExtensionContext, bundle: string,
-  grants: string[]): Promise<void> {
-  const user = await osAccount.getAccountManager().getForegroundOsAccountLocalId();
-  const want: Want = {
-    bundleName: BUNDLE,
-    abilityName: 'UserService',
-    parameters: { 'innkeeper.open.bundle': bundle, 'innkeeper.open.grants': grants.join(',') },
-  };
-  await context.startServiceExtensionAbilityWithAccount(want, user);
+  grants: string[]): Promise<Opened> {
+  const request = ++requests;
+  const answer = new Promise<Opened>((resolve) => {
+    const timer = setTimeout(() => answered(request, failed("Innkeeper User didn't answer")), ANSWER_MS);
+    pending.set(request, (o: Opened) => {
+      clearTimeout(timer);
+      pending.delete(request);
+      resolve(o);
+    });
+  });
+  try {
+    const user = await osAccount.getAccountManager().getForegroundOsAccountLocalId();
+    const want: Want = {
+      bundleName: BUNDLE,
+      abilityName: 'UserService',
+      parameters: {
+        'innkeeper.open.bundle': bundle,
+        'innkeeper.open.grants': grants.join(','),
+        'innkeeper.open.request': request,
+      },
+    };
+    await context.startServiceExtensionAbilityWithAccount(want, user);
+  } catch (e) {
+    answered(request, failed(`Innkeeper User didn't start: ${message(e as Object)}`));
+  }
+  return answer;
+}
+
+// Ends file launch `request` with Innkeeper User's answer `o`.
+export function answered(request: number, o: Opened): void {
+  const resolve = pending.get(request);
+  if (resolve !== undefined) {
+    resolve(o);
+  }
 }
 
 // Runs Innkeeper User for the foreground user, and starts it again when its

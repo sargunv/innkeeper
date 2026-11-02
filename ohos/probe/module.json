@@ -60,7 +60,10 @@
           },
           {
             "actions": ["ohos.want.action.viewData"],
-            "uris": [{ "scheme": "file", "type": "text/*" }]
+            "uris": [
+              { "scheme": "file", "type": "text/*" },
+              { "scheme": "file", "type": "image/*" }
+            ]
           }
         ]
       }

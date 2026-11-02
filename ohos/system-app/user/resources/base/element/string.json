@@ -15,6 +15,22 @@
     {
       "name": "desktop_description",
       "value": "Opens links on the desktop."
+    },
+    {
+      "name": "chooser_label",
+      "value": "Open With"
+    },
+    {
+      "name": "chooser_description",
+      "value": "Chooses the app that opens files from the desktop."
+    },
+    {
+      "name": "chooser_cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "chooser_ok",
+      "value": "OK"
     }
   ]
 }

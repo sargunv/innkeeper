@@ -205,28 +205,38 @@ reports boot completion. Issue #312 tracks the features that build on it.
   default browser at its first start in a profile with
   `defaultAppManager.setDefaultApplication`, which needs
   `SET_DEFAULT_APPLICATION` by ACL. A browser that the user picks later in OH's
-  Settings stays the default. Files that apps open don't reach the desktop. A
-  skill for every file type would make AMS show its chooser whenever an OH app
-  also takes the file, and the chooser fails on this image
-  ([Files from the desktop](#innkeeper-system)).
+  Settings stays the default. Files that apps open don't reach the desktop. OH
+  skills have no priority, so a skill for every file type would make AMS show
+  its own chooser whenever an OH app also takes the file, and that chooser fails
+  on this image ([Files from the desktop](#innkeeper-system)).
 - **Files from the desktop.** `innkeeper run <bundle> <file>` and
   `innkeeper open <files>` make a documents grant for each file with Session1's
   `Import`, and they send the grants in a `launch` command. Innkeeper System
   hands the grants to Innkeeper User's `UserService`, which runs as the
   foreground user (`user/ets/files/`). Innkeeper User reads each file through
   the bridge's documents service and copies it into its own files, because OH
-  apps open files by path. It then starts the app with a view want that carries
+  apps open files by path. It asks the bundle manager for the abilities whose
+  skills take a view want with the copies' URIs. An ability must take each of
+  the files' MIME types, as in Android's chooser. `run` asks within the bundle
+  that it names. One match opens at once. With several, Innkeeper User shows its
+  app chooser, `ChooserAbility` (`user/ets/chooser/`), which lists the apps with
+  their labels and icons from the bundle resource manager. OH has a chooser of
+  its own, but on this image it fails because it needs an app store
+  (`QueryAppGalleryBundleName`). The app starts with a view want that carries
   the copies' URIs and `FLAG_AUTH_READ_URI_PERMISSION`. OH's URI permission
   service grants the app those paths, and the app opens the URIs through the
-  user's appdata view ([How it boots](#how-it-boots)). `run` names the bundle,
-  and AMS picks its ability whose skills match the file. `open` names no bundle,
-  so AMS starts the one app whose skills match. OH would show its chooser when
-  several apps match, but on this image the chooser fails because it needs an
-  app store (`QueryAppGalleryBundleName`), and `open` then fails in Innkeeper
-  User's log. The copies stay until Innkeeper User starts again at the next
-  boot. Innkeeper System answers the command once Innkeeper User has the grants,
-  so a file that the app can't open fails in Innkeeper User's log
-  (`InnkeeperFiles`). Innkeeper User needs `START_ABILITIES_FROM_BACKGROUND`.
+  user's appdata view ([How it boots](#how-it-boots)). The copies stay until
+  Innkeeper User starts again. Innkeeper User answers by starting Innkeeper
+  System's service with the outcome in the want's parameters, and Innkeeper
+  System sends it to Session1's caller. A file that no app opens, a bundle that
+  isn't installed or a failed start therefore fails the CLI's command with a
+  plain message. Once the chooser shows, the command succeeds, and an error
+  after the user picks an app shows in the chooser. The answer can't use a
+  connection, because `connectServiceExtensionAbilityWithAccount` doesn't reach
+  AMS on this image. Innkeeper User needs `START_ABILITIES_FROM_BACKGROUND` to
+  start the app or the chooser, `GET_BUNDLE_INFO_PRIVILEGED` and
+  `GET_BUNDLE_RESOURCES` for the chooser, and `START_INVISIBLE_ABILITY` by ACL
+  to start Innkeeper System's private service.
 - **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
   connects OH's text fields to the host's input method
   ([Text input](#text-input)).
