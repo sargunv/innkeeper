@@ -22,9 +22,9 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   private desktop and waits until SceneBoard's home screen has focus and its
   window shows. It also runs selftest. Boot ends on the home screen, and a click
   on the desktop's seat opens Settings with OpenHarmony's cursor under the
-  pointer. A wheel detent scrolls Settings' list. OpenHarmony's input injector
-  scrolls Settings and goes home, and render_service must not have restarted
-  since boot. A key press reaches OpenHarmony's input service. A file written to
+  pointer. A wheel detent scrolls Settings' list. A dma-buf like the display
+  buffers must export no sync file, which keeps render_service's llvmpipe from
+  crashing. A key press reaches OpenHarmony's input service. A file written to
   the user's Download lands in the profile's data directory. Innkeeper System
   answers a Session1 command at once. The CLI installs the probe HAP
   (ohos/probe), signed for the profile's UDID, lists it and runs it. The bridge

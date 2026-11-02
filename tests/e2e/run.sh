@@ -550,9 +550,6 @@ else
     exit 1
   fi
   echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, Innkeeper System runs as a kept-alive system app and starts Innkeeper User as user 100, and it answers Session1 commands"
-  # Each animation from here on draws in render_service, which must not
-  # restart.
-  ohos_rs=$(s /system/bin/pidof render_service)
   # Sets the window's geometry for at(), which prints the seat's position of
   # panel pixel <x> <y>.
   # shellcheck disable=SC2329 # invoked through timed
@@ -602,7 +599,6 @@ else
     until_ok settings FOREGROUND
   }
   if ! timed ohos-input ohos_input; then
-    echo "e2e: FAIL (ohos-input); render_service: $(s /system/bin/pidof render_service)" >&2
     exit 1
   fi
   echo "ok   boot ends on the home screen, and the desktop pointer opens Settings as OpenHarmony's mouse"
@@ -637,14 +633,22 @@ else
   fi
   echo "ok   a wheel detent scrolls Settings' list"
   # shellcheck disable=SC2329 # invoked through timed
-  ohos_render() {
-    s /system/bin/sh -s "$ohos_rs" <"$repo/ohos/tests/render.sh" >>"$T/ohos.txt" 2>&1
+  ohos_fence() {
+    # The dma-buf tool (ohos/tests/dmabuf.c) makes a buffer as the buffer VDI
+    # does and asks for its sync file, which the shim refuses (#309). Exec
+    # passes this runner's environment, so the tool takes render_service's
+    # LD_PRELOAD.
+    s /system/bin/sh -c 'cat >/data/local/tmp/dmabuf && chmod 755 /data/local/tmp/dmabuf' \
+      <"$repo/out/test/ohos/dmabuf" || return
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c 'preload=$(xargs -0 -n 1 </proc/$(pidof render_service)/environ | grep "^LD_PRELOAD=") &&
+      exec env "$preload" /data/local/tmp/dmabuf' >>"$T/ohos.txt" 2>&1
   }
-  if ! timed ohos-render ohos_render; then
+  if ! timed ohos-fence ohos_fence; then
     tail -n 5 "$T/ohos.txt" >&2
     exit 1
   fi
-  echo 'ok   render_service draws the unlock, Settings and its scrolling without a restart'
+  echo "ok   a buffer's dma-buf exports no sync file, so the image's llvmpipe offers no native fences"
   # shellcheck disable=SC2329 # invoked through timed
   ohos_keys() {
     # MMI logs each key with its device, OpenHarmony's key code and state.
