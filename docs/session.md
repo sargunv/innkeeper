@@ -131,8 +131,9 @@ stateDiagram-v2
   continuous tasks as services (`ohos/system-app/ets/lifecycle/`). The bridge
   adds OpenHarmony's screen window to the windows, so the session stays up while
   that window is open, even on the home screen. Closing the window starts the
-  grace period. No OpenHarmony API lists other apps' reminders, so the report
-  has no wakeup, and a stopped session misses reminders.
+  grace period. Background apps work as on Android, and OpenHarmony's system app
+  stores the setting. No OpenHarmony API lists other apps' reminders, so the
+  report has no wakeup, and a stopped session misses reminders.
 - **Idle timeout.** The profile's `idle-minutes` setting is the grace period
   before the launcher stops an idle session, as `stop` does. The default is 2
   minutes, and Keep Running disables it. A change applies to a running session.
@@ -199,10 +200,10 @@ file or setting takes its default, and an unknown setting is an error.
 OpenHarmony uses the display setting, which is a phone preset because
 OpenHarmony has no windowed mode, the idle timeout, and the settings for
 following the desktop. OpenHarmony has no accent color. The CLI and the manager
-refuse adb and following the accent for OpenHarmony, along with app settings and
-opening files in apps. `innkeeper profile set` and the manager's Profile
-Settings page change settings. A running profile applies the live settings at
-once.
+refuse adb and following the accent for OpenHarmony, along with the app settings
+other than the background setting, and opening files in apps.
+`innkeeper profile set` and the manager's Profile Settings page change settings.
+A running profile applies the live settings at once.
 
 Keep Running is an Innkeeper preference shared by every profile
 (`$XDG_CONFIG_HOME/innkeeper/preferences.toml`). With it on, no profile stops

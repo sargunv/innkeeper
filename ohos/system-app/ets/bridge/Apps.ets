@@ -1,6 +1,9 @@
+import { util } from '@kit.ArkTS';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { blob, onEvent, open, Reply, request, waitParameter } from 'libinnkeeper.so';
+import { BackgroundApps } from '../lifecycle/BackgroundApps';
+import { backgroundCommand, response } from '../lifecycle/Background';
 import { AppMirror } from './AppMirror';
 import { Message, utf8 } from './Wire';
 
@@ -13,23 +16,48 @@ const RESULT = 0x0504;
 const CONNECTED = 0;
 const DOMAIN = 0x0000;
 const TAG = 'InnkeeperSystem';
-// The answer to every Session1 command that the bridge relays. It fits both
-// the app and the window responses (host/core/src/app_settings.rs).
+// The bridge's cap on a command's JSON.
+const MAX_JSON = 64 * 1024;
+// The answer to each Session1 command that the app doesn't implement. It fits
+// both the app and the window responses (host/core/src/app_settings.rs).
 const UNSUPPORTED = '{"error":"OpenHarmony profiles don\'t support this action.","info":null,"reply":null}';
 
 function close(reply: Reply): void {
   reply.fds.forEach((fd: number) => fileIo.closeSync(fd));
 }
 
-// Answers a COMMAND event, whose body is `u64 id, u32 length`, with a RESULT
-// in the same envelope. The bridge's caller waits up to 40 s for it.
-function answer(apps: number, body: ArrayBuffer): void {
-  if (body.byteLength !== 12) {
+// The command's JSON from the memfd `fd`, `length` bytes long.
+function readCommand(fd: number, length: number): string {
+  if (length > MAX_JSON) {
+    return '';
+  }
+  const buf = new ArrayBuffer(length);
+  const n = fileIo.readSync(fd, buf, { offset: 0 });
+  return util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf, 0, n));
+}
+
+// Runs the relayed command and returns the response JSON.
+async function run(command: string, background: BackgroundApps): Promise<string> {
+  const c = backgroundCommand(command);
+  if (c === undefined) {
+    return UNSUPPORTED;
+  }
+  return response(await background.set(c.bundle, c.enabled));
+}
+
+// Answers a COMMAND event, whose body is `u64 id, u32 length` and whose fd
+// holds the command's JSON, with a RESULT in the same envelope. The bridge's
+// caller waits up to 40 s for it. The callback closes the fds afterwards.
+function answer(apps: number, body: ArrayBuffer, fds: number[], background: BackgroundApps): void {
+  if (body.byteLength !== 12 || fds.length !== 1) {
     return;
   }
-  const json = utf8(UNSUPPORTED);
-  const reply = new Message().raw(new Uint8Array(body, 0, 8)).u32(json.length).buffer();
-  request(apps, RESULT, reply, [blob(new Uint8Array(json).buffer)]).then(close).catch((e: Error) => {
+  const command = readCommand(fds[0], new DataView(body).getUint32(8, true));
+  run(command, background).then((answer: string) => {
+    const json = utf8(answer);
+    const reply = new Message().raw(new Uint8Array(body, 0, 8)).u32(json.length).buffer();
+    return request(apps, RESULT, reply, [blob(new Uint8Array(json).buffer)]);
+  }).then(close).catch((e: Error) => {
     hilog.info(DOMAIN, TAG, 'RESULT not sent: %{public}s', e.message);
   });
 }
@@ -39,9 +67,9 @@ function answer(apps: number, body: ArrayBuffer): void {
 // BOOT_COMPLETED, so the app sends it after `bootevent.boot.completed` and
 // again on each new connection. From then on the app also mirrors the
 // installed apps to the desktop's app menu.
-export function startApps(): void {
+export function startApps(background: BackgroundApps): void {
   const apps = open(APPS, 'innkeeper-system');
-  const mirror = new AppMirror(apps);
+  const mirror = new AppMirror(apps, (): void => background.onChange());
   let booted = false;
   const report = (): void => {
     request(apps, BOOT_COMPLETED, new ArrayBuffer(0), []).then((reply: Reply) => {
@@ -56,12 +84,12 @@ export function startApps(): void {
     mirror.syncAll();
   };
   onEvent(apps, (type: number, body: ArrayBuffer, fds: number[]) => {
-    fds.forEach((fd: number) => fileIo.closeSync(fd));
     if (type === COMMAND) {
-      answer(apps, body);
+      answer(apps, body, fds, background);
     } else if (type === CONNECTED && booted) {
       report();
     }
+    fds.forEach((fd: number) => fileIo.closeSync(fd));
   });
   waitParameter('bootevent.boot.completed', 'true').then(() => {
     hilog.info(DOMAIN, TAG, 'boot completed');
