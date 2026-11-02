@@ -695,7 +695,9 @@ else
     # run with a URI sends a browser's link want, and the probe logs its URI.
     opened() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: opened innkeeper-probe://e2e/link' >/dev/null; }
     "$cli" run dev.sargunv.innkeeper.probes innkeeper-probe://e2e/link >>"$T/ohos.txt" 2>&1 || return
-    until_ok opened
+    until_ok opened || return
+    # hilog still holds the line that Innkeeper System logged at boot.
+    s /system/bin/hilog -x -T InnkeeperSystem | grep 'InnkeeperSystem: boot completed$' >/dev/null
   }
   if ! timed ohos-hap ohos_hap; then
     tail -n 20 "$T/ohos.txt" >&2
