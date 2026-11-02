@@ -519,6 +519,70 @@ else
     exit 1
   fi
   echo 'ok   OpenHarmony registers its core system abilities, starts SceneBoard, shows screen 0 in a desktop window and passes selftest'
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_hdc() {
+    local port server result=0
+    # hdc is off by default, and hdc authentication is on.
+    [[ $(s /system/bin/param get const.hdc.secure | tr -d '[:space:]') == 1 ]] || return
+    ! s /system/bin/pidof hdcd >/dev/null || return
+    # Runs in other checkouts share the hdc server port and the profiles' hdc
+    # ports, so one run at a time turns hdc on.
+    exec {hdc_lock}>"${XDG_RUNTIME_DIR%/*}/innkeeper-e2e-hdc.lock"
+    flock -w "$observation_wait" "$hdc_lock" || return
+    # The key pair, the hdc server's pid file and its log stay in the test's
+    # directory. The public key is copied to where the session looks for the
+    # user's key, in the dev sandbox's home.
+    rm -rf "$T/hdchome" "$T/hdctmp" && mkdir -p "$T/hdchome/.harmony" "$T/hdctmp"
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$T/hdchome/.harmony/hdckey" 2>/dev/null &&
+      openssl pkey -in "$T/hdchome/.harmony/hdckey" -pubout -out "$T/hdchome/.harmony/hdckey.pub" || return
+    local keys=$repo/out/dev/flatpak/$INNKEEPER_PROFILE/home/.harmony
+    mkdir -p "$keys" && cp "$T/hdchome/.harmony/hdckey.pub" "$keys/" || return
+    "$cli" profile set --hdc on >"$T/hdc-on.txt" 2>&1 || return
+    port=$(grep -o 'listens on 127\.0\.0\.1:[0-9]*' "$T/hdc-on.txt" | cut -d: -f2)
+    [[ -n $port ]] || return
+    # hdcd listens on loopback alone, and so does its discovery responder.
+    ss -ltnH "sport = :$port" >"$T/hdc-listen.txt"
+    ss -lunH 'sport = :8710' >>"$T/hdc-listen.txt"
+    grep -q "127.0.0.1:$port " "$T/hdc-listen.txt" || return
+    if grep -Ev "127\.0\.0\.1:($port|8710) " "$T/hdc-listen.txt"; then
+      echo "FAIL hdcd listens beyond loopback" >&2
+      return 1
+    fi
+    # A private hdc server connects with the authorized key, and the UDID that
+    # DevEco signs for matches the profile's.
+    local H=(env HOME="$T/hdchome" TMPDIR="$T/hdctmp" "$repo/out/test/probes/hdc/hdc" -s 127.0.0.1:15991)
+    "${H[@]}" -m >"$T/hdc-server.log" 2>&1 &
+    server=$!
+    # A client that finds no server starts one of its own, so the clients
+    # wait for this one.
+    # shellcheck disable=SC2329 # invoked through until_ok
+    serving() { [[ -n $(ss -ltnH 'sport = :15991') ]]; }
+    until_ok serving || result=$?
+    # shellcheck disable=SC2329 # invoked through until_ok
+    hdc_shell() {
+      "${H[@]}" tconn "127.0.0.1:$port" >/dev/null 2>&1
+      [[ $("${H[@]}" -t "127.0.0.1:$port" shell echo ok 2>/dev/null | tr -d '\r') == ok ]]
+    }
+    ((result)) || until_ok hdc_shell || result=$?
+    if ((result == 0)); then
+      "${H[@]}" -t "127.0.0.1:$port" shell bm get --udid 2>&1 | tr -d '\r' >"$T/hdc-udid.txt"
+      grep -qx "$udid" "$T/hdc-udid.txt" || result=1
+    fi
+    kill "$server" 2>/dev/null || true
+    wait "$server" 2>/dev/null || true
+    ((result == 0)) || return "$result"
+    "$cli" profile set --hdc off >/dev/null 2>&1 || return
+    # shellcheck disable=SC2329 # invoked through until_ok
+    closed() { [[ -z $(ss -ltnH "sport = :$port") ]]; }
+    until_ok closed || return
+    exec {hdc_lock}>&-
+  }
+  if ! timed ohos-hdc ohos_hdc; then
+    cat "$T/hdc-on.txt" "$T/hdc-listen.txt" "$T/hdc-udid.txt" >&2 2>/dev/null || true
+    grep 'hdc' "$(dirname "$bridge_log")/session.log" >&2 || true
+    exit 1
+  fi
+  echo "ok   hdc is off by default; on, hdcd listens on loopback and the user's key reaches it with hdc shell"
   # Innkeeper System (ohos/system-app) is a preinstalled system app that is
   # kept alive, and it reports boot completion to Session1.
   # shellcheck disable=SC2329 # invoked through timed
