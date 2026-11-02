@@ -30,11 +30,28 @@ use splash::Splash;
     about = "Run Android and OpenHarmony apps on Linux"
 )]
 struct Cli {
-    /// The name of the profile to use, as `profile list` shows it.
-    #[arg(long, global = true, value_name = "NAME", default_value = innkeeper_profile::profile::FIRST)]
-    profile: String,
+    /// The name of the profile to use, as `profile list` shows it. Without
+    /// it, `run` uses the app's profile, and other commands use `default`.
+    #[arg(long, global = true, value_name = "NAME")]
+    profile: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+impl Cli {
+    /// The profile that the command uses: `--profile`, or for `run` the
+    /// profile in the app's record, which desktop entries rely on, or else
+    /// `default`.
+    fn profile_name(&self, d: &xdg::Dirs) -> String {
+        let app = match &self.cmd {
+            Cmd::Run { package, .. } if self.profile.is_none() => xdg::app_profile(d, package),
+            _ => None,
+        };
+        self.profile
+            .clone()
+            .or(app)
+            .unwrap_or_else(|| innkeeper_profile::profile::FIRST.into())
+    }
 }
 
 #[derive(Subcommand)]
@@ -745,10 +762,11 @@ fn main() -> ExitCode {
         std::env::remove_var("DESKTOP_STARTUP_ID");
     }
     let cli = Cli::parse();
+    let name = cli.profile_name(&xdg::Dirs::from_env());
     let res = (|| match cli.cmd {
-        Cmd::Profile(cmd) => profile(&cli.profile, cmd),
+        Cmd::Profile(cmd) => profile(&name, cmd),
         cmd => {
-            let p = profiles::existing(&cli.profile)?;
+            let p = profiles::existing(&name)?;
             match cmd {
                 Cmd::Open { files } => open(&p, &files, token),
                 Cmd::Install { file } => install(&p, &file),
@@ -780,6 +798,35 @@ mod tests {
     fn parse(args: &str) -> Result<Cmd, clap::Error> {
         Cli::try_parse_from(std::iter::once("innkeeper").chain(args.split_whitespace()))
             .map(|c| c.cmd)
+    }
+
+    #[test]
+    fn profile_is_named_by_flag_else_the_apps_or_default() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/test/cli-run-profile");
+        let _ = std::fs::remove_dir_all(&root);
+        let d = xdg::Dirs {
+            data: root.join("share"),
+            config: root.join("config"),
+            cache: root.join("cache"),
+            portal: None,
+        };
+        std::fs::create_dir_all(d.applications()).unwrap();
+        std::fs::write(
+            d.app_desktop("org.ex.a"),
+            "[Desktop Entry]\nX-Innkeeper-Package=org.ex.a\nX-Innkeeper-Profile=work\n",
+        )
+        .unwrap();
+        let name = |args: &str| {
+            Cli::try_parse_from(std::iter::once("innkeeper").chain(args.split_whitespace()))
+                .unwrap()
+                .profile_name(&d)
+        };
+        assert_eq!(name("run org.ex.a"), "work");
+        assert_eq!(name("--profile other run org.ex.a"), "other");
+        assert_eq!(name("run org.ex.unknown"), "default");
+        assert_eq!(name("list"), "default");
+        assert_eq!(name("list --profile work"), "work");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -832,14 +879,6 @@ mod tests {
     }
 
     #[test]
-    fn profile_is_named_by_flag_else_default() {
-        let p = |args: &str| Cli::try_parse_from(args.split_whitespace()).map(|c| c.profile);
-        assert_eq!(p("innkeeper list").unwrap(), "default");
-        assert_eq!(p("innkeeper list --profile work").unwrap(), "work");
-        assert_eq!(p("innkeeper --profile work run a.b").unwrap(), "work");
-    }
-
-    #[test]
     fn profile_set_covers_every_setting() {
         let cli = Cli::try_parse_from(
             "innkeeper --profile work profile set --display device --idle-minutes 30 \
@@ -847,7 +886,7 @@ mod tests {
                 .split_whitespace(),
         )
         .unwrap();
-        assert_eq!(cli.profile, "work");
+        assert_eq!(cli.profile_name(&xdg::Dirs::from_env()), "work");
         let Cmd::Profile(ProfileCmd::Set(a)) = cli.cmd else {
             panic!("profile set did not parse");
         };

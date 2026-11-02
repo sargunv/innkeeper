@@ -64,7 +64,8 @@ doesn't say.
 - `--profile NAME` selects a profile. Without it, commands use the `default`
   profile, which is created on first use
   ([session](../../docs/session.md#profiles)). App entries run
-  `innkeeper --profile NAME run PKG`, so they keep their profile.
+  `innkeeper run PKG`. Without `--profile`, `run` uses the profile in the app's
+  record, so a renamed profile keeps its app-menu entries.
 - The supported desktops have no standard way to share text with an app, so the
   desktop entry accepts only files.
 

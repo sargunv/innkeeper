@@ -52,16 +52,12 @@ impl Prefix {
     }
 }
 
-use innkeeper_profile::profile::ProfileName;
-
-/// Builds the argv `innkeeper --profile <profile> <args>`, which runs the CLI
-/// ([`crate::xdg::INNKEEPER`]) against `profile`.
-pub fn cli(profile: &ProfileName, args: &[&str]) -> Vec<String> {
-    let mut v = vec![
-        crate::xdg::INNKEEPER.to_string(),
-        "--profile".into(),
-        profile.to_string(),
-    ];
-    v.extend(args.iter().map(|a| a.to_string()));
-    v
+/// Builds the argv `innkeeper run <package>`, which an app's desktop entry
+/// runs. It names no profile, so that renaming the profile leaves the app-menu
+/// entry as it is. The CLI finds the profile in the app's record
+/// (`X-Innkeeper-Profile`).
+pub fn app_command(package: &str) -> Vec<String> {
+    [crate::xdg::INNKEEPER, "run", package]
+        .map(String::from)
+        .into()
 }

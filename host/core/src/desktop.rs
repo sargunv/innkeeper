@@ -205,9 +205,9 @@ impl Splash {
 }
 
 impl AppEntry {
-    /// `innkeeper --profile <profile> run <package>`.
+    /// `innkeeper run <package>`.
     pub fn run(&self) -> Vec<String> {
-        crate::paths::cli(&self.profile, &["run", &self.package])
+        crate::paths::app_command(&self.package)
     }
 
     pub fn id(&self) -> String {
@@ -416,7 +416,7 @@ mod tests {
             "[Desktop Entry]\nType=Application\nVersion=1.5\nName=Wikipedia\n\
              Name[de]=Wikipedia DE\nName[pt_BR]=Wikipédia\nComment=Android app (org.wikipedia)\n\
              Icon=dev.sargunv.innkeeper.org.wikipedia\n\
-             Exec=innkeeper --profile work run org.wikipedia %U\nTerminal=false\n\
+             Exec=innkeeper run org.wikipedia %U\nTerminal=false\n\
              StartupNotify=true\nStartupWMClass=dev.sargunv.Innkeeper.org.wikipedia\nCategories=Utility;\n\
              MimeType=x-scheme-handler/wikipedia;\nKeywords=Android;\n\
              X-Innkeeper-Package=org.wikipedia\nX-Innkeeper-Profile=work\nX-Innkeeper-Version=2.7.50\n\
@@ -448,9 +448,7 @@ mod tests {
         );
         assert!(s.contains("Keywords=OpenHarmony;\n"), "{s}");
         assert!(
-            s.contains(
-                "Exec=innkeeper --profile work run org.wikipedia %U\nTerminal=false\nCategories="
-            ),
+            s.contains("Exec=innkeeper run org.wikipedia %U\nTerminal=false\nCategories="),
             "{s}"
         );
     }

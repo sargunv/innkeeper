@@ -280,6 +280,13 @@ fn app_entries(d: &Dirs) -> Vec<(String, PathBuf, String)> {
         .collect()
 }
 
+/// The profile that `pkg`'s record names, if it has a record.
+pub fn app_profile(d: &Dirs, pkg: &str) -> Option<String> {
+    crate::validate::package(pkg).ok()?;
+    let text = fs::read_to_string(d.app_desktop(pkg)).ok()?;
+    desktop::read_key(&text, "X-Innkeeper-Profile")
+}
+
 /// Lists apps with an Innkeeper desktop entry in any profile, sorted by name.
 pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
     let mut v: Vec<DesktopApp> = app_entries(d)
@@ -297,7 +304,9 @@ pub fn desktop_apps(d: &Dirs) -> Vec<DesktopApp> {
 }
 
 /// Points the entries of profile `from`'s apps at profile `to` after a
-/// rename. Returns how many were rewritten.
+/// rename. Returns how many were rewritten. An entry's command names no
+/// profile, so the app menu keeps the entry without asking. Entries from
+/// before that command change get it here, and the menu asks once for each.
 pub fn move_entries(d: &Dirs, from: &str, to: &str) -> usize {
     rewrite_entries(d, (from, to))
 }
@@ -312,7 +321,7 @@ fn rewrite_entries(d: &Dirs, (from, to): (&str, &str)) -> usize {
         if desktop::read_key(&text, "X-Innkeeper-Profile").as_deref() == Some(from)
             && let Ok(to) = innkeeper_profile::profile::ProfileName::new(to)
         {
-            let run = paths::cli(&to, &["run", &pkg]);
+            let run = paths::app_command(&pkg);
             let Some(new) = desktop::exec_line(&run, Some("%U"))
                 .ok()
                 .and_then(|line| desktop::replace_key(&text, "Exec", &line))
@@ -438,9 +447,23 @@ mod tests {
         };
         write_record(&d, &mut entry("org.ex.a", "p"), &[]).unwrap();
         write_record(&d, &mut entry("org.ex.b", "other"), &[]).unwrap();
+        // An entry from before the command named no profile.
+        write_record(&d, &mut entry("org.ex.c", "p"), &[]).unwrap();
+        let old = fs::read_to_string(d.app_desktop("org.ex.c")).unwrap();
+        let old = desktop::replace_key(&old, "Exec", "innkeeper --profile p run org.ex.c %U");
+        fs::write(d.app_desktop("org.ex.c"), old.unwrap()).unwrap();
         let text = |pkg: &str| fs::read_to_string(d.app_desktop(pkg)).unwrap();
         let before_b = text("org.ex.b");
-        assert_eq!(move_entries(&d, "p", "q"), 1);
+        // The command stays the same, so the app menu doesn't ask again.
+        let exec_a = desktop::read_key(&text("org.ex.a"), "Exec");
+        assert_eq!(move_entries(&d, "p", "q"), 2);
+        assert_eq!(desktop::read_key(&text("org.ex.a"), "Exec"), exec_a);
+        assert_eq!(
+            desktop::read_key(&text("org.ex.c"), "Exec"),
+            exec_a.map(|e| e.replace(".a", ".c"))
+        );
+        assert_eq!(app_profile(&d, "org.ex.a").as_deref(), Some("q"));
+        assert_eq!(app_profile(&d, "org.ex.missing"), None);
         let mut want = entry("org.ex.a", "q");
         want.icon = Some("android-package-archive".into());
         assert_eq!(text("org.ex.a"), want.render().unwrap());
@@ -450,7 +473,7 @@ mod tests {
                 .iter()
                 .map(|a| a.profile.as_deref())
                 .collect::<Vec<_>>(),
-            [Some("q"), Some("other")]
+            [Some("q"), Some("other"), Some("q")]
         );
         fs::remove_dir_all(&root).unwrap();
     }

@@ -188,11 +188,13 @@ Innkeeper lists profiles from their `data-<name>` directories.
 `innkeeper profile` and the manager's Profiles page create, rename, delete,
 start and stop them (`host/core/src/profiles.rs`). No profile is special. A
 command names a profile with `--profile NAME`. Without it, the CLI uses
-`default` and creates it the first time. An app entry runs
-`innkeeper --profile NAME run PKG` and records `X-Innkeeper-Profile`. The
-manager opens on the profile it showed last. Core takes the profile from its
-caller. Only the launcher and the programs it starts read `INNKEEPER_PROFILE`.
-Tests use named profiles with fresh data directories.
+`default` and creates it the first time. An app entry runs `innkeeper run PKG`
+and records `X-Innkeeper-Profile`, and `run` without `--profile` uses the
+recorded profile. The entry's command names no profile, so renaming the profile
+doesn't change the app-menu entry, which the DynamicLauncher portal could only
+replace by asking again. The manager opens on the profile it showed last. Core
+takes the profile from its caller. Only the launcher and the programs it starts
+read `INNKEEPER_PROFILE`. Tests use named profiles with fresh data directories.
 
 A profile's settings live in one file, `.innkeeper-profile.toml`, in its data
 directory next to the data version record (`host/profile/src/profile.rs`). The
