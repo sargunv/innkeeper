@@ -1,9 +1,20 @@
 {
   "string": [
-    { "name": "app_name", "value": "Innkeeper User" },
+    {
+      "name": "app_name",
+      "value": "Innkeeper User"
+    },
     {
       "name": "service_description",
       "value": "Connects the current OpenHarmony user to the desktop."
+    },
+    {
+      "name": "desktop_label",
+      "value": "Desktop"
+    },
+    {
+      "name": "desktop_description",
+      "value": "Opens links on the desktop."
     }
   ]
 }

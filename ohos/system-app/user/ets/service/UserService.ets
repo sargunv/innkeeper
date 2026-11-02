@@ -2,6 +2,7 @@ import ServiceExtensionAbility from '@ohos.app.ability.ServiceExtensionAbility';
 import Want from '@ohos.app.ability.Want';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { startClipboard } from '../clipboard/Clipboard';
+import { setDefaultBrowser } from '../desktop/Desktop';
 import { HostFiles } from '../files/HostFiles';
 
 const DOMAIN = 0x0000;
@@ -20,6 +21,7 @@ export default class UserService extends ServiceExtensionAbility {
     const user = Math.floor(this.context.applicationInfo.uid / UID_PER_USER);
     hilog.info(DOMAIN, TAG, 'started for user %{public}d', user);
     startClipboard(this.context);
+    setDefaultBrowser(this.context, user);
     this.files = new HostFiles(this.context);
     this.files.start();
   }

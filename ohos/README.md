@@ -196,6 +196,19 @@ reports boot completion. Issue #312 tracks the features that build on it.
   ([How it boots](#how-it-boots)). For a pasteboard clip of file URIs, the app
   reads each file with the pasteboard's grant and sends its name, MIME type and
   bytes. The MIME type comes from the record, or from the file name's extension.
+- **Links to the desktop.** As Android's system app holds the browser role,
+  Innkeeper User's `DesktopAbility` is OH's default browser
+  (`user/ets/desktop/`). Its skills take `http`, `https` and the other external
+  schemes that Android's system app lists, so an app's link opens in the
+  desktop's handler through the bridge's `HANDOFF`. The ability shows no page
+  and finishes once the bridge has the link. Innkeeper User makes itself the
+  default browser at its first start in a profile with
+  `defaultAppManager.setDefaultApplication`, which needs
+  `SET_DEFAULT_APPLICATION` by ACL. A browser that the user picks later in OH's
+  Settings stays the default. Files that apps open don't reach the desktop. A
+  skill for every file type would make AMS show its chooser whenever an OH app
+  also takes the file, and the chooser fails on this image
+  ([Files from the desktop](#innkeeper-system)).
 - **Files from the desktop.** `innkeeper run <bundle> <file>` and
   `innkeeper open <files>` make a documents grant for each file with Session1's
   `Import`, and they send the grants in a `launch` command. Innkeeper System
