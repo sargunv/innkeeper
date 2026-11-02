@@ -59,6 +59,9 @@ pub struct Shared {
     dbus: OnceLock<Option<zbus::blocking::Connection>>,
     settings: OnceLock<Arc<SettingsHub>>,
     notify: OnceLock<Option<Arc<NotifyHub>>>,
+    /// Set once a thread waits for the notification hub on behalf of the
+    /// background indicator.
+    notify_waiter: std::sync::atomic::AtomicBool,
     clipboard: OnceLock<Option<Arc<ClipboardHub>>>,
     mpris: OnceLock<Arc<MprisHub>>,
     next_client: std::sync::atomic::AtomicU64,
@@ -98,6 +101,7 @@ impl Shared {
             dbus: OnceLock::new(),
             settings: OnceLock::new(),
             notify: OnceLock::new(),
+            notify_waiter: Default::default(),
             clipboard: OnceLock::new(),
             mpris: OnceLock::new(),
             next_client: Default::default(),
@@ -115,7 +119,7 @@ impl Shared {
     /// Writes the report for the launcher with the bridge's own windows
     /// added, and shows the indicator while only background-allowed apps
     /// keep the session up.
-    fn write_lifecycle(&self) -> Reply {
+    fn write_lifecycle(self: &Arc<Self>) -> Reply {
         let own = self.input.own_windows();
         let mut state = self.lifecycle.state.lock().unwrap();
         let Some(r) = &state.report else {
@@ -141,7 +145,11 @@ impl Shared {
                 "lifecycle: background indicator {:?} (test session)",
                 want.as_ref().map(|w| &w.1)
             );
-        } else if let Some(hub) = self.notify() {
+        } else if let Some(hub) = match self.notify_connected() {
+            Some(hub) => hub,
+            // The report is written again once the hub has connected.
+            None => return Reply::ok(),
+        } {
             if let Some((client, _)) = &state.indicator
                 && want.as_ref().is_none_or(|w| w.0 != *client)
             {
@@ -238,6 +246,36 @@ impl Shared {
                     .ok()
             })
             .as_ref()
+    }
+
+    /// Returns the notification hub if connecting to the server has
+    /// finished. Connecting waits while D-Bus activates the server, which
+    /// takes a minute when the server never starts, and the window and
+    /// lifecycle threads must not wait that long. While the hub connects,
+    /// this returns None, and a thread writes the lifecycle report again once
+    /// it has connected.
+    fn notify_connected(self: &Arc<Self>) -> Option<Option<&Arc<NotifyHub>>> {
+        if let Some(hub) = self.notify.get() {
+            return Some(hub.as_ref());
+        }
+        if !self
+            .notify_waiter
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let shared = self.clone();
+            let spawned = std::thread::Builder::new()
+                .name("notify-connect".into())
+                .spawn(move || {
+                    shared.notify();
+                    shared.write_lifecycle();
+                });
+            if let Err(e) = spawned {
+                crate::warn!("notify: {e}");
+                self.notify_waiter
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        None
     }
 
     pub(crate) fn clipboard(&self) -> Option<&Arc<ClipboardHub>> {
@@ -671,6 +709,139 @@ mod tests {
         assert!(shared.clipboard.get().is_none());
         assert!(shared.notify.get().is_none());
         assert!(shared.dbus.get().is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A notification server that answers GetCapabilities after three
+    /// seconds, as one that D-Bus is still activating does.
+    struct SlowServer {
+        asked: Arc<std::sync::atomic::AtomicBool>,
+        notified: Arc<std::sync::atomic::AtomicBool>,
+    }
+    #[zbus::interface(name = "org.freedesktop.Notifications")]
+    impl SlowServer {
+        fn get_capabilities(&self) -> Vec<String> {
+            self.asked.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            vec![]
+        }
+        #[allow(clippy::too_many_arguments)]
+        fn notify(
+            &self,
+            _app: &str,
+            _replaces: u32,
+            _icon: &str,
+            _title: &str,
+            _body: &str,
+            _actions: Vec<String>,
+            _hints: HashMap<String, zbus::zvariant::OwnedValue>,
+            _timeout: i32,
+        ) -> u32 {
+            self.notified
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            1
+        }
+    }
+
+    #[test]
+    fn the_background_indicator_does_not_wait_for_the_notification_server() {
+        use std::io::BufRead;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+        let dir = crate::test_dir("system-slow-notifications");
+        // This bus has no service directories, so it can't activate the
+        // host's desktop services.
+        let config = dir.join("bus.conf");
+        std::fs::write(&config, "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><policy context=\"default\"><allow send_destination=\"*\"/><allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>").unwrap();
+        struct Bus(std::process::Child);
+        impl Drop for Bus {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut bus = Bus(std::process::Command::new("dbus-daemon")
+            .args(["--nofork", "--print-address", "--config-file"])
+            .arg(&config)
+            .env("XDG_RUNTIME_DIR", &dir)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap());
+        let mut address = String::new();
+        std::io::BufReader::new(bus.0.stdout.take().unwrap())
+            .read_line(&mut address)
+            .unwrap();
+        let address = address.trim();
+        let asked = Arc::new(AtomicBool::new(false));
+        let notified = Arc::new(AtomicBool::new(false));
+        let _server = zbus::blocking::connection::Builder::address(address)
+            .unwrap()
+            .name("org.freedesktop.Notifications")
+            .unwrap()
+            .serve_at(
+                "/org/freedesktop/Notifications",
+                SlowServer {
+                    asked: asked.clone(),
+                    notified: notified.clone(),
+                },
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        let shared = Shared::new(
+            &dir,
+            true,
+            crate::input::Hub::new(),
+            &innkeeper_profile::profile::ProfileName::new("t").unwrap(),
+        );
+        let conn = zbus::blocking::connection::Builder::address(address)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(shared.dbus.set(Some(conn)).is_ok());
+        // START connects to the notification server.
+        let start = {
+            let shared = shared.clone();
+            std::thread::spawn(move || shared.notify().is_some())
+        };
+        while !asked.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // A report in which only a background app keeps the session up
+        // shows the indicator. Writing it must not wait for the server.
+        let (sock, _peer) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        shared.lifecycle.state.lock().unwrap().report = Some(lifecycle::Report {
+            client: 1,
+            events: Events::new(Arc::new(sock)),
+            lifecycle: Lifecycle {
+                windows: 0,
+                services: 0,
+                wakeup_ms: 0,
+                len: 0,
+            },
+            background: vec![("org.example.player".into(), "Player".into())],
+        });
+        let begin = Instant::now();
+        let _ = shared.write_lifecycle();
+        assert!(
+            begin.elapsed() < Duration::from_secs(1),
+            "the lifecycle write waited {:?}",
+            begin.elapsed()
+        );
+        assert!(start.join().unwrap());
+        // The indicator shows once the server answers.
+        let end = Instant::now() + Duration::from_secs(5);
+        while !notified.load(Ordering::SeqCst) {
+            assert!(Instant::now() < end, "the indicator never showed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(bus);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

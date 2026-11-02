@@ -148,7 +148,9 @@ stateDiagram-v2
   with no window open. It is off by default, and the system app stores the
   setting. While such an app is installed, the session does not stop. The
   desktop shows a resident "Running in the background" notification that names
-  those apps.
+  those apps. The bridge shows it once it has connected to the desktop's
+  notification server. D-Bus can take a minute to activate a server that never
+  starts, and window changes and lifecycle reports do not wait for it.
 - **Wakeups.** Android forgets alarms when it stops, and apps set them again on
   `BOOT_COMPLETED`. The launcher therefore starts the session a minute before
   the next alarm clock (`AlarmManager.getNextAlarmClock`, which clock apps use).
