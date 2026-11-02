@@ -794,7 +794,11 @@ the same as Android's. OH's session stops when idle, as Android's does
   the sandbox has no `/dev/fuse` and refuses mounts. MediaLibrary runs without
   it. Apps reach photos through photoAccessHelper and URIs, and they can't open
   photos by their FUSE paths. MediaLibrary doesn't index the images in the
-  user's Docs folder.
+  user's Docs folder. Gallery's editor needs Gallery's N-API module
+  `libImageEditor.so`. The image's Gallery HAP has that library for arm64 and
+  has no x86_64 build of it. BMS installs no native libraries for Gallery on
+  this x86_64 image, and Gallery exits when the editor opens ("app lib path not
+  registered in namespace 'default'").
 - **Inodes.** BMS checks for free inodes before each install. btrfs has no fixed
   inode table and reports no free inodes, so BMS would refuse SceneBoard and the
   larger apps. On such filesystems the shim's `statfs` reports one free inode
