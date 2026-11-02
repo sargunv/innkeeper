@@ -98,16 +98,18 @@ the probe logs the file's text. A click on the probe's text field starts
 Innkeeper Keyboard, and keys typed in a French layout on the nested desktop type
 "aé" in the field. Text that `wl-copy` puts on the nested desktop's clipboard
 pastes into the field with Ctrl+V, and Ctrl+A and Ctrl+C in the field put its
-text on the desktop's clipboard. OH's music volume must be at its maximum, and a
-440 Hz tone that [tests/tone.c](tests/tone.c) plays through OH's audio API must
-reach a private null sink on the nested desktop. Root then grants the probe the
-microphone with `atm perm -g`, the host plays a tone into the null sink, and the
-probe must record it from the sink's monitor. The probe's media session must be
-an MPRIS player on the nested desktop's session bus, and MPRIS `PlayPause` must
-pause it. OH must take the time zone that the session started with, and it must
-turn dark when the nested desktop's portal does. Last, the probe starts an audio
-playback continuous task. With the window closed, the task must keep the session
-up, and once it stops, the session must stop.
+text on the desktop's clipboard. The probe then plays a magenta clip, and its
+player must render a frame. On a GPU, the magenta must show on the nested
+desktop. OH's music volume must be at its maximum, and a 440 Hz tone that
+[tests/tone.c](tests/tone.c) plays through OH's audio API must reach a private
+null sink on the nested desktop. Root then grants the probe the microphone with
+`atm perm -g`, the host plays a tone into the null sink, and the probe must
+record it from the sink's monitor. The probe's media session must be an MPRIS
+player on the nested desktop's session bus, and MPRIS `PlayPause` must pause it.
+OH must take the time zone that the session started with, and it must turn dark
+when the nested desktop's portal does. Last, the probe starts an audio playback
+continuous task. With the window closed, the task must keep the session up, and
+once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The

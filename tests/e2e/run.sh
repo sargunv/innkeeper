@@ -941,6 +941,34 @@ else
   fi
   echo "ok   a desktop copy pastes into the probe's text field, and a copy there reaches the desktop"
   # shellcheck disable=SC2329 # invoked through timed
+  ohos_video() {
+    local files=/data/app/el2/100/base/dev.sargunv.innkeeper.probes/haps/entry/files
+    # The probe plays a one-second magenta clip once on an XComponent below
+    # its field, and its player reports the first frame. The last frame stays
+    # on screen, so the screen is static again afterwards.
+    s /system/bin/sh -c "cat >$files/probe.mp4" <"$repo/out/test/probes/video.mp4" || return
+    s /system/bin/aa start -b dev.sargunv.innkeeper.probes -a EntryAbility --ps mode video \
+      >>"$T/ohos.txt" 2>&1 || return
+    rendered() { s /system/bin/hilog -x -T InnkeeperProbes | grep -q 'video frame$'; }
+    until_ok rendered || return
+    # render_service composes the YUV frames with GL. On a GPU, our EGL
+    # imports them, and the clip's color reaches the desktop. The image's EGL
+    # can't import YUV buffers, so without a GPU the video stays black.
+    # shellcheck disable=SC2016 # expanded in OpenHarmony
+    s /system/bin/sh -c 'for n in /dev/dri/renderD*; do (: <"$n") 2>/dev/null && exit 0; done; exit 1' ||
+      return 0
+    shown() {
+      desktop Screenshot "$T/video.png" >/dev/null &&
+        /usr/bin/python3 "$here/colour.py" "$T/video.png" 255 0 255
+    }
+    until_ok shown
+  }
+  if ! timed ohos-video ohos_video; then
+    s /system/bin/hilog -x -T InnkeeperProbes | grep video | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   the probe plays a video, and on a GPU its frames reach the desktop"
+  # shellcheck disable=SC2329 # invoked through timed
   ohos_audio() {
     local recorder player result=0
     # The desktop mixer is the volume control, so OH's music volume stays at
