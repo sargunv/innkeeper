@@ -135,6 +135,8 @@ struct State {
   pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
   VBlankCallback vblank = nullptr;
   void* vblankData = nullptr;
+  RefreshCallback refresh = nullptr;
+  void* refreshData = nullptr;
   bool vsync = false;
   bool threads = false;
   int32_t power = POWER_STATUS_ON;
@@ -221,7 +223,13 @@ void* bridgeLoop(void*) {
     lxb_close_fds(&p);
     pthread_mutex_lock(&g.mu);
     g.sock = sock;
+    const RefreshCallback refresh = g.refresh;
+    void* refreshData = g.refreshData;
     pthread_mutex_unlock(&g.mu);
+    // A new window shows nothing until Commit presents a frame, and
+    // render_service presents one only when the screen changes. The refresh
+    // callback makes it compose the screen again.
+    if (refresh) refresh(kDisplay, refreshData);
     while (lxb_recv(sock, &p) == 0) {
       if (p.type == kEvRelease && p.len >= 8) {
         const uint32_t id = lxb_u32(p.body);
@@ -652,10 +660,16 @@ RegDisplayVBlankCallback(uint32_t devId, VBlankCallback cb, void* data) {
   return HDF_SUCCESS;
 }
 
+EXPORT int32_t RegRefreshCallback(RefreshCallback cb, void* data) {
+  Lock l;
+  g.refresh = cb;
+  g.refreshData = data;
+  return HDF_SUCCESS;
+}
+
 // render_service's screen manager gives up unless these register. We have no
-// HWC events, refresh requests or idle vblanks to report.
+// HWC events or idle vblanks to report.
 EXPORT int32_t RegHwcEventCallback(void*, void*) { return HDF_SUCCESS; }
-EXPORT int32_t RegRefreshCallback(void*, void*) { return HDF_SUCCESS; }
 EXPORT int32_t RegDisplayVBlankIdleCallback(void*, void*) {
   return HDF_SUCCESS;
 }

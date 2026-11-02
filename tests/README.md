@@ -40,11 +40,11 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   desktop's notification server with its buttons, and invoking its first button
   there reaches the probe. OpenHarmony takes the session's time zone and turns
   dark when the desktop's portal does. The open window keeps the session up.
-  Closing it leaves OpenHarmony running, and `run` opens it again. With the
-  window closed, the probe's audio playback continuous task keeps the session
-  up. Once the task stops, the session stops after the grace period, which test
-  timers make one second. This group uses its own profile, `<profile>-ohos`, so
-  it runs alone.
+  Closing it leaves OpenHarmony running, and `run` opens it again with a frame
+  while a text selection keeps the screen static. With the window closed, the
+  probe's audio playback continuous task keeps the session up. Once the task
+  stops, the session stops after the grace period, which test timers make one
+  second. This group uses its own profile, `<profile>-ohos`, so it runs alone.
 
 The runner starts a private desktop
 ([tests/nested.sh](../docs/development.md#a-nested-isolated-desktop)) with fake
