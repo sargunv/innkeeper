@@ -48,9 +48,10 @@ every command.
 Android starts when an app needs it. It stops a couple of minutes after the last
 app window closes.
 
-Each profile has its own apps and data. A profile can also show a whole phone or
-tablet screen in one window. Innkeeper's Profiles page and each profile's
-settings control these options.
+Each profile has its own apps and data. A profile can also show the whole device
+screen in one window, and the screen resizes with the window from a phone to a
+tablet. Innkeeper's Profiles page and each profile's settings control these
+options.
 
 A profile can run OpenHarmony instead of Android. You choose the system when you
 create the profile, for example with

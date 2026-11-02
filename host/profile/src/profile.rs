@@ -163,10 +163,11 @@ impl System {
 
     /// The displays it can show as. OpenHarmony composes every window into
     /// one screen (ohos/README.md, "One window for all apps"), so it shows
-    /// as a phone. A tablet's landscape layout is untested there.
+    /// as a phone of a fixed size. A tablet's landscape layout is untested
+    /// there.
     pub fn displays(self) -> &'static [Display] {
         match self {
-            System::Android => &Display::ALL,
+            System::Android => &[Display::Windowed, Display::Device],
             System::Ohos => &[Display::SmallPhone, Display::MediumPhone],
         }
     }
@@ -245,35 +246,39 @@ impl Default for Settings {
 }
 
 /// How a profile shows on the desktop. Windowed puts each app task in its own
-/// window. The other presets show the whole device, with its launcher and
-/// system bars, in one window the size of the preset. The presets match
-/// Android Studio's virtual devices of the same names.
+/// window. The others show the whole device, with its launcher and system
+/// bars, in one window. Android's device screen resizes with its window.
+/// OpenHarmony's phones have a fixed size, and they match Android Studio's
+/// virtual devices of the same names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Display {
     #[default]
     Windowed,
+    /// Android's tablet preset became the resizable device.
+    #[serde(alias = "medium-tablet")]
+    Device,
     SmallPhone,
     MediumPhone,
-    MediumTablet,
 }
 
 impl Display {
     pub const ALL: [Display; 4] = [
         Display::Windowed,
+        Display::Device,
         Display::SmallPhone,
         Display::MediumPhone,
-        Display::MediumTablet,
     ];
 
-    /// The device window's width and height in pixels, in its natural
-    /// orientation, and its density. None when windowed.
+    /// The device screen's width and height in pixels, in its natural
+    /// orientation, and its density. None when windowed. The device screen
+    /// boots at a medium phone's size, and then Android's window manager
+    /// gives it its window's size (docs/display.md, "Phone mode").
     pub fn screen(self) -> Option<(u32, u32, u32)> {
         match self {
             Display::Windowed => None,
             Display::SmallPhone => Some((720, 1280, 320)),
-            Display::MediumPhone => Some((1080, 2400, 420)),
-            Display::MediumTablet => Some((2560, 1600, 320)),
+            Display::Device | Display::MediumPhone => Some((1080, 2400, 420)),
         }
     }
 
@@ -281,21 +286,14 @@ impl Display {
     pub fn name(self) -> &'static str {
         match self {
             Display::Windowed => "windowed",
+            Display::Device => "device",
             Display::SmallPhone => "small-phone",
             Display::MediumPhone => "medium-phone",
-            Display::MediumTablet => "medium-tablet",
         }
     }
 
     pub fn parse(name: &str) -> Option<Display> {
         Self::ALL.into_iter().find(|s| s.name() == name)
-    }
-
-    /// Whether Android lays the device out as a large screen (600 dp or more
-    /// on its short side), with a taskbar.
-    pub fn large(self) -> bool {
-        self.screen()
-            .is_some_and(|(w, h, dpi)| w.min(h) * 160 / dpi >= 600)
     }
 }
 
@@ -361,7 +359,14 @@ impl Settings {
     }
 
     pub fn parse(text: &str) -> Result<Self> {
-        let s: Self = toml::from_str(text)?;
+        let mut s: Self = toml::from_str(text)?;
+        // Android's phone presets became one device display that resizes
+        // with its window.
+        if s.system == System::Android
+            && matches!(s.display, Display::SmallPhone | Display::MediumPhone)
+        {
+            s.display = Display::Device;
+        }
         s.validate()?;
         Ok(s)
     }
@@ -571,7 +576,7 @@ mod tests {
         assert_eq!(Settings::load(&d).unwrap(), Settings::default());
         let data = d.join("data-new");
         let mut s = Settings {
-            display: Display::SmallPhone,
+            display: Display::Device,
             follow_accent: false,
             idle_minutes: 7,
             ..Settings::default()
@@ -583,9 +588,13 @@ mod tests {
         s.idle_minutes = 0;
         assert!(s.save(&data).is_err());
         assert_eq!(Settings::parse("").unwrap(), Settings::default());
-        let s =
-            Settings::parse("adb = true\nadb-port = 5561\ndisplay = \"medium-tablet\"\n").unwrap();
-        assert!(s.adb && s.adb_port == 5561 && s.display == Display::MediumTablet);
+        let s = Settings::parse("adb = true\nadb-port = 5561\ndisplay = \"device\"\n").unwrap();
+        assert!(s.adb && s.adb_port == 5561 && s.display == Display::Device);
+        // Android's old presets load as the device display.
+        for old in ["small-phone", "medium-phone", "medium-tablet"] {
+            let s = Settings::parse(&format!("display = \"{old}\"")).unwrap();
+            assert_eq!(s.display, Display::Device, "{old}");
+        }
         for bad in [
             "typo = true",
             "display = \"tv\"",
@@ -612,7 +621,8 @@ mod tests {
         assert_eq!(s.display, Display::MediumPhone);
         for bad in [
             "system = \"ohos\"",
-            "system = \"ohos\"\ndisplay = \"medium-tablet\"",
+            "system = \"ohos\"\ndisplay = \"device\"",
+            "system = \"ohos\"\ndisplay = \"windowed\"",
             "system = \"ohos\"\ndisplay = \"small-phone\"\nadb = true",
             "hdc = true",
             "system = \"harmony\"",
@@ -669,8 +679,6 @@ mod tests {
         }
         assert_eq!(Display::parse("huge"), None);
         assert_eq!(Display::Windowed.screen(), None);
-        assert!(!Display::SmallPhone.large() && !Display::MediumPhone.large());
-        assert!(Display::MediumTablet.large() && !Display::Windowed.large());
     }
 
     #[test]
