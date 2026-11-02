@@ -1,5 +1,5 @@
 use smithay_client_toolkit::reexports::csd_frame::{WindowManagerCapabilities, WindowState};
-use tiny_skia::{FillRule, PathBuilder, Pixmap, PixmapMut, PixmapPaint, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, PathBuilder, PixmapMut, Rect, Stroke, Transform};
 
 use crate::{theme::ColorMap, Location, SkiaResult};
 
@@ -7,6 +7,10 @@ use crate::{theme::ColorMap, Location, SkiaResult};
 const BUTTON_SIZE: f32 = 34.;
 const BUTTON_MARGIN: f32 = 6.;
 const BUTTON_SPACING: f32 = 0.;
+/// Adwaita's header bar spacing between its own buttons and the window controls.
+const GROUP_SPACING: f32 = 6.;
+/// Adwaita's corner radius for flat header bar buttons.
+const FLAT_BUTTON_RADIUS: f32 = 6.;
 const BUTTON_TOP: f32 = (crate::theme::HEADER_SIZE as f32 - BUTTON_SIZE) / 2.;
 
 #[derive(Debug)]
@@ -15,6 +19,8 @@ pub(crate) struct Buttons {
     buttons_left: Vec<Button>,
     buttons_right: Vec<Button>,
     layout_config: Option<String>,
+    /// Leave fullscreen shows only in a fullscreen window; F11 enters fullscreen.
+    fullscreen: bool,
 }
 
 type ButtonLayout = (Vec<Button>, Vec<Button>);
@@ -27,6 +33,7 @@ impl Default for Buttons {
             buttons_left,
             buttons_right,
             layout_config: None,
+            fullscreen: false,
         }
     }
 }
@@ -38,54 +45,48 @@ impl Buttons {
                 buttons_left,
                 buttons_right,
                 layout_config,
+                fullscreen: false,
             },
             _ => Self::default(),
         }
     }
 
+    /// Takes effect at the next [`Buttons::arrange`].
     pub fn set_fullscreen(&mut self, fullscreen: bool) {
-        for button in self
-            .buttons_left
-            .iter_mut()
-            .chain(self.buttons_right.iter_mut())
-        {
-            button.width = if fullscreen && button.kind == ButtonKind::Fullscreen {
-                164.
-            } else {
-                BUTTON_SIZE
-            };
-        }
+        self.fullscreen = fullscreen;
     }
 
     /// Rearrange the buttons with the new width.
     pub fn arrange(&mut self, width: u32, margin_h: f32) {
+        let fullscreen = self.fullscreen;
+        let shown = |button: &Button| fullscreen || button.kind != ButtonKind::Fullscreen;
+
         let mut left_x = BUTTON_MARGIN + margin_h;
-        let mut right_x = width as f32 - BUTTON_MARGIN;
-
-        for button in &mut self.buttons_left {
+        let mut previous = None;
+        for button in self.buttons_left.iter_mut().filter(|b| shown(b)) {
+            left_x += spacing(previous, button.kind);
             button.offset = left_x;
-
-            // Add the button size plus spacing
-            left_x += button.width + BUTTON_SPACING;
+            left_x += button.width;
+            previous = Some(button.kind);
         }
 
-        for button in &mut self.buttons_right {
-            // Subtract the button size.
-            right_x -= button.width;
-
-            // Update it
+        let mut right_x = width as f32 - BUTTON_MARGIN;
+        let mut previous = None;
+        for button in self.buttons_right.iter_mut().filter(|b| shown(b)) {
+            right_x -= spacing(previous, button.kind) + button.width;
             button.offset = right_x;
-
-            // Subtract spacing for the next button.
-            right_x -= BUTTON_SPACING;
+            previous = Some(button.kind);
         }
+
         for button in &mut self.buttons_right {
-            button.visible = button.x() >= margin_h && button.end_x() <= width as f32;
+            button.visible =
+                shown(button) && button.x() >= margin_h && button.end_x() <= width as f32;
         }
         let right_start = self.right_buttons_start_x().unwrap_or(width as f32);
         for button in &mut self.buttons_left {
-            button.visible =
-                button.x() >= margin_h && button.end_x() <= right_start - BUTTON_SPACING;
+            button.visible = shown(button)
+                && button.x() >= margin_h
+                && button.end_x() <= right_start - BUTTON_SPACING;
         }
     }
 
@@ -149,7 +150,6 @@ impl Buttons {
         colors: &ColorMap,
         mouse_location: Location,
         pressed: Location,
-        fullscreen_label: Option<&Pixmap>,
         pixmap: &mut PixmapMut,
         resizable: bool,
         state: &WindowState,
@@ -165,7 +165,6 @@ impl Buttons {
                 colors,
                 mouse_location,
                 pressed,
-                fullscreen_label,
                 pixmap,
                 resizable,
                 state,
@@ -278,7 +277,6 @@ impl Button {
         colors: &ColorMap,
         mouse_location: Location,
         pressed: Location,
-        fullscreen_label: Option<&Pixmap>,
         pixmap: &mut PixmapMut,
         resizable: bool,
         state: &WindowState,
@@ -291,7 +289,7 @@ impl Button {
             } else {
                 colors.button_hover_paint()
             }
-        } else if self.kind == ButtonKind::Back {
+        } else if self.kind.is_flat() {
             tiny_skia::Paint {
                 shader: tiny_skia::Shader::SolidColor(tiny_skia::Color::TRANSPARENT),
                 ..Default::default()
@@ -303,26 +301,20 @@ impl Button {
         // Convert to pixels.
         let x = self.center_x() * scale;
         let y = self.center_y() * scale;
-        let radius = if self.kind == ButtonKind::Back || self.width > BUTTON_SIZE {
-            self.radius()
-        } else {
-            12.
-        } * scale;
-
-        // Draw the button background.
-        let circle = if self.width > BUTTON_SIZE {
+        // Back and Leave fullscreen are flat header bar buttons; the rest are window controls.
+        let background = if self.kind.is_flat() {
             rounded_button(
                 self.offset * scale,
                 BUTTON_TOP * scale,
                 self.width * scale,
                 BUTTON_SIZE * scale,
-                radius,
+                FLAT_BUTTON_RADIUS * scale,
             )?
         } else {
-            PathBuilder::from_circle(x, y, radius)?
+            PathBuilder::from_circle(x, y, 12. * scale)?
         };
         pixmap.fill_path(
-            &circle,
+            &background,
             &button_bg,
             FillRule::Winding,
             Transform::identity(),
@@ -354,24 +346,8 @@ impl Button {
                 );
             }
             ButtonKind::Fullscreen => {
-                if self.width > BUTTON_SIZE {
-                    if let Some(label) = fullscreen_label {
-                        pixmap.draw_pixmap(
-                            (self.offset * scale + BUTTON_SIZE * scale) as i32,
-                            (y - label.height() as f32 / 2.) as i32,
-                            label.as_ref(),
-                            &PixmapPaint::default(),
-                            Transform::identity(),
-                            None,
-                        );
-                    }
-                }
-                // Inward corners indicate Leave fullscreen; outward corners indicate Enter.
-                let (corner, arm) = if state.contains(WindowState::FULLSCREEN) {
-                    (2., 5.)
-                } else {
-                    (5., 2.)
-                };
+                // Inward corners, as in Adwaita's view-restore-symbolic.
+                let (corner, arm) = (2., 6.);
                 let mut path = PathBuilder::new();
                 for (dx, dy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
                     path.move_to(x + dx * arm * scale, y + dy * corner * scale);
@@ -500,10 +476,26 @@ fn rounded_button(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::P
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ButtonKind {
     Back,
+    /// Leave fullscreen.
     Fullscreen,
     Close,
     Maximize,
     Minimize,
+}
+
+impl ButtonKind {
+    fn is_flat(self) -> bool {
+        matches!(self, ButtonKind::Back | ButtonKind::Fullscreen)
+    }
+}
+
+/// The gap before `next` when it follows `previous` towards the middle of the header.
+fn spacing(previous: Option<ButtonKind>, next: ButtonKind) -> f32 {
+    match previous {
+        None => 0.,
+        Some(previous) if previous.is_flat() != next.is_flat() => GROUP_SPACING,
+        Some(_) => BUTTON_SPACING,
+    }
 }
 
 #[cfg(test)]
@@ -558,8 +550,40 @@ mod tests {
         }
     }
 
+    fn shown(buttons: &[Button]) -> Vec<ButtonKind> {
+        buttons.iter().filter(|b| b.visible).map(|b| b.kind).collect()
+    }
+
     #[test]
-    fn metrics_capabilities_and_fullscreen_label_share_hit_targets() {
+    fn leave_fullscreen_shows_only_in_fullscreen_apart_from_the_window_controls() {
+        use ButtonKind::*;
+        let mut b = Buttons::new(None);
+        b.arrange(500, 0.);
+        assert_eq!(shown(&b.buttons_right), vec![Close, Maximize, Minimize]);
+        assert_eq!(b.find_button(500. - 6. - 3. * 34. - 17., 23.5), Location::Head);
+
+        b.set_fullscreen(true);
+        b.arrange(500, 0.);
+        assert_eq!(
+            shown(&b.buttons_right),
+            vec![Close, Maximize, Minimize, Fullscreen]
+        );
+        let [_, _, minimize, leave] = &b.buttons_right[..] else {
+            unreachable!()
+        };
+        assert_eq!(minimize.x() - leave.end_x(), GROUP_SPACING);
+        assert_eq!(
+            b.find_button(leave.center_x() as f64, 23.5),
+            Location::Button(Fullscreen)
+        );
+
+        b.set_fullscreen(false);
+        b.arrange(500, 0.);
+        assert_eq!(shown(&b.buttons_right), vec![Close, Maximize, Minimize]);
+    }
+
+    #[test]
+    fn capabilities_and_leading_controls_share_hit_targets() {
         let mut b = Buttons::new(Some("close,minimize,maximize:".into()));
         b.update_wm_capabilities(WindowManagerCapabilities::empty());
         b.set_fullscreen(true);
@@ -568,6 +592,12 @@ mod tests {
             kinds(&b.buttons_left),
             vec![ButtonKind::Back, ButtonKind::Close, ButtonKind::Fullscreen]
         );
+        // Back and Close, then Close and Leave fullscreen, sit a group apart.
+        let [back, close, leave] = &b.buttons_left[..] else {
+            unreachable!()
+        };
+        assert_eq!(close.x() - back.end_x(), GROUP_SPACING);
+        assert_eq!(leave.x() - close.end_x(), GROUP_SPACING);
         for button in &b.buttons_left {
             assert_eq!(
                 b.find_button(button.center_x() as f64, 23.5),
@@ -575,9 +605,9 @@ mod tests {
             );
             assert_eq!(b.find_button(button.center_x() as f64, 5.), Location::Head);
         }
-        assert_eq!(b.buttons_left.last().map(|b| b.width), Some(164.));
         b.set_fullscreen(false);
         b.arrange(1, 0.);
         assert!(b.buttons_left.iter().all(|b| b.x().is_finite()));
+        assert!(shown(&b.buttons_left).is_empty());
     }
 }

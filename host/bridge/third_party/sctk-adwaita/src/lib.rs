@@ -2,7 +2,7 @@
 //! Upstream commit: 1bddc2264a71ae3897903ec8a7d7b13b834ff1b1.
 //! Copyright Bartłomiej Maryńczak and contributors; MIT license in ../LICENSE.
 //!
-//! Innkeeper changes for upstream sync: buttons.rs adds and draws Back and Fullscreen;
+//! Innkeeper changes for upstream sync: buttons.rs adds and draws Back and Leave fullscreen;
 //! pointer.rs tracks completed custom button clicks; on_frame_click returns them alongside
 //! SCTK window actions. Header metrics, symbolic controls, states and shadows match
 //! Adwaita; fullscreen reveal animates the header without altering its title.
@@ -125,7 +125,6 @@ pub struct AdwaitaFrame<State> {
     hide_border: bool,
     fullscreen_revealed: bool,
     reveal_started: Option<Instant>,
-    fullscreen_label: Option<TitleText>,
     button_layout: Option<String>,
 
     width: NonZeroU32,
@@ -179,7 +178,6 @@ where
             hide_border: frame_config.hide_border,
             fullscreen_revealed: false,
             reveal_started: None,
-            fullscreen_label: TitleText::new(theme::Color::BLACK),
             button_layout: frame_config.button_layout,
             width: NonZeroU32::MIN,
             height: NonZeroU32::MIN,
@@ -326,11 +324,6 @@ where
             title_text.update_color(colors.font_color);
         }
 
-        if let Some(label) = self.fullscreen_label.as_mut() {
-            label.update_title("Leave fullscreen");
-            label.update_scale(self.scale_factor);
-            label.update_color(colors.button_icon);
-        }
         // Draw the borders.
         for (idx, part) in decorations.parts().filter(|(_, part)| !part.hide) {
             let scale = self.scale_factor;
@@ -371,7 +364,6 @@ where
                         &self.buttons,
                         mouse_location,
                         self.mouse.pressed_location(),
-                        self.fullscreen_label.as_ref().and_then(|t| t.pixmap()),
                         layout_config.hide_border,
                         self.hide_titlebar,
                         &mut self.shadow,
@@ -740,7 +732,6 @@ fn draw_part(
     buttons: &Buttons,
     mouse: Location,
     pressed: Location,
-    fullscreen_label: Option<&Pixmap>,
     hide_border: bool,
     hide_titlebar: bool,
     shadow: &mut Shadow,
@@ -774,7 +765,6 @@ fn draw_part(
                 buttons,
                 mouse,
                 pressed,
-                fullscreen_label,
                 hide_border,
             );
         }
@@ -838,7 +828,6 @@ fn draw_headerbar(
     buttons: &Buttons,
     mouse: Location,
     pressed: Location,
-    fullscreen_label: Option<&Pixmap>,
     hider_border: bool,
 ) {
     let _ = draw_headerbar_bg(pixmap, scale, colors, state);
@@ -920,7 +909,6 @@ fn draw_headerbar(
         colors,
         mouse,
         pressed,
-        fullscreen_label,
         pixmap,
         resizable,
         state,
@@ -1100,7 +1088,6 @@ mod animation_tests {
                 &buttons,
                 Location::None,
                 Location::None,
-                None,
                 true,
             );
             let title_pixel = header
