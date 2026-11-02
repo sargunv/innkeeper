@@ -529,6 +529,13 @@ else
     s /system/bin/bm dump -n dev.sargunv.innkeeper.system >"$T/system-app.txt" || return
     file_has "$T/system-app.txt" '"isSystemApp": true' &&
       file_has "$T/system-app.txt" '"isKeepAlive": true' || return
+    # Innkeeper System starts Innkeeper User as the foreground user, 100,
+    # whose apps' uids start at 20000000.
+    user_app() {
+      s /system/bin/hidumper -s AbilityManagerService -a -r >"$T/user-app.txt" &&
+        grep -A1 'process name \[dev\.sargunv\.innkeeper\.user\]' "$T/user-app.txt" | grep -Eq 'uid #200[0-9]{5}'
+    }
+    until_ok user_app || return
     # The app answers a relayed Session1 command at once. A command without an
     # answer would wait for the bridge's 40 s timeout.
     timeout 5 gdbus call --session --dest "dev.sargunv.Innkeeper.Session.p_${INNKEEPER_PROFILE//-/_}" \
@@ -537,11 +544,12 @@ else
     file_has "$T/session-command.txt" "OpenHarmony profiles don't support this action"
   }
   if ! timed ohos-system-app ohos_system_app; then
-    cat "$T/session-state.txt" "$T/session-command.txt" >&2
+    cat "$T/session-state.txt" "$T/session-command.txt" >&2 || true
     grep -E '"(isSystemApp|isKeepAlive)"' "$T/system-app.txt" >&2 || true
+    grep -A1 'process name \[dev\.sargunv\.innkeeper' "$T/user-app.txt" >&2 || true
     exit 1
   fi
-  echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, Innkeeper System runs as a kept-alive system app, and it answers Session1 commands"
+  echo "ok   Session1 reports the session booted once OpenHarmony's boot completes, Innkeeper System runs as a kept-alive system app and starts Innkeeper User as user 100, and it answers Session1 commands"
   # Each animation from here on draws in render_service, which must not
   # restart.
   ohos_rs=$(s /system/bin/pidof render_service)

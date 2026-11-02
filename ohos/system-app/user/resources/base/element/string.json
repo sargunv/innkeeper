@@ -1,0 +1,9 @@
+{
+  "string": [
+    { "name": "app_name", "value": "Innkeeper User" },
+    {
+      "name": "service_description",
+      "value": "Connects the current OpenHarmony user to the desktop."
+    }
+  ]
+}

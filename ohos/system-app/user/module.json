@@ -1,0 +1,38 @@
+{
+  "app": {
+    "bundleName": "dev.sargunv.innkeeper.user",
+    "vendor": "innkeeper",
+    "versionCode": 1,
+    "versionName": "1",
+    "icon": "$media:icon",
+    "label": "$string:app_name",
+    "apiReleaseType": "Release",
+    "compileSdkType": "OpenHarmony",
+    "minAPIVersion": 26,
+    "targetAPIVersion": 26,
+    "bundleType": "app",
+    "generateBuildHash": true
+  },
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:service_description",
+    "mainElement": "UserService",
+    "deviceTypes": ["default", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "virtualMachine": "ark",
+    "compileMode": "esmodule",
+    "extensionAbilities": [
+      {
+        "name": "UserService",
+        "srcEntry": "./ets/service/UserService.ets",
+        "type": "service",
+        "description": "$string:service_description",
+        "icon": "$media:icon",
+        "label": "$string:app_name",
+        "exported": false
+      }
+    ]
+  }
+}

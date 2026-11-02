@@ -74,25 +74,26 @@ fetches the image if needed. On a nested desktop it creates a fresh profile
 system abilities, screen 0 and SceneBoard come up and that selftest passes
 ([tests/boot.sh](tests/boot.sh)). It also checks that the window shows. Session1
 must report the session booted only once `bootevent.boot.completed` is set, and
-`bm dump` must show Innkeeper System as a kept-alive system app. A click on the
-nested desktop's seat then opens Settings, and MMI's cursor must be on the panel
-pixel under the seat's pointer. A wheel detent scrolls Settings' list. OH's
-input injector then scrolls Settings and goes home, and render_service must not
-have restarted since boot ([tests/render.sh](tests/render.sh)). A key press
-reaches MMI. A file written to `/storage/Users/currentUser/Download` lands in
-the profile's data directory. The probe HAP, signed for the profile's UDID, then
-installs, shows in `innkeeper list` and gets a desktop entry with its label and
-icon, and `innkeeper run` puts its window on screen with input focus. A click on
-the probe's text field starts Innkeeper Keyboard, and keys typed in a French
-layout on the nested desktop type "aé" in the field. OH's music volume must be
-at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays
-through OH's audio API must reach a private null sink on the nested desktop.
-Root then grants the probe the microphone with `atm perm -g`, the host plays a
-tone into the null sink, and the probe must record it from the sink's monitor.
-OH must take the time zone that the session started with, and it must turn dark
-when the nested desktop's portal does. Last, the probe starts an audio playback
-continuous task. With the window closed, the task must keep the session up, and
-once it stops, the session must stop.
+`bm dump` must show Innkeeper System as a kept-alive system app, and Innkeeper
+User must run as user 100. A click on the nested desktop's seat then opens
+Settings, and MMI's cursor must be on the panel pixel under the seat's pointer.
+A wheel detent scrolls Settings' list. OH's input injector then scrolls Settings
+and goes home, and render_service must not have restarted since boot
+([tests/render.sh](tests/render.sh)). A key press reaches MMI. A file written to
+`/storage/Users/currentUser/Download` lands in the profile's data directory. The
+probe HAP, signed for the profile's UDID, then installs, shows in
+`innkeeper list` and gets a desktop entry with its label and icon, and
+`innkeeper run` puts its window on screen with input focus. A click on the
+probe's text field starts Innkeeper Keyboard, and keys typed in a French layout
+on the nested desktop type "aé" in the field. OH's music volume must be at its
+maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays through OH's
+audio API must reach a private null sink on the nested desktop. Root then grants
+the probe the microphone with `atm perm -g`, the host plays a tone into the null
+sink, and the probe must record it from the sink's monitor. OH must take the
+time zone that the session started with, and it must turn dark when the nested
+desktop's portal does. Last, the probe starts an audio playback continuous task.
+With the window closed, the task must keep the session up, and once it stops,
+the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
@@ -120,21 +121,21 @@ reports boot completion. Issue #312 tracks the features that build on it.
 - **App.** The app is ArkTS. Its main element is a ServiceExtensionAbility,
   `SystemService`, so it has no window and no home-screen icon.
 - **Preinstall.** OH's bundle manager reads `etc/app/install_list.json` in each
-  config layer, and ours names `/sys_prod/app/InnkeeperSystem`. BMS installs the
-  app at a profile's first boot. `install_list_capability.json` makes the app
-  kept alive and a singleton, and allows its service extension, which BMS
-  otherwise refuses. The entry matches the app by its appId, which is the bundle
-  name and the signing key's public EC point. hap-sign-tool issues a new app
-  certificate at each signing, so a certificate fingerprint wouldn't match. AMS
-  starts a kept-alive app's main element at boot and restarts it if it dies. The
-  file also makes the image's `com.ohos.backgroundtaskmgr.resources` a
-  singleton. The image's own entry for that bundle names a certificate
-  fingerprint that the bundle's HAP doesn't have, so BMS would install it for
-  user 100 alone. The background task service runs as user 0 and loads the
-  notification texts for continuous tasks from that bundle. Without the texts,
-  every continuous task fails with 9800006. A profile created before this entry
-  existed keeps the old install, because BMS doesn't change a singleton on a
-  rescan.
+  config layer, and ours names `/sys_prod/app/InnkeeperSystem` and
+  `/sys_prod/app/InnkeeperUser`. BMS installs the apps at a profile's first
+  boot. `install_list_capability.json` makes Innkeeper System kept alive and a
+  singleton, and allows both apps' service extensions, which BMS otherwise
+  refuses. Each entry matches its app by its appId, which is the bundle name and
+  the signing key's public EC point. hap-sign-tool issues a new app certificate
+  at each signing, so a certificate fingerprint wouldn't match. AMS starts a
+  kept-alive app's main element at boot and restarts it if it dies. The file
+  also makes the image's `com.ohos.backgroundtaskmgr.resources` a singleton. The
+  image's own entry for that bundle names a certificate fingerprint that the
+  bundle's HAP doesn't have, so BMS would install it for user 100 alone. The
+  background task service runs as user 0 and loads the notification texts for
+  continuous tasks from that bundle. Without the texts, every continuous task
+  fails with 9800006. A profile created before this entry existed keeps the old
+  install, because BMS doesn't change a singleton on a rescan.
 - **Signing.** `ohos/sign.sh --system` signs with the SDK's public keys and a
   release profile at `system_basic` with `hos_system_app`. A release profile
   names no device, so one HAP serves every profile.
@@ -153,6 +154,21 @@ reports boot completion. Issue #312 tracks the features that build on it.
   connection. Session1's `State()` reports the session booted from then on, so
   the manager shows an OH profile as running once its home screen is up. The CLI
   reads the same parameter over `exec`.
+- **Innkeeper User.** OpenHarmony keeps some state for each user, such as the
+  pasteboard. Innkeeper System is a singleton, so it runs as user 0, and apps
+  run as user 100. `ohos/system-app/user` is a second app, Innkeeper User,
+  `dev.sargunv.innkeeper.user`, for the features that must run as the foreground
+  user. It is preinstalled and signed as Innkeeper System is, and it loads the
+  same native module. It isn't a singleton, and AMS keeps no app alive outside
+  user 0, so Innkeeper System starts Innkeeper User's ServiceExtensionAbility,
+  `UserService`, as the foreground user once boot completes
+  (`ets/service/PerUser.ets`). It watches the app's processes with
+  `appManager`'s application state observer and starts the service again when
+  its process dies. AMS accepts the start through
+  `startServiceExtensionAbilityWithAccount`, which needs
+  `INTERACT_ACROSS_LOCAL_ACCOUNTS`. The observer needs `RUNNING_STATE_OBSERVER`.
+  `connectServiceExtensionAbilityWithAccount` would report the process's death
+  too, but on this image its connection never reaches AMS.
 - **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
   connects OH's text fields to the host's input method
   ([Text input](#text-input)).
@@ -207,10 +223,10 @@ reports boot completion. Issue #312 tracks the features that build on it.
   runs the `background` app action and answers it without app info. It answers
   every other command with "OpenHarmony profiles don't support this action.", so
   callers don't wait for the bridge's timeout.
-- **Build.** `mise run build:ohos-system-app` builds the HAP and stages it with
-  the two JSON files. The SDK's declarations leave out the system APIs, such as
-  ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the SDK in
-  `$OHOS_SDK_HOME/<version>-system` with the full declarations from
+- **Build.** `mise run build:ohos-system-app` builds both HAPs and stages them
+  with the two JSON files. The SDK's declarations leave out the system APIs,
+  such as ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the
+  SDK in `$OHOS_SDK_HOME/<version>-system` with the full declarations from
   interface_sdk-js at the release's tag, processed by that repository's own
   scripts as the SDK's build does. [system-app/sdk.env](system-app/sdk.env) pins
   them and the N-API headers by checksum. ets-loader reports each use of a
