@@ -182,14 +182,20 @@ reports boot completion. Issue #312 tracks the features that build on it.
 - **Clipboard.** As Android's system app does, Innkeeper User syncs OH's
   pasteboard with the desktop's clipboard (`user/ets/clipboard/`). It connects
   to the bridge's system service, which sends each desktop clip as `CLIP`, and
-  it sends each new pasteboard clip in `CLIP_SET`. Text and images go both ways
-  under Android's caps. A pasteboard clip with an image's PixelMap goes as an
-  image, and anything else goes as its first record's text. The app holds
-  `READ_PASTEBOARD`, which `install_list_permissions.json` grants at install, so
-  it reads the pasteboard while other apps have focus. It marks each clip it
-  writes, and it skips a pasteboard clip with that mark or with the content of
-  the last desktop clip, so no clip comes back to the side that it came from.
-  File clips don't sync yet. A desktop clip of files clears the pasteboard.
+  it sends each new pasteboard clip in `CLIP_SET`. Text, images and files go
+  both ways under Android's caps. A pasteboard clip with an image's PixelMap
+  goes as an image, a clip of up to 16 file URIs goes as the files, and anything
+  else goes as its first record's text. The app holds `READ_PASTEBOARD`, which
+  `install_list_permissions.json` grants at install, so it reads the pasteboard
+  while other apps have focus. It marks each clip it writes, and it skips a
+  pasteboard clip with that mark or with the content of the last desktop clip,
+  so no clip comes back to the side that it came from. A desktop clip of files
+  becomes copies in the app's files and a pasteboard clip of their URIs, and a
+  new clip replaces the copies. The pasteboard grants the app that pastes the
+  URIs, and that app opens them through the user's appdata view
+  ([How it boots](#how-it-boots)). For a pasteboard clip of file URIs, the app
+  reads each file with the pasteboard's grant and sends its name, MIME type and
+  bytes. The MIME type comes from the record, or from the file name's extension.
 - **Files from the desktop.** `innkeeper run <bundle> <file>` and
   `innkeeper open <files>` make a documents grant for each file with Session1's
   `Import`, and they send the grants in a `launch` command. Innkeeper System

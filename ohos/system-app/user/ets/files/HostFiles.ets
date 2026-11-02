@@ -2,13 +2,13 @@ import common from '@ohos.app.ability.common';
 import Want from '@ohos.app.ability.Want';
 import wantConstant from '@ohos.app.ability.wantConstant';
 import { BusinessError } from '@ohos.base';
-import uniformTypeDescriptor from '@ohos.data.uniformTypeDescriptor';
 import fileUri from '@ohos.file.fileuri';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { onEvent, open, Reply, request } from 'libinnkeeper.so';
-import { extension, OPEN, openBody, openWant, STAT, statBody, statName } from './Docs';
+import { OPEN, openBody, openWant, STAT, statBody, statName } from './Docs';
+import { mimeOf } from './Mime';
 
 // host/bridge/src/ipc/proto.rs
 const DOCUMENTS = 4;
@@ -36,21 +36,6 @@ function message(e: Object): string {
 
 function close(reply: Reply): void {
   reply.fds.forEach((fd: number) => fileIo.closeSync(fd));
-}
-
-// The MIME type of a file name's extension, or '' if OpenHarmony knows none.
-function mimeOf(name: string): string {
-  const ext = extension(name);
-  if (ext === '') {
-    return '';
-  }
-  try {
-    const id = uniformTypeDescriptor.getUniformDataTypeByFilenameExtension(ext);
-    const types = uniformTypeDescriptor.getTypeDescriptor(id).mimeTypes;
-    return types.length > 0 ? types[0] : '';
-  } catch (e) {
-    return '';
-  }
 }
 
 // Opens files from the desktop in OpenHarmony apps. `innkeeper run <bundle>

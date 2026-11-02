@@ -19,7 +19,7 @@ export default class UserService extends ServiceExtensionAbility {
   onCreate(want: Want): void {
     const user = Math.floor(this.context.applicationInfo.uid / UID_PER_USER);
     hilog.info(DOMAIN, TAG, 'started for user %{public}d', user);
-    startClipboard();
+    startClipboard(this.context);
     this.files = new HostFiles(this.context);
     this.files.start();
   }

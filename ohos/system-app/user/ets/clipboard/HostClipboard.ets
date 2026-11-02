@@ -1,12 +1,16 @@
+import common from '@ohos.app.ability.common';
+import fileUri from '@ohos.file.fileuri';
 import image from '@ohos.multimedia.image';
 import pasteboard from '@ohos.pasteboard';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { blob, Reply, request } from 'libinnkeeper.so';
+import { mimeOf } from '../files/Mime';
 import {
-  BGRA, choose, Choice, ClipHeader, decodeImage, Echo, encodeHeader, encodeImage, fitScale, hash, IMAGE, Item,
-  MAX_TEXT, Rgba, RGBA, TAG, TEXT, toRgba, truncateUtf8,
+  BGRA, choose, Choice, ClipFile, ClipHeader, decodeFiles, decodeImage, Echo, encodeFiles, encodeHeader, encodeImage,
+  FILES, fileMime, fileOverhead, fitScale, hash, IMAGE, Item, MAX_FILE_BYTES, MAX_FILE_CLIP, MAX_TEXT, MIMETYPE_TEXT_URI,
+  Rgba, RGBA, TAG, TEXT, toRgba, truncateUtf8, uriName, Utf8,
 } from './Clip';
 
 // host/bridge/src/system/proto.rs
@@ -18,7 +22,7 @@ const encoder = new util.TextEncoder();
 const decoder = util.TextDecoder.create('utf-8', { fatal: true, ignoreBOM: true });
 
 // UTF-8 conversion with OpenHarmony's util.TextEncoder and TextDecoder.
-class OhosUtf8 {
+class OhosUtf8 implements Utf8 {
   encode(s: string): Uint8Array {
     // OpenHarmony's encoder returns nothing for an empty string.
     return s.length === 0 ? new Uint8Array(0) : encoder.encodeInto(s);
@@ -47,18 +51,36 @@ function close(reply: Reply): void {
   reply.fds.forEach((fd: number) => fileIo.closeSync(fd));
 }
 
-// Reads `len` bytes from the start of a blob's memfd.
-function readBlob(fd: number, len: number): Uint8Array {
-  const b = new ArrayBuffer(len);
+// Reads `len` bytes from the start of the file `fd`, such as a blob's memfd. Each read fills the
+// start of the buffer that it gets, so the reads go through a chunk.
+function readAll(fd: number, len: number): Uint8Array {
+  const out = new Uint8Array(len);
+  const chunk = new ArrayBuffer(Math.min(len, 1 << 20));
   let at = 0;
   while (at < len) {
-    const n = fileIo.readSync(fd, b, { offset: at, length: len - at });
+    const n = fileIo.readSync(fd, chunk, { offset: at, length: Math.min(len - at, chunk.byteLength) });
     if (n <= 0) {
-      throw new Error(`blob ends at ${at} of ${len} bytes`);
+      throw new Error(`the file ends at ${at} of ${len} bytes`);
     }
+    out.set(new Uint8Array(chunk, 0, n), at);
     at += n;
   }
-  return new Uint8Array(b);
+  return out;
+}
+
+// Reads the file at a file URI that the pasteboard granted, if it has at
+// most `max` bytes.
+function readUri(uri: string, max: number): Uint8Array {
+  const f = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+  try {
+    const size = fileIo.statSync(f.fd).size;
+    if (size > max) {
+      throw new Error(`${uriName(uri)} has ${size} bytes, over the clipboard's cap`);
+    }
+    return readAll(f.fd, size);
+  } finally {
+    fileIo.closeSync(f);
+  }
 }
 
 // The PixelMap's pixels as straight RGBA, at most MAX_SIDE on a side.
@@ -88,6 +110,10 @@ function imageKey(img: Rgba): string {
   return `image ${img.width}x${img.height} ${hash(img.pixels)}`;
 }
 
+function filesKey(files: ClipFile[]): string {
+  return `files ${files.map((f: ClipFile) => `${f.name} ${hash(f.bytes)}`).join(' ')}`;
+}
+
 // Syncs OpenHarmony's pasteboard with the desktop's clipboard, as Android's
 // ClipboardSync does. The bridge sends each new desktop clip as a CLIP
 // event, and the app sends each new pasteboard clip in CLIP_SET.
@@ -95,14 +121,55 @@ function imageKey(img: Rgba): string {
 // The app holds READ_PASTEBOARD, so it reads the pasteboard while other apps
 // have focus, as Android's system app reads the clipboard. The pasteboard
 // keeps a clip for each user, and the app runs as the foreground user.
+//
+// A desktop clip of files becomes copies in the app's files and a
+// pasteboard clip of their URIs. The pasteboard grants the app that pastes
+// the URIs, and it opens them through the user's appdata view. A pasteboard
+// clip of file URIs from an app goes to the desktop as the files' bytes,
+// which the app reads with the pasteboard's grant.
 export class HostClipboard {
   private board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
   private system: number;
   private echo: Echo = new Echo();
   private queue: Promise<void> = Promise.resolve();
+  // The desktop's file clips, one folder each. A new clip replaces the
+  // folder.
+  private clips: string;
+  private clip: number = 0;
 
-  constructor(system: number) {
+  constructor(context: common.ServiceExtensionContext, system: number) {
     this.system = system;
+    this.clips = `${context.filesDir}/clip`;
+    this.removeClips();
+  }
+
+  private removeClips(): void {
+    try {
+      fileIo.rmdirSync(this.clips);
+    } catch (e) {
+      // There is no earlier clip.
+    }
+  }
+
+  // Copies the desktop's files and returns a pasteboard clip of their URIs.
+  private filesData(files: ClipFile[]): pasteboard.PasteData {
+    this.removeClips();
+    const dir = `${this.clips}/${++this.clip}`;
+    const uris = files.map((f: ClipFile, i: number) => {
+      // Each file gets its own folder, so two files may have one name.
+      fileIo.mkdirSync(`${dir}/${i}`, true);
+      const path = `${dir}/${i}/${f.name}`;
+      const out = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(out.fd, f.bytes.buffer.slice(f.bytes.byteOffset, f.bytes.byteOffset + f.bytes.length));
+      } finally {
+        fileIo.closeSync(out);
+      }
+      return fileUri.getUriFromPath(path);
+    });
+    const data = pasteboard.createData(MIMETYPE_TEXT_URI, uris[0]);
+    uris.slice(1).forEach((u: string) => data.addRecord(MIMETYPE_TEXT_URI, u));
+    return data;
   }
 
   watch(): void {
@@ -113,7 +180,7 @@ export class HostClipboard {
   fromDesktop(h: ClipHeader, fd: number): void {
     let b: Uint8Array;
     try {
-      b = readBlob(fd, h.len);
+      b = readAll(fd, h.len);
     } catch (e) {
       failed('reading the desktop clip', e as Error);
       return;
@@ -152,12 +219,14 @@ export class HostClipboard {
         alphaType: image.AlphaType.UNPREMUL,
       });
       data = pasteboard.createData(pasteboard.MIMETYPE_PIXELMAP, pm);
+    } else if (kind === FILES) {
+      const files = decodeFiles(b, utf8);
+      if (files === undefined) {
+        return;
+      }
+      key = filesKey(files);
+      data = this.filesData(files);
     } else {
-      // A desktop file clip clears the pasteboard, so a paste doesn't give
-      // an older clip.
-      this.echo.incoming('');
-      await this.board.clearData();
-      log(`clip from the desktop (kind ${kind}) cleared the pasteboard`);
       return;
     }
     const p = data.getProperty();
@@ -190,7 +259,24 @@ export class HostClipboard {
     } else if (c.kind === IMAGE) {
       const img = await pixels(data.getPrimaryPixelMap());
       await this.send(tag, IMAGE, imageKey(img), encodeImage(img));
+    } else if (c.kind === FILES && tag !== TAG) {
+      const files = this.readFiles(c.uris, items);
+      await this.send(tag, FILES, filesKey(files), encodeFiles(files, utf8));
     }
+  }
+
+  // Reads the files of a pasteboard clip within the caps of a file clip.
+  private readFiles(uris: string[], items: Item[]): ClipFile[] {
+    let remaining = MAX_FILE_CLIP - 4;
+    return uris.map((uri: string, i: number) => {
+      const f = new ClipFile();
+      f.name = uriName(uri);
+      f.mime = fileMime(items[i].mime, mimeOf(f.name));
+      const max = Math.min(MAX_FILE_BYTES, remaining - fileOverhead(f.name, f.mime, utf8));
+      f.bytes = readUri(uri, max);
+      remaining -= fileOverhead(f.name, f.mime, utf8) + f.bytes.length;
+      return f;
+    });
   }
 
   private async send(tag: string, kind: number, key: string, b: Uint8Array): Promise<void> {
