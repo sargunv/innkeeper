@@ -85,15 +85,17 @@ probe HAP, signed for the profile's UDID, then installs, shows in
 `innkeeper list` and gets a desktop entry with its label and icon, and
 `innkeeper run` puts its window on screen with input focus. A click on the
 probe's text field starts Innkeeper Keyboard, and keys typed in a French layout
-on the nested desktop type "aé" in the field. OH's music volume must be at its
-maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c) plays through OH's
-audio API must reach a private null sink on the nested desktop. Root then grants
-the probe the microphone with `atm perm -g`, the host plays a tone into the null
-sink, and the probe must record it from the sink's monitor. OH must take the
-time zone that the session started with, and it must turn dark when the nested
-desktop's portal does. Last, the probe starts an audio playback continuous task.
-With the window closed, the task must keep the session up, and once it stops,
-the session must stop.
+on the nested desktop type "aé" in the field. Text that `wl-copy` puts on the
+nested desktop's clipboard pastes into the field with Ctrl+V, and Ctrl+A and
+Ctrl+C in the field put its text on the desktop's clipboard. OH's music volume
+must be at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c)
+plays through OH's audio API must reach a private null sink on the nested
+desktop. Root then grants the probe the microphone with `atm perm -g`, the host
+plays a tone into the null sink, and the probe must record it from the sink's
+monitor. OH must take the time zone that the session started with, and it must
+turn dark when the nested desktop's portal does. Last, the probe starts an audio
+playback continuous task. With the window closed, the task must keep the session
+up, and once it stops, the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
@@ -169,6 +171,18 @@ reports boot completion. Issue #312 tracks the features that build on it.
   `INTERACT_ACROSS_LOCAL_ACCOUNTS`. The observer needs `RUNNING_STATE_OBSERVER`.
   `connectServiceExtensionAbilityWithAccount` would report the process's death
   too, but on this image its connection never reaches AMS.
+- **Clipboard.** As Android's system app does, Innkeeper User syncs OH's
+  pasteboard with the desktop's clipboard (`user/ets/clipboard/`). It connects
+  to the bridge's system service, which sends each desktop clip as `CLIP`, and
+  it sends each new pasteboard clip in `CLIP_SET`. Text and images go both ways
+  under Android's caps. A pasteboard clip with an image's PixelMap goes as an
+  image, and anything else goes as its first record's text. The app holds
+  `READ_PASTEBOARD`, which `install_list_permissions.json` grants at install, so
+  it reads the pasteboard while other apps have focus. It marks each clip it
+  writes, and it skips a pasteboard clip with that mark or with the content of
+  the last desktop clip, so no clip comes back to the side that it came from.
+  Files don't sync, because an app can't open another app's file URI in an OH
+  profile (#312). A desktop clip of files clears the pasteboard.
 - **Input method.** The app's InputMethodExtensionAbility, Innkeeper Keyboard,
   connects OH's text fields to the host's input method
   ([Text input](#text-input)).
@@ -224,7 +238,7 @@ reports boot completion. Issue #312 tracks the features that build on it.
   every other command with "OpenHarmony profiles don't support this action.", so
   callers don't wait for the bridge's timeout.
 - **Build.** `mise run build:ohos-system-app` builds both HAPs and stages them
-  with the two JSON files. The SDK's declarations leave out the system APIs,
+  with the three JSON files. The SDK's declarations leave out the system APIs,
   such as ServiceExtensionAbility. `ohos/system-app/sdk.sh` makes a copy of the
   SDK in `$OHOS_SDK_HOME/<version>-system` with the full declarations from
   interface_sdk-js at the release's tag, processed by that repository's own
