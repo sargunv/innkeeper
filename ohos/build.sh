@@ -76,14 +76,15 @@ so=$out/vendor/lib64/libaudio_primary_impl.z.so
   "$stubs/bridge_client.o" "$stubs/libhilog.so" "$stubs/libc.so"
 "$llvm/llvm-strip" "$so"
 # The e2e audio and dma-buf checks run these tools in OH (ohos/tests/tone.c and
-# ohos/tests/dmabuf.c). They are test artifacts and stay out of the layer.
-mkdir -p out/test/ohos
+# ohos/tests/dmabuf.c). They are test artifacts, so they go with the probes,
+# which CI keeps with the stage, and stay out of the layer.
+mkdir -p out/test/probes/ohos
 # The stubs define no symbols, so the link leaves them for the loader.
 test_tool() {
   local tool=$1
   shift
   "$llvm/clang" "${cflags[@]}" -std=gnu17 -pie -nostdlib -Wl,--unresolved-symbols=ignore-all \
-    -Wl,-z,now -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 -o "out/test/ohos/$tool" \
+    -Wl,-z,now -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 -o "out/test/probes/ohos/$tool" \
     "$musl/lib64/Scrt1.o" "$musl/lib64/crti.o" "ohos/tests/$tool.c" \
     "$@" "$stubs/libc.so" "$musl/lib64/crtn.o"
 }

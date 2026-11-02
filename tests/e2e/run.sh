@@ -711,7 +711,7 @@ else
     # passes this runner's environment, so the tool takes render_service's
     # LD_PRELOAD.
     s /system/bin/sh -c 'cat >/data/local/tmp/dmabuf && chmod 755 /data/local/tmp/dmabuf' \
-      <"$repo/out/test/ohos/dmabuf" || return
+      <"$repo/out/test/probes/ohos/dmabuf" || return
     # shellcheck disable=SC2016 # expanded in OpenHarmony
     s /system/bin/sh -c 'preload=$(xargs -0 -n 1 </proc/$(pidof render_service)/environ | grep "^LD_PRELOAD=") &&
       exec env "$preload" /data/local/tmp/dmabuf' >>"$T/ohos.txt" 2>&1
@@ -977,7 +977,7 @@ else
     grep -q '"volume":15,"volumeType":"STREAM_MUSIC"' "$T/ohos-volume.txt" || return
     # The tone tool plays through OH's public audio API (ohos/tests/tone.c).
     s /system/bin/sh -c 'cat >/data/local/tmp/tone && chmod 755 /data/local/tmp/tone' \
-      <"$repo/out/test/ohos/tone" || return
+      <"$repo/out/test/probes/ohos/tone" || return
     parec -d "$INNKEEPER_AUDIO_SINK.monitor" --format=s16le --rate=48000 --channels=2 --raw \
       --latency-msec=20 >"$T/ohos-audio.raw" &
     recorder=$!
