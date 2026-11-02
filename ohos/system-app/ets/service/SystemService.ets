@@ -3,6 +3,7 @@ import Want from '@ohos.app.ability.Want';
 import { startApps } from '../bridge/Apps';
 import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
+import { startMedia } from '../media/HostMedia';
 import { startNotifications } from '../notify/Notifications';
 import { startPerUser } from './PerUser';
 import { startSettings } from '../settings/Settings';
@@ -16,6 +17,7 @@ export default class SystemService extends ServiceExtensionAbility {
     startApps(background);
     startLifecycle(background);
     startNotifications(this.context);
+    startMedia(this.context);
     startSettings();
     startPerUser(this.context);
   }

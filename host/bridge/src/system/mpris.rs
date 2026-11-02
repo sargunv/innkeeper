@@ -1,5 +1,5 @@
-//! Android media sessions as MPRIS players, so desktop media controls and
-//! media keys drive them.
+//! Android's and OpenHarmony's media sessions as MPRIS players, so desktop
+//! media controls and media keys drive them.
 //!
 //! The system app sends a media blob for each active `MediaSession`, keyed by
 //! a nonzero player id that the app chooses, whenever the session's metadata

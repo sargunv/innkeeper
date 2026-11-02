@@ -29,6 +29,7 @@
       { "name": "ohos.permission.GET_BUNDLE_RESOURCES" },
       { "name": "ohos.permission.INTERACT_ACROSS_LOCAL_ACCOUNTS" },
       { "name": "ohos.permission.LISTEN_BUNDLE_CHANGE" },
+      { "name": "ohos.permission.MANAGE_MEDIA_RESOURCES" },
       { "name": "ohos.permission.NOTIFICATION_CONTROLLER" },
       { "name": "ohos.permission.READ_ACCESSIBILITY_CONFIG" },
       { "name": "ohos.permission.RUNNING_STATE_OBSERVER" },
