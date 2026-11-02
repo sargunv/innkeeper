@@ -9,7 +9,9 @@ export INNKEEPER_TEST_COMPOSITOR=${INNKEEPER_TEST_COMPOSITOR:-kwin}
 N=$repo/out/test/nested/$INNKEEPER_PROFILE
 host_runtime=$XDG_RUNTIME_DIR
 rt=$(mktemp -d -p "$host_runtime" inkp-XXXXXX)
-unit=inkp-nested-$INNKEEPER_PROFILE
+# The user's systemd manager is shared by every checkout, so the unit name has
+# a hash of the checkout's path as well as the profile.
+unit=inkp-nested-$INNKEEPER_PROFILE-$(cd "$repo" && pwd -P | sha256sum | cut -c1-8)
 phase=bootstrap
 private_bus=""
 cleanup() {

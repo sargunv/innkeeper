@@ -120,6 +120,11 @@ gets a private D-Bus, runtime directory, HOME and XDG directories under
 null sink and no hardware monitors. `nested.sh` removes all of these when the
 command exits. Use it for anything that opens windows, portals or notifications.
 
+The desktop runs in the systemd user unit `inkp-nested-<profile>-<hash>`, where
+the hash comes from the checkout's path. Two checkouts can run the same profile
+at the same time. The e2e boot group turns adb on under a lock in the user's
+runtime directory, because the adb ports are shared by every checkout.
+
 The nested desktop serves `dev.sargunv.Innkeeper.TestDesktop`, which provides
 input, window visibility, position and geometry, and screenshots.
 `tests/e2e/kwin.py` serves it on KWin, and `tests/e2e/mutter.js` serves it on
