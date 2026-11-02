@@ -1,6 +1,7 @@
 import ServiceExtensionAbility from '@ohos.app.ability.ServiceExtensionAbility';
 import Want from '@ohos.app.ability.Want';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { startClipboard } from '../clipboard/Clipboard';
 
 const DOMAIN = 0x0000;
 const TAG = 'InnkeeperUser';
@@ -15,5 +16,6 @@ export default class UserService extends ServiceExtensionAbility {
   onCreate(want: Want): void {
     const user = Math.floor(this.context.applicationInfo.uid / UID_PER_USER);
     hilog.info(DOMAIN, TAG, 'started for user %{public}d', user);
+    startClipboard();
   }
 }

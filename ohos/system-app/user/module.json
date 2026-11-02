@@ -23,6 +23,7 @@
     "installationFree": false,
     "virtualMachine": "ark",
     "compileMode": "esmodule",
+    "requestPermissions": [{ "name": "ohos.permission.READ_PASTEBOARD" }],
     "extensionAbilities": [
       {
         "name": "UserService",
