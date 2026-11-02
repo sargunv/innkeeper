@@ -127,3 +127,4 @@ static_assert(sizeof(DisplayCapability) == 80, "OH layout");
 
 typedef void (*HotPlugCallback)(uint32_t devId, bool connected, void* data);
 typedef void (*VBlankCallback)(unsigned int sequence, uint64_t ns, void* data);
+typedef void (*RefreshCallback)(uint32_t devId, void* data);

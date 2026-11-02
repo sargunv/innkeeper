@@ -797,10 +797,7 @@ else
     until_ok typed || return
     printf '%s\n' key:29,1 key:16,1 key:16,0 key:46,1 key:46,0 key:29,0 | /usr/bin/python3 "$here/seat.py" --stdin
     copied() { [[ $(wl-paste --no-newline 2>/dev/null) == 'from the desktopa' ]]; }
-    until_ok copied || return
-    # End drops the selection, so the caret blinks again. ohos-screen needs
-    # OH to draw a frame after the window reopens (#363).
-    printf '%s\n' key:107,1 key:107,0 | /usr/bin/python3 "$here/seat.py" --stdin
+    until_ok copied
   }
   if ! timed ohos-clipboard ohos_clipboard; then
     echo "the desktop holds: $(wl-paste --no-newline 2>&1)" >&2
@@ -934,8 +931,12 @@ while True:
       >"$T/keeper.log" 2>&1 &
     keeper=$!
     until_ok file_has "$T/keeper.log" '^ready$' || return
+    # Ctrl+A on AZERTY selects the text in the probe's field, which stops its caret
+    # from blinking, so OpenHarmony has nothing new to draw.
+    printf '%s\n' key:29,1 key:16,1 key:16,0 key:29,0 | /usr/bin/python3 "$here/seat.py" --stdin
     # Closing the window leaves OpenHarmony running, and its composer's
-    # display stays headless until `run` opens the window again.
+    # display stays headless until `run` opens the window again. The new
+    # window shows a frame although the screen is static.
     frames=$(grep -c 'window [0-9]* shows its first frame' "$bridge_log")
     desktop Close dev.sargunv.innkeeper.ohos | grep -q true || return
     until_ok file_has "$bridge_log" 'display 0 stays headless' || return
@@ -969,7 +970,7 @@ while True:
     s /system/bin/hilog -x -T InnkeeperProbes,InnkeeperLifecycle 2>/dev/null | tail -n 5 >&2
     exit 1
   fi
-  echo "ok   the open window keeps OpenHarmony running, closing it leaves OpenHarmony running, run opens it again, an app's continuous task keeps the session up with the window closed, and the session stops when idle"
+  echo "ok   the open window keeps OpenHarmony running, closing it leaves OpenHarmony running, run opens it again on a static screen, an app's continuous task keeps the session up with the window closed, and the session stops when idle"
   echo 'e2e: PASS'
   exit
 fi
