@@ -6,9 +6,12 @@
  * It loads the EGL library (by default our libEGL_impl.so in
  * /vendor/lib64/chipsetsdk) and prints GL_RENDERER. A window surface on an
  * in-process consumer surface (OH_NativeImage) is cleared and swapped 30
- * times. Each frame must be in the consumer when eglSwapBuffers returns,
- * because render_service takes its screen's frame right after the swap, and
- * the consumer reads its color back. A NativeWindowBuffer with a known
+ * times. Before each frame, the test sets the window's buffer usage, as
+ * render_service does for its screen. Each frame must be in the consumer when
+ * eglSwapBuffers returns, because render_service takes its screen's frame
+ * right after the swap, and the consumer reads its color back. The frames
+ * must cycle through the window's queue of buffers, so the 30 frames may use
+ * at most MAX_BUFFERS distinct buffers. A NativeWindowBuffer with a known
  * pattern is imported with EGL_NATIVE_BUFFER_OHOS, with a current context as
  * render_service passes, and read back through a framebuffer. YUV 4:2:0
  * buffers in the layout of video frames are imported the same way, sampled
@@ -22,10 +25,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define W 64
 #define H 48
+/* OpenHarmony's BufferQueue holds 3 buffers by default. */
+#define MAX_BUFFERS 3
+#define SET_USAGE 5 /* NativeWindowOperation */
 
 typedef int EGLint;
 typedef unsigned int EGLBoolean, EGLenum, GLenum, GLuint, GLbitfield;
@@ -89,6 +96,7 @@ struct NativeBufferConfig {
 #define BUFFER_USAGE_CPU_READ (1 << 0)
 #define BUFFER_USAGE_CPU_WRITE (1 << 1)
 #define BUFFER_USAGE_MEM_DMA (1 << 3)
+#define BUFFER_USAGE_MEM_FB (1 << 6)
 #define BUFFER_USAGE_HW_RENDER (1 << 8)
 #define BUFFER_USAGE_HW_TEXTURE (1 << 9)
 
@@ -200,6 +208,8 @@ int main(int argc, char** argv) {
     sym(image_lib, "OH_NativeImage_ReleaseNativeWindowBuffer");
   struct BufferHandle* (*buffer_handle)(void*) =
     sym(window_lib, "OH_NativeWindow_GetBufferHandleFromNative");
+  int32_t (*window_opt)(void*, int, ...) =
+    sym(window_lib, "OH_NativeWindow_NativeWindowHandleOpt");
   void* (*buffer_alloc)(const struct NativeBufferConfig*) =
     sym(window_lib, "OH_NativeBuffer_Alloc");
   void* (*window_buffer_from_native)(void*) =
@@ -294,19 +304,26 @@ int main(int argc, char** argv) {
                 BUFFER_USAGE_HW_RENDER | BUFFER_USAGE_HW_TEXTURE
   );
   consumer_size(consumer, W, H);
-  EGLSurface surf =
-    eglCreateWindowSurface(dpy, config, acquire_window(consumer), NULL);
+  void* window = acquire_window(consumer);
+  EGLSurface surf = eglCreateWindowSurface(dpy, config, window, NULL);
   if (!ctx || !surf || !eglMakeCurrent(dpy, surf, surf, ctx)) {
     printf("FAIL: window surface: 0x%x\n", eglGetError());
     return 1;
   }
   printf("renderer: %s\n", (const char*)glGetString(GL_RENDERER));
 
-  /* Window surface: clear, swap, and read each frame from the consumer at
-   * once.
+  /* Window surface: set the usage that render_service sets on its screen,
+   * clear, swap, and read each frame from the consumer at once. A dma-buf's
+   * inode identifies its buffer.
    */
-  int bad = 0, late = 0;
+  int bad = 0, late = 0, buffers = 0;
+  ino_t seen[30];
   for (int n = 0; n < 30; n++) {
+    window_opt(
+      window, SET_USAGE,
+      (uint64_t)(BUFFER_USAGE_CPU_READ | BUFFER_USAGE_MEM_DMA |
+                 BUFFER_USAGE_MEM_FB)
+    );
     const uint8_t clear[4] = {200, 100, (uint8_t)(50 + n), 255};
     glClearColor(clear[0] / 255.f, clear[1] / 255.f, clear[2] / 255.f, 1);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -334,6 +351,12 @@ int main(int argc, char** argv) {
       close(fence);
     }
     struct BufferHandle* h = buffer_handle(frame);
+    struct stat st;
+    if (fstat(h->fd, &st) == 0) {
+      int known = 0;
+      for (int i = 0; i < buffers; i++) known |= seen[i] == st.st_ino;
+      if (!known) seen[buffers++] = st.st_ino;
+    }
     uint8_t* px = mmap(NULL, h->size, PROT_READ, MAP_SHARED, h->fd, 0);
     if (px == MAP_FAILED) {
       printf("FAIL: cannot map the frame\n");
@@ -352,10 +375,10 @@ int main(int argc, char** argv) {
   }
   printf(
     "window: 30 frames, %d with a wrong color, %d not in the consumer when "
-    "eglSwapBuffers returned\n",
-    bad, late
+    "eglSwapBuffers returned, %d buffers (at most %d)\n",
+    bad, late, buffers, MAX_BUFFERS
   );
-  bad += late;
+  bad += late + (buffers > MAX_BUFFERS);
 
   /* EGL_NATIVE_BUFFER_OHOS: left half red, right half blue. */
   const struct NativeBufferConfig cfg = {
