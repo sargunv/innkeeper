@@ -115,7 +115,9 @@ pub fn update(name: &str, change: impl FnOnce(&mut Settings)) -> Result<Settings
 pub fn set_keep_running(name: &str, on: bool) -> Result<Settings> {
     let data_home = innkeeper_profile::paths::data_home();
     let before = profile::any_keeps_running(&data_home);
-    let s = update(name, |s| s.keep_running = on)?;
+    // `update` can save the setting and then fail to reload a running
+    // session, so the login command follows what was saved either way.
+    let updated = update(name, |s| s.keep_running = on);
     let after = profile::any_keeps_running(&data_home);
     if before != after
         && let Err(e) = crate::login::autostart(after)
@@ -128,7 +130,7 @@ pub fn set_keep_running(name: &str, on: bool) -> Result<Settings> {
         let _ = update(name, |s| s.keep_running = !on);
         return Err(e);
     }
-    Ok(s)
+    updated
 }
 
 /// Asks profile `name`'s bridge, if it is running, to apply the saved

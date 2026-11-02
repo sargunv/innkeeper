@@ -30,6 +30,8 @@ struct Page {
     groups: RefCell<Vec<adw::PreferencesGroup>>,
     uninstall: adw::PreferencesGroup,
     busy: Cell<bool>,
+    /// Force Stop, which waits while Android answers another command.
+    force_stop: RefCell<Option<gtk::Button>>,
 }
 
 pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
@@ -65,6 +67,7 @@ pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
         groups: RefCell::default(),
         uninstall,
         busy: Cell::new(false),
+        force_stop: RefCell::default(),
     });
 
     let s = Rc::downgrade(&state);
@@ -75,14 +78,13 @@ pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
     });
     if android {
         let s = Rc::downgrade(&state);
-        state
-            .hero
-            .button("_Force Stop", false)
-            .connect_clicked(move |_| {
-                if let Some(s) = s.upgrade() {
-                    s.load(Command::new(&s.app.package, "force-stop"));
-                }
-            });
+        let force_stop = state.hero.button("_Force Stop", false);
+        force_stop.connect_clicked(move |_| {
+            if let Some(s) = s.upgrade() {
+                s.load(Command::new(&s.app.package, "force-stop"));
+            }
+        });
+        state.force_stop.replace(Some(force_stop));
     }
     let s = Rc::downgrade(&state);
     row.connect_activated(move |_| {
@@ -103,6 +105,12 @@ pub fn page(window: &Window, app: &DesktopApp) -> adw::NavigationPage {
 }
 
 impl Page {
+    fn set_force_stop_sensitive(&self, on: bool) {
+        if let Some(b) = self.force_stop.borrow().as_ref() {
+            b.set_sensitive(on);
+        }
+    }
+
     /// Shows `groups` between the top and Uninstall.
     fn set_groups(&self, groups: Vec<adw::PreferencesGroup>) {
         for g in self.groups.take() {
@@ -137,6 +145,7 @@ impl Page {
         if self.busy.replace(true) {
             return;
         }
+        self.set_force_stop_sensitive(false);
         let first = self.groups.borrow().is_empty();
         let progress = gtk::Label::new(None);
         if first {
@@ -160,6 +169,7 @@ impl Page {
             )
             .await;
             state.busy.set(false);
+            state.set_force_stop_sensitive(true);
             match result {
                 Ok(info) => state.show(info),
                 Err(e) => {
