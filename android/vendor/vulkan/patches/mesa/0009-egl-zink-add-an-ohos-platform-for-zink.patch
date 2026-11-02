@@ -1,22 +1,33 @@
 egl,zink: add an ohos platform for zink
 
 OpenHarmony's EGL wrapper loads a vendor EGL and GLES. This EGL platform
-makes Zink that EGL. Window surfaces use kopper with VK_OHOS_surface,
-which OpenHarmony's Vulkan swapchain layer provides. The layer takes the
-NativeWindow's buffers and hands them to the Vulkan driver with
-VK_OHOS_native_buffer. Swaps go through kopper, with damage and buffer
-age.
+makes Zink that EGL. Zink draws on the GPU of the first DRM render node
+that the process can open. The OpenHarmony build has no Gallium driver
+other than Zink, so the DRM pipe loader picks Zink for every device.
 
-The swapchain layer has no BGRA formats, so the window configs are RGBA.
-Mesa makes RGBA configs only when the loader reports
-DRI_LOADER_CAP_RGBA_ORDERING, and it asked only the image loader, which
-a kopper platform doesn't have. Version 2 of the kopper loader extension
-adds getCapability, and the platform reports RGBA ordering through it.
+A window surface works as on the Android platform. For each frame, the
+platform requests a buffer from the NativeWindow and imports the
+buffer's dma-buf as a linear image with the handle's row pitch. In
+eglSwapBuffers, it flushes the buffer back to the window with a sync
+file that signals when the frame's rendering is done. The buffers have
+no implicit synchronization. The platform keeps the image of each of the
+window's buffers, so each buffer is imported once.
+
+The window's queue allocates the buffers with the usage, format and size
+that the window's owner set. render_service sets its screen's usage
+before each frame. OpenHarmony's Vulkan swapchain layer sets the usage
+that the Vulkan driver asks for, so a swapchain on render_service's
+screen would get a new buffer for every frame. render_service also takes
+its screen's buffer from the window as soon as eglSwapBuffers returns, so
+the frame reaches the window inside the swap.
+
+The window configs are RGBA, because OpenHarmony's windows are RGBA.
+Mesa makes RGBA configs when the image loader reports
+DRI_LOADER_CAP_RGBA_ORDERING.
 
 render_service imports the buffers of other surfaces with
 eglCreateImageKHR(EGL_NATIVE_BUFFER_OHOS) and a NativeWindowBuffer. The
-platform imports the buffer's dma-buf as a linear image with the
-handle's row pitch, because a BufferHandle describes no tiling.
+platform imports them in the same way as window buffers.
 render_service passes its context with this target, so the platform
 ignores the context. The value of EGL_NATIVE_BUFFER_OHOS comes from
 OpenHarmony's EGL headers.
@@ -28,42 +39,11 @@ that dma-buf. The buffers carry no color metadata, so they import as
 BT.601 limited range with centered chroma, which is Android's gralloc
 default.
 
-Kopper presents on Zink's flush thread on every platform except
-Wayland. render_service acquires its screen's buffer from the
-NativeWindow as soon as eglSwapBuffers returns, so on OpenHarmony kopper
-presents inside the swap, as on Wayland.
-
-The surface and kopper code is a port of OpenHarmony's Mesa,
+The surface creation follows OpenHarmony's Mesa,
 https://gitee.com/openharmony/third_party_mesa3d at
 ea74a6339917390657db153cb9792f9ccac9f5ae, which is MIT-licensed like
-Mesa. The image import, the configs for each NativeBuffer format and
-the swap interval are new.
+Mesa.
 
-diff --git a/include/kopper_interface.h b/include/kopper_interface.h
-index 7e30277..e1b8675 100644
---- a/include/kopper_interface.h
-+++ b/include/kopper_interface.h
-@@ -102,7 +102,7 @@ struct kopper_loader_info {
- };
- 
- #define __DRI_KOPPER_LOADER "DRI_KopperLoader"
--#define __DRI_KOPPER_LOADER_VERSION 0
-+#define __DRI_KOPPER_LOADER_VERSION 2
- struct __DRIkopperLoaderExtensionRec {
-     __DRIextension base;
- 
-@@ -111,5 +111,11 @@ struct __DRIkopperLoaderExtensionRec {
-     /* Asks the loader to fill in the drawable's width and height */
-     void (*GetDrawableInfo)(struct dri_drawable *draw, int *w, int *h,
-                             void *closure);
-+
-+    /* Since version 2. Asks the loader about a capability, as
-+     * __DRIimageLoaderExtension::getCapability does, for a loader without
-+     * an image loader.
-+     */
-+    unsigned (*getCapability)(void *loaderPrivate, enum dri_loader_cap cap);
- };
- #endif /* KOPPER_INTERFACE_H */
 diff --git a/meson.build b/meson.build
 index 46764bc..bab8c33 100644
 --- a/meson.build
@@ -114,21 +94,39 @@ index edee4ff..3f911b6 100644
        UNREACHABLE("Platform teardown is not properly hooked.");
        break;
 diff --git a/src/egl/drivers/dri2/egl_dri2.h b/src/egl/drivers/dri2/egl_dri2.h
-index aa5692a..5a69127 100644
+index aa5692a..8660504 100644
 --- a/src/egl/drivers/dri2/egl_dri2.h
 +++ b/src/egl/drivers/dri2/egl_dri2.h
-@@ -363,6 +363,10 @@ struct dri2_egl_surface {
+@@ -363,6 +363,28 @@ struct dri2_egl_surface {
     } color_buffers[4], *back, *current;
  #endif
  
 +#ifdef HAVE_OHOS_PLATFORM
 +   struct NativeWindow *ohos_window;
++   /* The buffer that the next frame draws into, which the platform requested
++    * from the window, and the slot of its image.
++    */
++   struct NativeWindowBuffer *ohos_buffer;
++   struct ohos_color_buffer *ohos_back;
++   /* The window's buffers with their imported images, so that each buffer is
++    * imported once. A slot holds a reference on its buffer, which keeps the
++    * buffer's handle valid.
++    */
++   struct ohos_color_buffer {
++      struct NativeWindowBuffer *buffer;
++      const void *handle;
++      struct dri_image *image;
++      int age;
++      uint64_t last_request;
++   } ohos_color_buffers[8];
++   uint64_t ohos_requests;
++   struct dri_image *ohos_pbuffer_image;
 +#endif
 +
  #ifdef HAVE_ANDROID_PLATFORM
     struct ANativeWindow *window;
     struct ANativeWindowBuffer *buffer;
-@@ -570,6 +574,17 @@ dri2_initialize_android(_EGLDisplay *disp)
+@@ -570,6 +592,17 @@ dri2_initialize_android(_EGLDisplay *disp)
  }
  #endif
  
@@ -148,10 +146,10 @@ index aa5692a..5a69127 100644
  
 diff --git a/src/egl/drivers/dri2/platform_ohos.c b/src/egl/drivers/dri2/platform_ohos.c
 new file mode 100644
-index 0000000..d621170
+index 0000000..6714df0
 --- /dev/null
 +++ b/src/egl/drivers/dri2/platform_ohos.c
-@@ -0,0 +1,474 @@
+@@ -0,0 +1,684 @@
 +/*
 + * Copyright © 2026 Innkeeper contributors
 + *
@@ -159,40 +157,43 @@ index 0000000..d621170
 + */
 +
 +/*
-+ * The OpenHarmony platform. Zink draws window surfaces through kopper and
-+ * VK_OHOS_surface, which OpenHarmony's Vulkan swapchain layer provides. The
-+ * layer takes buffers from the NativeWindow and hands them to the Vulkan
-+ * driver with VK_OHOS_native_buffer. EGL_NATIVE_BUFFER_OHOS images import a
-+ * NativeWindowBuffer's dma-buf.
++ * The OpenHarmony platform. Zink draws on the GPU of a DRM render node.
++ * A window surface requests each frame's buffer from the NativeWindow,
++ * imports the buffer's dma-buf, and flushes the buffer back to the window
++ * in eglSwapBuffers, as the Android platform does with an ANativeWindow.
++ * EGL_NATIVE_BUFFER_OHOS images import a NativeWindowBuffer's dma-buf the
++ * same way.
 + *
-+ * The surface and kopper code follows platform_ohos.c in OpenHarmony's Mesa,
++ * The surface creation follows platform_ohos.c in OpenHarmony's Mesa,
 + * https://gitee.com/openharmony/third_party_mesa3d at
 + * ea74a6339917390657db153cb9792f9ccac9f5ae.
 + */
 +
++#include <fcntl.h>
++#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
++#include <unistd.h>
 +
 +#include <native_buffer/buffer_common.h>
 +#include <native_window/external_window.h>
-+#include <vulkan/vulkan_core.h>
-+#include <vulkan/vulkan_ohos.h>
 +
 +#include "drm-uapi/drm_fourcc.h"
 +#include "dri_util.h"
 +#include "egl_dri2.h"
 +#include "eglglobals.h"
-+#include "kopper_interface.h"
 +#include "loader_dri_helper.h"
 +#include "util/format/u_format.h"
++#include "util/libsync.h"
 +
 +/* From OpenHarmony's EGL headers. */
 +#ifndef EGL_NATIVE_BUFFER_OHOS
 +#define EGL_NATIVE_BUFFER_OHOS 0x34E1
 +#endif
 +
-+/* The formats of window surfaces and of imported buffers. The swapchain
-+ * layer has no BGRA formats, so those are for imports only.
++/* The formats of window surfaces and of imported buffers. A window's buffers
++ * have the window's format, and the window configs are those of the formats
++ * that OpenHarmony's windows use.
 + */
 +static const struct {
 +   int native_format;
@@ -213,6 +214,230 @@ index 0000000..d621170
 +   {NATIVEBUFFER_PIXEL_FMT_BGRX_8888, PIPE_FORMAT_BGRX8888_UNORM,
 +    DRM_FORMAT_XRGB8888, false},
 +};
++
++/* The YUV 4:2:0 formats that the buffer VDI allocates. The chroma planes
++ * follow the luma plane in the same dma-buf. A semi-planar format has one
++ * chroma plane with the luma's row pitch. A planar format has two chroma
++ * planes with half that pitch, in the order that the format names them.
++ */
++static const struct {
++   int native_format;
++   uint32_t fourcc;
++   bool planar;
++} ohos_yuv_formats[] = {
++   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_SP, DRM_FORMAT_NV12, false},
++   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_SP, DRM_FORMAT_NV21, false},
++   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_P, DRM_FORMAT_YUV420, true},
++   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_P, DRM_FORMAT_YVU420, true},
++};
++
++/* Fills in the fourcc and the planes of a buffer, and returns the number of
++ * planes, or 0 for a format that doesn't import.
++ */
++static int
++ohos_buffer_planes(const BufferHandle *handle, uint32_t *fourcc, int *offsets,
++                   int *pitches)
++{
++   const int stride = handle->stride, height = handle->height;
++
++   offsets[0] = 0;
++   pitches[0] = stride;
++   for (unsigned i = 0; i < ARRAY_SIZE(ohos_formats); i++) {
++      if (ohos_formats[i].native_format == handle->format) {
++         *fourcc = ohos_formats[i].fourcc;
++         return 1;
++      }
++   }
++   for (unsigned i = 0; i < ARRAY_SIZE(ohos_yuv_formats); i++) {
++      if (ohos_yuv_formats[i].native_format != handle->format)
++         continue;
++      const int chroma_rows = (height + 1) / 2;
++      const int luma = stride * height;
++      *fourcc = ohos_yuv_formats[i].fourcc;
++      if (!ohos_yuv_formats[i].planar) {
++         offsets[1] = luma;
++         pitches[1] = stride;
++         return luma + stride * chroma_rows <= handle->size ? 2 : 0;
++      }
++      offsets[1] = luma;
++      offsets[2] = luma + stride / 2 * chroma_rows;
++      pitches[1] = pitches[2] = stride / 2;
++      return offsets[2] + stride / 2 * chroma_rows <= handle->size ? 3 : 0;
++   }
++   return 0;
++}
++
++/* A BufferHandle is a single dma-buf with a row pitch. The handle describes
++ * no tiling, so the buffer is linear. YUV buffers have no color metadata, so
++ * they import as BT.601 limited range with centered chroma, as Android's
++ * gralloc fallback does.
++ */
++static struct dri_image *
++ohos_import_handle(struct dri2_egl_display *dri2_dpy,
++                   const BufferHandle *handle)
++{
++   if (!handle || handle->fd < 0 || handle->stride <= 0 || handle->height <= 0)
++      return NULL;
++
++   uint32_t fourcc = 0;
++   int offsets[3], pitches[3];
++   const int planes = ohos_buffer_planes(handle, &fourcc, offsets, pitches);
++   if (!planes)
++      return NULL;
++
++   int fds[3] = {handle->fd, handle->fd, handle->fd};
++   const bool yuv = planes > 1;
++   unsigned error;
++   return dri2_from_dma_bufs(
++      dri2_dpy->dri_screen_render_gpu, handle->width, handle->height, fourcc,
++      DRM_FORMAT_MOD_LINEAR, fds, planes, pitches, offsets,
++      yuv ? __DRI_YUV_COLOR_SPACE_ITU_REC601 : __DRI_YUV_COLOR_SPACE_UNDEFINED,
++      yuv ? __DRI_YUV_NARROW_RANGE : __DRI_YUV_RANGE_UNDEFINED,
++      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED,
++      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED, 0,
++      &error, NULL);
++}
++
++static void
++ohos_release_color_buffer(struct ohos_color_buffer *cb)
++{
++   if (cb->image)
++      dri2_destroy_image(cb->image);
++   if (cb->buffer)
++      OH_NativeWindow_NativeObjectUnreference(cb->buffer);
++   memset(cb, 0, sizeof(*cb));
++}
++
++/* Returns the slot for a buffer that the surface hasn't imported yet. The
++ * slots hold at most as many buffers as the window's queue, and the least
++ * recently requested buffers make room. When the queue replaces a buffer,
++ * for example after the window's usage or size changes, the old buffer is
++ * the least recently requested one.
++ */
++static struct ohos_color_buffer *
++ohos_free_slot(struct dri2_egl_surface *dri2_surf)
++{
++   const int slots = ARRAY_SIZE(dri2_surf->ohos_color_buffers);
++   int32_t queue_size = 0;
++
++   OH_NativeWindow_NativeWindowHandleOpt(dri2_surf->ohos_window,
++                                         GET_BUFFERQUEUE_SIZE, &queue_size);
++   const int capacity = CLAMP(queue_size, 1, slots);
++
++   for (;;) {
++      struct ohos_color_buffer *empty = NULL, *oldest = NULL;
++      int used = 0;
++      for (int i = 0; i < slots; i++) {
++         struct ohos_color_buffer *cb = &dri2_surf->ohos_color_buffers[i];
++         if (!cb->buffer) {
++            empty = empty ? empty : cb;
++            continue;
++         }
++         used++;
++         if (!oldest || cb->last_request < oldest->last_request)
++            oldest = cb;
++      }
++      if (used < capacity)
++         return empty;
++      ohos_release_color_buffer(oldest);
++   }
++}
++
++/* Requests the next frame's buffer from the window. The window's usage,
++ * format and size are those that its owner set, so the window's queue can
++ * reuse its buffers.
++ */
++static bool
++ohos_request_buffer(struct dri2_egl_surface *dri2_surf)
++{
++   _EGLDisplay *disp = dri2_surf->base.Resource.Display;
++   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
++   OHNativeWindowBuffer *buffer = NULL;
++   int fence_fd = -1;
++
++   if (OH_NativeWindow_NativeWindowRequestBuffer(dri2_surf->ohos_window,
++                                                 &buffer, &fence_fd) != 0 ||
++       !buffer) {
++      _eglLog(_EGL_WARNING, "ohos: the window has no free buffer");
++      return false;
++   }
++
++   const BufferHandle *handle = OH_NativeWindow_GetBufferHandleFromNative(buffer);
++   struct ohos_color_buffer *cb = NULL;
++   for (unsigned i = 0; i < ARRAY_SIZE(dri2_surf->ohos_color_buffers); i++) {
++      if (handle && dri2_surf->ohos_color_buffers[i].handle == handle) {
++         cb = &dri2_surf->ohos_color_buffers[i];
++         break;
++      }
++   }
++   if (!cb) {
++      struct dri_image *image = ohos_import_handle(dri2_dpy, handle);
++      if (!image) {
++         _eglLog(_EGL_WARNING, "ohos: cannot import the window's buffer");
++         if (fence_fd >= 0)
++            close(fence_fd);
++         OH_NativeWindow_NativeWindowAbortBuffer(dri2_surf->ohos_window, buffer);
++         return false;
++      }
++      cb = ohos_free_slot(dri2_surf);
++      OH_NativeWindow_NativeObjectReference(buffer);
++      cb->buffer = buffer;
++      cb->handle = handle;
++      cb->image = image;
++      cb->age = 0;
++   }
++   cb->last_request = ++dri2_surf->ohos_requests;
++
++   /* The fence signals when the window's consumer has released the buffer. */
++   if (fence_fd >= 0) {
++      if (disp->Extensions.ANDROID_native_fence_sync)
++         dri2_set_in_fence_fd(cb->image, fence_fd);
++      else
++         sync_wait(fence_fd, -1);
++      close(fence_fd);
++   }
++
++   dri2_surf->ohos_buffer = buffer;
++   dri2_surf->ohos_back = cb;
++   dri2_surf->base.Width = handle->width;
++   dri2_surf->base.Height = handle->height;
++   return true;
++}
++
++/* Returns a sync file that signals when the frame's rendering is done. The
++ * buffers have no implicit synchronization, so without native fences the
++ * swap waits for the rendering.
++ */
++static int
++ohos_frame_fence(_EGLDisplay *disp)
++{
++   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
++   _EGLContext *ctx = _eglGetCurrentContext();
++   if (!ctx)
++      return -1;
++
++   struct dri_context *dri_ctx = dri2_egl_context(ctx)->dri_context;
++   struct dri_screen *screen = dri2_dpy->dri_screen_render_gpu;
++   int fence_fd = -1;
++   void *fence;
++
++   if (disp->Extensions.ANDROID_native_fence_sync) {
++      fence = dri_create_fence_fd(dri_ctx, -1);
++      if (fence) {
++         fence_fd = dri_get_fence_fd(screen, fence);
++         dri_destroy_fence(screen, fence);
++      }
++   }
++   if (fence_fd < 0) {
++      fence = dri_create_fence(dri_ctx);
++      if (fence) {
++         dri_client_wait_sync(dri_ctx, fence, __DRI2_FENCE_FLAG_FLUSH_COMMANDS,
++                              UINT64_MAX);
++         dri_destroy_fence(screen, fence);
++      }
++   }
++   return fence_fd;
++}
 +
 +static _EGLSurface *
 +ohos_create_surface(_EGLDisplay *disp, EGLint type, _EGLConfig *conf,
@@ -297,6 +522,13 @@ index 0000000..d621170
 +
 +   driDestroyDrawable(dri2_surf->dri_drawable);
 +
++   if (dri2_surf->ohos_buffer)
++      OH_NativeWindow_NativeWindowAbortBuffer(dri2_surf->ohos_window,
++                                              dri2_surf->ohos_buffer);
++   for (unsigned i = 0; i < ARRAY_SIZE(dri2_surf->ohos_color_buffers); i++)
++      ohos_release_color_buffer(&dri2_surf->ohos_color_buffers[i]);
++   if (dri2_surf->ohos_pbuffer_image)
++      dri2_destroy_image(dri2_surf->ohos_pbuffer_image);
 +   if (dri2_surf->ohos_window)
 +      OH_NativeWindow_NativeObjectUnreference(dri2_surf->ohos_window);
 +
@@ -305,23 +537,57 @@ index 0000000..d621170
 +   return EGL_TRUE;
 +}
 +
++/* The frame reaches the window's consumer before the swap returns, because
++ * render_service takes its screen's buffer from the window as soon as
++ * eglSwapBuffers returns. EGL's damage rectangles and OpenHarmony's both
++ * have their origin at the bottom left.
++ */
 +static EGLBoolean
 +ohos_swap_buffers_with_damage(_EGLDisplay *disp, _EGLSurface *draw,
 +                              const EGLint *rects, EGLint n_rects)
 +{
 +   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
-+   const uint32_t flags =
-+      __DRI2_FLUSH_CONTEXT | __DRI2_FLUSH_INVALIDATE_ANCILLARY;
 +
-+   if (!dri2_surf->ohos_window)
++   if (draw->Type != EGL_WINDOW_BIT)
 +      return EGL_TRUE;
 +
-+   if (n_rects)
-+      kopperSwapBuffersWithDamage(dri2_surf->dri_drawable, flags, n_rects,
-+                                  rects);
-+   else
-+      kopperSwapBuffers(dri2_surf->dri_drawable, flags);
++   for (unsigned i = 0; i < ARRAY_SIZE(dri2_surf->ohos_color_buffers); i++) {
++      if (dri2_surf->ohos_color_buffers[i].age > 0)
++         dri2_surf->ohos_color_buffers[i].age++;
++   }
++   if (dri2_surf->ohos_back)
++      dri2_surf->ohos_back->age = 1;
 +
++   dri2_flush_drawable_for_swapbuffers_flags(disp, draw,
++                                             __DRI2_NOTHROTTLE_SWAPBUFFER);
++
++   /* Without GL commands since the last swap, the driver requested no
++    * buffer.
++    */
++   if (dri2_surf->ohos_buffer) {
++      struct Rect *damage = NULL;
++      Region region = {0};
++      if (n_rects > 0) {
++         damage = calloc(n_rects, sizeof(*damage));
++         for (EGLint i = 0; damage && i < n_rects; i++) {
++            damage[i].x = rects[4 * i];
++            damage[i].y = rects[4 * i + 1];
++            damage[i].w = rects[4 * i + 2];
++            damage[i].h = rects[4 * i + 3];
++         }
++         region.rects = damage;
++         region.rectNumber = damage ? n_rects : 0;
++      }
++      if (OH_NativeWindow_NativeWindowFlushBuffer(
++             dri2_surf->ohos_window, dri2_surf->ohos_buffer,
++             ohos_frame_fence(disp), region) != 0)
++         _eglLog(_EGL_WARNING, "ohos: the window did not take the frame");
++      free(damage);
++      dri2_surf->ohos_buffer = NULL;
++      dri2_surf->ohos_back = NULL;
++   }
++
++   dri_invalidate_drawable(dri2_surf->dri_drawable);
 +   return EGL_TRUE;
 +}
 +
@@ -336,110 +602,101 @@ index 0000000..d621170
 +{
 +   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(surf);
 +
-+   return kopperQueryBufferAge(dri2_surf->dri_drawable);
++   if (surf->Type != EGL_WINDOW_BIT)
++      return 0;
++   if (!dri2_surf->ohos_buffer && !ohos_request_buffer(dri2_surf)) {
++      _eglError(EGL_BAD_ALLOC, "ohos_query_buffer_age");
++      return -1;
++   }
++   return dri2_surf->ohos_back->age;
 +}
 +
++/* The window's queue paces the frames. The platform records the interval
++ * and doesn't use it.
++ */
 +static EGLBoolean
 +ohos_swap_interval(_EGLDisplay *disp, _EGLSurface *surf, EGLint interval)
 +{
-+   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(surf);
-+
-+   kopperSetSwapInterval(dri2_surf->dri_drawable, interval);
++   surf->SwapInterval = interval;
 +   return EGL_TRUE;
 +}
 +
-+/* The YUV 4:2:0 formats that the buffer VDI allocates. The chroma planes
-+ * follow the luma plane in the same dma-buf. A semi-planar format has one
-+ * chroma plane with the luma's row pitch. A planar format has two chroma
-+ * planes with half that pitch, in the order that the format names them.
-+ */
-+static const struct {
-+   int native_format;
-+   uint32_t fourcc;
-+   bool planar;
-+} ohos_yuv_formats[] = {
-+   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_SP, DRM_FORMAT_NV12, false},
-+   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_SP, DRM_FORMAT_NV21, false},
-+   {NATIVEBUFFER_PIXEL_FMT_YCBCR_420_P, DRM_FORMAT_YUV420, true},
-+   {NATIVEBUFFER_PIXEL_FMT_YCRCB_420_P, DRM_FORMAT_YVU420, true},
-+};
-+
-+/* Fills in the fourcc and the planes of a buffer, and returns the number of
-+ * planes, or 0 for a format that doesn't import.
-+ */
 +static int
-+ohos_buffer_planes(const BufferHandle *handle, uint32_t *fourcc, int *offsets,
-+                   int *pitches)
++ohos_image_get_buffers(struct dri_drawable *driDrawable, unsigned int format,
++                       uint32_t *stamp, void *loaderPrivate,
++                       uint32_t buffer_mask, struct __DRIimageList *images)
 +{
-+   const int stride = handle->stride, height = handle->height;
++   struct dri2_egl_surface *dri2_surf = loaderPrivate;
++   struct dri2_egl_display *dri2_dpy =
++      dri2_egl_display(dri2_surf->base.Resource.Display);
 +
-+   offsets[0] = 0;
-+   pitches[0] = stride;
-+   for (unsigned i = 0; i < ARRAY_SIZE(ohos_formats); i++) {
-+      if (ohos_formats[i].native_format == handle->format) {
-+         *fourcc = ohos_formats[i].fourcc;
++   images->image_mask = 0;
++   images->front = NULL;
++   images->back = NULL;
++
++   if (dri2_surf->base.Type == EGL_WINDOW_BIT) {
++      if (!(buffer_mask & __DRI_IMAGE_BUFFER_BACK))
 +         return 1;
-+      }
++      if (!dri2_surf->ohos_buffer && !ohos_request_buffer(dri2_surf))
++         return 0;
++      images->back = dri2_surf->ohos_back->image;
++      images->image_mask |= __DRI_IMAGE_BUFFER_BACK;
++      return 1;
 +   }
-+   for (unsigned i = 0; i < ARRAY_SIZE(ohos_yuv_formats); i++) {
-+      if (ohos_yuv_formats[i].native_format != handle->format)
-+         continue;
-+      const int chroma_rows = (height + 1) / 2;
-+      const int luma = stride * height;
-+      *fourcc = ohos_yuv_formats[i].fourcc;
-+      if (!ohos_yuv_formats[i].planar) {
-+         offsets[1] = luma;
-+         pitches[1] = stride;
-+         return luma + stride * chroma_rows <= handle->size ? 2 : 0;
++
++   /* A pbuffer has a front buffer and no back buffer, as on the Android
++    * platform.
++    */
++   if (buffer_mask & __DRI_IMAGE_BUFFER_FRONT) {
++      if (!dri2_surf->ohos_pbuffer_image) {
++         dri2_surf->ohos_pbuffer_image = dri_create_image(
++            dri2_dpy->dri_screen_render_gpu, dri2_surf->base.Width,
++            dri2_surf->base.Height, format, NULL, 0, 0, NULL);
++         if (!dri2_surf->ohos_pbuffer_image)
++            return 0;
 +      }
-+      offsets[1] = luma;
-+      offsets[2] = luma + stride / 2 * chroma_rows;
-+      pitches[1] = pitches[2] = stride / 2;
-+      return offsets[2] + stride / 2 * chroma_rows <= handle->size ? 3 : 0;
++      images->front = dri2_surf->ohos_pbuffer_image;
++      images->image_mask |= __DRI_IMAGE_BUFFER_FRONT;
 +   }
-+   return 0;
++   return 1;
 +}
 +
-+/* A NativeWindowBuffer holds a BufferHandle, a single dma-buf with a row
-+ * pitch. The handle describes no tiling, so the buffer is linear. YUV
-+ * buffers have no color metadata, so they import as BT.601 limited range
-+ * with centered chroma, as Android's gralloc fallback does.
-+ */
++static void
++ohos_flush_front_buffer(struct dri_drawable *driDrawable, void *loaderPrivate)
++{
++}
++
++/* The window formats are RGBA, so the configs are RGBA. */
++static unsigned
++ohos_get_capability(void *loaderPrivate, enum dri_loader_cap cap)
++{
++   return cap == DRI_LOADER_CAP_RGBA_ORDERING;
++}
++
++static const __DRIimageLoaderExtension ohos_image_loader_extension = {
++   .base = {__DRI_IMAGE_LOADER, 4},
++   .getBuffers = ohos_image_get_buffers,
++   .flushFrontBuffer = ohos_flush_front_buffer,
++   .getCapability = ohos_get_capability,
++};
++
++static const __DRIextension *ohos_loader_extensions[] = {
++   &ohos_image_loader_extension.base,
++   &image_lookup_extension.base,
++   NULL,
++};
++
 +static _EGLImage *
 +ohos_create_image_native_buffer(_EGLDisplay *disp,
 +                                OHNativeWindowBuffer *buffer)
 +{
 +   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
-+   BufferHandle *handle =
++   const BufferHandle *handle =
 +      buffer ? OH_NativeWindow_GetBufferHandleFromNative(buffer) : NULL;
 +
-+   if (!handle || handle->fd < 0 || handle->stride <= 0 ||
-+       handle->height <= 0) {
-+      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR");
-+      return NULL;
-+   }
-+
-+   uint32_t fourcc = 0;
-+   int offsets[3], pitches[3];
-+   const int planes = ohos_buffer_planes(handle, &fourcc, offsets, pitches);
-+   if (!planes) {
-+      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR: unsupported format");
-+      return NULL;
-+   }
-+
-+   int fds[3] = {handle->fd, handle->fd, handle->fd};
-+   const bool yuv = planes > 1;
-+   unsigned error;
-+   struct dri_image *dri_image = dri2_from_dma_bufs(
-+      dri2_dpy->dri_screen_render_gpu, handle->width, handle->height, fourcc,
-+      DRM_FORMAT_MOD_LINEAR, fds, planes, pitches, offsets,
-+      yuv ? __DRI_YUV_COLOR_SPACE_ITU_REC601 : __DRI_YUV_COLOR_SPACE_UNDEFINED,
-+      yuv ? __DRI_YUV_NARROW_RANGE : __DRI_YUV_RANGE_UNDEFINED,
-+      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED,
-+      yuv ? __DRI_YUV_CHROMA_SITING_0_5 : __DRI_YUV_CHROMA_SITING_UNDEFINED, 0,
-+      &error, NULL);
++   struct dri_image *dri_image = ohos_import_handle(dri2_dpy, handle);
 +   if (!dri_image) {
-+      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR: import failed");
++      _eglError(EGL_BAD_PARAMETER, "eglCreateEGLImageKHR");
 +      return NULL;
 +   }
 +
@@ -469,69 +726,6 @@ index 0000000..d621170
 +   .swap_buffers_with_damage = ohos_swap_buffers_with_damage,
 +   .query_buffer_age = ohos_query_buffer_age,
 +   .get_dri_drawable = dri2_surface_get_dri_drawable,
-+};
-+
-+static_assert(sizeof(struct kopper_vk_surface_create_storage) >=
-+                 sizeof(VkSurfaceCreateInfoOHOS),
-+              "");
-+
-+static void
-+ohos_kopper_set_surface_create_info(void *_draw,
-+                                    struct kopper_loader_info *out)
-+{
-+   struct dri2_egl_surface *dri2_surf = _draw;
-+   VkSurfaceCreateInfoOHOS *sci = (VkSurfaceCreateInfoOHOS *)&out->bos;
-+
-+   sci->sType = VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS;
-+   sci->pNext = NULL;
-+   sci->flags = 0;
-+   sci->window = dri2_surf->ohos_window;
-+
-+   out->has_alpha = dri2_surf->base.Config->AlphaSize > 0;
-+   out->present_opaque = dri2_surf->base.PresentOpaque;
-+   out->compression = 0;
-+}
-+
-+static void
-+ohos_kopper_get_drawable_info(struct dri_drawable *draw, int *w, int *h,
-+                              void *loaderPrivate)
-+{
-+   struct dri2_egl_surface *dri2_surf = loaderPrivate;
-+
-+   if (dri2_surf->ohos_window) {
-+      int32_t width = 0, height = 0;
-+
-+      if (OH_NativeWindow_NativeWindowHandleOpt(dri2_surf->ohos_window,
-+                                                GET_BUFFER_GEOMETRY, &height,
-+                                                &width) == 0 &&
-+          width > 0 && height > 0) {
-+         dri2_surf->base.Width = width;
-+         dri2_surf->base.Height = height;
-+      }
-+   }
-+
-+   *w = dri2_surf->base.Width;
-+   *h = dri2_surf->base.Height;
-+}
-+
-+/* The swapchain layer has no BGRA formats, so the configs are RGBA. */
-+static unsigned
-+ohos_get_capability(void *loaderPrivate, enum dri_loader_cap cap)
-+{
-+   return cap == DRI_LOADER_CAP_RGBA_ORDERING;
-+}
-+
-+static const __DRIkopperLoaderExtension kopper_loader_extension = {
-+   .base = {__DRI_KOPPER_LOADER, 2},
-+   .SetSurfaceCreateInfo = ohos_kopper_set_surface_create_info,
-+   .GetDrawableInfo = ohos_kopper_get_drawable_info,
-+   .getCapability = ohos_get_capability,
-+};
-+
-+static const __DRIextension *ohos_loader_extensions[] = {
-+   &kopper_loader_extension.base,
-+   &image_lookup_extension.base,
-+   NULL,
 +};
 +
 +static void
@@ -571,6 +765,22 @@ index 0000000..d621170
 +   }
 +}
 +
++/* OpenHarmony has no API that names a GPU, so the platform uses the first
++ * render node that it can open.
++ */
++static int
++ohos_open_render_node(void)
++{
++   for (int minor = 128; minor < 192; minor++) {
++      char path[32];
++      snprintf(path, sizeof(path), "/dev/dri/renderD%d", minor);
++      const int fd = open(path, O_RDWR | O_CLOEXEC);
++      if (fd >= 0)
++         return fd;
++   }
++   return -1;
++}
++
 +EGLBoolean
 +dri2_initialize_ohos(_EGLDisplay *disp)
 +{
@@ -579,20 +789,16 @@ index 0000000..d621170
 +   if (!dri2_dpy)
 +      return EGL_FALSE;
 +
-+   /* Zink finds its Vulkan device itself. */
-+   dri2_dpy->fd_render_gpu = -1;
-+   dri2_dpy->fd_display_gpu = -1;
-+   disp->Device = _eglFindDevice(dri2_dpy->fd_render_gpu, true);
++   dri2_dpy->fd_render_gpu = ohos_open_render_node();
++   if (dri2_dpy->fd_render_gpu < 0) {
++      err = "DRI2: no render node";
++      goto cleanup;
++   }
++   dri2_dpy->fd_display_gpu = dri2_dpy->fd_render_gpu;
 +
 +   dri2_dpy->driver_name = strdup("zink");
 +   if (!dri2_dpy->driver_name) {
 +      err = "DRI2: failed to allocate the driver name";
-+      goto cleanup;
-+   }
-+
-+   dri2_detect_swrast_kopper(disp);
-+   if (!dri2_dpy->kopper) {
-+      err = "DRI2: zink without kopper";
 +      goto cleanup;
 +   }
 +   dri2_dpy->loader_extensions = ohos_loader_extensions;
@@ -602,11 +808,13 @@ index 0000000..d621170
 +      goto cleanup;
 +   }
 +
++   if (!dri2_setup_device(disp, false)) {
++      err = "DRI2: failed to setup EGLDevice";
++      goto cleanup;
++   }
++
 +   dri2_setup_screen(disp);
 +
-+   /* Kopper allows any swap interval that the swapchain's present modes
-+    * allow.
-+    */
 +   dri2_dpy->min_swap_interval = 0;
 +   dri2_dpy->max_swap_interval = 1;
 +
@@ -665,127 +873,22 @@ index 4e62ee4..30fbc9c 100644
  elif with_platform_haiku
    c_args_for_egl += [
      '-D_EGL_BUILT_IN_DRIVER_HAIKU',
-diff --git a/src/gallium/drivers/zink/zink_instance.py b/src/gallium/drivers/zink/zink_instance.py
-index 234d0ec..1f4bd03 100755
---- a/src/gallium/drivers/zink/zink_instance.py
-+++ b/src/gallium/drivers/zink/zink_instance.py
-@@ -48,6 +48,7 @@ EXTENSIONS = [
-     Extension("VK_KHR_wayland_surface"),
-     Extension("VK_KHR_xcb_surface"),
-     Extension("VK_KHR_win32_surface"),
-+    Extension("VK_OHOS_surface"),
-     Extension("VK_EXT_swapchain_colorspace"),
- ]
+diff --git a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+index dc631b4..908eb56 100644
+--- a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
++++ b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+@@ -124,6 +124,11 @@ pipe_loader_drm_probe_fd_nodup(struct pipe_loader_device **dev, int fd, bool zin
+    if (!ddev)
+       return false;
  
-diff --git a/src/gallium/drivers/zink/zink_kopper.c b/src/gallium/drivers/zink/zink_kopper.c
-index 7781c00..e852847 100644
---- a/src/gallium/drivers/zink/zink_kopper.c
-+++ b/src/gallium/drivers/zink/zink_kopper.c
-@@ -79,6 +79,11 @@ init_dt_type(struct kopper_displaytarget *cdt)
-    case VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR:
-       cdt->type = KOPPER_WIN32;
-       break;
++#ifdef HAVE_OHOS_PLATFORM
++   /* The OpenHarmony build has no Gallium driver other than Zink. */
++   zink = true;
 +#endif
-+#ifdef VK_USE_PLATFORM_OHOS
-+   case VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS:
-+      cdt->type = KOPPER_OHOS;
-+      break;
- #endif
-    default:
-       UNREACHABLE("unsupported!");
-@@ -118,6 +123,13 @@ kopper_CreateSurface(struct zink_screen *screen, struct kopper_displaytarget *cd
-       error = VKSCR(CreateWin32SurfaceKHR)(screen->instance, win32, NULL, &surface);
-       break;
-    }
-+#endif
-+#ifdef VK_USE_PLATFORM_OHOS
-+   case VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS: {
-+      VkSurfaceCreateInfoOHOS *sci = (VkSurfaceCreateInfoOHOS *)&cdt->info.bos;
-+      error = VKSCR(CreateSurfaceOHOS)(screen->instance, sci, NULL, &surface);
-+      break;
-+   }
- #endif
-    default:
-       UNREACHABLE("unsupported!");
-@@ -245,6 +257,13 @@ find_dt_entry(struct zink_screen *screen, const struct kopper_displaytarget *cdt
-       he = _mesa_hash_table_search(&screen->dts, win32->hwnd);
-       break;
-    }
-+#endif
-+#ifdef VK_USE_PLATFORM_OHOS
-+   case KOPPER_OHOS: {
-+      VkSurfaceCreateInfoOHOS *sci = (VkSurfaceCreateInfoOHOS *)&cdt->info.bos;
-+      he = _mesa_hash_table_search(&screen->dts, sci->window);
-+      break;
-+   }
- #endif
-    default:
-       UNREACHABLE("unsupported!");
-@@ -354,6 +373,13 @@ kopper_CreateSwapchain(struct zink_screen *screen, struct kopper_displaytarget *
-       cswap->scci.imageExtent.width = w;
-       cswap->scci.imageExtent.height = h;
-       break;
-+   case KOPPER_OHOS:
-+      /* OpenHarmony's swapchain layer sets the window's buffer size from
-+       * imageExtent.
-+       */
-+      cswap->scci.imageExtent.width = w;
-+      cswap->scci.imageExtent.height = h;
-+      break;
-    default:
-       UNREACHABLE("unknown display platform");
-    }
-@@ -464,6 +490,7 @@ zink_kopper_displaytarget_create(struct zink_screen *screen, unsigned tex_usage,
-             break;
-          case KOPPER_WAYLAND:
-          case KOPPER_WIN32:
-+         case KOPPER_OHOS:
-             _mesa_hash_table_init(&screen->dts, screen, _mesa_hash_pointer, _mesa_key_pointer_equal);
-             break;
-          default:
-@@ -535,6 +562,13 @@ zink_kopper_displaytarget_create(struct zink_screen *screen, unsigned tex_usage,
-       _mesa_hash_table_insert(&screen->dts, win32->hwnd, cdt);
-       break;
-    }
-+#endif
-+#ifdef VK_USE_PLATFORM_OHOS
-+   case KOPPER_OHOS: {
-+      VkSurfaceCreateInfoOHOS *sci = (VkSurfaceCreateInfoOHOS *)&cdt->info.bos;
-+      _mesa_hash_table_insert(&screen->dts, sci->window, cdt);
-+      break;
-+   }
- #endif
-    default:
-       UNREACHABLE("unsupported!");
-@@ -547,9 +581,13 @@ zink_kopper_displaytarget_create(struct zink_screen *screen, unsigned tex_usage,
-     * eglSwapBuffers() returns causes serialization issues with the Wayland
-     * surface protocol and can lead to the compositor booting the app.  This
-     * means we can't do async submit on Wayland.
-+    *
-+    * OpenHarmony's render_service acquires its screen's buffer from the
-+    * NativeWindow as soon as eglSwapBuffers() returns, so the swapchain
-+    * layer must queue the buffer inside that call too.
-     */
-    cdt->async = util_queue_is_initialized(&screen->flush_queue) &&
--                cdt->type != KOPPER_WAYLAND;
-+                cdt->type != KOPPER_WAYLAND && cdt->type != KOPPER_OHOS;
- 
-    *stride = cdt->stride;
-    return cdt;
-diff --git a/src/gallium/drivers/zink/zink_kopper.h b/src/gallium/drivers/zink/zink_kopper.h
-index 4ed32fc..472c9f9 100644
---- a/src/gallium/drivers/zink/zink_kopper.h
-+++ b/src/gallium/drivers/zink/zink_kopper.h
-@@ -76,7 +76,8 @@ struct kopper_swapchain {
- enum kopper_type {
-    KOPPER_X11,
-    KOPPER_WAYLAND,
--   KOPPER_WIN32
-+   KOPPER_WIN32,
-+   KOPPER_OHOS,
- };
- 
- struct kopper_displaytarget
++
+    if (loader_get_pci_id_for_fd(fd, &vendor_id, &chip_id)) {
+       ddev->base.type = PIPE_LOADER_DEVICE_PCI;
+       ddev->base.u.pci.vendor_id = vendor_id;
 diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
 index 7efcbaa..ddbc8ff 100644
 --- a/src/gallium/drivers/zink/zink_screen.c
@@ -799,20 +902,3 @@ index 7efcbaa..ddbc8ff 100644
  #define VK_LIBNAME "libvulkan.so"
  #else
  #define VK_LIBNAME "libvulkan.so.1"
-diff --git a/src/gallium/frontends/dri/dri_screen.c b/src/gallium/frontends/dri/dri_screen.c
-index 7855f4b..2006f35 100644
---- a/src/gallium/frontends/dri/dri_screen.c
-+++ b/src/gallium/frontends/dri/dri_screen.c
-@@ -80,6 +80,12 @@ dri_loader_get_cap(struct dri_screen *screen, enum dri_loader_cap cap)
-        image_loader->getCapability)
-       return image_loader->getCapability(screen->loaderPrivate, cap);
- 
-+   const __DRIkopperLoaderExtension *kopper_loader = screen->kopper_loader;
-+
-+   if (kopper_loader && kopper_loader->base.version >= 2 &&
-+       kopper_loader->getCapability)
-+      return kopper_loader->getCapability(screen->loaderPrivate, cap);
-+
-    return 0;
- }
- 

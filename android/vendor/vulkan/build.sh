@@ -357,7 +357,8 @@ build_musl_runtimes() {
   cp -r "$repo/android/vendor/third_party/ohos/include/." "$sys/usr/include/"
   printf 'void %s(void) {}\n' OH_NativeWindow_NativeWindowHandleOpt \
     OH_NativeWindow_NativeObjectReference OH_NativeWindow_NativeObjectUnreference \
-    OH_NativeWindow_GetBufferHandleFromNative |
+    OH_NativeWindow_GetBufferHandleFromNative OH_NativeWindow_NativeWindowRequestBuffer \
+    OH_NativeWindow_NativeWindowFlushBuffer OH_NativeWindow_NativeWindowAbortBuffer |
     "$ndk_bin/clang" --target=x86_64-linux-musl -shared -nostdlib \
       -Wl,-soname,libnative_window.so -o "$sys/usr/lib/libnative_window.so" -x c -
   cp -r "$("$ndk_bin/clang" -print-resource-dir)/include" "$res/include"
