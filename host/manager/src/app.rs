@@ -165,6 +165,7 @@ impl Page {
             info.background,
             true,
         );
+        self.defaults(&settings, &info.defaults);
         prefs.add(&settings);
 
         let permissions = adw::PreferencesGroup::builder()
@@ -205,6 +206,36 @@ impl Page {
         actions.add(&row);
         prefs.add(&actions);
         self.content.append(&prefs);
+    }
+
+    /// A row with the types that the app opens by default and a button that
+    /// clears them.
+    fn defaults(self: &Rc<Self>, group: &adw::PreferencesGroup, defaults: &[String]) {
+        let row = adw::ActionRow::builder().title("Open by Default").build();
+        let text = defaults.join(", ");
+        let types = gtk::Label::builder()
+            .label(if defaults.is_empty() { "None" } else { &text })
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .max_width_chars(24)
+            .css_classes(["dim-label"])
+            .build();
+        if !defaults.is_empty() {
+            types.set_tooltip_text(Some(&text));
+        }
+        row.add_suffix(&types);
+        let clear = gtk::Button::builder()
+            .label("Clear")
+            .valign(gtk::Align::Center)
+            .sensitive(!defaults.is_empty())
+            .build();
+        let s = Rc::downgrade(self);
+        clear.connect_clicked(move |_| {
+            if let Some(s) = s.upgrade() {
+                s.load(Command::new(&s.app.package, "clear-defaults"));
+            }
+        });
+        row.add_suffix(&clear);
+        group.add(&row);
     }
 
     #[allow(clippy::too_many_arguments)]

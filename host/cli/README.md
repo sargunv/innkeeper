@@ -16,18 +16,22 @@ doesn't say.
   starts the bundle's launcher ability, `list` shows the bundles that the user
   installed, and `uninstall` refuses preinstalled bundles. `app stop`,
   `app clear-cache` and `app clear-data` use `aa force-stop` and `bm clean`.
-  `app info` shows the bundle's version, its sizes, its background setting and
-  its permissions. The sizes come from `du` over the bundle's code and its el1
-  and el2 data directories for user 100. A `system_grant` permission shows as
-  fixed. `app set --background` works as on Android, and `list` shows the
-  setting. `run` with a URI opens it as a browser link, as on Android. `run`
-  with a file opens it in the bundle, and `open` opens files in the app that
-  OpenHarmony picks. Such a profile refuses the other `app set` settings, and
-  the settings that OpenHarmony lacks (adb and following the desktop's accent
-  color). `profile list` shows each OpenHarmony profile's UDID, which a debug
-  signing profile names in its `device-ids`. `profile set --hdc on` turns on
-  hdc, which Android profiles refuse. With hdc on, `profile list` shows hdc's
-  address, and `profile start` prints the `hdc tconn` command once hdcd listens.
+  `app info` shows the bundle's version, its sizes, its background setting, its
+  permissions and the types it opens by default. The sizes come from `du` over
+  the bundle's code and its el1 and el2 data directories for user 100. A
+  `system_grant` permission shows as fixed. `app set --background` works as on
+  Android, and `list` shows the setting. `run` with a URI opens it as a browser
+  link, as on Android. `run` with a file opens it in the bundle, and `open`
+  opens files in the app that OpenHarmony picks. `app clear-defaults` resets the
+  defaults that OpenHarmony's app selector set for the bundle, so the selector
+  asks again. The defaults of the selector's "Desktop" belong to
+  `dev.sargunv.innkeeper.user`. Such a profile refuses the other `app set`
+  settings, and the settings that OpenHarmony lacks (adb and following the
+  desktop's accent color). `profile list` shows each OpenHarmony profile's UDID,
+  which a debug signing profile names in its `device-ids`.
+  `profile set --hdc on` turns on hdc, which Android profiles refuse. With hdc
+  on, `profile list` shows hdc's address, and `profile start` prints the
+  `hdc tconn` command once hdcd listens.
 - `run` with a URI sends a `VIEW` intent with the `BROWSABLE` category to the
   package. Only activities that accept browser links receive it. On OpenHarmony
   `aa start` sends a want with the action `ohos.want.action.viewData` and the
@@ -49,6 +53,11 @@ doesn't say.
 - `run` on a stopped session shows a splash window immediately
   (`src/splash.rs`). It passes the desktop's `XDG_ACTIVATION_TOKEN` on to the
   app's window ([display](../../docs/display.md#launch-feedback)).
+- `app info` lists the types that the app opens by default. Each type comes from
+  an Android preferred activity, which the user sets with "Always" in Android's
+  app chooser. A type is a MIME type, a URI scheme such as `https:`, or the
+  filter's action. `app clear-defaults` clears them with
+  `PackageManager.clearPackagePreferredActivities`, as Android's Settings does.
 - `app set --background on` keeps the session running while that app is
   installed ([session](../../docs/session.md#lifecycle)).
 - `uninstall` refuses system packages. `--keep-data` keeps `/data/data/<pkg>`.

@@ -3,7 +3,9 @@ package dev.sargunv.innkeeper.system.apps
 
 import android.app.IActivityManager
 import android.app.usage.StorageStatsManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.IPackageDataObserver
 import android.content.pm.IPackageManager
@@ -67,6 +69,7 @@ class AppSettings(private val context: Context) {
         }
         "force-stop" -> forceStop(pkg)
         "clear-cache" -> observe { observer -> packages.deleteApplicationCacheFiles(pkg, observer) }
+        "clear-defaults" -> pm.clearPackagePreferredActivities(pkg)
         "clear-data" ->
           observe { observer ->
             check(activities.clearApplicationUserData(pkg, false, observer, userId)) {
@@ -146,6 +149,22 @@ class AppSettings(private val context: Context) {
         IntegrationFeature.instance?.lifecycle?.background?.allowed()?.contains(pkg) == true,
       )
       .put("permissions", JSONArray(permissions(pkg)))
+      .put("defaults", JSONArray(defaults(pkg)))
+  }
+
+  /** The types of the app's preferred activities, which Android's chooser sets with "Always". */
+  private fun defaults(pkg: String): List<String> {
+    val filters = ArrayList<IntentFilter>()
+    @Suppress("DEPRECATION") pm.getPreferredActivities(filters, ArrayList<ComponentName>(), pkg)
+    return defaultTypes(
+      filters.map { f ->
+        PreferredFilter(
+          actions = f.actionsIterator()?.asSequence()?.toList().orEmpty(),
+          types = f.typesIterator()?.asSequence()?.toList().orEmpty(),
+          schemes = f.schemesIterator()?.asSequence()?.toList().orEmpty(),
+        )
+      },
+    )
   }
 
   private companion object {

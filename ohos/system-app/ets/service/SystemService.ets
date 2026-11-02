@@ -5,7 +5,7 @@ import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
 import { startMedia } from '../media/HostMedia';
 import { startNotifications } from '../notify/Notifications';
-import { openedAnswer } from '../open/Launch';
+import { userAnswer } from './Answer';
 import { answered, startPerUser } from './PerUser';
 import { startSettings } from '../settings/Settings';
 
@@ -23,11 +23,11 @@ export default class SystemService extends ServiceExtensionAbility {
     startPerUser(this.context);
   }
 
-  // Innkeeper User starts the service again with its answer to a file launch.
+  // Innkeeper User starts the service again with its answer to a request.
   onRequest(want: Want, startId: number): void {
-    const o = openedAnswer(want.parameters);
-    if (o !== undefined) {
-      answered(o.request, o);
+    const a = userAnswer(want.parameters);
+    if (a !== undefined) {
+      answered(a.request, a);
     }
   }
 }

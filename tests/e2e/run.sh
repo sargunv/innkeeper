@@ -870,7 +870,9 @@ else
   # selector over the probe. With "always" checked, a click on Desktop hands
   # the file to the desktop's portal and makes Desktop the default app for PNG
   # files. The probe's next open of the PNG then reaches the desktop without
-  # the selector.
+  # the selector. `app info` lists the default under Innkeeper User, and once
+  # `app clear-defaults` resets it, the probe's next open shows the selector
+  # again.
   # shellcheck disable=SC2329 # invoked through timed
   ohos_desktop_file() {
     local probe always desktop
@@ -907,14 +909,22 @@ else
     opened() { [[ $(grep -c '^openfile: from-ohos\.png$' "$desktop_log") -ge $1 ]]; }
     until_ok opened 1 || return
     view || return
-    until_ok opened 2
+    until_ok opened 2 || return
+    "$cli" app info dev.sargunv.innkeeper.user >"$T/user-info.txt" 2>>"$T/ohos.txt" || return
+    grep -qx '  image/png' "$T/user-info.txt" || return
+    "$cli" app clear-defaults dev.sargunv.innkeeper.user >>"$T/ohos.txt" 2>&1 || return
+    view || return
+    until_ok shown || return
+    # shellcheck disable=SC2086
+    click $desktop
+    until_ok opened 3
   }
   if ! timed ohos-desktop-file ohos_desktop_file; then
     s /system/bin/hidumper -s WindowManagerService -a -a >&2
     s /system/bin/hilog -x -T InnkeeperSelector | tail -n 10 >&2
     exit 1
   fi
-  echo "ok   OpenHarmony's app selector offers Desktop for a file that the probe opens, and with always checked the probe's next open goes to the desktop without it"
+  echo "ok   OpenHarmony's app selector offers Desktop for a file that the probe opens, with always checked the probe's next open goes to the desktop without it, and app clear-defaults brings it back"
   # probe_field sets field to the centre of the probe's text field on the
   # panel and its text, from the inspector dump: "<x> <y>|<text>".
   # shellcheck disable=SC2329 # invoked through until_ok

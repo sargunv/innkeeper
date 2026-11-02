@@ -58,11 +58,12 @@ if (device === "--system") {
   info["app-feature"] = "hos_system_app";
   // The system app reads and removes the notifications of every app, and it
   // starts the abilities that they open, which may be private. Innkeeper User
-  // makes itself the default browser, and it answers Innkeeper System by
-  // starting the private service of that app. Those permissions are above the
-  // APL of the app, so the profile allows them by ACL.
+  // reads and sets default apps, and it answers Innkeeper System by starting
+  // the private service of that app. Those permissions are above the APL of
+  // the app, so the profile allows them by ACL.
   p.acls = {
     "allowed-acls": [
+      "ohos.permission.GET_DEFAULT_APPLICATION",
       "ohos.permission.NOTIFICATION_CONTROLLER",
       "ohos.permission.SET_DEFAULT_APPLICATION",
       "ohos.permission.START_INVISIBLE_ABILITY",

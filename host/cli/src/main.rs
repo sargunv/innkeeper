@@ -73,7 +73,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum AppCmd {
-    /// Show storage, settings and permissions.
+    /// Show storage, settings, permissions and default types.
     Info {
         package: String,
         /// Print JSON.
@@ -84,6 +84,8 @@ enum AppCmd {
     ClearCache { package: String },
     /// Clear the app's files, accounts and settings.
     ClearData { package: String },
+    /// Clear the file and link types that the app opens by default.
+    ClearDefaults { package: String },
     /// Force-stop the app.
     Stop { package: String },
     /// Change the app's settings.
@@ -412,6 +414,10 @@ fn ohos_app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
         AppCmd::Stop { package } => (package, BundleAction::Stop),
         AppCmd::ClearCache { package } => (package, BundleAction::ClearCache),
         AppCmd::ClearData { package } => (package, BundleAction::ClearData),
+        AppCmd::ClearDefaults { package } => {
+            innkeeper_core::app_settings::ohos_defaults(profile, &package, true, &stderr)?;
+            return Ok(());
+        }
         AppCmd::Info { package, json } => {
             let info = ops::bundle_info(profile, &package, &stderr)?;
             if json {
@@ -475,6 +481,7 @@ fn app(profile: &ProfileName, cmd: AppCmd) -> Result<()> {
         }
         AppCmd::ClearCache { package } => vec![Command::new(&package, "clear-cache")],
         AppCmd::ClearData { package } => vec![Command::new(&package, "clear-data")],
+        AppCmd::ClearDefaults { package } => vec![Command::new(&package, "clear-defaults")],
         AppCmd::Stop { package } => vec![Command::new(&package, "force-stop")],
         AppCmd::Set {
             package,
@@ -517,6 +524,7 @@ fn app_info_text(i: &innkeeper_core::app_settings::AppInfo) -> String {
         on(i.escape_back),
     ));
     s.push_str(&permissions_text(&i.permissions));
+    s.push_str(&defaults_text(&i.defaults));
     s
 }
 
@@ -530,6 +538,18 @@ fn bundle_info_text(i: &innkeeper_core::ohos::BundleInfo) -> String {
         s.push_str(&format!("background   {}\n", if b { "on" } else { "off" }));
     }
     s.push_str(&permissions_text(&i.permissions));
+    s.push_str(&defaults_text(i.defaults.as_deref().unwrap_or_default()));
+    s
+}
+
+fn defaults_text(defaults: &[String]) -> String {
+    let mut s = String::new();
+    if !defaults.is_empty() {
+        s.push_str("open by default\n");
+    }
+    for d in defaults {
+        s.push_str(&format!("  {d}\n"));
+    }
     s
 }
 
@@ -793,11 +813,17 @@ mod tests {
             parse("app stop a.b"),
             Ok(Cmd::App(AppCmd::Stop { .. }))
         ));
+        assert!(matches!(
+            parse("app clear-defaults a.b"),
+            Ok(Cmd::App(AppCmd::ClearDefaults { package })) if package == "a.b"
+        ));
         for bad in [
             "app set a.b --permission CAMERA",
             "app set a.b --permission =on",
             "app set a.b --background yes",
             "app a.b",
+            "app clear-defaults",
+            "app clear-defaults a.b image/png",
             "background a.b on",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
@@ -933,6 +959,7 @@ mod tests {
                 granted: false,
                 editable: false,
             }],
+            defaults: vec!["text/plain".into(), "https:".into()],
         };
         let t = app_info_text(&info);
         assert!(t.contains("app size     2.5 MB\n"), "{t}");
@@ -941,6 +968,15 @@ mod tests {
             t.contains("  android.permission.CAMERA  denied (fixed)\n"),
             "{t}"
         );
+        assert!(
+            t.ends_with("open by default\n  text/plain\n  https:\n"),
+            "{t}"
+        );
+        let none = innkeeper_core::app_settings::AppInfo {
+            defaults: vec![],
+            ..info
+        };
+        assert!(!app_info_text(&none).contains("open by default"));
     }
 
     #[test]
@@ -964,6 +1000,7 @@ mod tests {
                 },
             ],
             background: Some(true),
+            defaults: Some(vec!["image/png".into(), ".png".into()]),
         };
         assert_eq!(
             bundle_info_text(&info),
@@ -973,11 +1010,20 @@ mod tests {
              background   on\n\
              permissions\n  \
              ohos.permission.CAMERA  denied\n  \
-             ohos.permission.INTERNET  granted (fixed)\n"
+             ohos.permission.INTERNET  granted (fixed)\n\
+             open by default\n  \
+             image/png\n  \
+             .png\n"
         );
         let bare = innkeeper_core::ohos::BundleInfo::default();
         assert!(!bundle_info_text(&bare).contains("permissions"));
         assert!(!bundle_info_text(&bare).contains("background"));
+        assert!(!bundle_info_text(&bare).contains("open by default"));
+        let cleared = innkeeper_core::ohos::BundleInfo {
+            defaults: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(!bundle_info_text(&cleared).contains("open by default"));
     }
 
     #[test]

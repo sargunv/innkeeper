@@ -16,17 +16,18 @@
 //!   and on window map or unmap. Clients also watch name ownership, subscribe
 //!   before reading, and read again on each signal.
 //! - `App(s package, s action, s permission, b enabled) → s response` runs one
-//!   of the actions `info`, `clear-cache`, `clear-data`, `force-stop`,
-//!   `permission`, `escape-back` and `background`. Only `permission` takes a
+//!   of the actions `info`, `clear-cache`, `clear-data`, `clear-defaults`,
+//!   `force-stop`, `permission`, `escape-back` and `background`. Only `permission` takes a
 //!   permission name, and only the last three take `enabled=true`. Bad
 //!   arguments fail with `InvalidArgs`. A disconnect, a full queue or the
 //!   40 s timeout fails with `Failed`. After a timeout Android may still have
 //!   performed the action, so the client should refresh. The response is JSON
 //!   of at most 64 KiB, either `{"error":"", "info":{…}}` or
 //!   `{"error":"message", "info":null}`. `info` has `app_bytes`, `data_bytes`
-//!   (which includes the cache), `cache_bytes`, `escape_back`, `background`
-//!   and `permissions`. Each permission has `name`, `granted` and `editable`,
-//!   and only requested dangerous permissions are listed. Only installed user
+//!   (which includes the cache), `cache_bytes`, `escape_back`, `background`,
+//!   `permissions` and `defaults`. Each permission has `name`, `granted` and
+//!   `editable`, and only requested dangerous permissions are listed.
+//!   `defaults` lists the types of the app's preferred activities. Only installed user
 //!   apps can be changed, and Android enforces its grant rules.
 //! - `Launch(s package, s component, s uri, at grants, s token, b wait,
 //!   b new_window, u width, u height) → s reply` opens `package` in its own
@@ -65,8 +66,9 @@
 //! wait, each for at most 40 s, and a reconnect cancels them.
 //! `wm/WindowCommands.kt` documents the window operations. OpenHarmony's
 //! system app implements the `background` app action, which it answers with
-//! `{"error":"", "info":null}`, and answers every other command with an
-//! error. Escape-as-Back is
+//! `{"error":"", "info":null}`, and the `info` and `clear-defaults` actions,
+//! which it answers with `{"error":"", "info":null, "defaults":[…]}`. It
+//! answers every other app command with an error. Escape-as-Back is
 //! stored per package in the system app's preferences, off by default, and
 //! applies to existing windows at the next key press.
 use std::collections::HashMap;

@@ -5,6 +5,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Choice, Choices, Picker } from '../chooser/Choice';
 import { defaultType } from './Defaults';
+import { SelectorDefaults } from './SelectorDefaults';
 
 const DOMAIN = 0x0000;
 const TAG = 'InnkeeperSelector';
@@ -30,8 +31,9 @@ function message(e: Object): string {
 // The selector reads AMS's dialog session for the apps and the want, and it
 // shows them in the chooser's page. With "always", it makes the chosen app the
 // user's default for the file's type, so the bundle manager hands later opens
-// of that type straight to the app. It answers AMS with the chosen app, or
-// with a refusal when the user cancels.
+// of that type straight to the app, and it records the default
+// (SelectorDefaults.ets). It answers AMS with the chosen app, or with a
+// refusal when the user cancels.
 export default class AppSelectorExtensionAbility extends UIExtensionAbility {
   private pickers: Map<UIExtensionContentSession, SessionPicker> = new Map();
 
@@ -51,7 +53,7 @@ export default class AppSelectorExtensionAbility extends UIExtensionAbility {
     if (choices.apps.length === 0) {
       choices.error = 'No apps to choose from';
     }
-    const picker = new SessionPicker(id, type, session);
+    const picker = new SessionPicker(id, type, session, new SelectorDefaults(this.context));
     this.pickers.set(session, picker);
     const storage = new LocalStorage();
     storage.setOrCreate<Choices>('choices', choices);
@@ -96,12 +98,14 @@ class SessionPicker implements Picker {
   private id: string;
   private type: string;
   private session: UIExtensionContentSession;
+  private defaults: SelectorDefaults;
   private answered: boolean = false;
 
-  constructor(id: string, type: string, session: UIExtensionContentSession) {
+  constructor(id: string, type: string, session: UIExtensionContentSession, defaults: SelectorDefaults) {
     this.id = id;
     this.type = type;
     this.session = session;
+    this.defaults = defaults;
   }
 
   async pick(c: Choice, always: boolean): Promise<void> {
@@ -113,6 +117,7 @@ class SessionPicker implements Picker {
           abilityName: c.target.abilityName,
         });
         hilog.info(DOMAIN, TAG, '%{public}s opens %{public}s by default', c.target.bundleName, this.type);
+        await this.defaults.remember(this.type, c.target.bundleName);
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'not the default for %{public}s: %{public}s', this.type, message(e as Object));
       }

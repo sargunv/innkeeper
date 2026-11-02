@@ -203,6 +203,10 @@ pub struct BundleInfo {
     /// Whether the app may run in the background. It is None until Innkeeper
     /// System's first activity report.
     pub background: Option<bool>,
+    /// The MIME types and file extensions that the app opens by default,
+    /// among those that Innkeeper User's app selector set. It is None when
+    /// Innkeeper User didn't answer.
+    pub defaults: Option<Vec<String>>,
 }
 
 /// OH's first user, the one an Innkeeper profile runs.

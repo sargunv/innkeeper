@@ -429,8 +429,8 @@ pub fn bundle_action(
     }
 }
 
-/// Reads the version, sizes and permissions of bundle `pkg` in OpenHarmony
-/// profile `profile`. Android's app info comes from the system app
+/// Reads the version, sizes, permissions and default types of bundle `pkg` in
+/// OpenHarmony profile `profile`. Android's app info comes from the system app
 /// ([`crate::app_settings`]).
 pub fn bundle_info(profile: &ProfileName, pkg: &str, report: Report) -> Result<ohos::BundleInfo> {
     let pkg = validate::package(pkg)?;
@@ -440,6 +440,13 @@ pub fn bundle_info(profile: &ProfileName, pkg: &str, report: Report) -> Result<o
     }
     let mut info = ohos::info(&s, pkg)?;
     info.background = background_apps(&s).map(|b| b.iter().any(|p| p == pkg));
+    info.defaults = crate::app_settings::ohos_defaults(profile, pkg, false, report)
+        .inspect_err(|e| {
+            report(Event::Warning(format!(
+                "can't read the default apps: {e:#}"
+            )))
+        })
+        .ok();
     Ok(info)
 }
 
