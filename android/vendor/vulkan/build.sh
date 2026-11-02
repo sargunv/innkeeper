@@ -10,7 +10,8 @@
 #   share/innkeeper/ohos/vendor/etc/vulkan/icd.d/{radeon,intel}_icd.x86_64.json
 #   share/innkeeper/ohos/vendor/etc/libdrm/amdgpu.ids
 # It also builds the test programs that tests/run.sh runs
-# (out/build/vulkan/{test,test-vendor}). The build is skipped when its inputs
+# (out/build/vulkan/{test,test-vendor}) and the one that tests/ohos.sh runs
+# (out/build/vulkan/test-ohos). The build is skipped when its inputs
 # (this directory, the container and the toolchain pin) still hash to
 # out/build/vulkan/.stamp.
 set -euo pipefail
@@ -423,6 +424,18 @@ EOF
     "$b/src/amd/vulkan/radeon_icd.x86_64.json" "$b/src/intel/vulkan/intel_icd.x86_64.json"
 }
 
+# The OpenHarmony test program goes in $work/test-ohos. It runs on the image's
+# musl and loads OpenHarmony's libraries with dlopen.
+build_test_ohos() {
+  local t=$work/test-ohos
+  rm -rf "$t"
+  mkdir -p "$t"
+  "$ndk_bin/clang" --target=x86_64-linux-musl --sysroot="$musl/sysroot" \
+    -resource-dir="$musl/resource" -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld \
+    -O2 -Wall -Werror -I"$src/mesa/include" -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
+    -o "$t/ohos_swapchain_test" "$here/tests/ohos_swapchain_test.c"
+}
+
 # OpenHarmony's drivers may only need musl, and they export only the ICD
 # entry points.
 check_elf_ohos() {
@@ -445,3 +458,4 @@ build_lvp
 install_etc
 build_test
 build_ohos
+build_test_ohos
