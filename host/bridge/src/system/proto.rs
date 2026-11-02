@@ -39,8 +39,9 @@
 //! | `0x4304` | MEDIA_CMD    | `u32 player`, `u8 cmd` (1 play, 2 pause, 3 play/pause, 4 stop, 5 next, 6 previous, 7 seek by, 8 seek to, 9 raise), `u8 0`, `u16 0`, `i64 arg` (µs)                                                       |
 //!
 //! Blob contents start with `u32 version` (1). [`super::notify::Note`] and
-//! [`super::mpris::Media`] document their layouts, and the system app's
-//! encoders (`Notifications.kt`, `MediaSync.kt`) mirror them. Text is a
+//! [`super::mpris::Media`] document their layouts, and the system apps'
+//! encoders (Android's `Notifications.kt` and `MediaSync.kt`, OpenHarmony's
+//! `Note.ets` and `Media.ets`) mirror them. Text is a
 //! `u32 len` followed by UTF-8. Images are `u16 width, u16 height` followed
 //! by raw RGBA8 rows, so nothing Android sends reaches a host image decoder.
 //! Clip kind 3 is a `u32 count` (1..16) of files. Each file is a text name

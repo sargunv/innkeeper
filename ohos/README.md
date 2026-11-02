@@ -92,10 +92,12 @@ must be at its maximum, and a 440 Hz tone that [tests/tone.c](tests/tone.c)
 plays through OH's audio API must reach a private null sink on the nested
 desktop. Root then grants the probe the microphone with `atm perm -g`, the host
 plays a tone into the null sink, and the probe must record it from the sink's
-monitor. OH must take the time zone that the session started with, and it must
-turn dark when the nested desktop's portal does. Last, the probe starts an audio
-playback continuous task. With the window closed, the task must keep the session
-up, and once it stops, the session must stop.
+monitor. The probe's media session must be an MPRIS player on the nested
+desktop's session bus, and MPRIS `PlayPause` must pause it. OH must take the
+time zone that the session started with, and it must turn dark when the nested
+desktop's portal does. Last, the probe starts an audio playback continuous task.
+With the window closed, the task must keep the session up, and once it stops,
+the session must stop.
 
 Init logs to the profile's kmsg log (`innkeeper profile log`). Once hilogd runs,
 services log to hilog. Read it with `hilog -x`, and filter by tag with `-T`. The
@@ -233,6 +235,19 @@ reports boot completion. Issue #312 tracks the features that build on it.
   `NOTIFICATION_CONTROLLER` and `START_INVISIBLE_ABILITY`, which the signing
   profile allows by ACL, and `START_ABILITIES_FROM_BACKGROUND` and
   `GET_BUNDLE_RESOURCES`.
+- **Media sessions.** As Android's system app does, the app shows OH's media
+  sessions as MPRIS players on the desktop (`ets/media/`). AVSession's manager
+  lists every app's sessions, and it announces each new and destroyed session.
+  The app makes a controller for each session and sends its title, artist,
+  album, artwork, duration, position, playback state and valid commands to the
+  bridge's system service as `MEDIA`. The session's metadata, playback state and
+  command events update the player. An inactive session leaves the desktop.
+  MPRIS play, pause, play/pause, stop, next, previous and seek become the
+  controller's control commands, and `Raise` opens the session's launch ability
+  on OH's screen. The app needs `MANAGE_MEDIA_RESOURCES`. AVSession serves the
+  foreground user's sessions to Innkeeper System, which runs as user 0. The app
+  sends artwork that a session gives as a PixelMap, and it leaves out artwork
+  given as a URI.
 - **Session1 commands.** The app reads each command that the bridge relays. It
   runs the `background` app action and answers it without app info. It answers
   every other command with "OpenHarmony profiles don't support this action.", so
