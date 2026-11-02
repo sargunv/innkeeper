@@ -44,12 +44,7 @@ async function run(command: string, context: common.ServiceExtensionContext,
   background: BackgroundApps): Promise<string> {
   const files = fileLaunch(command);
   if (files !== undefined) {
-    try {
-      await openInUser(context, files.bundle, files.grants);
-      return launched(files, '');
-    } catch (e) {
-      return launched(files, `Innkeeper User didn't start: ${(e as Error).message}`);
-    }
+    return launched(await openInUser(context, files.bundle, files.grants));
   }
   const c = backgroundCommand(command);
   if (c === undefined) {

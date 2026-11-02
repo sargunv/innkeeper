@@ -5,7 +5,8 @@ import { BackgroundApps } from '../lifecycle/BackgroundApps';
 import { startLifecycle } from '../lifecycle/SessionLifecycle';
 import { startMedia } from '../media/HostMedia';
 import { startNotifications } from '../notify/Notifications';
-import { startPerUser } from './PerUser';
+import { openedAnswer } from '../open/Launch';
+import { answered, startPerUser } from './PerUser';
 import { startSettings } from '../settings/Settings';
 
 // The app's main element. The profile's layer marks the app keep-alive
@@ -20,5 +21,13 @@ export default class SystemService extends ServiceExtensionAbility {
     startMedia(this.context);
     startSettings();
     startPerUser(this.context);
+  }
+
+  // Innkeeper User starts the service again with its answer to a file launch.
+  onRequest(want: Want, startId: number): void {
+    const o = openedAnswer(want.parameters);
+    if (o !== undefined) {
+      answered(o.request, o);
+    }
   }
 }

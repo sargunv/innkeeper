@@ -3,12 +3,12 @@
 // `innkeeper open` send. This module uses no OpenHarmony API, so its tests run
 // under Node.
 
-// The bundle that `innkeeper open` names, which asks OpenHarmony to choose the
+// The bundle that `innkeeper open` names, which asks the user to choose the
 // app.
 export const CHOOSER = 'dev.sargunv.innkeeper.system';
 
-// Files to open in an app, or in the app that OpenHarmony's chooser picks
-// when `bundle` is empty.
+// Files to open in an app, or in the app that the user picks in Innkeeper
+// User's chooser when `bundle` is empty.
 export interface FileLaunch {
   bundle: string;
   grants: string[];
@@ -41,18 +41,45 @@ export function fileLaunch(json: string): FileLaunch | undefined {
   return { bundle: bundle === CHOOSER ? '' : bundle as string, grants: ids };
 }
 
+// Innkeeper User's answer to a file launch, which it sends in the want
+// parameters of a start of Innkeeper System's service.
+export class Opened {
+  request: number = 0;
+  error: string = '';
+  reply: string = '';
+}
+
+// Reads Innkeeper User's answer from a want's parameters, or returns
+// undefined if they hold none.
+export function openedAnswer(p: Record<string, Object> | undefined): Opened | undefined {
+  if (p === undefined) {
+    return undefined;
+  }
+  const request = p['innkeeper.opened.request'];
+  const error = p['innkeeper.opened.error'];
+  const reply = p['innkeeper.opened.reply'];
+  if (typeof request !== 'number' || typeof error !== 'string' || typeof reply !== 'string') {
+    return undefined;
+  }
+  const o = new Opened();
+  o.request = request as number;
+  o.error = error as string;
+  o.reply = reply as string;
+  return o;
+}
+
 class WindowResponse {
   error: string = '';
   reply: string | null = null;
 }
 
-// The window response that the bridge relays to Session1's caller.
-export function launched(l: FileLaunch, error: string): string {
+// The window response that the bridge relays to Session1's caller. An error
+// leaves no reply.
+export function launched(o: Opened): string {
   const r = new WindowResponse();
-  r.error = error;
-  if (error === '') {
-    const n = l.grants.length;
-    r.reply = `opening ${n} ${n === 1 ? 'file' : 'files'} in ${l.bundle === '' ? 'the chosen app' : l.bundle}`;
+  r.error = o.error;
+  if (o.error === '') {
+    r.reply = o.reply;
   }
   return JSON.stringify(r);
 }

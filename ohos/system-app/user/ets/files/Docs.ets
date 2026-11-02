@@ -2,6 +2,8 @@
 // (host/bridge/src/documents/proto.rs), and the want that opens the copies.
 // This module uses no OpenHarmony API, so its tests run under Node.
 
+import { Target } from './Targets';
+
 export const OPEN = 0x0402;
 export const STAT = 0x0403;
 // OPEN's read mode.
@@ -60,8 +62,16 @@ export function extension(name: string): string {
   return dot > 0 ? name.substring(dot).toLowerCase() : '';
 }
 
+// The chooser's want parameters (chooser/ChooserAbility.ets): the copies'
+// URIs, their MIME types and the targets as JSON.
+export const CHOOSE_URIS = 'innkeeper.choose.uris';
+export const CHOOSE_TYPES = 'innkeeper.choose.types';
+export const CHOOSE_TARGETS = 'innkeeper.choose.targets';
+
 export class OpenWant {
   bundleName?: string;
+  moduleName?: string;
+  abilityName?: string;
   action: string = VIEW;
   uri: string = '';
   type?: string;
@@ -88,5 +98,14 @@ export function openWant(bundle: string, uris: string[], type: string, flag: num
     p[STREAM] = uris;
     w.parameters = p;
   }
+  return w;
+}
+
+// The want that opens `uris` in ability `t`. Their MIME types are `types`,
+// and the want carries the first one.
+export function targetWant(t: Target, uris: string[], types: string[], flag: number): OpenWant {
+  const w = openWant(t.bundleName, uris, types[0] ?? '', flag);
+  w.moduleName = t.moduleName;
+  w.abilityName = t.abilityName;
   return w;
 }

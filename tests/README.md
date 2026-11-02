@@ -38,7 +38,9 @@ from e2e, move it to a cheaper tier. Keep every bug regression test.
   AZERTY clears it. `app info` shows the probe's version and the grant state of
   its two permissions, and `run` with a link delivers its URI to the probe.
   `run` with a file gives the probe a readable copy, and the probe logs its
-  text. hilog still holds the line that Innkeeper System logged at boot.
+  text. `open` with a PNG, which the probe and Gallery both take, shows
+  Innkeeper User's app chooser, and a click on the probe's row opens the file
+  there. hilog still holds the line that Innkeeper System logged at boot.
   OpenHarmony's music volume must be at its maximum, and a tone it plays must
   reach a private null sink. The probe, granted the microphone, must record a
   tone that the host plays into that sink. A notification that the probe posts

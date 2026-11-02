@@ -824,6 +824,38 @@ else
     exit 1
   fi
   echo 'ok   the CLI installs, lists and runs the debug-signed probe HAP, it gets a desktop entry with its label and icon, its window has focus on screen, app info shows its version and permissions, and it opens a link and a file'
+  # The probe and Gallery both open PNG files, so open shows Innkeeper User's
+  # app chooser. A click on the probe's row opens the file in the probe.
+  # shellcheck disable=SC2329 # invoked through timed
+  ohos_chooser() {
+    local row
+    geometry || return
+    printf 'an image from the desktop' >"$T/image.png"
+    "$cli" open "$T/image.png" >>"$T/ohos.txt" 2>&1 || return
+    chooser() { s /system/bin/hidumper -s WindowManagerService -a -a | awk '$1 ~ /^user[0-9]+$/ { print $4; exit }'; }
+    probe_row() {
+      local w
+      w=$(chooser) && [[ -n $w ]] || return
+      row=$(s /system/bin/hidumper -s WindowManagerService -a "-w $w -inspector" |
+        awk '/compid: chooser_dev[.]sargunv[.]innkeeper[.]probes$/ { f = 1 } f && /[|] top: / { top = $3 }
+          f && /[|] left: / { left = $3 } f && /[|] width: / { width = $3 }
+          f && /[|] height: / { printf "%d %d\n", left + width / 2, top + $3 / 2; exit }')
+      [[ -n $row ]]
+    }
+    until_ok probe_row || return
+    # shellcheck disable=SC2086 # row is "<x> <y>"
+    { at $row && echo button:272,1 && echo button:272,0; } | /usr/bin/python3 "$here/seat.py" --stdin
+    read_image() { s /system/bin/hilog -x | grep -F 'innkeeper-probes: read an image from the desktop' >/dev/null; }
+    until_ok read_image || return
+    closed() { [[ -z $(chooser) ]]; }
+    until_ok closed
+  }
+  if ! timed ohos-chooser ohos_chooser; then
+    tail -n 5 "$T/ohos.txt" >&2
+    s /system/bin/hilog -x -T InnkeeperFiles | tail -n 5 >&2
+    exit 1
+  fi
+  echo "ok   open shows Innkeeper User's app chooser when two apps take the file, and a click on the probe opens the file there"
   # probe_field sets field to the centre of the probe's text field on the
   # panel and its text, from the inspector dump: "<x> <y>|<text>".
   # shellcheck disable=SC2329 # invoked through until_ok
