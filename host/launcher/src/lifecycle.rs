@@ -47,18 +47,18 @@ fn test_timers() -> bool {
 
 /// Seconds of idleness before the session stops, or 0 for never. Headless
 /// sessions (tests) never stop by themselves, and test timers stop after a
-/// second. Otherwise it is the profile's idle timeout, or never when Keep
-/// Running is on. Both are read on each call so that a change applies live.
+/// second. Otherwise it is the profile's idle timeout, or never when the
+/// profile keeps running. They are read on each call so that a change applies
+/// live.
 fn grace_secs(headless: bool, paths: &Paths) -> u64 {
     if headless {
         0
     } else if test_timers() {
         1
     } else {
-        let keep = crate::preferences::Preferences::load().is_ok_and(|p| p.keep_running);
         crate::profile::Settings::load(&paths.data)
             .unwrap_or_default()
-            .idle_seconds(keep)
+            .idle_seconds()
     }
 }
 

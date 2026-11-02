@@ -128,6 +128,14 @@ pub fn list(data_home: &Path) -> Vec<ProfileName> {
     v
 }
 
+/// Whether any profile under `data_home` keeps running, which makes
+/// Innkeeper start at login. A profile whose settings can't be read doesn't.
+pub fn any_keeps_running(data_home: &Path) -> bool {
+    list(data_home)
+        .iter()
+        .any(|n| Settings::load(&data_home.join(format!("data-{n}"))).is_ok_and(|s| s.keep_running))
+}
+
 /// The guest system a profile runs. It is chosen when the profile is made,
 /// because the profile's data belongs to that system.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,9 +224,12 @@ pub struct Settings {
     /// first turned on, and it is kept after that.
     pub hdc_port: u16,
     /// Minutes with nothing to do before the session stops, from 1 to 120.
-    /// The Keep Running preference ([`crate::preferences`]) overrides it.
-    /// Applies live.
+    /// [`Self::keep_running`] overrides it. Applies live.
     pub idle_minutes: u32,
+    /// The session never stops when idle, and it starts at login. Applies
+    /// live. Innkeeper's one login command, held by the Background portal,
+    /// starts every profile with this on.
+    pub keep_running: bool,
     /// The guest follows the desktop's dark mode, accent colour, languages and
     /// formats, and clock. OpenHarmony has no accent colour. Applies live.
     pub follow_dark: bool,
@@ -237,6 +248,7 @@ impl Default for Settings {
             hdc: false,
             hdc_port: 0,
             idle_minutes: 2,
+            keep_running: false,
             follow_dark: true,
             follow_accent: true,
             follow_locale: true,
@@ -406,8 +418,8 @@ impl Settings {
     }
 
     /// Seconds with nothing to do before the session stops, or 0 for never.
-    pub fn idle_seconds(&self, keep_running: bool) -> u64 {
-        if keep_running {
+    pub fn idle_seconds(&self) -> u64 {
+        if self.keep_running {
             0
         } else {
             u64::from(self.idle_minutes) * 60
@@ -568,6 +580,14 @@ mod tests {
         }
         fs::write(d.join("data-file"), "").unwrap();
         assert_eq!(list(&d), ["a", "work"]);
+        assert!(!any_keeps_running(&d));
+        Settings {
+            keep_running: true,
+            ..Settings::default()
+        }
+        .save(&d.join("data-work"))
+        .unwrap();
+        assert!(any_keeps_running(&d));
     }
 
     #[test]
@@ -583,8 +603,15 @@ mod tests {
         };
         s.save(&data).unwrap();
         assert_eq!(Settings::load(&data).unwrap(), s);
-        assert_eq!(s.idle_seconds(false), 420);
-        assert_eq!(s.idle_seconds(true), 0);
+        assert_eq!(s.idle_seconds(), 420);
+        assert_eq!(
+            Settings {
+                keep_running: true,
+                ..s.clone()
+            }
+            .idle_seconds(),
+            0
+        );
         s.idle_minutes = 0;
         assert!(s.save(&data).is_err());
         assert_eq!(Settings::parse("").unwrap(), Settings::default());

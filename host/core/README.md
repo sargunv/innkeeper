@@ -51,9 +51,10 @@ It builds no artifact of its own. `cargo test -p innkeeper-core` runs its tests.
   creates, renames, deletes, starts and stops profiles. It connects the user's
   adb server to a profile over adb's protocol on loopback. It turns hdcd on and
   off in a running OpenHarmony profile.
-- **Per-app settings** (`app_settings.rs`) and **preferences**
-  (`preferences.rs`) go through the bridge's session D-Bus API. When no session
-  runs, they are saved for the next start.
+- **Per-app settings** (`app_settings.rs`) go through the bridge's session D-Bus
+  API. When no session runs, they are saved for the next start.
+- **Login** (`login.rs`): while any profile keeps running, the Background portal
+  starts Innkeeper at login with `innkeeper profile start --login`.
 - **Paths** (`paths.rs`): core finds the prefix relative to the running
   executable, and the XDG dirs. A profile's own paths and settings come from
   `innkeeper-profile` (`host/profile`), which the launcher also uses.

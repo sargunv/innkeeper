@@ -1,5 +1,4 @@
-//! The Profile Settings page. It shows the current profile's settings and the
-//! Keep Running preference, which applies to every profile. An Android
+//! The Profile Settings page. It shows the current profile's settings. An Android
 //! profile has an adb switch, and an OpenHarmony profile has an hdc switch.
 //! Reads and writes run off the GTK thread.
 use std::cell::{Cell, RefCell};
@@ -7,9 +6,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use innkeeper_core::preferences;
 use innkeeper_core::profiles;
-use innkeeper_profile::preferences::Preferences;
 use innkeeper_profile::profile::{Display, Settings, System};
 
 use crate::{
@@ -24,7 +21,6 @@ struct Page {
     /// The profile whose settings the page shows.
     profile: String,
     settings: RefCell<Settings>,
-    keep_running: Cell<bool>,
     busy: Cell<bool>,
 }
 
@@ -53,7 +49,6 @@ pub fn page(window: &Window) -> adw::NavigationPage {
         content,
         profile,
         settings: RefCell::new(Settings::default()),
-        keep_running: Cell::new(false),
         busy: Cell::new(false),
     });
     page.connect_showing(move |_| state.load());
@@ -65,14 +60,9 @@ impl Page {
         let s = self.clone();
         let name = self.profile.clone();
         glib::spawn_future_local(async move {
-            let r = worker::run_quiet(move || {
-                Ok::<_, anyhow::Error>((profiles::settings(&name)?, Preferences::load()?))
-            })
-            .await;
-            match r {
-                Ok((settings, prefs)) => {
+            match worker::run_quiet(move || profiles::settings(&name)).await {
+                Ok(settings) => {
                     s.settings.replace(settings);
-                    s.keep_running.set(prefs.keep_running);
                     s.show();
                 }
                 Err(e) => s.error(&e),
@@ -115,15 +105,17 @@ impl Page {
         change(&mut self.settings.borrow_mut());
         let (name, next) = (self.profile.clone(), self.settings.borrow().clone());
         self.work(false, move || {
-            // Keep the adb and hdc fields. `debug_row` sets them through
-            // `adb::set` or `hdc::set`, which apply the change to the running
-            // session and authorize a key.
+            // Keep the fields that have their own calls. `debug_row` sets adb
+            // and hdc through `adb::set` or `hdc::set`, which apply the change
+            // to the running session and authorize a key.
+            // `profiles::set_keep_running` also sets the login command.
             profiles::update(&name, |s| {
                 *s = Settings {
                     adb: s.adb,
                     adb_port: s.adb_port,
                     hdc: s.hdc,
                     hdc_port: s.hdc_port,
+                    keep_running: s.keep_running,
                     ..next
                 }
             })
@@ -252,7 +244,7 @@ impl Page {
     }
 
     fn lifecycle_group(self: &Rc<Self>, p: &Settings) -> adw::PreferencesGroup {
-        let keep_running = self.keep_running.get();
+        let keep_running = p.keep_running;
         let group = adw::PreferencesGroup::builder()
             .title("When No Apps Are Open")
             .build();
@@ -279,7 +271,7 @@ impl Page {
         group.add(&row);
         let row = adw::ActionRow::builder()
             .title("Keep Running")
-            .subtitle("Starts every profile at login")
+            .subtitle("Starts at login")
             .activatable_widget(&keep)
             .build();
         row.add_prefix(&keep);
@@ -289,10 +281,10 @@ impl Page {
         keep.connect_toggled(move |r| {
             spin.set_sensitive(!r.is_active());
             if let Some(s) = s.upgrade() {
-                let on = r.is_active();
-                s.keep_running.set(on);
+                let (name, on) = (s.profile.clone(), r.is_active());
+                s.settings.borrow_mut().keep_running = on;
                 s.work(false, move || {
-                    preferences::save(Preferences { keep_running: on })
+                    profiles::set_keep_running(&name, on).map(drop)
                 });
             }
         });

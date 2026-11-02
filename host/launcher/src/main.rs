@@ -22,7 +22,7 @@ mod selftest;
 mod session;
 mod sys;
 
-pub use innkeeper_profile::{Paths, Status, field, paths, preferences, profile, status};
+pub use innkeeper_profile::{Paths, Status, field, paths, profile, status};
 
 fn main() {
     cli::main()

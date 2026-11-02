@@ -147,8 +147,11 @@ enum ProfileCmd {
     /// Start the profile and wait for it to boot.
     Start {
         /// Start every profile.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "login")]
         all: bool,
+        /// Start every profile that keeps running, as at login.
+        #[arg(long)]
+        login: bool,
     },
     /// Stop the profile.
     Stop,
@@ -180,7 +183,7 @@ struct SetArgs {
     /// Minutes with no apps open before the profile stops (1 to 120).
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=120))]
     idle_minutes: Option<u32>,
-    /// Keep every profile running, and start them at login.
+    /// Never stop the profile when idle, and start it at login.
     #[arg(long, value_parser = ["on", "off"])]
     keep_running: Option<String>,
     /// Follow the desktop's dark mode.
@@ -650,12 +653,15 @@ fn profile(name: &str, cmd: ProfileCmd) -> Result<()> {
             profiles::delete(&n)?;
             println!("deleted profile {n}");
         }
-        ProfileCmd::Start { all } => {
+        ProfileCmd::Start { all, login } => {
             let report = |m: &str| eprintln!("innkeeper: {m}");
-            if all {
+            if all || login {
                 // Keep starting the other profiles if one fails.
                 let mut failed = None;
-                for p in profiles::list()? {
+                for p in profiles::list()?
+                    .into_iter()
+                    .filter(|p| all || p.settings.keep_running)
+                {
                     match profiles::start(&p.name, &report) {
                         Ok(()) => announce_hdc(&p.name),
                         Err(e) => {
@@ -723,9 +729,7 @@ fn set(name: &str, args: &SetArgs) -> Result<()> {
         }
     }
     if let Some(on) = &args.keep_running {
-        innkeeper_core::preferences::save(innkeeper_profile::preferences::Preferences {
-            keep_running: on == "on",
-        })?;
+        profiles::set_keep_running(name, on == "on")?;
     }
     if let Some(on) = &args.adb {
         let s = innkeeper_core::adb::set(name, on == "on", &stderr)?;
@@ -895,8 +899,8 @@ mod tests {
         assert_eq!(s.display, innkeeper_profile::profile::Display::Device);
         assert_eq!(s.idle_minutes, 30);
         assert!(!s.follow_dark && s.follow_accent);
-        // --keep-running, --adb and --hdc don't change the profile's settings
-        // file.
+        // --keep-running, --adb and --hdc change more than the profile's
+        // settings file, so they have their own calls.
         let Ok(Cmd::Profile(ProfileCmd::Set(a))) =
             parse("profile set --keep-running on --adb on --hdc on")
         else {
@@ -928,8 +932,19 @@ mod tests {
         ));
         assert!(matches!(
             parse("profile start --all"),
-            Ok(Cmd::Profile(ProfileCmd::Start { all: true }))
+            Ok(Cmd::Profile(ProfileCmd::Start {
+                all: true,
+                login: false
+            }))
         ));
+        assert!(matches!(
+            parse("profile start --login"),
+            Ok(Cmd::Profile(ProfileCmd::Start {
+                all: false,
+                login: true
+            }))
+        ));
+        assert!(parse("profile start --all --login").is_err());
     }
 
     #[test]

@@ -406,7 +406,9 @@ fn wait_to_wake(cfg: &Config, at_ms: u64) -> Result<()> {
 /// is best effort and doesn't wait for the answer. `gdbus` comes from the
 /// Flatpak runtime.
 pub fn request_background(p: &Paths) {
-    if crate::preferences::Preferences::load().is_ok_and(|p| p.keep_running) {
+    // Its `autostart: false` would remove the login command that a profile
+    // that keeps running needs.
+    if crate::profile::any_keeps_running(&p.data_home) {
         return;
     }
     let opts = "{'reason': <'Android apps keep playing media, run foreground services and ring \

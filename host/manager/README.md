@@ -86,9 +86,9 @@ Android Settings in a separate window.
 - Turning off desktop following keeps the guest's current value. Later changes
   in Android's or OpenHarmony's Settings stay as they are.
 - By default, an idle profile stops after 2 minutes. The timeout can be 1 to 120
-  minutes. **Keep Running** applies to every profile. With it on, no profile
-  stops when idle, and one login command from the Background portal starts them
-  all. If the portal denies the request, the setting stays off.
+  minutes. A profile with **Keep Running** on never stops when idle, and starts
+  at login. If the Background portal denies starting at login, the setting stays
+  off.
 
 ## Profiles
 
