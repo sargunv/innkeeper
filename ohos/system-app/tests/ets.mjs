@@ -8,7 +8,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = join(here, "../../../out/build/ohos-system-app-tests");
+// node --test runs the test files in parallel processes, so each one copies
+// the modules into a directory of its own.
+const out = join(
+  here,
+  "../../../out/build/ohos-system-app-tests",
+  String(process.pid),
+);
 const user = ["clipboard", "desktop", "files", "selector"];
 for (const dir of [
   "defaults",
