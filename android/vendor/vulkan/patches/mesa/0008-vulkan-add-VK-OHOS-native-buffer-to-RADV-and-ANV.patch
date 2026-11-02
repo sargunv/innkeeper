@@ -1,0 +1,1193 @@
+vulkan: add VK_OHOS_native_buffer to RADV and ANV
+
+OpenHarmony's Vulkan swapchain layer is always on. It creates a device
+only when the driver advertises VK_OHOS_native_buffer, which is
+OpenHarmony's counterpart of VK_ANDROID_native_buffer. The layer makes
+each swapchain image with vkCreateImage and a VkNativeBufferOHOS that
+points to the buffer's BufferHandle. It calls vkAcquireImageOHOS with the
+buffer's acquire fence and vkQueueSignalReleaseImageOHOS for its release
+fence.
+
+The registry lists the extension as disabled, so vulkan_ohos.h does not
+declare it. vk_ohos_native_buffer.h declares it from the registry's
+values, and the generators treat it as they treat the Android extension.
+
+A BufferHandle has a dma-buf fd and a row pitch, and it describes no
+tiling. The drivers import the buffer as a linear image with that pitch,
+in memory that the image owns. The fence handling of the two extensions
+is the same, so it moves from vk_android.c to vk_native_buffer.c, which
+both platforms build.
+
+diff --git a/include/vulkan/vk_ohos_native_buffer.h b/include/vulkan/vk_ohos_native_buffer.h
+new file mode 100644
+index 0000000..67386fd
+--- /dev/null
++++ b/include/vulkan/vk_ohos_native_buffer.h
+@@ -0,0 +1,115 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++/*
++ * VK_OHOS_native_buffer is the interface between OpenHarmony's Vulkan
++ * swapchain layer and a driver. It is OpenHarmony's counterpart of
++ * VK_ANDROID_native_buffer. The registry lists it as disabled, so the
++ * generated vulkan_ohos.h does not declare it. The values below follow
++ * the registry.
++ */
++
++#ifndef VK_OHOS_NATIVE_BUFFER_H
++#define VK_OHOS_NATIVE_BUFFER_H
++
++#include <stdint.h>
++#include <vulkan/vulkan.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define VK_OHOS_native_buffer 1
++#define VK_OHOS_NATIVE_BUFFER_EXTENSION_NUMBER 454
++#define VK_OHOS_NATIVE_BUFFER_SPEC_VERSION 1
++#define VK_OHOS_NATIVE_BUFFER_EXTENSION_NAME "VK_OHOS_native_buffer"
++
++#define VK_OHOS_NATIVE_BUFFER_ENUM(type, id)                                  \
++   ((type)(1000000000 +                                                       \
++           (1000 * (VK_OHOS_NATIVE_BUFFER_EXTENSION_NUMBER - 1)) + (id)))
++
++#define VK_STRUCTURE_TYPE_NATIVE_BUFFER_OHOS                                  \
++   VK_OHOS_NATIVE_BUFFER_ENUM(VkStructureType, 1)
++#define VK_STRUCTURE_TYPE_SWAPCHAIN_IMAGE_CREATE_INFO_OHOS                    \
++   VK_OHOS_NATIVE_BUFFER_ENUM(VkStructureType, 2)
++#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENTATION_PROPERTIES_OHOS        \
++   VK_OHOS_NATIVE_BUFFER_ENUM(VkStructureType, 3)
++
++typedef enum VkSwapchainImageUsageFlagBitsOHOS {
++   VK_SWAPCHAIN_IMAGE_USAGE_SHARED_BIT_OHOS = 0x00000001,
++   VK_SWAPCHAIN_IMAGE_USAGE_FLAG_BITS_MAX_ENUM_OHOS = 0x7FFFFFFF
++} VkSwapchainImageUsageFlagBitsOHOS;
++typedef VkFlags VkSwapchainImageUsageFlagsOHOS;
++
++/* OpenHarmony's BufferHandle, from the display HDI's buffer_handle.h. The
++ * pixels are in fd. The handle does not describe a tiling, so a buffer is
++ * linear, with rows stride bytes apart.
++ */
++struct OHBufferHandle {
++   int32_t fd;
++   int32_t width;
++   int32_t stride;
++   int32_t height;
++   int32_t size;
++   int32_t format;
++   uint64_t usage;
++   void *virAddr;
++   uint64_t phyAddr;
++   uint32_t reserveFds;
++   uint32_t reserveInts;
++   int32_t reserve[];
++};
++
++typedef struct VkNativeBufferOHOS {
++   VkStructureType sType;
++   const void *pNext;
++   struct OHBufferHandle *handle;
++} VkNativeBufferOHOS;
++
++typedef struct VkSwapchainImageCreateInfoOHOS {
++   VkStructureType sType;
++   const void *pNext;
++   VkSwapchainImageUsageFlagsOHOS usage;
++} VkSwapchainImageCreateInfoOHOS;
++
++typedef struct VkPhysicalDevicePresentationPropertiesOHOS {
++   VkStructureType sType;
++   void *pNext;
++   VkBool32 sharedImage;
++} VkPhysicalDevicePresentationPropertiesOHOS;
++
++typedef VkResult(VKAPI_PTR *PFN_vkGetSwapchainGrallocUsageOHOS)(
++   VkDevice device, VkFormat format, VkImageUsageFlags imageUsage,
++   uint64_t *grallocUsage);
++typedef VkResult(VKAPI_PTR *PFN_vkAcquireImageOHOS)(
++   VkDevice device, VkImage image, int32_t nativeFenceFd,
++   VkSemaphore semaphore, VkFence fence);
++typedef VkResult(VKAPI_PTR *PFN_vkQueueSignalReleaseImageOHOS)(
++   VkQueue queue, uint32_t waitSemaphoreCount,
++   const VkSemaphore *pWaitSemaphores, VkImage image,
++   int32_t *pNativeFenceFd);
++
++#ifndef VK_NO_PROTOTYPES
++VKAPI_ATTR VkResult VKAPI_CALL
++vkGetSwapchainGrallocUsageOHOS(VkDevice device, VkFormat format,
++                               VkImageUsageFlags imageUsage,
++                               uint64_t *grallocUsage);
++
++VKAPI_ATTR VkResult VKAPI_CALL
++vkAcquireImageOHOS(VkDevice device, VkImage image, int32_t nativeFenceFd,
++                   VkSemaphore semaphore, VkFence fence);
++
++VKAPI_ATTR VkResult VKAPI_CALL
++vkQueueSignalReleaseImageOHOS(VkQueue queue, uint32_t waitSemaphoreCount,
++                              const VkSemaphore *pWaitSemaphores,
++                              VkImage image, int32_t *pNativeFenceFd);
++#endif
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* VK_OHOS_NATIVE_BUFFER_H */
+diff --git a/src/amd/vulkan/meson.build b/src/amd/vulkan/meson.build
+index 3969ca0..2ce5052 100644
+--- a/src/amd/vulkan/meson.build
++++ b/src/amd/vulkan/meson.build
+@@ -261,6 +261,10 @@ if with_xlib_lease
+   radv_deps += [dep_xlib_xrandr]
+ endif
+ 
++if with_platform_ohos
++  libradv_files += files('radv_ohos.c', 'radv_ohos.h')
++endif
++
+ if with_platform_android
+   radv_deps += dep_android
+ endif
+diff --git a/src/amd/vulkan/radv_image.c b/src/amd/vulkan/radv_image.c
+index 9c28766..39a441a 100644
+--- a/src/amd/vulkan/radv_image.c
++++ b/src/amd/vulkan/radv_image.c
+@@ -15,6 +15,9 @@
+ #include "ac_drm_fourcc.h"
+ #include "ac_formats.h"
+ #include "radv_android.h"
++#ifdef VK_USE_PLATFORM_OHOS
++#include "radv_ohos.h"
++#endif
+ #include "radv_buffer.h"
+ #include "radv_buffer_view.h"
+ #include "radv_device_memory.h"
+@@ -1796,6 +1799,12 @@ radv_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo, const V
+    if (gralloc_info)
+       return radv_image_from_gralloc(_device, pCreateInfo, gralloc_info, pAllocator, pImage);
+ #endif
++#ifdef VK_USE_PLATFORM_OHOS
++   const VkNativeBufferOHOS *ohos_info = vk_find_struct_const(pCreateInfo->pNext, NATIVE_BUFFER_OHOS);
++
++   if (ohos_info)
++      return radv_image_from_ohos_native_buffer(_device, pCreateInfo, ohos_info, pAllocator, pImage);
++#endif
+ 
+    VK_FROM_HANDLE(radv_device, device, _device);
+    const struct radv_physical_device *pdev = radv_device_physical(device);
+diff --git a/src/amd/vulkan/radv_ohos.c b/src/amd/vulkan/radv_ohos.c
+new file mode 100644
+index 0000000..e85e9c1
+--- /dev/null
++++ b/src/amd/vulkan/radv_ohos.c
+@@ -0,0 +1,131 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "radv_ohos.h"
++#include "radv_device.h"
++#include "radv_device_memory.h"
++#include "radv_entrypoints.h"
++#include "radv_image.h"
++#include "radv_physical_device.h"
++
++#include "util/os_file.h"
++
++#include "vk_log.h"
++#include "vk_ohos.h"
++
++#include <errno.h>
++#include <unistd.h>
++
++/* Creates an image on the buffer of a VkNativeBufferOHOS, which is how
++ * OpenHarmony's swapchain layer makes its swapchain images. The image owns
++ * the memory that it imports from the buffer's dma-buf.
++ */
++VkResult
++radv_image_from_ohos_native_buffer(VkDevice device_h, const VkImageCreateInfo *base_info,
++                                   const VkNativeBufferOHOS *native_buffer, const VkAllocationCallbacks *alloc,
++                                   VkImage *out_image_h)
++{
++   VK_FROM_HANDLE(radv_device, device, device_h);
++   const struct radv_physical_device *pdev = radv_device_physical(device);
++   VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info;
++   VkSubresourceLayout layout;
++   VkImage image_h;
++   VkDeviceMemory memory_h;
++   VkResult result;
++
++   result = vk_ohos_get_native_buffer_layout(native_buffer, &mod_info, &layout);
++   if (result != VK_SUCCESS)
++      return vk_error(device, result);
++
++   VkExternalMemoryImageCreateInfo external_info = {
++      .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
++      .pNext = base_info->pNext,
++      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++   };
++   mod_info.pNext = &external_info;
++   VkImageCreateInfo info = *base_info;
++   info.pNext = &mod_info;
++   info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
++
++   result = radv_image_create(device_h, &(struct radv_image_create_info){.vk_info = &info}, alloc, &image_h, false);
++   if (result != VK_SUCCESS)
++      return result;
++
++   /* The handle keeps its fd. Import a duplicate. */
++   int fd = os_dupfd_cloexec(native_buffer->handle->fd);
++   if (fd < 0) {
++      result = vk_error(device, errno == EMFILE ? VK_ERROR_TOO_MANY_OBJECTS : VK_ERROR_OUT_OF_HOST_MEMORY);
++      goto fail_image;
++   }
++
++   VkMemoryFdPropertiesKHR fd_props = {.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR};
++   result = radv_GetMemoryFdPropertiesKHR(device_h, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, fd, &fd_props);
++   if (result != VK_SUCCESS)
++      goto fail_fd;
++
++   VkMemoryRequirements2 reqs2 = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
++   radv_GetImageMemoryRequirements2(device_h,
++                                    &(VkImageMemoryRequirementsInfo2){
++                                       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
++                                       .image = image_h,
++                                    },
++                                    &reqs2);
++   const VkMemoryRequirements reqs = reqs2.memoryRequirements;
++   const uint32_t types = fd_props.memoryTypeBits & reqs.memoryTypeBits & ~pdev->memory_types_32bit;
++   if (!types) {
++      result = vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE, "no memory type for the OHOS native buffer");
++      goto fail_fd;
++   }
++
++   const VkMemoryDedicatedAllocateInfo dedicated_info = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
++      .image = image_h,
++   };
++   const VkImportMemoryFdInfoKHR import_info = {
++      .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
++      .pNext = &dedicated_info,
++      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++      .fd = fd,
++   };
++   result = radv_AllocateMemory(device_h,
++                                &(VkMemoryAllocateInfo){
++                                   .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++                                   .pNext = &import_info,
++                                   .allocationSize = reqs.size,
++                                   .memoryTypeIndex = ffs(types) - 1,
++                                },
++                                alloc, &memory_h);
++   if (result != VK_SUCCESS)
++      goto fail_fd;
++
++   /* The import has taken the fd. */
++   if (radv_device_memory_from_handle(memory_h)->bo->size < reqs.size) {
++      result = vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE, "OHOS native buffer too small for the image");
++      radv_FreeMemory(device_h, memory_h, alloc);
++      goto fail_image;
++   }
++
++   result = radv_BindImageMemory2(device_h, 1,
++                                  &(VkBindImageMemoryInfo){
++                                     .sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO,
++                                     .image = image_h,
++                                     .memory = memory_h,
++                                  });
++   if (result != VK_SUCCESS) {
++      radv_FreeMemory(device_h, memory_h, alloc);
++      goto fail_image;
++   }
++
++   radv_image_from_handle(image_h)->owned_memory = memory_h;
++   *out_image_h = image_h;
++   return VK_SUCCESS;
++
++fail_fd:
++   close(fd);
++fail_image:
++   radv_DestroyImage(device_h, image_h, alloc);
++   return result;
++}
+diff --git a/src/amd/vulkan/radv_ohos.h b/src/amd/vulkan/radv_ohos.h
+new file mode 100644
+index 0000000..a41c806
+--- /dev/null
++++ b/src/amd/vulkan/radv_ohos.h
+@@ -0,0 +1,17 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++#ifndef RADV_OHOS_H
++#define RADV_OHOS_H
++
++#include <vulkan/vulkan.h>
++#include <vulkan/vk_ohos_native_buffer.h>
++
++VkResult radv_image_from_ohos_native_buffer(VkDevice device_h, const VkImageCreateInfo *base_info,
++                                            const VkNativeBufferOHOS *native_buffer,
++                                            const VkAllocationCallbacks *alloc, VkImage *out_image_h);
++
++#endif /* RADV_OHOS_H */
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index e23d375..7820eae 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -975,6 +975,9 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device
+ #if DETECT_OS_ANDROID
+       .ANDROID_external_memory_android_hardware_buffer = RADV_SUPPORT_ANDROID_HARDWARE_BUFFER,
+       .ANDROID_native_buffer = true,
++#endif
++#ifdef VK_USE_PLATFORM_OHOS
++      .OHOS_native_buffer = true,
+ #endif
+       .GOOGLE_decorate_string = true,
+ #ifdef RADV_USE_WSI_PLATFORM
+diff --git a/src/intel/vulkan/anv_image.c b/src/intel/vulkan/anv_image.c
+index 24a7c39..7a0d97f 100644
+--- a/src/intel/vulkan/anv_image.c
++++ b/src/intel/vulkan/anv_image.c
+@@ -2389,6 +2389,14 @@ anv_image_init_from_create_info(struct anv_device *device,
+       return anv_image_init_from_gralloc(device, image, pCreateInfo,
+                                          gralloc_info);
+ 
++#ifdef VK_USE_PLATFORM_OHOS
++   const VkNativeBufferOHOS *ohos_info =
++      vk_find_struct_const(pCreateInfo->pNext, NATIVE_BUFFER_OHOS);
++   if (ohos_info)
++      return anv_image_init_from_ohos_native_buffer(device, image,
++                                                    pCreateInfo, ohos_info);
++#endif
++
+    struct anv_image_create_info create_info = {
+       .vk_info = pCreateInfo,
+       .no_private_binding_alloc = no_private_binding_alloc,
+diff --git a/src/intel/vulkan/anv_ohos.c b/src/intel/vulkan/anv_ohos.c
+new file mode 100644
+index 0000000..1bd2824
+--- /dev/null
++++ b/src/intel/vulkan/anv_ohos.c
+@@ -0,0 +1,81 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "anv_private.h"
++
++#include "vk_ohos.h"
++
++/* Initializes an image on the buffer of a VkNativeBufferOHOS, which is how
++ * OpenHarmony's swapchain layer makes its swapchain images. The image holds
++ * a reference to the BO that it imports from the buffer's dma-buf, as an
++ * image from gralloc does.
++ */
++VkResult
++anv_image_init_from_ohos_native_buffer(struct anv_device *device,
++                                       struct anv_image *image,
++                                       const VkImageCreateInfo *base_info,
++                                       const VkNativeBufferOHOS *native_buffer)
++{
++   VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info;
++   VkSubresourceLayout layout;
++   VkResult result;
++
++   result = vk_ohos_get_native_buffer_layout(native_buffer, &mod_info,
++                                             &layout);
++   if (result != VK_SUCCESS)
++      return vk_error(device, result);
++
++   VkImageCreateInfo info = *base_info;
++   mod_info.pNext = info.pNext;
++   info.pNext = &mod_info;
++   info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
++
++   struct anv_image_create_info anv_info = {
++      .vk_info = &info,
++      .isl_extra_usage_flags = ISL_SURF_USAGE_DISABLE_AUX_BIT,
++      .isl_tiling_flags = ISL_TILING_LINEAR_BIT,
++      .stride = layout.rowPitch,
++   };
++
++   /* The handle keeps its fd. anv_device_import_bo does not take it. */
++   struct anv_bo *bo;
++   result = anv_device_import_bo(device, native_buffer->handle->fd,
++                                 ANV_BO_ALLOC_EXTERNAL,
++                                 0 /* client_address */, &bo);
++   if (result != VK_SUCCESS) {
++      return vk_errorf(device, result,
++                       "failed to import the OHOS native buffer's dma-buf");
++   }
++
++   result = anv_image_init(device, image, &anv_info);
++   if (result != VK_SUCCESS)
++      goto fail_bo;
++
++   VkMemoryRequirements2 mem_reqs = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
++   };
++   anv_image_get_memory_requirements(device, image, image->vk.aspects,
++                                     &mem_reqs);
++   if (bo->size < mem_reqs.memoryRequirements.size) {
++      result = vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE,
++                         "OHOS native buffer too small for the image: "
++                         "%" PRIu64 "B < %" PRIu64 "B",
++                         bo->size, mem_reqs.memoryRequirements.size);
++      anv_image_finish(image);
++      goto fail_bo;
++   }
++
++   assert(!image->disjoint);
++   assert(image->n_planes == 1);
++   image->bindings[ANV_IMAGE_MEMORY_BINDING_MAIN].address.bo = bo;
++   image->from_gralloc = true;
++
++   return VK_SUCCESS;
++
++fail_bo:
++   anv_device_release_bo(device, bo);
++   return result;
++}
+diff --git a/src/intel/vulkan/anv_physical_device.c b/src/intel/vulkan/anv_physical_device.c
+index 86a86f7..ce7f0e6 100644
+--- a/src/intel/vulkan/anv_physical_device.c
++++ b/src/intel/vulkan/anv_physical_device.c
+@@ -464,6 +464,9 @@ get_device_extensions(const struct anv_physical_device *device,
+       .NV_compute_shader_derivatives         = true,
+       .VALVE_mutable_descriptor_type         = true,
+       .KHR_shader_bfloat16                   = device->info.has_bfloat16,
++#ifdef VK_USE_PLATFORM_OHOS
++      .OHOS_native_buffer                    = true,
++#endif
+    };
+ 
+    if (vk_android_get_ugralloc() != NULL) {
+diff --git a/src/intel/vulkan/anv_private.h b/src/intel/vulkan/anv_private.h
+index 3f60074..0244dfc 100644
+--- a/src/intel/vulkan/anv_private.h
++++ b/src/intel/vulkan/anv_private.h
+@@ -6592,6 +6592,16 @@ struct anv_image_create_info {
+ VkResult anv_image_init(struct anv_device *device, struct anv_image *image,
+                         const struct anv_image_create_info *create_info);
+ 
++#ifdef VK_USE_PLATFORM_OHOS
++#include <vulkan/vk_ohos_native_buffer.h>
++
++VkResult
++anv_image_init_from_ohos_native_buffer(struct anv_device *device,
++                                       struct anv_image *image,
++                                       const VkImageCreateInfo *base_info,
++                                       const VkNativeBufferOHOS *native_buffer);
++#endif
++
+ void anv_image_finish(struct anv_image *image);
+ 
+ void anv_image_get_memory_requirements(struct anv_device *device,
+diff --git a/src/intel/vulkan/meson.build b/src/intel/vulkan/meson.build
+index be26923..173e28f 100644
+--- a/src/intel/vulkan/meson.build
++++ b/src/intel/vulkan/meson.build
+@@ -277,6 +277,10 @@ if with_xlib_lease
+   anv_deps += [dep_xlib_xrandr]
+ endif
+ 
++if with_platform_ohos
++  libanv_files += files('anv_ohos.c')
++endif
++
+ if with_platform_android
+   anv_deps += idep_u_gralloc
+   libanv_files += files('anv_android.c')
+diff --git a/src/vulkan/meson.build b/src/vulkan/meson.build
+index b95e595..3ffd659 100644
+--- a/src/vulkan/meson.build
++++ b/src/vulkan/meson.build
+@@ -65,6 +65,9 @@ endif
+ if with_platform_android
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_ANDROID_KHR'
+ endif
++if with_platform_ohos
++  vulkan_wsi_list += '-DVK_USE_PLATFORM_OHOS'
++endif
+ if with_platform_windows
+   vulkan_wsi_list += '-DVK_USE_PLATFORM_WIN32_KHR'
+ endif
+diff --git a/src/vulkan/runtime/meson.build b/src/vulkan/runtime/meson.build
+index 7da99c8..42e5dd4 100644
+--- a/src/vulkan/runtime/meson.build
++++ b/src/vulkan/runtime/meson.build
+@@ -64,6 +64,14 @@ if with_platform_android
+   vulkan_lite_runtime_deps += [dep_android, idep_u_gralloc]
+ endif
+ 
++if with_platform_ohos
++  vulkan_lite_runtime_files += files('vk_ohos.c')
++endif
++
++if with_platform_android or with_platform_ohos
++  vulkan_lite_runtime_files += files('vk_native_buffer.c')
++endif
++
+ vk_common_entrypoints = custom_target(
+   'vk_common_entrypoints',
+   input : [vk_entrypoints_gen, vk_api_xml],
+diff --git a/src/vulkan/runtime/vk_android.c b/src/vulkan/runtime/vk_android.c
+index 80f9ad0..b4c3199 100644
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -30,6 +30,7 @@
+ #include "vk_format.h"
+ #include "vk_image.h"
+ #include "vk_log.h"
++#include "vk_native_buffer.h"
+ #include "vk_physical_device.h"
+ #include "vk_queue.h"
+ #include "vk_util.h"
+@@ -425,93 +426,9 @@ vk_common_AcquireImageANDROID(VkDevice _device,
+                               VkFence fence)
+ {
+    VK_FROM_HANDLE(vk_device, device, _device);
+-   VkResult result = VK_SUCCESS;
+ 
+-   /* From https://source.android.com/devices/graphics/implement-vulkan :
+-    *
+-    *    "The driver takes ownership of the fence file descriptor and closes
+-    *    the fence file descriptor when no longer needed. The driver must do
+-    *    so even if neither a semaphore or fence object is provided, or even
+-    *    if vkAcquireImageANDROID fails and returns an error."
+-    *
+-    * The Vulkan spec for VkImportFence/SemaphoreFdKHR(), however, requires
+-    * the file descriptor to be left alone on failure.
+-    */
+-   int semaphore_fd = -1, fence_fd = -1;
+-   if (nativeFenceFd >= 0) {
+-      if (semaphore != VK_NULL_HANDLE && fence != VK_NULL_HANDLE) {
+-         /* We have both so we have to import the sync file twice. One of
+-          * them needs to be a dup.
+-          */
+-         semaphore_fd = nativeFenceFd;
+-         fence_fd = dup(nativeFenceFd);
+-         if (fence_fd < 0) {
+-            VkResult err = (errno == EMFILE) ? VK_ERROR_TOO_MANY_OBJECTS :
+-                                               VK_ERROR_OUT_OF_HOST_MEMORY;
+-            close(nativeFenceFd);
+-            return vk_error(device, err);
+-         }
+-      } else if (semaphore != VK_NULL_HANDLE) {
+-         semaphore_fd = nativeFenceFd;
+-      } else if (fence != VK_NULL_HANDLE) {
+-         fence_fd = nativeFenceFd;
+-      } else {
+-         /* Nothing to import into so we have to close the file */
+-         close(nativeFenceFd);
+-      }
+-   }
+-
+-   if (semaphore != VK_NULL_HANDLE) {
+-      const VkImportSemaphoreFdInfoKHR info = {
+-         .sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
+-         .semaphore = semaphore,
+-         .flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
+-         .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+-         .fd = semaphore_fd,
+-      };
+-      result = device->dispatch_table.ImportSemaphoreFdKHR(_device, &info);
+-      if (result == VK_SUCCESS)
+-         semaphore_fd = -1; /* The driver took ownership */
+-   }
+-
+-   if (result == VK_SUCCESS && fence != VK_NULL_HANDLE) {
+-      const VkImportFenceFdInfoKHR info = {
+-         .sType = VK_STRUCTURE_TYPE_IMPORT_FENCE_FD_INFO_KHR,
+-         .fence = fence,
+-         .flags = VK_FENCE_IMPORT_TEMPORARY_BIT,
+-         .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+-         .fd = fence_fd,
+-      };
+-      result = device->dispatch_table.ImportFenceFdKHR(_device, &info);
+-      if (result == VK_SUCCESS)
+-         fence_fd = -1; /* The driver took ownership */
+-   }
+-
+-   if (semaphore_fd >= 0)
+-      close(semaphore_fd);
+-   if (fence_fd >= 0)
+-      close(fence_fd);
+-
+-   return result;
+-}
+-
+-static VkResult
+-vk_anb_semaphore_init_once(struct vk_queue *queue, struct vk_device *device)
+-{
+-   if (queue->anb_semaphore != VK_NULL_HANDLE)
+-      return VK_SUCCESS;
+-
+-   const VkExportSemaphoreCreateInfo export_info = {
+-      .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+-      .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+-   };
+-   const VkSemaphoreCreateInfo create_info = {
+-      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+-      .pNext = &export_info,
+-   };
+-   return device->dispatch_table.CreateSemaphore(vk_device_to_handle(device),
+-                                                 &create_info, NULL,
+-                                                 &queue->anb_semaphore);
++   return vk_native_buffer_acquire_image(device, nativeFenceFd, semaphore,
++                                         fence);
+ }
+ 
+ VKAPI_ATTR VkResult VKAPI_CALL
+@@ -522,58 +439,10 @@ vk_common_QueueSignalReleaseImageANDROID(VkQueue _queue,
+                                          int *pNativeFenceFd)
+ {
+    VK_FROM_HANDLE(vk_queue, queue, _queue);
+-   struct vk_device *device = queue->base.device;
+-   VkResult result;
+ 
+-   if (waitSemaphoreCount == 0) {
+-      *pNativeFenceFd = -1;
+-      return VK_SUCCESS;
+-   }
+-
+-   result = vk_anb_semaphore_init_once(queue, device);
+-   if (result != VK_SUCCESS)
+-      return result;
+-
+-   STACK_ARRAY(VkSemaphoreSubmitInfo, wait_infos, waitSemaphoreCount);
+-   for (uint32_t i = 0; i < waitSemaphoreCount; i++) {
+-      wait_infos[i] = (VkSemaphoreSubmitInfo){
+-         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+-         .semaphore = pWaitSemaphores[i],
+-         /* see wsi_common_queue_present for the rationale */
+-         .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+-      };
+-   }
+-   const VkSemaphoreSubmitInfo signal_info = {
+-      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+-      .semaphore = queue->anb_semaphore,
+-      /* see wsi_common_queue_present for the rationale */
+-      .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+-   };
+-   if (device->copy_sync_payloads != NULL) {
+-      result = vk_device_copy_semaphore_payloads(
+-         device, waitSemaphoreCount, wait_infos, 1, &signal_info, 0, NULL);
+-   } else {
+-      const VkSubmitInfo2 submit_info = {
+-         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+-         .waitSemaphoreInfoCount = waitSemaphoreCount,
+-         .pWaitSemaphoreInfos = wait_infos,
+-         .signalSemaphoreInfoCount = 1,
+-         .pSignalSemaphoreInfos = &signal_info,
+-      };
+-      result = device->dispatch_table.QueueSubmit2(_queue, 1, &submit_info,
+-                                                   VK_NULL_HANDLE);
+-   }
+-   STACK_ARRAY_FINISH(wait_infos);
+-   if (result != VK_SUCCESS)
+-      return result;
+-
+-   const VkSemaphoreGetFdInfoKHR get_fd = {
+-      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+-      .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+-      .semaphore = queue->anb_semaphore,
+-   };
+-   return device->dispatch_table.GetSemaphoreFdKHR(vk_device_to_handle(device),
+-                                                   &get_fd, pNativeFenceFd);
++   return vk_native_buffer_signal_release_image(queue, waitSemaphoreCount,
++                                                pWaitSemaphores,
++                                                pNativeFenceFd);
+ }
+ 
+ #if ANDROID_API_LEVEL >= 26
+diff --git a/src/vulkan/runtime/vk_native_buffer.c b/src/vulkan/runtime/vk_native_buffer.c
+new file mode 100644
+index 0000000..4b3de11
+--- /dev/null
++++ b/src/vulkan/runtime/vk_native_buffer.c
+@@ -0,0 +1,176 @@
++/*
++ * Copyright © 2022 Intel Corporation
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++/* The fence handling of VK_ANDROID_native_buffer and VK_OHOS_native_buffer,
++ * which define vkAcquireImage and vkQueueSignalReleaseImage alike.
++ */
++
++#include "vk_native_buffer.h"
++
++#include "vk_device.h"
++#include "vk_log.h"
++#include "vk_queue.h"
++
++#include "util/stack_array.h"
++
++#include <errno.h>
++#include <unistd.h>
++
++VkResult
++vk_native_buffer_acquire_image(struct vk_device *device, int nativeFenceFd,
++                               VkSemaphore semaphore, VkFence fence)
++{
++   VkDevice _device = vk_device_to_handle(device);
++   VkResult result = VK_SUCCESS;
++
++   /* From https://source.android.com/devices/graphics/implement-vulkan :
++    *
++    *    "The driver takes ownership of the fence file descriptor and closes
++    *    the fence file descriptor when no longer needed. The driver must do
++    *    so even if neither a semaphore or fence object is provided, or even
++    *    if vkAcquireImageANDROID or
++    *    vkAcquireImageOHOS fails and returns an error."
++    *
++    * The Vulkan spec for VkImportFence/SemaphoreFdKHR(), however, requires
++    * the file descriptor to be left alone on failure.
++    */
++   int semaphore_fd = -1, fence_fd = -1;
++   if (nativeFenceFd >= 0) {
++      if (semaphore != VK_NULL_HANDLE && fence != VK_NULL_HANDLE) {
++         /* We have both so we have to import the sync file twice. One of
++          * them needs to be a dup.
++          */
++         semaphore_fd = nativeFenceFd;
++         fence_fd = dup(nativeFenceFd);
++         if (fence_fd < 0) {
++            VkResult err = (errno == EMFILE) ? VK_ERROR_TOO_MANY_OBJECTS :
++                                               VK_ERROR_OUT_OF_HOST_MEMORY;
++            close(nativeFenceFd);
++            return vk_error(device, err);
++         }
++      } else if (semaphore != VK_NULL_HANDLE) {
++         semaphore_fd = nativeFenceFd;
++      } else if (fence != VK_NULL_HANDLE) {
++         fence_fd = nativeFenceFd;
++      } else {
++         /* Nothing to import into so we have to close the file */
++         close(nativeFenceFd);
++      }
++   }
++
++   if (semaphore != VK_NULL_HANDLE) {
++      const VkImportSemaphoreFdInfoKHR info = {
++         .sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
++         .semaphore = semaphore,
++         .flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
++         .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
++         .fd = semaphore_fd,
++      };
++      result = device->dispatch_table.ImportSemaphoreFdKHR(_device, &info);
++      if (result == VK_SUCCESS)
++         semaphore_fd = -1; /* The driver took ownership */
++   }
++
++   if (result == VK_SUCCESS && fence != VK_NULL_HANDLE) {
++      const VkImportFenceFdInfoKHR info = {
++         .sType = VK_STRUCTURE_TYPE_IMPORT_FENCE_FD_INFO_KHR,
++         .fence = fence,
++         .flags = VK_FENCE_IMPORT_TEMPORARY_BIT,
++         .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
++         .fd = fence_fd,
++      };
++      result = device->dispatch_table.ImportFenceFdKHR(_device, &info);
++      if (result == VK_SUCCESS)
++         fence_fd = -1; /* The driver took ownership */
++   }
++
++   if (semaphore_fd >= 0)
++      close(semaphore_fd);
++   if (fence_fd >= 0)
++      close(fence_fd);
++
++   return result;
++}
++
++static VkResult
++vk_anb_semaphore_init_once(struct vk_queue *queue, struct vk_device *device)
++{
++   if (queue->anb_semaphore != VK_NULL_HANDLE)
++      return VK_SUCCESS;
++
++   const VkExportSemaphoreCreateInfo export_info = {
++      .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
++      .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
++   };
++   const VkSemaphoreCreateInfo create_info = {
++      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
++      .pNext = &export_info,
++   };
++   return device->dispatch_table.CreateSemaphore(vk_device_to_handle(device),
++                                                 &create_info, NULL,
++                                                 &queue->anb_semaphore);
++}
++
++VkResult
++vk_native_buffer_signal_release_image(struct vk_queue *queue,
++                                      uint32_t waitSemaphoreCount,
++                                      const VkSemaphore *pWaitSemaphores,
++                                      int *pNativeFenceFd)
++{
++   VkQueue _queue = vk_queue_to_handle(queue);
++   struct vk_device *device = queue->base.device;
++   VkResult result;
++
++   if (waitSemaphoreCount == 0) {
++      *pNativeFenceFd = -1;
++      return VK_SUCCESS;
++   }
++
++   result = vk_anb_semaphore_init_once(queue, device);
++   if (result != VK_SUCCESS)
++      return result;
++
++   STACK_ARRAY(VkSemaphoreSubmitInfo, wait_infos, waitSemaphoreCount);
++   for (uint32_t i = 0; i < waitSemaphoreCount; i++) {
++      wait_infos[i] = (VkSemaphoreSubmitInfo){
++         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
++         .semaphore = pWaitSemaphores[i],
++         /* see wsi_common_queue_present for the rationale */
++         .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
++      };
++   }
++   const VkSemaphoreSubmitInfo signal_info = {
++      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
++      .semaphore = queue->anb_semaphore,
++      /* see wsi_common_queue_present for the rationale */
++      .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
++   };
++   if (device->copy_sync_payloads != NULL) {
++      result = vk_device_copy_semaphore_payloads(
++         device, waitSemaphoreCount, wait_infos, 1, &signal_info, 0, NULL);
++   } else {
++      const VkSubmitInfo2 submit_info = {
++         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
++         .waitSemaphoreInfoCount = waitSemaphoreCount,
++         .pWaitSemaphoreInfos = wait_infos,
++         .signalSemaphoreInfoCount = 1,
++         .pSignalSemaphoreInfos = &signal_info,
++      };
++      result = device->dispatch_table.QueueSubmit2(_queue, 1, &submit_info,
++                                                   VK_NULL_HANDLE);
++   }
++   STACK_ARRAY_FINISH(wait_infos);
++   if (result != VK_SUCCESS)
++      return result;
++
++   const VkSemaphoreGetFdInfoKHR get_fd = {
++      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
++      .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
++      .semaphore = queue->anb_semaphore,
++   };
++   return device->dispatch_table.GetSemaphoreFdKHR(vk_device_to_handle(device),
++                                                   &get_fd, pNativeFenceFd);
++}
+diff --git a/src/vulkan/runtime/vk_native_buffer.h b/src/vulkan/runtime/vk_native_buffer.h
+new file mode 100644
+index 0000000..10feb51
+--- /dev/null
++++ b/src/vulkan/runtime/vk_native_buffer.h
+@@ -0,0 +1,37 @@
++/*
++ * Copyright © 2022 Intel Corporation
++ *
++ * SPDX-License-Identifier: MIT
++ */
++#ifndef VK_NATIVE_BUFFER_H
++#define VK_NATIVE_BUFFER_H
++
++#include "vulkan/vulkan_core.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct vk_device;
++struct vk_queue;
++
++/* Imports the native fence of an acquired buffer into the semaphore and the
++ * fence. It takes ownership of nativeFenceFd, even when it fails.
++ */
++VkResult vk_native_buffer_acquire_image(struct vk_device *device,
++                                        int nativeFenceFd,
++                                        VkSemaphore semaphore,
++                                        VkFence fence);
++
++/* Returns a native fence that signals once the wait semaphores signal and
++ * the queue's earlier work completes.
++ */
++VkResult vk_native_buffer_signal_release_image(
++   struct vk_queue *queue, uint32_t waitSemaphoreCount,
++   const VkSemaphore *pWaitSemaphores, int *pNativeFenceFd);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* VK_NATIVE_BUFFER_H */
+diff --git a/src/vulkan/runtime/vk_ohos.c b/src/vulkan/runtime/vk_ohos.c
+new file mode 100644
+index 0000000..46223c0
+--- /dev/null
++++ b/src/vulkan/runtime/vk_ohos.c
+@@ -0,0 +1,99 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "vk_ohos.h"
++
++#include "vk_common_entrypoints.h"
++#include "vk_device.h"
++#include "vk_native_buffer.h"
++#include "vk_queue.h"
++
++#include "drm-uapi/drm_fourcc.h"
++
++#include <string.h>
++
++/* BufferUsage bits from OpenHarmony's display_type.h. */
++#define OHOS_BUFFER_USAGE_MEM_DMA (1ull << 3)
++#define OHOS_BUFFER_USAGE_HW_RENDER (1ull << 8)
++#define OHOS_BUFFER_USAGE_HW_TEXTURE (1ull << 9)
++
++VkResult
++vk_ohos_get_native_buffer_layout(
++   const VkNativeBufferOHOS *native_buffer,
++   VkImageDrmFormatModifierExplicitCreateInfoEXT *out,
++   VkSubresourceLayout *out_layout)
++{
++   const struct OHBufferHandle *handle = native_buffer->handle;
++
++   if (!handle || handle->fd < 0 || handle->stride <= 0)
++      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++
++   memset(out, 0, sizeof(*out));
++   memset(out_layout, 0, sizeof(*out_layout));
++
++   out->sType =
++      VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
++   out->drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
++   out->drmFormatModifierPlaneCount = 1;
++   out->pPlaneLayouts = out_layout;
++   out_layout->rowPitch = handle->stride;
++
++   return VK_SUCCESS;
++}
++
++VKAPI_ATTR VkResult VKAPI_CALL
++vk_common_GetSwapchainGrallocUsageOHOS(VkDevice device, VkFormat format,
++                                       VkImageUsageFlags imageUsage,
++                                       uint64_t *grallocUsage)
++{
++   const VkImageUsageFlags render_usage =
++      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
++   const VkImageUsageFlags texture_usage =
++      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
++      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
++   uint64_t usage = OHOS_BUFFER_USAGE_MEM_DMA;
++
++   if (imageUsage & ~(render_usage | texture_usage))
++      return VK_ERROR_FORMAT_NOT_SUPPORTED;
++   if (!(imageUsage & (render_usage | texture_usage)))
++      return VK_ERROR_FORMAT_NOT_SUPPORTED;
++
++   if (imageUsage & render_usage)
++      usage |= OHOS_BUFFER_USAGE_HW_RENDER;
++   if (imageUsage & texture_usage)
++      usage |= OHOS_BUFFER_USAGE_HW_TEXTURE;
++
++   /* The swapchain layer sets its own bits, such as CPU_READ for a linear
++    * swapchain, before it calls the driver.
++    */
++   *grallocUsage |= usage;
++
++   return VK_SUCCESS;
++}
++
++VKAPI_ATTR VkResult VKAPI_CALL
++vk_common_AcquireImageOHOS(VkDevice _device, VkImage image,
++                           int32_t nativeFenceFd, VkSemaphore semaphore,
++                           VkFence fence)
++{
++   VK_FROM_HANDLE(vk_device, device, _device);
++
++   return vk_native_buffer_acquire_image(device, nativeFenceFd, semaphore,
++                                         fence);
++}
++
++VKAPI_ATTR VkResult VKAPI_CALL
++vk_common_QueueSignalReleaseImageOHOS(VkQueue _queue,
++                                      uint32_t waitSemaphoreCount,
++                                      const VkSemaphore *pWaitSemaphores,
++                                      VkImage image, int32_t *pNativeFenceFd)
++{
++   VK_FROM_HANDLE(vk_queue, queue, _queue);
++
++   return vk_native_buffer_signal_release_image(queue, waitSemaphoreCount,
++                                                pWaitSemaphores,
++                                                pNativeFenceFd);
++}
+diff --git a/src/vulkan/runtime/vk_ohos.h b/src/vulkan/runtime/vk_ohos.h
+new file mode 100644
+index 0000000..9d0e8d0
+--- /dev/null
++++ b/src/vulkan/runtime/vk_ohos.h
+@@ -0,0 +1,28 @@
++/*
++ * Copyright © 2026 Innkeeper contributors
++ *
++ * SPDX-License-Identifier: MIT
++ */
++#ifndef VK_OHOS_H
++#define VK_OHOS_H
++
++#include "vulkan/vulkan_core.h"
++#include "vulkan/vk_ohos_native_buffer.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Describes the buffer of a VkNativeBufferOHOS as a single-plane linear
++ * image. The layout's row pitch is the handle's stride.
++ */
++VkResult vk_ohos_get_native_buffer_layout(
++   const VkNativeBufferOHOS *native_buffer,
++   VkImageDrmFormatModifierExplicitCreateInfoEXT *out,
++   VkSubresourceLayout *out_layout);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* VK_OHOS_H */
+diff --git a/src/vulkan/runtime/vk_queue.c b/src/vulkan/runtime/vk_queue.c
+index b6b8ba7..3d9adbc 100644
+--- a/src/vulkan/runtime/vk_queue.c
++++ b/src/vulkan/runtime/vk_queue.c
+@@ -1235,7 +1235,7 @@ vk_queue_finish(struct vk_queue *queue)
+       vk_queue_submit_destroy(queue, submit);
+    }
+ 
+-#ifdef VK_USE_PLATFORM_ANDROID_KHR
++#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(VK_USE_PLATFORM_OHOS)
+    if (queue->anb_semaphore != VK_NULL_HANDLE) {
+       struct vk_device *device = queue->base.device;
+       device->dispatch_table.DestroySemaphore(vk_device_to_handle(device),
+diff --git a/src/vulkan/runtime/vk_queue.h b/src/vulkan/runtime/vk_queue.h
+index 68cf649..a4508d2 100644
+--- a/src/vulkan/runtime/vk_queue.h
++++ b/src/vulkan/runtime/vk_queue.h
+@@ -146,8 +146,9 @@ struct vk_queue {
+    struct util_dynarray labels;
+    bool region_begin;
+ 
+-#ifdef VK_USE_PLATFORM_ANDROID_KHR
+-   /** SYNC_FD signal semaphore for vkQueueSignalReleaseImageANDROID
++#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(VK_USE_PLATFORM_OHOS)
++   /** SYNC_FD signal semaphore for vkQueueSignalReleaseImageANDROID and
++    * vkQueueSignalReleaseImageOHOS
+     *
+     * VK_ANDROID_native_buffer enforces explicit fencing on the present api
+     * boundary. To avoid assuming all waitSemaphores exportable to sync file
+diff --git a/src/vulkan/util/gen_enum_to_str.py b/src/vulkan/util/gen_enum_to_str.py
+index e1b0e06..00e5147 100644
+--- a/src/vulkan/util/gen_enum_to_str.py
++++ b/src/vulkan/util/gen_enum_to_str.py
+@@ -61,6 +61,9 @@ C_TEMPLATE = Template(textwrap.dedent(u"""\
+     #include <string.h>
+     #include <vulkan/vulkan_core.h>
+     #include <vulkan/vk_android_native_buffer.h>
++    #ifdef VK_USE_PLATFORM_OHOS
++    #include <vulkan/vk_ohos_native_buffer.h>
++    #endif
+     #include <vulkan/vk_layer.h>
+     #include "util/macros.h"
+     #include "vk_enum_to_str.h"
+@@ -157,6 +160,9 @@ H_TEMPLATE = Template(textwrap.dedent(u"""\
+ 
+     #include <vulkan/vulkan.h>
+     #include <vulkan/vk_android_native_buffer.h>
++    #ifdef VK_USE_PLATFORM_OHOS
++    #include <vulkan/vk_ohos_native_buffer.h>
++    #endif
+ 
+     #ifdef __cplusplus
+     extern "C" {
+@@ -206,6 +212,9 @@ H_DEFINE_TEMPLATE = Template(textwrap.dedent(u"""\
+ 
+     #include <vulkan/vulkan_core.h>
+     #include <vulkan/vk_android_native_buffer.h>
++    #ifdef VK_USE_PLATFORM_OHOS
++    #include <vulkan/vk_ohos_native_buffer.h>
++    #endif
+ 
+     #ifdef __cplusplus
+     extern "C" {
+@@ -296,7 +305,7 @@ def compute_max_enum_name(s):
+     max_enum_name = CamelCase_to_SHOUT_CASE(s)
+     last_prefix = max_enum_name.rsplit('_', 1)[-1]
+     # Those special prefixes need to be always at the end
+-    if last_prefix in ['AMD', 'AMDX', 'EXT', 'INTEL', 'KHR', 'NV', 'LUNARG', 'QCOM', 'MSFT', 'ARM', 'SEC'] :
++    if last_prefix in ['AMD', 'AMDX', 'EXT', 'INTEL', 'KHR', 'NV', 'LUNARG', 'QCOM', 'MSFT', 'ARM', 'SEC', 'OHOS'] :
+         max_enum_name = "_".join(max_enum_name.split('_')[:-1])
+         max_enum_name = max_enum_name + "_MAX_ENUM_" + last_prefix
+     else:
+diff --git a/src/vulkan/util/vk_dispatch_table_gen.py b/src/vulkan/util/vk_dispatch_table_gen.py
+index c2776d2..6471f41 100644
+--- a/src/vulkan/util/vk_dispatch_table_gen.py
++++ b/src/vulkan/util/vk_dispatch_table_gen.py
+@@ -47,6 +47,9 @@ TEMPLATE_H = Template(COPYRIGHT + """\
+ 
+ #include "vulkan/vulkan.h"
+ #include "vulkan/vk_android_native_buffer.h"
++#ifdef VK_USE_PLATFORM_OHOS
++#include "vulkan/vk_ohos_native_buffer.h"
++#endif
+ 
+ #include "vk_extensions.h"
+ 
+diff --git a/src/vulkan/util/vk_extensions.py b/src/vulkan/util/vk_extensions.py
+index 75125d8..5a04ed9 100644
+--- a/src/vulkan/util/vk_extensions.py
++++ b/src/vulkan/util/vk_extensions.py
+@@ -25,7 +25,7 @@ class Extension:
+         name = ext_elem.attrib['name']
+         number = int(ext_elem.attrib['number'])
+         supported = get_api_list(ext_elem.attrib['supported'])
+-        if name == 'VK_ANDROID_native_buffer':
++        if name in ('VK_ANDROID_native_buffer', 'VK_OHOS_native_buffer'):
+             assert not supported
+             supported = ['vulkan']
+ 
+diff --git a/src/vulkan/util/vk_physical_device_properties_gen.py b/src/vulkan/util/vk_physical_device_properties_gen.py
+index 9befa14..7349abf 100644
+--- a/src/vulkan/util/vk_physical_device_properties_gen.py
++++ b/src/vulkan/util/vk_physical_device_properties_gen.py
+@@ -148,6 +148,9 @@ TEMPLATE_H = Template(COPYRIGHT + """
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+ #include "vulkan/vk_android_native_buffer.h"
+ #endif /* VK_USE_PLATFORM_ANDROID_KHR */
++#ifdef VK_USE_PLATFORM_OHOS
++#include "vulkan/vk_ohos_native_buffer.h"
++#endif /* VK_USE_PLATFORM_OHOS */
+ 
+ #ifdef __cplusplus
+ extern "C" {

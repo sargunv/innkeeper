@@ -383,10 +383,9 @@ its own lock screen. OH's own injector also drives the screen over `exec`.
   RADV and ANV, built for OH's musl by `build:vulkan`
   ([android/vendor/vulkan](../android/vendor/vulkan/README.md#openharmony)).
   OH's Vulkan loader finds them through their manifests in
-  `/vendor/etc/vulkan/icd.d` and lists the selected GPU. OH's swapchain layer is
-  always on, and it refuses to create a device on a driver without
-  `VK_OHOS_native_buffer`. Upstream Mesa doesn't have that extension, so apps
-  can't use these drivers yet.
+  `/vendor/etc/vulkan/icd.d` and lists the selected GPU. The drivers implement
+  `VK_OHOS_native_buffer`, so Vulkan apps can present through OH's swapchain
+  layer.
 - **Native fences.** The image's llvmpipe finishes every GL context in the
   process whenever it exports a native fence fd, and EGL exports one on each
   swap. render_service draws on several threads, and a swap on one thread would

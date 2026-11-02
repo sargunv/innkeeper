@@ -73,6 +73,7 @@ session runs without `INNKEEPER_TEST`, like a user's session. The nested
 desktop's fake portals and notifications (`tests/e2e/desktop.py`) stand in for
 the real desktop.
 
-- `mise run test:bionic` runs manual Android-side HAL diagnostics.
+- `mise run test:bionic` runs manual Android-side HAL diagnostics, and the
+  Vulkan swapchain test in an OpenHarmony profile.
 - `mise run test:compat -- --only <package>` is for manual app troubleshooting.
   See [compat/README.md](compat/README.md). It refuses to run the whole corpus.

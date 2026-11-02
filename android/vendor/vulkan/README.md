@@ -49,6 +49,8 @@ on top of Vulkan (`ro.hardware.egl=angle`, in `etc/vulkan.prop`).
   - 0007 adds an `ohos` platform that leaves out display WSI (`VK_KHR_display`).
     That WSI calls `pthread_cancel`, which OpenHarmony's musl doesn't have, and
     musl resolves every symbol when it loads a library.
+  - 0008 adds `VK_OHOS_native_buffer` to RADV and ANV, which OpenHarmony's
+    swapchain layer requires ([OpenHarmony](#openharmony)).
 
 Tests: `tests/run.sh` runs in `mise run test:bionic`. It runs `vkdriver_test`
 (loading, compute, udmabuf import, ANB images, deferred binds),
@@ -57,6 +59,9 @@ checks YV12, NV12 and NV21 through EGLImage, as Skia imports them. The tests run
 on lavapipe and on the hardware driver that a normal launcher session selects.
 On hybrid systems, that is the selected GPU alone, because the broker permits
 only its node. Each invocation uses a fresh named Android session.
+`tests/ohos.sh` runs in `mise run test:bionic` too. It runs
+`ohos_swapchain_test` in a fresh OpenHarmony profile on a nested desktop, on the
+GPU that the launcher selects, and it is skipped without a GPU.
 
 ## OpenHarmony
 
@@ -65,9 +70,15 @@ The same build makes RADV and ANV for OpenHarmony
 `/vendor/lib64/chipsetsdk/libvulkan_{radeon,intel}.so`, with ICD manifests in
 `/vendor/etc/vulkan/icd.d`. OpenHarmony's Vulkan loader reads manifests from
 `/system/etc/vulkan/icd.d` and `/vendor/etc/vulkan/icd.d`, and each manifest
-names its driver by absolute path. The loader lists the GPU, but OH's swapchain
-layer refuses to create a device until the drivers support
-`VK_OHOS_native_buffer`.
+names its driver by absolute path.
+
+OH's swapchain layer is always on, and it creates a device only on a driver with
+`VK_OHOS_native_buffer`, OH's counterpart of Android's ANB extension. Patch 0008
+adds it to RADV and ANV. The layer creates each swapchain image with a
+`VkNativeBufferOHOS` that points to the buffer's `BufferHandle`. The handle has
+a dma-buf fd and a row pitch, and no tiling, so the drivers import the buffer as
+a linear image. The acquire and release fences are sync_files, as with ANB, and
+the fence code of the two extensions is shared.
 
 - **Toolchain.** The drivers build with the NDK's clang for `x86_64-linux-musl`
   (`cross/ohos-x86_64.ini`). The sysroot is the build container's musl with the
